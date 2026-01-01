@@ -58,7 +58,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 3. Drivers (`sys/drivers`)
 - [ ] **Storage:**
-    - [ ] **ATA/IDE:** Implement DMA transfers (Bus Mastering).
+    - [ ] **ATA/IDE:**
+        - [ ] Implement PIO Mode transfers.
+        - [ ] Implement DMA transfers (Bus Mastering).
+        - [ ] Support Primary/Secondary channels.
+        - [ ] Support Master/Slave drives.
     - [ ] **AHCI:** Implement command list and FIS construction.
     - [ ] **NVMe:** Implement Admin Queue and I/O Queue submission/completion.
 - [ ] **Input:**
@@ -189,6 +193,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 ### 8. Networking (Future)
 - [ ] **Layer 1: Network Interface Drivers (Kernel)**
     - [ ] **Loopback:** Virtual interface implementation.
+    - [ ] **NE2000:** ISA/PCI, 8390 NIC core, PIO/DMA data transfer.
+    - [ ] **3Com 3c509:** ISA, EtherLink III, PIO data transfer.
+    - [ ] **3Com 3c905:** PCI, EtherLink XL, Bus Master DMA (Boomerang).
     - [ ] **RTL8139:** Basic send/receive, interrupt handling.
     - [ ] **E1000:** Intel Gigabit Ethernet support.
     - [ ] **VirtIO Net:** Optimized network driver for QEMU/KVM.
@@ -245,8 +252,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Mass Storage (Flash drives)
     - [ ] **Audio:**
         - [ ] **Controllers:**
+            - [ ] **Sound Blaster 16/32:** DSP programming, DMA (ISA), Mixer.
             - [ ] AC97
             - [ ] Intel HDA
+    
         - [ ] **Subsystem:**
             - [ ] Mixer interface
             - [ ] `/dev/dsp` or `/dev/snd/*` nodes
