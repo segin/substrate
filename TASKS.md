@@ -10,14 +10,23 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Basic Bitmap Allocator (`pmm.c`).
         - [ ] Parse Multiboot Memory Map (mmap) to support non-contiguous RAM.
         - [ ] Implement `pmm_alloc_contiguous` for specific DMA drivers.
-    - [ ] **Virtual Memory Manager (VMM):**
-        - [ ] **Paging Init:** Bootstrap kernel page directory and identity map kernel (`vmm.c`).
-        - [ ] **Mapping:** Implement `vmm_map_page` and `vmm_unmap_page`.
-        - [ ] **Page Fault Handler:** Handle copy-on-write, demand paging, and invalid access.
-        - [ ] **Address Space:** Per-process Page Directory switching (`cr3` management).
-    - [ ] **Kernel Heap (kmalloc):**
-        - [ ] **Early Allocator:** Simple placement malloc for initialization.
-        - [ ] **Main Allocator:** Slab or Bucket allocator for efficient kernel objects.
+    - [ ] **Memory Management (BSD/Mach Design):**
+        - [ ] **Physical Memory (Machine Independent):**
+            - [ ] `vm_page_t`: Core structure tracking state of every physical page.
+            - [ ] **Page Queues:** Active/Inactive/Free lists for page replacement logic.
+        - [ ] **PMAP Layer (Machine Dependent - i386):**
+            - [ ] `pmap_init`: Bootstrap hardware paging structures.
+            - [ ] `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
+            - [ ] `pmap_activate`: Context switch hook (CR3 loading).
+            - [ ] **Recursive Paging:** Efficient Page Table mapping.
+        - [ ] **VM Subsystem (Machine Independent):**
+            - [ ] **VM Map:** `vm_map` structure representing an address space.
+            - [ ] **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
+            - [ ] **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
+            - [ ] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
+    - [ ] **Kernel Allocator (UMA/Zone):**
+        - [ ] **Zone Allocator:** Fixed-size object caching (equivalent to Slab, but BSD-style).
+        - [ ] **Kmem:** General purpose variable-size allocator (power-of-two free lists).
     - [ ] **User Memory:**
         - [ ] Implement `mmap`, `munmap`, `brk` system calls.
 - [ ] **Scheduling:**
@@ -47,11 +56,28 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **AHCI:** Implement command list and FIS construction.
     - [ ] **NVMe:** Implement Admin Queue and I/O Queue submission/completion.
 - [ ] **Input:**
-    - [ ] **Keyboard:** Implement Scancode Set 2 decoding and modifiers (Shift, Ctrl).
-    - [ ] **Mouse:** Implement PS/2 Mouse driver.
+    - [ ] **Keyboard (PS/2):**
+        - [ ] **Controller:** Initialize PS/2 Controller (i8042), disable ports, perform self-test.
+        - [ ] **Interrupts:** Handle IRQ1, read status/data ports.
+        - [ ] **Scancodes:** Implement state machine for Set 1 (or 2) decoding.
+        - [ ] **Keymap:** Map scancodes to ASCII/Unicode characters (US Layout).
+        - [ ] **Buffer:** Implement a circular buffer for raw keystrokes.
+    - [ ] **Mouse (PS/2):**
+        - [ ] **Initialization:** Enable auxiliary device (IRQ12), set sample rate/resolution.
+        - [ ] **Packet Parsing:** Decode 3-byte (or 4-byte) movement/button packets.
+        - [ ] **Event Queue:** Push mouse events (dx, dy, buttons) to a system queue.
+    - [ ] **Input Subsystem:**
+        - [ ] Abstract `input_event` structure (type, code, value).
+        - [ ] `/dev/input` interface for userspace access.
 - [ ] **Video:**
-    - [ ] Implement VESA Linear Framebuffer (LFB) support via Multiboot.
-    - [ ] Implement a console over framebuffer.
+    - [ ] **VESA/UEFI Framebuffer:**
+        - [ ] Parse Multiboot2 Framebuffer tag or UEFI GOP.
+        - [ ] Map framebuffer memory (requires VMM).
+    - [ ] **Framebuffer Console:**
+        - [ ] Import a bitmap font (e.g., PSF or raw bitmap).
+        - [ ] Implement `fb_putc` with blitting capability.
+        - [ ] Implement scrolling (hardware panning or software copy).
+        - [ ] Hook into `vga_write` or create generic `console_write`.
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS:**
@@ -65,13 +91,29 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] Implement File Allocation Table parsing and chain following.
     - [ ] Implement Long File Name (LFN) support.
 - [ ] **Pseudo-FS:**
-    - [ ] **DevFS (`/dev`):** Device node registration.
-    - [ ] **ProcFS (`/proc`):** Process information export.
-    - [ ] **SysFS (`/sys`):** Kernel object hierarchy export.
-    - [ ] **FUSE (`/dev/fuse`):** Userspace filesystem bridge.
+    - [ ] **DevFS (`/dev`):**
+        - [ ] **Device Registry:** Mechanism for drivers to register Character/Block devices.
+        - [ ] **VFS Glue:** Auto-generate VFS nodes when registering devices.
+        - [ ] **Nodes:** Support standard nodes (`null`, `zero`, `full`, `random`, `tty`).
+    - [ ] **ProcFS (`/proc`):**
+        - [ ] **Process Info:** Expose `cmdline`, `maps`, `status`, `fd` per PID.
+        - [ ] **System Info:** Expose `cpuinfo`, `meminfo`, `uptime`.
+        - [ ] **Dynamic generation:** Generate content on `read()` (virtual files).
+    - [ ] **SysFS (`/sys`):**
+        - [ ] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
+        - [ ] **Attributes:** Map kernel variables to readable/writable files.
+    - [ ] **FUSE (`/dev/fuse`):**
+        - [ ] **Device Interface:** Implement `/dev/fuse` char device for control.
+        - [ ] **Protocol:** Implement FUSE opcodes (`INIT`, `LOOKUP`, `READ`, `WRITE`).
+        - [ ] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
 
 ### 5. System Calls & Personalities
 - [ ] **Mechanisms:**
+    - [ ] **PTY Subsystem (Unix98):**
+        - [ ] **Multiplexor:** Implement `/dev/ptmx` cloning device.
+        - [ ] **DevPTS:** Implement `devpts` virtual filesystem for `/dev/pts`.
+        - [ ] **API Support:** Support `grantpt`, `unlockpt`, `ptsname` (via ioctls).
+        - [ ] **Line Discipline:** Implement termios processing (canonical mode, echo, signals).
     - [ ] Implement `sys_ioctl` framework.
     - [ ] Implement `sys_pipe` and `sys_dup2`.
     - [ ] Implement `sys_time` and RTC reading.
