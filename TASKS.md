@@ -56,7 +56,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **i386:**
     - [x] Complete GDT/TSS setup for user-mode switching.
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
-    - [ ] **VM86 Mode:** Support for Virtual 8086 mode (needed for Xenix/86 and DOS).
+    - [ ] **VM86 Mode (i386 only):** Support for Virtual 8086 mode (needed for Xenix/86 and DOS).
 - [ ] **x86_64:**
     - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`).
     - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching).
@@ -169,7 +169,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Xenix (286 & 386):**
         - [ ] **Binary Loader (`x.out`):**
             - [ ] Define `struct xexec` header (magic numbers 0x206 for 286, 0x20C for 386).
-            - [ ] Implement LDT management for 16-bit Segmented execution (286).
+            - [ ] Implement LDT management for 16-bit Segmented execution (286 - works on x86_64).
             - [ ] Implement 32-bit segment loading for Xenix 386.
         - [ ] **System Call Interface:**
             - [ ] **Mechanism:** Setup GDT Call Gate 7 (`lcall 7,0`) for syscall entry (used by both).
