@@ -46,7 +46,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
 
     multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)mmap_addr;
     while((uint32_t)mmap < mmap_addr + mmap_length) {
-        if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) {
+        if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE || mmap->type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE) {
             for (uint64_t i = 0; i < mmap->len; i += PMM_BLOCK_SIZE) {
                 uint32_t addr = (uint32_t)(mmap->addr + i);
                 if (addr < (128 * 1024 * 1024)) {
