@@ -56,6 +56,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **i386:**
     - [x] Complete GDT/TSS setup for user-mode switching.
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
+    - [ ] **VM86 Mode:** Support for Virtual 8086 mode (needed for Xenix/86 and DOS).
 - [ ] **x86_64:**
     - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`).
     - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching).
@@ -177,6 +178,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **Extensions:** Implement `cxenix` multiplexer and `rdchk`/`nap`.
     - [ ] **Linux:**
         - [ ] Improve `sys_clone` compatibility (flags).
+    - [ ] **Minix/386:**
+        - [ ] Implement `send`/`receive` message passing syscalls.
+        - [ ] Map Minix 3 kernel messages to native calls.
+    - [ ] **BSD Family (NetBSD/OpenBSD):**
+        - [ ] Implement `__sysctl` (MIB-based configuration).
+        - [ ] Support BSD-specific syscalls (`ktrace`, `pledge`/`unveil`).
+    - [ ] **Solaris (SVR4):**
+        - [ ] Implement SVR4 syscalls (`getdents64`, `stream` ioctls).
+        - [ ] Support Solaris door IPC emulation.
 
 ### 6. C Library (`lib/c`)
 - [ ] **Stdio:**
