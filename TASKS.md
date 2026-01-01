@@ -34,6 +34,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Kmem:** General purpose variable-size allocator (power-of-two free lists).
     - [ ] **User Memory:**
         - [ ] Implement `mmap`, `munmap`, `brk` system calls.
+    - [ ] **SMP & Interrupts:**
+        - [ ] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
+        - [ ] **Local APIC:** Initialize LAPIC for each core (timer, spurious interrupts).
+        - [ ] **IO-APIC:** Route IRQs to specific cores (replace legacy PIC).
+        - [ ] **Trampoline:** 16-bit real mode startup code for Application Processors (APs).
+        - [ ] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
 - [ ] **Scheduling:**
     - [ ] Implement Preemptive Multitasking (timer interrupt).
     - [ ] Implement Thread Priorities and Scheduling Classes.
@@ -154,6 +160,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] Implement `sys_pipe` and `sys_dup2`.
     - [ ] Implement `sys_time` and RTC reading.
     - [ ] **Emulation Path Lookup:** Check `/emul/<perso>/` before root for foreign personalities.
+    - [ ] **Debugging & Tracing:**
+        - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace).
+        - [ ] **Serial Console:** Interactive GDB stub over UART.
+        - [ ] **DTrace:** (As planned in ideas) Dynamic tracing framework.
 - [ ] **Personalities:**
     - [ ] **Xenix (286 & 386):**
         - [ ] **Binary Loader (`x.out`):**
