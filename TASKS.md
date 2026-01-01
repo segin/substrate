@@ -190,21 +190,56 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **`cp`:** Implement recursive copy (`-r`).
     - [ ] **`rm`:** Implement recursive delete (`-r`).
     - [ ] **`mkdir`:** Implement parents (`-p`).
+- [ ] **Editors:**
+    - [ ] **`vi` Clone:**
+        - [ ] Command mode parser.
+        - [ ] Insert/Replace modes.
+        - [ ] Basic `ex` command support (`:w`, `:q`).
+    - [ ] **TUI Editor (Pico/Nano-like):**
+        - [ ] Model-less text entry.
+        - [ ] On-screen command bar.
+        - [ ] Search/Replace functionality.
+    - [ ] **GUI Editor (Notepad-like):**
+        - [ ] Basic menu bar (File, Edit).
+        - [ ] `libg` and Widget Toolkit integration.
 - [ ] **System Utils:**
     - [ ] **`init` (PID 1):**
         - [ ] **Stage 1 (Basic):**
             - [ ] Parse `/etc/rc` shell script.
-            - [ ] Spawn `getty` on terminals.
+            - [ ] Check `/etc/system.conf` for `GRAPHICAL_LOGIN=yes`.
+            - [ ] Spawn `getty` on TTYs or start `login.gui`.
             - [ ] Reap zombie processes (wait loop).
-        - [ ] **Stage 2 (Service Manager - Future):**
-            - [ ] Dependency resolution (DAG).
-            - [ ] Process supervision (respawn on death).
-            - [ ] Parallel service startup.
-    - [ ] **`login`:** Implement PAM-like authentication or shadow file reading.
+    - [ ] **Graphical Login (`login.gui`):**
+        - [ ] GUI session starter.
+        - [ ] Reads username/password.
+        - [ ] Authenticates against `/etc/passwd` and `/etc/shadow`.
+        - [ ] Starts the default Desktop Environment shell on success.
+    - [ ] **`login` (CLI):** Implement PAM-like authentication or shadow file reading.
     - [ ] **`ps`:** Read from `/proc`.
     - [ ] **`top`:** Real-time process monitoring.
 
-### 8. Networking (Future)
+### 8. Security and Identity
+- [ ] **User & Group Management:**
+    - [ ] **Database:**
+        - [ ] Implement `/etc/passwd` parser.
+        - [ ] Implement `/etc/group` parser.
+        - [ ] Implement `/etc/shadow` parser for login.
+    - [ ] **Kernel Credentials:**
+        - [ ] Add `uid, gid, euid, egid, suid, sgid` to Process structure.
+        - [ ] Add supplementary group list to Process structure.
+    - [ ] **System Calls:**
+        - [ ] `getuid`, `getgid`, `geteuid`, `getegid`.
+        - [ ] `setuid`, `setgid`, `seteuid`, `setegid`.
+        - [ ] `setreuid`, `setregid`.
+        - [ ] `getgroups`, `setgroups`.
+- [ ] **Userland Identity Tools:**
+    - [ ] **`id`:**
+        - [ ] Implement `-u`, `-g`, `-G`, `-n` flags.
+        - [ ] Ensure POSIX-compliant output format.
+    - [ ] **`su`:** Enhance with user/group switching.
+    - [ ] **`login`:** Integrate with user database.
+
+### 9. Networking (Future)
 - [ ] **Layer 1: Network Interface Drivers (Kernel)**
     - [ ] **Loopback:** Virtual interface implementation.
     - [ ] **NE1000:** ISA, 8-bit, 8390 NIC core.
@@ -254,12 +289,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] `dhcp` (custom DHCP client)
         - [ ] basic `netcat`
     - [ ] **Analysis:** `tcpdump` (requires BPF or raw socket support).
-### 9. Hardware Support & Peripherals
+### 10. Hardware Support & Peripherals
 - [ ] **USB Subsystem:**
-    - [ ] **Controllers:**
-        - [ ] UHCI/OHCI (USB 1.1)
-        - [ ] EHCI (USB 2.0)
-        - [ ] XHCI (USB 3.0)
+            - [ ] **Controllers:**
+                - [ ] UHCI/OHCI (USB 1.1)
+                - [ ] EHCI (USB 2.0)
+    
     - [ ] **Core Stack:**
         - [ ] Enumeration
         - [ ] URB (Request Block) processing
@@ -285,14 +320,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     
 - [ ] **Power Management (ACPI):**
     - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser.
-    - [ ] **Events:**
-        - [ ] Power button
-        - [ ] Lid switch
-        - [ ] Battery status
     - [ ] **States:**
         - [ ] System Shutdown (`S5`)
         - [ ] Reboot
-### 10. Graphical User Interface (GUI)
+### 11. Graphical User Interface (GUI)
 - [ ] **Display Server (Window System):**
     - [ ] **Compositor:** Manages framebuffer, tracks window regions/z-order (software composition).
     - [ ] **IPC:** Protocol for clients to request windows and send draw commands (or shared memory buffers).
@@ -461,7 +492,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Terminal Emulator
             - [ ] Text Editor
             - [ ] Image Viewer
-        ### 11. Milestones
-    
-
-- [ ] **Bootable:** Kernel boots and reaches a functional user-space shell.
+        ### 12. Milestones
+        - [ ] **Bootable:** Kernel boots and reaches a functional user-space shell.
+        
+        ### 13. Advanced Features (Post-Milestone)
+        - [ ] **USB 3.0 (xHCI):** Implement support for modern USB controllers.
+        - [ ] **ACPI Events:** Handle Power button, Lid switch, and Battery status events.
+        
