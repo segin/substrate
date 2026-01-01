@@ -193,6 +193,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 ### 8. Networking (Future)
 - [ ] **Layer 1: Network Interface Drivers (Kernel)**
     - [ ] **Loopback:** Virtual interface implementation.
+    - [ ] **NE1000:** ISA, 8-bit, 8390 NIC core.
     - [ ] **NE2000:** ISA/PCI, 8390 NIC core, PIO/DMA data transfer.
     - [ ] **3Com 3c509:** ISA, EtherLink III, PIO data transfer.
     - [ ] **3Com 3c905:** PCI, EtherLink XL, Bus Master DMA (Boomerang).
