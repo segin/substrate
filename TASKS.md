@@ -253,9 +253,16 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Drivers:**
             - [ ] USB HID (Keyboard/Mouse)
             - [ ] Mass Storage (Flash drives)
-    - [ ] **Audio:**
+        - [ ] **Audio:**
+            - [ ] **Native API (Sun AudioIO):**
+                - [ ] Implement `/dev/audio` and `/dev/audioctl` character devices.
+                - [ ] Define `audio_info_t` structure and standard ioctls (`AUDIO_GETINFO`, `AUDIO_SETINFO`).
+                - [ ] Support u-law (mu-law), a-law, and linear PCM formats.
+            - [ ] **Compatibility:**
+                - [ ] **OSS Emulation:** Map `/dev/dsp` ioctls to native AudioIO calls.
             - [ ] **Controllers:**
                 - [ ] **Sound Blaster 16/32:** DSP programming, DMA (ISA), Mixer.
+    
                 - [ ] **Ensoniq AudioPCI (ES1370/1371):** PCI, Bus Master DMA, AC97-like.
                 - [ ] AC97
         

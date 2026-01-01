@@ -56,6 +56,9 @@ These components are essential for booting and basic system operation.
 ## Naming Conventions & Namespaces
 - **Network Interfaces:** Naming follows the `driver`+`instance` pattern (BSD-style).
   - Examples: `em0` (Intel PRO/1000), `re0` (Realtek 8139/8169), `bge0` (Broadcom), `lo0` (Loopback).
+- **Audio API:**
+  - **Native:** Sun AudioIO (`/dev/audio`, `ioctl` based) for simplicity and POSIX-like design.
+  - **Compatibility:** OSS v3/v4 emulation provided via `ossp` personality or userland wrapper.
 - **Kernel Object Namespace (KObject):**
   - All kernel subsystems (Drivers, Buses, Classes) are registered in a hierarchical object tree.
   - Rooted at `/sys` (exported via SysFS).
