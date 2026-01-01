@@ -135,6 +135,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Device Interface:** Implement `/dev/fuse` char device for control.
         - [ ] **Protocol:** Implement FUSE opcodes (`INIT`, `LOOKUP`, `READ`, `WRITE`).
         - [ ] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
+    - [ ] **Network Filesystems:**
+        - [ ] **9P (9P2000.L):**
+            - [ ] **Client:** Implement 9P client for VFS integration.
+            - [ ] **Transport:** Support virtio (for QEMU) and TCP transports.
+            - [ ] **Protocol:** Implement T/R message transaction loop.
 
 ### 5. System Calls & Personalities
 - [ ] **Mechanisms:**
@@ -185,7 +190,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **`rm`:** Implement recursive delete (`-r`).
     - [ ] **`mkdir`:** Implement parents (`-p`).
 - [ ] **System Utils:**
-    - [ ] **`init`:** Implement runlevels and service management.
+    - [ ] **`init` (PID 1):**
+        - [ ] **Stage 1 (Basic):**
+            - [ ] Parse `/etc/rc` shell script.
+            - [ ] Spawn `getty` on terminals.
+            - [ ] Reap zombie processes (wait loop).
+        - [ ] **Stage 2 (Service Manager - Future):**
+            - [ ] Dependency resolution (DAG).
+            - [ ] Process supervision (respawn on death).
+            - [ ] Parallel service startup.
     - [ ] **`login`:** Implement PAM-like authentication or shadow file reading.
     - [ ] **`ps`:** Read from `/proc`.
     - [ ] **`top`:** Real-time process monitoring.
