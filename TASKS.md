@@ -197,6 +197,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **NE2000:** ISA/PCI, 8390 NIC core, PIO/DMA data transfer.
     - [ ] **3Com 3c509:** ISA, EtherLink III, PIO data transfer.
     - [ ] **3Com 3c905:** PCI, EtherLink XL, Bus Master DMA (Boomerang).
+    - [ ] **Intel PRO/100 (i8255x):** PCI, 10/100 Mbps, Bus Master DMA.
     - [ ] **RTL8139:** Basic send/receive, interrupt handling.
     - [ ] **E1000:** Intel Gigabit Ethernet support.
     - [ ] **VirtIO Net:** Optimized network driver for QEMU/KVM.
@@ -252,9 +253,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] USB HID (Keyboard/Mouse)
             - [ ] Mass Storage (Flash drives)
     - [ ] **Audio:**
-        - [ ] **Controllers:**
-            - [ ] **Sound Blaster 16/32:** DSP programming, DMA (ISA), Mixer.
-            - [ ] AC97
+            - [ ] **Controllers:**
+                - [ ] **Sound Blaster 16/32:** DSP programming, DMA (ISA), Mixer.
+                - [ ] **Ensoniq AudioPCI (ES1370/1371):** PCI, Bus Master DMA, AC97-like.
+                - [ ] AC97
+        
             - [ ] Intel HDA
     
         - [ ] **Subsystem:**
