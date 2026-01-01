@@ -1,0 +1,32 @@
+#ifndef _SYSCALL_H
+#define _SYSCALL_H
+
+#include <stdint.h>
+#include "idt.h"
+
+// Define max syscalls
+#define MAX_SYSCALLS 512
+
+// Syscall Numbers
+#define SYS_EXIT    1
+#define SYS_FORK    2
+#define SYS_READ    3
+#define SYS_WRITE   4
+#define SYS_OPEN    5
+#define SYS_CLOSE   6
+#define SYS_WAITPID 7
+#define SYS_CREAT   8
+#define SYS_LINK    9
+#define SYS_UNLINK  10
+#define SYS_EXECVE  11
+#define SYS_CHDIR   12
+#define SYS_TIME    13
+#define SYS_MKNOD   14
+#define SYS_CHMOD   15
+#define SYS_LCHOWN  16
+#define SYS_CLONE   120
+// ... add more as needed
+
+void syscall_init(void);
+
+#endif

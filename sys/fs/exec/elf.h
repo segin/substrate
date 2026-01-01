@@ -1,0 +1,39 @@
+#ifndef _ELF_H
+#define _ELF_H
+
+#include <stdint.h>
+
+#define EI_NIDENT 16
+
+typedef struct {
+    unsigned char e_ident[EI_NIDENT];
+    uint16_t      e_type;
+    uint16_t      e_machine;
+    uint32_t      e_version;
+    uint32_t      e_entry;
+    uint32_t      e_phoff;
+    uint32_t      e_shoff;
+    uint32_t      e_flags;
+    uint16_t      e_ehsize;
+    uint16_t      e_phentsize;
+    uint16_t      e_phnum;
+    uint16_t      e_shentsize;
+    uint16_t      e_shnum;
+    uint16_t      e_shstrndx;
+} Elf32_Ehdr;
+
+#define ELFMAG0 0x7F
+#define ELFMAG1 'E'
+#define ELFMAG2 'L'
+#define ELFMAG3 'F'
+
+#define EI_OSABI 7
+#define ELFOSABI_SYSV 0
+#define ELFOSABI_LINUX 3
+#define ELFOSABI_FREEBSD 9
+#define ELFOSABI_TESTUNIX 64 // Custom ABI ID for TestUnix
+
+int elf_check_file(Elf32_Ehdr *hdr);
+int elf_load_file(void *file, uint32_t size);
+
+#endif

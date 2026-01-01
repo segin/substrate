@@ -1,0 +1,200 @@
+#include <unistd.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include <errno.h>
+#include <sys/syscall.h>
+#include <sys/stat.h>
+#include <sys/utsname.h>
+#include <time.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+extern int _syscall0(int);
+extern int _syscall1(int, int);
+extern int _syscall2(int, int, int);
+extern int _syscall3(int, int, int, int);
+
+int errno = 0;
+char **environ = NULL;
+
+void _exit(int status) {
+    _syscall1(SYS_EXIT, status);
+    while(1);
+}
+
+int fork(void) {
+    return _syscall0(SYS_FORK);
+}
+
+ssize_t read(int fd, void *buf, size_t count) {
+    return _syscall3(SYS_READ, fd, (int)buf, (int)count);
+}
+
+ssize_t write(int fd, const void *buf, size_t count) {
+    return _syscall3(SYS_WRITE, fd, (int)buf, (int)count);
+}
+
+int close(int fd) {
+    return _syscall1(SYS_CLOSE, fd);
+}
+
+int open(const char *pathname, int flags, ...) {
+    int mode = 0;
+    if (flags & O_CREAT) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+    return _syscall3(SYS_OPEN, (int)pathname, flags, mode);
+}
+
+int unlink(const char *pathname) {
+    return _syscall1(SYS_UNLINK, (int)pathname);
+}
+
+int link(const char *oldpath, const char *newpath) {
+    return _syscall2(SYS_LINK, (int)oldpath, (int)newpath);
+}
+
+int execve(const char *filename, char *const argv[], char *const envp[]) {
+    return _syscall3(SYS_EXECVE, (int)filename, (int)argv, (int)envp);
+}
+
+int execv(const char *filename, char *const argv[]) {
+    return execve(filename, argv, environ);
+}
+
+int execvp(const char *file, char *const argv[]) {
+    // Stub: no PATH search yet
+    return execv(file, argv);
+}
+
+int execl(const char *path, const char *arg, ...) {
+    va_list ap;
+    int argc = 0;
+    va_start(ap, arg);
+    while (va_arg(ap, char *)) argc++;
+    va_end(ap);
+
+    char **argv = malloc((argc + 2) * sizeof(char *));
+    argv[0] = (char *)arg;
+    va_start(ap, arg);
+    for (int i = 1; i <= argc; i++) argv[i] = va_arg(ap, char *);
+    argv[argc + 1] = NULL;
+    va_end(ap);
+
+    int ret = execv(path, argv);
+    free(argv);
+    return ret;
+}
+
+int chdir(const char *path) {
+    return _syscall1(SYS_CHDIR, (int)path);
+}
+
+char *getcwd(char *buf, size_t size) {
+    int ret = _syscall2(SYS_GETCWD, (int)buf, size);
+    if (ret < 0) return NULL;
+    return buf;
+}
+
+pid_t getpid(void) {
+    return _syscall0(SYS_GETPID);
+}
+
+uid_t getuid(void) { return _syscall0(SYS_GETUID); }
+gid_t getgid(void) { return _syscall0(SYS_GETGID); }
+uid_t geteuid(void) { return _syscall0(SYS_GETEUID); }
+gid_t getegid(void) { return _syscall0(SYS_GETEGID); }
+int setuid(uid_t uid) { return _syscall1(SYS_SETUID, uid); }
+int setgid(gid_t gid) { return _syscall1(SYS_SETGID, gid); }
+
+int pipe(int pipefd[2]) {
+    return _syscall1(SYS_PIPE, (int)pipefd);
+}
+
+int dup2(int oldfd, int newfd) {
+    return _syscall2(SYS_DUP2, oldfd, newfd);
+}
+
+void sync(void) {
+    _syscall0(SYS_SYNC);
+}
+
+int kill(pid_t pid, int sig) {
+    return _syscall2(SYS_KILL, pid, sig);
+}
+
+sighandler_t signal(int signum, sighandler_t handler) {
+    return (sighandler_t)_syscall2(SYS_SIGNAL, signum, (int)handler);
+}
+
+int access(const char *pathname, int mode) {
+    return _syscall2(SYS_ACCESS, (int)pathname, mode);
+}
+
+int isatty(int fd) {
+    if (fd >= 0 && fd <= 2) return 1;
+    return 0;
+}
+
+char *ttyname(int fd) {
+    if (isatty(fd)) return "/dev/tty";
+    return NULL;
+}
+
+int rename(const char *oldpath, const char *newpath) {
+    return _syscall2(SYS_RENAME, (int)oldpath, (int)newpath);
+}
+
+int mkdir(const char *pathname, mode_t mode) {
+    return _syscall2(SYS_MKDIR, (int)pathname, mode);
+}
+
+int rmdir(const char *pathname) {
+    return _syscall1(SYS_RMDIR, (int)pathname);
+}
+
+int stat(const char *pathname, struct stat *statbuf) {
+    return _syscall2(SYS_STAT, (int)pathname, (int)statbuf);
+}
+
+int mknod(const char *pathname, mode_t mode, dev_t dev) {
+    return _syscall3(SYS_MKNOD, (int)pathname, mode, dev);
+}
+
+extern int _syscall4(int, int, int, int, int);
+extern int _syscall5(int, int, int, int, int, int);
+
+int mount(const char *source, const char *target, const char *fs, unsigned long flags, const void *data) {
+    return _syscall5(SYS_MOUNT, (int)source, (int)target, (int)fs, (int)flags, (int)data);
+}
+
+int umount(const char *target) {
+    return _syscall1(SYS_UMOUNT, (int)target);
+}
+
+int uname(struct utsname *buf) {
+    return _syscall1(SYS_UNAME, (int)buf);
+}
+
+time_t time(time_t *tloc) {
+    int t = _syscall1(SYS_TIME, (int)tloc);
+    if (tloc) *tloc = t;
+    return t;
+}
+
+pid_t waitpid(pid_t pid, int *status, int options) {
+    return _syscall3(SYS_WAITPID, pid, (int)status, options);
+}
+
+pid_t wait(int *status) {
+    return waitpid(-1, status, 0);
+}
+
+off_t lseek(int fd, off_t offset, int whence) {
+    return _syscall3(SYS_LSEEK, fd, (int)offset, whence);
+}

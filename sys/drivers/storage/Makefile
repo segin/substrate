@@ -1,0 +1,15 @@
+include ../../../Makefile.inc
+
+CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../video -I../../../arch/i386
+LDFLAGS := $(FREESTANDING_LDFLAGS)
+
+SRCS = scsi/scsi.c ide/ide.c ahci/ahci.c nvme/nvme.c
+OBJS = $(SRCS:.c=.o)
+
+all: storage.o
+
+storage.o: $(OBJS)
+	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
+
+clean:
+	rm -f *.o scsi/*.o ide/*.o ahci/*.o nvme/*.o

@@ -6,30 +6,57 @@ This project implements a 32-bit x86 operating system. It follows a traditional 
 ## Core Components
 
 ### Kernel (`sys/`)
-The kernel is the core of the operating system, responsible for:
-- Hardware abstraction (x86 32-bit specific).
-- Memory management.
-- Process scheduling.
-- Device drivers.
+The kernel is the core of the operating system, structured as follows:
+
+- **`sys/core/`**: Central kernel logic, including the entry point (`kmain`), versioning, and kernel-wide initialization.
+- **`sys/arch/`**: Architecture-specific code.
+    - **`i386/`**: 32-bit x86 support.
+        - **Boot**: Multiboot compliant (`boot.S`).
+        - **Subsystems**: IDT, GDT, PMM, Syscalls (int 0x80), FPU Emulation (`fpu/`).
+- **`sys/drivers/`**: Hardware drivers.
+    - **`video/`**: VGA text mode driver.
+    - **`serial/`**: UART driver.
+    - **`input/`**: PS/2 Keyboard driver.
+    - **`storage/`**: Drivers for SCSI, IDE, AHCI, NVMe.
+- **`sys/vfs/`**: Virtual File System layer, providing an abstraction over specific file systems.
+- **`sys/fs/`**: File system implementations.
+    - **`ext2/`**, **`fat/`**, **`exfat/`**, **`minix/`**.
+    - **`exec/`**: Binary loaders (ELF, PE).
+        - **`perso/`**: Execution Personalities (Native, Linux, FreeBSD) handling syscall translation.
+- **`sys/kern/`**: Kernel subsystems.
+    - **Scheduling**: 1:1 Threading model (`sched.c`), Process/Thread management.
+    - **Time**: System time and tick handling.
+    - **Accounting**: Process accounting (`acct.c`).
+- **`sys/sys/`**: System-wide header definitions (`proc.h`, `file.h`, `acct.h`, `thr.h`).
 
 ### Core Userland (`bin/`, `lib/`)
 These components are essential for booting and basic system operation.
-- **`bin/`**: Contains the shell and critical utilities necessary for system recovery and basic operation.
-- **`lib/`**: Contains the dynamic linker/loader and fundamental shared libraries (libc, libm) required by binaries in `/bin` and `/usr/bin`.
-
-### Extended Userland (`usr.bin/`, `usr.lib/`)
-These components provide a fuller user environment.
-- **`usr.bin/`**: General purpose user tools and applications.
-- **`usr.lib/`**: Additional libraries not required for the immediate boot process.
+- **`bin/`**: Fundamental Unix utilities (`sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, `kill`, `sync`, etc.).
+- **`lib/`**:
+    - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.
+    - **`m/`**: Math library.
+    - **`dl/`**: Dynamic linker.
+    - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
+    - **`dbm/`**: Database Manager library.
+- **`sbin/`**: System administration binaries.
 
 ## Design Patterns & Standards
 - **ABIs:**
   - **C:** Standard Intel C ABI.
-  - **C++:** x86 version of the Itanium C++ ABI.
-- **Tooling:** Designed to be built with modern GCC.
+  - **Syscalls:** Interrupt `0x80`. Supports multiple personalities:
+    - **Native (TestUnix):** Custom syscalls (`sys_thr_new`, etc.).
+    - **Linux i386:** Compatibility layer (e.g. `sys_clone` mapping).
+    - **FreeBSD i386:** Compatibility layer.
+- **Tooling:** Built with modern GCC (`-m32`).
+- **Threading Model:**
+  - **1:1 Model:** Kernel threads are first-class citizens.
+  - **Scheduler:** Round-Robin with support for Processes and Threads.
+- **Exec:** ELF binaries are "branded" via `EI_OSABI` to select the correct personality.
 
 ## Data Storage & File System
-*To be defined.* (e.g., ext2, FAT, or custom FS).
+- **VFS:** Abstraction layer handling `open`, `read`, `write`, `close`, `readdir`.
+- **FD Management:** Per-process File Descriptor table.
 
 ## Integration points
-*To be defined.* (e.g., syscall interface).
+- **Syscall Interface:** Defined in `sys/arch/i386/syscall.c` and `sys/exec/perso/`.
+- **Boot:** Multiboot header in `sys/arch/i386/boot.S`.

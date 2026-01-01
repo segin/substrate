@@ -1,0 +1,7 @@
+#ifndef _SYS_VERSION_H
+#define _SYS_VERSION_H
+
+#define OS_NAME "testunix"
+#define OS_VERSION "0.1.0"
+
+#endif

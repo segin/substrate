@@ -1,0 +1,82 @@
+#include "personality.h"
+#include <stddef.h>
+#include "../../arch/i386/syscall.h"
+
+extern int sys_exit(int);
+extern int sys_write(int, const char*, int);
+extern int sys_read(int, char*, int);
+extern int sys_open(const char*, int, int);
+extern int sys_close(int);
+extern int sys_lseek(int, int, int);
+extern int sys_getuid(void);
+extern int sys_getgid(void);
+extern int sys_geteuid(void);
+extern int sys_getegid(void);
+extern int sys_setuid(int);
+extern int sys_setgid(int);
+extern int sys_mkdir(const char*, int);
+extern int sys_rmdir(const char*);
+extern int sys_mknod(const char*, int, int);
+extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
+extern int sys_umount(const char*);
+extern int sys_access(const char*, int);
+extern int sys_stat(const char*, void*);
+extern int sys_nanosleep(void*, void*);
+extern int sys_sync(void);
+extern int sys_kill(int, int);
+extern int sys_signal(int, void*);
+extern int sys_pipe(int*);
+extern int sys_dup2(int, int);
+extern int sys_uname(void*);
+extern int sys_getdents(unsigned int, void*, unsigned int);
+struct thr_param;
+extern int sys_thr_new(struct thr_param*, int);
+extern int sys_acct(const char*);
+extern int sys_time(uint32_t*);
+extern int sys_getpid(void);
+extern int sys_getcwd(char*, size_t);
+extern int sys_execve(const char*, char**, char**);
+extern int sys_fork(void);
+
+static void *native_syscalls[MAX_SYSCALLS] = {
+    [SYS_EXIT] = &sys_exit,
+    [SYS_FORK] = &sys_fork,
+    [SYS_READ] = &sys_read,
+    [SYS_WRITE] = &sys_write,
+    [SYS_OPEN] = &sys_open,
+    [SYS_CLOSE] = &sys_close,
+    [SYS_EXECVE] = &sys_execve,
+    [13] = &sys_time,
+    [14] = &sys_mknod,
+    [19] = &sys_lseek,
+    [20] = &sys_getpid,
+    [21] = &sys_mount,
+    [22] = &sys_umount,
+    [23] = &sys_setuid,
+    [24] = &sys_getuid,
+    [33] = &sys_access,
+    [36] = &sys_sync,
+    [37] = &sys_kill,
+    [39] = &sys_mkdir,
+    [40] = &sys_rmdir,
+    [42] = &sys_pipe,
+    [46] = &sys_setgid,
+    [47] = &sys_getgid,
+    [48] = &sys_signal,
+    [49] = &sys_geteuid,
+    [50] = &sys_getegid,
+    [51] = &sys_acct,
+    [63] = &sys_dup2,
+    [106] = &sys_stat,
+    [122] = &sys_uname,
+    [141] = &sys_getdents, 
+    [162] = &sys_nanosleep,
+    [183] = &sys_getcwd,
+    [455] = &sys_thr_new,
+};
+
+struct personality personality_native = {
+    .name = "TestUnix",
+    .syscall_table = native_syscalls,
+    .syscall_count = MAX_SYSCALLS
+};

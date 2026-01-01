@@ -1,0 +1,8 @@
+# Simple termcap for TestUnix
+testunix|TestUnix Console:\
+	:co#80:li#25:\
+	:am:bs:mi:ms:\
+	:cl=\E[2J:cm=\E[%i%d;%dH:ce=\E[K:\
+	:ho=\E[H:\
+	:af=\E[3%dm:ab=\E[4%dm:op=\E[39;49m:\
+	:md=\E[1m:me=\E[0m:

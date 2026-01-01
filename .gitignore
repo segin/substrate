@@ -1,0 +1,57 @@
+# Object files
+*.o
+*.obj
+
+# Libraries
+*.a
+*.so
+*.lib
+*.dll
+
+# Binaries and executables
+*.bin
+*.exe
+*.com
+*.out
+testunix.iso
+
+# System Kernel
+sys/kernel.bin
+
+# Temporary files
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+
+# Logs
+*.log
+
+# Userland binaries (specific ignores based on directory structure)
+# It's better to ignore by path if possible or clean before commit, 
+# but here are common patterns for this project structure:
+bin/*/
+!bin/*/Makefile
+!bin/*/*.c
+!bin/*/*.h
+!bin/*/*.S
+!bin/*/src/
+
+sbin/*/
+!sbin/*/Makefile
+!sbin/*/*.c
+!sbin/*/*.h
+!sbin/*/*.S
+
+usr.bin/*/
+!usr.bin/*/Makefile
+!usr.bin/*/*.c
+!usr.bin/*/*.h
+!usr.bin/*/*.S
+
+# Ignore the compiled output in bin subdirs that matches the dir name
+# (This is tricky with gitignore patterns, relying on extensions is safer)
+
+# Build artifacts
+kernel.map
