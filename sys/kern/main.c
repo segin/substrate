@@ -122,9 +122,15 @@ void kmain(unsigned long magic, unsigned long addr) {
         vga_write("\n", 1);
     }
     
-    // Initialize PMM (Dummy size 128MB)
-    pmm_init(128 * 1024 * 1024);
-    vga_write("PMM Initialized.\n", 17);
+    // Initialize PMM using Multiboot mmap
+    if (mboot_info->flags & (1<<6)) {
+        pmm_init(mboot_info->mmap_addr, mboot_info->mmap_length);
+        vga_write("PMM Initialized with Multiboot mmap.\n", 37);
+    } else {
+        // Fallback or panic
+        pmm_init(0, 0); 
+        vga_write("PMM Initialized (no mmap).\n", 27);
+    }
 
     // Initialize GDT
     gdt_init();

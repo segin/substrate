@@ -1,4 +1,5 @@
 #include "pmm.h"
+#include "multiboot.h"
 #include <string.h>
 
 static uint8_t* pmm_bitmap;
@@ -6,21 +7,60 @@ static size_t pmm_bitmap_size;
 static size_t pmm_total_blocks;
 static size_t pmm_used_blocks;
 
-// Assuming the bitmap is placed after the kernel code.
-// For now, we'll just hardcode a location for the bitmap or use a static array 
-// if memory is small, but a proper OS allocates this dynamically.
-// Here we use a static array large enough for 128MB RAM (32768 blocks -> 4096 bytes bitmap)
+// Static bitmap for 128MB (32768 blocks -> 4096 bytes)
 static uint8_t pmm_bitmap_static[4096]; 
 
-void pmm_init(size_t mem_size) {
-    pmm_total_blocks = mem_size / PMM_BLOCK_SIZE;
+static void pmm_mark_used(uint32_t addr) {
+    uint32_t block = addr / PMM_BLOCK_SIZE;
+    uint32_t idx = block / 8;
+    uint32_t bit = block % 8;
+    if (idx < pmm_bitmap_size) {
+        if (!(pmm_bitmap[idx] & (1 << bit))) {
+            pmm_bitmap[idx] |= (1 << bit);
+            pmm_used_blocks++;
+        }
+    }
+}
+
+static void pmm_mark_free(uint32_t addr) {
+    uint32_t block = addr / PMM_BLOCK_SIZE;
+    uint32_t idx = block / 8;
+    uint32_t bit = block % 8;
+    if (idx < pmm_bitmap_size) {
+        if (pmm_bitmap[idx] & (1 << bit)) {
+            pmm_bitmap[idx] &= ~(1 << bit);
+            pmm_used_blocks--;
+        }
+    }
+}
+
+void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
+    // For now, assume a max of 128MB for the static bitmap
+    pmm_total_blocks = (128 * 1024 * 1024) / PMM_BLOCK_SIZE;
     pmm_bitmap = pmm_bitmap_static;
-    pmm_bitmap_size = pmm_total_blocks / PMM_BLOCKS_PER_BYTE;
-    pmm_used_blocks = pmm_total_blocks; // Initially mark all as used until freed? 
-                                        // Or mark all free. Let's mark all free.
+    pmm_bitmap_size = 4096;
     
-    memset(pmm_bitmap, 0, 4096); 
-    pmm_used_blocks = 0;
+    // Mark everything as used/reserved by default
+    memset(pmm_bitmap, 0xFF, pmm_bitmap_size); 
+    pmm_used_blocks = pmm_total_blocks;
+
+    multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)mmap_addr;
+    while((uint32_t)mmap < mmap_addr + mmap_length) {
+        if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) {
+            for (uint64_t i = 0; i < mmap->len; i += PMM_BLOCK_SIZE) {
+                uint32_t addr = (uint32_t)(mmap->addr + i);
+                if (addr < (128 * 1024 * 1024)) {
+                    pmm_mark_free(addr);
+                }
+            }
+        }
+        mmap = (multiboot_mmap_entry_t*) ((uint32_t)mmap + mmap->size + sizeof(mmap->size));
+    }
+
+    // Keep the first 1MB reserved (Kernel, BIOS, Video)
+    for (uint32_t i = 0; i < 0x100000; i += PMM_BLOCK_SIZE) {
+        pmm_mark_used(i);
+    }
 }
 
 void* pmm_alloc_block(void) {

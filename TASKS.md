@@ -8,7 +8,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **Memory Management:**
     - [ ] **Physical Memory Manager (PMM):**
         - [x] Basic Bitmap Allocator (`pmm.c`).
-        - [ ] Parse Multiboot Memory Map (mmap) to support non-contiguous RAM.
+        - [x] Parse Multiboot Memory Map (mmap) to support non-contiguous RAM.
         - [ ] Parse e820 Memory Map (legacy BIOS).
         - [ ] Implement `pmm_alloc_contiguous` for specific DMA drivers.
     - [ ] **Memory Management (BSD/Mach Design):**
