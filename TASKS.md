@@ -198,6 +198,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **3Com 3c509:** ISA, EtherLink III, PIO data transfer.
     - [ ] **3Com 3c905:** PCI, EtherLink XL, Bus Master DMA (Boomerang).
     - [ ] **Intel PRO/100 (i8255x):** PCI, 10/100 Mbps, Bus Master DMA.
+    - [ ] **Broadcom BCM57xx (Tigon3):** PCI/PCIe Gigabit, Ring buffer management.
     - [ ] **RTL8139:** Basic send/receive, interrupt handling.
     - [ ] **E1000:** Intel Gigabit Ethernet support.
     - [ ] **VirtIO Net:** Optimized network driver for QEMU/KVM.
