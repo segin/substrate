@@ -15,6 +15,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 3.  **Documentation:** Keep documentation close to the code.
 4.  **Safety:** Always verify file contents before replacing.
 5.  **Build System:** Maintain the recursive Makefile structure. Ensure `make -C sys`, `make -C lib/c`, and `make -C bin` always pass.
+6.  **Git Operations:** Use `git mv` and `git rm` for file operations to preserve history.
 
 ## Directory Structure Overview
 - `sys/`: Kernel source.

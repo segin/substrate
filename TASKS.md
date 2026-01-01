@@ -19,6 +19,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
             - [ ] `pmap_activate`: Context switch hook (CR3 loading).
             - [ ] **Recursive Paging:** Efficient Page Table mapping.
+        - [ ] **PMAP Layer (Machine Dependent - x86_64):**
+            - [ ] `pmap_init`: Bootstrap PML4 paging structures.
+            - [ ] `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
+            - [ ] `pmap_activate`: Context switch hook (CR3 loading).
         - [ ] **VM Subsystem (Machine Independent):**
             - [ ] **VM Map:** `vm_map` structure representing an address space.
             - [ ] **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
@@ -46,9 +50,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [x] Complete GDT/TSS setup for user-mode switching.
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
 - [ ] **x86_64:**
-    - [ ] Implement Long Mode bootstrap (`boot.S`).
-    - [ ] Implement 64-bit Paging (PML4).
-    - [ ] Implement `syscall`/`sysret` entry point.
+    - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`).
+    - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching).
+    - [ ] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode.
+    - [ ] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR).
+    - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp).
 
 ### 3. Drivers (`sys/drivers`)
 - [ ] **Storage:**
