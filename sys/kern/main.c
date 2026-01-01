@@ -9,6 +9,7 @@
 #include "../arch/i386/idt.h"
 #include "../arch/i386/gdt.h"
 #include "../arch/i386/pmm.h"
+#include "../arch/i386/pmap.h"
 #include "../arch/i386/pci.h"
 #include "../arch/i386/syscall.h"
 #include "../arch/i386/fpu/fpu_emu.h"
@@ -132,6 +133,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize IDT
     idt_init();
     vga_write("IDT Initialized.\n", 17);
+
+    // Initialize PMAP (Paging)
+    pmap_bootstrap();
     
     // Initialize FPU
     fpu_init();
