@@ -63,13 +63,20 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **NVMe:** Implement Admin Queue and I/O Queue submission/completion.
 - [ ] **Input:**
     - [ ] **Keyboard (PS/2):**
-        - [ ] **Controller:** Initialize PS/2 Controller (i8042), disable ports, perform self-test.
-        - [ ] **Interrupts:** Handle IRQ1, read status/data ports.
+        - [ ] **Controller:**
+            - [ ] Initialize PS/2 Controller (i8042).
+            - [ ] Disable ports.
+            - [ ] Perform self-test.
+        - [ ] **Interrupts:**
+            - [ ] Handle IRQ1.
+            - [ ] Read status/data ports.
         - [ ] **Scancodes:** Implement state machine for Set 1 (or 2) decoding.
         - [ ] **Keymap:** Map scancodes to ASCII/Unicode characters (US Layout).
         - [ ] **Buffer:** Implement a circular buffer for raw keystrokes.
     - [ ] **Mouse (PS/2):**
-        - [ ] **Initialization:** Enable auxiliary device (IRQ12), set sample rate/resolution.
+        - [ ] **Initialization:**
+            - [ ] Enable auxiliary device (IRQ12).
+            - [ ] Set sample rate/resolution.
         - [ ] **Packet Parsing:** Decode 3-byte (or 4-byte) movement/button packets.
         - [ ] **Event Queue:** Push mouse events (dx, dy, buttons) to a system queue.
     - [ ] **Input Subsystem:**
@@ -100,10 +107,22 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **DevFS (`/dev`):**
         - [ ] **Device Registry:** Mechanism for drivers to register Character/Block devices.
         - [ ] **VFS Glue:** Auto-generate VFS nodes when registering devices.
-        - [ ] **Nodes:** Support standard nodes (`null`, `zero`, `full`, `random`, `tty`).
+        - [ ] **Nodes:**
+            - [ ] Support `null`.
+            - [ ] Support `zero`.
+            - [ ] Support `full`.
+            - [ ] Support `random`.
+            - [ ] Support `tty`.
     - [ ] **ProcFS (`/proc`):**
-        - [ ] **Process Info:** Expose `cmdline`, `maps`, `status`, `fd` per PID.
-        - [ ] **System Info:** Expose `cpuinfo`, `meminfo`, `uptime`.
+        - [ ] **Process Info:**
+            - [ ] Expose `cmdline`.
+            - [ ] Expose `maps`.
+            - [ ] Expose `status`.
+            - [ ] Expose `fd` per PID.
+        - [ ] **System Info:**
+            - [ ] Expose `cpuinfo`.
+            - [ ] Expose `meminfo`.
+            - [ ] Expose `uptime`.
         - [ ] **Dynamic generation:** Generate content on `read()` (virtual files).
     - [ ] **SysFS (`/sys`):**
         - [ ] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
@@ -198,25 +217,50 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **NetUSE API:** Interface for running NIC drivers in userspace.
     - [ ] **Userspace Stacks:** TUN/TAP style interface.
 - [ ] **Userland Tools**
-    - [ ] **Diagnostic:** `ping`, `ping6`, `traceroute`, `tracepath`.
-    - [ ] **Configuration:** `ifconfig`, `ip` (Netlink-style), `route`.
-    - [ ] **Clients:** `dhcp` (custom DHCP client), basic `netcat`.
-        - [ ] **Analysis:** `tcpdump` (requires BPF or raw socket support).
-    
+    - [ ] **Diagnostic:**
+        - [ ] `ping`
+        - [ ] `ping6`
+        - [ ] `traceroute`
+        - [ ] `tracepath`
+    - [ ] **Configuration:**
+        - [ ] `ifconfig`
+        - [ ] `ip` (Netlink-style)
+        - [ ] `route`
+    - [ ] **Clients:**
+        - [ ] `dhcp` (custom DHCP client)
+        - [ ] basic `netcat`
+    - [ ] **Analysis:** `tcpdump` (requires BPF or raw socket support).
     ### 9. Hardware Support & Peripherals
     - [ ] **USB Subsystem:**
-        - [ ] **Controllers:** UHCI/OHCI (USB 1.1), EHCI (USB 2.0), XHCI (USB 3.0).
-        - [ ] **Core Stack:** Enumeration, URB (Request Block) processing, Hub support.
-        - [ ] **Drivers:** USB HID (Keyboard/Mouse), Mass Storage (Flash drives).
+        - [ ] **Controllers:**
+            - [ ] UHCI/OHCI (USB 1.1)
+            - [ ] EHCI (USB 2.0)
+            - [ ] XHCI (USB 3.0)
+        - [ ] **Core Stack:**
+            - [ ] Enumeration
+            - [ ] URB (Request Block) processing
+            - [ ] Hub support
+        - [ ] **Drivers:**
+            - [ ] USB HID (Keyboard/Mouse)
+            - [ ] Mass Storage (Flash drives)
     - [ ] **Audio:**
-        - [ ] **Controllers:** AC97, Intel HDA.
-        - [ ] **Subsystem:** Mixer interface, `/dev/dsp` or `/dev/snd/*` nodes.
+        - [ ] **Controllers:**
+            - [ ] AC97
+            - [ ] Intel HDA
+        - [ ] **Subsystem:**
+            - [ ] Mixer interface
+            - [ ] `/dev/dsp` or `/dev/snd/*` nodes
+    
     - [ ] **Power Management (ACPI):**
         - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser.
-        - [ ] **Events:** Power button, Lid switch, Battery status.
-        - [ ] **States:** System Shutdown (`S5`), Reboot.
-    
-- [ ] **Graphical User Interface (GUI)**
+        - [ ] **Events:**
+            - [ ] Power button
+            - [ ] Lid switch
+            - [ ] Battery status
+        - [ ] **States:**
+            - [ ] System Shutdown (`S5`)
+            - [ ] Reboot
+    - [ ] **Graphical User Interface (GUI)**
     - [ ] **Display Server (Window System):**
         - [ ] **Compositor:** Manages framebuffer, tracks window regions/z-order (software composition).
         - [ ] **IPC:** Protocol for clients to request windows and send draw commands (or shared memory buffers).
@@ -225,142 +269,156 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Implement an X Server that runs as a client of the native Display Server (similar to XQuartz/Xwayland).
         - [ ] Bridge X11 protocol calls to native windowing/drawing commands.
     - [ ] **Graphics Library (`libg`):**
-        - [ ] **Primitives:** Line, Rect, Circle, Polygon drawing algorithms (Bresenham, etc.).
-        - [ ] **Blitting:** Fast bitmap copying/scaling, Alpha blending.
-        - [ ] **Text:** Font rendering (TrueType via `freetype` or bitmap fonts).
-                - [ ] **Widget Toolkit Architecture:**
-                    - [ ] **Base Object (`GObject` equivalent):**
-                        - [ ] Reference counting mechanism.
-                        - [ ] Signal/Slot or Callback system for events.
-                        - [ ] Property system with change notifications.
-                    - [ ] **Visual Base (`Widget`):**
-                        - [ ] **Geometry:** Bounds (x, y, w, h), Padding, Margin, Minimum/Maximum size.
-                        - [ ] **Hierarchy:** Parent/Child relationships, Child iteration, Z-order management.
-                        - [ ] **State:** Visibility (Visible/Hidden/Collapsed), Enabled/Disabled, Focused.
-                        - [ ] **Painting:** `on_paint(context)` virtual method, Dirty rectangle tracking.
-                        - [ ] **Input Handling:** `on_key_down`, `on_key_up`, `on_mouse_down`, `on_mouse_up`, `on_mouse_move`, `on_enter`, `on_leave`.
-                    - [ ] **Focus Management:** Tab order traversal, Focus stealing protection, Default widget.
-                    - [ ] **Theming Engine:**
-                        - [ ] CSS-like selector matching or Style objects.
-                        - [ ] System colors/fonts integration.
-                        - [ ] Custom painters (Delegate pattern).
-                    - [ ] **Layout Engine:**
-                        - [ ] Two-pass layout (Measure -> Arrange).
-                        - [ ] Auto-sizing based on content.
-            
-                - [ ] **Standard Widgets:**
-                    - [ ] **Buttons & Actions:**
-                        - [ ] **AbstractButton:** Base logic for click handling and states (Normal, Hover, Pressed, Disabled).
-                        - [ ] **PushButton:**
-                            - [ ] Text alignment, Icon support, Default/Cancel button modes.
-                            - [ ] Flat/Raised styling.
-                        - [ ] **ToggleButton:**
-                            - [ ] Checked/Unchecked state management.
-                            - [ ] Button grouping (Mutual exclusion logic).
-                        - [ ] **ImageButton:** Scaling modes, alpha blending support.
-                        - [ ] **SplitButton:** Primary action + Dropdown arrow area logic.
-                    - [ ] **Text Input:**
-                        - [ ] **LineEdit (Single-line):**
-                            - [ ] Cursor (Caret) rendering and blinking.
-                            - [ ] Text selection logic (Mouse drag, Shift+Arrow).
-                            - [ ] Clipboard operations (Cut/Copy/Paste).
-                            - [ ] Input masking (Password char, Numeric only, Regex filter).
-                            - [ ] Placeholder text (Hint).
-                        - [ ] **TextEditor (Multi-line):**
-                            - [ ] Word wrapping logic.
-                            - [ ] Scrollbar integration.
-                            - [ ] Undo/Redo stack.
-                            - [ ] Line numbering gutter.
-                        - [ ] **SpinBox:**
-                            - [ ] Up/Down buttons.
-                            - [ ] Value validation (Min/Max/Step).
-                            - [ ] Text-to-value parsing.
-                    - [ ] **Selection Controls:**
-                        - [ ] **CheckBox:**
-                            - [ ] Tri-state logic (Checked, Unchecked, Indeterminate).
-                            - [ ] Label positioning (Left/Right).
-                        - [ ] **RadioButton:**
-                            - [ ] Auto-grouping behavior within parent container.
-                            - [ ] Circular selection rendering.
-                        - [ ] **ToggleSwitch:**
-                            - [ ] Animation for sliding knob.
-                            - [ ] On/Off text labels inside track.
-                        - [ ] **ComboBox (Dropdown):**
-                            - [ ] Popup window creation/positioning.
-                            - [ ] Item model integration.
-                            - [ ] Autocomplete/Filtering input.
-                    - [ ] **Display Widgets:**
-                        - [ ] **Label:**
-                            - [ ] Rich text parsing (Bold, Italic, Color).
-                            - [ ] Ellipsis handling (...) for overflow.
-                            - [ ] Text alignment (Left, Center, Right, Justify).
-                            - [ ] Mnemonic handling (Alt+Key focus).
-                        - [ ] **ImageBox:**
-                            - [ ] Asset loading (PNG/JPG/BMP).
-                            - [ ] Scaling modes (Fit, Fill, Stretch, Center).
-                        - [ ] **Separator:** Horizontal/Vertical orientation, styling.
-                    - [ ] **Complex Data Views:**
-                        - [ ] **AbstractItemView:** Base class for Model/View architecture.
-                        - [ ] **ListView:**
-                            - [ ] **Modes:** Icon Mode (Grid), List Mode (Small Icons), Detail Mode (Columns).
-                            - [ ] Selection models (Single, Multi, Extended).
-                            - [ ] Virtualization (Rendering only visible items).
-                        - [ ] **TableView:**
-                            - [ ] **HeaderView:** Resizable columns, Sort indicators, Reordering.
-                            - [ ] **Grid:** Cell rendering delegates, Alternating row colors.
-                            - [ ] In-place cell editing widgets.
-                        - [ ] **TreeView:**
-                            - [ ] Indentation depth rendering.
-                            - [ ] Expander triangles (Open/Close).
-                            - [ ] Connecting lines.
-                    - [ ] **Feedback & Progress:**
-                        - [ ] **ProgressBar:**
-                            - [ ] Determinate mode (0-100%).
-                            - [ ] Indeterminate mode (Marquee/Pulse animation).
-                            - [ ] Text overlay.
-                        - [ ] **Slider:**
-                            - [ ] Horizontal/Vertical orientation.
-                            - [ ] Tick mark rendering (Above/Below/Both).
-                            - [ ] Range selection (Two knobs).
-                        - [ ] **StatusBar:**
-                            - [ ] Size grip rendering.
-                            - [ ] Temporary message queue.
-                            - [ ] Permanent widget area.
-                    - [ ] **Navigation & Menus:**
-                        - [ ] **TabControl:**
-                            - [ ] Tab bar rendering (Top/Bottom/Left/Right).
-                            - [ ] Page switching logic.
-                            - [ ] Closable tabs.
-                            - [ ] Draggable/Reorderable tabs.
-                        - [ ] **MenuBar:**
-                            - [ ] Root menu strip.
-                            - [ ] Keyboard navigation (Alt, Arrows).
-                        - [ ] **Menu/ContextMenu:**
-                            - [ ] Nested submenus.
-                            - [ ] Checkable items / Radio items.
-                            - [ ] Icons and Shortcuts text.
-                        - [ ] **Toolbar:**
-                            - [ ] Docking logic.
-                            - [ ] Overflow handling (Chevron menu).
-                    - [ ] **Containers & Layouts:**
-                        - [ ] **GroupBox:** Frame with title label.
-                        - [ ] **ScrollView:**
-                            - [ ] Viewport clipping.
-                            - [ ] Scrollbar visibility logic (Auto/Always/Never).
-                        - [ ] **SplitPane:**
-                            - [ ] Draggable divider handle.
-                            - [ ] Collapsible panes.
-                        - [ ] **StackView:** Layered widgets (one visible at a time).
-                        - [ ] **Layout Managers:**
-                            - [ ] **VBox/HBox:** Spacing, Alignment, Flex-grow.
-                            - [ ] **Grid:** Row/Column definitions, Spanning.
-                            - [ ] **Dock:** North/South/East/West/Center filling.
-                            - [ ] **Flow:** Wrap-around placement.
-                    - [ ] **System Dialogs:**
-                        - [ ] **MessageBox:** Icon, Message, Standard Buttons (Ok, Cancel, Yes, No).
-                        - [ ] **FileChooser:** Directory tree navigation, File filtering, Preview pane.
-                        - [ ] **ColorPicker:** RGB/HSV selectors, Palette grid, Color dropper.
-                        - [ ] **FontPicker:** Family list, Style list, Size input, Preview area.
+        - [ ] **Primitives:**
+            - [ ] Line drawing (Bresenham).
+            - [ ] Rect drawing.
+            - [ ] Circle drawing.
+            - [ ] Polygon drawing.
+        - [ ] **Blitting:**
+            - [ ] Fast bitmap copying.
+            - [ ] Scaling (Nearest Neighbor/Bilinear).
+            - [ ] Alpha blending.
+        - [ ] **Text:**
+            - [ ] Font rendering.
+            - [ ] TrueType support (via `freetype`).
+            - [ ] Bitmap font support.
+    - [ ] **Widget Toolkit:**
+        - [ ] **Architecture:**
+            - [ ] **Base Object (`GObject` equivalent):**
+                - [ ] Reference counting mechanism.
+                - [ ] Signal/Slot or Callback system for events.
+                - [ ] Property system with change notifications.
+            - [ ] **Visual Base (`Widget`):**
+                - [ ] **Geometry:** Bounds (x, y, w, h), Padding, Margin, Minimum/Maximum size.
+                - [ ] **Hierarchy:** Parent/Child relationships, Child iteration, Z-order management.
+                - [ ] **State:** Visibility (Visible/Hidden/Collapsed), Enabled/Disabled, Focused.
+                - [ ] **Painting:** `on_paint(context)` virtual method, Dirty rectangle tracking.
+                - [ ] **Input Handling:** `on_key_down`, `on_key_up`, `on_mouse_down`, `on_mouse_up`, `on_mouse_move`, `on_enter`, `on_leave`.
+            - [ ] **Focus Management:** Tab order traversal, Focus stealing protection, Default widget.
+            - [ ] **Theming Engine:**
+                - [ ] CSS-like selector matching or Style objects.
+                - [ ] System colors/fonts integration.
+                - [ ] Custom painters (Delegate pattern).
+            - [ ] **Layout Engine:**
+                - [ ] Two-pass layout (Measure -> Arrange).
+                - [ ] Auto-sizing based on content.
+        - [ ] **Standard Widgets:**
+            - [ ] **Buttons & Actions:**
+                - [ ] **AbstractButton:** Base logic for click handling and states (Normal, Hover, Pressed, Disabled).
+                - [ ] **PushButton:**
+                    - [ ] Text alignment.
+                    - [ ] Icon support.
+                    - [ ] Default/Cancel button modes.
+                    - [ ] Flat/Raised styling.
+                - [ ] **ToggleButton:**
+                    - [ ] Checked/Unchecked state management.
+                    - [ ] Button grouping (Mutual exclusion logic).
+                - [ ] **ImageButton:**
+                    - [ ] Scaling modes.
+                    - [ ] Alpha blending support.
+                - [ ] **SplitButton:** Primary action + Dropdown arrow area logic.
+            - [ ] **Text Input:**
+                - [ ] **LineEdit (Single-line):**
+                    - [ ] Cursor (Caret) rendering and blinking.
+                    - [ ] Text selection logic (Mouse drag, Shift+Arrow).
+                    - [ ] Clipboard operations (Cut/Copy/Paste).
+                    - [ ] Input masking (Password char, Numeric only, Regex filter).
+                    - [ ] Placeholder text (Hint).
+                - [ ] **TextEditor (Multi-line):**
+                    - [ ] Word wrapping logic.
+                    - [ ] Scrollbar integration.
+                    - [ ] Undo/Redo stack.
+                    - [ ] Line numbering gutter.
+                - [ ] **SpinBox:**
+                    - [ ] Up/Down buttons.
+                    - [ ] Value validation (Min/Max/Step).
+                    - [ ] Text-to-value parsing.
+            - [ ] **Selection Controls:**
+                - [ ] **CheckBox:**
+                    - [ ] Tri-state logic (Checked, Unchecked, Indeterminate).
+                    - [ ] Label positioning (Left/Right).
+                - [ ] **RadioButton:**
+                    - [ ] Auto-grouping behavior within parent container.
+                    - [ ] Circular selection rendering.
+                - [ ] **ToggleSwitch:**
+                    - [ ] Animation for sliding knob.
+                    - [ ] On/Off text labels inside track.
+                - [ ] **ComboBox (Dropdown):**
+                    - [ ] Popup window creation/positioning.
+                    - [ ] Item model integration.
+                    - [ ] Autocomplete/Filtering input.
+            - [ ] **Display Widgets:**
+                - [ ] **Label:**
+                    - [ ] Rich text parsing (Bold, Italic, Color).
+                    - [ ] Ellipsis handling (...) for overflow.
+                    - [ ] Text alignment (Left, Center, Right, Justify).
+                    - [ ] Mnemonic handling (Alt+Key focus).
+                - [ ] **ImageBox:**
+                    - [ ] Asset loading (PNG/JPG/BMP).
+                    - [ ] Scaling modes (Fit, Fill, Stretch, Center).
+                - [ ] **Separator:** Horizontal/Vertical orientation, styling.
+            - [ ] **Complex Data Views:**
+                - [ ] **AbstractItemView:** Base class for Model/View architecture.
+                - [ ] **ListView:**
+                    - [ ] **Modes:** Icon Mode (Grid), List Mode (Small Icons), Detail Mode (Columns).
+                    - [ ] Selection models (Single, Multi, Extended).
+                    - [ ] Virtualization (Rendering only visible items).
+                - [ ] **TableView:**
+                    - [ ] **HeaderView:** Resizable columns, Sort indicators, Reordering.
+                    - [ ] **Grid:** Cell rendering delegates, Alternating row colors.
+                    - [ ] In-place cell editing widgets.
+                - [ ] **TreeView:**
+                    - [ ] Indentation depth rendering.
+                    - [ ] Expander triangles (Open/Close).
+                    - [ ] Connecting lines.
+            - [ ] **Feedback & Progress:**
+                - [ ] **ProgressBar:**
+                    - [ ] Determinate mode (0-100%).
+                    - [ ] Indeterminate mode (Marquee/Pulse animation).
+                    - [ ] Text overlay.
+                - [ ] **Slider:**
+                    - [ ] Horizontal/Vertical orientation.
+                    - [ ] Tick mark rendering (Above/Below/Both).
+                    - [ ] Range selection (Two knobs).
+                - [ ] **StatusBar:**
+                    - [ ] Size grip rendering.
+                    - [ ] Temporary message queue.
+                    - [ ] Permanent widget area.
+            - [ ] **Navigation & Menus:**
+                - [ ] **TabControl:**
+                    - [ ] Tab bar rendering (Top/Bottom/Left/Right).
+                    - [ ] Page switching logic.
+                    - [ ] Closable tabs.
+                    - [ ] Draggable/Reorderable tabs.
+                - [ ] **MenuBar:**
+                    - [ ] Root menu strip.
+                    - [ ] Keyboard navigation (Alt, Arrows).
+                - [ ] **Menu/ContextMenu:**
+                    - [ ] Nested submenus.
+                    - [ ] Checkable items / Radio items.
+                    - [ ] Icons and Shortcuts text.
+                - [ ] **Toolbar:**
+                    - [ ] Docking logic.
+                    - [ ] Overflow handling (Chevron menu).
+            - [ ] **Containers & Layouts:**
+                - [ ] **GroupBox:** Frame with title label.
+                - [ ] **ScrollView:**
+                    - [ ] Viewport clipping.
+                    - [ ] Scrollbar visibility logic (Auto/Always/Never).
+                - [ ] **SplitPane:**
+                    - [ ] Draggable divider handle.
+                    - [ ] Collapsible panes.
+                - [ ] **StackView:** Layered widgets (one visible at a time).
+                - [ ] **Layout Managers:**
+                    - [ ] **VBox/HBox:** Spacing, Alignment, Flex-grow.
+                    - [ ] **Grid:** Row/Column definitions, Spanning.
+                    - [ ] **Dock:** North/South/East/West/Center filling.
+                    - [ ] **Flow:** Wrap-around placement.
+            - [ ] **System Dialogs:**
+                - [ ] **MessageBox:** Icon, Message, Standard Buttons (Ok, Cancel, Yes, No).
+                - [ ] **FileChooser:** Directory tree navigation, File filtering, Preview pane.
+                - [ ] **ColorPicker:** RGB/HSV selectors, Palette grid, Color dropper.
+                - [ ] **FontPicker:** Family list, Style list, Size input, Preview area.
                 - [ ] **Desktop Environment:**
         - [ ] **Shell:** Wallpaper, Taskbar, App Launcher.
         - [ ] **Apps:** Terminal Emulator, Text Editor, Image Viewer.
