@@ -25,6 +25,7 @@
 #include "../fs/minix/minix.h"
 #include "version.h"
 #include "panic.h"
+#include <string.h>
 
 // Simple string functions to avoid depending on libc in core if not available
 static int k_strcmp(const char *s1, const char *s2) {
@@ -105,20 +106,12 @@ void init_task(void *arg) {
 
 extern void pseudo_init(void);
 extern void procfs_init(void);
+extern void sysfs_init(void);
 
 // Kernel Entry Point
 void kmain(unsigned long magic, unsigned long addr) {
     vga_init();
     uart_init();
-    
-    vga_write("Kernel Started: ", 16);
-    vga_write(OS_NAME, sizeof(OS_NAME) - 1);
-    vga_write("\n", 1);
-    
-    if (magic != MULTIBOOT_BOOTLOADER_MAGIC) {
-        panic("Invalid multiboot magic.");
-    }
-
     multiboot_info_t *mboot_info = (multiboot_info_t*)addr;
     fb_init(mboot_info);
 
@@ -126,7 +119,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     if (mboot_info->flags & (1<<2)) {
         cmdline = (char*)mboot_info->cmdline;
         vga_write("Cmdline: ", 9);
-        vga_write(cmdline, k_strlen(cmdline));
+        vga_write(cmdline, strlen(cmdline));
         vga_write("\n", 1);
     }
     
@@ -182,10 +175,12 @@ void kmain(unsigned long magic, unsigned long addr) {
     minix_init();
     devfs_init();
     procfs_init();
+    sysfs_init();
     pseudo_init();
     vfs_init_mock_root(); // Hack for init finding
     vfs_mount(NULL, "/dev", "devfs", 0, NULL);
     vfs_mount(NULL, "/proc", "procfs", 0, NULL);
+    vfs_mount(NULL, "/sys", "sysfs", 0, NULL);
     
     // Initialize Scheduler
     sched_init();

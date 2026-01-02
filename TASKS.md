@@ -159,8 +159,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] **Dynamic generation:** Generate content on `read()` (virtual files).
         - [x] **Personality Awareness:** Detect caller personality (Linux/FreeBSD) and adjust file contents/formats dynamically (e.g., `status` file structure).
     - [ ] **SysFS (`/sys`):**
-        - [ ] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
-        - [ ] **Attributes:** Map kernel variables to readable/writable files.
+        - [x] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
+        - [x] **Attributes:** Map kernel variables to readable/writable files.
     - [ ] **FUSE (`/dev/fuse`):**
         - [ ] **Device Interface:** Implement `/dev/fuse` char device for control.
         - [ ] **Protocol:** Implement FUSE opcodes (`INIT`, `LOOKUP`, `READ`, `WRITE`).

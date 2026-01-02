@@ -1,0 +1,23 @@
+#ifndef _KOBJECT_H
+#define _KOBJECT_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+struct kobject {
+    char name[32];
+    struct kobject *parent;
+    struct kset    *kset;
+    uint32_t        refcount;
+};
+
+struct kset {
+    struct kobject kobj;
+    struct kobject **list;
+    int count;
+};
+
+void kobject_init(struct kobject *kobj, const char *name);
+void kset_init(struct kset *kset, const char *name);
+
+#endif
