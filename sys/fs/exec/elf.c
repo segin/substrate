@@ -197,6 +197,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         for (const char *p = path; *p; p++) {
             if (*p == '/') name = p + 1;
         }
+        strncpy(current_process->comm, name, sizeof(current_process->comm) - 1);
     }
     
     // Set up kernel stack for this process in TSS
