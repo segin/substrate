@@ -101,6 +101,36 @@ void smp_discover_cores(void) {
     }
 }
 
-int smp_get_cpu_count(void) {
-    return cpu_count;
+extern void trampoline_start(void);
+extern void trampoline_end(void);
+
+#define TRAMPOLINE_ADDR 0x8000
+
+void smp_ap_entry(void) {
+    vga_write("SMP: AP Core started.\n", 22);
+    while(1) __asm__ volatile("hlt");
+}
+
+void smp_boot_ap(uint8_t apic_id) {
+    // 1. Copy trampoline to low memory
+    size_t len = (uintptr_t)trampoline_end - (uintptr_t)trampoline_start;
+    memcpy((void*)TRAMPOLINE_ADDR, trampoline_start, len);
+
+    // 2. Set stack and entry point in trampoline
+    // (Offsets match the .S file)
+    uint32_t *stk_ptr = (uint32_t*)(TRAMPOLINE_ADDR + (len - 8));
+    uint32_t *ent_ptr = (uint32_t*)(TRAMPOLINE_ADDR + (len - 4));
+    
+    static char ap_stack[4096];
+    *stk_ptr = (uint32_t)ap_stack + 4096;
+    *ent_ptr = (uint32_t)smp_ap_entry;
+
+    // 3. Send INIT IPI
+    // (Requires lapic_write from lapic.c)
+    // lapic_write(LAPIC_ICRHI, apic_id << 24);
+    // lapic_write(LAPIC_ICRLO, 0x00004500); // INIT
+
+    // 4. Send STARTUP IPI
+    // lapic_write(LAPIC_ICRHI, apic_id << 24);
+    // lapic_write(LAPIC_ICRLO, 0x00004600 | (TRAMPOLINE_ADDR >> 12));
 }
