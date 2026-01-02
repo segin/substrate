@@ -13,7 +13,7 @@ AS ?= as
 TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 # Base flags for 32-bit x86
-COMMON_FLAGS = -m32 -Wall -Wextra -g -fno-stack-protector
+COMMON_FLAGS = -m32 -Wall -Wextra -Werror -g -fno-stack-protector
 LIBC_INCLUDE = $(TOP)/lib/c/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include)

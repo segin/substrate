@@ -27,6 +27,25 @@ _start:
 	push $0
 	popf
 
+	# Check for Multiboot magic
+	cmp $MULTIBOOT_BOOTLOADER_MAGIC, %eax
+	je .is_multiboot
+
+	# Check for FreeBSD magic (0x12345678)
+	cmp $0x12345678, %eax
+	je .is_freebsd
+
+	# Unknown bootloader, still pass args
+	jmp .is_multiboot
+
+.is_freebsd:
+	# Convert FreeBSD bootinfo to something kmain understands or tag it
+	# For now, just pass them as is.
+	# We can use a different magic to let kmain know
+	mov $0xF8EEB5D0, %eax # Internal tag for FreeBSD boot
+	jmp .is_multiboot
+
+.is_multiboot:
 	# Push Multiboot Info
 	push %ebx
 	push %eax

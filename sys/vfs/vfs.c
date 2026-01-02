@@ -53,6 +53,7 @@ uint32_t write_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buff
 }
 
 void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
+    (void)read; (void)write;
     if (node->open != 0)
         node->open(node);
 }

@@ -2,8 +2,6 @@
 #include "pmap.h"
 #include "../../drivers/video/vga.h"
 
-// Default physical address for LAPIC
-static uintptr_t lapic_phys = 0xFEE00000;
 // Virtual address where LAPIC is mapped
 static uintptr_t lapic_base = 0xFEE00000; 
 

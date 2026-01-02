@@ -4,6 +4,7 @@
 #include "../../kern/sched.h"
 
 int coff_load_file(void *file, uint32_t size) {
+    (void)size;
     coff_filehdr_t *filehdr = (coff_filehdr_t *)file;
 
     if (filehdr->f_magic != COFF_MAGIC_I386) {

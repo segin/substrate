@@ -104,6 +104,7 @@ void smp_ap_entry(void) {
 }
 
 void smp_boot_ap(uint8_t apic_id) {
+    (void)apic_id;
     // 1. Copy trampoline to low memory
     size_t len = (uintptr_t)trampoline_end - (uintptr_t)trampoline_start;
     memcpy((void*)TRAMPOLINE_ADDR, trampoline_start, len);

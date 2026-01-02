@@ -79,6 +79,7 @@ static uint32_t proc_uptime_read(fs_node_t *node, uint32_t offset, uint32_t size
 
 // Node for /proc/<pid>/
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint32_t index) {
+    (void)node;
     if (index == 0) { strcpy(proc_dirent.name, "."); return &proc_dirent; }
     if (index == 1) { strcpy(proc_dirent.name, ".."); return &proc_dirent; }
     if (index == 2) { strcpy(proc_dirent.name, "status"); return &proc_dirent; }

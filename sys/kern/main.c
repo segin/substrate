@@ -28,11 +28,6 @@
 #include <string.h>
 
 // Simple string functions to avoid depending on libc in core if not available
-static int k_strcmp(const char *s1, const char *s2) {
-    while (*s1 && (*s1 == *s2)) { s1++; s2++; }
-    return *(const unsigned char*)s1 - *(const unsigned char*)s2;
-}
-
 static int k_strncmp(const char *s1, const char *s2, size_t n) {
     while (n && *s1 && (*s1 == *s2)) { s1++; s2++; n--; }
     if (n == 0) return 0;
@@ -115,10 +110,24 @@ extern void p9_init(void);
 void kmain(unsigned long magic, unsigned long addr) {
     vga_init();
     uart_init();
-    multiboot_info_t *mboot_info = (multiboot_info_t*)addr;
-    fb_init(mboot_info);
+
+    multiboot_info_t *mboot_info;
+    static multiboot_info_t fake_mbi;
+
+    if (magic == 0xF8EEB5D0) {
+        vga_write("Booted via FreeBSD loader.\n", 27);
+        memset(&fake_mbi, 0, sizeof(fake_mbi));
+        mboot_info = &fake_mbi;
+    } else {
+        if (magic != MULTIBOOT_BOOTLOADER_MAGIC) {
+            panic("Invalid bootloader magic.");
+        }
+        mboot_info = (multiboot_info_t*)addr;
+    }
 
     char *cmdline = NULL;
+    fb_init(mboot_info);
+
     if (mboot_info->flags & (1<<2)) {
         cmdline = (char*)mboot_info->cmdline;
         vga_write("Cmdline: ", 9);

@@ -13,6 +13,7 @@ int elf_check_file(Elf32_Ehdr *hdr) {
 }
 
 int elf_load_file(void *file, uint32_t size) {
+    (void)size;
     Elf32_Ehdr *hdr = (Elf32_Ehdr*)file;
     if (!elf_check_file(hdr)) {
         vga_write("Not a valid ELF file.\n", 22);
