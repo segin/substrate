@@ -1,8 +1,41 @@
 # Booting TestUnix
 
-The TestUnix kernel (`kernel.bin`) is Multiboot-compliant. This allows it to be booted by any Multiboot-compliant bootloader, such as GRUB, or directly by emulators like QEMU.
+TestUnix supports four different boot methods on i386, each producing a specific kernel image.
 
-## 1. Booting with QEMU
+## 1. Multiboot (`kernel.multiboot`)
+Standard Multiboot 1 compliant ELF image. Bootable by GRUB, SeaBIOS, or QEMU `-kernel`.
+
+```bash
+qemu-system-i386 -kernel sys/kernel.multiboot
+```
+
+## 2. FreeBSD Loader (`kernel.freebsd`)
+ELF image compatible with the FreeBSD `loader`. The kernel detects the FreeBSD bootinfo structures and magic values.
+
+```bash
+# In FreeBSD loader:
+load /boot/kernel.freebsd
+boot
+```
+
+## 3. EFI (`kernel.efi`)
+PE32 binary for UEFI firmware. Bootable directly from an EFI shell or by a UEFI-compatible manager.
+
+```bash
+# In EFI Shell:
+fs0:
+kernel.efi
+```
+
+## 4. zImage / Raw (`kernel.zimage`)
+Flat binary with a minimal Linux-compatible boot header. Can be loaded by legacy loaders (LILO, Syslinux) or written to a raw device.
+
+```bash
+# Using QEMU to boot raw binary (requires loading at 1MB)
+qemu-system-i386 -device loader,file=sys/kernel.zimage,addr=0x100000
+```
+
+## 5. Booting with QEMU (Direct)
 
 The fastest way to boot the kernel for testing is using QEMU's direct kernel loading feature.
 

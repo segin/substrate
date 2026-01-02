@@ -120,9 +120,12 @@ void kmain(unsigned long magic, unsigned long addr) {
         mboot_info = &fake_mbi;
     } else {
         if (magic != MULTIBOOT_BOOTLOADER_MAGIC) {
-            panic("Invalid bootloader magic.");
+            vga_write("Warning: Unknown bootloader magic, assuming raw boot.\n", 54);
+            memset(&fake_mbi, 0, sizeof(fake_mbi));
+            mboot_info = &fake_mbi;
+        } else {
+            mboot_info = (multiboot_info_t*)addr;
         }
-        mboot_info = (multiboot_info_t*)addr;
     }
 
     char *cmdline = NULL;

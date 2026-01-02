@@ -4,7 +4,7 @@ include ../../../Makefile.inc
 CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../drivers/video
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = boot.S gdt.c sched.c idt.c isr.S pmm.c pci.c syscall.c pmap.c smp_discovery.c lapic.c ioapic.c trampoline.S fpu/fpu_emu.c efi_boot.c
+SRCS = boot.S gdt.c sched.c idt.c isr.S pmm.c pci.c syscall.c pmap.c smp_discovery.c lapic.c ioapic.c trampoline.S fpu/fpu_emu.c efi_boot.c zimage_header.S
 OBJS = $(SRCS:.c=.o)
 OBJS := $(OBJS:.S=.o)
 

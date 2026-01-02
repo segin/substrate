@@ -3,10 +3,10 @@ include ../Makefile.inc
 # Default to i386 if not specified
 ARCH ?= i386
 
-.PHONY: all clean install arch_kernel core kern drivers fs exec vfs exec_perso vm
+.PHONY: all clean install arch_kernel core kern drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi
 
-all: kernel.bin kernel.efi
-	@echo "Kernel build complete."
+all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
+	@echo "Kernel build complete (all formats)."
 
 kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso vm
 	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.bin \
@@ -23,6 +23,16 @@ kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso vm
 		exec/perso/perso.o \
 		vm/vm.o
 	@echo "Linked kernel.bin"
+
+kernel.multiboot: kernel.bin
+	cp kernel.bin kernel.multiboot
+
+kernel.freebsd: kernel.bin
+	cp kernel.bin kernel.freebsd
+
+kernel.zimage: kernel.bin
+	# For zImage, we often want a flat binary if using it with legacy loaders
+	objcopy -O binary kernel.bin kernel.zimage
 
 kernel.efi: arch_kernel kern drivers fs exec vfs exec_perso vm
 	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.elf \
