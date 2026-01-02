@@ -176,6 +176,9 @@ isr_exit:
 # User data selector: 0x23 (0x20 | 3)
 .global jump_to_userspace
 jump_to_userspace:
+    # DEBUG: Force a breakpoint immediately to prove we are running new code
+    int $3
+    
     # Load parameters FIRST
     mov 4(%esp), %ecx   # entry_point
     
