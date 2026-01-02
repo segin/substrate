@@ -20,9 +20,17 @@ static uint32_t proc_status_read(fs_node_t *node, uint32_t offset, uint32_t size
     }
     if (!p) return 0;
 
-    char buf[256];
-    sprintf(buf, "Name:\t%s\nPid:\t%d\nUid:\t%d\nGid:\t%d\nState:\tRunning\n", 
-            p->comm, p->pid, p->uid, p->gid);
+    char buf[512];
+    if (current_process->pers && strcmp(current_process->pers->name, "Linux") == 0) {
+        sprintf(buf, "Name:\t%s\nState:\tR (running)\nTgid:\t%d\nPid:\t%d\nUid:\t%d\t%d\t%d\t%d\nGid:\t%d\t%d\t%d\t%d\n", 
+                p->comm, p->pid, p->pid, p->uid, p->uid, p->uid, p->uid, p->gid, p->gid, p->gid, p->gid);
+    } else if (current_process->pers && strcmp(current_process->pers->name, "FreeBSD") == 0) {
+        // FreeBSD uses a different format, but for now just label it
+        sprintf(buf, "Name: %s\nPid: %d\nABI: FreeBSD\n", p->comm, p->pid);
+    } else {
+        sprintf(buf, "Name:\t%s\nPid:\t%d\nUid:\t%d\nGid:\t%d\nState:\tRunning\n", 
+                p->comm, p->pid, p->uid, p->gid);
+    }
     
     uint32_t len = strlen(buf);
     if (offset >= len) return 0;

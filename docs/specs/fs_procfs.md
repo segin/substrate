@@ -15,6 +15,9 @@ ProcFS is a virtual filesystem that provides an interface to kernel process stru
     - `/proc/meminfo`: Global memory usage statistics.
     - `/proc/uptime`: System uptime in seconds.
 
+## Personality Awareness
+ProcFS detects the personality of the calling process and adjusts the format of certain files accordingly. For example, `/proc/<pid>/status` returns a format compatible with the Linux kernel when accessed by a process running under the Linux personality.
+
 ## VFS Integration
 - Registered as a virtual filesystem in the VFS registry.
 - Uses `inode` field in `fs_node_t` to store the target PID for per-process files.
