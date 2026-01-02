@@ -3,12 +3,12 @@ include ../Makefile.inc
 # Default to i386 if not specified
 ARCH ?= i386
 
-.PHONY: all clean install arch_kernel core kern drivers fs exec vfs exec_perso
+.PHONY: all clean install arch_kernel core kern drivers fs exec vfs exec_perso vm
 
 all: kernel.bin
 	@echo "Kernel build complete."
 
-kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso
+kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso vm
 	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.bin \
 		arch/$(ARCH)/kernel.o \
 		kern/kern.o \
@@ -19,7 +19,8 @@ kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso
 		vfs/vfs_subsys.o \
 		fs/fs.o \
 		fs/exec/exec.o \
-		exec/perso/perso.o
+		exec/perso/perso.o \
+		vm/vm.o
 	@echo "Linked kernel.bin"
 
 arch_kernel:
@@ -29,6 +30,10 @@ arch_kernel:
 kern:
 	@echo "Building Kernel Subsystems..."
 	$(MAKE) -C kern
+
+vm:
+	@echo "Building VM Subsystem..."
+	$(MAKE) -C vm
 
 exec_perso:
 	@echo "Building Personalities..."
@@ -70,6 +75,7 @@ clean:
 	$(MAKE) -C fs clean
 	$(MAKE) -C fs/exec clean
 	$(MAKE) -C exec/perso clean
+	$(MAKE) -C vm clean
 	rm -f kernel.bin
 
 install:

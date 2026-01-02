@@ -13,7 +13,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Implement `pmm_alloc_contiguous` for specific DMA drivers.
     - [ ] **Memory Management (BSD/Mach Design):**
         - [ ] **Physical Memory (Machine Independent):**
-            - [ ] `vm_page_t`: Core structure tracking state of every physical page.
+            - [x] `vm_page_t`: Core structure tracking state of every physical page.
             - [ ] **Page Queues:** Active/Inactive/Free lists for page replacement logic.
         - [ ] **PMAP Layer (Machine Dependent - i386):**
             - [x] `pmap_init`: Bootstrap hardware paging structures.
