@@ -48,7 +48,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
 - [ ] **Scheduling (BSD-style):**
     - [x] Implement `kthread` creation and management.
-    - [ ] Implement Preemptive Multitasking (timer interrupt).
+    - [x] Implement Preemptive Multitasking (timer interrupt).
     - [ ] Implement Thread Priorities and Scheduling Classes (Realtime, Timeshare, Idle).
     - [x] Implement Context Switching (save/restore registers properly).
     - [ ] Implement `sleep` / `wakeup` (BSD-style condition variables).
@@ -272,7 +272,6 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Authenticates against `/etc/passwd` and `/etc/shadow`.
         - [ ] Starts the default Desktop Environment shell on success.
     - [ ] **`login` (CLI):** Implement PAM-like authentication or shadow file reading.
-    - [ ] **`ps`:** Read from `/proc`.
     - [ ] **`ps`:** Read from `/proc`.
     - [ ] **`top`:** Real-time process monitoring.
     - [ ] **Filesystem Tools (`sbin/`):**

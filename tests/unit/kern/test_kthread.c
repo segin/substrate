@@ -11,7 +11,10 @@ static void dummy_thread_func(void *arg) {
     kthread_exit();
 }
 
+extern void sched_init(void);
+
 bool test_kthread_creation(void) {
+    sched_init();
     int result = kthread_create(dummy_thread_func, NULL, NULL, "test-thread");
     return (result == 0);
 }

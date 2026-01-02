@@ -31,10 +31,9 @@ int coff_load_file(void *file, uint32_t size) {
         // TODO: Use vm_map_insert to map section raw data
     }
 
-    // Default to Xenix for now if we detect a 386 COFF binary, 
-    // though this should be more robust.
+    // Default to SVR3 for now if we detect a 386 COFF binary
     if (current_process) {
-        current_process->pers = &personality_linux; // Placeholder
+        current_process->pers = &personality_svr3;
     }
 
     vga_write("COFF Loader invoked (header parsed).\n", 37);

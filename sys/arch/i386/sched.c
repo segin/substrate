@@ -1,6 +1,7 @@
 #include "../../kern/sched.h"
 #include "../../sys/acct.h"
 #include <stddef.h>
+#include <stdint.h>
 
 // Simple memcpy/strcpy if not available in kernel lib yet, or assume built-in
 void k_strcpy(char *dst, const char *src) {
@@ -131,11 +132,11 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     
     // Simulate stack frame for "entry_point(arg)"
     uint32_t *stk = (uint32_t*)stack;
-    stk--; *stk = (uint32_t)arg;  // Arg
+    stk--; *stk = (uint32_t)(uintptr_t)arg;  // Arg
     stk--; *stk = 0;              // Fake Return Addr (or a thread_exit wrapper)
     
     // For switch_to: it will pop ebp, edi, esi, ebx
-    stk--; *stk = (uint32_t)entry_point; // This will be popped into EBP or something? 
+    stk--; *stk = (uint32_t)(uintptr_t)entry_point; // This will be popped into EBP or something? 
                                          // Wait, switch_to returns to whatever is on stack.
                                          // If we want it to "return" to entry_point, 
                                          // we should put entry_point where the 'ret' expects it.
@@ -150,9 +151,9 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     // [ebx]
     
     stk = (uint32_t*)stack;
-    stk--; *stk = (uint32_t)arg;
+    stk--; *stk = (uint32_t)(uintptr_t)arg;
     stk--; *stk = 0; // Return address from entry_point
-    stk--; *stk = (uint32_t)entry_point; // Return address for switch_to
+    stk--; *stk = (uint32_t)(uintptr_t)entry_point; // Return address for switch_to
     stk--; *stk = 0; // ebp
     stk--; *stk = 0; // edi
     stk--; *stk = 0; // esi

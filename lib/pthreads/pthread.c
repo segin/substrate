@@ -30,7 +30,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     if (!stack) return -1;
     
     struct thr_param param;
-    param.start_func = (void(*)(void*))start_routine; // Simplified: kernel jumps here
+    param.start_func = (void(*)(void*))(uintptr_t)start_routine; // Simplified: kernel jumps here
     param.arg = arg;
     param.stack_base = stack;
     param.stack_size = stack_size;

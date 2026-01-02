@@ -56,8 +56,12 @@ extern void isr28(void);
 extern void isr29(void);
 extern void isr30(void);
 extern void isr31(void);
+extern void isr32(void);  // IRQ0 (Timer)
 extern void isr33(void);  // IRQ1 (Keyboard)
 extern void isr128(void); // Syscall (0x80)
+
+extern void timer_tick(void);
+extern void sched_yield(void);
 
 void idt_init(void) {
     idt_ptr.limit = sizeof(idt_entry_t) * 256 - 1;
@@ -78,10 +82,15 @@ void idt_init(void) {
     outb(0xA1, 0x02);
     outb(0xA1, 0x01);
 
-    // Mask all interrupts except IRQ1 (Keyboard) and IRQ2 (Cascade)
-    // IRQ2 is needed for Slave PIC, though we don't use slave interrupts yet.
-    outb(0x21, 0xFD & ~0x04); // Unmask IRQ1 (bit 1) and IRQ2 (bit 2)
+    // Unmask IRQ0 (Timer) and IRQ1 (Keyboard)
+    outb(0x21, 0xFC); // 11111100: Unmask bit 0 and 1
     outb(0xA1, 0xFF);
+
+    // Initialize PIT (100Hz)
+    uint32_t divisor = 1193180 / 100;
+    outb(0x43, 0x36);
+    outb(0x40, divisor & 0xFF);
+    outb(0x40, (divisor >> 8) & 0xFF);
 
     // Set gates for exceptions
     idt_set_gate(0, (uint32_t)isr0, 0x08, 0x8E);
@@ -116,6 +125,9 @@ void idt_init(void) {
     idt_set_gate(29, (uint32_t)isr29, 0x08, 0x8E);
     idt_set_gate(30, (uint32_t)isr30, 0x08, 0x8E);
     idt_set_gate(31, (uint32_t)isr31, 0x08, 0x8E);
+    
+    // IRQ0 - Timer
+    idt_set_gate(32, (uint32_t)isr32, 0x08, 0x8E);
     
     // IRQ1 - Keyboard
     idt_set_gate(33, (uint32_t)isr33, 0x08, 0x8E);
@@ -210,24 +222,110 @@ static const char *exception_messages[] = {
 
 void isr_handler(registers_t *regs) {
 
-    if (regs->int_no == 33) {
 
-        keyboard_handler(regs);
 
-    } else if (regs->int_no == 7) {
+    if (regs->int_no == 32) {
 
-        fpu_handler(regs);
 
-    } else if (regs->int_no < 32) {
 
-        vga_write("EXCEPTION: ", 11);
+        timer_tick();
 
-        vga_write(exception_messages[regs->int_no], strlen(exception_messages[regs->int_no]));
 
-        vga_write("\n", 1);
 
-        panic("Unhandled Exception");
+        // Send EOI to PIC
+
+
+
+        if (regs->int_no >= 40) outb(0xA0, 0x20);
+
+
+
+        outb(0x20, 0x20);
+
+
+
+        sched_yield();
+
+
+
+        return;
+
+
 
     }
 
+
+
+
+
+
+
+    if (regs->int_no == 33) {
+
+
+
+        keyboard_handler(regs);
+
+
+
+    } else if (regs->int_no == 7) {
+
+
+
+        fpu_handler(regs);
+
+
+
+    } else if (regs->int_no < 32) {
+
+
+
+        vga_write("EXCEPTION: ", 11);
+
+
+
+        vga_write(exception_messages[regs->int_no], strlen(exception_messages[regs->int_no]));
+
+
+
+        vga_write("\n", 1);
+
+
+
+        panic("Unhandled Exception");
+
+
+
+    }
+
+
+
+
+
+
+
+    // Send EOI to PIC for other IRQs
+
+
+
+    if (regs->int_no >= 32 && regs->int_no <= 47) {
+
+
+
+        if (regs->int_no >= 40) outb(0xA0, 0x20);
+
+
+
+        outb(0x20, 0x20);
+
+
+
+    }
+
+
+
 }
+
+
+
+

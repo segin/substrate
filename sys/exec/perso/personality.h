@@ -12,5 +12,7 @@ struct personality {
 extern struct personality personality_native;
 extern struct personality personality_freebsd;
 extern struct personality personality_linux;
+extern struct personality personality_svr3;
+extern struct personality personality_svr4;
 
 #endif

@@ -31,6 +31,9 @@ int elf_load_file(void *file, uint32_t size) {
     } else if (hdr->e_ident[EI_OSABI] == ELFOSABI_TESTUNIX || hdr->e_ident[EI_OSABI] == ELFOSABI_SYSV) {
         vga_write("Detected TestUnix ELF.\n", 23);
         if (current_process) current_process->pers = &personality_native;
+    } else if (hdr->e_ident[EI_OSABI] == ELFOSABI_ATT_UNIX || hdr->e_ident[EI_OSABI] == ELFOSABI_MODESTO) {
+        vga_write("Detected SVR4 ELF.\n", 19);
+        if (current_process) current_process->pers = &personality_svr4;
     } else {
         vga_write("Unknown ELF OSABI.\n", 19);
         // Default to native?

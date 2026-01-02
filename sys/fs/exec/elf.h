@@ -51,6 +51,8 @@ typedef struct {
 #define ELFOSABI_LINUX 3
 #define ELFOSABI_FREEBSD 9
 #define ELFOSABI_TESTUNIX 64 // Custom ABI ID for TestUnix
+#define ELFOSABI_ATT_UNIX 65 // Custom ABI ID for AT&T UNIX
+#define ELFOSABI_MODESTO 11  // Novell Modesto / SVR4
 
 int elf_check_file(Elf32_Ehdr *hdr);
 int elf_load_file(void *file, uint32_t size);

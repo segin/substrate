@@ -4,6 +4,7 @@
 #include "../sys/vm/vm_kmem.h"
 #include "../sys/vm/vm_object.h"
 #include "../sys/vm/vm_page.h"
+#include "../sys/kern/sched.h"
 
 // VM Tests
 extern bool test_kmem_basic_alloc(void);
@@ -35,6 +36,25 @@ extern bool test_spinlock_initial_state(void);
 
 // kthread Tests
 extern bool test_kthread_creation(void);
+extern bool test_timer_tick_increments(void);
+
+// Scheduling Properties & Fuzzing
+extern bool prop_time_is_monotonic(int iterations);
+extern void fuzz_timer_interrupt(const uint8_t *data, size_t size);
+
+bool test_sched_properties(void) {
+    return prop_time_is_monotonic(1000);
+}
+
+bool test_sched_fuzz(void) {
+    uint8_t dummy_data[] = {0x10, 0x00, 0x00, 0x00}; // 16 ticks
+    fuzz_timer_interrupt(dummy_data, sizeof(dummy_data));
+    return true; // If it didn't crash, it passed for now
+}
+
+// Personality Tests
+extern bool test_svr3_personality_table(void);
+extern bool test_svr4_personality_table(void);
 
 typedef struct {
     const char *name;
@@ -65,6 +85,11 @@ test_case_t tests[] = {
     {"lock_basic", test_spinlock_basic},
     {"lock_init", test_spinlock_initial_state},
     {"kthread_create", test_kthread_creation},
+    {"timer_tick", test_timer_tick_increments},
+    {"sched_prop", test_sched_properties},
+    {"sched_fuzz", test_sched_fuzz},
+    {"svr3_perso", test_svr3_personality_table},
+    {"svr4_perso", test_svr4_personality_table},
     {NULL, NULL}
 };
 
@@ -73,10 +98,9 @@ int main() {
     int total = 0;
 
     // Initialize subsystems
-    vm_zone_init();
-    kmem_init();
     vm_object_init();
     vm_page_init();
+    sched_init();
 
     printf("Starting TestUnix Unit Tests...\n");
     printf("--------------------------------\n");

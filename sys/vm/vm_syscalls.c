@@ -8,7 +8,7 @@
 // User Memory System Calls
 
 void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t offset) {
-    (void)fd; (void)offset; // For now, only anonymous mappings
+    (void)fd; (void)offset; (void)prot; // For now, only anonymous mappings
     
     process_t *p = current_process;
     if (!p) return (void *)-1;

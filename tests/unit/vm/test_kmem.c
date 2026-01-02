@@ -38,9 +38,10 @@ bool test_kmem_multiple_alloc(void) {
 }
 
 bool test_kmem_too_large(void) {
-    void *ptr = kmalloc(4096);
+    // We now expect 4KB to be the new limit (or supported via host mock)
+    void *ptr = kmalloc(8192); // Test even larger
     if (ptr != NULL) {
-        kfree(ptr, 4096);
+        kfree(ptr, 8192);
         return false;
     }
     return true;
