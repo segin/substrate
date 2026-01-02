@@ -9,10 +9,22 @@
 #include "../../kern/panic.h"
 #include "fpu/fpu_emu.h"
 
-idt_entry_t idt_entries[256];
+idt_entry_t idt_entries[256] __attribute__((aligned(16)));
 idt_ptr_t   idt_ptr;
 
 extern void idt_flush(uint32_t);
+
+// ... (omitted ISR externs for brevity in search, matching block start)
+
+// ...
+
+    idt_set_gate(32, (uint32_t)isr32, 0x08, 0x8E);
+    idt_set_gate(33, (uint32_t)isr33, 0x08, 0x8E);
+    idt_set_gate(44, (uint32_t)isr44, 0x08, 0x8E);
+    idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0xEE); // DPL=3
+
+    idt_flush((uint32_t)&idt_ptr);
+}
 
 // ISR Handlers (defined in isr.S)
 extern void isr0(void);
