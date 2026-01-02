@@ -55,3 +55,45 @@ bool test_mutex_contention(void) {
     
     return true;
 }
+
+bool test_sema_basic(void) {
+    semaphore_t s;
+    sema_init(&s, 1, "test-sema");
+    
+    sema_wait(&s);
+    if (sema_getvalue(&s) != 0) return false;
+    
+    sema_post(&s);
+    if (sema_getvalue(&s) != 1) return false;
+    
+    return true;
+}
+
+bool test_sema_blocking(void) {
+    sched_init();
+    semaphore_t s;
+    sema_init(&s, 0, "block-sema"); // Start at 0
+    
+    char stack[4096];
+    int tid = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL);
+    thread_t *t = sched_get_thread(tid);
+    
+    // Simulate t trying to wait and blocking
+    current_thread = t;
+    current_thread->state = THREAD_RUNNING;
+    
+    // Manual wait logic because sema_wait would loop on sched_sleep
+    sched_sleep(&s);
+    
+    if (t->state != THREAD_BLOCKED) return false;
+    
+    // Now post from another thread (kernel thread)
+    current_thread = sched_get_thread(1);
+    current_thread->state = THREAD_RUNNING;
+    sema_post(&s);
+    
+    if (t->state != THREAD_READY) return false;
+    if (sema_getvalue(&s) != 1) return false;
+    
+    return true;
+}

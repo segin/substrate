@@ -27,4 +27,16 @@ void mutex_lock(mutex_t *m);
 void mutex_unlock(mutex_t *m);
 bool mutex_is_held(mutex_t *m);
 
+// Semaphore
+typedef struct {
+    int      value;
+    spinlock_t lock; // Protects the value
+    const char *name;
+} semaphore_t;
+
+void sema_init(semaphore_t *s, int value, const char *name);
+void sema_wait(semaphore_t *s);
+void sema_post(semaphore_t *s);
+int  sema_getvalue(semaphore_t *s);
+
 #endif

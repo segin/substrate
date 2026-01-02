@@ -43,6 +43,8 @@ extern bool test_sched_sleep_wakeup(void);
 // Sync Tests
 extern bool test_mutex_basic(void);
 extern bool test_mutex_contention(void);
+extern bool test_sema_basic(void);
+extern bool test_sema_blocking(void);
 
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
@@ -105,6 +107,8 @@ test_case_t tests[] = {
     {"sched_sleep", test_sched_sleep_wakeup},
     {"mutex_basic", test_mutex_basic},
     {"mutex_contend", test_mutex_contention},
+    {"sema_basic", test_sema_basic},
+    {"sema_block", test_sema_blocking},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},

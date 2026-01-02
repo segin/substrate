@@ -54,7 +54,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [x] Implement `sleep` / `wakeup` (BSD-style condition variables).
     - [x] Implement Kernel Mutexes and Spinlocks.
 - [ ] **Synchronization:**
-    - [ ] Implement Spinlocks, Mutexes, and Semaphores.
+    - [x] Implement Spinlocks, Mutexes, and Semaphores.
     - [ ] Implement Futex support for user-space synchronization (Linux personality).
 - [ ] **Signals:**
     - [ ] Implement Signal delivery mechanism (trampoline, context saving).
