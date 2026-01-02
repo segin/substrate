@@ -184,6 +184,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Support ELKS binaries (16-bit Real Mode via VM86).
         - [ ] **VM86:** Implement Virtual 8086 mode infrastructure (i386 only).
         - [ ] **Syscalls:** Implement `int 0x80` handling within VM86 context.
+    - [ ] **ELKS (Embeddable Linux Kernel Subset):**
+        - [ ] Support ELKS binaries (16-bit Real Mode via VM86).
+        - [ ] **VM86:** Implement Virtual 8086 mode infrastructure (i386 only).
+        - [ ] **Syscalls:** Implement `int 0x80` handling within VM86 context.
     - [ ] **Linux:**
         - [ ] Improve `sys_clone` compatibility (flags).
     - [ ] **Minix/386:**
