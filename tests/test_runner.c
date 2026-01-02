@@ -29,6 +29,10 @@ extern bool test_vm_fault_cow_trigger(void);
 // Arch Tests (Mocked)
 extern bool test_trampoline_preparation(void);
 
+// Kernel Tests
+extern bool test_spinlock_basic(void);
+extern bool test_spinlock_initial_state(void);
+
 typedef struct {
     const char *name;
     bool (*func)(void);
@@ -55,6 +59,8 @@ test_case_t tests[] = {
     {"swap_full", test_swap_full},
     {"cow_trigger", test_vm_fault_cow_trigger},
     {"smp_tramp", test_trampoline_preparation},
+    {"lock_basic", test_spinlock_basic},
+    {"lock_init", test_spinlock_initial_state},
     {NULL, NULL}
 };
 
