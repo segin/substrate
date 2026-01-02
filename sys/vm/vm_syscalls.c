@@ -1,7 +1,7 @@
 #include "vm_map.h"
 #include "vm_object.h"
 #include "vm_fault.h"
-#include "../sys/proc.h"
+#include <sys/proc.h>
 #include <stdint.h>
 #include <stddef.h>
 

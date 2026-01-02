@@ -1,5 +1,5 @@
-#include "../sys/kthread.h"
-#include "../sys/proc.h"
+#include <sys/kthread.h>
+#include <sys/proc.h>
 #include "../kern/sched.h"
 #include "../vm/vm_kmem.h"
 #include <stddef.h>

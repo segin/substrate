@@ -1,5 +1,5 @@
-#include "../sys/futex.h"
-#include "../sys/proc.h"
+#include <sys/futex.h>
+#include <sys/proc.h>
 #include "sched.h"
 #include <stddef.h>
 #include <stdint.h>

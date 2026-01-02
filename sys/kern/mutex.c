@@ -1,5 +1,5 @@
-#include "../sys/lock.h"
-#include "../sys/proc.h"
+#include <sys/lock.h>
+#include <sys/proc.h>
 #include "sched.h"
 #include <stddef.h>
 

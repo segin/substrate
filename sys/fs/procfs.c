@@ -1,5 +1,5 @@
 #include "../vfs/vfs.h"
-#include "../sys/proc.h"
+#include <sys/proc.h>
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>

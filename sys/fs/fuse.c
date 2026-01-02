@@ -1,5 +1,5 @@
 #include "../vfs/vfs.h"
-#include "../sys/fuse.h"
+#include <sys/fuse.h>
 #include "../kern/sched.h"
 #include <string.h>
 #include <stddef.h>

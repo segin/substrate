@@ -5,10 +5,10 @@
 #include "../../kern/version.h"
 #include "../../kern/panic.h"
 #include "../../exec/perso/personality.h"
-#include "../../sys/thr.h"
-#include "../../sys/acct.h"
-#include "../../sys/file.h"
-#include "../../sys/signal.h"
+#include <sys/thr.h>
+#include <sys/acct.h>
+#include <sys/file.h>
+#include <sys/signal.h>
 #include "../../vfs/vfs.h"
 #include "../../drivers/serial/uart.h"
 #include <sys/types.h>
@@ -16,9 +16,12 @@
 extern thread_t *current_thread; 
 extern process_t *current_process;
 extern thread_t threads[];
+extern process_t processes[];
 
 extern int sys_acct(const char *path);
 extern int sys_time(uint32_t *tloc);
+extern int sys_waitpid(int pid, int *status, int options);
+extern int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 extern void signal_handle_pending(registers_t *regs);
 
 // Simple file structure allocator
@@ -429,8 +432,75 @@ int sys_ioctl(int fd, int request, void *arg) {
     return -1; // ENOTTY
 }
 
+int sys_chdir(const char *path) {
+    if (!path) return -1;
+    // Stub for CWD support
+    return 0;
+}
+
+int sys_chmod(const char *path, int mode) {
+    (void)path; (void)mode;
+    return 0;
+}
+
+int sys_lchown(const char *path, int uid, int gid) {
+    (void)path; (void)uid; (void)gid;
+    return 0;
+}
+
+int sys_fcntl(int fd, int cmd, int arg) {
+    (void)fd; (void)cmd; (void)arg;
+    return 0;
+}
+
+int sys_creat(const char *path, int mode) {
+    return sys_open(path, 0x40 | 0x01 | 0x08, mode); // O_CREAT|O_WRONLY|O_TRUNC
+}
+
+int sys_signal(int sig, void *handler) {
+    struct sigaction act;
+    act.sa_handler = (sig_t)handler;
+    act.sa_mask = 0;
+    act.sa_flags = 0;
+    return sys_sigaction(sig, &act, NULL);
+}
+
+int sys_waitpid(int pid, int *status, int options) {
+    (void)options;
+    while (1) {
+        bool found = false;
+        for (int i = 0; i < 16; i++) {
+            if (processes[i].pid == -1) continue;
+            if (processes[i].ppid != current_process->pid) continue;
+            if (pid != -1 && processes[i].pid != pid) continue;
+            found = true;
+            bool all_zombies = true;
+            for (int j = 0; j < 64; j++) {
+                if (threads[j].proc == &processes[i] && threads[j].tid != -1) {
+                    if (threads[j].state != THREAD_ZOMBIE) {
+                        all_zombies = false;
+                        break;
+                    }
+                }
+            }
+            if (all_zombies) {
+                if (status) *status = processes[i].exit_code;
+                int child_pid = processes[i].pid;
+                processes[i].pid = -1;
+                return child_pid;
+            }
+        }
+        if (!found) return -1;
+        sched_sleep(&current_process->pid);
+    }
+}
+
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
-int sys_execve(const char *f, char *const a[], char *const e[]) { (void)f; (void)a; (void)e; return -1; }
+
+int sys_execve(const char *f, char *const a[], char *const e[]) {
+    (void)f; (void)a; (void)e;
+    return -1;
+}
 
 int sys_fork(void) {
     // In a real OS, fork() returns 0 in the child and the child's PID in the parent.

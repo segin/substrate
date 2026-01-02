@@ -1,5 +1,5 @@
 #include "../vfs/vfs.h"
-#include "../sys/9p.h"
+#include <sys/9p.h>
 #include <string.h>
 #include <stddef.h>
 

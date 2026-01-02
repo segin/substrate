@@ -1,4 +1,4 @@
-#include "../sys/kobject.h"
+#include <sys/kobject.h>
 #include <string.h>
 
 void kobject_init(struct kobject *kobj, const char *name) {

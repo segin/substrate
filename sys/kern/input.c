@@ -1,4 +1,4 @@
-#include "../sys/input.h"
+#include <sys/input.h>
 #include "../vfs/vfs.h"
 #include "sched.h"
 #include <string.h>

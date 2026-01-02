@@ -1,4 +1,4 @@
-#include "../sys/lock.h"
+#include <sys/lock.h>
 #include "panic.h"
 
 // Forward declaration for CPU ID helper (architecture specific)

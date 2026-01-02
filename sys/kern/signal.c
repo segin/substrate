@@ -1,5 +1,5 @@
-#include "../sys/signal.h"
-#include "../sys/proc.h"
+#include <sys/signal.h>
+#include <sys/proc.h>
 #include "sched.h"
 #include "../arch/i386/idt.h"
 #include "../drivers/video/vga.h"

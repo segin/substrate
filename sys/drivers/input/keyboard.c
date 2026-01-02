@@ -2,7 +2,7 @@
 #include "ps2.h"
 #include "../../arch/i386/io.h"
 #include "../../drivers/video/vga.h"
-#include "../../sys/input.h"
+#include <sys/input.h>
 
 #define KBD_BUFFER_SIZE 256
 static char kbd_buffer[KBD_BUFFER_SIZE];

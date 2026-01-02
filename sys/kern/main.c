@@ -17,7 +17,7 @@
 #include "../arch/i386/fpu/fpu_emu.h"
 #include "../arch/i386/multiboot.h"
 #include "sched.h"
-#include "../sys/input.h"
+#include <sys/input.h>
 #include "../vfs/vfs.h"
 #include "../fs/ext2/ext2.h"
 #include "../fs/fat/fat.h"

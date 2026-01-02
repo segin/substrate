@@ -2,7 +2,7 @@
 #include "ps2.h"
 #include "../../arch/i386/io.h"
 #include "../../drivers/video/vga.h"
-#include "../../sys/input.h"
+#include <sys/input.h>
 
 static uint8_t mouse_buttons = 0;
 

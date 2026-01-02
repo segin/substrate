@@ -1,7 +1,7 @@
 #ifndef _KERN_SCHED_H
 #define _KERN_SCHED_H
 
-#include "../sys/proc.h"
+#include <sys/proc.h>
 
 // API
 void sched_init(void);
