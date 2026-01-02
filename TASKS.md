@@ -47,7 +47,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] **Trampoline:** 16-bit real mode startup code for Application Processors (APs).
         - [x] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
 - [ ] **Scheduling (BSD-style):**
-    - [ ] Implement `kthread` creation and management.
+    - [x] Implement `kthread` creation and management.
     - [ ] Implement Preemptive Multitasking (timer interrupt).
     - [ ] Implement Thread Priorities and Scheduling Classes (Realtime, Timeshare, Idle).
     - [x] Implement Context Switching (save/restore registers properly).
