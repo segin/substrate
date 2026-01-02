@@ -181,6 +181,14 @@ jump_to_userspace:
     mov g_entry_point, %ecx
     mov g_user_stack, %edx
     
+    # DEBUG: Verify Segment 0x23 is valid
+    # If this crashes here, then GDT Entry 4 is garbage
+    mov $0x23, %ax
+    mov %ax, %ds
+    mov %ax, %es
+    # Restore Kernel Data for now (iret doesn't care about DS though)
+    # But let's leave them as user segments, that's fine too
+    
     # NOW turn off interrupts
     cli
     
