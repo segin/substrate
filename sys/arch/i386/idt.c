@@ -9,6 +9,14 @@
 #include "../../kern/panic.h"
 #include "fpu/fpu_emu.h"
 
+// Process/Thread access for exception handling
+typedef enum { THREAD_READY, THREAD_RUNNING, THREAD_BLOCKED, THREAD_ZOMBIE } thread_state_t;
+struct process;
+struct thread { int tid; struct process *proc; void *kstack_ptr; void *kstack_top; void *instr_ptr; int priority; int base_priority; int sched_class; void *wait_chan; unsigned sig_pending; unsigned sig_mask; thread_state_t state; struct thread *next; };
+struct process { int pid; int ppid; int exit_code; void *pers; void *fds[32]; void *root_node; };
+extern struct thread *current_thread;
+extern struct process *current_process;
+
 idt_entry_t idt_entries[256] __attribute__((aligned(16)));
 idt_ptr_t   idt_ptr;
 
