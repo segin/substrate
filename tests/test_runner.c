@@ -37,18 +37,33 @@ extern bool test_spinlock_initial_state(void);
 // kthread Tests
 extern bool test_kthread_creation(void);
 extern bool test_timer_tick_increments(void);
+extern bool test_sched_priority(void);
+extern bool test_sched_sleep_wakeup(void);
+
+// Sync Tests
+extern bool test_mutex_basic(void);
+extern bool test_mutex_contention(void);
 
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
+extern bool prop_realtime_preempts_timeshare(void);
+extern bool prop_sleep_wakeup_consistency(void);
 extern void fuzz_timer_interrupt(const uint8_t *data, size_t size);
+extern void fuzz_sched_priority(const uint8_t *data, size_t size);
 
 bool test_sched_properties(void) {
-    return prop_time_is_monotonic(1000);
+    return prop_time_is_monotonic(1000) && 
+           prop_realtime_preempts_timeshare() &&
+           prop_sleep_wakeup_consistency();
 }
 
 bool test_sched_fuzz(void) {
     uint8_t dummy_data[] = {0x10, 0x00, 0x00, 0x00}; // 16 ticks
     fuzz_timer_interrupt(dummy_data, sizeof(dummy_data));
+    
+    uint8_t prio_data[] = {0x01, 0x00, 0x40, 0x00}; // tid 1, class 0, prio 64
+    fuzz_sched_priority(prio_data, sizeof(prio_data));
+    
     return true; // If it didn't crash, it passed for now
 }
 
@@ -86,6 +101,10 @@ test_case_t tests[] = {
     {"lock_init", test_spinlock_initial_state},
     {"kthread_create", test_kthread_creation},
     {"timer_tick", test_timer_tick_increments},
+    {"sched_priority", test_sched_priority},
+    {"sched_sleep", test_sched_sleep_wakeup},
+    {"mutex_basic", test_mutex_basic},
+    {"mutex_contend", test_mutex_contention},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},

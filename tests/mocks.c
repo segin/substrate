@@ -62,12 +62,18 @@ uint8_t inb(uint16_t p) { (void)p; return 0; }
 uint32_t lapic_get_id() { return 0; }
 
 // kmem mocks for host
-void *kmalloc(size_t size) { return malloc(size); }
+void *kmalloc(size_t size) {
+    if (size > 4096) return NULL;
+    return malloc(size);
+}
 void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
 
 void set_kernel_stack(uint32_t stack) { (void)stack; }
 
-void switch_to(void *prev, void *next) { (void)prev; (void)next; }
+void switch_to(void *prev, void *next) {
+    (void)prev; (void)next;
+    // Do nothing in mock, context switching isn't real on host
+}
 
 // Syscall Mocks
 int sys_exit(int c) { (void)c; return 0; }

@@ -25,6 +25,8 @@ extern void switch_to(thread_t *prev, thread_t *next);
 extern void set_kernel_stack(uint32_t stack);
 
 void sched_init(void) {
+    next_tid = 1;
+    next_pid = 1;
     // Zero out arrays
     for (int i = 0; i < MAX_THREADS; i++) {
         threads[i].tid = -1;
@@ -49,6 +51,9 @@ void sched_init(void) {
     threads[0].tid = next_tid++;
     threads[0].proc = &processes[0];
     threads[0].state = THREAD_RUNNING;
+    threads[0].priority = 20;
+    threads[0].base_priority = 20;
+    threads[0].sched_class = SCHED_TIMESHARE;
     
     current_process = &processes[0];
     current_thread = &threads[0];
@@ -96,6 +101,9 @@ int sched_fork_process(process_t *parent, void *stack) {
     threads[i].tid = next_tid++;
     threads[i].proc = child_proc;
     threads[i].state = THREAD_READY;
+    threads[i].priority = current_thread->priority;
+    threads[i].base_priority = current_thread->base_priority;
+    threads[i].sched_class = current_thread->sched_class;
     
     // Setup Child Stack
     // For fork/clone(PROCESS), execution usually continues at the instruction after the syscall in the child.
@@ -129,6 +137,9 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     threads[i].tid = next_tid++;
     threads[i].proc = proc;
     threads[i].state = THREAD_READY;
+    threads[i].priority = 20;
+    threads[i].base_priority = 20;
+    threads[i].sched_class = SCHED_TIMESHARE;
     
     // Simulate stack frame for "entry_point(arg)"
     uint32_t *stk = (uint32_t*)stack;
@@ -168,34 +179,55 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
 void sched_yield(void) {
     if (!current_thread) return;
 
-    // Simple Round Robin
-    thread_t *next = current_thread + 1;
-    if (next >= &threads[MAX_THREADS]) next = &threads[0];
+    thread_t *best_thread = NULL;
+    int highest_prio = -1;
+    sched_class_t best_class = SCHED_IDLE;
 
-    int count = 0;
-    while (next->state != THREAD_READY && next != current_thread && count < MAX_THREADS) {
-        next++;
-        if (next >= &threads[MAX_THREADS]) next = &threads[0];
-        count++;
+    // Scan for best thread to run
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].state != THREAD_READY) continue;
+
+        bool better = false;
+        if (!best_thread) {
+            better = true;
+        } else if (threads[i].sched_class < best_class) {
+            better = true;
+        } else if (threads[i].sched_class == best_class) {
+            if (threads[i].priority > highest_prio) {
+                better = true;
+            }
+        }
+
+        if (better) {
+            best_thread = &threads[i];
+            highest_prio = threads[i].priority;
+            best_class = threads[i].sched_class;
+        }
     }
 
-    if (next == current_thread) return;
+    if (!best_thread) {
+        // If current thread is still running and nothing better found, keep it
+        if (current_thread && current_thread->state == THREAD_RUNNING) return;
+        // If blocked and nothing else to run... we have an idle problem.
+        // For now, just return. 
+        return;
+    }
 
-    if (next->state == THREAD_READY) {
-        thread_t *prev = current_thread;
-        
-        prev->state = THREAD_READY;
-        next->state = THREAD_RUNNING;
-        
-        current_thread = next;
-        current_process = current_thread->proc;
-        
-        // Update TSS kernel stack for interrupts (if we had a separate kernel stack per thread)
-        // Here we assume kstack_ptr is the top of the kernel stack for this thread.
-        // Actually we should store the base somewhere.
-        // For now, let's just use the current kstack_ptr as a hint.
-        set_kernel_stack(current_thread->kstack_ptr); 
+    // If current thread is still the best, and it's running, no switch
+    if (best_thread == current_thread && current_thread && current_thread->state == THREAD_RUNNING) return;
 
+    // Context Switch
+    thread_t *prev = current_thread;
+    thread_t *next = best_thread;
+    
+    if (prev && prev->state == THREAD_RUNNING) prev->state = THREAD_READY;
+    next->state = THREAD_RUNNING;
+    
+    current_thread = next;
+    current_process = current_thread->proc;
+    
+    set_kernel_stack(current_thread->kstack_ptr); 
+    if (prev && prev != next) {
         switch_to(prev, next);
     }
 }
@@ -203,4 +235,57 @@ void sched_yield(void) {
 int sched_get_current_tid(void) {
     if (current_thread) return current_thread->tid;
     return -1;
+}
+
+thread_t *sched_get_thread(int tid) {
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == tid) return &threads[i];
+    }
+    return NULL;
+}
+
+void sched_set_priority(int tid, sched_class_t cls, int prio) {
+
+    thread_t *t = sched_get_thread(tid);
+
+    if (!t) return;
+
+    t->sched_class = cls;
+
+    t->priority = prio;
+
+    t->base_priority = prio;
+
+}
+
+
+
+void sched_sleep(void *chan) {
+
+    if (!current_thread) return;
+
+    current_thread->wait_chan = chan;
+
+    current_thread->state = THREAD_BLOCKED;
+
+    sched_yield();
+
+}
+
+
+
+void sched_wakeup(void *chan) {
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+
+        if (threads[i].tid != -1 && threads[i].state == THREAD_BLOCKED && threads[i].wait_chan == chan) {
+
+            threads[i].state = THREAD_READY;
+
+            threads[i].wait_chan = NULL;
+
+        }
+
+    }
+
 }

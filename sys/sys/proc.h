@@ -34,6 +34,13 @@ typedef enum {
     THREAD_ZOMBIE
 } thread_state_t;
 
+// Scheduling Classes
+typedef enum {
+    SCHED_REALTIME,
+    SCHED_TIMESHARE,
+    SCHED_IDLE
+} sched_class_t;
+
 // Architecture Independent Thread Control Block
 // Arch-specific context (registers) should be stored in 'context' or similar, 
 // but for simplicity in this prototype we use generic names.
@@ -45,8 +52,12 @@ typedef struct thread {
     uintptr_t kstack_ptr; // Kernel Stack Pointer (ESP/RSP)
     uintptr_t instr_ptr;  // Instruction Pointer (EIP/RIP) - for context switching
     
-    // User Context (Saved on interrupt stack)
-    // uintptr_t user_stack; 
+    // Scheduling
+    int           priority;
+    int           base_priority;
+    sched_class_t sched_class;
+    
+    void         *wait_chan; // Channel thread is sleeping on
     
     thread_state_t state;
     struct thread *next;

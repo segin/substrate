@@ -49,10 +49,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **Scheduling (BSD-style):**
     - [x] Implement `kthread` creation and management.
     - [x] Implement Preemptive Multitasking (timer interrupt).
-    - [ ] Implement Thread Priorities and Scheduling Classes (Realtime, Timeshare, Idle).
+    - [x] Implement Thread Priorities and Scheduling Classes (Realtime, Timeshare, Idle).
     - [x] Implement Context Switching (save/restore registers properly).
-    - [ ] Implement `sleep` / `wakeup` (BSD-style condition variables).
-    - [ ] Implement Kernel Mutexes and Spinlocks.
+    - [x] Implement `sleep` / `wakeup` (BSD-style condition variables).
+    - [x] Implement Kernel Mutexes and Spinlocks.
 - [ ] **Synchronization:**
     - [ ] Implement Spinlocks, Mutexes, and Semaphores.
     - [ ] Implement Futex support for user-space synchronization (Linux personality).
