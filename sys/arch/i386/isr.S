@@ -194,13 +194,9 @@ jump_to_userspace:
     push $0x1B          # User CS
     push %ecx           # User EIP
     
-    # Set DS/ES/FS/GS to user data segment
-    # This is fine - loading a DPL=3 selector is allowed, we just can't access it yet
-    mov $0x23, %ax
-    mov %ax, %ds
-    mov %ax, %es  
-    mov %ax, %fs
-    mov %ax, %gs
+    # Don't touch DS/ES/FS/GS - leave as kernel segments 0x10
+    # Ring 3 can still use them for reading
+    # The IRET will change CPL to 3, CS to 0x1B, SS to 0x23
     
     # Jump to user mode
     iret
