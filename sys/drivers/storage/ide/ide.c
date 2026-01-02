@@ -17,3 +17,76 @@ void ide_init(void) {
     }
 }
 
+static void ide_wait_bsy(uint16_t bus) {
+    while (inb(bus + ATA_REG_STATUS) & ATA_SR_BSY);
+}
+
+static void ide_wait_drq(uint16_t bus) {
+    while (!(inb(bus + ATA_REG_STATUS) & ATA_SR_DRQ));
+}
+
+int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba, uint8_t count, void *buffer) {
+    outb(bus + ATA_REG_DEVICE, 0xE0 | (drive << 4) | ((lba >> 24) & 0x0F));
+    outb(bus + ATA_REG_SEC_COUNT, count);
+    outb(bus + ATA_REG_LBA_LOW, (uint8_t)lba);
+    outb(bus + ATA_REG_LBA_MID, (uint8_t)(lba >> 8));
+    outb(bus + ATA_REG_LBA_HIGH, (uint8_t)(lba >> 16));
+    outb(bus + ATA_REG_COMMAND, ATA_CMD_READ_PIO);
+
+    uint16_t *buf = (uint16_t *)buffer;
+    for (int i = 0; i < count; i++) {
+        ide_wait_bsy(bus);
+        ide_wait_drq(bus);
+        for (int j = 0; j < 256; j++) {
+            *buf++ = inw(bus + ATA_REG_DATA);
+        }
+    }
+    return 0;
+}
+
+int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba, uint8_t count, const void *buffer) {
+    outb(bus + ATA_REG_DEVICE, 0xE0 | (drive << 4) | ((lba >> 24) & 0x0F));
+    outb(bus + ATA_REG_SEC_COUNT, count);
+    outb(bus + ATA_REG_LBA_LOW, (uint8_t)lba);
+    outb(bus + ATA_REG_LBA_MID, (uint8_t)(lba >> 8));
+    outb(bus + ATA_REG_LBA_HIGH, (uint8_t)(lba >> 16));
+    outb(bus + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
+
+    uint16_t *buf = (uint16_t *)buffer;
+    for (int i = 0; i < count; i++) {
+        ide_wait_bsy(bus);
+        ide_wait_drq(bus);
+        for (int j = 0; j < 256; j++) {
+            outw(bus + ATA_REG_DATA, *buf++);
+        }
+    }
+    return 0;
+}
+
+int ide_identify(uint16_t bus, uint8_t drive, void *buffer) {
+    outb(bus + ATA_REG_DEVICE, 0xA0 | (drive << 4));
+    outb(bus + ATA_REG_SEC_COUNT, 0);
+    outb(bus + ATA_REG_LBA_LOW, 0);
+    outb(bus + ATA_REG_LBA_MID, 0);
+    outb(bus + ATA_REG_LBA_HIGH, 0);
+    outb(bus + ATA_REG_COMMAND, ATA_CMD_IDENTIFY);
+
+    uint8_t status = inb(bus + ATA_REG_STATUS);
+    if (status == 0) return -1; // Drive doesn't exist
+
+    ide_wait_bsy(bus);
+    
+    // Check if not ATA (ATAPI check)
+    if (inb(bus + ATA_REG_LBA_MID) != 0 || inb(bus + ATA_REG_LBA_HIGH) != 0) {
+        return -2; // Not ATA
+    }
+
+    ide_wait_drq(bus);
+
+    uint16_t *buf = (uint16_t *)buffer;
+    for (int i = 0; i < 256; i++) {
+        buf[i] = inw(bus + ATA_REG_DATA);
+    }
+    return 0;
+}
+

@@ -75,7 +75,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 ### 3. Drivers (`sys/drivers`)
 - [ ] **Storage:**
     - [ ] **ATA/IDE:**
-        - [ ] Implement PIO Mode transfers.
+        - [x] Implement PIO Mode transfers.
         - [ ] Implement DMA transfers (Bus Mastering).
         - [ ] Support Primary/Secondary channels.
         - [ ] Support Master/Slave drives.
