@@ -162,9 +162,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
         - [x] **Attributes:** Map kernel variables to readable/writable files.
     - [ ] **FUSE (`/dev/fuse`):**
-        - [ ] **Device Interface:** Implement `/dev/fuse` char device for control.
-        - [ ] **Protocol:** Implement FUSE opcodes (`INIT`, `LOOKUP`, `READ`, `WRITE`).
-        - [ ] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
+        - [x] **Device Interface:** Implement `/dev/fuse` char device for control.
+        - [x] **Protocol:** Implement FUSE opcodes (`INIT`, `LOOKUP`, `READ`, `WRITE`).
+        - [x] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
     - [ ] **Network Filesystems:**
         - [ ] **9P (9P2000.L):**
             - [ ] **Client:** Implement 9P client for VFS integration.

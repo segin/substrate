@@ -107,6 +107,8 @@ void init_task(void *arg) {
 extern void pseudo_init(void);
 extern void procfs_init(void);
 extern void sysfs_init(void);
+extern void fuse_init(void);
+extern void fuse_fs_init(void);
 
 // Kernel Entry Point
 void kmain(unsigned long magic, unsigned long addr) {
@@ -176,6 +178,8 @@ void kmain(unsigned long magic, unsigned long addr) {
     devfs_init();
     procfs_init();
     sysfs_init();
+    fuse_init();
+    fuse_fs_init();
     pseudo_init();
     vfs_init_mock_root(); // Hack for init finding
     vfs_mount(NULL, "/dev", "devfs", 0, NULL);
