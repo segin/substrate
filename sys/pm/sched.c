@@ -94,7 +94,9 @@ void sched_yield(void) {
     current_process = current_thread->proc;
     
     // Arch specific hooks
-    arch_set_kernel_stack(current_thread->kstack_ptr); 
+    if (current_thread->kstack_top) {
+        arch_set_kernel_stack(current_thread->kstack_top);
+    }
     if (prev && prev != next) {
         arch_switch_to(prev, next);
     }
