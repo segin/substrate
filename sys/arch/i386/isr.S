@@ -183,13 +183,6 @@ jump_to_userspace:
     mov 4(%esp), %ecx   # entry_point
     mov 8(%esp), %edx   # user_stack
     
-    # Set up segment registers for user mode
-    mov $0x23, %ax      # User data selector
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
-    
     # Build IRET stack frame (in order pushed):
     # SS, ESP, EFLAGS, CS, EIP
     push $0x23          # User SS
@@ -200,6 +193,14 @@ jump_to_userspace:
     push %eax
     push $0x1B          # User CS
     push %ecx           # User EIP
+    
+    # Set up segment registers for user mode RIGHT before IRET
+    # This must be done AFTER building the IRET frame
+    mov $0x23, %ax      # User data selector
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %fs
+    mov %ax, %gs
     
     # Jump to user mode
     iret
