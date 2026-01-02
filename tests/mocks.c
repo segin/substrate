@@ -57,3 +57,5 @@ void idt_set_gate(uint8_t n, uint32_t b, uint16_t s, uint8_t f) { (void)n; (void
 void outb(uint16_t p, uint8_t v) { (void)p; (void)v; }
 uint8_t inb(uint16_t p) { (void)p; return 0; }
 uint32_t get_time() { return 0; }
+
+uint32_t lapic_get_id() { return 0; }
