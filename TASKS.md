@@ -167,7 +167,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
     - [ ] **Network Filesystems:**
         - [ ] **9P (9P2000.L):**
-            - [ ] **Client:** Implement 9P client for VFS integration.
+            - [x] **Client:** Implement 9P client for VFS integration.
             - [ ] **Transport:** Support virtio (for QEMU) and TCP transports.
             - [ ] **Protocol:** Implement T/R message transaction loop.
 
