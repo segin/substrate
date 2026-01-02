@@ -33,6 +33,9 @@ extern bool test_trampoline_preparation(void);
 extern bool test_spinlock_basic(void);
 extern bool test_spinlock_initial_state(void);
 
+// kthread Tests
+extern bool test_kthread_creation(void);
+
 typedef struct {
     const char *name;
     bool (*func)(void);
@@ -61,6 +64,7 @@ test_case_t tests[] = {
     {"smp_tramp", test_trampoline_preparation},
     {"lock_basic", test_spinlock_basic},
     {"lock_init", test_spinlock_initial_state},
+    {"kthread_create", test_kthread_creation},
     {NULL, NULL}
 };
 
