@@ -69,6 +69,7 @@ typedef struct thread {
     
     // CPU Context (Abstracted)
     uintptr_t kstack_ptr; // Kernel Stack Pointer (ESP/RSP)
+    uintptr_t kstack_top; // Top of Kernel Stack (for TSS esp0)
     uintptr_t instr_ptr;  // Instruction Pointer (EIP/RIP) - for context switching
     
     // Scheduling
