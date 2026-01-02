@@ -198,9 +198,9 @@ jump_to_userspace:
     pushf               # EFLAGS
     pop %eax
     
-    # DISABLE INTERRUPTS for now to verify IRET mechanics only!
     # or $0x200, %eax     # Enable interrupts in user mode
-    and $~0x200, %eax   # Force Disable
+    # and $~0x200, %eax   # Force Disable
+    or $0x200, %eax       # Enable Interrupts
     
     push %eax
     push $0x1B          # User CS
