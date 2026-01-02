@@ -87,9 +87,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **Input:**
     - [ ] **Keyboard (PS/2):**
         - [ ] **Controller:**
-            - [ ] Initialize PS/2 Controller (i8042).
-            - [ ] Disable ports.
-            - [ ] Perform self-test.
+            - [x] Initialize PS/2 Controller (i8042).
+            - [x] Disable ports.
+            - [x] Perform self-test.
         - [ ] **Interrupts:**
             - [ ] Handle IRQ1.
             - [ ] Read status/data ports.

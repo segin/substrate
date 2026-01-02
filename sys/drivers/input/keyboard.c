@@ -1,4 +1,5 @@
 #include "keyboard.h"
+#include "ps2.h"
 #include "../../arch/i386/io.h"
 #include "../../drivers/video/vga.h"
 
@@ -14,12 +15,7 @@ static char kbd_us[128] = {
 };
 
 void keyboard_init(void) {
-    // IRQ1 is enabled in IDT/PIC init (currently masked, need to unmask)
-    // We assume IDT init will register the handler
-    
-    // Clear buffer
-    while(inb(0x64) & 1) inb(0x60);
-    
+    ps2_init();
     vga_write("Keyboard Driver Initialized.\n", 29);
 }
 
