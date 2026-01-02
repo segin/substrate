@@ -378,7 +378,18 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     kprint(hexbuf3);
     kprint("\n");
     
+    kprint(hexbuf3);
+    kprint("\n");
+    
     extern void jump_to_userspace(void);
+    
+    // Set the kernel stack for the next interrupt/syscall
+    // We can reuse the current stack since we're never returning
+    extern void set_kernel_stack(uint32_t stack);
+    uint32_t kernel_stack;
+    __asm__ volatile("mov %%esp, %0" : "=r"(kernel_stack));
+    set_kernel_stack(kernel_stack);
+    
     jump_to_userspace();
     
     // Should never reach here
