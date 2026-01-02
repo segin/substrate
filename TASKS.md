@@ -14,7 +14,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Memory Management (BSD/Mach Design):**
         - [ ] **Physical Memory (Machine Independent):**
             - [x] `vm_page_t`: Core structure tracking state of every physical page.
-            - [ ] **Page Queues:** Active/Inactive/Free lists for page replacement logic.
+            - [x] **Page Queues:** Active/Inactive/Free lists for page replacement logic.
         - [ ] **PMAP Layer (Machine Dependent - i386):**
             - [x] `pmap_init`: Bootstrap hardware paging structures.
             - [ ] `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
