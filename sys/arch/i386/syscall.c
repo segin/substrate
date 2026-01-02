@@ -7,6 +7,7 @@
 #include "../../sys/thr.h"
 #include "../../sys/acct.h"
 #include "../../sys/file.h"
+#include "../../sys/signal.h"
 #include "../../vfs/vfs.h"
 #include "../../drivers/serial/uart.h"
 #include <sys/types.h>
@@ -16,6 +17,7 @@ extern process_t *current_process;
 
 extern int sys_acct(const char *path);
 extern int sys_time(uint32_t *tloc);
+extern void signal_handle_pending(registers_t *regs);
 
 // Simple file structure allocator
 #define MAX_SYSTEM_FILES 128
@@ -233,6 +235,8 @@ void syscall_handler(registers_t *regs) {
     typedef int (*sys_func_t)(uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
     regs->eax = func(regs->ebx, regs->ecx, regs->edx);
+
+    signal_handle_pending(regs);
 }
 
 // Local stat def matching userspace
@@ -275,7 +279,6 @@ int sys_stat(const char *p, struct stat *buf) {
 }
 int sys_access(const char *p, int m) { (void)p; (void)m; return 0; }
 int sys_sync(void) { return 0; }
-int sys_kill(int p, int s) { (void)p; (void)s; return 0; }
 int sys_pipe(int *p) { if(p) { p[0]=3; p[1]=4; } return 0; }
 int sys_dup2(int o, int n) { (void)o; return n; }
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
@@ -285,7 +288,6 @@ int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0
 int sys_mount(const char *s, const char *t, const char *fs, unsigned long f, void *d) { (void)s; (void)t; (void)fs; (void)f; (void)d; return 0; }
 int sys_umount(const char *t) { (void)t; return 0; }
 int sys_nanosleep(void *req, void *rem) { (void)req; (void)rem; return 0; }
-int sys_signal(int s, void *h) { (void)s; (void)h; return 0; }
 int sys_getcwd(char *buf, size_t size) {
     if(!buf || size < 2) return -1;
     buf[0] = '/'; buf[1] = 0;

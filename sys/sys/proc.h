@@ -5,6 +5,7 @@
 #include "../exec/perso/personality.h"
 #include "file.h"
 #include "acct.h"
+#include "signal.h"
 
 #define MAX_FD 32
 
@@ -13,6 +14,9 @@ typedef struct process {
     int pid;
     struct personality *pers;
     file_t *fds[MAX_FD]; // File Descriptor Table
+    
+    // Signals
+    struct sigaction sig_actions[NSIG];
     
     // Accounting & Credentials
     char comm[AC_COMM_LEN];
@@ -58,6 +62,10 @@ typedef struct thread {
     sched_class_t sched_class;
     
     void         *wait_chan; // Channel thread is sleeping on
+    
+    // Signals
+    uint32_t      sig_pending;
+    uint32_t      sig_mask;
     
     thread_state_t state;
     struct thread *next;

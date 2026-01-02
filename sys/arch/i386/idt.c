@@ -62,6 +62,7 @@ extern void isr128(void); // Syscall (0x80)
 
 extern void timer_tick(void);
 extern void sched_yield(void);
+extern void signal_handle_pending(registers_t *regs);
 
 void idt_init(void) {
     idt_ptr.limit = sizeof(idt_entry_t) * 256 - 1;
@@ -308,15 +309,27 @@ void isr_handler(registers_t *regs) {
 
 
 
-    if (regs->int_no >= 32 && regs->int_no <= 47) {
+        if (regs->int_no >= 32 && regs->int_no <= 47) {
 
 
 
-        if (regs->int_no >= 40) outb(0xA0, 0x20);
+            if (regs->int_no >= 40) outb(0xA0, 0x20);
 
 
 
-        outb(0x20, 0x20);
+            outb(0x20, 0x20);
+
+
+
+        }
+
+
+
+    
+
+
+
+        signal_handle_pending(regs);
 
 
 
@@ -324,7 +337,7 @@ void isr_handler(registers_t *regs) {
 
 
 
-}
+    
 
 
 

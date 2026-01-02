@@ -11,8 +11,8 @@ void k_strcpy(char *dst, const char *src) {
 #define MAX_THREADS 64
 #define MAX_PROCS   16
 
-static thread_t threads[MAX_THREADS];
-static process_t processes[MAX_PROCS];
+thread_t threads[MAX_THREADS];
+process_t processes[MAX_PROCS];
 
 thread_t *current_thread = 0;
 process_t *current_process = 0;
@@ -27,6 +27,11 @@ extern void set_kernel_stack(uint32_t stack);
 void sched_init(void) {
     next_tid = 1;
     next_pid = 1;
+    
+    extern void *memset(void *s, int c, size_t n);
+    memset(threads, 0, sizeof(threads));
+    memset(processes, 0, sizeof(processes));
+
     // Zero out arrays
     for (int i = 0; i < MAX_THREADS; i++) {
         threads[i].tid = -1;

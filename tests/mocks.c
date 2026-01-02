@@ -19,7 +19,6 @@ void panic(const char *msg) {
 // Globals Mocks
 #include "../sys/sys/proc.h"
 #include "../sys/exec/perso/personality.h"
-process_t processes[16];
 struct personality personality_native = { "Native", NULL, 0 };
 
 // Paging Mocks
@@ -110,7 +109,6 @@ int sys_access(const char* p, int m) { (void)p; (void)m; return 0; }
 int sys_nice(int n) { (void)n; return 0; }
 int sys_statfs(const char* p, void* b) { (void)p; (void)b; return 0; }
 int sys_sync(void) { return 0; }
-int sys_kill(int p, int s) { (void)p; (void)s; return 0; }
 int sys_fstatfs(int fd, void* b) { (void)fd; (void)b; return 0; }
 int sys_pgrpsys(int a, int b, int c, int d) { (void)a; (void)b; (void)c; (void)d; return 0; }
 int sys_dup(int fd) { (void)fd; return 0; }
@@ -137,8 +135,4 @@ int sys_getdents(unsigned int fd, void* d, unsigned int c) { (void)fd; (void)d; 
 int sys_getcwd(char* b, size_t s) { (void)b; (void)s; return 0; }
 int sys_uname(void* b) { (void)b; return 0; }
 int sys_mprotect(void* a, size_t s, int p) { (void)a; (void)s; (void)p; return 0; }
-int sys_sigaction(int s, void* a, void* o) { (void)s; (void)a; (void)o; return 0; }
-int sys_sigpending(int s, void* p) { (void)s; (void)p; return 0; }
-int sys_sigprocmask(int h, void* s, void* o) { (void)h; (void)s; (void)o; return 0; }
-int sys_sigsuspend(void* m) { (void)m; return 0; }
 int sys_sigret(void) { return 0; }

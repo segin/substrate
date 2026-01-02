@@ -46,6 +46,11 @@ extern bool test_mutex_contention(void);
 extern bool test_sema_basic(void);
 extern bool test_sema_blocking(void);
 
+// Signal Tests
+extern bool test_signal_action(void);
+extern bool test_signal_mask(void);
+extern bool test_signal_delivery_default(void);
+
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
 extern bool prop_realtime_preempts_timeshare(void);
@@ -109,6 +114,9 @@ test_case_t tests[] = {
     {"mutex_contend", test_mutex_contention},
     {"sema_basic", test_sema_basic},
     {"sema_block", test_sema_blocking},
+    {"sig_action", test_signal_action},
+    {"sig_mask", test_signal_mask},
+    {"sig_deliver", test_signal_delivery_default},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
