@@ -191,23 +191,20 @@ jump_to_userspace:
     mov %ax, %fs
     mov %ax, %gs
     
-    # TEST: IRET to Kernel Mode (Ring 0)
-    # If this works, IRET is fine.
-    
-    mov $0x10, %ax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
-    
-    push $0x10          # Kernel SS
-    push %edx           # ESP
-    pushf
+    # Build IRET stack frame (in order pushed):
+    # SS, ESP, EFLAGS, CS, EIP
+    push $0x23          # User SS
+    push %edx           # User ESP (loaded earlier)
+    pushf               # EFLAGS
     pop %eax
-    or $0x200, %eax
+    
+    # DISABLE INTERRUPTS for now to verify IRET mechanics only!
+    # or $0x200, %eax     # Enable interrupts in user mode
+    and $~0x200, %eax   # Force Disable
+    
     push %eax
-    push $0x08          # Kernel CS
-    push %ecx           # EIP
+    push $0x1B          # User CS
+    push %ecx           # User EIP (loaded earlier)
     
     # Jump to user mode
     iret
