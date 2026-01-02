@@ -34,7 +34,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **Pager:** Implement a swap pager to move pages to/from disk.
                 - [x] **Backing Store:** Support swap files or partitions.
                 - [x] **Policy:** Implement page replacement algorithm (Clock/LRU).
-            - [ ] **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
+            - [x] **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
     - [ ] **Kernel Allocator (UMA/Zone):**
         - [x] **Zone Allocator:** Fixed-size object caching (equivalent to Slab, but BSD-style).
         - [x] **Kmem:** General purpose variable-size allocator (power-of-two free lists).
