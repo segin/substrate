@@ -31,7 +31,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
     - [ ] **Kernel Allocator (UMA/Zone):**
         - [x] **Zone Allocator:** Fixed-size object caching (equivalent to Slab, but BSD-style).
-        - [ ] **Kmem:** General purpose variable-size allocator (power-of-two free lists).
+        - [x] **Kmem:** General purpose variable-size allocator (power-of-two free lists).
     - [ ] **User Memory:**
         - [ ] Implement `mmap`, `munmap`, `brk` system calls.
     - [ ] **SMP & Interrupts:**
