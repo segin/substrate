@@ -38,6 +38,12 @@ extern int sys_futex(int*, int, int, void*, int*, int);
 extern int sys_fork(void);
 extern int sys_vfork(void);
 extern int sys_execve(const char*, char**, char**);
+extern int sys_chdir(const char*);
+extern int sys_fchdir(int);
+extern int sys_brk(uint32_t);
+extern int sys_ioctl(int, uint32_t, void*);
+extern int sys_lstat(const char*, void*);
+extern int sys_fstat(int, void*);
 
 static void *linux_syscalls[MAX_SYSCALLS] = {
     [1] = &sys_exit,
@@ -47,6 +53,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [5] = &sys_open,
     [6] = &sys_close,
     [11] = &sys_execve,
+    [12] = &sys_chdir,
     [13] = &sys_time,
     [14] = &sys_mknod,
     [19] = &sys_lseek,
@@ -61,16 +68,21 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [39] = &sys_mkdir,
     [40] = &sys_rmdir,
     [42] = &sys_pipe,
+    [45] = &sys_brk,
     [46] = &sys_setgid,
     [47] = &sys_getgid,
     [48] = &sys_signal,
     [49] = &sys_geteuid,
     [50] = &sys_getegid,
     [51] = &sys_acct,
+    [54] = &sys_ioctl,
     [63] = &sys_dup2,
     [106] = &sys_stat,
+    [107] = &sys_lstat,
+    [108] = &sys_fstat,
     [120] = &sys_clone,
     [122] = &sys_uname,
+    [133] = &sys_fchdir,
     [141] = &sys_getdents,
     [162] = &sys_nanosleep,
     [183] = &sys_getcwd,

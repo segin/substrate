@@ -36,6 +36,11 @@ typedef struct process {
     uint8_t  ac_flag;
     
     fs_node_t *tty;      // Controlling Terminal
+    fs_node_t *cwd_node; // Current working directory
+    
+    // Memory management
+    uint32_t brk;        // Program break (heap end)
+    uint32_t brk_start;  // Initial program break
     
     // Resource limits, FDs, etc. would go here
 } process_t;

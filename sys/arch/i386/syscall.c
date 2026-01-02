@@ -12,6 +12,7 @@
 #include "../../vfs/vfs.h"
 #include "../../drivers/serial/uart.h"
 #include <sys/types.h>
+#include <string.h>
 
 extern thread_t *current_thread; 
 extern process_t *current_process;
@@ -318,17 +319,71 @@ int sys_getegid(void) { return 0; }
 int sys_setuid(int u) { (void)u; return 0; }
 int sys_setgid(int g) { (void)g; return 0; }
 int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
-int sys_stat(const char *p, struct stat *buf) { 
-    // Need proper VFS stat. Stub for now to allow `test` to work partially?
-    (void)p; 
-    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    (void)root;
 
-    if(buf) {
-        buf->st_mtime = 1000;
-        buf->st_mode = 0040777; // Directory
-    }
+// Helper to fill stat struct from fs_node
+static void fill_stat(struct stat *buf, fs_node_t *node) {
+    if (!buf) return;
+    memset(buf, 0, sizeof(struct stat));
+    buf->st_ino = node->inode;
+    buf->st_size = node->length;
+    buf->st_uid = node->uid;
+    buf->st_gid = node->gid;
+    buf->st_mode = node->mask;
+    
+    // Set file type bits
+    if ((node->flags & 0x7) == FS_DIRECTORY)
+        buf->st_mode |= 0040000;  // S_IFDIR
+    else if ((node->flags & 0x7) == FS_SYMLINK)
+        buf->st_mode |= 0120000;  // S_IFLNK
+    else if ((node->flags & 0x7) == FS_CHARDEVICE)
+        buf->st_mode |= 0020000;  // S_IFCHR
+    else if ((node->flags & 0x7) == FS_BLOCKDEVICE)
+        buf->st_mode |= 0060000;  // S_IFBLK
+    else
+        buf->st_mode |= 0100000;  // S_IFREG
+    
+    buf->st_nlink = 1;
+    buf->st_blksize = 4096;
+    buf->st_blocks = (node->length + 511) / 512;
+}
+
+int sys_stat(const char *path, struct stat *buf) { 
+    if (!path || !buf) return -1;
+    
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *node = vfs_lookup(root, path);
+    
+    if (!node) return -1;
+    fill_stat(buf, node);
     return 0; 
+}
+
+int sys_lstat(const char *path, struct stat *buf) {
+    // Same as stat for now - symlinks are auto-resolved
+    // TODO: Implement no-follow version
+    return sys_stat(path, buf);
+}
+
+int sys_fstat(int fd, struct stat *buf) {
+    if (fd < 0 || fd >= MAX_FD || !buf) return -1;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->node) return -1;
+    fill_stat(buf, f->node);
+    return 0;
+}
+
+// ioctl - device control
+int sys_ioctl(int fd, uint32_t request, void *arg) {
+    if (fd < 0 || fd >= MAX_FD) return -1;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->node) return -1;
+    
+    if (f->node->ioctl) {
+        return f->node->ioctl(f->node, request, arg);
+    }
+    
+    // Default: not supported
+    return -1;
 }
 int sys_access(const char *path, int mode) {
     if (!path) return -1;
@@ -428,24 +483,6 @@ int sys_dup2(int oldfd, int newfd) {
     return newfd;
 }
 
-int sys_ioctl(int fd, int request, void *arg) {
-    if (fd < 0 || fd >= MAX_FD) return -1;
-    file_t *f = current_process->fds[fd];
-    if (!f) return -1;
-
-    if (f->node->ioctl) {
-        return f->node->ioctl(f->node, request, arg);
-    }
-
-    return -1; // ENOTTY
-}
-
-int sys_chdir(const char *path) {
-    if (!path) return -1;
-    // Stub for CWD support
-    return 0;
-}
-
 int sys_chmod(const char *path, int mode) {
     (void)path; (void)mode;
     return 0;
@@ -533,11 +570,54 @@ int sys_vfork(void) {
 
 int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0; }
 
-int sys_mount(const char *s, const char *t, const char *fs, unsigned long f, void *d) { (void)s; (void)t; (void)fs; (void)f; (void)d; return 0; }
-int sys_umount(const char *t) { (void)t; return 0; }
+int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
+    if (!target || !fstype) return -1;
+    return vfs_mount(source, target, fstype, flags, data);
+}
+
+int sys_umount(const char *target) { 
+    (void)target; 
+    // TODO: Implement unmount
+    return 0; 
+}
+
 int sys_nanosleep(void *req, void *rem) { (void)req; (void)rem; return 0; }
+
+// Current working directory per-process
+int sys_chdir(const char *path) {
+    if (!path) return -1;
+    
+    fs_node_t *node = NULL;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    
+    if (path[0] == '/') {
+        node = vfs_lookup(root, path);
+    } else {
+        // Relative path - lookup from cwd
+        fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+        node = vfs_lookup(cwd, path);
+    }
+    
+    if (!node) return -1;
+    if ((node->flags & 0x7) != FS_DIRECTORY) return -1;
+    
+    current_process->cwd_node = node;
+    return 0;
+}
+
+int sys_fchdir(int fd) {
+    if (fd < 0 || fd >= MAX_FD) return -1;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->node) return -1;
+    if ((f->node->flags & 0x7) != FS_DIRECTORY) return -1;
+    
+    current_process->cwd_node = f->node;
+    return 0;
+}
+
 int sys_getcwd(char *buf, size_t size) {
-    if(!buf || size < 2) return -1;
+    if (!buf || size < 2) return -1;
+    // TODO: Proper path tracking
     buf[0] = '/'; buf[1] = 0;
     return 0;
 }
