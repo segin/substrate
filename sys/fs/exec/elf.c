@@ -311,6 +311,18 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // 7. Push argc
     sp -= 4; *(uint32_t *)sp = argc;
     
+    // 8. Pre-initialize TLS/GS segment for musl
+    // Allocate a small TLS area (256 bytes) at bottom of user stack area
+    uint32_t tls_area = user_stack_base; // Use first page of stack area
+    // musl expects the TLS block to have a pointer to itself at offset 0
+    *(uint32_t *)tls_area = tls_area; // self pointer
+    
+    // Set up GDT entry 6 for TLS
+    extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
+    // Access: 0xF2 = Present, Ring 3, Data, Writable
+    // Gran: 0x40 = 32-bit, byte granularity
+    gdt_set_gate(6, tls_area, 0xFFFFF, 0xF2, 0xCF);
+    
     // Setup complete, jump to userspace
     extern uint32_t g_user_stack;
     extern uint32_t g_entry_point;
