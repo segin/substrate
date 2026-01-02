@@ -381,24 +381,36 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     kprint("\n");
     
     // Jump to user mode! ESP now points to argc at _start
-    // Use inline assembly to ensure correct parameter passing
-    kprint("execve: Manually jumping via inline asm...\n");
+    // Use globals to ensure values get there
+    extern uint32_t g_user_stack;
+    extern uint32_t g_entry_point;
     
-    __asm__ volatile(
-        "pushl %1\n\t"           // Push user_stack (2nd param)
-        "pushl %0\n\t"           // Push entry_point (1st param)  
-        "call jump_to_userspace\n\t"
-        "addl $8, %%esp\n\t"     // Clean up stack (should never get here)
-        :
-        : "r" (test_entry), "r" (test_sp)
-        : "memory"
-    );
+    g_user_stack = sp;
+    g_entry_point = entry;
+    
+    kprint("execve: Globals set. g_user_stack=0x");
+    // Print global to confirm
+    for (int i = 7; i >= 0; i--) {
+        int nib = (g_user_stack >> (i * 4)) & 0xF;
+        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    hexbuf3[8] = '\0';
+    kprint(hexbuf3);
+    kprint("\n");
+    
+    extern void jump_to_userspace(void);
+    jump_to_userspace();
     
     // Should never reach here
     return 0;
 }
 
 // Legacy function for compatibility
+// Global variable to pass stack pointer to ISR
+// Bypassing stack parameter passing issues
+uint32_t g_user_stack = 0;
+uint32_t g_entry_point = 0;
+
 int elf_load_file(void *file, uint32_t size) {
     (void)file; (void)size;
     return 0;

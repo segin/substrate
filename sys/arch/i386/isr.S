@@ -176,11 +176,13 @@ isr_exit:
 # User data selector: 0x23 (0x20 | 3)
 .global jump_to_userspace
 jump_to_userspace:
-    # DEBUG: Force a breakpoint immediately to prove we are running new code
-    int $3
+    # Load parameters from GLOBAL variables
+    # This bypasses stack parameter passing completely
+    mov g_entry_point, %ecx
+    mov g_user_stack, %edx
     
-    # Load parameters FIRST
-    mov 4(%esp), %ecx   # entry_point
+    # NOW turn off interrupts
+    cli
     
     # DEBUG: Hardcode the stack pointer to see if IRET works
     # If this works, the issue is definitely parameter passing
