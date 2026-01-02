@@ -357,7 +357,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     kprint("Entering main loop...\n");
     while (1) {
         sched_yield();
-        // Simple delay loop
-        for(volatile int i=0; i<100000; i++); 
+        // Halt until next interrupt (power efficient idle)
+        __asm__ volatile("sti; hlt");
     }
 }
