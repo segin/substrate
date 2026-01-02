@@ -16,7 +16,19 @@ int coff_load_file(void *file, uint32_t size) {
     if (filehdr->f_opthdr > 0) {
         coff_aouthdr_t *aouthdr = (coff_aouthdr_t *)((uintptr_t)file + sizeof(coff_filehdr_t));
         // Entry point is aouthdr->entry
+        vga_write("COFF: Entry point at 0x", 23);
+        // TODO: hex dump entry
         (void)aouthdr;
+    }
+
+    // Identify and map sections
+    coff_scnhdr_t *scnhdr = (coff_scnhdr_t *)((uintptr_t)file + sizeof(coff_filehdr_t) + filehdr->f_opthdr);
+    for (int i = 0; i < filehdr->f_nscns; i++) {
+        vga_write("COFF: Mapping section ", 22);
+        vga_write(scnhdr[i].s_name, 8);
+        vga_write("\n", 1);
+        
+        // TODO: Use vm_map_insert to map section raw data
     }
 
     // Default to Xenix for now if we detect a 386 COFF binary, 
