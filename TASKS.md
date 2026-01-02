@@ -121,6 +121,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Implement `fb_putc` with blitting capability.
         - [x] Implement scrolling (hardware panning or software copy).
         - [x] Hook into `vga_write` or create generic `console_write`.
+        - [x] Add CGA, Hercules, and EGA framebuffer drivers.
 - [ ] **Filesystem:**
 
 
