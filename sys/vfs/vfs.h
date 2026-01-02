@@ -70,6 +70,9 @@ int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode)
 void vfs_register_filesystem(filesystem_t *fs);
 int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data);
 
+void devfs_init(void);
+void devfs_register_device(fs_node_t *node);
+
 extern fs_node_t *fs_root; // Global root node
 
 void vfs_init_mock_root(void);

@@ -177,7 +177,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     fat_init();
     exfat_init();
     minix_init();
+    devfs_init();
     vfs_init_mock_root(); // Hack for init finding
+    vfs_mount(NULL, "/dev", "devfs", 0, NULL);
     
     // Initialize Scheduler
     sched_init();

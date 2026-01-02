@@ -138,7 +138,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [x] Implement Long File Name (LFN) support.
 - [ ] **Pseudo-FS:**
     - [ ] **DevFS (`/dev`):**
-        - [ ] **Device Registry:** Mechanism for drivers to register Character/Block devices.
+        - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
         - [ ] **VFS Glue:** Auto-generate VFS nodes when registering devices.
         - [ ] **Nodes:**
             - [ ] Support `null`.
