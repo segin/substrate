@@ -173,13 +173,14 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 5. System Calls & Personalities
 - [ ] **Mechanisms:**
-    - [ ] **PTY Subsystem (Unix98):**
-        - [ ] **Multiplexor:** Implement `/dev/ptmx` cloning device.
-        - [ ] **DevPTS:** Implement `devpts` virtual filesystem for `/dev/pts`.
-        - [ ] **API Support:** Support `grantpt`, `unlockpt`, `ptsname` (via ioctls).
-        - [ ] **Line Discipline:** Implement termios processing (canonical mode, echo, signals).
-    - [ ] Implement `sys_ioctl` framework.
-    - [ ] Implement `sys_pipe` and `sys_dup2`.
+        - [ ] **PTY Subsystem (Unix98):**
+            - [ ] **Multiplexor:** Implement `/dev/ptmx` cloning device.
+            - [ ] **DevPTS:** Implement `devpts` virtual filesystem for `/dev/pts`.
+            - [ ] **API Support:** Support `grantpt`, `unlockpt`, `ptsname` (via ioctls).
+            - [ ] **Line Discipline:** Implement termios processing (canonical mode, echo, signals).
+        - [x] Implement `sys_ioctl` framework.
+        - [ ] Implement `sys_pipe` and `sys_dup2`.
+
     - [ ] Implement `sys_time` and RTC reading.
     - [ ] **Emulation Path Lookup:** Check `/emul/<perso>/` before root for foreign personalities.
     - [ ] **Debugging & Tracing:**

@@ -20,6 +20,7 @@ typedef void (*open_type_t)(struct fs_node*);
 typedef void (*close_type_t)(struct fs_node*);
 typedef struct dirent * (*readdir_type_t)(struct fs_node*, uint32_t);
 typedef struct fs_node * (*finddir_type_t)(struct fs_node*, char *name);
+typedef int (*ioctl_type_t)(struct fs_node*, uint32_t, void*);
 
 typedef struct fs_node {
     char name[128];
@@ -36,6 +37,7 @@ typedef struct fs_node {
     close_type_t close;
     readdir_type_t readdir;
     finddir_type_t finddir;
+    ioctl_type_t ioctl;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
 } fs_node_t;
 

@@ -361,6 +361,18 @@ int sys_dup2(int oldfd, int newfd) {
     return newfd;
 }
 
+int sys_ioctl(int fd, int request, void *arg) {
+    if (fd < 0 || fd >= MAX_FD) return -1;
+    file_t *f = current_process->fds[fd];
+    if (!f) return -1;
+
+    if (f->node->ioctl) {
+        return f->node->ioctl(f->node, request, arg);
+    }
+
+    return -1; // ENOTTY
+}
+
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
 int sys_execve(const char *f, char *const a[], char *const e[]) { (void)f; (void)a; (void)e; return -1; }
 int sys_fork(void) { return -1; }
