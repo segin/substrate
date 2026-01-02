@@ -416,12 +416,24 @@ int sys_chroot(const char *path) {
 
 int sys_mkdir(const char *p, int m) { (void)p; (void)m; return 0; }
 int sys_rmdir(const char *p) { (void)p; return 0; }
-int sys_getuid(void) { return 0; }
-int sys_getgid(void) { return 0; }
-int sys_geteuid(void) { return 0; }
-int sys_getegid(void) { return 0; }
-int sys_setuid(int u) { (void)u; return 0; }
-int sys_setgid(int g) { (void)g; return 0; }
+int sys_getuid(void) { return current_process->uid; }
+int sys_getgid(void) { return current_process->gid; }
+int sys_geteuid(void) { return current_process->uid; } // No EUID yet
+int sys_getegid(void) { return current_process->gid; } // No EGID yet
+int sys_setuid(int u) {
+    if (current_process->uid == 0) {
+        current_process->uid = u;
+        return 0;
+    }
+    return -1;
+}
+int sys_setgid(int g) {
+    if (current_process->uid == 0) {
+        current_process->gid = g;
+        return 0;
+    }
+    return -1;
+}
 int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
 
 // Helper to fill stat struct from fs_node
