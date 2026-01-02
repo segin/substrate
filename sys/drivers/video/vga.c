@@ -1,4 +1,7 @@
 #include "vga.h"
+#include "fb.h"
+
+extern int fb_active;
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
@@ -185,6 +188,9 @@ void vga_putc(char c) {
 }
 
 void vga_write(const char* data, size_t size) {
+    if (fb_active) {
+        fb_write(data, size);
+    }
     for (size_t i = 0; i < size; i++)
         vga_putc(data[i]);
 }

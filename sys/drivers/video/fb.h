@@ -2,6 +2,7 @@
 #define _FB_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include "../../arch/i386/multiboot.h"
 
 typedef struct {
@@ -15,5 +16,7 @@ typedef struct {
 void fb_init(multiboot_info_t *mbi);
 void fb_putpixel(int x, int y, uint32_t color);
 void fb_clear(uint32_t color);
+void fb_putc(char c, uint32_t fg, uint32_t bg);
+void fb_write(const char *s, size_t n);
 
 #endif

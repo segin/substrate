@@ -115,10 +115,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Parse Multiboot2 Framebuffer tag or UEFI GOP.
         - [x] Map framebuffer memory (requires VMM).
     - [ ] **Framebuffer Console:**
-        - [ ] Import a bitmap font (e.g., PSF or raw bitmap).
-        - [ ] Implement `fb_putc` with blitting capability.
-        - [ ] Implement scrolling (hardware panning or software copy).
-        - [ ] Hook into `vga_write` or create generic `console_write`.
+        - [x] Import a bitmap font (e.g., PSF or raw bitmap).
+        - [x] Implement `fb_putc` with blitting capability.
+        - [x] Implement scrolling (hardware panning or software copy).
+        - [x] Hook into `vga_write` or create generic `console_write`.
+- [ ] **Filesystem:**
+
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS:**
