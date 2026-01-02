@@ -3,7 +3,7 @@ include ../../../Makefile.inc
 CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../arch/i386 -I../../kern
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = elf.c pe.c
+SRCS = elf.c pe.c coff.c
 OBJS = $(SRCS:.c=.o)
 
 all: exec.o

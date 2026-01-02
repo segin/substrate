@@ -178,6 +178,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Implement LDT management for 16-bit Segmented execution (286 - works on x86_64).
             - [ ] Implement 32-bit segment loading for Xenix 386.
             - [ ] **Shared Libraries:** Support COFF Static Shared Libraries (fixed address mapping).
+            - [x] **COFF Loader:** Implement basic COFF binary support for Xenix/386.
         - [ ] **System Call Interface:**
             - [ ] **Mechanism:** Setup GDT Call Gate 7 (`lcall 7,0`) for syscall entry (used by both).
             - [ ] **Dispatcher:** Implement translation layer for SVR3/Xenix syscall numbers.
