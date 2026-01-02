@@ -16,6 +16,7 @@ kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso vm
 		drivers/serial/serial.o \
 		drivers/input/input.o \
 		drivers/storage/storage.o \
+		drivers/devices/devices.o \
 		vfs/vfs_subsys.o \
 		fs/fs.o \
 		fs/exec/exec.o \
@@ -45,6 +46,7 @@ drivers:
 	$(MAKE) -C drivers/serial
 	$(MAKE) -C drivers/input
 	$(MAKE) -C drivers/storage
+	$(MAKE) -C drivers/devices
 
 libs:
 	@echo "Building User Libraries..."
@@ -71,6 +73,7 @@ clean:
 	$(MAKE) -C drivers/serial clean
 	$(MAKE) -C drivers/input clean
 	$(MAKE) -C drivers/storage clean
+	$(MAKE) -C drivers/devices clean
 	$(MAKE) -C vfs clean
 	$(MAKE) -C fs clean
 	$(MAKE) -C fs/exec clean

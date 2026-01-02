@@ -141,9 +141,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
         - [ ] **VFS Glue:** Auto-generate VFS nodes when registering devices.
         - [ ] **Nodes:**
-            - [ ] Support `null`.
-            - [ ] Support `zero`.
-            - [ ] Support `full`.
+                    - [x] Support `null`.
+                    - [x] Support `zero`.
+                    - [ ] Support `full`.
+            
             - [ ] Support `random`.
             - [ ] Support `tty`.
     - [ ] **ProcFS (`/proc`):**

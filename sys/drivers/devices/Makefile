@@ -1,0 +1,15 @@
+include ../../../Makefile.inc
+
+CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../arch/i386
+LDFLAGS := $(FREESTANDING_LDFLAGS)
+
+SRCS = null.c
+OBJS = $(SRCS:.c=.o)
+
+all: devices.o
+
+devices.o: $(OBJS)
+	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
+
+clean:
+	rm -f *.o
