@@ -193,7 +193,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **FreeBSD:**
         - [ ] Complete `thr_new` implementation.
         - [ ] **FreeBSD 14.3 Compatibility (i386):**
-            - [ ] Implement `struct kinfo_proc` (FreeBSD 14.3 layout).
+            - [x] Implement `struct kinfo_proc` (FreeBSD 14.3 layout).
             - [ ] Implement `libkvm` backend for FreeBSD personality.
             - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`.
     - [ ] **BSD Family (NetBSD/OpenBSD):**
