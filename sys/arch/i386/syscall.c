@@ -354,9 +354,9 @@ void syscall_handler(registers_t *regs) {
         return;
     }
     
-    typedef int (*sys_func_t)(uint32_t, uint32_t, uint32_t);
+    typedef int (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
-    regs->eax = func(regs->ebx, regs->ecx, regs->edx);
+    regs->eax = func(regs->ebx, regs->ecx, regs->edx, regs->esi, regs->edi, regs->ebp);
 
     signal_handle_pending(regs);
     
@@ -418,6 +418,7 @@ int sys_mkdir(const char *p, int m) { (void)p; (void)m; return 0; }
 int sys_rmdir(const char *p) { (void)p; return 0; }
 int sys_getuid(void) { return current_process->uid; }
 int sys_getgid(void) { return current_process->gid; }
+int sys_getppid(void) { return current_process->ppid; }
 int sys_geteuid(void) { return current_process->uid; } // No EUID yet
 int sys_getegid(void) { return current_process->gid; } // No EGID yet
 int sys_setuid(int u) {

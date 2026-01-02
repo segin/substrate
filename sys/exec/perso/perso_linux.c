@@ -86,7 +86,10 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [122] = &sys_uname,
     [133] = &sys_fchdir,
     [141] = &sys_getdents,
+    [64] = &sys_getppid,
     [162] = &sys_nanosleep,
+    [174] = &sys_sigaction, // rt_sigaction
+    [175] = &sys_sigprocmask, // rt_sigprocmask
     [183] = &sys_getcwd,
     [190] = &sys_vfork,
     // Map 32-bit UID/GID syscalls to 16-bit versions (we use 32-bit ints anyway)
