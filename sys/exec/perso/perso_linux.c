@@ -89,6 +89,10 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [162] = &sys_nanosleep,
     [183] = &sys_getcwd,
     [190] = &sys_vfork,
+    // Map 32-bit UID/GID syscalls to 16-bit versions (we use 32-bit ints anyway)
+    [199] = &sys_getuid, 
+    [200] = &sys_getgid,
+    [214] = &sys_setgid, // setfsgid32 (map to setgid for now)
     [240] = &sys_futex,
     [243] = &sys_set_thread_area,
 };

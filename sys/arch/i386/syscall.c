@@ -359,6 +359,19 @@ void syscall_handler(registers_t *regs) {
     regs->eax = func(regs->ebx, regs->ecx, regs->edx);
 
     signal_handle_pending(regs);
+    
+    // Check for ESP corruption (Kernel Stack bleeding into User Regs)
+    // Only if returning to User Mode (CS=0x1B)
+    if (regs->cs == 0x1B && regs->useresp >= 0xC0000000) {
+        kprint("SYSCALL RET: Bad User ESP: 0x");
+        char hex[16];
+        uint32_t val = regs->useresp;
+        for(int i=7; i>=0; i--) { int v=(val>>(i*4))&0xF; hex[7-i]=v<10?'0'+v:'A'+v-10; }
+        hex[8]=0;
+        kprint(hex);
+        kprint("\n");
+        panic("Syscall returning with Kernel ESP in User Frame");
+    }
 }
 
 // Local stat def matching userspace
