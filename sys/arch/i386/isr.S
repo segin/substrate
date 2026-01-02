@@ -131,35 +131,32 @@ ISR_NOERRCODE 128
 
 isr_common_stub:
     pusha
-    mov %ds, %ax
-    push %eax
     
+    # Save segment registers (DS and GS need separate handling)
+    mov %ds, %ax
+    push %eax          # Save DS
+    mov %gs, %ax
+    push %eax          # Save GS
+    
+    # Load kernel data segment
     mov $0x10, %ax
     mov %ax, %ds
     mov %ax, %es
     mov %ax, %fs
     mov %ax, %gs
     
-    push %esp      # Push pointer to registers_t
+    push %esp          # Push pointer to registers_t
     
-    # Check int_no (offset 44 from current esp: ptr(4) + ds(4) + pusha(32) + int_no(4) = 44?)
-    # Let's trace stack:
-    # [SS, UserESP, EFLAGS, CS, EIP] (Hardware)
+    # Stack layout now:
+    # [SS, UserESP, EFLAGS, CS, EIP] (Hardware) 
     # [ErrCode, IntNo] (ISR Macro)
-    # [EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI] (Pusha)
-    # [DS] (Manual push)
-    # [Ptr to Stack] (Manual push) <- ESP
+    # [EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI] (Pusha = 32 bytes)
+    # [DS] (4 bytes)
+    # [GS] (4 bytes)
+    # [Ptr to Stack] <- ESP (4 bytes)
     
-    # Registers_t struct matches: DS, EDI...EAX, IntNo, ErrCode, EIP... 
-    
-    # So regs->int_no is at offset: 
-    # DS (4) + Pusha (32) = 36 bytes from the structure base.
-    # Structure base is at (%esp) + 4 (skipping the ptr push).
-    
-    mov 40(%esp), %eax   # 4 (ptr) + 4 (ds) + 32 (pusha) = 40? No.
-    # regs is at esp+4.
-    # regs->int_no is at offset 36 in regs.
-    # So 4 + 36 = 40.
+    # int_no offset: 4 (ptr) + 4 (gs) + 4 (ds) + 32 (pusha) = 44
+    mov 44(%esp), %eax
     
     cmp $128, %eax
     je call_syscall
@@ -171,16 +168,17 @@ call_syscall:
     call syscall_handler
 
 isr_exit:
-    add $4, %esp   # Pop pointer to regs
+    add $4, %esp       # Pop pointer to regs
     
-    pop %eax
+    pop %eax           # Restore GS
+    mov %ax, %gs
+    pop %eax           # Restore DS
     mov %ax, %ds
     mov %ax, %es
     mov %ax, %fs
-    mov %ax, %gs
     
     popa
-    add $8, %esp # Cleans up the pushed error code and ISR number
+    add $8, %esp       # Clean up error code and ISR number
     iret
 
 # Jump to user mode
