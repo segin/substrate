@@ -119,3 +119,58 @@ void pmm_free_block(void* p) {
         }
     }
 }
+
+void* pmm_alloc_contiguous(size_t count) {
+    if (pmm_used_blocks + count > pmm_total_blocks) return NULL;
+
+    // Brute force search for 'count' consecutive free blocks
+    // Note: This is slow and inefficient for a large bitmap, but sufficient for a basic PMM.
+    // A proper implementation would use a better data structure (buddy allocator or free lists).
+    
+    for (size_t i = 0; i < pmm_total_blocks; i++) {
+        size_t free_run = 0;
+        for (size_t j = 0; j < count; j++) {
+            if (i + j >= pmm_total_blocks) break;
+            
+            size_t idx = (i + j) / 8;
+            size_t bit = (i + j) % 8;
+            
+            if (pmm_bitmap[idx] & (1 << bit)) {
+                // Used (bit is 1)
+                break;
+            }
+            free_run++;
+        }
+        
+        if (free_run == count) {
+            // Found a run, mark as used
+            for (size_t j = 0; j < count; j++) {
+                size_t idx = (i + j) / 8;
+                size_t bit = (i + j) % 8;
+                pmm_bitmap[idx] |= (1 << bit);
+            }
+            pmm_used_blocks += count;
+            return (void*)(i * PMM_BLOCK_SIZE);
+        }
+        
+        // Optimization: skip the used block we hit
+        i += free_run;
+    }
+    return NULL;
+}
+
+void pmm_free_contiguous(void* p, size_t count) {
+    uint32_t start_block = (uint32_t)p / PMM_BLOCK_SIZE;
+    for (size_t i = 0; i < count; i++) {
+        uint32_t block = start_block + i;
+        uint32_t idx = block / 8;
+        uint32_t bit = block % 8;
+        
+        if (idx < pmm_bitmap_size) {
+             if (pmm_bitmap[idx] & (1 << bit)) {
+                pmm_bitmap[idx] &= ~(1 << bit);
+                pmm_used_blocks--;
+            }
+        }
+    }
+}

@@ -10,7 +10,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Basic Bitmap Allocator (`pmm.c`).
         - [x] Parse Multiboot Memory Map (mmap) to support non-contiguous RAM.
         - [x] Parse e820 Memory Map (legacy BIOS).
-        - [ ] Implement `pmm_alloc_contiguous` for specific DMA drivers.
+        - [x] Implement `pmm_alloc_contiguous` for specific DMA drivers.
     - [ ] **Memory Management (BSD/Mach Design):**
         - [ ] **Physical Memory (Machine Independent):**
             - [ ] `vm_page_t`: Core structure tracking state of every physical page.
@@ -176,6 +176,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **Dispatcher:** Implement translation layer for SVR3/Xenix syscall numbers.
             - [ ] **ABI:** Handle argument passing (Stack-based for Xenix/SVR3).
             - [ ] **Extensions:** Implement `cxenix` multiplexer and `rdchk`/`nap`.
+    - [ ] **ELKS (Embeddable Linux Kernel Subset):**
+        - [ ] Support ELKS binaries (16-bit Real Mode via VM86).
+        - [ ] **VM86:** Implement Virtual 8086 mode infrastructure (i386 only).
+        - [ ] **Syscalls:** Implement `int 0x80` handling within VM86 context.
     - [ ] **Linux:**
         - [ ] Improve `sys_clone` compatibility (flags).
     - [ ] **Minix/386:**

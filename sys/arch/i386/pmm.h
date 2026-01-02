@@ -15,6 +15,8 @@
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length);
 void pmm_init_e820(e820_entry_t *map, uint32_t count);
 void* pmm_alloc_block(void);
+void* pmm_alloc_contiguous(size_t count);
 void pmm_free_block(void* p);
+void pmm_free_contiguous(void* p, size_t count);
 
 #endif
