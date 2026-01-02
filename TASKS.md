@@ -56,14 +56,16 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **Synchronization:**
     - [x] Implement Spinlocks, Mutexes, and Semaphores.
     - [x] Implement Futex support for user-space synchronization (Linux personality).
-        - [ ] **Signals:**
-            - [x] Implement Signal delivery mechanism (trampoline, context saving).
-            - [x] Implement `kill`, `sigaction`, `sigprocmask`.
-            - [x] Implement PID 1 protection and safe exit handling.
+- [ ] **Signals:**
+    - [x] Implement Signal delivery mechanism (trampoline, context saving).
+    - [x] Implement `kill`, `sigaction`, `sigprocmask`.
+    - [x] Implement PID 1 protection and safe exit handling.
+
 ### 2. Architecture (`sys/arch`)
 - [ ] **i386:**
     - [x] Complete GDT/TSS setup for user-mode switching.
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
+    - [x] **EFI Boot Target:** Support for booting as an EFI binary.
     - [ ] **VM86 Mode (i386 only):** Support for Virtual 8086 mode (needed for Xenix/86 and DOS).
 - [ ] **x86_64:**
     - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`).
@@ -73,13 +75,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp).
 
 ### 3. Drivers (`sys/drivers`)
-    - [ ] **Storage:**
+- [ ] **Storage:**
     - [ ] **ATA/IDE:**
         - [x] Implement PIO Mode transfers.
         - [x] Implement DMA transfers (Bus Mastering).
         - [x] Implement LBA48 support.
         - [ ] Support Primary/Secondary channels.
-
         - [ ] Support Master/Slave drives.
     - [ ] **AHCI:** Implement command list and FIS construction.
     - [ ] **NVMe:** Implement Admin Queue and I/O Queue submission/completion.
@@ -102,10 +103,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] Add support for shift, ctrl, alt modifiers.
         - [ ] **Buffer:**
             - [x] Implement a circular buffer for raw keystrokes.
-        - [ ] **Mouse (PS/2):**
-            - [ ] **Initialization:**
-                - [x] Enable auxiliary device (IRQ12).
-                - [x] Set sample rate/resolution.
+    - [ ] **Mouse (PS/2):**
+        - [ ] **Initialization:**
+            - [x] Enable auxiliary device (IRQ12).
+            - [x] Set sample rate/resolution.
         - [ ] **Packet Parsing:**
             - [x] Decode 3-byte (or 4-byte) movement/button packets.
         - [ ] **Event Queue:**
@@ -145,21 +146,21 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
         - [ ] **VFS Glue:** Auto-generate VFS nodes when registering devices.
         - [ ] **Nodes:**
-                            - [x] Support `null`.
-                            - [x] Support `zero`.
-                            - [x] Support `full`.
-                                    - [x] Support `random`.
-                                    - [x] Support `tty`.
-                                    - [ ] **ProcFS (`/proc`):**
-                                        - [ ] **Process Info:**
-                                            - [x] Expose `cmdline`.
-                                            - [x] Expose `maps`.
-                                            - [x] Expose `status`.
-                                            - [x] Expose `fd` per PID.
-                                                - [ ] **System Info:**
-                                                    - [x] Expose `cpuinfo`.
-                                                    - [x] Expose `meminfo`.
-                                                    - [x] Expose `uptime`.
+            - [x] Support `null`.
+            - [x] Support `zero`.
+            - [x] Support `full`.
+            - [x] Support `random`.
+            - [x] Support `tty`.
+    - [ ] **ProcFS (`/proc`):**
+        - [ ] **Process Info:**
+            - [x] Expose `cmdline`.
+            - [x] Expose `maps`.
+            - [x] Expose `status`.
+            - [x] Expose `fd` per PID.
+        - [ ] **System Info:**
+            - [x] Expose `cpuinfo`.
+            - [x] Expose `meminfo`.
+            - [x] Expose `uptime`.
         - [x] **Dynamic generation:** Generate content on `read()` (virtual files).
         - [x] **Personality Awareness:** Detect caller personality (Linux/FreeBSD) and adjust file contents/formats dynamically (e.g., `status` file structure).
     - [ ] **SysFS (`/sys`):**
@@ -177,17 +178,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 5. System Calls & Personalities
 - [ ] **Mechanisms:**
-        - [ ] **PTY Subsystem (Unix98):**
-            - [ ] **Multiplexor:** Implement `/dev/ptmx` cloning device.
-            - [ ] **DevPTS:** Implement `devpts` virtual filesystem for `/dev/pts`.
-            - [ ] **API Support:** Support `grantpt`, `unlockpt`, `ptsname` (via ioctls).
-            - [ ] **Line Discipline:** Implement termios processing (canonical mode, echo, signals).
-        - [x] Implement `sys_ioctl` framework.
-        - [ ] Implement `sys_pipe` and `sys_dup2`.
-
-    - [ ] Implement `sys_time` and RTC reading.
-    - [ ] **Emulation Path Lookup:** Check `/emul/<perso>/` before root for foreign personalities.
-    - [ ] **Debugging & Tracing:**
+    - [ ] **PTY Subsystem (Unix98):**
+        - [ ] **Multiplexor:** Implement `/dev/ptmx` cloning device.
+        - [ ] **DevPTS:** Implement `devpts` virtual filesystem for `/dev/pts`.
+        - [ ] **API Support:** Support `grantpt`, `unlockpt`, `ptsname` (via ioctls).
+        - [ ] **Line Discipline:** Implement termios processing (canonical mode, echo, signals).
+    - [x] Implement `sys_ioctl` framework.
+    - [x] Implement `sys_pipe` and `sys_dup2`.
+    - [x] Implement `sys_time` and RTC reading.
+    - [ ] **Emulation Path Lookup:** Check `/emul/<perso>/` before root for foreign personalities.    - [ ] **Debugging & Tracing:**
         - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace).
         - [ ] **Serial Console:** Interactive GDB stub over UART.
         - [ ] **DTrace:** (As planned in ideas) Dynamic tracing framework.

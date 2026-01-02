@@ -5,7 +5,7 @@ ARCH ?= i386
 
 .PHONY: all clean install arch_kernel core kern drivers fs exec vfs exec_perso vm
 
-all: kernel.bin
+all: kernel.bin kernel.efi
 	@echo "Kernel build complete."
 
 kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso vm
@@ -23,6 +23,23 @@ kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso vm
 		exec/perso/perso.o \
 		vm/vm.o
 	@echo "Linked kernel.bin"
+
+kernel.efi: arch_kernel kern drivers fs exec vfs exec_perso vm
+	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.elf \
+		arch/$(ARCH)/kernel.o \
+		kern/kern.o \
+		drivers/video/video.o \
+		drivers/serial/serial.o \
+		drivers/input/input.o \
+		drivers/storage/storage.o \
+		drivers/devices/devices.o \
+		vfs/vfs_subsys.o \
+		fs/fs.o \
+		fs/exec/exec.o \
+		exec/perso/perso.o \
+		vm/vm.o
+	objcopy -O pe-i386 kernel_efi.elf kernel.efi
+	@echo "Linked kernel.efi"
 
 arch_kernel:
 	@echo "Building Kernel for $(ARCH)..."

@@ -2,13 +2,14 @@ include Makefile.inc
 
 # Subdirectories to build
 # Order matters: lib is usually a dependency for bin/usr.bin
-# Subdirectories to build
-# Order matters: lib is usually a dependency for bin/usr.bin
 SUBDIRS = lib sbin sys bin usr.lib usr.bin
 
-.PHONY: all clean install $(SUBDIRS)
+.PHONY: all clean install efi debug $(SUBDIRS)
 
 all: $(SUBDIRS)
+
+efi:
+	$(MAKE) -C sys kernel.efi
 
 # Recursive make for each subdirectory
 $(SUBDIRS):
@@ -16,16 +17,6 @@ $(SUBDIRS):
 	$(MAKE) -C $@
 	@echo "<<< Leaving $@"
 
-
-.PHONY: all clean install $(SUBDIRS)
-
-all: $(SUBDIRS)
-
-# Recursive make for each subdirectory
-$(SUBDIRS):
-	@echo ">>> Entering $@"
-	$(MAKE) -C $@
-	@echo "<<< Leaving $@"
 
 clean:
 	@for dir in $(SUBDIRS); do \
@@ -41,4 +32,3 @@ install:
 
 debug: all
 	qemu-system-i386 -kernel sys/kernel.bin -nographic -serial file:serial.log
-
