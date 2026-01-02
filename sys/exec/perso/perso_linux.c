@@ -47,12 +47,7 @@ extern int sys_fstat(int, void*);
 
 extern int sys_set_thread_area(void*);
 
-int sys_restart_syscall(void) {
-    return -4; // -EINTR
-}
-
 static void *linux_syscalls[MAX_SYSCALLS] = {
-    [0] = &sys_restart_syscall,
     [1] = &sys_exit,
     [2] = &sys_fork,
     [3] = &sys_read,

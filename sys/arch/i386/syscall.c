@@ -1,26 +1,27 @@
 #include "syscall.h"
 #include "idt.h"
-#include "vga.h"
+#include "../../drivers/video/vga.h"
 #include "../../kern/sched.h"
 #include "../../kern/version.h"
 #include "../../kern/panic.h"
 #include "../../kern/console.h"
 #include "../../exec/perso/personality.h"
-#include <sys/thr.h>
-#include <sys/acct.h>
-#include <sys/file.h>
-#include <sys/signal.h>
+#include "../../include/sys/thr.h"
+#include "../../include/sys/acct.h"
+#include "../../include/sys/file.h"
+#include "../../include/sys/proc.h"
+#include "../../include/sys/signal.h"
 #include "../../vfs/vfs.h"
 #include "../../drivers/serial/uart.h"
 #include <sys/types.h>
 #include <string.h>
+#include <stdbool.h>
 #include <stdio.h>
-
 
 extern thread_t *current_thread; 
 extern process_t *current_process;
-extern thread_t threads[];
-extern process_t processes[];
+extern process_t processes[64];
+extern thread_t threads[256];
 
 extern int sys_acct(const char *path);
 extern int sys_time(uint32_t *tloc);
@@ -333,8 +334,9 @@ void syscall_handler(registers_t *regs) {
     
     // Check if syscall number is out of range
     if (regs->eax >= p->syscall_count) {
-        char buf[64];
-        sprintf(buf, "syscall: unimplemented #%u\n", (unsigned int)regs->eax);
+        char buf[128];
+        sprintf(buf, "syscall: unimplemented #%u (PID=%d, Pers=%s)\n", 
+                (unsigned int)regs->eax, current_process->pid, p->name);
         kprint(buf);
         regs->eax = -38; // ENOSYS
         return;
@@ -344,8 +346,9 @@ void syscall_handler(registers_t *regs) {
     
     // Check if syscall handler is NULL (not implemented)
     if (!location) {
-        char buf[64];
-        sprintf(buf, "syscall: unimplemented #%u\n", (unsigned int)regs->eax);
+        char buf[128];
+        sprintf(buf, "syscall: unimplemented #%u (PID=%d, Pers=%s)\n", 
+                (unsigned int)regs->eax, current_process->pid, p->name);
         kprint(buf);
         regs->eax = -38; // ENOSYS
         return;
@@ -592,8 +595,8 @@ int sys_creat(const char *path, int mode) {
 
 int sys_signal(int sig, void *handler) {
     struct sigaction act;
+    memset(&act, 0, sizeof(act));
     act.sa_handler = (sig_t)handler;
-    act.sa_mask = 0;
     act.sa_flags = 0;
     return sys_sigaction(sig, &act, NULL);
 }
