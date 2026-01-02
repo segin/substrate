@@ -99,11 +99,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] Map scancodes to ASCII/Unicode characters (US Layout).
         - [ ] **Buffer:**
             - [x] Implement a circular buffer for raw keystrokes.
-    - [ ] **Mouse (PS/2):**
-        - [ ] **Initialization:**
-            - [ ] Enable auxiliary device (IRQ12).
-            - [ ] Set sample rate/resolution.
-        - [ ] **Packet Parsing:** Decode 3-byte (or 4-byte) movement/button packets.
+        - [ ] **Mouse (PS/2):**
+            - [ ] **Initialization:**
+                - [x] Enable auxiliary device (IRQ12).
+                - [x] Set sample rate/resolution.
+            - [ ] **Packet Parsing:**
+     Decode 3-byte (or 4-byte) movement/button packets.
         - [ ] **Event Queue:** Push mouse events (dx, dy, buttons) to a system queue.
     - [ ] **Input Subsystem:**
         - [ ] Abstract `input_event` structure (type, code, value).

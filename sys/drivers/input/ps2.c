@@ -20,6 +20,11 @@ void ps2_write_data(uint8_t data) {
     outb(PS2_DATA_PORT, data);
 }
 
+void ps2_write_aux(uint8_t data) {
+    ps2_write_command(0xD4);
+    ps2_write_data(data);
+}
+
 uint8_t ps2_read_data(void) {
     ps2_wait_read();
     return inb(PS2_DATA_PORT);

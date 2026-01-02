@@ -2,6 +2,7 @@
 #include "../drivers/video/vga.h"
 #include "../drivers/serial/uart.h"
 #include "../drivers/input/keyboard.h"
+#include "../drivers/input/mouse.h"
 #include "../drivers/storage/scsi/scsi.h"
 #include "../drivers/storage/ide/ide.h"
 #include "../drivers/storage/ahci/ahci.h"
@@ -148,6 +149,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     
     // Initialize Keyboard
     keyboard_init();
+    
+    // Initialize Mouse
+    mouse_init();
 
     // Initialize Storage
     scsi_init();

@@ -3,7 +3,7 @@ include ../../Makefile.inc
 CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../arch/i386 -I..
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = acct.c time.c main.c panic.c spinlock.c mutex.c semaphore.c kthread.c signal.c futex.c
+SRCS = acct.c time.c main.c panic.c spinlock.c mutex.c semaphore.c kthread.c signal.c futex.c lib.c stubs.c
 OBJS = $(SRCS:.c=.o)
 
 all: kern.o

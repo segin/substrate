@@ -1,15 +1,7 @@
 #include "smp.h"
 #include "../../drivers/video/vga.h"
-
-// Simple memcmp for freestanding environment
-static int memcmp(const void *s1, const void *s2, size_t n) {
-    const unsigned char *p1 = s1, *p2 = s2;
-    while (n--) {
-        if (*p1 != *p2) return *p1 - *p2;
-        p1++; p2++;
-    }
-    return 0;
-}
+#include <string.h>
+#include <stdint.h>
 
 cpu_info_t cpus[MAX_CPUS];
 int cpu_count = 0;

@@ -3,20 +3,8 @@
 #include "io.h"
 #include <string.h>
 #include "../../drivers/input/keyboard.h"
+#include "../../drivers/input/mouse.h"
 #include "fpu/fpu_emu.h"
-
-// Simple memset/memcpy if not available in freestanding headers yet
-size_t strlen(const char *s) {
-    size_t len = 0;
-    while (s[len]) len++;
-    return len;
-}
-
-void *memset(void *s, int c, size_t n) {
-    unsigned char *p = s;
-    while(n--) *p++ = (unsigned char)c;
-    return s;
-}
 
 idt_entry_t idt_entries[256];
 idt_ptr_t   idt_ptr;
@@ -58,6 +46,7 @@ extern void isr30(void);
 extern void isr31(void);
 extern void isr32(void);  // IRQ0 (Timer)
 extern void isr33(void);  // IRQ1 (Keyboard)
+extern void isr44(void);  // IRQ12 (Mouse)
 extern void isr128(void); // Syscall (0x80)
 
 extern void timer_tick(void);
@@ -85,7 +74,7 @@ void idt_init(void) {
 
     // Unmask IRQ0 (Timer) and IRQ1 (Keyboard)
     outb(0x21, 0xFC); // 11111100: Unmask bit 0 and 1
-    outb(0xA1, 0xFF);
+    outb(0xA1, 0xEF); // 11101111: Unmask bit 4 (IRQ12)
 
     // Initialize PIT (100Hz)
     uint32_t divisor = 1193180 / 100;
@@ -132,6 +121,9 @@ void idt_init(void) {
     
     // IRQ1 - Keyboard
     idt_set_gate(33, (uint32_t)isr33, 0x08, 0x8E);
+    
+    // IRQ12 - Mouse
+    idt_set_gate(44, (uint32_t)isr44, 0x08, 0x8E);
     
     // Syscall
     idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0x8E);
@@ -261,15 +253,47 @@ void isr_handler(registers_t *regs) {
 
 
 
-    if (regs->int_no == 33) {
+        if (regs->int_no == 33) {
 
 
 
-        keyboard_handler(regs);
 
 
 
-    } else if (regs->int_no == 7) {
+
+            keyboard_handler(regs);
+
+
+
+
+
+
+
+        } else if (regs->int_no == 44) {
+
+
+
+
+
+
+
+            mouse_handler(regs);
+
+
+
+
+
+
+
+        } else if (regs->int_no == 7) {
+
+
+
+
+
+
+
+    
 
 
 

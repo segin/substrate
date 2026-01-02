@@ -20,5 +20,6 @@ void ps2_init(void);
 uint8_t ps2_read_data(void);
 void ps2_write_command(uint8_t cmd);
 void ps2_write_data(uint8_t data);
+void ps2_write_aux(uint8_t data);
 
 #endif
