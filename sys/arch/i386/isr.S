@@ -197,11 +197,12 @@ jump_to_userspace:
     # NOW turn off interrupts
     cli
     
-    # Set DS/ES/FS/GS to user data segment
+    # Set DS/ES/FS to user data segment, GS to TLS segment
     mov $0x23, %ax
     mov %ax, %ds
     mov %ax, %es  
     mov %ax, %fs
+    mov $0x33, %ax    # TLS segment (GDT entry 6 | RPL 3)
     mov %ax, %gs
     
     # Build IRET stack frame (in order pushed):
