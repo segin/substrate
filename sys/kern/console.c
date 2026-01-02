@@ -1,4 +1,5 @@
 #include "console.h"
+#include <sys/proc.h>
 #include "../vfs/vfs.h"
 #include <string.h>
 
@@ -65,13 +66,34 @@ void console_push_char(char c) {
     }
 }
 
+extern thread_t *current_thread;
+extern void sched_yield(void);
+
+static inline void cli(void) { __asm__ volatile("cli"); }
+static inline void sti(void) { __asm__ volatile("sti"); }
+
 void console_read(char *data, size_t len) {
     size_t i = 0;
     while (i < len) {
+        cli();
         while (console_in_head == console_in_tail) {
-            extern void sched_sleep(void *chan);
-            sched_sleep(&console_in_buf);
+            // Atomic check-and-block
+            // We must set state to BLOCKED within the critical section (interrupts disabled)
+            // so we don't miss the wakeup from the ISR.
+            if (current_thread) {
+                current_thread->wait_chan = &console_in_buf;
+                current_thread->state = THREAD_BLOCKED;
+            }
+            
+            // Re-enable interrupts before yielding to allow ISR to run and wake us
+            sti();
+            sched_yield();
+            
+            // Re-disable for next check
+            cli();
         }
+        sti(); // Ensure interrupts enabled when data available
+        
         data[i++] = console_in_buf[console_in_tail];
         console_in_tail = (console_in_tail + 1) % CONSOLE_BUF_SIZE;
     }
