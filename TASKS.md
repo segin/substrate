@@ -28,7 +28,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] **VM Map:** `vm_map` structure representing an address space.
             - [x] **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
             - [x] **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
-            - [ ] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
+            - [x] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
     - [ ] **Kernel Allocator (UMA/Zone):**
         - [ ] **Zone Allocator:** Fixed-size object caching (equivalent to Slab, but BSD-style).
         - [ ] **Kmem:** General purpose variable-size allocator (power-of-two free lists).
