@@ -140,6 +140,11 @@ uint32_t elf_load(fs_node_t *file) {
         detected_os = ELFOSABI_LINUX;
     }
     
+    kprint("ELF: Personality: ");
+    if (detected_os == ELFOSABI_LINUX) kprint("Linux\n");
+    else if (detected_os == ELFOSABI_FREEBSD) kprint("FreeBSD\n");
+    else kprint("Native\n");
+    
     if (current_process) {
         switch (detected_os) {
             case ELFOSABI_FREEBSD:
