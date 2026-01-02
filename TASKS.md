@@ -131,7 +131,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Auto-detection:** Implement filesystem probing/recognition during mount.
     - [ ] **Unified Interface:** Ensure Sockets, Pipes, and Devices operate through VFS vnodes.
 - [ ] **EXT2 (Native Filesystem):**
-    - [ ] Implement Inode and Block allocation/freeing.
+    - [x] Implement Inode and Block allocation/freeing.
     - [ ] Implement Directory entry creation/deletion.
 - [ ] **FAT16/32:**
     - [ ] Implement File Allocation Table parsing and chain following.
