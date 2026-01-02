@@ -184,12 +184,12 @@ jump_to_userspace:
     # NOW turn off interrupts
     cli
     
-    # DEBUG: Hardcode the stack pointer to see if IRET works
-    # If this works, the issue is definitely parameter passing
-    mov $0xBFFFFFC0, %edx 
-    
-    # NOW turn off interrupts
-    cli
+    # Set DS/ES/FS/GS to user data segment
+    mov $0x23, %ax
+    mov %ax, %ds
+    mov %ax, %es  
+    mov %ax, %fs
+    mov %ax, %gs
     
     # Build IRET stack frame (in order pushed):
     # SS, ESP, EFLAGS, CS, EIP
@@ -202,12 +202,8 @@ jump_to_userspace:
     push $0x1B          # User CS
     push %ecx           # User EIP (loaded earlier)
     
-    # Don't touch DS/ES/FS/GS - leave as kernel segments 0x10
-    # Ring 3 can still use them for reading
-    # The IRET will change CPL to 3, CS to 0x1B, SS to 0x23
-    
-    # DEBUG: Trigger breakpoint before iret
-    # int $3
+    # Jump to user mode
+    iret
     
     # Jump to user mode
     iret
