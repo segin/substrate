@@ -99,6 +99,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] Implement state machine for Set 1 (or 2) decoding.
         - [ ] **Keymap:**
             - [x] Map scancodes to ASCII/Unicode characters (US Layout).
+            - [x] Add support for shift, ctrl, alt modifiers.
         - [ ] **Buffer:**
             - [x] Implement a circular buffer for raw keystrokes.
         - [ ] **Mouse (PS/2):**

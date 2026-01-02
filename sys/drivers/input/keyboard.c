@@ -31,9 +31,19 @@ static char kbd_us[128] = {
     0, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',   0,
    '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/',   0, '*',
     0, ' ',   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
 };
+
+static char kbd_us_shifted[128] = {
+    0,  27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b',
+  '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',
+    0, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',   0,
+   '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?',   0, '*',
+    0, ' ',   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+};
+
+static int kbd_shift = 0;
+static int kbd_ctrl  = 0;
+static int kbd_alt   = 0;
 
 void keyboard_init(void) {
     ps2_init();
@@ -50,11 +60,35 @@ void keyboard_handler(registers_t *regs) {
         goto out;
     }
 
-    // For now, we still use the basic map, but we could handle extended ones
     if (kbd_extended) {
-        // Handle extended scancodes here
-        // e.g. arrows, etc.
+        // Handle extended scancodes
         kbd_extended = 0;
+        goto out;
+    }
+
+    // Handle modifiers
+    if (scancode == 0x2A || scancode == 0x36) { // LShift, RShift pressed
+        kbd_shift = 1;
+        goto out;
+    }
+    if (scancode == 0xAA || scancode == 0xB6) { // LShift, RShift released
+        kbd_shift = 0;
+        goto out;
+    }
+    if (scancode == 0x1D) { // Ctrl pressed
+        kbd_ctrl = 1;
+        goto out;
+    }
+    if (scancode == 0x9D) { // Ctrl released
+        kbd_ctrl = 0;
+        goto out;
+    }
+    if (scancode == 0x38) { // Alt pressed
+        kbd_alt = 1;
+        goto out;
+    }
+    if (scancode == 0xB8) { // Alt released
+        kbd_alt = 0;
         goto out;
     }
 
@@ -64,7 +98,7 @@ void keyboard_handler(registers_t *regs) {
     } else {
         // Pressed
         if (scancode < 128) {
-            char c = kbd_us[scancode];
+            char c = kbd_shift ? kbd_us_shifted[scancode] : kbd_us[scancode];
             if (c) {
                 kbd_push(c);
                 input_enqueue(EV_KEY, scancode, 1);

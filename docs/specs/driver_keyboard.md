@@ -6,7 +6,8 @@ The keyboard driver handles input from standard PS/2 keyboard devices. It decode
 ## Scancode Decoding
 - **State Machine:** Tracks extended scancodes (prefixed with `0xE0`).
 - **Set 1:** Maps scancodes directly to characters or actions.
-- **Keyups:** Currently ignored (scancodes with bit 7 set).
+- **Modifiers:** Tracks the state of Shift, Ctrl, and Alt keys. Uses a shifted keymap when Shift is active.
+- **Keyups:** Handled for modifier keys; ignored for others.
 
 ## Input Buffer
 - **Type:** Circular buffer.
