@@ -4,6 +4,7 @@
 #include "../../kern/sched.h"
 #include "../../kern/version.h"
 #include "../../kern/panic.h"
+#include "../../kern/console.h"
 #include "../../exec/perso/personality.h"
 #include <sys/thr.h>
 #include <sys/acct.h>
@@ -13,6 +14,8 @@
 #include "../../drivers/serial/uart.h"
 #include <sys/types.h>
 #include <string.h>
+#include <stdio.h>
+
 
 extern thread_t *current_thread; 
 extern process_t *current_process;
