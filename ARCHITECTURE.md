@@ -49,7 +49,8 @@ These components are essential for booting and basic system operation.
     - **FreeBSD i386:** Compatibility layer.
 - **Tooling:** Built with modern GCC (`-m32`).
 - **Threading Model:**
-  - **1:1 Model:** Kernel threads are first-class citizens.
+  - **BSD-style:** 1:1 Kernel threading model using `kthread` infrastructure.
+  - **Userspace:** POSIX Threads (pthreads) implemented via `libthr` wrapping kernel primitives.
   - **Scheduler:** Round-Robin with support for Processes and Threads.
 - **Exec:** ELF binaries are "branded" via `EI_OSABI` to select the correct personality.
 
