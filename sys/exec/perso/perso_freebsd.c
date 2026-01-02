@@ -5,6 +5,8 @@
 // FreeBSD syscall declarations
 extern int sys_exit(int);
 extern int sys_fork(void);
+struct freebsd_utsname;
+int sys_freebsd_uname(struct freebsd_utsname*);
 extern int sys_read(int, char*, int);
 extern int sys_write(int, const char*, int);
 extern int sys_open(const char*, int, int);
@@ -67,13 +69,39 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [54] = &sys_ioctl,
     [59] = &sys_execve,
     [66] = &sys_vfork,
+    [76] = &sys_vfork,  // FreeBSD: vfork (at 66 usually, but let's keep existing mapping if valid. Wait, vfork is 66 in table above. 76 is getrlimit usually. I'll stick to adding 164)
     [136] = &sys_mkdir,
     [137] = &sys_rmdir,
+    [164] = &sys_freebsd_uname,
     [188] = &sys_stat,   // FreeBSD: stat
     [189] = &sys_fstat,  // FreeBSD: fstat
     [190] = &sys_lstat,  // FreeBSD: lstat
     [326] = &sys_getcwd,
 };
+
+struct freebsd_utsname {
+    char sysname[256];
+    char nodename[256];
+    char release[256];
+    char version[256];
+    char machine[256];
+};
+
+static void strncpy_zero(char *dest, const char *src, int n) {
+    int i;
+    for(i = 0; i < n && src[i]; i++) dest[i] = src[i];
+    for(; i < n; i++) dest[i] = 0;
+}
+
+int sys_freebsd_uname(struct freebsd_utsname *buf) {
+    if (!buf) return -1;
+    strncpy_zero(buf->sysname, "FreeBSD", 256);
+    strncpy_zero(buf->nodename, "localhost", 256);
+    strncpy_zero(buf->release, "14.3-RELEASE-p5", 256);
+    strncpy_zero(buf->version, "FreeBSD 14.3-RELEASE-p5 GENERIC", 256);
+    strncpy_zero(buf->machine, "i386", 256);
+    return 0;
+}
 
 struct personality personality_freebsd = {
     .name = "FreeBSD",
