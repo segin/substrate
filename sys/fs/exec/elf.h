@@ -22,6 +22,25 @@ typedef struct {
     uint16_t      e_shstrndx;
 } Elf32_Ehdr;
 
+typedef struct {
+    uint32_t p_type;
+    uint32_t p_offset;
+    uint32_t p_vaddr;
+    uint32_t p_paddr;
+    uint32_t p_filesz;
+    uint32_t p_memsz;
+    uint32_t p_flags;
+    uint32_t p_align;
+} Elf32_Phdr;
+
+#define PT_NULL    0
+#define PT_LOAD    1
+#define PT_DYNAMIC 2
+#define PT_INTERP  3
+#define PT_NOTE    4
+#define PT_SHLIB   5
+#define PT_PHDR    6
+
 #define ELFMAG0 0x7F
 #define ELFMAG1 'E'
 #define ELFMAG2 'L'

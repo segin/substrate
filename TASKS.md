@@ -214,6 +214,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **Math (`libm`):**
     - [ ] Implement basic floating point functions (`sin`, `cos`, `pow`, `sqrt`).
 - [ ] **Dynamic Linker (`ld.so`):**
+    - [ ] Implement `PT_INTERP` support in kernel ELF loader to load the dynamic linker.
     - [ ] Implement ELF relocation processing (PLT/GOT).
     - [ ] Implement `dlopen`, `dlsym`.
 - [ ] **Kernel Interface Library (`libkvm`):**
