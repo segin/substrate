@@ -106,6 +106,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Packet Parsing:**
             - [x] Decode 3-byte (or 4-byte) movement/button packets.
         - [ ] **Event Queue:**
+            - [x] Push mouse events (dx, dy, buttons) to a system queue.
     - [ ] **Input Subsystem:**
         - [ ] Abstract `input_event` structure (type, code, value).
         - [ ] `/dev/input` interface for userspace access.

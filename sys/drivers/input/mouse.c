@@ -3,6 +3,30 @@
 #include "../../arch/i386/io.h"
 #include "../../drivers/video/vga.h"
 
+static uint8_t mouse_buttons = 0;
+
+#define MOUSE_QUEUE_SIZE 64
+static mouse_event_t mouse_queue[MOUSE_QUEUE_SIZE];
+static int mouse_q_head = 0;
+static int mouse_q_tail = 0;
+
+static void mouse_q_push(int32_t dx, int32_t dy, uint8_t buttons) {
+    int next = (mouse_q_head + 1) % MOUSE_QUEUE_SIZE;
+    if (next != mouse_q_tail) {
+        mouse_queue[mouse_q_head].dx = dx;
+        mouse_queue[mouse_q_head].dy = dy;
+        mouse_queue[mouse_q_head].buttons = buttons;
+        mouse_q_head = next;
+    }
+}
+
+int mouse_get_event(mouse_event_t *ev) {
+    if (mouse_q_head == mouse_q_tail) return 0;
+    if (ev) *ev = mouse_queue[mouse_q_tail];
+    mouse_q_tail = (mouse_q_tail + 1) % MOUSE_QUEUE_SIZE;
+    return 1;
+}
+
 void mouse_init(void) {
     vga_write("Mouse: Initializing...\n", 23);
 
@@ -64,6 +88,8 @@ void mouse_handler(registers_t *regs) {
 
                 mouse_x += dx;
                 mouse_y -= dy; // PS/2 Y-axis is inverted relative to screen coords
+
+                mouse_q_push(dx, -dy, mouse_buttons);
 
                 // Log movement (optional)
                 // char buf[64];
