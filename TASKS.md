@@ -134,7 +134,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [x] Implement Inode and Block allocation/freeing.
     - [x] Implement Directory entry creation/deletion.
 - [ ] **FAT16/32:**
-    - [ ] Implement File Allocation Table parsing and chain following.
+    - [x] Implement File Allocation Table parsing and chain following.
     - [ ] Implement Long File Name (LFN) support.
 - [ ] **Pseudo-FS:**
     - [ ] **DevFS (`/dev`):**
