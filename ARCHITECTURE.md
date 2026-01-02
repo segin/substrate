@@ -56,17 +56,19 @@ These components are essential for booting and basic system operation.
 ## Naming Conventions & Namespaces
 - **Network Interfaces:** Naming follows the `driver`+`instance` pattern (BSD-style).
   - Examples: `em0` (Intel PRO/1000), `re0` (Realtek 8139/8169), `bge0` (Broadcom), `lo0` (Loopback).
-- **Storage Devices:** Naming follows the `type`+`instance` pattern (BSD-style).
+- **Storage Devices:** Naming follows the `/dev/storage/`+`type`+`instance` pattern.
   - **Types:**
-    - `ada`: ATA/SATA devices (AHCI/IDE).
-    - `da`: Direct Access (SCSI/USB Mass Storage).
-    - `nvme`: NVMe Namespaces (e.g., `nvme0ns1`).
-    - `fd`: Floppy Disk.
-    - `cd`: CD-ROM/DVD (ATAPI/SCSI).
+    - `sata`: SATA devices (AHCI).
+    - `ide`: Legacy IDE devices.
+    - `scsi`: SCSI devices.
+    - `usb`: USB Mass Storage.
+    - `nvme`: NVMe Namespaces (e.g., `nvme0`).
+    - `floppy`: Floppy Disk.
+    - `optical`: CD-ROM/DVD (ATAPI/SCSI).
   - **Partitions:**
-    - **MBR/BSD Slices:** `s1`, `s2` (e.g., `ada0s1`).
-    - **BSD Labels:** `a`-`h` suffix inside a slice (e.g., `ada0s1a`).
-    - **GPT:** `p1`, `p2` (e.g., `ada0p1`, `nvme0ns1p1`).
+    - **MBR/BSD Slices:** `s1`, `s2` (e.g., `/dev/storage/sata0s1`).
+    - **BSD Labels:** `a`-`h` suffix inside a slice (e.g., `/dev/storage/sata0s1a`).
+    - **GPT:** `p1`, `p2` (e.g., `/dev/storage/nvme0p1`).
 - **Audio API:**
   - **Native:** Sun AudioIO (`/dev/audio`, `ioctl` based) for simplicity and POSIX-like design.
   - **Compatibility:** OSS v3/v4 emulation provided via `ossp` personality or userland wrapper.
