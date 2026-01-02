@@ -73,11 +73,13 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp).
 
 ### 3. Drivers (`sys/drivers`)
-- [ ] **Storage:**
+    - [ ] **Storage:**
     - [ ] **ATA/IDE:**
         - [x] Implement PIO Mode transfers.
-        - [ ] Implement DMA transfers (Bus Mastering).
+        - [x] Implement DMA transfers (Bus Mastering).
+        - [x] Implement LBA48 support.
         - [ ] Support Primary/Secondary channels.
+
         - [ ] Support Master/Slave drives.
     - [ ] **AHCI:** Implement command list and FIS construction.
     - [ ] **NVMe:** Implement Admin Queue and I/O Queue submission/completion.

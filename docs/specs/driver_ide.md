@@ -9,21 +9,21 @@ The ATA/IDE driver provides support for legacy hard disk drives using Programmed
     - Secondary: I/O base 0x170, Control base 0x376.
 - **Commands:**
     - `ATA_CMD_IDENTIFY` (0xEC): Retrieve drive information.
-    - `ATA_CMD_READ_PIO` (0x20): Read sectors using PIO.
-    - `ATA_CMD_WRITE_PIO` (0x30): Write sectors using PIO.
+    - `ATA_CMD_READ_PIO` (0x20): Read sectors using PIO (28-bit LBA).
+    - `ATA_CMD_READ_PIO_EXT` (0x24): Read sectors using PIO (48-bit LBA).
+    - `ATA_CMD_READ_DMA_EXT` (0x25): Read sectors using DMA (48-bit LBA).
 - **Status Checking:** Polls the Status Register for `BSY` (Busy) and `DRQ` (Data Request) bits.
 
 ## API
 ### `int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba, uint8_t count, void *buffer)`
-Reads a specified number of sectors starting from an LBA.
+Reads a specified number of sectors using 28-bit LBA.
 
-### `int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba, uint8_t count, const void *buffer)`
-Writes a specified number of sectors.
+### `int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba, uint16_t count, void *buffer)`
+Reads sectors using 48-bit LBA support.
 
-### `int ide_identify(uint16_t bus, uint8_t drive, void *buffer)`
-Identifies the drive and fills the buffer with 512 bytes of identification data.
+### `int ide_dma_setup(uint16_t bus, uint8_t drive, uint64_t lba, uint16_t count, void *phys_addr, int write)`
+Configures the Bus Master IDE controller for a UDMA transfer.
 
 ## Constraints
-- Current implementation only supports 28-bit LBA.
-- No DMA support yet.
+- DMA implementation is currently a skeleton (PRDT setup needed).
 - No interrupt support yet (uses polling).

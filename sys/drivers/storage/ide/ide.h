@@ -16,6 +16,10 @@
 
 #define ATA_CMD_READ_PIO   0x20
 #define ATA_CMD_WRITE_PIO  0x30
+#define ATA_CMD_READ_PIO_EXT 0x24
+#define ATA_CMD_WRITE_PIO_EXT 0x34
+#define ATA_CMD_READ_DMA_EXT 0x25
+#define ATA_CMD_WRITE_DMA_EXT 0x35
 #define ATA_CMD_IDENTIFY   0xEC
 
 #define ATA_SR_BSY         0x80
@@ -29,7 +33,9 @@
 
 void ide_init(void);
 int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba, uint8_t count, void *buffer);
+int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba, uint16_t count, void *buffer);
 int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba, uint8_t count, const void *buffer);
 int ide_identify(uint16_t bus, uint8_t drive, void *buffer);
+int ide_dma_setup(uint16_t bus, uint8_t drive, uint64_t lba, uint16_t count, void *phys_addr, int write);
 
 #endif
