@@ -197,18 +197,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         for (const char *p = path; *p; p++) {
             if (*p == '/') name = p + 1;
         }
-        strncpy(current_process->comm, name, sizeof(current_process->comm) - 1);
     }
-    
-    kprint("execve: Ready to jump to userspace at 0x");
-    char hexbuf[16];
-    for (int i = 7; i >= 0; i--) {
-        int nib = (entry >> (i * 4)) & 0xF;
-        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf[8] = '\0';
-    kprint(hexbuf);
-    kprint("\n");
     
     // Set up kernel stack for this process in TSS
     extern void set_kernel_stack(uint32_t stack);
@@ -226,7 +215,6 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     uint32_t user_stack_base = 0xBFFF0000; // Bottom of 64KB stack
     uint32_t user_stack_size = 16; // 16 pages = 64KB
     
-    kprint("execve: Allocating user stack...\n");
     for (uint32_t i = 0; i < user_stack_size; i++) {
         uint32_t va = user_stack_base + i * 0x1000;
         void *pa = pmm_alloc_block();
@@ -310,81 +298,14 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // 7. Push argc
     sp -= 4; *(uint32_t *)sp = argc;
     
-    kprint("execve: Stack setup complete, argc=");
-    char buf[4];
-    buf[0] = '0' + argc;
-    buf[1] = '\0';
-    kprint(buf);
-    kprint(", SP=0x");
-    char hexbuf2[16];
-    for (int i = 7; i >= 0; i--) {
-        int nib = (sp >> (i * 4)) & 0xF;
-        hexbuf2[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf2[8] = '\0';
-    kprint(hexbuf2);
-    kprint("\n");
-    
-    // DEBUG: Print sp one more time right before jump
-    kprint("execve: About to jump with sp=0x");
-    char hexbuf3[16];
-    for (int i = 7; i >= 0; i--) {
-        int nib = (sp >> (i * 4)) & 0xF;
-        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf3[8] = '\0';
-    kprint(hexbuf3);
-    kprint(", entry=0x");
-    for (int i = 7; i >= 0; i--) {
-        int nib = (entry >> (i * 4)) & 0xF;
-        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf3[8] = '\0';
-    kprint(hexbuf3);
-    kprint("\n");
-    
-    kprint("execve: Jumping to userspace...\n");
-    
-    // DEBUG: Manually inspect what will be pushed
-    kprint("DEBUG: Checking parameters before call:\n");
-    kprint("  entry (will be 1st param) = 0x");
-    for (int i = 7; i >= 0; i--) {
-        int nib = (entry >> (i * 4)) & 0xF;
-        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf3[8] = '\0';
-    kprint(hexbuf3);
-    kprint("\n  sp (will be 2nd param) = 0x");
-    for (int i = 7; i >= 0; i--) {
-        int nib = (sp >> (i * 4)) & 0xF;
-        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf3[8] = '\0';
-    kprint(hexbuf3);
-    kprint("\n");
-    
-    // Jump to user mode! ESP now points to argc at _start
-    
-    // Jump to user mode! ESP now points to argc at _start
-    // Use globals to ensure values get there
+    // Setup complete, jump to userspace
     extern uint32_t g_user_stack;
     extern uint32_t g_entry_point;
     
     g_user_stack = sp;
     g_entry_point = entry;
     
-    kprint("execve: Globals set. g_user_stack=0x");
-    // Print global to confirm
-    for (int i = 7; i >= 0; i--) {
-        int nib = (g_user_stack >> (i * 4)) & 0xF;
-        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf3[8] = '\0';
-    kprint(hexbuf3);
-    kprint("\n");
-    
     extern void jump_to_userspace(void);
-    
     jump_to_userspace();
     
     // Should never reach here
