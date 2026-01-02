@@ -1,7 +1,7 @@
 #include "vm_map.h"
 #include "vm_object.h"
 #include "vm_fault.h"
-#include <sys/proc.h>
+#include "../include/sys/proc.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -45,8 +45,48 @@ int sys_munmap(void *addr, size_t length) {
     return 0;
 }
 
+#include <string.h>
+
+extern int pmap_enter(void *pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
+extern void *pmap_kernel(void);
+extern void *pmm_alloc_block(void);
+
 void *sys_brk(void *addr) {
-    // Implementation would track 'p->brk' and grow/shrink heap mapping.
-    (void)addr;
-    return NULL;
+    if (!current_process) return NULL;
+    
+    // If querying (addr == 0) or uninitialized
+    if (!addr || !current_process->brk_start)
+        return (void *)current_process->brk;
+
+    uint32_t new_brk = (uint32_t)addr;
+    uint32_t old_brk = current_process->brk;
+
+    // Don't shrink below start
+    if (new_brk < current_process->brk_start) 
+        return (void *)old_brk;
+
+    // Align to page boundaries
+    uint32_t old_page_end = (old_brk + 0xFFF) & 0xFFFFF000;
+    uint32_t new_page_end = (new_brk + 0xFFF) & 0xFFFFF000;
+
+    void *pmap = pmap_kernel();
+
+    if (new_page_end > old_page_end) {
+        // Allocate and map new pages
+        for (uint32_t va = old_page_end; va < new_page_end; va += 0x1000) {
+            void *pa = pmm_alloc_block();
+            if (!pa) return (void *)old_brk; // Out of memory
+            
+            // Map page (pmap_enter handles permissions internally for now)
+            if (pmap_enter(pmap, va, (uint32_t)pa, 0, 0) < 0) {
+                return (void *)old_brk;
+            }
+            memset((void *)va, 0, 0x1000);
+        }
+    }
+    // If shrinking, we leak pages for now (lazy unmap). 
+    // This is safe for stability, just wasteful.
+
+    current_process->brk = new_brk;
+    return (void *)new_brk;
 }

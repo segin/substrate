@@ -73,6 +73,7 @@ uint32_t elf_load(fs_node_t *file) {
     extern void *pmm_alloc_block(void);
     
     void *pmap = pmap_kernel();
+    uint32_t max_vaddr = 0;
     
     for (int i = 0; i < ehdr.e_phnum; i++) {
         uint32_t ph_offset = ehdr.e_phoff + i * ehdr.e_phentsize;
@@ -129,6 +130,8 @@ uint32_t elf_load(fs_node_t *file) {
             }
             
             // BSS is already zeroed since we memset each page
+            
+            if (va_end > max_vaddr) max_vaddr = va_end;
         }
     }
     
@@ -157,6 +160,9 @@ uint32_t elf_load(fs_node_t *file) {
                 current_process->pers = &personality_native;
                 break;
         }
+        
+        current_process->brk_start = max_vaddr;
+        current_process->brk = max_vaddr;
     }
     
     return ehdr.e_entry;
