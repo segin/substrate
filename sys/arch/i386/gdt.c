@@ -1,6 +1,7 @@
 #include "gdt.h"
 #include <stdint.h>
 
+extern void gdt_flush(uint32_t);
 extern void tss_flush();
 
 gdt_entry_t gdt_entries[6] __attribute__((aligned(16)));
