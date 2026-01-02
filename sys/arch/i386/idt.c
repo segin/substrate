@@ -179,17 +179,41 @@ void isr_handler(registers_t *regs) {
     } else if (regs->int_no == 7) {
         fpu_handler(regs);
     } else if (regs->int_no < 32) {
+        // Exception - check if from user mode or kernel mode
+        int is_usermode = (regs->cs & 0x3) == 3;
+        
         char buf[256];
         kprint("\nEXCEPTION: ");
         kprint(exception_messages[regs->int_no]);
-        kprint("\n");
+        if (is_usermode) {
+            kprint(" (in user process)\n");
+        } else {
+            kprint(" (in kernel)\n");
+        }
         sprintf(buf, "EIP: 0x%08X  CS: 0x%04X  ERR: 0x%08X\n", (unsigned int)regs->eip, (unsigned int)regs->cs, (unsigned int)regs->err_code);
         kprint(buf);
         sprintf(buf, "EAX: 0x%08X  EBX: 0x%08X  ECX: 0x%08X  EDX: 0x%08X\n", (unsigned int)regs->eax, (unsigned int)regs->ebx, (unsigned int)regs->ecx, (unsigned int)regs->edx);
         kprint(buf);
         sprintf(buf, "ESI: 0x%08X  EDI: 0x%08X  EBP: 0x%08X  ESP: 0x%08X\n", (unsigned int)regs->esi, (unsigned int)regs->edi, (unsigned int)regs->ebp, (unsigned int)regs->esp);
         kprint(buf);
-        panic("Unhandled Exception");
+        
+        if (is_usermode) {
+            // User-mode crash - kill the process
+            kprint("Killing user process.\n");
+            if (current_process && current_process->pid == 1) {
+                panic("init died - no recovery possible");
+            }
+            // Mark thread as zombie and yield
+            if (current_thread) {
+                current_thread->state = THREAD_ZOMBIE;
+            }
+            sched_yield();
+            // Should not return, but if it does...
+            for(;;) { __asm__ volatile("hlt"); }
+        } else {
+            // Kernel-mode crash - panic
+            panic("Unhandled Kernel Exception");
+        }
     }
 
     if (regs->int_no >= 32 && regs->int_no <= 47) {
