@@ -313,7 +313,8 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     
     // 8. Pre-initialize TLS/GS segment for musl
     // Allocate a small TLS area (256 bytes) at bottom of user stack area
-    uint32_t tls_area = user_stack_base; // Use first page of stack area
+    // Offset by 1 page (4KB) to allow negative offsets (musl uses GS-offset for local storage)
+    uint32_t tls_area = user_stack_base + 0x1000; 
     // musl expects the TLS block to have a pointer to itself at offset 0
     *(uint32_t *)tls_area = tls_area; // self pointer
     
