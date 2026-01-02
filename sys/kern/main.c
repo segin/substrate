@@ -104,6 +104,7 @@ void init_task(void *arg) {
 }
 
 extern void pseudo_init(void);
+extern void procfs_init(void);
 
 // Kernel Entry Point
 void kmain(unsigned long magic, unsigned long addr) {
@@ -180,9 +181,11 @@ void kmain(unsigned long magic, unsigned long addr) {
     exfat_init();
     minix_init();
     devfs_init();
+    procfs_init();
     pseudo_init();
     vfs_init_mock_root(); // Hack for init finding
     vfs_mount(NULL, "/dev", "devfs", 0, NULL);
+    vfs_mount(NULL, "/proc", "procfs", 0, NULL);
     
     // Initialize Scheduler
     sched_init();

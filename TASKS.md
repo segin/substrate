@@ -146,14 +146,14 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                             - [x] Support `full`.
                                     - [x] Support `random`.
                                     - [x] Support `tty`.
-                                - [ ] **ProcFS (`/proc`):**
-                            
-        - [ ] **Process Info:**
-            - [ ] Expose `cmdline`.
-            - [ ] Expose `maps`.
-            - [ ] Expose `status`.
-            - [ ] Expose `fd` per PID.
-        - [ ] **System Info:**
+                                    - [ ] **ProcFS (`/proc`):**
+                                        - [ ] **Process Info:**
+                                            - [x] Expose `cmdline`.
+                                            - [x] Expose `maps`.
+                                            - [x] Expose `status`.
+                                            - [x] Expose `fd` per PID.
+                                        - [ ] **System Info:**
+                                
             - [ ] Expose `cpuinfo`.
             - [ ] Expose `meminfo`.
             - [ ] Expose `uptime`.
