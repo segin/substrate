@@ -12,6 +12,8 @@
 // Process Structure
 typedef struct process {
     int pid;
+    int ppid; // Parent PID
+    int exit_code;
     struct personality *pers;
     file_t *fds[MAX_FD]; // File Descriptor Table
     fs_node_t *root_node; // Per-process root (for chroot)

@@ -1,7 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-int sys_waitpid(int pid, int *status, int options) { (void)pid; (void)status; (void)options; return -1; }
 int sys_link(const char *old, const char *new) { (void)old; (void)new; return -1; }
 int sys_unlink(const char *path) { (void)path; return -1; }
 int sys_chdir(const char *path) { (void)path; return -1; }

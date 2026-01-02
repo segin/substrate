@@ -43,6 +43,7 @@ void sched_init(void) {
 
     // Create Initial Kernel Process
     processes[0].pid = next_pid++;
+    processes[0].ppid = 0; // Kernel has no parent
     processes[0].pers = &personality_native;
     processes[0].root_node = fs_root;
     for(int j=0; j<MAX_FD; j++) processes[0].fds[j] = 0;
@@ -73,6 +74,7 @@ process_t *sched_create_process(struct personality *pers) {
     if (i == MAX_PROCS) return NULL;
     
     processes[i].pid = next_pid++;
+    processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].pers = pers;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;

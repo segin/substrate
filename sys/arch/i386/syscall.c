@@ -3,6 +3,7 @@
 #include "vga.h"
 #include "../../kern/sched.h"
 #include "../../kern/version.h"
+#include "../../kern/panic.h"
 #include "../../exec/perso/personality.h"
 #include "../../sys/thr.h"
 #include "../../sys/acct.h"
@@ -14,6 +15,7 @@
 
 extern thread_t *current_thread; 
 extern process_t *current_process;
+extern thread_t threads[];
 
 extern int sys_acct(const char *path);
 extern int sys_time(uint32_t *tloc);
@@ -208,10 +210,26 @@ int sys_uname(struct utsname *buf) {
 }
 
 int sys_exit(int code) {
-    vga_write("Process exited.\n", 16);
-    uart_write("Process exited.\n", 16);
+    if (current_process->pid == 1) {
+        panic("Attempted to exit init process!");
+    }
+    
+    current_process->exit_code = code;
     acct_process(code);
-    while(1);
+    
+    // Mark all threads of this process as zombie (simplified)
+    for (int i = 0; i < 64; i++) {
+        if (threads[i].proc == current_process && threads[i].tid != -1) {
+            threads[i].state = THREAD_ZOMBIE;
+        }
+    }
+    
+    // Wake up parent
+    sched_wakeup(&current_process->ppid);
+    
+    while(1) {
+        sched_yield();
+    }
     return 0;
 }
 
@@ -322,8 +340,46 @@ int sys_access(const char *path, int mode) {
     return vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
 }
 
-int sys_sync(void) { return 0; }
-int sys_pipe(int *p) { if(p) { p[0]=3; p[1]=4; } return 0; }
+int sys_sync(void) {
+    // In a real system, we'd iterate over all mounted filesystems
+    // and call their sync methods.
+    return 0;
+}
+
+extern int sys_stat(const char *p, struct stat *buf);
+extern void pipe_create(fs_node_t **read_node, fs_node_t **write_node);
+
+int sys_pipe(int *fds) {
+    if (!fds) return -1;
+
+    fs_node_t *read_node, *write_node;
+    pipe_create(&read_node, &write_node);
+
+    int f1 = -1, f2 = -1;
+    for (int i = 0; i < MAX_FD; i++) {
+        if (!current_process->fds[i]) {
+            if (f1 == -1) f1 = i;
+            else if (f2 == -1) { f2 = i; break; }
+        }
+    }
+
+    if (f1 == -1 || f2 == -1) return -1;
+
+    file_t *rf = file_alloc();
+    rf->node = read_node;
+    rf->flags = 0; // O_RDONLY
+    current_process->fds[f1] = rf;
+
+    file_t *wf = file_alloc();
+    wf->node = write_node;
+    wf->flags = 0; // O_WRONLY
+    current_process->fds[f2] = wf;
+
+    fds[0] = f1;
+    fds[1] = f2;
+    return 0;
+}
+
 int sys_dup(int oldfd) {
     if (oldfd < 0 || oldfd >= MAX_FD) return -1;
     file_t *f = current_process->fds[oldfd];
@@ -375,8 +431,15 @@ int sys_ioctl(int fd, int request, void *arg) {
 
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
 int sys_execve(const char *f, char *const a[], char *const e[]) { (void)f; (void)a; (void)e; return -1; }
-int sys_fork(void) { return -1; }
+
+int sys_fork(void) {
+    // In a real OS, fork() returns 0 in the child and the child's PID in the parent.
+    // Our simplified scheduler handles process creation.
+    return sched_fork_process(current_process, NULL); // NULL stack means duplicate? 
+}
+
 int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0; }
+
 int sys_mount(const char *s, const char *t, const char *fs, unsigned long f, void *d) { (void)s; (void)t; (void)fs; (void)f; (void)d; return 0; }
 int sys_umount(const char *t) { (void)t; return 0; }
 int sys_nanosleep(void *req, void *rem) { (void)req; (void)rem; return 0; }

@@ -24,7 +24,8 @@ static uint32_t zero_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8
 // /dev/full
 static uint32_t full_write(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
-    return 0; // Simulate ENOSPC (no bytes written)
+    // Always return error (ENOSPC is usually 28)
+    return -28; 
 }
 
 // /dev/random (very simple PRNG)

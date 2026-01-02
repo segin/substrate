@@ -46,6 +46,11 @@ int sys_sigsuspend(const uint32_t *mask) {
 
 int sys_kill(int pid, int sig) {
     if (sig < 0 || sig > NSIG) return -1;
+    
+    if (pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
+        return -1; // Operation not permitted on init
+    }
+
     process_t *target = NULL;
     if (current_process && pid == current_process->pid) target = current_process;
     else {
