@@ -14,6 +14,7 @@ typedef struct process {
     int pid;
     struct personality *pers;
     file_t *fds[MAX_FD]; // File Descriptor Table
+    fs_node_t *root_node; // Per-process root (for chroot)
     
     // Signals
     struct sigaction sig_actions[NSIG];

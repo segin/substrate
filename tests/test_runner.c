@@ -59,6 +59,8 @@ extern bool test_fd_dup2(void);
 extern bool test_vfs_permissions_root(void);
 extern bool test_vfs_permissions_user(void);
 extern bool test_vfs_permissions_group(void);
+extern bool test_vfs_chroot_basic(void);
+extern bool test_vfs_chroot_effect(void);
 
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
@@ -133,6 +135,8 @@ test_case_t tests[] = {
     {"vfs_perm_root", test_vfs_permissions_root},
     {"vfs_perm_user", test_vfs_permissions_user},
     {"vfs_perm_group", test_vfs_permissions_group},
+    {"vfs_chroot_basic", test_vfs_chroot_basic},
+    {"vfs_chroot_effect", test_vfs_chroot_effect},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},

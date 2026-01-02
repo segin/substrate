@@ -82,13 +82,14 @@ int sys_open(const char *path, int flags, int mode) {
     // Lookup file
     // Handle absolute/relative. For now assume root relative if starts with /
     fs_node_t *node = 0;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+
     if (path[0] == '/') {
         // Skip leading / for finddir which usually expects name in dir
-        // Mock root handling:
-        if (path[1] == 0) node = fs_root;
-        else node = finddir_fs(fs_root, (char*)path + 1);
+        if (path[1] == 0) node = root;
+        else node = finddir_fs(root, (char*)path + 1);
     } else {
-        node = finddir_fs(fs_root, (char*)path);
+        node = finddir_fs(root, (char*)path);
     }
 
     if (!node) return -1;
@@ -259,6 +260,26 @@ struct stat {
     unsigned long  st_ctime_nsec;
 };
 
+int sys_chroot(const char *path) {
+    if (!path) return -1;
+
+    fs_node_t *node = 0;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+
+    if (path[0] == '/') {
+        if (path[1] == 0) node = root;
+        else node = finddir_fs(root, (char*)path + 1);
+    } else {
+        node = finddir_fs(root, (char*)path);
+    }
+
+    if (!node) return -1;
+    if ((node->flags & 0x07) != FS_DIRECTORY) return -1;
+
+    current_process->root_node = node;
+    return 0;
+}
+
 int sys_mkdir(const char *p, int m) { (void)p; (void)m; return 0; }
 int sys_rmdir(const char *p) { (void)p; return 0; }
 int sys_getuid(void) { return 0; }
@@ -271,6 +292,9 @@ int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; 
 int sys_stat(const char *p, struct stat *buf) { 
     // Need proper VFS stat. Stub for now to allow `test` to work partially?
     (void)p; 
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    (void)root;
+
     if(buf) {
         buf->st_mtime = 1000;
         buf->st_mode = 0040777; // Directory
@@ -281,11 +305,13 @@ int sys_access(const char *path, int mode) {
     if (!path) return -1;
 
     fs_node_t *node = 0;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+
     if (path[0] == '/') {
-        if (path[1] == 0) node = fs_root;
-        else node = finddir_fs(fs_root, (char*)path + 1);
+        if (path[1] == 0) node = root;
+        else node = finddir_fs(root, (char*)path + 1);
     } else {
-        node = finddir_fs(fs_root, (char*)path);
+        node = finddir_fs(root, (char*)path);
     }
 
     if (!node) return -1;

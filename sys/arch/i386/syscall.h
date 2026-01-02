@@ -21,6 +21,7 @@
 #define SYS_EXECVE  11
 #define SYS_CHDIR   12
 #define SYS_TIME    13
+#define SYS_CHROOT  61
 #define SYS_MKNOD   14
 #define SYS_CHMOD   15
 #define SYS_LCHOWN  16

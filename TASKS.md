@@ -127,7 +127,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [x] Implement Mount points and filesystem registration.
     - [x] Implement File Descriptor reference counting and management.
     - [x] Implement Permissions checking (`access`).
-    - [ ] Implement `chroot()`: Support per-process root directory.
+    - [x] Implement `chroot()`: Support per-process root directory.
     - [ ] **Auto-detection:** Implement filesystem probing/recognition during mount.
     - [ ] **Unified Interface:** Ensure Sockets, Pipes, and Devices operate through VFS vnodes.
 - [ ] **EXT2 (Native Filesystem):**
