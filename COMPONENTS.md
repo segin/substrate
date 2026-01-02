@@ -13,3 +13,4 @@ This database tracks the engineering artifacts and verification status for every
 | **Zone Allocator** | Stable | [Doc](docs/specs/vm_zone.md) | [tests/unit/vm/test_zone.c](tests/unit/vm/test_zone.c) | No | No |
 | **Fault Handler** | Stable | [Doc](docs/specs/vm_fault.md) | [tests/unit/vm/test_fault.c](tests/unit/vm/test_fault.c) | No | No |
 | **Kmem** | Stable | [Doc](docs/specs/vm_kmem.md) | [tests/unit/vm/test_kmem.c](tests/unit/vm/test_kmem.c) | **Pending** | **Pending** |
+| **User Memory** | Beta | [Doc](docs/specs/user_memory.md) | [tests/unit/vm/test_user_memory.c](tests/unit/vm/test_user_memory.c) | **Pending** | **Pending** |
