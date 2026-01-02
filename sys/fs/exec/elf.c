@@ -237,8 +237,15 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     }
     
     // Build argc/argv/envp on user stack
-    // Start at top of stack and work down
-    uint32_t sp = 0xC0000000; // Top of user space
+    // User stack is mapped from user_stack_base to user_stack_base + (user_stack_size * 0x1000)
+    // That's 0xBFFF0000 to 0xC0000000 (64KB, 16 pages)
+    // Valid addresses: 0xBFFF0000 to 0xBFFFFFFF (last byte before 0xC0000000)
+    // Start sp at top of valid range and work down
+    uint32_t sp = user_stack_base + (user_stack_size * 0x1000); // 0xC0000000
+    // This is one byte PAST the last valid address, so back up
+    // We'll immediately subtract when we place the first string, so this is OK
+    // But to be safe, let's start 16 bytes below to ensure 16-byte alignment  
+    sp = (sp - 16) & ~15; // Start 16 bytes below boundary, 16-byte aligned
     
     // 1. Copy argv strings to stack (at the top)
     int argc = 0;
