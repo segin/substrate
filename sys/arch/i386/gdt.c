@@ -1,9 +1,6 @@
-#include "gdt.h"
-
-extern void gdt_flush(uint32_t);
 extern void tss_flush();
 
-gdt_entry_t gdt_entries[6];
+gdt_entry_t gdt_entries[6] __attribute__((aligned(16)));
 gdt_ptr_t   gdt_ptr;
 tss_entry_t tss_entry;
 
@@ -45,8 +42,8 @@ void gdt_init() {
     gdt_set_gate(0, 0, 0, 0, 0);                // Null segment
     gdt_set_gate(1, 0, 0xFFFFFFFF, 0x9A, 0xCF); // Code segment (0x08)
     gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF); // Data segment (0x10)
-    gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFA, 0xCF); // User mode code segment (0x18 | 3 = 0x1B)  
-    gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xCF); // User mode data segment (0x20 | 3 = 0x23)
+    gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFB, 0xCF); // User mode code segment (0x18 | 3 = 0x1B)  
+    gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF3, 0xCF); // User mode data segment (0x20 | 3 = 0x23)
     write_tss(5, 0x10, 0x0);
 
     gdt_flush((uint32_t)&gdt_ptr);
