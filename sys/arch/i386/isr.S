@@ -198,6 +198,9 @@ jump_to_userspace:
     # Ring 3 can still use them for reading
     # The IRET will change CPL to 3, CS to 0x1B, SS to 0x23
     
+    # DEBUG: Trigger breakpoint before iret
+    # int $3
+    
     # Jump to user mode
     iret
 # fork_child_return - called when child process is scheduled
