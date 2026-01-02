@@ -18,7 +18,13 @@ Allocates a free block and returns its index.
 ### `uint32_t ext2_alloc_inode(void)`
 Allocates a free inode and returns its index.
 
+### `int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode)`
+Adds a directory entry to the specified directory.
+
+### `int ext2_remove_entry(fs_node_t *dir, const char *name)`
+Removes an entry from the directory.
+
 ## Constraints
-- Allocation logic is currently stubbed.
-- Support for multiple block groups is planned.
-- No journaling support (EXT3).
+- Directory entry logic is currently stubbed.
+- Support for linked-list directory structure.
+- No support for directory indexing (HTree).

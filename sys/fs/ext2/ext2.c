@@ -30,5 +30,22 @@ void ext2_free_inode(uint32_t inode) {
     (void)inode;
 }
 
+int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) {
+    // 1. Read directory data blocks.
+    // 2. Find empty space or end of block.
+    // 3. Create ext2_dirent_t structure.
+    // 4. Update parent directory inode (size).
+    (void)dir; (void)name; (void)inode;
+    return 0; // Stub
+}
+
+int ext2_remove_entry(fs_node_t *dir, const char *name) {
+    // 1. Read directory data blocks.
+    // 2. Search for entry by name.
+    // 3. Update rec_len of previous entry to skip removed one.
+    (void)dir; (void)name;
+    return 0; // Stub
+}
+
 // TODO: Implement read, write, open, close, readdir, finddir for EXT2
 

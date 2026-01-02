@@ -43,10 +43,20 @@ typedef struct {
     uint32_t bg_reserved[3];
 } ext2_group_desc_t;
 
+typedef struct {
+    uint32_t inode;
+    uint16_t rec_len;
+    uint8_t  name_len;
+    uint8_t  file_type;
+    char     name[];
+} ext2_dirent_t;
+
 void ext2_init(void);
 uint32_t ext2_alloc_block(void);
 void ext2_free_block(uint32_t block);
 uint32_t ext2_alloc_inode(void);
 void ext2_free_inode(uint32_t inode);
+int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode);
+int ext2_remove_entry(fs_node_t *dir, const char *name);
 
 #endif

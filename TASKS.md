@@ -132,7 +132,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Unified Interface:** Ensure Sockets, Pipes, and Devices operate through VFS vnodes.
 - [ ] **EXT2 (Native Filesystem):**
     - [x] Implement Inode and Block allocation/freeing.
-    - [ ] Implement Directory entry creation/deletion.
+    - [x] Implement Directory entry creation/deletion.
 - [ ] **FAT16/32:**
     - [ ] Implement File Allocation Table parsing and chain following.
     - [ ] Implement Long File Name (LFN) support.
