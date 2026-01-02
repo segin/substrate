@@ -75,6 +75,31 @@ static void itoa(char *buf, int val) {
     buf[i] = '\0';
 }
 
+// Hex conversion helper
+static void utoa_hex(char *buf, unsigned int val, int uppercase, int width) {
+    char tmp[16];
+    const char *digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+    int i = 0;
+    
+    if (val == 0) {
+        tmp[i++] = '0';
+    } else {
+        while (val > 0) {
+            tmp[i++] = digits[val & 0xF];
+            val >>= 4;
+        }
+    }
+    
+    // Pad with zeros
+    while (i < width) tmp[i++] = '0';
+    
+    // Reverse into buf
+    for (int j = 0; j < i; j++) {
+        buf[j] = tmp[i - j - 1];
+    }
+    buf[i] = '\0';
+}
+
 int sprintf(char *str, const char *format, ...) {
     char *s = str;
     const char *f = format;
@@ -82,16 +107,73 @@ int sprintf(char *str, const char *format, ...) {
     __builtin_va_start(ap, format);
 
     while (*f) {
-        if (*f == '%' && *(f+1) == 'd') {
-            int val = __builtin_va_arg(ap, int);
-            itoa(s, val);
-            s += strlen(s);
-            f += 2;
-        } else if (*f == '%' && *(f+1) == 's') {
-            const char *val = __builtin_va_arg(ap, const char *);
-            strcpy(s, val);
-            s += strlen(s);
-            f += 2;
+        if (*f == '%') {
+            f++;
+            
+            // Parse width (e.g., %08X)
+            int width = 0;
+            int pad_zero = 0;
+            if (*f == '0') { pad_zero = 1; f++; }
+            while (*f >= '0' && *f <= '9') {
+                width = width * 10 + (*f - '0');
+                f++;
+            }
+            (void)pad_zero; // Used implicitly in width
+            
+            switch (*f) {
+                case 'd':
+                case 'i': {
+                    int val = __builtin_va_arg(ap, int);
+                    itoa(s, val);
+                    s += strlen(s);
+                    break;
+                }
+                case 'u': {
+                    unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    itoa(s, val); // Simple - treats as signed
+                    s += strlen(s);
+                    break;
+                }
+                case 'x': {
+                    unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    utoa_hex(s, val, 0, width);
+                    s += strlen(s);
+                    break;
+                }
+                case 'X': {
+                    unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    utoa_hex(s, val, 1, width);
+                    s += strlen(s);
+                    break;
+                }
+                case 'p': {
+                    unsigned int val = (unsigned int)(uintptr_t)__builtin_va_arg(ap, void*);
+                    *s++ = '0'; *s++ = 'x';
+                    utoa_hex(s, val, 0, 8);
+                    s += strlen(s);
+                    break;
+                }
+                case 's': {
+                    const char *val = __builtin_va_arg(ap, const char *);
+                    if (!val) val = "(null)";
+                    strcpy(s, val);
+                    s += strlen(s);
+                    break;
+                }
+                case 'c': {
+                    char c = (char)__builtin_va_arg(ap, int);
+                    *s++ = c;
+                    break;
+                }
+                case '%':
+                    *s++ = '%';
+                    break;
+                default:
+                    *s++ = '%';
+                    *s++ = *f;
+                    break;
+            }
+            f++;
         } else {
             *s++ = *f++;
         }
