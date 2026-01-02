@@ -17,7 +17,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] **Page Queues:** Active/Inactive/Free lists for page replacement logic.
         - [ ] **PMAP Layer (Machine Dependent - i386):**
             - [x] `pmap_init`: Bootstrap hardware paging structures.
-            - [ ] `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
+            - [x] `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
             - [ ] `pmap_activate`: Context switch hook (CR3 loading).
             - [ ] **Recursive Paging:** Efficient Page Table mapping.
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**

@@ -89,19 +89,86 @@ void pmap_activate(pmap_t pmap) {
     __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pdir_phys));
 }
 
+// Recursive Paging Helpers
+#define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
+#define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
+#define PTE_ADDR(pte)   ((phys_addr)(pte) & ~0xFFF)
+
+// Access to PD and PTs via recursive mapping
+// PD is at 0xFFFFF000
+#define V_PD  ((uint32_t *)0xFFFFF000)
+// PTs are at 0xFFC00000. PT[i] is at 0xFFC00000 + i*4096
+#define V_PT(i) ((uint32_t *)(0xFFC00000 + ((i) << 12)))
+
 int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
-    (void)pmap; (void)va; (void)pa; (void)prot; (void)flags;
-    // Walk PD, allocate PT if needed, set PTE
+    (void)prot; (void)flags; // Simplified for now
+    
+    // We only support the kernel pmap (current CR3) for now 
+    // because accessing other address spaces requires temporarily recursive-mapping them 
+    // or switching CR3.
+    if (pmap != pmap_kernel()) {
+        // TODO: Handle foreign pmap modification
+        return -1;
+    }
+
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+
+    // 1. Check if PT exists
+    if (!(V_PD[pdi] & PTE_P)) {
+        // Allocate new PT
+        void *pt_phys = pmm_alloc_block();
+        if (!pt_phys) return -1; // OOM
+
+        // Map it into PD
+        // Kernel space (Global)? User space?
+        // For now, simple R/W/P/User
+        V_PD[pdi] = (uint32_t)pt_phys | PTE_P | PTE_W | PTE_U;
+        
+        // We must invalidate the TLB for the new PT window before accessing it
+        pmap_invalidate_page((uint32_t)V_PT(pdi));
+
+        // Clear the new PT (it's mapped at V_PT(pdi))
+        uint32_t *pt = V_PT(pdi);
+        for (int i = 0; i < 1024; i++) pt[i] = 0;
+    }
+
+    // 2. Set PTE
+    uint32_t *pt = V_PT(pdi);
+    pt[pti] = (pa & 0xFFFFF000) | PTE_P | PTE_W | PTE_U; // Default to permissive for bootstrap
+
+    // 3. Flush TLB
+    pmap_invalidate_page(va);
+
     return 0;
 }
 
 void pmap_remove(pmap_t pmap, uint32_t va) {
-    (void)pmap; (void)va;
+    if (pmap != pmap_kernel()) return;
+
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+
+    if (!(V_PD[pdi] & PTE_P)) return;
+
+    uint32_t *pt = V_PT(pdi);
+    pt[pti] = 0;
+    
+    pmap_invalidate_page(va);
 }
 
 uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
-    (void)pmap; (void)va;
-    return 0;
+    if (pmap != pmap_kernel()) return 0;
+
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+
+    if (!(V_PD[pdi] & PTE_P)) return 0;
+
+    uint32_t *pt = V_PT(pdi);
+    if (!(pt[pti] & PTE_P)) return 0;
+
+    return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);
 }
 
 void pmap_invalidate_page(uint32_t va) {
