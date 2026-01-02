@@ -45,6 +45,8 @@ extern bool test_mutex_basic(void);
 extern bool test_mutex_contention(void);
 extern bool test_sema_basic(void);
 extern bool test_sema_blocking(void);
+extern bool test_futex_basic(void);
+extern bool test_futex_blocking(void);
 
 // Signal Tests
 extern bool test_signal_action(void);
@@ -114,6 +116,8 @@ test_case_t tests[] = {
     {"mutex_contend", test_mutex_contention},
     {"sema_basic", test_sema_basic},
     {"sema_block", test_sema_blocking},
+    {"futex_basic", test_futex_basic},
+    {"futex_block", test_futex_blocking},
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},

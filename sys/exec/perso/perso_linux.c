@@ -34,6 +34,7 @@ extern int sys_time(uint32_t*);
 extern int sys_getpid(void);
 extern int sys_getcwd(char*, size_t);
 extern int sys_clone(uint32_t, void*, int*, void*, int*);
+extern int sys_futex(int*, int, int, void*, int*, int);
 
 static void *linux_syscalls[MAX_SYSCALLS] = {
     [1] = &sys_exit,
@@ -68,6 +69,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [141] = &sys_getdents,
     [162] = &sys_nanosleep,
     [183] = &sys_getcwd,
+    [240] = &sys_futex,
 };
 
 struct personality personality_linux = {

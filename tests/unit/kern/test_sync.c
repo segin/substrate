@@ -97,3 +97,47 @@ bool test_sema_blocking(void) {
     
     return true;
 }
+
+#include "../../../sys/sys/futex.h"
+
+extern int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3);
+
+bool test_futex_basic(void) {
+    int futex_val = 1;
+    
+    // Should not block if val doesn't match
+    if (sys_futex(&futex_val, FUTEX_WAIT, 0, NULL, NULL, 0) == 0) return false;
+    
+    // Success case (WAKE)
+    if (sys_futex(&futex_val, FUTEX_WAKE, 1, NULL, NULL, 0) != 0) return false;
+    
+    return true;
+}
+
+bool test_futex_blocking(void) {
+    sched_init();
+    int futex_val = 10;
+    
+    char stack[4096];
+    int tid = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL);
+    thread_t *t = sched_get_thread(tid);
+    
+    // Simulate t calling FUTEX_WAIT
+    current_thread = t;
+    current_thread->state = THREAD_RUNNING;
+    
+    // Manual simulation of sys_futex call that blocks
+    sys_futex(&futex_val, FUTEX_WAIT, 10, NULL, NULL, 0);
+    
+    if (t->state != THREAD_BLOCKED) return false;
+    if (t->wait_chan != &futex_val) return false;
+    
+    // Now wake up from kernel thread
+    current_thread = sched_get_thread(1);
+    current_thread->state = THREAD_RUNNING;
+    sys_futex(&futex_val, FUTEX_WAKE, 1, NULL, NULL, 0);
+    
+    if (t->state != THREAD_READY) return false;
+    
+    return true;
+}

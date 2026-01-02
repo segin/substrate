@@ -55,7 +55,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [x] Implement Kernel Mutexes and Spinlocks.
 - [ ] **Synchronization:**
     - [x] Implement Spinlocks, Mutexes, and Semaphores.
-    - [ ] Implement Futex support for user-space synchronization (Linux personality).
+    - [x] Implement Futex support for user-space synchronization (Linux personality).
 - [ ] **Signals:**
     - [x] Implement Signal delivery mechanism (trampoline, context saving).
     - [x] Implement `kill`, `sigaction`, `sigprocmask`.

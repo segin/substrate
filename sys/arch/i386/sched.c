@@ -281,16 +281,62 @@ void sched_sleep(void *chan) {
 
 void sched_wakeup(void *chan) {
 
+
+
+    sched_wakeup_n(chan, -1); // -1 means wake all
+
+
+
+}
+
+
+
+
+
+
+
+void sched_wakeup_n(void *chan, int n) {
+
+
+
+    int woken = 0;
+
+
+
     for (int i = 0; i < MAX_THREADS; i++) {
+
+
 
         if (threads[i].tid != -1 && threads[i].state == THREAD_BLOCKED && threads[i].wait_chan == chan) {
 
+
+
             threads[i].state = THREAD_READY;
+
+
 
             threads[i].wait_chan = NULL;
 
+
+
+            woken++;
+
+
+
+            if (n > 0 && woken >= n) break;
+
+
+
         }
+
+
 
     }
 
+
+
 }
+
+
+
+

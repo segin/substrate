@@ -20,6 +20,7 @@ int sched_get_current_tid(void);
 void sched_set_priority(int tid, sched_class_t cls, int prio);
 void sched_sleep(void *chan);
 void sched_wakeup(void *chan);
+void sched_wakeup_n(void *chan, int n);
 process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
 

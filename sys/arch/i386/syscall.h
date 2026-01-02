@@ -25,6 +25,7 @@
 #define SYS_CHMOD   15
 #define SYS_LCHOWN  16
 #define SYS_CLONE   120
+#define SYS_FUTEX   240
 // ... add more as needed
 
 void syscall_init(void);
