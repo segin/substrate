@@ -96,6 +96,13 @@ void keyboard_handler(registers_t *regs) {
     if (scancode & 0x80) {
         // Released
     } else {
+        // Ctrl+F9 - Dump process table
+        if (kbd_ctrl && scancode == 0x43) { // F9 = 0x43
+            extern void debug_dump_processes(void);
+            debug_dump_processes();
+            goto out;
+        }
+        
         // Pressed
         if (scancode < 128) {
             char c = kbd_shift ? kbd_us_shifted[scancode] : kbd_us[scancode];
