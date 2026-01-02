@@ -30,7 +30,29 @@ extern bool test_vm_fault_cow_trigger(void);
 extern bool test_trampoline_preparation(void);
 
 typedef struct {
-...
+    const char *name;
+    bool (*func)(void);
+} test_case_t;
+
+test_case_t tests[] = {
+    {"kmem_basic", test_kmem_basic_alloc},
+    {"kmem_multi", test_kmem_multiple_alloc},
+    {"kmem_large", test_kmem_too_large},
+    {"zone_basic", test_zone_create_and_alloc},
+    {"zone_exhaust", test_zone_exhaustion},
+    {"map_init", test_vm_map_init},
+    {"map_insert", test_vm_map_insert_and_find},
+    {"map_remove", test_vm_map_remove},
+    {"object_life", test_vm_object_lifecycle},
+    {"object_page", test_vm_object_page_mgmt},
+    {"page_queues", test_vm_page_queue_ops},
+    {"page_flags", test_vm_page_flags},
+    {"fault_anon", test_vm_fault_anonymous},
+    {"fault_prot", test_vm_fault_protection_violation},
+    {"mmap_logic", test_mmap_logic},
+    {"munmap_logic", test_munmap_logic},
+    {"swap_life", test_swap_lifecycle},
+    {"swap_full", test_swap_full},
     {"cow_trigger", test_vm_fault_cow_trigger},
     {"smp_tramp", test_trampoline_preparation},
     {NULL, NULL}
