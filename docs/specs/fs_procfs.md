@@ -11,6 +11,9 @@ ProcFS is a virtual filesystem that provides an interface to kernel process stru
     - `/proc/<pid>/status`: Contains basic process metadata (Name, PID, UID, GID).
     - `/proc/<pid>/cmdline`: Contains the command line arguments (stubbed).
     - `/proc/<pid>/maps`: Contains the virtual memory layout (stubbed).
+    - `/proc/cpuinfo`: CPU identification and capabilities.
+    - `/proc/meminfo`: Global memory usage statistics.
+    - `/proc/uptime`: System uptime in seconds.
 
 ## VFS Integration
 - Registered as a virtual filesystem in the VFS registry.

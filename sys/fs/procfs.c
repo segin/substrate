@@ -31,6 +31,44 @@ static uint32_t proc_status_read(fs_node_t *node, uint32_t offset, uint32_t size
     return size;
 }
 
+// Node for /proc/cpuinfo
+static uint32_t proc_cpuinfo_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    char buf[256];
+    sprintf(buf, "Processor:\t0\nVendor:\t\tGenericx86\nModel Name:\tTestUnix Virtual CPU\n");
+    uint32_t len = strlen(buf);
+    if (offset >= len) return 0;
+    if (offset + size > len) size = len - offset;
+    memcpy(buffer, buf + offset, size);
+    return size;
+}
+
+// Node for /proc/meminfo
+static uint32_t proc_meminfo_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    // Mock values
+    char buf[256];
+    sprintf(buf, "MemTotal:\t65536 kB\nMemFree:\t32768 kB\n");
+    uint32_t len = strlen(buf);
+    if (offset >= len) return 0;
+    if (offset + size > len) size = len - offset;
+    memcpy(buffer, buf + offset, size);
+    return size;
+}
+
+// Node for /proc/uptime
+extern uint32_t get_time(void);
+static uint32_t proc_uptime_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    char buf[64];
+    sprintf(buf, "%d.00\n", get_time());
+    uint32_t len = strlen(buf);
+    if (offset >= len) return 0;
+    if (offset + size > len) size = len - offset;
+    memcpy(buffer, buf + offset, size);
+    return size;
+}
+
 // Node for /proc/<pid>/
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint32_t index) {
     if (index == 0) { strcpy(proc_dirent.name, "."); return &proc_dirent; }
@@ -58,8 +96,11 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index) {
     (void)node;
     if (index == 0) { strcpy(proc_dirent.name, "."); return &proc_dirent; }
     if (index == 1) { strcpy(proc_dirent.name, ".."); return &proc_dirent; }
+    if (index == 2) { strcpy(proc_dirent.name, "cpuinfo"); return &proc_dirent; }
+    if (index == 3) { strcpy(proc_dirent.name, "meminfo"); return &proc_dirent; }
+    if (index == 4) { strcpy(proc_dirent.name, "uptime"); return &proc_dirent; }
 
-    int count = 2;
+    int count = 5;
     for (int i = 0; i < 16; i++) {
         if (processes[i].pid != -1) {
             if (count == (int)index) {
@@ -74,6 +115,32 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index) {
 
 static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
     (void)node;
+
+    if (strcmp(name, "cpuinfo") == 0) {
+        static fs_node_t cpu_node;
+        memset(&cpu_node, 0, sizeof(fs_node_t));
+        strcpy(cpu_node.name, "cpuinfo");
+        cpu_node.flags = FS_FILE;
+        cpu_node.read = &proc_cpuinfo_read;
+        return &cpu_node;
+    }
+    if (strcmp(name, "meminfo") == 0) {
+        static fs_node_t mem_node;
+        memset(&mem_node, 0, sizeof(fs_node_t));
+        strcpy(mem_node.name, "meminfo");
+        mem_node.flags = FS_FILE;
+        mem_node.read = &proc_meminfo_read;
+        return &mem_node;
+    }
+    if (strcmp(name, "uptime") == 0) {
+        static fs_node_t up_node;
+        memset(&up_node, 0, sizeof(fs_node_t));
+        strcpy(up_node.name, "uptime");
+        up_node.flags = FS_FILE;
+        up_node.read = &proc_uptime_read;
+        return &up_node;
+    }
+
     int pid = 0;
     char *p = name;
     while (*p >= '0' && *p <= '9') {
