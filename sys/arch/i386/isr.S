@@ -176,9 +176,12 @@ isr_exit:
 # User data selector: 0x23 (0x20 | 3)
 .global jump_to_userspace
 jump_to_userspace:
-    # Load parameters FIRST, before doing anything that might affect the stack
+    # Load parameters FIRST
     mov 4(%esp), %ecx   # entry_point
-    mov 8(%esp), %edx   # user_stack
+    
+    # DEBUG: Hardcode the stack pointer to see if IRET works
+    # If this works, the issue is definitely parameter passing
+    mov $0xBFFFFFC0, %edx 
     
     # NOW turn off interrupts
     cli
