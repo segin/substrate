@@ -280,7 +280,43 @@ int sys_stat(const char *p, struct stat *buf) {
 int sys_access(const char *p, int m) { (void)p; (void)m; return 0; }
 int sys_sync(void) { return 0; }
 int sys_pipe(int *p) { if(p) { p[0]=3; p[1]=4; } return 0; }
-int sys_dup2(int o, int n) { (void)o; return n; }
+int sys_dup(int oldfd) {
+    if (oldfd < 0 || oldfd >= MAX_FD) return -1;
+    file_t *f = current_process->fds[oldfd];
+    if (!f) return -1;
+
+    // Find free FD
+    int newfd = -1;
+    for (int i = 0; i < MAX_FD; i++) {
+        if (!current_process->fds[i]) {
+            newfd = i;
+            break;
+        }
+    }
+    if (newfd == -1) return -1;
+
+    current_process->fds[newfd] = f;
+    f->ref_count++;
+    return newfd;
+}
+
+int sys_dup2(int oldfd, int newfd) {
+    if (oldfd < 0 || oldfd >= MAX_FD) return -1;
+    if (newfd < 0 || newfd >= MAX_FD) return -1;
+    if (oldfd == newfd) return newfd;
+
+    file_t *f = current_process->fds[oldfd];
+    if (!f) return -1;
+
+    if (current_process->fds[newfd]) {
+        sys_close(newfd);
+    }
+
+    current_process->fds[newfd] = f;
+    f->ref_count++;
+    return newfd;
+}
+
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
 int sys_execve(const char *f, char *const a[], char *const e[]) { (void)f; (void)a; (void)e; return -1; }
 int sys_fork(void) { return -1; }

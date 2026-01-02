@@ -53,6 +53,10 @@ extern bool test_signal_action(void);
 extern bool test_signal_mask(void);
 extern bool test_signal_delivery_default(void);
 
+// VFS Tests
+extern bool test_fd_ref_counting(void);
+extern bool test_fd_dup2(void);
+
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
 extern bool prop_realtime_preempts_timeshare(void);
@@ -121,6 +125,8 @@ test_case_t tests[] = {
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},
+    {"fd_refcnt", test_fd_ref_counting},
+    {"fd_dup2", test_fd_dup2},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},

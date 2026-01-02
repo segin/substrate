@@ -39,6 +39,7 @@ extern int sys_kill(int, int);
 extern int sys_fstatfs(int, void*);
 extern int sys_pgrpsys(int, int, int, int);
 extern int sys_dup(int);
+extern int sys_dup2(int, int);
 extern int sys_pipe(int*);
 extern int sys_times(void*);
 extern int sys_prof(void*, size_t, unsigned long, unsigned int);
@@ -100,6 +101,7 @@ static void *svr4_syscalls[MAX_SYSCALLS] = {
     [34] = &sys_nice,
     [36] = &sys_sync,
     [37] = &sys_kill,
+    [41] = &sys_dup,
     [42] = &sys_pipe,
     [46] = &sys_setgid,
     [47] = &sys_getgid,
@@ -108,6 +110,7 @@ static void *svr4_syscalls[MAX_SYSCALLS] = {
     [59] = &sys_execve,
     [61] = &sys_chroot,
     [62] = &sys_fcntl,
+    [63] = &sys_dup2,
     [79] = &sys_rmdir,
     [80] = &sys_mkdir,
     [81] = &sys_getdents,
