@@ -1,5 +1,22 @@
 #include "uart.h"
 #include "../../arch/i386/io.h"
+#include "../../kern/console.h"
+
+static void uart_console_write(const char *data, size_t len) {
+    uart_write(data, len);
+}
+
+static console_backend_t uart_console = {
+    .name = "uart",
+    .write = uart_console_write,
+    .putchar = uart_putc,
+    .clear = NULL,
+    .next = NULL
+};
+
+console_backend_t *uart_get_console(void) {
+    return &uart_console;
+}
 
 void uart_init(void) {
     outb(UART_COM1 + 1, 0x00);    // Disable all interrupts
@@ -9,6 +26,9 @@ void uart_init(void) {
     outb(UART_COM1 + 3, 0x03);    // 8 bits, no parity, one stop bit
     outb(UART_COM1 + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
     outb(UART_COM1 + 4, 0x0B);    // IRQs enabled, RTS/DSR set
+    
+    // Note: Registration handled by caller (main.c) or here? 
+    // Caller might want to decide if enabled.
 }
 
 int uart_received(void) {

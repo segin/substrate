@@ -54,6 +54,18 @@ typedef struct {
 #define ELFOSABI_ATT_UNIX 65 // Custom ABI ID for AT&T UNIX
 #define ELFOSABI_MODESTO 11  // Novell Modesto / SVR4
 
+#define NT_GNU_ABI_TAG 1
+#define NT_GNU_HWCAP   2
+#define NT_GNU_BUILD_ID 3
+#define NT_GNU_GOLD_VERSION 4
+#define NT_GNU_PROPERTY_TYPE_0 5
+
+typedef struct {
+    uint32_t n_namesz;
+    uint32_t n_descsz;
+    uint32_t n_type;
+} Elf32_Nhdr;
+
 int elf_check_file(Elf32_Ehdr *hdr);
 int elf_load_file(void *file, uint32_t size);
 

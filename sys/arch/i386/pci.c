@@ -39,9 +39,30 @@ void pci_check_device(uint8_t bus, uint8_t device) {
     uint32_t vendorID = pci_read(bus, device, function, 0);
     if(vendorID == 0xFFFF) return; // Device doesn't exist
 
-    // If device exists, we can print it
-    vga_write("PCI Device found.\n", 18);
-    // Real implementation would check header type and scan functions
+    uint32_t deviceID = pci_read(bus, device, function, 2);
+    uint32_t classCode = pci_read(bus, device, function, 0x0A);
+    
+    // Print device info: bus:dev.func vendor:device class
+    static char hex[] = "0123456789ABCDEF";
+    char buf[48];
+    int i = 0;
+    
+    buf[i++] = 'P'; buf[i++] = 'C'; buf[i++] = 'I'; buf[i++] = ' ';
+    buf[i++] = hex[(bus >> 4) & 0xF]; buf[i++] = hex[bus & 0xF];
+    buf[i++] = ':';
+    buf[i++] = hex[(device >> 4) & 0xF]; buf[i++] = hex[device & 0xF];
+    buf[i++] = '.'; buf[i++] = '0'; buf[i++] = ' ';
+    buf[i++] = hex[(vendorID >> 12) & 0xF]; buf[i++] = hex[(vendorID >> 8) & 0xF];
+    buf[i++] = hex[(vendorID >> 4) & 0xF]; buf[i++] = hex[vendorID & 0xF];
+    buf[i++] = ':';
+    buf[i++] = hex[(deviceID >> 12) & 0xF]; buf[i++] = hex[(deviceID >> 8) & 0xF];
+    buf[i++] = hex[(deviceID >> 4) & 0xF]; buf[i++] = hex[deviceID & 0xF];
+    buf[i++] = ' '; buf[i++] = '[';
+    buf[i++] = hex[(classCode >> 12) & 0xF]; buf[i++] = hex[(classCode >> 8) & 0xF];
+    buf[i++] = hex[(classCode >> 4) & 0xF]; buf[i++] = hex[classCode & 0xF];
+    buf[i++] = ']'; buf[i++] = '\n'; buf[i] = 0;
+    
+    vga_write(buf, i);
 }
 
 void pci_scan(void) {

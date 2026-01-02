@@ -1,9 +1,51 @@
 #include "vfs.h"
 #include <string.h>
+#include "../drivers/video/vga.h"
 
 fs_node_t *fs_root = 0; 
 
 static filesystem_t *filesystems = NULL;
+
+// External filesystem init functions
+extern void ext2_init(void);
+extern void fat_init(void);
+extern void exfat_init(void);
+extern void minix_init(void);
+extern void devfs_init(void);
+extern void procfs_init(void);
+extern void sysfs_init(void);
+extern void fuse_init(void);
+extern void fuse_fs_init(void);
+extern void p9_init(void);
+extern void pseudo_init(void);
+
+void vfs_init(void) {
+    vga_write("VFS: Initializing...\n", 21);
+    
+    // Register real filesystem drivers
+    ext2_init();
+    fat_init();
+    exfat_init();
+    minix_init();
+    
+    // Register pseudo-filesystems
+    devfs_init();
+    procfs_init();
+    sysfs_init();
+    pseudo_init();
+    
+    // Register network/special filesystems
+    fuse_init();
+    fuse_fs_init();
+    p9_init();
+    
+    // Mount pseudo-filesystems
+    vfs_mount(NULL, "/dev", "devfs", 0, NULL);
+    vfs_mount(NULL, "/proc", "procfs", 0, NULL);
+    vfs_mount(NULL, "/sys", "sysfs", 0, NULL);
+    
+    vga_write("VFS: Ready.\n", 12);
+}
 
 void vfs_register_filesystem(filesystem_t *fs) {
     fs->next = filesystems;
@@ -105,51 +147,54 @@ int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode)
     return (node->mask & mask) == mask ? 0 : -1;
 }
 
-// Temporary Mock Root for Init testing
-static struct dirent mock_dirent;
-static fs_node_t mock_root;
-static fs_node_t mock_init;
 
-struct dirent *mock_readdir(fs_node_t *node, uint32_t index) {
-    (void)node;
-    if (index == 0) {
-        // Return 'init'
-        int i=0;
-        char *n = "init";
-        while(n[i]) { mock_dirent.name[i] = n[i]; i++; }
-        mock_dirent.name[i] = 0;
-        mock_dirent.ino = 2;
-        return &mock_dirent;
+int readlink_fs(fs_node_t *node, char *buf, size_t size) {
+    if (node && node->readlink) {
+        return node->readlink(node, buf, size);
     }
-    return 0;
+    return -1;
 }
 
-fs_node_t *mock_finddir(fs_node_t *node, char *name) {
-    (void)node;
-    // Check if name is "init" or "sbin/init" logic (vfs handles / splitting usually, but here we get one component)
-    // Actually finddir_fs in basic VFS usually gets one component.
-    // But our try_init passes "sbin/init".
-    // Our finddir_fs logic in syscall/main is: `path + 1`.
-    // If path is "/sbin/init", it asks for "sbin/init".
-    // Standard VFS walk is component by component.
-    // For this hack, we check full match.
+int symlink_fs(fs_node_t *parent, const char *target, const char *name) {
+    if (parent && parent->symlink) {
+        return parent->symlink(parent, target, name);
+    }
+    return -1;
+}
+
+fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
+    if (!root) return NULL;
     
-    // Simple check
+    // Copy path to modify it
+    char path_buf[128];
+    // strncpy(path_buf, path, 127);
     int i=0;
-    while(name[i] && name[i] != '/') i++;
+    while(path[i] && i<127) { path_buf[i] = path[i]; i++; }
+    path_buf[i] = 0;
     
-    // If user asked for "sbin/init", we cheat and say yes.
-    // In reality, we should mount a ramdisk or something.
+    fs_node_t *current = root;
+    char *p = path_buf;
     
-    return &mock_init;
+    // Skip leading slash
+    if (*p == '/') p++;
+    
+    while (*p) {
+        char *slash = strchr(p, '/');
+        if (slash) *slash = 0; // Terminate current segment
+        
+        fs_node_t *next = finddir_fs(current, p);
+        if (!next) return NULL;
+        
+        current = next;
+        
+        if (slash) {
+            p = slash + 1;
+            while (*p == '/') p++; // Skip multiple slashes
+        } else {
+            break;
+        }
+    }
+    
+    return current;
 }
 
-void vfs_init_mock_root(void) {
-    mock_root.flags = FS_DIRECTORY;
-    mock_root.readdir = mock_readdir;
-    mock_root.finddir = mock_finddir;
-    
-    mock_init.flags = FS_FILE;
-    
-    fs_root = &mock_root;
-}

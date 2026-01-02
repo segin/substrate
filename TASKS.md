@@ -4,575 +4,103 @@
 
 This document tracks the progress and remaining tasks for the TestUnix operating system.
 
-### 1. Kernel Core (`sys/core`, `sys/kern`)
+### 1. Kernel Core (`sys/kern`)
+- [ ] **Console Subsystem:**
+    - [ ] **Abstraction:** Implement `console_write`, `console_read` and backend registration.
+    - [ ] **VGA Backend:** Adapt `vga.c` to console interface.
+    - [ ] **Serial Backend:** Adapt `uart.c` to console interface.
+    - [ ] **Framebuffer Backend:** For high-res graphics modes.
 - [ ] **Memory Management:**
-    - [ ] **Physical Memory Manager (PMM):**
-        - [x] Basic Bitmap Allocator (`pmm.c`).
-        - [x] Parse Multiboot Memory Map (mmap) to support non-contiguous RAM.
-        - [x] Parse e820 Memory Map (legacy BIOS).
-        - [x] Implement `pmm_alloc_contiguous` for specific DMA drivers.
-    - [ ] **Memory Management (BSD/Mach Design):**
-        - [ ] **Physical Memory (Machine Independent):**
-            - [x] `vm_page_t`: Core structure tracking state of every physical page.
-            - [x] **Page Queues:** Active/Inactive/Free lists for page replacement logic.
-        - [ ] **PMAP Layer (Machine Dependent - i386):**
-            - [x] `pmap_init`: Bootstrap hardware paging structures.
-            - [x] `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
-            - [x] `pmap_activate`: Context switch hook (CR3 loading).
-            - [x] **Recursive Paging:** Efficient Page Table mapping.
-        - [ ] **PMAP Layer (Machine Dependent - x86_64):**
-            - [x] `pmap_init`: Bootstrap PML4 paging structures.
-            - [x] `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
-            - [x] `pmap_activate`: Context switch hook (CR3 loading).
-        - [ ] **VM Subsystem (Machine Independent):**
-            - [x] **VM Map:** `vm_map` structure representing an address space.
-            - [x] **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
-            - [x] **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
-            - [x] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
-            - [x] **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
-            - [x] **Swap Subsystem:**
-                - [x] **Pager:** Implement a swap pager to move pages to/from disk.
-                - [x] **Backing Store:** Support swap files or partitions.
-                - [x] **Policy:** Implement page replacement algorithm (Clock/LRU).
-            - [x] **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
-    - [ ] **Kernel Allocator (UMA/Zone):**
-        - [x] **Zone Allocator:** Fixed-size object caching (equivalent to Slab, but BSD-style).
-        - [x] **Kmem:** General purpose variable-size allocator (power-of-two free lists).
-    - [ ] **User Memory:**
-        - [x] Implement `mmap`, `munmap`, `brk` system calls.
-    - [ ] **SMP & Interrupts:**
-        - [x] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
-        - [x] **Local APIC:** Initialize LAPIC for each core (timer, spurious interrupts).
-        - [x] **IO-APIC:** Route IRQs to specific cores (replace legacy PIC).
-        - [x] **Trampoline:** 16-bit real mode startup code for Application Processors (APs).
-        - [x] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
-- [ ] **Scheduling (BSD-style):**
-    - [x] Implement `kthread` creation and management.
-    - [x] Implement Preemptive Multitasking (timer interrupt).
-    - [x] Implement Thread Priorities and Scheduling Classes (Realtime, Timeshare, Idle).
-    - [x] Implement Context Switching (save/restore registers properly).
-    - [x] Implement `sleep` / `wakeup` (BSD-style condition variables).
-    - [x] Implement Kernel Mutexes and Spinlocks.
-- [ ] **Synchronization:**
-    - [x] Implement Spinlocks, Mutexes, and Semaphores.
-    - [x] Implement Futex support for user-space synchronization (Linux personality).
-- [ ] **Signals:**
-    - [x] Implement Signal delivery mechanism (trampoline, context saving).
-    - [x] Implement `kill`, `sigaction`, `sigprocmask`.
-    - [x] Implement PID 1 protection and safe exit handling.
+    - [x] **Physical Memory Manager (PMM):**
+        - [x] Basic Bitmap Allocator.
+        - [x] Multiboot mmap parsing.
+        - [x] Kernel Memory Reservation (`_kernel_end`).
+    - [x] **Command Line Parsing:**
+        - [x] `cmdline_init`, `cmdline_get`, `cmdline_has`.
+        - [x] Print command line at boot.
+    - [ ] **Virtual Memory (VM):**
+        - [x] `vm_page_t`, `vm_map`, `vm_object` structures.
+        - [x] Page Fault Handler.
+        - [x] Copy-on-Write (CoW).
+        - [x] Swap Subsystem (Pager/Policy).
+        - [x] `kmalloc`/`kfree` (Slab/Zone allocator).
+- [ ] **Scheduling & Sync:**
+    - [x] Preemptive Multitasking.
+    - [x] Round-Robin Scheduler.
+    - [x] `kthread` and `process` management.
+    - [x] Mutexes, Spinlocks, Semaphores.
+    - [x] Signals logic.
+
+- [x] **Process Manager (`sys/pm`):**
+    - [x] Basic `sys/pm` structure and `pm.o`.
+    - [x] Move process creation/management out of arch-specific sched.
+    - [/] `fork`, `exec`, `exit` implementation. (`fork` implemented)
+    - [ ] Process Groups / Sessions.
+    - [x] **Generic Scheduler:** Migrate `sched.c` logic to `sys/pm/sched.c` (generic).
 
 ### 2. Architecture (`sys/arch`)
 - [ ] **i386:**
-    - [x] Complete GDT/TSS setup for user-mode switching.
-    - [x] Implement Exception Handling (Page Fault, GPF, etc.).
-    - [x] **EFI Boot Target:** Support for booting as an EFI binary.
-    - [ ] **VM86 Mode (i386 only):** Support for Virtual 8086 mode (needed for Xenix/86 and DOS).
+    - [x] GDT/IDT/TSS.
+    - [x] Interrupt/Exception handling.
+    - [x] EFI Boot Support (`kernel.efi`).
+    - [ ] VM86 Mode.
 - [ ] **x86_64:**
-    - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`).
-    - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching).
-    - [ ] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode.
-    - [ ] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR).
-    - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp).
+    - [ ] Long Mode Bootstrap.
+    - [ ] 64-bit Paging (PML4).
 
 ### 3. Drivers (`sys/drivers`)
 - [ ] **Storage:**
+    - [ ] **RAM Disk:**
+        - [ ] Multiboot Module loading (Initrd).
+        - [ ] Block Driver (`/dev/ram0`).
     - [ ] **ATA/IDE:**
-        - [x] Implement PIO Mode transfers.
-        - [x] Implement DMA transfers (Bus Mastering).
-        - [x] Implement LBA48 support.
-        - [ ] Support Primary/Secondary channels.
-        - [ ] Support Master/Slave drives.
-    - [ ] **AHCI:** Implement command list and FIS construction.
-    - [ ] **NVMe:** Implement Admin Queue and I/O Queue submission/completion.
-    - [ ] **Partitioning & DevFS:**
-        - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables.
-        - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS.
+        - [x] PIO Mode.
+        - [x] DMA Mode.
+        - [x] Drive Enumeration (4 Buses, `/dev/storage/ideX` naming).
+    - [ ] **AHCI/NVMe:** Initial stub drivers.
 - [ ] **Input:**
-    - [ ] **Keyboard (PS/2):**
-        - [ ] **Controller:**
-            - [x] Initialize PS/2 Controller (i8042).
-            - [x] Disable ports.
-            - [x] Perform self-test.
-        - [ ] **Interrupts:**
-            - [x] Handle IRQ1.
-            - [x] Read status/data ports.
-        - [ ] **Scancodes:**
-            - [x] Implement state machine for Set 1 (or 2) decoding.
-        - [ ] **Keymap:**
-            - [x] Map scancodes to ASCII/Unicode characters (US Layout).
-            - [x] Add support for shift, ctrl, alt modifiers.
-        - [ ] **Buffer:**
-            - [x] Implement a circular buffer for raw keystrokes.
-    - [ ] **Mouse (PS/2):**
-        - [ ] **Initialization:**
-            - [x] Enable auxiliary device (IRQ12).
-            - [x] Set sample rate/resolution.
-        - [ ] **Packet Parsing:**
-            - [x] Decode 3-byte (or 4-byte) movement/button packets.
-        - [ ] **Event Queue:**
-            - [x] Push mouse events (dx, dy, buttons) to a system queue.
-    - [ ] **Input Subsystem:**
-        - [x] Abstract `input_event` structure (type, code, value).
-        - [x] `/dev/input` interface for userspace access.
-- [ ] **Video:**
-    - [ ] **VESA/UEFI Framebuffer:**
-        - [x] Parse Multiboot2 Framebuffer tag or UEFI GOP.
-        - [x] Map framebuffer memory (requires VMM).
-    - [ ] **Framebuffer Console:**
-        - [x] Import a bitmap font (e.g., PSF or raw bitmap).
-        - [x] Implement `fb_putc` with blitting capability.
-        - [x] Implement scrolling (hardware panning or software copy).
-        - [x] Hook into `vga_write` or create generic `console_write`.
-        - [x] Add CGA, Hercules, and EGA framebuffer drivers.
-- [ ] **Filesystem:**
-
+    - [x] PS/2 Keyboard.
+    - [x] PS/2 Mouse.
+    - [x] Input Event Subsystem.
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS:**
-    - [x] Implement Mount points and filesystem registration.
-    - [x] Implement File Descriptor reference counting and management.
-    - [x] Implement Permissions checking (`access`).
-    - [x] Implement `chroot()`: Support per-process root directory.
-    - [ ] **Auto-detection:** Implement filesystem probing/recognition during mount.
-    - [ ] **Unified Interface:** Ensure Sockets, Pipes, and Devices operate through VFS vnodes.
-- [ ] **EXT2 (Native Filesystem):**
-    - [x] Implement Inode and Block allocation/freeing.
-    - [x] Implement Directory entry creation/deletion.
-- [ ] **FAT16/32:**
-    - [x] Implement File Allocation Table parsing and chain following.
-    - [x] Implement Long File Name (LFN) support.
-- [ ] **Pseudo-FS:**
+    - [x] Mount/Unmount logic.
+    - [x] File Descriptor management.
+    - [x] File Descriptor management.
+    - [x] `open`, `read`, `write`, `close`, `stat`.
+    - [x] `readlink`, `symlink` support.
+    - [ ] **Root Mount:** Support `root=` kernel argument.
+- [ ] **Filesystems:**
+    - [x] EXT2 (Read/Write).
+    - [x] FAT16/32.
     - [ ] **DevFS (`/dev`):**
-        - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
-        - [ ] **VFS Glue:** Auto-generate VFS nodes when registering devices.
-        - [ ] **Nodes:**
-            - [x] Support `null`.
-            - [x] Support `zero`.
-            - [x] Support `full`.
-            - [x] Support `random`.
-            - [x] Support `tty`.
-    - [ ] **ProcFS (`/proc`):**
-        - [ ] **Process Info:**
-            - [x] Expose `cmdline`.
-            - [x] Expose `maps`.
-            - [x] Expose `status`.
-            - [x] Expose `fd` per PID.
-        - [ ] **System Info:**
-            - [x] Expose `cpuinfo`.
-            - [x] Expose `meminfo`.
-            - [x] Expose `uptime`.
-        - [x] **Dynamic generation:** Generate content on `read()` (virtual files).
-        - [x] **Personality Awareness:** Detect caller personality (Linux/FreeBSD) and adjust file contents/formats dynamically (e.g., `status` file structure).
-    - [ ] **SysFS (`/sys`):**
-        - [x] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
-        - [x] **Attributes:** Map kernel variables to readable/writable files.
-    - [ ] **FUSE (`/dev/fuse`):**
-        - [x] **Device Interface:** Implement `/dev/fuse` char device for control.
-        - [x] **Protocol:** Implement FUSE opcodes (`INIT`, `LOOKUP`, `READ`, `WRITE`).
-        - [x] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
-    - [ ] **Network Filesystems:**
-        - [ ] **9P (9P2000.L):**
-            - [x] **Client:** Implement 9P client for VFS integration.
-            - [ ] **Transport:** Support virtio (for QEMU) and TCP transports.
-            - [ ] **Protocol:** Implement T/R message transaction loop.
+        - [x] Device Registry.
+        - [ ] Generic Block/Char device nodes.
+- [ ] **Pseudo-FS:**
+    - [x] ProcFS (`/proc`).
+    - [x] SysFS (`/sys`).
 
-### 5. System Calls & Personalities
-- [ ] **Mechanisms:**
-    - [ ] **PTY Subsystem (Unix98):**
-        - [ ] **Multiplexor:** Implement `/dev/ptmx` cloning device.
-        - [ ] **DevPTS:** Implement `devpts` virtual filesystem for `/dev/pts`.
-        - [ ] **API Support:** Support `grantpt`, `unlockpt`, `ptsname` (via ioctls).
-        - [ ] **Line Discipline:** Implement termios processing (canonical mode, echo, signals).
-    - [x] Implement `sys_ioctl` framework.
-    - [x] Implement `sys_pipe` and `sys_dup2`.
-    - [x] Implement `sys_time` and RTC reading.
-    - [ ] **Emulation Path Lookup:** Check `/emul/<perso>/` before root for foreign personalities.    - [ ] **Debugging & Tracing:**
-        - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace).
-        - [ ] **Serial Console:** Interactive GDB stub over UART.
-        - [ ] **DTrace:** (As planned in ideas) Dynamic tracing framework.
-- [ ] **Personalities:**
-    - [ ] **Xenix (286 & 386):**
-        - [ ] **Binary Loader (`x.out`):**
-            - [ ] Define `struct xexec` header (magic numbers 0x206 for 286, 0x20C for 386).
-            - [ ] Implement LDT management for 16-bit Segmented execution (286 - works on x86_64).
-            - [ ] Implement 32-bit segment loading for Xenix 386.
-            - [ ] **Shared Libraries:** Support COFF Static Shared Libraries (fixed address mapping).
-            - [x] **COFF Loader:** Implement basic COFF binary support for Xenix/386.
-        - [ ] **System Call Interface:**
-            - [ ] **Mechanism:** Setup GDT Call Gate 7 (`lcall 7,0`) for syscall entry (used by both).
-            - [ ] **Dispatcher:** Implement translation layer for SVR3/Xenix syscall numbers.
-            - [ ] **ABI:** Handle argument passing (Stack-based for Xenix/SVR3).
-            - [ ] **Extensions:** Implement `cxenix` multiplexer and `rdchk`/`nap`.
-    - [ ] **ELKS (Embeddable Linux Kernel Subset):**
-        - [ ] Support ELKS binaries (16-bit Real Mode via VM86).
-        - [ ] **VM86:** Implement Virtual 8086 mode infrastructure (i386 only).
-        - [ ] **Syscalls:** Implement `int 0x80` handling within VM86 context.
-    - [ ] **Linux:**
-        - [ ] Improve `sys_clone` compatibility (flags).
-    - [ ] **Minix/386:**
-        - [ ] Implement `send`/`receive` message passing syscalls.
-        - [ ] Map Minix 3 kernel messages to native calls.
-    - [ ] **FreeBSD:**
-        - [ ] Complete `thr_new` implementation.
-        - [ ] **FreeBSD 14.3 Compatibility (i386):**
-            - [x] Implement `struct kinfo_proc` (FreeBSD 14.3 layout).
-            - [ ] Implement `libkvm` backend for FreeBSD personality.
-            - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`.
-    - [ ] **BSD Family (NetBSD/OpenBSD):**
-        - [ ] Implement `__sysctl` (MIB-based configuration).
-        - [ ] Support BSD-specific syscalls (`ktrace`, `pledge`/`unveil`).
-    - [ ] **Solaris (SVR4):**
-        - [ ] Implement SVR4 syscalls (`getdents64`, `stream` ioctls).
-        - [ ] Support Solaris door IPC emulation.
+### 5. Userland & Binaries
+- [ ] **Init System:**
+    - [ ] Parse `/etc/inittab` or `/etc/rc`.
+    - [ ] Launch shell.
+- [ ] **Shell:**
+    - [ ] Basic command execution.
+    - [ ] Environment variables.
+- [ ] **Tools:**
+    - [ ] `ls`, `cat`, `cp`, `mv`.
+    - [x] `brandelf` (ELF branding tool).
+    - [ ] `vi` clone.
 
-### 6. C Library (`lib/c`)
-- [ ] **Stdio:**
-    - [ ] Implement Buffered I/O logic (`fflush`, buffer management).
-    - [ ] Complete `printf` family (all format specifiers).
-- [ ] **String/Mem:**
-    - [ ] Optimize `memcpy`, `memset`, `memmove`.
-- [ ] **Math (`libm`):**
-    - [ ] Implement basic floating point functions (`sin`, `cos`, `pow`, `sqrt`).
-- [ ] **Dynamic Linker (`ld.so`):**
-    - [ ] Implement `PT_INTERP` support in kernel ELF loader to load the dynamic linker.
-    - [ ] Implement ELF relocation processing (PLT/GOT).
-    - [ ] Implement `dlopen`, `dlsym`.
-- [ ] **Kernel Interface Library (`libkvm`):**
-    - [ ] **API:**
-        - [ ] `kvm_open()` / `kvm_close()`.
-        - [ ] `kvm_read()` / `kvm_write()`: Access kernel memory via `/dev/kmem`.
-        - [ ] `kvm_getprocs()`: Extract process list from kernel structures.
-        - [ ] `kvm_nlist()`: Resolve kernel symbols.
-    - [ ] **Dependencies:**
-        - [ ] Implement `/dev/mem` and `/dev/kmem` in DevFS.
-        - [ ] Export kernel symbol table (ksyms) to userspace.
+### 6. Exec/Loader
+- [x] ELF Loader.
+- [x] Shebang support.
+- [x] Linux ELF Detection (ABI Tag + `PT_INTERP` heuristic).
+- [ ] `a.out` Loader (optional).
 
-### 7. Userland Binaries (`bin/`)
-- [ ] **Shell (`sh`):**
-    - [ ] Implement environment variable handling.
-    - [ ] Implement pipelines (`|`) and redirection (`>`, `<`).
-    - [ ] Implement job control (`&`, `bg`, `fg`, `jobs`).
-    - [ ] Implement scripting support (`if`, `for`, `while`).
-- [ ] **Core Utils:**
-    - [ ] **`ls`:** Implement flags (`-l`, `-a`, `-h`).
-    - [ ] **`cp`:** Implement recursive copy (`-r`).
-    - [ ] **`rm`:** Implement recursive delete (`-r`).
-    - [ ] **`mkdir`:** Implement parents (`-p`).
-- [ ] **Editors:**
-    - [ ] **`vi` Clone:**
-        - [ ] Command mode parser.
-        - [ ] Insert/Replace modes.
-        - [ ] Basic `ex` command support (`:w`, `:q`).
-    - [ ] **TUI Editor (Pico/Nano-like):**
-        - [ ] Model-less text entry.
-        - [ ] On-screen command bar.
-        - [ ] Search/Replace functionality.
-    - [ ] **GUI Editor (Notepad-like):**
-        - [ ] Basic menu bar (File, Edit).
-        - [ ] `libg` and Widget Toolkit integration.
-- [ ] **System Utils:**
-    - [ ] **`init` (PID 1):**
-        - [ ] **Stage 1 (Basic):**
-            - [ ] Parse `/etc/rc` shell script.
-            - [ ] Check `/etc/system.conf` for `GRAPHICAL_LOGIN=yes`.
-            - [ ] Spawn `getty` on TTYs or start `login.gui`.
-            - [ ] Reap zombie processes (wait loop).
-    - [ ] **Graphical Login (`login.gui`):**
-        - [ ] GUI session starter.
-        - [ ] Reads username/password.
-        - [ ] Authenticates against `/etc/passwd` and `/etc/shadow`.
-        - [ ] Starts the default Desktop Environment shell on success.
-    - [ ] **`login` (CLI):** Implement PAM-like authentication or shadow file reading.
-    - [ ] **`ps`:** Read from `/proc`.
-    - [ ] **`top`:** Real-time process monitoring.
-    - [ ] **Filesystem Tools (`sbin/`):**
-        - [ ] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
-        - [ ] **`fsck`:** Implement `ext2` consistency check.
-
-### 8. Security and Identity
-- [ ] **User & Group Management:**
-    - [ ] **Database:**
-        - [ ] Implement `/etc/passwd` parser.
-        - [ ] Implement `/etc/group` parser.
-        - [ ] Implement `/etc/shadow` parser for login.
-    - [ ] **Kernel Credentials:**
-        - [ ] Add `uid, gid, euid, egid, suid, sgid` to Process structure.
-        - [ ] Add supplementary group list to Process structure.
-    - [ ] **System Calls:**
-        - [ ] `getuid`, `getgid`, `geteuid`, `getegid`.
-        - [ ] `setuid`, `setgid`, `seteuid`, `setegid`.
-        - [ ] `setreuid`, `setregid`.
-        - [ ] `getgroups`, `setgroups`.
-- [ ] **Userland Identity Tools:**
-    - [ ] **`id`:**
-        - [ ] Implement `-u`, `-g`, `-G`, `-n` flags.
-        - [ ] Ensure POSIX-compliant output format.
-    - [ ] **`su`:** Enhance with user/group switching.
-    - [ ] **`login`:** Integrate with user database.
-
-### 9. Networking (Future)
-- [ ] **Layer 1: Network Interface Drivers (Kernel)**
-    - [ ] **Loopback:** Virtual interface implementation.
-    - [ ] **NE1000:** ISA, 8-bit, 8390 NIC core.
-    - [ ] **NE2000:** ISA/PCI, 8390 NIC core, PIO/DMA data transfer.
-    - [ ] **3Com 3c509:** ISA, EtherLink III, PIO data transfer.
-    - [ ] **3Com 3c905:** PCI, EtherLink XL, Bus Master DMA (Boomerang).
-    - [ ] **Intel PRO/100 (i8255x):** PCI, 10/100 Mbps, Bus Master DMA.
-    - [ ] **Broadcom BCM57xx (Tigon3):** PCI/PCIe Gigabit, Ring buffer management.
-    - [ ] **RTL8139:** Basic send/receive, interrupt handling.
-    - [ ] **E1000:** Intel Gigabit Ethernet support.
-    - [ ] **VirtIO Net:** Optimized network driver for QEMU/KVM.
-- [ ] **Layer 2: Packet Interface Layer**
-    - [ ] Define abstract packet structure (like `sk_buff` or `mbuf`).
-    - [ ] Implement packet queuing and dispatching to protocol drivers.
-    - [ ] Implement `ifconfig` style interface management (up/down/flags).
-- [ ] **Layer 3: Protocol Drivers (Kernel Stack)**
-    - [ ] **Ethernet (L2):** Frame parsing and encapsulation.
-    - [ ] **ARP (L2.5):** Resolution, caching, and timeout logic.
-    - [ ] **IPv4 (L3):** Packet processing, routing table, fragmentation/reassembly.
-    - [ ] **IPv6 (L3):**
-        - [ ] Packet parsing and extension headers.
-        - [ ] Neighbor Discovery Protocol (NDP) (replaces ARP).
-        - [ ] SLAAC/DHCPv6 for address autoconfiguration.
-        - [ ] Dual-stack socket support.
-    - [ ] **ICMPv4/v6 (L3):** Echo request/reply and error messages.
-    - [ ] **UDP (L4):** Datagram sending/receiving.
-    - [ ] **TCP (L4):** Connection state machine, window management, congestion control.
-- [ ] **Layer 4: Socket API**
-    - [ ] **VFS Integration:** Map sockets to file descriptors.
-    - [ ] **Syscalls:** `socket`, `bind`, `connect`, `listen`, `accept`, `setsockopt`.
-    - [ ] **I/O:** `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg`.
-    - [ ] **Multiplexing:** `select`/`poll`/`epoll`.
-- [ ] **Supplemental: Userspace & Extensibility**
-    - [ ] **NetUSE API:** Interface for running NIC drivers in userspace.
-    - [ ] **Userspace Stacks:** TUN/TAP style interface.
-- [ ] **Userland Tools**
-    - [ ] **Diagnostic:**
-        - [ ] `ping`
-        - [ ] `ping6`
-        - [ ] `traceroute`
-        - [ ] `tracepath`
-    - [ ] **Configuration:**
-        - [ ] `ifconfig`
-        - [ ] `ip` (Netlink-style)
-        - [ ] `route`
-    - [ ] **Clients:**
-        - [ ] `dhcp` (custom DHCP client)
-        - [ ] basic `netcat`
-    - [ ] **Analysis:** `tcpdump` (requires BPF or raw socket support).
-### 10. Hardware Support & Peripherals
-- [ ] **USB Subsystem:**
-            - [ ] **Controllers:**
-                - [ ] UHCI/OHCI (USB 1.1)
-                - [ ] EHCI (USB 2.0)
-    
-    - [ ] **Core Stack:**
-        - [ ] Enumeration
-        - [ ] URB (Request Block) processing
-        - [ ] Hub support
-    - [ ] **Drivers:**
-        - [ ] USB HID (Keyboard/Mouse)
-        - [ ] Mass Storage (Flash drives)
-- [ ] **Audio:**
-        - [ ] **Native API (Sun AudioIO):**
-            - [ ] Implement `/dev/audio` and `/dev/audioctl` character devices.
-            - [ ] Define `audio_info_t` structure and standard ioctls (`AUDIO_GETINFO`, `AUDIO_SETINFO`).
-            - [ ] Support u-law (mu-law), a-law, and linear PCM formats.
-        - [ ] **Compatibility:**
-            - [ ] **OSS Emulation:** Map `/dev/dsp` ioctls to native AudioIO calls.
-        - [ ] **Controllers:**
-            - [ ] **Sound Blaster 16/32:** DSP programming, DMA (ISA), Mixer.
-            - [ ] **Ensoniq AudioPCI (ES1370/1371):** PCI, Bus Master DMA, AC97-like.
-            - [ ] AC97
-            - [ ] Intel HDA
-        - [ ] **Subsystem:**
-            - [ ] Mixer interface
-            - [ ] `/dev/dsp` or `/dev/snd/*` nodes
-    
-- [ ] **Power Management (ACPI):**
-    - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser.
-    - [ ] **States:**
-        - [ ] System Shutdown (`S5`)
-        - [ ] Reboot
-### 11. Graphical User Interface (GUI)
-- [ ] **Display Server (Window System):**
-    - [ ] **Compositor:** Manages framebuffer, tracks window regions/z-order (software composition).
-    - [ ] **IPC:** Protocol for clients to request windows and send draw commands (or shared memory buffers).
-    - [ ] **Input:** Routes mouse/keyboard events from `/dev/input` to the active window.
-- [ ] **X11 Compatibility (`XTestUnix`):**
-    - [ ] Implement an X Server that runs as a client of the native Display Server (similar to XQuartz/Xwayland).
-    - [ ] Bridge X11 protocol calls to native windowing/drawing commands.
-- [ ] **Graphics Library (`libg`):**
-        - [ ] **Primitives:**
-            - [ ] Line drawing (Bresenham).
-            - [ ] Rect drawing.
-            - [ ] Circle drawing.
-            - [ ] Polygon drawing.
-        - [ ] **Blitting:**
-            - [ ] Fast bitmap copying.
-            - [ ] Scaling (Nearest Neighbor/Bilinear).
-            - [ ] Alpha blending.
-        - [ ] **Text:**
-            - [ ] Font rendering.
-            - [ ] TrueType support (via `freetype`).
-            - [ ] Bitmap font support.
-- [ ] **Widget Toolkit:**
-        - [ ] **Architecture:**
-            - [ ] **Base Object (`GObject` equivalent):**
-                - [ ] Reference counting mechanism.
-                - [ ] Signal/Slot or Callback system for events.
-                - [ ] Property system with change notifications.
-            - [ ] **Visual Base (`Widget`):**
-                - [ ] **Geometry:** Bounds (x, y, w, h), Padding, Margin, Minimum/Maximum size.
-                - [ ] **Hierarchy:** Parent/Child relationships, Child iteration, Z-order management.
-                - [ ] **State:** Visibility (Visible/Hidden/Collapsed), Enabled/Disabled, Focused.
-                - [ ] **Painting:** `on_paint(context)` virtual method, Dirty rectangle tracking.
-                - [ ] **Input Handling:** `on_key_down`, `on_key_up`, `on_mouse_down`, `on_mouse_up`, `on_mouse_move`, `on_enter`, `on_leave`.
-            - [ ] **Focus Management:** Tab order traversal, Focus stealing protection, Default widget.
-            - [ ] **Theming Engine:**
-                - [ ] CSS-like selector matching or Style objects.
-                - [ ] System colors/fonts integration.
-                - [ ] Custom painters (Delegate pattern).
-            - [ ] **Layout Engine:**
-                - [ ] Two-pass layout (Measure -> Arrange).
-                - [ ] Auto-sizing based on content.
-    
-            - [ ] **Standard Widgets:**
-    
-                - [ ] **Interactive Containers (Composition-First):**
-    
-                    - [ ] **Button:** A generic container widget implementing interaction logic.
-    
-                        - [ ] **Content:** Support for any child widget (e.g., Label, Image, Layout).
-    
-                        - [ ] **States:** Normal, Hover, Pressed, Disabled.
-    
-                        - [ ] **Styles:** Flat, Raised, Outlined, Ghost.
-    
-                        - [ ] **Behaviors:** Default (Enter key), Cancel (Esc key).
-    
-                    - [ ] **ToggleButton:** Extension of Button adding persistent `is_checked` state.
-    
-                        - [ ] **Grouping:** Support for mutual exclusion (Radio behavior).
-    
-                    - [ ] **SplitButton:** Composite widget with primary action area and dropdown trigger.
-    
-    
-        - [ ] **Text Input:**
-            - [ ] **LineEdit (Single-line):**
-                - [ ] Cursor (Caret) rendering and blinking.
-                - [ ] Text selection logic (Mouse drag, Shift+Arrow).
-                - [ ] Clipboard operations (Cut/Copy/Paste).
-                - [ ] Input masking (Password char, Numeric only, Regex filter).
-                - [ ] Placeholder text (Hint).
-            - [ ] **TextEditor (Multi-line):**
-                - [ ] Word wrapping logic.
-                - [ ] Scrollbar integration.
-                - [ ] Undo/Redo stack.
-                - [ ] Line numbering gutter.
-            - [ ] **SpinBox:**
-                - [ ] Up/Down buttons.
-                - [ ] Value validation (Min/Max/Step).
-                - [ ] Text-to-value parsing.
-        - [ ] **Selection Controls:**
-            - [ ] **CheckBox:**
-                - [ ] Tri-state logic (Checked, Unchecked, Indeterminate).
-                - [ ] Label positioning (Left/Right).
-            - [ ] **RadioButton:**
-                - [ ] Auto-grouping behavior within parent container.
-                - [ ] Circular selection rendering.
-            - [ ] **ToggleSwitch:**
-                - [ ] Animation for sliding knob.
-                - [ ] On/Off text labels inside track.
-            - [ ] **ComboBox (Dropdown):**
-                - [ ] Popup window creation/positioning.
-                - [ ] Item model integration.
-                - [ ] Autocomplete/Filtering input.
-        - [ ] **Display Widgets:**
-            - [ ] **Label:**
-                - [ ] Rich text parsing (Bold, Italic, Color).
-                - [ ] Ellipsis handling (...) for overflow.
-                - [ ] Text alignment (Left, Center, Right, Justify).
-                - [ ] Mnemonic handling (Alt+Key focus).
-            - [ ] **ImageBox:**
-                - [ ] Asset loading (PNG/JPG/BMP).
-                - [ ] Scaling modes (Fit, Fill, Stretch, Center).
-            - [ ] **Separator:** Horizontal/Vertical orientation, styling.
-        - [ ] **Complex Data Views:**
-            - [ ] **AbstractItemView:** Base class for Model/View architecture.
-            - [ ] **ListView:**
-                - [ ] **Modes:** Icon Mode (Grid), List Mode (Small Icons), Detail Mode (Columns).
-                - [ ] Selection models (Single, Multi, Extended).
-                - [ ] Virtualization (Rendering only visible items).
-            - [ ] **TableView:**
-                - [ ] **HeaderView:** Resizable columns, Sort indicators, Reordering.
-                - [ ] **Grid:** Cell rendering delegates, Alternating row colors.
-                - [ ] In-place cell editing widgets.
-            - [ ] **TreeView:**
-                - [ ] Indentation depth rendering.
-                - [ ] Expander triangles (Open/Close).
-                - [ ] Connecting lines.
-        - [ ] **Feedback & Progress:**
-            - [ ] **ProgressBar:**
-                - [ ] Determinate mode (0-100%).
-                - [ ] Indeterminate mode (Marquee/Pulse animation).
-                - [ ] Text overlay.
-            - [ ] **Slider:**
-                - [ ] Horizontal/Vertical orientation.
-                - [ ] Tick mark rendering (Above/Below/Both).
-                - [ ] Range selection (Two knobs).
-            - [ ] **StatusBar:**
-                - [ ] Size grip rendering.
-                - [ ] Temporary message queue.
-                - [ ] Permanent widget area.
-        - [ ] **Navigation & Menus:**
-            - [ ] **TabControl:**
-                - [ ] Tab bar rendering (Top/Bottom/Left/Right).
-                - [ ] Page switching logic.
-                - [ ] Closable tabs.
-                - [ ] Draggable/Reorderable tabs.
-            - [ ] **MenuBar:**
-                - [ ] Root menu strip.
-                - [ ] Keyboard navigation (Alt, Arrows).
-            - [ ] **Menu/ContextMenu:**
-                - [ ] Nested submenus.
-                - [ ] Checkable items / Radio items.
-                - [ ] Icons and Shortcuts text.
-            - [ ] **Toolbar:**
-                - [ ] Docking logic.
-                - [ ] Overflow handling (Chevron menu).
-        - [ ] **Containers & Layouts:**
-            - [ ] **GroupBox:** Frame with title label.
-            - [ ] **ScrollView:**
-                - [ ] Viewport clipping.
-                - [ ] Scrollbar visibility logic (Auto/Always/Never).
-            - [ ] **SplitPane:**
-                - [ ] Draggable divider handle.
-                - [ ] Collapsible panes.
-            - [ ] **StackView:** Layered widgets (one visible at a time).
-            - [ ] **Layout Managers:**
-                - [ ] **VBox/HBox:** Spacing, Alignment, Flex-grow.
-                - [ ] **Grid:** Row/Column definitions, Spanning.
-                - [ ] **Dock:** North/South/East/West/Center filling.
-                - [ ] **Flow:** Wrap-around placement.
-        - [ ] **System Dialogs:**
-            - [ ] **MessageBox:** Icon, Message, Standard Buttons (Ok, Cancel, Yes, No).
-            - [ ] **FileChooser:** Directory tree navigation, File filtering, Preview pane.
-            - [ ] **ColorPicker:** RGB/HSV selectors, Palette grid, Color dropper.
-            - [ ] **FontPicker:** Family list, Style list, Size input, Preview area.
-- [ ] **Desktop Environment:**
-        - [ ] **Shell:**
-            - [ ] Wallpaper
-            - [ ] Taskbar
-            - [ ] App Launcher
-        - [ ] **Apps:**
-            - [ ] Terminal Emulator
-            - [ ] Text Editor
-            - [ ] Image Viewer
-        ### 12. Milestones
-        - [ ] **Bootable:** Kernel boots and reaches a functional user-space shell.
-        
-        ### 13. Advanced Features (Post-Milestone)
-        - [ ] **USB 3.0 (xHCI):** Implement support for modern USB controllers.
-        - [ ] **ACPI Events:** Handle Power button, Lid switch, and Battery status events.
-        
+### 7. Verification & Testing
+- [ ] **Automated Tests:**
+    - [x] Kernel Unit Tests.
+    - [x] Boot Crash Fix (SSE disabled).
+    - [ ] Integration Tests (Boot logic).

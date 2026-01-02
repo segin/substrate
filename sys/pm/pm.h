@@ -1,0 +1,15 @@
+#ifndef _SYS_PM_H
+#define _SYS_PM_H
+
+#include <sys/proc.h>
+
+#define MAX_PROCS 16
+
+extern process_t processes[MAX_PROCS];
+extern process_t *current_process;
+
+void pm_init(void);
+process_t *proc_create(struct personality *pers);
+int proc_fork(process_t *parent, void *stack);
+
+#endif

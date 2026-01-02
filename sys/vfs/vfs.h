@@ -22,6 +22,10 @@ typedef struct dirent * (*readdir_type_t)(struct fs_node*, uint32_t);
 typedef struct fs_node * (*finddir_type_t)(struct fs_node*, char *name);
 typedef int (*ioctl_type_t)(struct fs_node*, uint32_t, void*);
 
+// Symlink Operations
+typedef int (*readlink_type_t)(struct fs_node*, char *buf, size_t size);
+typedef int (*symlink_type_t)(struct fs_node*, const char *target, const char *name);
+
 typedef struct fs_node {
     char name[128];
     uint32_t mask;        // The permissions mask.
@@ -38,6 +42,8 @@ typedef struct fs_node {
     readdir_type_t readdir;
     finddir_type_t finddir;
     ioctl_type_t ioctl;
+    readlink_type_t readlink;
+    symlink_type_t symlink;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
 } fs_node_t;
 
@@ -67,16 +73,20 @@ void open_fs(fs_node_t *node, uint8_t read, uint8_t write);
 void close_fs(fs_node_t *node);
 struct dirent *readdir_fs(fs_node_t *node, uint32_t index);
 fs_node_t *finddir_fs(fs_node_t *node, char *name);
+int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
+int readlink_fs(fs_node_t *node, char *buf, size_t size);
+int symlink_fs(fs_node_t *parent, const char *target, const char *name);
+
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
 
 void vfs_register_filesystem(filesystem_t *fs);
 int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data);
+fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
+void vfs_init(void);
 
 void devfs_init(void);
 void devfs_register_device(fs_node_t *node);
 
 extern fs_node_t *fs_root; // Global root node
-
-void vfs_init_mock_root(void);
 
 #endif

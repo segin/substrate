@@ -47,8 +47,14 @@ static void pmm_init_bitmap(void) {
 }
 
 static void pmm_reserve_kernel(void) {
-    // Keep the first 1MB reserved (Kernel, BIOS, Video)
-    for (uint32_t i = 0; i < 0x100000; i += PMM_BLOCK_SIZE) {
+    extern uint32_t _kernel_end;
+    uint32_t kernel_end = (uint32_t)&_kernel_end;
+    
+    // Reserve everything from 0 up to kernel_end, aligned to next block
+    // Also ensuring at least 1MB is reserved if kernel is small (which it isn't, but for safety)
+    if (kernel_end < 0x100000) kernel_end = 0x100000;
+    
+    for (uint32_t i = 0; i < kernel_end; i += PMM_BLOCK_SIZE) {
         pmm_mark_used(i);
     }
 }

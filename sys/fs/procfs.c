@@ -1,10 +1,11 @@
 #include "../vfs/vfs.h"
 #include <sys/proc.h>
+#include "../../pm/pm.h"
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>
 
-extern process_t processes[];
+// processes[] is declared in pm.h
 
 static struct dirent proc_dirent;
 
@@ -12,7 +13,7 @@ static struct dirent proc_dirent;
 static uint32_t proc_status_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = NULL;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid == pid) {
             p = &processes[i];
             break;
@@ -110,7 +111,7 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index) {
     if (index == 4) { strcpy(proc_dirent.name, "uptime"); return &proc_dirent; }
 
     int count = 5;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
             if (count == (int)index) {
                 sprintf(proc_dirent.name, "%d", processes[i].pid);
@@ -158,7 +159,7 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
     }
 
     if (pid > 0 && *p == '\0') {
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid == pid) {
                 static fs_node_t pid_dir;
                 memset(&pid_dir, 0, sizeof(fs_node_t));

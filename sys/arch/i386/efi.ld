@@ -23,4 +23,13 @@ SECTIONS
 		*(.bss)
 		*(COMMON)
 	}
+    
+    _kernel_end = .;
+
+	/DISCARD/ :
+	{
+		*(.comment)
+		*(.eh_frame)
+		*(.note.gnu.property)
+	}
 }

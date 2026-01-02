@@ -19,26 +19,39 @@
 #include "sched.h"
 #include <sys/input.h>
 #include "../vfs/vfs.h"
-#include "../fs/ext2/ext2.h"
-#include "../fs/fat/fat.h"
-#include "../fs/exfat/exfat.h"
-#include "../fs/minix/minix.h"
 #include "version.h"
 #include "panic.h"
+#include "console.h"
+#include "cmdline.h"
 #include <string.h>
 
 // Simple string functions to avoid depending on libc in core if not available
+int serial_debug_enabled = 0;
+
+
+char *strstr(const char *haystack, const char *needle) {
+    if (!*needle) return (char*)haystack;
+    for (; *haystack; haystack++) {
+        if (*haystack == *needle) {
+             const char *h = haystack;
+             const char *n = needle;
+             while (*h && *n && *h == *n) {
+                 h++; n++;
+             }
+             if (!*n) return (char*)haystack;
+        }
+    }
+    return NULL;
+}
+
+
 static int k_strncmp(const char *s1, const char *s2, size_t n) {
     while (n && *s1 && (*s1 == *s2)) { s1++; s2++; n--; }
     if (n == 0) return 0;
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
-static size_t k_strlen(const char *s) {
-    size_t len = 0;
-    while (s[len]) len++;
-    return len;
-}
+
 
 // Try to execute init
 static int try_init(const char *path) {
@@ -47,14 +60,14 @@ static int try_init(const char *path) {
     
     // Check if file exists
     // We assume fs_root is mounted.
-    // If fs_root is NULL (which it is currently until we mount root), we can't look it up.
     if (!fs_root) return -1;
 
-    fs_node_t *node = finddir_fs(fs_root, (char*)path + 1); // Skip leading /
+    // Use vfs_lookup to traverse the path (init path is absolute)
+    fs_node_t *node = vfs_lookup(fs_root, path);
     if (node) {
-        vga_write("Found init: ", 12);
-        vga_write(path, k_strlen(path));
-        vga_write("\n", 1);
+        kprint("Found init: ");
+        kprint(path);
+        kprint("\n");
         
         // Mock execution
         // sys_execve(path, ...);
@@ -108,53 +121,107 @@ extern void p9_init(void);
 
 // Kernel Entry Point
 void kmain(unsigned long magic, unsigned long addr) {
-    vga_init();
-    uart_init();
+    console_init();
+    vga_init(); // Registers VGA console
+    uart_init(); // Initializes UART hardare
 
-    multiboot_info_t *mboot_info;
+    // 1. Process Multiboot Info EARLY to get cmdline
+    multiboot_info_t *mboot_info = (multiboot_info_t *)addr;
     static multiboot_info_t fake_mbi;
+    char *cmdline = NULL;
 
     if (magic == 0xF8EEB5D0) {
-        vga_write("Booted via FreeBSD loader.\n", 27);
         memset(&fake_mbi, 0, sizeof(fake_mbi));
         mboot_info = &fake_mbi;
+         kprint("Booted via FreeBSD loader.\n");
+    } else if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
+        if (mboot_info->flags & (1<<2)) {
+            cmdline = (char *)mboot_info->cmdline;
+        }
     } else {
-        if (magic != MULTIBOOT_BOOTLOADER_MAGIC) {
-            vga_write("Warning: Unknown bootloader magic, assuming raw boot.\n", 54);
-            memset(&fake_mbi, 0, sizeof(fake_mbi));
-            mboot_info = &fake_mbi;
-        } else {
-            mboot_info = (multiboot_info_t*)addr;
+         kprint("Warning: Unknown bootloader magic, assuming raw boot.\n");
+         mboot_info = NULL; 
+    }
+
+    // 2. Initialize Command Line Parser
+    if (cmdline) {
+        cmdline_init(cmdline);
+    } else {
+        cmdline_init("");
+    }
+
+    // Check for serial debug
+    if (cmdline_has("serial_debug")) {
+        serial_debug_enabled = 1;
+        console_register(uart_get_console());
+        kprint("Serial Debug Enabled.\n");
+    }
+
+    // Display kernel ident banner (mirrored if serial_debug_enabled)
+    kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
+
+    uint32_t mmap_addr = 0;
+    uint32_t mmap_length = 0;
+    
+    // Parse Multiboot Modules (Initrd)
+    if (mboot_info && (mboot_info->flags & (1<<3))) {
+        // Mods present
+        uint32_t mods_count = mboot_info->mods_count;
+        uint32_t mods_addr = mboot_info->mods_addr;
+        
+        kprint("Multiboot Modules found: ");
+        // Print count
+        char c = mods_count + '0'; // Hack for single digit
+        char s[2] = {c, 0};
+        kprint(s);
+        kprint("\n");
+        
+        if (mods_count > 0) {
+            // Assume first module is initrd
+            // module structure: 
+            // u32 mod_start
+            // u32 mod_end
+            // u32 string (cmdline)
+            // u32 reserved
+            struct multiboot_mod_list {
+                uint32_t mod_start;
+                uint32_t mod_end;
+                uint32_t cmdline;
+                uint32_t pad;
+            } *mod = (struct multiboot_mod_list *)mods_addr;
+            
+            extern void ramdisk_init(void *addr, size_t size);
+            ramdisk_init((void*)mod->mod_start, mod->mod_end - mod->mod_start);
         }
     }
-
-    char *cmdline = NULL;
-    fb_init(mboot_info);
-
-    if (mboot_info->flags & (1<<2)) {
-        cmdline = (char*)mboot_info->cmdline;
-        vga_write("Cmdline: ", 9);
-        vga_write(cmdline, strlen(cmdline));
-        vga_write("\n", 1);
-    }
     
-    // Initialize PMM using Multiboot mmap
-    if (mboot_info->flags & (1<<6)) {
-        pmm_init(mboot_info->mmap_addr, mboot_info->mmap_length);
-        vga_write("PMM Initialized with Multiboot mmap.\n", 37);
+    if (mboot_info && (mboot_info->flags & (1<<6))) {
+        mmap_addr = mboot_info->mmap_addr;
+        mmap_length = mboot_info->mmap_length;
+    }
+
+    // Initialize PMM
+    // We already have memory map from Multiboot
+    if (mmap_addr) {
+        pmm_init(mmap_addr, mmap_length);
+        kprint("PMM Initialized with Multiboot mmap.\n");
     } else {
         // Fallback or panic
         pmm_init(0, 0); 
-        vga_write("PMM Initialized (no mmap).\n", 27);
+        kprint("PMM Initialized (no mmap).\n");
     }
 
     // Initialize GDT
     gdt_init();
-    vga_write("GDT Initialized.\n", 17);
+    kprint("GDT Initialized.\n");
 
-    // Initialize IDT
+    // Initialize Scheduler BEFORE IDT (timer calls sched_yield!)
+    sched_init();
+    kprint("Scheduler Initialized.\n");
+
+    // Initialize IDT (enables timer which calls sched_yield)
     idt_init();
-    vga_write("IDT Initialized.\n", 17);
+    kprint("IDT Initialized.\n");
 
     // Initialize PMAP (Paging)
     pmap_bootstrap();
@@ -183,33 +250,53 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize PCI
     pci_init();
 
-    // Initialize VFS & Filesystems
-    ext2_init();
-    fat_init();
-    exfat_init();
-    minix_init();
-    devfs_init();
-    procfs_init();
-    sysfs_init();
-    fuse_init();
-    fuse_fs_init();
-    p9_init();
-    pseudo_init();
-    vfs_init_mock_root(); // Hack for init finding
-    vfs_mount(NULL, "/dev", "devfs", 0, NULL);
-    vfs_mount(NULL, "/proc", "procfs", 0, NULL);
-    vfs_mount(NULL, "/sys", "sysfs", 0, NULL);
+    // Initialize VFS (handles filesystem registration and pseudo-fs mounts)
+    vfs_init();
     
-    // Initialize Scheduler
-    sched_init();
-    vga_write("Scheduler Initialized.\n", 23);
+    // Check for Root Filesystem
+    // Parse root= argument
+    char root_dev[64] = {0};
+    if (cmdline_get("root", root_dev, sizeof(root_dev))) {
+        kprint("Mounting root from: ");
+        kprint(root_dev);
+        kprint("\n");
+        
+        // TODO: Wait for device to appear if needed?
+        // Simple loop?
+        
+        // Try to mount as specific types or auto-detect if we had a list.
+        // For now, let's look for rootfstype=
+        char root_type[32] = {0};
+        if (!cmdline_get("rootfstype", root_type, sizeof(root_type))) {
+             // Default to ext2 if not specified, or try multiple?
+             strcpy(root_type, "ext2");
+        }
+        
+        if (vfs_mount(root_dev, "/", root_type, 0, NULL) != 0) {
+            // Try fat?
+            if (vfs_mount(root_dev, "/", "fat", 0, NULL) != 0) {
+                 // Try v9fs?
+                 // vfs_mount(root_dev, "/", "9p", 0, NULL);
+                 kprint("Failed to mount root filesystem.\n");
+            }
+        }
+    } else {
+        kprint("No root= argument specified. Trying default /dev/ram0 (if initrd loaded)...\n");
+        // Fallback to initrd
+        vfs_mount("/dev/ram0", "/", "ext2", 0, NULL);
+    }
+
+    if (!fs_root) {
+        panic("VFS: No root filesystem mounted! Use root=/dev/x argument.");
+    }
 
     // Create Init Task
     // We pass cmdline to it
     static char dummy_stack[4096];
-    sched_create_thread(current_process, init_task, dummy_stack + 4096, cmdline);
+    extern process_t processes[]; // Accessible from sched.c
+    sched_create_thread(&processes[0], init_task, dummy_stack + 4096, cmdline);
 
-    vga_write("Entering main loop...\n", 22);
+    kprint("Entering main loop...\n");
     while (1) {
         sched_yield();
         // Simple delay loop

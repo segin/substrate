@@ -3,15 +3,16 @@ include ../Makefile.inc
 # Default to i386 if not specified
 ARCH ?= i386
 
-.PHONY: all clean install arch_kernel core kern drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi
+.PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi
 
 all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
 	@echo "Kernel build complete (all formats)."
 
-kernel.bin: arch_kernel kern drivers fs exec vfs exec_perso vm
+kernel.bin: arch_kernel kern pm drivers fs exec vfs exec_perso vm
 	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.bin \
 		arch/$(ARCH)/kernel.o \
 		kern/kern.o \
+		pm/pm.o \
 		drivers/video/video.o \
 		drivers/serial/serial.o \
 		drivers/input/input.o \
@@ -38,6 +39,7 @@ kernel.efi: arch_kernel kern drivers fs exec vfs exec_perso vm
 	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.elf \
 		arch/$(ARCH)/kernel.o \
 		kern/kern.o \
+		pm/pm.o \
 		drivers/video/video.o \
 		drivers/serial/serial.o \
 		drivers/input/input.o \
@@ -62,6 +64,10 @@ kern:
 vm:
 	@echo "Building VM Subsystem..."
 	$(MAKE) -C vm
+
+pm:
+	@echo "Building Process Manager..."
+	$(MAKE) -C pm
 
 exec_perso:
 	@echo "Building Personalities..."
@@ -96,6 +102,7 @@ clean:
 	@echo "Cleaning Kernel..."
 	$(MAKE) -C arch/$(ARCH) clean
 	$(MAKE) -C kern clean
+	$(MAKE) -C pm clean
 	$(MAKE) -C drivers/video clean
 	$(MAKE) -C drivers/serial clean
 	$(MAKE) -C drivers/input clean

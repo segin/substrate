@@ -1,7 +1,10 @@
 #include "vga.h"
 #include "fb.h"
+#include "../../kern/console.h"
+#include "../../arch/i386/io.h"
 
 extern int fb_active;
+extern int serial_debug_enabled;
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
@@ -32,13 +35,8 @@ static inline uint16_t vga_entry(unsigned char uc, uint8_t color) {
     return (uint16_t) uc | (uint16_t) color << 8;
 }
 
-void vga_init(void) {
-    terminal_row = 0;
-    terminal_column = 0;
-    terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    terminal_buffer = VGA_MEMORY;
-    vga_clear_screen();
-}
+// Initial vga_init removed, new one at bottom registers console backend
+
 
 void vga_set_color(uint8_t fg, uint8_t bg) {
     terminal_color = vga_entry_color(fg, bg);
@@ -187,10 +185,41 @@ void vga_putc(char c) {
     }
 }
 
-void vga_write(const char* data, size_t size) {
+// Helper for console abstraction
+static void vga_console_write(const char *data, size_t len) {
     if (fb_active) {
-        fb_write(data, size);
+        fb_write(data, len);
     }
-    for (size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < len; i++)
         vga_putc(data[i]);
 }
+
+static void vga_console_clear(void) {
+    vga_clear_screen();
+}
+
+static console_backend_t vga_console = {
+    .name = "vga",
+    .write = vga_console_write,
+    .putchar = vga_putc,
+    .clear = vga_console_clear,
+    .next = NULL
+};
+
+// Deprecated direct write (kept for headers compatibility if needed temporarily)
+// But we should use console_write everywhere.
+void vga_write(const char* data, size_t size) {
+    vga_console_write(data, size);
+}
+
+void vga_init(void) {
+    terminal_row = 0;
+    terminal_column = 0;
+    terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    terminal_buffer = VGA_MEMORY;
+    vga_clear_screen();
+    
+    // Register backend
+    console_register(&vga_console);
+}
+

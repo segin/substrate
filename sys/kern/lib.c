@@ -100,3 +100,10 @@ int sprintf(char *str, const char *format, ...) {
     __builtin_va_end(ap);
     return s - str;
 }
+
+char *strchr(const char *s, int c) {
+    while (*s != (char)c) {
+        if (!*s++) return NULL;
+    }
+    return (char *)s;
+}

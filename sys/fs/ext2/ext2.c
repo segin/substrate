@@ -47,5 +47,23 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     return 0; // Stub
 }
 
+
+int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
+    (void)node; (void)buf; (void)size;
+    // 1. If fast symlink (size < 60), data is in inode.i_block
+    // 2. If slow symlink, read data block.
+    return -1; // Stub
+}
+
+int ext2_symlink(fs_node_t *parent, const char *target, const char *name) {
+    (void)parent; (void)target; (void)name;
+    // 1. Alloc inode
+    // 2. Write target path
+    // 3. Add to parent dir
+    return -1; // Stub
+}
+
 // TODO: Implement read, write, open, close, readdir, finddir for EXT2
+
+
 

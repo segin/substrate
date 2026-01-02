@@ -299,27 +299,76 @@ void isr_handler(registers_t *regs) {
 
         fpu_handler(regs);
 
-
-
     } else if (regs->int_no < 32) {
-
-
-
-        vga_write("EXCEPTION: ", 11);
-
-
-
+        // Print exception details
+        static char hex[] = "0123456789ABCDEF";
+        char buf[80];
+        
+        vga_write("\nEXCEPTION: ", 12);
         vga_write(exception_messages[regs->int_no], strlen(exception_messages[regs->int_no]));
-
-
-
         vga_write("\n", 1);
-
-
-
+        
+        // EIP
+        vga_write("EIP: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->eip >> (i*4)) & 0xF];
+        buf[8] = ' '; buf[9] = ' ';
+        vga_write(buf, 10);
+        
+        // CS
+        vga_write("CS: 0x", 6);
+        for (int i = 3; i >= 0; i--) buf[3-i] = hex[(regs->cs >> (i*4)) & 0xF];
+        buf[4] = ' '; buf[5] = ' ';
+        vga_write(buf, 6);
+        
+        // Error code
+        vga_write("ERR: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->err_code >> (i*4)) & 0xF];
+        buf[8] = '\n';
+        vga_write(buf, 9);
+        
+        // EAX, EBX, ECX, EDX
+        vga_write("EAX: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->eax >> (i*4)) & 0xF];
+        buf[8] = ' '; buf[9] = ' ';
+        vga_write(buf, 10);
+        
+        vga_write("EBX: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->ebx >> (i*4)) & 0xF];
+        buf[8] = ' '; buf[9] = ' ';
+        vga_write(buf, 10);
+        
+        vga_write("ECX: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->ecx >> (i*4)) & 0xF];
+        buf[8] = ' '; buf[9] = ' ';
+        vga_write(buf, 10);
+        
+        vga_write("EDX: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->edx >> (i*4)) & 0xF];
+        buf[8] = '\n';
+        vga_write(buf, 9);
+        
+        // ESI, EDI, EBP, ESP
+        vga_write("ESI: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->esi >> (i*4)) & 0xF];
+        buf[8] = ' '; buf[9] = ' ';
+        vga_write(buf, 10);
+        
+        vga_write("EDI: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->edi >> (i*4)) & 0xF];
+        buf[8] = ' '; buf[9] = ' ';
+        vga_write(buf, 10);
+        
+        vga_write("EBP: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->ebp >> (i*4)) & 0xF];
+        buf[8] = ' '; buf[9] = ' ';
+        vga_write(buf, 10);
+        
+        vga_write("ESP: 0x", 7);
+        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->esp >> (i*4)) & 0xF];
+        buf[8] = '\n';
+        vga_write(buf, 9);
+        
         panic("Unhandled Exception");
-
-
 
     }
 

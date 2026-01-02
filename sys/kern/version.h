@@ -4,4 +4,6 @@
 #define OS_NAME "testunix"
 #define OS_VERSION "0.1.0"
 
+extern int serial_debug_enabled;
+
 #endif
