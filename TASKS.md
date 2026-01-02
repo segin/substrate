@@ -211,6 +211,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **Dynamic Linker (`ld.so`):**
     - [ ] Implement ELF relocation processing (PLT/GOT).
     - [ ] Implement `dlopen`, `dlsym`.
+- [ ] **Kernel Interface Library (`libkvm`):**
+    - [ ] **API:**
+        - [ ] `kvm_open()` / `kvm_close()`.
+        - [ ] `kvm_read()` / `kvm_write()`: Access kernel memory via `/dev/kmem`.
+        - [ ] `kvm_getprocs()`: Extract process list from kernel structures.
+        - [ ] `kvm_nlist()`: Resolve kernel symbols.
+    - [ ] **Dependencies:**
+        - [ ] Implement `/dev/mem` and `/dev/kmem` in DevFS.
+        - [ ] Export kernel symbol table (ksyms) to userspace.
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
