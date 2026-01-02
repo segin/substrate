@@ -413,21 +413,27 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] Two-pass layout (Measure -> Arrange).
                 - [ ] Auto-sizing based on content.
     
-    - [ ] **Standard Widgets:**
-        - [ ] **Buttons & Actions:**
-            - [ ] **AbstractButton:** Base logic for click handling and states (Normal, Hover, Pressed, Disabled).
-            - [ ] **PushButton:**
-                - [ ] Text alignment.
-                - [ ] Icon support.
-                - [ ] Default/Cancel button modes.
-                - [ ] Flat/Raised styling.
-            - [ ] **ToggleButton:**
-                - [ ] Checked/Unchecked state management.
-                - [ ] Button grouping (Mutual exclusion logic).
-            - [ ] **ImageButton:**
-                - [ ] Scaling modes.
-                - [ ] Alpha blending support.
-            - [ ] **SplitButton:** Primary action + Dropdown arrow area logic.
+            - [ ] **Standard Widgets:**
+    
+                - [ ] **Interactive Containers (Composition-First):**
+    
+                    - [ ] **Button:** A generic container widget implementing interaction logic.
+    
+                        - [ ] **Content:** Support for any child widget (e.g., Label, Image, Layout).
+    
+                        - [ ] **States:** Normal, Hover, Pressed, Disabled.
+    
+                        - [ ] **Styles:** Flat, Raised, Outlined, Ghost.
+    
+                        - [ ] **Behaviors:** Default (Enter key), Cancel (Esc key).
+    
+                    - [ ] **ToggleButton:** Extension of Button adding persistent `is_checked` state.
+    
+                        - [ ] **Grouping:** Support for mutual exclusion (Radio behavior).
+    
+                    - [ ] **SplitButton:** Composite widget with primary action area and dropdown trigger.
+    
+    
         - [ ] **Text Input:**
             - [ ] **LineEdit (Single-line):**
                 - [ ] Cursor (Caret) rendering and blinking.
