@@ -176,23 +176,23 @@ isr_exit:
 # User data selector: 0x23 (0x20 | 3)
 .global jump_to_userspace
 jump_to_userspace:
-    # Turn off interrupts during transition
-    cli
-    
-    # Get parameters
+    # Load parameters FIRST, before doing anything that might affect the stack
     mov 4(%esp), %ecx   # entry_point
     mov 8(%esp), %edx   # user_stack
+    
+    # NOW turn off interrupts
+    cli
     
     # Build IRET stack frame (in order pushed):
     # SS, ESP, EFLAGS, CS, EIP
     push $0x23          # User SS
-    push %edx           # User ESP
+    push %edx           # User ESP (loaded earlier)
     pushf               # EFLAGS
     pop %eax
     or $0x200, %eax     # Enable interrupts in user mode
     push %eax
     push $0x1B          # User CS
-    push %ecx           # User EIP
+    push %ecx           # User EIP (loaded earlier)
     
     # Don't touch DS/ES/FS/GS - leave as kernel segments 0x10
     # Ring 3 can still use them for reading
