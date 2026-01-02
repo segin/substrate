@@ -3,12 +3,19 @@
 # FreeBSD uses int $0x80 with syscall number in %eax, args pushed right-to-left on stack
 
 .section .bss
-    .lcomm buf, 325             # struct utsname (65*5)
+    .lcomm buf, 1280            # struct utsname (256*5)
 
 .section .data
     sp: .asciz " "
     nl: .asciz "\n"
     os: .asciz "FreeBSD"
+
+# FreeBSD utsname offsets (256 bytes each)
+.equ OFF_SYSNAME,  0
+.equ OFF_NODENAME, 256
+.equ OFF_RELEASE,  512
+.equ OFF_VERSION,  768
+.equ OFF_MACHINE,  1024
 
 .section .text
 .global _start
@@ -89,32 +96,32 @@ _start:
     
     test $0x01, %edi            # -s
     jz .L1
-    mov $buf, %esi
+    mov $buf+OFF_SYSNAME, %esi
     call .Lprint
 .L1:
     test $0x02, %edi            # -n
     jz .L2
-    mov $buf+65, %esi
+    mov $buf+OFF_NODENAME, %esi
     call .Lprint
 .L2:
     test $0x04, %edi            # -r
     jz .L3
-    mov $buf+130, %esi
+    mov $buf+OFF_RELEASE, %esi
     call .Lprint
 .L3:
     test $0x08, %edi            # -v
     jz .L4
-    mov $buf+195, %esi
+    mov $buf+OFF_VERSION, %esi
     call .Lprint
 .L4:
     test $0x10, %edi            # -m
     jz .L5
-    mov $buf+260, %esi
+    mov $buf+OFF_MACHINE, %esi
     call .Lprint
 .L5:
     test $0x20, %edi            # -i (FreeBSD: same as -m typically)
     jz .L6
-    mov $buf+260, %esi
+    mov $buf+OFF_MACHINE, %esi
     call .Lprint
 .L6:
     test $0x40, %edi            # -o
