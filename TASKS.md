@@ -33,7 +33,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] **Zone Allocator:** Fixed-size object caching (equivalent to Slab, but BSD-style).
         - [x] **Kmem:** General purpose variable-size allocator (power-of-two free lists).
     - [ ] **User Memory:**
-        - [ ] Implement `mmap`, `munmap`, `brk` system calls.
+        - [x] Implement `mmap`, `munmap`, `brk` system calls.
     - [ ] **SMP & Interrupts:**
         - [ ] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
         - [ ] **Local APIC:** Initialize LAPIC for each core (timer, spurious interrupts).
