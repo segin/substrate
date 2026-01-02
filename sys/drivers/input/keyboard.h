@@ -6,5 +6,6 @@
 
 void keyboard_init(void);
 void keyboard_handler(registers_t *regs);
+char keyboard_getc(void);
 
 #endif

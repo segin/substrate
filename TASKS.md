@@ -91,11 +91,14 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] Disable ports.
             - [x] Perform self-test.
         - [ ] **Interrupts:**
-            - [ ] Handle IRQ1.
-            - [ ] Read status/data ports.
-        - [ ] **Scancodes:** Implement state machine for Set 1 (or 2) decoding.
-        - [ ] **Keymap:** Map scancodes to ASCII/Unicode characters (US Layout).
-        - [ ] **Buffer:** Implement a circular buffer for raw keystrokes.
+            - [x] Handle IRQ1.
+            - [x] Read status/data ports.
+        - [ ] **Scancodes:**
+            - [x] Implement state machine for Set 1 (or 2) decoding.
+        - [ ] **Keymap:**
+            - [x] Map scancodes to ASCII/Unicode characters (US Layout).
+        - [ ] **Buffer:**
+            - [x] Implement a circular buffer for raw keystrokes.
     - [ ] **Mouse (PS/2):**
         - [ ] **Initialization:**
             - [ ] Enable auxiliary device (IRQ12).
