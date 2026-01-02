@@ -194,13 +194,17 @@ jump_to_userspace:
     push $0x1B          # User CS
     push %ecx           # User EIP
     
-    # Set up segment registers for user mode RIGHT before IRET
-    # This must be done AFTER building the IRET frame
-    mov $0x23, %ax      # User data selector
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
+    # Don't load user segments here - we're still in ring 0
+    # The IRET will switch to ring 3, and then the user code can set up its segments
+    # Or we can set them AFTER the iret in a trampoline
+    # For now, keep kernel segments - they're still accessible from ring 3
+    # Actually, that won't work. We need user segments.
+    # The problem is we can't load DPL=3 segments while in CPL=0
+    # But wait - we CAN load them, the issue is accessing them
+    # Let me try keeping the old approach but being more careful
+    
+    # Actually, let's try NOT setting DS/ES/FS/GS at all
+    # and let the user code do: mov $0x23, %ax; mov %ax, %ds etc.
     
     # Jump to user mode
     iret
