@@ -73,6 +73,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Support Master/Slave drives.
     - [ ] **AHCI:** Implement command list and FIS construction.
     - [ ] **NVMe:** Implement Admin Queue and I/O Queue submission/completion.
+    - [ ] **Partitioning & DevFS:**
+        - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables.
+        - [ ] **Registration:** Register device nodes (`/dev/ada0`, `/dev/ada0s1`) with DevFS.
 - [ ] **Input:**
     - [ ] **Keyboard (PS/2):**
         - [ ] **Controller:**
