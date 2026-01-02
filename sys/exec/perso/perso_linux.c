@@ -45,6 +45,8 @@ extern int sys_ioctl(int, uint32_t, void*);
 extern int sys_lstat(const char*, void*);
 extern int sys_fstat(int, void*);
 
+extern int sys_set_thread_area(void*);
+
 static void *linux_syscalls[MAX_SYSCALLS] = {
     [1] = &sys_exit,
     [2] = &sys_fork,
@@ -88,6 +90,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [183] = &sys_getcwd,
     [190] = &sys_vfork,
     [240] = &sys_futex,
+    [243] = &sys_set_thread_area,
 };
 
 struct personality personality_linux = {

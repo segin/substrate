@@ -253,6 +253,70 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     return -1;
 }
 
+// Linux struct user_desc for set_thread_area
+struct user_desc {
+    unsigned int entry_number;
+    unsigned int base_addr;
+    unsigned int limit;
+    unsigned int seg_32bit:1;
+    unsigned int contents:2;
+    unsigned int read_exec_only:1;
+    unsigned int limit_in_pages:1;
+    unsigned int seg_not_present:1;
+    unsigned int useable:1;
+};
+
+// GDT TLS entries (Linux uses entries 6, 7, 8 for TLS)
+#define GDT_TLS_ENTRIES 3
+#define GDT_TLS_START 6
+
+extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
+
+int sys_set_thread_area(struct user_desc *u_info) {
+    if (!u_info) return -14; // EFAULT
+    
+    struct user_desc info;
+    memcpy(&info, u_info, sizeof(info));
+    
+    // If entry_number is -1, allocate a new TLS entry
+    if (info.entry_number == (unsigned int)-1) {
+        info.entry_number = GDT_TLS_START; // Use first TLS slot
+    }
+    
+    // Validate entry number (TLS entries 6, 7, 8)
+    if (info.entry_number < GDT_TLS_START || 
+        info.entry_number >= GDT_TLS_START + GDT_TLS_ENTRIES) {
+        return -22; // EINVAL
+    }
+    
+    // Set up the GDT entry
+    // Access byte: 0xF2 = Present, Ring 3, Data segment, Expand-up, Writable
+    uint8_t access = 0xF2;
+    // Granularity: 0x40 = 32-bit segment, byte granularity
+    uint8_t gran = 0x40;
+    
+    if (info.limit_in_pages) {
+        gran |= 0x80; // Page granularity
+    }
+    if (!info.seg_32bit) {
+        gran &= ~0x40; // 16-bit segment
+    }
+    if (info.seg_not_present) {
+        access &= ~0x80; // Not present
+    }
+    
+    gdt_set_gate(info.entry_number, info.base_addr, info.limit, access, gran);
+    
+    // Load GS with the new selector (entry_number * 8 | RPL 3)
+    uint16_t selector = (info.entry_number << 3) | 3;
+    __asm__ volatile("mov %0, %%gs" : : "r"(selector));
+    
+    // Write back the entry number to user
+    u_info->entry_number = info.entry_number;
+    
+    return 0;
+}
+
 // Global pointer to current syscall's register frame (for fork)
 registers_t *syscall_regs = NULL;
 

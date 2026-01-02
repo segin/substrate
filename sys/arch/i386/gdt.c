@@ -4,11 +4,12 @@
 extern void gdt_flush(uint32_t);
 extern void tss_flush();
 
-gdt_entry_t gdt_entries[6] __attribute__((aligned(16)));
+// Expanded to 10 entries: 5 base + TSS + 3 TLS + 1 spare
+gdt_entry_t gdt_entries[10] __attribute__((aligned(16)));
 gdt_ptr_t   gdt_ptr;
 tss_entry_t tss_entry __attribute__((aligned(16)));
 
-static void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
+void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
     gdt_entries[num].base_low    = (base & 0xFFFF);
     gdt_entries[num].base_middle = (base >> 16) & 0xFF;
     gdt_entries[num].base_high   = (base >> 24) & 0xFF;
@@ -40,7 +41,7 @@ static void write_tss(int32_t num, uint16_t ss0, uint32_t esp0) {
 }
 
 void gdt_init() {
-    gdt_ptr.limit = (sizeof(gdt_entry_t) * 6) - 1;
+    gdt_ptr.limit = (sizeof(gdt_entry_t) * 10) - 1; // 10 entries: base + TSS + TLS
     gdt_ptr.base  = (uint32_t)&gdt_entries;
 
     gdt_set_gate(0, 0, 0, 0, 0);                // Null segment
