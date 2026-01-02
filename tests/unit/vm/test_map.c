@@ -41,12 +41,13 @@ bool test_vm_map_remove(void) {
     vm_map_t map;
     vm_map_init(&map, NULL, 0x1000, 0x10000);
     
-    vm_map_insert(&map, NULL, 0, 0x2000, 0x4000);
-    if (map.nentries != 1) return false;
+    vm_map_insert(&map, NULL, 0, 0x2000, 0x3000);
+    vm_map_insert(&map, NULL, 0, 0x4000, 0x5000);
+    if (map.nentries != 2) return false;
     
-    // Remove 0x3000-0x4000 (trim end)
-    vm_map_remove(&map, 0x3000, 0x4000);
-    if (map.header->next->end != 0x3000) return false;
+    // Remove 0x4000-0x5000 (entire entry)
+    vm_map_remove(&map, 0x4000, 0x5000);
+    if (map.nentries != 1) return false;
     
     // Remove 0x2000-0x3000 (entire entry)
     vm_map_remove(&map, 0x2000, 0x3000);

@@ -1,5 +1,9 @@
 #include <stdio.h>
 #include <stdbool.h>
+#include "../sys/vm/vm_zone.h"
+#include "../sys/vm/vm_kmem.h"
+#include "../sys/vm/vm_object.h"
+#include "../sys/vm/vm_page.h"
 
 // VM Tests
 extern bool test_kmem_basic_alloc(void);
@@ -22,35 +26,43 @@ extern bool test_swap_lifecycle(void);
 extern bool test_swap_full(void);
 extern bool test_vm_fault_cow_trigger(void);
 
-/*
-// Arch Tests (Mocked)
-extern bool test_gdt_structure(void);
-extern bool test_tss_stack_update(void);
-extern bool test_idt_exception_gates(void);
-extern bool test_smp_initial_count(void);
-extern bool test_acpi_discovery_logic(void);
-extern bool test_lapic_id_read(void);
-extern bool test_ioapic_init_logic(void);
-*/
-
 typedef struct {
-...
+    const char *name;
+    bool (*func)(void);
+} test_case_t;
+
+test_case_t tests[] = {
+    {"kmem_basic", test_kmem_basic_alloc},
+    {"kmem_multi", test_kmem_multiple_alloc},
+    {"kmem_large", test_kmem_too_large},
+    {"zone_basic", test_zone_create_and_alloc},
+    {"zone_exhaust", test_zone_exhaustion},
+    {"map_init", test_vm_map_init},
+    {"map_insert", test_vm_map_insert_and_find},
+    {"map_remove", test_vm_map_remove},
+    {"object_life", test_vm_object_lifecycle},
+    {"object_page", test_vm_object_page_mgmt},
+    {"page_queues", test_vm_page_queue_ops},
+    {"page_flags", test_vm_page_flags},
+    {"fault_anon", test_vm_fault_anonymous},
+    {"fault_prot", test_vm_fault_protection_violation},
+    {"mmap_logic", test_mmap_logic},
+    {"munmap_logic", test_munmap_logic},
+    {"swap_life", test_swap_lifecycle},
+    {"swap_full", test_swap_full},
     {"cow_trigger", test_vm_fault_cow_trigger},
-    /*
-    {"gdt_struct", test_gdt_structure},
-    {"tss_update", test_tss_stack_update},
-    {"idt_gates", test_idt_exception_gates},
-    {"smp_count", test_smp_initial_count},
-    {"smp_acpi", test_acpi_discovery_logic},
-    {"lapic_read", test_lapic_id_read},
-    {"ioapic_init", test_ioapic_init_logic},
-    */
     {NULL, NULL}
 };
 
 int main() {
     int passed = 0;
     int total = 0;
+
+    // Initialize subsystems
+    vm_zone_init();
+    kmem_init();
+    vm_object_init();
+    vm_page_init();
 
     printf("Starting TestUnix Unit Tests...\n");
     printf("--------------------------------\n");
