@@ -124,7 +124,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS:**
-    - [ ] Implement Mount points and filesystem registration.
+    - [x] Implement Mount points and filesystem registration.
     - [ ] Implement File Descriptor reference counting and management.
     - [ ] Implement Permissions checking (`access`).
     - [ ] Implement `chroot()`: Support per-process root directory.

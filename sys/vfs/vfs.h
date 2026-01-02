@@ -44,6 +44,20 @@ struct dirent {
     uint32_t ino;
 };
 
+typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
+
+typedef struct filesystem {
+    char name[32];
+    mount_type_t mount;
+    struct filesystem *next;
+} filesystem_t;
+
+typedef struct vfs_mount {
+    char path[128];
+    fs_node_t *root;
+    struct vfs_mount *next;
+} vfs_mount_t;
+
 // Standard VFS functions
 uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
 uint32_t write_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
@@ -51,6 +65,9 @@ void open_fs(fs_node_t *node, uint8_t read, uint8_t write);
 void close_fs(fs_node_t *node);
 struct dirent *readdir_fs(fs_node_t *node, uint32_t index);
 fs_node_t *finddir_fs(fs_node_t *node, char *name);
+
+void vfs_register_filesystem(filesystem_t *fs);
+int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data);
 
 extern fs_node_t *fs_root; // Global root node
 

@@ -1,6 +1,42 @@
 #include "vfs.h"
+#include <string.h>
 
 fs_node_t *fs_root = 0; 
+
+static filesystem_t *filesystems = NULL;
+
+void vfs_register_filesystem(filesystem_t *fs) {
+    fs->next = filesystems;
+    filesystems = fs;
+}
+
+int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
+    // Find filesystem type
+    filesystem_t *fs = filesystems;
+    while (fs) {
+        if (strcmp(fs->name, type) == 0) break;
+        fs = fs->next;
+    }
+    if (!fs) return -1;
+
+    // Call mount implementation
+    fs_node_t *root = fs->mount(device, flags, data);
+    if (!root) return -1;
+
+    // Add to mount list
+    // (Note: In a real system, we'd find the node at 'path' and mark it as a mountpoint)
+    // For now, we support mounting at / (root) or just adding to a list for lookup.
+    
+    if (strcmp(path, "/") == 0) {
+        fs_root = root;
+    } else {
+        // Find existing node and mark it
+        // fs_node_t *target = vfs_walk(path);
+        // if (target) { target->flags |= FS_MOUNTPOINT; target->ptr = root; }
+    }
+
+    return 0;
+}
 
 uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
     if (node->read != 0)
@@ -35,6 +71,12 @@ struct dirent *readdir_fs(fs_node_t *node, uint32_t index) {
 
 fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     if (!node) return 0; // Safety
+    
+    // If this is a mountpoint, cross into the mounted filesystem
+    if ((node->flags & FS_MOUNTPOINT) && node->ptr) {
+        node = node->ptr;
+    }
+
     if ((node->flags & 0x7) == FS_DIRECTORY && node->finddir != 0)
         return node->finddir(node, name);
     else
