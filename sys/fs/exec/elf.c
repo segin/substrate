@@ -359,26 +359,6 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     kprint("\n");
     
     // Jump to user mode! ESP now points to argc at _start
-    extern void jump_to_userspace(uint32_t entry_point, uint32_t user_stack);
-    
-    // Use inline assembly to verify parameters
-    uint32_t test_entry = entry;
-    uint32_t test_sp = sp;
-    kprint("DEBUG: About to call with test_entry=0x");
-    for (int i = 7; i >= 0; i--) {
-        int nib = (test_entry >> (i * 4)) & 0xF;
-        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf3[8] = '\0';
-    kprint(hexbuf3);
-    kprint(", test_sp=0x");
-    for (int i = 7; i >= 0; i--) {
-        int nib = (test_sp >> (i * 4)) & 0xF;
-        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf3[8] = '\0';
-    kprint(hexbuf3);
-    kprint("\n");
     
     // Jump to user mode! ESP now points to argc at _start
     // Use globals to ensure values get there
