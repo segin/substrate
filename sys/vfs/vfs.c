@@ -83,6 +83,27 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
         return 0;
 }
 
+int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode) {
+    if (uid == 0) return 0; // Root always has access
+
+    uint32_t mask = 0;
+    if (uid == node->uid) {
+        if (mode & 4) mask |= 0400;
+        if (mode & 2) mask |= 0200;
+        if (mode & 1) mask |= 0100;
+    } else if (gid == node->gid) {
+        if (mode & 4) mask |= 0040;
+        if (mode & 2) mask |= 0020;
+        if (mode & 1) mask |= 0010;
+    } else {
+        if (mode & 4) mask |= 0004;
+        if (mode & 2) mask |= 0002;
+        if (mode & 1) mask |= 0001;
+    }
+
+    return (node->mask & mask) == mask ? 0 : -1;
+}
+
 // Temporary Mock Root for Init testing
 static struct dirent mock_dirent;
 static fs_node_t mock_root;

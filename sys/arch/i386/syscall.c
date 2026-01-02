@@ -277,7 +277,25 @@ int sys_stat(const char *p, struct stat *buf) {
     }
     return 0; 
 }
-int sys_access(const char *p, int m) { (void)p; (void)m; return 0; }
+int sys_access(const char *path, int mode) {
+    if (!path) return -1;
+
+    fs_node_t *node = 0;
+    if (path[0] == '/') {
+        if (path[1] == 0) node = fs_root;
+        else node = finddir_fs(fs_root, (char*)path + 1);
+    } else {
+        node = finddir_fs(fs_root, (char*)path);
+    }
+
+    if (!node) return -1;
+
+    // F_OK check
+    if (mode == F_OK) return 0;
+
+    return vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
+}
+
 int sys_sync(void) { return 0; }
 int sys_pipe(int *p) { if(p) { p[0]=3; p[1]=4; } return 0; }
 int sys_dup(int oldfd) {

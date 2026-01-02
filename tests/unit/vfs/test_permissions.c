@@ -1,0 +1,42 @@
+#include <stdbool.h>
+#include <stddef.h>
+#include "../../../sys/sys/file.h"
+#include "../../../sys/kern/sched.h"
+
+extern int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
+
+bool test_vfs_permissions_root(void) {
+    fs_node_t node;
+    node.uid = 1000;
+    node.gid = 1000;
+    node.mask = 0; // No permissions for anyone
+    
+    // Root should still have access
+    if (vfs_check_permissions(&node, 0, 0, 7) != 0) return false;
+    
+    return true;
+}
+
+bool test_vfs_permissions_user(void) {
+    fs_node_t node;
+    node.uid = 1000;
+    node.gid = 1000;
+    node.mask = 0700; // rwx for owner
+    
+    if (vfs_check_permissions(&node, 1000, 1000, 7) != 0) return false;
+    if (vfs_check_permissions(&node, 1001, 1000, 7) == 0) return false; // Group match but not UID
+    
+    return true;
+}
+
+bool test_vfs_permissions_group(void) {
+    fs_node_t node;
+    node.uid = 1000;
+    node.gid = 1000;
+    node.mask = 0070; // rwx for group
+    
+    if (vfs_check_permissions(&node, 1001, 1000, 7) != 0) return false;
+    if (vfs_check_permissions(&node, 1001, 1001, 7) == 0) return false;
+    
+    return true;
+}

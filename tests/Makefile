@@ -14,7 +14,7 @@ UNIT_TESTS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/arch/test_trampoline.c \
              unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c \
              unit/kern/test_sync.c unit/kern/test_signal.c \
-             unit/vfs/test_fd.c \
+             unit/vfs/test_fd.c unit/vfs/test_permissions.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c
 

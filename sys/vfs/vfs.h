@@ -65,6 +65,7 @@ void open_fs(fs_node_t *node, uint8_t read, uint8_t write);
 void close_fs(fs_node_t *node);
 struct dirent *readdir_fs(fs_node_t *node, uint32_t index);
 fs_node_t *finddir_fs(fs_node_t *node, char *name);
+int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
 
 void vfs_register_filesystem(filesystem_t *fs);
 int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data);
