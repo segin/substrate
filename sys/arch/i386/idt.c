@@ -50,7 +50,20 @@ extern void isr30(void);
 extern void isr31(void);
 extern void isr32(void);  // IRQ0 (Timer)
 extern void isr33(void);  // IRQ1 (Keyboard)
+extern void isr34(void);  // IRQ2 (Cascade)
+extern void isr35(void);  // IRQ3 (COM2)
+extern void isr36(void);  // IRQ4 (COM1)
+extern void isr37(void);  // IRQ5 (LPT2)
+extern void isr38(void);  // IRQ6 (Floppy)
+extern void isr39(void);  // IRQ7 (LPT1/Spurious)
+extern void isr40(void);  // IRQ8 (RTC)
+extern void isr41(void);  // IRQ9
+extern void isr42(void);  // IRQ10
+extern void isr43(void);  // IRQ11
 extern void isr44(void);  // IRQ12 (Mouse)
+extern void isr45(void);  // IRQ13 (FPU)
+extern void isr46(void);  // IRQ14 (IDE Primary)
+extern void isr47(void);  // IRQ15 (IDE Secondary)
 extern void isr128(void); // Syscall (0x80)
 
 extern void timer_tick(void);
@@ -121,7 +134,20 @@ void idt_init(void) {
     
     idt_set_gate(32, (uint32_t)isr32, 0x08, 0x8E);
     idt_set_gate(33, (uint32_t)isr33, 0x08, 0x8E);
+    idt_set_gate(34, (uint32_t)isr34, 0x08, 0x8E);
+    idt_set_gate(35, (uint32_t)isr35, 0x08, 0x8E);
+    idt_set_gate(36, (uint32_t)isr36, 0x08, 0x8E);
+    idt_set_gate(37, (uint32_t)isr37, 0x08, 0x8E);
+    idt_set_gate(38, (uint32_t)isr38, 0x08, 0x8E);
+    idt_set_gate(39, (uint32_t)isr39, 0x08, 0x8E);
+    idt_set_gate(40, (uint32_t)isr40, 0x08, 0x8E);
+    idt_set_gate(41, (uint32_t)isr41, 0x08, 0x8E);
+    idt_set_gate(42, (uint32_t)isr42, 0x08, 0x8E);
+    idt_set_gate(43, (uint32_t)isr43, 0x08, 0x8E);
     idt_set_gate(44, (uint32_t)isr44, 0x08, 0x8E);
+    idt_set_gate(45, (uint32_t)isr45, 0x08, 0x8E);
+    idt_set_gate(46, (uint32_t)isr46, 0x08, 0x8E);
+    idt_set_gate(47, (uint32_t)isr47, 0x08, 0x8E);
     idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0xEE); // DPL=3
 
     idt_flush((uint32_t)&idt_ptr);
@@ -132,12 +158,7 @@ void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
     idt_entries[num].base_high = (base >> 16) & 0xFFFF;
     idt_entries[num].sel     = sel;
     idt_entries[num].always0 = 0;
-    idt_entries[num].flags   = flags | 0x60; // Set DPL=3 if needed? No, logic above sets 0x8E.
-    // Wait, 0x8E | 0x60 = 0xEE.
-    // Actually, | 0x60 sets DPL=3 ALWAYS.
-    // This is wrong for System gates (DPL=0).
-    // I should NOT OR with 0x60 blindly.
-    // Original code didn't have | 0x60 in Step 3504 code view.
+    idt_entries[num].flags   = flags;  // Use flags directly, caller sets DPL
     // So I will remove it.
     idt_entries[num].flags = flags;
 }
