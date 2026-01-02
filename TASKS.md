@@ -184,15 +184,17 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Support ELKS binaries (16-bit Real Mode via VM86).
         - [ ] **VM86:** Implement Virtual 8086 mode infrastructure (i386 only).
         - [ ] **Syscalls:** Implement `int 0x80` handling within VM86 context.
-    - [ ] **ELKS (Embeddable Linux Kernel Subset):**
-        - [ ] Support ELKS binaries (16-bit Real Mode via VM86).
-        - [ ] **VM86:** Implement Virtual 8086 mode infrastructure (i386 only).
-        - [ ] **Syscalls:** Implement `int 0x80` handling within VM86 context.
     - [ ] **Linux:**
         - [ ] Improve `sys_clone` compatibility (flags).
     - [ ] **Minix/386:**
         - [ ] Implement `send`/`receive` message passing syscalls.
         - [ ] Map Minix 3 kernel messages to native calls.
+    - [ ] **FreeBSD:**
+        - [ ] Complete `thr_new` implementation.
+        - [ ] **FreeBSD 14.3 Compatibility (i386):**
+            - [ ] Implement `struct kinfo_proc` (FreeBSD 14.3 layout).
+            - [ ] Implement `libkvm` backend for FreeBSD personality.
+            - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`.
     - [ ] **BSD Family (NetBSD/OpenBSD):**
         - [ ] Implement `__sysctl` (MIB-based configuration).
         - [ ] Support BSD-specific syscalls (`ktrace`, `pledge`/`unveil`).
