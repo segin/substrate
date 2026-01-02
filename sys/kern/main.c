@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "../drivers/video/vga.h"
+#include "../drivers/video/fb.h"
 #include "../drivers/serial/uart.h"
 #include "../drivers/input/keyboard.h"
 #include "../drivers/input/mouse.h"
@@ -116,6 +117,8 @@ void kmain(unsigned long magic, unsigned long addr) {
     }
 
     multiboot_info_t *mboot_info = (multiboot_info_t*)addr;
+    fb_init(mboot_info);
+
     char *cmdline = NULL;
     if (mboot_info->flags & (1<<2)) {
         cmdline = (char*)mboot_info->cmdline;

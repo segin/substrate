@@ -112,8 +112,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] `/dev/input` interface for userspace access.
 - [ ] **Video:**
     - [ ] **VESA/UEFI Framebuffer:**
-        - [ ] Parse Multiboot2 Framebuffer tag or UEFI GOP.
-        - [ ] Map framebuffer memory (requires VMM).
+        - [x] Parse Multiboot2 Framebuffer tag or UEFI GOP.
+        - [x] Map framebuffer memory (requires VMM).
     - [ ] **Framebuffer Console:**
         - [ ] Import a bitmap font (e.g., PSF or raw bitmap).
         - [ ] Implement `fb_putc` with blitting capability.
