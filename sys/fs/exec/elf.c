@@ -380,7 +380,19 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     kprint(hexbuf3);
     kprint("\n");
     
-    jump_to_userspace(test_entry, test_sp);
+    // Jump to user mode! ESP now points to argc at _start
+    // Use inline assembly to ensure correct parameter passing
+    kprint("execve: Manually jumping via inline asm...\n");
+    
+    __asm__ volatile(
+        "pushl %1\n\t"           // Push user_stack (2nd param)
+        "pushl %0\n\t"           // Push entry_point (1st param)  
+        "call jump_to_userspace\n\t"
+        "addl $8, %%esp\n\t"     // Clean up stack (should never get here)
+        :
+        : "r" (test_entry), "r" (test_sp)
+        : "memory"
+    );
     
     // Should never reach here
     return 0;
