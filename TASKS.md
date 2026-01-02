@@ -144,10 +144,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                             - [x] Support `null`.
                             - [x] Support `zero`.
                             - [x] Support `full`.
-                            - [x] Support `random`.
-                            - [ ] Support `tty`.
-                    
-    - [ ] **ProcFS (`/proc`):**
+                                    - [x] Support `random`.
+                                    - [x] Support `tty`.
+                                - [ ] **ProcFS (`/proc`):**
+                            
         - [ ] **Process Info:**
             - [ ] Expose `cmdline`.
             - [ ] Expose `maps`.
