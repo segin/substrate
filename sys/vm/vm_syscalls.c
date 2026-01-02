@@ -47,8 +47,9 @@ int sys_munmap(void *addr, size_t length) {
 
 #include <string.h>
 
-extern int pmap_enter(void *pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
-extern void *pmap_kernel(void);
+extern int pmap_enter(struct pmap *pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
+struct pmap;
+extern struct pmap *pmap_kernel(void);
 extern void *pmm_alloc_block(void);
 
 void *sys_brk(void *addr) {
@@ -69,7 +70,7 @@ void *sys_brk(void *addr) {
     uint32_t old_page_end = (old_brk + 0xFFF) & 0xFFFFF000;
     uint32_t new_page_end = (new_brk + 0xFFF) & 0xFFFFF000;
 
-    void *pmap = pmap_kernel();
+    struct pmap *pmap = pmap_kernel();
 
     if (new_page_end > old_page_end) {
         // Allocate and map new pages

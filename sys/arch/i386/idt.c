@@ -209,6 +209,8 @@ void isr_handler(registers_t *regs) {
             // User-mode crash - kill the process
             kprint("Killing user process.\n");
             if (current_process && current_process->pid == 1) {
+                extern void debug_dump_processes(void);
+                debug_dump_processes();
                 panic("init died - no recovery possible");
             }
             // Mark thread as zombie and yield
