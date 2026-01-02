@@ -27,7 +27,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **VM Subsystem (Machine Independent):**
             - [x] **VM Map:** `vm_map` structure representing an address space.
             - [x] **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
-            - [ ] **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
+            - [x] **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
             - [ ] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
     - [ ] **Kernel Allocator (UMA/Zone):**
         - [ ] **Zone Allocator:** Fixed-size object caching (equivalent to Slab, but BSD-style).
