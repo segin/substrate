@@ -41,7 +41,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **User Memory:**
         - [x] Implement `mmap`, `munmap`, `brk` system calls.
     - [ ] **SMP & Interrupts:**
-        - [ ] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
+        - [x] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
         - [ ] **Local APIC:** Initialize LAPIC for each core (timer, spurious interrupts).
         - [ ] **IO-APIC:** Route IRQs to specific cores (replace legacy PIC).
         - [ ] **Trampoline:** 16-bit real mode startup code for Application Processors (APs).
