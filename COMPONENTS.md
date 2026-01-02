@@ -5,7 +5,7 @@ This database tracks the engineering artifacts and verification status for every
 | Component | Status | Spec | Unit Test | Property Test | Fuzz Test |
 |-----------|--------|------|-----------|---------------|-----------|
 | **PMM (i386)** | Stable | [Doc](docs/specs/pmm.md) | [tests/unit/vm/test_pmm.c](tests/unit/vm/test_pmm.c) | [tests/unit/vm/prop_pmm.c](tests/unit/vm/prop_pmm.c) | [tests/fuzz/fuzz_pmm.c](tests/fuzz/fuzz_pmm.c) |
-| **PMAP (i386)** | Stable | [Doc](docs/specs/pmap.md) | [tests/unit/arch/test_pmap_i386.c](tests/unit/arch/test_pmap_i386.c) | No | No |
+| **PMAP (i386)** | Stable | [Doc](docs/specs/pmap.md) | [tests/unit/arch/test_pmap_i386.c](tests/unit/arch/test_pmap_i386.c) | [tests/unit/arch/prop_pmap_i386.c](tests/unit/arch/prop_pmap_i386.c) | [tests/fuzz/fuzz_pmap_i386.c](tests/fuzz/fuzz_pmap_i386.c) |
 | **PMAP (x86_64)** | Stable | [Doc](docs/specs/pmap.md) | [tests/unit/arch/test_pmap_x64.c](tests/unit/arch/test_pmap_x64.c) | No | No |
 | **VM Page** | Stable | [Doc](docs/specs/vm_page.md) | [tests/unit/vm/test_page.c](tests/unit/vm/test_page.c) | No | No |
 | **VM Map** | Stable | [Doc](docs/specs/vm_map.md) | [tests/unit/vm/test_map.c](tests/unit/vm/test_map.c) | No | No |
