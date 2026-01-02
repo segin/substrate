@@ -26,6 +26,15 @@ void pmap_init(void) {
 
 pmap_t pmap_kernel(void) { return kernel_pmap_ptr; }
 
+void pmap_activate(pmap_t pmap) {
+    uint64_t current_cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
+
+    if (current_cr3 != pmap->pml4_phys) {
+        __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pml4_phys));
+    }
+}
+
 static void pmap_invalidate_page(uint64_t va) {
     __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
 }

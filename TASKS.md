@@ -23,7 +23,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**
             - [x] `pmap_init`: Bootstrap PML4 paging structures.
             - [x] `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
-            - [ ] `pmap_activate`: Context switch hook (CR3 loading).
+            - [x] `pmap_activate`: Context switch hook (CR3 loading).
         - [ ] **VM Subsystem (Machine Independent):**
             - [ ] **VM Map:** `vm_map` structure representing an address space.
             - [ ] **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
