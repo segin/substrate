@@ -2,6 +2,7 @@
 #include "ps2.h"
 #include "../../arch/i386/io.h"
 #include "../../drivers/video/vga.h"
+#include "../../sys/input.h"
 
 static uint8_t mouse_buttons = 0;
 
@@ -55,7 +56,6 @@ static uint8_t mouse_cycle = 0;
 static int8_t  mouse_byte[3];
 static int32_t mouse_x = 0;
 static int32_t mouse_y = 0;
-static uint8_t mouse_buttons = 0;
 
 void mouse_handler(registers_t *regs) {
     uint8_t status = inb(PS2_STATUS_PORT);
@@ -90,6 +90,9 @@ void mouse_handler(registers_t *regs) {
                 mouse_y -= dy; // PS/2 Y-axis is inverted relative to screen coords
 
                 mouse_q_push(dx, -dy, mouse_buttons);
+                input_enqueue(EV_REL, 0, dx);
+                input_enqueue(EV_REL, 1, -dy);
+                input_enqueue(EV_KEY, 0x110, mouse_buttons & 1); // BTN_LEFT
 
                 // Log movement (optional)
                 // char buf[64];

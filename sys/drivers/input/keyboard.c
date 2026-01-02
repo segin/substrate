@@ -2,6 +2,7 @@
 #include "ps2.h"
 #include "../../arch/i386/io.h"
 #include "../../drivers/video/vga.h"
+#include "../../sys/input.h"
 
 #define KBD_BUFFER_SIZE 256
 static char kbd_buffer[KBD_BUFFER_SIZE];
@@ -66,6 +67,7 @@ void keyboard_handler(registers_t *regs) {
             char c = kbd_us[scancode];
             if (c) {
                 kbd_push(c);
+                input_enqueue(EV_KEY, scancode, 1);
             }
         }
     }

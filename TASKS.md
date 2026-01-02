@@ -108,8 +108,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Event Queue:**
             - [x] Push mouse events (dx, dy, buttons) to a system queue.
     - [ ] **Input Subsystem:**
-        - [ ] Abstract `input_event` structure (type, code, value).
-        - [ ] `/dev/input` interface for userspace access.
+        - [x] Abstract `input_event` structure (type, code, value).
+        - [x] `/dev/input` interface for userspace access.
 - [ ] **Video:**
     - [ ] **VESA/UEFI Framebuffer:**
         - [ ] Parse Multiboot2 Framebuffer tag or UEFI GOP.
