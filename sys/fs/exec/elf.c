@@ -320,6 +320,24 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     kprint(hexbuf2);
     kprint("\n");
     
+    // DEBUG: Print sp one more time right before jump
+    kprint("execve: About to jump with sp=0x");
+    char hexbuf3[16];
+    for (int i = 7; i >= 0; i--) {
+        int nib = (sp >> (i * 4)) & 0xF;
+        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    hexbuf3[8] = '\0';
+    kprint(hexbuf3);
+    kprint(", entry=0x");
+    for (int i = 7; i >= 0; i--) {
+        int nib = (entry >> (i * 4)) & 0xF;
+        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    hexbuf3[8] = '\0';
+    kprint(hexbuf3);
+    kprint("\n");
+    
     kprint("execve: Jumping to userspace...\n");
     
     // Jump to user mode! ESP now points to argc at _start
