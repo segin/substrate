@@ -43,7 +43,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **SMP & Interrupts:**
         - [x] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
         - [x] **Local APIC:** Initialize LAPIC for each core (timer, spurious interrupts).
-        - [ ] **IO-APIC:** Route IRQs to specific cores (replace legacy PIC).
+        - [x] **IO-APIC:** Route IRQs to specific cores (replace legacy PIC).
         - [ ] **Trampoline:** 16-bit real mode startup code for Application Processors (APs).
         - [ ] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
 - [ ] **Scheduling (BSD-style):**
