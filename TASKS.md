@@ -103,9 +103,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **Initialization:**
                 - [x] Enable auxiliary device (IRQ12).
                 - [x] Set sample rate/resolution.
-            - [ ] **Packet Parsing:**
-     Decode 3-byte (or 4-byte) movement/button packets.
-        - [ ] **Event Queue:** Push mouse events (dx, dy, buttons) to a system queue.
+        - [ ] **Packet Parsing:**
+            - [x] Decode 3-byte (or 4-byte) movement/button packets.
+        - [ ] **Event Queue:**
     - [ ] **Input Subsystem:**
         - [ ] Abstract `input_event` structure (type, code, value).
         - [ ] `/dev/input` interface for userspace access.

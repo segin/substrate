@@ -27,12 +27,50 @@ void mouse_init(void) {
     vga_write("Mouse Driver Initialized.\n", 26);
 }
 
+static uint8_t mouse_cycle = 0;
+static int8_t  mouse_byte[3];
+static int32_t mouse_x = 0;
+static int32_t mouse_y = 0;
+static uint8_t mouse_buttons = 0;
+
 void mouse_handler(registers_t *regs) {
     uint8_t status = inb(PS2_STATUS_PORT);
     if (status & 1) {
         uint8_t data = inb(PS2_DATA_PORT);
-        // Process mouse data packet here
-        (void)data;
+        
+        switch (mouse_cycle) {
+            case 0:
+                mouse_byte[0] = data;
+                // Bit 3 should always be 1 for the first byte
+                if (data & 0x08) mouse_cycle++;
+                break;
+            case 1:
+                mouse_byte[1] = data;
+                mouse_cycle++;
+                break;
+            case 2:
+                mouse_byte[2] = data;
+                mouse_cycle = 0;
+
+                // Decode
+                mouse_buttons = mouse_byte[0] & 0x07; // Left, Right, Middle bits
+                
+                int32_t dx = (int32_t)mouse_byte[1];
+                int32_t dy = (int32_t)mouse_byte[2];
+
+                // Handle sign bits
+                if (mouse_byte[0] & 0x10) dx -= 256;
+                if (mouse_byte[0] & 0x20) dy -= 256;
+
+                mouse_x += dx;
+                mouse_y -= dy; // PS/2 Y-axis is inverted relative to screen coords
+
+                // Log movement (optional)
+                // char buf[64];
+                // snprintf(buf, 64, "Mouse: %d, %d buttons=%x\n", mouse_x, mouse_y, mouse_buttons);
+                // vga_write(buf, strlen(buf));
+                break;
+        }
     }
     
     // Send EOI to slave PIC
@@ -40,4 +78,10 @@ void mouse_handler(registers_t *regs) {
     // Send EOI to master PIC
     outb(0x20, 0x20);
     (void)regs;
+}
+
+void mouse_get_state(int32_t *x, int32_t *y, uint8_t *buttons) {
+    if (x) *x = mouse_x;
+    if (y) *y = mouse_y;
+    if (buttons) *buttons = mouse_buttons;
 }

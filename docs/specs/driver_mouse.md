@@ -11,15 +11,25 @@ The mouse driver manages input from standard PS/2 mouse devices via the auxiliar
 
 ## Interrupt Handling
 - **IRQ:** 12 (IDT vector 44).
-- **Handler:** Reads raw bytes from the data port (0x60).
+- **Handler:** Reads raw bytes from the data port (0x60) and decodes 3-byte packets.
+
+## Packet Decoding
+- **Byte 0:** Button states (Left, Right, Middle) and sign bits for X/Y movement.
+- **Byte 1:** X movement.
+- **Byte 2:** Y movement.
+- **Scaling:** Signed 8-bit values are accumulated into global `mouse_x` and `mouse_y` coordinates.
 
 ## API
 ### `void mouse_init(void)`
 Performs mouse initialization and enables interrupts.
 
 ### `void mouse_handler(registers_t *regs)`
-ISR for IRQ12. Processes raw mouse data.
+ISR for IRQ12. Processes raw mouse data and decodes packets.
+
+### `void mouse_get_state(int32_t *x, int32_t *y, uint8_t *buttons)`
+Returns the current accumulated position and button state.
 
 ## Constraints
-- Packet parsing (decoding movement and buttons) is not yet implemented.
-- Polling used for initial communication; interrupts used for data.
+- Does not yet support 4-byte IntelliMouse packets (Scroll wheel).
+- Accumulated coordinates are unbound (no screen resolution clipping).
+- Not yet integrated with an event queue.
