@@ -25,7 +25,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
             - [x] `pmap_activate`: Context switch hook (CR3 loading).
         - [ ] **VM Subsystem (Machine Independent):**
-            - [ ] **VM Map:** `vm_map` structure representing an address space.
+            - [x] **VM Map:** `vm_map` structure representing an address space.
             - [ ] **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
             - [ ] **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
             - [ ] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.

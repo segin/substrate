@@ -3,7 +3,7 @@ include ../../Makefile.inc
 CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../sys
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = vm_page.c
+SRCS = vm_page.c vm_map.c
 OBJS = $(SRCS:.c=.o)
 
 all: vm.o
