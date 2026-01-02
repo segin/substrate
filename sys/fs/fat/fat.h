@@ -52,7 +52,19 @@ typedef struct {
     uint32_t file_size;
 } __attribute__((packed)) fat_dirent_t;
 
+typedef struct {
+    uint8_t  order;
+    uint16_t name1[5];
+    uint8_t  attr;
+    uint8_t  type;
+    uint8_t  checksum;
+    uint16_t name2[6];
+    uint16_t cluster;
+    uint16_t name3[2];
+} __attribute__((packed)) fat_lfn_t;
+
 void fat_init(void);
 uint32_t fat_get_next_cluster(uint32_t cluster);
+int fat_parse_lfn(fat_lfn_t *lfn, char *buffer);
 
 #endif

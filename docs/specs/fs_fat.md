@@ -8,12 +8,16 @@ The FAT driver provides compatibility with standard MS-DOS and Windows formatted
 - **FAT (File Allocation Table):** A linked list of clusters representing file data.
 - **Cluster Chaining:** `fat_get_next_cluster()` reads the FAT to find the next part of a file.
 - **Directory Entries:** 32-byte structures containing 8.3 filenames, attributes, and starting cluster.
+- **LFN (Long File Names):** Uses multiple consecutive directory entries with the `ATTR_LONG_NAME` attribute to store filenames up to 255 characters in UTF-16.
 
 ## API
 ### `uint32_t fat_get_next_cluster(uint32_t cluster)`
 Retrieves the next cluster index in a chain.
 
+### `int fat_parse_lfn(fat_lfn_t *lfn, char *buffer)`
+Decodes a Long File Name entry into the provided buffer.
+
 ## Constraints
-- LFN (Long File Names) are not yet supported.
+- LFN support is currently stubbed.
 - Write support is not yet implemented.
-- Cluster calculation currently stubbed.
+- UTF-16 to ASCII conversion is not yet functional.

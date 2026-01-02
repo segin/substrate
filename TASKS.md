@@ -135,7 +135,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [x] Implement Directory entry creation/deletion.
 - [ ] **FAT16/32:**
     - [x] Implement File Allocation Table parsing and chain following.
-    - [ ] Implement Long File Name (LFN) support.
+    - [x] Implement Long File Name (LFN) support.
 - [ ] **Pseudo-FS:**
     - [ ] **DevFS (`/dev`):**
         - [ ] **Device Registry:** Mechanism for drivers to register Character/Block devices.
