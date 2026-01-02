@@ -29,7 +29,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
             - [x] **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
             - [x] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
-            - [ ] **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
+            - [x] **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
             - [ ] **Swap Subsystem:**
                 - [ ] **Pager:** Implement a swap pager to move pages to/from disk.
                 - [ ] **Backing Store:** Support swap files or partitions.

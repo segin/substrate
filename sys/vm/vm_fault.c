@@ -33,6 +33,19 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     // 4. Lookup existing page
     vm_page_t *m = vm_object_lookup_page(obj, pindex);
 
+    if (m && (prot & VM_PROT_WRITE) && (obj->ref_count > 1)) {
+        // Copy-on-Write: Create a new private copy
+        vm_page_t *new_m = vm_page_alloc(NULL, 0, 0); // Temporary orphan page
+        if (!new_m) return VM_FAULT_ERROR;
+
+        // TODO: pmap_copy_page(m->phys_addr, new_m->phys_addr);
+        new_m->flags |= PG_VALID | PG_DIRTY;
+
+        // Replace old page in object (if it's a private shadowing object)
+        // For now, we'll just switch the mapping to the new page.
+        m = new_m;
+    }
+
     if (!m) {
         // 5. Page not present, allocate it
         m = vm_page_alloc(obj, pindex, 0);
