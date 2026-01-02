@@ -21,7 +21,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] `pmap_activate`: Context switch hook (CR3 loading).
             - [x] **Recursive Paging:** Efficient Page Table mapping.
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**
-            - [ ] `pmap_init`: Bootstrap PML4 paging structures.
+            - [x] `pmap_init`: Bootstrap PML4 paging structures.
             - [ ] `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
             - [ ] `pmap_activate`: Context switch hook (CR3 loading).
         - [ ] **VM Subsystem (Machine Independent):**
