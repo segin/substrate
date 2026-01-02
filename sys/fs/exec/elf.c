@@ -280,6 +280,18 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     sp &= ~15;
     
     // 4. Build auxiliary vector (for Linux compatibility)
+    // Re-read ELF header to get program header info for auxv
+    Elf32_Ehdr ehdr;
+    if (file->read(file, 0, sizeof(Elf32_Ehdr), (uint8_t *)&ehdr) == sizeof(Elf32_Ehdr)) {
+        // AT_ENTRY - entry point
+        sp -= 8; *(uint32_t *)sp = 9; *((uint32_t *)sp + 1) = entry; // AT_ENTRY
+        // AT_PHNUM - number of program headers  
+        sp -= 8; *(uint32_t *)sp = 5; *((uint32_t *)sp + 1) = ehdr.e_phnum; // AT_PHNUM
+        // AT_PHENT - size of program header entry
+        sp -= 8; *(uint32_t *)sp = 4; *((uint32_t *)sp + 1) = ehdr.e_phentsize; // AT_PHENT
+        // AT_PHDR - program headers in memory (loaded at e_phoff from file start)
+        sp -= 8; *(uint32_t *)sp = 3; *((uint32_t *)sp + 1) = 0x08048000 + ehdr.e_phoff; // AT_PHDR (assume loaded at 0x08048000)
+    }
     // Push in reverse order (since stack grows down)
     sp -= 8; *(uint32_t *)sp = 0; *((uint32_t *)sp + 1) = 0; // AT_NULL
     sp -= 8; *(uint32_t *)sp = 6; *((uint32_t *)sp + 1) = 0x1000; // AT_PAGESZ = 4096
