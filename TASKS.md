@@ -121,7 +121,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] Implement File Descriptor reference counting and management.
     - [ ] Implement Permissions checking (`access`).
     - [ ] Implement `chroot()`: Support per-process root directory.
-- [ ] **EXT2:**
+    - [ ] **Auto-detection:** Implement filesystem probing/recognition during mount.
+    - [ ] **Unified Interface:** Ensure Sockets, Pipes, and Devices operate through VFS vnodes.
+- [ ] **EXT2 (Native Filesystem):**
     - [ ] Implement Inode and Block allocation/freeing.
     - [ ] Implement Directory entry creation/deletion.
 - [ ] **FAT16/32:**
@@ -271,7 +273,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Starts the default Desktop Environment shell on success.
     - [ ] **`login` (CLI):** Implement PAM-like authentication or shadow file reading.
     - [ ] **`ps`:** Read from `/proc`.
+    - [ ] **`ps`:** Read from `/proc`.
     - [ ] **`top`:** Real-time process monitoring.
+    - [ ] **Filesystem Tools (`sbin/`):**
+        - [ ] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
+        - [ ] **`fsck`:** Implement `ext2` consistency check.
 
 ### 8. Security and Identity
 - [ ] **User & Group Management:**
