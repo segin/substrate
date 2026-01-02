@@ -30,10 +30,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
             - [x] **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
             - [x] **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
-            - [ ] **Swap Subsystem:**
-                - [ ] **Pager:** Implement a swap pager to move pages to/from disk.
-                - [ ] **Backing Store:** Support swap files or partitions.
-                - [ ] **Policy:** Implement page replacement algorithm (Clock/LRU).
+            - [x] **Swap Subsystem:**
+                - [x] **Pager:** Implement a swap pager to move pages to/from disk.
+                - [x] **Backing Store:** Support swap files or partitions.
+                - [x] **Policy:** Implement page replacement algorithm (Clock/LRU).
             - [ ] **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
     - [ ] **Kernel Allocator (UMA/Zone):**
         - [x] **Zone Allocator:** Fixed-size object caching (equivalent to Slab, but BSD-style).
