@@ -140,8 +140,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Expose `meminfo`.
             - [ ] Expose `uptime`.
         - [ ] **Dynamic generation:** Generate content on `read()` (virtual files).
-        - [ ] **Personality Awareness:** Detect caller personality (Linux/FreeBSD) and adjust data formats accordingly (e.g., `status` file layout).
-        - [ ] **Emulation Mounts:** support mounting native procfs at `/emul/linux/proc` and `/emul/freebsd/proc` with forced personality formatting.
+        - [ ] **Personality Awareness:** Detect caller personality (Linux/FreeBSD) and adjust file contents/formats dynamically (e.g., `status` file structure).
     - [ ] **SysFS (`/sys`):**
         - [ ] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
         - [ ] **Attributes:** Map kernel variables to readable/writable files.
