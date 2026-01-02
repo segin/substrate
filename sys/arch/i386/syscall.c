@@ -254,15 +254,36 @@ int sys_thr_new(struct thr_param *param, int param_size) {
 registers_t *syscall_regs = NULL;
 
 void syscall_handler(registers_t *regs) {
-    if (!current_process || !current_process->pers) return;
+    if (!current_process || !current_process->pers) {
+        regs->eax = -38; // ENOSYS
+        return;
+    }
     
     // Save regs pointer for special syscalls like fork
     syscall_regs = regs;
     
     struct personality *p = current_process->pers;
-    if (regs->eax >= p->syscall_count) return;
+    
+    // Check if syscall number is out of range
+    if (regs->eax >= p->syscall_count) {
+        char buf[64];
+        sprintf(buf, "syscall: unimplemented #%u\n", (unsigned int)regs->eax);
+        kprint(buf);
+        regs->eax = -38; // ENOSYS
+        return;
+    }
+    
     void *location = p->syscall_table[regs->eax];
-    if (!location) return;
+    
+    // Check if syscall handler is NULL (not implemented)
+    if (!location) {
+        char buf[64];
+        sprintf(buf, "syscall: unimplemented #%u\n", (unsigned int)regs->eax);
+        kprint(buf);
+        regs->eax = -38; // ENOSYS
+        return;
+    }
+    
     typedef int (*sys_func_t)(uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
     regs->eax = func(regs->ebx, regs->ecx, regs->edx);
