@@ -93,7 +93,8 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     // In higher-half kernel, physical needs to be converted
     #define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
     uint32_t *kstack = (uint32_t *)((uint32_t)P2V(kstack_base2) + 0x1000);
-    
+    t->kstack_top = (uintptr_t)kstack;
+
     // Build IRET frame on child's kernel stack
     // push in reverse order (stack grows down)
     kstack--; *kstack = regs->ss;         // SS
@@ -140,6 +141,7 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     
     // Simulate stack frame for "entry_point(arg)"
     uint32_t *stk = (uint32_t*)stack;
+    t->kstack_top = (uintptr_t)stk;
     
     // Correct stack for switch_to (same as before):
     // [Arg]
