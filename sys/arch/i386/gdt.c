@@ -6,7 +6,7 @@ extern void tss_flush();
 
 gdt_entry_t gdt_entries[6] __attribute__((aligned(16)));
 gdt_ptr_t   gdt_ptr;
-tss_entry_t tss_entry;
+tss_entry_t tss_entry __attribute__((aligned(16)));
 
 static void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
     gdt_entries[num].base_low    = (base & 0xFFFF);
