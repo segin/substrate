@@ -86,7 +86,12 @@ void pmap_destroy(pmap_t pmap) {
 }
 
 void pmap_activate(pmap_t pmap) {
-    __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pdir_phys));
+    uint32_t current_cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
+    
+    if (current_cr3 != pmap->pdir_phys) {
+        __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pdir_phys));
+    }
 }
 
 // Recursive Paging Helpers
