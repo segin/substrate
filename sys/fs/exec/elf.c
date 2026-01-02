@@ -340,9 +340,47 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     
     kprint("execve: Jumping to userspace...\n");
     
+    // DEBUG: Manually inspect what will be pushed
+    kprint("DEBUG: Checking parameters before call:\n");
+    kprint("  entry (will be 1st param) = 0x");
+    for (int i = 7; i >= 0; i--) {
+        int nib = (entry >> (i * 4)) & 0xF;
+        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    hexbuf3[8] = '\0';
+    kprint(hexbuf3);
+    kprint("\n  sp (will be 2nd param) = 0x");
+    for (int i = 7; i >= 0; i--) {
+        int nib = (sp >> (i * 4)) & 0xF;
+        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    hexbuf3[8] = '\0';
+    kprint(hexbuf3);
+    kprint("\n");
+    
     // Jump to user mode! ESP now points to argc at _start
     extern void jump_to_userspace(uint32_t entry_point, uint32_t user_stack);
-    jump_to_userspace(entry, sp);
+    
+    // Use inline assembly to verify parameters
+    uint32_t test_entry = entry;
+    uint32_t test_sp = sp;
+    kprint("DEBUG: About to call with test_entry=0x");
+    for (int i = 7; i >= 0; i--) {
+        int nib = (test_entry >> (i * 4)) & 0xF;
+        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    hexbuf3[8] = '\0';
+    kprint(hexbuf3);
+    kprint(", test_sp=0x");
+    for (int i = 7; i >= 0; i--) {
+        int nib = (test_sp >> (i * 4)) & 0xF;
+        hexbuf3[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    hexbuf3[8] = '\0';
+    kprint(hexbuf3);
+    kprint("\n");
+    
+    jump_to_userspace(test_entry, test_sp);
     
     // Should never reach here
     return 0;
