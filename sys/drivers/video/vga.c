@@ -6,9 +6,9 @@
 extern int fb_active;
 extern int serial_debug_enabled;
 
-static const size_t VGA_WIDTH = 80;
-static const size_t VGA_HEIGHT = 25;
-static uint16_t* const VGA_MEMORY = (uint16_t*) 0xB8000;
+static size_t VGA_WIDTH = 80;
+static size_t VGA_HEIGHT = 25;
+static uint16_t* const VGA_MEMORY = (uint16_t*) 0xC00B8000;
 
 static size_t terminal_row;
 static size_t terminal_column;
@@ -210,6 +210,34 @@ static console_backend_t vga_console = {
 // But we should use console_write everywhere.
 void vga_write(const char* data, size_t size) {
     vga_console_write(data, size);
+}
+
+void vga_set_mode(int width, int height) {
+    if (width == 80 && (height == 50 || height == 60 || height == 25)) {
+        VGA_WIDTH = width;
+        VGA_HEIGHT = height;
+        
+        // standard VGA registers for 80x50/60 often involve adjusting 
+        // the Maximum Scan Line register in the CRT controller.
+        // For 80x50, we want 8x8 font.
+        if (height == 50) {
+            // Set max scanline to 7 (8 pixels high)
+            outb(0x3D4, 0x09);
+            uint8_t val = inb(0x3D5);
+            val &= ~0x1F;
+            val |= 0x07;
+            outb(0x3D5, val);
+        } else if (height == 25) {
+            // Restore default (max scanline 15 -> 16 pixels high)
+            outb(0x3D4, 0x09);
+            uint8_t val = inb(0x3D5);
+            val &= ~0x1F;
+            val |= 0x0F;
+            outb(0x3D5, val);
+        }
+        // 60 and 132 would need more complex SVGA/VESA logic or custom VGA timings.
+        // For this prototype, we'll support 80x25 and 80x50.
+    }
 }
 
 void vga_init(void) {

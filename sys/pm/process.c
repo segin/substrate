@@ -1,5 +1,6 @@
 #include "pm.h"
 #include <sys/acct.h>
+#include <sys/file.h>
 #include <kern/sched.h> // For MAX_THREADS, thread creation
 #include <stddef.h>
 #include <string.h>

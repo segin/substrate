@@ -2,6 +2,7 @@
 #include "multiboot.h"
 #include "e820.h"
 #include <string.h>
+#include "../../kern/console.h"
 
 static uint8_t* pmm_bitmap;
 static size_t pmm_bitmap_size;
@@ -48,14 +49,53 @@ static void pmm_init_bitmap(void) {
 
 static void pmm_reserve_kernel(void) {
     extern uint32_t _kernel_end;
-    uint32_t kernel_end = (uint32_t)&_kernel_end;
+    uint32_t v_end = (uint32_t)(uintptr_t)&_kernel_end;
     
-    // Reserve everything from 0 up to kernel_end, aligned to next block
-    // Also ensuring at least 1MB is reserved if kernel is small (which it isn't, but for safety)
-    if (kernel_end < 0x100000) kernel_end = 0x100000;
+    // Convert higher-half virtual end to physical end
+    // (Assuming linear mapping V = P + 0xC0000000)
+    uint32_t p_end = v_end - 0xC0000000;
     
-    for (uint32_t i = 0; i < kernel_end; i += PMM_BLOCK_SIZE) {
+    // Reserve first 1MB for BIOS/Multiboot safety
+    for (uint32_t i = 0; i < 0x100000; i += PMM_BLOCK_SIZE) {
         pmm_mark_used(i);
+    }
+    
+    // Reserve kernel physical range (starts at 1MB)
+    for (uint32_t i = 0x100000; i < p_end; i += PMM_BLOCK_SIZE) {
+        pmm_mark_used(i);
+    }
+}
+
+// Reclaim early boot setup memory
+void pmm_reclaim_setup(void) {
+    extern uint32_t _setup_start, _setup_end;
+    uint32_t start = (uint32_t)(uintptr_t)&_setup_start;
+    uint32_t end = (uint32_t)(uintptr_t)&_setup_end;
+    uint32_t size = end - start;
+    
+    kprint("Freeing unused kernel memory: ");
+    // Print size in KB
+    char buf[16];
+    uint32_t kb = size / 1024;
+    int pos = 0;
+    if (kb == 0) {
+        buf[pos++] = '0';
+    } else {
+        int started = 0;
+        for (int div = 1000; div >= 1; div /= 10) {
+            int digit = (kb / div) % 10;
+            if (digit || started) {
+                buf[pos++] = '0' + digit;
+                started = 1;
+            }
+        }
+    }
+    buf[pos] = '\0';
+    kprint(buf);
+    kprint("K\n");
+    
+    for (uint32_t i = start; i < end; i += PMM_BLOCK_SIZE) {
+        pmm_free_block((void*)i);
     }
 }
 

@@ -2,10 +2,15 @@
 #define _SYS_PROC_H
 
 #include <stdint.h>
-#include "../exec/perso/personality.h"
-#include "file.h"
-#include "acct.h"
-#include "signal.h"
+#include <sys/acct.h>
+#include <sys/signal.h>
+
+// Forward declarations
+struct personality;
+struct fs_node;
+typedef struct fs_node fs_node_t;
+struct file;
+typedef struct file file_t;
 
 #define MAX_FD 32
 
@@ -29,6 +34,8 @@ typedef struct process {
     uint32_t uid;
     uint32_t gid;
     uint8_t  ac_flag;
+    
+    fs_node_t *tty;      // Controlling Terminal
     
     // Resource limits, FDs, etc. would go here
 } process_t;

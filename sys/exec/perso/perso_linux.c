@@ -35,13 +35,18 @@ extern int sys_getpid(void);
 extern int sys_getcwd(char*, size_t);
 extern int sys_clone(uint32_t, void*, int*, void*, int*);
 extern int sys_futex(int*, int, int, void*, int*, int);
+extern int sys_fork(void);
+extern int sys_vfork(void);
+extern int sys_execve(const char*, char**, char**);
 
 static void *linux_syscalls[MAX_SYSCALLS] = {
     [1] = &sys_exit,
+    [2] = &sys_fork,
     [3] = &sys_read,
     [4] = &sys_write,
     [5] = &sys_open,
     [6] = &sys_close,
+    [11] = &sys_execve,
     [13] = &sys_time,
     [14] = &sys_mknod,
     [19] = &sys_lseek,
@@ -69,6 +74,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [141] = &sys_getdents,
     [162] = &sys_nanosleep,
     [183] = &sys_getcwd,
+    [190] = &sys_vfork,
     [240] = &sys_futex,
 };
 

@@ -37,6 +37,7 @@ extern int sys_getpid(void);
 extern int sys_getcwd(char*, size_t);
 extern int sys_execve(const char*, char**, char**);
 extern int sys_fork(void);
+extern int sys_vfork(void);
 
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
@@ -48,6 +49,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXECVE] = &sys_execve,
     [13] = &sys_time,
     [14] = &sys_mknod,
+    [66] = &sys_vfork,  // BSD/Linux vfork syscall number
     [19] = &sys_lseek,
     [20] = &sys_getpid,
     [21] = &sys_mount,

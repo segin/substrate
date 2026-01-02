@@ -65,3 +65,5 @@ sys/kernel.freebsd
 sys/kernel.multiboot
 sys/kernel.zimage
 sys/screen.png
+last_boot.txt
+.gitignore

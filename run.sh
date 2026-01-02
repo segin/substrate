@@ -8,6 +8,7 @@
 qemu-system-i386 \
   -kernel sys/kernel.multiboot \
   -m 128M \
-  -serial stdio \
-  -drive file=root.img,format=raw,index=2,media=disk \
+  -display none \
+  -serial file:serial.log \
+  -drive file=root.img,format=raw,index=0,media=disk \
   -append "serial_debug root=/dev/storage/ide0"

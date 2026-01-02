@@ -12,12 +12,14 @@ void panic(const char *msg) {
         vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_RED);
     }
 
-    console_write("\n *** KERNEL PANIC ***\n\n", 24);
-    
     if (msg) {
+        console_write("\n*** KERNEL PANIC ***\n\n", 22);
         console_write("Reason: ", 8);
         console_write(msg, strlen(msg));
         console_write("\n", 1);
+    } else {
+        console_write("\n*** KERNEL PANIC ***\n\n", 22);
+        console_write("Reason: Unknown error\n", 22);
     }
 
     console_write("\nSystem Halted.", 15);

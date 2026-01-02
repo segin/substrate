@@ -6,5 +6,6 @@
 void cmdline_init(const char *cmdline);
 int cmdline_has(const char *key);
 int cmdline_get(const char *key, char *buf, size_t buf_len);
+int cmdline_get_full(char *buf, size_t buf_len);
 
 #endif

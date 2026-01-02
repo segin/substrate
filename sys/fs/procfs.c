@@ -1,6 +1,7 @@
 #include "../vfs/vfs.h"
 #include <sys/proc.h>
 #include "../../pm/pm.h"
+#include "../exec/perso/personality.h"
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>

@@ -57,9 +57,10 @@ int sys_write(int fd, const char *buf, int len) {
 
 int sys_read(int fd, char *buf, int len) {
     if (fd == 0) {
-        // Stdin (keyboard?)
-        // Stub: return 0 (EOF)
-        return 0;
+        // Stdin - read from console input buffer (keyboard)
+        extern void console_read(char *data, size_t len);
+        console_read(buf, len);
+        return len;
     }
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
@@ -248,8 +249,15 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     return -1;
 }
 
+// Global pointer to current syscall's register frame (for fork)
+registers_t *syscall_regs = NULL;
+
 void syscall_handler(registers_t *regs) {
     if (!current_process || !current_process->pers) return;
+    
+    // Save regs pointer for special syscalls like fork
+    syscall_regs = regs;
+    
     struct personality *p = current_process->pers;
     if (regs->eax >= p->syscall_count) return;
     void *location = p->syscall_table[regs->eax];
@@ -498,14 +506,29 @@ int sys_waitpid(int pid, int *status, int options) {
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
 
 int sys_execve(const char *f, char *const a[], char *const e[]) {
-    (void)f; (void)a; (void)e;
-    return -1;
+    extern int elf_execve(const char *path, char *const argv[], char *const envp[]);
+    return elf_execve(f, a, e);
 }
 
 int sys_fork(void) {
+    // Fork needs access to the current syscall's register frame
+    extern registers_t *syscall_regs;
     // In a real OS, fork() returns 0 in the child and the child's PID in the parent.
-    // Our simplified scheduler handles process creation.
-    return sched_fork_process(current_process, NULL); // NULL stack means duplicate? 
+    return sched_fork_process(current_process, syscall_regs);
+}
+
+int sys_vfork(void) {
+    // vfork: child shares parent's address space, parent blocks until child exec/exit
+    // For now, implement as regular fork (simpler, same behavior but less efficient)
+    // A proper implementation would:
+    // 1. Not duplicate page tables
+    // 2. Mark parent as VFORK_WAITING
+    // 3. Only run child until it execs or exits
+    // 4. Resume parent after child's exec/exit
+    
+    // Simple implementation: just call fork
+    extern registers_t *syscall_regs;
+    return sched_fork_process(current_process, syscall_regs);
 }
 
 int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0; }

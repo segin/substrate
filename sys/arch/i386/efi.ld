@@ -3,8 +3,11 @@ ENTRY(efi_main)
 SECTIONS
 {
 	. = 0x400000;
+	_setup_start = .;
+	_setup_end = .;
 	.text :
 	{
+		_kernel_start = .;
 		*(.text)
 		*(.text.*)
 	}

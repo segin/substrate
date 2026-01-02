@@ -69,4 +69,9 @@ typedef struct {
 int elf_check_file(Elf32_Ehdr *hdr);
 int elf_load_file(void *file, uint32_t size);
 
+// New ELF loading interface
+struct fs_node; // Forward declaration
+uint32_t elf_load(struct fs_node *file);
+int elf_execve(const char *path, char *const argv[], char *const envp[]);
+
 #endif

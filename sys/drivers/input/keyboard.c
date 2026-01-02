@@ -101,6 +101,8 @@ void keyboard_handler(registers_t *regs) {
             char c = kbd_shift ? kbd_us_shifted[scancode] : kbd_us[scancode];
             if (c) {
                 kbd_push(c);
+                extern void console_push_char(char c);
+                console_push_char(c);
                 input_enqueue(EV_KEY, scancode, 1);
             }
         }

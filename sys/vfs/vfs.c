@@ -59,22 +59,52 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
         if (strcmp(fs->name, type) == 0) break;
         fs = fs->next;
     }
-    if (!fs) return -1;
+    if (!fs) {
+        vga_write("VFS: Unknown filesystem type: ", 30);
+        vga_write(type, strlen(type));
+        vga_write("\n", 1);
+        return -1;
+    }
 
-    // Call mount implementation
-    fs_node_t *root = fs->mount(device, flags, data);
+    // Lookup device node if device path is specified
+    fs_node_t *dev_node = NULL;
+    if (device && device[0] == '/') {
+        // Parse path like /dev/storage/ram0
+        // Start from devfs if path begins with /dev/
+        if (strncmp(device, "/dev/", 5) == 0) {
+            // Find devfs mount
+            extern fs_node_t *devfs_root_node_ptr;
+            fs_node_t *devfs_root = devfs_root_node_ptr;
+            if (devfs_root) {
+                const char *subpath = device + 5; // skip "/dev/"
+                // Parse path components
+                char component[64];
+                fs_node_t *current = devfs_root;
+                while (*subpath && current) {
+                    // Get next component
+                    int i = 0;
+                    while (*subpath && *subpath != '/' && i < 63) {
+                        component[i++] = *subpath++;
+                    }
+                    component[i] = '\0';
+                    if (*subpath == '/') subpath++;
+                    
+                    if (i > 0 && current->finddir) {
+                        current = current->finddir(current, component);
+                    }
+                }
+                dev_node = current;
+            }
+        }
+    }
+
+    // Call mount implementation with device node as data
+    fs_node_t *root = fs->mount(device, flags, dev_node ? dev_node : data);
     if (!root) return -1;
 
     // Add to mount list
-    // (Note: In a real system, we'd find the node at 'path' and mark it as a mountpoint)
-    // For now, we support mounting at / (root) or just adding to a list for lookup.
-    
     if (strcmp(path, "/") == 0) {
         fs_root = root;
-    } else {
-        // Find existing node and mark it
-        // fs_node_t *target = vfs_walk(path);
-        // if (target) { target->flags |= FS_MOUNTPOINT; target->ptr = root; }
     }
 
     return 0;
@@ -120,10 +150,70 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
         node = node->ptr;
     }
 
-    if ((node->flags & 0x7) == FS_DIRECTORY && node->finddir != 0)
-        return node->finddir(node, name);
-    else
-        return 0;
+    if ((node->flags & 0x7) == FS_DIRECTORY && node->finddir != 0) {
+        fs_node_t *result = node->finddir(node, name);
+        
+        // Resolve symlinks automatically
+        if (result && (result->flags & 0x7) == FS_SYMLINK && result->readlink) {
+            static char link_target[256];
+            int len = result->readlink(result, link_target, sizeof(link_target));
+            if (len > 0) {
+                link_target[len] = '\0';
+                
+                // Resolve the target path
+                fs_node_t *target;
+                if (link_target[0] == '/') {
+                    // Absolute symlink - start from root
+                    target = vfs_lookup(fs_root, link_target);
+                } else {
+                    // Relative symlink - start from parent directory
+                    target = finddir_fs(node, link_target);
+                }
+                
+                if (target) {
+                    return target;
+                }
+                // If symlink resolution fails, return the symlink node itself
+            }
+        }
+        return result;
+    }
+    return 0;
+}
+
+// Lookup a path from a root node
+fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
+    if (!path || !root) return NULL;
+    if (path[0] == '/') path++; // Skip leading /
+    if (path[0] == '\0') return root; // Root itself
+    
+    fs_node_t *current = root;
+    static char component[256];
+    const char *p = path;
+    
+    while (*p) {
+        // Extract next path component
+        int i = 0;
+        while (*p && *p != '/' && i < 255) {
+            component[i++] = *p++;
+        }
+        component[i] = '\0';
+        
+        if (i == 0) {
+            // Empty component (double slash)
+            if (*p == '/') p++;
+            continue;
+        }
+        
+        // Lookup this component
+        current = finddir_fs(current, component);
+        if (!current) return NULL;
+        
+        // Skip trailing slash
+        if (*p == '/') p++;
+    }
+    
+    return current;
 }
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode) {
@@ -160,41 +250,5 @@ int symlink_fs(fs_node_t *parent, const char *target, const char *name) {
         return parent->symlink(parent, target, name);
     }
     return -1;
-}
-
-fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
-    if (!root) return NULL;
-    
-    // Copy path to modify it
-    char path_buf[128];
-    // strncpy(path_buf, path, 127);
-    int i=0;
-    while(path[i] && i<127) { path_buf[i] = path[i]; i++; }
-    path_buf[i] = 0;
-    
-    fs_node_t *current = root;
-    char *p = path_buf;
-    
-    // Skip leading slash
-    if (*p == '/') p++;
-    
-    while (*p) {
-        char *slash = strchr(p, '/');
-        if (slash) *slash = 0; // Terminate current segment
-        
-        fs_node_t *next = finddir_fs(current, p);
-        if (!next) return NULL;
-        
-        current = next;
-        
-        if (slash) {
-            p = slash + 1;
-            while (*p == '/') p++; // Skip multiple slashes
-        } else {
-            break;
-        }
-    }
-    
-    return current;
 }
 

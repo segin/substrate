@@ -75,3 +75,9 @@ int cmdline_get(const char *key, char *buf, size_t buf_len) {
     
     return 0;
 }
+int cmdline_get_full(char *buf, size_t buf_len) {
+    if (!initialized || !buf || buf_len == 0) return -1;
+    strncpy(buf, kernel_cmdline, buf_len);
+    buf[buf_len - 1] = 0;
+    return 0;
+}

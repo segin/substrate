@@ -2,8 +2,11 @@
 #include "vga.h"
 #include "io.h"
 #include <string.h>
+#include <stdio.h>
 #include "../../drivers/input/keyboard.h"
 #include "../../drivers/input/mouse.h"
+#include "../../kern/console.h"
+#include "../../kern/panic.h"
 #include "fpu/fpu_emu.h"
 
 idt_entry_t idt_entries[256];
@@ -53,28 +56,52 @@ extern void timer_tick(void);
 extern void sched_yield(void);
 extern void signal_handle_pending(registers_t *regs);
 
+static const char *exception_messages[] = {
+    "Division By Zero",
+    "Debug",
+    "Non Maskable Interrupt",
+    "Breakpoint",
+    "Into Detected Overflow",
+    "Out of Bounds",
+    "Invalid Opcode",
+    "No Coprocessor",
+    "Double Fault",
+    "Coprocessor Segment Overrun",
+    "Bad TSS",
+    "Segment Not Present",
+    "Stack Fault",
+    "General Protection Fault",
+    "Page Fault",
+    "Unknown Interrupt",
+    "Coprocessor Fault",
+    "Alignment Check",
+    "Machine Check",
+    "Reserved", "Reserved", "Reserved", "Reserved", "Reserved",
+    "Reserved", "Reserved", "Reserved", "Reserved", "Reserved",
+    "Reserved", "Reserved",
+    "Security Exception",
+    "Reserved"
+};
+
 void idt_init(void) {
     idt_ptr.limit = sizeof(idt_entry_t) * 256 - 1;
     idt_ptr.base  = (uint32_t)&idt_entries;
 
     memset(&idt_entries, 0, sizeof(idt_entry_t) * 256);
 
-    // Remap the PIC (Programmable Interrupt Controller)
-    // Master PIC
+    // Remap PIC
     outb(0x20, 0x11);
-    outb(0x21, 0x20); // Offset 0x20 (32)
+    outb(0x21, 0x20);
     outb(0x21, 0x04);
     outb(0x21, 0x01);
-
-    // Slave PIC
     outb(0xA0, 0x11);
-    outb(0xA1, 0x28); // Offset 0x28 (40)
+    outb(0xA1, 0x28);
     outb(0xA1, 0x02);
     outb(0xA1, 0x01);
 
-    // Unmask IRQ0 (Timer) and IRQ1 (Keyboard)
-    outb(0x21, 0xFC); // 11111100: Unmask bit 0 and 1
-    outb(0xA1, 0xEF); // 11101111: Unmask bit 4 (IRQ12)
+    // Unmask IRQs
+    outb(0x21, 0xFC);
+    outb(0xA1, 0xEF);
 
     // Initialize PIT (100Hz)
     uint32_t divisor = 1193180 / 100;
@@ -82,7 +109,12 @@ void idt_init(void) {
     outb(0x40, divisor & 0xFF);
     outb(0x40, (divisor >> 8) & 0xFF);
 
-    // Set gates for exceptions
+    // Set Exception Gates
+    for (int i = 0; i < 32; i++) {
+        // We'll use a table-driven approach in isr.S usually, but for now 
+        // let's manually map the most common ones.
+        // I have ISRs defined in isr.S up to 31.
+    }
     idt_set_gate(0, (uint32_t)isr0, 0x08, 0x8E);
     idt_set_gate(1, (uint32_t)isr1, 0x08, 0x8E);
     idt_set_gate(2, (uint32_t)isr2, 0x08, 0x8E);
@@ -116,16 +148,9 @@ void idt_init(void) {
     idt_set_gate(30, (uint32_t)isr30, 0x08, 0x8E);
     idt_set_gate(31, (uint32_t)isr31, 0x08, 0x8E);
     
-    // IRQ0 - Timer
     idt_set_gate(32, (uint32_t)isr32, 0x08, 0x8E);
-    
-    // IRQ1 - Keyboard
     idt_set_gate(33, (uint32_t)isr33, 0x08, 0x8E);
-    
-    // IRQ12 - Mouse
     idt_set_gate(44, (uint32_t)isr44, 0x08, 0x8E);
-    
-    // Syscall
     idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0x8E);
 
     idt_flush((uint32_t)&idt_ptr);
@@ -139,279 +164,39 @@ void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
     idt_entries[num].flags   = flags;
 }
 
-#include "../../kern/panic.h"
-
-
-
-static const char *exception_messages[] = {
-
-    "Division By Zero",
-
-    "Debug",
-
-    "Non Maskable Interrupt",
-
-    "Breakpoint",
-
-    "Into Detected Overflow",
-
-    "Out of Bounds",
-
-    "Invalid Opcode",
-
-    "No Coprocessor",
-
-    "Double Fault",
-
-    "Coprocessor Segment Overrun",
-
-    "Bad TSS",
-
-    "Segment Not Present",
-
-    "Stack Fault",
-
-    "General Protection Fault",
-
-    "Page Fault",
-
-    "Unknown Interrupt",
-
-    "Coprocessor Fault",
-
-    "Alignment Check",
-
-    "Machine Check",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Reserved",
-
-    "Security Exception",
-
-    "Reserved"
-
-};
-
-
-
 void isr_handler(registers_t *regs) {
-
-
-
     if (regs->int_no == 32) {
-
-
-
         timer_tick();
-
-
-
-        // Send EOI to PIC
-
-
-
         if (regs->int_no >= 40) outb(0xA0, 0x20);
-
-
-
         outb(0x20, 0x20);
-
-
-
         sched_yield();
-
-
-
         return;
-
-
-
     }
 
-
-
-
-
-
-
-        if (regs->int_no == 33) {
-
-
-
-
-
-
-
-            keyboard_handler(regs);
-
-
-
-
-
-
-
-        } else if (regs->int_no == 44) {
-
-
-
-
-
-
-
-            mouse_handler(regs);
-
-
-
-
-
-
-
-        } else if (regs->int_no == 7) {
-
-
-
-
-
-
-
-    
-
-
-
+    if (regs->int_no == 33) {
+        keyboard_handler(regs);
+    } else if (regs->int_no == 44) {
+        mouse_handler(regs);
+    } else if (regs->int_no == 7) {
         fpu_handler(regs);
-
     } else if (regs->int_no < 32) {
-        // Print exception details
-        static char hex[] = "0123456789ABCDEF";
-        char buf[80];
-        
-        vga_write("\nEXCEPTION: ", 12);
-        vga_write(exception_messages[regs->int_no], strlen(exception_messages[regs->int_no]));
-        vga_write("\n", 1);
-        
-        // EIP
-        vga_write("EIP: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->eip >> (i*4)) & 0xF];
-        buf[8] = ' '; buf[9] = ' ';
-        vga_write(buf, 10);
-        
-        // CS
-        vga_write("CS: 0x", 6);
-        for (int i = 3; i >= 0; i--) buf[3-i] = hex[(regs->cs >> (i*4)) & 0xF];
-        buf[4] = ' '; buf[5] = ' ';
-        vga_write(buf, 6);
-        
-        // Error code
-        vga_write("ERR: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->err_code >> (i*4)) & 0xF];
-        buf[8] = '\n';
-        vga_write(buf, 9);
-        
-        // EAX, EBX, ECX, EDX
-        vga_write("EAX: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->eax >> (i*4)) & 0xF];
-        buf[8] = ' '; buf[9] = ' ';
-        vga_write(buf, 10);
-        
-        vga_write("EBX: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->ebx >> (i*4)) & 0xF];
-        buf[8] = ' '; buf[9] = ' ';
-        vga_write(buf, 10);
-        
-        vga_write("ECX: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->ecx >> (i*4)) & 0xF];
-        buf[8] = ' '; buf[9] = ' ';
-        vga_write(buf, 10);
-        
-        vga_write("EDX: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->edx >> (i*4)) & 0xF];
-        buf[8] = '\n';
-        vga_write(buf, 9);
-        
-        // ESI, EDI, EBP, ESP
-        vga_write("ESI: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->esi >> (i*4)) & 0xF];
-        buf[8] = ' '; buf[9] = ' ';
-        vga_write(buf, 10);
-        
-        vga_write("EDI: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->edi >> (i*4)) & 0xF];
-        buf[8] = ' '; buf[9] = ' ';
-        vga_write(buf, 10);
-        
-        vga_write("EBP: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->ebp >> (i*4)) & 0xF];
-        buf[8] = ' '; buf[9] = ' ';
-        vga_write(buf, 10);
-        
-        vga_write("ESP: 0x", 7);
-        for (int i = 7; i >= 0; i--) buf[7-i] = hex[(regs->esp >> (i*4)) & 0xF];
-        buf[8] = '\n';
-        vga_write(buf, 9);
-        
+        char buf[256];
+        kprint("\nEXCEPTION: ");
+        kprint(exception_messages[regs->int_no]);
+        kprint("\n");
+        sprintf(buf, "EIP: 0x%08X  CS: 0x%04X  ERR: 0x%08X\n", (unsigned int)regs->eip, (unsigned int)regs->cs, (unsigned int)regs->err_code);
+        kprint(buf);
+        sprintf(buf, "EAX: 0x%08X  EBX: 0x%08X  ECX: 0x%08X  EDX: 0x%08X\n", (unsigned int)regs->eax, (unsigned int)regs->ebx, (unsigned int)regs->ecx, (unsigned int)regs->edx);
+        kprint(buf);
+        sprintf(buf, "ESI: 0x%08X  EDI: 0x%08X  EBP: 0x%08X  ESP: 0x%08X\n", (unsigned int)regs->esi, (unsigned int)regs->edi, (unsigned int)regs->ebp, (unsigned int)regs->esp);
+        kprint(buf);
         panic("Unhandled Exception");
-
     }
 
-
-
-
-
-
-
-    // Send EOI to PIC for other IRQs
-
-
-
-        if (regs->int_no >= 32 && regs->int_no <= 47) {
-
-
-
-            if (regs->int_no >= 40) outb(0xA0, 0x20);
-
-
-
-            outb(0x20, 0x20);
-
-
-
-        }
-
-
-
-    
-
-
-
-        signal_handle_pending(regs);
-
-
-
+    if (regs->int_no >= 32 && regs->int_no <= 47) {
+        if (regs->int_no >= 40) outb(0xA0, 0x20);
+        outb(0x20, 0x20);
     }
 
-
-
-    
-
-
-
-
+    signal_handle_pending(regs);
+}

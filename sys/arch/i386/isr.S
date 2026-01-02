@@ -169,3 +169,58 @@ isr_exit:
     popa
     add $8, %esp # Cleans up the pushed error code and ISR number
     iret
+
+# Jump to user mode
+# void jump_to_userspace(uint32_t entry_point, uint32_t user_stack)
+# User code selector: 0x1B (0x18 | 3)
+# User data selector: 0x23 (0x20 | 3)
+.global jump_to_userspace
+jump_to_userspace:
+    # Turn off interrupts during transition
+    cli
+    
+    # Get parameters
+    mov 4(%esp), %ecx   # entry_point
+    mov 8(%esp), %edx   # user_stack
+    
+    # Set up segment registers for user mode
+    mov $0x23, %ax      # User data selector
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %fs
+    mov %ax, %gs
+    
+    # Build IRET stack frame (in order pushed):
+    # SS, ESP, EFLAGS, CS, EIP
+    push $0x23          # User SS
+    push %edx           # User ESP
+    pushf               # EFLAGS
+    pop %eax
+    or $0x200, %eax     # Enable interrupts in user mode
+    push %eax
+    push $0x1B          # User CS
+    push %ecx           # User EIP
+    
+    # Jump to user mode
+    iret
+# fork_child_return - called when child process is scheduled
+# Child's stack already has: DS, pusha regs, int_no, err_code, IRET frame
+# This restores registers and returns to userspace via IRET
+.global fork_child_return
+fork_child_return:
+    # Pop DS and restore data segments
+    pop %eax
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %fs
+    mov %ax, %gs
+    
+    # Restore general registers (popa)
+    popa
+    
+    # Skip int_no and err_code
+    add $8, %esp
+    
+    # Return to userspace via IRET
+    # Stack has: EIP, CS, EFLAGS, UserESP, SS
+    iret
