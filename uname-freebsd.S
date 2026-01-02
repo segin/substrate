@@ -17,6 +17,14 @@
 .equ OFF_VERSION,  768
 .equ OFF_MACHINE,  1024
 
+.section .note.tag, "a"
+    .align 4
+    .long 8                     # namesz
+    .long 4                     # descsz
+    .long 1                     # type (NT_FREEBSD_ABI_TAG)
+    .asciz "FreeBSD"            # name
+    .long 1400000               # desc (__FreeBSD_version)
+
 .section .text
 .global _start
 
