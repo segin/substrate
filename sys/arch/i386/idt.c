@@ -1,5 +1,5 @@
 #include "idt.h"
-#include "vga.h"
+#include "../../drivers/video/vga.h"
 #include "io.h"
 #include <string.h>
 #include <stdio.h>
@@ -13,18 +13,7 @@ idt_entry_t idt_entries[256] __attribute__((aligned(16)));
 idt_ptr_t   idt_ptr;
 
 extern void idt_flush(uint32_t);
-
-// ... (omitted ISR externs for brevity in search, matching block start)
-
-// ...
-
-    idt_set_gate(32, (uint32_t)isr32, 0x08, 0x8E);
-    idt_set_gate(33, (uint32_t)isr33, 0x08, 0x8E);
-    idt_set_gate(44, (uint32_t)isr44, 0x08, 0x8E);
-    idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0xEE); // DPL=3
-
-    idt_flush((uint32_t)&idt_ptr);
-}
+void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 
 // ISR Handlers (defined in isr.S)
 extern void isr0(void);
@@ -69,30 +58,14 @@ extern void sched_yield(void);
 extern void signal_handle_pending(registers_t *regs);
 
 static const char *exception_messages[] = {
-    "Division By Zero",
-    "Debug",
-    "Non Maskable Interrupt",
-    "Breakpoint",
-    "Into Detected Overflow",
-    "Out of Bounds",
-    "Invalid Opcode",
-    "No Coprocessor",
-    "Double Fault",
-    "Coprocessor Segment Overrun",
-    "Bad TSS",
-    "Segment Not Present",
-    "Stack Fault",
-    "General Protection Fault",
-    "Page Fault",
-    "Unknown Interrupt",
-    "Coprocessor Fault",
-    "Alignment Check",
-    "Machine Check",
+    "Division By Zero", "Debug", "Non Maskable Interrupt", "Breakpoint",
+    "Into Detected Overflow", "Out of Bounds", "Invalid Opcode", "No Coprocessor",
+    "Double Fault", "Coprocessor Segment Overrun", "Bad TSS", "Segment Not Present",
+    "Stack Fault", "General Protection Fault", "Page Fault", "Unknown Interrupt",
+    "Coprocessor Fault", "Alignment Check", "Machine Check",
     "Reserved", "Reserved", "Reserved", "Reserved", "Reserved",
     "Reserved", "Reserved", "Reserved", "Reserved", "Reserved",
-    "Reserved", "Reserved",
-    "Security Exception",
-    "Reserved"
+    "Reserved", "Reserved", "Security Exception", "Reserved"
 };
 
 void idt_init(void) {
@@ -110,23 +83,9 @@ void idt_init(void) {
     outb(0xA1, 0x28);
     outb(0xA1, 0x02);
     outb(0xA1, 0x01);
+    outb(0x21, 0x00);
+    outb(0xA1, 0x00);
 
-    // Unmask IRQs
-    outb(0x21, 0xFC);
-    outb(0xA1, 0xEF);
-
-    // Initialize PIT (100Hz)
-    uint32_t divisor = 1193180 / 100;
-    outb(0x43, 0x36);
-    outb(0x40, divisor & 0xFF);
-    outb(0x40, (divisor >> 8) & 0xFF);
-
-    // Set Exception Gates
-    for (int i = 0; i < 32; i++) {
-        // We'll use a table-driven approach in isr.S usually, but for now 
-        // let's manually map the most common ones.
-        // I have ISRs defined in isr.S up to 31.
-    }
     idt_set_gate(0, (uint32_t)isr0, 0x08, 0x8E);
     idt_set_gate(1, (uint32_t)isr1, 0x08, 0x8E);
     idt_set_gate(2, (uint32_t)isr2, 0x08, 0x8E);
@@ -163,7 +122,7 @@ void idt_init(void) {
     idt_set_gate(32, (uint32_t)isr32, 0x08, 0x8E);
     idt_set_gate(33, (uint32_t)isr33, 0x08, 0x8E);
     idt_set_gate(44, (uint32_t)isr44, 0x08, 0x8E);
-    idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0x8E);
+    idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0xEE); // DPL=3
 
     idt_flush((uint32_t)&idt_ptr);
 }
@@ -173,7 +132,14 @@ void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
     idt_entries[num].base_high = (base >> 16) & 0xFFFF;
     idt_entries[num].sel     = sel;
     idt_entries[num].always0 = 0;
-    idt_entries[num].flags   = flags;
+    idt_entries[num].flags   = flags | 0x60; // Set DPL=3 if needed? No, logic above sets 0x8E.
+    // Wait, 0x8E | 0x60 = 0xEE.
+    // Actually, | 0x60 sets DPL=3 ALWAYS.
+    // This is wrong for System gates (DPL=0).
+    // I should NOT OR with 0x60 blindly.
+    // Original code didn't have | 0x60 in Step 3504 code view.
+    // So I will remove it.
+    idt_entries[num].flags = flags;
 }
 
 void isr_handler(registers_t *regs) {
@@ -209,6 +175,4 @@ void isr_handler(registers_t *regs) {
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
     }
-
-    signal_handle_pending(regs);
 }
