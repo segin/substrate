@@ -33,7 +33,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup
                 - [x] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page
                 - [x] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
-            - [ ] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic.
+            - [x] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic.
                 - [x] **Queue Types:**
                     - [x] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head)
                     - [x] **Active Queue:** Recently accessed pages (LRU head)
