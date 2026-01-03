@@ -30,7 +30,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **Fields:** `phys_addr`, `flags`, `wire_count`, `ref_count`, `order` (buddy), `object`, `pindex`
                 - [x] **State Flags:** `PG_BUSY`, `PG_VALID`, `PG_DIRTY`, `PG_ACTIVE`, `PG_INACTIVE`, `PG_FREE`, `PG_ZERO`, `PG_SWAPPED`
                 - [x] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator)
-                - [ ] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup
+                - [x] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup
                 - [ ] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page
                 - [ ] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
             - [ ] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic.
