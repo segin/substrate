@@ -332,14 +332,23 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [/] Register-level mode switching logic.
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
-- [ ] **VFS:**
-    - [x] Implement Mount points and filesystem registration.
-    - [x] Implement File Descriptor reference counting and management.
-    - [x] Implement Permissions checking (`access`).
-    - [x] Implement `chroot()`: Support per-process root directory.
-    - [x] **Auto-detection:** Implement filesystem probing/recognition during mount.
-    - [x] **Unified Interface:** Ensure Sockets, Pipes, and Devices operate through VFS vnodes.
-    - [x] **Command Line Root:** Support `root=` argument with fallback to `/dev/storage/ram0`.
+- [ ] **VFS Subsystem Refactor (BSD-style):**
+    - [ ] **Core Structures:**
+        - [ ] **`struct vnode`:** Rewrite to support separate `v_op` (operations vector) and `v_data` (private fs data).
+        - [ ] **`struct mount`:** Track mounted filesystem state, `vfs_op` vector, and vnode list.
+        - [ ] **`struct file`:** Generic file handle (refcounts, offset, type: VNODE/SOCKET/PIPE/KQUEUE).
+    - [ ] **Pathname Lookup (`namei`):**
+        - [ ] **Logic:** Handle directory traversal, `..`, symlinks (with recursion limits), and mount point crossings.
+        - [ ] **Name Cache:** Hash table implementation to speed up path-to-vnode resolution.
+    - [ ] **Operations Vectors:**
+        - [ ] **`vfs_ops`:** `vfs_mount`, `vfs_unmount`, `vfs_root`, `vfs_statfs`, `vfs_sync`, `vfs_vget`.
+        - [ ] **`vnode_ops`:** `vop_lookup`, `vop_create`, `vop_remove`, `vop_rename`, `vop_getattr`, `vop_setattr`, `vop_read`, `vop_write`, `vop_ioctl`.
+    - [ ] **Buffer Cache Integration (`bio`):**
+        - [ ] **Bread/Bwrite:** Block I/O layer integration for file systems.
+        - [ ] **VNode Pager:** Integration with VM subsystem for memory mapped files.
+    - [ ] **Locking & Concurrency:**
+        - [ ] **VNode Locks:** Shared/Exclusive locks for file access.
+        - [ ] **Interlock:** Spinlocks for vnode state changes.
 - [ ] **Feature Gaps:**
     - [ ] **Write Support:** Implement `write_inode` and `write_block` for FS backends.
     - [ ] **FSCK utilities:** Port e2fsprogs or implement native `ext2` fsck.
