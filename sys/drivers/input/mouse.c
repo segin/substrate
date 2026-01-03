@@ -29,27 +29,7 @@ int mouse_get_event(mouse_event_t *ev) {
 }
 
 void mouse_init(void) {
-    kprint("Mouse: Initializing...\n");
-
-    // 1. Enable auxiliary device
-    ps2_write_command(PS2_CMD_ENABLE_P2);
-
-    // 2. Enable interrupts in configuration byte
-    ps2_write_command(PS2_CMD_READ_CONFIG);
-    uint8_t config = ps2_read_data();
-    config |= 2; // Enable IRQ12
-    ps2_write_command(PS2_CMD_WRITE_CONFIG);
-    ps2_write_data(config);
-
-    // 3. Set default settings
-    ps2_write_aux(0xF6);
-    ps2_read_data(); // ACK (0xFA)
-
-    // 4. Enable packet streaming
-    ps2_write_aux(0xF4);
-    ps2_read_data(); // ACK (0xFA)
-
-    kprint("Mouse Driver Initialized.\n");
+    kprint("Mouse: Driver loaded (initialized via PS/2 controller).\n");
 }
 
 static uint8_t mouse_cycle = 0;
@@ -102,10 +82,8 @@ void mouse_handler(registers_t *regs) {
         }
     }
     
-    // Send EOI to slave PIC
-    outb(0xA0, 0x20);
-    // Send EOI to master PIC
-    outb(0x20, 0x20);
+    
+    // EOI handled by IDT dispatcher
     (void)regs;
 }
 

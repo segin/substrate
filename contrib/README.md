@@ -18,4 +18,4 @@ The TestUnix target is defined as a derivative of the Generic Unix target, using
 
 ### Syscall Interface
 Software interrupt `0x80`.
-Calling convention: Standard i386 Linux-style for 32-bit, custom System V for 64-bit.
+Calling convention: BSD-style (Arguments on stack, Syscall ID in EAX).
