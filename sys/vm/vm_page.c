@@ -6,12 +6,16 @@
 static vm_page_t *free_queue = NULL;
 static vm_page_t *active_queue = NULL;
 static vm_page_t *inactive_queue = NULL;
+static vm_page_t *wired_queue = NULL;      // Pages pinned in memory (kernel, DMA)
+static vm_page_t *laundry_queue = NULL;    // Dirty pages pending writeback
 
 void vm_page_init(void) {
     // Initialize queues
     free_queue = NULL;
     active_queue = NULL;
     inactive_queue = NULL;
+    wired_queue = NULL;
+    laundry_queue = NULL;
 }
 
 // Internal helper to add a page to the head of a queue
