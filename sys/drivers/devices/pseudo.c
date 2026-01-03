@@ -5,25 +5,25 @@
 #include <string.h>
 
 // /dev/null
-static uint32_t null_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t null_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)size; (void)buffer;
     return 0; // EOF
 }
 
-static uint32_t null_write(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t null_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer;
     return size; // Discarded
 }
 
 // /dev/zero
-static uint32_t zero_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t zero_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     memset(buffer, 0, size);
     return size;
 }
 
 // /dev/full
-static uint32_t full_write(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t full_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
     // Always return error (ENOSPC is usually 28)
     return -28; 
@@ -31,7 +31,7 @@ static uint32_t full_write(fs_node_t *node, uint32_t offset, uint32_t size, uint
 
 // /dev/random (very simple PRNG)
 static uint32_t random_state = 123456789;
-static uint32_t random_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t random_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     for (uint32_t i = 0; i < size; i++) {
         random_state = random_state * 1103515245 + 12345;
@@ -41,7 +41,7 @@ static uint32_t random_read(fs_node_t *node, uint32_t offset, uint32_t size, uin
 }
 
 // /dev/tty - proxy to current process's controlling terminal
-static uint32_t tty_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t tty_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
@@ -59,7 +59,7 @@ static uint32_t tty_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_
     return count;
 }
 
-static uint32_t tty_write(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t tty_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY

@@ -20,7 +20,7 @@ void input_enqueue(uint16_t type, uint16_t code, int32_t value) {
     }
 }
 
-static uint32_t input_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     
     if (size < sizeof(input_event_t)) return 0;

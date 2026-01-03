@@ -37,4 +37,8 @@ fs_node_t *console_get_node(void);
 // Helper for formatted printing (replaces kprintf later)
 void kprint(const char *str);
 
+struct process;
+// Attach console to a process's FDs 0, 1, 2
+void console_attach_std_fds(struct process *proc);
+
 #endif

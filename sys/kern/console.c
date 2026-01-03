@@ -99,13 +99,13 @@ void console_read(char *data, size_t len) {
     }
 }
 
-static uint32_t console_node_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t console_node_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     console_read((char*)buffer, size);
     return size;
 }
 
-static uint32_t console_node_write(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t console_node_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     console_write((const char*)buffer, size);
     return size;
@@ -146,4 +146,35 @@ void kprint(const char *str) {
     const char *s = str;
     while (*s++) len++;
     console_write(str, len);
+}
+
+#include <sys/file.h>
+#include "../vm/vm_kmem.h"
+
+void console_attach_std_fds(struct process *proc) {
+    if (!proc) return;
+
+    fs_node_t *node = console_get_node();
+    if (!node) {
+        kprint("console: Cannot attach std fds - node not found!\n");
+        return;
+    }
+
+    // Manually populate FDs 0, 1, 2
+    for (int i = 0; i < 3; i++) {
+        file_t *f = (file_t*)kmalloc(sizeof(file_t));
+        if (!f) {
+            kprint("console: OOM during std fd init\n");
+            return;
+        }
+        memset(f, 0, sizeof(file_t));
+        f->node = node;
+        f->offset = 0;
+        f->flags = 2; // R/W (O_RDWR) - assuming 2 is RDWR from standard fcntl
+        // In sys/file.h: R_OK=4, W_OK=2. Flags are usually O_RDONLY=0, O_WRONLY=1, O_RDWR=2.
+        // Let's assume standard POSIX values for file flags which sys_open likely uses.
+        f->ref_count = 1;
+        
+        proc->fds[i] = f;
+    }
 }

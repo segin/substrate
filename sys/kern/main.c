@@ -68,11 +68,12 @@ void kinit_task(void *arg) {
 
     kprint("kinit: Starting init process...\n");
 
-    // Open standard FDs (0, 1, 2)
-    extern int sys_open(const char *path, int flags, int mode);
-    sys_open("/dev/console", 0, 0); // stdin
-    sys_open("/dev/console", 0, 0); // stdout
-    sys_open("/dev/console", 0, 0); // stderr
+    // Import console attachment function
+    extern void console_attach_std_fds(struct process *proc);
+    extern struct process *current_process;
+    
+    // Attach stdin/stdout/stderr to console directly
+    console_attach_std_fds(current_process);
 
     // Parse cmdline for init=
     if (cmdline) {
