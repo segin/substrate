@@ -26,7 +26,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues.
     - [ ] **Memory Management (BSD/Mach Design):**
         - [ ] **Physical Memory (Machine Independent):**
-            - [ ] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page.
+            - [x] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page.
                 - [x] **Fields:** `phys_addr`, `flags`, `wire_count`, `ref_count`, `order` (buddy), `object`, `pindex`
                 - [x] **State Flags:** `PG_BUSY`, `PG_VALID`, `PG_DIRTY`, `PG_ACTIVE`, `PG_INACTIVE`, `PG_FREE`, `PG_ZERO`, `PG_SWAPPED`
                 - [x] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator)
@@ -34,7 +34,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page
                 - [x] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
             - [ ] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic.
-                - [ ] **Queue Types:**
+                - [x] **Queue Types:**
                     - [x] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head)
                     - [x] **Active Queue:** Recently accessed pages (LRU head)
                     - [x] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed)
@@ -42,9 +42,31 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] **Laundry Queue:** Dirty pages waiting to be written to backing store
                 - [x] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()`
                 - [ ] **LRU Scanning:** Periodic scan to move pages from Active→Inactive based on access bits
+                    - [ ] `vm_pageout_scan()`: Walk active queue and check PTE accessed bits
+                    - [ ] `pmap_is_referenced()`: Query PTE A bit for a given page
+                    - [ ] `pmap_clear_reference()`: Clear PTE A bit after checking
+                    - [ ] Move unreferenced pages to inactive queue tail
+                    - [ ] Second-chance algorithm: Pages touched again stay active
                 - [ ] **Page Daemon:** Background thread (`pagedaemon`) to free pages when `free_count < free_target`
+                    - [ ] `vm_pageout()`: Main daemon loop (sleeps on `vm_pages_needed` wakeup)
+                    - [ ] `vm_page_launder()`: Write dirty pages to backing store
+                    - [ ] `vm_page_try_to_free()`: Attempt to free clean inactive pages
+                    - [ ] Priority-based scanning: Inactive→Laundry→Active
+                    - [ ] OOM killer hook: Kill process if cannot free memory
                 - [ ] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management
+                    - [ ] `vm_page_free_min`: Absolute minimum free pages (panic below)
+                    - [ ] `vm_page_free_target`: Target free pages (daemon sleeps above)
+                    - [ ] `vm_page_inactive_target`: Target inactive queue length
+                    - [ ] `vm_page_free_reserved`: Reserved for kernel emergencies
+                    - [ ] Dynamic threshold adjustment based on total RAM
                 - [ ] **Statistics:** Track queue lengths, page faults, pageouts, pageins
+                    - [ ] `vm_stat` structure: `free_count`, `active_count`, `inactive_count`, `wire_count`
+                    - [ ] `vm_stat.pageins`: Pages read from disk
+                    - [ ] `vm_stat.pageouts`: Pages written to disk
+                    - [ ] `vm_stat.faults`: Total page faults handled
+                    - [ ] `vm_stat.cow_faults`: Copy-on-write faults
+                    - [ ] `vm_stat.reactivations`: Pages moved back to active
+                    - [ ] `/proc/vmstat` or sysctl interface for userspace
         - [/] **PMAP Layer (Machine Dependent - i386):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
             - [ ] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
