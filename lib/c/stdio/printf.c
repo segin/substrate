@@ -54,12 +54,34 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
         }
         format++;
         
-        int width = 0;
+        int left_align = 0;
         int pad_zero = 0;
-        if (*format == '0') { pad_zero = 1; format++; }
+        
+        // Parse flags
+        while (*format == '-' || *format == '0') {
+            if (*format == '-') left_align = 1;
+            else if (*format == '0') pad_zero = 1;
+            format++;
+        }
+        // Standard: '-' overrides '0'
+        if (left_align) pad_zero = 0;
+        
+        // Parse Width
+        int width = 0;
         while (*format >= '0' && *format <= '9') {
             width = width * 10 + (*format - '0');
             format++;
+        }
+        
+        // Parse Precision
+        int precision = -1;
+        if (*format == '.') {
+            format++;
+            precision = 0;
+            while (*format >= '0' && *format <= '9') {
+                precision = precision * 10 + (*format - '0');
+                format++;
+            }
         }
         
         int len_l = 0; // l=1, ll=2, h=-1, hh=-2
@@ -78,7 +100,8 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 if (len_l == 2) s_val = va_arg(ap, int64_t);
                 else if (len_l == 1) s_val = va_arg(ap, long);
                 else s_val = va_arg(ap, int); // char/short promoted to int
-                print_int(buf, (uint64_t)s_val, 10, 1, width, pad_zero, 0);
+                // Only pass width to print_int if we want ZERO padding.
+                print_int(buf, (uint64_t)s_val, 10, 1, pad_zero ? width : 0, pad_zero, 0);
                 s_arg = buf;
                 break;
             case 'u':
@@ -88,7 +111,8 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 if (*format == 'p') {
                     u_val = (uintptr_t)va_arg(ap, void*);
                     strcpy(buf, "0x");
-                    print_int(buf+2, u_val, 16, 0, width, 1, 0); // Ptrs often zero padded?
+                    // Pointers usually zero padded if width specified? Let's assume standard behavior is just hex.
+                    print_int(buf+2, u_val, 16, 0, pad_zero ? width : 0, pad_zero, 0); 
                     s_arg = buf;
                 } else {
                     int base = (*format == 'u') ? 10 : 16;
@@ -96,7 +120,7 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                     if (len_l == 2) u_val = va_arg(ap, uint64_t);
                     else if (len_l == 1) u_val = va_arg(ap, unsigned long);
                     else u_val = va_arg(ap, unsigned int);
-                    print_int(buf, u_val, base, 0, width, pad_zero, upper);
+                    print_int(buf, u_val, base, 0, pad_zero ? width : 0, pad_zero, upper);
                     s_arg = buf;
                 }
                 break;
@@ -117,7 +141,33 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 break;
         }
         
-        while (*s_arg && str < end) *str++ = *s_arg++;
+        // Calculate length of argument string with precision cap
+        size_t len = 0;
+        const char *tmp = s_arg;
+        while (*tmp && (precision < 0 || len < (size_t)precision)) {
+            len++;
+            tmp++;
+        }
+        
+        int pad = (width > (int)len) ? (width - (int)len) : 0;
+        
+        // Right alignment (padding before)
+        if (!left_align) {
+            while (pad-- > 0 && str < end) *str++ = ' ';
+        }
+        
+        // String/Number content
+        size_t print_len = 0;
+        while (*s_arg && str < end && (precision < 0 || print_len < (size_t)precision)) {
+             *str++ = *s_arg++;
+             print_len++;
+        }
+        
+        // Left alignment (padding after)
+        if (left_align) {
+            while (pad-- > 0 && str < end) *str++ = ' ';
+        }
+        
         format++;
     }
     *str = 0;
