@@ -10,6 +10,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Userland Linker Flags:** `-m32 -nostdlib -fno-pie`.
 
 ## Recent Accomplishments
+- **PMM Hardening:** Phase 1 boot memory detection with sanitization, total RAM reporting, and proper kernel bounds.
 - **Per-Process Address Spaces:** Implemented `pmap_create()` and `pmap_destroy()` for full process isolation with 3GB/1GB user/kernel split
 - **FPU State Tracking:** Lazy FPU context switching with FXSAVE/FXRSTOR
 - **Filesystem Timestamps:** Added atime/mtime/ctime tracking with atomic updates
@@ -21,10 +22,10 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Build System:** Root filesystem generation in `dist/`
 
 ## Current Status
+- PMM Phase 1 (Boot Detection Hardening) complete; Phase 2 (Free List) pending
 - User process foundation complete (pmap layer)
 - VirtIO drivers (Block, 9P) linked and initialized
 - Ready for mmap() implementation
-- Personality drivers (Linux/FreeBSD) need mmap integration
 
 ## Directives
 1.  **Architecture Maintenance:** Always read `ARCHITECTURE.md` before starting complex tasks. Update `ARCHITECTURE.md` if your changes impact the system structure or design.
