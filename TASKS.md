@@ -32,7 +32,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator)
                 - [x] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup
                 - [x] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page
-                - [ ] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
+                - [x] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
             - [ ] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic.
                 - [ ] **Queue Types:**
                     - [ ] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head)

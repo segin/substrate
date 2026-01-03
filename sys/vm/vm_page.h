@@ -40,7 +40,18 @@ typedef struct vm_page {
 
     // Buddy Allocator state
     uint8_t  order;       // Power of two order (0 = 1 page)
+    
+    // Pmap backlinks for TLB shootdown
+    // Each entry tracks a (pmap, va) pair that maps this page
+    struct pv_entry *pv_list;  // Head of PV entry list
 } vm_page_t;
+
+// PV Entry: Tracks a single mapping (pmap, va) for a physical page
+struct pv_entry {
+    struct pv_entry *next;      // Next entry in page's pv_list
+    struct pmap *pmap;          // Pmap containing this mapping
+    uintptr_t va;               // Virtual address of mapping
+};
 
 // Queue management
 void vm_page_init(void);
