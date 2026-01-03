@@ -9,6 +9,19 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Toolchain:** Modern GCC (`-m32`, `-nostdlib`, `-fno-builtin`).
 - **Userland Linker Flags:** `-m32 -nostdlib -fno-pie`.
 
+## Recent Accomplishments
+- **Per-Process Address Spaces:** Implemented `pmap_create()` and `pmap_destroy()` for full process isolation with 3GB/1GB user/kernel split
+- **FPU State Tracking:** Lazy FPU context switching with FXSAVE/FXRSTOR
+- **Filesystem Timestamps:** Added atime/mtime/ctime tracking with atomic updates
+- **TTY Integration:** Per-process controlling terminal support
+- **Time System:** 64-bit time_t, RTC driver, gettimeofday/clock_gettime syscalls
+- **Build System:** Root filesystem generation in `dist/`
+
+## Current Status
+- User process foundation complete (pmap layer)
+- Ready for mmap() implementation
+- Personality drivers (Linux/FreeBSD) need mmap integration
+
 ## Directives
 1.  **Architecture Maintenance:** Always read `ARCHITECTURE.md` before starting complex tasks. Update `ARCHITECTURE.md` if your changes impact the system structure or design.
 2.  **Code Style:** Adhere to standard kernel coding styles (similar to BSD/Linux) for C and C++.
@@ -21,6 +34,8 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - `sys/`: Kernel source.
     - `core/`: Main entry (`kmain`).
     - `arch/`: Architecture specific (`i386`, `x86_64`).
+        - `i386/pmap.c`: Virtual memory management (pmap layer)
+        - `i386/fpu/`: FPU emulation and state management
     - `drivers/`: Hardware drivers (`video`, `serial`, `input`, `storage`).
     - `fs/`: Filesystems (`ext2`, `fat`, `minix`, `exec`).
     - `kern/`: Kernel core subsystems (Scheduler, Time, Acct).
@@ -39,3 +54,8 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 ## Known Issues
 - Interrupt responsiveness: `Ctrl+F9` debug dump sometimes fails during idle states.
 - Stack corruption: Occasional Page Faults (ERR 5) in `sh` being investigated.
+
+## Next Steps
+- Implement mmap() syscall with personality driver integration
+- Hook Linux and FreeBSD personalities to native mmap
+- Create comprehensive tests
