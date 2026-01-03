@@ -59,14 +59,14 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] `vm_page_inactive_target`: Target inactive queue length
                     - [x] `vm_page_free_reserved`: Reserved for kernel emergencies
                     - [x] Dynamic threshold adjustment based on total RAM
-                - [ ] **Statistics:** Track queue lengths, page faults, pageouts, pageins
-                    - [ ] `vm_stat` structure: `free_count`, `active_count`, `inactive_count`, `wire_count`
-                    - [ ] `vm_stat.pageins`: Pages read from disk
-                    - [ ] `vm_stat.pageouts`: Pages written to disk
-                    - [ ] `vm_stat.faults`: Total page faults handled
-                    - [ ] `vm_stat.cow_faults`: Copy-on-write faults
-                    - [ ] `vm_stat.reactivations`: Pages moved back to active
-                    - [ ] `/proc/vmstat` or sysctl interface for userspace
+                - [x] **Statistics:** Track queue lengths, page faults, pageouts, pageins
+                    - [x] `vm_stat` structure: `free_count`, `active_count`, `inactive_count`, `wire_count`
+                    - [x] `vm_stat.pageins`: Pages read from disk
+                    - [x] `vm_stat.pageouts`: Pages written to disk
+                    - [x] `vm_stat.faults`: Total page faults handled
+                    - [x] `vm_stat.cow_faults`: Copy-on-write faults
+                    - [x] `vm_stat.reactivations`: Pages moved back to active
+                    - [x] `/proc/vmstat` or sysctl interface for userspace
         - [/] **PMAP Layer (Machine Dependent - i386):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
             - [ ] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
