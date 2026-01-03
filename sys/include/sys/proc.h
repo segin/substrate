@@ -51,6 +51,9 @@ typedef struct process {
     // FPU Context
     fpu_context_t fpu_ctx;
     
+    // mmap regions
+    struct vm_area *vm_areas;  // Linked list of mapped regions
+    
     // Resource limits, FDs, etc. would go here
 } process_t;
 
