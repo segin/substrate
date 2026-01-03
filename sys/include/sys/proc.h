@@ -14,6 +14,12 @@ typedef struct file file_t;
 
 #define MAX_FD 32
 
+// FPU Context Structure
+typedef struct {
+    uint8_t fpu_state[512] __attribute__((aligned(16)));  // FXSAVE area (512 bytes, 16-byte aligned)
+    int fpu_used;                                          // Flag: has this process used FPU?
+} fpu_context_t;
+
 // Process Structure
 typedef struct process {
     int pid;
@@ -41,6 +47,9 @@ typedef struct process {
     // Memory management
     uint32_t brk;        // Program break (heap end)
     uint32_t brk_start;  // Initial program break
+    
+    // FPU Context
+    fpu_context_t fpu_ctx;
     
     // Resource limits, FDs, etc. would go here
 } process_t;

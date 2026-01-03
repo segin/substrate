@@ -29,7 +29,12 @@
 #define CW_PRECISION    0x0020
 // ... precision control, rounding control ...
 
+// Forward declaration
+struct process;
+
 void fpu_init(void);
 void fpu_handler(registers_t *regs);
+void fpu_save_context(struct process *p);
+void fpu_restore_context(struct process *p);
 
 #endif
