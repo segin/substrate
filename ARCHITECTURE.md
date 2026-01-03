@@ -54,10 +54,10 @@ These components are essential for booting and basic system operation.
 ## Design Patterns & Standards
 - **ABIs:**
   - **C:** Standard Intel C ABI.
-  - **Syscalls:** Interrupt `0x80`. Supports multiple personalities:
-    - **Native (TestUnix):** Custom syscalls (`sys_thr_new`, etc.).
-    - **Linux i386:** Compatibility layer (e.g. `sys_clone` mapping).
-    - **FreeBSD i386:** Compatibility layer.
+  - **Syscalls:** Interrupt `0x80`. Supports multiple personalities with distinct ABIs:
+    - **Native (TestUnix):** BSD-style calling convention. Arguments are passed on the stack. Syscall number in `EAX`.
+    - **Linux i386:** Linux-style calling convention. Arguments in registers (`EBX`, `ECX`, `EDX`, `ESI`, `EDI`, `EBP`). Syscall number in `EAX`.
+    - **FreeBSD i386:** BSD-style calling convention (Stack-based).
 - **Tooling:** Built with modern GCC (`-m32`).
 - **Threading Model:**
   - **BSD-style:** 1:1 Kernel threading model using `kthread` infrastructure.
