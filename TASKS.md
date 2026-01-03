@@ -27,7 +27,24 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Memory Management (BSD/Mach Design):**
         - [ ] **Physical Memory (Machine Independent):**
             - [ ] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page.
+                - [ ] **Fields:** `phys_addr`, `flags`, `wire_count`, `ref_count`, `order` (buddy), `object`, `pindex`
+                - [ ] **State Flags:** `PG_BUSY`, `PG_VALID`, `PG_DIRTY`, `PG_ACTIVE`, `PG_INACTIVE`, `PG_FREE`, `PG_ZERO`, `PG_SWAPPED`
+                - [ ] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator)
+                - [ ] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup
+                - [ ] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page
+                - [ ] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
             - [ ] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic.
+                - [ ] **Queue Types:**
+                    - [ ] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head)
+                    - [ ] **Active Queue:** Recently accessed pages (LRU head)
+                    - [ ] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed)
+                    - [ ] **Wired Queue:** Pages that cannot be paged out (kernel, DMA buffers)
+                    - [ ] **Laundry Queue:** Dirty pages waiting to be written to backing store
+                - [ ] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()`
+                - [ ] **LRU Scanning:** Periodic scan to move pages from Active→Inactive based on access bits
+                - [ ] **Page Daemon:** Background thread (`pagedaemon`) to free pages when `free_count < free_target`
+                - [ ] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management
+                - [ ] **Statistics:** Track queue lengths, page faults, pageouts, pageins
         - [/] **PMAP Layer (Machine Dependent - i386):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
             - [ ] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.

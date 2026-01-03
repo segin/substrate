@@ -20,6 +20,11 @@ The kernel is the core of the operating system, structured as follows:
             - `0x23`: User Data Segment (0x20 | RPL 3)
             - `0x28`: TSS
             - `0x33`: TLS Segment (0x30 | RPL 3) - Used for Thread-Local Storage (GS)
+        - **Physical Memory Manager (PMM)**:
+            - **Buddy Allocator:** O(log N) allocation/free with automatic page coalescing.
+            - **Orders:** 0-10 (4KB to 4MB blocks).
+            - **Initialization:** `pmm_buddy_init_range()` populates free lists with maximum-order blocks.
+            - **Bitmap:** Kept for diagnostics, not used for allocation decisions.
 - **`sys/drivers/`**: Hardware drivers.
     - **`video/`**: VGA text mode driver.
     - **`serial/`**: UART driver.

@@ -35,6 +35,9 @@ static spinlock_t pmm_lock;
 // Forward declarations for Buddy Allocator
 static void pmm_buddy_free_locked(vm_page_t *page, int order);
 static vm_page_t* pmm_buddy_alloc_locked(int order);
+static void pmm_buddy_init_range(uint32_t start, uint32_t end);
+static void pmm_buddy_enqueue(int order, vm_page_t *page);
+static void pmm_buddy_dequeue(int order, vm_page_t *page);
 
 // ==================== Watermark (Bump) Allocator ====================
 // Used during early boot before free list is ready
@@ -102,12 +105,7 @@ static void pmm_mark_free(uint32_t addr) {
         if (pmm_bitmap[idx] & (1 << bit)) {
             pmm_bitmap[idx] &= ~(1 << bit);
             pmm_used_blocks--;
-            
-            // Integrate with Buddy Allocator
-            vm_page_t *page = pmm_get_page(addr);
-            if (page) {
-                pmm_buddy_free_locked(page, 0);
-            }
+            // NOTE: Do NOT call buddy_free here - bitmap is for diagnostics only
         }
     }
 }
@@ -300,39 +298,91 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     if (mmap_addr == 0 || mmap_length == 0) {
         // Fallback: assume 16MB conventional
          kprint("PMM: No memory map provided, assuming 16MB.\n");
-        for (uint32_t i = 0x100000; i < (16 * 1024 * 1024); i += PMM_BLOCK_SIZE) {
-            if (i < pmm_total_blocks * PMM_BLOCK_SIZE)
-                pmm_mark_free(i);
-        }
+        // Use proper buddy initialization for fallback range
+        extern uint32_t _kernel_end;
+        uint32_t k_end = ((uint32_t)(uintptr_t)&_kernel_end - 0xC0000000);
+        k_end = (k_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+        pmm_buddy_init_range(k_end, 16 * 1024 * 1024);
         pmm_reserve_kernel();
         return;
     }
 
-    // Phase 2: Mark usable pages
+    // Phase 2: Initialize buddy allocator with usable memory ranges
+    // First, reserve kernel memory
+    pmm_reserve_kernel();
+    
+    // Then add usable ranges to buddy allocator
     multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
     while ((uint32_t)(uintptr_t)mmap < mmap_addr + mmap_length) {
         if (pmm_is_usable_type(mmap->type)) {
             uint32_t start = pmm_clamp_addr(mmap->addr);
             uint32_t end = pmm_clamp_addr(mmap->addr + mmap->len);
             
-            // Align to page boundaries
-            start = (start + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
-            end = end & ~(PMM_BLOCK_SIZE - 1);
+            // Cap to total blocks
+            if (end > pmm_total_blocks * PMM_BLOCK_SIZE) {
+                end = pmm_total_blocks * PMM_BLOCK_SIZE;
+            }
             
-            // Mark free, respecting total blocks (bitmap size)
-            for (uint32_t addr = start; addr < end; addr += PMM_BLOCK_SIZE) {
-                 if (addr < pmm_total_blocks * PMM_BLOCK_SIZE)
-                    pmm_mark_free(addr);
+            // Skip first 1MB (BIOS/Multiboot) and kernel region
+            extern uint32_t _kernel_end;
+            uint32_t k_end = ((uint32_t)(uintptr_t)&_kernel_end - 0xC0000000);
+            k_end = (k_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+            
+            // Skip watermark region too
+            uint32_t wm_end = (watermark_ptr + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+            
+            uint32_t safe_start = start;
+            if (safe_start < wm_end) safe_start = wm_end;
+            
+            if (safe_start < end) {
+                pmm_buddy_init_range(safe_start, end);
             }
         }
         mmap = (multiboot_mmap_entry_t*)((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
     }
-    
-    // Mark watermark region as used! 
-    // (Actually pmm_mark_free normally marks pages free, and we started with 0xFF (used). 
-    // Watermark allocated pages were never marked free, so they remain used. Correct.)
+}
 
-    pmm_reserve_kernel();
+// Initialize buddy allocator for a contiguous range of usable memory
+// This properly coalesces pages into the largest possible buddy blocks
+static void pmm_buddy_init_range(uint32_t start, uint32_t end) {
+    // Align start up, end down to page boundaries
+    start = (start + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+    end = end & ~(PMM_BLOCK_SIZE - 1);
+    
+    if (start >= end) return;
+    
+    uint32_t addr = start;
+    while (addr < end) {
+        // Find the largest order block that fits and is naturally aligned
+        int order = 0;
+        while (order < PMM_MAX_ORDER - 1) {
+            uint32_t block_size = (1 << (order + 1)) * PMM_BLOCK_SIZE;
+            // Check alignment and fit
+            if ((addr & (block_size - 1)) != 0) break;  // Not aligned for larger order
+            if (addr + block_size > end) break;          // Doesn't fit
+            order++;
+        }
+        
+        // Add this block to the buddy free list
+        vm_page_t *page = pmm_get_page(addr);
+        if (page) {
+            // Clear used bits in bitmap for the entire block
+            for (uint32_t i = 0; i < (1U << order); i++) {
+                uint32_t pa = addr + (i * PMM_BLOCK_SIZE);
+                uint32_t block = pa / PMM_BLOCK_SIZE;
+                uint32_t idx = block / 8;
+                uint32_t bit = block % 8;
+                if (idx < pmm_bitmap_size) {
+                    pmm_bitmap[idx] &= ~(1 << bit);
+                    pmm_used_blocks--;
+                }
+            }
+            pmm_buddy_enqueue(order, page);
+            pmm_free_count += (1 << order);
+        }
+        
+        addr += (1 << order) * PMM_BLOCK_SIZE;
+    }
 }
 
 vm_page_t *pmm_get_page(uintptr_t pa) {
@@ -466,8 +516,10 @@ void pmm_free_block(void* p) {
     spinlock_acquire(&pmm_lock);
 
     vm_page_t *page = pmm_get_page(addr);
-    if (page) {
+    if (page && !(page->flags & PG_FREE)) {
+        // Update bitmap for diagnostics
         pmm_mark_free(addr);
+        // Free to buddy system
         pmm_buddy_free_locked(page, 0);
     }
 
