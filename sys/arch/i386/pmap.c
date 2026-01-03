@@ -66,11 +66,129 @@ pmap_t pmap_kernel(void) {
 }
 
 pmap_t pmap_create(void) {
-    return 0; // Stub
+    // 1. Allocate page directory from PMM
+    void *pd_mem = pmm_alloc_block();
+    if (!pd_mem) {
+        // Out of memory
+        return 0;
+    }
+    
+    uint32_t pd_phys = (uint32_t)(uintptr_t)pd_mem;
+    
+    // Edge case: Validate physical address alignment
+    if (pd_phys & 0xFFF) {
+        // PMM returned unaligned block - this should never happen
+        pmm_free_block(pd_mem);
+        return 0;
+    }
+    
+    // Edge case: Check for physical address overflow (>4GB on 32-bit)
+    if (pd_phys == 0) {
+        // Address is NULL or wrapped around
+        pmm_free_block(pd_mem);
+        return 0;
+    }
+    
+    // 2. Map to virtual address for setup (physical + KERNEL_VIRT_BASE)
+    uint32_t *pd = (uint32_t *)(pd_phys + 0xC0000000);
+    
+    // Edge case: Verify we can access kernel page directory
+    uint32_t *kernel_pd = (uint32_t *)0xFFFFF000;  // Recursive mapping
+    if (!kernel_pd) {
+        pmm_free_block(pd_mem);
+        return 0;
+    }
+    
+    // 3. Zero out page directory
+    for (int i = 0; i < 1024; i++) {
+        pd[i] = 0;
+    }
+    
+    // 4. Copy kernel mappings (upper 256 entries: 0xC0000000-0xFFFFFFFF)
+    //    User processes need kernel mappings for syscalls/interrupts
+    for (int i = 768; i < 1023; i++) {  // Copy entries 768-1022
+        // Edge case: Validate kernel PDE before copying
+        if (kernel_pd[i] & PTE_P) {
+            pd[i] = kernel_pd[i];
+        }
+    }
+    
+    // 5. Set up recursive mapping at entry 1023
+    pd[1023] = pd_phys | PTE_P | PTE_W;
+    
+    // 6. Return physical address (pmap_t is physical pointer)
+    return (pmap_t)pd_phys;
 }
 
 void pmap_destroy(pmap_t pmap) {
-    (void)pmap;
+    // Edge case: NULL pmap
+    if (!pmap) return;
+    
+    // Edge case: Don't destroy kernel pmap
+    if (pmap == kernel_pmap_ptr) return;
+    
+    uint32_t pd_phys = (uint32_t)pmap;
+    
+    // Edge case: Check if this is the currently active pmap
+    uint32_t current_cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
+    if (current_cr3 == pd_phys) {
+        // Cannot destroy active address space!
+        // Switch to kernel pmap first
+        pmap_activate(kernel_pmap_ptr);
+    }
+    
+    // Edge case: Validate physical address
+    if (pd_phys == 0 || (pd_phys & 0xFFF)) {
+        // Invalid physical address (NULL or misaligned)
+        return;
+    }
+    
+    // 1. Map page directory to virtual address
+    uint32_t *pd = (uint32_t *)(pd_phys + 0xC0000000);
+    
+    // 2. Free all user page tables (entries 0-767, user space only)
+    for (int i = 0; i < 768; i++) {
+        if (pd[i] & PTE_P) {
+            // Get page table physical address
+            uint32_t pt_phys = pd[i] & ~0xFFF;
+            
+            // Edge case: Validate page table address
+            if (pt_phys == 0 || (pt_phys & 0xFFF)) {
+                continue;  // Skip invalid PT
+            }
+            
+            // Map page table to virtual address
+            uint32_t *pt = (uint32_t *)(pt_phys + 0xC0000000);
+            
+            // Free all mapped pages in this page table
+            for (int j = 0; j < 1024; j++) {
+                if (pt[j] & PTE_P) {
+                    uint32_t page_phys = pt[j] & ~0xFFF;
+                    
+                    // Edge case: Validate page address before freeing
+                    if (page_phys != 0 && !(page_phys & 0xFFF)) {
+                        // Don't free kernel pages (>= 0xC0000000 virtual)
+                        if (page_phys < 0x40000000) {  // Reasonable upper bound for user pages
+                            pmm_free_block((void *)(uintptr_t)page_phys);
+                        }
+                    }
+                }
+            }
+            
+            // Free page table itself
+            pmm_free_block((void *)(uintptr_t)pt_phys);
+            
+            // Clear PDE to prevent double-free
+            pd[i] = 0;
+        }
+    }
+    
+    // Edge case: Clear recursive mapping to prevent confusion
+    pd[1023] = 0;
+    
+    // 3. Free page directory
+    pmm_free_block((void *)(uintptr_t)pd_phys);
 }
 
 void pmap_activate(pmap_t pmap) {
