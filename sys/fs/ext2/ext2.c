@@ -1,5 +1,4 @@
 #include "ext2.h"
-#include "../../drivers/video/vga.h"
 #include "../../vfs/vfs.h"
 #include "../../kern/console.h"
 #include <string.h>
@@ -296,7 +295,7 @@ static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     
     fs_node_t *dev = (fs_node_t *)data;
     if (!dev || !dev->read) {
-        vga_write("EXT2: No device or read function\n", 33);
+        kprint("EXT2: No device or read function\n");
         return NULL;
     }
     
@@ -304,14 +303,14 @@ static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     uint8_t sb_buf[1024];
     uint32_t read = dev->read(dev, 1024, 1024, sb_buf);
     if (read != 1024) {
-        vga_write("EXT2: Failed to read superblock\n", 32);
+        kprint("EXT2: Failed to read superblock\n");
         return NULL;
     }
     
     memcpy(&ext2_fs.sb, sb_buf, sizeof(ext2_superblock_t));
     
     if (ext2_fs.sb.s_magic != EXT2_SUPER_MAGIC) {
-        vga_write("EXT2: Invalid magic number\n", 27);
+        kprint("EXT2: Invalid magic number\n");
         return NULL;
     }
     
@@ -337,7 +336,7 @@ static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     // Read root inode (inode 2)
     ext2_inode_t root_inode;
     if (ext2_read_inode(&ext2_fs, EXT2_ROOT_INO, &root_inode) != 0) {
-        vga_write("EXT2: Failed to read root inode\n", 32);
+        kprint("EXT2: Failed to read root inode\n");
         return NULL;
     }
     
@@ -355,7 +354,7 @@ static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_root.readdir = ext2_readdir;
     ext2_root.finddir = ext2_finddir;
     
-    vga_write("EXT2: Mounted successfully\n", 27);
+    kprint("EXT2: Mounted successfully\n");
     return &ext2_root;
 }
 
@@ -365,7 +364,7 @@ static filesystem_t ext2_filesystem = {
 };
 
 void ext2_init(void) {
-    vga_write("Initializing EXT2 Driver...\n", 28);
+    kprint("Initializing EXT2 Driver...\n");
     vfs_register_filesystem(&ext2_filesystem);
 }
 

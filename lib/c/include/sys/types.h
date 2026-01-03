@@ -11,7 +11,7 @@ typedef uint32_t size_t;
 typedef int32_t ssize_t;
 typedef int32_t mode_t;
 typedef uint32_t dev_t;
-typedef long time_t;
+typedef int64_t time_t;
 typedef long fpos_t;
 
 #endif

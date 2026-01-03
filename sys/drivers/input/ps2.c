@@ -1,6 +1,6 @@
 #include "ps2.h"
 #include "../../arch/i386/io.h"
-#include "../../drivers/video/vga.h"
+#include "../../kern/console.h"
 
 static void ps2_wait_write(void) {
     while (inb(PS2_STATUS_PORT) & 2);
@@ -31,7 +31,7 @@ uint8_t ps2_read_data(void) {
 }
 
 void ps2_init(void) {
-    vga_write("PS/2: Initializing controller...\n", 33);
+    kprint("PS/2: Initializing controller...\n");
 
     // 1. Disable devices
     ps2_write_command(PS2_CMD_DISABLE_P1);
@@ -50,7 +50,7 @@ void ps2_init(void) {
     // 4. Controller self-test
     ps2_write_command(PS2_CMD_SELF_TEST);
     if (ps2_read_data() != 0x55) {
-        vga_write("PS/2: Controller self-test failed!\n", 35);
+        kprint("PS/2: Controller self-test failed!\n");
         return;
     }
 
@@ -64,5 +64,5 @@ void ps2_init(void) {
     ps2_write_command(PS2_CMD_WRITE_CONFIG);
     ps2_write_data(config);
 
-    vga_write("PS/2: Controller initialized.\n", 30);
+    kprint("PS/2: Controller initialized.\n");
 }

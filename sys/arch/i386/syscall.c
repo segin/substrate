@@ -1,6 +1,5 @@
 #include "syscall.h"
 #include "idt.h"
-#include "../../drivers/video/vga.h"
 #include "../../kern/sched.h"
 #include "../../kern/version.h"
 #include "../../kern/panic.h"
@@ -24,7 +23,7 @@ extern process_t processes[64];
 extern thread_t threads[256];
 
 extern int sys_acct(const char *path);
-extern int sys_time(uint32_t *tloc);
+extern int64_t sys_time(int64_t *tloc);
 extern int sys_waitpid(int pid, int *status, int options);
 extern int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 extern void signal_handle_pending(registers_t *regs);
@@ -49,7 +48,7 @@ void file_free(file_t *f) {
 
 int sys_write(int fd, const char *buf, int len) {
     if (fd == 1 || fd == 2) {
-        vga_write(buf, len);
+        console_write(buf, len);
         uart_write(buf, len);
         return len;
     }
@@ -354,9 +353,11 @@ void syscall_handler(registers_t *regs) {
         return;
     }
     
-    typedef int (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+    typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
-    regs->eax = func(regs->ebx, regs->ecx, regs->edx, regs->esi, regs->edi, regs->ebp);
+    int64_t ret = func(regs->ebx, regs->ecx, regs->edx, regs->esi, regs->edi, regs->ebp);
+    regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
+    regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
 
     signal_handle_pending(regs);
     

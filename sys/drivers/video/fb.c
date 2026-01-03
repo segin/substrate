@@ -1,6 +1,6 @@
 #include "fb.h"
 #include "font.h"
-#include "../../drivers/video/vga.h"
+#include "../../kern/console.h"
 #include <stddef.h>
 
 static fb_info_t fb;
@@ -10,7 +10,7 @@ int fb_active = 0;
 
 void fb_init(multiboot_info_t *mbi) {
     if (!(mbi->flags & (1 << 12))) {
-        vga_write("FB: Multiboot info has no framebuffer.\n", 39);
+        kprint("FB: Multiboot info has no framebuffer.\n");
         fb_active = 0;
         return;
     }
@@ -22,7 +22,7 @@ void fb_init(multiboot_info_t *mbi) {
     fb.bpp = mbi->framebuffer_bpp;
 
     fb_active = 1;
-    vga_write("FB: Initialized framebuffer.\n", 30);
+    kprint("FB: Initialized framebuffer.\n");
 }
 
 void fb_putpixel(int x, int y, uint32_t color) {

@@ -15,6 +15,7 @@
 #include "../arch/i386/pci.h"
 #include "../arch/i386/syscall.h"
 #include "../arch/i386/fpu/fpu_emu.h"
+#include "../arch/i386/rtc.h"
 #include "../arch/i386/multiboot.h"
 #include <sys/proc.h>
 #include "../pm/pm.h"
@@ -66,6 +67,12 @@ void kinit_task(void *arg) {
     extern int elf_execve(const char *path, char *const argv[], char *const envp[]);
 
     kprint("kinit: Starting init process...\n");
+
+    // Open standard FDs (0, 1, 2)
+    extern int sys_open(const char *path, int flags, int mode);
+    sys_open("/dev/console", 0, 0); // stdin
+    sys_open("/dev/console", 0, 0); // stdout
+    sys_open("/dev/console", 0, 0); // stderr
 
     // Parse cmdline for init=
     if (cmdline) {
@@ -139,9 +146,21 @@ static void early_uart_print(const char *s) {
     while (*s) early_uart_putc(*s++);
 }
 
+// Multiboot Data Reclamation Support
+static multiboot_info_t mboot_copy;
+static multiboot_mmap_entry_t mboot_mmap_copy[64];
+static struct {
+    uint32_t mod_start;
+    uint32_t mod_end;
+    uint32_t cmdline;
+    uint32_t pad;
+} mboot_mods_copy[8];
+static uint32_t mboot_orig_addr = 0;
+
 // Kernel Entry Point
 void kmain(unsigned long magic, unsigned long addr) {
     early_uart_print("KMAIN START\n");
+    mboot_orig_addr = addr;
     // 0. Setup Kernel Task IMMEDIATELY
     extern process_t processes[];
     extern process_t *current_process;
@@ -196,6 +215,11 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Display kernel ident banner (mirrored if serial_debug_enabled)
     kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
 
+    // Dump Memory Map Early
+    if (mboot_info && (mboot_info->flags & (1<<6))) {
+        pmm_dump_mmap((uintptr_t)VIRTUAL_d(mboot_info->mmap_addr), mboot_info->mmap_length);
+    }
+
     uint32_t mmap_addr = 0;
     uint32_t mmap_length = 0;
     
@@ -239,9 +263,43 @@ void kmain(unsigned long magic, unsigned long addr) {
         kprint("PMM Initialized (no mmap).\n");
     }
 
+    // Update mboot_info to point to our copies
+    if (mboot_info) {
+        memcpy(&mboot_copy, mboot_info, sizeof(multiboot_info_t));
+        // mmap updated above if present
+        
+        // Modules updated if present
+        if (mboot_info->flags & (1<<3)) {
+             uint32_t mods_count = mboot_info->mods_count;
+             if (mods_count > 8) mods_count = 8;
+             uint32_t mods_addr_virt = (uintptr_t)VIRTUAL_d(mboot_info->mods_addr);
+             memcpy(mboot_mods_copy, (void*)(uintptr_t)mods_addr_virt, mods_count * 16);
+             mboot_copy.mods_addr = PHYSICAL_d(mboot_mods_copy);
+             mboot_copy.mods_count = mods_count;
+        }
+        
+        mboot_info = &mboot_copy;
+    }
+    
+    if (mboot_info && (mboot_info->flags & (1<<6))) {
+        mmap_addr = (uintptr_t)VIRTUAL_d(mboot_info->mmap_addr);
+        mmap_length = mboot_info->mmap_length;
+        
+        // Copy mmap
+        uint32_t count = mmap_length / sizeof(multiboot_mmap_entry_t);
+        if (count > 64) count = 64;
+        memcpy(mboot_mmap_copy, (void*)(uintptr_t)mmap_addr, count * sizeof(multiboot_mmap_entry_t));
+        mboot_copy.mmap_addr = PHYSICAL_d(mboot_mmap_copy);
+        mboot_copy.mmap_length = count * sizeof(multiboot_mmap_entry_t);
+        mboot_copy.flags |= (1<<6);
+    }
+
     // Initialize GDT
     gdt_init();
     kprint("GDT Initialized.\n");
+
+    // Initialize RTC and set system time
+    rtc_init();
 
     // Initialize PMAP (Paging) MUST HAPPEN BEFORE SCHEDULER/VFS
     pmap_bootstrap();
@@ -300,6 +358,10 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize VFS (handles filesystem registration and pseudo-fs mounts)
     vfs_init();
     
+    // Register console device in /dev
+    extern void console_register_devfs(void);
+    console_register_devfs();
+    
     // Check for Root Filesystem
     // Parse root= argument
     char root_dev[64] = {0};
@@ -353,6 +415,24 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Reclaim early boot code
     extern void pmm_reclaim_setup(void);
     pmm_reclaim_setup();
+    
+    // Reclaim original multiboot info (1 page)
+    if (mboot_orig_addr) {
+        kprint("Freeing Multiboot info: 4K\n");
+        extern void pmm_reclaim_range(uint32_t start, uint32_t end);
+        pmm_reclaim_range(mboot_orig_addr, mboot_orig_addr + 4096);
+    }
+    
+    // Note: mboot_copy contains the physical mods_addr of our COPY.
+    // We want to reclaim the ORIGINAL mods_addr from the bootloader.
+    // We didn't save it explicitly, but we can get it from the bootloader's MBI
+    // if we hadn't reclaimed the MBI page yet. 
+    // Wait, mboot_orig_addr is physical. VIRTUAL_d(mboot_orig_addr) is the original MBI.
+    multiboot_info_t *orig_mbi = (multiboot_info_t*)VIRTUAL_d(mboot_orig_addr);
+    if (mboot_orig_addr && (orig_mbi->flags & (1<<3))) {
+        kprint("Freeing Multiboot modules list: 4K\n");
+        pmm_reclaim_range(orig_mbi->mods_addr, orig_mbi->mods_addr + 4096);
+    }
 
     kprint("Entering main loop...\n");
     while (1) {

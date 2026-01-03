@@ -1,7 +1,7 @@
 #include "minix.h"
-#include "../../drivers/video/vga.h"
+#include "../../kern/console.h"
 
 void minix_init(void) {
-    vga_write("Initializing Minix FS Driver...\n", 32);
+    kprint("Initializing Minix FS Driver...\n");
 }
 

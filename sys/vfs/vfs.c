@@ -1,6 +1,7 @@
 #include "vfs.h"
 #include <string.h>
-#include "../drivers/video/vga.h"
+#include "../kern/console.h"
+#include <stdio.h>
 
 fs_node_t *fs_root = 0; 
 
@@ -20,7 +21,7 @@ extern void p9_init(void);
 extern void pseudo_init(void);
 
 void vfs_init(void) {
-    vga_write("VFS: Initializing...\n", 21);
+    kprint("VFS: Initializing...\n");
     
     // Register real filesystem drivers
     ext2_init();
@@ -44,7 +45,7 @@ void vfs_init(void) {
     vfs_mount(NULL, "/proc", "procfs", 0, NULL);
     vfs_mount(NULL, "/sys", "sysfs", 0, NULL);
     
-    vga_write("VFS: Ready.\n", 12);
+    kprint("VFS: Ready.\n");
 }
 
 void vfs_register_filesystem(filesystem_t *fs) {
@@ -60,9 +61,9 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
         fs = fs->next;
     }
     if (!fs) {
-        vga_write("VFS: Unknown filesystem type: ", 30);
-        vga_write(type, strlen(type));
-        vga_write("\n", 1);
+        char buf[128];
+        sprintf(buf, "VFS: Unknown filesystem type: %s\n", type);
+        kprint(buf);
         return -1;
     }
 

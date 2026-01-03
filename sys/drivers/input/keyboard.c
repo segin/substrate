@@ -1,7 +1,6 @@
 #include "keyboard.h"
 #include "ps2.h"
 #include "../../arch/i386/io.h"
-#include "../../drivers/video/vga.h"
 #include <sys/input.h>
 #include "../../kern/console.h"
 
@@ -48,14 +47,13 @@ static int kbd_alt   = 0;
 
 void keyboard_init(void) {
     ps2_init();
-    vga_write("Keyboard Driver Initialized.\n", 29);
+    kprint("Keyboard Driver Initialized.\n");
 }
 
 static int kbd_extended = 0;
 
 void keyboard_handler(registers_t *regs) {
     uint8_t scancode = inb(0x60);
-    kprint("K"); // DEBUG: Keyboard IRQ received
     
     if (scancode == 0xE0) {
         kbd_extended = 1;
@@ -118,7 +116,5 @@ void keyboard_handler(registers_t *regs) {
     }
     
 out:
-    // Send EOI to master PIC (IRQ 1 is on master)
-    outb(0x20, 0x20);
     (void)regs;
 }

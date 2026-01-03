@@ -73,3 +73,6 @@ uname-freebsd.S
 uname-linux.S
 sys/symbols_end.txt
 sys/symbols_start.txt
+
+# Distribution root filesystem
+dist/

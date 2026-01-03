@@ -23,11 +23,20 @@ static uint32_t tty_write_proxy(fs_node_t *node, uint32_t offset, uint32_t size,
     return 0;
 }
 
+static int tty_ioctl_proxy(fs_node_t *node, uint32_t request, void *arg) {
+    (void)node;
+    fs_node_t *tty = current_process ? current_process->tty : NULL;
+    if (!tty) tty = console_get_node();
+    if (tty && tty->ioctl) return tty->ioctl(tty, request, arg);
+    return -1;
+}
+
 static fs_node_t tty_node = {
     .name = "tty",
     .flags = FS_CHARDEVICE,
     .read = tty_read_proxy,
-    .write = tty_write_proxy
+    .write = tty_write_proxy,
+    .ioctl = tty_ioctl_proxy
 };
 
 // Device registry - split into char devices and storage devices

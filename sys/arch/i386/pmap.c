@@ -1,6 +1,5 @@
 #include "pmap.h"
 #include "pmm.h"
-#include "../../drivers/video/vga.h"
 #include "../../kern/panic.h"
 #include "../../kern/console.h"
 #include <string.h>
@@ -20,7 +19,7 @@ static struct pmap kernel_pmap_store;
 static pmap_t kernel_pmap_ptr = &kernel_pmap_store;
 
 void pmap_bootstrap(void) {
-    vga_write("PMAP: Bootstrapping...\n", 23);
+    kprint("PMAP: Bootstrapping...\n");
     
     // Clear directory
     for (int i = 0; i < 1024; i++) {
@@ -59,7 +58,7 @@ void pmap_bootstrap(void) {
     // Enable Paging (Reload CR3)
     __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));
     
-    vga_write("PMAP: Paging Enabled (Higher Half).\n", 35);
+    kprint("PMAP: Paging Enabled (Higher Half).\n");
 }
 
 pmap_t pmap_kernel(void) {

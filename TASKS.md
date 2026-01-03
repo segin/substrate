@@ -6,21 +6,31 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 1. Kernel Core (`sys/core`, `sys/kern`)
 - [ ] **Memory Management:**
-    - [ ] **Physical Memory Manager (PMM):**
+    - [/] **Physical Memory Manager (PMM):**
         - [x] Basic Bitmap Allocator (`pmm.c`).
         - [x] Parse Multiboot Memory Map (mmap) to support non-contiguous RAM.
         - [x] Parse e820 Memory Map (legacy BIOS).
         - [x] Implement `pmm_alloc_contiguous` for specific DMA drivers.
+        - [ ] Dynamic bitmap allocation to support >128MB systems
     - [ ] **Memory Management (BSD/Mach Design):**
         - [ ] **Physical Memory (Machine Independent):**
             - [x] `vm_page_t`: Core structure tracking state of every physical page.
             - [x] **Page Queues:** Active/Inactive/Free lists for page replacement logic.
-        - [ ] **PMAP Layer (Machine Dependent - i386):**
+        - [/] **PMAP Layer (Machine Dependent - i386):**
             - [x] `pmap_init`: Bootstrap hardware paging structures.
             - [x] `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
             - [x] `pmap_activate`: Context switch hook (CR3 loading).
             - [x] **Recursive Paging:** Efficient Page Table mapping.
             - [x] **Higher Half Transition:** Stable 3GB/1GB split with LMA=1M/VMA=C0000000.
+            - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management (required for user processes)
+            - [ ] `pmap_protect`: Change page protections
+            - [ ] `pmap_copy`: Copy mappings between address spaces
+            - [ ] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits
+            - [ ] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits
+            - [ ] Copy-on-write support
+            - [ ] TLB shootdown for SMP (invalidate remote CPU TLBs)
+            - [ ] Large page (4MB PSE) support
+            - [ ] Global page support (PGE)
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**
             - [x] `pmap_init`: Bootstrap PML4 paging structures.
             - [x] `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
@@ -120,6 +130,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Map framebuffer memory (requires VMM).
     - [ ] **Framebuffer Console:**
         - [x] Import a bitmap font (e.g., PSF or raw bitmap).
+        - [ ] **16x8 monospaced framebuffer font support.**
         - [x] Implement `fb_putc` with blitting capability.
         - [x] Implement scrolling (hardware panning or software copy).
         - [x] Hook into `vga_write` or create generic `console_write`.

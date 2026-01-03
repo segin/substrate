@@ -2,6 +2,7 @@
 #include "multiboot.h"
 #include "e820.h"
 #include <string.h>
+#include <stdio.h>
 #include "../../kern/console.h"
 
 static uint8_t* pmm_bitmap;
@@ -66,14 +67,29 @@ static void pmm_reserve_kernel(void) {
     }
 }
 
+// Generic range reclamation (physical addresses)
+void pmm_reclaim_range(uint32_t start, uint32_t end) {
+    // Round start down to block boundary
+    start &= ~(PMM_BLOCK_SIZE - 1);
+    // Round end up to block boundary
+    end = (end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+
+    for (uint32_t i = start; i < end; i += PMM_BLOCK_SIZE) {
+        pmm_free_block((void*)(uintptr_t)i);
+    }
+}
+
 // Reclaim early boot setup memory
 void pmm_reclaim_setup(void) {
     extern uint32_t _setup_start, _setup_end;
+    // These are virtual addresses in Higher Half, but .setup is identity mapped at 1MB
+    // Actually, in the linker script, .setup is at 1M physical.
+    // _setup_start/end are the addresses of the section.
     uint32_t start = (uint32_t)(uintptr_t)&_setup_start;
     uint32_t end = (uint32_t)(uintptr_t)&_setup_end;
     uint32_t size = end - start;
     
-    kprint("Freeing unused kernel memory: ");
+    kprint("Freeing setup memory: ");
     // Print size in KB
     char buf[16];
     uint32_t kb = size / 1024;
@@ -94,9 +110,7 @@ void pmm_reclaim_setup(void) {
     kprint(buf);
     kprint("K\n");
     
-    for (uint32_t i = start; i < end; i += PMM_BLOCK_SIZE) {
-        pmm_free_block((void*)i);
-    }
+    pmm_reclaim_range(start, end);
 }
 
 void pmm_init_e820(e820_entry_t *map, uint32_t count) {
@@ -119,7 +133,7 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm_init_bitmap();
 
-    multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)mmap_addr;
+    multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
     while((uint32_t)mmap < mmap_addr + mmap_length) {
         if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE || mmap->type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE) {
             for (uint64_t i = 0; i < mmap->len; i += PMM_BLOCK_SIZE) {
@@ -129,7 +143,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
                 }
             }
         }
-        mmap = (multiboot_mmap_entry_t*) ((uint32_t)mmap + mmap->size + sizeof(mmap->size));
+        mmap = (multiboot_mmap_entry_t*) ((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
     }
 
     pmm_reserve_kernel();
@@ -153,7 +167,7 @@ void* pmm_alloc_block(void) {
 }
 
 void pmm_free_block(void* p) {
-    uint32_t addr = (uint32_t)p;
+    uint32_t addr = (uint32_t)(uintptr_t)p;
     uint32_t block = addr / PMM_BLOCK_SIZE;
     uint32_t idx = block / 8;
     uint32_t bit = block % 8;
@@ -163,6 +177,32 @@ void pmm_free_block(void* p) {
             pmm_bitmap[idx] &= ~(1 << bit);
             pmm_used_blocks--;
         }
+    }
+}
+
+void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
+    kprint("BIOS-e820 physical RAM map:\n");
+    multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
+    while((uint32_t)mmap < mmap_addr + mmap_length) {
+        char buf[128];
+        const char* type_str = "unknown";
+        if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) type_str = "usable";
+        else if (mmap->type == MULTIBOOT_MEMORY_RESERVED) type_str = "reserved";
+        else if (mmap->type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE) type_str = "ACPI data";
+        else if (mmap->type == MULTIBOOT_MEMORY_NVS) type_str = "ACPI NVS";
+        else if (mmap->type == MULTIBOOT_MEMORY_BADRAM) type_str = "bad RAM";
+
+        // Print in format: [0x0000000000000000 - 0x000000000009ffff] usable
+        uint64_t start = mmap->addr;
+        uint64_t end = mmap->addr + mmap->len - 1;
+        
+        sprintf(buf, " [0x%08x%08x - 0x%08x%08x] %s\n", 
+            (uint32_t)(start >> 32), (uint32_t)(start & 0xFFFFFFFF),
+            (uint32_t)(end >> 32), (uint32_t)(end & 0xFFFFFFFF),
+            type_str);
+        kprint(buf);
+        
+        mmap = (multiboot_mmap_entry_t*) ((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
     }
 }
 
@@ -206,7 +246,7 @@ void* pmm_alloc_contiguous(size_t count) {
 }
 
 void pmm_free_contiguous(void* p, size_t count) {
-    uint32_t start_block = (uint32_t)p / PMM_BLOCK_SIZE;
+    uint32_t start_block = (uint32_t)(uintptr_t)p / PMM_BLOCK_SIZE;
     for (size_t i = 0; i < count; i++) {
         uint32_t block = start_block + i;
         uint32_t idx = block / 8;

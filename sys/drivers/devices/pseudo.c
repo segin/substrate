@@ -1,6 +1,6 @@
 #include "../../vfs/vfs.h"
 #include "../input/keyboard.h"
-#include "../video/vga.h"
+#include "../../kern/console.h"
 #include <string.h>
 
 // /dev/null
@@ -53,7 +53,7 @@ static uint32_t tty_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_
 
 static uint32_t tty_write(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
-    vga_write((const char *)buffer, size);
+    console_write((const char *)buffer, size);
     return size;
 }
 

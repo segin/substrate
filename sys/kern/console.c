@@ -111,15 +111,33 @@ static uint32_t console_node_write(fs_node_t *node, uint32_t offset, uint32_t si
     return size;
 }
 
+static int console_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+    (void)node; (void)arg;
+    // Basic TTY ioctls for BusyBox shell
+    if (request == 0x5401) { // TCGETS
+        return 0; // Succeed
+    }
+    if (request == 0x5402) { // TCSETS
+        return 0; // Succeed
+    }
+    return -1;
+}
+
 static fs_node_t console_node = {
     .name = "console",
     .flags = FS_CHARDEVICE,
     .read = console_node_read,
-    .write = console_node_write
+    .write = console_node_write,
+    .ioctl = console_node_ioctl
 };
 
 fs_node_t *console_get_node(void) {
     return &console_node;
+}
+
+void console_register_devfs(void) {
+    extern void devfs_register_device(fs_node_t *node);
+    devfs_register_device(&console_node);
 }
 
 void kprint(const char *str) {

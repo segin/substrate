@@ -113,7 +113,34 @@ static void handle_csi(char c) {
                 if (terminal_column >= VGA_WIDTH) terminal_column = VGA_WIDTH - 1;
             }
             break;
-        // TODO: Add more codes (A, B, C, D for movement)
+        case 'A': // Cursor Up
+        case 'B': // Cursor Down
+        case 'C': // Cursor Forward
+        case 'D': // Cursor Backward
+            {
+                int n = (ansi_param_count > 0) ? ansi_params[0] : 1;
+                if (n < 1) n = 1;
+                if (c == 'A') terminal_row = (terminal_row >= (size_t)n) ? terminal_row - n : 0;
+                else if (c == 'B') terminal_row = (terminal_row + n < VGA_HEIGHT) ? terminal_row + n : VGA_HEIGHT - 1;
+                else if (c == 'C') terminal_column = (terminal_column + n < VGA_WIDTH) ? terminal_column + n : VGA_WIDTH - 1;
+                else if (c == 'D') terminal_column = (terminal_column >= (size_t)n) ? terminal_column - n : 0;
+            }
+            break;
+        case 'K': // Erase in Line
+            {
+                int n = (ansi_param_count > 0) ? ansi_params[0] : 0;
+                if (n == 0) { // Erase from cursor to end
+                    for (size_t x = terminal_column; x < VGA_WIDTH; x++)
+                        terminal_putentryat(' ', terminal_color, x, terminal_row);
+                } else if (n == 1) { // Erase from start to cursor
+                    for (size_t x = 0; x <= terminal_column; x++)
+                        terminal_putentryat(' ', terminal_color, x, terminal_row);
+                } else if (n == 2) { // Erase whole line
+                    for (size_t x = 0; x < VGA_WIDTH; x++)
+                        terminal_putentryat(' ', terminal_color, x, terminal_row);
+                }
+            }
+            break;
     }
 }
 

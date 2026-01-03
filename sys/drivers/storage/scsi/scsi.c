@@ -1,7 +1,7 @@
 #include "scsi.h"
-#include "../../video/vga.h"
+#include "../../../kern/console.h"
 
 void scsi_init(void) {
-    vga_write("SCSI Stack Initialized.\n", 24);
+    kprint("SCSI Stack Initialized.\n");
 }
 

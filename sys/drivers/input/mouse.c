@@ -1,7 +1,7 @@
 #include "mouse.h"
 #include "ps2.h"
 #include "../../arch/i386/io.h"
-#include "../../drivers/video/vga.h"
+#include "../../kern/console.h"
 #include <sys/input.h>
 
 static uint8_t mouse_buttons = 0;
@@ -29,7 +29,7 @@ int mouse_get_event(mouse_event_t *ev) {
 }
 
 void mouse_init(void) {
-    vga_write("Mouse: Initializing...\n", 23);
+    kprint("Mouse: Initializing...\n");
 
     // 1. Enable auxiliary device
     ps2_write_command(PS2_CMD_ENABLE_P2);
@@ -49,7 +49,7 @@ void mouse_init(void) {
     ps2_write_aux(0xF4);
     ps2_read_data(); // ACK (0xFA)
 
-    vga_write("Mouse Driver Initialized.\n", 26);
+    kprint("Mouse Driver Initialized.\n");
 }
 
 static uint8_t mouse_cycle = 0;

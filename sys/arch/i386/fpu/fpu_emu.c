@@ -1,7 +1,7 @@
 #include "fpu_emu.h"
 #include "../idt.h"
 #include "../io.h"
-#include "../../drivers/video/vga.h"
+#include "../../../kern/console.h"
 
 extern void isr7(void);
 
@@ -25,7 +25,7 @@ void fpu_handler(registers_t *regs) {
     // But x86 usually has an FPU (or SSE) these days.
     // To properly emulate a 387, we would decode the instruction.
     
-    vga_write("FPU Device Not Available (NM) - Emulation stub.\n", 44);
+    kprint("FPU Device Not Available (NM) - Emulation stub.\n");
     
     // HACK: Increment EIP to skip instruction? No, that crashes.
     // We must handle it or hang.

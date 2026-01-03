@@ -1,7 +1,7 @@
 #include "exfat.h"
-#include "../../drivers/video/vga.h"
+#include "../../kern/console.h"
 
 void exfat_init(void) {
-    vga_write("Initializing exFAT Driver...\n", 29);
+    kprint("Initializing exFAT Driver...\n");
 }
 

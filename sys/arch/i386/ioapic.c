@@ -1,5 +1,5 @@
 #include "ioapic.h"
-#include "../../drivers/video/vga.h"
+#include "../../kern/console.h"
 
 static uintptr_t ioapic_base = 0;
 
@@ -15,7 +15,7 @@ static inline void ioapic_write(uint8_t reg, uint32_t val) {
 
 void ioapic_init(uintptr_t base) {
     ioapic_base = base;
-    vga_write("IO-APIC: Initialized at 0x", 26);
+    kprint("IO-APIC: Initialized at 0x");
     // TODO: print hex base
 }
 

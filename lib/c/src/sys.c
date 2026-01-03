@@ -7,14 +7,18 @@
 #include <sys/syscall.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/time.h>
+#include <sys/times.h>
 #include <time.h>
 #include <signal.h>
 #include <sys/wait.h>
 
-extern int _syscall0(int);
-extern int _syscall1(int, int);
-extern int _syscall2(int, int, int);
-extern int _syscall3(int, int, int, int);
+extern int64_t _syscall0(int);
+extern int64_t _syscall1(int, int);
+extern int64_t _syscall2(int, int, int);
+extern int64_t _syscall3(int, int, int, int);
+extern int64_t _syscall4(int, int, int, int, int);
+extern int64_t _syscall5(int, int, int, int, int, int);
 
 int errno = 0;
 char **environ = NULL;
@@ -25,19 +29,19 @@ void _exit(int status) {
 }
 
 int fork(void) {
-    return _syscall0(SYS_FORK);
+    return (int)_syscall0(SYS_FORK);
 }
 
 ssize_t read(int fd, void *buf, size_t count) {
-    return _syscall3(SYS_READ, fd, (int)buf, (int)count);
+    return (ssize_t)_syscall3(SYS_READ, fd, (int)buf, (int)count);
 }
 
 ssize_t write(int fd, const void *buf, size_t count) {
-    return _syscall3(SYS_WRITE, fd, (int)buf, (int)count);
+    return (ssize_t)_syscall3(SYS_WRITE, fd, (int)buf, (int)count);
 }
 
 int close(int fd) {
-    return _syscall1(SYS_CLOSE, fd);
+    return (int)_syscall1(SYS_CLOSE, fd);
 }
 
 int open(const char *pathname, int flags, ...) {
@@ -48,19 +52,19 @@ int open(const char *pathname, int flags, ...) {
         mode = va_arg(ap, int);
         va_end(ap);
     }
-    return _syscall3(SYS_OPEN, (int)pathname, flags, mode);
+    return (int)_syscall3(SYS_OPEN, (int)pathname, flags, mode);
 }
 
 int unlink(const char *pathname) {
-    return _syscall1(SYS_UNLINK, (int)pathname);
+    return (int)_syscall1(SYS_UNLINK, (int)pathname);
 }
 
 int link(const char *oldpath, const char *newpath) {
-    return _syscall2(SYS_LINK, (int)oldpath, (int)newpath);
+    return (int)_syscall2(SYS_LINK, (int)oldpath, (int)newpath);
 }
 
 int execve(const char *filename, char *const argv[], char *const envp[]) {
-    return _syscall3(SYS_EXECVE, (int)filename, (int)argv, (int)envp);
+    return (int)_syscall3(SYS_EXECVE, (int)filename, (int)argv, (int)envp);
 }
 
 int execv(const char *filename, char *const argv[]) {
@@ -92,32 +96,32 @@ int execl(const char *path, const char *arg, ...) {
 }
 
 int chdir(const char *path) {
-    return _syscall1(SYS_CHDIR, (int)path);
+    return (int)_syscall1(SYS_CHDIR, (int)path);
 }
 
 char *getcwd(char *buf, size_t size) {
-    int ret = _syscall2(SYS_GETCWD, (int)buf, size);
+    int ret = (int)_syscall2(SYS_GETCWD, (int)buf, size);
     if (ret < 0) return NULL;
     return buf;
 }
 
 pid_t getpid(void) {
-    return _syscall0(SYS_GETPID);
+    return (pid_t)_syscall0(SYS_GETPID);
 }
 
-uid_t getuid(void) { return _syscall0(SYS_GETUID); }
-gid_t getgid(void) { return _syscall0(SYS_GETGID); }
-uid_t geteuid(void) { return _syscall0(SYS_GETEUID); }
-gid_t getegid(void) { return _syscall0(SYS_GETEGID); }
-int setuid(uid_t uid) { return _syscall1(SYS_SETUID, uid); }
-int setgid(gid_t gid) { return _syscall1(SYS_SETGID, gid); }
+uid_t getuid(void) { return (uid_t)_syscall0(SYS_GETUID); }
+gid_t getgid(void) { return (gid_t)_syscall0(SYS_GETGID); }
+uid_t geteuid(void) { return (uid_t)_syscall0(SYS_GETEUID); }
+gid_t getegid(void) { return (gid_t)_syscall0(SYS_GETEGID); }
+int setuid(uid_t uid) { return (int)_syscall1(SYS_SETUID, uid); }
+int setgid(gid_t gid) { return (int)_syscall1(SYS_SETGID, gid); }
 
 int pipe(int pipefd[2]) {
-    return _syscall1(SYS_PIPE, (int)pipefd);
+    return (int)_syscall1(SYS_PIPE, (int)pipefd);
 }
 
 int dup2(int oldfd, int newfd) {
-    return _syscall2(SYS_DUP2, oldfd, newfd);
+    return (int)_syscall2(SYS_DUP2, oldfd, newfd);
 }
 
 void sync(void) {
@@ -125,7 +129,7 @@ void sync(void) {
 }
 
 int kill(pid_t pid, int sig) {
-    return _syscall2(SYS_KILL, pid, sig);
+    return (int)_syscall2(SYS_KILL, pid, sig);
 }
 
 sighandler_t signal(int signum, sighandler_t handler) {
@@ -133,7 +137,7 @@ sighandler_t signal(int signum, sighandler_t handler) {
 }
 
 int access(const char *pathname, int mode) {
-    return _syscall2(SYS_ACCESS, (int)pathname, mode);
+    return (int)_syscall2(SYS_ACCESS, (int)pathname, mode);
 }
 
 int isatty(int fd) {
@@ -147,48 +151,57 @@ char *ttyname(int fd) {
 }
 
 int rename(const char *oldpath, const char *newpath) {
-    return _syscall2(SYS_RENAME, (int)oldpath, (int)newpath);
+    return (int)_syscall2(SYS_RENAME, (int)oldpath, (int)newpath);
 }
 
 int mkdir(const char *pathname, mode_t mode) {
-    return _syscall2(SYS_MKDIR, (int)pathname, mode);
+    return (int)_syscall2(SYS_MKDIR, (int)pathname, mode);
 }
 
 int rmdir(const char *pathname) {
-    return _syscall1(SYS_RMDIR, (int)pathname);
+    return (int)_syscall1(SYS_RMDIR, (int)pathname);
 }
 
 int stat(const char *pathname, struct stat *statbuf) {
-    return _syscall2(SYS_STAT, (int)pathname, (int)statbuf);
+    return (int)_syscall2(SYS_STAT, (int)pathname, (int)statbuf);
 }
 
 int mknod(const char *pathname, mode_t mode, dev_t dev) {
-    return _syscall3(SYS_MKNOD, (int)pathname, mode, dev);
+    return (int)_syscall3(SYS_MKNOD, (int)pathname, mode, dev);
 }
 
-extern int _syscall4(int, int, int, int, int);
-extern int _syscall5(int, int, int, int, int, int);
-
 int mount(const char *source, const char *target, const char *fs, unsigned long flags, const void *data) {
-    return _syscall5(SYS_MOUNT, (int)source, (int)target, (int)fs, (int)flags, (int)data);
+    return (int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)fs, (int)flags, (int)data);
 }
 
 int umount(const char *target) {
-    return _syscall1(SYS_UMOUNT, (int)target);
+    return (int)_syscall1(SYS_UMOUNT, (int)target);
 }
 
 int uname(struct utsname *buf) {
-    return _syscall1(SYS_UNAME, (int)buf);
+    return (int)_syscall1(SYS_UNAME, (int)buf);
 }
 
 time_t time(time_t *tloc) {
-    int t = _syscall1(SYS_TIME, (int)tloc);
+    time_t t = (time_t)_syscall1(SYS_TIME, (int)tloc);
     if (tloc) *tloc = t;
     return t;
 }
 
+int gettimeofday(struct timeval *tv, struct timezone *tz) {
+    return (int)_syscall2(SYS_GETTIMEOFDAY, (int)tv, (int)tz);
+}
+
+int clock_gettime(clockid_t clk_id, struct timespec *tp) {
+    return (int)_syscall2(SYS_CLOCK_GETTIME, clk_id, (int)tp);
+}
+
+clock_t times(struct tms *buf) {
+    return (clock_t)_syscall1(SYS_TIMES, (int)buf);
+}
+
 pid_t waitpid(pid_t pid, int *status, int options) {
-    return _syscall3(SYS_WAITPID, pid, (int)status, options);
+    return (pid_t)_syscall3(SYS_WAITPID, pid, (int)status, options);
 }
 
 pid_t wait(int *status) {

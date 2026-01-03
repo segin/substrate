@@ -1,5 +1,5 @@
 #include "smp.h"
-#include "../../drivers/video/vga.h"
+#include "../../kern/console.h"
 #include <string.h>
 #include <stdint.h>
 
@@ -28,7 +28,7 @@ struct acpi_header {
 } __attribute__((packed));
 
 void smp_discover_cores(void) {
-    vga_write("SMP: Discovering cores...\n", 26);
+    kprint("SMP: Discovering cores...\n");
     
     // Default to 1 CPU (Bootstrap Processor)
     cpu_count = 1;
@@ -47,7 +47,7 @@ void smp_discover_cores(void) {
     }
 
     if (!rsdp) {
-        vga_write("SMP: ACPI not found, falling back to UP.\n", 41);
+        kprint("SMP: ACPI not found, falling back to UP.\n");
         return;
     }
 
@@ -99,7 +99,7 @@ extern void trampoline_end(void);
 #define TRAMPOLINE_ADDR 0x8000
 
 void smp_ap_entry(void) {
-    vga_write("SMP: AP Core started.\n", 22);
+    kprint("SMP: AP Core started.\n");
     while(1) __asm__ volatile("hlt");
 }
 

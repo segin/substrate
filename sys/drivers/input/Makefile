@@ -1,6 +1,6 @@
 include ../../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../video -I../../../arch/i386 -I../../../include
+CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../video -I$(SYS_INCLUDE)
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = keyboard.c ps2.c mouse.c

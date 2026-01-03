@@ -1,6 +1,6 @@
 #include "lapic.h"
 #include "pmap.h"
-#include "../../drivers/video/vga.h"
+#include "../../kern/console.h"
 
 // Virtual address where LAPIC is mapped
 static uintptr_t lapic_base = 0xFEE00000; 
@@ -14,7 +14,7 @@ static inline void lapic_write(uint32_t reg, uint32_t val) {
 }
 
 void lapic_init(void) {
-    vga_write("LAPIC: Initializing...\n", 23);
+    kprint("LAPIC: Initializing...\n");
 
     // 1. Ensure LAPIC is mapped in PMAP
     // pmap_enter(pmap_kernel(), lapic_base, lapic_phys, VM_PROT_READ|VM_PROT_WRITE, 0);
@@ -29,7 +29,7 @@ void lapic_init(void) {
     // 4. Set Initial Count
     // lapic_write(LAPIC_TICF, 10000000); 
 
-    vga_write("LAPIC: Enabled.\n", 16);
+    kprint("LAPIC: Enabled.\n");
 }
 
 void lapic_send_eoi(void) {

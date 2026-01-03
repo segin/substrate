@@ -2,7 +2,7 @@
 #include <sys/proc.h>
 #include "sched.h"
 #include "../arch/i386/idt.h"
-#include "../drivers/video/vga.h"
+#include "console.h"
 #include "panic.h"
 #include <stddef.h>
 
@@ -115,7 +115,7 @@ void signal_handle_pending(registers_t *regs) {
     } else if (act->sa_handler == SIG_DFL) {
         // Default actions
         if (sig == SIGKILL || sig == SIGINT || sig == SIGTERM || sig == SIGSEGV) {
-            vga_write("Process terminated by signal\n", 29);
+            kprint("Process terminated by signal\n");
             // In a real OS, call sys_exit
             panic("Process signal termination");
         }
@@ -138,6 +138,6 @@ void signal_handle_pending(registers_t *regs) {
     
     // For this prototype, we'll just log and panic if a handler is set, 
     // as full user-mode signal delivery is complex.
-    vga_write("Signal handler delivery not fully implemented in prototype\n", 51);
+    kprint("Signal handler delivery not fully implemented in prototype\n");
     panic("Signal handler delivery");
 }
