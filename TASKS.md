@@ -316,20 +316,25 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Input Subsystem:**
         - [x] Abstract `input_event` structure (type, code, value).
         - [x] `/dev/input` interface for userspace access.
-- [ ] **Video:**
-    - [ ] **VESA/UEFI Framebuffer:**
-        - [x] Parse Multiboot2 Framebuffer tag or UEFI GOP.
-        - [x] Map framebuffer memory (requires VMM).
-    - [ ] **Framebuffer Console:**
-        - [x] Import a bitmap font (e.g., PSF or raw bitmap).
-        - [ ] **16x8 monospaced framebuffer font support.**
-        - [x] Implement `fb_putc` with blitting capability.
-        - [x] Implement scrolling (hardware panning or software copy).
-        - [x] Hook into `vga_write` or create generic `console_write`.
-        - [x] Add CGA, Hercules, and EGA framebuffer drivers.
-    - [ ] **VGA Text Mode Control:**
-        - [/] Implement kernel flags for 80x50, 80x60, 132x50, 132x60.
-        - [/] Register-level mode switching logic.
+- [ ] **Console Subsystem (`sys/console`):**
+    - [ ] **Core Abstraction:**
+        - [ ] **Virtual Terminal:** State machine for ANSI/VT102 escape sequences.
+        - [ ] **Generic API:** `console_write`, `console_read`, `console_ioctl`.
+        - [ ] **TTY Integration:** Discipline hook for termios line processing.
+    - [ ] **Backend Drivers (Pluggable):**
+        - [ ] **VGA Text Mode:**
+            - [ ] Direct memory writing (0xB8000).
+            - [ ] Hardware cursor control / text attribute handling.
+            - [ ] Modes: 80x25, 80x50, 132x60 support.
+        - [ ] **Framebuffer Console (Graphical):**
+            - [ ] Drivers: VESA, UEFI GOP, BGA, VirtIO-GPU.
+            - [ ] Rendering: PSF Bitmap font support, Software Blitting, Scrolling.
+            - [ ] Emulation: VT102 compatible rendering on pixel buffer.
+        - [ ] **Serial Console (Headless):**
+            - [ ] VT102 Pass-through (allow host terminal to handle rendering).
+    - [ ] **Features:**
+        - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles.
+        - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS Subsystem Refactor (BSD-style):**
