@@ -1,56 +1,127 @@
 #include <sys/input.h>
-#include "../vfs/vfs.h"
-#include "sched.h"
+#include <sys/file.h>
+#include "../vm/vm_kmem.h"
+#include "../kern/sched.h"
 #include <string.h>
+#include "../kern/console.h" // for kprint
+#include "../vfs/vfs.h"     // for devfs_register
 
-#define INPUT_QUEUE_SIZE 128
-static input_event_t input_queue[INPUT_QUEUE_SIZE];
-static int input_q_head = 0;
-static int input_q_tail = 0;
+#define INPUT_QUEUE_SIZE 64
 
+// An open handle to an input device (or the multiplexer)
+typedef struct input_handle {
+    input_event_t queue[INPUT_QUEUE_SIZE];
+    int head;
+    int tail;
+    int dropped;
+    struct input_handle *next;
+} input_handle_t;
+
+// Global list of devices
+static input_dev_t *input_devices = NULL;
+
+static input_event_t global_event_log[INPUT_QUEUE_SIZE];
+static uint64_t global_seq = 0; // Total events written
+
+static fs_node_t event_node;
+
+void input_register_devfs(void);
+
+void input_init(void) {
+    input_devices = NULL;
+    kprint("Input Subsystem Initialized\n");
+    input_register_devfs();
+}
+
+int input_register_device(input_dev_t *dev) {
+    if (!dev) return -1;
+    dev->next = input_devices;
+    input_devices = dev;
+    kprint("Input: Registered device: ");
+    kprint(dev->name);
+    kprint("\n");
+    return 0;
+}
+
+void input_unregister_device(input_dev_t *dev) {
+    // TODO: Implement removal from list
+    (void)dev;
+}
+
+void input_notify_readers(void) {
+    sched_wakeup(&global_event_log);
+}
+
+// Distribute event to all handles
+void input_report_event(input_dev_t *dev, uint16_t type, uint16_t code, int32_t value) {
+    (void)dev; // In future, use this to filter
+    
+    uint64_t idx = global_seq % INPUT_QUEUE_SIZE;
+    global_event_log[idx].time_sec = 0; // TODO: Get real time
+    global_event_log[idx].time_usec = 0;
+    global_event_log[idx].type = type;
+    global_event_log[idx].code = code;
+    global_event_log[idx].value = value;
+    global_seq++;
+    
+    input_notify_readers();
+}
+
+void input_sync(input_dev_t *dev) {
+    input_report_event(dev, EV_SYN, 0, 0);
+}
+
+// Legacy compatibility wrapper
+static input_dev_t legacy_dev = { .name = "Legacy Input" };
 void input_enqueue(uint16_t type, uint16_t code, int32_t value) {
-    int next = (input_q_head + 1) % INPUT_QUEUE_SIZE;
-    if (next != input_q_tail) {
-        input_queue[input_q_head].type = type;
-        input_queue[input_q_head].code = code;
-        input_queue[input_q_head].value = value;
-        input_q_head = next;
-        // Wake up any threads waiting for input
-        sched_wakeup(&input_queue);
-    }
+    input_report_event(&legacy_dev, type, code, value);
 }
 
 static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
-    (void)node; (void)offset;
-    
+    (void)node;
     if (size < sizeof(input_event_t)) return 0;
-
-    // Block until input available
-    while (input_q_head == input_q_tail) {
-        sched_sleep(&input_queue);
-    }
-
-    int count = 0;
-    input_event_t *ev_buf = (input_event_t *)buffer;
     
-    while (input_q_head != input_q_tail && size >= sizeof(input_event_t)) {
-        ev_buf[count] = input_queue[input_q_tail];
-        input_q_tail = (input_q_tail + 1) % INPUT_QUEUE_SIZE;
+    uint64_t current_seq = offset / sizeof(input_event_t);
+    
+    // WaitForData
+    while (current_seq >= global_seq) {
+         extern void sched_sleep(void *chan);
+         sched_sleep(&global_event_log);
+    }
+    
+    // Check for overrun
+    if (global_seq > current_seq + INPUT_QUEUE_SIZE) {
+        // Overrun!
+        return -1; // EOVERFLOW equivalent
+    }
+    
+    int read_count = 0;
+    input_event_t *out = (input_event_t*)buffer;
+    
+    while (current_seq < global_seq && size >= sizeof(input_event_t)) {
+        uint64_t idx = current_seq % INPUT_QUEUE_SIZE;
+        *out = global_event_log[idx];
+        out++;
+        read_count++;
+        current_seq++;
         size -= sizeof(input_event_t);
-        count++;
     }
-
-    return count * sizeof(input_event_t);
-}
-
-fs_node_t input_device_node;
-
-void input_init(void) {
-    memset(&input_device_node, 0, sizeof(fs_node_t));
-    strcpy(input_device_node.name, "input");
-    input_device_node.flags = FS_CHARDEVICE;
-    input_device_node.read = &input_read;
     
-    // In a real system, we would register this in /dev
-    // For now it's just a global node.
+    return read_count * sizeof(input_event_t);
 }
+
+void input_register_devfs(void) {
+    memset(&event_node, 0, sizeof(fs_node_t));
+    strcpy(event_node.name, "input/event0"); // Todo: directory support in devfs? 
+    // If devfs is flat, maybe just "event0"? 
+    // Let's try "event0" to be safe and accessible as /dev/event0 for now.
+    // Or if I want simple access.
+    // Ideally user wants /dev/input/event0.
+    // Assuming devfs handles slashes? Probably not.
+    // Let's use "input0" for now.
+    strcpy(event_node.name, "input0");
+    event_node.flags = FS_CHARDEVICE;
+    event_node.read = &input_read;
+    devfs_register_device(&event_node);
+}
+

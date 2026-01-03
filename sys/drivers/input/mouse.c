@@ -28,8 +28,15 @@ int mouse_get_event(mouse_event_t *ev) {
     return 1;
 }
 
+static input_dev_t mouse_dev = {
+    .name = "PS/2 Mouse",
+    .caps = (1 << EV_REL) | (1 << EV_KEY),
+};
+
 void mouse_init(void) {
-    kprint("Mouse: Driver loaded (initialized via PS/2 controller).\n");
+    if (input_register_device(&mouse_dev) == 0) {
+        kprint("Mouse: Driver loaded (initialized via PS/2 controller).\n");
+    }
 }
 
 static uint8_t mouse_cycle = 0;
@@ -70,9 +77,13 @@ void mouse_handler(registers_t *regs) {
                 mouse_y -= dy; // PS/2 Y-axis is inverted relative to screen coords
 
                 mouse_q_push(dx, -dy, mouse_buttons);
-                input_enqueue(EV_REL, 0, dx);
-                input_enqueue(EV_REL, 1, -dy);
-                input_enqueue(EV_KEY, 0x110, mouse_buttons & 1); // BTN_LEFT
+                
+                input_report_rel(&mouse_dev, REL_X, dx);
+                input_report_rel(&mouse_dev, REL_Y, -dy);
+                input_report_key(&mouse_dev, 0x110, mouse_buttons & 1); // BTN_LEFT
+                input_report_key(&mouse_dev, 0x111, mouse_buttons & 2); // BTN_RIGHT
+                input_report_key(&mouse_dev, 0x112, mouse_buttons & 4); // BTN_MIDDLE
+                input_sync(&mouse_dev);
 
                 // Log movement (optional)
                 // char buf[64];
@@ -81,7 +92,6 @@ void mouse_handler(registers_t *regs) {
                 break;
         }
     }
-    
     
     // EOI handled by IDT dispatcher
     (void)regs;

@@ -45,8 +45,14 @@ static int kbd_shift = 0;
 static int kbd_ctrl  = 0;
 static int kbd_alt   = 0;
 
+static input_dev_t kbd_dev = {
+    .name = "PS/2 Keyboard",
+    .caps = (1 << EV_KEY),
+};
+
 void keyboard_init(void) {
     ps2_init();
+    input_register_device(&kbd_dev);
     kprint("Keyboard Driver Initialized.\n");
 }
 
@@ -110,7 +116,10 @@ void keyboard_handler(registers_t *regs) {
                 kbd_push(c);
                 extern void console_push_char(char c);
                 console_push_char(c);
-                input_enqueue(EV_KEY, scancode, 1);
+                
+                input_report_key(&kbd_dev, scancode, 1);
+                // input_report_key(&kbd_dev, scancode, 0); // Release immediately for now since we ignore break codes
+                input_sync(&kbd_dev);
             }
         }
     }

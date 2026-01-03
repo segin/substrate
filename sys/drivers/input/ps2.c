@@ -103,7 +103,6 @@ void ps2_init(void) {
 
     // 7. Enable devices and interrupts
     ps2_write_command(PS2_CMD_ENABLE_P1);
-    config = ps2_read_data(); // Read current config (why? we need to re-read to enable IRQs)
     ps2_write_command(PS2_CMD_READ_CONFIG);
     config = ps2_read_data();
     config |= 1; // IRQ 1
