@@ -379,23 +379,66 @@ void syscall_handler(registers_t *regs) {
 
 // Local stat def matching userspace
 struct stat {
-    unsigned long  st_dev;
-    unsigned long  st_ino;
-    unsigned short st_mode;
-    unsigned short st_nlink;
-    unsigned short st_uid;
-    unsigned short st_gid;
-    unsigned long  st_rdev;
-    unsigned long  st_size;
-    unsigned long  st_blksize;
-    unsigned long  st_blocks;
-    time_t         st_atime;
-    unsigned long  st_atime_nsec;
+    uint32_t       st_dev;
+    uint32_t       st_ino;
+    uint16_t       st_mode;
+    uint16_t       st_nlink;
+    uint16_t       st_uid;
+    uint16_t       st_gid;
+    uint32_t       st_rdev;
+    off_t          st_size;    // 64-bit size
+    uint32_t       st_blksize;
+    uint32_t       st_pad1;    // padding
+    blkcnt_t       st_blocks;  // 64-bit block count
+    time_t         st_atime;   // 64-bit time
+    uint32_t       st_atime_nsec;
+    uint32_t       st_pad2;
     time_t         st_mtime;
-    unsigned long  st_mtime_nsec;
+    uint32_t       st_mtime_nsec;
+    uint32_t       st_pad3;
     time_t         st_ctime;
-    unsigned long  st_ctime_nsec;
+    uint32_t       st_ctime_nsec;
+    uint32_t       st_pad4;
 };
+
+extern int sys_vm86(void *v);
+extern int sys_sysarch(int op, void *args);
+
+// ...
+
+// Helper to fill stat struct from fs_node
+static void fill_stat(struct stat *buf, fs_node_t *node) {
+    if (!buf) return;
+    memset(buf, 0, sizeof(struct stat));
+    buf->st_ino = node->inode;
+    buf->st_size = (off_t)node->length;
+    buf->st_uid = node->uid;
+    buf->st_gid = node->gid;
+    buf->st_mode = node->mask;
+    
+    // Set file type bits
+    if ((node->flags & 0x7) == FS_DIRECTORY)
+        buf->st_mode |= 0040000;  // S_IFDIR
+    else if ((node->flags & 0x7) == FS_SYMLINK)
+        buf->st_mode |= 0120000;  // S_IFLNK
+    else if ((node->flags & 0x7) == FS_CHARDEVICE)
+        buf->st_mode |= 0020000;  // S_IFCHR
+    else if ((node->flags & 0x7) == FS_BLOCKDEVICE)
+        buf->st_mode |= 0060000;  // S_IFBLK
+    else
+        buf->st_mode |= 0100000;  // S_IFREG
+    
+    buf->st_nlink = 1;
+    buf->st_blksize = 4096;
+    buf->st_blocks = (node->length + 511) / 512;
+    
+    // Fill times (assuming node has these fields, derived from fs_node_t extensions)
+    // For now, these might be 0 if fs_node_t doesn't have 64-bit timestamps yet, 
+    // but structure is ready.
+    buf->st_atime = node->atime;
+    buf->st_mtime = node->mtime;
+    buf->st_ctime = node->ctime;
+}
 
 int sys_chroot(const char *path) {
     if (!path) return -1;
@@ -440,32 +483,6 @@ int sys_setgid(int g) {
 }
 int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
 
-// Helper to fill stat struct from fs_node
-static void fill_stat(struct stat *buf, fs_node_t *node) {
-    if (!buf) return;
-    memset(buf, 0, sizeof(struct stat));
-    buf->st_ino = node->inode;
-    buf->st_size = node->length;
-    buf->st_uid = node->uid;
-    buf->st_gid = node->gid;
-    buf->st_mode = node->mask;
-    
-    // Set file type bits
-    if ((node->flags & 0x7) == FS_DIRECTORY)
-        buf->st_mode |= 0040000;  // S_IFDIR
-    else if ((node->flags & 0x7) == FS_SYMLINK)
-        buf->st_mode |= 0120000;  // S_IFLNK
-    else if ((node->flags & 0x7) == FS_CHARDEVICE)
-        buf->st_mode |= 0020000;  // S_IFCHR
-    else if ((node->flags & 0x7) == FS_BLOCKDEVICE)
-        buf->st_mode |= 0060000;  // S_IFBLK
-    else
-        buf->st_mode |= 0100000;  // S_IFREG
-    
-    buf->st_nlink = 1;
-    buf->st_blksize = 4096;
-    buf->st_blocks = (node->length + 511) / 512;
-}
 
 int sys_stat(const char *path, struct stat *buf) { 
     if (!path || !buf) return -1;
