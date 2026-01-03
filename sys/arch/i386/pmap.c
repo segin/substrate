@@ -10,6 +10,10 @@
 __attribute__((aligned(4096)))
 static uint32_t kernel_page_directory[1024];
 
+// Static page tables for bootstrap (128MB = 32 tables)
+__attribute__((aligned(4096)))
+static uint32_t kernel_page_tables[32][1024];
+
 struct pmap {
     uint32_t *pdir; // Virtual pointer (if mapped) or Physical?
     uint32_t pdir_phys;
@@ -19,7 +23,7 @@ static struct pmap kernel_pmap_store;
 static pmap_t kernel_pmap_ptr = &kernel_pmap_store;
 
 void pmap_bootstrap(void) {
-    kprint("PMAP: Bootstrapping...\n");
+    kprint("PMAP: Bootstrapping...\\n");
     
     // Clear directory
     for (int i = 0; i < 1024; i++) {
@@ -30,24 +34,25 @@ void pmap_bootstrap(void) {
     #define V2P(x) ((uint32_t)(x) - 0xC0000000)
     #define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
 
-    // Allocate a page for the first Page Table.
-    // pmm_alloc_block returns a PHYSICAL address.
-    uint32_t pt_phys = (uint32_t)pmm_alloc_block();
-    if (!pt_phys) panic("PMAP: No memory for initial PT");
-    
-    uint32_t *pt_virt = (uint32_t*)P2V(pt_phys);
-    
-    // Identity map 0-4MB
-    for (int i = 0; i < 1024; i++) {
-        pt_virt[i] = (i * 0x1000) | PTE_P | PTE_W; 
+    // Map first 128MB (32 page tables x 4MB each) to support PMM allocations
+    // Use static page tables instead of PMM since PMM isn't initialized yet
+    for (int pt_idx = 0; pt_idx < 32; pt_idx++) {
+        uint32_t *pt_virt = kernel_page_tables[pt_idx];
+        uint32_t pt_phys = V2P(pt_virt);
+        
+        // Map 4MB chunk
+        for (int i = 0; i < 1024; i++) {
+            uint32_t phys_addr = (pt_idx * 0x400000) + (i * 0x1000);
+            pt_virt[i] = phys_addr | PTE_P | PTE_W; 
+        }
+        
+        // Entry pt_idx of PD points to this PT (Identity mapping)
+        kernel_page_directory[pt_idx] = pt_phys | PTE_P | PTE_W;
+
+        // Also map to Higher Half (0xC0000000+)
+        kernel_page_directory[768 + pt_idx] = pt_phys | PTE_P | PTE_W;
     }
     
-    // Entry 0 of PD points to this PT (Identity)
-    kernel_page_directory[0] = pt_phys | PTE_P | PTE_W;
-
-    // Entry 768 of PD points to this PT (Higher Half 0xC0000000)
-    kernel_page_directory[768] = pt_phys | PTE_P | PTE_W;
-
     // Recursive Mapping: Last entry points to PD itself
     kernel_page_directory[1023] = V2P(kernel_page_directory) | PTE_P | PTE_W;
 
@@ -58,7 +63,7 @@ void pmap_bootstrap(void) {
     // Enable Paging (Reload CR3)
     __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));
     
-    kprint("PMAP: Paging Enabled (Higher Half).\n");
+    kprint("PMAP: Paging Enabled (Higher Half, 32MB mapped).\\n");
 }
 
 pmap_t pmap_kernel(void) {
@@ -210,7 +215,10 @@ void pmap_activate(pmap_t pmap) {
 
 int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
     (void)prot; (void)flags;
-    if (pmap != pmap_kernel()) return -1;
+    // Must be active address space to use recursive mapping
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return -1;
 
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
@@ -231,7 +239,9 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
 }
 
 void pmap_remove(pmap_t pmap, uint32_t va) {
-    if (pmap != pmap_kernel()) return;
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return;
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
     if (!(V_PD[pdi] & PTE_P)) return;
@@ -241,7 +251,9 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
 }
 
 uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
-    if (pmap != pmap_kernel()) return 0;
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return 0;
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
     if (!(V_PD[pdi] & PTE_P)) return 0;
