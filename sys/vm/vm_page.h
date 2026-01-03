@@ -38,6 +38,8 @@ typedef struct vm_page {
     uint16_t wire_count;  // Wired down (cannot be paged out)
     uint16_t ref_count;   // General usage count
 
+    // Buddy Allocator state
+    uint8_t  order;       // Power of two order (0 = 1 page)
 } vm_page_t;
 
 // Queue management

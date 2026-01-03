@@ -11,9 +11,10 @@
 // ==================== PMM Data Structures ====================
 // Hybrid approach: Free list for O(1) single-page, bitmap for contiguous
 
-// Free List (O(1) single-page allocation)
-static uint32_t pmm_free_list_head;   // Physical address of first free page (0 = empty)
-static size_t pmm_free_count;         // Number of pages in free list
+// Buddy Allocator (O(log N) contiguous allocation)
+#define PMM_MAX_ORDER 11   // 2^10 = 1024 pages = 4MB block
+static vm_page_t *pmm_buddy_free_lists[PMM_MAX_ORDER];
+static size_t pmm_free_count;         // Total free pages across all orders
 
 // Bitmap (for contiguous allocation and tracking)
 static uint8_t* pmm_bitmap;
@@ -30,6 +31,10 @@ static uint8_t pmm_bitmap_static[4096];
 
 // SMP Lock
 static spinlock_t pmm_lock;
+
+// Forward declarations for Buddy Allocator
+static void pmm_buddy_free_locked(vm_page_t *page, int order);
+static vm_page_t* pmm_buddy_alloc_locked(int order);
 
 // ==================== Watermark (Bump) Allocator ====================
 // Used during early boot before free list is ready
@@ -97,6 +102,12 @@ static void pmm_mark_free(uint32_t addr) {
         if (pmm_bitmap[idx] & (1 << bit)) {
             pmm_bitmap[idx] &= ~(1 << bit);
             pmm_used_blocks--;
+            
+            // Integrate with Buddy Allocator
+            vm_page_t *page = pmm_get_page(addr);
+            if (page) {
+                pmm_buddy_free_locked(page, 0);
+            }
         }
     }
 }
@@ -332,48 +343,111 @@ vm_page_t *pmm_get_page(uintptr_t pa) {
     return NULL;
 }
 
-// ==================== O(1) Free List Allocator ====================
-// Each free page stores the physical address of the next free page at offset 0
-// We use the kernel's higher-half mapping: VA = PA + 0xC0000000
+// ==================== Buddy Allocator Implementation ====================
 
-#define PHYS_TO_VIRT(p) ((void*)((uintptr_t)(p) + 0xC0000000))
-#define VIRT_TO_PHYS(v) ((uint32_t)((uintptr_t)(v) - 0xC0000000))
-
-// Add a page to the free list (O(1) push)
-static void pmm_free_list_push(uint32_t phys_addr) {
-    uint32_t* page_ptr = (uint32_t*)PHYS_TO_VIRT(phys_addr);
-    *page_ptr = pmm_free_list_head;  // Store current head in new page
-    pmm_free_list_head = phys_addr;  // New page becomes head
-    pmm_free_count++;
+// Local helpers for queue management (same as vm_page.c but for pmm_buddy_free_lists)
+static void pmm_buddy_enqueue(int order, vm_page_t *page) {
+    page->next = pmm_buddy_free_lists[order];
+    page->prev = NULL;
+    if (pmm_buddy_free_lists[order]) {
+        pmm_buddy_free_lists[order]->prev = page;
+    }
+    pmm_buddy_free_lists[order] = page;
+    page->order = order;
+    page->flags |= PG_FREE;
 }
 
-// Remove a page from the free list (O(1) pop)
-static uint32_t pmm_free_list_pop(void) {
-    if (pmm_free_list_head == 0) return 0;  // Empty list
-    
-    uint32_t result = pmm_free_list_head;
-    uint32_t* page_ptr = (uint32_t*)PHYS_TO_VIRT(result);
-    pmm_free_list_head = *page_ptr;  // Next page becomes head
-    pmm_free_count--;
-    return result;
+static void pmm_buddy_dequeue(int order, vm_page_t *page) {
+    if (page->prev) {
+        page->prev->next = page->next;
+    } else {
+        pmm_buddy_free_lists[order] = page->next;
+    }
+    if (page->next) {
+        page->next->prev = page->prev;
+    }
+    page->next = NULL;
+    page->prev = NULL;
+    page->flags &= ~PG_FREE;
+}
+
+// Low-level buddy allocation (requires lock held)
+static vm_page_t* pmm_buddy_alloc_locked(int order) {
+    if (order >= PMM_MAX_ORDER) return NULL;
+
+    // 1. Find a block at target order or higher
+    for (int i = order; i < PMM_MAX_ORDER; i++) {
+        if (pmm_buddy_free_lists[i]) {
+            vm_page_t *page = pmm_buddy_free_lists[i];
+            pmm_buddy_dequeue(i, page);
+
+            // 2. Split blocks down to requested order
+            while (i > order) {
+                i--;
+                // Brother buddy is half-way through the block
+                uint32_t buddy_pa = page->phys_addr + ((1 << i) * PMM_BLOCK_SIZE);
+                vm_page_t *buddy = pmm_get_page(buddy_pa);
+                if (buddy) {
+                    pmm_buddy_enqueue(i, buddy);
+                }
+            }
+            
+            pmm_free_count -= (1 << order);
+            return page;
+        }
+    }
+    return NULL;
+}
+
+// Low-level buddy free (requires lock held)
+static void pmm_buddy_free_locked(vm_page_t *page, int order) {
+    if (!page || order >= PMM_MAX_ORDER) return;
+
+    pmm_free_count += (1 << order);
+
+    while (order < PMM_MAX_ORDER - 1) {
+        // Calculate buddy address: bitwise XOR of the block address with its size
+        uint32_t buddy_pa = page->phys_addr ^ ((1 << order) * PMM_BLOCK_SIZE);
+        vm_page_t *buddy = pmm_get_page(buddy_pa);
+
+        // Can only merge if buddy exists, is free, and is the SAME order
+        if (buddy && (buddy->flags & PG_FREE) && (buddy->order == order)) {
+            // Found buddy, merge them!
+            pmm_buddy_dequeue(order, buddy);
+            
+            // The combined block starts at the lower address
+            if (buddy->phys_addr < page->phys_addr) {
+                page = buddy;
+            }
+            order++;
+        } else {
+            // No more merging possible
+            break;
+        }
+    }
+
+    pmm_buddy_enqueue(order, page);
+}
+
+static int pmm_get_order(size_t count) {
+    int order = 0;
+    while ((1UL << order) < count) {
+        order++;
+    }
+    return order;
 }
 
 void* pmm_alloc_block(void) {
     uint32_t flags = intr_disable();
     spinlock_acquire(&pmm_lock);
 
-    // Try free list first (O(1))
-    uint32_t addr = pmm_free_list_pop();
-    if (addr != 0) {
-        // Also update bitmap for contiguous allocation tracking
-        uint32_t block = addr / PMM_BLOCK_SIZE;
-        uint32_t idx = block / 8;
-        uint32_t bit = block % 8;
-        if (idx < pmm_bitmap_size) {
-            pmm_bitmap[idx] |= (1 << bit);
-            pmm_used_blocks++;
-        }
+    vm_page_t *page = pmm_buddy_alloc_locked(0);
+    
+    if (page) {
+        // Still track in bitmap for safety/diagnostic compatibility
+        pmm_mark_used(page->phys_addr);
         
+        uint32_t addr = page->phys_addr;
         spinlock_release(&pmm_lock);
         intr_restore(flags);
         return (void*)(uintptr_t)addr;
@@ -381,30 +455,21 @@ void* pmm_alloc_block(void) {
     
     spinlock_release(&pmm_lock);
     intr_restore(flags);
-    return NULL;  // Out of memory
+    return NULL; 
 }
 
 void pmm_free_block(void* p) {
     uint32_t addr = (uint32_t)(uintptr_t)p;
-    if (addr == 0) return;  // NULL check
+    if (addr == 0) return; 
     
     uint32_t flags = intr_disable();
     spinlock_acquire(&pmm_lock);
 
-    uint32_t block = addr / PMM_BLOCK_SIZE;
-    uint32_t idx = block / 8;
-    uint32_t bit = block % 8;
-
-    // Update bitmap
-    if (idx < pmm_bitmap_size) {
-        if (pmm_bitmap[idx] & (1 << bit)) {
-            pmm_bitmap[idx] &= ~(1 << bit);
-            pmm_used_blocks--;
-        }
+    vm_page_t *page = pmm_get_page(addr);
+    if (page) {
+        pmm_mark_free(addr);
+        pmm_buddy_free_locked(page, 0);
     }
-    
-    // Add to free list
-    pmm_free_list_push(addr);
 
     spinlock_release(&pmm_lock);
     intr_restore(flags);
@@ -437,50 +502,24 @@ void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
 }
 
 void* pmm_alloc_contiguous(size_t count) {
+    if (count == 0) return NULL;
+    int order = pmm_get_order(count);
+    
     uint32_t flags = intr_disable();
     spinlock_acquire(&pmm_lock);
 
-    if (pmm_used_blocks + count > pmm_total_blocks) {
+    vm_page_t *page = pmm_buddy_alloc_locked(order);
+    
+    if (page) {
+        // Mark all pages as used in bitmap
+        for (size_t i = 0; i < (1UL << order); i++) {
+            pmm_mark_used(page->phys_addr + (i * PMM_BLOCK_SIZE));
+        }
+        
+        uint32_t addr = page->phys_addr;
         spinlock_release(&pmm_lock);
         intr_restore(flags);
-        return NULL;
-    }
-
-    // Brute force search for 'count' consecutive free blocks
-    // Note: This is slow and inefficient for a large bitmap, but sufficient for a basic PMM.
-    // A proper implementation would use a better data structure (buddy allocator or free lists).
-    
-    for (size_t i = 0; i < pmm_total_blocks; i++) {
-        size_t free_run = 0;
-        for (size_t j = 0; j < count; j++) {
-            if (i + j >= pmm_total_blocks) break;
-            
-            size_t idx = (i + j) / 8;
-            size_t bit = (i + j) % 8;
-            
-            if (pmm_bitmap[idx] & (1 << bit)) {
-                // Used (bit is 1)
-                break;
-            }
-            free_run++;
-        }
-        
-        if (free_run == count) {
-            // Found a run, mark as used
-            for (size_t j = 0; j < count; j++) {
-                size_t idx = (i + j) / 8;
-                size_t bit = (i + j) % 8;
-                pmm_bitmap[idx] |= (1 << bit);
-            }
-            pmm_used_blocks += count;
-            
-            spinlock_release(&pmm_lock);
-            intr_restore(flags);
-            return (void*)(i * PMM_BLOCK_SIZE);
-        }
-        
-        // Optimization: skip the used block we hit
-        i += free_run;
+        return (void*)(uintptr_t)addr;
     }
 
     spinlock_release(&pmm_lock);
@@ -489,22 +528,32 @@ void* pmm_alloc_contiguous(size_t count) {
 }
 
 void pmm_free_contiguous(void* p, size_t count) {
-    uint32_t start_block = (uint32_t)(uintptr_t)p / PMM_BLOCK_SIZE;
+    if (!p || count == 0) return;
+    int order = pmm_get_order(count);
+    uint32_t addr = (uint32_t)(uintptr_t)p;
 
     uint32_t flags = intr_disable();
     spinlock_acquire(&pmm_lock);
 
-    for (size_t i = 0; i < count; i++) {
-        uint32_t block = start_block + i;
-        uint32_t idx = block / 8;
-        uint32_t bit = block % 8;
-        
-        if (idx < pmm_bitmap_size) {
-             if (pmm_bitmap[idx] & (1 << bit)) {
+    vm_page_t *page = pmm_get_page(addr);
+    if (page) {
+         // Mark all pages as free in bitmap
+        for (size_t i = 0; i < (1UL << order); i++) {
+            // We use a modified loop because pmm_mark_free would call buddy_free 
+            // per block, which we don't want here (we want to free the whole block).
+            // Actually, pmm_mark_free currently calls pmm_buddy_free_locked(page, 0).
+            // If we are freeing a contiguous block of order N, we should call buddy_free(page, N).
+            
+            uint32_t p_addr = addr + (i * PMM_BLOCK_SIZE);
+            uint32_t block = p_addr / PMM_BLOCK_SIZE;
+            uint32_t idx = block / 8;
+            uint32_t bit = block % 8;
+            if (idx < pmm_bitmap_size && (pmm_bitmap[idx] & (1 << bit))) {
                 pmm_bitmap[idx] &= ~(1 << bit);
                 pmm_used_blocks--;
             }
         }
+        pmm_buddy_free_locked(page, order);
     }
 
     spinlock_release(&pmm_lock);

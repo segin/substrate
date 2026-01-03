@@ -20,7 +20,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] **Low Memory (4MiB) Support:** efficient handling of constrained environments.
             - [ ] **Algorithms:**
                 - [x] **Single Page:** O(1) Free List allocation (replace bitmap scan).
-                - [ ] **Contiguous:** Implement Buddy Allocator or Bitmap Tree for efficient `pmm_alloc_contiguous`.
+                - [x] **Contiguous:** Implement Buddy Allocator or Bitmap Tree for efficient `pmm_alloc_contiguous`.
         - [ ] **Safety & Integration:**
             - [x] **Locking:** Fine-grained spinlocks for SMP access.
             - [x] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues.
