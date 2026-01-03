@@ -64,16 +64,18 @@ struct timezone {
 
 int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (tv) {
-        int64_t now = get_time();
-        tv->tv_sec = now;
-        // Calculate microseconds from remaining ticks
-        uint64_t remaining_ticks = ticks % HZ;
-        tv->tv_usec = (int32_t)((remaining_ticks * 1000000) / HZ);
-    }
+    if (!tv) return -1;
+    
+    int64_t total_seconds = boot_time + div64_32(ticks, HZ);
+    
+    tv->tv_sec = total_seconds;
+    tv->tv_usec = (int32_t)(div64_32(ticks % HZ * 1000000, HZ));
+    
     if (tz) {
-        tz->tz_minuteswest = 0;  // UTC
-        tz->tz_dsttime = 0;      // No DST
+        tz->tz_minuteswest = 0;
+        tz->tz_dsttime = 0;
     }
+    
     return 0;
 }
 
@@ -86,19 +88,18 @@ struct timespec {
 int sys_clock_gettime(int clk_id, struct timespec *tp) {
     if (!tp) return -1;
     
-    if (clk_id == 0) {  // CLOCK_REALTIME
-        int64_t now = get_time();
-        tp->tv_sec = now;
-        uint64_t remaining_ticks = ticks % HZ;
-        tp->tv_nsec = (int32_t)((remaining_ticks * 1000000000) / HZ);
-    } else if (clk_id == 1) {  // CLOCK_MONOTONIC
-        int64_t uptime = get_uptime();
+    if (clk_id == CLOCK_REALTIME) {
+        int64_t total_seconds = boot_time + div64_32(ticks, HZ);
+        tp->tv_sec = total_seconds;
+        tp->tv_nsec = (int32_t)(div64_32((ticks % HZ) * 1000000000, HZ));
+    } else if (clk_id == CLOCK_MONOTONIC) {
+        int64_t uptime = div64_32(ticks, HZ);
         tp->tv_sec = uptime;
-        uint64_t remaining_ticks = ticks % HZ;
-        tp->tv_nsec = (int32_t)((remaining_ticks * 1000000000) / HZ);
+        tp->tv_nsec = (int32_t)(div64_32((ticks % HZ) * 1000000000, HZ));
     } else {
-        return -1;  // Unsupported clock
+        return -1;
     }
+    
     return 0;
 }
 
