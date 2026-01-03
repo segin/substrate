@@ -13,6 +13,13 @@ The kernel is the core of the operating system, structured as follows:
     - **`i386/`**: 32-bit x86 support.
         - **Boot**: Multiboot compliant (`boot.S`).
         - **Subsystems**: IDT, GDT, PMM, Syscalls (int 0x80), FPU Emulation (`fpu/`).
+        - **GDT Segment Layout**:
+            - `0x08`: Kernel Code Segment
+            - `0x10`: Kernel Data Segment
+            - `0x1B`: User Code Segment (0x18 | RPL 3)
+            - `0x23`: User Data Segment (0x20 | RPL 3)
+            - `0x28`: TSS
+            - `0x33`: TLS Segment (0x30 | RPL 3) - Used for Thread-Local Storage (GS)
 - **`sys/drivers/`**: Hardware drivers.
     - **`video/`**: VGA text mode driver.
     - **`serial/`**: UART driver.

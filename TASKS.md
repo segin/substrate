@@ -191,7 +191,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [ ] **i386:**
     - [x] Complete GDT/TSS setup for user-mode switching.
     - [ ] **Verification:**
-        - [ ] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
+        - [x] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
         - [ ] Ensure PTE_USER bit set for all user-accessible pages
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
     - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
