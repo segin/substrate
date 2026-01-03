@@ -5,6 +5,14 @@
 #include <stdio.h>
 #include "../../kern/console.h"
 
+// ==================== PMM Data Structures ====================
+// Hybrid approach: Free list for O(1) single-page, bitmap for contiguous
+
+// Free List (O(1) single-page allocation)
+static uint32_t pmm_free_list_head;   // Physical address of first free page (0 = empty)
+static size_t pmm_free_count;         // Number of pages in free list
+
+// Bitmap (for contiguous allocation and tracking)
 static uint8_t* pmm_bitmap;
 static size_t pmm_bitmap_size;
 static size_t pmm_total_blocks;
@@ -203,35 +211,67 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm_reserve_kernel();
 }
 
-void* pmm_alloc_block(void) {
-    if (pmm_used_blocks >= pmm_total_blocks) return NULL;
+// ==================== O(1) Free List Allocator ====================
+// Each free page stores the physical address of the next free page at offset 0
+// We use the kernel's higher-half mapping: VA = PA + 0xC0000000
 
-    for (size_t i = 0; i < pmm_bitmap_size; i++) {
-        if (pmm_bitmap[i] != 0xFF) {
-            for (int j = 0; j < 8; j++) {
-                if (!(pmm_bitmap[i] & (1 << j))) {
-                    pmm_bitmap[i] |= (1 << j);
-                    pmm_used_blocks++;
-                    return (void*)((i * 8 + j) * PMM_BLOCK_SIZE);
-                }
-            }
+#define PHYS_TO_VIRT(p) ((void*)((uintptr_t)(p) + 0xC0000000))
+#define VIRT_TO_PHYS(v) ((uint32_t)((uintptr_t)(v) - 0xC0000000))
+
+// Add a page to the free list (O(1) push)
+static void pmm_free_list_push(uint32_t phys_addr) {
+    uint32_t* page_ptr = (uint32_t*)PHYS_TO_VIRT(phys_addr);
+    *page_ptr = pmm_free_list_head;  // Store current head in new page
+    pmm_free_list_head = phys_addr;  // New page becomes head
+    pmm_free_count++;
+}
+
+// Remove a page from the free list (O(1) pop)
+static uint32_t pmm_free_list_pop(void) {
+    if (pmm_free_list_head == 0) return 0;  // Empty list
+    
+    uint32_t result = pmm_free_list_head;
+    uint32_t* page_ptr = (uint32_t*)PHYS_TO_VIRT(result);
+    pmm_free_list_head = *page_ptr;  // Next page becomes head
+    pmm_free_count--;
+    return result;
+}
+
+void* pmm_alloc_block(void) {
+    // Try free list first (O(1))
+    uint32_t addr = pmm_free_list_pop();
+    if (addr != 0) {
+        // Also update bitmap for contiguous allocation tracking
+        uint32_t block = addr / PMM_BLOCK_SIZE;
+        uint32_t idx = block / 8;
+        uint32_t bit = block % 8;
+        if (idx < pmm_bitmap_size) {
+            pmm_bitmap[idx] |= (1 << bit);
+            pmm_used_blocks++;
         }
+        return (void*)(uintptr_t)addr;
     }
-    return NULL;
+    return NULL;  // Out of memory
 }
 
 void pmm_free_block(void* p) {
     uint32_t addr = (uint32_t)(uintptr_t)p;
+    if (addr == 0) return;  // NULL check
+    
     uint32_t block = addr / PMM_BLOCK_SIZE;
     uint32_t idx = block / 8;
     uint32_t bit = block % 8;
 
+    // Update bitmap
     if (idx < pmm_bitmap_size) {
         if (pmm_bitmap[idx] & (1 << bit)) {
             pmm_bitmap[idx] &= ~(1 << bit);
             pmm_used_blocks--;
         }
     }
+    
+    // Add to free list
+    pmm_free_list_push(addr);
 }
 
 void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
