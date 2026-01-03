@@ -11,7 +11,7 @@
 static struct dirent proc_dirent;
 
 // Node for /proc/<pid>/status
-static uint32_t proc_status_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t proc_status_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = NULL;
     for (int i = 0; i < MAX_PROCS; i++) {
@@ -42,7 +42,7 @@ static uint32_t proc_status_read(fs_node_t *node, uint32_t offset, uint32_t size
 }
 
 // Node for /proc/cpuinfo
-static uint32_t proc_cpuinfo_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t proc_cpuinfo_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     char buf[256];
     sprintf(buf, "Processor:\t0\nVendor:\t\tGenericx86\nModel Name:\tTestUnix Virtual CPU\n");
@@ -54,7 +54,7 @@ static uint32_t proc_cpuinfo_read(fs_node_t *node, uint32_t offset, uint32_t siz
 }
 
 // Node for /proc/meminfo
-static uint32_t proc_meminfo_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t proc_meminfo_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     // Mock values
     char buf[256];
@@ -68,7 +68,7 @@ static uint32_t proc_meminfo_read(fs_node_t *node, uint32_t offset, uint32_t siz
 
 // Node for /proc/uptime
 extern uint32_t get_time(void);
-static uint32_t proc_uptime_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t proc_uptime_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     char buf[64];
     sprintf(buf, "%d.00\n", get_time());

@@ -354,6 +354,8 @@ void kmain(unsigned long magic, unsigned long addr) {
     // 4. Hardware Discovery - PCI Bus Scan, Storage Controllers
     pci_init();
     ide_init();
+    extern void virtio_init(void);
+    virtio_init();
     
     // Initialize VFS (handles filesystem registration and pseudo-fs mounts)
     vfs_init();

@@ -2,6 +2,7 @@ include ../Makefile.inc
 
 # Default to i386 if not specified
 ARCH ?= i386
+LIBGCC := $(shell $(CC) -m32 -print-libgcc-file-name)
 
 .PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi
 
@@ -18,11 +19,13 @@ kernel.bin: arch_kernel kern pm drivers fs exec vfs exec_perso vm
 		drivers/input/input.o \
 		drivers/storage/storage.o \
 		drivers/devices/devices.o \
+		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
 		fs/fs.o \
 		fs/exec/exec.o \
 		exec/perso/perso.o \
-		vm/vm.o
+		vm/vm.o \
+		$(LIBGCC)
 	@echo "Linked kernel.bin"
 
 kernel.multiboot: kernel.bin
@@ -45,11 +48,13 @@ kernel.efi: arch_kernel kern drivers fs exec vfs exec_perso vm
 		drivers/input/input.o \
 		drivers/storage/storage.o \
 		drivers/devices/devices.o \
+		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
 		fs/fs.o \
 		fs/exec/exec.o \
 		exec/perso/perso.o \
-		vm/vm.o
+		vm/vm.o \
+		$(LIBGCC)
 	objcopy -O pe-i386 kernel_efi.elf kernel.efi
 	@echo "Linked kernel.efi"
 
@@ -80,6 +85,7 @@ drivers:
 	$(MAKE) -C drivers/input
 	$(MAKE) -C drivers/storage
 	$(MAKE) -C drivers/devices
+	$(MAKE) -C drivers/virtio
 
 libs:
 	@echo "Building User Libraries..."
@@ -108,6 +114,7 @@ clean:
 	$(MAKE) -C drivers/input clean
 	$(MAKE) -C drivers/storage clean
 	$(MAKE) -C drivers/devices clean
+	$(MAKE) -C drivers/virtio clean
 	$(MAKE) -C vfs clean
 	$(MAKE) -C fs clean
 	$(MAKE) -C fs/exec clean

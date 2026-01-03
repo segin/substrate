@@ -11,7 +11,7 @@
 
 typedef int pid_t;
 typedef int ssize_t;
-typedef int off_t;
+// off_t defined in sys/types.h
 
 [[noreturn]] void _exit(int status);
 int fork(void);

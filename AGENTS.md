@@ -15,10 +15,12 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Filesystem Timestamps:** Added atime/mtime/ctime tracking with atomic updates
 - **TTY Integration:** Per-process controlling terminal support
 - **Time System:** 64-bit time_t, RTC driver, gettimeofday/clock_gettime syscalls
+- **VirtIO Drivers:** Implemented Core VirtIO, Block Device (virtio-blk), and 9P Transport (virtio-9p) drivers.
 - **Build System:** Root filesystem generation in `dist/`
 
 ## Current Status
 - User process foundation complete (pmap layer)
+- VirtIO drivers (Block, 9P) linked and initialized
 - Ready for mmap() implementation
 - Personality drivers (Linux/FreeBSD) need mmap integration
 
@@ -58,4 +60,5 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 ## Next Steps
 - Implement mmap() syscall with personality driver integration
 - Hook Linux and FreeBSD personalities to native mmap
+- Flesh out 9P filesystem logic implementation
 - Create comprehensive tests

@@ -6,7 +6,7 @@
 
 extern fs_node_t *console_get_node(void);
 
-static uint32_t tty_read_proxy(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t tty_read_proxy(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     // Proxies to current process's TTY or default console
     fs_node_t *tty = current_process ? current_process->tty : NULL;
@@ -15,7 +15,7 @@ static uint32_t tty_read_proxy(fs_node_t *node, uint32_t offset, uint32_t size, 
     return 0;
 }
 
-static uint32_t tty_write_proxy(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t tty_write_proxy(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     fs_node_t *tty = current_process ? current_process->tty : NULL;
     if (!tty) tty = console_get_node();

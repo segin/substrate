@@ -17,7 +17,7 @@ static int ext2_node_cache_idx = 0;
 
 // Forward declarations
 static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
-static uint32_t ext2_file_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
+static uint32_t ext2_file_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
 static struct dirent *ext2_readdir(fs_node_t *node, uint32_t index);
 static fs_node_t *ext2_finddir(fs_node_t *node, char *name);
 static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size);
@@ -25,7 +25,7 @@ static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size);
 // Read a block from the device
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
     if (!fs || !fs->device || !fs->device->read) return 0;
-    uint32_t offset = block_num * fs->block_size;
+    off_t offset = (off_t)block_num * fs->block_size;
     return fs->device->read(fs->device, offset, fs->block_size, buffer);
 }
 
@@ -93,7 +93,7 @@ static uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t 
 }
 
 // Read data from an inode at a given offset
-uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t offset, uint32_t size, void *buffer) {
+uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, void *buffer) {
     if (offset >= inode->i_size) return 0;
     if (offset + size > inode->i_size) size = inode->i_size - offset;
     
@@ -102,8 +102,9 @@ uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t offset, ui
     uint32_t total_read = 0;
     
     while (size > 0) {
-        uint32_t block_idx = offset / fs->block_size;
-        uint32_t block_offset = offset % fs->block_size;
+        // Use 64-bit division/modulo
+        uint32_t block_idx = (uint32_t)(offset / fs->block_size);
+        uint32_t block_offset = (uint32_t)(offset % fs->block_size);
         uint32_t block_num = ext2_get_block_num(fs, inode, block_idx);
         
         if (block_num == 0) {
@@ -193,7 +194,7 @@ static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size) {
 }
 
 // File read operation
-static uint32_t ext2_file_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t ext2_file_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     return ext2_inode_read(ctx->fs, &ctx->inode, offset, size, buffer);
 }

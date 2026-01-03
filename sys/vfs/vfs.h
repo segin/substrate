@@ -14,8 +14,12 @@
 
 struct fs_node;
 
-typedef uint32_t (*read_type_t)(struct fs_node*, uint32_t, uint32_t, uint8_t*);
-typedef uint32_t (*write_type_t)(struct fs_node*, uint32_t, uint32_t, uint8_t*);
+#include <sys/types.h>
+
+/* ... */
+
+typedef uint32_t (*read_type_t)(struct fs_node*, off_t, uint32_t, uint8_t*);
+typedef uint32_t (*write_type_t)(struct fs_node*, off_t, uint32_t, uint8_t*);
 typedef void (*open_type_t)(struct fs_node*);
 typedef void (*close_type_t)(struct fs_node*);
 typedef struct dirent * (*readdir_type_t)(struct fs_node*, uint32_t);
@@ -33,7 +37,7 @@ typedef struct fs_node {
     uint32_t gid;         // The owning group.
     uint32_t flags;       // Includes the node type.
     uint32_t inode;       // This is device-specific - provides a way for a filesystem to identify files.
-    uint32_t length;      // Size of the file, in bytes.
+    off_t    length;      // Size of the file, in bytes (64-bit).
     uint32_t impl;        // An implementation-defined number.
     
     // Timestamps (64-bit for Year 2038 compliance)
@@ -72,9 +76,11 @@ typedef struct vfs_mount {
     struct vfs_mount *next;
 } vfs_mount_t;
 
+/* ... */
+
 // Standard VFS functions
-uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
-uint32_t write_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
+uint32_t read_fs(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
+uint32_t write_fs(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
 void open_fs(fs_node_t *node, uint8_t read, uint8_t write);
 void close_fs(fs_node_t *node);
 struct dirent *readdir_fs(fs_node_t *node, uint32_t index);

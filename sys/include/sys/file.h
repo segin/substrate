@@ -11,7 +11,7 @@
 
 typedef struct file {
     fs_node_t *node;
-    uint32_t offset;
+    off_t offset;
     int flags;
     int ref_count;
 } file_t;

@@ -18,6 +18,7 @@ The kernel is the core of the operating system, structured as follows:
     - **`serial/`**: UART driver.
     - **`input/`**: PS/2 Keyboard driver.
     - **`storage/`**: Drivers for SCSI, IDE, AHCI, NVMe.
+    - **`virtio/`**: Virtualized devices (Block, 9P, Net).
 - **`sys/vfs/`**: Virtual File System layer, providing an abstraction over specific file systems.
 - **`sys/fs/`**: File system implementations.
     - **`ext2/`**, **`fat/`**, **`exfat/`**, **`minix/`**.

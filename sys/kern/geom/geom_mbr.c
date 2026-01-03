@@ -1,6 +1,7 @@
 #include "geom.h"
 #include "../console.h"
 #include <string.h>
+#include <stdio.h>
 
 // MBR Partition Entry
 struct mbr_entry {
@@ -20,7 +21,6 @@ struct mbr {
 
 void geom_scan(geom_disk_t *disk, uint64_t offset, int depth, const char *prefix);
 
-
 static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const char *prefix) {
     uint8_t buf[512];
     if (geom_read_sector(disk, offset, buf) != 0) return -1;
@@ -28,63 +28,44 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     struct mbr *mbr = (struct mbr *)buf;
     if (mbr->signature != 0xAA55) return -1;
 
-    // Found MBR
-    // Print logic
+    // Print MBR partition table summary
     if (depth == 0) {
-        kprint(disk->name); // Should check if prefix matches disk->name?
+        kprint(disk->name);
+        kprint(": ");
+    } else {
+        // Indent for nested partitions
+        for (int d = 0; d < depth; d++) kprint("  ");
+        kprint(prefix);
         kprint(": ");
     }
     
-    int printed = 0;
+    int printed_partitions = 0;
     
     for (int i = 0; i < 4; i++) {
         if (mbr->entries[i].type != 0) {
-            if (printed) kprint(" ");
+            if (printed_partitions) kprint(" ");
             
-            // Construct name: prefix + "p" + (i+1)
-            // Need a simpler way to print without sprintf buffer? 
-            // Or just print pieces provided we don't have threading issues.
-            kprint(prefix); 
-            kprint("p");
-            char idx[2] = { '1' + i, 0 };
-            kprint(idx);
+            char part_name[32];
+            sprintf(part_name, "%sp%d", prefix, i+1);
+            kprint(part_name);
             
-            printed = 1;
+            printed_partitions = 1;
         }
+    }
+    
+    if (!printed_partitions && depth == 0) {
+        kprint("(no slices)");
     }
     kprint("\n");
     
-    // Pass 2: Recursion
-    // Now we need to recurse for sub-slices (like BSD or Ext)
+    // Recursively scan partitions (e.g., BSD slices inside MBR)
     for (int i = 0; i < 4; i++) {
-        // BSD Partition ID (386BSD, FreeBSD, etc)
+        // Check for container types (0xA5 = FreeBSD/386BSD, 0x05/0x0F = Extended)
         if (mbr->entries[i].type == 0xA5) {
-             // Construct new prefix for child
-             char new_prefix[32];
+             char new_prefix[64];
+             sprintf(new_prefix, "%sp%d", prefix, i+1);
              
-             // strcpy(new_prefix, prefix)
-             int j=0;
-             const char *s = prefix;
-             while(*s && j < 20) new_prefix[j++] = *s++;
-             new_prefix[j++] = 'p';
-             new_prefix[j++] = '1' + i;
-             new_prefix[j] = 0;
-             
-             // For sub-partitions, we indent?
-             // User output: "  ide0p2: ide0p2a ..."
-             // If we are about to check this partition, we should scan it.
-             // If the scan finds something, it will print.
-             
-             // Calculate absolute offset
              uint64_t part_offset = offset + mbr->entries[i].lba_start;
-             
-             // We need to print indentation BEFORE the child prints its label?
-             // But the child prints.
-             // Child prints: "prefix: ..."
-             // We want "  prefix: ..."
-             // Let's modify kprint to handle indentation? No.
-             // Let's assume child is responsible for indentation based on depth.
-             
              geom_scan(disk, part_offset, depth + 1, new_prefix);
         }
     }

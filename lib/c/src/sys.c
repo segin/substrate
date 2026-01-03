@@ -133,81 +133,13 @@ int kill(pid_t pid, int sig) {
 }
 
 sighandler_t signal(int signum, sighandler_t handler) {
-    return (sighandler_t)_syscall2(SYS_SIGNAL, signum, (int)handler);
+    return (sighandler_t)(uintptr_t)_syscall2(SYS_SIGNAL, signum, (int)handler);
 }
 
-int access(const char *pathname, int mode) {
-    return (int)_syscall2(SYS_ACCESS, (int)pathname, mode);
-}
-
-int isatty(int fd) {
-    if (fd >= 0 && fd <= 2) return 1;
-    return 0;
-}
-
-char *ttyname(int fd) {
-    if (isatty(fd)) return "/dev/tty";
-    return NULL;
-}
-
-int rename(const char *oldpath, const char *newpath) {
-    return (int)_syscall2(SYS_RENAME, (int)oldpath, (int)newpath);
-}
-
-int mkdir(const char *pathname, mode_t mode) {
-    return (int)_syscall2(SYS_MKDIR, (int)pathname, mode);
-}
-
-int rmdir(const char *pathname) {
-    return (int)_syscall1(SYS_RMDIR, (int)pathname);
-}
-
-int stat(const char *pathname, struct stat *statbuf) {
-    return (int)_syscall2(SYS_STAT, (int)pathname, (int)statbuf);
-}
-
-int mknod(const char *pathname, mode_t mode, dev_t dev) {
-    return (int)_syscall3(SYS_MKNOD, (int)pathname, mode, dev);
-}
-
-int mount(const char *source, const char *target, const char *fs, unsigned long flags, const void *data) {
-    return (int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)fs, (int)flags, (int)data);
-}
-
-int umount(const char *target) {
-    return (int)_syscall1(SYS_UMOUNT, (int)target);
-}
-
-int uname(struct utsname *buf) {
-    return (int)_syscall1(SYS_UNAME, (int)buf);
-}
-
-time_t time(time_t *tloc) {
-    time_t t = (time_t)_syscall1(SYS_TIME, (int)tloc);
-    if (tloc) *tloc = t;
-    return t;
-}
-
-int gettimeofday(struct timeval *tv, struct timezone *tz) {
-    return (int)_syscall2(SYS_GETTIMEOFDAY, (int)tv, (int)tz);
-}
-
-int clock_gettime(clockid_t clk_id, struct timespec *tp) {
-    return (int)_syscall2(SYS_CLOCK_GETTIME, clk_id, (int)tp);
-}
-
-clock_t times(struct tms *buf) {
-    return (clock_t)_syscall1(SYS_TIMES, (int)buf);
-}
-
-pid_t waitpid(pid_t pid, int *status, int options) {
-    return (pid_t)_syscall3(SYS_WAITPID, pid, (int)status, options);
-}
-
-pid_t wait(int *status) {
-    return waitpid(-1, status, 0);
-}
+/* ... */
 
 off_t lseek(int fd, off_t offset, int whence) {
-    return _syscall3(SYS_LSEEK, fd, (int)offset, whence);
+    uint32_t off_lo = (uint32_t)(offset & 0xFFFFFFFF);
+    uint32_t off_hi = (uint32_t)((offset >> 32) & 0xFFFFFFFF);
+    return (off_t)_syscall4(SYS_LSEEK, fd, off_lo, off_hi, whence);
 }

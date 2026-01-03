@@ -111,7 +111,7 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
     return 0;
 }
 
-uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+uint32_t read_fs(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     if (node->read != 0) {
         uint32_t result = node->read(node, offset, size, buffer);
         
@@ -124,7 +124,7 @@ uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffe
         return 0;
 }
 
-uint32_t write_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+uint32_t write_fs(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     if (node->write != 0) {
         uint32_t result = node->write(node, offset, size, buffer);
         

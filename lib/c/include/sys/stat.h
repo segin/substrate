@@ -4,16 +4,16 @@
 #include <sys/types.h>
 
 struct stat {
-    unsigned long  st_dev;
+    dev_t          st_dev;
     unsigned long  st_ino;
-    unsigned short st_mode;
+    mode_t         st_mode;
     unsigned short st_nlink;
-    unsigned short st_uid;
-    unsigned short st_gid;
-    unsigned long  st_rdev;
-    unsigned long  st_size;
+    uid_t          st_uid;
+    gid_t          st_gid;
+    dev_t          st_rdev;
+    off_t          st_size;
     unsigned long  st_blksize;
-    unsigned long  st_blocks;
+    blkcnt_t       st_blocks;
     time_t         st_atime;
     unsigned long  st_atime_nsec;
     time_t         st_mtime;

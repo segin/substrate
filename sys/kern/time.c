@@ -1,37 +1,13 @@
+#include <stdint.h>
+#include <sys/types.h>
+#include <sys/math.h>
 #include "time.h"
 #include "../arch/i386/io.h"
-#include <stdint.h>
 
-volatile int64_t ticks = 0;
-int64_t boot_time = 0;  // Unix timestamp when system booted
+int64_t boot_time = 0;
 
-#define HZ 100  // Timer frequency (ticks per second)
-
-// Software 64-bit division to avoid libgcc dependency
-static uint64_t div64_32(uint64_t dividend, uint32_t divisor) {
-    if (divisor == 0) return 0;
-    
-    uint64_t quotient = 0;
-    uint64_t remainder = 0;
-    
-    for (int i = 63; i >= 0; i--) {
-        remainder = (remainder << 1) | ((dividend >> i) & 1);
-        if (remainder >= divisor) {
-            remainder -= divisor;
-            quotient |= (1ULL << i);
-        }
-    }
-    
-    return quotient;
-}
-
-// Software 64-bit modulo
-static uint64_t mod64_32(uint64_t dividend, uint32_t divisor) {
-    if (divisor == 0) return 0;
-    
-    uint64_t quotient = div64_32(dividend, divisor);
-    return dividend - (quotient * divisor);
-}
+static uint64_t ticks = 0;
+static const uint32_t HZ = 100;
 
 int64_t get_time(void) {
     return boot_time + div64_32(ticks, HZ);
@@ -45,14 +21,12 @@ void set_boot_time(int64_t time) {
     boot_time = time;
 }
 
-// time syscall
 int64_t sys_time(int64_t *tloc) {
     int64_t t = get_time();
     if (tloc) *tloc = t;
     return t;
 }
 
-// gettimeofday syscall
 struct timeval {
     int64_t tv_sec;
     int32_t tv_usec;
@@ -79,7 +53,6 @@ int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
     return 0;
 }
 
-// clock_gettime syscall
 struct timespec {
     int64_t tv_sec;
     int32_t tv_nsec;
@@ -106,7 +79,6 @@ int sys_clock_gettime(int clk_id, struct timespec *tp) {
     return 0;
 }
 
-// times syscall  
 struct tms {
     int32_t tms_utime;
     int32_t tms_stime;
@@ -116,13 +88,10 @@ struct tms {
 
 int32_t sys_times(struct tms *buf) {
     if (!buf) return -1;
-    
-    // TODO: Track actual process/thread times
     buf->tms_utime = 0;
     buf->tms_stime = 0;
     buf->tms_cutime = 0;
     buf->tms_cstime = 0;
-    
     return (int32_t)ticks;
 }
 

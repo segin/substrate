@@ -132,10 +132,12 @@ int sys_close(int fd) {
     return 0;
 }
 
-int sys_lseek(int fd, int off, int w) {
+int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int w) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
+    
+    off_t off = ((off_t)off_hi << 32) | off_lo;
     
     if (w == 0) f->offset = off; // SEEK_SET
     else if (w == 1) f->offset += off; // SEEK_CUR

@@ -15,6 +15,9 @@
 #define L_tmpnam 20
 #define FILENAME_MAX 256
 #define FOPEN_MAX 16
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
 
 typedef struct {
     int fd;
