@@ -46,13 +46,13 @@ void fb_clear(uint32_t color) {
 void fb_putc(char c, uint32_t fg, uint32_t bg) {
     if (c == '\n') {
         cursor_x = 0;
-        cursor_y += 8;
+        cursor_y += 16;
     } else if (c == '\r') {
         cursor_x = 0;
     } else {
         if (c >= 32 && c <= 126) {
-            const uint8_t *glyph = font_8x8[c - 32];
-            for (int y = 0; y < 8; y++) {
+            const uint8_t *glyph = font_8x16[c - 32];
+            for (int y = 0; y < 16; y++) {
                 for (int x = 0; x < 8; x++) {
                     if (glyph[y] & (0x80 >> x)) {
                         fb_putpixel(cursor_x + x, cursor_y + y, fg);
@@ -67,24 +67,24 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
 
     if (cursor_x >= (int)fb.width) {
         cursor_x = 0;
-        cursor_y += 8;
+        cursor_y += 16;
     }
 
-    if (cursor_y + 8 > (int)fb.height) {
-        // Scroll up by 8 pixels
+    if (cursor_y + 16 > (int)fb.height) {
+        // Scroll up by 16 pixels
         extern void *memcpy(void *dest, const void *src, size_t n);
         void *dst = fb.addr;
-        void *src = (void*)((uintptr_t)fb.addr + 8 * fb.pitch);
-        size_t size = (fb.height - 8) * fb.pitch;
+        void *src = (void*)((uintptr_t)fb.addr + 16 * fb.pitch);
+        size_t size = (fb.height - 16) * fb.pitch;
         memcpy(dst, src, size);
         
-        // Clear bottom 8 pixels
-        for (uint32_t y = fb.height - 8; y < fb.height; y++) {
+        // Clear bottom 16 pixels
+        for (uint32_t y = fb.height - 16; y < fb.height; y++) {
             for (uint32_t x = 0; x < fb.width; x++) {
                 fb_putpixel(x, y, bg != 0xFFFFFFFF ? bg : 0);
             }
         }
-        cursor_y -= 8;
+        cursor_y -= 16;
     }
 }
 
