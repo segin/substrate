@@ -58,4 +58,10 @@ void vm_page_init(void);
 vm_page_t *vm_page_alloc(struct vm_object *object, uint64_t pindex, int req);
 void vm_page_free(vm_page_t *m);
 
+// Queue operations
+void vm_page_activate(vm_page_t *m);
+void vm_page_deactivate(vm_page_t *m);
+void vm_page_wire(vm_page_t *m);
+void vm_page_unwire(vm_page_t *m);
+
 #endif

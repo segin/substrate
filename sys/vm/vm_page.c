@@ -106,3 +106,67 @@ void vm_page_free(vm_page_t *m) {
     enqueue(&free_queue, m);
     m->flags |= PG_FREE;
 }
+
+// Move page to active queue (recently accessed)
+void vm_page_activate(vm_page_t *m) {
+    if (!m || (m->flags & PG_ACTIVE)) return;
+    
+    // Remove from current queue
+    if (m->flags & PG_INACTIVE) {
+        dequeue(&inactive_queue, m);
+        m->flags &= ~PG_INACTIVE;
+    } else if (m->flags & PG_FREE) {
+        dequeue(&free_queue, m);
+        m->flags &= ~PG_FREE;
+    }
+    
+    enqueue(&active_queue, m);
+    m->flags |= PG_ACTIVE;
+}
+
+// Move page to inactive queue (eviction candidate)
+void vm_page_deactivate(vm_page_t *m) {
+    if (!m || (m->flags & PG_INACTIVE)) return;
+    
+    // Remove from active queue
+    if (m->flags & PG_ACTIVE) {
+        dequeue(&active_queue, m);
+        m->flags &= ~PG_ACTIVE;
+    }
+    
+    enqueue(&inactive_queue, m);
+    m->flags |= PG_INACTIVE;
+}
+
+// Wire page (pin in memory, cannot be paged out)
+void vm_page_wire(vm_page_t *m) {
+    if (!m) return;
+    
+    m->wire_count++;
+    
+    // Remove from LRU queues if being wired for first time
+    if (m->wire_count == 1) {
+        if (m->flags & PG_ACTIVE) {
+            dequeue(&active_queue, m);
+            m->flags &= ~PG_ACTIVE;
+        } else if (m->flags & PG_INACTIVE) {
+            dequeue(&inactive_queue, m);
+            m->flags &= ~PG_INACTIVE;
+        }
+        enqueue(&wired_queue, m);
+    }
+}
+
+// Unwire page (allow paging out when wire_count reaches 0)
+void vm_page_unwire(vm_page_t *m) {
+    if (!m || m->wire_count == 0) return;
+    
+    m->wire_count--;
+    
+    // Move back to active queue when fully unwired
+    if (m->wire_count == 0) {
+        dequeue(&wired_queue, m);
+        enqueue(&active_queue, m);
+        m->flags |= PG_ACTIVE;
+    }
+}

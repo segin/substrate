@@ -40,7 +40,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed)
                     - [x] **Wired Queue:** Pages that cannot be paged out (kernel, DMA buffers)
                     - [x] **Laundry Queue:** Dirty pages waiting to be written to backing store
-                - [ ] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()`
+                - [x] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()`
                 - [ ] **LRU Scanning:** Periodic scan to move pages from Active→Inactive based on access bits
                 - [ ] **Page Daemon:** Background thread (`pagedaemon`) to free pages when `free_count < free_target`
                 - [ ] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management
