@@ -170,3 +170,48 @@ void vm_page_unwire(vm_page_t *m) {
         m->flags |= PG_ACTIVE;
     }
 }
+
+// External pmap functions (to be implemented in pmap layer)
+extern int pmap_is_referenced(vm_page_t *m);
+extern void pmap_clear_reference(vm_page_t *m);
+
+// LRU scanner: Walk active queue and move unreferenced pages to inactive
+// Returns number of pages deactivated
+int vm_pageout_scan(int max_scan) {
+    int scanned = 0;
+    int deactivated = 0;
+    
+    vm_page_t *m = active_queue;
+    
+    while (m && scanned < max_scan) {
+        vm_page_t *next = m->next;  // Save next before potential dequeue
+        scanned++;
+        
+        // Skip wired pages (shouldn't be on active queue but check anyway)
+        if (m->wire_count > 0) {
+            m = next;
+            continue;
+        }
+        
+        // Check if page was recently accessed via PTE A bit
+        if (pmap_is_referenced(m)) {
+            // Page was accessed - give it second chance
+            pmap_clear_reference(m);
+            // Move to head of active queue (most recently used)
+            dequeue(&active_queue, m);
+            enqueue(&active_queue, m);
+            m->flags |= PG_ACTIVE;  // Keep active flag
+        } else {
+            // Page not accessed - move to inactive queue
+            dequeue(&active_queue, m);
+            m->flags &= ~PG_ACTIVE;
+            enqueue(&inactive_queue, m);
+            m->flags |= PG_INACTIVE;
+            deactivated++;
+        }
+        
+        m = next;
+    }
+    
+    return deactivated;
+}

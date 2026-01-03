@@ -265,3 +265,76 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
 void pmap_invalidate_page(uint32_t va) {
     __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
 }
+
+// Include vm_page.h for vm_page_t
+#include "../../vm/vm_page.h"
+
+// Check if page was accessed (PTE A bit set)
+// Walks all PV entries for this page and checks PTE A bits
+int pmap_is_referenced(vm_page_t *m) {
+    if (!m) return 0;
+    
+    struct pv_entry *pv = m->pv_list;
+    while (pv) {
+        pmap_t pmap = pv->pmap;
+        uint32_t va = pv->va;
+        
+        // Only check if this is the current address space
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+        if (pmap->pdir_phys != cr3) {
+            pv = pv->next;
+            continue;
+        }
+        
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+        
+        if (!(V_PD[pdi] & PTE_P)) {
+            pv = pv->next;
+            continue;
+        }
+        
+        uint32_t *pt = V_PT(pdi);
+        if (pt[pti] & PTE_A) {
+            return 1;  // Page was accessed
+        }
+        
+        pv = pv->next;
+    }
+    
+    return 0;  // Not referenced
+}
+
+// Clear accessed bit on all mappings of this page
+void pmap_clear_reference(vm_page_t *m) {
+    if (!m) return;
+    
+    struct pv_entry *pv = m->pv_list;
+    while (pv) {
+        pmap_t pmap = pv->pmap;
+        uint32_t va = pv->va;
+        
+        // Only modify current address space
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+        if (pmap->pdir_phys != cr3) {
+            pv = pv->next;
+            continue;
+        }
+        
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+        
+        if (!(V_PD[pdi] & PTE_P)) {
+            pv = pv->next;
+            continue;
+        }
+        
+        uint32_t *pt = V_PT(pdi);
+        pt[pti] &= ~PTE_A;  // Clear accessed bit
+        pmap_invalidate_page(va);  // Flush TLB
+        
+        pv = pv->next;
+    }
+}

@@ -42,7 +42,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] **Laundry Queue:** Dirty pages waiting to be written to backing store
                 - [x] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()`
                 - [ ] **LRU Scanning:** Periodic scan to move pages from Active→Inactive based on access bits
-                    - [ ] `vm_pageout_scan()`: Walk active queue and check PTE accessed bits
+                    - [x] `vm_pageout_scan()`: Walk active queue and check PTE accessed bits
                     - [ ] `pmap_is_referenced()`: Query PTE A bit for a given page
                     - [ ] `pmap_clear_reference()`: Clear PTE A bit after checking
                     - [ ] Move unreferenced pages to inactive queue tail
