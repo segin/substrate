@@ -19,7 +19,49 @@ static size_t pmm_total_blocks;
 static size_t pmm_used_blocks;
 
 // Static bitmap for 128MB (32768 blocks -> 4096 bytes)
-static uint8_t pmm_bitmap_static[4096]; 
+static uint8_t pmm_bitmap_static[4096];
+
+// ==================== Watermark (Bump) Allocator ====================
+// Used during early boot before free list is ready
+// Allocates from kernel end, only grows, never frees
+
+static uint32_t watermark_base;     // Start of watermark region (physical)
+static uint32_t watermark_ptr;      // Current allocation pointer (physical)
+static uint32_t watermark_end;      // End of available early-boot memory
+
+// Initialize watermark allocator (called very early, before pmm_init)
+void pmm_watermark_init(void) {
+    extern uint32_t _kernel_end;
+    uint32_t v_end = (uint32_t)(uintptr_t)&_kernel_end;
+    uint32_t p_end = v_end - 0xC0000000;  // Convert to physical
+    
+    // Align to page boundary
+    watermark_base = (p_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+    watermark_ptr = watermark_base;
+    // Conservative limit: 1MB for early-boot structures
+    watermark_end = watermark_base + (1024 * 1024);
+}
+
+// Allocate from watermark (O(1) bump allocation, never freed)
+void* pmm_watermark_alloc(size_t bytes) {
+    // Align to 16 bytes
+    bytes = (bytes + 15) & ~15;
+    
+    if (watermark_ptr + bytes > watermark_end) {
+        return NULL;  // Out of early-boot memory
+    }
+    
+    uint32_t result = watermark_ptr;
+    watermark_ptr += bytes;
+    
+    // Return virtual address (kernel mapping)
+    return (void*)(uintptr_t)(result + 0xC0000000);
+}
+
+// Get watermark high-water mark for later reservation
+uint32_t pmm_watermark_used(void) {
+    return watermark_ptr - watermark_base;
+} 
 
 static void pmm_mark_used(uint32_t addr) {
     uint32_t block = addr / PMM_BLOCK_SIZE;

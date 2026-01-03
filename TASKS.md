@@ -15,7 +15,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Calculate and report total usable RAM.
                 - [x] Properly identify kernel physical bounds from linker symbols.
         - [ ] **Core Allocator Rewrite:**
-            - [ ] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures.
+            - [x] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures.
             - [ ] **Dynamic Metadata:** Calculate and allocate `vm_page_t` array or bitmaps based on *actual* detected RAM (remove 128MB static limit).
             - [ ] **Low Memory (4MiB) Support:** efficient handling of constrained environments.
             - [ ] **Algorithms:**
