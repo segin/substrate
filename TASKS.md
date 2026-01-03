@@ -838,7 +838,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] System Shutdown (`S5`)
         - [ ] Reboot
 
-### 11. Continuous Directives
+### 11. Build System & Packaging
+- [ ] **Kernel Image Formats:**
+    - [ ] **zImage Support:**
+        - [ ] Standard Linux-compatible zImage header (magic, entry point, size).
+        - [ ] Flat binary generation (`objcopy -O binary`).
+        - [ ] Bootloader compatibility (QEMU `-kernel` or U-Boot `bootz`).
+        - [ ] Piggybacked initrd support (if applicable).
+
+### 12. Continuous Directives
 > [!IMPORTANT]
 > These are not one-off tasks but ongoing directives to be performed regularly.
 
