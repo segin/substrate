@@ -22,7 +22,12 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Build System:** Root filesystem generation in `dist/`
 
 ## Current Status
-- PMM Phase 1 (Boot Detection Hardening) complete; Phase 2 (Free List) pending
+- **PMM Refactor:** Phase 2 in progress.
+    - O(1) Free List replaced by O(log N) Buddy Allocator.
+    - Contiguous allocation optimized via Buddy system.
+    - Bootstrap Watermark Allocator implemented.
+    - Dynamic Metadata sizing (no 128MB limit) implemented.
+    - Low Memory safeguards active.
 - User process foundation complete (pmap layer)
 - VirtIO drivers (Block, 9P) linked and initialized
 - Ready for mmap() implementation
@@ -40,6 +45,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
     - `core/`: Main entry (`kmain`).
     - `arch/`: Architecture specific (`i386`, `x86_64`).
         - `i386/pmap.c`: Virtual memory management (pmap layer)
+        - `i386/gdt.c`: GDT with verified segments (0x1B/0x23/0x33)
         - `i386/fpu/`: FPU emulation and state management
     - `drivers/`: Hardware drivers (`video`, `serial`, `input`, `storage`).
     - `fs/`: Filesystems (`ext2`, `fat`, `minix`, `exec`).
