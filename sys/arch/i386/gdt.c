@@ -50,6 +50,12 @@ void gdt_init() {
     gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFB, 0xCF); // User mode code segment (0x18 | 3 = 0x1B)  
     gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF3, 0xCF); // User mode data segment (0x20 | 3 = 0x23)
     write_tss(5, 0x10, 0x0);
+    
+    // TLS segment at entry 6 (selector 0x30 | 3 = 0x33)
+    // Initially points to address 0, will be updated by set_thread_area syscall
+    // Access: 0xF3 = Present, Ring 3, Data, Writable
+    // Granularity: 0xCF = 4KB pages, 32-bit
+    gdt_set_gate(6, 0, 0xFFFFFFFF, 0xF3, 0xCF);
 
     gdt_flush((uint32_t)&gdt_ptr);
     tss_flush();

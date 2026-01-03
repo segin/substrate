@@ -7,6 +7,10 @@
 .long MULTIBOOT_HEADER_MAGIC
 .long MULTIBOOT_HEADER_FLAGS
 .long -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
+.long 0         # mode_type: 0 = linear graphics
+.long 1024      # width
+.long 768       # height
+.long 32        # depth
 
 .section .setup, "ax"
 .global _start

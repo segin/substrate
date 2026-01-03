@@ -190,6 +190,13 @@ void isr_handler(registers_t *regs) {
         // Exception - check if from user mode or kernel mode
         int is_usermode = (regs->cs & 0x3) == 3;
         
+        // VM86 Mode Check for GPF (13)
+        if (regs->int_no == 13 && (regs->eflags & 0x20000)) { // EFLAGS_VM = 0x20000
+            extern void vm86_gpf_handler(registers_t *regs);
+            vm86_gpf_handler(regs);
+            return;
+        }
+
         char buf[256];
         kprint("\nEXCEPTION: ");
         kprint(exception_messages[regs->int_no]);
