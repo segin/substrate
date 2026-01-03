@@ -32,3 +32,10 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
     - `pthreads/`: Threading support.
     - `dbm/`: Database library.
 - `sbin/`: System binaries.
+
+### Debugging Note
+If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be masked at the PIC or the controller state is stuck.
+
+## Known Issues
+- Interrupt responsiveness: `Ctrl+F9` debug dump sometimes fails during idle states.
+- Stack corruption: Occasional Page Faults (ERR 5) in `sh` being investigated.

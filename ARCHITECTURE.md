@@ -38,7 +38,17 @@ These components are essential for booting and basic system operation.
     - **`dl/`**: Dynamic linker.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
     - **`dbm/`**: Database Manager library.
-- **`sbin/`**: System administration binaries.
+- `sbin/`: System binaries.
+
+## Personality Emulation
+- **Linux:** Emulates Linux 2.6.x i386 syscalls. Handles `rt_sigaction` (174) and `rt_sigprocmask` (175) by mapping to internal signal infrastructure.
+- **FreeBSD:** Planned support for FreeBSD 8/10+ i386 binaries.
+
+## Recent Progress (as of Jan 2026)
+- Implemented `sys_brk` for dynamic heap allocation.
+- Stabilized BusyBox TLS (GS segment and Variant II offsets).
+- Resolved shell input race conditions via atomic sleep in `console_read`.
+- Upgraded syscall handler to 6-register passing.
 
 ## Design Patterns & Standards
 - **ABIs:**
@@ -83,5 +93,7 @@ These components are essential for booting and basic system operation.
 - **FD Management:** Per-process File Descriptor table.
 
 ## Integration points
-- **Syscall Interface:** Defined in `sys/arch/i386/syscall.c` and `sys/exec/perso/`.
+- **Syscall Interface:** Defined in `sys/arch/i386/syscall.c` and `sys/exec/perso/`. Now supports up to 6 arguments for Linux compatibility (e.g., `rt_sigaction`, `mount`).
 - **Boot:** Multiboot header in `sys/arch/i386/boot.S`.
+- **System Stability**: Features identity syscall stubs for BusyBox and a kernel-stack safety check in the syscall dispatcher.
+- **Lost Wakeup Protection**: The console driver uses interrupt masking (`cli`/`sti`) to prevent race conditions during blocking reads.
