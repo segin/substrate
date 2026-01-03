@@ -35,7 +35,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
             - [ ] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic.
                 - [ ] **Queue Types:**
-                    - [ ] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head)
+                    - [x] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head)
                     - [ ] **Active Queue:** Recently accessed pages (LRU head)
                     - [ ] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed)
                     - [ ] **Wired Queue:** Pages that cannot be paged out (kernel, DMA buffers)
