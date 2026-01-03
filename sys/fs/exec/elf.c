@@ -3,7 +3,9 @@
 #include "../../vfs/vfs.h"
 #include "../../kern/console.h"
 #include "../../pm/pm.h"
+#include "../../kern/panic.h"
 #include <string.h>
+#include "../../vm/vm_map.h"
 
 // Forward declarations
 extern process_t *current_process;
@@ -12,6 +14,8 @@ extern struct personality personality_native;
 extern struct personality personality_linux;
 extern struct personality personality_freebsd;
 extern struct personality personality_svr4;
+
+// Globals for userspace transition
 
 int elf_check_file(Elf32_Ehdr *hdr) {
     if (!hdr) return 0;
@@ -67,9 +71,7 @@ uint32_t elf_load(fs_node_t *file) {
     // Read program headers and load PT_LOAD segments
     Elf32_Phdr phdr;
     
-    // Import pmap functions
-    extern int pmap_enter(void *pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
-    extern void *pmap_kernel(void);
+    // Use pmap_t from vm_map.h/pmap.h
     extern void *pmm_alloc_block(void);
     
     void *pmap = pmap_kernel();
@@ -106,6 +108,11 @@ uint32_t elf_load(fs_node_t *file) {
             uint32_t va_end = (phdr.p_vaddr + phdr.p_memsz + 0xFFF) & 0xFFFFF000;
             
             // Allocate and map pages for this segment
+            // Track PA for each VA so we can write to it via kernel mapping
+            typedef struct { uint32_t va; void *pa; } page_map_t;
+            page_map_t page_maps[256]; // Max 256 pages per segment (1MB)
+            int num_pages = 0;
+            
             for (uint32_t va = va_start; va < va_end; va += 0x1000) {
                 // Allocate physical page
                 void *pa = pmm_alloc_block();
@@ -120,13 +127,63 @@ uint32_t elf_load(fs_node_t *file) {
                     return 0;
                 }
                 
-                // Zero the page first
-                memset((void *)va, 0, 0x1000);
+                // Save mapping for later access via kernel space
+                if (num_pages < 256) {
+                    page_maps[num_pages].va = va;
+                    page_maps[num_pages].pa = pa;
+                    num_pages++;
+                }
+                
+                // Zero the page using PA mapped to kernel space
+                #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
+                memset(VIRTUAL_d(pa), 0, 0x1000);
             }
             
-            // Now copy file data to the mapped pages
+            
+            // Now copy file data to the mapped segment via kernel space
+            // We need to translate user VA to kernel VA via the physical address
+            // Simple approach: read directly into kernel buffer then copy page-by-page
             if (phdr.p_filesz > 0) {
-                file->read(file, phdr.p_offset, phdr.p_filesz, (uint8_t *)phdr.p_vaddr);
+                // Allocate temporary buffer in kernel space for segment data
+                static uint8_t segment_buffer[1024*1024]; // 1MB max segment size
+                if (phdr.p_filesz > sizeof(segment_buffer)) {
+                    kprint("ELF: Segment too large\n");
+                    return 0;
+                }
+                
+                // Read entire segment into kernel buffer
+                if (file->read(file, phdr.p_offset, phdr.p_filesz, segment_buffer) != phdr.p_filesz) {
+                    kprint("ELF: Failed to read segment data\n");
+                    return 0;
+                }
+                
+                // Copy from kernel buffer to mapped user pages (via kernel addresses)
+                uint32_t bytes_copied = 0;
+                for (int pi = 0; pi < num_pages && bytes_copied < phdr.p_filesz; pi++) {
+                    uint32_t page_va = page_maps[pi].va;
+                    uint32_t segment_va = phdr.p_vaddr;
+                    
+                    // Does this page overlap with the segment?
+                    uint32_t page_end = page_va + 0x1000;
+                    uint32_t segment_end = segment_va + phdr.p_filesz;
+                    
+                    if (page_va < segment_end && page_end > segment_va) {
+                        // Calculate overlap
+                        uint32_t copy_start_va = (page_va > segment_va) ? page_va : segment_va;
+                        uint32_t copy_end_va = (page_end < segment_end) ? page_end : segment_end;
+                        uint32_t copy_size = copy_end_va - copy_start_va;
+                        
+                        // Offset into page
+                        uint32_t offset_in_page = copy_start_va - page_va;
+                        // Offset into segment data
+                        uint32_t offset_in_segment = copy_start_va - segment_va;
+                        
+                        // Copy to kernel-mapped page
+                        uint8_t *dest = (uint8_t *)VIRTUAL_d(page_maps[pi].pa) + offset_in_page;
+                        memcpy(dest, segment_buffer + offset_in_segment, copy_size);
+                        bytes_copied += copy_size;
+                    }
+                }
             }
             
             // BSS is already zeroed since we memset each page
@@ -204,23 +261,30 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
             if (*p == '/') name = p + 1;
         }
         strncpy(current_process->comm, name, sizeof(current_process->comm) - 1);
+        
+        // Initialize VM map
+        extern vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max);
+        if (current_process->vm_map) {
+             // TODO: kfree old map
+        }
+        current_process->vm_map = vm_map_create(pmap_kernel(), 0, 0xC0000000);
     }
     
     // Set up kernel stack for this process in TSS
     extern void set_kernel_stack(uint32_t stack);
-    // Use a static kernel stack for now
     static uint8_t kernel_stack[8192] __attribute__((aligned(16)));
     set_kernel_stack((uint32_t)(uintptr_t)(kernel_stack + 8192));
     
-    // Allocate and map user stack pages (16KB stack = 4 pages)
-    // Stack grows down, so map pages at 0xBFFFC000 - 0xBFFFFFFF
-    extern int pmap_enter(void *pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
-    extern void *pmap_kernel(void);
+    // Allocate and map user stack pages
     extern void *pmm_alloc_block(void);
     
     void *pmap = pmap_kernel();
-    uint32_t user_stack_base = 0xBFFF0000; // Bottom of 64KB stack
-    uint32_t user_stack_size = 16; // 16 pages = 64KB
+    uint32_t user_stack_base = 0xBFFF0000;
+    uint32_t user_stack_size = 16; // 64KB
+    
+    // Track physical addresses for kernel-space access
+    typedef struct { uint32_t va; void *pa; } stack_page_t;
+    stack_page_t stack_pages[16];
     
     for (uint32_t i = 0; i < user_stack_size; i++) {
         uint32_t va = user_stack_base + i * 0x1000;
@@ -229,127 +293,113 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
             kprint("execve: Out of memory for user stack\n");
             return -1;
         }
+        // Map with user access (PTE_U)
         if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, 0, 0) < 0) {
             kprint("execve: Failed to map user stack\n");
             return -1;
         }
-        memset((void *)va, 0, 0x1000);
+        stack_pages[i].va = va;
+        stack_pages[i].pa = pa;
+        
+        // Zero via kernel mapping
+        #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
+        memset(VIRTUAL_d(pa), 0, 0x1000);
     }
     
-    // Build argc/argv/envp on user stack
-    // User stack is mapped from user_stack_base to user_stack_base + (user_stack_size * 0x1000)
-    // That's 0xBFFF0000 to 0xC0000000 (64KB, 16 pages)
-    // Valid addresses: 0xBFFF0000 to 0xBFFFFFFF (last byte before 0xC0000000)
-    // Start sp at top of valid range and work down
-    uint32_t sp = user_stack_base + (user_stack_size * 0x1000); // 0xC0000000
-    // This is one byte PAST the last valid address, so back up
-    // We'll immediately subtract when we place the first string, so this is OK
-    // But to be safe, let's start 16 bytes below to ensure 16-byte alignment  
-    sp = (sp - 16) & ~15; // Start 16 bytes below boundary, 16-byte aligned
+    // Build minimal stack: just argc and argv[0] = path
+    // Stack grows DOWN, strings are placed at TOP, then pointers below
+    // Layout: [strings...] [envp NULL] [argv NULL] [argv[0]] [argc] <- sp
     
-    // 1. Copy argv strings to stack (at the top)
-    int argc = 0;
-    uint32_t argv_ptrs[32]; // Max 32 args for now
+    uint32_t sp = 0xBFFFFFFC; // Start at very top (leave 4 bytes margin)
     
-    if (argv) {
-        for (int i = 0; argv[i] && i < 32; i++) {
-            size_t len = strlen(argv[i]) + 1;
-            sp -= len;
-            sp &= ~3; // Align to 4 bytes
-            memcpy((void *)sp, argv[i], len);
-            argv_ptrs[argc++] = sp;
-        }
-    } else {
-        // Default: use the path as argv[0]
-        size_t len = strlen(path) + 1;
-        sp -= len;
-        sp &= ~3;
-        memcpy((void *)sp, path, len);
-        argv_ptrs[argc++] = sp;
-    }
+    // Helper to write to user stack via kernel mapping
+    #define STACK_WRITE32(user_va, val) do { \
+        uint32_t page_idx = ((user_va) - user_stack_base) / 0x1000; \
+        uint32_t offset = ((user_va) - user_stack_base) % 0x1000; \
+        if (page_idx < user_stack_size) { \
+            uint32_t *kptr = (uint32_t*)((uint8_t*)VIRTUAL_d(stack_pages[page_idx].pa) + offset); \
+            *kptr = (val); \
+        } \
+    } while(0)
     
-    // 2. Copy envp strings to stack
-    int envc = 0;
-    uint32_t envp_ptrs[64]; // Max 64 env vars
+    // Copy argv[0] string to stack (use actual path, not "sh")
+    const char *argv0_str = path;
+    size_t argv0_len = strlen(argv0_str) + 1;
+    sp -= argv0_len;
+    sp &= ~3; // 4-byte align
+    uint32_t argv0_ptr = sp;
     
-    if (envp) {
-        for (int i = 0; envp[i] && i < 64; i++) {
-            size_t len = strlen(envp[i]) + 1;
-            sp -= len;
-            sp &= ~3;
-            memcpy((void *)sp, envp[i], len);
-            envp_ptrs[envc++] = sp;
+    // Copy string byte by byte via kernel mapping  
+    for (size_t i = 0; i < argv0_len; i++) {
+        uint32_t addr = argv0_ptr + i;
+        uint32_t page_idx = (addr - user_stack_base) / 0x1000;
+        uint32_t offset = (addr - user_stack_base) % 0x1000;
+        if (page_idx < user_stack_size) {
+            uint8_t *kptr = (uint8_t*)VIRTUAL_d(stack_pages[page_idx].pa) + offset;
+            *kptr = argv0_str[i];
         }
     }
     
-    // 3. Align stack to 16 bytes for ABI compliance
+    // Now align to 16 bytes BEFORE placing pointers (after all strings)
     sp &= ~15;
     
-    // 4. Build auxiliary vector (for Linux compatibility)
-    // Re-read ELF header to get program header info for auxv
-    Elf32_Ehdr ehdr;
-    if (file->read(file, 0, sizeof(Elf32_Ehdr), (uint8_t *)&ehdr) == sizeof(Elf32_Ehdr)) {
-        // AT_ENTRY - entry point
-        sp -= 8; *(uint32_t *)sp = 9; *((uint32_t *)sp + 1) = entry; // AT_ENTRY
-        // AT_PHNUM - number of program headers  
-        sp -= 8; *(uint32_t *)sp = 5; *((uint32_t *)sp + 1) = ehdr.e_phnum; // AT_PHNUM
-        // AT_PHENT - size of program header entry
-        sp -= 8; *(uint32_t *)sp = 4; *((uint32_t *)sp + 1) = ehdr.e_phentsize; // AT_PHENT
-        // AT_PHDR - program headers in memory (loaded at e_phoff from file start)
-        sp -= 8; *(uint32_t *)sp = 3; *((uint32_t *)sp + 1) = 0x08048000 + ehdr.e_phoff; // AT_PHDR (assume loaded at 0x08048000)
+    // Build envp array (just NULL)
+    sp -= 4; STACK_WRITE32(sp, 0);           // envp[0] = NULL
+    
+    // Build argv array
+    sp -= 4; STACK_WRITE32(sp, 0);           // argv[1] = NULL (terminator)
+    sp -= 4; STACK_WRITE32(sp, argv0_ptr);   // argv[0] = pointer to string
+    
+    // Push argc
+    sp -= 4; STACK_WRITE32(sp, 1);           // argc = 1
+    
+    kprint("execve: Jumping to userspace, entry=0x");
+    char hexbuf[16];
+    uint32_t val = entry;
+    for (int i = 7; i >= 0; i--) {
+        int nib = (val >> (i * 4)) & 0xF;
+        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
     }
-    // Push in reverse order (since stack grows down)
-    sp -= 8; *(uint32_t *)sp = 0; *((uint32_t *)sp + 1) = 0; // AT_NULL
-    sp -= 8; *(uint32_t *)sp = 6; *((uint32_t *)sp + 1) = 0x1000; // AT_PAGESZ = 4096
-    
-    // 5. Push envp array (NULL terminated)
-    sp -= 4; *(uint32_t *)sp = 0; // envp NULL terminator
-    for (int i = envc - 1; i >= 0; i--) {
-        sp -= 4; *(uint32_t *)sp = envp_ptrs[i];
+    hexbuf[8] = '\0';
+    kprint(hexbuf);
+    kprint(", sp=0x");
+    val = sp;
+    for (int i = 7; i >= 0; i--) {
+        int nib = (val >> (i * 4)) & 0xF;
+        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
     }
+    hexbuf[8] = '\0';
+    kprint(hexbuf);
+    kprint("\n");
     
-    // 6. Push argv array (NULL terminated)
-    sp -= 4; *(uint32_t *)sp = 0; // argv NULL terminator
-    for (int i = argc - 1; i >= 0; i--) {
-        sp -= 4; *(uint32_t *)sp = argv_ptrs[i];
+    kprint("execve: Final check - entry=0x");
+    val = entry;
+    for (int i = 7; i >= 0; i--) {
+        int nib = (val >> (i * 4)) & 0xF;
+        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
     }
+    hexbuf[8] = '\0';
+    kprint(hexbuf);
+    kprint(", stack=0x");
+    val = sp;
+    for (int i = 7; i >= 0; i--) {
+        int nib = (val >> (i * 4)) & 0xF;
+        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    hexbuf[8] = '\0';
+    kprint(hexbuf);
+    kprint("\n");
     
-    // 7. Push argc
-    sp -= 4; *(uint32_t *)sp = argc;
-    
-    // 8. Pre-initialize TLS/GS segment for musl
-    // Allocate a small TLS area (256 bytes) at bottom of user stack area
-    // Offset by 1 page (4KB) to allow negative offsets (musl uses GS-offset for local storage)
-    uint32_t tls_area = user_stack_base + 0x1000; 
-    // musl expects the TLS block to have a pointer to itself at offset 0
-    *(uint32_t *)tls_area = tls_area; // self pointer
-    
-    // Set up GDT entry 6 for TLS
-    extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
-    // Access: 0xF2 = Present, Ring 3, Data, Writable
-    // Gran: 0x40 = 32-bit, byte granularity
-    gdt_set_gate(6, tls_area, 0xFFFFF, 0xF2, 0xCF);
-    
-    // Setup complete, jump to userspace
-    extern uint32_t g_user_stack;
-    extern uint32_t g_entry_point;
-    
-    g_user_stack = sp;
-    g_entry_point = entry;
-    
-    extern void jump_to_userspace(void);
-    jump_to_userspace();
+    // Jump to userspace - does not return
+    extern void jump_to_userspace(uint32_t entry, uint32_t stack);
+    jump_to_userspace(entry, sp);
     
     // Should never reach here
+    panic("jump_to_userspace returned!");
     return 0;
 }
 
 // Legacy function for compatibility
-// Global variable to pass stack pointer to ISR
-// Bypassing stack parameter passing issues
-uint32_t g_user_stack = 0;
-uint32_t g_entry_point = 0;
-
 int elf_load_file(void *file, uint32_t size) {
     (void)file; (void)size;
     return 0;

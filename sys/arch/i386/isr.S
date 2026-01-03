@@ -189,8 +189,8 @@ isr_exit:
 jump_to_userspace:
     # Load parameters from GLOBAL variables
     # This bypasses stack parameter passing completely
-    mov g_entry_point, %ecx
-    mov g_user_stack, %edx
+    mov 4(%esp), %ecx
+    mov 8(%esp), %edx
     
     # NOW turn off interrupts
     cli
