@@ -2,6 +2,7 @@
 #include "../kern/console.h"
 #include <stdio.h>
 #include "../exec/perso/personality.h"
+#include <string.h>
 
 extern thread_t threads[];
 extern thread_t *current_thread;
@@ -29,8 +30,8 @@ void debug_dump_processes(void) {
         kprint(buf);
     }
     
-    kprint("\n TID | PID | State    | Process Name     | Personality | Stack Ptr  | Stack Top\n");
-    kprint("-----|-----|----------|------------------|-------------|------------|------------\n");
+    kprint("\n TID | PID | STATE    | NAME             | PERSO   | WAIT REASON\n");
+    kprint("-----|-----|----------|------------------|---------|------------\n");
     
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid == -1) continue;
@@ -49,9 +50,10 @@ void debug_dump_processes(void) {
                 pers = t->proc->pers->name;
         }
         
-        sprintf(buf, " %3d | %3d | %s | %s | %s | 0x%08X | 0x%08X\n",
-                t->tid, pid, state, name, pers,
-                (unsigned int)t->kstack_ptr, (unsigned int)t->kstack_top);
+        const char *reason = t->wait_reason ? t->wait_reason : "";
+
+        sprintf(buf, " %3d | %3d | %-8.8s | %-16.16s | %-7.7s | %s\n",
+                t->tid, pid, state, name, pers, reason);
         kprint(buf);
     }
     

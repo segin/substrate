@@ -11,6 +11,7 @@ struct fs_node;
 typedef struct fs_node fs_node_t;
 struct file;
 typedef struct file file_t;
+struct pmap;
 
 #define MAX_FD 32
 
@@ -53,6 +54,8 @@ typedef struct process {
     
     // mmap regions
     struct vm_area *vm_areas;  // Linked list of mapped regions
+    struct vm_map *vm_map;    // TestUnix VM Map
+    struct pmap *pmap;         // Pmap (Page Table) handle
     
     // Resource limits, FDs, etc. would go here
 } process_t;
@@ -90,6 +93,7 @@ typedef struct thread {
     sched_class_t sched_class;
     
     void         *wait_chan; // Channel thread is sleeping on
+    const char   *wait_reason; // Description of wait event
     
     // Signals
     uint32_t      sig_pending;
