@@ -194,46 +194,82 @@ static uint32_t pmm_clamp_addr(uint64_t addr) {
 }
 
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
-    pmm_init_bitmap();
-    
+    // 1. Initialize bootstrap watermark allocator
+    pmm_watermark_init();
+
+    // 2. Find maximum physical memory address
+    uint64_t max_phys_addr = 0x1000000; // Assume at least 16MB
     uint64_t total_usable_bytes = 0;
     uint32_t usable_regions = 0;
 
+    if (mmap_addr != 0 && mmap_length != 0) {
+        multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
+        while ((uint32_t)(uintptr_t)mmap < mmap_addr + mmap_length) {
+            if (pmm_is_usable_type(mmap->type)) {
+                uint64_t end = mmap->addr + mmap->len;
+                if (end > max_phys_addr) max_phys_addr = end;
+                
+                // Track usable stats
+                 uint32_t start_clamped = pmm_clamp_addr(mmap->addr);
+                uint32_t end_clamped = pmm_clamp_addr(end);
+                 if (end_clamped > start_clamped) {
+                    total_usable_bytes += (end_clamped - start_clamped);
+                    usable_regions++;
+                }
+            }
+            mmap = (multiboot_mmap_entry_t*)((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
+        }
+    }
+
+    // 3. Calculate and allocate bitmap
+    // max_phys_addr / 4096 = total blocks
+    // total blocks / 8 = bytes needed
+    max_phys_addr = pmm_clamp_addr(max_phys_addr);
+    
+    // Align max_phys to block size
+    if (max_phys_addr & (PMM_BLOCK_SIZE - 1)) {
+        max_phys_addr = (max_phys_addr + PMM_BLOCK_SIZE) & ~(PMM_BLOCK_SIZE - 1);
+    }
+    
+    pmm_total_blocks = max_phys_addr / PMM_BLOCK_SIZE;
+    size_t bitmap_bytes = (pmm_total_blocks + 7) / 8;
+    
+    // Attempt dynamic allocation
+    pmm_bitmap = (uint8_t*)pmm_watermark_alloc(bitmap_bytes);
+    
+    if (pmm_bitmap) {
+        pmm_bitmap_size = bitmap_bytes;
+        kprint("PMM: Dynamic bitmap allocated. ");
+    } else {
+        // Fallback to static bitmap
+        pmm_bitmap = pmm_bitmap_static;
+        pmm_bitmap_size = sizeof(pmm_bitmap_static);
+        pmm_total_blocks = pmm_bitmap_size * 8; // Cap at 128MB
+        kprint("PMM: Using static bitmap (128MB limit). ");
+    }
+
+    // Mark everything as used initially
+    memset(pmm_bitmap, 0xFF, pmm_bitmap_size); 
+    pmm_used_blocks = pmm_total_blocks;
+
+    // Report stats
+    char buf[64];
+    sprintf(buf, "%u MB RAM detected.\n", (uint32_t)(max_phys_addr / (1024 * 1024)));
+    kprint(buf);
+
     if (mmap_addr == 0 || mmap_length == 0) {
-        // Fallback: assume 16MB conventional (very conservative)
-        kprint("PMM: No memory map provided, assuming 16MB.\n");
+        // Fallback: assume 16MB conventional
+         kprint("PMM: No memory map provided, assuming 16MB.\n");
         for (uint32_t i = 0x100000; i < (16 * 1024 * 1024); i += PMM_BLOCK_SIZE) {
-            pmm_mark_free(i);
+            if (i < pmm_total_blocks * PMM_BLOCK_SIZE)
+                pmm_mark_free(i);
         }
         pmm_reserve_kernel();
         return;
     }
 
-    // Phase 1: Calculate total usable RAM (first pass)
+    // Phase 2: Mark usable pages
     multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
-    while ((uint32_t)(uintptr_t)mmap < mmap_addr + mmap_length) {
-        if (pmm_is_usable_type(mmap->type)) {
-            // Clamp to 32-bit address space
-            uint32_t start = pmm_clamp_addr(mmap->addr);
-            uint32_t end = pmm_clamp_addr(mmap->addr + mmap->len);
-            
-            if (end > start && start < 0xFFFFFFFF) {
-                uint32_t region_size = end - start;
-                total_usable_bytes += region_size;
-                usable_regions++;
-            }
-        }
-        mmap = (multiboot_mmap_entry_t*)((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
-    }
-
-    // Report to console
-    char buf[64];
-    sprintf(buf, "PMM: %u usable regions, %u MB total\n", 
-            usable_regions, (uint32_t)(total_usable_bytes / (1024 * 1024)));
-    kprint(buf);
-
-    // Phase 2: Mark usable pages (second pass)
-    mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
     while ((uint32_t)(uintptr_t)mmap < mmap_addr + mmap_length) {
         if (pmm_is_usable_type(mmap->type)) {
             uint32_t start = pmm_clamp_addr(mmap->addr);
@@ -243,12 +279,18 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
             start = (start + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
             end = end & ~(PMM_BLOCK_SIZE - 1);
             
-            for (uint32_t addr = start; addr < end && addr < (128 * 1024 * 1024); addr += PMM_BLOCK_SIZE) {
-                pmm_mark_free(addr);
+            // Mark free, respecting total blocks (bitmap size)
+            for (uint32_t addr = start; addr < end; addr += PMM_BLOCK_SIZE) {
+                 if (addr < pmm_total_blocks * PMM_BLOCK_SIZE)
+                    pmm_mark_free(addr);
             }
         }
         mmap = (multiboot_mmap_entry_t*)((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
     }
+    
+    // Mark watermark region as used! 
+    // (Actually pmm_mark_free normally marks pages free, and we started with 0xFF (used). 
+    // Watermark allocated pages were never marked free, so they remain used. Correct.)
 
     pmm_reserve_kernel();
 }
