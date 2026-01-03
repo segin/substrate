@@ -89,12 +89,29 @@ These components are essential for booting and basic system operation.
   - Rooted at `/sys` (exported via SysFS).
   - Provides reference counting (`kref`) and unified lifecycle management.
 
-## Data Storage & File System
-- **VFS:** Abstraction layer handling `open`, `read`, `write`, `close`, `readdir`.
-- **FD Management:** Per-process File Descriptor table.
+## Framebuffer Interface
+- **Device Node:** `/dev/fb0` (Character Device).
+- **Access Method:**
+  - **MMAP:** Direct access to video memory.
+    - Uses standard `mmap()` syscall.
+    - Kernel interprets offset as page offset (4096-byte units) to support large framebuffers on 32-bit systems (similar to Linux `mmap2`).
+    - Libc wrapper handles `int64_t` byte offset -> page index conversion.
+  - **IOCTL:** Screen information retrieval.
+    - `FBIOGET_VSCREENINFO`: Fills `struct fb_var_screeninfo` with width, height, bpp, etc.
+- **Header:** `sys/fb.h` defines `struct fb_var_screeninfo`.
+- **Native Initialization:**
+  - **Multiboot:** Default method, relies on bootloader video setup.
+  - **BGA (Bochs Graphics Adapter):** Activated via kernel command line `video=bga`. Sets 1024x768x32 resolution directly via I/O ports `0x1CE`/`0x1CF`.
 
-## Integration points
-- **Syscall Interface:** Defined in `sys/arch/i386/syscall.c` and `sys/exec/perso/`. Now supports up to 6 arguments for Linux compatibility (e.g., `rt_sigaction`, `mount`).
+## System Calls & ABI
+- **Mechanism:** Interrupt `0x80`.
+- **Arguments:** Passed in registers `EBX`, `ECX`, `EDX`, `ESI`, `EDI`, `EBP`.
+- **Return Value:** `EAX` (low 32-bits), `EDX` (high 32-bits).
+- **64-bit Support (on 32-bit):**
+  - **Off_t / Time_t:** 64-bit signed integers.
+  - **Stat:** `struct stat` uses 64-bit fields for size, blocks, and timestamps (nanosecond precision).
+  - **Lseek:** `sys_lseek` accepts `off_lo` and `off_hi` to form 64-bit offset.
+  - **Mmap:** `sys_mmap` accepts `uint32_t` page_offset (offset / 4096) as the 6th argument using `_syscall6`.
 - **Boot:** Multiboot header in `sys/arch/i386/boot.S`.
 - **System Stability**: Features identity syscall stubs for BusyBox and a kernel-stack safety check in the syscall dispatcher.
 - **Lost Wakeup Protection**: The console driver uses interrupt masking (`cli`/`sti`) to prevent race conditions during blocking reads.
