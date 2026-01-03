@@ -67,3 +67,7 @@ sys/kernel.zimage
 sys/screen.png
 last_boot.txt
 .gitignore
+uname_linux
+uname-freebsd
+uname-freebsd.S
+uname-linux.S
