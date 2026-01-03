@@ -18,4 +18,6 @@ The TestUnix target is defined as a derivative of the Generic Unix target, using
 
 ### Syscall Interface
 Software interrupt `0x80`.
-Calling convention: BSD-style (Arguments on stack, Syscall ID in EAX).
+Calling convention: 
+- **Native:** BSD-style (Arguments on stack, Syscall ID in EAX).
+- **Linux Personality:** Standard i386 Linux-style (Arguments in registers EBX, ECX, EDX, ESI, EDI, EBP).
