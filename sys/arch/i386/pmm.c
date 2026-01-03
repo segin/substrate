@@ -130,20 +130,74 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     pmm_reserve_kernel();
 }
 
+
+// Validate memory map entry type
+static int pmm_is_usable_type(uint32_t type) {
+    return (type == MULTIBOOT_MEMORY_AVAILABLE || 
+            type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE);
+}
+
+// Clamp 64-bit address to 32-bit (ignore high memory for now)
+static uint32_t pmm_clamp_addr(uint64_t addr) {
+    if (addr > 0xFFFFFFFF) return 0xFFFFFFFF;
+    return (uint32_t)addr;
+}
+
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm_init_bitmap();
+    
+    uint64_t total_usable_bytes = 0;
+    uint32_t usable_regions = 0;
 
+    if (mmap_addr == 0 || mmap_length == 0) {
+        // Fallback: assume 16MB conventional (very conservative)
+        kprint("PMM: No memory map provided, assuming 16MB.\n");
+        for (uint32_t i = 0x100000; i < (16 * 1024 * 1024); i += PMM_BLOCK_SIZE) {
+            pmm_mark_free(i);
+        }
+        pmm_reserve_kernel();
+        return;
+    }
+
+    // Phase 1: Calculate total usable RAM (first pass)
     multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
-    while((uint32_t)mmap < mmap_addr + mmap_length) {
-        if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE || mmap->type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE) {
-            for (uint64_t i = 0; i < mmap->len; i += PMM_BLOCK_SIZE) {
-                uint32_t addr = (uint32_t)(mmap->addr + i);
-                if (addr < (128 * 1024 * 1024)) {
-                    pmm_mark_free(addr);
-                }
+    while ((uint32_t)(uintptr_t)mmap < mmap_addr + mmap_length) {
+        if (pmm_is_usable_type(mmap->type)) {
+            // Clamp to 32-bit address space
+            uint32_t start = pmm_clamp_addr(mmap->addr);
+            uint32_t end = pmm_clamp_addr(mmap->addr + mmap->len);
+            
+            if (end > start && start < 0xFFFFFFFF) {
+                uint32_t region_size = end - start;
+                total_usable_bytes += region_size;
+                usable_regions++;
             }
         }
-        mmap = (multiboot_mmap_entry_t*) ((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
+        mmap = (multiboot_mmap_entry_t*)((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
+    }
+
+    // Report to console
+    char buf[64];
+    sprintf(buf, "PMM: %u usable regions, %u MB total\n", 
+            usable_regions, (uint32_t)(total_usable_bytes / (1024 * 1024)));
+    kprint(buf);
+
+    // Phase 2: Mark usable pages (second pass)
+    mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
+    while ((uint32_t)(uintptr_t)mmap < mmap_addr + mmap_length) {
+        if (pmm_is_usable_type(mmap->type)) {
+            uint32_t start = pmm_clamp_addr(mmap->addr);
+            uint32_t end = pmm_clamp_addr(mmap->addr + mmap->len);
+            
+            // Align to page boundaries
+            start = (start + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+            end = end & ~(PMM_BLOCK_SIZE - 1);
+            
+            for (uint32_t addr = start; addr < end && addr < (128 * 1024 * 1024); addr += PMM_BLOCK_SIZE) {
+                pmm_mark_free(addr);
+            }
+        }
+        mmap = (multiboot_mmap_entry_t*)((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
     }
 
     pmm_reserve_kernel();

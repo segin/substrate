@@ -10,6 +10,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] **Boot Memory Detection:**
             - [x] Parse Multiboot Memory Map (mmap).
             - [x] Parse e820 Memory Map (legacy BIOS).
+            - [x] **Hardening (Phase 1):**
+                - [x] Sanitize memory map entries (validate type, clamp to 32-bit).
+                - [x] Calculate and report total usable RAM.
+                - [x] Properly identify kernel physical bounds from linker symbols.
         - [ ] **Core Allocator Rewrite:**
             - [ ] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures.
             - [ ] **Dynamic Metadata:** Calculate and allocate `vm_page_t` array or bitmaps based on *actual* detected RAM (remove 128MB static limit).
@@ -325,7 +329,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **VGA Text Mode:**
             - [ ] Direct memory writing (0xB8000).
             - [ ] Hardware cursor control / text attribute handling.
-            - [ ] Modes: 80x25, 80x50, 132x60 support.
+            - [ ] **Mode Probing:** Detect hardware-supported configurations via BIOS/VESA.
+            - [ ] **All Supported Modes:** Enable any mode the hardware offers (80x25, 80x50, 132x60, etc.).
         - [ ] **Framebuffer Console (Graphical):**
             - [ ] Drivers: VESA, UEFI GOP, BGA, VirtIO-GPU.
             - [ ] Rendering: PSF Bitmap font support, Software Blitting, Scrolling.
