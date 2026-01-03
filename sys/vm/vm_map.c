@@ -1,17 +1,14 @@
 #include "vm_map.h"
 #include <stddef.h>
 
-// Placeholder for memory allocation of structures
-// Since kmalloc isn't implemented, we use a static pool for bootstrap map entries
-#define MAX_BOOTSTRAP_ENTRIES 64
-static vm_map_entry_t bootstrap_entries[MAX_BOOTSTRAP_ENTRIES];
-static int next_bootstrap_entry = 0;
+#include "vm_kmem.h"
 
 static vm_map_entry_t *alloc_entry(void) {
-    if (next_bootstrap_entry < MAX_BOOTSTRAP_ENTRIES) {
-        return &bootstrap_entries[next_bootstrap_entry++];
-    }
-    return NULL;
+    return kmalloc(sizeof(vm_map_entry_t));
+}
+
+static void free_entry(vm_map_entry_t *entry) {
+    kfree(entry, sizeof(vm_map_entry_t));
 }
 
 void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
@@ -22,18 +19,26 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     map->size = 0;
     
     // Setup sentinel header
-    static vm_map_entry_t sentinel;
-    sentinel.next = &sentinel;
-    sentinel.prev = &sentinel;
-    sentinel.start = sentinel.end = 0;
+    vm_map_entry_t *sentinel = alloc_entry();
+    if (sentinel) {
+        sentinel->next = sentinel;
+        sentinel->prev = sentinel;
+        sentinel->start = sentinel->end = 0;
+        sentinel->object = NULL;
+    }
     
-    map->header = &sentinel;
+    map->header = sentinel;
 }
 
 vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
-    // Requires kmalloc. For now, we can't create dynamic maps easily.
-    (void)pmap; (void)min; (void)max;
-    return NULL; 
+    vm_map_t *map = kmalloc(sizeof(vm_map_t));
+    if (!map) return NULL;
+    vm_map_init(map, pmap, min, max);
+    if (!map->header) {
+        kfree(map, sizeof(vm_map_t));
+        return NULL;
+    }
+    return map;
 }
 
 // Internal helper: find the entry containing VA, or the entry immediately preceding it.
@@ -122,7 +127,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             cur->next->prev = cur->prev;
             map->nentries--;
             map->size -= (cur->end - cur->start);
-            // TODO: kfree(cur) if dynamic
+            free_entry(cur);
         } else if (cur->start < start && cur->end > end) {
             // Split entry (not implemented yet)
             return -1;

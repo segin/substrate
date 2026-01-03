@@ -4,6 +4,7 @@
 #include "../kern/console.h"
 #include <sys/mman.h>
 #include <sys/proc.h>
+#include <sys/file.h>
 
 extern process_t *current_process;
 
@@ -37,7 +38,7 @@ static uint32_t vm_find_free_range(process_t *proc, uint32_t length, uint32_t hi
 }
 
 // Core mmap implementation
-void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t offset) {
     if (!current_process) return MAP_FAILED;
     
     // Validate parameters
@@ -74,19 +75,30 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t off
     
     // Handle file-backed mapping
     if (!(flags & MAP_ANONYMOUS)) {
-        // TODO: Validate fd, store file reference
-        area->vm_file = NULL;  // Stub for now
-        area->vm_offset = offset;
-    }
-    
-    // Insert into process's vm_areas
-    if (vm_area_insert(&current_process->vm_areas, area) != 0) {
-        vm_area_destroy(area);
-        return MAP_FAILED;
-    }
-    
-    // Map pages immediately for anonymous mappings
-    if (flags & MAP_ANONYMOUS) {
+        if (fd < 0 || fd >= MAX_FD)  {
+            vm_area_destroy(area);
+            return MAP_FAILED;
+        }
+        file_t *f = current_process->fds[fd];
+        if (!f || !f->node) {
+            vm_area_destroy(area);
+            return MAP_FAILED;
+        }
+        
+        area->vm_file = f->node; // Ideally incref
+        // offset argument is page offset (4096 byte units) to support >4GB files
+        area->vm_offset = (off_t)offset << 12;
+        
+        // Try VFS mmap (device mapping)
+        extern void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
+        if (mmap_fs(f->node, (void*)start_addr, length, prot, flags, area->vm_offset) == (void*)-1) {
+             // Fallback or error? For now, if driver doesn't support it, fail.
+             // (Unless we implement generic read() -> page cache later)
+             vm_area_destroy(area);
+             return MAP_FAILED;
+        }
+    } else {
+        // Map pages immediately for anonymous mappings
         uint32_t pte_flags = PTE_P | PTE_U;
         if (prot & PROT_WRITE) pte_flags |= PTE_W;
         

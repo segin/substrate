@@ -4,6 +4,9 @@
 #include "../include/sys/proc.h"
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
+#include "../arch/i386/pmm.h"
+#include "vm_kmem.h"
 
 // User Memory System Calls
 
@@ -11,14 +14,11 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     (void)fd; (void)offset; (void)prot; // For now, only anonymous mappings
     
     process_t *p = current_process;
-    if (!p) return (void *)-1;
+    if (!p || !p->vm_map) return (void *)-1;
 
-    // Use current_process->vm_map (need to add this to proc.h)
-    // For now, assume a placeholder or get from current_thread
-    // vm_map_t *map = p->vm_map;
-    vm_map_t *map = NULL; // STUB: need to integrate with process structure
+    vm_map_t *map = p->vm_map;
 
-    if (flags & 0x20) { // MAP_ANONYMOUS (example value)
+    if (flags & 0x20) { // MAP_ANON/MAP_ANONYMOUS (assuming 0x20)
         uintptr_t v_addr = (uintptr_t)addr;
         
         if (v_addr == 0) {
@@ -31,6 +31,16 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         if (vm_map_insert(map, obj, 0, v_addr, v_addr + length) != 0) {
             vm_object_deallocate(obj);
             return (void *)-1;
+        }
+
+        // We don't necessarily map into HW page tables yet (lazy faulting)
+        // unless we want to do it now. Let's do it now for simplicity.
+        for (uint32_t va = v_addr; va < v_addr + length; va += 0x1000) {
+            void *pa = pmm_alloc_block();
+            if (!pa) break; // Partial success or error
+            pmap_enter(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), va, (uint32_t)(uintptr_t)pa, 0, 0);
+            #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
+            memset(VIRTUAL_d(pa), 0, 0x1000);
         }
 
         return (void *)v_addr;
@@ -47,9 +57,8 @@ int sys_munmap(void *addr, size_t length) {
 
 #include <string.h>
 
-extern int pmap_enter(struct pmap *pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
-struct pmap;
-extern struct pmap *pmap_kernel(void);
+extern int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
+extern pmap_t pmap_kernel(void);
 extern void *pmm_alloc_block(void);
 
 void *sys_brk(void *addr) {
@@ -70,7 +79,6 @@ void *sys_brk(void *addr) {
     uint32_t old_page_end = (old_brk + 0xFFF) & 0xFFFFF000;
     uint32_t new_page_end = (new_brk + 0xFFF) & 0xFFFFF000;
 
-    struct pmap *pmap = pmap_kernel();
 
     if (new_page_end > old_page_end) {
         // Allocate and map new pages
@@ -78,11 +86,13 @@ void *sys_brk(void *addr) {
             void *pa = pmm_alloc_block();
             if (!pa) return (void *)old_brk; // Out of memory
             
-            // Map page (pmap_enter handles permissions internally for now)
-            if (pmap_enter(pmap, va, (uint32_t)pa, 0, 0) < 0) {
+            // Map page
+            if (pmap_enter(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(), va, (uint32_t)(uintptr_t)pa, 0, 0) < 0) {
                 return (void *)old_brk;
             }
-            memset((void *)va, 0, 0x1000);
+            // Zero via kernel mapping
+            #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
+            memset(VIRTUAL_d(pa), 0, 0x1000);
         }
     }
     // If shrinking, we leak pages for now (lazy unmap). 
