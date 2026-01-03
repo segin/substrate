@@ -14,14 +14,14 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Sanitize memory map entries (validate type, clamp to 32-bit).
                 - [x] Calculate and report total usable RAM.
                 - [x] Properly identify kernel physical bounds from linker symbols.
-        - [ ] **Core Allocator Rewrite:**
+        - [x] **Core Allocator Rewrite:**
             - [x] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures.
             - [x] **Dynamic Metadata:** Calculate and allocate `vm_page_t` array or bitmaps based on *actual* detected RAM (remove 128MB static limit).
             - [x] **Low Memory (4MiB) Support:** efficient handling of constrained environments.
             - [ ] **Algorithms:**
                 - [x] **Single Page:** O(1) Free List allocation (replace bitmap scan).
                 - [x] **Contiguous:** Implement Buddy Allocator or Bitmap Tree for efficient `pmm_alloc_contiguous`.
-        - [ ] **Safety & Integration:**
+        - [x] **Safety & Integration:**
             - [x] **Locking:** Fine-grained spinlocks for SMP access.
             - [x] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues.
     - [ ] **Memory Management (BSD/Mach Design):**
