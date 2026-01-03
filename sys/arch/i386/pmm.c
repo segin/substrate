@@ -2,6 +2,7 @@
 #include "multiboot.h"
 #include "e820.h"
 #include "intr.h"
+#include "../../vm/vm_page.h"
 #include <string.h>
 #include <stdio.h>
 #include <sys/lock.h>
@@ -19,6 +20,10 @@ static uint8_t* pmm_bitmap;
 static size_t pmm_bitmap_size;
 static size_t pmm_total_blocks;
 static size_t pmm_used_blocks;
+
+// VM Page Array
+vm_page_t *pmm_page_array = NULL;
+size_t pmm_total_pages = 0;
 
 // Static bitmap for 128MB (32768 blocks -> 4096 bytes)
 static uint8_t pmm_bitmap_static[4096];
@@ -247,6 +252,11 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // Attempt dynamic allocation
     pmm_bitmap = (uint8_t*)pmm_watermark_alloc(bitmap_bytes);
     
+    // Also allocate vm_page_t array
+    size_t array_bytes = pmm_total_blocks * sizeof(vm_page_t);
+    pmm_page_array = (vm_page_t*)pmm_watermark_alloc(array_bytes);
+    pmm_total_pages = pmm_total_blocks;
+    
     if (pmm_bitmap) {
         pmm_bitmap_size = bitmap_bytes;
         kprint("PMM: Dynamic bitmap allocated. ");
@@ -256,6 +266,15 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
         pmm_bitmap_size = sizeof(pmm_bitmap_static);
         pmm_total_blocks = pmm_bitmap_size * 8; // Cap at 128MB
         kprint("PMM: Using static bitmap (128MB limit). ");
+    }
+
+    if (pmm_page_array) {
+        memset(pmm_page_array, 0, pmm_total_blocks * sizeof(vm_page_t));
+        for (size_t i = 0; i < pmm_total_blocks; i++) {
+            pmm_page_array[i].phys_addr = i * PMM_BLOCK_SIZE;
+            pmm_page_array[i].flags = PG_FREE;
+        }
+        kprint("Page array allocated.\n");
     }
 
     // Mark everything as used initially
@@ -303,6 +322,14 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // Watermark allocated pages were never marked free, so they remain used. Correct.)
 
     pmm_reserve_kernel();
+}
+
+vm_page_t *pmm_get_page(uintptr_t pa) {
+    size_t idx = pa / PMM_BLOCK_SIZE;
+    if (idx < pmm_total_pages) {
+        return &pmm_page_array[idx];
+    }
+    return NULL;
 }
 
 // ==================== O(1) Free List Allocator ====================

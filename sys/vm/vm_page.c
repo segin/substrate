@@ -53,19 +53,11 @@ vm_page_t *vm_page_alloc(struct vm_object *object, uint64_t pindex, int req) {
         void *phys = pmm_alloc_block();
         if (!phys) return NULL; // OOM
 
-        // We need a kernel heap to allocate the vm_page_t structure itself!
-        // But we haven't implemented kmalloc yet. 
-        // Chicken and egg problem.
+        // Use the globally allocated page array in PMM
+        page = pmm_get_page((uintptr_t)phys);
+        if (!page) return NULL;
         
-        // For this stage, we will cheat and assume we can just cast the physical 
-        // address to a vm_page_t wrapper if we had a 1:1 array of struct pages 
-        // (like Linux mem_map).
-        
-        // Since we don't have that array yet, we'll return NULL for now 
-        // until 'kmalloc' is implemented, effectively disabling dynamic growth.
-        // OR we can use a static pool for bootstrap.
-        
-        return NULL; 
+        page->flags &= ~PG_FREE;
     }
 
     // Initialize page

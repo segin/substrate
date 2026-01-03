@@ -28,4 +28,10 @@ void pmm_watermark_init(uint32_t phys_limit);
 void* pmm_watermark_alloc(size_t bytes);
 uint32_t pmm_watermark_used(void);
 
+// VM Page Integration
+struct vm_page;
+extern struct vm_page *pmm_page_array;
+extern size_t pmm_total_pages;
+struct vm_page *pmm_get_page(uintptr_t pa);
+
 #endif
