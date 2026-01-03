@@ -112,16 +112,30 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
 }
 
 uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
-    if (node->read != 0)
-        return node->read(node, offset, size, buffer);
-    else
+    if (node->read != 0) {
+        uint32_t result = node->read(node, offset, size, buffer);
+        
+        // Update access time
+        extern int64_t get_time(void);
+        node->atime = get_time();
+        
+        return result;
+    } else
         return 0;
 }
 
 uint32_t write_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
-    if (node->write != 0)
-        return node->write(node, offset, size, buffer);
-    else
+    if (node->write != 0) {
+        uint32_t result = node->write(node, offset, size, buffer);
+        
+        // Update modification and change times
+        extern int64_t get_time(void);
+        int64_t now = get_time();
+        node->mtime = now;
+        node->ctime = now;
+        
+        return result;
+    } else
         return 0;
 }
 

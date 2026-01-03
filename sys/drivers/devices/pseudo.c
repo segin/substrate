@@ -1,6 +1,7 @@
 #include "../../vfs/vfs.h"
 #include "../input/keyboard.h"
 #include "../../kern/console.h"
+#include <sys/proc.h>
 #include <string.h>
 
 // /dev/null
@@ -39,9 +40,16 @@ static uint32_t random_read(fs_node_t *node, uint32_t offset, uint32_t size, uin
     return size;
 }
 
-// /dev/tty
+// /dev/tty - proxy to current process's controlling terminal
 static uint32_t tty_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
+    
+    // Get current process's TTY
+    if (current_process && current_process->tty && current_process->tty->read) {
+        return current_process->tty->read(current_process->tty, offset, size, buffer);
+    }
+    
+    // Fallback to keyboard if no TTY assigned
     uint32_t count = 0;
     while (count < size) {
         char c = keyboard_getc();
@@ -53,6 +61,13 @@ static uint32_t tty_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_
 
 static uint32_t tty_write(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset;
+    
+    // Get current process's TTY
+    if (current_process && current_process->tty && current_process->tty->write) {
+        return current_process->tty->write(current_process->tty, offset, size, buffer);
+    }
+    
+    // Fallback to console
     console_write((const char *)buffer, size);
     return size;
 }
