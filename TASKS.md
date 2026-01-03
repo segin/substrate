@@ -29,7 +29,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page.
                 - [x] **Fields:** `phys_addr`, `flags`, `wire_count`, `ref_count`, `order` (buddy), `object`, `pindex`
                 - [x] **State Flags:** `PG_BUSY`, `PG_VALID`, `PG_DIRTY`, `PG_ACTIVE`, `PG_INACTIVE`, `PG_FREE`, `PG_ZERO`, `PG_SWAPPED`
-                - [ ] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator)
+                - [x] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator)
                 - [ ] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup
                 - [ ] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page
                 - [ ] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
