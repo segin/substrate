@@ -3,6 +3,7 @@
 #include "../../arch/i386/io.h"
 #include "../../drivers/video/vga.h"
 #include <sys/input.h>
+#include "../../kern/console.h"
 
 #define KBD_BUFFER_SIZE 256
 static char kbd_buffer[KBD_BUFFER_SIZE];
