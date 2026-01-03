@@ -37,7 +37,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] **Queue Types:**
                     - [x] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head)
                     - [x] **Active Queue:** Recently accessed pages (LRU head)
-                    - [ ] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed)
+                    - [x] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed)
                     - [ ] **Wired Queue:** Pages that cannot be paged out (kernel, DMA buffers)
                     - [ ] **Laundry Queue:** Dirty pages waiting to be written to backing store
                 - [ ] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()`
