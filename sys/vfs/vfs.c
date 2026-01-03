@@ -267,3 +267,10 @@ int symlink_fs(fs_node_t *parent, const char *target, const char *name) {
     return -1;
 }
 
+void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
+    if (node && node->mmap) {
+        return node->mmap(node, addr, length, prot, flags, offset);
+    }
+    return (void *)-1;
+}
+

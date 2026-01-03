@@ -180,6 +180,8 @@ void kmain(unsigned long magic, unsigned long addr) {
     #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
 
     // 2. Process Multiboot Info EARLY to get cmdline
+    // Note: boot.S already converted 'addr' (mboot_info) to Higher Half Virtual Address.
+    // However, pointers *inside* the struct (like cmdline, mmap_addr) are still PHYSICAL.
     multiboot_info_t *mboot_info = (multiboot_info_t *)addr;
     static multiboot_info_t fake_mbi;
     char *cmdline = NULL;
@@ -205,6 +207,11 @@ void kmain(unsigned long magic, unsigned long addr) {
         cmdline_init("");
     }
     kprint("\n");
+
+    // Initialize Framebuffer Console (if available)
+    if (mboot_info) {
+        fb_init(mboot_info);
+    }
 
     // Check for serial debug
     if (cmdline_has("serial_debug")) {
@@ -263,6 +270,17 @@ void kmain(unsigned long magic, unsigned long addr) {
         pmm_init(0, 0); 
         kprint("PMM Initialized (no mmap).\n");
     }
+
+    // Initialize VM subsystem
+    extern void vm_page_init(void);
+    extern void vm_object_init(void);
+    extern void vm_zone_init(void);
+    extern void kmem_init(void);
+    vm_page_init();
+    vm_object_init();
+    vm_zone_init();
+    kmem_init();  // Initialize kernel memory allocator
+    kprint("VM subsystem initialized.\n");
 
     // Update mboot_info to point to our copies
     if (mboot_info) {
@@ -420,21 +438,28 @@ void kmain(unsigned long magic, unsigned long addr) {
     pmm_reclaim_setup();
     
     // Reclaim original multiboot info (1 page)
+    // We want to reclaim the ORIGINAL mods_addr from the bootloader.
+    // We must read it from the MBI *before* we reclaim the MBI memory!
+    
+    // Note: mboot_orig_addr is already Virtual (passed from boot.S)
+    multiboot_info_t *orig_mbi = (multiboot_info_t*)mboot_orig_addr;
+    uint32_t mods_addr = 0;
+    int has_mods = 0;
+    
     if (mboot_orig_addr) {
+        if (orig_mbi->flags & (1<<3)) {
+            has_mods = 1;
+            mods_addr = orig_mbi->mods_addr;
+        }
+        
         kprint("Freeing Multiboot info: 4K\n");
         extern void pmm_reclaim_range(uint32_t start, uint32_t end);
         pmm_reclaim_range(mboot_orig_addr, mboot_orig_addr + 4096);
     }
     
-    // Note: mboot_copy contains the physical mods_addr of our COPY.
-    // We want to reclaim the ORIGINAL mods_addr from the bootloader.
-    // We didn't save it explicitly, but we can get it from the bootloader's MBI
-    // if we hadn't reclaimed the MBI page yet. 
-    // Wait, mboot_orig_addr is physical. VIRTUAL_d(mboot_orig_addr) is the original MBI.
-    multiboot_info_t *orig_mbi = (multiboot_info_t*)VIRTUAL_d(mboot_orig_addr);
-    if (mboot_orig_addr && (orig_mbi->flags & (1<<3))) {
+    if (has_mods) {
         kprint("Freeing Multiboot modules list: 4K\n");
-        pmm_reclaim_range(orig_mbi->mods_addr, orig_mbi->mods_addr + 4096);
+        pmm_reclaim_range(mods_addr, mods_addr + 4096);
     }
 
     kprint("Entering main loop...\n");

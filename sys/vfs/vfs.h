@@ -25,6 +25,7 @@ typedef void (*close_type_t)(struct fs_node*);
 typedef struct dirent * (*readdir_type_t)(struct fs_node*, uint32_t);
 typedef struct fs_node * (*finddir_type_t)(struct fs_node*, char *name);
 typedef int (*ioctl_type_t)(struct fs_node*, uint32_t, void*);
+typedef void * (*mmap_type_t)(struct fs_node*, void *addr, size_t length, int prot, int flags, off_t offset);
 
 // Symlink Operations
 typedef int (*readlink_type_t)(struct fs_node*, char *buf, size_t size);
@@ -52,6 +53,7 @@ typedef struct fs_node {
     readdir_type_t readdir;
     finddir_type_t finddir;
     ioctl_type_t ioctl;
+    mmap_type_t mmap;
     readlink_type_t readlink;
     symlink_type_t symlink;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
@@ -86,6 +88,7 @@ void close_fs(fs_node_t *node);
 struct dirent *readdir_fs(fs_node_t *node, uint32_t index);
 fs_node_t *finddir_fs(fs_node_t *node, char *name);
 int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
+void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
 int readlink_fs(fs_node_t *node, char *buf, size_t size);
 int symlink_fs(fs_node_t *parent, const char *target, const char *name);
 
