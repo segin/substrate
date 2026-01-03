@@ -67,4 +67,10 @@ void vm_page_unwire(vm_page_t *m);
 // LRU scanning
 int vm_pageout_scan(int max_scan);
 
+// Page Daemon
+void vm_pageout(void);
+void vm_page_launder(vm_page_t *m);
+int vm_page_try_to_free(vm_page_t *m);
+void vm_page_wakeup_daemon(void);
+
 #endif

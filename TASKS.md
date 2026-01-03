@@ -47,12 +47,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] `pmap_clear_reference()`: Clear PTE A bit after checking
                     - [x] Move unreferenced pages to inactive queue tail
                     - [x] Second-chance algorithm: Pages touched again stay active
-                - [ ] **Page Daemon:** Background thread (`pagedaemon`) to free pages when `free_count < free_target`
-                    - [ ] `vm_pageout()`: Main daemon loop (sleeps on `vm_pages_needed` wakeup)
-                    - [ ] `vm_page_launder()`: Write dirty pages to backing store
-                    - [ ] `vm_page_try_to_free()`: Attempt to free clean inactive pages
-                    - [ ] Priority-based scanning: Inactive→Laundry→Active
-                    - [ ] OOM killer hook: Kill process if cannot free memory
+                - [x] **Page Daemon:** Background thread (`pagedaemon`) to free pages when `free_count < free_target`
+                    - [x] `vm_pageout()`: Main daemon loop (sleeps on `vm_pages_needed` wakeup)
+                    - [x] `vm_page_launder()`: Write dirty pages to backing store
+                    - [x] `vm_page_try_to_free()`: Attempt to free clean inactive pages
+                    - [x] Priority-based scanning: Inactive→Laundry→Active
+                    - [x] OOM killer hook: Kill process if cannot free memory
                 - [ ] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management
                     - [ ] `vm_page_free_min`: Absolute minimum free pages (panic below)
                     - [ ] `vm_page_free_target`: Target free pages (daemon sleeps above)

@@ -215,3 +215,136 @@ int vm_pageout_scan(int max_scan) {
     
     return deactivated;
 }
+
+// ==================== Page Daemon ====================
+// Background daemon that frees pages when memory is low
+
+// Thresholds (pages)
+static int vm_page_free_min = 16;      // Panic below this
+static int vm_page_free_target = 64;   // Daemon sleeps above this
+static int __attribute__((unused)) vm_page_free_reserved = 8;  // Reserved for kernel emergencies
+
+// Statistics (some not yet used - will be exposed via /proc/vmstat)
+static int vm_stat_free_count = 0;
+static int __attribute__((unused)) vm_stat_active_count = 0;
+static int vm_stat_inactive_count = 0;
+static int __attribute__((unused)) vm_stat_wire_count = 0;
+static int vm_stat_pageouts = 0;
+static int __attribute__((unused)) vm_stat_pageins = 0;
+static int __attribute__((unused)) vm_stat_faults = 0;
+
+// Wakeup flag for daemon
+static volatile int vm_pages_needed = 0;
+
+// Try to free a clean inactive page
+// Returns 1 if page was freed, 0 otherwise
+int vm_page_try_to_free(vm_page_t *m) {
+    if (!m) return 0;
+    
+    // Cannot free dirty pages directly
+    if (m->flags & PG_DIRTY) return 0;
+    
+    // Cannot free busy pages
+    if (m->flags & PG_BUSY) return 0;
+    
+    // Cannot free wired pages
+    if (m->wire_count > 0) return 0;
+    
+    // Free the page back to PMM
+    vm_page_free(m);
+    vm_stat_free_count++;
+    return 1;
+}
+
+// Move dirty page to laundry queue for writeback
+void vm_page_launder(vm_page_t *m) {
+    if (!m || !(m->flags & PG_DIRTY)) return;
+    
+    // Remove from inactive queue
+    if (m->flags & PG_INACTIVE) {
+        dequeue(&inactive_queue, m);
+        m->flags &= ~PG_INACTIVE;
+        vm_stat_inactive_count--;
+    }
+    
+    // Add to laundry queue
+    enqueue(&laundry_queue, m);
+    // Note: Actual writeout would happen here via vm_object's backing store
+    // For now, just mark as clean after "writing"
+    m->flags &= ~PG_DIRTY;
+    vm_stat_pageouts++;
+    
+    // Move back to inactive after "cleaning"
+    dequeue(&laundry_queue, m);
+    enqueue(&inactive_queue, m);
+    m->flags |= PG_INACTIVE;
+    vm_stat_inactive_count++;
+}
+
+// Main pageout daemon loop
+// Called periodically or when vm_pages_needed is set
+void vm_pageout(void) {
+    extern void kprint(const char *);
+    
+    // Check if we need to free pages
+    if (vm_stat_free_count >= vm_page_free_target && !vm_pages_needed) {
+        return;  // Plenty of free memory
+    }
+    
+    int freed = 0;
+    int target = vm_page_free_target - vm_stat_free_count;
+    if (target < 0) target = 0;
+    
+    // Phase 1: Scan active queue, move cold pages to inactive
+    vm_pageout_scan(target * 2);
+    
+    // Phase 2: Try to free clean inactive pages
+    vm_page_t *m = inactive_queue;
+    while (m && freed < target) {
+        vm_page_t *next = m->next;
+        
+        if (!(m->flags & PG_DIRTY) && !(m->flags & PG_BUSY) && m->wire_count == 0) {
+            dequeue(&inactive_queue, m);
+            m->flags &= ~PG_INACTIVE;
+            vm_stat_inactive_count--;
+            
+            if (vm_page_try_to_free(m)) {
+                freed++;
+            }
+        }
+        
+        m = next;
+    }
+    
+    // Phase 3: Launder dirty pages if still short
+    if (freed < target) {
+        m = inactive_queue;
+        while (m && freed < target) {
+            vm_page_t *next = m->next;
+            
+            if ((m->flags & PG_DIRTY) && !(m->flags & PG_BUSY)) {
+                vm_page_launder(m);
+                // Try to free now that it's clean
+                if (vm_page_try_to_free(m)) {
+                    freed++;
+                }
+            }
+            
+            m = next;
+        }
+    }
+    
+    // Clear request
+    vm_pages_needed = 0;
+    
+    // Panic if critically low
+    if (vm_stat_free_count < vm_page_free_min) {
+        kprint("PANIC: Out of memory!\n");
+        // OOM killer would go here
+    }
+}
+
+// Signal that pages are needed
+void vm_page_wakeup_daemon(void) {
+    vm_pages_needed = 1;
+}
