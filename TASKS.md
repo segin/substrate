@@ -17,7 +17,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Core Allocator Rewrite:**
             - [x] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures.
             - [x] **Dynamic Metadata:** Calculate and allocate `vm_page_t` array or bitmaps based on *actual* detected RAM (remove 128MB static limit).
-            - [ ] **Low Memory (4MiB) Support:** efficient handling of constrained environments.
+            - [x] **Low Memory (4MiB) Support:** efficient handling of constrained environments.
             - [ ] **Algorithms:**
                 - [x] **Single Page:** O(1) Free List allocation (replace bitmap scan).
                 - [ ] **Contiguous:** Implement Buddy Allocator or Bitmap Tree for efficient `pmm_alloc_contiguous`.

@@ -24,7 +24,7 @@ void pmm_dump_map(void);
 void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length);
 
 // Watermark Allocator (Early Boot)
-void pmm_watermark_init(void);
+void pmm_watermark_init(uint32_t phys_limit);
 void* pmm_watermark_alloc(size_t bytes);
 uint32_t pmm_watermark_used(void);
 

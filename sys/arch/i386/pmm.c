@@ -30,7 +30,7 @@ static uint32_t watermark_ptr;      // Current allocation pointer (physical)
 static uint32_t watermark_end;      // End of available early-boot memory
 
 // Initialize watermark allocator (called very early, before pmm_init)
-void pmm_watermark_init(void) {
+void pmm_watermark_init(uint32_t phys_limit) {
     extern uint32_t _kernel_end;
     uint32_t v_end = (uint32_t)(uintptr_t)&_kernel_end;
     uint32_t p_end = v_end - 0xC0000000;  // Convert to physical
@@ -38,8 +38,12 @@ void pmm_watermark_init(void) {
     // Align to page boundary
     watermark_base = (p_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
     watermark_ptr = watermark_base;
-    // Conservative limit: 1MB for early-boot structures
+    
+    // Default 1MB for early-boot structures, but clamped to physical RAM limit
     watermark_end = watermark_base + (1024 * 1024);
+    if (watermark_end > phys_limit) {
+        watermark_end = phys_limit;
+    }
 }
 
 // Allocate from watermark (O(1) bump allocation, never freed)
@@ -180,7 +184,6 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     pmm_reserve_kernel();
 }
 
-
 // Validate memory map entry type
 static int pmm_is_usable_type(uint32_t type) {
     return (type == MULTIBOOT_MEMORY_AVAILABLE || 
@@ -194,10 +197,8 @@ static uint32_t pmm_clamp_addr(uint64_t addr) {
 }
 
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
-    // 1. Initialize bootstrap watermark allocator
-    pmm_watermark_init();
-
-    // 2. Find maximum physical memory address
+    // 1. Find maximum physical memory address FIRST
+    // (We need this to init watermark allocator safely)
     uint64_t max_phys_addr = 0x1000000; // Assume at least 16MB
     uint64_t total_usable_bytes = 0;
     uint32_t usable_regions = 0;
@@ -221,7 +222,8 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
         }
     }
 
-    // 3. Calculate and allocate bitmap
+    // 2. Initialize bootstrap watermark allocator with limit
+    pmm_watermark_init(pmm_clamp_addr(max_phys_addr));
     // max_phys_addr / 4096 = total blocks
     // total blocks / 8 = bytes needed
     max_phys_addr = pmm_clamp_addr(max_phys_addr);
@@ -361,7 +363,7 @@ void pmm_free_block(void* p) {
 void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
     kprint("BIOS-e820 physical RAM map:\n");
     multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
-    while((uint32_t)mmap < mmap_addr + mmap_length) {
+    while((uint32_t)(uintptr_t)mmap < mmap_addr + mmap_length) {
         char buf[128];
         const char* type_str = "unknown";
         if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) type_str = "usable";
