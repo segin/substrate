@@ -41,6 +41,8 @@
 #define SYS_DUP2    63
 #define SYS_TIMES   43
 #define SYS_GETTIMEOFDAY 78
+#define SYS_MMAP    90
+#define SYS_MUNMAP  91
 #define SYS_STAT    106
 #define SYS_NANOSLEEP 162
 #define SYS_CLOCK_GETTIME 265

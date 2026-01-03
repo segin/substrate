@@ -12,6 +12,7 @@
 #include <time.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 
 extern int64_t _syscall0(int);
 extern int64_t _syscall1(int, int);
@@ -19,6 +20,7 @@ extern int64_t _syscall2(int, int, int);
 extern int64_t _syscall3(int, int, int, int);
 extern int64_t _syscall4(int, int, int, int, int);
 extern int64_t _syscall5(int, int, int, int, int, int);
+extern int64_t _syscall6(int, int, int, int, int, int, int);
 
 int errno = 0;
 char **environ = NULL;
@@ -142,4 +144,24 @@ off_t lseek(int fd, off_t offset, int whence) {
     uint32_t off_lo = (uint32_t)(offset & 0xFFFFFFFF);
     uint32_t off_hi = (uint32_t)((offset >> 32) & 0xFFFFFFFF);
     return (off_t)_syscall4(SYS_LSEEK, fd, off_lo, off_hi, whence);
+}
+
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+    // We pass offset in 4096-byte units (page offset) to the kernel
+    // to allow mapping > 4GB files with 32-bit registers.
+    // Check if offset is page aligned
+    if (offset & 0xFFF) {
+        errno = EINVAL;
+        return (void *)-1;
+    }
+    uint32_t pgoff = (uint32_t)(offset >> 12);
+    // Note: We are truncating top bits of 64-bit offset >> 12.
+    // This supports files up to 16TB (2^32 * 4096).
+    // If original offset is huge, pgoff might wrap, but 16TB is enough for now.
+    
+    return (void *)(uintptr_t)_syscall6(SYS_MMAP, (int)addr, (int)length, prot, flags, fd, (int)pgoff);
+}
+
+int munmap(void *addr, size_t length) {
+    return (int)_syscall2(SYS_MUNMAP, (int)addr, (int)length);
 }

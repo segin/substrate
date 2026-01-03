@@ -4,6 +4,7 @@
 .global _syscall3
 .global _syscall4
 .global _syscall5
+.global _syscall6
 
 # int _syscall0(int num)
 _syscall0:

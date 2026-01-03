@@ -15,4 +15,35 @@ typedef uint32_t dev_t;
 typedef int64_t time_t;
 typedef long fpos_t;
 
+// Additional POSIX types
+typedef uint32_t clock_t;
+typedef int32_t  clockid_t;
+typedef int32_t  timer_t;
+typedef int64_t  useconds_t;
+typedef int64_t  suseconds_t;
+typedef uint32_t id_t;
+typedef int32_t  key_t;
+
+typedef uint64_t fsblkcnt_t;
+typedef uint64_t fsfilcnt_t;
+
+// Pthread types (Opaque integers or pointers for now)
+typedef int32_t  pthread_t;
+typedef int32_t  pthread_attr_t;
+typedef int32_t  pthread_mutex_t;
+typedef int32_t  pthread_mutexattr_t;
+typedef int32_t  pthread_cond_t;
+typedef int32_t  pthread_condattr_t;
+typedef int32_t  pthread_key_t;
+typedef int32_t  pthread_once_t;
+typedef int32_t  pthread_rwlock_t;
+typedef int32_t  pthread_rwlockattr_t;
+typedef int32_t  pthread_spinlock_t;
+typedef int32_t  pthread_barrier_t;
+typedef int32_t  pthread_barrierattr_t;
+
+// BSD/Legacy
+typedef uint32_t vm_offset_t;
+typedef uint32_t vm_size_t;
+
 #endif
