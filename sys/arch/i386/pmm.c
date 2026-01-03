@@ -1,8 +1,10 @@
 #include "pmm.h"
 #include "multiboot.h"
 #include "e820.h"
+#include "intr.h"
 #include <string.h>
 #include <stdio.h>
+#include <sys/lock.h>
 #include "../../kern/console.h"
 
 // ==================== PMM Data Structures ====================
@@ -20,6 +22,9 @@ static size_t pmm_used_blocks;
 
 // Static bitmap for 128MB (32768 blocks -> 4096 bytes)
 static uint8_t pmm_bitmap_static[4096];
+
+// SMP Lock
+static spinlock_t pmm_lock;
 
 // ==================== Watermark (Bump) Allocator ====================
 // Used during early boot before free list is ready
@@ -197,6 +202,9 @@ static uint32_t pmm_clamp_addr(uint64_t addr) {
 }
 
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
+    // 0. Initialize Lock
+    spinlock_init(&pmm_lock, "pmm");
+
     // 1. Find maximum physical memory address FIRST
     // (We need this to init watermark allocator safely)
     uint64_t max_phys_addr = 0x1000000; // Assume at least 16MB
@@ -324,6 +332,9 @@ static uint32_t pmm_free_list_pop(void) {
 }
 
 void* pmm_alloc_block(void) {
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&pmm_lock);
+
     // Try free list first (O(1))
     uint32_t addr = pmm_free_list_pop();
     if (addr != 0) {
@@ -335,8 +346,14 @@ void* pmm_alloc_block(void) {
             pmm_bitmap[idx] |= (1 << bit);
             pmm_used_blocks++;
         }
+        
+        spinlock_release(&pmm_lock);
+        intr_restore(flags);
         return (void*)(uintptr_t)addr;
     }
+    
+    spinlock_release(&pmm_lock);
+    intr_restore(flags);
     return NULL;  // Out of memory
 }
 
@@ -344,6 +361,9 @@ void pmm_free_block(void* p) {
     uint32_t addr = (uint32_t)(uintptr_t)p;
     if (addr == 0) return;  // NULL check
     
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&pmm_lock);
+
     uint32_t block = addr / PMM_BLOCK_SIZE;
     uint32_t idx = block / 8;
     uint32_t bit = block % 8;
@@ -358,6 +378,9 @@ void pmm_free_block(void* p) {
     
     // Add to free list
     pmm_free_list_push(addr);
+
+    spinlock_release(&pmm_lock);
+    intr_restore(flags);
 }
 
 void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
@@ -387,7 +410,14 @@ void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
 }
 
 void* pmm_alloc_contiguous(size_t count) {
-    if (pmm_used_blocks + count > pmm_total_blocks) return NULL;
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&pmm_lock);
+
+    if (pmm_used_blocks + count > pmm_total_blocks) {
+        spinlock_release(&pmm_lock);
+        intr_restore(flags);
+        return NULL;
+    }
 
     // Brute force search for 'count' consecutive free blocks
     // Note: This is slow and inefficient for a large bitmap, but sufficient for a basic PMM.
@@ -416,17 +446,27 @@ void* pmm_alloc_contiguous(size_t count) {
                 pmm_bitmap[idx] |= (1 << bit);
             }
             pmm_used_blocks += count;
+            
+            spinlock_release(&pmm_lock);
+            intr_restore(flags);
             return (void*)(i * PMM_BLOCK_SIZE);
         }
         
         // Optimization: skip the used block we hit
         i += free_run;
     }
+
+    spinlock_release(&pmm_lock);
+    intr_restore(flags);
     return NULL;
 }
 
 void pmm_free_contiguous(void* p, size_t count) {
     uint32_t start_block = (uint32_t)(uintptr_t)p / PMM_BLOCK_SIZE;
+
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&pmm_lock);
+
     for (size_t i = 0; i < count; i++) {
         uint32_t block = start_block + i;
         uint32_t idx = block / 8;
@@ -439,4 +479,7 @@ void pmm_free_contiguous(void* p, size_t count) {
             }
         }
     }
+
+    spinlock_release(&pmm_lock);
+    intr_restore(flags);
 }

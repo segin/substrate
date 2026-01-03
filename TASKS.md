@@ -22,7 +22,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **Single Page:** O(1) Free List allocation (replace bitmap scan).
                 - [ ] **Contiguous:** Implement Buddy Allocator or Bitmap Tree for efficient `pmm_alloc_contiguous`.
         - [ ] **Safety & Integration:**
-            - [ ] **Locking:** Fine-grained spinlocks for SMP access.
+            - [x] **Locking:** Fine-grained spinlocks for SMP access.
             - [ ] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues.
     - [ ] **Memory Management (BSD/Mach Design):**
         - [ ] **Physical Memory (Machine Independent):**
