@@ -1,50 +1,51 @@
-#include <stdint.h>
-#include <sys/types.h>
 #include "time.h"
+#include "../arch/i386/io.h"
+#include <stdint.h>
 
-// Boot time (seconds since epoch) - set by RTC driver
-int64_t boot_time = 0;
+volatile int64_t ticks = 0;
+int64_t boot_time = 0;  // Unix timestamp when system booted
 
-// Uptime tracking
-static uint64_t ticks = 0;      // Total ticks since boot
-static const uint32_t HZ = 100; // Timer frequency (100Hz)
+#define HZ 100  // Timer frequency (ticks per second)
 
-// Software 64-bit division by 32-bit constant
-// Avoids linking against __divdi3 from libgcc
-static inline int64_t div64_32(int64_t dividend, uint32_t divisor) {
-    int64_t quotient = 0;
-    int64_t remainder = 0;
+// Software 64-bit division to avoid libgcc dependency
+static uint64_t div64_32(uint64_t dividend, uint32_t divisor) {
+    if (divisor == 0) return 0;
     
-    // Handle negative dividends
-    int negative = 0;
-    if (dividend < 0) {
-        negative = 1;
-        dividend = -dividend;
-    }
+    uint64_t quotient = 0;
+    uint64_t remainder = 0;
     
-    // Long division algorithm
     for (int i = 63; i >= 0; i--) {
-        remainder <<= 1;
-        remainder |= (dividend >> i) & 1;
-        
-        if ((uint64_t)remainder >= divisor) {
+        remainder = (remainder << 1) | ((dividend >> i) & 1);
+        if (remainder >= divisor) {
             remainder -= divisor;
-            quotient |= (1LL << i);
+            quotient |= (1ULL << i);
         }
     }
     
-    return negative ? -quotient : quotient;
+    return quotient;
 }
 
-int64_t get_uptime(void) {
-    return div64_32((int64_t)ticks, HZ);
+// Software 64-bit modulo
+static uint64_t mod64_32(uint64_t dividend, uint32_t divisor) {
+    if (divisor == 0) return 0;
+    
+    uint64_t quotient = div64_32(dividend, divisor);
+    return dividend - (quotient * divisor);
 }
 
 int64_t get_time(void) {
-    return boot_time + get_uptime();
+    return boot_time + div64_32(ticks, HZ);
 }
 
-// Syscall stub
+int64_t get_uptime(void) {
+    return div64_32(ticks, HZ);
+}
+
+void set_boot_time(int64_t time) {
+    boot_time = time;
+}
+
+// time syscall
 int64_t sys_time(int64_t *tloc) {
     int64_t t = get_time();
     if (tloc) *tloc = t;
@@ -63,13 +64,12 @@ struct timezone {
 };
 
 int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
-    if (tv) {
     if (!tv) return -1;
     
     int64_t total_seconds = boot_time + div64_32(ticks, HZ);
     
     tv->tv_sec = total_seconds;
-    tv->tv_usec = (int32_t)(div64_32(ticks % HZ * 1000000, HZ));
+    tv->tv_usec = (int32_t)(div64_32(mod64_32(ticks, HZ) * 1000000, HZ));
     
     if (tz) {
         tz->tz_minuteswest = 0;
@@ -85,17 +85,20 @@ struct timespec {
     int32_t tv_nsec;
 };
 
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
+
 int sys_clock_gettime(int clk_id, struct timespec *tp) {
     if (!tp) return -1;
     
     if (clk_id == CLOCK_REALTIME) {
         int64_t total_seconds = boot_time + div64_32(ticks, HZ);
         tp->tv_sec = total_seconds;
-        tp->tv_nsec = (int32_t)(div64_32((ticks % HZ) * 1000000000, HZ));
+        tp->tv_nsec = (int32_t)(div64_32(mod64_32(ticks, HZ) * 1000000000, HZ));
     } else if (clk_id == CLOCK_MONOTONIC) {
         int64_t uptime = div64_32(ticks, HZ);
         tp->tv_sec = uptime;
-        tp->tv_nsec = (int32_t)(div64_32((ticks % HZ) * 1000000000, HZ));
+        tp->tv_nsec = (int32_t)(div64_32(mod64_32(ticks, HZ) * 1000000000, HZ));
     } else {
         return -1;
     }
@@ -103,27 +106,26 @@ int sys_clock_gettime(int clk_id, struct timespec *tp) {
     return 0;
 }
 
-// times syscall (process time tracking)
+// times syscall  
 struct tms {
-    int32_t tms_utime;   // user time
-    int32_t tms_stime;   // system time
-    int32_t tms_cutime;  // user time of children
-    int32_t tms_cstime;  // system time of children
+    int32_t tms_utime;
+    int32_t tms_stime;
+    int32_t tms_cutime;
+    int32_t tms_cstime;
 };
 
 int32_t sys_times(struct tms *buf) {
-    if (buf) {
-        // For now, return zeroes - proper accounting needs scheduler integration
-        buf->tms_utime = 0;
-        buf->tms_stime = 0;
-        buf->tms_cutime = 0;
-        buf->tms_cstime = 0;
-    }
-    // Return current uptime in clock ticks
+    if (!buf) return -1;
+    
+    // TODO: Track actual process/thread times
+    buf->tms_utime = 0;
+    buf->tms_stime = 0;
+    buf->tms_cutime = 0;
+    buf->tms_cstime = 0;
+    
     return (int32_t)ticks;
 }
 
-// Tick handler (called from timer interrupt)
 void timer_tick(void) {
     ticks++;
 }
