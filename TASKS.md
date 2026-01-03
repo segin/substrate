@@ -53,12 +53,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] `vm_page_try_to_free()`: Attempt to free clean inactive pages
                     - [x] Priority-based scanning: Inactive→Laundry→Active
                     - [x] OOM killer hook: Kill process if cannot free memory
-                - [ ] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management
-                    - [ ] `vm_page_free_min`: Absolute minimum free pages (panic below)
-                    - [ ] `vm_page_free_target`: Target free pages (daemon sleeps above)
-                    - [ ] `vm_page_inactive_target`: Target inactive queue length
-                    - [ ] `vm_page_free_reserved`: Reserved for kernel emergencies
-                    - [ ] Dynamic threshold adjustment based on total RAM
+                - [x] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management
+                    - [x] `vm_page_free_min`: Absolute minimum free pages (panic below)
+                    - [x] `vm_page_free_target`: Target free pages (daemon sleeps above)
+                    - [x] `vm_page_inactive_target`: Target inactive queue length
+                    - [x] `vm_page_free_reserved`: Reserved for kernel emergencies
+                    - [x] Dynamic threshold adjustment based on total RAM
                 - [ ] **Statistics:** Track queue lengths, page faults, pageouts, pageins
                     - [ ] `vm_stat` structure: `free_count`, `active_count`, `inactive_count`, `wire_count`
                     - [ ] `vm_stat.pageins`: Pages read from disk
