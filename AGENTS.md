@@ -32,7 +32,10 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
     - Bootstrap Watermark Allocator implemented.
     - Dynamic Metadata sizing (no 128MB limit) implemented.
     - Low Memory safeguards active.
-- User process foundation complete (pmap layer)
+- **User process foundation complete (pmap layer):**
+    - Recursive paging and global page support.
+    - `pmap_protect` and `pmap_copy` with Copy-on-Write (COW).
+    - `pmap_kenter`/`pmap_kremove` kernel fast paths.
 - VirtIO drivers (Block, 9P) linked and initialized
 - Ready for mmap() implementation
 
