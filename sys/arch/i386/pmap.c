@@ -17,13 +17,29 @@ static uint32_t kernel_page_tables[32][1024];
 struct pmap {
     uint32_t *pdir; // Virtual pointer (if mapped) or Physical?
     uint32_t pdir_phys;
+    int ref_count;  // Reference count for pmap
 };
 
 static struct pmap kernel_pmap_store;
 static pmap_t kernel_pmap_ptr = &kernel_pmap_store;
 
+// Global pmap lock for SMP safety
+static volatile int pmap_lock = 0;
+
+static void __attribute__((unused)) pmap_lock_acquire(void) {
+    while (__sync_lock_test_and_set(&pmap_lock, 1)) {
+        while (pmap_lock) {
+            __asm__ volatile("pause");
+        }
+    }
+}
+
+static void __attribute__((unused)) pmap_lock_release(void) {
+    __sync_lock_release(&pmap_lock);
+}
+
 void pmap_bootstrap(void) {
-    kprint("PMAP: Bootstrapping...\\n");
+    kprint("PMAP: Bootstrapping...\n");
     
     // Clear directory
     for (int i = 0; i < 1024; i++) {
@@ -34,16 +50,32 @@ void pmap_bootstrap(void) {
     #define V2P(x) ((uint32_t)(x) - 0xC0000000)
     #define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
 
+    // Check for PGE (Global Pages) support via CPUID
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
+    int has_pge = (edx >> 13) & 1;  // PGE bit in EDX
+    
+    uint32_t kernel_pte_flags = PTE_P | PTE_W;
+    if (has_pge) {
+        kernel_pte_flags |= PTE_G;  // Mark kernel pages global
+        // Enable PGE in CR4
+        uint32_t cr4;
+        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+        cr4 |= 0x80;  // CR4.PGE bit 7
+        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
+        kprint("PMAP: PGE (Global Pages) enabled\n");
+    }
+
     // Map first 128MB (32 page tables x 4MB each) to support PMM allocations
     // Use static page tables instead of PMM since PMM isn't initialized yet
     for (int pt_idx = 0; pt_idx < 32; pt_idx++) {
         uint32_t *pt_virt = kernel_page_tables[pt_idx];
         uint32_t pt_phys = V2P(pt_virt);
         
-        // Map 4MB chunk
+        // Map 4MB chunk with global flag for kernel
         for (int i = 0; i < 1024; i++) {
             uint32_t phys_addr = (pt_idx * 0x400000) + (i * 0x1000);
-            pt_virt[i] = phys_addr | PTE_P | PTE_W; 
+            pt_virt[i] = phys_addr | kernel_pte_flags; 
         }
         
         // Entry pt_idx of PD points to this PT (Identity mapping)
@@ -59,11 +91,15 @@ void pmap_bootstrap(void) {
     // Setup abstract handle
     kernel_pmap_store.pdir = kernel_page_directory;
     kernel_pmap_store.pdir_phys = V2P(kernel_page_directory);
+    kernel_pmap_store.ref_count = 1;
+
+    // Initialize pmap lock
+    pmap_lock = 0;
 
     // Enable Paging (Reload CR3)
     __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));
     
-    kprint("PMAP: Paging Enabled (Higher Half, 32MB mapped).\\n");
+    kprint("PMAP: Paging Enabled (Higher Half, 128MB mapped)\n");
 }
 
 pmap_t pmap_kernel(void) {

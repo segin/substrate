@@ -69,7 +69,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] `/proc/vmstat` or sysctl interface for userspace
         - [/] **PMAP Layer (Machine Dependent - i386):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
-                - [ ] Initialize kernel page directory from static bootstrap
+                - [x] Initialize kernel page directory from static bootstrap
                 - [ ] Set up recursive mapping at PD entry 1023 (0xFFC00000)
                 - [ ] Map kernel space (0xC0000000+) with global flag if available
                 - [ ] Initialize pmap lock for SMP safety
