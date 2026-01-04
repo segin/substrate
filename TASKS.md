@@ -721,7 +721,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] **Native Syscalls:** Thunks for syscall instruction directly in PE text.
                 - [ ] **Relocations:** Full `.reloc` processing (Base Relocations) for ASLR/PIC.
         - [ ] **a.out Loader (Legacy/Multi-OS):**
-            - [ ] **Legacy a.out:** Implement `binfmt_aout` for OMAGIC/QMAGIC/ZMAGIC binaries.
+            - [ ] **Legacy a.out:** Implement `exec_aout` for OMAGIC/QMAGIC/ZMAGIC binaries.
             - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic.
             - [ ] **SunOS 4.0.x (Sun386i):** Support Sun386i `a.out` format and personality.
         - [ ] **Personality / Migration:**
