@@ -682,8 +682,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [/] **Auxiliary Vector:** Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support.
             - [ ] **Interpreter:** Handle `PT_INTERP` (load ld.so).
             - [ ] **Auxiliary Vector:**
-                - [ ] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`.
-                - [ ] Populate `AT_ENTRY`, `AT_BASE` (interpreter base).
+                - [x] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`.
+                - [x] Populate `AT_ENTRY`, `AT_BASE` (interpreter base).
                 - [x] Populate `AT_EXECFN`, `AT_PLATFORM`.
                 - [x] Populate `AT_RANDOM`, `AT_SECURE`.
         - [ ] **Shebang Support (`binfmt_script`):**
