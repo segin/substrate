@@ -39,7 +39,7 @@ kernel.zimage: kernel.bin
 	# For zImage, we often want a flat binary if using it with legacy loaders
 	objcopy -O binary kernel.bin kernel.zimage
 
-kernel.efi: arch_kernel kern drivers fs exec vfs exec_perso vm
+kernel.efi: arch_kernel kern drivers fs exec vfs exec_perso vm tests
 	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.elf \
 		arch/$(ARCH)/kernel.o \
 		kern/kern.o \
@@ -55,6 +55,7 @@ kernel.efi: arch_kernel kern drivers fs exec vfs exec_perso vm
 		fs/exec/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
+		tests/tests.o \
 		$(LIBGCC)
 	objcopy -O pe-i386 kernel_efi.elf kernel.efi
 	@echo "Linked kernel.efi"
