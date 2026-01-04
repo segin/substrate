@@ -45,6 +45,10 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va); // Get PA from VA
 #define VM_PROT_EXEC    0x04
 #define VM_PROT_ALL     (VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXEC)
 
+// Kernel-only fast paths (no locking, assumes kernel pmap active)
+void pmap_kenter(uint32_t va, uint32_t pa);
+void pmap_kremove(uint32_t va);
+
 // Helper to flush TLB
 void pmap_invalidate_page(uint32_t va);
 

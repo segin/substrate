@@ -250,7 +250,7 @@ void pmap_activate(pmap_t pmap) {
 #define V_PT(i) ((uint32_t *)(0xFFC00000 + ((i) << 12)))
 
 int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
-    (void)prot; (void)flags;
+    (void)flags;
     // Must be active address space to use recursive mapping
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
@@ -259,17 +259,29 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
 
+    // Allocate page table on demand if not present
     if (!(V_PD[pdi] & PTE_P)) {
         void *pt_phys = pmm_alloc_block();
         if (!pt_phys) return -1;
+        // PDE always gets W and U so PT can control actual permissions
         V_PD[pdi] = (uint32_t)pt_phys | PTE_P | PTE_W | PTE_U;
         pmap_invalidate_page((uint32_t)V_PT(pdi));
         uint32_t *pt = V_PT(pdi);
         for (int i = 0; i < 1024; i++) pt[i] = 0;
     }
 
+    // Build PTE flags from prot parameter
+    uint32_t pte_flags = PTE_P;
+    if (prot & VM_PROT_WRITE) {
+        pte_flags |= PTE_W;
+    }
+    if (va < 0xC0000000) {
+        pte_flags |= PTE_U;  // User accessible if in user space
+    }
+    // Note: i386 doesn't have NX bit in standard mode
+
     uint32_t *pt = V_PT(pdi);
-    pt[pti] = (pa & 0xFFFFF000) | PTE_P | PTE_W | PTE_U;
+    pt[pti] = (pa & 0xFFFFF000) | pte_flags;
     pmap_invalidate_page(va);
     return 0;
 }
@@ -278,6 +290,45 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return;
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+    if (!(V_PD[pdi] & PTE_P)) return;
+    uint32_t *pt = V_PT(pdi);
+    pt[pti] = 0;
+    pmap_invalidate_page(va);
+}
+
+// Kernel-only fast path: no pmap/locking overhead
+// Assumes kernel is always active and va is in kernel space
+void pmap_kenter(uint32_t va, uint32_t pa) {
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+
+    // Allocate page table on demand if not present
+    if (!(V_PD[pdi] & PTE_P)) {
+        void *pt_phys = pmm_alloc_block();
+        if (!pt_phys) return;  // OOM - should not happen for kernel
+        V_PD[pdi] = (uint32_t)pt_phys | PTE_P | PTE_W;
+        pmap_invalidate_page((uint32_t)V_PT(pdi));
+        uint32_t *pt = V_PT(pdi);
+        for (int i = 0; i < 1024; i++) pt[i] = 0;
+    }
+
+    uint32_t *pt = V_PT(pdi);
+    // Kernel pages: P, W, no U (supervisor only), G if available
+    uint32_t pte_flags = PTE_P | PTE_W;
+    // Check if PGE is enabled (CR4 bit 7)
+    uint32_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    if (cr4 & 0x80) {
+        pte_flags |= PTE_G;  // Global page
+    }
+    pt[pti] = (pa & 0xFFFFF000) | pte_flags;
+    pmap_invalidate_page(va);
+}
+
+// Kernel-only fast removal
+void pmap_kremove(uint32_t va) {
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
     if (!(V_PD[pdi] & PTE_P)) return;
