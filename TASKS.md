@@ -670,7 +670,14 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **Pointer Thunking:** Convert 16-bit pointers to kernel linear addresses using LDT base.
     - [ ] **Linux:**
         - [x] ELF Loader personality detection (brandelf support).
-        - [ ] Improve `sys_clone` compatibility (flags).
+        - [ ] **Binary Format Support:**
+            - [ ] **Legacy a.out:** Implement `binfmt_aout` for OMAGIC/QMAGIC/ZMAGIC Linux binaries.
+            - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic.
+        - [ ] **Syscalls:**
+            - [ ] Improve `sys_clone` compatibility (flags).
+            - [ ] `socketcall` (multiplexed networking).
+            - [ ] `ipc` (System V IPC multiplexer).
+            - [ ] `ioctl` translation layer.
     - [ ] **Minix/386:**
         - [ ] Implement `send`/`receive` message passing syscalls.
         - [ ] Map Minix 3 kernel messages to native calls.
