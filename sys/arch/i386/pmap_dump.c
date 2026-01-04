@@ -5,7 +5,7 @@
 
 void pmap_dump(void *pmap_ptr) {
     if (!pmap_ptr) {
-        kprint("pmap_dump: NULL pmap\\n");
+        kprint("pmap_dump: NULL pmap\n");
         return;
     }
     
@@ -13,7 +13,7 @@ void pmap_dump(void *pmap_ptr) {
     char buf[128];
     int mapped_count = 0;
     
-    kprint("Page Directory Entries:\\n");
+    kprint("Page Directory Entries:\n");
     
     for (int pde_idx = 0; pde_idx < 1024; pde_idx++) {
         if (pd[pde_idx] & 1) { // Present bit
@@ -27,7 +27,7 @@ void pmap_dump(void *pmap_ptr) {
             }
             
             if (pt_mapped > 0) {
-                sprintf(buf, "  PDE[%3d] = 0x%08X -> 0x%08X-%08X (%d pages, %s%s%s)\\n",
+                sprintf(buf, "  PDE[%3d] = 0x%08X -> 0x%08X-0x%08X (%d pages, %s%s%s)\n",
                     pde_idx, pd[pde_idx],
                     pde_addr, pde_addr + 0x3FFFFF,
                     pt_mapped,
@@ -40,6 +40,6 @@ void pmap_dump(void *pmap_ptr) {
         }
     }
     
-    sprintf(buf, "Total: %d mapped page directories\\n", mapped_count);
+    sprintf(buf, "Total: %d mapped page directories\n", mapped_count);
     kprint(buf);
 }
