@@ -17,7 +17,7 @@ void pmap_dump(void *proc_ptr) {
     }
     
     // proc->pmap is a PHYSICAL address
-    uint32_t pmap_phys = (uint32_t)proc->pmap;
+    uintptr_t pmap_phys = (uintptr_t)proc->pmap;
     // Map to kernel virtual address (linear map)
     uint32_t *pd = (uint32_t *)(pmap_phys + 0xC0000000);
     
@@ -30,7 +30,7 @@ void pmap_dump(void *proc_ptr) {
         if (pd[pde_idx] & 1) { // Present bit
             uint32_t pde_addr = (pde_idx << 22);
             // Get PT physical address from PDE
-            uint32_t pt_phys = pd[pde_idx] & 0xFFFFF000;
+            uintptr_t pt_phys = pd[pde_idx] & 0xFFFFF000;
             // Map to kernel virtual address
             uint32_t *pt = (uint32_t *)(pt_phys + 0xC0000000);
             

@@ -53,34 +53,10 @@ kinit: Starting init process...
 kinit: Trying /bin/sh
 ELF: Loading executable, entry=0x08048AE4
 ELF: Mapping segment at 0x08048000, size=000D4DC8
-ELF: Mapping segment at 0x0811DDC8, size=00006158
-ELF: Personality: Linux
-execve: Jumping to userspace, entry=0x08048AE4, sp=0xBFFFFFE0
-execve: Final check - entry=0x08048AE4, stack=0xBFFFFFE0
-
-EXCEPTION: Page Fault (in user process)
-EIP: 0x08065D2B  CS: 0x001B  ERR: 0x00000007
-EAX: 0x08124000  EBX: 0x08124000  ECX: 0x00000000  EDX: 0x08124000
-ESI: 0x00000000  EDI: 0x00000001  EBP: 0x00000010  ESP: 0xC014E884
-Killing user process.
-
-=== MEMORY SPACE DUMP (PID 1) ===
-pmap_dump: process->pmap is NULL
-=== END MEMORY DUMP ===
-
-
-=== PROCESS TABLE DUMP (Ctrl+F9) ===
-Current Thread: TID=2
-Current Process: PID=1 (sh)
-
-   TID |   PID | STATE    | NAME             | PERSO   | WAIT REASON
--------|-------|----------|------------------|---------|------------
-     1 |     1 | READY    | sh               | Linux   | 
-     2 |     1 | RUNNING  | sh               | Linux   | 
-=== END PROCESS DUMP ===
-
+ELF: Failed to map page
+execve: Failed to load ELF
 
 *** KERNEL PANIC ***
-Reason: init died - no recovery possible
+Reason: kinit: Requested init failed.
 
 System Halted.
