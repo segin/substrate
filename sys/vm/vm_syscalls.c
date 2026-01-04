@@ -2,51 +2,90 @@
 #include "vm_object.h"
 #include "vm_fault.h"
 #include "../include/sys/proc.h"
+#include "../include/sys/file.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include "../arch/i386/pmm.h"
 #include "vm_kmem.h"
 
+// mman.h flag definitions (duplicated here for kernel use)
+#define PROT_NONE  0x0
+#define PROT_READ  0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC  0x4
+
+#define MAP_SHARED    0x001
+#define MAP_PRIVATE   0x002
+#define MAP_FIXED     0x010
+#define MAP_ANONYMOUS 0x020
+
 // User Memory System Calls
 
 void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t offset) {
-    (void)fd; (void)offset; (void)prot; // For now, only anonymous mappings
-    
     process_t *p = current_process;
     if (!p || !p->vm_map) return (void *)-1;
+    if (length == 0) return (void *)-1;
 
     vm_map_t *map = p->vm_map;
+    uintptr_t v_addr = (uintptr_t)addr;
 
-    if (flags & 0x20) { // MAP_ANON/MAP_ANONYMOUS (assuming 0x20)
-        uintptr_t v_addr = (uintptr_t)addr;
-        
-        if (v_addr == 0) {
-            if (vm_map_find_space(map, &v_addr, length) != 0) return (void *)-1;
-        }
-
-        vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, length);
-        if (!obj) return (void *)-1;
-
-        if (vm_map_insert(map, obj, 0, v_addr, v_addr + length) != 0) {
-            vm_object_deallocate(obj);
-            return (void *)-1;
-        }
-
-        // We don't necessarily map into HW page tables yet (lazy faulting)
-        // unless we want to do it now. Let's do it now for simplicity.
-        for (uint32_t va = v_addr; va < v_addr + length; va += 0x1000) {
-            void *pa = pmm_alloc_block();
-            if (!pa) break; // Partial success or error
-            pmap_enter(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), va, (uint32_t)(uintptr_t)pa, 0, 0);
-            #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
-            memset(VIRTUAL_d(pa), 0, 0x1000);
-        }
-
-        return (void *)v_addr;
+    // Find virtual address space
+    if (v_addr == 0 || !(flags & MAP_FIXED)) {
+        if (vm_map_find_space(map, &v_addr, length) != 0) return (void *)-1;
     }
 
-    return (void *)-1;
+    // Translate prot to VM_PROT_* flags
+    uint32_t vm_prot = 0;
+    if (prot & PROT_READ)  vm_prot |= VM_PROT_READ;
+    if (prot & PROT_WRITE) vm_prot |= VM_PROT_WRITE;
+    if (prot & PROT_EXEC)  vm_prot |= VM_PROT_EXEC;
+
+    // Create VM object for tracking
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, length);
+    if (!obj) return (void *)-1;
+
+    if (vm_map_insert(map, obj, 0, v_addr, v_addr + length) != 0) {
+        vm_object_deallocate(obj);
+        return (void *)-1;
+    }
+
+    // Determine if file-backed or anonymous
+    file_t *file = NULL;
+    if (!(flags & MAP_ANONYMOUS) && fd >= 0 && fd < MAX_FD) {
+        file = p->fds[fd];
+    }
+
+    // Allocate and map pages
+    #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
+    uint64_t file_offset = offset;
+
+    for (uintptr_t va = v_addr; va < v_addr + length; va += 0x1000) {
+        void *pa = pmm_alloc_block();
+        if (!pa) {
+            // Partial failure - pages before this are mapped
+            break;
+        }
+
+        // Zero the page first
+        memset(VIRTUAL_d(pa), 0, 0x1000);
+
+        // If file-backed, read data into page
+        if (file && file->node && file->node->read) {
+            uint32_t bytes_to_read = 0x1000;
+            // Clamp to remaining length
+            if (va + 0x1000 > v_addr + length) {
+                bytes_to_read = (v_addr + length) - va;
+            }
+            file->node->read(file->node, file_offset, bytes_to_read, (uint8_t *)VIRTUAL_d(pa));
+            file_offset += bytes_to_read;
+        }
+
+        // Map page with requested protection
+        pmap_enter(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), va, (uint32_t)(uintptr_t)pa, vm_prot, 0);
+    }
+
+    return (void *)v_addr;
 }
 
 int sys_munmap(void *addr, size_t length) {
