@@ -53,10 +53,15 @@ kinit: Starting init process...
 kinit: Trying /bin/sh
 ELF: Loading executable, entry=0x08048AE4
 ELF: Mapping segment at 0x08048000, size=000D4DC8
-ELF: Failed to map page
-execve: Failed to load ELF
+ELF: Mapping segment at 0x0811DDC8, size=00006158
+ELF: Personality: Linux
+
+EXCEPTION: Page Fault (in kernel)
+EIP: 0xC0113B1C  CS: 0x0008  ERR: 0x00000000
+EAX: 0x00387F80  EBX: 0xC014F640  ECX: 0x00000005  EDX: 0x00000020
+ESI: 0x00000000  EDI: 0x00000000  EBP: 0xC014E584  ESP: 0xC014E558
 
 *** KERNEL PANIC ***
-Reason: kinit: Requested init failed.
+Reason: Unhandled Kernel Exception
 
 System Halted.

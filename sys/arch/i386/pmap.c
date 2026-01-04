@@ -161,15 +161,19 @@ pmap_t pmap_create(void) {
         pd[i] = 0;
     }
     
-    // 4. Copy kernel mappings (upper 256 entries: 0xC0000000-0xFFFFFFFF)
-    //    User processes need kernel mappings for syscalls/interrupts
-    uint32_t *kernel_pd = (uint32_t *)0xFFFFF000; // Recursive map of CURRENT PD (which is kernel) - wait, this assumes we are running on kernel PD or creating from it? 
-    // Wait, 0xFFFFF000 is recursive map of CURRENT CR3.
-    // If we are in pmap_create, we are likely called by execve.
-    // execve is running in OLD process context.
-    // OLD process MUST have kernel mappings. So copying from 0xFFFFF000 is safe.
+    // 4. Copy kernel mappings
+    // Higher Half (0xC0000000+)
+    uint32_t *kernel_pd = (uint32_t *)0xFFFFF000; 
 
     for (int i = 768; i < 1023; i++) {
+        if (kernel_pd[i] & PTE_P) {
+             pd[i] = kernel_pd[i];
+        }
+    }
+
+    // Copy Lower Half Identity Map (0-128MB) if present
+    // Required because kernel allocator currently relies on it
+    for (int i = 0; i < 32; i++) {
         if (kernel_pd[i] & PTE_P) {
              pd[i] = kernel_pd[i];
         }
