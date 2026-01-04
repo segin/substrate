@@ -719,7 +719,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Flags:**
             - [x] `-` (Left-align within field width).
             - [x] `+` (Force sign for positive numbers).
-            - [ ] ` ` (Space prefix for positive numbers).
+            - [x] ` ` (Space prefix for positive numbers).
             - [ ] `#` (Alternate form: 0x for hex, force decimal point).
             - [ ] `0` (Zero-padding).
         - [ ] **Width & Precision:**

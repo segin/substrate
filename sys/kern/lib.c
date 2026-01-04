@@ -56,8 +56,8 @@ int strcmp(const char *s1, const char *s2) {
     return *(const unsigned char *)s1 - *(const unsigned char *)s2;
 }
 
-// Integer to ASCII with optional sign prefix
-static void itoa(char *buf, int val, int force_sign) {
+// Integer to ASCII with optional sign/space prefix
+static void itoa(char *buf, int val, int force_sign, int space_prefix) {
     char tmp[16];
     int i = 0;
     int is_negative = (val < 0);
@@ -65,6 +65,10 @@ static void itoa(char *buf, int val, int force_sign) {
     if (val == 0) {
         if (force_sign) {
             buf[0] = '+';
+            buf[1] = '0';
+            buf[2] = '\0';
+        } else if (space_prefix) {
+            buf[0] = ' ';
             buf[1] = '0';
             buf[2] = '\0';
         } else {
@@ -82,12 +86,14 @@ static void itoa(char *buf, int val, int force_sign) {
         val /= 10;
     }
     
-    // Add sign
+    // Add sign or space
     int j = 0;
     if (is_negative) {
         buf[j++] = '-';
     } else if (force_sign) {
         buf[j++] = '+';
+    } else if (space_prefix) {
+        buf[j++] = ' ';
     }
     
     // Reverse digits
@@ -135,8 +141,10 @@ int sprintf(char *str, const char *format, ...) {
             // Parse flags
             int left_align = 0;
             int force_sign = 0;
+            int space_prefix = 0;
             if (*f == '-') { left_align = 1; f++; }
             if (*f == '+') { force_sign = 1; f++; }
+            if (*f == ' ' && !force_sign) { space_prefix = 1; f++; }
             
             // Parse width (e.g., %08X or %16s)
             int width = 0;
@@ -163,13 +171,13 @@ int sprintf(char *str, const char *format, ...) {
                 case 'd':
                 case 'i': {
                     int val = __builtin_va_arg(ap, int);
-                    itoa(s, val, force_sign);
+                    itoa(s, val, force_sign, space_prefix);
                     s += strlen(s);
                     break;
                 }
                 case 'u': {
                     unsigned int val = __builtin_va_arg(ap, unsigned int);
-                    itoa(s, (int)val, 0); // No sign for unsigned
+                    itoa(s, (int)val, 0, 0); // No sign for unsigned
                     s += strlen(s);
                     break;
                 }
