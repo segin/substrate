@@ -45,6 +45,10 @@ The kernel is the core of the operating system, structured as follows:
         - **`perso/`**: Execution Personalities (Native, Linux, FreeBSD) handling syscall translation.
 - **`sys/kern/`**: Kernel subsystems.
     - **Scheduling**: 1:1 Threading model (`sched.c`), Process/Thread management.
+    - **Process Model**:
+      - **PID 0 (TID 0):** Swapper/Idle task.
+      - **PID 1 (TID 1):** Init process (spawned by kernel).
+      - **PID = MainTID:** Invariant enforced for all new processes.
     - **Time**: System time and tick handling.
     - **Accounting**: Process accounting (`acct.c`).
 - **`sys/sys/`**: System-wide header definitions (`proc.h`, `file.h`, `acct.h`, `thr.h`).

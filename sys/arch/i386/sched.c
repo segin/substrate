@@ -45,7 +45,7 @@ void sched_init(void) {
     // alloc requires a process.
     
     // Setup Kernel Process (PID 1)
-    processes[0].pid = 1;
+    processes[0].pid = 0;
     processes[0].ppid = 0;
     processes[0].pers = &personality_native;
     processes[0].root_node = fs_root;

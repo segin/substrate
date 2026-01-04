@@ -22,6 +22,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Build System:** Root filesystem generation in `dist/`
 - **Test Framework:** Implemented comprehensive kernel test runner (`sys/tests`), integrated into build system, with initial PMAP property tests.
 - **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0`, numeric width, and conversions: d/i/u/o/x/X/p/s/c for improved debug output
+- **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant for cleaner process identification.
 
 
 ## Current Status
@@ -41,6 +42,10 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
     - `pmap_kenter`/`pmap_kremove` kernel fast paths.
     - Identity-mapping for Local APIC (0xFEE00000) during bootstrap.
     - Identity-mapping for Local APIC (0xFEE00000) during bootstrap.
+- **Process Model Refactored:**
+    - Swapper: PID 0 (TID 0).
+    - Init: PID 1 (TID 1).
+    - Init spawned via `sched_spawn_kernel_process` and transitions via `execve`.
 - VirtIO drivers (Block, 9P) linked and initialized
 - Ready for mmap() implementation
 

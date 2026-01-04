@@ -150,7 +150,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     pm_init();
     current_process = &processes[0];
     current_process->pid = 0;
-    strcpy(current_process->comm, "kernel");
+    strcpy(current_process->comm, "(swapper)");
 
     console_init();
     vga_init(); // Registers VGA console
@@ -417,8 +417,7 @@ void kmain(unsigned long magic, unsigned long addr) {
 
     // Create Init Task
     // We pass cmdline to it
-    static char dummy_stack[4096];
-    sched_create_thread(&processes[0], init_task, dummy_stack + 4096, cmdline);
+    sched_spawn_kernel_process(init_task, cmdline);
 
     // Reclaim early boot code
     pmm_reclaim_setup();
