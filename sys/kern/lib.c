@@ -56,23 +56,45 @@ int strcmp(const char *s1, const char *s2) {
     return *(const unsigned char *)s1 - *(const unsigned char *)s2;
 }
 
-// Very simple sprintf for procfs
-static void itoa(char *buf, int val) {
+// Integer to ASCII with optional sign prefix
+static void itoa(char *buf, int val, int force_sign) {
     char tmp[16];
     int i = 0;
+    int is_negative = (val < 0);
+    
     if (val == 0) {
-        buf[0] = '0';
-        buf[1] = '\0';
+        if (force_sign) {
+            buf[0] = '+';
+            buf[1] = '0';
+            buf[2] = '\0';
+        } else {
+            buf[0] = '0';
+            buf[1] = '\0';
+        }
         return;
     }
+    
+    // Handle negative
+    if (is_negative) val = -val;
+    
     while (val > 0) {
         tmp[i++] = (val % 10) + '0';
         val /= 10;
     }
-    for (int j = 0; j < i; j++) {
-        buf[j] = tmp[i - j - 1];
+    
+    // Add sign
+    int j = 0;
+    if (is_negative) {
+        buf[j++] = '-';
+    } else if (force_sign) {
+        buf[j++] = '+';
     }
-    buf[i] = '\0';
+    
+    // Reverse digits
+    for (int k = 0; k < i; k++) {
+        buf[j++] = tmp[i - k - 1];
+    }
+    buf[j] = '\0';
 }
 
 // Hex conversion helper
@@ -112,7 +134,9 @@ int sprintf(char *str, const char *format, ...) {
             
             // Parse flags
             int left_align = 0;
+            int force_sign = 0;
             if (*f == '-') { left_align = 1; f++; }
+            if (*f == '+') { force_sign = 1; f++; }
             
             // Parse width (e.g., %08X or %16s)
             int width = 0;
@@ -139,13 +163,13 @@ int sprintf(char *str, const char *format, ...) {
                 case 'd':
                 case 'i': {
                     int val = __builtin_va_arg(ap, int);
-                    itoa(s, val);
+                    itoa(s, val, force_sign);
                     s += strlen(s);
                     break;
                 }
                 case 'u': {
                     unsigned int val = __builtin_va_arg(ap, unsigned int);
-                    itoa(s, val); // Simple - treats as signed
+                    itoa(s, (int)val, 0); // No sign for unsigned
                     s += strlen(s);
                     break;
                 }
