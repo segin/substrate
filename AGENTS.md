@@ -20,6 +20,8 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **PS/2 Subsystem:** Expanded PS/2 controller driver to support dual-channel (Mouse/Aux) operation.
 - **Framebuffer:** Implemented native linear framebuffer driver (`fb.c`) with Multiboot support and bitmap font console. Added Bochs Graphics Adapter (BGA) native driver support via `video=bga`.
 - **Build System:** Root filesystem generation in `dist/`
+- **Test Framework:** Implemented comprehensive kernel test runner (`sys/tests`), integrated into build system, with initial PMAP property tests.
+
 
 ## Current Status
 - **PMM Refactor:** Phase 2 complete.

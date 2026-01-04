@@ -608,6 +608,9 @@ void pmm_free_contiguous(void* p, size_t count) {
         pmm_buddy_free_locked(page, order);
     }
 
-    spinlock_release(&pmm_lock);
     intr_restore(flags);
+}
+
+size_t pmm_get_used_blocks(void) {
+    return pmm_used_blocks;
 }

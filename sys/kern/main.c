@@ -376,6 +376,10 @@ void kmain(unsigned long magic, unsigned long addr) {
     extern void virtio_init(void);
     virtio_init();
     
+    // Run Kernel Tests (if requested via cmdline 'test=...')
+    extern void run_kernel_tests(void);
+    run_kernel_tests();
+    
     // Initialize VFS (handles filesystem registration and pseudo-fs mounts)
     vfs_init();
     

@@ -4,12 +4,12 @@ include ../Makefile.inc
 ARCH ?= i386
 LIBGCC := $(shell $(CC) -m32 -print-libgcc-file-name)
 
-.PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi
+.PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi tests
 
 all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
 	@echo "Kernel build complete (all formats)."
 
-kernel.bin: arch_kernel kern pm drivers fs exec vfs exec_perso vm
+kernel.bin: arch_kernel kern pm drivers fs exec vfs exec_perso vm tests
 	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.bin \
 		arch/$(ARCH)/kernel.o \
 		kern/kern.o \
@@ -25,6 +25,7 @@ kernel.bin: arch_kernel kern pm drivers fs exec vfs exec_perso vm
 		fs/exec/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
+		tests/tests.o \
 		$(LIBGCC)
 	@echo "Linked kernel.bin"
 
@@ -121,6 +122,10 @@ clean:
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean
 	rm -f kernel.bin
+
+tests:
+	@echo "Building Kernel Tests..."
+	$(MAKE) -C tests
 
 install:
 	@echo "Installing Kernel..."

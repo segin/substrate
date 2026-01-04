@@ -1,0 +1,42 @@
+/*
+ * test_runner.c - Kernel Test Framework Entry Point
+ */
+
+#include "../kern/console.h"
+#include "../kern/cmdline.h"
+#include <string.h>
+
+// Forward declarations of test suites
+void run_pmap_tests(void);
+void run_pmap_protect_property_tests(void);
+void run_mmap_tests(void);
+
+void run_kernel_tests(void) {
+    char test_arg[32] = {0};
+    
+    if (cmdline_get("test", test_arg, sizeof(test_arg)) != 0) {
+        // No test argument
+        return;
+    }
+    
+    kprint("\n\n=== RUNNING KERNEL TESTS ===\n");
+    
+    int all = (strcmp(test_arg, "all") == 0) || (strcmp(test_arg, "1") == 0);
+    
+    if (all || strcmp(test_arg, "pmap") == 0) {
+        run_pmap_tests();
+        run_pmap_protect_property_tests();
+    }
+    
+    if (all || strcmp(test_arg, "mmap") == 0) {
+        // run_mmap_tests(); // Uncomment when ready
+    }
+
+    kprint("=== TESTS COMPLETE ===\n\n");
+    
+    // Optional: Halt after tests if requested
+    if (cmdline_has("test_halt")) {
+        kprint("Halting system as requested.\n");
+        for (;;) __asm__ volatile("hlt");
+    }
+}

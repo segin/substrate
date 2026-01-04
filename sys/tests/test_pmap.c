@@ -84,13 +84,12 @@ void test_null_pmap(void) {
     kprint("  PASS\n");
 }
 
-// Test 5: Memory leak check
-void test_memory_leak(void) {
-    kprint("Test: memory leak check\n");
+// Check for memory leaks
+static void test_memory_leak(void) {
+    kprint("Test: Memory Leak Check... ");
     
-    // Get initial free blocks
-    extern uint32_t pmm_used_blocks;
-    uint32_t initial_used = pmm_used_blocks;
+    extern size_t pmm_get_used_blocks(void);
+    size_t start_blocks = pmm_get_used_blocks();
     
     // Create and destroy 10 pmaps
     for (int i = 0; i < 10; i++) {
@@ -99,10 +98,10 @@ void test_memory_leak(void) {
         pmap_destroy(pmap);
     }
     
-    uint32_t final_used = pmm_used_blocks;
+    size_t final_blocks = pmm_get_used_blocks();
     
     // Should have same number of used blocks (no leak)
-    TEST_ASSERT(initial_used == final_used, "no memory leak detected");
+    TEST_ASSERT(start_blocks == final_blocks, "no memory leak detected");
     
     kprint("  PASS\n");
 }
@@ -117,7 +116,6 @@ void run_pmap_tests(void) {
     test_memory_leak();
     
     kprint("\nResults: ");
-    char buf[64];
     kprint("Passed: ");
     // TODO: Add itoa to print numbers
     kprint(" Failed: ");

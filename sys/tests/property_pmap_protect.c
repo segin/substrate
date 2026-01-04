@@ -56,6 +56,7 @@ void run_pmap_protect_property_tests(void) {
     kprint("\n=== PMAP Protect/Copy Property Tests ===\n");
     
     property_copy_cow();
+    property_protect_rw();
     
     kprint("Property tests completed\n");
 }
