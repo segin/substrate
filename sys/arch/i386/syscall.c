@@ -379,12 +379,23 @@ void syscall_handler(registers_t *regs) {
             sprintf(buf, "SYSCALL: %d (PID=%d, %s) STACK Args: %08X %08X %08X %08X %08X %08X\n", 
                     (unsigned int)regs->eax, current_process->pid, p->name,
                     arg1, arg2, arg3, arg4, arg5, arg6);
+            kprint(buf);
         } else {
-            sprintf(buf, "SYSCALL: %d (PID=%d, %s) REGS: %08X %08X %08X %08X %08X %08X\n", 
-                    (unsigned int)regs->eax, current_process->pid, p->name,
-                    arg1, arg2, arg3, arg4, arg5, arg6);
+            // Header
+            sprintf(buf, "SYSCALL: %d (PID=%d, %s)\n", 
+                    (unsigned int)regs->eax, current_process->pid, p->name);
+            kprint(buf);
+            
+            // Registers Line 1
+            sprintf(buf, "    EBX: %08X  ECX: %08X  EDX: %08X\n", 
+                    arg1, arg2, arg3);
+            kprint(buf);
+            
+            // Registers Line 2
+            sprintf(buf, "    ESI: %08X  EDI: %08X  EBP: %08X\n", 
+                    arg4, arg5, arg6);
+            kprint(buf);
         }
-        kprint(buf);
     }
     
     // Check if syscall number is out of range

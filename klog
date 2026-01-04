@@ -57,7 +57,6 @@ ELF: Mapping segment at 0x0811DDC8, size=00006158
 ELF: Personality: Linux
 execve: Jumping to userspace, entry=0x08048AE4, sp=0xBFFFFFE0
 execve: Final check - entry=0x08048AE4, stack=0xBFFFFFE0
-SYSCALL: 45 (PID=1) EBX=00000000 ECX=00000000 EDX=00000000
 SYSCALL: 45 (PID=1, Linux) REGS: 00000000 00000000 00000000 00000470 00000010 00000010
 
 EXCEPTION: Page Fault (in user process)
