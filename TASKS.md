@@ -686,7 +686,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Populate `AT_ENTRY`, `AT_BASE` (interpreter base).
                 - [x] Populate `AT_EXECFN`, `AT_PLATFORM`.
                 - [x] Populate `AT_RANDOM`, `AT_SECURE`.
-        - [ ] **Shebang Support (`binfmt_script`):**
+        - [ ] **Shebang Support (`exec_script`):**
             - [ ] Parse `#!` line.
             - [ ] Handle recursion depth limits (prevent loops).
             - [ ] Argument parsing (`#! /bin/sh -x`).
