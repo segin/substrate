@@ -50,10 +50,7 @@ Freeing Multiboot info: 4K
 Freeing Multiboot modules list: 4K
 Entering main loop...
 kinit: Starting init process...
-kinit: Trying default init paths...
-execve: File not found: /sbin/init
-execve: File not found: /etc/init
-execve: File not found: /bin/init
+kinit: Trying /bin/sh
 ELF: Loading executable, entry=0x08048AE4
 ELF: Mapping segment at 0x08048000, size=000D4DC8
 ELF: Mapping segment at 0x0811DDC8, size=00006158
@@ -68,7 +65,7 @@ ESI: 0x00000000  EDI: 0x00000001  EBP: 0x00000010  ESP: 0xC014E884
 Killing user process.
 
 === MEMORY SPACE DUMP (PID 1) ===
-pmap_dump: Could not locate pmap in process struct
+pmap_dump: process->pmap is NULL
 === END MEMORY DUMP ===
 
 

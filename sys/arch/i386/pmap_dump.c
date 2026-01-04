@@ -16,8 +16,11 @@ void pmap_dump(void *proc_ptr) {
         return;
     }
     
-    // proc->pmap is a VIRTUAL address (pointer to page directory)
-    uint32_t *pd = (uint32_t *)proc->pmap;
+    // proc->pmap is a PHYSICAL address
+    uint32_t pmap_phys = (uint32_t)proc->pmap;
+    // Map to kernel virtual address (linear map)
+    uint32_t *pd = (uint32_t *)(pmap_phys + 0xC0000000);
+    
     char buf[128];
     int mapped_count = 0;
     
@@ -26,7 +29,10 @@ void pmap_dump(void *proc_ptr) {
     for (int pde_idx = 0; pde_idx < 1024; pde_idx++) {
         if (pd[pde_idx] & 1) { // Present bit
             uint32_t pde_addr = (pde_idx << 22);
-            uint32_t *pt = (uint32_t *)((pd[pde_idx] & 0xFFFFF000) + 0xC0000000);
+            // Get PT physical address from PDE
+            uint32_t pt_phys = pd[pde_idx] & 0xFFFFF000;
+            // Map to kernel virtual address
+            uint32_t *pt = (uint32_t *)(pt_phys + 0xC0000000);
             
             // Count mapped pages in this table
             int pt_mapped = 0;
