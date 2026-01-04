@@ -218,10 +218,10 @@ void isr_handler(registers_t *regs) {
             if (current_process && current_process->pid == 1) {
                 extern void debug_dump_processes(void);
                 extern void pmap_dump(void *proc_ptr);
-                extern int cmdline_has_arg(const char *arg);
+                extern int cmdline_has(const char *key);
                 
                 // Dump memory if procmem argument present
-                if (cmdline_has_arg("procmem")) {
+                if (cmdline_has("procmem")) {
                     kprint("=== MEMORY SPACE DUMP (PID 1) ===\n");
                     pmap_dump(current_process);
                     kprint("=== END MEMORY DUMP ===\n\n");
