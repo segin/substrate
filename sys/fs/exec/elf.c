@@ -389,8 +389,140 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     
     #undef PUSH_STRING
     
-    // Now align to 16 bytes BEFORE placing pointers (after all strings)
+    // now align to 16 bytes BEFORE placing pointers (after all strings)
     sp &= ~15;
+
+    // --- AUXV SETUP ---
+    // Read ELF header again to get PHDR info
+    Elf32_Ehdr ehdr;
+    if (file->read(file, 0, sizeof(Elf32_Ehdr), (uint8_t *)&ehdr) != sizeof(Elf32_Ehdr)) {
+        kprint("execve: Failed to re-read header for AUXV\n");
+        return -1;
+    }
+    
+    // Calculate AT_PHDR
+    // We scan PHDRs to find where the program headers are mapped.
+    // Ideally use PT_PHDR, otherwise find PT_LOAD containing e_phoff.
+    uint32_t at_phdr = 0;
+    Elf32_Phdr phdr_scan;
+    
+    for (int i = 0; i < ehdr.e_phnum; i++) {
+        uint32_t offset = ehdr.e_phoff + i * ehdr.e_phentsize;
+        if (file->read(file, offset, sizeof(Elf32_Phdr), (uint8_t *)&phdr_scan) == sizeof(Elf32_Phdr)) {
+            if (phdr_scan.p_type == 6) { // PT_PHDR
+                at_phdr = phdr_scan.p_vaddr;
+                break;
+            }
+            // Fallback: Check if this PT_LOAD covers the file offset of phdr table
+            if (phdr_scan.p_type == PT_LOAD) {
+                if (ehdr.e_phoff >= phdr_scan.p_offset && 
+                    ehdr.e_phoff < (phdr_scan.p_offset + phdr_scan.p_filesz)) {
+                    at_phdr = phdr_scan.p_vaddr + (ehdr.e_phoff - phdr_scan.p_offset);
+                }
+            }
+        }
+    }
+    
+    if (at_phdr == 0) {
+        // Fallback to assumption if not found (e.g. headers not mapped?)
+        // Standard Linux static binaries usually have headers mapped.
+        // If not mapped, musl might fail to init TLS.
+        kprint("execve: Warning - Could not determine AT_PHDR\n");
+        at_phdr = 0x08048000 + ehdr.e_phoff; // Legacy guess
+    }
+    
+    // Push AUXV entries (Key, Value) pairs
+    // Stack grows down, so push in reverse order of desired array?
+    // Array: [Type1, Val1], [Type2, Val2] ... [NULL, 0]
+    // Pushing down: Push [NULL, 0] first (highest address), then others.
+    
+    // AT_NULL
+    sp -= 4; STACK_WRITE32(sp, 0); // Val
+    sp -= 4; STACK_WRITE32(sp, AT_NULL); // Type
+    
+    // AT_ENTRY
+    sp -= 4; STACK_WRITE32(sp, entry);
+    sp -= 4; STACK_WRITE32(sp, AT_ENTRY);
+    
+    // AT_PHNUM
+    sp -= 4; STACK_WRITE32(sp, ehdr.e_phnum);
+    sp -= 4; STACK_WRITE32(sp, AT_PHNUM);
+    
+    // AT_PHENT
+    sp -= 4; STACK_WRITE32(sp, ehdr.e_phentsize);
+    sp -= 4; STACK_WRITE32(sp, AT_PHENT);
+    
+    // AT_PHDR
+    sp -= 4; STACK_WRITE32(sp, at_phdr);
+    sp -= 4; STACK_WRITE32(sp, AT_PHDR);
+    
+    // AT_PAGESZ (4096)
+    sp -= 4; STACK_WRITE32(sp, 4096);
+    sp -= 4; STACK_WRITE32(sp, AT_PAGESZ);
+
+    // AT_FLAGS (0)
+    sp -= 4; STACK_WRITE32(sp, 0);
+    sp -= 4; STACK_WRITE32(sp, AT_FLAGS);
+    
+    // AT_BASE (Interpreter base, 0 for static)
+    sp -= 4; STACK_WRITE32(sp, 0);
+    sp -= 4; STACK_WRITE32(sp, AT_BASE);
+
+    // Push 16 bytes of random data for AT_RANDOM
+    // TODO: Use true RNG. For now, pseudo-random or fixed.
+    static uint32_t rand_seed = 0xAA55AA55;
+    uint32_t rand_ptr;
+    sp -= 16;
+    rand_ptr = sp;
+    for (int i = 0; i < 4; i++) {
+        rand_seed = rand_seed * 1103515245 + 12345;
+        STACK_WRITE32(sp + i * 4, rand_seed);
+    }
+    
+    // AT_RANDOM
+    sp -= 4; STACK_WRITE32(sp, rand_ptr);
+    sp -= 4; STACK_WRITE32(sp, AT_RANDOM);
+
+    // AT_SECURE
+    sp -= 4; STACK_WRITE32(sp, 0);
+    sp -= 4; STACK_WRITE32(sp, AT_SECURE);
+
+    // AT_UID / AT_GID
+    sp -= 4; STACK_WRITE32(sp, current_process->uid);
+    sp -= 4; STACK_WRITE32(sp, AT_UID);
+    sp -= 4; STACK_WRITE32(sp, current_process->gid);
+    sp -= 4; STACK_WRITE32(sp, AT_GID);
+    sp -= 4; STACK_WRITE32(sp, current_process->uid);
+    sp -= 4; STACK_WRITE32(sp, AT_EUID);
+    sp -= 4; STACK_WRITE32(sp, current_process->gid);
+    sp -= 4; STACK_WRITE32(sp, AT_EGID);
+
+    // Push platform string "i686" for AT_PLATFORM
+    const char *platform_str = "i686";
+    size_t platform_len = 5; // strlen("i686") + 1
+    sp -= platform_len;
+    sp &= ~3; // Align to 4 bytes
+    uint32_t platform_ptr = sp;
+    for (size_t i = 0; i < platform_len; i++) {
+        uint32_t addr = platform_ptr + i;
+        uint32_t page_idx = (addr - user_stack_base) / 0x1000;
+        uint32_t offset = (addr - user_stack_base) % 0x1000;
+        if (page_idx < user_stack_size) {
+            uint8_t *kptr = (uint8_t*)VIRTUAL_d(stack_pages[page_idx].pa) + offset;
+            *kptr = platform_str[i];
+        }
+    }
+    
+    // AT_PLATFORM
+    sp -= 4; STACK_WRITE32(sp, platform_ptr);
+    sp -= 4; STACK_WRITE32(sp, AT_PLATFORM);
+    
+    // AT_EXECFN - points to the executable path (already on stack as argv[0])
+    // We'll use argv0_ptr which already points to the path string
+    sp -= 4; STACK_WRITE32(sp, argv0_ptr);
+    sp -= 4; STACK_WRITE32(sp, AT_EXECFN);
+    
+    // ------------------
     
     // Build envp array: [PATH, TERM, NULL]
     // Stack grows down, so push NULL (last), then TERM, then PATH (first)
