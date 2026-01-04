@@ -740,7 +740,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] `L` (long double).
         - [ ] **Conversion Specifiers:**
             - [ ] **Integers:** `d`, `i` (signed decimal).
-            - [ ] **Unsigned:** `u` (decimal), `o` (octal).
+            - [x] **Unsigned:** `u` (decimal), `o` (octal).
             - [ ] **Hex:** `x`, `X` (lower/upper case).
             - [ ] **Floating Point (Basic):** `f`, `F` (decimal notation).
             - [ ] **Scientific:** `e`, `E` (exponential notation).

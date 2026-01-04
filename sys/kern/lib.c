@@ -128,6 +128,27 @@ static void utoa_hex(char *buf, unsigned int val, int uppercase, int width) {
     buf[i] = '\0';
 }
 
+// Octal conversion helper
+static void utoa_oct(char *buf, unsigned int val) {
+    char tmp[16];
+    int i = 0;
+    
+    if (val == 0) {
+        tmp[i++] = '0';
+    } else {
+        while (val > 0) {
+            tmp[i++] = '0' + (val & 7);
+            val >>= 3;
+        }
+    }
+    
+    // Reverse into buf
+    for (int j = 0; j < i; j++) {
+        buf[j] = tmp[i - j - 1];
+    }
+    buf[i] = '\0';
+}
+
 int sprintf(char *str, const char *format, ...) {
     char *s = str;
     const char *f = format;
@@ -210,6 +231,15 @@ int sprintf(char *str, const char *format, ...) {
                 case 'u': {
                     unsigned int val = __builtin_va_arg(ap, unsigned int);
                     itoa(s, (int)val, 0, 0); // No sign for unsigned
+                    s += strlen(s);
+                    break;
+                }
+                case 'o': {
+                    unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    if (alternate_form && val != 0) {
+                        *s++ = '0'; // Octal prefix
+                    }
+                    utoa_oct(s, val);
                     s += strlen(s);
                     break;
                 }
