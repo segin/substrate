@@ -75,6 +75,9 @@ uint32_t elf_load(fs_node_t *file) {
     extern void *pmm_alloc_block(void);
     
     void *pmap = pmap_kernel();
+    if (current_process && current_process->pmap) {
+        pmap = (void*)((uintptr_t)current_process->pmap);
+    }
     uint32_t max_vaddr = 0;
     
     for (int i = 0; i < ehdr.e_phnum; i++) {
@@ -252,6 +255,19 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         return -1;
     }
     
+    // Create new address space for this process
+    extern pmap_t pmap_create(void);
+    pmap_t new_pmap = pmap_create();
+    if (!new_pmap) {
+        kprint("execve: Failed to create pmap\n");
+        return -1;
+    }
+
+    // Assign to process immediately so elf_load uses it
+    if (current_process) {
+        current_process->pmap = (struct pmap *)(uintptr_t)new_pmap;
+    }
+
     // Load the ELF
     uint32_t entry = elf_load(file);
     if (entry == 0) {
@@ -398,6 +414,12 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
+    // Switch to new address space before jumping!
+    if (current_process && current_process->pmap) {
+        extern void pmap_activate(pmap_t pmap);
+        pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
+    }
+    
     jump_to_userspace(entry, sp);
     
     // Should never reach here
