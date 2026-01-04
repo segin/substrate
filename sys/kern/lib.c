@@ -142,9 +142,11 @@ int sprintf(char *str, const char *format, ...) {
             int left_align = 0;
             int force_sign = 0;
             int space_prefix = 0;
+            int alternate_form = 0;
             if (*f == '-') { left_align = 1; f++; }
             if (*f == '+') { force_sign = 1; f++; }
             if (*f == ' ' && !force_sign) { space_prefix = 1; f++; }
+            if (*f == '#') { alternate_form = 1; f++; }
             
             // Parse width (e.g., %08X or %16s)
             int width = 0;
@@ -183,12 +185,20 @@ int sprintf(char *str, const char *format, ...) {
                 }
                 case 'x': {
                     unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    if (alternate_form && val != 0) {
+                        *s++ = '0';
+                        *s++ = 'x';
+                    }
                     utoa_hex(s, val, 0, width);
                     s += strlen(s);
                     break;
                 }
                 case 'X': {
                     unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    if (alternate_form && val != 0) {
+                        *s++ = '0';
+                        *s++ = 'X';
+                    }
                     utoa_hex(s, val, 1, width);
                     s += strlen(s);
                     break;
