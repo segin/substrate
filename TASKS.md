@@ -127,8 +127,50 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] Only flush global pages with INVPCID or MOV CR4
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap PML4 paging structures.
+                - [ ] Initialize kernel PML4 from static bootstrap
+                - [ ] Set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000)
+                - [ ] Map kernel space at canonical upper half (-2GB)
+                - [ ] Initialize pmap lock for SMP safety
+                - [ ] Enable NX bit via IA32_EFER.NXE
             - [ ] **Refactor:** `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: Walk PML4→PDPT→PD→PT
+                - [ ] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB
+                - [ ] `pmap_kenter(va, pa)`: Kernel-only fast path
+                - [ ] `pmap_kremove(va)`: Kernel-only removal
+                - [ ] Allocate page tables on demand when entry is empty
+                - [ ] Handle NX (No Execute) bit for memory protection
+                - [ ] Support 2MB large pages (PDE.PS) and 1GB huge pages (PDPTE.PS)
             - [ ] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading).
+                - [ ] Load pmap->pml4_phys into CR3
+                - [ ] Handle PCID if available (Process Context Identifiers)
+                - [ ] Maintain `curpmap` pointer
+            - [ ] **Refactor:** **Recursive Paging:** Efficient 4-level page table mapping.
+                - [ ] Reserve PML4 entry 510 for self-referencing
+                - [ ] Define macros for accessing PML4/PDPT/PD/PT via recursive window
+                - [ ] V_PML4, V_PDPT(n), V_PD(n), V_PT(n) macros
+            - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management
+                - [ ] `pmap_create()`: Allocate new PML4, copy kernel mappings (entries 256-511)
+                - [ ] `pmap_destroy()`: Free all user page table levels and PML4
+                - [ ] `pmap_reference()`: Increment pmap reference count
+            - [ ] `pmap_protect`: Change page protections
+                - [ ] Walk range and update PTE protection bits (R/W, NX, U/S)
+                - [ ] Invalidate affected TLB entries
+            - [ ] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits
+            - [ ] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits
+            - [ ] Copy-on-write support (same as i386)
+            - [ ] TLB shootdown for SMP
+                - [ ] IPI mechanism for remote TLB invalidation
+                - [ ] INVPCID instruction support if available
+            - [ ] Large page support
+                - [ ] 2MB pages (PDE with PS bit)
+                - [ ] 1GB pages (PDPTE with PS bit, if supported)
+            - [ ] Global page support (PGE)
+                - [ ] Set CR4.PGE to enable global pages
+                - [ ] Mark kernel pages with PG_G
+            - [ ] PCID support (Process Context Identifiers)
+                - [ ] Detect PCID via CPUID
+                - [ ] Allocate PCIDs to processes
+                - [ ] Use INVPCID for targeted TLB flushes
         - [ ] **VM Subsystem (Machine Independent - Massive Refactor):**
             - [ ] **Rewrite:** **VM Map:** `vm_map` structure representing an address space.
             - [ ] **Rewrite:** **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
