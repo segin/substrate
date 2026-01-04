@@ -21,7 +21,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Framebuffer:** Implemented native linear framebuffer driver (`fb.c`) with Multiboot support and bitmap font console. Added Bochs Graphics Adapter (BGA) native driver support via `video=bga`.
 - **Build System:** Root filesystem generation in `dist/`
 - **Test Framework:** Implemented comprehensive kernel test runner (`sys/tests`), integrated into build system, with initial PMAP property tests.
-- **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0` for improved debug output formatting
+- **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0`, and numeric width support for improved debug output formatting
 
 
 ## Current Status

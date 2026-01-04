@@ -723,7 +723,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] `#` (Alternate form: 0x for hex, force decimal point).
             - [x] `0` (Zero-padding).
         - [ ] **Width & Precision:**
-            - [ ] Numeric width (e.g., `%5d`).
+            - [x] Numeric width (e.g., `%5d`).
             - [ ] Dynamic width `*` (from argument).
             - [x] Numeric precision (e.g., `%.5d`) - strings only.
             - [ ] Dynamic precision `.*`(from argument).

@@ -177,16 +177,28 @@ int sprintf(char *str, const char *format, ...) {
                     itoa(tmp, val, force_sign, space_prefix);
                     int len = strlen(tmp);
                     
-                    // Apply zero-padding if needed
-                    if (pad_zero && width > len) {
-                        // Check if there's a sign
-                        int has_sign = (tmp[0] == '+' || tmp[0] == '-' || tmp[0] == ' ');
-                        if (has_sign) {
-                            *s++ = tmp[0]; // Output sign first
-                            for (int i = 0; i < width - len; i++) *s++ = '0';
-                            strcpy(s, tmp + 1); // Copy rest after sign
+                    // Apply padding if width specified
+                    if (width > len) {
+                        if (pad_zero) {
+                            // Zero-padding: sign first, then zeros
+                            int has_sign = (tmp[0] == '+' || tmp[0] == '-' || tmp[0] == ' ');
+                            if (has_sign) {
+                                *s++ = tmp[0];
+                                for (int i = 0; i < width - len; i++) *s++ = '0';
+                                strcpy(s, tmp + 1);
+                            } else {
+                                for (int i = 0; i < width - len; i++) *s++ = '0';
+                                strcpy(s, tmp);
+                            }
+                        } else if (left_align) {
+                            // Left-align: value first, then spaces
+                            strcpy(s, tmp);
+                            s += len;
+                            for (int i = 0; i < width - len; i++) *s++ = ' ';
+                            *s = '\0';
                         } else {
-                            for (int i = 0; i < width - len; i++) *s++ = '0';
+                            // Right-align (default): spaces first, then value
+                            for (int i = 0; i < width - len; i++) *s++ = ' ';
                             strcpy(s, tmp);
                         }
                     } else {
