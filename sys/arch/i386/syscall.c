@@ -319,13 +319,33 @@ int sys_set_thread_area(struct user_desc *u_info) {
     return 0;
 }
 
+static int syscall_log_active = 0;
+extern int cmdline_has(const char *key);
+
 // Global pointer to current syscall's register frame (for fork)
 registers_t *syscall_regs = NULL;
 
 void syscall_handler(registers_t *regs) {
+    // Check for logging flag once
+    static int checked_log = 0;
+    if (!checked_log) {
+        if (cmdline_has("syscall_log")) {
+            syscall_log_active = 1;
+        }
+        checked_log = 1;
+    }
+
     if (!current_process || !current_process->pers) {
         regs->eax = -38; // ENOSYS
         return;
+    }
+
+    if (syscall_log_active) {
+        char buf[128];
+        sprintf(buf, "SYSCALL: %d (PID=%d) EBX=%08X ECX=%08X EDX=%08X\n", 
+                (unsigned int)regs->eax, current_process->pid, 
+                (unsigned int)regs->ebx, (unsigned int)regs->ecx, (unsigned int)regs->edx);
+        kprint(buf);
     }
     
     // Save regs pointer for special syscalls like fork
@@ -335,10 +355,11 @@ void syscall_handler(registers_t *regs) {
     
     // Check if syscall number is out of range
     if (regs->eax >= p->syscall_count) {
-        char buf[128];
-        sprintf(buf, "syscall: unimplemented #%u (PID=%d, Pers=%s)\n", 
-                (unsigned int)regs->eax, current_process->pid, p->name);
-        kprint(buf);
+        if (syscall_log_active) {
+            char buf[64];
+            sprintf(buf, "SYSCALL: Out of range #%u\n", (unsigned int)regs->eax);
+            kprint(buf);
+        }
         regs->eax = -38; // ENOSYS
         return;
     }
@@ -347,10 +368,11 @@ void syscall_handler(registers_t *regs) {
     
     // Check if syscall handler is NULL (not implemented)
     if (!location) {
-        char buf[128];
-        sprintf(buf, "syscall: unimplemented #%u (PID=%d, Pers=%s)\n", 
-                (unsigned int)regs->eax, current_process->pid, p->name);
-        kprint(buf);
+        if (syscall_log_active) {
+            char buf[64];
+            sprintf(buf, "SYSCALL: Not implemented #%u\n", (unsigned int)regs->eax);
+            kprint(buf);
+        }
         regs->eax = -38; // ENOSYS
         return;
     }
@@ -360,6 +382,11 @@ void syscall_handler(registers_t *regs) {
     int64_t ret = func(regs->ebx, regs->ecx, regs->edx, regs->esi, regs->edi, regs->ebp);
     regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
     regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
+
+    if (syscall_log_active) {
+        // Log return value? Maybe too noisy. 
+        // kprint("SYSCALL: Returned\n");
+    }
 
     signal_handle_pending(regs);
     
