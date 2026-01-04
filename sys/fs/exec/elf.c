@@ -293,8 +293,8 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
             kprint("execve: Out of memory for user stack\n");
             return -1;
         }
-        // Map with user access (PTE_U)
-        if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, 0, 0) < 0) {
+        // Map with user access and WRITE permission for stack operations
+        if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, VM_PROT_WRITE, 0) < 0) {
             kprint("execve: Failed to map user stack\n");
             return -1;
         }
