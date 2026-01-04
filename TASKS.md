@@ -670,9 +670,6 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **Pointer Thunking:** Convert 16-bit pointers to kernel linear addresses using LDT base.
     - [ ] **Linux:**
         - [x] ELF Loader personality detection (brandelf support).
-        - [ ] **Binary Format Support:**
-            - [ ] **Legacy a.out:** Implement `binfmt_aout` for OMAGIC/QMAGIC/ZMAGIC Linux binaries.
-            - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic.
         - [ ] **Syscalls:**
             - [ ] Improve `sys_clone` compatibility (flags).
             - [ ] `socketcall` (multiplexed networking).
@@ -723,6 +720,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] Define Subsystem ID for TestUnix (e.g., in `sys/pe.h`).
                 - [ ] **Native Syscalls:** Thunks for syscall instruction directly in PE text.
                 - [ ] **Relocations:** Full `.reloc` processing (Base Relocations) for ASLR/PIC.
+        - [ ] **a.out Loader (Legacy/Multi-OS):**
+            - [ ] **Legacy a.out:** Implement `binfmt_aout` for OMAGIC/QMAGIC/ZMAGIC binaries.
+            - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic.
+            - [ ] **SunOS 4.0.x (Sun386i):** Support Sun386i `a.out` format and personality.
         - [ ] **Personality / Migration:**
             - [ ] **Syscall Translation:** Remap foreign syscall numbers to native.
             - [ ] **Errno Translation:** Remap error codes.
