@@ -1,0 +1,84 @@
+KMAIN START
+Serial Debug Enabled.
+testunix kernel v0.1.0 (i386)
+BIOS-e820 physical RAM map:
+ [0x0000000000000000 - 0x000000000009fbff] usable
+ [0x000000000009fc00 - 0x000000000009ffff] reserved
+ [0x00000000000f0000 - 0x00000000000fffff] reserved
+ [0x0000000000100000 - 0x0000000007fdffff] usable
+ [0x0000000007fe0000 - 0x0000000007ffffff] reserved
+ [0x00000000fffc0000 - 0x00000000ffffffff] reserved
+Multiboot Modules found: 0
+PMM: Dynamic bitmap allocated. Page array allocated.
+127 MB RAM detected.
+PMM Initialized with Multiboot mmap.
+VM subsystem initialized.
+GDT Initialized.
+RTC: Hardware clock initialized
+PMAP: Bootstrapping...
+PMAP: PGE (Global Pages) enabled
+PMAP: Paging Enabled (Higher Half, 128MB mapped)
+Scheduler Initialized.
+PS/2: Initializing controller...
+PS/2: Dual Channel Detected.
+PS/2: Mouse Reset. ACK=fa Test=aa ID=0
+PS/2: Mouse Enabled.
+PS/2: Controller initialized.
+Input: Registered device: PS/2 Keyboard
+Keyboard Driver Initialized.
+testunix kernel v0.1.0 (i386)
+Boot Args: kernel.bin serial_debug root=/dev/storage/ide0 init=/bin/busybox
+Serial Debug Enabled.
+IDT Initialized.
+Scanning PCI Bus...
+PCI 00:00.0 8086:1237 [0600]
+PCI 00:01.0 8086:7000 [0601]
+PCI 00:02.0 1234:1111 [0300]
+PCI 00:03.0 8086:100e [0200]
+IDE Driver Initialized.
+Block device /dev/storage/ide0 registered
+  ide0: QEMU HARDDISK (Primary Master)
+VFS: Initializing...
+Initializing EXT2 Driver...
+Initializing exFAT Driver...
+Initializing Minix FS Driver...
+VFS: Ready.
+Mounting root from: /dev/storage/ide0
+EXT2: Mounted successfully
+Freeing setup memory: 0K
+Freeing Multiboot info: 4K
+Freeing Multiboot modules list: 4K
+Entering main loop...
+kinit: Starting init process...
+kinit: Trying default init paths...
+execve: File not found: /sbin/init
+execve: File not found: /etc/init
+execve: File not found: /bin/init
+ELF: Loading executable, entry=0x08048AE4
+ELF: Mapping segment at 0x08048000, size=000D4DC8
+ELF: Mapping segment at 0x0811DDC8, size=00006158
+ELF: Personality: Linux
+execve: Jumping to userspace, entry=0x08048AE4, sp=0xBFFFFFE0
+execve: Final check - entry=0x08048AE4, stack=0xBFFFFFE0
+
+EXCEPTION: Page Fault (in user process)
+EIP: 0x08065D2B  CS: 0x001B  ERR: 0x00000007
+EAX: 0x08124000  EBX: 0x08124000  ECX: 0x00000000  EDX: 0x08124000
+ESI: 0x00000000  EDI: 0x00000001  EBP: 0x00000010  ESP: 0xC014E884
+Killing user process.
+
+=== PROCESS TABLE DUMP (Ctrl+F9) ===
+Current Thread: TID=2
+Current Process: PID=1 (sh)
+
+   TID |   PID | STATE    | NAME             | PERSO   | WAIT REASON
+-------|-------|----------|------------------|---------|------------
+     1 |     1 | READY    | sh               | Linux   | 
+     2 |     1 | RUNNING  | sh               | Linux   | 
+=== END PROCESS DUMP ===
+
+
+*** KERNEL PANIC ***
+Reason: init died - no recovery possible
+
+System Halted.

@@ -113,6 +113,12 @@ uint32_t elf_load(fs_node_t *file) {
             page_map_t page_maps[256]; // Max 256 pages per segment (1MB)
             int num_pages = 0;
             
+            // Determine permissions from ELF segment flags
+            int prot = 0;
+            if (phdr.p_flags & 0x4) prot |= VM_PROT_READ;    // PF_R
+            if (phdr.p_flags & 0x2) prot |= VM_PROT_WRITE;   // PF_W
+            if (phdr.p_flags & 0x1) prot |= VM_PROT_EXEC;    // PF_X
+            
             for (uint32_t va = va_start; va < va_end; va += 0x1000) {
                 // Allocate physical page
                 void *pa = pmm_alloc_block();
@@ -121,9 +127,8 @@ uint32_t elf_load(fs_node_t *file) {
                     return 0;
                 }
                 
-                // Map with user access and WRITE permission
-                // (program segments contain .text, .data, .bss - need write for data/bss)
-                if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, VM_PROT_WRITE, 0) < 0) {
+                // Map with permissions from segment header
+                if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, prot, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
                     return 0;
                 }
