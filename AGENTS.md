@@ -22,9 +22,13 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Build System:** Root filesystem generation in `dist/`
 
 ## Current Status
-- **PMM Refactor:** Phase 2 in progress.
-    - O(1) Free List replaced by O(log N) Buddy Allocator.
+- **PMM Refactor:** Phase 2 complete.
+    - O(log N) Buddy Allocator with proper page coalescing.
     - Contiguous allocation optimized via Buddy system.
+    - Bootstrap Watermark Allocator implemented.
+    - Dynamic Metadata sizing (no 128MB limit) implemented.
+    - Low Memory safeguards active.
+    - Fixed double-free bugs and initialization issues.
     - Bootstrap Watermark Allocator implemented.
     - Dynamic Metadata sizing (no 128MB limit) implemented.
     - Low Memory safeguards active.
