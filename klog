@@ -68,7 +68,14 @@ ESI: 0x00000000  EDI: 0x00000001  EBP: 0x00000010  ESP: 0xC014E884
 Killing user process.
 
 === MEMORY SPACE DUMP (PID 1) ===
-Page Directory Entries:\n  PDE[  0] = 0x00000001 -> 0x00000000-003FFFFF (236 pages, RK)\n  PDE[133] = 0x00006873 -> 0x21400000-217FFFFF (42 pages, WK)\n  PDE[284] = 0xFFFFFFFF -> 0x47000000-473FFFFF (13 pages, WUG)\n  PDE[568] = 0xFFFFFFFF -> 0x8E000000-8E3FFFFF (13 pages, WUG)\n  PDE[852] = 0xFFFFFFFF -> 0xD5000000-D53FFFFF (13 pages, WUG)\nTotal: 5 mapped page directories\n=== END MEMORY DUMP ===
+Page Directory Entries:
+  PDE[  0] = 0x00000001 -> 0x00000000-0x003FFFFF (237 pages, RK)
+  PDE[133] = 0x00006873 -> 0x21400000-0x217FFFFF (42 pages, WK)
+  PDE[284] = 0xFFFFFFFF -> 0x47000000-0x473FFFFF (13 pages, WUG)
+  PDE[568] = 0xFFFFFFFF -> 0x8E000000-0x8E3FFFFF (13 pages, WUG)
+  PDE[852] = 0xFFFFFFFF -> 0xD5000000-0xD53FFFFF (13 pages, WUG)
+Total: 5 mapped page directories
+=== END MEMORY DUMP ===
 
 
 === PROCESS TABLE DUMP (Ctrl+F9) ===
