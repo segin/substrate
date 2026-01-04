@@ -28,7 +28,10 @@ int elf_check_file(Elf32_Ehdr *hdr) {
 
 // Load ELF from file node and prepare for execution
 // Returns entry point address on success, 0 on failure
-uint32_t elf_load(fs_node_t *file) {
+uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32_t *interp_len) {
+
+    if (interp_len) *interp_len = 0;
+
     if (!file || !file->read) {
         kprint("ELF: No file or read function\n");
         return 0;
@@ -46,8 +49,8 @@ uint32_t elf_load(fs_node_t *file) {
         return 0;
     }
     
-    if (ehdr.e_type != 2) { // ET_EXEC
-        kprint("ELF: Not an executable\n");
+    if (ehdr.e_type != 2 && ehdr.e_type != 3) { // ET_EXEC or ET_DYN
+        kprint("ELF: Not an executable or shared object\n");
         return 0;
     }
     
@@ -59,7 +62,9 @@ uint32_t elf_load(fs_node_t *file) {
     kprint("ELF: Loading executable, entry=0x");
     // Print entry point in hex (simple)
     char hexbuf[16];
-    uint32_t val = ehdr.e_entry;
+    uint32_t entry = ehdr.e_entry + load_base;
+    uint32_t val = entry;
+
     for (int i = 7; i >= 0; i--) {
         int nib = (val >> (i * 4)) & 0xF;
         hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
@@ -87,6 +92,16 @@ uint32_t elf_load(fs_node_t *file) {
             return 0;
         }
         
+        if (phdr.p_type == PT_INTERP) {
+            if (interp_path && interp_len && phdr.p_filesz > 0) {
+                uint32_t to_read = (phdr.p_filesz < *interp_len) ? phdr.p_filesz : (*interp_len - 1);
+                if (file->read(file, phdr.p_offset, to_read, (uint8_t *)interp_path) == to_read) {
+                    interp_path[to_read] = '\0';
+                    *interp_len = to_read;
+                }
+            }
+        }
+        
         if (phdr.p_type == PT_LOAD && phdr.p_memsz > 0) {
             kprint("ELF: Mapping segment at 0x");
             val = phdr.p_vaddr;
@@ -107,8 +122,10 @@ uint32_t elf_load(fs_node_t *file) {
             kprint("\n");
             
             // Calculate page-aligned start and end
-            uint32_t va_start = phdr.p_vaddr & 0xFFFFF000;
-            uint32_t va_end = (phdr.p_vaddr + phdr.p_memsz + 0xFFF) & 0xFFFFF000;
+            uint32_t vaddr = phdr.p_vaddr + load_base;
+            uint32_t va_start = vaddr & 0xFFFFF000;
+            uint32_t va_end = (vaddr + phdr.p_memsz + 0xFFF) & 0xFFFFF000;
+
             
             // Allocate and map pages for this segment
             // Track PA for each VA so we can write to it via kernel mapping
@@ -170,7 +187,8 @@ uint32_t elf_load(fs_node_t *file) {
                 uint32_t bytes_copied = 0;
                 for (int pi = 0; pi < num_pages && bytes_copied < phdr.p_filesz; pi++) {
                     uint32_t page_va = page_maps[pi].va;
-                    uint32_t segment_va = phdr.p_vaddr;
+                    uint32_t segment_va = phdr.p_vaddr + load_base;
+
                     
                     // Does this page overlap with the segment?
                     uint32_t page_end = page_va + 0x1000;
@@ -227,11 +245,13 @@ uint32_t elf_load(fs_node_t *file) {
                 break;
         }
         
-        current_process->brk_start = max_vaddr;
-        current_process->brk = max_vaddr;
+        if (load_base == 0) {
+            current_process->brk_start = max_vaddr;
+            current_process->brk = max_vaddr;
+        }
     }
     
-    return ehdr.e_entry;
+    return entry;
 }
 
 // Execute a binary - loads ELF and prepares for userspace transition
@@ -273,12 +293,37 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     pmap_activate(new_pmap);
 
     // Load the ELF
-    uint32_t entry = elf_load(file);
+    char interp_path[256];
+    uint32_t interp_len = sizeof(interp_path);
+    uint32_t at_base = 0;
+    uint32_t entry = elf_load(file, 0, interp_path, &interp_len);
     if (entry == 0) {
         kprint("execve: Failed to load ELF\n");
-        // TODO: Switch back to old pmap? destroy new_pmap?
         return -1;
     }
+
+    if (interp_len > 0) {
+        kprint("execve: Loading interpreter: ");
+        kprint(interp_path);
+        kprint("\n");
+        
+        fs_node_t *interp_file = vfs_lookup(fs_root, interp_path);
+        if (!interp_file) {
+            kprint("execve: Interpreter not found\n");
+            return -1;
+        }
+        
+        uint32_t interp_base = 0x40000000;
+        uint32_t interp_entry = elf_load(interp_file, interp_base, NULL, NULL);
+        if (interp_entry == 0) {
+            kprint("execve: Failed to load interpreter\n");
+            return -1;
+        }
+        
+        at_base = interp_base;
+        entry = interp_entry;
+    }
+
     
     // Update process name
     if (current_process) {
@@ -465,7 +510,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     sp -= 4; STACK_WRITE32(sp, AT_FLAGS);
     
     // AT_BASE (Interpreter base, 0 for static)
-    sp -= 4; STACK_WRITE32(sp, 0);
+    sp -= 4; STACK_WRITE32(sp, at_base);
     sp -= 4; STACK_WRITE32(sp, AT_BASE);
 
     // Push 16 bytes of random data for AT_RANDOM

@@ -60,6 +60,31 @@ typedef struct {
 #define NT_GNU_GOLD_VERSION 4
 #define NT_GNU_PROPERTY_TYPE_0 5
 
+// Auxiliary Vector Types
+#define AT_NULL   0
+#define AT_IGNORE 1
+#define AT_EXECFD 2
+#define AT_PHDR   3
+#define AT_PHENT  4
+#define AT_PHNUM  5
+#define AT_PAGESZ 6
+#define AT_BASE   7
+#define AT_FLAGS  8
+#define AT_ENTRY  9
+#define AT_NOTELF 10
+#define AT_UID    11
+#define AT_EUID   12
+#define AT_GID    13
+#define AT_EGID   14
+#define AT_PLATFORM 15
+#define AT_HWCAP  16
+#define AT_CLKTCK 17
+#define AT_SECURE 23
+#define AT_RANDOM 25
+#define AT_EXECFN 31
+#define AT_SYSINFO 32
+#define AT_SYSINFO_EHDR 33
+
 typedef struct {
     uint32_t n_namesz;
     uint32_t n_descsz;
@@ -71,7 +96,7 @@ int elf_load_file(void *file, uint32_t size);
 
 // New ELF loading interface
 struct fs_node; // Forward declaration
-uint32_t elf_load(struct fs_node *file);
+uint32_t elf_load(struct fs_node *file, uint32_t load_base, char *interp_path, uint32_t *interp_len);
 int elf_execve(const char *path, char *const argv[], char *const envp[]);
 
 #endif
