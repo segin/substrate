@@ -19,11 +19,6 @@ static uint32_t kernel_page_tables[33][1024];
 #define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
 #define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
 
-struct pmap {
-    uint32_t *pdir; // Virtual pointer (if mapped) or Physical?
-    uint32_t pdir_phys;
-    int ref_count;  // Reference count for pmap
-};
 
 static struct pmap kernel_pmap_store;
 static pmap_t kernel_pmap_ptr = &kernel_pmap_store;
@@ -130,10 +125,18 @@ pmap_t pmap_kernel(void) {
 }
 
 pmap_t pmap_create(void) {
-    // 1. Allocate page directory from PMM
+    // 1. Allocate page for struct pmap
+    // We waste a whole page for a tiny struct, but we don't have kmalloc yet
+    void *pmap_mem = pmm_alloc_block();
+    if (!pmap_mem) return 0;
+    
+    // Convert to Kernel Virtual Address
+    pmap_t pmap = (pmap_t)((uintptr_t)pmap_mem + 0xC0000000);
+    
+    // 2. Allocate Page Directory
     void *pd_mem = pmm_alloc_block();
     if (!pd_mem) {
-        // Out of memory
+        pmm_free_block(pmap_mem);
         return 0;
     }
     
@@ -141,27 +144,17 @@ pmap_t pmap_create(void) {
     
     // Edge case: Validate physical address alignment
     if (pd_phys & 0xFFF) {
-        // PMM returned unaligned block - this should never happen
         pmm_free_block(pd_mem);
+        pmm_free_block(pmap_mem);
         return 0;
     }
     
-    // Edge case: Check for physical address overflow (>4GB on 32-bit)
-    if (pd_phys == 0) {
-        // Address is NULL or wrapped around
-        pmm_free_block(pd_mem);
-        return 0;
-    }
-    
-    // 2. Map to virtual address for setup (physical + KERNEL_VIRT_BASE)
-    uint32_t *pd = (uint32_t *)(pd_phys + 0xC0000000);
-    
-    // Edge case: Verify we can access kernel page directory
-    uint32_t *kernel_pd = (uint32_t *)0xFFFFF000;  // Recursive mapping
-    if (!kernel_pd) {
-        pmm_free_block(pd_mem);
-        return 0;
-    }
+    // Setup struct
+    pmap->pdir_phys = pd_phys;
+    pmap->pdir = (uint32_t *)(pd_phys + 0xC0000000); // Linear map
+    pmap->ref_count = 1;
+
+    uint32_t *pd = pmap->pdir;
     
     // 3. Zero out page directory
     for (int i = 0; i < 1024; i++) {
@@ -170,18 +163,22 @@ pmap_t pmap_create(void) {
     
     // 4. Copy kernel mappings (upper 256 entries: 0xC0000000-0xFFFFFFFF)
     //    User processes need kernel mappings for syscalls/interrupts
-    for (int i = 768; i < 1023; i++) {  // Copy entries 768-1022
-        // Edge case: Validate kernel PDE before copying
+    uint32_t *kernel_pd = (uint32_t *)0xFFFFF000; // Recursive map of CURRENT PD (which is kernel) - wait, this assumes we are running on kernel PD or creating from it? 
+    // Wait, 0xFFFFF000 is recursive map of CURRENT CR3.
+    // If we are in pmap_create, we are likely called by execve.
+    // execve is running in OLD process context.
+    // OLD process MUST have kernel mappings. So copying from 0xFFFFF000 is safe.
+
+    for (int i = 768; i < 1023; i++) {
         if (kernel_pd[i] & PTE_P) {
-            pd[i] = kernel_pd[i];
+             pd[i] = kernel_pd[i];
         }
     }
     
     // 5. Set up recursive mapping at entry 1023
     pd[1023] = pd_phys | PTE_P | PTE_W;
     
-    // 6. Return physical address (pmap_t is physical pointer)
-    return (pmap_t)pd_phys;
+    return pmap;
 }
 
 void pmap_destroy(pmap_t pmap) {

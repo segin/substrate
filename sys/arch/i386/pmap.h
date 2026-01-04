@@ -16,7 +16,15 @@
 #define PTE_G           0x100   // Global
 
 // Abstract PMAP handle (opaque pointer to Page Directory)
+// Abstract PMAP handle
 typedef struct pmap *pmap_t;
+
+struct pmap {
+    uint32_t *pdir;      // Virtual pointer to PD
+    uint32_t pdir_phys;  // Physical address of PD
+    int ref_count;       // Reference count
+    // uint32_t lock;    // Potential future lock
+};
 
 // Hardcoded Kernel Page Directory Virtual Address (Recursive Mapping)
 // We'll use the last entry (1023) to point to itself.
