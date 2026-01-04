@@ -16,10 +16,19 @@ void pmap_dump(void *proc_ptr) {
         return;
     }
     
-    // proc->pmap is a PHYSICAL address
-    uintptr_t pmap_phys = (uintptr_t)proc->pmap;
-    // Map to kernel virtual address (linear map)
-    uint32_t *pd = (uint32_t *)(pmap_phys + 0xC0000000);
+    // proc->pmap is a VIRTUAL pointer to struct pmap
+    pmap_t pmap = proc->pmap;
+    uint32_t *pd = pmap->pdir;
+    
+    if (!pd) {
+         kprint("pmap_dump: pmap->pdir is NULL\n");
+         // Try phys fallback? 
+         if (pmap->pdir_phys) {
+             pd = (uint32_t *)((uintptr_t)pmap->pdir_phys + 0xC0000000);
+         } else {
+             return;
+         }
+    }
     
     char buf[128];
     int mapped_count = 0;
