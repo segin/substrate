@@ -377,6 +377,13 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     
     // Build argv array
     sp -= 4; STACK_WRITE32(sp, 0);           // argv[1] = NULL (terminator)
+    // Push envp terminator (NULL)
+    sp -= 4; STACK_WRITE32(sp, 0);
+
+    // Push argv terminator (NULL)
+    sp -= 4; STACK_WRITE32(sp, 0);
+
+    // Push argv[0]
     sp -= 4; STACK_WRITE32(sp, argv0_ptr);   // argv[0] = pointer to string
     
     // Push argc
