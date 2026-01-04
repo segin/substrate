@@ -121,8 +121,9 @@ uint32_t elf_load(fs_node_t *file) {
                     return 0;
                 }
                 
-                // Map with user access (PTE_U set in pmap_enter)
-                if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, 0, 0) < 0) {
+                // Map with user access and WRITE permission
+                // (program segments contain .text, .data, .bss - need write for data/bss)
+                if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, VM_PROT_WRITE, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
                     return 0;
                 }
