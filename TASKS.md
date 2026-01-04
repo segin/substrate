@@ -68,11 +68,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] `vm_stat.reactivations`: Pages moved back to active
                     - [x] `/proc/vmstat` or sysctl interface for userspace
         - [/] **PMAP Layer (Machine Dependent - i386):**
-            - [ ] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
+            - [x] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
                 - [x] Initialize kernel page directory from static bootstrap
-                - [ ] Set up recursive mapping at PD entry 1023 (0xFFC00000)
-                - [ ] Map kernel space (0xC0000000+) with global flag if available
-                - [ ] Initialize pmap lock for SMP safety
+                - [x] Set up recursive mapping at PD entry 1023 (0xFFC00000)
+                - [x] Map kernel space (0xC0000000+) with global flag if available
+                - [x] Initialize pmap lock for SMP safety
             - [ ] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
                 - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: Insert/update PTE
                 - [ ] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB
