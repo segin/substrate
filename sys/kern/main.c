@@ -74,7 +74,7 @@ int strncmp(const char *s1, const char *s2, size_t n) {
 // kinit - kernel init task (becomes PID 1 after exec)
 // This is forked from kernel task 0 and execs the init binary
 void kinit_task(void *arg) {
-    char *cmdline = (char*)arg;
+    (void)arg;  // Unused now that we use cmdline_get
     char *init_path = NULL;
     
     kprint("kinit: Starting init process...\n");
@@ -82,23 +82,10 @@ void kinit_task(void *arg) {
     // Attach stdin/stdout/stderr to console directly
     console_attach_std_fds(current_process);
 
-    // Parse cmdline for init=
-    if (cmdline) {
-        char *p = cmdline;
-        while (*p) {
-            if (strncmp(p, "init=", 5) == 0) {
-                init_path = p + 5;
-                char *end = init_path;
-                while (*end && *end != ' ') end++;
-                *end = 0;
-                break;
-            }
-            p++;
-        }
-    }
-
-    // Try to exec init
-    if (init_path) {
+    // Parse cmdline for init= using proper cmdline API
+    char init_buf[256];
+    if (cmdline_get("init", init_buf, sizeof(init_buf)) == 0) {
+        init_path = init_buf;
         kprint("kinit: Trying ");
         kprint(init_path);
         kprint("\n");

@@ -68,13 +68,7 @@ ESI: 0x00000000  EDI: 0x00000001  EBP: 0x00000010  ESP: 0xC014E884
 Killing user process.
 
 === MEMORY SPACE DUMP (PID 1) ===
-Page Directory Entries:
-  PDE[  0] = 0x00000001 -> 0x00000000-0x003FFFFF (237 pages, RK)
-  PDE[133] = 0x00006873 -> 0x21400000-0x217FFFFF (42 pages, WK)
-  PDE[284] = 0xFFFFFFFF -> 0x47000000-0x473FFFFF (13 pages, WUG)
-  PDE[568] = 0xFFFFFFFF -> 0x8E000000-0x8E3FFFFF (13 pages, WUG)
-  PDE[852] = 0xFFFFFFFF -> 0xD5000000-0xD53FFFFF (13 pages, WUG)
-Total: 5 mapped page directories
+pmap_dump: Could not locate pmap in process struct
 === END MEMORY DUMP ===
 
 
