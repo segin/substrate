@@ -818,8 +818,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 - [x] Fix `init=` command line parsing <!-- id: 5 -->
 - [x] Fix `run_kernel_tests` linker error in EFI build <!-- id: 6 -->
 - [x] Add `syscall_log` kernel parameter for debugging <!-- id: 7 -->
-- [/] Investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 -->
-- [/] Investigate Page Fault at `0x08065d2b` (accessing `0x08124000`) <!-- id: 9 -->
+- [x] Investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 -->
+- [x] Investigate Page Fault at `0x08065d2b` (accessing `0x08124000`) <!-- id: 9 -->
 - [ ] **Editors:**
     - [ ] **`vi` Clone:**
         - [ ] Command mode parser.
