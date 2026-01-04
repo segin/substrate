@@ -80,15 +80,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] `pmap_kremove(va)`: Kernel-only removal
                 - [x] Allocate page tables on demand when PDE is empty
                 - [x] Handle PG_U (user), PG_W (write), PG_G (global) flags
-            - [ ] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading).
-                - [ ] Load pmap->pdir_phys into CR3
-                - [ ] Handle lazy FPU state switching
-                - [ ] Maintain `curpmap` pointer
-            - [ ] **Refactor:** **Recursive Paging:** Efficient Page Table mapping.
-                - [ ] Reserve PDE 1023 for self-referencing
-                - [ ] V_PD macro: Access current PD at 0xFFFFF000
-                - [ ] V_PT(n) macro: Access PT n at 0xFFC00000 + n*4096
-                - [ ] Use recursive mapping for PTE manipulation
+            - [x] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading).
+                - [x] Load pmap->pdir_phys into CR3
+                - [x] Handle lazy FPU state switching
+                - [x] Maintain `curpmap` pointer
+            - [x] **Refactor:** **Recursive Paging:** Efficient Page Table mapping.
+                - [x] Reserve PDE 1023 for self-referencing
+                - [x] V_PD macro: Access current PD at 0xFFFFF000
+                - [x] V_PT(n) macro: Access PT n at 0xFFC00000 + n*4096
+                - [x] Use recursive mapping for PTE manipulation
             - [x] **Higher Half Transition:** Stable 3GB/1GB split with LMA=1M/VMA=C0000000.
             - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management
                 - [ ] `pmap_create()`: Allocate new page directory, copy kernel mappings
