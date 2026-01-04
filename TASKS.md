@@ -588,7 +588,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [ ] `sem_t` structure.
 
     - [x] Implement `sys_time` and RTC reading.
-    - [x] **Emulation Path Lookup:** Check `/emul/<perso>/` before root for foreign personalities.
+    - [x] **Emulation Path Lookup:** Check `/perso/<perso>/` before root for foreign personalities.
     - [ ] **Debugging & Tracing:**
         - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace).
         - [ ] **Serial Console:** Interactive GDB stub over UART.
@@ -651,11 +651,23 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **Memory Model:**
                 - [ ] 286: Large/Small memory model emulation (LDT switching).
                 - [ ] 386: Near/Far pointer handling.
-    - [ ] **ELKS (Embeddable Linux Kernel Subset):**
+    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
         - [ ] **Execution Strategy:**
-            - [ ] **LDT (16-bit Protected Mode):** Primary execution model (Run 8086 code in Prot16).
-        - [ ] **Loader:** Parse ELKS `a.out` / binary headers.
-        - [ ] **Syscalls:** Implement `int 0x80` handling 16-bit stack frames.
+            - [ ] **LDT Management:** Allocate a Local Descriptor Table (LDT) for each ELKS process.
+            - [ ] **Segmentation:**
+                - [ ] **CS (Code Segment):** Create 16-bit code segment descriptor in LDT.
+                - [ ] **DS/SS (Data/Stack):** Create 16-bit data segment descriptor in LDT.
+                - [ ] **Joint I&D:** Support CS base == DS base for `a.out` binaries.
+                - [ ] **Split I&D:** Support distinct bases for CS and DS (if header specifies).
+            - [ ] **Address Translation:** Map 16-bit segmented addresses (Seg:Off) to 32-bit linear address space.
+        - [ ] **Loader:**
+            - [ ] **Header Parsing:** Parse Minix-style `a.out` headers used by ELKS.
+            - [ ] **Relocations:** Handle 16-bit relocations if applicable (usually position-independent or fixed load).
+            - [ ] **Variable Stack:** Setup 16-bit stack frame.
+        - [ ] **Syscalls (`int 0x80`):**
+            - [ ] **Trap Handling:** Detect `int 0x80` from 16-bit CS.
+            - [ ] **Stack Frame:** Decode 16-bit stack frame (`SS:SP` at high addresses of segment).
+            - [ ] **Pointer Thunking:** Convert 16-bit pointers to kernel linear addresses using LDT base.
     - [ ] **Linux:**
         - [x] ELF Loader personality detection (brandelf support).
         - [ ] Improve `sys_clone` compatibility (flags).
