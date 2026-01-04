@@ -73,13 +73,13 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Set up recursive mapping at PD entry 1023 (0xFFC00000)
                 - [x] Map kernel space (0xC0000000+) with global flag if available
                 - [x] Initialize pmap lock for SMP safety
-            - [ ] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
-                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: Insert/update PTE
-                - [ ] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB
-                - [ ] `pmap_kenter(va, pa)`: Kernel-only fast path (no locking)
-                - [ ] `pmap_kremove(va)`: Kernel-only removal
-                - [ ] Allocate page tables on demand when PDE is empty
-                - [ ] Handle PG_U (user), PG_W (write), PG_G (global) flags
+            - [x] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
+                - [x] `pmap_enter(pmap, va, pa, prot, flags)`: Insert/update PTE
+                - [x] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB
+                - [x] `pmap_kenter(va, pa)`: Kernel-only fast path (no locking)
+                - [x] `pmap_kremove(va)`: Kernel-only removal
+                - [x] Allocate page tables on demand when PDE is empty
+                - [x] Handle PG_U (user), PG_W (write), PG_G (global) flags
             - [ ] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading).
                 - [ ] Load pmap->pdir_phys into CR3
                 - [ ] Handle lazy FPU state switching
