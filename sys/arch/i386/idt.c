@@ -214,9 +214,19 @@ void isr_handler(registers_t *regs) {
         
         if (is_usermode) {
             // User-mode crash - kill the process
-            kprint("Killing user process.\n");
+            kprint("Killing user process.\n\n");
             if (current_process && current_process->pid == 1) {
                 extern void debug_dump_processes(void);
+                extern void pmap_dump(void *proc_ptr);
+                extern int cmdline_has_arg(const char *arg);
+                
+                // Dump memory if procmem argument present
+                if (cmdline_has_arg("procmem")) {
+                    kprint("=== MEMORY SPACE DUMP (PID 1) ===\n");
+                    pmap_dump(current_process);
+                    kprint("=== END MEMORY DUMP ===\n\n");
+                }
+                
                 debug_dump_processes();
                 panic("init died - no recovery possible");
             }
