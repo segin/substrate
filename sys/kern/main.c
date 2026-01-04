@@ -1,4 +1,10 @@
 #include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+#include <stddef.h>
+#include <sys/proc.h>
+#include <sys/input.h>
+
 #include "../drivers/video/vga.h"
 #include "../drivers/video/fb.h"
 #include "../drivers/serial/uart.h"
@@ -8,6 +14,9 @@
 #include "../drivers/storage/ide/ide.h"
 #include "../drivers/storage/ahci/ahci.h"
 #include "../drivers/storage/nvme/nvme.h"
+#include "../drivers/virtio/virtio.h"
+#include "../drivers/storage/ramdisk.h"
+
 #include "../arch/i386/idt.h"
 #include "../arch/i386/gdt.h"
 #include "../arch/i386/pmm.h"
@@ -17,16 +26,21 @@
 #include "../arch/i386/fpu/fpu_emu.h"
 #include "../arch/i386/rtc.h"
 #include "../arch/i386/multiboot.h"
-#include <sys/proc.h>
+
 #include "../pm/pm.h"
-#include <string.h>
-#include <stdio.h>
-#include <stddef.h>
+#include "../vfs/vfs.h"
+#include "../fs/exec/elf.h"
+#include "../fs/procfs.h"
+#include "../fs/sysfs.h"
+#include "../fs/pseudofs.h"
+#include "../fs/fuse.h"
+#include "../fs/9p.h"
+
+#include "../tests/tests.h"
+
 #include "console.h"
 #include "cmdline.h"
 #include "sched.h"
-#include <sys/input.h>
-#include "../vfs/vfs.h"
 #include "version.h"
 #include "panic.h"
 
@@ -63,15 +77,8 @@ void kinit_task(void *arg) {
     char *cmdline = (char*)arg;
     char *init_path = NULL;
     
-    // Import elf_execve
-    extern int elf_execve(const char *path, char *const argv[], char *const envp[]);
-
     kprint("kinit: Starting init process...\n");
 
-    // Import console attachment function
-    extern void console_attach_std_fds(struct process *proc);
-    extern struct process *current_process;
-    
     // Attach stdin/stdout/stderr to console directly
     console_attach_std_fds(current_process);
 
@@ -123,16 +130,6 @@ void init_task(void *arg) {
     kinit_task(arg);
 }
 
-extern void pseudo_init(void);
-extern void procfs_init(void);
-extern void sysfs_init(void);
-extern void fuse_init(void);
-extern void fuse_fs_init(void);
-extern void p9_init(void);
-extern void input_init(void);
-
-extern void pm_init(void);
-
 static void early_uart_putc(char c) {
     uint16_t port = 0x3F8;
     // Wait for transmit buffer empty
@@ -163,9 +160,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     early_uart_print("KMAIN START\n");
     mboot_orig_addr = addr;
     // 0. Setup Kernel Task IMMEDIATELY
-    extern process_t processes[];
-    extern process_t *current_process;
-    extern void pm_init(void);
     pm_init();
     current_process = &processes[0];
     current_process->pid = 0;
@@ -232,7 +226,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     uint32_t mmap_length = 0;
     
     // Parse Multiboot Modules (Initrd)
-    // Parse Multiboot Modules (Initrd)
     if (mboot_info && (mboot_info->flags & (1<<3))) {
         uint32_t mods_count = mboot_info->mods_count;
         uint32_t mods_addr_phys = mboot_info->mods_addr;
@@ -252,7 +245,6 @@ void kmain(unsigned long magic, unsigned long addr) {
                 uint32_t pad;
             } *mod = (struct multiboot_mod_list *)(uintptr_t)mods_addr_virt;
             
-            extern void ramdisk_init(void *addr, size_t size);
             ramdisk_init(VIRTUAL_d(mod->mod_start), mod->mod_end - mod->mod_start);
         }
     }
@@ -260,6 +252,14 @@ void kmain(unsigned long magic, unsigned long addr) {
     if (mboot_info && (mboot_info->flags & (1<<6))) {
         mmap_addr = (uintptr_t)VIRTUAL_d(mboot_info->mmap_addr);
         mmap_length = mboot_info->mmap_length;
+        
+        // Copy mmap
+        uint32_t count = mmap_length / sizeof(multiboot_mmap_entry_t);
+        if (count > 64) count = 64;
+        memcpy(mboot_mmap_copy, (void*)(uintptr_t)mmap_addr, count * sizeof(multiboot_mmap_entry_t));
+        mboot_copy.mmap_addr = PHYSICAL_d(mboot_mmap_copy);
+        mboot_copy.mmap_length = count * sizeof(multiboot_mmap_entry_t);
+        mboot_copy.flags |= (1<<6);
     }
 
     // Initialize PMM
@@ -373,18 +373,15 @@ void kmain(unsigned long magic, unsigned long addr) {
     // 4. Hardware Discovery - PCI Bus Scan, Storage Controllers
     pci_init();
     ide_init();
-    extern void virtio_init(void);
     virtio_init();
     
     // Run Kernel Tests (if requested via cmdline 'test=...')
-    extern void run_kernel_tests(void);
     run_kernel_tests();
     
     // Initialize VFS (handles filesystem registration and pseudo-fs mounts)
     vfs_init();
     
     // Register console device in /dev
-    extern void console_register_devfs(void);
     console_register_devfs();
     
     // Check for Root Filesystem
@@ -434,11 +431,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Create Init Task
     // We pass cmdline to it
     static char dummy_stack[4096];
-    extern process_t processes[]; // Accessible from sched.c
     sched_create_thread(&processes[0], init_task, dummy_stack + 4096, cmdline);
 
     // Reclaim early boot code
-    extern void pmm_reclaim_setup(void);
     pmm_reclaim_setup();
     
     // Reclaim original multiboot info (1 page)
@@ -457,7 +452,6 @@ void kmain(unsigned long magic, unsigned long addr) {
         }
         
         kprint("Freeing Multiboot info: 4K\n");
-        extern void pmm_reclaim_range(uint32_t start, uint32_t end);
         pmm_reclaim_range(mboot_orig_addr, mboot_orig_addr + 4096);
     }
     

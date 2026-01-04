@@ -106,5 +106,6 @@ typedef struct thread {
 // Globals
 extern thread_t *current_thread;
 extern process_t *current_process;
+extern process_t processes[];
 
 #endif

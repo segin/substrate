@@ -41,4 +41,7 @@ struct process;
 // Attach console to a process's FDs 0, 1, 2
 void console_attach_std_fds(struct process *proc);
 
+// Register /dev/console
+void console_register_devfs(void);
+
 #endif
