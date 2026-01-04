@@ -11,9 +11,13 @@
 __attribute__((aligned(4096)))
 static uint32_t kernel_page_directory[1024];
 
-// Static page tables for bootstrap (128MB = 32 tables)
+// Static page tables for bootstrap (128MB = 32 tables + 1 for HW)
 __attribute__((aligned(4096)))
-static uint32_t kernel_page_tables[32][1024];
+static uint32_t kernel_page_tables[33][1024];
+
+// Recursive Paging Helpers
+#define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
+#define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
 
 struct pmap {
     uint32_t *pdir; // Virtual pointer (if mapped) or Physical?
@@ -88,6 +92,24 @@ void pmap_bootstrap(void) {
     
     // Recursive Mapping: Last entry points to PD itself
     kernel_page_directory[1023] = V2P(kernel_page_directory) | PTE_P | PTE_W;
+
+    // Map Hardware: Identity-map LAPIC (0xFEE00000)
+    // LAPIC is at PD index 1019
+    {
+        uint32_t *pt_virt = kernel_page_tables[32];
+        uint32_t pt_phys = V2P(pt_virt);
+        
+        // Zero the HW page table
+        for (int i = 0; i < 1024; i++) pt_virt[i] = 0;
+
+        // Map the LAPIC page specifically
+        uint32_t lapic_pa = 0xFEE00000;
+        uint32_t lapic_pti = PT_INDEX(lapic_pa);
+        pt_virt[lapic_pti] = lapic_pa | PTE_P | PTE_W | PTE_G;
+
+        // Map the page table into the directory
+        kernel_page_directory[PD_INDEX(lapic_pa)] = pt_phys | PTE_P | PTE_W;
+    }
 
     // Setup abstract handle
     kernel_pmap_store.pdir = kernel_page_directory;
@@ -241,10 +263,6 @@ void pmap_activate(pmap_t pmap) {
         __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pdir_phys));
     }
 }
-
-// Recursive Paging Helpers
-#define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
-#define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
 
 // Access to PD and PTs via recursive mapping
 #define V_PD  ((uint32_t *)0xFFFFF000)

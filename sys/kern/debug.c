@@ -30,8 +30,8 @@ void debug_dump_processes(void) {
         kprint(buf);
     }
     
-    kprint("\n TID | PID | STATE    | NAME             | PERSO   | WAIT REASON\n");
-    kprint("-----|-----|----------|------------------|---------|------------\n");
+    kprint("\n   TID |   PID | STATE    | NAME             | PERSO   | WAIT REASON\n");
+    kprint("-------|-------|----------|------------------|---------|------------\n");
     
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid == -1) continue;
@@ -52,7 +52,7 @@ void debug_dump_processes(void) {
         
         const char *reason = t->wait_reason ? t->wait_reason : "";
 
-        sprintf(buf, " %3d | %3d | %-8.8s | %-16.16s | %-7.7s | %s\n",
+        sprintf(buf, " %5d | %5d | %-8.8s | %-16.16s | %-7.7s | %s\n",
                 t->tid, pid, state, name, pers, reason);
         kprint(buf);
     }

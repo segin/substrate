@@ -717,7 +717,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
         - [ ] **User:** `lib/c` implementation.
         - [ ] **Flags:**
-            - [ ] `-` (Left-align within field width).
+            - [x] `-` (Left-align within field width).
             - [ ] `+` (Force sign for positive numbers).
             - [ ] ` ` (Space prefix for positive numbers).
             - [ ] `#` (Alternate form: 0x for hex, force decimal point).
@@ -725,9 +725,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Width & Precision:**
             - [ ] Numeric width (e.g., `%5d`).
             - [ ] Dynamic width `*` (from argument).
-            - [ ] Numeric precision (e.g., `%.5d`).
+            - [x] Numeric precision (e.g., `%.5d`) - strings only.
             - [ ] Dynamic precision `.*`(from argument).
-            - [ ] Combined width/precision (e.g., `%5.2f`).
+            - [x] Combined width/precision (e.g., `%5.2f`) - strings only.
             - [ ] Negative width logic (treat as `-` flag + positive width).
         - [ ] **Length Modifiers:**
             - [ ] `hh` (signed/unsigned char).
@@ -855,13 +855,24 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Add `uid, gid, euid, egid, suid, sgid` to Process structure.
         - [ ] Add supplementary group list to Process structure.
     - [ ] **System Calls:**
-        - [ ] `getuid`, `getgid`, `geteuid`, `getegid`.
-        - [ ] `setuid`, `setgid`, `seteuid`, `setegid`.
-        - [ ] `setreuid`, `setregid`.
-        - [ ] `getgroups`, `setgroups`.
+        - [ ] `getuid`
+        - [ ] `getgid`
+        - [ ] `geteuid`
+        - [ ] `getegid`
+        - [ ] `setuid`
+        - [ ] `setgid`
+        - [ ] `seteuid`
+        - [ ] `setegid`
+        - [ ] `setreuid`
+        - [ ] `setregid`
+        - [ ] `getgroups`
+        - [ ] `setgroups`
 - [ ] **Userland Identity Tools:**
     - [ ] **`id`:**
-        - [ ] Implement `-u`, `-g`, `-G`, `-n` flags.
+        - [ ] Implement `-u` (UID) flag.
+        - [ ] Implement `-g` (GID) flag.
+        - [ ] Implement `-G` (Groups) flag.
+        - [ ] Implement `-n` (Name) flag.
         - [ ] Ensure POSIX-compliant output format.
     - [ ] **`su`:** Enhance with user/group switching.
     - [ ] **`login`:** Integrate with user database.
@@ -929,17 +940,24 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 10. Hardware Support & Peripherals
 - [ ] **USB Subsystem:**
-            - [ ] **Controllers:**
-                - [ ] UHCI/OHCI (USB 1.1)
-                - [ ] EHCI (USB 2.0)
+    - [ ] **Host Controllers:**
+        - [ ] **UHCI (Universal Host Controller Interface):** Intel/VIA USB 1.1 support.
+        - [ ] **OHCI (Open Host Controller Interface):** Compaq/Microsoft USB 1.1 support.
+        - [ ] **EHCI (Enhanced Host Controller Interface):** USB 2.0 support.
+        - [ ] **xHCI (eXtensible Host Controller Interface):** USB 3.0+ support.
     
     - [ ] **Core Stack:**
-        - [ ] Enumeration
-        - [ ] URB (Request Block) processing
-        - [ ] Hub support
-    - [ ] **Drivers:**
-        - [ ] USB HID (Keyboard/Mouse)
-        - [ ] Mass Storage (Flash drives)
+        - [ ] Bus management and root hub enumeration.
+        - [ ] URB (USB Request Block) infrastructure.
+        - [ ] Pipe management (Control, Bulk, Interrupt, Isochronous).
+        - [ ] Device descriptor parsing and configuration management.
+        - [ ] Hub support and port status monitoring.
+    
+    - [ ] **Class Drivers:**
+        - [ ] **HID (Human Interface Device):** Support for USB keyboards and mice.
+        - [ ] **Mass Storage (UMSS/BOT):** Bulk-Only Transport for flash drives.
+        - [ ] **ACM (Abstract Control Model):** USB CDC serial ports.
+        - [ ] **Audio:** Support for USB audio output.
 - [ ] **Audio:**
         - [ ] **Native API (Sun AudioIO):**
             - [ ] Implement `/dev/audio` and `/dev/audioctl` character devices.

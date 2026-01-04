@@ -22,12 +22,13 @@ _start:
 	# Save Multiboot magic and info pointer
 	mov %eax, %ebp
 
-	# 1. Setup Page Table to map first 4MB to physical 0 (Identity)
-	# and also map to 3GB (Higher Half)
+	# 1. Setup Page Tables to map first 8MB
+	# Tables map physical 0..8MB to 0..8MB (Identity) and 3GB..3GB+8MB (Higher Half)
+	
+	# Table 1: 0..4MB
 	mov $(boot_page_table1 - 0xC0000000), %edi
 	mov $0, %esi
 	mov $1024, %ecx
-
 1:
 	mov %esi, %edx
 	shl $12, %edx
@@ -37,14 +38,37 @@ _start:
 	inc %esi
 	loop 1b
 
+	# Table 2: 4..8MB
+	mov $(boot_page_table2 - 0xC0000000), %edi
+	mov $1024, %esi # Start at page 1024 (4MB)
+	mov $1024, %ecx
+2:
+	mov %esi, %edx
+	shl $12, %edx
+	or $3, %edx  # Present + RW
+	mov %edx, (%edi)
+	add $4, %edi
+	inc %esi
+	loop 2b
+
 	# 2. Setup Page Directory
 	mov $(boot_page_directory - 0xC0000000), %edx
-	# Entry 0: PT1 (Identity)
+	
+	# Entry 0, 1: PT1, PT2 (Identity 0..8MB)
 	mov $(boot_page_table1 - 0xC0000000), %eax
 	or $3, %eax
 	mov %eax, (%edx)
-	# Entry 768: PT1 (Higher Half)
+	mov $(boot_page_table2 - 0xC0000000), %eax
+	or $3, %eax
+	mov %eax, 4(%edx)
+
+	# Entry 768, 769: PT1, PT2 (Higher Half 3GB..3GB+8MB)
+	mov $(boot_page_table1 - 0xC0000000), %eax
+	or $3, %eax
 	mov %eax, 3072(%edx)
+	mov $(boot_page_table2 - 0xC0000000), %eax
+	or $3, %eax
+	mov %eax, 3076(%edx)
 
 	# 3. Enable Paging
 	mov %edx, %cr3
@@ -94,6 +118,8 @@ higher_half:
 boot_page_directory:
 	.skip 4096
 boot_page_table1:
+	.skip 4096
+boot_page_table2:
 	.skip 4096
 .align 16
 stack_bottom:

@@ -38,6 +38,8 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
     - Recursive paging and global page support.
     - `pmap_protect` and `pmap_copy` with Copy-on-Write (COW).
     - `pmap_kenter`/`pmap_kremove` kernel fast paths.
+    - Identity-mapping for Local APIC (0xFEE00000) during bootstrap.
+    - Identity-mapping for Local APIC (0xFEE00000) during bootstrap.
 - VirtIO drivers (Block, 9P) linked and initialized
 - Ready for mmap() implementation
 

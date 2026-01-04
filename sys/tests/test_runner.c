@@ -5,6 +5,7 @@
 #include "../kern/console.h"
 #include "../kern/cmdline.h"
 #include <string.h>
+#include "tests.h"
 
 // Forward declarations of test suites
 void run_pmap_tests(void);
@@ -26,6 +27,7 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "pmap") == 0) {
         run_pmap_tests();
         run_pmap_protect_property_tests();
+        run_vm_expanded_tests();
     }
     
     if (all || strcmp(test_arg, "mmap") == 0) {

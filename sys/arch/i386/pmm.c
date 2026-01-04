@@ -57,8 +57,8 @@ void pmm_watermark_init(uint32_t phys_limit) {
     watermark_base = (p_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
     watermark_ptr = watermark_base;
     
-    // Default 1MB for early-boot structures, but clamped to physical RAM limit
-    watermark_end = watermark_base + (1024 * 1024);
+    // Default 4MB for early-boot structures, but clamped to physical RAM limit
+    watermark_end = watermark_base + (4 * 1024 * 1024);
     if (watermark_end > phys_limit) {
         watermark_end = phys_limit;
     }

@@ -110,13 +110,28 @@ int sprintf(char *str, const char *format, ...) {
         if (*f == '%') {
             f++;
             
-            // Parse width (e.g., %08X)
+            // Parse flags
+            int left_align = 0;
+            if (*f == '-') { left_align = 1; f++; }
+            
+            // Parse width (e.g., %08X or %16s)
             int width = 0;
             int pad_zero = 0;
-            if (*f == '0') { pad_zero = 1; f++; }
+            if (*f == '0' && !left_align) { pad_zero = 1; f++; }
             while (*f >= '0' && *f <= '9') {
                 width = width * 10 + (*f - '0');
                 f++;
+            }
+            
+            // Parse precision (e.g., %.16s or %5.2f)
+            int precision = -1;
+            if (*f == '.') {
+                f++;
+                precision = 0;
+                while (*f >= '0' && *f <= '9') {
+                    precision = precision * 10 + (*f - '0');
+                    f++;
+                }
             }
             (void)pad_zero; // Used implicitly in width
             
@@ -156,8 +171,28 @@ int sprintf(char *str, const char *format, ...) {
                 case 's': {
                     const char *val = __builtin_va_arg(ap, const char *);
                     if (!val) val = "(null)";
-                    strcpy(s, val);
-                    s += strlen(s);
+                    
+                    // Calculate string length (limited by precision if set)
+                    int len = 0;
+                    const char *p = val;
+                    while (*p && (precision == -1 || len < precision)) {
+                        len++;
+                        p++;
+                    }
+                    
+                    // Handle left-align vs right-align
+                    if (!left_align && width > len) {
+                        // Right-align: add padding before string
+                        for (int i = 0; i < width - len; i++) *s++ = ' ';
+                    }
+                    
+                    // Copy the string (up to precision)
+                    for (int i = 0; i < len; i++) *s++ = val[i];
+                    
+                    // Left-align: add padding after string
+                    if (left_align && width > len) {
+                        for (int i = 0; i < width - len; i++) *s++ = ' ';
+                    }
                     break;
                 }
                 case 'c': {

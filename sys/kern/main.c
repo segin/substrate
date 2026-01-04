@@ -320,7 +320,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize RTC and set system time
     rtc_init();
 
-    // Initialize PMAP (Paging) MUST HAPPEN BEFORE SCHEDULER/VFS
+    // Initialize PMAP (Paging) - maps LAPIC and sets up recursive paging
     pmap_bootstrap();
 
     // Initialize Scheduler BEFORE IDT (timer calls sched_yield!)

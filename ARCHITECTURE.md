@@ -31,6 +31,7 @@ The kernel is the core of the operating system, structured as follows:
             - **Copy-on-Write (COW):** `pmap_copy` implements fork() optimization by marking pages read-only and sharing physical frames until write fault.
             - **Global Pages:** Uses PGE (if available) for kernel mappings (0xC0000000+) to minimize TLB flushes on context switch.
             - **Fast Paths:** `pmap_kenter`/`pmap_kremove` for low-overhead kernel mappings without locking.
+            - **Hardware Mapping:** Identity-maps critical I/O regions like the Local APIC (0xFEE00000) during bootstrap to support safe early-boot spinlock operations once paging is enabled.
 - **`sys/drivers/`**: Hardware drivers.
     - **`video/`**: VGA text mode driver.
     - **`serial/`**: UART driver.
