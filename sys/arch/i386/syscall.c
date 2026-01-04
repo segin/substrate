@@ -352,6 +352,47 @@ void syscall_handler(registers_t *regs) {
     syscall_regs = regs;
     
     struct personality *p = current_process->pers;
+
+    uint32_t arg1, arg2, arg3, arg4, arg5, arg6;
+    int is_stack_abi = 0;
+
+    // Detect ABI (FreeBSD i386 uses stack passing)
+    if (p && p->name && (strcmp(p->name, "FreeBSD") == 0)) {
+        is_stack_abi = 1;
+        // FreeBSD args are on stack just above return address (ESP+4)
+        // We assume 32-bit pointers
+        uint32_t *user_stack = (uint32_t *)(uintptr_t)regs->useresp;
+        // Check for validity/mapping ideally, but for now strict debug
+        // Note: user_stack[0] is return address (usually)
+        arg1 = user_stack[1];
+        arg2 = user_stack[2];
+        arg3 = user_stack[3];
+        arg4 = user_stack[4];
+        arg5 = user_stack[5];
+        arg6 = user_stack[6];
+    } else {
+        // Default / Linux ABI (Registers)
+        arg1 = regs->ebx;
+        arg2 = regs->ecx;
+        arg3 = regs->edx;
+        arg4 = regs->esi;
+        arg5 = regs->edi;
+        arg6 = regs->ebp;
+    }
+
+    if (syscall_log_active) {
+        char buf[256];
+        if (is_stack_abi) {
+            sprintf(buf, "SYSCALL: %d (PID=%d, %s) STACK Args: %08X %08X %08X %08X %08X %08X\n", 
+                    (unsigned int)regs->eax, current_process->pid, p->name,
+                    arg1, arg2, arg3, arg4, arg5, arg6);
+        } else {
+            sprintf(buf, "SYSCALL: %d (PID=%d, %s) REGS: %08X %08X %08X %08X %08X %08X\n", 
+                    (unsigned int)regs->eax, current_process->pid, p->name,
+                    arg1, arg2, arg3, arg4, arg5, arg6);
+        }
+        kprint(buf);
+    }
     
     // Check if syscall number is out of range
     if (regs->eax >= p->syscall_count) {
@@ -369,9 +410,7 @@ void syscall_handler(registers_t *regs) {
     // Check if syscall handler is NULL (not implemented)
     if (!location) {
         if (syscall_log_active) {
-            char buf[64];
-            sprintf(buf, "SYSCALL: Not implemented #%u\n", (unsigned int)regs->eax);
-            kprint(buf);
+             // ...
         }
         regs->eax = -38; // ENOSYS
         return;
@@ -379,7 +418,9 @@ void syscall_handler(registers_t *regs) {
     
     typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
-    int64_t ret = func(regs->ebx, regs->ecx, regs->edx, regs->esi, regs->edi, regs->ebp);
+    
+    // Dispatch with the fetched arguments (ABI-agnostic dispatch)
+    int64_t ret = func(arg1, arg2, arg3, arg4, arg5, arg6);
     regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
     regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
 
