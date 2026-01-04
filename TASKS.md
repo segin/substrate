@@ -685,7 +685,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`.
                 - [ ] Populate `AT_ENTRY`, `AT_BASE` (interpreter base).
                 - [x] Populate `AT_EXECFN`, `AT_PLATFORM`.
-                - [ ] Populate `AT_RANDOM`, `AT_SECURE`.
+                - [x] Populate `AT_RANDOM`, `AT_SECURE`.
         - [ ] **Shebang Support (`binfmt_script`):**
             - [ ] Parse `#!` line.
             - [ ] Handle recursion depth limits (prevent loops).
