@@ -307,6 +307,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     extern void *pmm_alloc_block(void);
     
     // pmap is already active, so pmap_enter will use the correct page directory
+    pmap_t pmap = new_pmap;
     uint32_t user_stack_base = 0xBFFF0000;
     uint32_t user_stack_size = 16; // 64KB
     
