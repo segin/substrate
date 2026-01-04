@@ -69,19 +69,62 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] `/proc/vmstat` or sysctl interface for userspace
         - [/] **PMAP Layer (Machine Dependent - i386):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
+                - [ ] Initialize kernel page directory from static bootstrap
+                - [ ] Set up recursive mapping at PD entry 1023 (0xFFC00000)
+                - [ ] Map kernel space (0xC0000000+) with global flag if available
+                - [ ] Initialize pmap lock for SMP safety
             - [ ] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: Insert/update PTE
+                - [ ] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB
+                - [ ] `pmap_kenter(va, pa)`: Kernel-only fast path (no locking)
+                - [ ] `pmap_kremove(va)`: Kernel-only removal
+                - [ ] Allocate page tables on demand when PDE is empty
+                - [ ] Handle PG_U (user), PG_W (write), PG_G (global) flags
             - [ ] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading).
+                - [ ] Load pmap->pdir_phys into CR3
+                - [ ] Handle lazy FPU state switching
+                - [ ] Maintain `curpmap` pointer
             - [ ] **Refactor:** **Recursive Paging:** Efficient Page Table mapping.
+                - [ ] Reserve PDE 1023 for self-referencing
+                - [ ] V_PD macro: Access current PD at 0xFFFFF000
+                - [ ] V_PT(n) macro: Access PT n at 0xFFC00000 + n*4096
+                - [ ] Use recursive mapping for PTE manipulation
             - [x] **Higher Half Transition:** Stable 3GB/1GB split with LMA=1M/VMA=C0000000.
-            - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management (required for user processes)
+            - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management
+                - [ ] `pmap_create()`: Allocate new page directory, copy kernel mappings
+                - [ ] `pmap_destroy()`: Free all user PTEs and page directory
+                - [ ] `pmap_reference()`: Increment pmap reference count
+                - [ ] Clone kernel portion (768-1023) from kernel_pmap
+                - [ ] Track pmap in global list for TLB shootdown
             - [ ] `pmap_protect`: Change page protections
+                - [ ] Walk range and update PTE protection bits
+                - [ ] Handle R/W and NX bit changes
+                - [ ] Invalidate affected TLB entries
             - [ ] `pmap_copy`: Copy mappings between address spaces
-            - [ ] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits
-            - [ ] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits
+                - [ ] Copy PTE entries from src to dst pmap
+                - [ ] Set up COW if requested (clear write bit)
+                - [ ] Used for fork() optimization
+            - [x] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits
+            - [x] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits
             - [ ] Copy-on-write support
+                - [ ] Mark shared pages read-only in both parent and child
+                - [ ] On write fault: allocate new page, copy contents, remap R/W
+                - [ ] Track COW page reference counts
+                - [ ] `pmap_page_is_cow()`: Check if page is COW shared
             - [ ] TLB shootdown for SMP (invalidate remote CPU TLBs)
+                - [ ] IPI (Inter-Processor Interrupt) mechanism
+                - [ ] `pmap_shootdown_page(va)`: Invalidate single page on all CPUs
+                - [ ] `pmap_shootdown_range(va, len)`: Invalidate range
+                - [ ] `pmap_shootdown_all()`: Full TLB flush on all CPUs
             - [ ] Large page (4MB PSE) support
+                - [ ] Detect PSE via CPUID
+                - [ ] Use PDE with PS bit for 4MB mappings (kernel text/data)
+                - [ ] `pmap_enter_pse()`: Create 4MB mapping
             - [ ] Global page support (PGE)
+                - [ ] Detect PGE via CPUID
+                - [ ] Set CR4.PGE to enable global pages
+                - [ ] Mark kernel pages with PG_G to survive CR3 reload
+                - [ ] Only flush global pages with INVPCID or MOV CR4
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap PML4 paging structures.
             - [ ] **Refactor:** `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
