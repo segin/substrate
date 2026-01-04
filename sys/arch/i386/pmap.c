@@ -1,5 +1,6 @@
 #include "pmap.h"
 #include "pmm.h"
+#include "../../vm/vm_page.h"
 #include "../../kern/panic.h"
 #include "../../kern/console.h"
 #include <string.h>
@@ -347,6 +348,131 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
     uint32_t *pt = V_PT(pdi);
     if (!(pt[pti] & PTE_P)) return 0;
     return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);
+}
+
+// Change page protections for a virtual address range
+// Returns 0 on success, -1 on error
+int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
+    // Must be active address space
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return -1;
+    
+    // Walk range page by page
+    for (uint32_t va = sva; va < eva; va += 0x1000) {
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+        
+        // Skip if page table not present
+        if (!(V_PD[pdi] & PTE_P)) continue;
+        
+        uint32_t *pt = V_PT(pdi);
+        
+        // Skip if page not present
+        if (!(pt[pti] & PTE_P)) continue;
+        
+        // Update protection bits
+        uint32_t pte = pt[pti] & 0xFFFFF000;  // Keep physical address
+        pte |= PTE_P;
+        
+        if (prot & VM_PROT_WRITE) {
+            pte |= PTE_W;
+        }
+        // Note: i386 doesn't have NX in 32-bit mode without PAE
+        
+        if (va < 0xC0000000) {
+            pte |= PTE_U;  // User accessible
+        }
+        
+        pt[pti] = pte;
+        pmap_invalidate_page(va);
+    }
+    
+    return 0;
+}
+
+// Copy mappings from src_pmap to dst_pmap for fork()
+// If cow is set, mark pages read-only for copy-on-write
+int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int cow) {
+    // Must be able to access both pmaps - this is complex
+    // For simplicity, we require src_pmap to be active
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (src_pmap->pdir_phys != cr3) return -1;
+    
+    // Map dst page directory temporarily
+    uint32_t *dst_pd = (uint32_t *)(dst_pmap->pdir_phys + 0xC0000000);
+    
+    // Walk range page by page
+    for (uint32_t va = sva; va < eva; va += 0x1000) {
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+        
+        // Skip if source page table not present
+        if (!(V_PD[pdi] & PTE_P)) continue;
+        
+        uint32_t *src_pt = V_PT(pdi);
+        
+        // Skip if source page not present
+        if (!(src_pt[pti] & PTE_P)) continue;
+        
+        uint32_t src_pte = src_pt[pti];
+        
+        // Ensure destination page table exists
+        if (!(dst_pd[pdi] & PTE_P)) {
+            void *pt_phys = pmm_alloc_block();
+            if (!pt_phys) return -1;
+            dst_pd[pdi] = (uint32_t)pt_phys | PTE_P | PTE_W | PTE_U;
+            uint32_t *new_pt = (uint32_t *)((uint32_t)pt_phys + 0xC0000000);
+            for (int i = 0; i < 1024; i++) new_pt[i] = 0;
+        }
+        
+        // Get destination page table
+        uint32_t dst_pt_phys = dst_pd[pdi] & 0xFFFFF000;
+        uint32_t *dst_pt = (uint32_t *)(dst_pt_phys + 0xC0000000);
+        
+        // Copy PTE
+        uint32_t dst_pte = src_pte;
+        
+        // If COW requested, mark both pages read-only
+        if (cow && (src_pte & PTE_W)) {
+            // Clear write bit for COW
+            dst_pte &= ~PTE_W;
+            src_pt[pti] &= ~PTE_W;
+            pmap_invalidate_page(va);
+        }
+
+        // Increment reference count on the physical page
+        uint32_t page_pa = src_pte & 0xFFFFF000;
+        vm_page_t *page = pmm_get_page(page_pa);
+        if (page) {
+            __sync_fetch_and_add(&page->ref_count, 1);
+        }
+        
+        dst_pt[pti] = dst_pte;
+    }
+    
+    return 0;
+}
+
+// Check if a page is marked for copy-on-write
+// (page is present but not writable, with ref_count > 1)
+int pmap_page_is_cow(pmap_t pmap, uint32_t va) {
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return 0;
+    
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+    
+    if (!(V_PD[pdi] & PTE_P)) return 0;
+    
+    uint32_t *pt = V_PT(pdi);
+    if (!(pt[pti] & PTE_P)) return 0;
+    
+    // COW pages are present but not writable
+    // (We'd need to check ref_count in vm_page_t for full detection)
+    return (pt[pti] & PTE_P) && !(pt[pti] & PTE_W);
 }
 
 void pmap_invalidate_page(uint32_t va) {

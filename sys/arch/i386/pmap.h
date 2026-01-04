@@ -49,6 +49,11 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va); // Get PA from VA
 void pmap_kenter(uint32_t va, uint32_t pa);
 void pmap_kremove(uint32_t va);
 
+// Protection and copying
+int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot);
+int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int cow);
+int pmap_page_is_cow(pmap_t pmap, uint32_t va);
+
 // Helper to flush TLB
 void pmap_invalidate_page(uint32_t va);
 

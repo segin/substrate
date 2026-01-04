@@ -96,21 +96,21 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] `pmap_reference()`: Increment pmap reference count
                 - [ ] Clone kernel portion (768-1023) from kernel_pmap
                 - [ ] Track pmap in global list for TLB shootdown
-            - [ ] `pmap_protect`: Change page protections
-                - [ ] Walk range and update PTE protection bits
-                - [ ] Handle R/W and NX bit changes
-                - [ ] Invalidate affected TLB entries
-            - [ ] `pmap_copy`: Copy mappings between address spaces
-                - [ ] Copy PTE entries from src to dst pmap
-                - [ ] Set up COW if requested (clear write bit)
-                - [ ] Used for fork() optimization
+            - [x] `pmap_protect`: Change page protections
+                - [x] Walk range and update PTE protection bits
+                - [x] Handle R/W and NX bit changes
+                - [x] Invalidate affected TLB entries
+            - [x] `pmap_copy`: Copy mappings between address spaces
+                - [x] Copy PTE entries from src to dst pmap
+                - [x] Set up COW if requested (clear write bit)
+                - [x] Used for fork() optimization
             - [x] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits
             - [x] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits
-            - [ ] Copy-on-write support
-                - [ ] Mark shared pages read-only in both parent and child
+            - [x] Copy-on-write support
+                - [x] Mark shared pages read-only in both parent and child
                 - [ ] On write fault: allocate new page, copy contents, remap R/W
-                - [ ] Track COW page reference counts
-                - [ ] `pmap_page_is_cow()`: Check if page is COW shared
+                - [x] Track COW page reference counts
+                - [x] `pmap_page_is_cow()`: Check if page is COW shared
             - [ ] TLB shootdown for SMP (invalidate remote CPU TLBs)
                 - [ ] IPI (Inter-Processor Interrupt) mechanism
                 - [ ] `pmap_shootdown_page(va)`: Invalidate single page on all CPUs

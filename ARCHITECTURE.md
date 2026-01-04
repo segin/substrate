@@ -25,6 +25,12 @@ The kernel is the core of the operating system, structured as follows:
             - **Orders:** 0-10 (4KB to 4MB blocks).
             - **Initialization:** `pmm_buddy_init_range()` populates free lists with maximum-order blocks.
             - **Bitmap:** Kept for diagnostics, not used for allocation decisions.
+        - **Virtual Memory Manager (PMAP):**
+            - **Recursive Paging:** Self-reference at PDE 1023 (0xFFC00000) allows O(1) page table manipulation.
+            - **Protection:** `pmap_protect` walks ranges to update R/W/U bits and invalidate TLBs.
+            - **Copy-on-Write (COW):** `pmap_copy` implements fork() optimization by marking pages read-only and sharing physical frames until write fault.
+            - **Global Pages:** Uses PGE (if available) for kernel mappings (0xC0000000+) to minimize TLB flushes on context switch.
+            - **Fast Paths:** `pmap_kenter`/`pmap_kremove` for low-overhead kernel mappings without locking.
 - **`sys/drivers/`**: Hardware drivers.
     - **`video/`**: VGA text mode driver.
     - **`serial/`**: UART driver.
