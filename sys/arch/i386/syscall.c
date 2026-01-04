@@ -340,13 +340,6 @@ void syscall_handler(registers_t *regs) {
         return;
     }
 
-    if (syscall_log_active) {
-        char buf[128];
-        sprintf(buf, "SYSCALL: %d (PID=%d) EBX=%08X ECX=%08X EDX=%08X\n", 
-                (unsigned int)regs->eax, current_process->pid, 
-                (unsigned int)regs->ebx, (unsigned int)regs->ecx, (unsigned int)regs->edx);
-        kprint(buf);
-    }
     
     // Save regs pointer for special syscalls like fork
     syscall_regs = regs;
