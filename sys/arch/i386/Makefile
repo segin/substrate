@@ -6,6 +6,9 @@ LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = boot.S gdt.c sched.c idt.c isr.S pmm.c pci.c syscall.c pmap.c pmap_dump.c smp_discovery.c lapic.c ioapic.c rtc.c trampoline.S fpu/fpu_emu.c efi_boot.S zimage_header.S vm86.c sysarch.c
 
+OBJS = $(SRCS:.c=.o)
+OBJS := $(OBJS:.S=.o)
+
 # Helper to build the kernel object (not fully linked kernel yet)
 all: kernel.o
 
