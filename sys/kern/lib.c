@@ -173,7 +173,25 @@ int sprintf(char *str, const char *format, ...) {
                 case 'd':
                 case 'i': {
                     int val = __builtin_va_arg(ap, int);
-                    itoa(s, val, force_sign, space_prefix);
+                    char tmp[32];
+                    itoa(tmp, val, force_sign, space_prefix);
+                    int len = strlen(tmp);
+                    
+                    // Apply zero-padding if needed
+                    if (pad_zero && width > len) {
+                        // Check if there's a sign
+                        int has_sign = (tmp[0] == '+' || tmp[0] == '-' || tmp[0] == ' ');
+                        if (has_sign) {
+                            *s++ = tmp[0]; // Output sign first
+                            for (int i = 0; i < width - len; i++) *s++ = '0';
+                            strcpy(s, tmp + 1); // Copy rest after sign
+                        } else {
+                            for (int i = 0; i < width - len; i++) *s++ = '0';
+                            strcpy(s, tmp);
+                        }
+                    } else {
+                        strcpy(s, tmp);
+                    }
                     s += strlen(s);
                     break;
                 }

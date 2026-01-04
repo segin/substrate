@@ -721,7 +721,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [x] `+` (Force sign for positive numbers).
             - [x] ` ` (Space prefix for positive numbers).
             - [x] `#` (Alternate form: 0x for hex, force decimal point).
-            - [ ] `0` (Zero-padding).
+            - [x] `0` (Zero-padding).
         - [ ] **Width & Precision:**
             - [ ] Numeric width (e.g., `%5d`).
             - [ ] Dynamic width `*` (from argument).
