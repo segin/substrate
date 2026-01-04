@@ -679,9 +679,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [/] **ELF Loader Improvements:**
             - [x] **Stack Setup:** Properly terminate argv/envp vectors.
             - [x] **Default Environment:** Populate PATH and TERM.
-            - [/] **Auxiliary Vector:** Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support.
+            - [x] **Auxiliary Vector:** Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support.
             - [ ] **Interpreter:** Handle `PT_INTERP` (load ld.so).
-            - [ ] **Auxiliary Vector:**
+            - [x] **Auxiliary Vector:**
                 - [x] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`.
                 - [x] Populate `AT_ENTRY`, `AT_BASE` (interpreter base).
                 - [x] Populate `AT_EXECFN`, `AT_PLATFORM`.
