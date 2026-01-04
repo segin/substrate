@@ -268,10 +268,15 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         current_process->pmap = (struct pmap *)(uintptr_t)new_pmap;
     }
 
+    // Switch to new address space NOW so pmap_enter works (uses recursive mapping of active PD)
+    extern void pmap_activate(pmap_t pmap);
+    pmap_activate(new_pmap);
+
     // Load the ELF
     uint32_t entry = elf_load(file);
     if (entry == 0) {
         kprint("execve: Failed to load ELF\n");
+        // TODO: Switch back to old pmap? destroy new_pmap?
         return -1;
     }
     
@@ -289,7 +294,8 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         if (current_process->vm_map) {
              // TODO: kfree old map
         }
-        current_process->vm_map = vm_map_create(pmap_kernel(), 0, 0xC0000000);
+        // Use the proper pmap pointer (already active)
+        current_process->vm_map = vm_map_create((pmap_t)(uintptr_t)current_process->pmap, 0, 0xC0000000); 
     }
     
     // Set up kernel stack for this process in TSS
@@ -300,7 +306,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Allocate and map user stack pages
     extern void *pmm_alloc_block(void);
     
-    void *pmap = pmap_kernel();
+    // pmap is already active, so pmap_enter will use the correct page directory
     uint32_t user_stack_base = 0xBFFF0000;
     uint32_t user_stack_size = 16; // 64KB
     
@@ -414,12 +420,6 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
-    // Switch to new address space before jumping!
-    if (current_process && current_process->pmap) {
-        extern void pmap_activate(pmap_t pmap);
-        pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
-    }
-    
     jump_to_userspace(entry, sp);
     
     // Should never reach here
