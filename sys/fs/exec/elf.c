@@ -351,40 +351,66 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         } \
     } while(0)
     
-    // Copy argv[0] string to stack (use actual path, not "sh")
-    const char *argv0_str = path;
-    size_t argv0_len = strlen(argv0_str) + 1;
-    sp -= argv0_len;
-    sp &= ~3; // 4-byte align
-    uint32_t argv0_ptr = sp;
+    // Define environment strings
+    const char *env_term = "TERM=ansi";
+    const char *env_path = "PATH=/bin";
     
-    // Copy string byte by byte via kernel mapping  
-    for (size_t i = 0; i < argv0_len; i++) {
-        uint32_t addr = argv0_ptr + i;
-        uint32_t page_idx = (addr - user_stack_base) / 0x1000;
-        uint32_t offset = (addr - user_stack_base) % 0x1000;
-        if (page_idx < user_stack_size) {
-            uint8_t *kptr = (uint8_t*)VIRTUAL_d(stack_pages[page_idx].pa) + offset;
-            *kptr = argv0_str[i];
-        }
-    }
+    uint32_t ptr_term = 0, ptr_path = 0, argv0_ptr = 0;
+
+    // Helper macro to copy string to user stack (simulating multiple pushes)
+    // We do this inline to avoid function call overhead/complexity with local vars
+    #define PUSH_STRING(str, ptr_out) do { \
+        const char *s = (str); \
+        size_t len = strlen(s) + 1; \
+        sp -= len; \
+        sp &= ~3; /* 4-byte align */ \
+        ptr_out = sp; \
+        for (size_t i = 0; i < len; i++) { \
+            uint32_t addr = ptr_out + i; \
+            uint32_t page_idx = (addr - user_stack_base) / 0x1000; \
+            uint32_t offset = (addr - user_stack_base) % 0x1000; \
+            if (page_idx < user_stack_size) { \
+                uint8_t *kptr = (uint8_t*)VIRTUAL_d(stack_pages[page_idx].pa) + offset; \
+                *kptr = s[i]; \
+            } \
+        } \
+    } while(0)
+
+    // Push strings to stack (High -> Low address)
+    
+    // 1. Push TERM=ansi
+    PUSH_STRING(env_term, ptr_term);
+    
+    // 2. Push PATH=/bin
+    PUSH_STRING(env_path, ptr_path);
+    
+    // 3. Push argv[0] (path)
+    PUSH_STRING(path, argv0_ptr);
+    
+    #undef PUSH_STRING
     
     // Now align to 16 bytes BEFORE placing pointers (after all strings)
     sp &= ~15;
     
-    // Build envp array (just NULL)
-    sp -= 4; STACK_WRITE32(sp, 0);           // envp[0] = NULL
+    // Build envp array: [PATH, TERM, NULL]
+    // Stack grows down, so push NULL (last), then TERM, then PATH (first)
     
-    // Build argv array
-    sp -= 4; STACK_WRITE32(sp, 0);           // argv[1] = NULL (terminator)
-    // Push envp terminator (NULL)
+    // envp[2] = NULL
+    sp -= 4; STACK_WRITE32(sp, 0);
+    
+    // envp[1] = ptr_term
+    sp -= 4; STACK_WRITE32(sp, ptr_term);
+    
+    // envp[0] = ptr_path
+    sp -= 4; STACK_WRITE32(sp, ptr_path);
+    
+    // Build argv array: [argv0, NULL]
+    
+    // argv[1] = NULL
     sp -= 4; STACK_WRITE32(sp, 0);
 
-    // Push argv terminator (NULL)
-    sp -= 4; STACK_WRITE32(sp, 0);
-
-    // Push argv[0]
-    sp -= 4; STACK_WRITE32(sp, argv0_ptr);   // argv[0] = pointer to string
+    // argv[0] = ptr
+    sp -= 4; STACK_WRITE32(sp, argv0_ptr);
     
     // Push argc
     sp -= 4; STACK_WRITE32(sp, 1);           // argc = 1

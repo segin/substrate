@@ -675,8 +675,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Solaris (SVR4):**
         - [ ] Implement SVR4 syscalls (`getdents64`, `stream` ioctls).
         - [ ] Support Solaris door IPC emulation.
-    - [ ] **Exec Implementation & Binary Loaders:**
-        - [ ] **ELF Loader Improvements:**
+    - [/] **Exec Implementation & Binary Loaders:**
+        - [/] **ELF Loader Improvements:**
+            - [x] **Stack Setup:** Properly terminate argv/envp vectors.
+            - [x] **Default Environment:** Populate PATH and TERM.
             - [ ] **Interpreter:** Handle `PT_INTERP` (load ld.so).
             - [ ] **Auxiliary Vector:**
                 - [ ] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`.
