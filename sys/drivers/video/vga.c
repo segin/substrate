@@ -56,6 +56,19 @@ static void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
     terminal_buffer[index] = vga_entry(c, color);
 }
 
+// Update VGA hardware cursor position to match software cursor
+static void vga_update_cursor(void) {
+    uint16_t pos = terminal_row * VGA_WIDTH + terminal_column;
+    
+    // CRT Controller: Cursor Location High Register (0x0E)
+    outb(0x3D4, 0x0E);
+    outb(0x3D5, (pos >> 8) & 0xFF);
+    
+    // CRT Controller: Cursor Location Low Register (0x0F)
+    outb(0x3D4, 0x0F);
+    outb(0x3D5, pos & 0xFF);
+}
+
 static void terminal_scroll() {
     for (size_t y = 0; y < VGA_HEIGHT - 1; y++) {
         for (size_t x = 0; x < VGA_WIDTH; x++) {
@@ -210,6 +223,9 @@ void vga_putc(char c) {
             state = ANSI_NORMAL;
         }
     }
+    
+    // Update hardware cursor to current position
+    vga_update_cursor();
 }
 
 // Helper for console abstraction
@@ -273,6 +289,7 @@ void vga_init(void) {
     terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     terminal_buffer = VGA_MEMORY;
     vga_clear_screen();
+    vga_update_cursor();
     
     // Register backend
     console_register(&vga_console);
