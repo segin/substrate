@@ -304,10 +304,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     gdt_init();
     kprint("GDT Initialized.\n");
 
-    // Initialize FPU very early for kernel floating-point math
-    extern void fpu_init(void);
-    fpu_init();
-
     // Initialize RTC and set system time
     rtc_init();
 
@@ -320,6 +316,10 @@ void kmain(unsigned long magic, unsigned long addr) {
     
     // Initialize IDT ASAP to catch faults!
     idt_init();
+    
+    // Initialize FPU (needs IDT for #NM handler)
+    extern void fpu_init(void);
+    fpu_init();
     
     keyboard_init();
     
