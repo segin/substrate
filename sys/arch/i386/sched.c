@@ -44,12 +44,14 @@ void sched_init(void) {
     // Manually setup threads[0] equivalent logic, but via alloc?
     // alloc requires a process.
     
-    // Setup Kernel Process (PID 1)
+    // Setup Kernel Process (PID 0 - Swapper)
     processes[0].pid = 0;
     processes[0].ppid = 0;
     processes[0].pers = &personality_native;
     processes[0].root_node = fs_root;
-    // ... init FDs
+    processes[0].is_kernel_task = 1;
+    extern char *strcpy(char *, const char *);
+    strcpy(processes[0].comm, "swapper");
     
     // Copy permissions/acct
     // ... (simplified)

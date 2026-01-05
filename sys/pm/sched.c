@@ -15,7 +15,7 @@ extern void arch_set_kernel_stack(uintptr_t stack);
 
 
 void sched_init_generic(void) {
-    next_tid = 1;
+    next_tid = 0;
     extern void *memset(void *s, int c, size_t n);
     memset(threads, 0, sizeof(threads));
     

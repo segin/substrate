@@ -39,13 +39,23 @@ void debug_dump_processes(void) {
         thread_t *t = &threads[i];
         const char *state = (t->state < 4) ? state_names[t->state] : "???";
         int pid = -1;
+        static char name_buf[24];
         const char *name = "(kernel)";
         const char *pers = "Native";
         
         if (t->proc) {
             pid = t->proc->pid;
-            if (t->proc->comm[0]) name = t->proc->comm;
-            else name = "(unnamed)";
+            if (t->proc->comm[0]) {
+                // Wrap kernel task names in parentheses
+                if (t->proc->is_kernel_task) {
+                    sprintf(name_buf, "(%s)", t->proc->comm);
+                    name = name_buf;
+                } else {
+                    name = t->proc->comm;
+                }
+            } else {
+                name = "(unnamed)";
+            }
             if (t->proc->pers && t->proc->pers->name)
                 pers = t->proc->pers->name;
         }
