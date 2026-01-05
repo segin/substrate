@@ -157,7 +157,17 @@ struct dirent *readdir_fs(fs_node_t *node, uint32_t index) {
         return 0;
 }
 
+// Forward declaration for symlink resolution with depth tracking
+static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth);
+
 fs_node_t *finddir_fs(fs_node_t *node, char *name) {
+    return finddir_fs_internal(node, name, 0);
+}
+
+// Maximum symlink recursion depth to prevent infinite loops
+#define MAX_SYMLINK_DEPTH 8
+
+static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth) {
     if (!node) return 0; // Safety
     
     // If this is a mountpoint, cross into the mounted filesystem
@@ -168,8 +178,14 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     if ((node->flags & 0x7) == FS_DIRECTORY && node->finddir != 0) {
         fs_node_t *result = node->finddir(node, name);
         
-        // Resolve symlinks automatically
+        // Resolve symlinks automatically (with depth limit)
         if (result && (result->flags & 0x7) == FS_SYMLINK && result->readlink) {
+            // Check recursion depth limit
+            if (depth >= MAX_SYMLINK_DEPTH) {
+                // Too many symlink levels - return the symlink node itself (ELOOP)
+                return result;
+            }
+            
             static char link_target[256];
             int len = result->readlink(result, link_target, sizeof(link_target));
             if (len > 0) {
@@ -181,8 +197,8 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
                     // Absolute symlink - start from root
                     target = vfs_lookup(fs_root, link_target);
                 } else {
-                    // Relative symlink - start from parent directory
-                    target = finddir_fs(node, link_target);
+                    // Relative symlink - recurse with incremented depth
+                    target = finddir_fs_internal(node, link_target, depth + 1);
                 }
                 
                 if (target) {

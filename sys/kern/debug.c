@@ -30,8 +30,8 @@ void debug_dump_processes(void) {
         kprint(buf);
     }
     
-    kprint("\n   TID |   PID | STATE    | NAME             | PERSO   | WAIT REASON\n");
-    kprint("-------|-------|----------|------------------|---------|------------\n");
+    kprint("\n   TID |   PID | STATE    | NAME             | PERSO     | WAIT REASON\n");
+    kprint("-------|-------|----------|------------------|-----------|------------\n");
     
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid == -1) continue;
@@ -41,7 +41,7 @@ void debug_dump_processes(void) {
         int pid = -1;
         static char name_buf[24];
         const char *name = "(kernel)";
-        const char *pers = "Native";
+        const char *pers = "(kernel)";
         
         if (t->proc) {
             pid = t->proc->pid;
@@ -56,13 +56,17 @@ void debug_dump_processes(void) {
             } else {
                 name = "(unnamed)";
             }
-            if (t->proc->pers && t->proc->pers->name)
+            // Kernel tasks show "(kernel)" instead of personality
+            if (t->proc->is_kernel_task) {
+                pers = "(kernel)";
+            } else if (t->proc->pers && t->proc->pers->name) {
                 pers = t->proc->pers->name;
+            }
         }
         
         const char *reason = t->wait_reason ? t->wait_reason : "";
 
-        sprintf(buf, " %5d | %5d | %-8.8s | %-16.16s | %-7.7s | %s\n",
+        sprintf(buf, " %5d | %5d | %-8.8s | %-16.16s | %-9.9s | %s\n",
                 t->tid, pid, state, name, pers, reason);
         kprint(buf);
     }
