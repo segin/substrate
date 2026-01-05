@@ -304,22 +304,22 @@ void kmain(unsigned long magic, unsigned long addr) {
     gdt_init();
     kprint("GDT Initialized.\n");
 
+    // Initialize IDT immediately after GDT to catch early exceptions
+    idt_init();
+    
+    // Initialize FPU (needs IDT for #NM handler)
+    extern void fpu_init(void);
+    fpu_init();
+
     // Initialize RTC and set system time
     rtc_init();
 
     // Initialize PMAP (Paging) - maps LAPIC and sets up recursive paging
     pmap_bootstrap();
 
-    // Initialize Scheduler BEFORE IDT (timer calls sched_yield!)
+    // Initialize Scheduler
     sched_init();
     kprint("Scheduler Initialized.\n");
-    
-    // Initialize IDT ASAP to catch faults!
-    idt_init();
-    
-    // Initialize FPU (needs IDT for #NM handler)
-    extern void fpu_init(void);
-    fpu_init();
     
     keyboard_init();
     
