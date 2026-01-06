@@ -148,11 +148,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [ ] Use PCID if available to avoid TLB flush. (Future x86_64)
                     - [ ] Update `curpmap` thread-local pointer. (Scheduler integration)
                     - [ ] Set TSS ESP0 for kernel stack. (Scheduler integration)
-                - [ ] **Kernel PDE Synchronization:**
-                    - [ ] When kernel maps new pages (e.g., vmalloc), must update all pmaps.
-                    - [ ] Maintain `kernel_pmap` as authoritative source.
-                    - [ ] On PDE change in kernel range, walk global pmap list and copy.
-                    - [ ] Alternatively: share kernel PTs by reference (single PT, multiple PDEs point to it).
+                - [x] **Kernel PDE Synchronization:**
+                    - [ ] When kernel maps new pages (e.g., vmalloc), must update all pmaps. (Deferred)
+                    - [x] Maintain `kernel_pmap` as authoritative source.
+                    - [ ] On PDE change in kernel range, walk global pmap list and copy. (Deferred)
+                    - [x] Alternatively: share kernel PTs by reference (pmap_create copies kernel PDEs).
                 - [ ] **ASID/PCID Support (Future x86_64):**
                     - [ ] ASID pool management (allocate, free, recycle).
                     - [ ] Assign ASID on pmap creation.
