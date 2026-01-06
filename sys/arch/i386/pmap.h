@@ -1,6 +1,19 @@
 #ifndef _PMAP_H
 #define _PMAP_H
 
+/*
+ * pmap.h - x86 Physical Map (PMAP) Layer
+ *
+ * Per-Process Address Space Architecture:
+ * - Each process has its own pmap_t representing its virtual address space.
+ * - User Space: 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767)
+ * - Kernel Space: 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared)
+ * - Kernel PDEs are shared by reference, not copied.
+ * - Recursive mapping at PDE 1023 for efficient PT access.
+ * - Dynamic PT Allocation: Page tables allocated on-demand (~4KB per 4MB).
+ * - Minimum overhead: 1 PD (4KB) + PTs as needed.
+ */
+
 #include <stdint.h>
 #include <stddef.h>
 

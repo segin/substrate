@@ -26,12 +26,17 @@ The kernel is the core of the operating system, structured as follows:
             - **Initialization:** `pmm_buddy_init_range()` populates free lists with maximum-order blocks.
             - **Bitmap:** Kept for diagnostics, not used for allocation decisions.
         - **Virtual Memory Manager (PMAP):**
+            - **Per-Process Address Spaces:** Each process has its own `pmap_t` representing its virtual address space:
+                - **User Space:** 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767)
+                - **Kernel Space:** 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared by reference)
+                - Kernel PDEs are shared between all pmaps, not copied.
             - **Recursive Paging:** Self-reference at PDE 1023 (0xFFC00000) allows O(1) page table manipulation.
             - **Protection:** `pmap_protect` walks ranges to update R/W/U bits and invalidate TLBs.
             - **Copy-on-Write (COW):** `pmap_copy` implements fork() optimization by marking pages read-only and sharing physical frames until write fault.
             - **Global Pages:** Uses PGE (if available) for kernel mappings (0xC0000000+) to minimize TLB flushes on context switch.
             - **Fast Paths:** `pmap_kenter`/`pmap_kremove` for low-overhead kernel mappings without locking.
             - **Hardware Mapping:** Identity-maps critical I/O regions like the Local APIC (0xFEE00000) during bootstrap to support safe early-boot spinlock operations once paging is enabled.
+            - **Dynamic PT Allocation:** Page tables are allocated on-demand (~4KB per 4MB mapped) to minimize per-process overhead.
 - **`sys/drivers/`**: Hardware drivers.
     - **`video/`**: VGA text mode driver.
     - **`serial/`**: UART driver.

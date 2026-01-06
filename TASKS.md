@@ -91,15 +91,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Use recursive mapping for PTE manipulation
             - [x] **Higher Half Transition:** Stable 3GB/1GB split with LMA=1M/VMA=C0000000.
             - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management
-                - [ ] **Architecture Overview:**
-                    - [ ] Each process gets its own `pmap_t` representing its virtual address space.
-                    - [ ] User space: 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767).
-                    - [ ] Kernel space: 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared).
-                    - [ ] Kernel PDEs are shared by reference, not copied.
-                    - [ ] Recursive mapping at PDE 1023 for efficient PT access.
-                    - [ ] **Dynamic PT Allocation:** Only allocate page tables on demand (not 768 PTs upfront).
-                    - [ ] Minimum overhead per process: 1 PD (4KB) + PTs as needed (~4KB per 4MB mapped).
-                    - [ ] Avoid pre-allocating all user-space PTs (would waste 128KB+ per process).
+                - [x] **Architecture Overview:**
+                    - [x] Each process gets its own `pmap_t` representing its virtual address space.
+                    - [x] User space: 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767).
+                    - [x] Kernel space: 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared).
+                    - [x] Kernel PDEs are shared by reference, not copied.
+                    - [x] Recursive mapping at PDE 1023 for efficient PT access.
+                    - [x] **Dynamic PT Allocation:** Only allocate page tables on demand (not 768 PTs upfront).
+                    - [x] Minimum overhead per process: 1 PD (4KB) + PTs as needed (~4KB per 4MB mapped).
+                    - [x] Avoid pre-allocating all user-space PTs (would waste 128KB+ per process).
                 - [ ] **`pmap_t` Data Structure:**
                     - [ ] `pd_phys`: Physical address of page directory.
                     - [ ] `pd_virt`: Virtual address for kernel access to PD.
