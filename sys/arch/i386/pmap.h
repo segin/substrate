@@ -29,14 +29,31 @@
 #define PTE_G           0x100   // Global
 
 // Abstract PMAP handle (opaque pointer to Page Directory)
-// Abstract PMAP handle
 typedef struct pmap *pmap_t;
 
+// Per-pmap statistics
+struct pmap_stats {
+    uint32_t faults;        // Total page faults
+    uint32_t cow_faults;    // COW page faults
+    uint32_t zero_fills;    // Zero-fill page faults
+};
+
+// Linked list entry for global pmap list
+struct pmap_list_entry {
+    struct pmap *next;
+    struct pmap *prev;
+};
+
 struct pmap {
-    uint32_t *pdir;      // Virtual pointer to PD
-    uint32_t pdir_phys;  // Physical address of PD
-    int ref_count;       // Reference count
-    // uint32_t lock;    // Potential future lock
+    uint32_t *pdir;             // pd_virt: Virtual pointer to PD
+    uint32_t pdir_phys;         // pd_phys: Physical address of PD
+    int ref_count;              // refcount: Number of references (for COW sharing)
+    uint32_t resident_count;    // Count of resident pages in this pmap
+    uint32_t wired_count;       // Count of wired (unpageable) pages
+    struct pmap_stats stats;    // Per-pmap statistics
+    volatile int lock;          // Spinlock for SMP safety
+    uint16_t asid;              // Address Space ID (for TLB tagging, future PCID)
+    struct pmap_list_entry list_entry;  // For global pmap list (TLB shootdown)
 };
 
 // Hardcoded Kernel Page Directory Virtual Address (Recursive Mapping)

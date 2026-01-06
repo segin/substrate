@@ -100,16 +100,16 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] **Dynamic PT Allocation:** Only allocate page tables on demand (not 768 PTs upfront).
                     - [x] Minimum overhead per process: 1 PD (4KB) + PTs as needed (~4KB per 4MB mapped).
                     - [x] Avoid pre-allocating all user-space PTs (would waste 128KB+ per process).
-                - [ ] **`pmap_t` Data Structure:**
-                    - [ ] `pd_phys`: Physical address of page directory.
-                    - [ ] `pd_virt`: Virtual address for kernel access to PD.
-                    - [ ] `refcount`: Number of references (for COW sharing).
-                    - [ ] `resident_count`: Count of resident pages in this pmap.
-                    - [ ] `wired_count`: Count of wired (unpageable) pages.
-                    - [ ] `stats`: Per-pmap statistics (faults, cow_faults, zero_fills).
-                    - [ ] `lock`: Spinlock for SMP safety.
-                    - [ ] `asid`: Address Space ID (for TLB tagging, future PCID).
-                    - [ ] `list_entry`: For global pmap list (TLB shootdown).
+                - [x] **`pmap_t` Data Structure:**
+                    - [x] `pd_phys`: Physical address of page directory.
+                    - [x] `pd_virt`: Virtual address for kernel access to PD.
+                    - [x] `refcount`: Number of references (for COW sharing).
+                    - [x] `resident_count`: Count of resident pages in this pmap.
+                    - [x] `wired_count`: Count of wired (unpageable) pages.
+                    - [x] `stats`: Per-pmap statistics (faults, cow_faults, zero_fills).
+                    - [x] `lock`: Spinlock for SMP safety.
+                    - [x] `asid`: Address Space ID (for TLB tagging, future PCID).
+                    - [x] `list_entry`: For global pmap list (TLB shootdown).
                 - [ ] **`pmap_create()` - Create New Address Space:**
                     - [ ] Allocate one 4KB page for page directory.
                     - [ ] Zero user portion (PDEs 0-767).

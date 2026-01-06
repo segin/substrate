@@ -153,6 +153,15 @@ pmap_t pmap_create(void) {
     pmap->pdir_phys = pd_phys;
     pmap->pdir = (uint32_t *)(pd_phys + 0xC0000000); // Linear map
     pmap->ref_count = 1;
+    pmap->resident_count = 0;
+    pmap->wired_count = 0;
+    pmap->stats.faults = 0;
+    pmap->stats.cow_faults = 0;
+    pmap->stats.zero_fills = 0;
+    pmap->lock = 0;
+    pmap->asid = 0;  // ASID allocation is future work
+    pmap->list_entry.next = 0;
+    pmap->list_entry.prev = 0;
 
     uint32_t *pd = pmap->pdir;
     
