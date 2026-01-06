@@ -43,6 +43,7 @@ typedef struct vm_page {
 
     // Access tracking for page aging
     uint16_t access_count;  // Incremented on each access (for LRU)
+    uint8_t  age;           // Age counter (decremented if not accessed, 0=evict candidate)
 
     // Modification tracking for writeback scheduling
     uint32_t last_modified;  // Timestamp of last D-bit clear (for writeback)
@@ -86,5 +87,11 @@ void vm_page_wakeup_daemon(void);
 int vm_page_needs_writeback(vm_page_t *m);
 void vm_page_mark_for_writeback(vm_page_t *m);
 void vm_page_writeback_done(vm_page_t *m);
+
+// Page aging algorithm
+#define VM_PAGE_AGE_MAX     3   // Start age for newly accessed pages
+#define VM_PAGE_AGE_INITIAL 2   // Initial age for new pages
+void vm_page_age_scan(void);     // Periodic scan of all pages
+int vm_page_is_evict_candidate(vm_page_t *m);
 
 #endif

@@ -199,11 +199,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Locate PTE and clear D bit.
                     - [x] Invalidate TLB entry.
                     - [x] **Usage:** Track pages that need writeback to swap/file.
-                - [ ] **Page Aging Algorithm Integration:**
-                    - [ ] Periodic scanning of all resident pages.
-                    - [ ] Decrement age counter if not referenced.
-                    - [ ] Pages with age 0 become eviction candidates.
-                    - [ ] Support for multiple aging policies (Clock, LRU approximation).
+                - [x] **Page Aging Algorithm Integration:**
+                    - [x] Periodic scanning of all resident pages.
+                    - [x] Decrement age counter if not referenced.
+                    - [x] Pages with age 0 become eviction candidates.
+                    - [x] Support for multiple aging policies (Clock, LRU approximation).
                 - [ ] **Hardware A/D Bit Emulation (if needed):**
                     - [ ] Some architectures lack hardware A/D bits.
                     - [ ] Emulate via software: mark page not-present, trap on access.

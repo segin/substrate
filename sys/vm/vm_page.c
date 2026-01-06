@@ -399,3 +399,98 @@ void vm_page_writeback_done(vm_page_t *m) {
         // Page is clean - can be freed without writeback
     }
 }
+
+// ==================== Page Aging Algorithm ====================
+// Implements clock/LRU approximation for page replacement
+
+// External pmap function for access tracking
+extern void pmap_track_access(vm_page_t *m);
+
+// Periodic scan of all resident pages - decrement age if not accessed
+// Called by page daemon periodically
+void vm_page_age_scan(void) {
+    extern int64_t get_uptime(void);
+    (void)get_uptime;  // Suppress unused warning if not needed
+    
+    // Scan active queue - pages accessed get max age, others decrement
+    vm_page_t *m = active_queue;
+    while (m) {
+        vm_page_t *next = m->next;
+        
+        // Skip wired pages
+        if (m->wire_count > 0) {
+            m = next;
+            continue;
+        }
+        
+        // Check A-bit via pmap and update access tracking
+        if (pmap_is_referenced(m)) {
+            // Page was accessed - reset age to max
+            m->age = VM_PAGE_AGE_MAX;
+            pmap_clear_reference(m);
+        } else {
+            // Page not accessed - decrement age
+            if (m->age > 0) {
+                m->age--;
+            }
+            // If age reaches 0, move to inactive queue
+            if (m->age == 0) {
+                dequeue(&active_queue, m);
+                m->flags &= ~PG_ACTIVE;
+                enqueue(&inactive_queue, m);
+                m->flags |= PG_INACTIVE;
+            }
+        }
+        
+        m = next;
+    }
+    
+    // Scan inactive queue - further age inactive pages
+    m = inactive_queue;
+    while (m) {
+        vm_page_t *next = m->next;
+        
+        // Skip wired pages
+        if (m->wire_count > 0) {
+            m = next;
+            continue;
+        }
+        
+        // Check if page was accessed while inactive
+        if (pmap_is_referenced(m)) {
+            // Reactivate
+            dequeue(&inactive_queue, m);
+            m->flags &= ~PG_INACTIVE;
+            enqueue(&active_queue, m);
+            m->flags |= PG_ACTIVE;
+            m->age = VM_PAGE_AGE_INITIAL;  // Give a second chance
+            pmap_clear_reference(m);
+        }
+        
+        m = next;
+    }
+}
+
+// Check if page is a candidate for eviction (age=0, not wired, not busy)
+int vm_page_is_evict_candidate(vm_page_t *m) {
+    if (!m) return 0;
+    
+    // Wired pages cannot be evicted
+    if (m->wire_count > 0) return 0;
+    
+    // Busy pages cannot be evicted
+    if (m->flags & PG_BUSY) return 0;
+    
+    // Pages in writeback cannot be evicted
+    if (m->flags & PG_WRITEBACK) return 0;
+    
+    // Active pages are not candidates (need to age out first)
+    if (m->flags & PG_ACTIVE) return 0;
+    
+    // Inactive pages with age 0 are primary candidates
+    if ((m->flags & PG_INACTIVE) && m->age == 0) {
+        return 1;
+    }
+    
+    return 0;
+}
