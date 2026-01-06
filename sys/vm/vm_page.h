@@ -34,6 +34,8 @@ typedef struct vm_page {
     #define PG_ZERO     0x0040 // Page is zeroed
     #define PG_SWAPPED  0x0080 // Page is on swap disk
     #define PG_PRIVATE  0x0100 // Private mapping (no COW, copy directly)
+    #define PG_WRITEBACK 0x0200 // Writeback in progress
+    #define PG_NEEDSYNC  0x0400 // Needs writeback to swap/file
 
     // Reference count (number of mappings)
     uint16_t wire_count;  // Wired down (cannot be paged out)
@@ -79,5 +81,10 @@ void vm_pageout(void);
 void vm_page_launder(vm_page_t *m);
 int vm_page_try_to_free(vm_page_t *m);
 void vm_page_wakeup_daemon(void);
+
+// Writeback tracking
+int vm_page_needs_writeback(vm_page_t *m);
+void vm_page_mark_for_writeback(vm_page_t *m);
+void vm_page_writeback_done(vm_page_t *m);
 
 #endif

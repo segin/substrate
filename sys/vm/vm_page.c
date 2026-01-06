@@ -348,3 +348,54 @@ void vm_pageout(void) {
 void vm_page_wakeup_daemon(void) {
     vm_pages_needed = 1;
 }
+
+// ==================== Writeback Tracking ====================
+// Track pages that need writeback to swap/file
+
+// Check if page needs writeback to backing store
+int vm_page_needs_writeback(vm_page_t *m) {
+    if (!m) return 0;
+    
+    // Page needs writeback if:
+    // - It's marked dirty (PG_DIRTY) and not already being written (PG_WRITEBACK)
+    // - OR it's explicitly marked as needing sync (PG_NEEDSYNC)
+    if ((m->flags & PG_DIRTY) && !(m->flags & PG_WRITEBACK)) {
+        return 1;
+    }
+    if (m->flags & PG_NEEDSYNC) {
+        return 1;
+    }
+    return 0;
+}
+
+// Mark page for writeback (sets PG_WRITEBACK, starts I/O)
+void vm_page_mark_for_writeback(vm_page_t *m) {
+    if (!m) return;
+    
+    // Don't start writeback on already writing page
+    if (m->flags & PG_WRITEBACK) return;
+    
+    // Set writeback in progress
+    m->flags |= PG_WRITEBACK;
+    m->flags |= PG_BUSY;  // Page is busy during I/O
+    
+    // Record time for scheduling (use uptime as monotonic timestamp)
+    extern int64_t get_uptime(void);
+    m->last_modified = (uint32_t)get_uptime();
+}
+
+// Complete writeback (called when I/O finishes)
+void vm_page_writeback_done(vm_page_t *m) {
+    if (!m) return;
+    
+    // Clear writeback flags
+    m->flags &= ~PG_WRITEBACK;
+    m->flags &= ~PG_BUSY;
+    m->flags &= ~PG_NEEDSYNC;
+    
+    // If no one dirtied the page during writeback, it's now clean
+    // (If someone did, PG_DIRTY will still be set from the new write)
+    if (!(m->flags & PG_DIRTY)) {
+        // Page is clean - can be freed without writeback
+    }
+}
