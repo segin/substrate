@@ -537,11 +537,27 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
         // Skip if page not present
         if (!(pt[pti] & PTE_P)) continue;
         
+        uint32_t old_pte = pt[pti];
+        int was_writable = (old_pte & PTE_W) != 0;
+        int wants_writable = (prot & VM_PROT_WRITE) != 0;
+        
+        // Protection upgrade: read-only → read/write
+        // Check for COW page (read-only with ref_count > 1)
+        if (!was_writable && wants_writable) {
+            uint32_t pa = old_pte & 0xFFFFF000;
+            vm_page_t *page = pmm_get_page(pa);
+            if (page && page->ref_count > 1) {
+                // COW page - caller must handle copy-on-write first
+                // Return special value to signal COW needed
+                return -11; // -EAGAIN: COW copy required
+            }
+        }
+        
         // Update protection bits
-        uint32_t pte = pt[pti] & 0xFFFFF000;  // Keep physical address
+        uint32_t pte = old_pte & 0xFFFFF000;  // Keep physical address
         pte |= PTE_P;
         
-        if (prot & VM_PROT_WRITE) {
+        if (wants_writable) {
             pte |= PTE_W;
         }
         // Note: i386 doesn't have NX in 32-bit mode without PAE
