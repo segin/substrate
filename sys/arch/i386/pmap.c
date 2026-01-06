@@ -240,6 +240,12 @@ void pmap_destroy(pmap_t pmap) {
     // Edge case: Don't destroy kernel pmap
     if (pmap == kernel_pmap_ptr) return;
     
+    // Decrement reference count (checkpoint 123)
+    pmap->ref_count--;
+    
+    // If refcount > 0, pmap is still in use by COW children (checkpoint 124)
+    if (pmap->ref_count > 0) return;
+    
     uint32_t pd_phys = (uint32_t)pmap;
     
     // Edge case: Check if this is the currently active pmap
