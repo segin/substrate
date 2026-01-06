@@ -348,7 +348,21 @@ pmap_t pmap_fork(pmap_t src_pmap) {
     pmap_t dst_pmap = pmap_create();
     if (!dst_pmap) return 0;
     
-    // TODO: Steps 2-5 will be implemented in subsequent checkboxes
+    // Step 2: Walk parent's user PDEs (0-767) (checkbox 140)
+    uint32_t *src_pd = src_pmap->pdir;
+    uint32_t *dst_pd = dst_pmap->pdir;
+    
+    for (int pdi = 0; pdi < 768; pdi++) {
+        if (!(src_pd[pdi] & PTE_P)) continue;  // Skip non-present PDEs
+        
+        // Get source page table
+        uint32_t src_pt_phys = src_pd[pdi] & ~0xFFF;
+        uint32_t *src_pt = (uint32_t *)(src_pt_phys + 0xC0000000);
+        
+        // TODO: Walk PTEs in subsequent checkboxes (141-143)
+        (void)dst_pd;
+        (void)src_pt;
+    }
     
     return dst_pmap;
 }
