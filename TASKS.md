@@ -119,7 +119,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Add to global pmap list for TLB management.
                     - [x] Allocate unique ASID if available.
                     - [x] Return `pmap_t*` or NULL on failure.
-                - [ ] **`pmap_destroy()` - Destroy Address Space:**
+                - [x] **`pmap_destroy()` - Destroy Address Space:**
                     - [x] Decrement reference count.
                     - [x] If refcount > 0, return (still in use by COW children).
                     - [x] Walk all user PDEs (0-767):
