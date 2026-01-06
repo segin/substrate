@@ -494,3 +494,80 @@ int vm_page_is_evict_candidate(vm_page_t *m) {
     
     return 0;
 }
+
+// ==================== Page Replacement Integration ====================
+// Export info to VM layer and swapper/pageout daemon
+
+// Get current page statistics
+void vm_page_get_stats(vm_page_stats_t *stats) {
+    if (!stats) return;
+    
+    stats->active_count = 0;
+    stats->inactive_count = 0;
+    stats->dirty_count = 0;
+    stats->free_count = 0;
+    
+    // Count active pages
+    vm_page_t *m = active_queue;
+    while (m) {
+        stats->active_count++;
+        if (m->flags & PG_DIRTY) stats->dirty_count++;
+        m = m->next;
+    }
+    
+    // Count inactive pages
+    m = inactive_queue;
+    while (m) {
+        stats->inactive_count++;
+        if (m->flags & PG_DIRTY) stats->dirty_count++;
+        m = m->next;
+    }
+    
+    // Count free pages
+    m = free_queue;
+    while (m) {
+        stats->free_count++;
+        m = m->next;
+    }
+}
+
+// Estimate working set size (pages actively used)
+// Returns count of pages that have been recently accessed
+int vm_page_estimate_working_set(void) {
+    int count = 0;
+    
+    // Active pages with age > 0 are part of working set
+    vm_page_t *m = active_queue;
+    while (m) {
+        if (m->age > 0) count++;
+        m = m->next;
+    }
+    
+    // Recently reactivated inactive pages
+    m = inactive_queue;
+    while (m) {
+        if (pmap_is_referenced(m)) count++;  // About to be reactivated
+        m = m->next;
+    }
+    
+    return count;
+}
+
+// Hint for swapper/pageout daemon: should we start paging out?
+// Returns 1 if memory pressure is high
+int vm_page_should_pageout(void) {
+    vm_page_stats_t stats;
+    vm_page_get_stats(&stats);
+    
+    // Pageout if free pages below target or inactive queue low
+    if (stats.free_count < vm_page_free_target) {
+        return 1;
+    }
+    
+    // Pageout if too many dirty pages
+    if (stats.dirty_count > stats.inactive_count / 2) {
+        return 1;
+    }
+    
+    return 0;
+}

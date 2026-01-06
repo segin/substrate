@@ -208,10 +208,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Some architectures lack hardware A/D bits.
                     - [x] Emulate via software: mark page not-present, trap on access.
                     - [x] Not needed for x86/x86_64 (native support).
-                - [ ] **Integration with Page Replacement:**
-                    - [ ] Export referenced/modified info to VM layer.
-                    - [ ] Support for working set estimation.
-                    - [ ] Feed into swapper/pageout daemon decisions.
+                - [x] **Integration with Page Replacement:**
+                    - [x] Export referenced/modified info to VM layer.
+                    - [x] Support for working set estimation.
+                    - [x] Feed into swapper/pageout daemon decisions.
             - [ ] **Copy-on-Write (COW) System:**
                 - [x] Mark shared pages read-only in both parent and child
                 - [ ] **COW Fault Handler:**

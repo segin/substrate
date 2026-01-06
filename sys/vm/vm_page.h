@@ -94,4 +94,16 @@ void vm_page_writeback_done(vm_page_t *m);
 void vm_page_age_scan(void);     // Periodic scan of all pages
 int vm_page_is_evict_candidate(vm_page_t *m);
 
+// Page replacement integration
+typedef struct vm_page_stats {
+    int active_count;       // Pages in active queue
+    int inactive_count;     // Pages in inactive queue
+    int dirty_count;        // Dirty pages needing writeback
+    int free_count;         // Available free pages
+} vm_page_stats_t;
+
+void vm_page_get_stats(vm_page_stats_t *stats);
+int vm_page_estimate_working_set(void);   // Estimate working set size
+int vm_page_should_pageout(void);          // Hint for swapper/pageout daemon
+
 #endif
