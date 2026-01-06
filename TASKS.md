@@ -121,7 +121,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Return `pmap_t*` or NULL on failure.
                 - [ ] **`pmap_destroy()` - Destroy Address Space:**
                     - [x] Decrement reference count.
-                    - [ ] If refcount > 0, return (still in use by COW children).
+                    - [x] If refcount > 0, return (still in use by COW children).
                     - [ ] Walk all user PDEs (0-767):
                         - [ ] For each present PDE, walk all 1024 PTEs.
                         - [ ] For each present PTE, decrement physical page refcount.
