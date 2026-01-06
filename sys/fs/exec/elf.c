@@ -517,6 +517,25 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         at_phdr = 0x08048000 + ehdr.e_phoff; // Legacy guess
     }
     
+    // Debug: print AT_PHDR value
+    kprint("execve: AT_PHDR=0x");
+    char phdr_buf[9];
+    for (int j = 7; j >= 0; j--) {
+        int nib = (at_phdr >> (j * 4)) & 0xF;
+        phdr_buf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    }
+    phdr_buf[8] = '\0';
+    kprint(phdr_buf);
+    kprint(" phnum=");
+    // Print phnum
+    if (ehdr.e_phnum < 10) {
+        char c = '0' + ehdr.e_phnum;
+        kprint(&c);
+    } else {
+        kprint("?");
+    }
+    kprint("\n");
+    
     // Push AUXV entries (Key, Value) pairs
     // Stack grows down, so push in reverse order of desired array?
     // Array: [Type1, Val1], [Type2, Val2] ... [NULL, 0]
