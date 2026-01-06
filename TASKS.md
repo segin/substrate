@@ -97,6 +97,9 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [ ] Kernel space: 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared).
                     - [ ] Kernel PDEs are shared by reference, not copied.
                     - [ ] Recursive mapping at PDE 1023 for efficient PT access.
+                    - [ ] **Dynamic PT Allocation:** Only allocate page tables on demand (not 768 PTs upfront).
+                    - [ ] Minimum overhead per process: 1 PD (4KB) + PTs as needed (~4KB per 4MB mapped).
+                    - [ ] Avoid pre-allocating all user-space PTs (would waste 128KB+ per process).
                 - [ ] **`pmap_t` Data Structure:**
                     - [ ] `pd_phys`: Physical address of page directory.
                     - [ ] `pd_virt`: Virtual address for kernel access to PD.

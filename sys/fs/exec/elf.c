@@ -85,6 +85,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     }
     uint32_t max_vaddr = 0;
     
+    // TLS segment tracking
+    uint32_t tls_vaddr = 0;
+    uint32_t tls_filesz = 0;
+    uint32_t tls_memsz = 0;
+    uint32_t tls_align = 1;
+    int has_tls = 0;
+    (void)tls_vaddr;  // Will be used for debug output
+    (void)tls_align;  // Will be used for proper alignment
+    
     for (int i = 0; i < ehdr.e_phnum; i++) {
         uint32_t ph_offset = ehdr.e_phoff + i * ehdr.e_phentsize;
         if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)&phdr) != sizeof(Elf32_Phdr)) {
@@ -100,6 +109,24 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                     *interp_len = to_read;
                 }
             }
+        }
+        
+        // Detect TLS segment
+        if (phdr.p_type == PT_TLS) {
+            tls_vaddr = phdr.p_vaddr;
+            tls_filesz = phdr.p_filesz;
+            tls_memsz = phdr.p_memsz;
+            tls_align = phdr.p_align ? phdr.p_align : 1;
+            has_tls = 1;
+            kprint("ELF: Found TLS segment, memsz=");
+            char tbuf[16];
+            for (int j = 7; j >= 0; j--) {
+                int nib = (tls_memsz >> (j * 4)) & 0xF;
+                tbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+            }
+            tbuf[8] = '\0';
+            kprint(tbuf);
+            kprint("\n");
         }
         
         if (phdr.p_type == PT_LOAD && phdr.p_memsz > 0) {
@@ -216,6 +243,86 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
             // BSS is already zeroed since we memset each page
             
             if (va_end > max_vaddr) max_vaddr = va_end;
+        }
+    }
+    
+    // Set up TLS if segment was found
+    if (has_tls && tls_memsz > 0) {
+        kprint("ELF: Setting up TLS block\n");
+        
+        // TLS layout for i386:
+        // The TCB (Thread Control Block) sits at the END of the TLS block
+        // GS points to the TCB, and TLS data is at negative offsets from GS
+        // Layout: [TLS data (tls_memsz bytes)] [TCB pointer (4 bytes)]
+        
+        uint32_t tls_total_size = tls_memsz + 8; // TLS data + TCB area
+        uint32_t tls_pages = (tls_total_size + 0xFFF) >> 12;
+        
+        // Allocate TLS block in user space (just after max_vaddr)
+        uint32_t tls_block_start = (max_vaddr + 0xFFF) & ~0xFFF;
+        
+        for (uint32_t i = 0; i < tls_pages; i++) {
+            void *pa = pmm_alloc_block();
+            if (!pa) {
+                kprint("ELF: Failed to alloc TLS page\n");
+                break;
+            }
+            uint32_t va = tls_block_start + i * 0x1000;
+            pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, VM_PROT_READ | VM_PROT_WRITE, 0);
+            memset(VIRTUAL_d(pa), 0, 0x1000);
+        }
+        
+        // Copy initialized TLS data from ELF (read from file into TLS block)
+        if (tls_filesz > 0) {
+            // TLS data is in the PT_TLS segment of the file
+            // We need to find it and copy to our TLS block
+            // The data comes from p_offset in the PT_TLS segment
+            // Re-read program headers to find PT_TLS offset
+            for (int i = 0; i < ehdr.e_phnum; i++) {
+                uint32_t ph_offset = ehdr.e_phoff + i * ehdr.e_phentsize;
+                Elf32_Phdr tls_phdr;
+                if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)&tls_phdr) == sizeof(Elf32_Phdr)) {
+                    if (tls_phdr.p_type == PT_TLS) {
+                        // Read TLS init data into kernel buffer then copy to user space
+                        static uint8_t tls_init_buf[4096]; // Max 4KB TLS init
+                        uint32_t to_copy = tls_filesz > sizeof(tls_init_buf) ? sizeof(tls_init_buf) : tls_filesz;
+                        if (file->read(file, tls_phdr.p_offset, to_copy, tls_init_buf) == to_copy) {
+                            // Copy to user TLS block (at start of block)
+                            uint32_t tls_data_va = tls_block_start;
+                            uint32_t tls_pa = pmap_extract(pmap, tls_data_va);
+                            if (tls_pa) {
+                                memcpy(VIRTUAL_d(tls_pa), tls_init_buf, to_copy);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // The TCB pointer is at the end of the TLS block
+        // GS base should point to the TCB (end of TLS data)
+        uint32_t tls_base = tls_block_start + tls_memsz;
+        
+        // Set up GDT entry 6 for TLS (selector 0x33 = entry 6 | RPL 3)
+        // Access: 0xF2 = Present|Ring3|Data|Writable
+        // Gran: 0xCF = 4KB pages, 32-bit
+        extern void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
+        gdt_set_gate(6, tls_base, 0xFFFFFFFF, 0xF2, 0xCF);
+        
+        kprint("ELF: TLS base set to 0x");
+        char tbuf[16];
+        for (int j = 7; j >= 0; j--) {
+            int nib = (tls_base >> (j * 4)) & 0xF;
+            tbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+        }
+        tbuf[8] = '\0';
+        kprint(tbuf);
+        kprint("\n");
+        
+        // Store TLS base in process for context switches
+        if (current_process) {
+            // We'll need a field for this - for now just set it in GDT
         }
     }
     

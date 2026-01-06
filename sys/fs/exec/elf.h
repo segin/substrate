@@ -40,6 +40,7 @@ typedef struct {
 #define PT_NOTE    4
 #define PT_SHLIB   5
 #define PT_PHDR    6
+#define PT_TLS     7
 
 #define ELFMAG0 0x7F
 #define ELFMAG1 'E'
