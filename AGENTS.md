@@ -12,8 +12,8 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 ## Recent Accomplishments
 - **VFS Hard Link Support:** Implemented `link` in VFS and hooked up `sys_link` across native, Linux, and FreeBSD personalities. Improved ABI detection for stack-based syscalls.
 - **VFS Unlink Support:** Implemented `unlink` in VFS and hooked up `sys_unlink` across native, Linux, and FreeBSD personalities.
+- **Per-Process Address Spaces:** Implemented `pmap_create()`, `pmap_destroy()`, `pmap_reference()`, `pmap_release()`, `pmap_fork()` with COW support. Global pmap list for TLB management. Full 3GB/1GB user/kernel split.
 - **PMM Hardening:** Phase 1 boot memory detection with sanitization, total RAM reporting, and proper kernel bounds.
-- **Per-Process Address Spaces:** Implemented `pmap_create()` and `pmap_destroy()` for full process isolation with 3GB/1GB user/kernel split
 - **FPU State Tracking:** Lazy FPU context switching with FXSAVE/FXRSTOR
 - **Filesystem Timestamps:** Added atime/mtime/ctime tracking with atomic updates
 - **TTY Integration:** Per-process controlling terminal support
