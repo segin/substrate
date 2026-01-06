@@ -153,7 +153,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Maintain `kernel_pmap` as authoritative source.
                     - [ ] On PDE change in kernel range, walk global pmap list and copy. (Deferred)
                     - [x] Alternatively: share kernel PTs by reference (pmap_create copies kernel PDEs).
-                - [ ] **ASID/PCID Support (Future x86_64):**
+                - [ ] **ASID/PCID Support (Future x86_64):** (Deferred)
                     - [ ] ASID pool management (allocate, free, recycle).
                     - [ ] Assign ASID on pmap creation.
                     - [ ] Include ASID in CR3 on context switch.
