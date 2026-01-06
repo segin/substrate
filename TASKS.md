@@ -110,15 +110,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] `lock`: Spinlock for SMP safety.
                     - [x] `asid`: Address Space ID (for TLB tagging, future PCID).
                     - [x] `list_entry`: For global pmap list (TLB shootdown).
-                - [ ] **`pmap_create()` - Create New Address Space:**
-                    - [ ] Allocate one 4KB page for page directory.
-                    - [ ] Zero user portion (PDEs 0-767).
-                    - [ ] Copy kernel PDEs (768-1022) from `kernel_pmap`.
-                    - [ ] Set up recursive mapping in PDE 1023.
-                    - [ ] Initialize reference count to 1.
-                    - [ ] Add to global pmap list for TLB management.
-                    - [ ] Allocate unique ASID if available.
-                    - [ ] Return `pmap_t*` or NULL on failure.
+                - [x] **`pmap_create()` - Create New Address Space:**
+                    - [x] Allocate one 4KB page for page directory.
+                    - [x] Zero user portion (PDEs 0-767).
+                    - [x] Copy kernel PDEs (768-1022) from `kernel_pmap`.
+                    - [x] Set up recursive mapping in PDE 1023.
+                    - [x] Initialize reference count to 1.
+                    - [x] Add to global pmap list for TLB management.
+                    - [x] Allocate unique ASID if available.
+                    - [x] Return `pmap_t*` or NULL on failure.
                 - [ ] **`pmap_destroy()` - Destroy Address Space:**
                     - [ ] Decrement reference count.
                     - [ ] If refcount > 0, return (still in use by COW children).

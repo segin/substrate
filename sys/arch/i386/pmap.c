@@ -23,8 +23,44 @@ static uint32_t kernel_page_tables[33][1024];
 static struct pmap kernel_pmap_store;
 static pmap_t kernel_pmap_ptr = &kernel_pmap_store;
 
+// Global pmap list for TLB shootdown
+static struct pmap *pmap_list_head = NULL;
+static volatile int pmap_list_lock = 0;
+
 // Global pmap lock for SMP safety
 static volatile int pmap_lock = 0;
+
+// Helper: Add pmap to global list
+static void pmap_list_add(pmap_t pmap) {
+    while (__sync_lock_test_and_set(&pmap_list_lock, 1)) {
+        __asm__ volatile("pause");
+    }
+    pmap->list_entry.next = pmap_list_head;
+    pmap->list_entry.prev = NULL;
+    if (pmap_list_head) {
+        pmap_list_head->list_entry.prev = pmap;
+    }
+    pmap_list_head = pmap;
+    __sync_lock_release(&pmap_list_lock);
+}
+
+// Helper: Remove pmap from global list
+static void pmap_list_remove(pmap_t pmap) {
+    while (__sync_lock_test_and_set(&pmap_list_lock, 1)) {
+        __asm__ volatile("pause");
+    }
+    if (pmap->list_entry.prev) {
+        pmap->list_entry.prev->list_entry.next = pmap->list_entry.next;
+    } else {
+        pmap_list_head = pmap->list_entry.next;
+    }
+    if (pmap->list_entry.next) {
+        pmap->list_entry.next->list_entry.prev = pmap->list_entry.prev;
+    }
+    pmap->list_entry.next = NULL;
+    pmap->list_entry.prev = NULL;
+    __sync_lock_release(&pmap_list_lock);
+}
 
 static void __attribute__((unused)) pmap_lock_acquire(void) {
     while (__sync_lock_test_and_set(&pmap_lock, 1)) {
@@ -191,6 +227,9 @@ pmap_t pmap_create(void) {
     // 5. Set up recursive mapping at entry 1023
     pd[1023] = pd_phys | PTE_P | PTE_W;
     
+    // 6. Add to global pmap list for TLB management
+    pmap_list_add(pmap);
+    
     return pmap;
 }
 
@@ -261,8 +300,15 @@ void pmap_destroy(pmap_t pmap) {
     // Edge case: Clear recursive mapping to prevent confusion
     pd[1023] = 0;
     
-    // 3. Free page directory
+    // 3. Remove from global pmap list
+    pmap_list_remove(pmap);
+    
+    // 4. Free page directory
     pmm_free_block((void *)(uintptr_t)pd_phys);
+    
+    // 5. Free the pmap struct itself
+    void *pmap_phys = (void *)((uintptr_t)pmap - 0xC0000000);
+    pmm_free_block(pmap_phys);
 }
 
 void pmap_activate(pmap_t pmap) {
