@@ -182,7 +182,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [ ] **Enhancements:**
                         - [x] Batch query for multiple pages (`pmap_is_referenced_range`).
                         - [x] Clear A bit atomically while querying (`pmap_test_and_clear_ref`).
-                        - [ ] Track per-page access frequency for page aging.
+                        - [x] Track per-page access frequency for page aging.
                 - [x] **`pmap_is_modified(pmap, va)` - Check if Page Was Written:**
                     - [x] Locate PTE for given virtual address.
                     - [x] Return true if PTE Dirty (D) bit is set.

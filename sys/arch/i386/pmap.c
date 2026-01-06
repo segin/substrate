@@ -838,3 +838,54 @@ int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va) {
     
     return 0;  // Not referenced
 }
+
+// Track access frequency for page aging
+// Called by page daemon to scan pages and update access_count
+// Clears A bit and increments access_count if page was accessed
+void pmap_track_access(vm_page_t *m) {
+    if (!m) return;
+    
+    struct pv_entry *pv = m->pv_list;
+    int was_accessed = 0;
+    
+    while (pv) {
+        pmap_t pmap = pv->pmap;
+        uint32_t va = pv->va;
+        
+        // Only check if this is the current address space
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+        if (pmap->pdir_phys != cr3) {
+            pv = pv->next;
+            continue;
+        }
+        
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+        
+        if (!(V_PD[pdi] & PTE_P)) {
+            pv = pv->next;
+            continue;
+        }
+        
+        uint32_t *pt = V_PT(pdi);
+        if (!(pt[pti] & PTE_P)) {
+            pv = pv->next;
+            continue;
+        }
+        
+        // Check and clear A bit
+        if (pt[pti] & PTE_A) {
+            pt[pti] &= ~PTE_A;
+            pmap_invalidate_page(va);
+            was_accessed = 1;
+        }
+        
+        pv = pv->next;
+    }
+    
+    // Update access count with saturation
+    if (was_accessed && m->access_count < 0xFFFF) {
+        m->access_count++;
+    }
+}

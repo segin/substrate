@@ -39,6 +39,9 @@ typedef struct vm_page {
     uint16_t wire_count;  // Wired down (cannot be paged out)
     uint16_t ref_count;   // General usage count
 
+    // Access tracking for page aging
+    uint16_t access_count;  // Incremented on each access (for LRU)
+
     // Buddy Allocator state
     uint8_t  order;       // Power of two order (0 = 1 page)
     
