@@ -170,10 +170,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Copy PTE entries from src to dst pmap
                 - [x] Set up COW if requested (clear write bit)
                 - [x] Used for fork() optimization
-                - [ ] **Enhancements:**
+                - [x] **Enhancements:**
                     - [x] Support partial range copy (for vfork/clone).
                     - [x] Copy-on-write reference counting integration.
-                    - [ ] Handle mixed COW and private mappings.
+                    - [x] Handle mixed COW and private mappings.
             - [ ] **Page Reference/Modification Tracking:**
                 - [x] **`pmap_is_referenced(pmap, va)` - Check if Page Was Accessed:**
                     - [x] Locate PTE for given virtual address.

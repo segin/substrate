@@ -33,6 +33,7 @@ typedef struct vm_page {
     #define PG_FREE     0x0020 // On the free list
     #define PG_ZERO     0x0040 // Page is zeroed
     #define PG_SWAPPED  0x0080 // Page is on swap disk
+    #define PG_PRIVATE  0x0100 // Private mapping (no COW, copy directly)
 
     // Reference count (number of mappings)
     uint16_t wire_count;  // Wired down (cannot be paged out)

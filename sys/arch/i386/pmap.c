@@ -626,6 +626,11 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
         
         uint32_t src_pte = src_pt[pti];
         
+        // Check if this is a private mapping (should not be COW'd)
+        uint32_t page_pa = src_pte & 0xFFFFF000;
+        vm_page_t *page = pmm_get_page(page_pa);
+        int is_private = (page && (page->flags & PG_PRIVATE));
+        
         // Ensure destination page table exists
         if (!(dst_pd[pdi] & PTE_P)) {
             void *pt_phys = pmm_alloc_block();
@@ -639,25 +644,41 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
         uint32_t dst_pt_phys = dst_pd[pdi] & 0xFFFFF000;
         uint32_t *dst_pt = (uint32_t *)(dst_pt_phys + 0xC0000000);
         
-        // Copy PTE
-        uint32_t dst_pte = src_pte;
-        
-        // If COW requested, mark both pages read-only
-        if (cow && (src_pte & PTE_W)) {
-            // Clear write bit for COW
-            dst_pte &= ~PTE_W;
-            src_pt[pti] &= ~PTE_W;
-            pmap_invalidate_page(va);
-        }
+        // Handle private vs shared mappings
+        if (is_private) {
+            // Private mapping: allocate new page and copy contents
+            void *new_page = pmm_alloc_block();
+            if (!new_page) return -1;
+            
+            // Copy page contents
+            uint32_t *src_data = (uint32_t *)(page_pa + 0xC0000000);
+            uint32_t *dst_data = (uint32_t *)((uint32_t)new_page + 0xC0000000);
+            for (int i = 0; i < 1024; i++) dst_data[i] = src_data[i];
+            
+            // Set destination PTE with new physical page
+            dst_pt[pti] = (uint32_t)new_page | (src_pte & 0xFFF);
+            
+            // Mark new page as private too
+            vm_page_t *new_pg = pmm_get_page((uint32_t)new_page);
+            if (new_pg) new_pg->flags |= PG_PRIVATE;
+        } else {
+            // Shared mapping: use COW if requested
+            uint32_t dst_pte = src_pte;
+            
+            if (cow && (src_pte & PTE_W)) {
+                // Clear write bit for COW
+                dst_pte &= ~PTE_W;
+                src_pt[pti] &= ~PTE_W;
+                pmap_invalidate_page(va);
+            }
 
-        // Increment reference count on the physical page
-        uint32_t page_pa = src_pte & 0xFFFFF000;
-        vm_page_t *page = pmm_get_page(page_pa);
-        if (page) {
-            __sync_fetch_and_add(&page->ref_count, 1);
+            // Increment reference count on the shared physical page
+            if (page) {
+                __sync_fetch_and_add(&page->ref_count, 1);
+            }
+            
+            dst_pt[pti] = dst_pte;
         }
-        
-        dst_pt[pti] = dst_pte;
     }
     
     return 0;
