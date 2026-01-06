@@ -509,6 +509,9 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
     return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);
 }
 
+// Threshold for switching to full TLB flush vs individual INVLPG
+#define TLB_BATCH_THRESHOLD 32
+
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error
 int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
@@ -516,6 +519,10 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return -1;
+    
+    // Track pages needing TLB invalidation for batching
+    uint32_t pages_modified = 0;
+    uint32_t first_va = 0, last_va = 0;
     
     // Walk range page by page
     for (uint32_t va = sva; va < eva; va += 0x1000) {
@@ -544,7 +551,26 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
         }
         
         pt[pti] = pte;
-        pmap_invalidate_page(va);
+        
+        // Track for batch TLB invalidation
+        if (pages_modified == 0) first_va = va;
+        last_va = va;
+        pages_modified++;
+    }
+    
+    // Batch TLB invalidation: use full flush for large ranges
+    if (pages_modified > TLB_BATCH_THRESHOLD) {
+        // Full TLB flush via CR3 reload
+        __asm__ volatile("mov %0, %%cr3" :: "r"(cr3));
+    } else {
+        // Individual INVLPG for small ranges
+        for (uint32_t va = first_va; va <= last_va && pages_modified > 0; va += 0x1000) {
+            uint32_t pdi = PD_INDEX(va);
+            uint32_t pti = PT_INDEX(va);
+            if ((V_PD[pdi] & PTE_P) && (V_PT(pdi)[pti] & PTE_P)) {
+                pmap_invalidate_page(va);
+            }
+        }
     }
     
     return 0;

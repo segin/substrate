@@ -163,7 +163,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Handle R/W and NX bit changes
                 - [x] Invalidate affected TLB entries
                 - [ ] **Enhancements:**
-                    - [ ] Batch TLB invalidations for large ranges.
+                    - [x] Batch TLB invalidations for large ranges.
                     - [ ] Support protection upgrade (read→read/write) and downgrade.
                     - [ ] Track protection changes for COW handling.
             - [x] `pmap_copy`: Copy mappings between address spaces
