@@ -93,7 +93,6 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     int has_tls = 0;
     (void)tls_vaddr;  // Will be used for debug output
     (void)tls_align;  // Will be used for proper alignment
-    (void)tls_filesz; // Not used when musl handles TLS
     
     for (int i = 0; i < ehdr.e_phnum; i++) {
         uint32_t ph_offset = ehdr.e_phoff + i * ehdr.e_phentsize;
@@ -248,16 +247,81 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     }
     
     // Set up TLS if segment was found
-    // NOTE: For musl/glibc static executables, the C library handles TLS initialization
-    // itself using builtin_tls or mmap, then calls set_thread_area to set up GS.
-    // We should NOT pre-set up GDT entry 6 as it conflicts with musl's expectations.
+    // This binary's libc expects GS to be pre-set by the kernel.
+    // It accesses errno via %gs:-12, so we need a valid GS base.
     if (has_tls && tls_memsz > 0) {
-        kprint("ELF: Found PT_TLS segment (musl will set up TLS via set_thread_area)\n");
+        kprint("ELF: Setting up TLS block\n");
         
-        // Update max_vaddr to reserve space for TLS (musl may use brk area)
-        // Align to page and add some space for TLS + TCB
-        uint32_t tls_reserve = ((tls_memsz + 0x1000 + 0xFFF) & ~0xFFF);
-        max_vaddr = ((max_vaddr + 0xFFF) & ~0xFFF) + tls_reserve;
+        // TLS layout for i386 (Variant II):
+        // The TCB (Thread Control Block) sits at the END of the TLS block
+        // GS points to the TCB, and TLS data is at negative offsets from GS
+        // Layout: [TLS data (tls_memsz bytes)] [TCB area]
+        
+        uint32_t tls_total_size = tls_memsz + 32; // TLS data + TCB area (space for errno etc)
+        uint32_t tls_pages = (tls_total_size + 0xFFF) >> 12;
+        
+        // Allocate TLS block in user space (just after max_vaddr)
+        uint32_t tls_block_start = (max_vaddr + 0xFFF) & ~0xFFF;
+        
+        for (uint32_t i = 0; i < tls_pages; i++) {
+            void *pa = pmm_alloc_block();
+            if (!pa) {
+                kprint("ELF: Failed to alloc TLS page\n");
+                break;
+            }
+            uint32_t va = tls_block_start + i * 0x1000;
+            pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, VM_PROT_READ | VM_PROT_WRITE, 0);
+            memset(VIRTUAL_d(pa), 0, 0x1000);
+        }
+        
+        // Copy initialized TLS data from ELF
+        if (tls_filesz > 0) {
+            for (int i = 0; i < ehdr.e_phnum; i++) {
+                uint32_t ph_offset = ehdr.e_phoff + i * ehdr.e_phentsize;
+                Elf32_Phdr tls_phdr;
+                if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)&tls_phdr) == sizeof(Elf32_Phdr)) {
+                    if (tls_phdr.p_type == PT_TLS) {
+                        static uint8_t tls_init_buf[4096];
+                        uint32_t to_copy = tls_filesz > sizeof(tls_init_buf) ? sizeof(tls_init_buf) : tls_filesz;
+                        if (file->read(file, tls_phdr.p_offset, to_copy, tls_init_buf) == to_copy) {
+                            uint32_t tls_pa = pmap_extract(pmap, tls_block_start);
+                            if (tls_pa) {
+                                memcpy(VIRTUAL_d(tls_pa), tls_init_buf, to_copy);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // GS base points to TCB (end of TLS data block)
+        // This allows %gs:0 to return self-pointer and %gs:-N to access TLS data
+        uint32_t tls_base = tls_block_start + tls_memsz + 16; // Leave room for TLS access
+        
+        // Write self-pointer at %gs:0 for pthread_self compatibility
+        uint32_t tls_base_pa = pmap_extract(pmap, tls_base & ~0xFFF);
+        if (tls_base_pa) {
+            uint32_t *self_ptr = (uint32_t *)((uint8_t *)VIRTUAL_d(tls_base_pa) + (tls_base & 0xFFF));
+            *self_ptr = tls_base;  // self-pointer
+        }
+        
+        // Set up GDT entry 6 for TLS (selector 0x33 = entry 6 | RPL 3)
+        extern void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
+        gdt_set_gate(6, tls_base, 0xFFFFFFFF, 0xF2, 0xCF);
+        
+        kprint("ELF: TLS base set to 0x");
+        char tbuf[9];
+        for (int j = 7; j >= 0; j--) {
+            int nib = (tls_base >> (j * 4)) & 0xF;
+            tbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+        }
+        tbuf[8] = '\0';
+        kprint(tbuf);
+        kprint("\n");
+        
+        // Update max_vaddr to prevent brk overlap
+        max_vaddr = tls_block_start + (tls_pages * 0x1000);
     }
     
     // Detect personality based on OSABI
