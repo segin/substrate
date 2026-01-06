@@ -317,6 +317,29 @@ void pmap_destroy(pmap_t pmap) {
     pmm_free_block(pmap_phys);
 }
 
+void pmap_reference(pmap_t pmap) {
+    if (!pmap) return;
+    if (pmap == kernel_pmap_ptr) return; // Kernel pmap never released
+    
+    // Atomically increment reference count
+    __sync_fetch_and_add(&pmap->ref_count, 1);
+}
+
+void pmap_release(pmap_t pmap) {
+    if (!pmap) return;
+    if (pmap == kernel_pmap_ptr) return; // Kernel pmap never released
+    
+    // Atomically decrement reference count
+    int old_count = __sync_fetch_and_sub(&pmap->ref_count, 1);
+    
+    // If was 1 (now 0), destroy the pmap
+    if (old_count == 1) {
+        // ref_count is now 0, pmap_destroy will proceed
+        pmap->ref_count = 1; // Reset for pmap_destroy's decrement
+        pmap_destroy(pmap);
+    }
+}
+
 void pmap_activate(pmap_t pmap) {
     uint32_t current_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));

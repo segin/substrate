@@ -70,6 +70,8 @@ pmap_t pmap_create(void);
 void pmap_destroy(pmap_t pmap);
 void pmap_activate(pmap_t pmap); // Switch CR3 to this pmap
 pmap_t pmap_kernel(void);        // Get kernel pmap
+void pmap_reference(pmap_t pmap); // Increment ref_count
+void pmap_release(pmap_t pmap);   // Decrement ref_count, destroy if 0
 
 // Mapping Operations
 // Returns 0 on success, < 0 on error

@@ -129,12 +129,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Free the page directory page.
                     - [x] Remove from global pmap list.
                     - [x] Release ASID to pool.
-                - [ ] **`pmap_reference()` - Increment Reference Count:**
-                    - [ ] Atomically increment `refcount`.
-                    - [ ] Used when forking to share pmap temporarily.
-                - [ ] **`pmap_release()` - Decrement Reference Count:**
-                    - [ ] Atomically decrement `refcount`.
-                    - [ ] If reaches 0, call `pmap_destroy()`.
+                - [x] **`pmap_reference()` - Increment Reference Count:**
+                    - [x] Atomically increment `refcount`.
+                    - [x] Used when forking to share pmap temporarily.
+                - [x] **`pmap_release()` - Decrement Reference Count:**
+                    - [x] Atomically decrement `refcount`.
+                    - [x] If reaches 0, call `pmap_destroy()`.
                 - [ ] **`pmap_fork()` - Fork Address Space (COW):**
                     - [ ] Create new pmap via `pmap_create()`.
                     - [ ] Walk parent's user PTEs:
