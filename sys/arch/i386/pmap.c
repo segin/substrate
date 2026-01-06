@@ -809,3 +809,32 @@ int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
     
     return ref_count;
 }
+
+// Atomic test and clear: check if page was accessed and clear A bit
+// Returns 1 if page was referenced (and now cleared), 0 otherwise
+int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va) {
+    if (!pmap) return 0;
+    
+    // Must be active address space
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return 0;
+    
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+    
+    if (!(V_PD[pdi] & PTE_P)) return 0;
+    
+    uint32_t *pt = V_PT(pdi);
+    if (!(pt[pti] & PTE_P)) return 0;
+    
+    // Test and clear A bit atomically
+    uint32_t old_pte = pt[pti];
+    if (old_pte & PTE_A) {
+        pt[pti] = old_pte & ~PTE_A;
+        pmap_invalidate_page(va);
+        return 1;  // Was referenced
+    }
+    
+    return 0;  // Not referenced
+}

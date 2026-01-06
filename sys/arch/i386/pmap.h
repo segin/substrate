@@ -102,5 +102,6 @@ void pmap_invalidate_page(uint32_t va);
 
 // Page reference/modification tracking
 int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva);
+int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va);
 
 #endif

@@ -181,7 +181,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] CPU sets A bit automatically on first access.
                     - [ ] **Enhancements:**
                         - [x] Batch query for multiple pages (`pmap_is_referenced_range`).
-                        - [ ] Clear A bit atomically while querying (`pmap_test_and_clear_ref`).
+                        - [x] Clear A bit atomically while querying (`pmap_test_and_clear_ref`).
                         - [ ] Track per-page access frequency for page aging.
                 - [x] **`pmap_is_modified(pmap, va)` - Check if Page Was Written:**
                     - [x] Locate PTE for given virtual address.
