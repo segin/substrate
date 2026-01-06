@@ -14,6 +14,7 @@ extern int sys_close(int);
 extern int sys_execve(const char*, char**, char**);
 extern int sys_chdir(const char*);
 extern int sys_getpid(void);
+extern int sys_unlink(const char*);
 extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
 extern int sys_umount(const char*);
 extern int sys_getuid(void);
@@ -46,6 +47,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [4] = &sys_write,
     [5] = &sys_open,
     [6] = &sys_close,
+    [10] = &sys_unlink,
     [12] = &sys_chdir,
     [13] = &sys_fchdir,
     [17] = &sys_getuid,  // FreeBSD: old break

@@ -46,6 +46,7 @@
 
 // Simple string functions to avoid depending on libc in core if not available
 int serial_debug_enabled = 0;
+int syscall_trace_enabled = 0;
 
 
 char *strstr(const char *haystack, const char *needle) {
@@ -199,6 +200,11 @@ void kmain(unsigned long magic, unsigned long addr) {
         serial_debug_enabled = 1;
         console_register(uart_get_console());
         kprint("Serial Debug Enabled.\n");
+    }
+    
+    if (cmdline_has("syscall_trace") || cmdline_has("syscall_log")) {
+        syscall_trace_enabled = 1;
+        kprint("Syscall Tracing Enabled.\n");
     }
 
     // Display kernel ident banner (mirrored if serial_debug_enabled)

@@ -27,7 +27,7 @@ void geom_gpt_init(void);
 
 void console_register(console_backend_t *backend);
 void console_write(const char *data, size_t len);
-void console_read(char *data, size_t len);
+int console_read(char *data, size_t len);
 void console_putchar(char c);
 void console_clear(void);
 

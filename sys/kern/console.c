@@ -72,31 +72,29 @@ extern void sched_yield(void);
 static inline void cli(void) { __asm__ volatile("cli"); }
 static inline void sti(void) { __asm__ volatile("sti"); }
 
-void console_read(char *data, size_t len) {
+int console_read(char *data, size_t len) {
+    if (len == 0) return 0;
+    
     size_t i = 0;
-    while (i < len) {
-        cli();
-        while (console_in_head == console_in_tail) {
-            // Atomic check-and-block
-            // We must set state to BLOCKED within the critical section (interrupts disabled)
-            // so we don't miss the wakeup from the ISR.
-            if (current_thread) {
-                current_thread->wait_chan = &console_in_buf;
-                current_thread->state = THREAD_BLOCKED;
-            }
-            
-            // Re-enable interrupts before yielding to allow ISR to run and wake us
-            sti();
-            sched_yield();
-            
-            // Re-disable for next check
-            cli();
+    cli();
+    // Wait for at least one character
+    while (console_in_head == console_in_tail) {
+        if (current_thread) {
+            current_thread->wait_chan = &console_in_buf;
+            current_thread->state = THREAD_BLOCKED;
         }
-        sti(); // Ensure interrupts enabled when data available
-        
+        sti();
+        sched_yield();
+        cli();
+    }
+    
+    // Read as much as available into request, up to len
+    while (i < len && console_in_head != console_in_tail) {
         data[i++] = console_in_buf[console_in_tail];
         console_in_tail = (console_in_tail + 1) % CONSOLE_BUF_SIZE;
     }
+    sti();
+    return (int)i;
 }
 
 static uint32_t console_node_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
@@ -119,6 +117,37 @@ static int console_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     }
     if (request == 0x5402) { // TCSETS
         return 0; // Succeed
+    }
+    if (request == 0x5413) { // TIOCGWINSZ
+        struct winsize {
+            unsigned short ws_row;
+            unsigned short ws_col;
+            unsigned short ws_xpixel;
+            unsigned short ws_ypixel;
+        } *ws = (struct winsize*)arg;
+        if (ws) {
+            ws->ws_row = 25;
+            ws->ws_col = 80;
+            ws->ws_xpixel = 0;
+            ws->ws_ypixel = 0;
+        }
+        return 0;
+    }
+    if (request == 0x540E) { // TIOCSCTTY
+        // Make this the controlling terminal for the process
+        // For now, accept success
+        return 0;
+    }
+    if (request == 0x540F) { // TIOCGPGRP
+        if (arg) {
+            // Return process group ID (just usage of PID for now)
+            *(int*)arg = current_process->pid;
+        }
+        return 0;
+    }
+    if (request == 0x5410) { // TIOCSPGRP
+        // Set process group
+        return 0;
     }
     return -1;
 }

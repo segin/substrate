@@ -50,6 +50,12 @@ extern int sys_fstat(int, void*);
 extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
 
 extern int sys_set_thread_area(void*);
+extern int sys_fcntl(int, int, int);
+extern int sys_getpgid(int);
+extern int sys_setpgid(int, int);
+extern int sys_getpgrp(void);
+extern int sys_unlink(const char*);
+extern int sys_sigprocmask(int, const void*, void*);
 
 static void *linux_syscalls[MAX_SYSCALLS] = {
     [1] = &sys_exit,
@@ -58,16 +64,19 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [4] = &sys_write,
     [5] = &sys_open,
     [6] = &sys_close,
+    [10] = &sys_unlink,
     [11] = &sys_execve,
     [12] = &sys_chdir,
     [13] = &sys_time,
     [14] = &sys_mknod,
+    [18] = &sys_stat,
     [19] = &sys_lseek,
     [20] = &sys_getpid,
     [21] = &sys_mount,
     [22] = &sys_umount,
     [23] = &sys_setuid,
     [24] = &sys_getuid,
+    [28] = &sys_fstat,
     [33] = &sys_access,
     [36] = &sys_sync,
     [37] = &sys_kill,
@@ -82,26 +91,36 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [50] = &sys_getegid,
     [51] = &sys_acct,
     [54] = &sys_ioctl,
+    [57] = &sys_setpgid,
     [63] = &sys_dup2,
+    [64] = &sys_getppid,
+    [65] = &sys_getpgrp,
+    [84] = &sys_lstat,
     [90] = &sys_mmap,  // mmap
     [106] = &sys_stat,
     [107] = &sys_lstat,
     [108] = &sys_fstat,
     [120] = &sys_clone,
     [122] = &sys_uname,
+    [132] = &sys_getpgid,
     [133] = &sys_fchdir,
     [141] = &sys_getdents,
-    [64] = &sys_getppid,
     [162] = &sys_nanosleep,
     [174] = &sys_sigaction, // rt_sigaction
     [175] = &sys_sigprocmask, // rt_sigprocmask
     [183] = &sys_getcwd,
     [190] = &sys_vfork,
     [192] = &sys_mmap,  // mmap2 (same as mmap, offset already in bytes)
-    // Map 32-bit UID/GID syscalls to 16-bit versions (we use 32-bit ints anyway)
+    [195] = &sys_stat,   // stat64
+    [196] = &sys_lstat,  // lstat64
+    [197] = &sys_fstat,  // fstat64
     [199] = &sys_getuid, 
     [200] = &sys_getgid,
+    [201] = &sys_geteuid,
+    [202] = &sys_getegid,
     [214] = &sys_setgid, // setfsgid32 (map to setgid for now)
+    [220] = &sys_getdents, // getdents64
+    [221] = &sys_fcntl,  // fcntl64
     [240] = &sys_futex,
     [243] = &sys_set_thread_area,
 };

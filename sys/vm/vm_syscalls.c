@@ -104,8 +104,20 @@ void *sys_brk(void *addr) {
     if (!current_process) return NULL;
     
     // If querying (addr == 0) or uninitialized
-    if (!addr || !current_process->brk_start)
+    if (!addr || !current_process->brk_start) {
+        extern int syscall_trace_enabled;
+        if (syscall_trace_enabled) {
+            extern void kprint(const char*);
+            char buf[64];
+            char *digits = "0123456789ABCDEF";
+            uint32_t val = current_process->brk;
+            kprint("BRK: Query/Early returning 0x");
+            for(int i=0;i<8;i++) buf[7-i] = digits[(val>>(i*4))&0xF];
+            buf[8] = '\n'; buf[9]=0;
+            kprint(buf);
+        }
         return (void *)current_process->brk;
+    }
 
     uint32_t new_brk = (uint32_t)addr;
     uint32_t old_brk = current_process->brk;
@@ -123,11 +135,23 @@ void *sys_brk(void *addr) {
         // Allocate and map new pages
         for (uint32_t va = old_page_end; va < new_page_end; va += 0x1000) {
             void *pa = pmm_alloc_block();
-            if (!pa) return (void *)old_brk; // Out of memory
+            if (!pa) {
+                extern int syscall_trace_enabled;
+                if (syscall_trace_enabled) {
+                    extern void kprint(const char*);
+                    kprint("BRK: pmm_alloc failed!\n");
+                }
+                return (void *)old_brk; // Out of memory
+            }
             
-            // Map page
-            if (pmap_enter(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(), va, (uint32_t)(uintptr_t)pa, 0, 0) < 0) {
-                return (void *)old_brk;
+            // Map page with Read/Write permissions (USER handled by pmap for user addresses)
+            if (pmap_enter(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(), va, (uint32_t)(uintptr_t)pa, VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
+                 extern int syscall_trace_enabled;
+                 if (syscall_trace_enabled) {
+                     extern void kprint(const char*);
+                     kprint("BRK: pmap_enter failed!\n");
+                 }
+                 return (void *)old_brk;
             }
             // Zero via kernel mapping
             #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
@@ -138,5 +162,19 @@ void *sys_brk(void *addr) {
     // This is safe for stability, just wasteful.
 
     current_process->brk = new_brk;
+    
+    // Debug print for success (restored and gated)
+    extern int syscall_trace_enabled;
+    if (syscall_trace_enabled) {
+        extern void kprint(const char*);
+        char buf[64];
+        char *digits = "0123456789ABCDEF";
+        uint32_t val = new_brk;
+        kprint("BRK: Returning 0x");
+        for(int i=0;i<8;i++) buf[7-i] = digits[(val>>(i*4))&0xF];
+        buf[8] = '\n'; buf[9]=0;
+        kprint(buf);
+    }
+    
     return (void *)new_brk;
 }

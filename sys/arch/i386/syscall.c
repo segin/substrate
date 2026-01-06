@@ -62,9 +62,8 @@ int sys_write(int fd, const char *buf, int len) {
 int sys_read(int fd, char *buf, int len) {
     if (fd == 0) {
         // Stdin - read from console input buffer (keyboard)
-        extern void console_read(char *data, size_t len);
-        console_read(buf, len);
-        return len;
+        extern int console_read(char *data, size_t len);
+        return console_read(buf, len);
     }
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
@@ -329,28 +328,18 @@ int sys_set_thread_area(struct user_desc *u_info) {
     return 0;
 }
 
-static int syscall_log_active = 0;
-extern int cmdline_has(const char *key);
+// Global flag from main.c
+extern int syscall_trace_enabled;
 
 // Global pointer to current syscall's register frame (for fork)
 registers_t *syscall_regs = NULL;
 
 void syscall_handler(registers_t *regs) {
-    // Check for logging flag once
-    static int checked_log = 0;
-    if (!checked_log) {
-        if (cmdline_has("syscall_log")) {
-            syscall_log_active = 1;
-        }
-        checked_log = 1;
-    }
-
     if (!current_process || !current_process->pers) {
         regs->eax = -38; // ENOSYS
         return;
     }
 
-    
     // Save regs pointer for special syscalls like fork
     syscall_regs = regs;
     
@@ -383,7 +372,7 @@ void syscall_handler(registers_t *regs) {
         arg6 = regs->ebp;
     }
 
-    if (syscall_log_active) {
+    if (syscall_trace_enabled) {
         char buf[256];
         if (is_stack_abi) {
             sprintf(buf, "SYSCALL: %d (PID=%d, %s) STACK Args: %08X %08X %08X %08X %08X %08X\n", 
@@ -410,7 +399,7 @@ void syscall_handler(registers_t *regs) {
     
     // Check if syscall number is out of range
     if (regs->eax >= p->syscall_count) {
-        if (syscall_log_active) {
+        if (syscall_trace_enabled) {
             char buf[64];
             sprintf(buf, "SYSCALL: Out of range #%u\n", (unsigned int)regs->eax);
             kprint(buf);
@@ -423,7 +412,7 @@ void syscall_handler(registers_t *regs) {
     
     // Check if syscall handler is NULL (not implemented)
     if (!location) {
-        if (syscall_log_active) {
+        if (syscall_trace_enabled) {
              // ...
         }
         regs->eax = -38; // ENOSYS
@@ -438,7 +427,7 @@ void syscall_handler(registers_t *regs) {
     regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
     regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
 
-    if (syscall_log_active) {
+    if (syscall_trace_enabled) {
         // Log return value? Maybe too noisy. 
         // kprint("SYSCALL: Returned\n");
     }
@@ -604,6 +593,45 @@ int sys_ioctl(int fd, uint32_t request, void *arg) {
     // Default: not supported
     return -1;
 }
+int sys_unlink(const char *path) {
+    if (!path) return -1;
+    
+    char dir[256];
+    char file[128];
+    
+    // Find the last slash to separate directory and filename
+    const char *last_slash = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+    
+    fs_node_t *parent = NULL;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    
+    if (!last_slash) {
+        // No slash - parent is CWD
+        parent = current_process->cwd_node ? current_process->cwd_node : root;
+        strcpy(file, path);
+    } else if (last_slash == path) {
+        // Only one slash at the beginning - parent is root
+        parent = root;
+        strcpy(file, path + 1);
+    } else {
+        // Split into dir and file
+        size_t dirlen = last_slash - path;
+        if (dirlen >= sizeof(dir)) return -1;
+        memcpy(dir, path, dirlen);
+        dir[dirlen] = '\0';
+        strcpy(file, last_slash + 1);
+        
+        parent = vfs_lookup(root, dir);
+    }
+    
+    if (!parent || !file[0]) return -1;
+    
+    return unlink_fs(parent, file);
+}
+
 int sys_access(const char *path, int mode) {
     if (!path) return -1;
 
@@ -715,6 +743,11 @@ int sys_lchown(const char *path, int uid, int gid) {
 int sys_fcntl(int fd, int cmd, int arg) {
     (void)fd; (void)cmd; (void)arg;
     return 0;
+}
+
+int sys_getpgid(int pid) { 
+    if (pid == 0) return current_process->pid;
+    return pid; 
 }
 
 int sys_creat(const char *path, int mode) {

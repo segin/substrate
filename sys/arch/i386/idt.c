@@ -212,6 +212,13 @@ void isr_handler(registers_t *regs) {
         sprintf(buf, "ESI: 0x%08X  EDI: 0x%08X  EBP: 0x%08X  ESP: 0x%08X\n", (unsigned int)regs->esi, (unsigned int)regs->edi, (unsigned int)regs->ebp, (unsigned int)regs->esp);
         kprint(buf);
         
+        if (regs->int_no == 14) {
+            uint32_t cr2;
+            __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+            sprintf(buf, "CR2: 0x%08X\n", (unsigned int)cr2);
+            kprint(buf);
+        }
+        
         if (is_usermode) {
             // User-mode crash - kill the process
             kprint("Killing user process.\n\n");

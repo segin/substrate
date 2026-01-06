@@ -12,6 +12,8 @@ void run_pmap_tests(void);
 void run_pmap_protect_property_tests(void);
 void run_mmap_tests(void);
 void run_pid_tests(void);
+void run_unlink_tests(void);
+void run_unlink_property_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -30,6 +32,8 @@ void run_kernel_tests(void) {
         run_pmap_protect_property_tests();
         run_vm_expanded_tests();
         run_pid_tests();
+        run_unlink_tests();
+        run_unlink_property_tests();
     }
     
     if (all || strcmp(test_arg, "mmap") == 0) {

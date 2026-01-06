@@ -10,6 +10,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Userland Linker Flags:** `-m32 -nostdlib -fno-pie`.
 
 ## Recent Accomplishments
+- **VFS Unlink Support:** Implemented `unlink` in VFS and hooked up `sys_unlink` across native, Linux, and FreeBSD personalities.
 - **PMM Hardening:** Phase 1 boot memory detection with sanitization, total RAM reporting, and proper kernel bounds.
 - **Per-Process Address Spaces:** Implemented `pmap_create()` and `pmap_destroy()` for full process isolation with 3GB/1GB user/kernel split
 - **FPU State Tracking:** Lazy FPU context switching with FXSAVE/FXRSTOR
@@ -47,7 +48,9 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
     - Init: PID 1 (TID 1).
     - Init spawned via `sched_spawn_kernel_process` and transitions via `execve`.
 - VirtIO drivers (Block, 9P) linked and initialized
-- Ready for mmap() implementation
+- **PT_TLS Support:** ELF loader now handles PT_TLS segment, allocates TLS block, sets GDT entry 6 for GS-based TLS access
+- **VGA Hardware Cursor:** Fixed to sync with software cursor position
+- Debugging remaining TLS access issue (ESI pointing to PT_TLS template instead of allocated block)
 
 ## Directives
 1.  **Architecture Maintenance:** Always read `ARCHITECTURE.md` before starting complex tasks. Update `ARCHITECTURE.md` if your changes impact the system structure or design.
@@ -56,6 +59,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 4.  **Safety:** Always verify file contents before replacing.
 5.  **Build System:** Maintain the recursive Makefile structure. Ensure `make -C sys`, `make -C lib/c`, and `make -C bin` always pass.
 6.  **Git Operations:** Use `git mv` and `git rm` for file operations to preserve history.
+7.  **PMAP Work Methodology:** See `~/.gemini/antigravity/brain/*/master_directives.md` - Complete ONE checkbox at a time, update docs/specs/database/unit/property/fuzzing tests, commit, push.
 
 ## Directory Structure Overview
 - `sys/`: Kernel source.
@@ -81,10 +85,11 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 
 ## Known Issues
 - Interrupt responsiveness: `Ctrl+F9` debug dump sometimes fails during idle states.
-- Stack corruption: Occasional Page Faults (ERR 5) in `sh` being investigated.
+- **TLS Template Access:** After PT_TLS setup, some code accesses PT_TLS template (0x0811EE18) instead of using GS-relative addressing.
+- **PMAP Memory Overhead:** 32 identity-mapped kernel PDEs (0-31) in userspace consume 128KB+ per process.
 
 ## Next Steps
+- Debug remaining TLS access issue (ESI=0x0811EE18 crash)
+- Refactor PMAP to dynamically allocate page tables (reduce 128KB overhead)
 - Implement mmap() syscall with personality driver integration
-- Hook Linux and FreeBSD personalities to native mmap
 - Flesh out 9P filesystem logic implementation
-- Create comprehensive tests

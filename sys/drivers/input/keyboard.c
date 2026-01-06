@@ -113,6 +113,12 @@ void keyboard_handler(registers_t *regs) {
         if (scancode < 128) {
             char c = kbd_shift ? kbd_us_shifted[scancode] : kbd_us[scancode];
             if (c) {
+                // DEBUG: Confirm interrupt (gated)
+                extern int syscall_trace_enabled;
+                if (syscall_trace_enabled) {
+                    kprint("KBD_IRQ\n");
+                }
+                
                 kbd_push(c);
                 extern void console_push_char(char c);
                 console_push_char(c);
