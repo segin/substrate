@@ -215,6 +215,14 @@ void isr_handler(registers_t *regs) {
         if (regs->int_no == 14) {
             uint32_t cr2;
             __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+            
+            // Try to handle page fault (e.g. COW)
+            // We pass error code and faulting address
+            extern int pmap_fault(uint32_t err_code, uint32_t cr2);
+            if (pmap_fault(regs->err_code, cr2)) {
+                return; // Fault handled successfully
+            }
+
             sprintf(buf, "CR2: 0x%08X\n", (unsigned int)cr2);
             kprint(buf);
         }

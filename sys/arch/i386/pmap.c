@@ -18,6 +18,9 @@ static uint32_t kernel_page_tables[33][1024];
 // Recursive Paging Helpers
 #define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
 #define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
+#define PTE_FRAME       0xFFFFF000 // Frame address mask
+
+#include "../../include/sys/proc.h" // For current_process
 
 
 static struct pmap kernel_pmap_store;
@@ -997,4 +1000,101 @@ void pmap_track_modify(vm_page_t *m, uint32_t current_time) {
     if (was_modified) {
         m->last_modified = current_time;
     }
+}
+
+// ==================== Fault Handling ====================
+
+// Page Fault Handler
+// Returns 1 if handled, 0 if unhandled (kernel should panic/kill process)
+int pmap_fault(uint32_t err_code, uint32_t cr2) {
+    // Check for Copy-on-Write (COW) fault
+    // Error Code bits:
+    // P (bit 0) = 1 (Page Present)
+    // W (bit 1) = 1 (Write Operation)
+    if ((err_code & 0x03) == 0x03) {
+        // It was a write to a present page.
+        // Check if the page is read-only in the page table.
+        
+        uint32_t pdi = PD_INDEX(cr2);
+        uint32_t pti = PT_INDEX(cr2);
+        
+        // Use current address space (V_PD/V_PT)
+        if (!(V_PD[pdi] & PTE_P)) return 0;
+        
+        uint32_t *pt = V_PT(pdi);
+        if (!(pt[pti] & PTE_P)) return 0;
+        
+        // If PTE is writable, then this wasn't a COW fault
+        if (pt[pti] & PTE_W) return 0;
+        
+        // It's a write to a read-only present page. COW candidate.
+        
+        uint32_t phys_old = pt[pti] & PTE_FRAME;
+        vm_page_t *page_old = pmm_get_page(phys_old);
+        
+        if (!page_old) return 0; 
+        
+        if (!page_old) return 0; 
+        
+        // Use current process's pmap
+        pmap_t pmap = NULL;
+        if (current_process) {
+            pmap = current_process->pmap;
+        }
+        if (!pmap) return 0;
+
+        // Perform COW copy
+        // 1. Allocate new page
+        void *phys_new = pmm_alloc_block();
+        if (!phys_new) {
+            extern void kprint(const char *);
+            kprint("pmap_fault: OOM during COW\n");
+            return 0;
+        }
+        
+        // 2. Map new page temporarily to copy
+        // Use a fixed kernel virtual address scratch space (assuming single core for now)
+        // 0xFFEFF000 is used as scratch
+        
+        pmap_kenter(0xFFEFF000, (uint32_t)phys_new); // Access is RW in kernel by default
+        __asm__ volatile("invlpg 0xFFEFF000");
+        
+        // Copy from faulting address (readable) to new page (writable)
+        memcpy((void*)0xFFEFF000, (void*)(cr2 & 0xFFFFF000), 0x1000);
+        
+        pmap_kremove(0xFFEFF000);
+        __asm__ volatile("invlpg 0xFFEFF000");
+
+        // 3. Update mappings
+        // Decrement ref count of old page
+        if (page_old->ref_count > 1) {
+            __sync_fetch_and_sub(&page_old->ref_count, 1);
+        } else {
+             // Optimization: If ref_count == 1, steal the page?
+             // But we already allocated a new one. 
+             // To implement the optimization properly, we should check BEFORE allocation.
+             // But for safety/simplicity now, we just swap.
+             // Actually, if ref_count is 1, we don't need to copy, just upgrade!
+             // Checkbox 6 says "If refcount == 1, optionally remap..."
+             // Let's implement that optimization now to save the allocation.
+             
+             // Free the unused new page
+             vm_page_free(pmm_get_page((uintptr_t)phys_new));
+             
+             // Just upgrade permissions
+             pt[pti] |= PTE_W;
+             pmap_invalidate_page(cr2);
+             return 1;
+        }
+
+        // 4. Map new page R/W in place of old
+        pt[pti] = (uint32_t)phys_new | PTE_P | PTE_W | PTE_U | PTE_A | PTE_D;
+        pmap_invalidate_page(cr2);
+        
+        pmap->stats.cow_faults++;
+        return 1;
+    }
+    
+    // Not a COW fault
+    return 0;
 }

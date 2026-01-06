@@ -215,12 +215,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **Copy-on-Write (COW) System:**
                 - [x] Mark shared pages read-only in both parent and child
                 - [ ] **COW Fault Handler:**
-                    - [ ] On write fault to COW page:
-                    - [ ] Allocate new physical page.
-                    - [ ] Copy contents from original page.
-                    - [ ] Map new page R/W at faulting VA.
-                    - [ ] Decrement original page refcount.
-                    - [ ] If refcount == 1, optionally remap original R/W in parent.
+                    - [x] On write fault to COW page:
+                    - [x] Allocate new physical page.
+                    - [x] Copy contents from original page.
+                    - [x] Map new page R/W at faulting VA.
+                    - [x] Decrement original page refcount.
+                    - [x] If refcount == 1, optionally remap original R/W in parent.
                 - [x] Track COW page reference counts
                 - [x] `pmap_page_is_cow()`: Check if page is COW shared
                 - [ ] **COW Statistics:**
@@ -446,13 +446,27 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] `WNOHANG`: Non-blocking wait support.
         - [ ] `WUNTRACED`: Report stopped children.
         - [ ] `WCONTINUED`: Report resumed children.
-    - [ ] **Process Groups & Sessions:**
-        - [ ] Implement `sys_setsid` / `sys_getsid`.
-        - [ ] Implement `sys_setpgid` / `sys_getpgid`.
-        - [ ] **Job Control:**
-            - [ ] Controlling TTY (ctty) association.
-            - [ ] SIGTSTP / SIGCONT handling.
-            - [ ] Background write attempts (SIGTTOU).
+    - [ ] **Process Groups & Sessions (Job Control Infrastructure):**
+        - [ ] **Session Management:**
+            - [ ] Implement `sys_setsid()`: Create new session, become leader, detach ctty.
+            - [ ] Implement `sys_getsid()`: Retrieve Session ID.
+            - [ ] Add `p_session` and `p_pgrp` pointers to `struct process`.
+            - [ ] Track Session Leader and Process Group Leader.
+        - [ ] **Process Groups:**
+            - [ ] Implement `sys_setpgid()`: Set Process Group ID.
+            - [ ] Implement `sys_getpgid()`: Get Process Group ID.
+            - [ ] Handle orphaned process groups.
+        - [ ] **Controlling Terminal (CTTY):**
+            - [ ] Implement `ioctl(TIOCSCTTY)`: Set controlling terminal for session.
+            - [ ] Implement `sys_tcgetpgrp()` / `sys_tcsetpgrp()`: Foreground group control.
+            - [ ] Kernel TTY Layer integration: `tty->pgrp` tracking.
+            - [ ] Signal generation: `SIGINT`, `SIGQUIT`, `SIGTSTP` from TTY input.
+        - [ ] **Job Control Signals:**
+            - [ ] Handle `STOP` vs `TSTP`.
+            - [ ] Implement `SIGCONT` resume logic (wake from stopped state).
+            - [ ] Background I/O controls:
+                - [ ] `SIGTTIN`: Reading from TTY while in background group.
+                - [ ] `SIGTTOU`: Writing to TTY while in background group.
 
 ### 2. Architecture (`sys/arch`)
 - [ ] **i386:**
