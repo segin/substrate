@@ -1,6 +1,10 @@
 #include <sys/tty.h>
 #include <sys/termios.h>
 #include "tests.h"
+#include <string.h>
+#include "../kern/console.h"
+
+#define ASSERT(x) do { if (!(x)) { kprint("ASSERT FAILED: " #x "\n"); } } while (0)
 
 // Mock driver for testing
 static char mock_out_buf[1024];
@@ -37,7 +41,6 @@ void test_tty_alloc(void) {
 
 void test_tty_canonical(void) {
     struct tty *tty = tty_alloc(&mock_driver, 2);
-    char buf[32];
     
     // Test 1: Write incomplete line
     tty_flip_buffer_push(tty, 'a');
