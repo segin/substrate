@@ -810,22 +810,226 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Optimizations (i386/x87):**
         - [ ] Inline Assembly for `fsin`, `fcos`, `fsqrt`, `fyl2x`.
         - [ ] `sincos` optimization.
-- [ ] **Dynamic Linker (`ld.so`):**
-    - [ ] Implement `PT_INTERP` support in kernel ELF loader to load the dynamic linker.
-    - [ ] Implement ELF relocation processing (PLT/GOT).
-    - [ ] Implement `dlopen`, `dlsym`.
+- [ ] **Dynamic Linker (`ld.so` / `ld-testunix.so`):**
+    - [ ] **Kernel ELF Loader Support:**
+        - [ ] Parse `PT_INTERP` program header to identify dynamic linker path.
+        - [ ] Load dynamic linker ELF into memory alongside main executable.
+        - [ ] Set up auxiliary vector (`AT_*`) entries for dynamic linker:
+            - [ ] `AT_BASE` - Base address where linker was loaded.
+            - [ ] `AT_PHDR` - Address of program headers.
+            - [ ] `AT_PHENT` - Size of program header entry.
+            - [ ] `AT_PHNUM` - Number of program headers.
+            - [ ] `AT_ENTRY` - Entry point of main executable.
+            - [ ] `AT_EXECFN` - Path to executable.
+            - [ ] `AT_RANDOM` - Pointer to 16 bytes of random data.
+            - [ ] `AT_PAGESZ` - System page size.
+            - [ ] `AT_UID`, `AT_EUID`, `AT_GID`, `AT_EGID` - User/group IDs.
+            - [ ] `AT_SECURE` - Set if running setuid/setgid.
+        - [ ] Transfer control to dynamic linker entry point (not main executable).
+    - [ ] **Dynamic Linker Bootstrap:**
+        - [ ] Self-relocation: Linker must relocate itself before anything else.
+        - [ ] Parse own ELF headers to find own relocations.
+        - [ ] Apply `R_386_RELATIVE` relocations to fix up addresses.
+        - [ ] No libc calls during bootstrap (use raw syscalls).
+    - [ ] **ELF Parsing:**
+        - [ ] Parse `PT_DYNAMIC` segment to find dynamic section.
+        - [ ] Process dynamic tags: `DT_NEEDED`, `DT_STRTAB`, `DT_SYMTAB`, `DT_HASH`, `DT_GNU_HASH`.
+        - [ ] Parse `DT_RELA`/`DT_REL` for relocation entries.
+        - [ ] Parse `DT_JMPREL` for PLT relocations.
+        - [ ] Parse `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`.
+    - [ ] **Library Loading:**
+        - [ ] Implement library search path parsing (`LD_LIBRARY_PATH`, `/etc/ld.so.conf`).
+        - [ ] Default search paths: `/lib`, `/usr/lib`, `/usr/local/lib`.
+        - [ ] `$ORIGIN` expansion in rpath/runpath.
+        - [ ] `DT_RPATH` and `DT_RUNPATH` handling.
+        - [ ] Load shared libraries via `mmap()` with correct protections.
+        - [ ] Handle library dependencies recursively (breadth-first order).
+        - [ ] Detect circular dependencies.
+        - [ ] Handle `DT_SONAME` for library identity.
+    - [ ] **Symbol Resolution:**
+        - [ ] Implement symbol lookup using `DT_HASH` (SYSV hash).
+        - [ ] Implement symbol lookup using `DT_GNU_HASH` (GNU hash, faster).
+        - [ ] Symbol versioning support (`DT_VERSYM`, `DT_VERNEED`, `DT_VERDEF`).
+        - [ ] Symbol binding types: `STB_LOCAL`, `STB_GLOBAL`, `STB_WEAK`.
+        - [ ] Symbol visibility: `STV_DEFAULT`, `STV_HIDDEN`, `STV_PROTECTED`.
+        - [ ] Handle undefined weak symbols (resolve to NULL).
+        - [ ] Interposition: First definition wins (global scope).
+    - [ ] **Relocation Processing:**
+        - [ ] **i386 Relocation Types:**
+            - [ ] `R_386_NONE` - No relocation.
+            - [ ] `R_386_32` - Absolute 32-bit relocation.
+            - [ ] `R_386_PC32` - PC-relative 32-bit relocation.
+            - [ ] `R_386_GOT32` - GOT entry offset.
+            - [ ] `R_386_PLT32` - PLT entry offset.
+            - [ ] `R_386_COPY` - Copy symbol from shared lib to executable.
+            - [ ] `R_386_GLOB_DAT` - Set GOT entry to symbol address.
+            - [ ] `R_386_JMP_SLOT` - PLT lazy binding slot.
+            - [ ] `R_386_RELATIVE` - Base address + addend.
+            - [ ] `R_386_TLS_TPOFF` - Thread-local storage offset.
+            - [ ] `R_386_TLS_DTPMOD32`, `R_386_TLS_DTPOFF32` - TLS dynamic relocations.
+        - [ ] Apply relocations in correct order (non-PLT before PLT).
+        - [ ] Handle `BIND_NOW` / `LD_BIND_NOW` for eager binding.
+    - [ ] **Procedure Linkage Table (PLT):**
+        - [ ] Implement lazy binding via PLT stubs.
+        - [ ] PLT0: Call into resolver with library and relocation index.
+        - [ ] `_dl_runtime_resolve()`: Resolve symbol and patch GOT.
+        - [ ] Support `LD_BIND_NOT` for debugging (don't update GOT).
+    - [ ] **Global Offset Table (GOT):**
+        - [ ] GOT[0]: Points to `_DYNAMIC` section.
+        - [ ] GOT[1]: Link map pointer for this object.
+        - [ ] GOT[2]: Resolver entry point.
+        - [ ] GOT[3+]: Function/data addresses.
+    - [ ] **Thread-Local Storage (TLS):**
+        - [ ] Implement TLS allocation for each loaded library.
+        - [ ] Static TLS model (known at link time).
+        - [ ] Dynamic TLS model (allocated at runtime).
+        - [ ] `__tls_get_addr()` implementation.
+        - [ ] TLS initialization (`PT_TLS` segment copying).
+    - [ ] **Initialization and Finalization:**
+        - [ ] Call `DT_INIT` functions for each library.
+        - [ ] Call `DT_INIT_ARRAY` constructors.
+        - [ ] Call in dependency order (dependencies before dependents).
+        - [ ] Call `DT_FINI_ARRAY` destructors on exit.
+        - [ ] Call `DT_FINI` functions on exit.
+        - [ ] `atexit()` integration.
+    - [ ] **Runtime Loading (`libdl`):**
+        - [ ] `dlopen(filename, flags)` - Load shared library at runtime.
+            - [ ] `RTLD_LAZY` - Lazy binding.
+            - [ ] `RTLD_NOW` - Immediate binding.
+            - [ ] `RTLD_GLOBAL` - Symbols available globally.
+            - [ ] `RTLD_LOCAL` - Symbols private to this object.
+            - [ ] `RTLD_NODELETE` - Don't unload on dlclose.
+            - [ ] `RTLD_NOLOAD` - Don't load, just return handle if loaded.
+            - [ ] `RTLD_DEEPBIND` - Put this library before global scope.
+        - [ ] `dlsym(handle, symbol)` - Look up symbol in library.
+            - [ ] `RTLD_DEFAULT` - Search default library order.
+            - [ ] `RTLD_NEXT` - Search libraries after caller.
+        - [ ] `dlclose(handle)` - Unload library (decrement refcount).
+        - [ ] `dlerror()` - Get last error message.
+        - [ ] `dladdr(addr, info)` - Get info about address (library, symbol).
+        - [ ] `dlinfo(handle, request, info)` - Get linker info.
+    - [ ] **Debugging Support:**
+        - [ ] `r_debug` structure for debugger integration.
+        - [ ] `_r_debug` symbol export.
+        - [ ] `RT_ADD`, `RT_DELETE`, `RT_CONSISTENT` state notifications.
+        - [ ] `LD_DEBUG` environment variable support.
+        - [ ] Debug output: bindings, libs, symbols, reloc, files, statistics.
+    - [ ] **Security Features:**
+        - [ ] Ignore `LD_LIBRARY_PATH` for setuid/setgid binaries.
+        - [ ] Ignore `LD_PRELOAD` for setuid/setgid binaries.
+        - [ ] Implement `PT_GNU_RELRO` (read-only relocations).
+        - [ ] Implement BIND_NOW for full RELRO.
+        - [ ] Validate ELF headers and segments.
+    - [ ] **Configuration:**
+        - [ ] `/etc/ld.so.conf` - Library path configuration.
+        - [ ] `/etc/ld.so.cache` - Precomputed library cache.
+        - [ ] `ldconfig` tool to rebuild cache.
+    - [ ] **Testing:**
+        - [ ] Unit tests for relocation types.
+        - [ ] Integration tests with simple shared libraries.
+        - [ ] Test lazy vs eager binding.
+        - [ ] Test `dlopen`/`dlsym`/`dlclose` lifecycle.
+        - [ ] Test circular dependency detection.
+        - [ ] Test symbol versioning.
+        - [ ] Test TLS in shared libraries.
 - [ ] **System Interface Libraries:**
     - [ ] **Native Kernel Introspection (`libsys` / `libkernel`):**
-        - [ ] **Data Sources:** `sysctl` MIBs, `procfs` structures, Netlink sockets.
-        - [ ] **Process Info:** `proc_getall`, `proc_getstatus`.
-        - [ ] **Memory Stats:** `vm_getstats`.
+        - [ ] **Core Architecture:**
+            - [ ] Define `libsys` as the canonical native interface to kernel internals.
+            - [ ] Design as a thin wrapper over syscalls + structured parsing of `/proc` and `/sys`.
+            - [ ] Support both sync and async query modes (for monitoring tools).
+            - [ ] Thread-safe design with per-thread error state.
+        - [ ] **Data Sources:**
+            - [ ] **`sysctl` MIBs:** Full hierarchical MIB traversal (`kern.*`, `vm.*`, `hw.*`, `net.*`).
+            - [ ] **`procfs` Structures:** Parse `/proc/[pid]/stat`, `status`, `maps`, `fd/`, `cmdline`, `environ`.
+            - [ ] **`sysfs` Structures:** Parse `/sys/devices/`, `/sys/class/`, `/sys/block/` for hardware info.
+            - [ ] **Netlink Sockets:** `NETLINK_ROUTE` for network interfaces, `NETLINK_KOBJECT_UEVENT` for hotplug.
+            - [ ] **Direct Syscalls:** `sysinfo()`, `uname()`, `getrlimit()`, `clock_gettime()`.
+        - [ ] **Process Information API:**
+            - [ ] `sys_proc_count()` - Get total number of processes.
+            - [ ] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
+            - [ ] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info.
+            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
+            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
+            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
+            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)` - Get current working directory.
+            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
+            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
+            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
+        - [ ] **Memory Statistics API:**
+            - [ ] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
+            - [ ] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).
+            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
+            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
+            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
+        - [ ] **CPU Information API:**
+            - [ ] `sys_cpu_count()` - Number of CPUs (online/possible/present).
+            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
+            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
+            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
+        - [ ] **System Information API:**
+            - [ ] `sys_uptime(struct timespec *ts)` - System uptime.
+            - [ ] `sys_boottime(struct timespec *ts)` - Boot timestamp.
+            - [ ] `sys_hostname(char *buf, size_t len)` - System hostname.
+            - [ ] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
+            - [ ] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
+        - [ ] **Network Information API:**
+            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)` - List network interfaces.
+            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
+            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
+            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
+        - [ ] **Data Structures:**
+            - [ ] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
+            - [ ] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
+            - [ ] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
+            - [ ] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.
     - [ ] **BSD Compatibility Shim (`libkvm`):**
-        - [ ] **Wrapper Layer:** Implement `kvm_*` API on top of `libsys`.
-        - [ ] `kvm_open()` / `kvm_close()`: Context initialization.
-        - [ ] `kvm_getprocs()`: Translate `libsys` process structures to `kinfo_proc`.
-        - [ ] `kvm_nlist()`: Map or query kernel symbol table from Native API.
+        - [ ] **Design Goals:**
+            - [ ] Provide FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
+            - [ ] Implement entirely in userspace using `libsys` (no `/dev/kmem` access).
+            - [ ] Support for `kinfo_proc`, `kinfo_vmentry`, `kinfo_file` structures.
+        - [ ] **Wrapper Layer:**
+            - [ ] Map `kvm_*` calls to equivalent `libsys` functions.
+            - [ ] Handle structure translation between native and BSD formats.
+            - [ ] Maintain BSD ABI compatibility for source-level portability.
+        - [ ] **Core Functions:**
+            - [ ] `kvm_open(execfile, corefile, swapfile, flags, errstr)` - Initialize KVM context.
+            - [ ] `kvm_openfiles(...)` - Extended open with more options.
+            - [ ] `kvm_close(kd)` - Close KVM context and free resources.
+            - [ ] `kvm_geterr(kd)` - Get error message from last failed operation.
+        - [ ] **Process Functions:**
+            - [ ] `kvm_getprocs(kd, op, arg, cnt)` - Get process list as `kinfo_proc` array.
+            - [ ] `kvm_getargv(kd, kp, nchr)` - Get command line arguments for process.
+            - [ ] `kvm_getenvv(kd, kp, nchr)` - Get environment for process.
+            - [ ] `kvm_getproc2(kd, op, arg, elem_size, cnt)` - Extended proc info.
+        - [ ] **Virtual Memory Functions:**
+            - [ ] `kvm_getfiles(kd, op, arg, cnt)` - Get open file list.
+            - [ ] `kvm_getvmmap(kd, kp, cnt)` - Get VM mappings for process.
+        - [ ] **Kernel Symbol Functions:**
+            - [ ] `kvm_nlist(kd, nl)` - Look up kernel symbols from `/proc/kallsyms` or kernel ELF.
+            - [ ] `kvm_read(kd, addr, buf, len)` - Read kernel memory (via `/proc/kcore` if available).
+            - [ ] `kvm_write(kd, addr, buf, len)` - Write kernel memory (requires privileges).
+        - [ ] **Data Structures (BSD-compatible):**
+            - [ ] `struct kinfo_proc` - BSD process information structure.
+            - [ ] `struct kinfo_vmentry` - BSD VM mapping structure.
+            - [ ] `struct kinfo_file` - BSD open file structure.
+            - [ ] `struct nlist` - Symbol lookup request/response.
+    - [ ] **Linux Compatibility Shim (`libproc`):**
+        - [ ] Provide `libprocps` / `procps-ng` compatible API.
+        - [ ] `openproc()` / `closeproc()` - Process enumeration context.
+        - [ ] `readproc()` / `readproctab()` - Read process information.
+        - [ ] `look_up_our_self()` - Get info about calling process.
+        - [ ] `get_proc_stats()` - System-wide /proc/stat parsing.
     - [ ] **Dependencies:**
         - [ ] System Call Interfaces for inspection (avoiding `/dev/kmem` reading).
+        - [ ] `/proc` filesystem implementation with full Linux-compatible structure.
+        - [ ] `/sys` filesystem implementation for hardware introspection.
+        - [ ] Kernel symbol export mechanism for `kvm_nlist()` support.
+    - [ ] **Testing:**
+        - [ ] Unit tests for each `libsys` function.
+        - [ ] Compatibility tests against BSD `libkvm` applications.
+        - [ ] Performance benchmarks for high-frequency queries.
+        - [ ] Thread safety stress tests.
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
