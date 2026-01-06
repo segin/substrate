@@ -135,7 +135,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **`pmap_release()` - Decrement Reference Count:**
                     - [x] Atomically decrement `refcount`.
                     - [x] If reaches 0, call `pmap_destroy()`.
-                - [ ] **`pmap_fork()` - Fork Address Space (COW):**
+                - [x] **`pmap_fork()` - Fork Address Space (COW):**
                     - [x] Create new pmap via `pmap_create()`.
                     - [x] Walk parent's user PTEs:
                         - [x] Copy PTE to child with write bit cleared.
