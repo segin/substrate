@@ -171,8 +171,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Set up COW if requested (clear write bit)
                 - [x] Used for fork() optimization
                 - [ ] **Enhancements:**
-                    - [ ] Support partial range copy (for vfork/clone).
-                    - [ ] Copy-on-write reference counting integration.
+                    - [x] Support partial range copy (for vfork/clone).
+                    - [x] Copy-on-write reference counting integration.
                     - [ ] Handle mixed COW and private mappings.
             - [ ] **Page Reference/Modification Tracking:**
                 - [x] **`pmap_is_referenced(pmap, va)` - Check if Page Was Accessed:**
