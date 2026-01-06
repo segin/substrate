@@ -359,9 +359,38 @@ pmap_t pmap_fork(pmap_t src_pmap) {
         uint32_t src_pt_phys = src_pd[pdi] & ~0xFFF;
         uint32_t *src_pt = (uint32_t *)(src_pt_phys + 0xC0000000);
         
-        // TODO: Walk PTEs in subsequent checkboxes (141-143)
-        (void)dst_pd;
-        (void)src_pt;
+        // Allocate page table for child (checkbox 141)
+        void *dst_pt_mem = pmm_alloc_block();
+        if (!dst_pt_mem) {
+            pmap_destroy(dst_pmap);
+            return 0;
+        }
+        uint32_t dst_pt_phys = (uint32_t)(uintptr_t)dst_pt_mem;
+        uint32_t *dst_pt = (uint32_t *)(dst_pt_phys + 0xC0000000);
+        
+        // Set up child PDE
+        dst_pd[pdi] = dst_pt_phys | (src_pd[pdi] & 0xFFF);
+        
+        // Walk all PTEs in this page table (checkbox 141-143)
+        for (int pti = 0; pti < 1024; pti++) {
+            uint32_t src_pte = src_pt[pti];
+            
+            if (!(src_pte & PTE_P)) {
+                dst_pt[pti] = 0;
+                continue;
+            }
+            
+            // Copy PTE to child with write bit cleared (checkbox 141)
+            dst_pt[pti] = src_pte & ~PTE_W;
+            
+            // Clear write bit in parent too (both now COW) (checkbox 142)
+            src_pt[pti] = src_pte & ~PTE_W;
+            
+            // Note: Page refcount increment would go here (checkbox 143)
+            // but PMM doesn't support refcounting yet
+            
+            dst_pmap->resident_count++;
+        }
     }
     
     return dst_pmap;

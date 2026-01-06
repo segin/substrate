@@ -138,7 +138,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] **`pmap_fork()` - Fork Address Space (COW):**
                     - [x] Create new pmap via `pmap_create()`.
                     - [x] Walk parent's user PTEs:
-                        - [ ] Copy PTE to child with write bit cleared.
+                        - [x] Copy PTE to child with write bit cleared.
                         - [ ] Clear write bit in parent too (both now COW).
                         - [ ] Increment physical page reference count.
                     - [ ] Increment parent's resident page COW counter.
