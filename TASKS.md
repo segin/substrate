@@ -124,11 +124,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] If refcount > 0, return (still in use by COW children).
                     - [x] Walk all user PDEs (0-767):
                         - [x] For each present PDE, walk all 1024 PTEs.
-                        - [ ] For each present PTE, decrement physical page refcount.
-                        - [ ] Free PT page if all entries are empty.
-                    - [ ] Free the page directory page.
-                    - [ ] Remove from global pmap list.
-                    - [ ] Release ASID to pool.
+                        - [x] For each present PTE, decrement physical page refcount.
+                        - [x] Free PT page if all entries are empty.
+                    - [x] Free the page directory page.
+                    - [x] Remove from global pmap list.
+                    - [x] Release ASID to pool.
                 - [ ] **`pmap_reference()` - Increment Reference Count:**
                     - [ ] Atomically increment `refcount`.
                     - [ ] Used when forking to share pmap temporarily.
