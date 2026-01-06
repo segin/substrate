@@ -91,40 +91,180 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] Use recursive mapping for PTE manipulation
             - [x] **Higher Half Transition:** Stable 3GB/1GB split with LMA=1M/VMA=C0000000.
             - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management
-                - [ ] `pmap_create()`: Allocate new page directory, copy kernel mappings
-                - [ ] `pmap_destroy()`: Free all user PTEs and page directory
-                - [ ] `pmap_reference()`: Increment pmap reference count
-                - [ ] Clone kernel portion (768-1023) from kernel_pmap
-                - [ ] Track pmap in global list for TLB shootdown
+                - [ ] **Architecture Overview:**
+                    - [ ] Each process gets its own `pmap_t` representing its virtual address space.
+                    - [ ] User space: 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767).
+                    - [ ] Kernel space: 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared).
+                    - [ ] Kernel PDEs are shared by reference, not copied.
+                    - [ ] Recursive mapping at PDE 1023 for efficient PT access.
+                - [ ] **`pmap_t` Data Structure:**
+                    - [ ] `pd_phys`: Physical address of page directory.
+                    - [ ] `pd_virt`: Virtual address for kernel access to PD.
+                    - [ ] `refcount`: Number of references (for COW sharing).
+                    - [ ] `resident_count`: Count of resident pages in this pmap.
+                    - [ ] `wired_count`: Count of wired (unpageable) pages.
+                    - [ ] `stats`: Per-pmap statistics (faults, cow_faults, zero_fills).
+                    - [ ] `lock`: Spinlock for SMP safety.
+                    - [ ] `asid`: Address Space ID (for TLB tagging, future PCID).
+                    - [ ] `list_entry`: For global pmap list (TLB shootdown).
+                - [ ] **`pmap_create()` - Create New Address Space:**
+                    - [ ] Allocate one 4KB page for page directory.
+                    - [ ] Zero user portion (PDEs 0-767).
+                    - [ ] Copy kernel PDEs (768-1022) from `kernel_pmap`.
+                    - [ ] Set up recursive mapping in PDE 1023.
+                    - [ ] Initialize reference count to 1.
+                    - [ ] Add to global pmap list for TLB management.
+                    - [ ] Allocate unique ASID if available.
+                    - [ ] Return `pmap_t*` or NULL on failure.
+                - [ ] **`pmap_destroy()` - Destroy Address Space:**
+                    - [ ] Decrement reference count.
+                    - [ ] If refcount > 0, return (still in use by COW children).
+                    - [ ] Walk all user PDEs (0-767):
+                        - [ ] For each present PDE, walk all 1024 PTEs.
+                        - [ ] For each present PTE, decrement physical page refcount.
+                        - [ ] Free PT page if all entries are empty.
+                    - [ ] Free the page directory page.
+                    - [ ] Remove from global pmap list.
+                    - [ ] Release ASID to pool.
+                - [ ] **`pmap_reference()` - Increment Reference Count:**
+                    - [ ] Atomically increment `refcount`.
+                    - [ ] Used when forking to share pmap temporarily.
+                - [ ] **`pmap_release()` - Decrement Reference Count:**
+                    - [ ] Atomically decrement `refcount`.
+                    - [ ] If reaches 0, call `pmap_destroy()`.
+                - [ ] **`pmap_fork()` - Fork Address Space (COW):**
+                    - [ ] Create new pmap via `pmap_create()`.
+                    - [ ] Walk parent's user PTEs:
+                        - [ ] Copy PTE to child with write bit cleared.
+                        - [ ] Clear write bit in parent too (both now COW).
+                        - [ ] Increment physical page reference count.
+                    - [ ] Increment parent's resident page COW counter.
+                    - [ ] Return new pmap.
+                - [ ] **`pmap_switch()` / `pmap_activate()` - Context Switch:**
+                    - [ ] Load new pmap's `pd_phys` into CR3.
+                    - [ ] Use PCID if available to avoid TLB flush.
+                    - [ ] Update `curpmap` thread-local pointer.
+                    - [ ] Set TSS ESP0 for kernel stack.
+                - [ ] **Kernel PDE Synchronization:**
+                    - [ ] When kernel maps new pages (e.g., vmalloc), must update all pmaps.
+                    - [ ] Maintain `kernel_pmap` as authoritative source.
+                    - [ ] On PDE change in kernel range, walk global pmap list and copy.
+                    - [ ] Alternatively: share kernel PTs by reference (single PT, multiple PDEs point to it).
+                - [ ] **ASID/PCID Support (Future x86_64):**
+                    - [ ] ASID pool management (allocate, free, recycle).
+                    - [ ] Assign ASID on pmap creation.
+                    - [ ] Include ASID in CR3 on context switch.
+                    - [ ] Avoid TLB flush when switching between processes with different ASIDs.
             - [x] `pmap_protect`: Change page protections
                 - [x] Walk range and update PTE protection bits
                 - [x] Handle R/W and NX bit changes
                 - [x] Invalidate affected TLB entries
+                - [ ] **Enhancements:**
+                    - [ ] Batch TLB invalidations for large ranges.
+                    - [ ] Support protection upgrade (read→read/write) and downgrade.
+                    - [ ] Track protection changes for COW handling.
             - [x] `pmap_copy`: Copy mappings between address spaces
                 - [x] Copy PTE entries from src to dst pmap
                 - [x] Set up COW if requested (clear write bit)
                 - [x] Used for fork() optimization
-            - [x] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits
-            - [x] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits
-            - [x] Copy-on-write support
+                - [ ] **Enhancements:**
+                    - [ ] Support partial range copy (for vfork/clone).
+                    - [ ] Copy-on-write reference counting integration.
+                    - [ ] Handle mixed COW and private mappings.
+            - [ ] **Page Reference/Modification Tracking:**
+                - [x] **`pmap_is_referenced(pmap, va)` - Check if Page Was Accessed:**
+                    - [x] Locate PTE for given virtual address.
+                    - [x] Return true if PTE Accessed (A) bit is set.
+                    - [x] CPU sets A bit automatically on first access.
+                    - [ ] **Enhancements:**
+                        - [ ] Batch query for multiple pages (`pmap_is_referenced_range`).
+                        - [ ] Clear A bit atomically while querying (`pmap_test_and_clear_ref`).
+                        - [ ] Track per-page access frequency for page aging.
+                - [x] **`pmap_is_modified(pmap, va)` - Check if Page Was Written:**
+                    - [x] Locate PTE for given virtual address.
+                    - [x] Return true if PTE Dirty (D) bit is set.
+                    - [x] CPU sets D bit automatically on first write.
+                    - [ ] **Enhancements:**
+                        - [ ] Batch query for multiple pages.
+                        - [ ] Clear D bit atomically while querying.
+                        - [ ] Track modification for writeback scheduling.
+                - [x] **`pmap_clear_reference(pmap, va)` - Clear Accessed Bit:**
+                    - [x] Locate PTE and clear A bit.
+                    - [x] Invalidate TLB entry to force re-check on next access.
+                    - [ ] **Usage:** Page replacement algorithms (Clock, WSClock, LRU).
+                - [x] **`pmap_clear_modify(pmap, va)` - Clear Dirty Bit:**
+                    - [x] Locate PTE and clear D bit.
+                    - [x] Invalidate TLB entry.
+                    - [ ] **Usage:** Track pages that need writeback to swap/file.
+                - [ ] **Page Aging Algorithm Integration:**
+                    - [ ] Periodic scanning of all resident pages.
+                    - [ ] Decrement age counter if not referenced.
+                    - [ ] Pages with age 0 become eviction candidates.
+                    - [ ] Support for multiple aging policies (Clock, LRU approximation).
+                - [ ] **Hardware A/D Bit Emulation (if needed):**
+                    - [ ] Some architectures lack hardware A/D bits.
+                    - [ ] Emulate via software: mark page not-present, trap on access.
+                    - [ ] Not needed for x86/x86_64 (native support).
+                - [ ] **Integration with Page Replacement:**
+                    - [ ] Export referenced/modified info to VM layer.
+                    - [ ] Support for working set estimation.
+                    - [ ] Feed into swapper/pageout daemon decisions.
+            - [ ] **Copy-on-Write (COW) System:**
                 - [x] Mark shared pages read-only in both parent and child
-                - [ ] On write fault: allocate new page, copy contents, remap R/W
+                - [ ] **COW Fault Handler:**
+                    - [ ] On write fault to COW page:
+                    - [ ] Allocate new physical page.
+                    - [ ] Copy contents from original page.
+                    - [ ] Map new page R/W at faulting VA.
+                    - [ ] Decrement original page refcount.
+                    - [ ] If refcount == 1, optionally remap original R/W in parent.
                 - [x] Track COW page reference counts
                 - [x] `pmap_page_is_cow()`: Check if page is COW shared
-            - [ ] TLB shootdown for SMP (invalidate remote CPU TLBs)
-                - [ ] IPI (Inter-Processor Interrupt) mechanism
-                - [ ] `pmap_shootdown_page(va)`: Invalidate single page on all CPUs
-                - [ ] `pmap_shootdown_range(va, len)`: Invalidate range
-                - [ ] `pmap_shootdown_all()`: Full TLB flush on all CPUs
-            - [ ] Large page (4MB PSE) support
-                - [ ] Detect PSE via CPUID
-                - [ ] Use PDE with PS bit for 4MB mappings (kernel text/data)
-                - [ ] `pmap_enter_pse()`: Create 4MB mapping
-            - [ ] Global page support (PGE)
-                - [ ] Detect PGE via CPUID
-                - [ ] Set CR4.PGE to enable global pages
-                - [ ] Mark kernel pages with PG_G to survive CR3 reload
-                - [ ] Only flush global pages with INVPCID or MOV CR4
+                - [ ] **COW Statistics:**
+                    - [ ] Track total COW faults.
+                    - [ ] Track pages saved by COW.
+                    - [ ] Track COW page duplications.
+            - [ ] **TLB Management:**
+                - [ ] **Single CPU TLB:**
+                    - [ ] `invlpg(va)`: Invalidate single page.
+                    - [ ] CR3 reload: Flush entire TLB (expensive).
+                    - [ ] Track flush statistics.
+                - [ ] **SMP TLB Shootdown:**
+                    - [ ] IPI (Inter-Processor Interrupt) mechanism.
+                    - [ ] `pmap_shootdown_page(va)`: Invalidate single page on all CPUs.
+                    - [ ] `pmap_shootdown_range(va, len)`: Invalidate range.
+                    - [ ] `pmap_shootdown_all()`: Full TLB flush on all CPUs.
+                    - [ ] Defer shootdown for batch operations.
+                    - [ ] Shootdown completion barrier.
+                - [ ] **INVPCID (Future x86_64):**
+                    - [ ] Detect INVPCID support via CPUID.
+                    - [ ] Use INVPCID for targeted TLB invalidation.
+                    - [ ] Invalidate by PCID+VA, PCID only, or all-except-global.
+            - [ ] **Large Page Support:**
+                - [ ] **4MB PSE Pages (i386):**
+                    - [ ] Detect PSE via CPUID (CR4.PSE).
+                    - [ ] Use PDE with PS=1 for 4MB mappings.
+                    - [ ] `pmap_enter_pse(pmap, va, pa, prot)`: Create 4MB mapping.
+                    - [ ] Align VA and PA to 4MB boundary.
+                    - [ ] Use for kernel text/data to reduce TLB pressure.
+                - [ ] **2MB/1GB Pages (x86_64):**
+                    - [ ] 2MB pages: PDE.PS=1 (no PT needed).
+                    - [ ] 1GB pages: PDPTE.PS=1 (no PD/PT needed).
+                    - [ ] Detect support via CPUID.
+                    - [ ] Automatic promotion: coalesce adjacent 4KB pages.
+                    - [ ] Demotion: split large page on partial unmap.
+            - [ ] **Global Page Support (PGE):**
+                - [ ] Detect PGE via CPUID.
+                - [ ] Set CR4.PGE to enable global pages.
+                - [ ] Mark kernel pages with PG_G flag.
+                - [ ] Global pages survive CR3 reload.
+                - [ ] Use INVPCID or CR4 toggle to flush global pages.
+            - [ ] **PMAP Statistics and Debugging:**
+                - [ ] Per-pmap counters: resident, wired, mapped, faults.
+                - [ ] Global counters: total_pmaps, active_pmaps, cow_faults.
+                - [ ] `pmap_dump(pmap)`: Debug dump of pmap contents.
+                - [ ] `pmap_check(pmap)`: Consistency verification.
+                - [ ] Export stats via `/proc/vmstat` or sysctl.
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap PML4 paging structures.
                 - [ ] Initialize kernel PML4 from static bootstrap
