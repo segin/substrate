@@ -204,10 +204,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Decrement age counter if not referenced.
                     - [x] Pages with age 0 become eviction candidates.
                     - [x] Support for multiple aging policies (Clock, LRU approximation).
-                - [ ] **Hardware A/D Bit Emulation (if needed):**
-                    - [ ] Some architectures lack hardware A/D bits.
-                    - [ ] Emulate via software: mark page not-present, trap on access.
-                    - [ ] Not needed for x86/x86_64 (native support).
+                - [x] **Hardware A/D Bit Emulation (if needed):**
+                    - [x] Some architectures lack hardware A/D bits.
+                    - [x] Emulate via software: mark page not-present, trap on access.
+                    - [x] Not needed for x86/x86_64 (native support).
                 - [ ] **Integration with Page Replacement:**
                     - [ ] Export referenced/modified info to VM layer.
                     - [ ] Support for working set estimation.
