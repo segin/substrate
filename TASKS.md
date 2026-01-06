@@ -188,7 +188,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Return true if PTE Dirty (D) bit is set.
                     - [x] CPU sets D bit automatically on first write.
                     - [ ] **Enhancements:**
-                        - [ ] Batch query for multiple pages.
+                        - [x] Batch query for multiple pages.
                         - [ ] Clear D bit atomically while querying.
                         - [ ] Track modification for writeback scheduling.
                 - [x] **`pmap_clear_reference(pmap, va)` - Clear Accessed Bit:**
