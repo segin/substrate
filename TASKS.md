@@ -189,7 +189,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] CPU sets D bit automatically on first write.
                     - [ ] **Enhancements:**
                         - [x] Batch query for multiple pages.
-                        - [ ] Clear D bit atomically while querying.
+                        - [x] Clear D bit atomically while querying.
                         - [ ] Track modification for writeback scheduling.
                 - [x] **`pmap_clear_reference(pmap, va)` - Clear Accessed Bit:**
                     - [x] Locate PTE and clear A bit.

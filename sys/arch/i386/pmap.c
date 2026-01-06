@@ -918,3 +918,32 @@ int pmap_is_modified_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
     
     return mod_count;
 }
+
+// Atomic test and clear: check if page was modified and clear D bit
+// Returns 1 if page was modified (and now cleared), 0 otherwise
+int pmap_test_and_clear_modify(pmap_t pmap, uint32_t va) {
+    if (!pmap) return 0;
+    
+    // Must be active address space
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return 0;
+    
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+    
+    if (!(V_PD[pdi] & PTE_P)) return 0;
+    
+    uint32_t *pt = V_PT(pdi);
+    if (!(pt[pti] & PTE_P)) return 0;
+    
+    // Test and clear D bit atomically
+    uint32_t old_pte = pt[pti];
+    if (old_pte & PTE_D) {
+        pt[pti] = old_pte & ~PTE_D;
+        pmap_invalidate_page(va);
+        return 1;  // Was modified
+    }
+    
+    return 0;  // Not modified
+}
