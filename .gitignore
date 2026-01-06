@@ -76,3 +76,4 @@ sys/symbols_start.txt
 
 # Distribution root filesystem
 dist/
+klog
