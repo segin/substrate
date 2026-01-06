@@ -55,6 +55,7 @@ extern int sys_getpgid(int);
 extern int sys_setpgid(int, int);
 extern int sys_getpgrp(void);
 extern int sys_unlink(const char*);
+extern int sys_link(const char*, const char*);
 extern int sys_sigprocmask(int, const void*, void*);
 
 static void *linux_syscalls[MAX_SYSCALLS] = {
@@ -64,6 +65,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [4] = &sys_write,
     [5] = &sys_open,
     [6] = &sys_close,
+    [9] = &sys_link,
     [10] = &sys_unlink,
     [11] = &sys_execve,
     [12] = &sys_chdir,

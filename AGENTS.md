@@ -10,6 +10,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Userland Linker Flags:** `-m32 -nostdlib -fno-pie`.
 
 ## Recent Accomplishments
+- **VFS Hard Link Support:** Implemented `link` in VFS and hooked up `sys_link` across native, Linux, and FreeBSD personalities. Improved ABI detection for stack-based syscalls.
 - **VFS Unlink Support:** Implemented `unlink` in VFS and hooked up `sys_unlink` across native, Linux, and FreeBSD personalities.
 - **PMM Hardening:** Phase 1 boot memory detection with sanitization, total RAM reporting, and proper kernel bounds.
 - **Per-Process Address Spaces:** Implemented `pmap_create()` and `pmap_destroy()` for full process isolation with 3GB/1GB user/kernel split

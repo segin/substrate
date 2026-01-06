@@ -30,6 +30,7 @@ typedef void * (*mmap_type_t)(struct fs_node*, void *addr, size_t length, int pr
 // Symlink Operations
 typedef int (*readlink_type_t)(struct fs_node*, char *buf, size_t size);
 typedef int (*symlink_type_t)(struct fs_node*, const char *target, const char *name);
+typedef int (*link_type_t)(struct fs_node*, struct fs_node*, const char*);
 typedef int (*unlink_type_t)(struct fs_node*, const char *name);
 
 typedef struct fs_node {
@@ -57,6 +58,7 @@ typedef struct fs_node {
     mmap_type_t mmap;
     readlink_type_t readlink;
     symlink_type_t symlink;
+    link_type_t link;
     unlink_type_t unlink;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
 } fs_node_t;
@@ -93,6 +95,7 @@ int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
 int readlink_fs(fs_node_t *node, char *buf, size_t size);
 int symlink_fs(fs_node_t *parent, const char *target, const char *name);
+int link_fs(fs_node_t *parent, fs_node_t *source, const char *name);
 int unlink_fs(fs_node_t *node, const char *name);
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);

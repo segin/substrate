@@ -283,6 +283,13 @@ int symlink_fs(fs_node_t *parent, const char *target, const char *name) {
     return -1;
 }
 
+int link_fs(fs_node_t *parent, fs_node_t *source, const char *name) {
+    if (parent && parent->link) {
+        return parent->link(parent, source, name);
+    }
+    return -1;
+}
+
 int unlink_fs(fs_node_t *node, const char *name) {
     if (node && node->unlink) {
         return node->unlink(node, name);

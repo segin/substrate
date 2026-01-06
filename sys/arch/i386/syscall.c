@@ -348,8 +348,8 @@ void syscall_handler(registers_t *regs) {
     uint32_t arg1, arg2, arg3, arg4, arg5, arg6;
     int is_stack_abi = 0;
 
-    // Detect ABI (FreeBSD i386 uses stack passing)
-    if (p && p->name && (strcmp(p->name, "FreeBSD") == 0)) {
+    // Detect ABI (FreeBSD/Native i386 uses stack passing)
+    if (p && p->name && (strcmp(p->name, "FreeBSD") == 0 || strcmp(p->name, "testunix") == 0 || strcmp(p->name, "AT&T UNIX SVR4") == 0)) {
         is_stack_abi = 1;
         // FreeBSD args are on stack just above return address (ESP+4)
         // We assume 32-bit pointers
@@ -630,6 +630,45 @@ int sys_unlink(const char *path) {
     if (!parent || !file[0]) return -1;
     
     return unlink_fs(parent, file);
+}
+
+int sys_link(const char *oldpath, const char *newpath) {
+    if (!oldpath || !newpath) return -1;
+
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
+    // Resolve oldpath to source node
+    fs_node_t *source = vfs_lookup(cwd, oldpath);
+    if (!source) return -1;
+
+    // Resolve newpath to parent directory and name
+    char dir[256];
+    char file[128];
+    const char *last_slash = NULL;
+    for (const char *p = newpath; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+
+    fs_node_t *parent = NULL;
+    if (!last_slash) {
+        parent = cwd;
+        strcpy(file, newpath);
+    } else if (last_slash == newpath) {
+        parent = root;
+        strcpy(file, newpath + 1);
+    } else {
+        size_t dirlen = last_slash - newpath;
+        if (dirlen >= sizeof(dir)) return -1;
+        memcpy(dir, newpath, dirlen);
+        dir[dirlen] = '\0';
+        strcpy(file, last_slash + 1);
+        parent = vfs_lookup(root, dir);
+    }
+
+    if (!parent || !file[0]) return -1;
+
+    return link_fs(parent, source, file);
 }
 
 int sys_access(const char *path, int mode) {

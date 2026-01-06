@@ -38,6 +38,7 @@ extern int sys_getcwd(char*, size_t);
 extern int sys_execve(const char*, char**, char**);
 extern int sys_fork(void);
 extern int sys_vfork(void);
+extern int sys_link(const char*, const char*);
 
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
@@ -47,6 +48,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_OPEN] = &sys_open,
     [SYS_CLOSE] = &sys_close,
     [SYS_EXECVE] = &sys_execve,
+    [9] = &sys_link,
     [13] = &sys_time,
     [14] = &sys_mknod,
     [66] = &sys_vfork,  // BSD/Linux vfork syscall number

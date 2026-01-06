@@ -38,7 +38,7 @@ The kernel is the core of the operating system, structured as follows:
     - **`input/`**: PS/2 Keyboard and Mouse drivers.
     - **`storage/`**: Drivers for SCSI, IDE, AHCI, NVMe.
     - **`virtio/`**: Virtualized devices (Block, 9P, Net).
-- **`sys/vfs/`**: Virtual File System layer, providing an abstraction over specific file systems. Supports `unlink` for file deletion.
+- **`sys/vfs/`**: Virtual File System layer, providing an abstraction over specific file systems. Supports `unlink` and `link` for file management.
 - **`sys/fs/`**: File system implementations.
     - **`ext2/`**, **`fat/`**, **`exfat/`**, **`minix/`**.
     - **`exec/`**: Binary loaders (ELF, PE).
@@ -136,6 +136,6 @@ These components are essential for booting and basic system operation.
   - **Lseek:** `sys_lseek` accepts `off_lo` and `off_hi` to form 64-bit offset.
   - **Mmap:** `sys_mmap` accepts `uint32_t` page_offset (offset / 4096) as the 6th argument using `_syscall6`.
 - **Boot:** Multiboot header in `sys/arch/i386/boot.S`.
-- **System Calls**: Supports `unlink` (native/Linux/FreeBSD) for file deletion.
+- **System Calls**: Supports `unlink` and `link` (native/Linux/FreeBSD) for file management.
 - **System Stability**: Features identity syscall stubs for BusyBox and a kernel-stack safety check in the syscall dispatcher.
 - **Lost Wakeup Protection**: The console driver uses interrupt masking (`cli`/`sti`) to prevent race conditions during blocking reads.
