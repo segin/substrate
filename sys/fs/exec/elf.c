@@ -329,6 +329,10 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
         kprint(tbuf);
         kprint("\n");
         
+        // Update max_vaddr to account for TLS allocation
+        // This prevents brk from overlapping TLS block
+        max_vaddr = tls_block_start + (tls_pages * 0x1000);
+        
         // Store TLS base in process for context switches
         if (current_process) {
             // We'll need a field for this - for now just set it in GDT
