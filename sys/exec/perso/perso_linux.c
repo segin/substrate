@@ -47,6 +47,7 @@ extern int sys_brk(uint32_t);
 extern int sys_ioctl(int, uint32_t, void*);
 extern int sys_lstat(const char*, void*);
 extern int sys_fstat(int, void*);
+extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
 
 extern int sys_set_thread_area(void*);
 
@@ -82,6 +83,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [51] = &sys_acct,
     [54] = &sys_ioctl,
     [63] = &sys_dup2,
+    [90] = &sys_mmap,  // mmap
     [106] = &sys_stat,
     [107] = &sys_lstat,
     [108] = &sys_fstat,
@@ -95,6 +97,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [175] = &sys_sigprocmask, // rt_sigprocmask
     [183] = &sys_getcwd,
     [190] = &sys_vfork,
+    [192] = &sys_mmap,  // mmap2 (same as mmap, offset already in bytes)
     // Map 32-bit UID/GID syscalls to 16-bit versions (we use 32-bit ints anyway)
     [199] = &sys_getuid, 
     [200] = &sys_getgid,
