@@ -340,6 +340,19 @@ void pmap_release(pmap_t pmap) {
     }
 }
 
+pmap_t pmap_fork(pmap_t src_pmap) {
+    // Edge case: NULL source pmap
+    if (!src_pmap) return 0;
+    
+    // Step 1: Create new pmap via pmap_create() (checkbox 139)
+    pmap_t dst_pmap = pmap_create();
+    if (!dst_pmap) return 0;
+    
+    // TODO: Steps 2-5 will be implemented in subsequent checkboxes
+    
+    return dst_pmap;
+}
+
 void pmap_activate(pmap_t pmap) {
     uint32_t current_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
