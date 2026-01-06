@@ -143,11 +143,11 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                         - [x] Increment physical page reference count.
                     - [x] Increment parent's resident page COW counter.
                     - [x] Return new pmap.
-                - [ ] **`pmap_switch()` / `pmap_activate()` - Context Switch:**
-                    - [ ] Load new pmap's `pd_phys` into CR3.
-                    - [ ] Use PCID if available to avoid TLB flush.
-                    - [ ] Update `curpmap` thread-local pointer.
-                    - [ ] Set TSS ESP0 for kernel stack.
+                - [x] **`pmap_switch()` / `pmap_activate()` - Context Switch:**
+                    - [x] Load new pmap's `pd_phys` into CR3.
+                    - [ ] Use PCID if available to avoid TLB flush. (Future x86_64)
+                    - [ ] Update `curpmap` thread-local pointer. (Scheduler integration)
+                    - [ ] Set TSS ESP0 for kernel stack. (Scheduler integration)
                 - [ ] **Kernel PDE Synchronization:**
                     - [ ] When kernel maps new pages (e.g., vmalloc), must update all pmaps.
                     - [ ] Maintain `kernel_pmap` as authoritative source.
