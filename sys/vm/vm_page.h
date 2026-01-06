@@ -42,6 +42,9 @@ typedef struct vm_page {
     // Access tracking for page aging
     uint16_t access_count;  // Incremented on each access (for LRU)
 
+    // Modification tracking for writeback scheduling
+    uint32_t last_modified;  // Timestamp of last D-bit clear (for writeback)
+
     // Buddy Allocator state
     uint8_t  order;       // Power of two order (0 = 1 page)
     

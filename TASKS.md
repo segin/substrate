@@ -190,7 +190,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [ ] **Enhancements:**
                         - [x] Batch query for multiple pages.
                         - [x] Clear D bit atomically while querying.
-                        - [ ] Track modification for writeback scheduling.
+                        - [x] Track modification for writeback scheduling.
                 - [x] **`pmap_clear_reference(pmap, va)` - Clear Accessed Bit:**
                     - [x] Locate PTE and clear A bit.
                     - [x] Invalidate TLB entry to force re-check on next access.

@@ -947,3 +947,54 @@ int pmap_test_and_clear_modify(pmap_t pmap, uint32_t va) {
     
     return 0;  // Not modified
 }
+
+// Track modification for writeback scheduling
+// Used by page daemon to find dirty pages and schedule writebacks
+// Updates last_modified timestamp when D-bit is cleared
+void pmap_track_modify(vm_page_t *m, uint32_t current_time) {
+    if (!m) return;
+    
+    struct pv_entry *pv = m->pv_list;
+    int was_modified = 0;
+    
+    while (pv) {
+        pmap_t pmap = pv->pmap;
+        uint32_t va = pv->va;
+        
+        // Only check if this is the current address space
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+        if (pmap->pdir_phys != cr3) {
+            pv = pv->next;
+            continue;
+        }
+        
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+        
+        if (!(V_PD[pdi] & PTE_P)) {
+            pv = pv->next;
+            continue;
+        }
+        
+        uint32_t *pt = V_PT(pdi);
+        if (!(pt[pti] & PTE_P)) {
+            pv = pv->next;
+            continue;
+        }
+        
+        // Check and clear D bit
+        if (pt[pti] & PTE_D) {
+            pt[pti] &= ~PTE_D;
+            pmap_invalidate_page(va);
+            was_modified = 1;
+        }
+        
+        pv = pv->next;
+    }
+    
+    // Update modification timestamp for writeback scheduling
+    if (was_modified) {
+        m->last_modified = current_time;
+    }
+}
