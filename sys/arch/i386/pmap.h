@@ -33,9 +33,11 @@ typedef struct pmap *pmap_t;
 
 // Per-pmap statistics
 struct pmap_stats {
-    uint32_t faults;        // Total page faults
-    uint32_t cow_faults;    // COW page faults
-    uint32_t zero_fills;    // Zero-fill page faults
+    uint32_t faults;               // Total page faults
+    uint32_t cow_faults;           // COW page faults
+    uint32_t zero_fills;           // Zero-fill page faults
+    uint32_t protection_upgrades;  // Protection upgrades (read→write)
+    uint32_t protection_downgrades; // Protection downgrades (write→read)
 };
 
 // Linked list entry for global pmap list

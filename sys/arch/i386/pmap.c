@@ -568,6 +568,13 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
         
         pt[pti] = pte;
         
+        // Track protection changes for stats
+        if (!was_writable && wants_writable) {
+            pmap->stats.protection_upgrades++;
+        } else if (was_writable && !wants_writable) {
+            pmap->stats.protection_downgrades++;
+        }
+        
         // Track for batch TLB invalidation
         if (pages_modified == 0) first_va = va;
         last_va = va;

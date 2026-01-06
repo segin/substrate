@@ -165,7 +165,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] **Enhancements:**
                     - [x] Batch TLB invalidations for large ranges.
                     - [x] Support protection upgrade (read→read/write) and downgrade.
-                    - [ ] Track protection changes for COW handling.
+                    - [x] Track protection changes for COW handling.
             - [x] `pmap_copy`: Copy mappings between address spaces
                 - [x] Copy PTE entries from src to dst pmap
                 - [x] Set up COW if requested (clear write bit)
