@@ -304,6 +304,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
         // GS base should point to the TCB (end of TLS data)
         uint32_t tls_base = tls_block_start + tls_memsz;
         
+        // For TLS variant II (used by musl/glibc on i386):
+        // The thread pointer (%gs:0) must return itself.
+        // Write tls_base at *tls_base (self-pointer for pthread_self)
+        uint32_t tls_base_pa = pmap_extract(pmap, tls_base & ~0xFFF);
+        if (tls_base_pa) {
+            uint32_t *self_ptr = (uint32_t *)((uint8_t *)VIRTUAL_d(tls_base_pa) + (tls_base & 0xFFF));
+            *self_ptr = tls_base;
+        }
+        
         // Set up GDT entry 6 for TLS (selector 0x33 = entry 6 | RPL 3)
         // Access: 0xF2 = Present|Ring3|Data|Writable
         // Gran: 0xCF = 4KB pages, 32-bit
