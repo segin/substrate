@@ -139,10 +139,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                     - [x] Create new pmap via `pmap_create()`.
                     - [x] Walk parent's user PTEs:
                         - [x] Copy PTE to child with write bit cleared.
-                        - [ ] Clear write bit in parent too (both now COW).
-                        - [ ] Increment physical page reference count.
-                    - [ ] Increment parent's resident page COW counter.
-                    - [ ] Return new pmap.
+                        - [x] Clear write bit in parent too (both now COW).
+                        - [x] Increment physical page reference count.
+                    - [x] Increment parent's resident page COW counter.
+                    - [x] Return new pmap.
                 - [ ] **`pmap_switch()` / `pmap_activate()` - Context Switch:**
                     - [ ] Load new pmap's `pd_phys` into CR3.
                     - [ ] Use PCID if available to avoid TLB flush.
