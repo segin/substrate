@@ -780,3 +780,32 @@ void pmap_clear_reference(vm_page_t *m) {
         pv = pv->next;
     }
 }
+
+// Batch query: check if any page in range was accessed
+// Returns count of referenced pages in range
+int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
+    if (!pmap) return 0;
+    
+    // Must be active address space
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return 0;
+    
+    int ref_count = 0;
+    
+    for (uint32_t va = sva; va < eva; va += 0x1000) {
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+        
+        if (!(V_PD[pdi] & PTE_P)) continue;
+        
+        uint32_t *pt = V_PT(pdi);
+        if (!(pt[pti] & PTE_P)) continue;
+        
+        if (pt[pti] & PTE_A) {
+            ref_count++;
+        }
+    }
+    
+    return ref_count;
+}

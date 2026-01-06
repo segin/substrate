@@ -60,7 +60,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 4.  **Safety:** Always verify file contents before replacing.
 5.  **Build System:** Maintain the recursive Makefile structure. Ensure `make -C sys`, `make -C lib/c`, and `make -C bin` always pass.
 6.  **Git Operations:** Use `git mv` and `git rm` for file operations to preserve history.
-7.  **PMAP Work Methodology:** See `~/.gemini/antigravity/brain/*/master_directives.md` - Complete ONE checkbox at a time, update docs/specs/database/unit/property/fuzzing tests, commit, push.
+7.  **TASKS.md Work Methodology:** Complete ONE checkbox at a time, update docs/specs/database/unit/property/fuzzing tests as applicable, commit, push. This applies to ALL checkboxes in `TASKS.md`, not just PMAP work.
 
 ## Directory Structure Overview
 - `sys/`: Kernel source.

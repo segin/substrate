@@ -100,4 +100,7 @@ int pmap_page_is_cow(pmap_t pmap, uint32_t va);
 // Helper to flush TLB
 void pmap_invalidate_page(uint32_t va);
 
+// Page reference/modification tracking
+int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva);
+
 #endif
