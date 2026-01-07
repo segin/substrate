@@ -1,0 +1,35 @@
+.\" Process this file with
+.\" groff -man -Tascii rename.2
+.\"
+.TH RENAME 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+rename \- change the name or location of a file
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "int rename(const char *" oldpath ", const char *" newpath ");"
+.SH DESCRIPTION
+.B rename
+() renames a file, moving it between directories if required.
+Any other hard links to the file (as created using
+.BR link (2))
+are unaffected. Open file descriptors for
+.I oldpath
+are also unaffected.
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EACCES
+Write permission is denied for the directory containing
+.I oldpath
+or
+.IR newpath .
+.TP
+.B EEXIST
+.I newpath
+already exists and is not empty.
+.TP
+.B ENOENT
+.I oldpath
+does not exist.
