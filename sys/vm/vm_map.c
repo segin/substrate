@@ -187,3 +187,62 @@ void vm_map_destroy(vm_map_t *map) {
     
     kfree(map, sizeof(vm_map_t));
 }
+
+// Change protection on a range of addresses
+int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) {
+    vm_map_entry_t *header = map->header;
+    
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start >= end)
+            break;
+        if (cur->end <= start)
+            continue;
+            
+        // Check if requested protection exceeds max
+        if ((prot & ~cur->max_protection) != 0)
+            return -1;
+            
+        cur->protection = prot;
+        
+        // Update pmap for overlapping range
+        uintptr_t rs = (cur->start > start) ? cur->start : start;
+        uintptr_t re = (cur->end < end) ? cur->end : end;
+        pmap_protect(map->pmap, rs, re, prot);
+    }
+    return 0;
+}
+
+// Wire pages in a range (make unpageable)
+int vm_map_wire(vm_map_t *map, uintptr_t start, uintptr_t end) {
+    vm_map_entry_t *header = map->header;
+    
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start >= end)
+            break;
+        if (cur->end <= start)
+            continue;
+            
+        cur->wire_count++;
+        cur->flags |= VME_WIRED;
+    }
+    return 0;
+}
+
+// Unwire pages in a range
+int vm_map_unwire(vm_map_t *map, uintptr_t start, uintptr_t end) {
+    vm_map_entry_t *header = map->header;
+    
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start >= end)
+            break;
+        if (cur->end <= start)
+            continue;
+            
+        if (cur->wire_count > 0) {
+            cur->wire_count--;
+            if (cur->wire_count == 0)
+                cur->flags &= ~VME_WIRED;
+        }
+    }
+    return 0;
+}

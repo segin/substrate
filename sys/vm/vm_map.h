@@ -9,6 +9,18 @@
 // Forward declarations
 struct vm_object;
 
+// VM Map Entry Inheritance
+#define VM_INHERIT_SHARE    0   // Share mapping across fork
+#define VM_INHERIT_COPY     1   // Copy-on-write across fork
+#define VM_INHERIT_NONE     2   // Don't inherit across fork
+#define VM_INHERIT_ZERO     3   // Map as zero-filled in child
+
+// VM Map Entry Flags
+#define VME_WIRED       0x01    // Pages are wired (unpageable)
+#define VME_NEEDS_COPY  0x02    // Copy-on-write pending
+#define VME_IS_SUB_MAP  0x04    // Entry is a submap
+#define VME_NEEDS_ZERO  0x08    // Zero before first access
+
 // VM Map Entry: Represents a contiguous range of virtual addresses.
 typedef struct vm_map_entry {
     struct vm_map_entry *prev;
@@ -18,13 +30,14 @@ typedef struct vm_map_entry {
     uintptr_t end;
     
     struct vm_object *object;
-    uint64_t offset;
+    uint64_t offset;            // Offset into object
     
-    uint8_t protection;
-    uint8_t max_protection;
-    uint8_t inheritance;
+    uint8_t protection;         // Current access permissions
+    uint8_t max_protection;     // Maximum allowed permissions
+    uint8_t inheritance;        // Fork behavior (VM_INHERIT_*)
+    uint8_t flags;              // Entry flags (VME_*)
     
-    // Additional flags like wire_count, etc.
+    uint16_t wire_count;        // Wiring reference count
 } vm_map_entry_t;
 
 // VM Map: Represents a complete virtual address space.
@@ -48,5 +61,8 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end);
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length);
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va);
 void vm_map_destroy(vm_map_t *map);
+int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot);
+int vm_map_wire(vm_map_t *map, uintptr_t start, uintptr_t end);
+int vm_map_unwire(vm_map_t *map, uintptr_t start, uintptr_t end);
 
 #endif

@@ -104,6 +104,54 @@ void test_vm_map_remove(void) {
     kprint("  PASS\n");
 }
 
+// Test 5: Entry flags and inheritance
+void test_vm_map_entry_flags(void) {
+    kprint("Test: vm_map_entry flags\n");
+    
+    pmap_t pmap = pmap_create();
+    vm_map_t *map = vm_map_create(pmap, 0x1000, 0x100000);
+    
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x2000);
+    vm_map_insert(map, obj, 0, 0x10000, 0x12000);
+    
+    vm_map_entry_t *entry = vm_map_lookup(map, 0x10000);
+    TEST_ASSERT(entry != NULL, "entry found");
+    
+    // Set protection
+    entry->protection = VM_PROT_READ | VM_PROT_WRITE;
+    entry->max_protection = VM_PROT_ALL;
+    entry->inheritance = VM_INHERIT_COPY;
+    
+    TEST_ASSERT(entry->inheritance == VM_INHERIT_COPY, "inheritance set");
+    
+    vm_map_destroy(map);
+    kprint("  PASS\n");
+}
+
+// Test 6: Wire/unwire
+void test_vm_map_wire(void) {
+    kprint("Test: vm_map wire/unwire\n");
+    
+    pmap_t pmap = pmap_create();
+    vm_map_t *map = vm_map_create(pmap, 0x1000, 0x100000);
+    vm_map_insert(map, NULL, 0, 0x10000, 0x20000);
+    
+    int ret = vm_map_wire(map, 0x10000, 0x20000);
+    TEST_ASSERT(ret == 0, "wire succeeded");
+    
+    vm_map_entry_t *entry = vm_map_lookup(map, 0x10000);
+    TEST_ASSERT(entry != NULL, "entry found");
+    TEST_ASSERT(entry->wire_count == 1, "wire_count is 1");
+    TEST_ASSERT((entry->flags & VME_WIRED) != 0, "VME_WIRED set");
+    
+    vm_map_unwire(map, 0x10000, 0x20000);
+    TEST_ASSERT(entry->wire_count == 0, "wire_count is 0 after unwire");
+    TEST_ASSERT((entry->flags & VME_WIRED) == 0, "VME_WIRED cleared");
+    
+    vm_map_destroy(map);
+    kprint("  PASS\n");
+}
+
 void run_vm_map_tests(void) {
     kprint("\n=== VM Map Unit Tests ===\n");
     
@@ -111,6 +159,8 @@ void run_vm_map_tests(void) {
     test_vm_map_insert_lookup();
     test_vm_map_find_space();
     test_vm_map_remove();
+    test_vm_map_entry_flags();
+    test_vm_map_wire();
     
     kprint("\nVM Map Tests Complete\n");
 }

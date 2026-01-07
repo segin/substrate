@@ -324,7 +324,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Use INVPCID for targeted TLB flushes
         - [ ] **VM Subsystem (Machine Independent - Massive Refactor):**
             - [x] **Rewrite:** **VM Map:** `vm_map` structure representing an address space.
-            - [ ] **Rewrite:** **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
+            - [x] **Rewrite:** **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
             - [ ] **Rewrite:** **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
             - [ ] **Rewrite:** **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
             - [ ] **Rewrite:** **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
