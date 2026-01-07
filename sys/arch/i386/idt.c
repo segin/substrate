@@ -186,6 +186,9 @@ void isr_handler(registers_t *regs) {
         mouse_handler(regs);
     } else if (regs->int_no == 7) {
         fpu_handler(regs);
+    } else if (regs->int_no == 36) {
+        extern void uart_handler(registers_t *regs);
+        uart_handler(regs);
     } else if (regs->int_no < 32) {
         // Exception - check if from user mode or kernel mode
         int is_usermode = (regs->cs & 0x3) == 3;
