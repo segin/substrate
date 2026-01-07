@@ -16,7 +16,6 @@
 
 /* External declarations */
 extern uint32_t get_time(void);
-extern int sys_pmap_stats(struct pmap_stats *out);
 extern void cmdline_get(char *buf, size_t buf_len);
 
 /* Forward declarations */
@@ -87,12 +86,14 @@ static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
 }
 
 static uint32_t proc_pmap_stats_read(char *buf, size_t size) {
+    (void)size;
     struct pmap_stats stats;
+    // sys_pmap_stats is declared in pmap.h
     if (sys_pmap_stats(&stats) != 0) {
-        return snprintf(buf, size, "error: could not get stats\n"); 
+        return sprintf(buf, "error: could not get stats\n"); 
     }
     
-    return snprintf(buf, size, 
+    return sprintf(buf, 
         "Faults: %u\n"
         "COW Faults: %u\n"
         "Zero Fills: %u\n"
