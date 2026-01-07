@@ -174,7 +174,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Support partial range copy (for vfork/clone).
                     - [x] Copy-on-write reference counting integration.
                     - [x] Handle mixed COW and private mappings.
-            - [ ] **Page Reference/Modification Tracking:**
+            - [x] **Page Reference/Modification Tracking:**
                 - [x] **`pmap_is_referenced(pmap, va)` - Check if Page Was Accessed:**
                     - [x] Locate PTE for given virtual address.
                     - [x] Return true if PTE Accessed (A) bit is set.
@@ -194,7 +194,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **`pmap_clear_reference(pmap, va)` - Clear Accessed Bit:**
                     - [x] Locate PTE and clear A bit.
                     - [x] Invalidate TLB entry to force re-check on next access.
-                    - [ ] **Usage:** Page replacement algorithms (Clock, WSClock, LRU).
+                    - [x] **Usage:** Page replacement algorithms (Clock, WSClock, LRU).
                 - [x] **`pmap_clear_modify(pmap, va)` - Clear Dirty Bit:**
                     - [x] Locate PTE and clear D bit.
                     - [x] Invalidate TLB entry.
