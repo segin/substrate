@@ -146,8 +146,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **`pmap_switch()` / `pmap_activate()` - Context Switch:**
                     - [x] Load new pmap's `pd_phys` into CR3.
                     - [ ] Use PCID if available to avoid TLB flush. (Future x86_64)
-                    - [ ] Update `curpmap` thread-local pointer. (Scheduler integration)
-                    - [ ] Set TSS ESP0 for kernel stack. (Scheduler integration)
+                    - [x] Update `curpmap` thread-local pointer. (Scheduler integration)
+                    - [x] Set TSS ESP0 for kernel stack. (Scheduler integration)
                 - [x] **Kernel PDE Synchronization:**
                     - [ ] When kernel maps new pages (e.g., vmalloc), must update all pmaps. (Deferred)
                     - [x] Maintain `kernel_pmap` as authoritative source.
@@ -1369,6 +1369,12 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **`login` (CLI):** Implement PAM-like authentication or shadow file reading.
     - [ ] **`ps`:** Read from `/proc`.
     - [ ] **`top`:** Real-time process monitoring.
+
+### 8. LibC & Build System (User Requests)
+- [ ] **LibC Improvements:**
+    - [ ] Implement `getopt_long` natively (GNU compatible).
+- [ ] **Build System:**
+    - [ ] Implement `native_dist` target to build usermode tools for the host OS (skipping libc/libm etc).
     - [ ] **Filesystem Tools (`sbin/`):**
         - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
         - [ ] **`fsck`:** Implement `ext2` consistency check.

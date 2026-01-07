@@ -30,6 +30,7 @@
 
 // Abstract PMAP handle (opaque pointer to Page Directory)
 typedef struct pmap *pmap_t;
+extern pmap_t curpmap;
 
 // Per-pmap statistics
 struct pmap_stats {

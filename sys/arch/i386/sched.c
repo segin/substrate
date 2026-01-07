@@ -3,6 +3,7 @@
 #include <sys/acct.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "pmap.h"
 
 // Arch-Specific Externs
 extern void switch_to(thread_t *prev, thread_t *next);
@@ -19,6 +20,11 @@ extern void sched_init_generic(void);
 
 // Exposed to Generic Scheduler
 void arch_switch_to(thread_t *prev, thread_t *next) {
+    // Switch Address Space if needed
+    if (next->proc && next->proc->pmap) {
+        pmap_activate(next->proc->pmap);
+    }
+    
     switch_to(prev, next);
 }
 
@@ -50,6 +56,8 @@ void sched_init(void) {
     processes[0].pers = &personality_native;
     processes[0].root_node = fs_root;
     processes[0].is_kernel_task = 1;
+    processes[0].pmap = pmap_kernel(); // Use Kernel PMAP
+    
     extern char *strcpy(char *, const char *);
     strcpy(processes[0].comm, "swapper");
     
@@ -68,6 +76,9 @@ void sched_init(void) {
     
     current_thread = t;
     current_process = &processes[0];
+    
+    // Ensure we start effectively in kernel pmap (already loaded but helpful for consistency)
+    pmap_activate(processes[0].pmap);
 }
 
 int sched_fork_thread(process_t *proc, void *parent_regs) {

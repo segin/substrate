@@ -421,10 +421,17 @@ pmap_t pmap_fork(pmap_t src_pmap) {
     return dst_pmap;
 }
 
+// Active pmap
+pmap_t curpmap = NULL;
+
 void pmap_activate(pmap_t pmap) {
+    if (!pmap) return;
+
+    curpmap = pmap;
     uint32_t current_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
     
+    // PCID TODO: Check if we can skip flush
     if (current_cr3 != pmap->pdir_phys) {
         __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pdir_phys));
     }
