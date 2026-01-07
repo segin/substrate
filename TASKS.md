@@ -1030,9 +1030,23 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] `scalbn()`
             - [ ] `nextafter()`
             - [ ] `copysign()`
-    - [ ] **Optimizations (i386/x87):**
-        - [ ] Inline Assembly for `fsin`, `fcos`, `fsqrt`, `fyl2x`.
-        - [ ] `sincos` optimization.
+    - [ ] **Optimizations (i386/x87 Inline Assembly):**
+        - [ ] **Trigonometric Functions:**
+            - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
+            - [ ] `sincos()`: Use `fsincos` (compute both simultaneously).
+            - [ ] `tan()`: Use `fptan` (partial tangent) and handle stack pop.
+            - [ ] **Range Reduction:** x87 fails for |x| > 2^63. Implement `fprem` / `fprem1` loop for accurate argument reduction.
+        - [ ] **Logarithms & Exponentials:**
+            - [ ] `log()` / `log10()` / `log2()`: Use `fyl2x` (y * log2(x)) with y=1.
+            - [ ] `pow(x, y)`: Use `fyl2x` to compute y*log2(x), then `f2xm1` and `fscale`.
+            - [ ] `exp()` / `exp2()`: Use `f2xm1` (2^x - 1) and `fscale`.
+        - [ ] **Basic Arithmetic:**
+            - [ ] `sqrt()`: Use `fsqrt` (IEEE 754 compliant).
+            - [ ] `fabs()`: Use `fabs` (Absolute value).
+            - [ ] `fmod()` / `remainder()`: Use `fprem` / `fprem1`.
+        - [ ] **Rounding & Manipulation:**
+            - [ ] `rint()` / `nearbyint()`: Use `frndint` (Round to integer according to CW).
+            - [ ] `scalbn()` / `ldexp()`: Use `fscale` (exponent manipulation).
 - [ ] **Dynamic Linker (`ld.so` / `ld-testunix.so`):**
     - [ ] **Kernel ELF Loader Support:**
         - [ ] Parse `PT_INTERP` program header to identify dynamic linker path.
