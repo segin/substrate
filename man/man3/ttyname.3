@@ -21,3 +21,20 @@ is not connected to a terminal).
 The function
 .B ttyname
 () returns a pointer to a pathname on success. On error, NULL is returned.
+.SH EXAMPLES
+.B Program source
+.nf
+
+#include <unistd.h>
+#include <stdio.h>
+
+int main(void) {
+    char *name;
+    if ((name = ttyname(STDIN_FILENO)) != NULL) {
+        printf("Standard input is connected to %s\\n", name);
+    } else {
+        printf("Standard input is not a terminal\\n");
+    }
+    return 0;
+}
+.fi
