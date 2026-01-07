@@ -1,0 +1,25 @@
+.\" Process this file with
+.\" groff -man -Tascii waitpid.2
+.\"
+.TH WAITPID 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+waitpid, wait \- wait for process to change state
+.SH SYNOPSIS
+.B #include <sys/types.h>
+.br
+.B #include <sys/wait.h>
+.PP
+.BI "pid_t wait(int *" wstatus ");"
+.br
+.BI "pid_t waitpid(pid_t " pid ", int *" wstatus ", int " options ");"
+.SH DESCRIPTION
+All of these system calls are used to wait for state changes in a child
+of the calling process, and obtain information about the child whose
+state has changed. A state change is considered to be: the child
+terminated; the child was stopped by a signal; or the child was resumed
+by a signal.
+.SH RETURN VALUE
+on success, returns the process ID of the child whose state has changed;
+if WNOHANG was specified and one or more child(ren) specified by pid
+exist, but have not yet changed state, then 0 is returned.
+On error, -1 is returned.
