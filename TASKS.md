@@ -1333,7 +1333,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Implement `crypt(key, salt)`.
             - [ ] Support DES (legacy) and MD5/SHA variants.
         - [ ] **High-Level API:**
-            - [ ] `auth_check_user(const char *user, const char *pass)` - Validation helper.
+            - [ ] `auth_check_user(const char *user, const char *pass)` - Validation helper (Requires Root / Shadow Access).
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
