@@ -21,6 +21,8 @@ pmap \- machine-dependent virtual memory interface
 .br
 .BI "int pmap_enter(pmap_t " pmap ", uint32_t " va ", uint32_t " pa ", uint32_t " prot ", uint32_t " flags ");"
 .br
+.BI "int pmap_enter_pse(pmap_t " pmap ", uint32_t " va ", uint32_t " pa ", uint32_t " flags ");"
+.br
 .BI "void pmap_remove(pmap_t " pmap ", uint32_t " va ");"
 .br
 .BI "void pmap_protect(pmap_t " pmap ", uint32_t " sva ", uint32_t " eva ", uint32_t " prot ");"
@@ -49,6 +51,13 @@ maps a virtual address
 to physical address
 .I pa
 with the specified protection and flags.
+.PP
+.B pmap_enter_pse
+creates a 4MB Page Size Extension (PSE) mapping from 4MB-aligned
+.I va
+to
+.IR pa .
+This uses a single Page Directory Entry (PDE) to map a large page, reducing TLB pressure.
 .PP
 .B pmap_remove
 unmaps the virtual address

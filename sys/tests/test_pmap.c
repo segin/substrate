@@ -27,7 +27,7 @@ void test_pmap_lifecycle(void) {
     TEST_ASSERT(pmap != 0, "pmap_create returned non-NULL");
     
     // Validate it's a proper physical address
-    uint32_t phys = (uint32_t)pmap;
+    uint32_t phys = (uintptr_t)pmap;
     TEST_ASSERT((phys & 0xFFF) == 0, "pmap is page-aligned");
     
     // Destroy it
@@ -105,6 +105,28 @@ static void test_memory_leak(void) {
     
     kprint("  PASS\n");
 }
+// Test 5: PSE 4MB Page Support
+void test_pmap_pse(void) {
+    kprint("Test: PSE 4MB Mapping\n");
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    // Try valid 4MB alignment
+    uint32_t va = 0x800000; // 8MB
+    uint32_t pa = 0x400000; // 4MB
+    int ret = pmap_enter_pse(pmap, va, pa, PTE_W | PTE_U);
+    TEST_ASSERT(ret == 0, "pmap_enter_pse valid alignment");
+
+    // Try invalid alignment
+    ret = pmap_enter_pse(pmap, va + 0x1000, pa, 0);
+    TEST_ASSERT(ret != 0, "pmap_enter_pse invalid VA alignment");
+    
+    ret = pmap_enter_pse(pmap, va, pa + 0x1000, 0);
+    TEST_ASSERT(ret != 0, "pmap_enter_pse invalid PA alignment");
+
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
 
 void run_pmap_tests(void) {
     kprint("\n=== PMAP Unit Tests ===\n");
@@ -113,6 +135,7 @@ void run_pmap_tests(void) {
     test_multiple_pmaps();
     test_kernel_pmap_protection();
     test_null_pmap();
+    test_pmap_pse();
     test_memory_leak();
     
     kprint("\nResults: ");

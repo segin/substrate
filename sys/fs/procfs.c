@@ -86,28 +86,36 @@ static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
     return sprintf(buf, "0.00 0.00 0.00 1/10 1\n");
 }
 
-static uint32_t gen_cow_stats(char *buf, size_t size __attribute__((unused))) {
+static uint32_t proc_pmap_stats_read(char *buf, size_t size) {
     struct pmap_stats stats;
-    if (sys_get_cow_stats(&stats) != 0) {
-        return sprintf(buf, "error: could not get stats\n");
+    if (sys_pmap_stats(&stats) != 0) {
+        return snprintf(buf, size, "error: could not get stats\n"); 
     }
     
-    return sprintf(buf,
-        "Faults:\t\t\t%u\n"
-        "COW Faults:\t\t%u\n"
-        "Zero Fills:\t\t%u\n"
-        "Prot Upgrades:\t\t%u\n"
-        "Prot Downgrades:\t%u\n"
-        "COW Pages Mapped:\t%u\n"
-        "COW Duplications:\t%u\n"
-        "Pages Saved by COW:\t%u\n"
-        "TLB Invlpg:\t\t%u\n"
-        "TLB Full Flush:\t\t%u\n",
-        stats.faults, stats.cow_faults, stats.zero_fills,
-        stats.protection_upgrades, stats.protection_downgrades,
-        stats.cow_pages_mapped, stats.cow_duplications, 
-        stats.pages_saved_by_cow, stats.tlb_invlpg_count, 
-        stats.tlb_full_flush_count);
+    return snprintf(buf, size, 
+        "Faults: %u\n"
+        "COW Faults: %u\n"
+        "Zero Fills: %u\n"
+        "Prot Upgrades: %u\n"
+        "Prot Downgrades: %u\n"
+        "COW Pages Mapped: %u\n"
+        "COW Duplications: %u\n"
+        "Pages Saved by COW: %u\n"
+        "TLB Single Invalidations: %u\n"
+        "TLB Full Flushes: %u\n"
+        "Total PMAPs: %u\n",
+        stats.faults,
+        stats.cow_faults,
+        stats.zero_fills,
+        stats.protection_upgrades,
+        stats.protection_downgrades,
+        stats.cow_pages_mapped,
+        stats.cow_duplications,
+        stats.pages_saved_by_cow,
+        stats.tlb_invlpg_count,
+        stats.tlb_full_flush_count,
+        stats.total_pmaps
+    );
 }
 
 static uint32_t gen_filesystems(char *buf, size_t size __attribute__((unused))) {

@@ -44,10 +44,11 @@ struct pmap_stats {
     uint32_t pages_saved_by_cow;   // Pages never duplicated (process exited clean)
     uint32_t tlb_invlpg_count;     // Single-page TLB invalidations (invlpg)
     uint32_t tlb_full_flush_count; // Full TLB flushes (CR3 reload)
+    uint32_t total_pmaps;          // Current number of allocated pmaps
 };
 
 // Syscall to get stats
-int sys_get_cow_stats(struct pmap_stats *out);
+int sys_pmap_stats(struct pmap_stats *out);
 
 // Linked list entry for global pmap list
 struct pmap_list_entry {
@@ -88,6 +89,7 @@ pmap_t pmap_fork(pmap_t src_pmap); // Fork with COW
 // Mapping Operations
 // Returns 0 on success, < 0 on error
 int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
+int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags);
 void pmap_remove(pmap_t pmap, uint32_t va);
 uint32_t pmap_extract(pmap_t pmap, uint32_t va); // Get PA from VA
 

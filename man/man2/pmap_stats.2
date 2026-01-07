@@ -1,0 +1,42 @@
+.TH GET_COW_STATS 2 "January 2026" "Substrate Kernel" "System Calls"
+.SH NAME
+sys_pmap_stats \- get pmap and virtual memory statistics
+.SH SYNOPSIS
+.B #include <sys/arch/i386/pmap.h>
+.LP
+.BI "int sys_pmap_stats(struct pmap_stats *" out ");"
+.SH DESCRIPTION
+.B sys_pmap_stats
+retrieves global virtual memory statistics from the kernel.
+.PP
+The
+.I out
+argument points to a
+.B pmap_stats
+structure:
+.PP
+.RS
+.nf
+struct pmap_stats {
+    uint32_t faults;                /* Total page faults */
+    uint32_t cow_faults;            /* COW faults */
+    uint32_t zero_fills;            /* Zero-fill faults */
+    uint32_t protection_upgrades;   /* Read->Write upgrades */
+    uint32_t protection_downgrades; /* Write->Read downgrades */
+    uint32_t cow_pages_mapped;      /* Pages shared via COW */
+    uint32_t cow_duplications;      /* Pages duplicated by COW */
+    uint32_t pages_saved_by_cow;    /* Pages saved by COW optimization */
+    uint32_t tlb_invlpg_count;      /* TLB single page flushes */
+    uint32_t tlb_full_flush_count;  /* TLB full flushes */
+    uint32_t total_pmaps;           /* Current allocated pmaps */
+};
+.fi
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EFAULT
+.I stats
+points to an invalid address.
+.SH SEE ALSO
+.BR pmap (9)

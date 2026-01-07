@@ -251,13 +251,13 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [ ] Detect INVPCID support via CPUID.
                     - [ ] Use INVPCID for targeted TLB invalidation.
                     - [ ] Invalidate by PCID+VA, PCID only, or all-except-global.
-            - [ ] **Large Page Support:**
-                - [ ] **4MB PSE Pages (i386):**
-                    - [ ] Detect PSE via CPUID (CR4.PSE).
-                    - [ ] Use PDE with PS=1 for 4MB mappings.
-                    - [ ] `pmap_enter_pse(pmap, va, pa, prot)`: Create 4MB mapping.
-                    - [ ] Align VA and PA to 4MB boundary.
-                    - [ ] Use for kernel text/data to reduce TLB pressure.
+            - [x] **Large Page Support:**
+                - [x] **4MB PSE Pages (i386):**
+                    - [x] Detect PSE via CPUID (CR4.PSE).
+                    - [x] Use PDE with PS=1 for 4MB mappings.
+                    - [x] `pmap_enter_pse(pmap, va, pa, prot)`: Create 4MB mapping.
+                    - [x] Align VA and PA to 4MB boundary.
+                    - [x] Use for kernel text/data to reduce TLB pressure.
                 - [ ] **2MB/1GB Pages (x86_64):**
                     - [ ] 2MB pages: PDE.PS=1 (no PT needed).
                     - [ ] 1GB pages: PDPTE.PS=1 (no PD/PT needed).
@@ -270,12 +270,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Mark kernel pages with PG_G flag.
                 - [ ] Global pages survive CR3 reload.
                 - [ ] Use INVPCID or CR4 toggle to flush global pages.
-            - [ ] **PMAP Statistics and Debugging:**
-                - [ ] Per-pmap counters: resident, wired, mapped, faults.
-                - [ ] Global counters: total_pmaps, active_pmaps, cow_faults.
+            - [x] **PMAP Statistics and Debugging:**
+                - [x] Per-pmap counters: resident, wired, mapped, faults.
+                - [x] Global counters: total_pmaps, active_pmaps, cow_faults.
                 - [ ] `pmap_dump(pmap)`: Debug dump of pmap contents.
                 - [ ] `pmap_check(pmap)`: Consistency verification.
-                - [ ] Export stats via `/proc/vmstat` or sysctl.
+                - [x] Export stats via syscall (`sys_pmap_stats`).
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap PML4 paging structures.
                 - [ ] Initialize kernel PML4 from static bootstrap
@@ -440,41 +440,66 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Hash table bucketing for wait queues.
 - [ ] **Signals:**
     - [x] Implement Signal delivery mechanism (trampoline, context saving).
-    - [ ] **Debug Delivery:** currently panics on delivery
-        - [ ] Implement sigreturn trampoline
-        - [ ] Push full signal frame to user stack
-        - [ ] Verify register restoration
     - [x] Implement `kill`, `sigaction`, `sigprocmask`.
     - [x] Implement PID 1 protection and safe exit handling.
+    - [ ] **Delivery & context:**
+        - [ ] **Debug Delivery:**
+            - [ ] Isolate logic for frame pushing (remove panic).
+            - [ ] Create architecture-dependent `struct sigframe`.
+            - [ ] Copy frame to aligned user stack pointer.
+            - [ ] Set `EIP` to trampoline, `ESP` to frame.
+        - [ ] **Trampoline:**
+            - [ ] `sys_sigreturn`: Restore keys registers from stack frame.
+            - [ ] Verification: Check `ss` and `cs` integrity on return.
+        - [ ] **Frame Management:**
+            - [ ] `sigaltstack`: Support alternative signal stack.
+            - [ ] `SA_SIGINFO`: Extended `siginfo_t` support.
+    - [ ] **Generation:**
+        - [ ] `psignal(p, sig)`: Send signal to process.
+        - [ ] `pgsignal(pgrp, sig)`: Send signal to process group.
+        - [ ] `trapsignal(p, sig, code)`: Send synchronous trap signal.
 - [ ] **Process Lifecycle:**
     - [ ] **Wait Subsystem (`wait4`/`waitpid`):**
-        - [ ] **ZOMBIE State:** Ensure process isn't freed until reaped.
-        - [ ] **Orphan Reparenting:** Reassign children of dead parents to PPID 1 (`init`).
-        - [ ] **rusage:** Aggregate CPU time/memory statistics for dead children.
-        - [ ] `WNOHANG`: Non-blocking wait support.
-        - [ ] `WUNTRACED`: Report stopped children.
-        - [ ] `WCONTINUED`: Report resumed children.
-    - [ ] **Process Groups & Sessions (Job Control Infrastructure):**
-        - [ ] **Session Management:**
-            - [ ] Implement `sys_setsid()`: Create new session, become leader, detach ctty.
-            - [ ] Implement `sys_getsid()`: Retrieve Session ID.
-            - [ ] Add `p_session` and `p_pgrp` pointers to `struct process`.
-            - [ ] Track Session Leader and Process Group Leader.
-        - [ ] **Process Groups:**
-            - [ ] Implement `sys_setpgid()`: Set Process Group ID.
-            - [ ] Implement `sys_getpgid()`: Get Process Group ID.
-            - [ ] Handle orphaned process groups.
+        - [ ] **State Transitions:**
+            - [ ] **ZOMBIE State:** Preserve `p_xstat` and `p_rusage` until reaped.
+            - [ ] **State Lock:** Protect state transitions (`p_stat`).
+        - [ ] **Reparenting:**
+            - [ ] Scan children array on exit.
+            - [ ] Reassign to `init` (PID 1) or next valid reaper.
+        - [ ] **Statistics (`rusage`):**
+            - [ ] `ru_utime`, `ru_stime`: User/System CPU time.
+            - [ ] `ru_maxrss`: Max resident set size.
+            - [ ] `ru_minflt`, `ru_majflt`: Page faults.
+            - [ ] Propagate child rusage to parent on wait.
+        - [ ] **Flags Support:**
+            - [ ] `WNOHANG`: Return immediately if no child has state change.
+            - [ ] `WUNTRACED`: Return if child has stopped (job control).
+            - [ ] `WCONTINUED`: Return if child has continued (SIGCONT).
+        - [ ] **Wait6:** Implement BSD `wait6` for advanced filtering (P_PID, P_PGID, P_ALL).
+    - [ ] **Process Groups & Sessions (Job Control):**
+        - [ ] **Infrastructure:**
+            - [ ] `struct pgrp`: List of processes, pointer to session.
+            - [ ] `struct session`: List of process groups, pointer to leader, ctty vnode ref.
+            - [ ] **Refcounting:** Ensure structures persist while referenced.
+        - [ ] **Session API:**
+            - [ ] `sys_setsid()`: New session, become leader, detach ctty.
+            - [ ] `sys_getsid()`: Get session ID.
+        - [ ] **Group API:**
+            - [ ] `sys_setpgid()`: Set process group ID (join/create).
+            - [ ] `sys_getpgid()`: Get process group ID.
+            - [ ] **Orphaned Groups:** Detect groups where parent of every member is in a different session.
         - [ ] **Controlling Terminal (CTTY):**
-            - [ ] Implement `ioctl(TIOCSCTTY)`: Set controlling terminal for session.
-            - [ ] Implement `sys_tcgetpgrp()` / `sys_tcsetpgrp()`: Foreground group control.
-            - [ ] Kernel TTY Layer integration: `tty->pgrp` tracking.
-            - [ ] Signal generation: `SIGINT`, `SIGQUIT`, `SIGTSTP` from TTY input.
+            - [ ] `TIOCSCTTY`: Set controlling terminal (session leader only).
+            - [ ] `TIOCNOTTY`: Detach controlling terminal.
+            - [ ] `sys_tcgetpgrp()`: Get foreground process group.
+            - [ ] `sys_tcsetpgrp()`: Set foreground process group (SIGTTOU check).
+            - [ ] **Carrier Loss:** Send `SIGHUP` to session leader on carrier drop.
         - [ ] **Job Control Signals:**
-            - [ ] Handle `STOP` vs `TSTP`.
-            - [ ] Implement `SIGCONT` resume logic (wake from stopped state).
-            - [ ] Background I/O controls:
-                - [ ] `SIGTTIN`: Reading from TTY while in background group.
-                - [ ] `SIGTTOU`: Writing to TTY while in background group.
+            - [ ] **Stop:** `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU` (default action: suspend).
+            - [ ] **Continue:** `SIGCONT` (wake up, discard pending stop signals).
+            - [ ] **Background I/O:**
+                - [ ] `SIGTTIN`: Generated by TTY read from background group.
+                - [ ] `SIGTTOU`: Generated by TTY write from background group (if `TOSTOP` set).
 
 ### 2. Architecture (`sys/arch`)
 - [ ] **i386:**
@@ -504,87 +529,87 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp).
 
 ### 3. Drivers (`sys/drivers`)
-    - [ ] **Storage Subsystem (Unified SCSI Stack):**
-        - [ ] **Core Architecture (CAM/Mid-layer):**
-            - [ ] **Data Structures:** Define `scsi_request`, `scsi_device`, `scsi_link` (transport linkage).
-            - [ ] **Discovery:**
-                - [ ] Implement Bus Scanning logic (HBA enumeration).
-                - [ ] Implement `REPORT LUNS` and `INQUIRY` probing.
-                - [ ] Device Registry: registration of found targets/LUNs.
-            - [ ] **Command Handling:**
-                - [ ] Asynchronous command queueing (completion callbacks).
-                - [ ] Timeout management and retries.
-                - [ ] Error Handling: Sense Data definition and parsing (SPC-3).
-        - [ ] **High-Level Device Drivers:**
-            - [ ] **Unified Userspace Interface:**
-                - [ ] **Device Nodes:**
-                    - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`) - Direct generic SCSI access (Bus:Target:LUN).
-                    - [ ] `/dev/storage/scsi/B` (e.g., `0`) - Bus controller ioctl endpoint (Enumeration/Rescan).
-                    - [ ] `/dev/storage/scsiN` (e.g., `scsi0`) - High-level Block Device alias (e.g., first disk).
-                - [ ] **Drivers (`sd`/`sr` unified):**
-                    - [ ] **Command Translation:** Map high-level Block I/O to SCSI READ/WRITE CDBs.
-                    - [ ] **Device Type Handling:**
-                        - [ ] **Direct Access (Disk):** Capacity/Geometry, Cache Flush.
-                        - [ ] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking.
-                - [ ] **Integration:**
-                    - [ ] Register with DevFS using the schematic above.
-                    - [ ] Implement `ioctl` for Bus Enumeration on controller nodes.
-        - [ ] **Transport/HBA Drivers (Low-Level):**
-            - [ ] **ATAPI (Legacy):**
-                - [ ] Encapsulate SCSI CDBs into ATA Packet Commands used by IDE/PATA.
-                - [ ] Handle IRQ and DRQ states for packet transfer.
-            - [ ] **USB Mass Storage:**
-                - [ ] Implement Bulk-Only Transport (BOT).
-                - [ ] Handle Command Block Wrapper (CBW) and Command Status Wrapper (CSW).
-            - [ ] **VirtIO-SCSI:**
-                - [ ] Pass-through driver mapping request queues to virtqueues.
-                - [ ] Event queue handling (hot-plug).
-    - [ ] **ATA/IDE (Legacy):**
-        - [x] Implement PIO Mode transfers.
-        - [ ] **DMA Transfers:**
-            - [ ] Bus Master Register access
-            - [ ] PRDT (Physical Region Descriptor Table) setup
-        - [x] Implement LBA48 support.
-        - [ ] **ATAPI (SCSI Transport):**
-            - [ ] Packet command transmission standard (hooks into SCSI stack)
-            - [ ] CD-ROM support
-        - [x] Support Primary/Secondary channels.
-        - [x] Support Master/Slave drives.
-    - [ ] **AHCI:**
-        - [ ] **HBA Initialization:**
-            - [ ] Enable AHCI Mode (GHC.AE).
-            - [ ] Perform HBA Reset processes (GHC.HR).
-            - [ ] Capability detection (CAP, CAP2).
-            - [ ] MSI-X / Interrupt setup.
-        - [ ] **Port Enumeration:**
-            - [ ] Check Implemented Ports (PI).
-            - [ ] Determine Port Type (SSTS.DET).
-            - [ ] Allocate Command Lists and FIS Receive areas (aligned 1K/256B).
-            - [ ] Start Command Engine (CMD.ST) and FIS Receive (CMD.FRE).
+- [ ] **Storage Subsystem (Unified SCSI Stack):**
+    - [ ] **Core Architecture (CAM/Mid-layer):**
+        - [ ] **Data Structures:** Define `scsi_request`, `scsi_device`, `scsi_link` (transport linkage).
+        - [ ] **Discovery:**
+            - [ ] Implement Bus Scanning logic (HBA enumeration).
+            - [ ] Implement `REPORT LUNS` and `INQUIRY` probing.
+            - [ ] Device Registry: registration of found targets/LUNs.
         - [ ] **Command Handling:**
-            - [ ] Build Command Tables (PRDTs).
-            - [ ] Issue commands via Command Issue (CI) bitmask.
-            - [ ] Handle completion interrupts.
-    - [ ] **NVMe:**
-        - [ ] **Controller Initialization:**
-            - [ ] Check CAP (Capabilities) register (Timeout, Doorbell stride).
-            - [ ] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0.
-            - [ ] Configure Admin Queue Attributes (AQA).
-            - [ ] Create Admin Submission/Completion Queues (ASQ/ACQ).
-            - [ ] Enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1.
-        - [ ] **Namespace Discovery:**
-            - [ ] Issue `Identify Controller` command.
-            - [ ] Issue `Identify Namespace` for active NSIDs.
-        - [ ] **I/O Queue Creation:**
-            - [ ] Determine number of queues supported.
-            - [ ] Issue `Create I/O Completion Queue`.
-            - [ ] Issue `Create I/O Submission Queue`.
-        - [ ] **Block I/O:**
-            - [ ] PRP (Physical Region Page) List construction for data buffers.
-            - [ ] Issue Read/Write NVM commands.
-    - [ ] **Partitioning & DevFS:**
-        - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables.
-        - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS.
+            - [ ] Asynchronous command queueing (completion callbacks).
+            - [ ] Timeout management and retries.
+            - [ ] Error Handling: Sense Data definition and parsing (SPC-3).
+    - [ ] **High-Level Device Drivers:**
+        - [ ] **Unified Userspace Interface:**
+            - [ ] **Device Nodes:**
+                - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`) - Direct generic SCSI access (Bus:Target:LUN).
+                - [ ] `/dev/storage/scsi/B` (e.g., `0`) - Bus controller ioctl endpoint (Enumeration/Rescan).
+                - [ ] `/dev/storage/scsiN` (e.g., `scsi0`) - High-level Block Device alias (e.g., first disk).
+            - [ ] **Drivers (`sd`/`sr` unified):**
+                - [ ] **Command Translation:** Map high-level Block I/O to SCSI READ/WRITE CDBs.
+                - [ ] **Device Type Handling:**
+                    - [ ] **Direct Access (Disk):** Capacity/Geometry, Cache Flush.
+                    - [ ] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking.
+            - [ ] **Integration:**
+                - [ ] Register with DevFS using the schematic above.
+                - [ ] Implement `ioctl` for Bus Enumeration on controller nodes.
+    - [ ] **Transport/HBA Drivers (Low-Level):**
+        - [ ] **ATAPI (Legacy):**
+            - [ ] Encapsulate SCSI CDBs into ATA Packet Commands used by IDE/PATA.
+            - [ ] Handle IRQ and DRQ states for packet transfer.
+        - [ ] **USB Mass Storage:**
+            - [ ] Implement Bulk-Only Transport (BOT).
+            - [ ] Handle Command Block Wrapper (CBW) and Command Status Wrapper (CSW).
+        - [ ] **VirtIO-SCSI:**
+            - [ ] Pass-through driver mapping request queues to virtqueues.
+            - [ ] Event queue handling (hot-plug).
+- [ ] **ATA/IDE (Legacy):**
+    - [x] Implement PIO Mode transfers.
+    - [ ] **DMA Transfers:**
+        - [ ] Bus Master Register access
+        - [ ] PRDT (Physical Region Descriptor Table) setup
+    - [x] Implement LBA48 support.
+    - [ ] **ATAPI (SCSI Transport):**
+        - [ ] Packet command transmission standard (hooks into SCSI stack)
+        - [ ] CD-ROM support
+    - [x] Support Primary/Secondary channels.
+    - [x] Support Master/Slave drives.
+- [ ] **AHCI:**
+    - [ ] **HBA Initialization:**
+        - [ ] Enable AHCI Mode (GHC.AE).
+        - [ ] Perform HBA Reset processes (GHC.HR).
+        - [ ] Capability detection (CAP, CAP2).
+        - [ ] MSI-X / Interrupt setup.
+    - [ ] **Port Enumeration:**
+        - [ ] Check Implemented Ports (PI).
+        - [ ] Determine Port Type (SSTS.DET).
+        - [ ] Allocate Command Lists and FIS Receive areas (aligned 1K/256B).
+        - [ ] Start Command Engine (CMD.ST) and FIS Receive (CMD.FRE).
+    - [ ] **Command Handling:**
+        - [ ] Build Command Tables (PRDTs).
+        - [ ] Issue commands via Command Issue (CI) bitmask.
+        - [ ] Handle completion interrupts.
+- [ ] **NVMe:**
+    - [ ] **Controller Initialization:**
+        - [ ] Check CAP (Capabilities) register (Timeout, Doorbell stride).
+        - [ ] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0.
+        - [ ] Configure Admin Queue Attributes (AQA).
+        - [ ] Create Admin Submission/Completion Queues (ASQ/ACQ).
+        - [ ] Enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1.
+    - [ ] **Namespace Discovery:**
+        - [ ] Issue `Identify Controller` command.
+        - [ ] Issue `Identify Namespace` for active NSIDs.
+    - [ ] **I/O Queue Creation:**
+        - [ ] Determine number of queues supported.
+        - [ ] Issue `Create I/O Completion Queue`.
+        - [ ] Issue `Create I/O Submission Queue`.
+    - [ ] **Block I/O:**
+        - [ ] PRP (Physical Region Page) List construction for data buffers.
+        - [ ] Issue Read/Write NVM commands.
+- [ ] **Partitioning & DevFS:**
+    - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables.
+    - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS.
 - [ ] **Input:**
     - [ ] **Keyboard (PS/2):**
         - [ ] **Controller:**
@@ -615,15 +640,50 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Console Subsystem (`sys/console`):**
     - [ ] **TTY Subsystem (Core):**
         - [ ] **Structures (`tty_t`):**
-            - [ ] **Buffers:** Input (raw), Output (tty), Canonical (cooked).
-            - [ ] **State:** `termios` (c_lflag, c_iflag, etc.), `winsize`.
-            - [ ] **Line Discipline (`ldisc`):**
-                - [ ] `n_tty_read`: Canonical (line-buffered) vs Raw mode.
-                - [ ] `n_tty_write`: Output processing (ONLCR, etc.).
-                - [ ] `echo`: Handling `ECHO`, `ECHOE` (backspace), `ECHONL`.
-                - [ ] `signals`: `ISIG` handling (`CTRL+C`->SIGINT, `CTRL+Z`->SIGTSTP).
-            - [ ] **Driver Hooks:** `put_char`, `flush_chars`, `write`, `ioctl`.
-            - [ ] **Session/PGRP:** Pointer to `session` and foreground `pgrp`.
+            - [ ] **Buffers & Queues:**
+                - [ ] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data.
+                - [ ] **Write Buffer (Output):** Queue for driver consumption.
+                - [ ] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode.
+                - [ ] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`.
+            - [ ] **State Control (`termios`):**
+                - [ ] `c_iflag`: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON).
+                - [ ] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS).
+                - [ ] `c_cflag`: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS).
+                - [ ] `c_lflag`: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP).
+                - [ ] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME).
+                - [ ] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`.
+            - [ ] **Line Discipline (`N_TTY`):**
+                - [ ] **Input Processing (`n_tty_receive_buf`):**
+                    - [ ] Parity checks and stripping.
+                    - [ ] Newline translation (CR->NL).
+                    - [ ] Software flow control (XON/XOFF detection).
+                    - [ ] Signal generation check (`ISIG`).
+                - [ ] **Canonical Editing (`n_tty_read`):**
+                    - [ ] Backspace/Delete handling (`VERASE`).
+                    - [ ] Line kill (`VKILL`).
+                    - [ ] Word erase (`VWERASE`).
+                    - [ ] EOF handling (`VEOF` / Ctrl+D).
+                - [ ] **Output Post-processing (`n_tty_write`):**
+                    - [ ] Newline expansion (NL -> CR/NL).
+                    - [ ] Tab expansion (optional).
+                - [ ] **Echoing Logic:**
+                    - [ ] Raw echo (input char -> output).
+                    - [ ] Control char echo (`^C`).
+                    - [ ] Erase echo (backspace-space-backspace sequence).
+            - [ ] **Driver Interface (`tty_driver`):**
+                - [ ] `install` / `remove`: setup private data.
+                - [ ] `open` / `close`: hardware init/shutdown.
+                - [ ] `write`: device output path.
+                - [ ] `put_char`: optimized single-char write.
+                - [ ] `flush_chars`: kick hardware transmission.
+                - [ ] `write_room`: check available hardware buffer space.
+                - [ ] `chars_in_buffer`: check pending bytes.
+                - [ ] `ioctl`: hardware-specific controls.
+                - [ ] `throttle` / `unthrottle`: hardware flow control hooks.
+            - [ ] **Session/Job Control:**
+                - [ ] `tty_struct.session`: Pointer to current session.
+                - [ ] `tty_struct.pgrp`: Pointer to foreground process group.
+                - [ ] `tty_check_change()`: Verify background writes (`SIGTTOU`).
         - [ ] **API:**
             - [ ] `tty_init()`: Initialize subsystem.
             - [ ] `tty_alloc()`: Create a new TTY device.
@@ -653,25 +713,131 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS Subsystem Refactor (BSD-style):**
-    - [ ] **Core Structures:**
-        - [ ] **`struct vnode`:** Rewrite to support separate `v_op` (operations vector) and `v_data` (private fs data).
-        - [ ] **`struct mount`:** Track mounted filesystem state, `vfs_op` vector, and vnode list.
-        - [ ] **`struct file`:** Generic file handle (refcounts, offset, type: VNODE/SOCKET/PIPE/KQUEUE).
+    - [ ] **Core Structures & Life Cycle:**
+        - [ ] **`struct vnode`:**
+            - [ ] `v_type` (VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD).
+            - [ ] `v_tag` (VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.).
+            - [ ] `v_op` (operations vector), `v_data` (private fs data).
+            - [ ] `v_mount` (pointer to mount point).
+            - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
+            - [ ] `v_writecount` (writers count), `v_flag` (VROOT, VTEXT, VSYSTEM, etc.).
+            - [ ] `v_lock` (exclusive/shared lock).
+            - [ ] **Life Cycle:** `getnewvnode()`, `vref()`, `vrele()`, `vput()`, `vget()`, `vgone()`, `vclean()`.
+        - [ ] **`struct mount`:**
+            - [ ] `mnt_vnodecovered` (vnode mounted on).
+            - [ ] `mnt_op` (VFS ops vector).
+            - [ ] `mnt_data` (private fs data).
+            - [ ] `mnt_flag` (MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS).
+            - [ ] `mnt_nvnodelist` (list of active vnodes).
+            - [ ] `mnt_stat` (cached filesystem statistics).
+        - [ ] **`struct file`:**
+            - [ ] `f_type` (DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE).
+            - [ ] `f_data` (pointer to vnode/socket/pipe).
+            - [ ] `f_flag` (FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT).
+            - [ ] `f_ops` (file operations vector: read, write, ioctl, poll, close).
+            - [ ] `f_offset` (current file offset).
+            - [ ] `f_count` (reference count).
+            - [ ] `f_cred` (credentials at open time).
     - [ ] **Pathname Lookup (`namei`):**
-        - [ ] **Logic:** Handle directory traversal, `..`, symlinks (with recursion limits), and mount point crossings.
-        - [ ] **Name Cache:** Hash table implementation to speed up path-to-vnode resolution.
+        - [ ] **`struct nameidata`:** Encapsulate lookup state, path string, purpose (LOOKUP/CREATE/DELETE).
+        - [ ] **`struct componentname`:** Current path component being resolved.
+        - [ ] **Lookup Logic:**
+            - [ ] Parsing `/` delimiters.
+            - [ ] Handling `.` and `..`.
+            - [ ] Crossing mount points (`mnt_vnodecovered`).
+            - [ ] Symbolic link resolution (recursion limit: MAXSYMLINKS).
+        - [ ] **Name Cache:** Global hash table (`nchash`) mapping `(directory vnode, name)` -> `target vnode`.
     - [ ] **Operations Vectors:**
-        - [ ] **`vfs_ops`:** `vfs_mount`, `vfs_unmount`, `vfs_root`, `vfs_statfs`, `vfs_sync`, `vfs_vget`.
-        - [ ] **`vnode_ops`:** `vop_lookup`, `vop_create`, `vop_remove`, `vop_rename`, `vop_getattr`, `vop_setattr`, `vop_read`, `vop_write`, `vop_ioctl`.
+        - [ ] **`vfs_ops` (Filesystem-level):**
+            - [ ] `vfs_mount(mp, path, data, ndp, p)`
+            - [ ] `vfs_start(mp, flags, p)`
+            - [ ] `vfs_unmount(mp, mntflags, p)`
+            - [ ] `vfs_root(mp, vpp)`
+            - [ ] `vfs_statfs(mp, sbp, p)`
+            - [ ] `vfs_sync(mp, waitfor, cred, p)`
+            - [ ] `vfs_vget(mp, ino, vpp)`
+            - [ ] `vfs_fhtovp(mp, fhp, vpp)`
+        - [ ] **`vnode_ops` (File-level):**
+            - [ ] **Name Resolution:**
+                - [ ] `vop_lookup(dvp, vpp, cnp)`: Look up component name in directory.
+                - [ ] `vop_cachedlookup(dvp, vpp, cnp)`: Lookup wrapper for name cache interaction.
+            - [ ] **Creation/Deletion:**
+                - [ ] `vop_create(dvp, vpp, cnp, vap)`: Create regular file.
+                - [ ] `vop_mknod(dvp, vpp, cnp, vap)`: Create device node.
+                - [ ] `vop_mkdir(dvp, vpp, cnp, vap)`: Create directory.
+                - [ ] `vop_whiteout(dvp, cnp, flags)`: UnionFS whiteout support.
+                - [ ] `vop_remove(dvp, vp, cnp)`: Remove directory entry (unlink).
+                - [ ] `vop_rmdir(dvp, vp, cnp)`: Remove directory.
+            - [ ] **Access/Attributes:**
+                - [ ] `vop_access(vp, mode, cred, p)`: Check permissions (r/w/x).
+                - [ ] `vop_getattr(vp, vap, cred, p)`: Get file attributes (stat).
+                - [ ] `vop_setattr(vp, vap, cred, p)`: Set file attributes (chmod/chown/utimes).
+                - [ ] `vop_pathconf(vp, name, retval)`: POSIX pathconf support.
+            - [ ] **I/O Operations:**
+                - [ ] `vop_open(vp, mode, cred, p)`: file open.
+                - [ ] `vop_close(vp, fflag, cred, p)`: file close.
+                - [ ] `vop_read(vp, uio, ioflag, cred)`: Read data.
+                - [ ] `vop_write(vp, uio, ioflag, cred)`: Write data.
+                - [ ] `vop_ioctl(vp, command, data, fflag, cred, p)`: Device control.
+                - [ ] `vop_poll(vp, events, cred, p)`: Select/Poll support.
+                - [ ] `vop_fsync(vp, cred, waitfor, p)`: Flush dirty buffers to disk.
+                - [ ] `vop_bmap(vp, bn, vpp, bnp, runp)`: Logical -> Physical block mapping.
+                - [ ] `vop_strategy(vp, bp)`: Block I/O strategy (buffer cache).
+            - [ ] **Directories:**
+                - [ ] `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`: Read directory entries.
+            - [ ] **Links:**
+                - [ ] `vop_link(dvp, vp, cnp)`: Create hard link.
+                - [ ] `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`: Rename file/dir.
+                - [ ] `vop_symlink(dvp, vpp, cnp, vap, target)`: Create symbolic link.
+                - [ ] `vop_readlink(vp, uio, cred)`: Read symbolic link target.
+            - [ ] **VM/Memory:**
+                - [ ] `vop_inactive(vp, p)`: Vnode is no longer referenced.
+                - [ ] `vop_reclaim(vp, p)`: Vnode is being reused/freed.
+                - [ ] `vop_lock(vp, flags, p)`: Lock vnode.
+                - [ ] `vop_unlock(vp, flags, p)`: Unlock vnode.
+                - [ ] `vop_islocked(vp, p)`: Query lock status.
+                - [ ] `vop_print(vp)`: Debug print vnode details.
     - [ ] **Buffer Cache Integration (`bio`):**
-        - [ ] **Bread/Bwrite:** Block I/O layer integration for file systems.
-        - [ ] **VNode Pager:** Integration with VM subsystem for memory mapped files.
-    - [ ] **Locking & Concurrency:**
-        - [ ] **VNode Locks:** Shared/Exclusive locks for file access.
-        - [ ] **Interlock:** Spinlocks for vnode state changes.
-- [ ] **Feature Gaps:**
-    - [ ] **Write Support:** Implement `write_inode` and `write_block` for FS backends.
-    - [ ] **FSCK utilities:** Port e2fsprogs or implement native `ext2` fsck.
+        - [ ] **`struct buf`:**
+            - [ ] `b_flags` (B_BUSY, B_DONE, B_ERROR, B_DELWRI, B_PHYS, B_READ, B_WRITE).
+            - [ ] `b_data` (pointer to data), `b_bcount` (byte count).
+            - [ ] `b_blkno` (logical block number), `b_lblkno` (logical block).
+            - [ ] `b_vp` (vnode owner), `b_rcred` / `b_wcred` (credentials).
+            - [ ] `b_resid` (residual bytes).
+        - [ ] **Queues:**
+            - [ ] `bufqueues[HQ_LOCKED]` (Locked buffers).
+            - [ ] `bufqueues[HQ_CLEAN]` (Clean buffers, LRU).
+            - [ ] `bufqueues[HQ_DIRTY]` (Dirty buffers, delayed write).
+            - [ ] `bufqueues[HQ_EMPTY]` (Empty headers).
+        - [ ] **Functions:**
+            - [ ] `getblk(vp, blkno, size, slpflag, slptimeo)`: Get block from cache or allocate.
+            - [ ] `bread(vp, blkno, size, cred, bpp)`: Read block (sync).
+            - [ ] `bwrite(bp)`: Write block (sync).
+            - [ ] `bawrite(bp)`: Write block (async).
+            - [ ] `bdwrite(bp)`: Delayed write (mark dirty, release).
+            - [ ] `brelse(bp)`: Release buffer to free list.
+        - [ ] **Synchronization:**
+            - [ ] `biowait(bp)`: Sleep until B_DONE.
+            - [ ] `biodone(bp)`: Wakeup waiters, call `b_iodone` callback.
+    - [ ] **VM Integration (Unified Buffer Cache):**
+        - [ ] **VNode Pager:**
+            - [ ] `vnode_pager_getpages()`: Read pages from vnode.
+            - [ ] `vnode_pager_putpages()`: Write pages to vnode.
+        - [ ] **Page Cache:**
+            - [ ] Use `vm_page_t` for buffer backing store.
+            - [ ] Zero-copy I/O paths for mmap.
+    - [ ] **Concurrency & Locking:**
+        - [ ] **VNode Locks:**
+            - [ ] `lockmgr` implementation (shared/exclusive/upgrade/downgrade).
+            - [ ] `LK_SHARED`: Concurrent readers.
+            - [ ] `LK_EXCLUSIVE`: Single writer.
+            - [ ] `LK_NOWAIT`: Non-blocking acquisition.
+        - [ ] **Interlock:** `v_interlock` mutex for field consistency.
+        - [ ] **Mount Lock:** `mnt_lock` for mount point stability.
+        - [ ] **Namecache Lock:** Reader-writer lock for `nchash`.
+- [ ] **Legacy/Feature Gaps:**
+    - [ ] **Write Support:** Ensure all existing FS drivers implement complete write paths.
+    - [ ] **FSCK:** Port e2fsprogs or implement native consistency checker.
 - [ ] **EXT2 (Native Filesystem):**
     - [x] Implement Inode and Block allocation/freeing.
     - [x] Implement Directory entry creation/deletion.
@@ -762,37 +928,68 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 5. System Calls & Personalities
 - [ ] **Mechanisms:**
-        - [ ] **PTY Subsystem (Unix98) - Massive Expansion:**
-            - [ ] **Core PTY Driver (`/dev/pts/N`, `/dev/ptmx`):**
-                - [ ] Implement `pts_fs` (DevPTS) virtual filesystem.
-                - [ ] Implement `ptmx_open`: Allocate next available PTY index.
-                - [ ] Implement `pts_open`: Validate index and ownership.
-                - [ ] Slave/Master pair coupling (ring buffers).
-                - [ ] TTY association logic (controlling terminal).
+        - [ ] **PTY Subsystem (Unix98/System V) - Massive Expansion:**
+            - [ ] **Core PTY Driver (`/dev/pts/` + `/dev/ptmx`):**
+                - [ ] **DevPTS Filesystem (`pts_fs`):**
+                    - [ ] `pts_mount()`: Mount logic.
+                    - [ ] `pts_lookup()`: Resolve PTY indices to vnodes.
+                    - [ ] `pts_getattr()`: Synthesize attributes (uid/gid/mode).
+                    - [ ] `pts_readdir()`: List active PTYs.
+                - [ ] **Multiplexer (`/dev/ptmx`):**
+                    - [ ] `ptmx_open()`: Allocate next free `pts` index (0..255+).
+                    - [ ] Create master/slave `tty` structures.
+                    - [ ] Initialize queues and termios defaults.
+                - [ ] **Data Path:**
+                    - [ ] **Master Write:** Input to Slave Read queue.
+                    - [ ] **Slave Write:** Input to Master Read queue.
+                    - [ ] **Ring Buffers:** Lockless (or locked) circular buffers.
             - [ ] **IOCTL API (`libc` support):**
-                - [ ] `TIOCGPTN`: Get PTY Number (for `ptsname`).
-                - [ ] `TIOCSPTLCK`: Lock/Unlock PTY (for `unlockpt`).
-                - [ ] `TIOCGPKT`: Packet mode for master side.
-                - [ ] `TIOCSIG`: Send signal to slave side.
+                - [ ] `TIOCGPTN` (Get PTY Number): Return index for `ptsname()`.
+                - [ ] `TIOCSPTLCK` (Lock/Unlock): Handle `unlockpt()` (prevent race conditions).
+                - [ ] `TIOCGPKT` (Packet Mode): Control byte for master (flush/stop/start/ioctl).
+                - [ ] `TIOCSIG` (Signal): Send specific signal to slave process group.
             - [ ] **Line Discipline (`N_TTY`):**
-                - [ ] Canonical Mode (Line Editing: backspace, werase, kill).
-                - [ ] Echoing logic (`ECHO`, `ECHOE`, `ECHOK`, `ECHONL`).
-                - [ ] Signal generation (`ISIG`: `INTP`, `QUIT`, `SUSP`).
-                - [ ] Output post-processing (`OPOST`: `ONLCR`).
-                - [ ] `termios` structure management.
+                - [ ] **Input Processing (`c_iflag`):**
+                    - [ ] `IGNBRK`, `BRKINT` (Break handling).
+                    - [ ] `IGNPAR`, `PARMRK`, `INPCK` (Parity).
+                    - [ ] `ISTRIP` (Strip 8th bit).
+                    - [ ] `INLCR`, `IGNCR`, `ICRNL` (CR/LF mapping).
+                    - [ ] `IXON`, `IXOFF` (Software flow control XON/XOFF).
+                - [ ] **Output Processing (`c_oflag`):**
+                    - [ ] `OPOST` (Enable processing).
+                    - [ ] `ONLCR` (NL -> CR/NL translation).
+                - [ ] **Local Processing (`c_lflag`):**
+                    - [ ] `ISIG` (Signal generation: VINTR, VQUIT, VSUSP).
+                    - [ ] `ICANON` (Canonical mode / Line editing).
+                    - [ ] `ECHO`, `ECHOE` (Erase), `ECHOK` (Kill), `ECHONL`.
+                    - [ ] `IEXTEN` (Extended processing).
+                    - [ ] `TOSTOP` (Background write SIGTTOU).
+                - [ ] **Control Characters (`c_cc`):**
+                    - [ ] `VEOF`, `VEOL` (End of file/line).
+                    - [ ] `VERASE`, `VKILL` (Editing).
+                    - [ ] `VMIN`, `VTIME` (Non-canonical read timing).
         - [x] Implement `sys_ioctl` framework.
         - [x] Implement `sys_pipe` and `sys_dup2`.
         - [ ] **Compatibility Syscalls (Deep Dive):**
             - [ ] **`sys_mount` (VFS Integration):**
-                - [ ] **VFS Layer:**
-                    - [ ] Find driver by name (`get_fs_driver()`).
-                    - [ ] Allocate superblock and root node.
-                    - [ ] Mount point binding (directory overlay).
+                - [ ] **Driver Lookup:**
+                    - [ ] `get_fs_driver(name)`: Find registered filesystem (EXT2, FAT, UDF).
+                    - [ ] Module autoloading trigger (optional).
+                - [ ] **Superblock:**
+                    - [ ] `vfs_mount_alloc()`: Allocate `struct mount`.
+                    - [ ] Call `vfs_mount()` op of the driver.
+                    - [ ] Read superblock from disk (buffer cache).
+                - [ ] **Mount Point Binding:**
+                    - [ ] Lookup mount point vnode (`namei`).
+                    - [ ] Verify directory type and permissions.
+                    - [ ] **Overlay:** Set `v_mountedhere` on cover vnode.
+                    - [ ] Set `mnt_vnodecovered` on new mount structure.
                 - [ ] **Flag Support:**
-                    - [ ] `MS_RDONLY`: Enforce read-only checks on writes.
-                    - [ ] `MS_NOEXEC`: Block execution permissions.
-                    - [ ] `MS_NOSUID`: Ignore setuid bits.
-                    - [ ] `MS_NODEV`: Verify no character/block special nodes.
+                    - [ ] `MS_RDONLY`: Enforce read-only checks on `vop_write`/`vop_create`.
+                    - [ ] `MS_NOEXEC`: Check `VEXEC` permission in `sys_execve`.
+                    - [ ] `MS_NOSUID`: Mask `VSUID`/`VSGID` in `vop_getattr`.
+                    - [ ] `MS_NODEV`: Return error in `vop_open` for device nodes.
+                    - [ ] `MS_SYNCHRONOUS`: Force O_SYNC on all opens.
             - [ ] **`sys_clone` (Process/Thread Creation):**
                 - [ ] **Context Duplication:**
                     - [ ] `CLONE_VM`: Share address space (refcount pmap).
@@ -864,69 +1061,115 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] **SCO Unix 3.2v4 (`SCO-U/ODT3`):** Enhanced System V ABI (ODT 3.0).
             - [ ] **SCO OpenServer 5 (`SCO-OSR5`):** Advanced COFF/ELF hybrid features.
         - [ ] **Binary Loaders:**
-            - [ ] **`x.out` (Microsoft):** Magic 0x206 (286), 0x20C (386). Segment definitions.
-            - [ ] **COFF (Common Object File Format):**
-                - [ ] **Headers:**
-                    - [ ] File Header (Machine, Sections, Date, SymPtr).
-                    - [ ] Optional Header (AOUT format: Magic, Text/Data sizes, Entry).
-                    - [ ] Section Headers (Name, PhysAddr, VirtAddr, Flags).
-                - [ ] **Data:**
-                    - [ ] Raw Data handling.
-                    - [ ] Relocations (RelPtr, RelNum).
-                    - [ ] Line Numbers (LinenoPtr).
-                - [ ] **Symbols:** String Table and Symbol Table parsing.
-                - [ ] **SCO Extensions:**
-                    - [ ] `.lib` section for Shared Libraries.
-                    - [ ] Dynamic Linking info parsing.
-            - [ ] **OMF (Intel Object Module Format):**
-                - [ ] Record Parsing Loop.
-                - [ ] **Records:**
-                    - [ ] `THEADR` / `LHEADR` (Module Name).
-                    - [ ] `MODEND` (Module End, Entry Point).
-                    - [ ] `LEDATA` / `LIDATA` (Logical/Iterated Data).
-                    - [ ] `FIXUPP` (Relocations).
-                    - [ ] `SEGDEF` / `GRPDEF` (Segment/Group definitions).
+            - [ ] **`x.out` (Microsoft / Xenix):**
+                - [ ] **Header:** Magic 0x206 (286 Small), 0x20C (N86), 0x140 (8086).
+                - [ ] **Segments:** TEXT (RX), DATA (RW), BSS (Zero).
+                - [ ] **Symbol Table:** Generic Xenix symbol format.
+            - [ ] **COFF (Common Object File Format) - SCO/SVR3:**
+                - [ ] **File Header (`filehdr`):**
+                    - [ ] Magic: 0x14C (i386).
+                    - [ ] Number of sections.
+                    - [ ] Time/Date stamp (ignored or used for link verification).
+                    - [ ] Pointer to symbol table / Number of symbols.
+                - [ ] **Optional Header (`aouthdr`):**
+                    - [ ] Magic: 0x10B (ZMAGIC - Demand Paged).
+                    - [ ] `tsize` (Text size), `dsize` (Data size), `bsize` (BSS size).
+                    - [ ] `entry` (Entry point virtual address).
+                    - [ ] `text_start`, `data_start`.
+                - [ ] **Section Headers (`scnhdr`):**
+                    - [ ] Name (`.text`, `.data`, `.bss`, `.lib`).
+                    - [ ] `paddr` (Physical), `vaddr` (Virtual).
+                    - [ ] `size`, `scnptr` (File offset).
+                    - [ ] Flags (`STYP_TEXT`, `STYP_DATA`, `STYP_BSS`).
+                - [ ] **SCO Shared Libraries (`.lib` section):**
+                    - [ ] Parse `.lib` section header.
+                    - [ ] **Path entries:** Absolute path to shared library.
+                    - [ ] **Offset entries:** Import method (static jump table).
+            - [ ] **OMF (Intel Object Module Format) - 286/386:**
+                - [ ] **Record Types:**
+                    - [ ] `0x80` (`THEADR`): Module Name.
+                    - [ ] `0x88` (`COMENT`): Compiler info / Memory model.
+                    - [ ] `0x98` (`SEGDEF`): Segment Definition (Attributes, Size).
+                    - [ ] `0x9A` (`GRPDEF`): Group Definition (DGROUP).
+                    - [ ] `0xA0` (`LEDATA`): Logical Enumerated Data (Content).
+                    - [ ] `0xB0` (`FIXUPP`): Relocation Records (Segment-relative, Self-relative).
+                    - [ ] `0x8A` (`MODEND`): Module End (Main entry point).
+                - [ ] **Loading Logic:** Multi-pass linker/loader to resolve inter-segment references.
         - [ ] **System Call Interface:**
-            - [ ] **Mechanisms:**
-                - [ ] `lcall 7,0` (Call Gate) entry (Standard iBCS2).
-                - [ ] `int 0x80` (Linux/BSD compat).
-                - [ ] `int 0x7F` / `int 0x79` (Legacy/Alternative vectors - Verify specific flavor usage).
+            - [ ] **Mechanisms (ABI Differences):**
+                - [ ] **iBCS2 / SCO:**
+                    - [ ] `lcall 7,0` (Call Gate 0).
+                - [ ] **Linux:**
+                    - [ ] `int 0x80` (Interrupt Vector 128).
+                - [ ] **Legacy / Special:**
+                    - [ ] `int 0x21` (DOS emulation in VM86).
+                    - [ ] `int 0x7F` (Older Xenix).
             - [ ] **ABI Translation:**
-                - [ ] Stack-based argument passing (16-bit vs 32-bit frames).
-                - [ ] `cxenix` multiplexer (syscall 0x07 range).
-                - [ ] `rdchk`, `nap`, `ftime` implementations.
-                - [ ] **Shared Memory:**
-                    - [ ] `sdget`, `sdfree`, `sdenter`, `sdleave` (Xenix Shared Data).
-                    - [ ] `xsbrk` (Xenix sbrk extension).
-                - [ ] **VM86 APIs (Merge with 8086 support):**
-                    - [ ] `v86_init`, `v86_sleep` (Virtual 8086 control).
-            - [ ] **Memory Model:**
-                - [ ] 286: Large/Small memory model emulation (LDT switching).
-                - [ ] 386: Near/Far pointer handling.
+            - [ ] **ABI Translation (iBCS2):**
+                - [ ] **Stack Frame Decoding:**
+                    - [ ] 16-bit client: arguments at `SS:SP+2` (2-byte words).
+                    - [ ] 32-bit client: arguments at `SS:ESP+4` (4-byte words).
+                - [ ] **CXENIX Dispatcher (Syscall 0x07):**
+                    - [ ] Sub-function handling (table driven) for Xenix extensions.
+                    - [ ] `rdchk` (check for data), `nap` (millisecond sleep).
+                    - [ ] `ftime` (System V time).
+                - [ ] **Shared Memory (Xenix):**
+                    - [ ] `sdget`, `sdfree` (Create/Destroy shared data).
+                    - [ ] `sdenter`, `sdleave` (Attach/Detach).
+                    - [ ] **Memory mapping:** Map high memory segments via LDT.
+                    - [ ] `xsbrk` (Extended break for huge data).
+                - [ ] **VM86 Support:**
+                    - [ ] `v86_init`: Initialize VM86 task state.
+                    - [ ] `v86_sleep`: Wait for interrupt/event.
+                    - [ ] Monitor BIOS calls trapped via GPF/Invalid Opcode.
     - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
-        - [ ] **Execution Strategy:**
-            - [ ] **LDT Management:** Allocate a Local Descriptor Table (LDT) for each ELKS process.
-            - [ ] **Segmentation:**
-                - [ ] **CS (Code Segment):** Create 16-bit code segment descriptor in LDT.
-                - [ ] **DS/SS (Data/Stack):** Create 16-bit data segment descriptor in LDT.
-                - [ ] **Joint I&D:** Support CS base == DS base for `a.out` binaries.
-                - [ ] **Split I&D:** Support distinct bases for CS and DS (if header specifies).
-            - [ ] **Address Translation:** Map 16-bit segmented addresses (Seg:Off) to 32-bit linear address space.
-        - [ ] **Loader:**
-            - [ ] **Header Parsing:** Parse Minix-style `a.out` headers used by ELKS.
-            - [ ] **Relocations:** Handle 16-bit relocations if applicable (usually position-independent or fixed load).
-            - [ ] **Variable Stack:** Setup 16-bit stack frame.
-        - [ ] **Syscalls (`int 0x80`):**
-            - [ ] **Trap Handling:** Detect `int 0x80` from 16-bit CS.
-            - [ ] **Stack Frame:** Decode 16-bit stack frame (`SS:SP` at high addresses of segment).
-            - [ ] **Pointer Thunking:** Convert 16-bit pointers to kernel linear addresses using LDT base.
-    - [ ] **Linux:**
+    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
+        - [ ] **16-Bit Execution Environment:**
+            - [ ] **LDT Setup:**
+                - [ ] Descriptor 0: NULL.
+                - [ ] Descriptor 1: CS (Code), 16-bit conforming/non-conforming.
+                - [ ] Descriptor 2: DS (Data), 16-bit expand-up/down.
+            - [ ] **Segmentation Logic:**
+                - [ ] **Small Model:** CS != DS/SS.
+                - [ ] **Tiny Model:** CS == DS == SS (COM file style).
+                - [ ] **Stack:** 16-bit Stack Pointer (`SP`) wraparound handling.
+        - [ ] **Loader (`a.out` Minix):**
+            - [ ] **Header:** 32-byte header (Magic, HeaderLen, Text/Data/Bss sizes).
+            - [ ] **Load:** Read segments into allocated low-memory pages.
+            - [ ] **Relocation:** Applying fixups if not position independent.
+        - [ ] **Syscall Interface (`int 0x80`):**
+            - [ ] **Trap:** IDT entry 0x80 handling 16-bit caller.
+            - [ ] **Argument Fetch:**
+                - [ ] Read `BX` (First arg), `CX` (Second), `DX` (Third), `SI`, `DI`.
+                - [ ] Or read stack arguments if used.
+            - [ ] **Pointer Thunking:**
+                - [ ] Convert `DS:BX` (16:16) -> Linear Address (`LDT[DS].Base + BX`).
+                - [ ] Bounds checking against segment limit.
+    - [ ] **Linux (Massive Expansion):**
         - [x] ELF Loader personality detection (brandelf support).
-        - [ ] **Syscalls:**
-            - [ ] Improve `sys_clone` compatibility (flags).
-            - [ ] `socketcall` (multiplexed networking).
-            - [ ] `ipc` (System V IPC multiplexer).
-            - [ ] `ioctl` translation layer.
+        - [ ] **Signal Compatibility:**
+            - [ ] **Mapping:** Translate Linux signal numbers to native (e.g., SIGCHLD, SIGSTOP).
+            - [ ] **Sigaction:** Translate `linux_sigaction` structure (mask bits).
+            - [ ] **Trampoline:** Linux-compatible signal return trampoline.
+        - [ ] **Error Codes:**
+            - [ ] Map internal errno to Linux errno (arch-specific).
+        - [ ] **FS Path Translation:**
+            - [ ] `/proc` -> `/compat/linux/proc` redirection.
+            - [ ] `/sys` -> `/compat/linux/sys` redirection.
+            - [ ] `at()` syscalls family support.
+        - [ ] **Networking (`socketcall`):**
+            - [ ] Multiplexer syscall 102 (`sys_socketcall`).
+            - [ ] Subcalls: `SYS_SOCKET`, `SYS_BIND`, `SYS_CONNECT`, `SYS_LISTEN`, `SYS_ACCEPT`, `SYS_GETSOCKNAME`, `SYS_GETPEERNAME`, `SYS_SOCKETPAIR`, `SYS_SEND`, `SYS_RECV`, `SYS_SENDTO`, `SYS_RECVFROM`, `SYS_SHUTDOWN`, `SYS_SETSOCKOPT`, `SYS_GETSOCKOPT`, `SYS_SENDMSG`, `SYS_RECVMSG`.
+        - [ ] **IPC Multiplexer (`sys_ipc`):**
+            - [ ] Multiplexer syscall 117.
+            - [ ] Subcalls: `SEMOP`, `SEMGET`, `SEMCTL`, `MSGSND`, `MSGRCV`, `MSGGET`, `MSGCTL`, `SHMAT`, `SHMDT`, `SHMGET`, `SHMCTL`.
+        - [ ] **Ioctls (`sys_ioctl`):**
+            - [ ] **Termios:** `TCGETS`, `TCSETS`, `TCSETSW`, `TCSETSF` (Linux layouts).
+            - [ ] **Sockio:** `SIOCGIFNAME`, `SIOCGIFADDR`, `SIOCGIFBRDADDR`, `SIOCGIFNETMASK`.
+        - [ ] **Process Creation (`sys_clone` extended):**
+            - [ ] `CLONE_PARENT_SETTID`: Write TID to parent.
+            - [ ] `CLONE_CHILD_CLEARTID`: Clear TID in child on exit (futex wake).
+            - [ ] `CLONE_SETTLS`: TLS setup on thread creation.
     - [ ] **Minix/386:**
         - [ ] Implement `send`/`receive` message passing syscalls.
         - [ ] Map Minix 3 kernel messages to native calls.

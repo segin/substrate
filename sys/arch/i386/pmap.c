@@ -77,6 +77,7 @@ static void pmap_list_remove(pmap_t pmap) {
     }
     pmap->list_entry.next = NULL;
     pmap->list_entry.prev = NULL;
+    global_pmap_stats.total_pmaps--;
     __sync_lock_release(&pmap_list_lock);
 }
 
@@ -107,7 +108,16 @@ void pmap_bootstrap(void) {
     // Check for PGE (Global Pages) support via CPUID
     uint32_t eax, ebx, ecx, edx;
     __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
-    int has_pge = (edx >> 13) & 1;  // PGE bit in EDX
+    int has_pge = (edx >> 13) & 1;  // PGE bit 13 in EDX
+    int has_pse = (edx >> 3) & 1;   // PSE bit 3 in EDX
+
+    if (has_pse) {
+        uint32_t cr4;
+        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+        cr4 |= 0x10;  // CR4.PSE bit 4
+        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
+        kprint("PMAP: PSE (4MB Pages) enabled\n");
+    }
     
     uint32_t kernel_pte_flags = PTE_P | PTE_W;
     if (has_pge) {
@@ -1266,17 +1276,51 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
     return 0;
 }
 
-// Syscall to expose COW stats
-int sys_get_cow_stats(struct pmap_stats *out) {
+// Syscall to expose PMAP stats (Global)
+int sys_pmap_stats(struct pmap_stats *out) {
     if (!out) return -1;
-    // Provide global system-wide stats
-    // We could also provide current process stats if requested, 
-    // but the task asks for "Total" which implies global.
-    // For now we return the global stats.
     
-    // Safety check: verify pointer is in user range if strict?
-    // For now trust it (dangerous but standard for this stage).
+    // Update dynamic global counters before returning
+    // (Assuming single threaded or atomic updates for counters handled elsewhere)
+    // For now, total_pmaps is maintained in global_pmap_stats by create/destroy
     
     *out = global_pmap_stats;
+    return 0;
+}
+
+// Create a 4MB Page Size Extension (PSE) mapping
+// Maps a 4MB-aligned virtual address to a 4MB-aligned physical address
+int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags) {
+    if (!pmap) return -1;
+    
+    // Validate alignment (must be 4MB aligned)
+    if ((va & 0x3FFFFF) || (pa & 0x3FFFFF)) {
+        return -1; // Not 4MB aligned
+    }
+
+    uint32_t pd_index = va >> 22;
+    uint32_t *pd = (uint32_t *)pmap;
+
+    // Construct PDE with PS bit (bit 7)
+    // 4MB pages don't use page tables, the PDE points directly to physical memory
+    uint32_t pde = pa | PTE_P | PTE_PS | (flags & 0xFFF);
+    
+    // If user flag is set, ensure it's allowed (basic check, can be expanded)
+    if (flags & PTE_U) {
+        pde |= PTE_U;
+    }
+    
+    if (flags & PTE_W) {
+        pde |= PTE_W;
+    }
+    
+    // We might need to invalidate TLB if we are changing an existing mapping
+    // But for now, just overwrite
+    pd[pd_index] = pde;
+    
+    // Invalidate TLB for this address if it's the current pmap
+    // checking against current_pmap or just invlpg
+    __asm__ volatile("invlpg (%0)" :: "r" (va) : "memory");
+
     return 0;
 }

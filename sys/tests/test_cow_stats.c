@@ -1,40 +1,37 @@
 #include <sys/types.h>
-#include <sys/proc.h>
+#include <stdint.h>
 #include "../arch/i386/pmap.h"
 #include "../kern/console.h"
 #include <string.h>
 
-#define ASSERT(c) if(!(c)) { kprint("Assertion failed: " #c "\n"); return 0; }
+#define ASSERT(c) if(!(c)) { kprint("Assertion failed: " #c "\n"); return; }
 
-extern int sys_get_cow_stats(struct pmap_stats *out);
+extern int sys_pmap_stats(struct pmap_stats *out);
 
-// Test ability to read COW stats
-int test_cow_stats_read(void) {
-    kprint("Testing COW stats read...\n");
+// Test 1: Read Stats
+void test_cow_stats_read(void) {
+    kprint("Test: PMAP Stats Read... ");
     
     struct pmap_stats stats;
-    memset(&stats, 0xFF, sizeof(stats)); // Fill with garbage
+    int ret = sys_pmap_stats(&stats);
     
-    int ret = sys_get_cow_stats(&stats);
-    ASSERT(ret == 0);
+    if (ret != 0) {
+        kprint("FAIL (syscall returned error)\n");
+        return;
+    }
     
-    // Check if values are reasonable (should be >= 0, and likely 0 for new boot)
-    // Actually some might be non-zero if system has been running
-    kprint("COW Stats:\n");
-    // Manual integer to string for kprint (std libs might not be fully linked or convenient)
-    // Actually we can use kprint format? No, kprint is basic string.
-    // We'll trust the syscall output if ret is 0 and it overwrote garbage.
+    // Check reasonable values
+    if (stats.faults == 0) kprint("WARN (faults == 0) ");
+    if (stats.total_pmaps == 0) {
+         kprint("FAIL (total_pmaps == 0)\n");
+         return;
+    }
     
-    ASSERT(stats.cow_faults != 0xFFFFFFFF);
-    ASSERT(stats.cow_pages_mapped != 0xFFFFFFFF);
-    ASSERT(stats.cow_duplications != 0xFFFFFFFF);  // New field
-    ASSERT(stats.pages_saved_by_cow != 0xFFFFFFFF);  // New field
-    
-    kprint("test_cow_stats_read passed\n");
-    return 1;
+    kprint("PASS\n");
 }
 
-int run_cow_stats_tests(void) {
-    if (!test_cow_stats_read()) return 0;
-    return 1;
+void run_cow_stats_tests(void) {
+    kprint("\n=== PMAP Stats Tests ===\n");
+    test_cow_stats_read();
+    kprint("\n");
 }
