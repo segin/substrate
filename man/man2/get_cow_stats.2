@@ -15,7 +15,7 @@ argument points to a
 .I struct pmap_stats
 buffer that will be filled with the statistical data. The structure is defined as:
 .PP
-.ne 12
+.ne 14
 .nf
 struct pmap_stats {
     uint32_t faults;              /* Total page faults */
@@ -26,6 +26,8 @@ struct pmap_stats {
     uint32_t cow_pages_mapped;    /* Pages initially shared as COW */
     uint32_t cow_duplications;    /* Pages duplicated during COW */
     uint32_t pages_saved_by_cow;  /* Pages never duplicated */
+    uint32_t tlb_invlpg_count;    /* Single-page TLB invalidations */
+    uint32_t tlb_full_flush_count; /* Full TLB flushes (CR3 reload) */
 };
 .fi
 .SH RETURN VALUE

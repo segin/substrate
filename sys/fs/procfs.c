@@ -89,10 +89,11 @@ static uint32_t proc_cow_stats_read(fs_node_t *node, off_t offset, uint32_t size
     if (sys_get_cow_stats(&stats) != 0) return 0;
     
     char buf[512];
-    sprintf(buf, "Faults:\t%u\nCOW Faults:\t%u\nZero Fills:\t%u\nProt Upgrades:\t%u\nProt Downgrades:\t%u\nCOW Pages Mapped:\t%u\nCOW Duplications:\t%u\nPages Saved by COW:\t%u\n",
+    sprintf(buf, "Faults:\t%u\nCOW Faults:\t%u\nZero Fills:\t%u\nProt Upgrades:\t%u\nProt Downgrades:\t%u\nCOW Pages Mapped:\t%u\nCOW Duplications:\t%u\nPages Saved by COW:\t%u\nTLB Invlpg:\t%u\nTLB Full Flush:\t%u\n",
             stats.faults, stats.cow_faults, stats.zero_fills, 
             stats.protection_upgrades, stats.protection_downgrades,
-            stats.cow_pages_mapped, stats.cow_duplications, stats.pages_saved_by_cow);
+            stats.cow_pages_mapped, stats.cow_duplications, stats.pages_saved_by_cow,
+            stats.tlb_invlpg_count, stats.tlb_full_flush_count);
             
     uint32_t len = strlen(buf);
     if (offset >= len) return 0;
