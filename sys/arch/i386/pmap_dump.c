@@ -4,20 +4,13 @@
 #include <stdio.h>
 #include <sys/proc.h>
 
-void pmap_dump(void *proc_ptr) {
-    if (!proc_ptr) {
-        kprint("pmap_dump: NULL process\n");
+void pmap_dump(pmap_t pmap) {
+    if (!pmap) {
+        kprint("pmap_dump: NULL pmap\n");
         return;
     }
     
-    process_t *proc = (process_t *)proc_ptr;
-    if (!proc->pmap) {
-        kprint("pmap_dump: process->pmap is NULL\n");
-        return;
-    }
-    
-    // proc->pmap is a VIRTUAL pointer to struct pmap
-    pmap_t pmap = proc->pmap;
+    // pmap->pdir is a VIRTUAL pointer to struct pmap
     uint32_t *pd = pmap->pdir;
     
     if (!pd) {
