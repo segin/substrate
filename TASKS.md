@@ -343,7 +343,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                         - [x] **vm_object Refcounts:** Track number of regions sharing the same backing store.
                         - [ ] **Shared Mappings (`MAP_SHARED`):** write-through logic for multi-process memory sharing.
                     - [ ] **Copy-on-Write (COW):**
-                        - [ ] **Write-Protection:** Mark pages read-only (`!PTE_RW`) in child on fork.
+                        - [x] **Write-Protection:** Mark pages read-only (`!PTE_RW`) in child on fork.
                         - [ ] **Fault Handling:**
                              - [ ] Detect write fault on present, read-only CoW page.
                              - [ ] Allocate new frame.
