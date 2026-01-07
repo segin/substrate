@@ -1,0 +1,60 @@
+.\" Process this file with
+.\" groff -man -Tascii proc.5
+.\"
+.TH PROC 5 "January 2026" "Substrate Kernel" "File Formats"
+.SH NAME
+proc \- process information pseudo-filesystem
+.SH DESCRIPTION
+The
+.B proc
+filesystem is a pseudo-filesystem which provides an interface to kernel
+data structures. It is commonly mounted at
+.IR /proc .
+.PP
+Most of the files in the proc filesystem are read-only, but some may be
+writable for process control purposes.
+.SS Files and Directories
+The following files are available in the root of the proc filesystem:
+.TP
+.B /proc/cpuinfo
+CPU information: processor type, vendor, MHz, cache size, and capabilities.
+.TP
+.B /proc/meminfo
+Memory usage statistics: total, free, buffers, cached, swap.
+.TP
+.B /proc/uptime
+System uptime in seconds and idle time.
+.TP
+.B /proc/cmdline
+Kernel boot command line as passed by the bootloader.
+.TP
+.B /proc/version
+Kernel version string including build date.
+.TP
+.B /proc/loadavg
+System load averages for the last 1, 5, and 15 minutes.
+.TP
+.B /proc/cow_stats
+Copy-on-Write memory statistics: page faults, COW duplications, TLB flushes.
+.TP
+.B /proc/filesystems
+List of supported filesystems.
+.SS Per-Process Directories
+For each running process with PID
+.IR n ,
+there exists a directory
+.BI /proc/ n /
+containing the following files:
+.TP
+.BI /proc/ n /status
+Process status information: name, state, PID, UID, GID.
+.TP
+.BI /proc/ n /cmdline
+Command line used to start the process.
+.SH NOTES
+The proc filesystem is implemented using a table-driven architecture,
+making it easy to add new entries. Each entry is defined by a generator
+function that produces the file contents on read.
+.SH SEE ALSO
+.BR mount (2),
+.BR procfs (7)

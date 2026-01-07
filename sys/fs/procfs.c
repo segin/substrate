@@ -1,19 +1,166 @@
+/*
+ * procfs.c - Process Filesystem Implementation
+ *
+ * Table-driven design for extensibility. Each static entry is defined
+ * in procfs_entries[]. Per-process directories are handled separately.
+ */
+
 #include "../vfs/vfs.h"
 #include "../../include/sys/proc.h"
 #include "../../pm/pm.h"
 #include "../exec/perso/personality.h"
+#include "../../arch/i386/pmap.h"
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>
 
-// processes[] is declared in pm.h
+/* External declarations */
+extern uint32_t get_time(void);
+extern int sys_get_cow_stats(struct pmap_stats *out);
+extern void cmdline_get(char *buf, size_t buf_len);
 
+/* Forward declarations */
+static uint32_t procfs_generic_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
+static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index);
+static fs_node_t *procfs_finddir(fs_node_t *node, char *name);
+
+/*
+ * ProcFS Entry Structure
+ * Each static /proc entry is defined by a generator function that fills
+ * a buffer with the file contents.
+ */
+typedef uint32_t (*procfs_gen_t)(char *buf, size_t size);
+
+struct procfs_entry {
+    const char *name;
+    procfs_gen_t generator;
+};
+
+/* Generator functions for each /proc entry */
+
+static uint32_t gen_cpuinfo(char *buf, size_t size __attribute__((unused))) {
+    return sprintf(buf,
+        "processor\t: 0\n"
+        "vendor_id\t: GenuineIntel\n"
+        "model name\t: Substrate Virtual CPU\n"
+        "cpu MHz\t\t: 1000.000\n"
+        "cache size\t: 256 KB\n"
+        "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic\n");
+}
+
+static uint32_t gen_meminfo(char *buf, size_t size __attribute__((unused))) {
+    /* TODO: Get real values from PMM */
+    return sprintf(buf,
+        "MemTotal:       65536 kB\n"
+        "MemFree:        32768 kB\n"
+        "Buffers:            0 kB\n"
+        "Cached:          8192 kB\n"
+        "SwapTotal:          0 kB\n"
+        "SwapFree:           0 kB\n");
+}
+
+static uint32_t gen_uptime(char *buf, size_t size __attribute__((unused))) {
+    uint32_t t = get_time();
+    return sprintf(buf, "%u.00 0.00\n", t);
+}
+
+static uint32_t gen_cmdline(char *buf, size_t size) {
+    cmdline_get(buf, size);
+    size_t len = strlen(buf);
+    if (len < size - 1) {
+        buf[len] = '\n';
+        buf[len + 1] = '\0';
+        len++;
+    }
+    return len;
+}
+
+static uint32_t gen_version(char *buf, size_t size __attribute__((unused))) {
+    return sprintf(buf, 
+        "Substrate version 0.1.0 (gcc) #1 SMP PREEMPT %s\n",
+        __DATE__);
+}
+
+static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
+    /* TODO: Calculate real load average */
+    return sprintf(buf, "0.00 0.00 0.00 1/10 1\n");
+}
+
+static uint32_t gen_cow_stats(char *buf, size_t size __attribute__((unused))) {
+    struct pmap_stats stats;
+    if (sys_get_cow_stats(&stats) != 0) {
+        return sprintf(buf, "error: could not get stats\n");
+    }
+    
+    return sprintf(buf,
+        "Faults:\t\t\t%u\n"
+        "COW Faults:\t\t%u\n"
+        "Zero Fills:\t\t%u\n"
+        "Prot Upgrades:\t\t%u\n"
+        "Prot Downgrades:\t%u\n"
+        "COW Pages Mapped:\t%u\n"
+        "COW Duplications:\t%u\n"
+        "Pages Saved by COW:\t%u\n"
+        "TLB Invlpg:\t\t%u\n"
+        "TLB Full Flush:\t\t%u\n",
+        stats.faults, stats.cow_faults, stats.zero_fills,
+        stats.protection_upgrades, stats.protection_downgrades,
+        stats.cow_pages_mapped, stats.cow_duplications, 
+        stats.pages_saved_by_cow, stats.tlb_invlpg_count, 
+        stats.tlb_full_flush_count);
+}
+
+static uint32_t gen_filesystems(char *buf, size_t size __attribute__((unused))) {
+    return sprintf(buf,
+        "nodev\tprocfs\n"
+        "\text2\n"
+        "\tminix\n"
+        "\tfat\n");
+}
+
+/*
+ * Entry table - Static /proc entries
+ * Add new entries here for automatic registration.
+ */
+static struct procfs_entry procfs_entries[] = {
+    { "cpuinfo",     gen_cpuinfo },
+    { "meminfo",     gen_meminfo },
+    { "uptime",      gen_uptime },
+    { "cmdline",     gen_cmdline },
+    { "version",     gen_version },
+    { "loadavg",     gen_loadavg },
+    { "cow_stats",   gen_cow_stats },
+    { "filesystems", gen_filesystems },
+    { NULL, NULL }  /* Sentinel */
+};
+
+#define PROCFS_STATIC_COUNT (sizeof(procfs_entries) / sizeof(procfs_entries[0]) - 1)
+
+/*
+ * Generic read function for table-driven entries
+ * The entry pointer is stored in node->impl
+ */
+static uint32_t procfs_generic_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    struct procfs_entry *entry = (struct procfs_entry *)(uintptr_t)node->impl;
+    if (!entry || !entry->generator) return 0;
+    
+    char tmp[1024];
+    uint32_t len = entry->generator(tmp, sizeof(tmp));
+    
+    if (offset >= len) return 0;
+    if (offset + size > len) size = len - offset;
+    
+    memcpy(buffer, tmp + offset, size);
+    return size;
+}
+
+/* Per-process directory support */
 static struct dirent proc_dirent;
 
-// Node for /proc/<pid>/status
-static uint32_t proc_status_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t proc_pid_status_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = NULL;
+    
     for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid == pid) {
             p = &processes[i];
@@ -23,122 +170,105 @@ static uint32_t proc_status_read(fs_node_t *node, off_t offset, uint32_t size, u
     if (!p) return 0;
 
     char buf[512];
+    int len;
+    
     if (current_process->pers && strcmp(current_process->pers->name, "Linux") == 0) {
-        sprintf(buf, "Name:\t%s\nState:\tR (running)\nTgid:\t%d\nPid:\t%d\nUid:\t%d\t%d\t%d\t%d\nGid:\t%d\t%d\t%d\t%d\n", 
-                p->comm, p->pid, p->pid, p->uid, p->uid, p->uid, p->uid, p->gid, p->gid, p->gid, p->gid);
-    } else if (current_process->pers && strcmp(current_process->pers->name, "FreeBSD") == 0) {
-        // FreeBSD uses a different format, but for now just label it
-        sprintf(buf, "Name: %s\nPid: %d\nABI: FreeBSD\n", p->comm, p->pid);
+        len = sprintf(buf,
+            "Name:\t%s\n"
+            "State:\tR (running)\n"
+            "Tgid:\t%d\n"
+            "Pid:\t%d\n"
+            "Uid:\t%d\t%d\t%d\t%d\n"
+            "Gid:\t%d\t%d\t%d\t%d\n",
+            p->comm, p->pid, p->pid,
+            p->uid, p->uid, p->uid, p->uid,
+            p->gid, p->gid, p->gid, p->gid);
     } else {
-        sprintf(buf, "Name:\t%s\nPid:\t%d\nUid:\t%d\nGid:\t%d\nState:\tRunning\n", 
-                p->comm, p->pid, p->uid, p->gid);
+        len = sprintf(buf,
+            "Name:\t%s\n"
+            "Pid:\t%d\n"
+            "Uid:\t%d\n"
+            "Gid:\t%d\n"
+            "State:\tRunning\n",
+            p->comm, p->pid, p->uid, p->gid);
     }
     
-    uint32_t len = strlen(buf);
-    if (offset >= len) return 0;
-    if (offset + size > len) size = len - offset;
+    if (offset >= (uint32_t)len) return 0;
+    if (offset + size > (uint32_t)len) size = len - offset;
     memcpy(buffer, buf + offset, size);
     return size;
 }
 
-// Node for /proc/cpuinfo
-static uint32_t proc_cpuinfo_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
-    (void)node;
-    char buf[256];
-    sprintf(buf, "Processor:\t0\nVendor:\t\tGenericx86\nModel Name:\tSubstrate Virtual CPU\n");
-    uint32_t len = strlen(buf);
-    if (offset >= len) return 0;
-    if (offset + size > len) size = len - offset;
-    memcpy(buffer, buf + offset, size);
-    return size;
-}
-
-// Node for /proc/meminfo
-static uint32_t proc_meminfo_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
-    (void)node;
-    // Mock values
-    char buf[256];
-    sprintf(buf, "MemTotal:\t65536 kB\nMemFree:\t32768 kB\n");
-    uint32_t len = strlen(buf);
-    if (offset >= len) return 0;
-    if (offset + size > len) size = len - offset;
-    memcpy(buffer, buf + offset, size);
-    return size;
-}
-
-// Node for /proc/uptime
-extern uint32_t get_time(void);
-static uint32_t proc_uptime_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
-    (void)node;
-    char buf[64];
-    sprintf(buf, "%d.00\n", get_time());
-    uint32_t len = strlen(buf);
-    if (offset >= len) return 0;
-    if (offset + size > len) size = len - offset;
-    memcpy(buffer, buf + offset, size);
-    return size;
-}
-
-// Node for /proc/cow_stats
-#include "../../arch/i386/pmap.h"
-extern int sys_get_cow_stats(struct pmap_stats *out);
-
-static uint32_t proc_cow_stats_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
-    (void)node;
-    struct pmap_stats stats;
-    if (sys_get_cow_stats(&stats) != 0) return 0;
+static uint32_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    int pid = node->inode;
+    process_t *p = NULL;
     
-    char buf[512];
-    sprintf(buf, "Faults:\t%u\nCOW Faults:\t%u\nZero Fills:\t%u\nProt Upgrades:\t%u\nProt Downgrades:\t%u\nCOW Pages Mapped:\t%u\nCOW Duplications:\t%u\nPages Saved by COW:\t%u\nTLB Invlpg:\t%u\nTLB Full Flush:\t%u\n",
-            stats.faults, stats.cow_faults, stats.zero_fills, 
-            stats.protection_upgrades, stats.protection_downgrades,
-            stats.cow_pages_mapped, stats.cow_duplications, stats.pages_saved_by_cow,
-            stats.tlb_invlpg_count, stats.tlb_full_flush_count);
-            
-    uint32_t len = strlen(buf);
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (processes[i].pid == pid) {
+            p = &processes[i];
+            break;
+        }
+    }
+    if (!p) return 0;
+    
+    /* Return process command name (comm) as cmdline */
+    uint32_t len = strlen(p->comm);
     if (offset >= len) return 0;
     if (offset + size > len) size = len - offset;
-    memcpy(buffer, buf + offset, size);
+    memcpy(buffer, p->comm + offset, size);
     return size;
 }
 
-// Node for /proc/<pid>/
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint32_t index) {
     (void)node;
-    if (index == 0) { strcpy(proc_dirent.name, "."); return &proc_dirent; }
-    if (index == 1) { strcpy(proc_dirent.name, ".."); return &proc_dirent; }
-    if (index == 2) { strcpy(proc_dirent.name, "status"); return &proc_dirent; }
-    if (index == 3) { strcpy(proc_dirent.name, "cmdline"); return &proc_dirent; }
-    return NULL;
+    const char *entries[] = { ".", "..", "status", "cmdline", NULL };
+    if (index >= 4) return NULL;
+    strcpy(proc_dirent.name, entries[index]);
+    return &proc_dirent;
 }
 
 static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
+    static fs_node_t pid_file;
+    
+    memset(&pid_file, 0, sizeof(fs_node_t));
+    pid_file.inode = node->inode;
+    pid_file.flags = FS_FILE;
+    
     if (strcmp(name, "status") == 0) {
-        static fs_node_t status_node;
-        memset(&status_node, 0, sizeof(fs_node_t));
-        strcpy(status_node.name, "status");
-        status_node.flags = FS_FILE;
-        status_node.inode = node->inode; // Pass PID
-        status_node.read = &proc_status_read;
-        return &status_node;
+        strcpy(pid_file.name, "status");
+        pid_file.read = &proc_pid_status_read;
+        return &pid_file;
+    }
+    if (strcmp(name, "cmdline") == 0) {
+        strcpy(pid_file.name, "cmdline");
+        pid_file.read = &proc_pid_cmdline_read;
+        return &pid_file;
     }
     return NULL;
 }
 
-// Root /proc readdir
+/* Root /proc directory operations */
+
 static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index) {
     (void)node;
+    
+    /* . and .. */
     if (index == 0) { strcpy(proc_dirent.name, "."); return &proc_dirent; }
     if (index == 1) { strcpy(proc_dirent.name, ".."); return &proc_dirent; }
-    if (index == 2) { strcpy(proc_dirent.name, "cpuinfo"); return &proc_dirent; }
-    if (index == 3) { strcpy(proc_dirent.name, "meminfo"); return &proc_dirent; }
-    if (index == 4) { strcpy(proc_dirent.name, "uptime"); return &proc_dirent; }
-    if (index == 5) { strcpy(proc_dirent.name, "cow_stats"); return &proc_dirent; }
-
-    int count = 6;
+    
+    /* Static entries from table */
+    uint32_t static_idx = index - 2;
+    if (static_idx < PROCFS_STATIC_COUNT) {
+        strcpy(proc_dirent.name, procfs_entries[static_idx].name);
+        return &proc_dirent;
+    }
+    
+    /* Process directories */
+    uint32_t proc_idx = static_idx - PROCFS_STATIC_COUNT;
+    uint32_t count = 0;
     for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
-            if (count == (int)index) {
+            if (count == proc_idx) {
                 sprintf(proc_dirent.name, "%d", processes[i].pid);
                 return &proc_dirent;
             }
@@ -150,40 +280,21 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index) {
 
 static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
     (void)node;
-
-    if (strcmp(name, "cpuinfo") == 0) {
-        static fs_node_t cpu_node;
-        memset(&cpu_node, 0, sizeof(fs_node_t));
-        strcpy(cpu_node.name, "cpuinfo");
-        cpu_node.flags = FS_FILE;
-        cpu_node.read = &proc_cpuinfo_read;
-        return &cpu_node;
-    }
-    if (strcmp(name, "meminfo") == 0) {
-        static fs_node_t mem_node;
-        memset(&mem_node, 0, sizeof(fs_node_t));
-        strcpy(mem_node.name, "meminfo");
-        mem_node.flags = FS_FILE;
-        mem_node.read = &proc_meminfo_read;
-        return &mem_node;
-    }
-    if (strcmp(name, "uptime") == 0) {
-        static fs_node_t up_node;
-        memset(&up_node, 0, sizeof(fs_node_t));
-        strcpy(up_node.name, "uptime");
-        up_node.flags = FS_FILE;
-        up_node.read = &proc_uptime_read;
-        return &up_node;
-    }
-    if (strcmp(name, "cow_stats") == 0) {
-        static fs_node_t cow_node;
-        memset(&cow_node, 0, sizeof(fs_node_t));
-        strcpy(cow_node.name, "cow_stats");
-        cow_node.flags = FS_FILE;
-        cow_node.read = &proc_cow_stats_read;
-        return &cow_node;
+    static fs_node_t entry_node;
+    
+    /* Search static entries table */
+    for (int i = 0; procfs_entries[i].name != NULL; i++) {
+        if (strcmp(name, procfs_entries[i].name) == 0) {
+            memset(&entry_node, 0, sizeof(fs_node_t));
+            strcpy(entry_node.name, procfs_entries[i].name);
+            entry_node.flags = FS_FILE;
+            entry_node.impl = (uintptr_t)&procfs_entries[i];
+            entry_node.read = &procfs_generic_read;
+            return &entry_node;
+        }
     }
 
+    /* Parse numeric PID */
     int pid = 0;
     char *p = name;
     while (*p >= '0' && *p <= '9') {
@@ -207,6 +318,8 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
     }
     return NULL;
 }
+
+/* Mount and initialization */
 
 static fs_node_t procfs_root_node;
 
