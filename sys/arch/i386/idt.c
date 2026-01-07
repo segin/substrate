@@ -9,13 +9,8 @@
 #include "../../kern/panic.h"
 #include "fpu/fpu_emu.h"
 
-// Process/Thread access for exception handling
-typedef enum { THREAD_READY, THREAD_RUNNING, THREAD_BLOCKED, THREAD_ZOMBIE } thread_state_t;
-struct process;
-struct thread { int tid; struct process *proc; void *kstack_ptr; void *kstack_top; void *instr_ptr; int priority; int base_priority; int sched_class; void *wait_chan; unsigned sig_pending; unsigned sig_mask; thread_state_t state; struct thread *next; };
-struct process { int pid; int ppid; int exit_code; void *pers; void *fds[32]; void *root_node; };
-extern struct thread *current_thread;
-extern struct process *current_process;
+#include <sys/proc.h>
+#include "pmap.h"
 
 idt_entry_t idt_entries[256] __attribute__((aligned(16)));
 idt_ptr_t   idt_ptr;
@@ -235,13 +230,13 @@ void isr_handler(registers_t *regs) {
             kprint("Killing user process.\n\n");
             if (current_process && current_process->pid == 1) {
                 extern void debug_dump_processes(void);
-                extern void pmap_dump(void *proc_ptr);
+                extern void pmap_dump(pmap_t pmap);
                 extern int cmdline_has(const char *key);
                 
                 // Dump memory if procmem argument present
                 if (cmdline_has("procmem")) {
                     kprint("=== MEMORY SPACE DUMP (PID 1) ===\n");
-                    pmap_dump(current_process);
+                    pmap_dump(current_process->pmap);
                     kprint("=== END MEMORY DUMP ===\n\n");
                 }
                 
