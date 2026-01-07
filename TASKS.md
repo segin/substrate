@@ -1055,12 +1055,34 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Apply `R_386_RELATIVE` relocations to fix up addresses.
         - [ ] No libc calls during bootstrap (use raw syscalls).
     - [ ] **ELF Parsing:**
-        - [ ] Parse `PT_DYNAMIC` segment to find dynamic section.
-        - [ ] Process dynamic tags: `DT_NEEDED`, `DT_STRTAB`, `DT_SYMTAB`, `DT_HASH`, `DT_GNU_HASH`.
-        - [ ] Parse `DT_RELA`/`DT_REL` for relocation entries.
-        - [ ] Parse `DT_JMPREL` for PLT relocations.
-        - [ ] Parse `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`.
-    - [ ] **Library Loading:**
+        - [ ] **Parse `PT_DYNAMIC` Segment:**
+            - [ ] Locate `PT_DYNAMIC` in Program Header Table.
+            - [ ] Read all `Elf32_Dyn` entries into strict memory structure.
+            - [ ] Map tags to internal state variables.
+        - [ ] **Process Dynamic Tags (Mandatory):**
+            - [ ] `DT_NEEDED`: Add library to load queue (recursive dependency).
+            - [ ] `DT_STRTAB`: Verify string table address and size.
+            - [ ] `DT_SYMTAB`: Verify symbol table address and entry size (`DT_SYMENT`).
+            - [ ] `DT_HASH` / `DT_GNU_HASH`: setup hash tables for symbol lookup.
+            - [ ] `DT_STRSZ`: String table size validation.
+            - [ ] `DT_PLTGOT`: Address of PLT/GOT.
+            - [ ] `DT_DEBUG`: Set for debugger interface (`r_debug`).
+        - [ ] **Process Relocation Tags:**
+            - [ ] `DT_REL` / `DT_RELA`: Relocation table address.
+            - [ ] `DT_RELSZ` / `DT_RELASZ`: Relocation table size.
+            - [ ] `DT_RELENT` / `DT_RELAENT`: size of each relocation entry.
+            - [ ] `DT_PLTREL`: Type of reloc in PLT (`DT_REL` or `DT_RELA`).
+            - [ ] `DT_JMPREL`: PLT relocation table address.
+            - [ ] `DT_PLTRELSZ`: PLT relocation table size.
+        - [ ] **Process Initialization/Termination Tags:**
+            - [ ] `DT_INIT`: Legacy init function address.
+            - [ ] `DT_FINI`: Legacy fini function address.
+            - [ ] `DT_INIT_ARRAY`: Array of init function pointers.
+            - [ ] `DT_INIT_ARRAYSZ`: Size of init array.
+            - [ ] `DT_FINI_ARRAY`: Array of fini function pointers.
+            - [ ] `DT_FINI_ARRAYSZ`: Size of fini array.
+            - [ ] `DT_PREINIT_ARRAY`: Array of pre-init function pointers.
+            - [ ] `DT_PREINIT_ARRAYSZ`: Size of pre-init array.    - [ ] **Library Loading:**
         - [ ] Implement library search path parsing (`LD_LIBRARY_PATH`, `/etc/ld.so.conf`).
         - [ ] Default search paths: `/lib`, `/usr/lib`, `/usr/local/lib`.
         - [ ] `$ORIGIN` expansion in rpath/runpath.
@@ -1163,12 +1185,36 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Support both sync and async query modes (for monitoring tools).
             - [ ] Thread-safe design with per-thread error state.
         - [ ] **Data Sources:**
-            - [ ] **`sysctl` MIBs (System Control):**
-                - [ ] `kern.*` (`ostype`, `osrelease`, `version`, `hostname`, `boottime`).
-                - [ ] `hw.*` (`machine`, `model`, `ncpu`, `physmem`, `usermem`).
-                - [ ] `vm.*` (`loadavg`, `swap_usage`, `vmtotal`).
-                - [ ] `net.*` (`inet.ip.stats`, `inet.tcp.stats`, `link.generic`).
-            - [ ] **`procfs` Structures (Process Filesystem):**
+            - [ ] **`sysctl` MIBs (System Control) - Detailed:**
+                - [ ] **`kern` (Kernel):**
+                    - [ ] `kern.ostype` (string): OS Name (e.g. "TestUnix").
+                    - [ ] `kern.osrelease` (string): Release version.
+                    - [ ] `kern.osrevision` (int): Revision number.
+                    - [ ] `kern.version` (string): Full version string.
+                    - [ ] `kern.hostname` (string): System hostname (RW).
+                    - [ ] `kern.domainname` (string): NIS domain name (RW).
+                    - [ ] `kern.boottime` (struct timeval): System boot timestamp.
+                    - [ ] `kern.maxproc` (int): Maximum number of processes.
+                    - [ ] `kern.maxfiles` (int): Maximum open files system-wide.
+                - [ ] **`hw` (Hardware):**
+                    - [ ] `hw.machine` (string): Machine architecture (e.g. "i386").
+                    - [ ] `hw.model` (string): CPU model name.
+                    - [ ] `hw.ncpu` (int): Number of active CPUs.
+                    - [ ] `hw.byteorder` (int): 4321 (big) or 1234 (little).
+                    - [ ] `hw.physmem` (long): Total physical memory in bytes.
+                    - [ ] `hw.usermem` (long): Non-kernel memory.
+                    - [ ] `hw.pagesize` (int): System page size (4096).
+                - [ ] **`vm` (Virtual Memory):**
+                    - [ ] `vm.loadavg` (struct loadavg): 1, 5, 15 min load averages.
+                    - [ ] `vm.swap_usage` (struct swap_stat): Swap total, used, free.
+                    - [ ] `vm.vmtotal` (struct vmtotal): System-wide virtual memory statistics.
+                    - [ ] `vm.overcommit` (int): Memory overcommit policy.
+                - [ ] **`net` (Network):**
+                    - [ ] `net.inet.ip.stats` (struct ipstat): IP packet counters.
+                    - [ ] `net.inet.ip.forwarding` (int): IPv4 forwarding enabled/disabled.
+                    - [ ] `net.inet.tcp.stats` (struct tcpstat): TCP connection stats.
+                    - [ ] `net.inet.udp.stats` (struct udpstat): UDP packet stats.
+                    - [ ] `net.link.generic.system.ifcount` (int): Number of interfaces.            - [ ] **`procfs` Structures (Process Filesystem):**
                 - [ ] `/proc/[pid]/stat`: Process state, stats, metrics (Linux compatible).
                 - [ ] `/proc/[pid]/status`: Human-readable status info.
                 - [ ] `/proc/[pid]/maps`: Memory map regions and permissions.
