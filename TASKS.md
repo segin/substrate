@@ -696,11 +696,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Implement `udf_read_partition()` - Parse Partition Descriptor.
         - [x] Implement `udf_read_lvd()` - Parse Logical Volume Descriptor.
         - [x] Implement `udf_read_fsd()` - Parse File Set Descriptor.
-        - [ ] Implement `udf_read_fe()` - Read File Entry (inode).
-        - [ ] Implement `udf_read_file()` - Read file data via allocation descriptors.
-        - [ ] Implement `udf_readdir()` - Iterate directory FIDs.
-        - [ ] Implement `udf_finddir()` - Lookup by name.
-        - [ ] Implement `udf_mount()` - VFS mount integration.
+        - [x] Implement `udf_read_fe()` - Read File Entry (inode).
+        - [x] Implement `udf_read_file()` - Read file data via allocation descriptors.
+        - [x] Implement `udf_readdir()` - Iterate directory FIDs.
+        - [x] Implement `udf_finddir()` - Lookup by name.
+        - [x] Implement `udf_mount()` - VFS mount integration.
     - [ ] **Write Support (`sys/fs/udf/udf_write.c`):**
         - [ ] Implement `udf_read_space_bitmap()` - Parse unallocated space.
         - [ ] Implement `udf_alloc_block()` - Allocate from space bitmap.
