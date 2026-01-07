@@ -1168,7 +1168,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] **`sysfs` Structures:** Parse `/sys/devices/`, `/sys/class/`, `/sys/block/` for hardware info.
             - [ ] **Netlink Sockets:** `NETLINK_ROUTE` for network interfaces, `NETLINK_KOBJECT_UEVENT` for hotplug.
             - [ ] **Direct Syscalls:** `sysinfo()`, `uname()`, `getrlimit()`, `clock_gettime()`.
-        - [ ] **Process Information API:**
+        - [ ] **Process Information API (Native Syscalls):**
             - [ ] `sys_proc_count()` - Get total number of processes.
             - [ ] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
             - [ ] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info.
