@@ -1,0 +1,16 @@
+.\" Process this file with
+.\" groff -man -Tascii uname.2
+.\"
+.TH UNAME 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+uname \- get name and information about current kernel
+.SH SYNOPSIS
+.B #include <sys/utsname.h>
+.PP
+.BI "int uname(struct utsname *" buf ");"
+.SH DESCRIPTION
+.B uname()
+returns system information in the structure pointed to by
+.IR buf .
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.

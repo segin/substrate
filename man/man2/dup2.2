@@ -1,0 +1,26 @@
+.\" Process this file with
+.\" groff -man -Tascii dup2.2
+.\"
+.TH DUP2 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+dup2 \- duplicate a file descriptor
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int dup2(int " oldfd ", int " newfd ");"
+.SH DESCRIPTION
+.B dup2()
+makes
+.I newfd
+be the copy of
+.IR oldfd ,
+closing
+.I newfd
+first if necessary.
+.SH RETURN VALUE
+On success, the new file descriptor is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EBADF
+.I oldfd
+is not an open file descriptor.

@@ -1,0 +1,60 @@
+.\" Process this file with
+.\" groff -man -Tascii personality.9
+.\"
+.TH PERSONALITY 9 "January 2026" "TestUnix Kernel" "Kernel Developer's Manual"
+.SH NAME
+personality \- kernel binary emulation subsystem
+.SH SYNOPSIS
+.B #include <sys/exec/perso/personality.h>
+.PP
+.B struct personality {
+.br
+.BI "    const char *" name ";"
+.br
+.BI "    void **" syscall_table ";"
+.br
+.BI "    const char **" syscall_names ";"
+.br
+.BI "    struct syscall_fmt *" syscall_fmts ";"
+.br
+.BI "    uint32_t " syscall_count ";"
+.B };
+.PP
+.BI "extern struct personality " personality_native ";"
+.br
+.BI "extern struct personality " personality_linux ";"
+.br
+.BI "extern struct personality " personality_freebsd ";"
+.SH DESCRIPTION
+The
+.B personality
+subsystem allows the kernel to execute binaries compiled for different operating systems by intercepting system calls and mapping them to the kernel's internal implementation. Each process is associated with a specific
+.B personality
+structure, which dictates how system calls are dispatched and traced.
+.PP
+The
+.I personality
+structure contains the following fields:
+.TP
+.I name
+A human-readable string identifying the personality (e.g., "Linux", "FreeBSD", "Native"). Used for process listing and debugging.
+.TP
+.I syscall_table
+A pointer to an array of function pointers. The index into this array corresponds to the system call number (e.g., the value in the EAX register upon interrupt 0x80).
+.TP
+.I syscall_names
+An optional array of strings used by the syscall tracer (`strace`-like functionality) to print the name of the system call instead of just its number.
+.TP
+.I syscall_fmts
+An optional array of
+.B struct syscall_fmt
+entry, defining the number and types of arguments for each system call. This allows the tracer to pretty-print arguments (e.g., displaying strings, pointers, or hex values).
+.TP
+.I syscall_count
+The size of the
+.I syscall_table
+and associated metadata arrays.
+.SH SEE ALSO
+.BR perso_native (9),
+.BR perso_linux (9),
+.BR perso_freebsd (9)

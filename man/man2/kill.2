@@ -1,0 +1,25 @@
+.\" Process this file with
+.\" groff -man -Tascii kill.2
+.\"
+.TH KILL 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+kill \- send signal to a process
+.SH SYNOPSIS
+.B #include <sys/types.h>
+.br
+.B #include <signal.h>
+.PP
+.BI "int kill(pid_t " pid ", int " sig ");"
+.SH DESCRIPTION
+The
+.B kill()
+system call can be used to send any signal to any process group or process.
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EINVAL
+An invalid signal was specified.
+.TP
+.B ESRCH
+The process or process group does not exist.

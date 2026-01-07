@@ -1,0 +1,20 @@
+.\" Process this file with
+.\" groff -man -Tascii close.2
+.\"
+.TH CLOSE 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+close \- close a file descriptor
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int close(int " fd ");"
+.SH DESCRIPTION
+.B close()
+closes a file descriptor, so that it no longer refers to any file and may be reused.
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EBADF
+.I fd
+is not a valid open file descriptor.

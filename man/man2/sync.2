@@ -1,0 +1,16 @@
+.\" Process this file with
+.\" groff -man -Tascii sync.2
+.\"
+.TH SYNC 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+sync \- commit buffer cache to disk
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "void sync(void);"
+.SH DESCRIPTION
+.B sync()
+causes all pending modifications to filesystem metadata and data to be written to the underlying filesystems.
+.SH RETURN VALUE
+.B sync()
+is always successful.

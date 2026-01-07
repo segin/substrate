@@ -1,0 +1,15 @@
+.\" Process this file with
+.\" groff -man -Tascii intro.2
+.\"
+.TH INTRO 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+intro \- introduction to system calls
+.SH DESCRIPTION
+Section 2 of the manual describes the system calls provided by the TestUnix kernel's native personality. These calls provide the interface between user-space applications and the kernel.
+.PP
+System calls are invoked via the `int 0x80` software interrupt. The system call number is passed in the EAX register, and arguments are passed in EBX, ECX, EDX, ESI, EDI, and EBP.
+.SH RETURN VALUE
+On success, zero or a positive value is returned. On failure, -1 is returned and the global variable `errno` is set to indicate the error.
+.SH SEE ALSO
+.BR personality (9),
+.BR peso_native (9)

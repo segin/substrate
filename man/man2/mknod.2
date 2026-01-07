@@ -1,0 +1,25 @@
+.\" Process this file with
+.\" groff -man -Tascii mknod.2
+.\"
+.TH MKNOD 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+mknod \- create a special or ordinary file
+.SH SYNOPSIS
+.B #include <sys/stat.h>
+.PP
+.BI "int mknod(const char *" pathname ", mode_t " mode ", dev_t " dev ");"
+.SH DESCRIPTION
+.B mknod()
+creates a filesystem node (file, device special file, or named pipe) named
+.IR pathname ,
+with attributes specified by
+.I mode
+and
+.IR dev .
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EEXIST
+.I pathname
+already exists.

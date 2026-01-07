@@ -1,0 +1,22 @@
+.\" Process this file with
+.\" groff -man -Tascii link.2
+.\"
+.TH LINK 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+link \- make a new name for a file
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int link(const char *" oldpath ", const char *" newpath ");"
+.SH DESCRIPTION
+.B link()
+creates a new link (also known as a hard link) to an existing file.
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EXDEV
+.I oldpath
+and
+.I newpath
+are not on the same mounted filesystem.

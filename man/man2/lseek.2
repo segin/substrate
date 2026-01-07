@@ -1,0 +1,22 @@
+.\" Process this file with
+.\" groff -man -Tascii lseek.2
+.\"
+.TH LSEEK 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+lseek \- reposition read/write file offset
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "off_t lseek(int " fd ", off_t " offset ", int " whence ");"
+.SH DESCRIPTION
+.B lseek()
+repositions the file offset of the open file description associated with the file descriptor
+.I fd
+to the argument
+.I offset
+according to the directive
+.IR whence .
+.SH RETURN VALUE
+Upon successful completion,
+.B lseek()
+returns the resulting offset location as measured in bytes from the beginning of the file. On error, the value (off_t) -1 is returned.

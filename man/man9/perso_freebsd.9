@@ -1,0 +1,42 @@
+.\" Process this file with
+.\" groff -man -Tascii perso_freebsd.9
+.\"
+.TH PERSO_FREEBSD 9 "January 2026" "TestUnix Kernel" "Kernel Developer's Manual"
+.SH NAME
+perso_freebsd \- FreeBSD i386 binary compatibility personality
+.SH SYNOPSIS
+.B #include <sys/exec/perso/personality.h>
+.PP
+.BI "extern struct personality " personality_freebsd ";"
+.SH DESCRIPTION
+The
+.B perso_freebsd
+personality allows the kernel to execute FreeBSD i386 binaries. It implements the FreeBSD system call table and handles OS-specific behaviors.
+.SH SYSTEM CALLS
+The system call table follows the FreeBSD ABI:
+.TP
+.B SYS_exit (1)
+Terminate process.
+.TP
+.B SYS_fork (2)
+Create process.
+.TP
+.B SYS_read (3)
+Read input.
+.TP
+.B SYS_write (4)
+Write output.
+.TP
+.B SYS_uname (164)
+Note that this differs significantly from Linux/Native (usually 122). This implementation returns a `struct freebsd_utsname` identifying the system as "FreeBSD 14.3-RELEASE-p5".
+.SH LIMITATIONS
+.IP * 2
+Global/Static syscall table implementation.
+.IP * 2
+Missing deep structure conversion for `stat`, `dirent`, etc. (Direct mapping is used where ABIs coincidentally overlap).
+.IP * 2
+Tracing metadata (`syscall_names`, `syscall_fmts`) is currently unimplemented for this personality, meaning syscall traces will show raw numbers and hex arguments.
+.SH SEE ALSO
+.BR personality (9),
+.BR perso_native (9),
+.BR perso_linux (9)

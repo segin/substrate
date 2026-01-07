@@ -1,0 +1,46 @@
+.\" Process this file with
+.\" groff -man -Tascii open.2
+.\"
+.TH OPEN 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+open \- open and possibly create a file
+.SH SYNOPSIS
+.B #include <fcntl.h>
+.PP
+.BI "int open(const char *" pathname ", int " flags ", mode_t " mode ");"
+.SH DESCRIPTION
+The
+.B open()
+system call opens the file specified by
+.I pathname
+.
+.PP
+The
+.I flags
+argument must include one of the following access modes:
+.B O_RDONLY
+,
+.B O_WRONLY
+, or
+.B O_RDWR
+.
+.PP
+The file created (if
+.B O_CREAT
+is specified) will have permissions specified by
+.IR mode .
+.SH RETURN VALUE
+On success, the new file descriptor is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EACCES
+The requested access to the file is not allowed.
+.TP
+.B EEXIST
+.B O_CREAT
+and
+.B O_EXCL
+were specified, and the file exists.
+.TP
+.B ENOENT
+The file does not exist.

@@ -1,0 +1,20 @@
+.\" Process this file with
+.\" groff -man -Tascii time.2
+.\"
+.TH TIME 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+time \- get time in seconds
+.SH SYNOPSIS
+.B #include <time.h>
+.PP
+.BI "time_t time(time_t *" tloc ");"
+.SH DESCRIPTION
+.B time()
+returns the time as the number of seconds since the Epoch, 1970-01-01 00:00:00 +0000 (UTC).
+.PP
+If
+.I tloc
+is non-NULL, the return value is also stored in the memory pointed to by
+.IR tloc .
+.SH RETURN VALUE
+On success, the value of time in seconds since the Epoch is returned. On error, ((time_t) -1) is returned.

@@ -1,0 +1,20 @@
+.\" Process this file with
+.\" groff -man -Tascii acct.2
+.\"
+.TH ACCT 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+acct \- switch process accounting on or off
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int acct(const char *" filename ");"
+.SH DESCRIPTION
+The
+.B acct()
+system call enables or disables process accounting. If called with the name of an existing file as its argument, accounting is turned on, and records for each terminating process are appended to
+.IR filename .
+If
+.I filename
+is NULL, accounting is turned off.
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.

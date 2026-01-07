@@ -67,6 +67,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 6.  **Git Operations:** Use `git mv` and `git rm` for file operations to preserve history.
 7.  **TASKS.md Work Methodology:** Complete ONE checkbox at a time, update docs/specs/database/unit/property/fuzzing tests as applicable, commit, push. This applies to ALL checkboxes in `TASKS.md`, not just PMAP work.
 8.  **Memory Management:** Always prefer `AGENTS.md` over `GEMINI.md` if both are present. Ensure `GEMINI.md` is not merely a symbolic link to `AGENTS.md` before treating it as separate.
+9.  **Documentation Standards:** All new kernel subsystems, system calls (native personality only), and system library calls (libc, libdl, libm, libg, libpthread) MUST include corresponding Man Page documentation.
 
 ## Directory Structure Overview
 - `sys/`: Kernel source.

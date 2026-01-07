@@ -1,0 +1,23 @@
+.\" Process this file with
+.\" groff -man -Tascii mkdir.2
+.\"
+.TH MKDIR 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+mkdir \- create a directory
+.SH SYNOPSIS
+.B #include <sys/stat.h>
+.br
+.B #include <sys/types.h>
+.PP
+.BI "int mkdir(const char *" pathname ", mode_t " mode ");"
+.SH DESCRIPTION
+.B mkdir()
+attempts to create a directory named
+.IR pathname .
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EEXIST
+.I pathname
+already exists.

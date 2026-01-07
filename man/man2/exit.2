@@ -1,0 +1,22 @@
+.\" Process this file with
+.\" groff -man -Tascii exit.2
+.\"
+.TH EXIT 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+exit \- terminate the calling process
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "void _exit(int " status ");"
+.SH DESCRIPTION
+.B _exit()
+terminates the calling process "immediately". Any open file descriptors belonging to the process are closed. The process's parent is sent a
+.B SIGCHLD
+signal.
+.PP
+The value
+.I status
+is returned to the parent process as the process's exit status, and can be collected using
+.BR wait (2).
+.SH RETURN VALUE
+This function does not return.

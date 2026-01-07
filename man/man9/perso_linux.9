@@ -1,0 +1,53 @@
+.\" Process this file with
+.\" groff -man -Tascii perso_linux.9
+.\"
+.TH PERSO_LINUX 9 "January 2026" "TestUnix Kernel" "Kernel Developer's Manual"
+.SH NAME
+perso_linux \- Linux i386 binary compatibility personality
+.SH SYNOPSIS
+.B #include <sys/exec/perso/personality.h>
+.PP
+.BI "extern struct personality " personality_linux ";"
+.SH DESCRIPTION
+The
+.B perso_linux
+personality enables the execution of unmodified Linux i386 binaries on the TestUnix kernel. It maps Linux system call numbers to the corresponding internal kernel implementations.
+.PP
+This personality is feature-rich and includes extensive tracing metadata to support debugging of foreign binaries.
+.SH IMPLEMENTATION DETAILS
+.TP
+.B Syscall Mapping
+The personality maps standard Linux 2.6/3.x syscall numbers:
+.RS
+.IP * 2
+.B __NR_exit (1)
+.IP * 2
+.B __NR_fork (2)
+.IP * 2
+.B __NR_read (3)
+.IP * 2
+.B __NR_clone (120)
+.RE
+.TP
+.B Specialized Shims
+Several system calls require specialized shim functions to adapt Linux structures to internal kernel structures:
+.RS
+.TP
+.B sys_uname (122)
+Populates a `struct new_utsname` with "Linux" as the system name to satisfy libc startup checks.
+.TP
+.B sys_set_thread_area (243)
+Handles GDT entry allocation for Thread Local Storage (TLS) segment registers (GS), critical for `glibc` initialization.
+.TP
+.B sys_socketcall (102)
+Multiplexes socket operations (not yet fully implemented).
+.RE
+.SH TRACING
+The Linux personality structure populates `syscall_names` and `syscall_fmts`, allowing the kernel's built-in tracer to display:
+.IP
+`execve("/bin/ls", ["ls", NULL], [ENV...]) = 0`
+.PP
+Instead of raw numbers.
+.SH SEE ALSO
+.BR personality (9),
+.BR perso_native (9)

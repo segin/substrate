@@ -1,0 +1,33 @@
+.\" Process this file with
+.\" groff -man -Tascii read.2
+.\"
+.TH READ 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+read \- read from a file descriptor
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "ssize_t read(int " fd ", void *" buf ", size_t " count ");"
+.SH DESCRIPTION
+.B read()
+attempts to read up to
+.I count
+bytes from file descriptor
+.I fd
+into the buffer starting at
+.IR buf .
+.SH RETURN VALUE
+On success, the number of bytes read is returned (zero indicates end of file). On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EBADF
+.I fd
+is not a valid file descriptor or is not open for reading.
+.TP
+.B EFAULT
+.I buf
+is outside your accessible address space.
+.TP
+.B EINVAL
+.I fd
+is attached to an object which is unsuitable for reading.

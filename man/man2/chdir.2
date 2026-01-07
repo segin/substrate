@@ -1,0 +1,25 @@
+.\" Process this file with
+.\" groff -man -Tascii chdir.2
+.\"
+.TH CHDIR 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+chdir \- change working directory
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int chdir(const char *" path ");"
+.SH DESCRIPTION
+.B chdir()
+changes the current working directory of the calling process to the directory specified in
+.IR path .
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B ENOENT
+The file does not exist.
+.TP
+.B ENOTDIR
+The component of
+.I path
+is not a directory.

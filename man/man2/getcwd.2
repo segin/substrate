@@ -1,0 +1,20 @@
+.\" Process this file with
+.\" groff -man -Tascii getcwd.2
+.\"
+.TH GETCWD 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+getcwd \- get current working directory
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "char *getcwd(char *" buf ", size_t " size ");"
+.SH DESCRIPTION
+.B getcwd()
+copies an absolute pathname of the current working directory to the array pointed to by
+.IR buf ,
+which is of length
+.IR size .
+.SH RETURN VALUE
+On success,
+.I buf
+is returned. On error, NULL is returned.

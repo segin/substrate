@@ -1,0 +1,22 @@
+.\" Process this file with
+.\" groff -man -Tascii getuid.2
+.\"
+.TH GETUID 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+getuid, geteuid \- get user identity
+.SH SYNOPSIS
+.B #include <unistd.h>
+.br
+.B #include <sys/types.h>
+.PP
+.BI "uid_t getuid(void);"
+.br
+.BI "uid_t geteuid(void);"
+.SH DESCRIPTION
+.B getuid()
+returns the real user ID of the calling process.
+.PP
+.B geteuid()
+returns the effective user ID of the calling process.
+.SH RETURN VALUE
+These functions are always successful.

@@ -1,0 +1,50 @@
+.\" Process this file with
+.\" groff -man -Tascii perso_native.9
+.\"
+.TH PERSO_NATIVE 9 "January 2026" "TestUnix Kernel" "Kernel Developer's Manual"
+.SH NAME
+perso_native \- Native TestUnix kernel personality
+.SH SYNOPSIS
+.B #include <sys/exec/perso/personality.h>
+.PP
+.BI "extern struct personality " personality_native ";"
+.SH DESCRIPTION
+The
+.B perso_native
+personality implements the canonical system call interface for the TestUnix operating system. It allows native applications (compiled specifically for this kernel) to interact with the hardware and kernel services.
+.PP
+This personality uses the Reference Syscall Table, which is largely inspired by standard Unix System V and Linux numbering but may diverge for new, custom features.
+.SH SYSCALLS
+Key system calls implemented in the native personality include:
+.TP
+.B SYS_EXIT (1)
+Terminate the current process.
+.TP
+.B SYS_FORK (2)
+Create a new process.
+.TP
+.B SYS_READ (3)
+Read from a file descriptor.
+.TP
+.B SYS_WRITE (4)
+Write to a file descriptor.
+.TP
+.B SYS_OPEN (5)
+Open and possibly create a file.
+.TP
+.B SYS_CLOSE (6)
+Close a file descriptor.
+.TP
+.B SYS_TIME (13)
+Get time of day (seconds since epoch).
+.TP
+.B SYS_MKNOD (14)
+Create a filesystem node (special file).
+.TP
+.B SYS_GET_COW_STATS (241)
+Custom debugging syscall to retrieve Copy-On-Write statistics for the memory manager.
+.SH EXTENSIONS
+The native personality is the designated host for all Kernel Virtual Machine (KVM) API extensions, including process introspection (`sys_proc_*`) and system statistics (`sys_vm_*`), as detailed in the project roadmap.
+.SH SEE ALSO
+.BR personality (9),
+.BR perso_linux (9)

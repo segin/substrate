@@ -1,0 +1,22 @@
+.\" Process this file with
+.\" groff -man -Tascii getdents.2
+.\"
+.TH GETDENTS 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+getdents \- get directory entries
+.SH SYNOPSIS
+.B #include <unistd.h>
+.br
+.B #include <sys/dirent.h>
+.PP
+.BI "int getdents(unsigned int " fd ", struct linux_dirent *" dirp ", unsigned int " count ");"
+.SH DESCRIPTION
+.B getdents()
+reads several
+.I linux_dirent
+structures from the directory referred to by the open file descriptor
+.I fd
+into the buffer pointed to by
+.IR dirp .
+.SH RETURN VALUE
+On success, the number of bytes read is returned. On end of directory, 0 is returned. On error, -1 is returned.

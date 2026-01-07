@@ -1,0 +1,20 @@
+.\" Process this file with
+.\" groff -man -Tascii getpid.2
+.\"
+.TH GETPID 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+getpid, getppid \- get process identification
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "pid_t getpid(void);"
+.br
+.BI "pid_t getppid(void);"
+.SH DESCRIPTION
+.B getpid()
+returns the process ID (PID) of the calling process.
+.PP
+.B getppid()
+returns the process ID of the parent of the calling process.
+.SH RETURN VALUE
+These functions are always successful.

@@ -1,0 +1,22 @@
+.\" Process this file with
+.\" groff -man -Tascii getgid.2
+.\"
+.TH GETGID 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+getgid, getegid \- get group identity
+.SH SYNOPSIS
+.B #include <unistd.h>
+.br
+.B #include <sys/types.h>
+.PP
+.BI "gid_t getgid(void);"
+.br
+.BI "gid_t getegid(void);"
+.SH DESCRIPTION
+.B getgid()
+returns the real group ID of the calling process.
+.PP
+.B getegid()
+returns the effective group ID of the calling process.
+.SH RETURN VALUE
+These functions are always successful.

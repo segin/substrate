@@ -1,0 +1,22 @@
+.\" Process this file with
+.\" groff -man -Tascii vfork.2
+.\"
+.TH VFORK 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+vfork \- create a child process and block parent
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "pid_t vfork(void);"
+.SH DESCRIPTION
+.B vfork()
+creates a new process, just like
+.BR fork (2).
+However, the parent process is suspended until the child terminates or calls
+.BR execve (2).
+The child shares the parent's memory, so it must not modify memory (except for specific variables) or return from the calling function.
+.SH RETURN VALUE
+On success, the PID of the child process is returned in the parent, and 0 is returned in the child. On failure, -1 is returned.
+.SH SEE ALSO
+.BR fork (2),
+.BR execve (2)

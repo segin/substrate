@@ -1,0 +1,33 @@
+.\" Process this file with
+.\" groff -man -Tascii access.2
+.\"
+.TH ACCESS 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+access \- check user's permissions for a file
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int access(const char *" pathname ", int " mode ");"
+.SH DESCRIPTION
+.B access()
+checks whether the calling process can access the file
+.IR pathname .
+.I mode
+is a mask consisting of one or more of
+.B R_OK
+,
+.B W_OK
+,
+.B X_OK
+, or
+.B F_OK
+.
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EACCES
+The requested access would be denied to the file, or search permission is denied for one of the directories in the path prefix.
+.TP
+.B ENOENT
+The file does not exist.

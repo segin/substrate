@@ -1,0 +1,36 @@
+.\" Process this file with
+.\" groff -man -Tascii execve.2
+.\"
+.TH EXECVE 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+execve \- execute program
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int execve(const char *" filename ", char *const " argv "[], char *const " envp "[]);"
+.SH DESCRIPTION
+.B execve()
+executes the program referred to by
+.IR filename .
+The program is ostensibly replaced by the new program, with its own text, data, and stack segments.
+.PP
+.I argv
+is an array of argument strings passed to the new program.
+.I envp
+is an array of strings, conventionally of the form
+.B key=value
+, which are passed as environment to the new program.
+.SH RETURN VALUE
+On success,
+.B execve()
+does not return, on error -1 is returned, and errno is set appropriately.
+.SH ERRORS
+.TP
+.B EACCES
+Execute permission is denied for the file or a script interpreter.
+.TP
+.B ENOENT
+The file or a script interpreter does not exist.
+.TP
+.B ENOEXEC
+An executable is not in a recognized format, is for the wrong architecture, or has some other format error.

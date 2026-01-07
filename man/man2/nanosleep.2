@@ -1,0 +1,17 @@
+.\" Process this file with
+.\" groff -man -Tascii nanosleep.2
+.\"
+.TH NANOSLEEP 2 "January 2026" "TestUnix Kernel" "System Calls Manual"
+.SH NAME
+nanosleep \- high-resolution sleep
+.SH SYNOPSIS
+.B #include <time.h>
+.PP
+.BI "int nanosleep(const struct timespec *" req ", struct timespec *" rem ");"
+.SH DESCRIPTION
+.B nanosleep()
+suspends the execution of the calling thread until either at least the time specified in
+.I req
+has elapsed, or the delivery of a signal triggers the invocation of a handler.
+.SH RETURN VALUE
+On success, zero is returned. On error, -1 is returned.
