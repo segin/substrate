@@ -104,4 +104,104 @@ struct udf_avdp {
     uint8_t reserved[480];
 } __attribute__((packed));
 
+/*
+ * Primary Volume Descriptor (ECMA-167 3/10.1)
+ */
+struct udf_pvd {
+    struct udf_tag tag;
+    uint32_t vds_number;
+    uint32_t pvd_number;
+    char     volume_id[32];         /* dstring */
+    uint16_t volume_seq_number;
+    uint16_t max_volume_seq_number;
+    uint16_t interchange_level;
+    uint16_t max_interchange_level;
+    uint32_t charset_list;
+    uint32_t max_charset_list;
+    char     volume_set_id[128];    /* dstring */
+    struct udf_charspec desc_charset;
+    struct udf_charspec expl_charset;
+    struct udf_extent_ad volume_abstract;
+    struct udf_extent_ad volume_copyright;
+    struct udf_regid app_id;
+    struct udf_timestamp recording_time;
+    struct udf_regid impl_id;
+    uint8_t  impl_use[64];
+    uint32_t predecessor_vds_location;
+    uint16_t flags;
+    uint8_t  reserved[22];
+} __attribute__((packed));
+
+/*
+ * Partition Descriptor (ECMA-167 3/10.5)
+ */
+struct udf_pd {
+    struct udf_tag tag;
+    uint32_t vds_number;
+    uint16_t partition_flags;
+    uint16_t partition_number;
+    struct udf_regid partition_contents;
+    uint8_t  contents_use[128];     /* For UDF: contains partition header */
+    uint32_t access_type;           /* 1=read-only, 3=rewritable */
+    uint32_t partition_start;       /* First sector of partition */
+    uint32_t partition_length;      /* Length in sectors */
+    struct udf_regid impl_id;
+    uint8_t  impl_use[128];
+    uint8_t  reserved[156];
+} __attribute__((packed));
+
+/*
+ * Long Allocation Descriptor (ECMA-167 4/14.14.2)
+ */
+struct udf_long_ad {
+    uint32_t length;                /* Extent length + flags in upper 2 bits */
+    uint32_t block;                 /* Logical block (relative to partition) */
+    uint16_t partition;             /* Partition reference number */
+    uint8_t  impl_use[6];
+} __attribute__((packed));
+
+/*
+ * Logical Volume Descriptor (ECMA-167 3/10.6)
+ */
+struct udf_lvd {
+    struct udf_tag tag;
+    uint32_t vds_number;
+    struct udf_charspec desc_charset;
+    char     logical_volume_id[128]; /* dstring */
+    uint32_t logical_block_size;
+    struct udf_regid domain_id;
+    struct udf_long_ad fsd_location; /* File Set Descriptor location */
+    uint32_t map_table_length;
+    uint32_t num_partition_maps;
+    struct udf_regid impl_id;
+    uint8_t  impl_use[128];
+    struct udf_extent_ad integrity_seq_extent;
+    /* Followed by partition maps */
+} __attribute__((packed));
+
+/*
+ * File Set Descriptor (ECMA-167 4/14.1)
+ */
+struct udf_fsd {
+    struct udf_tag tag;
+    struct udf_timestamp recording_time;
+    uint16_t interchange_level;
+    uint16_t max_interchange_level;
+    uint32_t charset_list;
+    uint32_t max_charset_list;
+    uint32_t fileset_number;
+    uint32_t fileset_desc_number;
+    struct udf_charspec logical_vol_charset;
+    char     logical_vol_id[128];
+    struct udf_charspec fileset_charset;
+    char     fileset_id[32];
+    char     copyright_id[32];
+    char     abstract_id[32];
+    struct udf_long_ad root_dir_icb;   /* Root directory location */
+    struct udf_regid domain_id;
+    struct udf_long_ad next_extent;
+    struct udf_long_ad stream_dir_icb;
+    uint8_t  reserved[32];
+} __attribute__((packed));
+
 #endif /* _FS_UDF_UDF_H */

@@ -682,10 +682,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **On-Disk Structures (`sys/fs/udf/udf.h`):**
         - [x] Define `udf_tag` (Descriptor Tag - 16 bytes).
         - [x] Define `udf_avdp` (Anchor Volume Descriptor Pointer).
-        - [ ] Define `udf_pvd` (Primary Volume Descriptor).
-        - [ ] Define `udf_pd` (Partition Descriptor).
-        - [ ] Define `udf_lvd` (Logical Volume Descriptor).
-        - [ ] Define `udf_fsd` (File Set Descriptor).
+        - [x] Define `udf_pvd` (Primary Volume Descriptor).
+        - [x] Define `udf_pd` (Partition Descriptor).
+        - [x] Define `udf_lvd` (Logical Volume Descriptor).
+        - [x] Define `udf_fsd` (File Set Descriptor).
         - [ ] Define `udf_fe`/`udf_efe` (File Entry / Extended File Entry).
         - [ ] Define `udf_fid` (File Identifier Descriptor).
         - [ ] Define `udf_short_ad`/`udf_long_ad` (Allocation Descriptors).
