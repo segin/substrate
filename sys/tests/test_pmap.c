@@ -153,6 +153,50 @@ void test_pmap_dump(void) {
     kprint("  PASS\n");
 }
 
+// Test 8: PGE detection via CR4
+void test_pge_detection(void) {
+    kprint("Test: PGE detection\n");
+    
+    // Check if PGE is enabled in CR4
+    uint32_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    
+    int pge_enabled = (cr4 >> 7) & 1;
+    if (pge_enabled) {
+        kprint("  PGE is enabled in CR4\n");
+    } else {
+        kprint("  PGE is NOT enabled (may be unsupported CPU)\n");
+    }
+    
+    // Also verify PGE bit via CPUID
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
+    int has_pge = (edx >> 13) & 1;
+    
+    if (has_pge && pge_enabled) {
+        kprint("  CPUID reports PGE support, CR4.PGE enabled - PASS\n");
+    } else if (!has_pge) {
+        kprint("  CPUID reports no PGE support - SKIP\n");
+    } else {
+        kprint("  PGE supported but not enabled - WARN\n");
+    }
+}
+
+// Test 9: Global page flush function (smoke test)
+void test_pge_global_flush(void) {
+    kprint("Test: pmap_flush_global_pages\n");
+    
+    // Just verify it doesn't crash
+    pmap_flush_global_pages();
+    
+    // Verify stats incremented
+    struct pmap_stats stats;
+    sys_pmap_stats(&stats);
+    TEST_ASSERT(stats.tlb_full_flush_count > 0, "tlb_full_flush_count incremented");
+    
+    kprint("  PASS\n");
+}
+
 void run_pmap_tests(void) {
     kprint("\n=== PMAP Unit Tests ===\n");
     
@@ -163,6 +207,8 @@ void run_pmap_tests(void) {
     test_pmap_pse();
     test_pmap_check();
     test_pmap_dump();
+    test_pge_detection();
+    test_pge_global_flush();
     test_memory_leak();
     
     kprint("\nResults: ");

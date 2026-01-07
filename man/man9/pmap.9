@@ -113,6 +113,11 @@ Uses recursive paging (PDE 1023 points to itself) for O(1) page table access.
 Kernel PDEs (768-1022) are shared by reference across all pmaps.
 .IP \[bu]
 TLB invalidation via INVLPG; batch invalidation for large ranges.
+.IP \[bu]
+Global pages (PGE): kernel pages marked with PG_G survive CR3 reloads.
+Use
+.B pmap_flush_global_pages
+to flush global pages (toggles CR4.PGE).
 .SH SEE ALSO
 .BR pmm (9),
 .BR vm_page (9)

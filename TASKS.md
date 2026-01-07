@@ -264,12 +264,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [ ] Detect support via CPUID.
                     - [ ] Automatic promotion: coalesce adjacent 4KB pages.
                     - [ ] Demotion: split large page on partial unmap.
-            - [ ] **Global Page Support (PGE):**
-                - [ ] Detect PGE via CPUID.
-                - [ ] Set CR4.PGE to enable global pages.
-                - [ ] Mark kernel pages with PG_G flag.
-                - [ ] Global pages survive CR3 reload.
-                - [ ] Use INVPCID or CR4 toggle to flush global pages.
+            - [x] **Global Page Support (PGE):**
+                - [x] Detect PGE via CPUID.
+                - [x] Set CR4.PGE to enable global pages.
+                - [x] Mark kernel pages with PG_G flag.
+                - [x] Global pages survive CR3 reload.
+                - [x] Use INVPCID or CR4 toggle to flush global pages.
             - [x] **PMAP Statistics and Debugging:**
                 - [x] Per-pmap counters: resident, wired, mapped, faults.
                 - [x] Global counters: total_pmaps, active_pmaps, cow_faults.

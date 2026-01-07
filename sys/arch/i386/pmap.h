@@ -111,6 +111,7 @@ int pmap_page_is_cow(pmap_t pmap, uint32_t va);
 // Helper to flush TLB
 void pmap_invalidate_page(uint32_t va);
 void pmap_invalidate_all(void);  // CR3 reload, flushes entire TLB
+void pmap_flush_global_pages(void);  // CR4 toggle, flushes TLB including global pages
 
 // SMP TLB Shootdown (invalidate on all CPUs)
 void pmap_shootdown_page(uint32_t va);

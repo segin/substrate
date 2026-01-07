@@ -766,6 +766,30 @@ void pmap_invalidate_all(void) {
     __sync_fetch_and_add(&global_pmap_stats.tlb_full_flush_count, 1);
 }
 
+// Flush entire TLB including global pages
+// Uses CR4.PGE toggle method (disable PGE, reload CR3, re-enable PGE)
+void pmap_flush_global_pages(void) {
+    uint32_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    
+    if (cr4 & 0x80) {  // PGE is enabled
+        // Disable PGE
+        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4 & ~0x80));
+        
+        // Reload CR3 to flush TLB (now includes global pages since PGE is off)
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+        __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+        
+        // Re-enable PGE
+        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
+    } else {
+        // PGE not enabled, just do normal flush
+        pmap_invalidate_all();
+    }
+    __sync_fetch_and_add(&global_pmap_stats.tlb_full_flush_count, 1);
+}
+
 // SMP TLB Shootdown Support
 #include "lapic.h"
 
