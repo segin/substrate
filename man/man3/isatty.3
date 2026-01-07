@@ -1,0 +1,21 @@
+.\" Process this file with
+.\" groff -man -Tascii isatty.3
+.\"
+.TH ISATTY 3 "January 2026" "Substrate Standard C Library" "Library Calls Manual"
+.SH NAME
+isatty \- test whether a file descriptor refers to a terminal
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int isatty(int " fd ");"
+.SH DESCRIPTION
+The
+.B isatty
+() function tests whether
+.I fd
+is an open file descriptor referring to a terminal.
+.SH RETURN VALUE
+.B isatty
+() returns 1 if
+.I fd
+is an open file descriptor referring to a terminal; otherwise 0 is returned.
