@@ -236,11 +236,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Track pages saved by COW.
                     - [x] Track COW page duplications.
             - [ ] **TLB Management:**
-                - [ ] **Single CPU TLB:**
+                - [x] **Single CPU TLB:**
                     - [x] `invlpg(va)`: Invalidate single page.
                     - [x] CR3 reload: Flush entire TLB (expensive).
                     - [x] Track flush statistics.
-                - [ ] **SMP TLB Shootdown:**
+                - [x] **SMP TLB Shootdown:**
                     - [x] IPI (Inter-Processor Interrupt) mechanism.
                     - [x] `pmap_shootdown_page(va)`: Invalidate single page on all CPUs.
                     - [x] `pmap_shootdown_range(va, len)`: Invalidate range.
