@@ -701,15 +701,15 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Implement `udf_readdir()` - Iterate directory FIDs.
         - [x] Implement `udf_finddir()` - Lookup by name.
         - [x] Implement `udf_mount()` - VFS mount integration.
-    - [ ] **Write Support (`sys/fs/udf/udf_write.c`):**
-        - [ ] Implement `udf_read_space_bitmap()` - Parse unallocated space.
-        - [ ] Implement `udf_alloc_block()` - Allocate from space bitmap.
-        - [ ] Implement `udf_free_block()` - Return block to space bitmap.
-        - [ ] Implement `udf_create_fe()` - Create new File Entry.
-        - [ ] Implement `udf_write_file()` - Write file data.
-        - [ ] Implement `udf_add_fid()` - Add directory entry.
-        - [ ] Implement `udf_remove_fid()` - Remove directory entry.
-        - [ ] Implement `udf_truncate()` - Truncate/extend file.
+    - [x] **Write Support (`sys/fs/udf/udf_write.c`):**
+        - [x] Implement `udf_read_space_bitmap()` - Parse unallocated space.
+        - [x] Implement `udf_alloc_block()` - Allocate from space bitmap.
+        - [x] Implement `udf_free_block()` - Return block to space bitmap.
+        - [x] Implement `udf_create_fe()` - Create new File Entry.
+        - [x] Implement `udf_write_file()` - Write file data.
+        - [x] Implement `udf_add_fid()` - Add directory entry.
+        - [x] Implement `udf_remove_fid()` - Remove directory entry.
+        - [x] Implement `udf_truncate()` - Truncate/extend file.
     - [ ] **Testing:**
         - [ ] Unit tests (`sys/tests/test_udf.c`).
         - [ ] Property tests for allocation/deallocation.
