@@ -1,0 +1,83 @@
+.\" Process this file with
+.\" groff -man -Tascii pmap.9
+.\"
+.TH PMAP 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+pmap \- machine-dependent virtual memory interface
+.SH SYNOPSIS
+.B #include <sys/arch/i386/pmap.h>
+.LP
+.BI "pmap_t pmap_create(void);"
+.br
+.BI "void pmap_destroy(pmap_t " pmap ");"
+.br
+.BI "void pmap_reference(pmap_t " pmap ");"
+.br
+.BI "void pmap_release(pmap_t " pmap ");"
+.br
+.BI "pmap_t pmap_fork(pmap_t " src ");"
+.br
+.BI "void pmap_activate(pmap_t " pmap ");"
+.br
+.BI "int pmap_enter(pmap_t " pmap ", uint32_t " va ", uint32_t " pa ", uint32_t " prot ", uint32_t " flags ");"
+.br
+.BI "void pmap_remove(pmap_t " pmap ", uint32_t " va ");"
+.br
+.BI "void pmap_protect(pmap_t " pmap ", uint32_t " sva ", uint32_t " eva ", uint32_t " prot ");"
+.br
+.BI "int pmap_copy(pmap_t " dst ", pmap_t " src ", uint32_t " sva ", uint32_t " eva ", int " cow ");"
+.SH DESCRIPTION
+The
+.B pmap
+module provides the machine-dependent interface to the virtual memory system. It manages per-process page tables and provides operations for mapping, unmapping, and protecting virtual address ranges.
+.SS Address Space Management
+.B pmap_create
+allocates a new address space with an empty user region and shared kernel mappings.
+.PP
+.B pmap_destroy
+frees all user page tables and physical pages, then releases the pmap structure.
+.PP
+.B pmap_fork
+creates a copy of the source address space using Copy-on-Write (COW). Both parent and child share physical pages until a write occurs.
+.PP
+.B pmap_activate
+loads the pmap's page directory into CR3, making it the current address space.
+.SS Mapping Operations
+.B pmap_enter
+maps a virtual address
+.I va
+to physical address
+.I pa
+with the specified protection and flags.
+.PP
+.B pmap_remove
+unmaps the virtual address
+.IR va .
+.PP
+.B pmap_protect
+changes the protection bits for a range of virtual addresses.
+.PP
+.B pmap_copy
+copies mappings from source to destination pmap. If
+.I cow
+is set, pages are marked read-only for copy-on-write.
+.SS Page Tracking
+.BI "int pmap_is_referenced(vm_page_t *" m ");"
+.br
+.BI "void pmap_clear_reference(vm_page_t *" m ");"
+.br
+.BI "int pmap_is_modified_range(pmap_t " pmap ", uint32_t " sva ", uint32_t " eva ");"
+.br
+.BI "int pmap_test_and_clear_modify(pmap_t " pmap ", uint32_t " va ");"
+.PP
+These functions query and clear the hardware Accessed (A) and Dirty (D) bits in page table entries, used by page replacement algorithms.
+.SH IMPLEMENTATION NOTES
+.IP \[bu] 2
+Uses recursive paging (PDE 1023 points to itself) for O(1) page table access.
+.IP \[bu]
+Kernel PDEs (768-1022) are shared by reference across all pmaps.
+.IP \[bu]
+TLB invalidation via INVLPG; batch invalidation for large ranges.
+.SH SEE ALSO
+.BR pmm (9),
+.BR vm_page (9)

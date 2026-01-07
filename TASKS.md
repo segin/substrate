@@ -1075,7 +1075,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Rounding & Manipulation:**
             - [ ] `rint()` / `nearbyint()`: Use `frndint` (Round to integer according to CW).
             - [ ] `scalbn()` / `ldexp()`: Use `fscale` (exponent manipulation).
-- [ ] **Dynamic Linker (`ld.so` / `ld-substrate.so`):**
+- [ ] **Dynamic Linker (`/sbin/ld.so`):**
     - [ ] **Kernel ELF Loader Support:**
         - [ ] Parse `PT_INTERP` program header to identify dynamic linker path.
         - [ ] Load dynamic linker ELF into memory alongside main executable.

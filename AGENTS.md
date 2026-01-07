@@ -34,20 +34,16 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 
 ## Current Status
 - **PMM Refactor:** Phase 2 complete.
-    - O(log N) Buddy Allocator with proper page coalescing.
+    - O(log N) Buddy Allocator with proper page coalescing (Orders 0-10).
     - Contiguous allocation optimized via Buddy system.
-    - Bootstrap Watermark Allocator implemented.
-    - Dynamic Metadata sizing (no 128MB limit) implemented.
-    - Low Memory safeguards active.
-    - Fixed double-free bugs and initialization issues.
-    - Bootstrap Watermark Allocator implemented.
-    - Dynamic Metadata sizing (no 128MB limit) implemented.
+    - Bootstrap Watermark Allocator for early boot.
+    - Dynamic Metadata sizing (no static limit).
     - Low Memory safeguards active.
 - **User process foundation complete (pmap layer):**
     - Recursive paging and global page support.
     - `pmap_protect` and `pmap_copy` with Copy-on-Write (COW).
     - `pmap_kenter`/`pmap_kremove` kernel fast paths.
-    - Identity-mapping for Local APIC (0xFEE00000) during bootstrap.
+    - Page reference/modification tracking (`pmap_is_referenced`, `pmap_is_modified_range`).
     - Identity-mapping for Local APIC (0xFEE00000) during bootstrap.
 - **Process Model Refactored:**
     - Swapper: PID 0 (TID 0).
