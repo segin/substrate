@@ -179,7 +179,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Locate PTE for given virtual address.
                     - [x] Return true if PTE Accessed (A) bit is set.
                     - [x] CPU sets A bit automatically on first access.
-                    - [ ] **Enhancements:**
+                    - [x] **Enhancements:**
                         - [x] Batch query for multiple pages (`pmap_is_referenced_range`).
                         - [x] Clear A bit atomically while querying (`pmap_test_and_clear_ref`).
                         - [x] Track per-page access frequency for page aging.
@@ -187,7 +187,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Locate PTE for given virtual address.
                     - [x] Return true if PTE Dirty (D) bit is set.
                     - [x] CPU sets D bit automatically on first write.
-                    - [ ] **Enhancements:**
+                    - [x] **Enhancements:**
                         - [x] Batch query for multiple pages.
                         - [x] Clear D bit atomically while querying.
                         - [x] Track modification for writeback scheduling.

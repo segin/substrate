@@ -62,15 +62,37 @@ copies mappings from source to destination pmap. If
 .I cow
 is set, pages are marked read-only for copy-on-write.
 .SS Page Tracking
-.BI "int pmap_is_referenced(vm_page_t *" m ");"
+.BI "int pmap_is_referenced(vm_page_t *" m ");
 .br
-.BI "void pmap_clear_reference(vm_page_t *" m ");"
+.BI "void pmap_clear_reference(vm_page_t *" m ");
 .br
-.BI "int pmap_is_modified_range(pmap_t " pmap ", uint32_t " sva ", uint32_t " eva ");"
+.BI "int pmap_is_referenced_range(pmap_t " pmap ", uint32_t " sva ", uint32_t " eva ");
 .br
-.BI "int pmap_test_and_clear_modify(pmap_t " pmap ", uint32_t " va ");"
+.BI "int pmap_test_and_clear_ref(pmap_t " pmap ", uint32_t " va ");
+.br
+.BI "void pmap_track_access(vm_page_t *" m ");
+.br
+.BI "int pmap_is_modified_range(pmap_t " pmap ", uint32_t " sva ", uint32_t " eva ");
+.br
+.BI "int pmap_test_and_clear_modify(pmap_t " pmap ", uint32_t " va ");
+.br
+.BI "void pmap_track_modify(vm_page_t *" m ", uint32_t " current_time ");
 .PP
 These functions query and clear the hardware Accessed (A) and Dirty (D) bits in page table entries, used by page replacement algorithms.
+.PP
+.B pmap_is_referenced_range
+counts accessed pages in a range.
+.B pmap_test_and_clear_ref
+atomically tests and clears the A bit.
+.B pmap_track_access
+updates per-page access frequency for aging.
+.PP
+.B pmap_is_modified_range
+counts dirty pages in a range.
+.B pmap_test_and_clear_modify
+atomically tests and clears the D bit.
+.B pmap_track_modify
+records modification time for writeback scheduling.
 .SH IMPLEMENTATION NOTES
 .IP \[bu] 2
 Uses recursive paging (PDE 1023 points to itself) for O(1) page table access.
