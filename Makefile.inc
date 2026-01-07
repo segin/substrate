@@ -12,6 +12,9 @@ AS ?= as
 
 TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
+# Default install destination
+DESTDIR ?= $(TOP)/dist
+
 # Base flags for 32-bit x86
 COMMON_FLAGS = -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx
 LIBC_INCLUDE = $(TOP)/lib/c/include

@@ -2,7 +2,7 @@ include Makefile.inc
 
 # Subdirectories to build
 # Order matters: lib is usually a dependency for bin/usr.bin
-SUBDIRS = lib sbin sys bin usr.lib usr.bin
+SUBDIRS = lib sbin sys bin usr.lib usr.bin man
 
 .PHONY: all clean install efi multiboot freebsd zimage debug $(SUBDIRS)
 
@@ -34,6 +34,22 @@ clean:
 	done
 
 install:
+	@mkdir -p $(DESTDIR)/bin
+	@mkdir -p $(DESTDIR)/dev
+	@mkdir -p $(DESTDIR)/etc
+	@mkdir -p $(DESTDIR)/lib
+	@mkdir -p $(DESTDIR)/mnt
+	@mkdir -p $(DESTDIR)/proc
+	@mkdir -p $(DESTDIR)/sbin
+	@mkdir -p $(DESTDIR)/sys
+	@mkdir -p $(DESTDIR)/tmp
+	@mkdir -p $(DESTDIR)/usr/bin
+	@mkdir -p $(DESTDIR)/usr/include
+	@mkdir -p $(DESTDIR)/usr/lib
+	@mkdir -p $(DESTDIR)/usr/local
+	@mkdir -p $(DESTDIR)/usr/man
+	@mkdir -p $(DESTDIR)/usr/share
+	@mkdir -p $(DESTDIR)/var
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing $$dir"; \
 		$(MAKE) -C $$dir install; \

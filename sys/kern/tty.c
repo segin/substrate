@@ -20,6 +20,7 @@ void tty_default_termios(struct termios *t) {
     
     t->c_cc[VINTR] = 3;  // ^C
     t->c_cc[VQUIT] = 28; // ^\ (Escaped backslash)
+    t->c_cc[VSUSP] = 26; // ^Z
     t->c_cc[VERASE] = 127; // DEL
     t->c_cc[VKILL] = 21; // ^U
     t->c_cc[VEOF] = 4;   // ^D
@@ -101,11 +102,20 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     
     // Handle specific control chars if ISIG
     if (tty->termios.c_lflag & ISIG) {
+        int sig = 0;
         if (c == tty->termios.c_cc[VINTR]) { // ^C
-            // Send SIGINT to pgrp
-            // extern void kill_pgrp(int pgrp, int sig);
-            // if (tty->pgrp > 0) kill_pgrp(tty->pgrp, SIGINT);
-            echo_char(tty, '^'); echo_char(tty, 'C'); echo_char(tty, '\n');
+            sig = SIGINT;
+        } else if (c == tty->termios.c_cc[VQUIT]) { // ^\ 
+            sig = SIGQUIT;
+        } else if (c == tty->termios.c_cc[VSUSP]) { // ^Z
+            sig = SIGTSTP;
+        }
+
+        if (sig != 0) {
+            if (tty->pgrp > 0) signal_send_group(tty->pgrp, sig);
+            echo_char(tty, '^');
+            echo_char(tty, c + 64); // '@' for 0, 'A' for 1...
+            echo_char(tty, '\n');
             return;
         }
     }

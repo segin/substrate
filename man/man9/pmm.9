@@ -1,0 +1,56 @@
+.TH PMM 9 "January 2026" "TestUnix Kernel" "Kernel Developer's Manual"
+.SH NAME
+pmm_alloc_block, pmm_free_block, pmm_alloc_contiguous, pmm_free_contiguous, pmm_watermark_alloc \- physical memory manager
+.SH SYNOPSIS
+.B #include <sys/arch/i386/pmm.h>
+.LP
+.BI "void *pmm_alloc_block(void);"
+.br
+.BI "void pmm_free_block(void *" p ");"
+.br
+.BI "void *pmm_alloc_contiguous(size_t " count ");"
+.br
+.BI "void pmm_free_contiguous(void *" p ", size_t " count ");"
+.br
+.BI "void *pmm_watermark_alloc(size_t " bytes ");"
+.SH DESCRIPTION
+The Physical Memory Manager (PMM) manages the allocation and release of physical memory frames (4KB blocks). It employs a hybrid strategy using free lists for O(1) single-page allocations and a Buddy Allocator for O(log N) contiguous allocations.
+.SS Early Boot Allocation
+.B pmm_watermark_alloc
+allocates memory from a reserved early-boot region ("watermark") before the main allocator is initialized. This memory cannot be freed. It returns a virtual address in the kernel higher-half (0xC0000000+).
+.SS Standard Allocation
+.B pmm_alloc_block
+allocates a single 4KB physical page. It returns the physical address of the page, or NULL if no memory is available.
+.PP
+.B pmm_free_block
+releases a single 4KB physical page back to the pool.
+.I p
+must be a valid physical address previously allocated.
+.PP
+.B pmm_alloc_contiguous
+allocates
+.I count
+physically contiguous pages. This uses the Buddy Allocator to find a suitable block.
+.PP
+.B pmm_free_contiguous
+releases a contiguous block of
+.I count
+pages.
+.SH IMPLEMENTATION NOTES
+.IP \[bu] 2
+The allocator uses per-order free lists (orders 0-10) to manage blocks from 4KB to 4MB.
+.IP \[bu]
+A bitmap is maintained for diagnostics but is not the primary allocation mechanism.
+.IP \[bu]
+.B pmm_init
+must be called during kernel bootstrap to populate the free lists from the memory map (e.g., E820).
+.SH RETURN VALUES
+.B pmm_alloc_block
+and
+.B pmm_alloc_contiguous
+return the physical address of the allocated memory, or NULL on failure.
+.B pmm_watermark_alloc
+returns a kernel virtual address.
+.SH SEE ALSO
+.BR pmap (9),
+.BR vm_page (9)

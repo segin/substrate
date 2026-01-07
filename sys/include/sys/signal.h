@@ -43,4 +43,7 @@ struct sigaction {
 // Signal bits
 #define sigmask(sig) (1 << ((sig) - 1))
 
+int sys_kill(int pid, int sig);
+int signal_send_group(int pgrp, int sig);
+
 #endif

@@ -24,7 +24,9 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Build System:** Root filesystem generation in `dist/`
 - **Test Framework:** Implemented comprehensive kernel test runner (`sys/tests`), integrated into build system, with initial PMAP property tests.
 - **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0`, numeric width, and conversions: d/i/u/o/x/X/p/s/c for improved debug output
-- **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant for cleaner process identification.
+- **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant. Added Process Group (`pgrp`) and Session support.
+- **TTY Signals:** Implemented signal generation from TTY (`SIGINT`, `SIGQUIT`, `SIGTSTP`) and group signal delivery (`signal_send_group`).
+- **Build System:** Fixed `dist` directory generation to include standard Unix hierarchy (`usr/include`, `usr/local`, etc.) and ensured `vmunix` installation.
 
 
 ## Current Status
@@ -61,6 +63,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 5.  **Build System:** Maintain the recursive Makefile structure. Ensure `make -C sys`, `make -C lib/c`, and `make -C bin` always pass.
 6.  **Git Operations:** Use `git mv` and `git rm` for file operations to preserve history.
 7.  **TASKS.md Work Methodology:** Complete ONE checkbox at a time, update docs/specs/database/unit/property/fuzzing tests as applicable, commit, push. This applies to ALL checkboxes in `TASKS.md`, not just PMAP work.
+8.  **Memory Management:** Always prefer `AGENTS.md` over `GEMINI.md` if both are present. Ensure `GEMINI.md` is not merely a symbolic link to `AGENTS.md` before treating it as separate.
 
 ## Directory Structure Overview
 - `sys/`: Kernel source.

@@ -84,6 +84,23 @@ int sys_kill(int pid, int sig) {
     return 0;
 }
 
+int signal_send_group(int pgrp, int sig) {
+    if (sig < 0 || sig > NSIG) return -1;
+    if (pgrp <= 0) return -1;
+
+    extern process_t processes[];
+    int count = 0;
+
+    for (int i = 0; i < 16; i++) { // TODO: Remove hardcoded limit
+        if (processes[i].pid != -1 && processes[i].pgrp == pgrp) {
+            sys_kill(processes[i].pid, sig);
+            count++;
+        }
+    }
+    return (count > 0) ? 0 : -1;
+}
+
+
 void signal_handle_pending(registers_t *regs) {
     if (!current_thread || !current_process) return;
 

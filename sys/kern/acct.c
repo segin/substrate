@@ -80,3 +80,34 @@ void acct_process(int exitcode) {
     // fs_node usually has 'length'.
     write_fs(acct_node, acct_node->length, sizeof(struct acct), (uint8_t*)&ac);
 }
+
+int sys_getpgrp(void) {
+    if (!current_process) return -1;
+    return current_process->pgrp;
+}
+
+int sys_setpgid(int pid, int pgid) {
+    if (pgid < 0) return -1;
+    
+    process_t *target = NULL;
+    if (pid == 0) {
+        target = current_process;
+    } else {
+        // Find process by PID (TODO: Move find_process to common helper)
+        extern process_t processes[];
+        for (int i = 0; i < 16; i++) {
+            if (processes[i].pid == pid) {
+                target = &processes[i];
+                break;
+            }
+        }
+    }
+    
+    if (!target) return -1; // ESRCH
+    
+    // Simplistic permission check (must be same session, etc - omitted for prototype)
+    if (pgid == 0) target->pgrp = target->pid;
+    else target->pgrp = pgid;
+    
+    return 0;
+}

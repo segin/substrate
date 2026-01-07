@@ -128,5 +128,7 @@ tests:
 	@echo "Building Kernel Tests..."
 	$(MAKE) -C tests
 
-install:
-	@echo "Installing Kernel..."
+install: kernel.bin
+	@echo "Installing Kernel to $(DESTDIR)/vmunix..."
+	@mkdir -p $(DESTDIR)
+	@cp kernel.bin $(DESTDIR)/vmunix

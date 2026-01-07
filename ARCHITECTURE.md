@@ -54,9 +54,15 @@ The kernel is the core of the operating system, structured as follows:
       - **PID 0 (TID 0):** Swapper/Idle task.
       - **PID 1 (TID 1):** Init process (spawned by kernel).
       - **PID = MainTID:** Invariant enforced for all new processes.
+      - **Process Groups (pgrp):** Used for job control and signal delivery. Inherited on fork.
+      - **Sessions:** High-level grouping for terminal control.
     - **Time**: System time and tick handling.
     - **Accounting**: Process accounting (`acct.c`).
-- **`sys/sys/`**: System-wide header definitions (`proc.h`, `file.h`, `acct.h`, `thr.h`).
+    - **Signals**:
+      - **Implementation:** `signal.c` handles delivery and state.
+      - **Group Signaling:** `signal_send_group` allows targeting all processes in a `pgrp`.
+      - **TTY Integration:** Key presses (`^C`, `^\`, `^Z`) trigger signals (`SIGINT`, `SIGQUIT`, `SIGTSTP`) to the foreground process group.
+- **`sys/sys/`**: System-wide header definitions (`proc.h`, `file.h`, `acct.h`, `thr.h`, `termios.h`, `signal.h`).
 
 ### Core Userland (`bin/`, `lib/`)
 These components are essential for booting and basic system operation.
