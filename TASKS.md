@@ -351,7 +351,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                              - [x] Update PTE to point to new frame with `PTE_RW`.
                              - [x] Decrement refcount on original frame.
                     - [ ] **Lazy Faulting Improvements:**
-                        - [ ] **Demand Paging:** Only allocate frames when accessed (Zero-fill on demand).
+                        - [x] **Demand Paging:** Only allocate frames when accessed (Zero-fill on demand).
                         - [ ] **Prefaulting:** Heuristic to load surrounding pages during IO to reduce disk seeks.
     - [ ] **Kernel Allocator (UMA/Zone):**
     - [ ] **Kernel Allocator (UMA/Slab Refactor):**
