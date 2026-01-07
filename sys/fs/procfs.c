@@ -16,7 +16,7 @@
 
 /* External declarations */
 extern uint32_t get_time(void);
-extern int sys_get_cow_stats(struct pmap_stats *out);
+extern int sys_pmap_stats(struct pmap_stats *out);
 extern void cmdline_get(char *buf, size_t buf_len);
 
 /* Forward declarations */
@@ -137,7 +137,7 @@ static struct procfs_entry procfs_entries[] = {
     { "cmdline",     gen_cmdline },
     { "version",     gen_version },
     { "loadavg",     gen_loadavg },
-    { "cow_stats",   gen_cow_stats },
+    { "pmap_stats",  proc_pmap_stats_read },
     { "filesystems", gen_filesystems },
     { NULL, NULL }  /* Sentinel */
 };
