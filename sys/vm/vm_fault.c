@@ -1,69 +1,107 @@
 #include "vm_fault.h"
 #include "vm_object.h"
 #include "vm_page.h"
+#include "../arch/i386/pmap.h"
 #include <stddef.h>
 
+#define P2V(x) ((uintptr_t)(x) + 0xC0000000)
+
+// Helper to copy a page (FIXME: Optimize with pmap_copy_page)
+static void page_copy(uintptr_t src_pa, uintptr_t dst_pa) {
+    uint32_t *src = (uint32_t *)P2V(src_pa);
+    uint32_t *dst = (uint32_t *)P2V(dst_pa);
+    for (int i = 0; i < 1024; i++) dst[i] = src[i];
+}
+
+// Helper to zero a page (FIXME: Optimize with pmap_zero_page)
+static void page_zero(uintptr_t pa) {
+    uint32_t *p = (uint32_t *)P2V(pa);
+    for (int i = 0; i < 1024; i++) p[i] = 0;
+}
+
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
-    vm_map_entry_t *entry = NULL;
-    uintptr_t page_va = va & ~0xFFF; // Align to page boundary
-
-    // 1. Find the map entry covering this VA
-    // (In a real implementation, we'd have a search function)
-    vm_map_entry_t *header = map->header;
-    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
-        if (va >= cur->start && va < cur->end) {
-            entry = cur;
-            break;
-        }
-    }
-
+    uintptr_t page_va = va & ~0xFFF;
+    
+    // 1. Find the map entry
+    vm_map_entry_t *entry = vm_map_lookup(map, va);
     if (!entry) return VM_FAULT_ERROR;
 
     // 2. Check protection
-    if ((entry->protection & prot) != prot) {
-        return VM_FAULT_ERROR; // Protection violation
-    }
+    if ((entry->protection & prot) != prot)
+        return VM_FAULT_ERROR;
 
-    // 3. Resolve page against the object
-    vm_object_t *obj = entry->object;
-    if (!obj) return VM_FAULT_ERROR;
-
-    uint64_t pindex = (uint64_t)(page_va - entry->start + entry->offset) / 4096;
-
-    // 4. Lookup existing page
-    vm_page_t *m = vm_object_lookup_page(obj, pindex);
-
-    if (m && (prot & VM_PROT_WRITE) && (obj->ref_count > 1)) {
-        // Copy-on-Write: Create a new private copy
-        vm_page_t *new_m = vm_page_alloc(NULL, 0, 0); // Temporary orphan page
-        if (!new_m) return VM_FAULT_ERROR;
-
-        // TODO: pmap_copy_page(m->phys_addr, new_m->phys_addr);
-        new_m->flags |= PG_VALID | PG_DIRTY;
-
-        // Replace old page in object (if it's a private shadowing object)
-        // For now, we'll just switch the mapping to the new page.
-        m = new_m;
-    }
-
-    if (!m) {
-        // 5. Page not present, allocate it
-        m = vm_page_alloc(obj, pindex, 0);
-        if (!m) return VM_FAULT_ERROR; // OOM or pager error
-
-        // If it's a default object, zero it
-        if (obj->type == VM_OBJ_TYPE_DEFAULT) {
-            // TODO: pmap_zero_page(m->phys_addr);
-            m->flags |= PG_ZERO | PG_VALID;
-        }
-        
-        vm_object_add_page(obj, m);
-    }
-
-    // 6. Enter the mapping into the PMAP (hardware tables)
-    // We pass VM_PROT flags to pmap_enter.
-    int err = pmap_enter(map->pmap, page_va, m->phys_addr, entry->protection, 0);
+    // 3. Resolve page against the object chain
+    vm_object_t *first_obj = entry->object;
+    if (!first_obj) return VM_FAULT_ERROR;
     
+    vm_object_t *obj = first_obj;
+    vm_page_t *m = NULL;
+    uint64_t offset = (page_va - entry->start) + entry->offset;
+    uint64_t pindex = offset / 4096;
+    
+    // Walk shadow chain
+    while (obj) {
+        m = vm_object_lookup_page(obj, pindex);
+        if (m) break;
+        
+        // Move to backing object
+        if (obj->shadow) {
+            pindex += obj->shadow_offset / 4096; // Adjust index for shadow
+            obj = obj->shadow;
+        } else {
+            break; // No more objects
+        }
+    }
+    
+    // 4. Handle Copy-on-Write (COW) fault
+    // If we want to WRITE, and the page is in a shared object (ref_count > 1) 
+    // OR it's not in the top-level object, we need to copy it.
+    bool needs_copy = false;
+    if (prot & VM_PROT_WRITE) {
+        if (m && (obj != first_obj || obj->ref_count > 1)) {
+            needs_copy = true;
+        } else if (!m && first_obj->ref_count > 1) {
+            // Allocate new page in first_obj, potentially zero-filled if no backing
+            // If we fall through to allocation, ensure it's private
+        }
+    }
+
+    if (m && needs_copy) {
+        // Allocate new page in top-level object
+        vm_page_t *new_m = vm_page_alloc(first_obj, (offset / 4096), 0);
+        if (!new_m) return VM_FAULT_ERROR;
+        
+        page_copy(m->phys_addr, new_m->phys_addr);
+        new_m->flags |= PG_VALID | PG_DIRTY;
+        
+        m = new_m; // Use the new page
+        vm_object_add_page(first_obj, m);
+    }
+    
+    // 5. Page not present - allocate it
+    if (!m) {
+        // If we found nothing in the chain, allocate in top-level
+        pindex = offset / 4096;
+        m = vm_page_alloc(first_obj, pindex, 0);
+        if (!m) return VM_FAULT_ERROR;
+
+        if (first_obj->type == VM_OBJ_TYPE_DEFAULT) {
+            page_zero(m->phys_addr);
+            m->flags |= PG_ZERO | PG_VALID;
+        } else {
+            // TODO: Call pager
+        }
+        vm_object_add_page(first_obj, m);
+    }
+    
+    // 6. Enter mapping
+    // If it's a COW mapping (read-only view of shared page), reduce permissions
+    uint8_t enter_prot = entry->protection;
+    if ((prot & VM_PROT_WRITE) == 0 && (obj->ref_count > 1)) {
+       enter_prot &= ~VM_PROT_WRITE; // Force Read-Only for COW
+    }
+
+    int err = pmap_enter(map->pmap, page_va, m->phys_addr, enter_prot, 0);
     if (err < 0) return VM_FAULT_ERROR;
 
     return VM_FAULT_SUCCESS;

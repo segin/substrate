@@ -326,7 +326,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Rewrite:** **VM Map:** `vm_map` structure representing an address space.
             - [x] **Rewrite:** **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
             - [x] **Rewrite:** **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
-            - [ ] **Rewrite:** **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
+            - [x] **Rewrite:** **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
             - [ ] **Rewrite:** **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
             - [ ] **Rewrite:** **Swap Subsystem:**
                 - [ ] **Pager:** Implement a swap pager to move pages to/from disk.

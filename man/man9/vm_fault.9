@@ -1,0 +1,49 @@
+.TH VM_FAULT 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+vm_fault \- high-level page fault handler
+.SH SYNOPSIS
+.B #include <sys/vm/vm_fault.h>
+.LP
+.BI "int vm_fault(vm_map_t *" map ", uintptr_t " va ", uint8_t " prot ");"
+.SH DESCRIPTION
+.B vm_fault
+resolves a page fault at virtual address
+.I va
+within the given
+.I map .
+It enforces protection checks specified by
+.I prot
+and installs valid mappings into the physical map (pmap).
+.SS Fault Resolution
+1. Locates the
+.B vm_map_entry
+covering
+.I va .
+.br
+2. Verifies that the requested access
+.I prot
+is allowed by the entry's protection.
+.br
+3. Traverses the backing object chain (shadow chain) to find the page.
+.br
+4. Handles Copy-on-Write (COW) if writing to a shared page.
+.br
+5. Allocates a new page (zero-filled or paged in) if not found.
+.br
+6. Enters the physical mapping into the pmap.
+.SH RETURN VALUE
+Returns
+.B VM_FAULT_SUCCESS
+(0) if resolved successfully.
+.br
+Returns
+.B VM_FAULT_ERROR
+(-1) on failure (invalid address, protection violation, OOM).
+.br
+Returns
+.B VM_FAULT_RETRY
+(1) if the fault should be retried (e.g., transient lock failure).
+.SH SEE ALSO
+.BR vm_map (9),
+.BR vm_object (9),
+.BR pmap (9)
