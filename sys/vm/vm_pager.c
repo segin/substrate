@@ -90,12 +90,71 @@ static int stub_getput(struct vm_pager *pager, vm_page_t *m, bool sync) {
     return -1; // Not implemented
 }
 
-// Default ops (placeholders)
+// VNode Pager: File-backed memory mapping
+// pager->priv contains a pointer to the fs_node_t
+
+#define P2V(x) ((uintptr_t)(x) + 0xC0000000)
+
+// Forward declaration for VFS
+struct fs_node;
+extern uint32_t read_fs(struct fs_node*, int64_t, uint32_t, uint8_t*);
+extern uint32_t write_fs(struct fs_node*, int64_t, uint32_t, uint8_t*);
+
+static int vnode_getpage(struct vm_pager *pager, vm_page_t *m, bool sync) {
+    (void)sync;  // Always synchronous for now
+    if (!pager || !pager->priv || !m) return -1;
+    
+    struct fs_node *node = (struct fs_node *)pager->priv;
+    uint64_t offset = m->pindex * 4096;
+    uint8_t *buf = (uint8_t *)P2V(m->phys_addr);
+    
+    // Read page from file
+    uint32_t bytes_read = read_fs(node, (int64_t)offset, 4096, buf);
+    
+    // Zero remainder if short read
+    if (bytes_read < 4096) {
+        for (uint32_t i = bytes_read; i < 4096; i++) {
+            buf[i] = 0;
+        }
+    }
+    
+    m->flags |= PG_VALID;
+    return 0;
+}
+
+static int vnode_putpage(struct vm_pager *pager, vm_page_t *m, bool sync) {
+    (void)sync;  // Always synchronous for now
+    if (!pager || !pager->priv || !m) return -1;
+    
+    struct fs_node *node = (struct fs_node *)pager->priv;
+    uint64_t offset = m->pindex * 4096;
+    uint8_t *buf = (uint8_t *)P2V(m->phys_addr);
+    
+    // Write page to file
+    uint32_t bytes_written = write_fs(node, (int64_t)offset, 4096, buf);
+    
+    if (bytes_written == 4096) {
+        m->flags &= ~PG_DIRTY;
+        return 0;
+    }
+    return -1;
+}
+
+static bool vnode_haspage(struct vm_pager *pager, uint64_t pindex) {
+    if (!pager || !pager->priv) return false;
+    // For file-backed mappings, has_page is true if within file size
+    // This is a simplified check - assumes pager covers entire file
+    (void)pindex;
+    return true;  // Let getpage handle EOF
+}
+
+// Vnode pager ops
 vm_pager_ops_t vnode_pager_ops = {
     .alloc = stub_alloc,
     .dealloc = stub_dealloc,
-    .getpage = stub_getput,
-    .putpage = stub_getput
+    .getpage = vnode_getpage,
+    .putpage = vnode_putpage,
+    .haspage = vnode_haspage
 };
 
 vm_pager_ops_t device_pager_ops = {
