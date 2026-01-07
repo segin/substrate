@@ -172,6 +172,21 @@ void vm_page_unwire(vm_page_t *m) {
     }
 }
 
+// Hold page (increment ref_count for mapping)
+void vm_page_hold(vm_page_t *m) {
+    if (!m) return;
+    m->ref_count++;
+}
+
+// Unhold page (decrement ref_count, free if zero and not wired)
+void vm_page_unhold(vm_page_t *m) {
+    if (!m || m->ref_count == 0) return;
+    m->ref_count--;
+    // Note: Page is freed by vm_page_free() when no longer needed
+    // ref_count reaching 0 indicates no active mappings, but page may
+    // still be cached in inactive queue for potential reuse
+}
+
 // External pmap functions (to be implemented in pmap layer)
 extern int pmap_is_referenced(vm_page_t *m);
 extern void pmap_clear_reference(vm_page_t *m);

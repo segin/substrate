@@ -73,6 +73,8 @@ void vm_page_activate(vm_page_t *m);
 void vm_page_deactivate(vm_page_t *m);
 void vm_page_wire(vm_page_t *m);
 void vm_page_unwire(vm_page_t *m);
+void vm_page_hold(vm_page_t *m);
+void vm_page_unhold(vm_page_t *m);
 
 // LRU scanning
 int vm_pageout_scan(int max_scan);
