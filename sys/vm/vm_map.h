@@ -64,5 +64,6 @@ void vm_map_destroy(vm_map_t *map);
 int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot);
 int vm_map_wire(vm_map_t *map, uintptr_t start, uintptr_t end);
 int vm_map_unwire(vm_map_t *map, uintptr_t start, uintptr_t end);
+vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap);
 
 #endif

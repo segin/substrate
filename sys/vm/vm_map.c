@@ -246,3 +246,58 @@ int vm_map_unwire(vm_map_t *map, uintptr_t start, uintptr_t end) {
     }
     return 0;
 }
+
+// Fork a vm_map (duplicate entries for child process)
+vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
+    vm_map_t *dst_map = vm_map_create(dst_pmap, src_map->min_offset, src_map->max_offset);
+    if (!dst_map) return NULL;
+    
+    vm_map_entry_t *src_entry;
+    vm_map_entry_t *header = src_map->header;
+    
+    for (src_entry = header->next; src_entry != header; src_entry = src_entry->next) {
+        vm_object_t *obj = src_entry->object;
+        
+        // Determine inheritance behavior
+        if (src_entry->inheritance == VM_INHERIT_NONE)
+            continue;
+            
+        vm_object_t *new_obj = NULL;
+        uint64_t new_offset = src_entry->offset;
+        
+        if (src_entry->inheritance == VM_INHERIT_SHARE) {
+            // Shared mapping
+            new_obj = obj;
+            if (new_obj) vm_object_reference(new_obj);
+            
+        } else if (src_entry->inheritance == VM_INHERIT_COPY) {
+            // Copy-on-Write
+            if (obj) {
+                obj->flags |= VM_OBJ_COPY;
+                new_obj = obj;
+                vm_object_reference(new_obj);
+                
+                // Downgrade protection in parent to ensure COW trap happens
+                pmap_protect(src_map->pmap, src_entry->start, src_entry->end, src_entry->protection & ~VM_PROT_WRITE);
+            }
+        } else if (src_entry->inheritance == VM_INHERIT_ZERO) {
+            // Child gets new zero-filled object
+            new_obj = NULL; // Lazy allocation
+        }
+        
+        if (vm_map_insert(dst_map, new_obj, new_offset, src_entry->start, src_entry->end) != 0) {
+            vm_map_destroy(dst_map);
+            return NULL;
+        }
+        
+        vm_map_entry_t *dst_entry = vm_map_lookup(dst_map, src_entry->start);
+        if (dst_entry) {
+            dst_entry->protection = src_entry->protection;
+            dst_entry->max_protection = src_entry->max_protection;
+            dst_entry->inheritance = src_entry->inheritance;
+            dst_entry->flags = src_entry->flags & ~VME_WIRED; 
+        }
+    }
+    
+    return dst_map;
+}
