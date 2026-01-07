@@ -1433,9 +1433,47 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Reads username/password.
         - [ ] Authenticates against `/etc/passwd` and `/etc/shadow`.
         - [ ] Starts the default Desktop Environment shell on success.
-    - [ ] **`login` (CLI):** Implement PAM-like authentication or shadow file reading.
-    - [ ] **`ps`:** Read from `/proc`.
-    - [ ] **`top`:** Real-time process monitoring.
+    - [ ] **`login` (CLI Auth):**
+        - [ ] **Phase 1: Classic Unix Auth (`/etc/passwd`):**
+            - [ ] Display generic "login:" prompt.
+            - [ ] Disable TTY echo for password input.
+            - [ ] Parse `/etc/passwd` (v7 format: user:pwd:uid:gid:gecos:home:shell).
+            - [ ] Verify functionality with empty/plaintext passwords first, then `crypt()`.
+            - [ ] Check file ownership/permissions of `/etc/passwd` (must be root owned).
+        - [ ] **Phase 2: Session Setup:**
+            - [ ] Initialize Environment (`HOME`, `SHELL`, `USER`, `LOGNAME`, `PATH`, `TERM`).
+            - [ ] Set Process Group / Session ID (`setsid`).
+            - [ ] Apply Group IDs (`setgid`, `initgroups`).
+            - [ ] Apply User ID (`setuid`).
+            - [ ] Change to user's home directory (`chdir`).
+            - [ ] Display `/etc/motd`.
+            - [ ] Execute Shell (`execve`).
+        - [ ] **Phase 3: Security & Logging:**
+            - [ ] Implement account expiration checking.
+            - [ ] Record login in `/var/run/utmp` and `/var/log/wtmp`.
+            - [ ] Handle login failures (delay, syslog).
+    - [ ] **`ps` (Process Status):**
+        - [ ] **Data Gathering:**
+            - [ ] Iterate over `/proc/[pid]` directories.
+            - [ ] Parse `/proc/[pid]/stat` for state, ppid, pgrp, session, tty.
+            - [ ] Parse `/proc/[pid]/cmdline` or `comm` for process name.
+            - [ ] Parse `/proc/[pid]/status` for UID/GID mappings.
+        - [ ] **Formatting & Output:**
+            - [ ] Resolve TTY major/minor to device names (`/dev/tty1`).
+            - [ ] Calculate %CPU and %MEM (requires global stats).
+            - [ ] Format columns (PID, TTY, TIME, CMD).
+            - [ ] Support BSD syntax (`aux`) vs SysV syntax (`-ef`).
+    - [ ] **`top` (Real-time Monitor):**
+        - [ ] **Backend:**
+            - [ ] Efficiently scan `/proc` (snapshotting).
+            - [ ] Calculate CPU delta usage between samples.
+            - [ ] Read global stats (`/proc/stat`, `/proc/meminfo`).
+        - [ ] **UI / Display:**
+            - [ ] Initialize terminal (raw mode, no echo).
+            - [ ] Handle VT100 control sequences (clear screen, cursor positioning).
+            - [ ] Display Header (Uptime, Load Avg, CPU states, Mem/Swap).
+            - [ ] Display Process List (Sortable by CPU/Mem).
+            - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
 
 ### 8. LibC & Build System (User Requests)
 - [ ] **LibC Improvements:**
