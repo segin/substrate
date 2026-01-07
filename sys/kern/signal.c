@@ -5,6 +5,9 @@
 #include "console.h"
 #include "panic.h"
 #include <stddef.h>
+#include "../pm/pm.h"
+
+extern thread_t threads[MAX_THREADS];
 
 // Signal System Calls
 int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
@@ -45,43 +48,78 @@ int sys_sigsuspend(const uint32_t *mask) {
 }
 
 int sys_kill(int pid, int sig) {
-    if (sig < 0 || sig > NSIG) return -1;
-    
-    if (pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
-        return -1; // Operation not permitted on init
-    }
+    if (sig < 0 || sig > NSIG) return -1; // EINVAL
 
-    process_t *target = NULL;
-    if (current_process && pid == current_process->pid) target = current_process;
-    else {
-        // Search for process by PID
-        extern process_t processes[];
-        for (int i = 0; i < 16; i++) {
+    // Handle PID > 0: Send to specific process
+    if (pid > 0) {
+        // Init Protection
+        if (pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
+            return -1; // EPERM
+        }
+
+        process_t *target = NULL;
+        // Search process list
+        for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid == pid) {
                 target = &processes[i];
                 break;
             }
         }
-    }
 
-    if (!target) return -1;
+        if (!target) return -1; // ESRCH
 
-    extern thread_t threads[];
-    for (int i = 0; i < 64; i++) {
-        if (threads[i].proc == target && threads[i].tid != -1) {
-            threads[i].sig_pending |= sigmask(sig);
-            // If thread is sleeping, wake it up (simplified)
-            if (threads[i].state == THREAD_BLOCKED) {
-                // If it was in sigsuspend, the wait_chan is &sig_pending
-                sched_wakeup(&threads[i].sig_pending);
-                // Also wake from generic sleep? 
-                // In real OS, only EINTR-able sleeps are woken.
+        if (sig == 0) return 0; // Existence check
+
+        // Deliver signal to threads of the target
+        int found_threads = 0;
+        for (int i = 0; i < MAX_THREADS; i++) {
+            if (threads[i].tid != -1 && threads[i].proc == target) {
+                // Determine if we should interrupt this thread
+                bool deliver = true;
+                
+                // For logic simplicity, we deliver to ALL threads of the process
+                // This ensures if one is blocked, others might handle it, 
+                // or if it's a kill, everyone dies.
+                
+                if (deliver) {
+                    threads[i].sig_pending |= sigmask(sig);
+                    
+                    // Wake up if sleeping interruptibly
+                    if (threads[i].state == THREAD_BLOCKED) {
+                        // We wake on the pending mask address which sigsuspend/sleep uses
+                        sched_wakeup(&threads[i].sig_pending);
+                    }
+                    found_threads++;
+                }
             }
-            break;
         }
+        
+        // If no threads found (zombie process?), maybe allow?
+        // But the process exists.
+        return 0;
+    }
+    else if (pid == 0) {
+        // Send to current process group
+        if (!current_process) return -1;
+        return signal_send_group(current_process->pgrp, sig);
+    }
+    else if (pid == -1) {
+        // Send to all processes (except Init)
+        // Requires privilege check in real OS
+        for (int i = 0; i < MAX_PROCS; i++) {
+            if (processes[i].pid > 1) {
+                 // Recursively call for single PID (simplifies logic)
+                 sys_kill(processes[i].pid, sig);
+            }
+        }
+        return 0;
+    }
+    else {
+        // pid < -1: Send to process group -pid
+        return signal_send_group(-pid, sig);
     }
 
-    return 0;
+    return -1;
 }
 
 int signal_send_group(int pgrp, int sig) {
@@ -91,7 +129,7 @@ int signal_send_group(int pgrp, int sig) {
     extern process_t processes[];
     int count = 0;
 
-    for (int i = 0; i < 16; i++) { // TODO: Remove hardcoded limit
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1 && processes[i].pgrp == pgrp) {
             sys_kill(processes[i].pid, sig);
             count++;

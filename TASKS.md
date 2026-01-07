@@ -331,7 +331,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] **Rewrite:** **Swap Subsystem:**
                 - [x] **Pager:** Implement a swap pager to move pages to/from disk.
                 - [x] **Backing Store:** Support swap files or partitions.
-                - [ ] **Policy:** Implement page replacement algorithm (Clock/LRU).
+                - [x] **Policy:** Implement page replacement algorithm (Clock/LRU).
             - [x] **Rewrite:** **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
             - [ ] **Advanced Features:**
                 - [ ] **Advanced Features:**

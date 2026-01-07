@@ -8,5 +8,6 @@ void run_vm_object_tests(void);
 void run_vm_fault_tests(void);
 void run_vm_cow_tests(void);
 void run_vm_pager_tests(void);
+void run_vm_policy_tests(void);
 
 #endif

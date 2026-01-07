@@ -3,7 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MAX_THREADS 64
+#include <stddef.h>
+#include <stdint.h>
 
 thread_t threads[MAX_THREADS];
 thread_t *current_thread = NULL;

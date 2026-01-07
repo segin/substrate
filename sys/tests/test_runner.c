@@ -50,6 +50,7 @@ void run_kernel_tests(void) {
         run_vm_fault_tests();
         run_vm_cow_tests();
         run_vm_pager_tests();
+        run_vm_policy_tests();
     }
     
     if (all || strcmp(test_arg, "mmap") == 0) {

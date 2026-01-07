@@ -3,6 +3,8 @@
 
 #include <sys/proc.h>
 
+#define MAX_THREADS 64
+
 // API
 void sched_init(void);
 

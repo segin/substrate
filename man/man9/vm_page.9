@@ -1,0 +1,54 @@
+.TH VM_PAGE 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+vm_page \- physical page management and replacement policy
+.SH SYNOPSIS
+.B #include <sys/vm/vm_page.h>
+.LP
+.BI "vm_page_t *vm_page_alloc(vm_object_t *" object ", uint64_t " pindex ", int " req ");"
+.br
+.BI "void vm_page_free(vm_page_t *" m ");"
+.br
+.BI "void vm_page_activate(vm_page_t *" m ");"
+.br
+.BI "void vm_page_deactivate(vm_page_t *" m ");"
+.br
+.BI "void vm_page_wire(vm_page_t *" m ");"
+.br
+.BI "void vm_page_unwire(vm_page_t *" m ");"
+.br
+.BI "void vm_pageout_scan(int " max_scan ");"
+.br
+.BI "void vm_page_launder(vm_page_t *" m ");"
+.SH DESCRIPTION
+The
+.B vm_page
+subsystem manages physical pages of memory, tracking their state, ownership, and position in the LRU queues.
+.SS Page States
+.IP \[bu] 2
+.B PG_ACTIVE
+\- Recently accessed pages. Scanned by the page daemon using a Clock algorithm.
+.IP \[bu]
+.B PG_INACTIVE
+\- Candidates for reclamation. If clean, can be freed immediately. If dirty, must be laundered.
+.IP \[bu]
+.B PG_BUSY
+\- Page is currently involved in an I/O operation or allocation.
+.IP \[bu]
+.B PG_DIRTY
+\- Page contents have been modified and differ from backing store.
+.SS Replacement Policy
+The system uses a 
+.B two-handed clock algorithm
+(or approximate LRU). 
+.B vm_pageout_scan
+walks the active queue. Pages with the hardware reference bit set are given a "second chance" and moved to the tail of the active queue. Unreferenced pages are demoted to the inactive queue.
+.PP
+The
+.B pageout daemon
+(vm_pageout) wakes when free memory is low. It scans the active queue to refill the inactive queue, then reclaims clean inactive pages or launders dirty ones via the
+.B vm_pager
+interface.
+.SH SEE ALSO
+.BR vm_object (9),
+.BR vm_pager (9),
+.BR pmap (9)

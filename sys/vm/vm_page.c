@@ -1,4 +1,5 @@
 #include "vm_page.h"
+#include "vm_pager.h"
 #include <stddef.h>
 #include "../arch/i386/pmm.h" // For pmm_alloc_block
 
@@ -269,16 +270,40 @@ void vm_page_launder(vm_page_t *m) {
     
     // Add to laundry queue
     enqueue(&laundry_queue, m);
-    // Note: Actual writeout would happen here via vm_object's backing store
-    // For now, just mark as clean after "writing"
-    m->flags &= ~PG_DIRTY;
-    vm_stat_pageouts++;
     
-    // Move back to inactive after "cleaning"
+    // Perform writeback via pager
+    bool success = false;
+    if (m->object && m->object->pager) {
+        // Asynchronous or synchronous?
+        // Page daemon should probably block or queue async IO. 
+        // For simplicity, we do synchronous write here (might block daemon).
+        if (vm_pager_put_pages(m->object->pager, &m, 1, true) == 0) {
+            success = true;
+        }
+    } else if (m->object && m->object->type == VM_OBJ_TYPE_DEFAULT) {
+        // Anonymous memory without pager yet?
+        // Should have been assigned a swap pager.
+        // If not, we can't page it out.
+    }
+    
+    // Remove from laundry queue
     dequeue(&laundry_queue, m);
-    enqueue(&inactive_queue, m);
-    m->flags |= PG_INACTIVE;
-    vm_stat_inactive_count++;
+
+    if (success) {
+        // Mark clean
+        m->flags &= ~PG_DIRTY;
+        vm_stat_pageouts++;
+        
+        // Move to inactive queue (now clean, so next scan can free it)
+        enqueue(&inactive_queue, m);
+        m->flags |= PG_INACTIVE;
+        vm_stat_inactive_count++;
+    } else {
+        // Failed to swap out (no swap space?)
+        // Reactivate it to avoid tight loop of failing laundry
+        enqueue(&active_queue, m);
+        m->flags |= PG_ACTIVE;
+    }
 }
 
 // Main pageout daemon loop
