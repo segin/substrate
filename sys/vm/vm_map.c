@@ -1,4 +1,5 @@
 #include "vm_map.h"
+#include "vm_object.h"
 #include <stddef.h>
 
 #include "vm_kmem.h"
@@ -145,4 +146,44 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
         cur = tmp;
     }
     return 0;
+}
+
+// Lookup entry containing the given virtual address
+vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
+    vm_map_entry_t *header = map->header;
+    vm_map_entry_t *cur;
+    
+    for (cur = header->next; cur != header; cur = cur->next) {
+        if (va >= cur->start && va < cur->end) {
+            return cur;
+        }
+    }
+    return NULL;
+}
+
+// Destroy a vm_map and free all its entries
+void vm_map_destroy(vm_map_t *map) {
+    if (!map) return;
+    
+    vm_map_entry_t *header = map->header;
+    if (header) {
+        vm_map_entry_t *cur = header->next;
+        while (cur != header) {
+            vm_map_entry_t *next = cur->next;
+            // Dereference the object if present
+            if (cur->object) {
+                vm_object_deallocate(cur->object);
+            }
+            free_entry(cur);
+            cur = next;
+        }
+        free_entry(header);
+    }
+    
+    // Destroy the associated pmap
+    if (map->pmap) {
+        pmap_destroy(map->pmap);
+    }
+    
+    kfree(map, sizeof(vm_map_t));
 }

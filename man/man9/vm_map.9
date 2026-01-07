@@ -1,0 +1,91 @@
+.TH VM_MAP 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+vm_map \- virtual address space management
+.SH SYNOPSIS
+.B #include <sys/vm/vm_map.h>
+.LP
+.BI "void vm_map_init(vm_map_t *" map ", pmap_t " pmap ", uintptr_t " min ", uintptr_t " max ");"
+.br
+.BI "vm_map_t *vm_map_create(pmap_t " pmap ", uintptr_t " min ", uintptr_t " max ");"
+.br
+.BI "void vm_map_destroy(vm_map_t *" map ");"
+.br
+.BI "int vm_map_insert(vm_map_t *" map ", struct vm_object *" obj ", uint64_t " offset ", uintptr_t " start ", uintptr_t " end ");"
+.br
+.BI "int vm_map_remove(vm_map_t *" map ", uintptr_t " start ", uintptr_t " end ");"
+.br
+.BI "int vm_map_find_space(vm_map_t *" map ", uintptr_t *" addr ", size_t " length ");"
+.br
+.BI "vm_map_entry_t *vm_map_lookup(vm_map_t *" map ", uintptr_t " va ");"
+.SH DESCRIPTION
+The
+.B vm_map
+module manages virtual address spaces. Each process has a
+.B vm_map_t
+that describes its valid memory regions via a linked list of
+.B vm_map_entry_t
+structures.
+.SS Structures
+.B vm_map_t
+contains:
+.IP \[bu] 2
+.B pmap
+\- machine-dependent page tables
+.IP \[bu]
+.B header
+\- sentinel node for entry list
+.IP \[bu]
+.B nentries
+\- count of entries
+.IP \[bu]
+.B min_offset/max_offset
+\- address space bounds
+.PP
+.B vm_map_entry_t
+describes a contiguous region:
+.IP \[bu] 2
+.B start/end
+\- virtual address range
+.IP \[bu]
+.B object
+\- backing vm_object
+.IP \[bu]
+.B offset
+\- offset into object
+.IP \[bu]
+.B protection
+\- access permissions
+.SS Functions
+.B vm_map_create
+allocates and initializes a new map.
+.PP
+.B vm_map_destroy
+frees all entries and the map itself.
+.PP
+.B vm_map_insert
+adds a new mapping backed by
+.IR obj .
+.PP
+.B vm_map_remove
+unmaps a range, splitting or trimming entries as needed.
+.PP
+.B vm_map_find_space
+locates a free region of the requested size.
+.PP
+.B vm_map_lookup
+returns the entry containing
+.IR va ,
+or NULL if not mapped.
+.SH RETURN VALUE
+.B vm_map_create
+returns NULL on allocation failure.
+.PP
+.B vm_map_insert, vm_map_remove, vm_map_find_space
+return 0 on success, -1 on error.
+.PP
+.B vm_map_lookup
+returns the entry or NULL.
+.SH SEE ALSO
+.BR vm_object (9),
+.BR vm_fault (9),
+.BR pmap (9)
