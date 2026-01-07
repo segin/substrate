@@ -71,6 +71,9 @@ bool vm_pager_has_page(vm_pager_t *pager, uint64_t pindex) {
 
 // Stub implementations for pagers
 static struct vm_pager *stub_alloc(void *handle, size_t size, uint8_t prot, uint64_t offset) {
+    (void)size;
+    (void)prot;
+    (void)offset;
     vm_pager_t *pager = kmalloc(sizeof(vm_pager_t));
     if (pager) pager->priv = handle;
     return pager;
@@ -81,6 +84,9 @@ static void stub_dealloc(struct vm_pager *pager) {
 }
 
 static int stub_getput(struct vm_pager *pager, vm_page_t *m, bool sync) {
+    (void)pager;
+    (void)m;
+    (void)sync;
     return -1; // Not implemented
 }
 
