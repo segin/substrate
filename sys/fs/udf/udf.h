@@ -51,4 +51,57 @@ struct udf_tag {
     uint32_t tag_location;      /* Sector number of this descriptor */
 } __attribute__((packed));
 
+/*
+ * Extent Descriptor (ECMA-167 3/7.1)
+ * Describes location and length of an extent.
+ */
+struct udf_extent_ad {
+    uint32_t length;            /* Extent length in bytes */
+    uint32_t location;          /* Logical block number */
+} __attribute__((packed));
+
+/*
+ * Entity Identifier / Registration ID (ECMA-167 1/7.4)
+ */
+struct udf_regid {
+    uint8_t  flags;
+    char     identifier[23];
+    uint8_t  suffix[8];
+} __attribute__((packed));
+
+/*
+ * Character Set Specification (ECMA-167 1/7.2.1)
+ */
+struct udf_charspec {
+    uint8_t  type;              /* 0 = CS0 (OSTA Compressed Unicode) */
+    uint8_t  info[63];
+} __attribute__((packed));
+
+/*
+ * Timestamp (ECMA-167 1/7.3)
+ */
+struct udf_timestamp {
+    uint16_t type_and_tz;       /* Type (bits 12-15), timezone (bits 0-11) */
+    int16_t  year;
+    uint8_t  month;
+    uint8_t  day;
+    uint8_t  hour;
+    uint8_t  minute;
+    uint8_t  second;
+    uint8_t  centiseconds;
+    uint8_t  hundreds_usec;
+    uint8_t  microseconds;
+} __attribute__((packed));
+
+/*
+ * Anchor Volume Descriptor Pointer (ECMA-167 3/10.2)
+ * Located at sector 256 (and last sector, and N-256).
+ */
+struct udf_avdp {
+    struct udf_tag tag;
+    struct udf_extent_ad main_vds_extent;    /* Main VDS location */
+    struct udf_extent_ad reserve_vds_extent; /* Reserve VDS location */
+    uint8_t reserved[480];
+} __attribute__((packed));
+
 #endif /* _FS_UDF_UDF_H */

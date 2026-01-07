@@ -681,7 +681,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **UDF (Universal Disk Format):**
     - [ ] **On-Disk Structures (`sys/fs/udf/udf.h`):**
         - [x] Define `udf_tag` (Descriptor Tag - 16 bytes).
-        - [ ] Define `udf_avdp` (Anchor Volume Descriptor Pointer).
+        - [x] Define `udf_avdp` (Anchor Volume Descriptor Pointer).
         - [ ] Define `udf_pvd` (Primary Volume Descriptor).
         - [ ] Define `udf_pd` (Partition Descriptor).
         - [ ] Define `udf_lvd` (Logical Volume Descriptor).
