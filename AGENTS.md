@@ -30,6 +30,7 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **Init Safety:** Kernel now catches `init` process exit (e.g., from detached stdin) and enters an idle loop instead of panicking.
 - **Build System:** Fixed `dist` directory generation to include standard Unix hierarchy (`usr/include`, `usr/local`, etc.) and ensured `vmunix` installation.
 - **Boot/Init:** Cleaned up `sbin` build process; kernel now boots correctly with `root=/dev/hda` for external root filesystems, attempting fallback to `init` search path.
+- **UDF Filesystem Driver:** Complete read-write UDF (Universal Disk Format) driver per ECMA-167/OSTA spec. On-disk structures in `udf.h`, read-only support in `udf.c`, write support in `udf_write.c`, with unit tests and man pages (`udf.4`, `udf.5`).
 
 
 ## Current Status
