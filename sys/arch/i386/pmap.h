@@ -110,6 +110,12 @@ int pmap_page_is_cow(pmap_t pmap, uint32_t va);
 void pmap_invalidate_page(uint32_t va);
 void pmap_invalidate_all(void);  // CR3 reload, flushes entire TLB
 
+// SMP TLB Shootdown (invalidate on all CPUs)
+void pmap_shootdown_page(uint32_t va);
+void pmap_shootdown_range(uint32_t va, uint32_t len);
+void pmap_shootdown_all(void);
+void pmap_shootdown_handler(void);  // Called by IPI handler
+
 // Page reference/modification tracking
 int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva);
 int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va);
