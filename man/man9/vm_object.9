@@ -1,0 +1,54 @@
+.TH VM_OBJECT 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+vm_object \- virtual memory backing store abstraction
+.SH SYNOPSIS
+.B #include <sys/vm/vm_object.h>
+.LP
+.BI "vm_object_t *vm_object_allocate(vm_object_type_t " type ", size_t " size ");"
+.br
+.BI "void vm_object_reference(vm_object_t *" object ");"
+.br
+.BI "void vm_object_deallocate(vm_object_t *" object ");"
+.br
+.BI "vm_object_t *vm_object_shadow(vm_object_t *" source ");"
+.br
+.BI "void vm_object_add_page(vm_object_t *" object ", vm_page_t *" page ");"
+.br
+.BI "void vm_object_remove_page(vm_object_t *" object ", vm_page_t *" page ");"
+.br
+.BI "vm_page_t *vm_object_lookup_page(vm_object_t *" object ", uint64_t " pindex ");"
+.SH DESCRIPTION
+The
+.B vm_object
+subsystem manages abstract data sources for virtual memory. Objects can be anonymous (zero-filled), file-backed (vnode), or physical device memory.
+.SS Object Types
+.IP \[bu] 2
+.B VM_OBJ_TYPE_DEFAULT
+\- Anonymous memory (SWAP/RAM).
+.IP \[bu]
+.B VM_OBJ_TYPE_VNODE
+\- File-backed memory.
+.IP \[bu]
+.B VM_OBJ_TYPE_DEVICE
+\- Memory mapped I/O.
+.SS Shadow Objects
+Shadow objects implement Copy-on-Write (COW). A shadow object points to a backing object. Pages present in the shadow overlay the backing object; missing pages fall back to the backing object.
+.SH FUNCTIONS
+.B vm_object_allocate
+creates a new object of the given type and size.
+.PP
+.B vm_object_reference
+increments the reference count.
+.PP
+.B vm_object_deallocate
+decrements the reference count and frees the object if zero.
+.PP
+.B vm_object_shadow
+creates a new shadow object pointing to
+.IR source .
+.PP
+.B vm_object_lookup_page
+finds a resident page at the given index.
+.SH SEE ALSO
+.BR vm_map (9),
+.BR vm_page (9)

@@ -1,32 +1,43 @@
 #include "vm_object.h"
+#include "vm_kmem.h"
 #include <stddef.h>
 
 // Static pool for bootstrap objects (until kmalloc is ready)
 #define MAX_BOOTSTRAP_OBJECTS 32
 static vm_object_t bootstrap_objects[MAX_BOOTSTRAP_OBJECTS];
 static int next_bootstrap_object = 0;
+static int kmalloc_ready = 0;
 
 static vm_object_t *alloc_object(void) {
-    if (next_bootstrap_object < MAX_BOOTSTRAP_OBJECTS) {
+    if (next_bootstrap_object < MAX_BOOTSTRAP_OBJECTS)
         return &bootstrap_objects[next_bootstrap_object++];
-    }
+    if (kmalloc_ready)
+        return kmalloc(sizeof(vm_object_t));
     return NULL;
 }
 
 void vm_object_init(void) {
     next_bootstrap_object = 0;
+    kmalloc_ready = 1;  // kmalloc should be ready after init
 }
 
 vm_object_t *vm_object_allocate(vm_object_type_t type, size_t size) {
     vm_object_t *obj = alloc_object();
-    if (!obj) return NULL;
+    if (!obj)
+        return NULL;
 
     obj->type = type;
     obj->size = size;
     obj->ref_count = 1;
     obj->pages = NULL;
     obj->page_count = 0;
+    obj->resident_count = 0;
     obj->handle = NULL;
+    obj->pager = NULL;
+    obj->shadow = NULL;
+    obj->shadow_offset = 0;
+    obj->flags = (type == VM_OBJ_TYPE_DEFAULT) ? VM_OBJ_INTERNAL : 0;
+    obj->next = obj->prev = NULL;
 
     return obj;
 }
@@ -87,4 +98,23 @@ vm_page_t *vm_object_lookup_page(vm_object_t *object, uint64_t pindex) {
         if (p->pindex == pindex) return p;
     }
     return NULL;
+}
+
+// Create a shadow object backed by the source object
+// This is used for Copy-on-Write forks
+vm_object_t *vm_object_shadow(vm_object_t *source) {
+    if (!source) return NULL;
+    
+    vm_object_t *shadow = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, source->size);
+    if (!shadow) return NULL;
+    
+    shadow->shadow = source;
+    shadow->shadow_offset = 0;
+    
+    vm_object_reference(source);
+    
+    // Mark source as COPY object since it's now shared
+    source->flags |= VM_OBJ_COPY;
+    
+    return shadow;
 }
