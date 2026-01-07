@@ -678,7 +678,45 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **FAT16/32:**
     - [x] Implement File Allocation Table parsing and chain following.
     - [x] Implement Long File Name (LFN) support.
-- [ ] **Pseudo-FS:**
+- [ ] **UDF (Universal Disk Format):**
+    - [ ] **On-Disk Structures (`sys/fs/udf/udf.h`):**
+        - [x] Define `udf_tag` (Descriptor Tag - 16 bytes).
+        - [ ] Define `udf_avdp` (Anchor Volume Descriptor Pointer).
+        - [ ] Define `udf_pvd` (Primary Volume Descriptor).
+        - [ ] Define `udf_pd` (Partition Descriptor).
+        - [ ] Define `udf_lvd` (Logical Volume Descriptor).
+        - [ ] Define `udf_fsd` (File Set Descriptor).
+        - [ ] Define `udf_fe`/`udf_efe` (File Entry / Extended File Entry).
+        - [ ] Define `udf_fid` (File Identifier Descriptor).
+        - [ ] Define `udf_short_ad`/`udf_long_ad` (Allocation Descriptors).
+    - [ ] **Read-Only Support (`sys/fs/udf/udf.c`):**
+        - [ ] Implement `udf_read_tag()` - Tag CRC verification.
+        - [ ] Implement `udf_find_avdp()` - Locate Anchor at sector 256.
+        - [ ] Implement `udf_read_vds()` - Parse Volume Descriptor Sequence.
+        - [ ] Implement `udf_read_partition()` - Parse Partition Descriptor.
+        - [ ] Implement `udf_read_lvd()` - Parse Logical Volume Descriptor.
+        - [ ] Implement `udf_read_fsd()` - Parse File Set Descriptor.
+        - [ ] Implement `udf_read_fe()` - Read File Entry (inode).
+        - [ ] Implement `udf_read_file()` - Read file data via allocation descriptors.
+        - [ ] Implement `udf_readdir()` - Iterate directory FIDs.
+        - [ ] Implement `udf_finddir()` - Lookup by name.
+        - [ ] Implement `udf_mount()` - VFS mount integration.
+    - [ ] **Write Support (`sys/fs/udf/udf_write.c`):**
+        - [ ] Implement `udf_read_space_bitmap()` - Parse unallocated space.
+        - [ ] Implement `udf_alloc_block()` - Allocate from space bitmap.
+        - [ ] Implement `udf_free_block()` - Return block to space bitmap.
+        - [ ] Implement `udf_create_fe()` - Create new File Entry.
+        - [ ] Implement `udf_write_file()` - Write file data.
+        - [ ] Implement `udf_add_fid()` - Add directory entry.
+        - [ ] Implement `udf_remove_fid()` - Remove directory entry.
+        - [ ] Implement `udf_truncate()` - Truncate/extend file.
+    - [ ] **Testing:**
+        - [ ] Unit tests (`sys/tests/test_udf.c`).
+        - [ ] Property tests for allocation/deallocation.
+        - [ ] Fuzzing tests for descriptor parsing.
+    - [ ] **Documentation:**
+        - [ ] Create `man/man5/udf.5` (filesystem description).
+        - [ ] Create `man/man4/udf.4` (kernel driver).
     - [ ] **DevFS (`/dev`):**
         - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
         - [x] **VFS Glue:** Auto-generate VFS nodes when registering devices.
