@@ -686,9 +686,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Define `udf_pd` (Partition Descriptor).
         - [x] Define `udf_lvd` (Logical Volume Descriptor).
         - [x] Define `udf_fsd` (File Set Descriptor).
-        - [ ] Define `udf_fe`/`udf_efe` (File Entry / Extended File Entry).
-        - [ ] Define `udf_fid` (File Identifier Descriptor).
-        - [ ] Define `udf_short_ad`/`udf_long_ad` (Allocation Descriptors).
+        - [x] Define `udf_fe`/`udf_efe` (File Entry / Extended File Entry).
+        - [x] Define `udf_fid` (File Identifier Descriptor).
+        - [x] Define `udf_short_ad`/`udf_long_ad` (Allocation Descriptors).
     - [ ] **Read-Only Support (`sys/fs/udf/udf.c`):**
         - [ ] Implement `udf_read_tag()` - Tag CRC verification.
         - [ ] Implement `udf_find_avdp()` - Locate Anchor at sector 256.

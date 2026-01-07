@@ -204,4 +204,113 @@ struct udf_fsd {
     uint8_t  reserved[32];
 } __attribute__((packed));
 
+/*
+ * Short Allocation Descriptor (ECMA-167 4/14.14.1)
+ */
+struct udf_short_ad {
+    uint32_t length;                /* Extent length + type in upper 2 bits */
+    uint32_t position;              /* Logical block position */
+} __attribute__((packed));
+
+/* ICB Tag (ECMA-167 4/14.6) - Common header for file entries */
+struct udf_icb_tag {
+    uint32_t prior_entries;
+    uint16_t strategy_type;
+    uint16_t strategy_param;
+    uint16_t max_entries;
+    uint8_t  reserved;
+    uint8_t  file_type;             /* 4=directory, 5=file, 12=symlink */
+    uint32_t parent_icb_block;
+    uint16_t parent_icb_partition;
+    uint16_t flags;                 /* Allocation descriptor type in bits 0-2 */
+} __attribute__((packed));
+
+/* Allocation descriptor types (in ICB flags bits 0-2) */
+#define UDF_ICB_FLAG_AD_SHORT   0
+#define UDF_ICB_FLAG_AD_LONG    1
+#define UDF_ICB_FLAG_AD_EXT     2
+#define UDF_ICB_FLAG_AD_INLINE  3   /* Data embedded in allocation area */
+
+/* File types */
+#define UDF_FILETYPE_DIR        4
+#define UDF_FILETYPE_FILE       5
+#define UDF_FILETYPE_SYMLINK    12
+
+/*
+ * File Entry (ECMA-167 4/14.9) - UDF "inode"
+ */
+struct udf_fe {
+    struct udf_tag tag;
+    struct udf_icb_tag icb_tag;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t permissions;
+    uint16_t file_link_count;
+    uint8_t  record_format;
+    uint8_t  record_display_attrs;
+    uint32_t record_length;
+    uint64_t info_length;           /* File size in bytes */
+    uint64_t logical_blocks;
+    struct udf_timestamp access_time;
+    struct udf_timestamp modify_time;
+    struct udf_timestamp attr_time;
+    uint32_t checkpoint;
+    struct udf_long_ad ext_attr_icb;
+    struct udf_regid impl_id;
+    uint64_t unique_id;
+    uint32_t ext_attr_length;
+    uint32_t alloc_desc_length;
+    /* Followed by: extended attributes, then allocation descriptors */
+} __attribute__((packed));
+
+/*
+ * Extended File Entry (ECMA-167 4/14.17) - Larger version with more timestamps
+ */
+struct udf_efe {
+    struct udf_tag tag;
+    struct udf_icb_tag icb_tag;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t permissions;
+    uint16_t file_link_count;
+    uint8_t  record_format;
+    uint8_t  record_display_attrs;
+    uint32_t record_length;
+    uint64_t info_length;
+    uint64_t object_size;
+    uint64_t logical_blocks;
+    struct udf_timestamp access_time;
+    struct udf_timestamp modify_time;
+    struct udf_timestamp create_time;   /* EFE has creation time */
+    struct udf_timestamp attr_time;
+    uint32_t checkpoint;
+    uint32_t reserved;
+    struct udf_long_ad ext_attr_icb;
+    struct udf_long_ad stream_dir_icb;
+    struct udf_regid impl_id;
+    uint64_t unique_id;
+    uint32_t ext_attr_length;
+    uint32_t alloc_desc_length;
+    /* Followed by: extended attributes, then allocation descriptors */
+} __attribute__((packed));
+
+/*
+ * File Identifier Descriptor (ECMA-167 4/14.4) - Directory entry
+ */
+struct udf_fid {
+    struct udf_tag tag;
+    uint16_t file_version;
+    uint8_t  characteristics;       /* Bit 1=hidden, bit 2=directory, bit 3=parent */
+    uint8_t  file_id_length;        /* Length of filename */
+    struct udf_long_ad icb;         /* Location of file entry */
+    uint16_t impl_use_length;
+    /* Followed by: impl_use[], file_id[], padding to 4-byte boundary */
+} __attribute__((packed));
+
+/* FID characteristics flags */
+#define UDF_FID_HIDDEN      (1 << 0)
+#define UDF_FID_DIRECTORY   (1 << 1)
+#define UDF_FID_DELETED     (1 << 2)
+#define UDF_FID_PARENT      (1 << 3)
+
 #endif /* _FS_UDF_UDF_H */
