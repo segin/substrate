@@ -15,23 +15,21 @@ argument points to a
 .I struct pmap_stats
 buffer that will be filled with the statistical data. The structure is defined as:
 .PP
-.ne 8
+.ne 12
 .nf
 struct pmap_stats {
-    uint32_t resident_count;      /* Total resident pages */
-    uint32_t wired_count;         /* Wired (unpageable) pages */
     uint32_t faults;              /* Total page faults */
     uint32_t cow_faults;          /* Faults handled via COW */
     uint32_t zero_fills;          /* Zero-filled pages */
     uint32_t protection_upgrades; /* R/O -> R/W upgrades */
     uint32_t protection_downgrades; /* R/W -> R/O downgrades */
-    uint32_t cow_pages_mapped;    /* Total pages currently shared via COW */
+    uint32_t cow_pages_mapped;    /* Pages initially shared as COW */
+    uint32_t cow_duplications;    /* Pages duplicated during COW */
+    uint32_t pages_saved_by_cow;  /* Pages never duplicated */
 };
 .fi
 .SH RETURN VALUE
-On success, zero is returned. On error, -1 is returned, and
-.I errno
-is set appropriately.
+On success, zero is returned. On error, -1 is returned.
 .SH ERRORS
 .TP
 .B EFAULT

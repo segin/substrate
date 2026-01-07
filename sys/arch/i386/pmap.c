@@ -325,6 +325,13 @@ void pmap_destroy(pmap_t pmap) {
     // Edge case: Clear recursive mapping to prevent confusion
     pd[1023] = 0;
     
+    // Track pages saved by COW before destroying stats
+    // Pages saved = pages initially shared - pages that were actually duplicated
+    if (pmap->stats.cow_pages_mapped > pmap->stats.cow_duplications) {
+        uint32_t saved = pmap->stats.cow_pages_mapped - pmap->stats.cow_duplications;
+        __sync_fetch_and_add(&global_pmap_stats.pages_saved_by_cow, saved);
+    }
+    
     // 3. Remove from global pmap list
     pmap_list_remove(pmap);
     
@@ -1121,6 +1128,7 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         pmap_invalidate_page(cr2);
         
         pmap_stat_inc(pmap, offsetof(struct pmap_stats, cow_faults));
+        pmap_stat_inc(pmap, offsetof(struct pmap_stats, cow_duplications));  // New: track duplications
         pmap_stat_inc(pmap, offsetof(struct pmap_stats, faults)); // Also a general fault
         return 1;
     }

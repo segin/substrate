@@ -27,6 +27,8 @@ int test_cow_stats_read(void) {
     
     ASSERT(stats.cow_faults != 0xFFFFFFFF);
     ASSERT(stats.cow_pages_mapped != 0xFFFFFFFF);
+    ASSERT(stats.cow_duplications != 0xFFFFFFFF);  // New field
+    ASSERT(stats.pages_saved_by_cow != 0xFFFFFFFF);  // New field
     
     kprint("test_cow_stats_read passed\n");
     return 1;

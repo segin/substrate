@@ -220,9 +220,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Export referenced/modified info to VM layer.
                     - [x] Support for working set estimation.
                     - [x] Feed into swapper/pageout daemon decisions.
-            - [ ] **Copy-on-Write (COW) System:**
+            - [x] **Copy-on-Write (COW) System:**
                 - [x] Mark shared pages read-only in both parent and child
-                - [ ] **COW Fault Handler:**
+                - [x] **COW Fault Handler:**
                     - [x] On write fault to COW page:
                     - [x] Allocate new physical page.
                     - [x] Copy contents from original page.
@@ -231,10 +231,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] If refcount == 1, optionally remap original R/W in parent.
                 - [x] Track COW page reference counts
                 - [x] `pmap_page_is_cow()`: Check if page is COW shared
-                - [ ] **COW Statistics:**
-                    - [ ] Track total COW faults.
-                    - [ ] Track pages saved by COW.
-                    - [ ] Track COW page duplications.
+                - [x] **COW Statistics:**
+                    - [x] Track total COW faults.
+                    - [x] Track pages saved by COW.
+                    - [x] Track COW page duplications.
             - [ ] **TLB Management:**
                 - [ ] **Single CPU TLB:**
                     - [ ] `invlpg(va)`: Invalidate single page.

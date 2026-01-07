@@ -40,6 +40,8 @@ struct pmap_stats {
     uint32_t protection_upgrades;  // Protection upgrades (read→write)
     uint32_t protection_downgrades; // Protection downgrades (write→read)
     uint32_t cow_pages_mapped;     // Total pages initially shared as COW
+    uint32_t cow_duplications;     // Pages physically duplicated during COW
+    uint32_t pages_saved_by_cow;   // Pages never duplicated (process exited clean)
 };
 
 // Syscall to get stats
