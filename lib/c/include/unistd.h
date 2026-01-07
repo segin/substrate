@@ -25,6 +25,7 @@ ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 int close(int fd);
 int unlink(const char *pathname);
+int rmdir(const char *pathname);
 int link(const char *oldpath, const char *newpath);
 int chdir(const char *path);
 char *getcwd(char *buf, size_t size);

@@ -41,5 +41,6 @@ struct stat {
 
 int mkdir(const char *pathname, int mode);
 int stat(const char *pathname, struct stat *statbuf);
+int mknod(const char *pathname, mode_t mode, dev_t dev);
 
 #endif
