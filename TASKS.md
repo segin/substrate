@@ -724,21 +724,49 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 5. System Calls & Personalities
 - [ ] **Mechanisms:**
-        - [ ] **PTY Subsystem (Unix98):**
-            - [ ] **Multiplexor:** Implement `/dev/ptmx` cloning device.
-            - [ ] **DevPTS:** Implement `devpts` virtual filesystem for `/dev/pts`.
-            - [ ] **API Support:** Support `grantpt`, `unlockpt`, `ptsname` (via ioctls).
-            - [ ] **Line Discipline:** Implement termios processing (canonical mode, echo, signals).
+        - [ ] **PTY Subsystem (Unix98) - Massive Expansion:**
+            - [ ] **Core PTY Driver (`/dev/pts/N`, `/dev/ptmx`):**
+                - [ ] Implement `pts_fs` (DevPTS) virtual filesystem.
+                - [ ] Implement `ptmx_open`: Allocate next available PTY index.
+                - [ ] Implement `pts_open`: Validate index and ownership.
+                - [ ] Slave/Master pair coupling (ring buffers).
+                - [ ] TTY association logic (controlling terminal).
+            - [ ] **IOCTL API (`libc` support):**
+                - [ ] `TIOCGPTN`: Get PTY Number (for `ptsname`).
+                - [ ] `TIOCSPTLCK`: Lock/Unlock PTY (for `unlockpt`).
+                - [ ] `TIOCGPKT`: Packet mode for master side.
+                - [ ] `TIOCSIG`: Send signal to slave side.
+            - [ ] **Line Discipline (`N_TTY`):**
+                - [ ] Canonical Mode (Line Editing: backspace, werase, kill).
+                - [ ] Echoing logic (`ECHO`, `ECHOE`, `ECHOK`, `ECHONL`).
+                - [ ] Signal generation (`ISIG`: `INTP`, `QUIT`, `SUSP`).
+                - [ ] Output post-processing (`OPOST`: `ONLCR`).
+                - [ ] `termios` structure management.
         - [x] Implement `sys_ioctl` framework.
         - [x] Implement `sys_pipe` and `sys_dup2`.
-        - [ ] **Compatibility syscalls:**
-            - [ ] **`sys_mount` (proper):**
-                - [ ] Lookup VFS driver by name.
-                - [ ] Implement `MS_RDONLY`, `MS_NOEXEC`, `MS_NOSUID` flags.
-            - [ ] **`sys_clone`:**
-                - [ ] Flag handling (`CLONE_VM`, `CLONE_FS`, `CLONE_FILES`, `CLONE_SIGHAND`, `CLONE_THREAD`).
-                - [ ] User stack setup (`child_stack` argument).
-                - [ ] TLS setup (`set_thread_area` or `tls_val`).
+        - [ ] **Compatibility Syscalls (Deep Dive):**
+            - [ ] **`sys_mount` (VFS Integration):**
+                - [ ] **VFS Layer:**
+                    - [ ] Find driver by name (`get_fs_driver()`).
+                    - [ ] Allocate superblock and root node.
+                    - [ ] Mount point binding (directory overlay).
+                - [ ] **Flag Support:**
+                    - [ ] `MS_RDONLY`: Enforce read-only checks on writes.
+                    - [ ] `MS_NOEXEC`: Block execution permissions.
+                    - [ ] `MS_NOSUID`: Ignore setuid bits.
+                    - [ ] `MS_NODEV`: Verify no character/block special nodes.
+            - [ ] **`sys_clone` (Process/Thread Creation):**
+                - [ ] **Context Duplication:**
+                    - [ ] `CLONE_VM`: Share address space (refcount pmap).
+                    - [ ] `CLONE_FS`: Share cwd/root (refcount nodes).
+                    - [ ] `CLONE_FILES`: Share FD table (refcount table).
+                    - [ ] `CLONE_SIGHAND`: Share signal handlers.
+                - [ ] **Stack & TLS:**
+                    - [ ] Switch to user-provided stack (`child_stack`).
+                    - [ ] Implement `CLONE_SETTLS`: Set GDT entries (GS base).
+                - [ ] **Thread Grouping:**
+                    - [ ] `CLONE_THREAD`: Join thread group (`pgrp`/`tgid`).
+                    - [ ] `CLONE_PARENT`: Share parent process.
             - [ ] **Event Notification:**
                 - [ ] **`sys_select` / `sys_poll`:**
                     - [ ] `select_wait` queueing logic.
