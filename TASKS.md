@@ -692,10 +692,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Read-Only Support (`sys/fs/udf/udf.c`):**
         - [x] Implement `udf_read_tag()` - Tag CRC verification.
         - [x] Implement `udf_find_avdp()` - Locate Anchor at sector 256.
-        - [ ] Implement `udf_read_vds()` - Parse Volume Descriptor Sequence.
-        - [ ] Implement `udf_read_partition()` - Parse Partition Descriptor.
-        - [ ] Implement `udf_read_lvd()` - Parse Logical Volume Descriptor.
-        - [ ] Implement `udf_read_fsd()` - Parse File Set Descriptor.
+        - [x] Implement `udf_read_vds()` - Parse Volume Descriptor Sequence.
+        - [x] Implement `udf_read_partition()` - Parse Partition Descriptor.
+        - [x] Implement `udf_read_lvd()` - Parse Logical Volume Descriptor.
+        - [x] Implement `udf_read_fsd()` - Parse File Set Descriptor.
         - [ ] Implement `udf_read_fe()` - Read File Entry (inode).
         - [ ] Implement `udf_read_file()` - Read file data via allocation descriptors.
         - [ ] Implement `udf_readdir()` - Iterate directory FIDs.

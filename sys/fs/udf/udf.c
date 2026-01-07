@@ -128,6 +128,78 @@ int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp) {
     return -1;
 }
 
+/*
+ * Read Volume Descriptor Sequence
+ * Parses PVD, PD, and LVD from the VDS extent
+ */
+int udf_read_vds(fs_node_t *dev, struct udf_extent_ad *vds_extent,
+                 struct udf_pvd *pvd, struct udf_pd *pd, struct udf_lvd *lvd) {
+    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    struct udf_tag tag;
+    
+    uint32_t start = vds_extent->location;
+    uint32_t count = vds_extent->length / UDF_SECTOR_SIZE;
+    
+    int found_pvd = 0, found_pd = 0, found_lvd = 0;
+    
+    for (uint32_t i = 0; i < count && !(found_pvd && found_pd && found_lvd); i++) {
+        if (udf_read_tag(dev, start + i, &tag, sector_buf, UDF_SECTOR_SIZE) != 0) {
+            continue;  /* Skip invalid sectors */
+        }
+        
+        switch (tag.tag_id) {
+        case UDF_TAG_PRIMARY_VD:
+            memcpy(pvd, sector_buf, sizeof(struct udf_pvd));
+            found_pvd = 1;
+            break;
+        case UDF_TAG_PARTITION_D:
+            memcpy(pd, sector_buf, sizeof(struct udf_pd));
+            found_pd = 1;
+            break;
+        case UDF_TAG_LOGICAL_VD:
+            memcpy(lvd, sector_buf, sizeof(struct udf_lvd));
+            found_lvd = 1;
+            break;
+        case UDF_TAG_TERMINATING:
+            i = count;  /* Stop at terminating descriptor */
+            break;
+        }
+    }
+    
+    if (!found_pvd || !found_pd || !found_lvd) {
+        kprint("UDF: VDS incomplete\n");
+        return -1;
+    }
+    
+    return 0;
+}
+
+/*
+ * Read File Set Descriptor from the location in LVD
+ */
+int udf_read_fsd(fs_node_t *dev, struct udf_fs *fs, struct udf_lvd *lvd, 
+                 struct udf_fsd *fsd) {
+    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    struct udf_tag tag;
+    
+    /* FSD location is relative to partition start */
+    uint32_t fsd_block = lvd->fsd_location.block;
+    uint32_t fsd_sector = fs->partition_start + fsd_block;
+    
+    if (udf_read_tag(dev, fsd_sector, &tag, sector_buf, UDF_SECTOR_SIZE) != 0) {
+        kprint("UDF: Failed to read FSD\n");
+        return -1;
+    }
+    
+    if (tag.tag_id != UDF_TAG_FSD) {
+        kprint("UDF: Invalid FSD tag\n");
+        return -1;
+    }
+    
+    memcpy(fsd, sector_buf, sizeof(struct udf_fsd));
+    return 0;
+}
+
 /* VFS filesystem structure */
 static filesystem_t udf_filesystem = {
     .name = "udf",
