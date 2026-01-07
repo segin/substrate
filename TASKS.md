@@ -1163,11 +1163,32 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Support both sync and async query modes (for monitoring tools).
             - [ ] Thread-safe design with per-thread error state.
         - [ ] **Data Sources:**
-            - [ ] **`sysctl` MIBs:** Full hierarchical MIB traversal (`kern.*`, `vm.*`, `hw.*`, `net.*`).
-            - [ ] **`procfs` Structures:** Parse `/proc/[pid]/stat`, `status`, `maps`, `fd/`, `cmdline`, `environ`.
-            - [ ] **`sysfs` Structures:** Parse `/sys/devices/`, `/sys/class/`, `/sys/block/` for hardware info.
-            - [ ] **Netlink Sockets:** `NETLINK_ROUTE` for network interfaces, `NETLINK_KOBJECT_UEVENT` for hotplug.
-            - [ ] **Direct Syscalls:** `sysinfo()`, `uname()`, `getrlimit()`, `clock_gettime()`.
+            - [ ] **`sysctl` MIBs (System Control):**
+                - [ ] `kern.*` (`ostype`, `osrelease`, `version`, `hostname`, `boottime`).
+                - [ ] `hw.*` (`machine`, `model`, `ncpu`, `physmem`, `usermem`).
+                - [ ] `vm.*` (`loadavg`, `swap_usage`, `vmtotal`).
+                - [ ] `net.*` (`inet.ip.stats`, `inet.tcp.stats`, `link.generic`).
+            - [ ] **`procfs` Structures (Process Filesystem):**
+                - [ ] `/proc/[pid]/stat`: Process state, stats, metrics (Linux compatible).
+                - [ ] `/proc/[pid]/status`: Human-readable status info.
+                - [ ] `/proc/[pid]/maps`: Memory map regions and permissions.
+                - [ ] `/proc/[pid]/cmdline`: Command line arguments.
+                - [ ] `/proc/[pid]/environ`: Environment variables.
+                - [ ] `/proc/[pid]/fd/`: Open file descriptors (symlinks).
+                - [ ] `/proc/meminfo`: Global memory usage.
+                - [ ] `/proc/cpuinfo`: CPU capabilities and model info.
+            - [ ] **`sysfs` Structures (System Filesystem):**
+                - [ ] `/sys/class/net/`: Network interface properties.
+                - [ ] `/sys/block/`: Block device attributes (`size`, `stat`).
+                - [ ] `/sys/devices/system/cpu/`: CPU topology.
+            - [ ] **Netlink Sockets (Linux Compatibility):**
+                - [ ] `NETLINK_ROUTE`: Interface/Address/Route management (`RTM_*`).
+                - [ ] `NETLINK_KOBJECT_UEVENT`: Hotplug/Device events.
+            - [ ] **Direct Standard Syscalls:**
+                - [ ] `sysinfo()`: System uptime, total RAM, free RAM.
+                - [ ] `uname()`: System identification.
+                - [ ] `getrlimit()`: Process resource limits.
+                - [ ] `clock_gettime()`: High-resolution system clocks.
         - [ ] **Process Information API (Native Syscalls):**
             - [ ] `sys_proc_count()` - Get total number of processes.
             - [ ] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
