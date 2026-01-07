@@ -48,6 +48,7 @@
 #define SYS_LSTAT   107
 #define SYS_FSTAT   108
 #define SYS_NANOSLEEP 162
+#define SYS_MSYNC 144
 #define SYS_CLOCK_GETTIME 265
 #define SYS_CLONE   120
 #define SYS_UNAME   122

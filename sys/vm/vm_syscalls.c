@@ -178,3 +178,40 @@ void *sys_brk(void *addr) {
     
     return (void *)new_brk;
 }
+
+// msync flags (from sys/mman.h)
+#define MS_ASYNC      1
+#define MS_SYNC       2
+#define MS_INVALIDATE 4
+
+// Forward declarations for pager
+extern int vm_pager_put_pages(void *pager, void **pages, int count, bool sync);
+
+int sys_msync(void *addr, size_t length, int flags) {
+    if (!current_process || !current_process->vm_map) return -1;
+    if (length == 0) return 0;
+    
+    (void)flags;  // Treat all as synchronous for now
+    
+    vm_map_t *map = current_process->vm_map;
+    uintptr_t start = (uintptr_t)addr & ~0xFFF;
+    uintptr_t end = ((uintptr_t)addr + length + 0xFFF) & ~0xFFF;
+    
+    // Walk the range and flush dirty pages
+    for (uintptr_t va = start; va < end; va += 0x1000) {
+        vm_map_entry_t *entry = vm_map_lookup(map, va);
+        if (!entry || !entry->object) continue;
+        
+        uint64_t pindex = (va - entry->start + entry->offset) / 4096;
+        vm_page_t *m = vm_object_lookup_page(entry->object, pindex);
+        
+        if (m && (m->flags & PG_DIRTY)) {
+            // Write back via pager
+            if (entry->object->pager) {
+                vm_pager_put_pages(entry->object->pager, (void**)&m, 1, true);
+            }
+        }
+    }
+    
+    return 0;
+}

@@ -31,6 +31,7 @@
 #define SYS_FSTAT   108
 #define SYS_CLONE   120
 #define SYS_FUTEX   240
+#define SYS_MSYNC   144
 #define SYS_GET_COW_STATS 241
 // ... add more as needed
 

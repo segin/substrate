@@ -44,6 +44,7 @@ extern int sys_link(const char*, const char*);
 struct pmap_stats;
 extern int sys_pmap_stats(struct pmap_stats*);
 extern int sys_ioctl(int, uint32_t, void*);
+extern int sys_msync(void*, size_t, int);
 
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
@@ -82,6 +83,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_FSTAT] = &sys_fstat,
     [122] = &sys_uname,
     [141] = &sys_getdents, 
+    [SYS_MSYNC] = &sys_msync,
     [162] = &sys_nanosleep,
     [183] = &sys_getcwd,
     [241] = &sys_pmap_stats,

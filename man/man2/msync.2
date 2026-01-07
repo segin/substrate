@@ -1,0 +1,62 @@
+.\" Process this file with
+.\" groff -man -Tascii msync.2
+.\"
+.TH MSYNC 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+msync \- synchronize a file with a memory map
+.SH SYNOPSIS
+.B #include <sys/mman.h>
+.PP
+.BI "int msync(void *" addr ", size_t " length ", int " flags ");"
+.SH DESCRIPTION
+.B msync
+() flushes changes made to the in-core copy of a file that was mapped
+into memory using
+.BR mmap (2)
+back to the filesystem.
+.PP
+The
+.I flags
+argument should be one of
+.BR MS_ASYNC ,
+.BR MS_SYNC ,
+or
+.BR MS_INVALIDATE .
+.SH RETURN VALUE
+On success, 0 is returned. On error, -1 is returned.
+.SH EXAMPLES
+.B Program source
+.nf
+
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdio.h>
+
+int main(void) {
+    int fd = open("testfile.txt", O_RDWR | O_CREAT, 0644);
+    write(fd, "Hello World!\\n", 13);
+    
+    char *map = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                     MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) {
+        perror("mmap");
+        return 1;
+    }
+
+    // Modify the mapped memory
+    memcpy(map, "Modified!\\n", 10);
+
+    // Synchronize to disk
+    if (msync(map, 4096, MS_SYNC) == -1) {
+        perror("msync");
+        return 1;
+    }
+
+    printf("Changes synced to disk.\\n");
+    munmap(map, 4096);
+    close(fd);
+    return 0;
+}
+.fi

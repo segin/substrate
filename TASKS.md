@@ -337,7 +337,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] **Advanced Features:**
                     - [ ] **File-backed mmap (`MAP_FILE`):**
                         - [x] **VNode Pager:** Interface to trigger VFS `read` operations on missing pages.
-                        - [ ] **Write-back:** Track dirty pages and implement `msync` to flush to disk.
+                        - [x] **Write-back:** Track dirty pages and implement `msync` to flush to disk.
                     - [ ] **Reference Counting & Shared Memory:**
                         - [x] **vm_page_t Refcounts:** Track number of mappings pointing to physical frames.
                         - [x] **vm_object Refcounts:** Track number of regions sharing the same backing store.
