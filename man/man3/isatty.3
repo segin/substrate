@@ -19,3 +19,19 @@ is an open file descriptor referring to a terminal.
 () returns 1 if
 .I fd
 is an open file descriptor referring to a terminal; otherwise 0 is returned.
+.SH EXAMPLES
+.B Program source
+.nf
+
+#include <unistd.h>
+#include <stdio.h>
+
+int main(void) {
+    if (isatty(STDOUT_FILENO)) {
+        printf("Standard output is a terminal.\\n");
+    } else {
+        printf("Standard output is NOT a terminal.\\n");
+    }
+    return 0;
+}
+.fi
