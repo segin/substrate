@@ -748,6 +748,14 @@ void pmap_invalidate_page(uint32_t va) {
     __sync_fetch_and_add(&global_pmap_stats.tlb_invlpg_count, 1);
 }
 
+// Flush entire TLB by reloading CR3 (expensive)
+void pmap_invalidate_all(void) {
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+    __sync_fetch_and_add(&global_pmap_stats.tlb_full_flush_count, 1);
+}
+
 // Include vm_page.h for vm_page_t
 #include "../../vm/vm_page.h"
 

@@ -238,7 +238,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] **TLB Management:**
                 - [ ] **Single CPU TLB:**
                     - [x] `invlpg(va)`: Invalidate single page.
-                    - [ ] CR3 reload: Flush entire TLB (expensive).
+                    - [x] CR3 reload: Flush entire TLB (expensive).
                     - [ ] Track flush statistics.
                 - [ ] **SMP TLB Shootdown:**
                     - [ ] IPI (Inter-Processor Interrupt) mechanism.
