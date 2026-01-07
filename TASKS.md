@@ -1256,15 +1256,86 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
-    - [ ] Implement environment variable handling.
-    - [ ] Implement pipelines (`|`) and redirection (`>`, `<`).
-    - [ ] Implement job control (`&`, `bg`, `fg`, `jobs`).
-    - [ ] Implement scripting support (`if`, `for`, `while`).
-- [ ] **Core Utils:**
-    - [ ] **`ls`:** Implement flags (`-l`, `-a`, `-h`).
-    - [ ] **`cp`:** Implement recursive copy (`-r`).
-    - [ ] **`rm`:** Implement recursive delete (`-r`).
-    - [ ] **`mkdir`:** Implement parents (`-p`).
+    - [ ] **Command Parsing & Execution:**
+        - [ ] Environment variable expansion (`$VAR`, `${VAR}`).
+        - [ ] Command substitution (`$(cmd)`, `` `cmd` ``).
+        - [ ] Exit status (`$?`).
+    - [ ] **IO Redirection:**
+        - [ ] Output redirection (`>`, `>>`).
+        - [ ] Input redirection (`<`).
+        - [ ] Pipes (`|`).
+        - [ ] File descriptor duplication (`2>&1`).
+    - [ ] **Job Control:**
+        - [ ] Background execution (`&`).
+        - [ ] `jobs` builtin.
+        - [ ] `fg` / `bg` builtins.
+        - [ ] Signal handling (SIGINT, SIGTSTP).
+    - [ ] **Control Structures:**
+        - [ ] `if` / `then` / `else` / `fi`.
+        - [ ] `for` loops.
+        - [ ] `while` loops.
+        - [ ] Function definitions.
+- [ ] **Core Utilities:**
+    - [ ] **`ls` - List directory contents:**
+        - [ ] `-a`, `--all`: List all files including hidden ones.
+        - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
+        - [ ] `-l`: Long listing format (permissions, ownership, size, time).
+        - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+        - [ ] `-R`, `--recursive`: List subdirectories recursively.
+        - [ ] `-r`, `--reverse`: Reverse order while sorting.
+        - [ ] `-S`: Sort by file size.
+        - [ ] `-t`: Sort by modification time.
+        - [ ] `--color`: Colorize output.
+    - [ ] **`cp` - Copy files and directories:**
+        - [ ] `-r`, `-R`, `--recursive`: Copy directories recursively.
+        - [ ] `-f`, `--force`: Force overwrite.
+        - [ ] `-i`, `--interactive`: Prompt before overwrite.
+        - [ ] `-p`: Preserve file attributes (mode, ownership, timestamps).
+        - [ ] `-v`, `--verbose`: Explain what is being done.
+    - [ ] **`mv` - Move (rename) files:**
+        - [ ] `-f`, `--force`: Do not prompt before overwriting.
+        - [ ] `-i`, `--interactive`: Prompt before overwrite.
+        - [ ] `-v`, `--verbose`: Verbose output.
+    - [ ] **`rm` - Remove files or directories:**
+        - [ ] `-r`, `-R`, `--recursive`: Remove directories and their contents recursively.
+        - [ ] `-f`, `--force`: Ignore nonexistent files and arguments, never prompt.
+        - [ ] `-i`: Prompt before every removal.
+        - [ ] `-v`, `--verbose`: Verbose output.
+    - [ ] **`mkdir` - Make directories:**
+        - [ ] `-p`, `--parents`: No error if existing, make parent directories as needed.
+        - [ ] `-m`, `--mode=MODE`: Set file mode (as in chmod).
+        - [ ] `-v`, `--verbose`: Print a message for each created directory.
+    - [ ] **`rmdir` - Remove empty directories:**
+        - [ ] `-p`, `--parents`: Remove explicit parent directories if being emptied.
+    - [ ] **`cat` - Concatenate files and print on standard output:**
+        - [ ] `-n`, `--number`: Number all output lines.
+        - [ ] `-E`, `--show-ends`: Display `$` at end of each line.
+    - [ ] **`echo` - Display a line of text:**
+        - [ ] `-n`: Do not output the trailing newline.
+        - [ ] `-e`: Enable interpretation of backslash escapes.
+    - [ ] **`touch` - Change file timestamps:**
+        - [ ] `-a`: Change only the access time.
+        - [ ] `-m`: Change only the modification time.
+        - [ ] `-c`, `--no-create`: Do not create any files.
+    - [ ] **`chmod` - Change file mode bits:**
+        - [ ] `-R`, `--recursive`: Change files and directories recursively.
+        - [ ] Symbolic mode support (e.g., `u+x`).
+        - [ ] Octal mode support (e.g., `755`).
+    - [ ] **`chown` - Change file owner and group:**
+        - [ ] `-R`, `--recursive`: Operate on files and directories recursively.
+    - [ ] **`ln` - Make links between files:**
+        - [ ] `-s`, `--symbolic`: Make symbolic links instead of hard links.
+        - [ ] `-f`, `--force`: Remove existing destination files.
+    - [ ] **`wc` - Print newline, word, and byte counts:**
+        - [ ] `-c`, `--bytes`: Print the byte counts.
+        - [ ] `-l`, `--lines`: Print the newline counts.
+        - [ ] `-w`, `--words`: Print the word counts.
+    - [ ] **`head` - Output the first part of files:**
+        - [ ] `-n`, `--lines`: Print the first K lines.
+        - [ ] `-c`, `--bytes`: Print the first K bytes.
+    - [ ] **`tail` - Output the last part of files:**
+        - [ ] `-n`, `--lines`: Output the last K lines.
+        - [ ] `-f`, `--follow`: Output appended data as the file grows.
 - [x] Fix `pmap_dump` memory access logic (use `sys/proc.h` correctly) <!-- id: 4 -->
 - [x] Fix `init=` command line parsing <!-- id: 5 -->
 - [x] Fix `run_kernel_tests` linker error in EFI build <!-- id: 6 -->
