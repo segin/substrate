@@ -1,0 +1,44 @@
+.TH VM_PAGER 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+vm_pager \- virtual memory pager interface
+.SH SYNOPSIS
+.B #include <sys/vm/vm_pager.h>
+.LP
+.BI "vm_pager_t *vm_pager_allocate(vm_object_type_t " type ", void *" handle ", size_t " size ", uint8_t " prot ", uint64_t " offset ");"
+.br
+.BI "void vm_pager_deallocate(vm_pager_t *" pager ");"
+.br
+.BI "int vm_pager_get_pages(vm_pager_t *" pager ", vm_page_t **" m ", int " count ", bool " sync ");"
+.br
+.BI "int vm_pager_put_pages(vm_pager_t *" pager ", vm_page_t **" m ", int " count ", bool " sync ");"
+.br
+.BI "bool vm_pager_has_page(vm_pager_t *" pager ", uint64_t " pindex ");"
+.SH DESCRIPTION
+The
+.B vm_pager
+interface abstracts data movement between memory and backing store (swap, files, devices).
+.SS Functions
+.B vm_pager_allocate
+instantiates a pager for a given object type.
+.PP
+.B vm_pager_get_pages
+retrieves data from backing store into physical pages.
+.PP
+.B vm_pager_put_pages
+writes data from physical pages to backing store.
+.PP
+.B vm_pager_has_page
+checks if a page index exists in the backing store.
+.SH SUPPORTED PAGERS
+.IP \[bu] 2
+.B swap_pager
+\- Uses swap space (anonymous memory).
+.IP \[bu]
+.B vnode_pager
+\- Uses files via VFS.
+.IP \[bu]
+.B device_pager
+\- Maps physical device memory.
+.SH SEE ALSO
+.BR vm_object (9),
+.BR vm_page (9)

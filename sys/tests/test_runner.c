@@ -43,6 +43,14 @@ void run_kernel_tests(void) {
         run_tty_tests();
         run_cow_stats_tests();
     }
+
+    if (all || strcmp(test_arg, "vm") == 0) {
+        run_vm_map_tests();
+        run_vm_object_tests();
+        run_vm_fault_tests();
+        run_vm_cow_tests();
+        run_vm_pager_tests();
+    }
     
     if (all || strcmp(test_arg, "mmap") == 0) {
         // run_mmap_tests(); // Uncomment when ready

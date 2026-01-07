@@ -1,6 +1,7 @@
 #include "vm_fault.h"
 #include "vm_object.h"
 #include "vm_page.h"
+#include "vm_pager.h"
 #include "../arch/i386/pmap.h"
 #include <stddef.h>
 
@@ -85,11 +86,21 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         m = vm_page_alloc(first_obj, pindex, 0);
         if (!m) return VM_FAULT_ERROR;
 
-        if (first_obj->type == VM_OBJ_TYPE_DEFAULT) {
+        if (first_obj->pager && vm_pager_has_page(first_obj->pager, pindex)) {
+            if (vm_pager_get_pages(first_obj->pager, &m, 1, true) != 0) {
+                // Pager failed (IO error?)
+                vm_page_free(m);
+                return VM_FAULT_ERROR;
+            }
+            m->flags |= PG_VALID; // Pager sets valid
+        } else if (first_obj->type == VM_OBJ_TYPE_DEFAULT) {
             page_zero(m->phys_addr);
             m->flags |= PG_ZERO | PG_VALID;
         } else {
-            // TODO: Call pager
+            // Unhandled object type or missing page in file
+            // For VNode objects, this usually means zero-fill extended region
+            page_zero(m->phys_addr);
+            m->flags |= PG_ZERO | PG_VALID;
         }
         vm_object_add_page(first_obj, m);
     }

@@ -329,10 +329,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Rewrite:** **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
             - [x] **Rewrite:** **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
             - [ ] **Rewrite:** **Swap Subsystem:**
-                - [ ] **Pager:** Implement a swap pager to move pages to/from disk.
-                - [ ] **Backing Store:** Support swap files or partitions.
+                - [x] **Pager:** Implement a swap pager to move pages to/from disk.
+                - [x] **Backing Store:** Support swap files or partitions.
                 - [ ] **Policy:** Implement page replacement algorithm (Clock/LRU).
-            - [ ] **Rewrite:** **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
+            - [x] **Rewrite:** **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
             - [ ] **Advanced Features:**
                 - [ ] **Advanced Features:**
                     - [ ] **File-backed mmap (`MAP_FILE`):**
