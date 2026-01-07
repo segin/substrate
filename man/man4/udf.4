@@ -1,0 +1,71 @@
+.\" UDF driver man page
+.TH UDF 4 "January 2026" "Substrate Kernel" "Special Files"
+.SH NAME
+udf \- Universal Disk Format filesystem driver
+.SH SYNOPSIS
+.B mount -t udf
+.I device mountpoint
+.SH DESCRIPTION
+The
+.B udf
+driver provides read-write support for Universal Disk Format filesystems.
+.SS Structures
+The driver defines the following on-disk structures in
+.IR udf.h :
+.TP
+.B struct udf_tag
+16-byte descriptor tag with CRC verification.
+.TP
+.B struct udf_avdp
+Anchor Volume Descriptor Pointer.
+.TP
+.B struct udf_pvd, udf_pd, udf_lvd
+Volume descriptors (Primary, Partition, Logical).
+.TP
+.B struct udf_fsd
+File Set Descriptor containing root directory location.
+.TP
+.B struct udf_fe, udf_efe
+File Entry and Extended File Entry (inode equivalents).
+.TP
+.B struct udf_fid
+File Identifier Descriptor (directory entry).
+.SS Read Operations
+.TP
+.B udf_find_avdp()
+Locate Anchor at sector 256.
+.TP
+.B udf_read_vds()
+Parse Volume Descriptor Sequence.
+.TP
+.B udf_read_fe()
+Read File Entry from ICB location.
+.TP
+.B udf_read_file()
+Read file data via allocation descriptors.
+.SS Write Operations
+.TP
+.B udf_alloc_block(), udf_free_block()
+Block allocation from space bitmap.
+.TP
+.B udf_create_fe()
+Create new File Entry.
+.TP
+.B udf_write_file()
+Write file data.
+.TP
+.B udf_add_fid(), udf_remove_fid()
+Directory entry management.
+.SH FILES
+.TP
+.I sys/fs/udf/udf.h
+Structure definitions.
+.TP
+.I sys/fs/udf/udf.c
+Read-only operations.
+.TP
+.I sys/fs/udf/udf_write.c
+Write operations.
+.SH SEE ALSO
+.BR udf (5),
+.BR mount (2)

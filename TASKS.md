@@ -710,13 +710,13 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Implement `udf_add_fid()` - Add directory entry.
         - [x] Implement `udf_remove_fid()` - Remove directory entry.
         - [x] Implement `udf_truncate()` - Truncate/extend file.
-    - [ ] **Testing:**
-        - [ ] Unit tests (`sys/tests/test_udf.c`).
-        - [ ] Property tests for allocation/deallocation.
+    - [x] **Testing:**
+        - [x] Unit tests (`sys/tests/test_udf.c`).
+        - [x] Property tests for allocation/deallocation.
         - [ ] Fuzzing tests for descriptor parsing.
-    - [ ] **Documentation:**
-        - [ ] Create `man/man5/udf.5` (filesystem description).
-        - [ ] Create `man/man4/udf.4` (kernel driver).
+    - [x] **Documentation:**
+        - [x] Create `man/man5/udf.5` (filesystem description).
+        - [x] Create `man/man4/udf.4` (kernel driver).
     - [ ] **DevFS (`/dev`):**
         - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
         - [x] **VFS Glue:** Auto-generate VFS nodes when registering devices.

@@ -1,0 +1,52 @@
+.\" UDF filesystem man page
+.TH UDF 5 "January 2026" "Substrate Kernel" "File Formats"
+.SH NAME
+udf \- Universal Disk Format filesystem
+.SH DESCRIPTION
+The
+.B UDF
+filesystem is a vendor-neutral filesystem defined by ECMA-167 and the
+Optical Storage Technology Association (OSTA). It is commonly used on
+optical media (CD, DVD, Blu-ray) and modern USB flash drives.
+.PP
+UDF supports features including:
+.IP \(bu 3
+Long filenames (up to 255 Unicode characters)
+.IP \(bu
+Timestamps with sub-second precision
+.IP \(bu
+Named streams and extended attributes
+.IP \(bu
+Large file support (up to 16 EB theoretical)
+.IP \(bu
+Sparse files
+.SS Sector Size
+The standard sector size is 2048 bytes for optical media. Other sector
+sizes may be used on hard disks and flash media.
+.SS Volume Structure
+A UDF volume contains:
+.TP
+.B Anchor Volume Descriptor Pointer (AVDP)
+Located at sector 256, points to the Volume Descriptor Sequence.
+.TP
+.B Volume Descriptor Sequence (VDS)
+Contains Primary VD, Partition Descriptor, and Logical Volume Descriptor.
+.TP
+.B File Set Descriptor (FSD)
+Points to the root directory.
+.TP
+.B File Entry (FE/EFE)
+Analogous to Unix inodes, contains file metadata and allocation info.
+.TP
+.B File Identifier Descriptor (FID)
+Directory entries linking names to File Entries.
+.SH MOUNT OPTIONS
+None currently supported.
+.SH LIMITATIONS
+This implementation supports UDF 1.50 through 2.60 for read operations and
+basic write operations for inline (small) files.
+.SH SEE ALSO
+.BR mount (2),
+.BR mkudffs (8)
+.SH STANDARDS
+ECMA-167, OSTA UDF 2.60
