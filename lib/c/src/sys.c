@@ -13,6 +13,8 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 
 extern int64_t _syscall0(int);
 extern int64_t _syscall1(int, int);
@@ -164,4 +166,95 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 
 int munmap(void *addr, size_t length) {
     return (int)_syscall2(SYS_MUNMAP, (int)addr, (int)length);
+}
+
+pid_t waitpid(pid_t pid, int *status, int options) {
+    return (pid_t)_syscall3(SYS_WAITPID, pid, (int)status, options);
+}
+
+pid_t wait(int *status) {
+    return waitpid(-1, status, 0);
+}
+
+int access(const char *pathname, int mode) {
+    return (int)_syscall2(SYS_ACCESS, (int)pathname, mode);
+}
+
+int stat(const char *pathname, struct stat *buf) {
+    return (int)_syscall2(SYS_STAT, (int)pathname, (int)buf);
+}
+
+int lstat(const char *pathname, struct stat *buf) {
+    return (int)_syscall2(SYS_LSTAT, (int)pathname, (int)buf);
+}
+
+int fstat(int fd, struct stat *buf) {
+    return (int)_syscall2(SYS_FSTAT, fd, (int)buf);
+}
+
+time_t time(time_t *tloc) {
+    return (time_t)_syscall1(SYS_TIME, (int)tloc);
+}
+
+int mkdir(const char *pathname, mode_t mode) {
+    return (int)_syscall2(SYS_MKDIR, (int)pathname, mode);
+}
+
+int rmdir(const char *pathname) {
+    return (int)_syscall1(SYS_RMDIR, (int)pathname);
+}
+
+int mknod(const char *pathname, mode_t mode, dev_t dev) {
+    return (int)_syscall3(SYS_MKNOD, (int)pathname, mode, dev);
+}
+
+int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
+    return (int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)filesystemtype, (int)mountflags, (int)data);
+}
+
+int umount(const char *target) {
+    return (int)_syscall1(SYS_UMOUNT, (int)target);
+}
+
+int rename(const char *oldpath, const char *newpath) {
+    return (int)_syscall2(SYS_RENAME, (int)oldpath, (int)newpath);
+}
+
+int uname(struct utsname *buf) {
+    return (int)_syscall1(SYS_UNAME, (int)buf);
+}
+
+int nanosleep(const struct timespec *req, struct timespec *rem) {
+    return (int)_syscall2(SYS_NANOSLEEP, (int)req, (int)rem);
+}
+
+unsigned int sleep(unsigned int seconds) {
+    struct timespec req = { .tv_sec = seconds, .tv_nsec = 0 };
+    struct timespec rem = { 0 };
+    if (nanosleep(&req, &rem) == 0) return 0;
+    return (unsigned int)rem.tv_sec;
+}
+
+int clock_gettime(clockid_t clk_id, struct timespec *tp) {
+    return (int)_syscall2(SYS_CLOCK_GETTIME, clk_id, (int)tp);
+}
+
+int ioctl(int fd, unsigned long request, ...) {
+    va_list ap;
+    va_start(ap, request);
+    void *arg = va_arg(ap, void *);
+    va_end(ap);
+    return (int)_syscall3(SYS_IOCTL, fd, request, (int)arg);
+}
+
+int isatty(int fd) {
+    struct termios ios;
+    return ioctl(fd, TCGETS, &ios) == 0;
+}
+
+char *ttyname(int fd) {
+    if (!isatty(fd)) return NULL;
+    static char buf[32];
+    sprintf(buf, "/dev/tty%d", fd);
+    return buf;
 }

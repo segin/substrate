@@ -88,3 +88,27 @@ _syscall5:
     pop %ecx
     pop %ebx
     ret
+
+# int _syscall6(int num, int arg1, int arg2, int arg3, int arg4, int arg5, int arg6)
+_syscall6:
+    push %ebx
+    push %ecx
+    push %edx
+    push %esi
+    push %edi
+    push %ebp
+    mov 28(%esp), %eax   # 6 pushes * 4 = 24 + 4(ret) = 28
+    mov 32(%esp), %ebx
+    mov 36(%esp), %ecx
+    mov 40(%esp), %edx
+    mov 44(%esp), %esi
+    mov 48(%esp), %edi
+    mov 52(%esp), %ebp
+    int $0x80
+    pop %ebp
+    pop %edi
+    pop %esi
+    pop %edx
+    pop %ecx
+    pop %ebx
+    ret
