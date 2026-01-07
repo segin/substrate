@@ -27,6 +27,7 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant. Added Process Group (`pgrp`) and Session support.
 - **TTY Signals:** Implemented signal generation from TTY (`SIGINT`, `SIGQUIT`, `SIGTSTP`) and group signal delivery (`signal_send_group`).
 - **Build System:** Fixed `dist` directory generation to include standard Unix hierarchy (`usr/include`, `usr/local`, etc.) and ensured `vmunix` installation.
+- **Boot/Init:** Cleaned up `sbin` build process; kernel now boots correctly with `root=/dev/hda` for external root filesystems, attempting fallback to `init` search path.
 
 
 ## Current Status

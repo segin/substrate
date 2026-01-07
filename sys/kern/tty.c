@@ -58,7 +58,7 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
 }
 
 void tty_free(struct tty *tty) {
-    if (tty) kmfree(tty);
+    if (tty) kfree(tty, sizeof(struct tty));
 }
 
 // Minimal ring buffer ops

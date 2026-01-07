@@ -73,7 +73,7 @@ These components are essential for booting and basic system operation.
     - **`dl/`**: Dynamic linker.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
     - **`dbm/`**: Database Manager library.
-- `sbin/`: System binaries.
+- `sbin/`: System binaries (Currently empty/stubbed as we rely on external rootfs/busybox for init).
 
 ## Personality Emulation
 - **Linux:** Emulates Linux 2.6.x i386 syscalls. Handles `rt_sigaction` (174) and `rt_sigprocmask` (175) by mapping to internal signal infrastructure.

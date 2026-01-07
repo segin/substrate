@@ -1,7 +1,8 @@
 include ../Makefile.inc
 
 # Subdirectories for system binaries
-SUBDIRS = mkfs fsck ld.so init
+SUBDIRS = 
+
 
 .PHONY: all clean install $(SUBDIRS)
 
@@ -15,12 +16,12 @@ $(SUBDIRS):
 clean:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning sbin/$$dir"; \
-		$(MAKE) -C $@ clean; \
+		$(MAKE) -C $$dir clean; \
 	done
 
 install:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing sbin/$$dir"; \
-		$(MAKE) -C $@ install; \
+		$(MAKE) -C $$dir install; \
 	done
 
