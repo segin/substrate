@@ -7,7 +7,10 @@
 #include <stddef.h>
 
 // Simple bitmap-based swap allocator
+// Simple bitmap-based swap allocator
 #define MAX_SWAP_PAGES 1024
+#define SWAP_BLOCK_NONE 0xFFFFFFFF
+
 static uint32_t swap_bitmap[MAX_SWAP_PAGES / 32];
 // Real implementation would have a list of swap devices/files
 
@@ -33,6 +36,10 @@ static void free_swap_block(int block) {
 }
 
 static struct vm_pager *swap_pager_alloc(void *handle, size_t size, uint8_t prot, uint64_t offset) {
+    (void)handle;
+    (void)prot;
+    (void)offset;
+
     swap_pager_t *pager = kmalloc(sizeof(swap_pager_t));
     if (!pager) return NULL;
     
@@ -46,7 +53,7 @@ static struct vm_pager *swap_pager_alloc(void *handle, size_t size, uint8_t prot
     }
     
     for (uint32_t i = 0; i < pager->max_pages; i++) {
-        pager->swp_blocks[i] = -1; // Metadata only, block allocated on putpage
+        pager->swp_blocks[i] = SWAP_BLOCK_NONE; // Metadata only, block allocated on putpage
     }
     
     return (vm_pager_t *)pager;
@@ -55,8 +62,8 @@ static struct vm_pager *swap_pager_alloc(void *handle, size_t size, uint8_t prot
 static void swap_pager_dealloc(struct vm_pager *p) {
     swap_pager_t *pager = (swap_pager_t *)p;
     for (uint32_t i = 0; i < pager->max_pages; i++) {
-        if (pager->swp_blocks[i] != -1) {
-            free_swap_block(pager->swp_blocks[i]);
+        if (pager->swp_blocks[i] != SWAP_BLOCK_NONE) {
+            free_swap_block((int)pager->swp_blocks[i]);
         }
     }
     kfree(pager->swp_blocks, pager->max_pages * sizeof(uint32_t));
@@ -64,12 +71,13 @@ static void swap_pager_dealloc(struct vm_pager *p) {
 }
 
 static int swap_pager_getpage(struct vm_pager *p, vm_page_t *m, bool sync) {
+    (void)sync;
     swap_pager_t *pager = (swap_pager_t *)p;
     uint64_t pindex = m->pindex;
     
     if (pindex >= pager->max_pages) return -1;
-    int block = pager->swp_blocks[pindex];
-    if (block == -1) return -1; // Block not on disk
+    uint32_t block = pager->swp_blocks[pindex];
+    if (block == SWAP_BLOCK_NONE) return -1; // Block not on disk
     
     // TODO: Read from swap device (block * 4096)
     // block_read(swap_dev, block, m->phys_addr);
@@ -79,16 +87,17 @@ static int swap_pager_getpage(struct vm_pager *p, vm_page_t *m, bool sync) {
 }
 
 static int swap_pager_putpage(struct vm_pager *p, vm_page_t *m, bool sync) {
+    (void)sync;
     swap_pager_t *pager = (swap_pager_t *)p;
     uint64_t pindex = m->pindex;
     
     if (pindex >= pager->max_pages) return -1;
     
-    int block = pager->swp_blocks[pindex];
-    if (block == -1) {
-        block = alloc_swap_block();
-        if (block == -1) return -1; // Swap full
-        pager->swp_blocks[pindex] = block;
+    uint32_t block = pager->swp_blocks[pindex];
+    if (block == SWAP_BLOCK_NONE) {
+        int new_block = alloc_swap_block();
+        if (new_block == -1) return -1; // Swap full
+        pager->swp_blocks[pindex] = (uint32_t)new_block;
     }
     
     // TODO: Write to swap device
@@ -98,7 +107,7 @@ static int swap_pager_putpage(struct vm_pager *p, vm_page_t *m, bool sync) {
 static bool swap_pager_haspage(struct vm_pager *p, uint64_t pindex) {
     swap_pager_t *pager = (swap_pager_t *)p;
     if (pindex >= pager->max_pages) return false;
-    return pager->swp_blocks[pindex] != -1;
+    return pager->swp_blocks[pindex] != SWAP_BLOCK_NONE;
 }
 
 vm_pager_ops_t swap_pager_ops = {
