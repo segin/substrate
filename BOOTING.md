@@ -1,6 +1,6 @@
-# Booting TestUnix
+# Booting Substrate
 
-TestUnix supports four different boot methods on i386, each producing a specific kernel image.
+Substrate supports four different boot methods on i386, each producing a specific kernel image.
 
 ## 1. Multiboot (`kernel.multiboot`)
 Standard Multiboot 1 compliant ELF image. Bootable by GRUB, SeaBIOS, or QEMU `-kernel`.
@@ -70,7 +70,7 @@ To boot on real hardware or via a disk image in QEMU, you can use GRUB.
 Create a `grub.cfg` file:
 
 ```text
-menuentry "TestUnix" {
+menuentry "Substrate" {
     multiboot /boot/kernel.bin
     boot
 }
@@ -90,7 +90,7 @@ You can use `grub-mkrescue` to create a bootable ISO image:
    ```
 3. Generate the ISO:
    ```bash
-   grub-mkrescue -o testunix.iso isodir
+   grub-mkrescue -o substrate.iso isodir
    ```
 
 ## 3. Kernel Command Line

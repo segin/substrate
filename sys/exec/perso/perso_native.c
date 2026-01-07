@@ -83,7 +83,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
 };
 
 struct personality personality_native = {
-    .name = "testunix",
+    .name = "substrate",
     .syscall_table = native_syscalls,
     .syscall_count = MAX_SYSCALLS
 };

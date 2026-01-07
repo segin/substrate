@@ -189,7 +189,7 @@ struct utsname {
 
 int sys_uname(struct utsname *buf) {
     if (!buf) return -1;
-    char *s = "TestUnix";
+    char *s = "Substrate";
     char *n = "localhost";
     char *r = "0.1";
     char *v = "Kernel";
@@ -346,7 +346,7 @@ void syscall_handler(registers_t *regs) {
 
 
     // Detect ABI (FreeBSD/Native i386 uses stack passing)
-    if (p && p->name && (strcmp(p->name, "FreeBSD") == 0 || strcmp(p->name, "testunix") == 0 || strcmp(p->name, "AT&T UNIX SVR4") == 0)) {
+    if (p && p->name && (strcmp(p->name, "FreeBSD") == 0 || strcmp(p->name, "substrate") == 0 || strcmp(p->name, "AT&T UNIX SVR4") == 0)) {
         // FreeBSD/Native args are on stack just above return address (ESP+4)
         uint32_t *user_stack = (uint32_t *)(uintptr_t)regs->useresp;
         args[0] = user_stack[1];

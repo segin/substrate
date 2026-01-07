@@ -1,7 +1,7 @@
 .\" Process this file with
 .\" groff -man -Tascii perso_linux.9
 .\"
-.TH PERSO_LINUX 9 "January 2026" "TestUnix Kernel" "Kernel Developer's Manual"
+.TH PERSO_LINUX 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
 .SH NAME
 perso_linux \- Linux i386 binary compatibility personality
 .SH SYNOPSIS
@@ -11,7 +11,7 @@ perso_linux \- Linux i386 binary compatibility personality
 .SH DESCRIPTION
 The
 .B perso_linux
-personality enables the execution of unmodified Linux i386 binaries on the TestUnix kernel. It maps Linux system call numbers to the corresponding internal kernel implementations.
+personality enables the execution of unmodified Linux i386 binaries on the Substrate kernel. It maps Linux system call numbers to the corresponding internal kernel implementations.
 .PP
 This personality is feature-rich and includes extensive tracing metadata to support debugging of foreign binaries.
 .SH IMPLEMENTATION DETAILS

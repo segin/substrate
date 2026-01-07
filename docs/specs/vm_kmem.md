@@ -1,7 +1,7 @@
 # Kmem Allocator Specification
 
 ## Overview
-The `kmem` allocator is a general-purpose, variable-size memory allocator for the TestUnix kernel. It is built upon the Zone Allocator (UMA) to provide efficient allocation for small objects while maintaining power-of-two alignment.
+The `kmem` allocator is a general-purpose, variable-size memory allocator for the Substrate kernel. It is built upon the Zone Allocator (UMA) to provide efficient allocation for small objects while maintaining power-of-two alignment.
 
 ## Design
 - **Architecture:** Power-of-two buckets.

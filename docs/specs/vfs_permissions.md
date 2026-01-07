@@ -1,7 +1,7 @@
 # VFS Permissions Specification
 
 ## Overview
-TestUnix implements a standard Unix permissions model based on UIDs, GIDs, and permission masks (rwxrwxrwx).
+Substrate implements a standard Unix permissions model based on UIDs, GIDs, and permission masks (rwxrwxrwx).
 
 ## Implementation
 - **Permission Check:** The `vfs_check_permissions()` function evaluates if a given UID/GID pair has the required access mode (`R_OK`, `W_OK`, `X_OK`) for a specific VFS node.

@@ -16,7 +16,7 @@ struct thr_param {
     int     flags;
 };
 
-// Syscall number (arbitrary choice for TestUnix native, or matching FreeBSD 455)
+// Syscall number (arbitrary choice for Substrate native, or matching FreeBSD 455)
 #define SYS_THR_NEW 455
 
 #endif

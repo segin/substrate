@@ -1,7 +1,7 @@
 # Kernel Scheduler Specification
 
 ## Overview
-The TestUnix scheduler implements a Round-Robin scheduling algorithm with support for preemptive multitasking. It manages `thread_t` units across processes.
+The Substrate scheduler implements a Round-Robin scheduling algorithm with support for preemptive multitasking. It manages `thread_t` units across processes.
 
 ## Preemption
 - **Mechanism:** Driven by the Programmable Interval Timer (PIT) on i386.

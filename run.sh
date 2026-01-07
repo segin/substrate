@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run TestUnix in QEMU
+# Run Substrate in QEMU
 # - Uses kernel.multiboot
 # - Attaches root.img as Primary Master IDE drive
 # - Passes root=/dev/storage/ide0 to kernel

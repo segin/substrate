@@ -45,7 +45,7 @@ static uint32_t proc_status_read(fs_node_t *node, off_t offset, uint32_t size, u
 static uint32_t proc_cpuinfo_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     char buf[256];
-    sprintf(buf, "Processor:\t0\nVendor:\t\tGenericx86\nModel Name:\tTestUnix Virtual CPU\n");
+    sprintf(buf, "Processor:\t0\nVendor:\t\tGenericx86\nModel Name:\tSubstrate Virtual CPU\n");
     uint32_t len = strlen(buf);
     if (offset >= len) return 0;
     if (offset + size > len) size = len - offset;

@@ -51,7 +51,7 @@ typedef struct {
 #define ELFOSABI_SYSV 0
 #define ELFOSABI_LINUX 3
 #define ELFOSABI_FREEBSD 9
-#define ELFOSABI_TESTUNIX 64 // Custom ABI ID for TestUnix
+#define ELFOSABI_TESTUNIX 64 // Custom ABI ID for Substrate
 #define ELFOSABI_ATT_UNIX 65 // Custom ABI ID for AT&T UNIX
 #define ELFOSABI_MODESTO 11  // Novell Modesto / SVR4
 

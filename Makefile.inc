@@ -1,4 +1,4 @@
-# Common definitions for TestUnix build system
+# Common definitions for Substrate build system
 
 # Default architecture
 ARCH ?= i386

@@ -12,7 +12,7 @@ cat > isodir/boot/grub/grub.cfg << EOF
 set timeout=0
 set default=0
 
-menuentry "TestUnix" {
+menuentry "Substrate" {
     multiboot /boot/kernel.bin serial_debug root=/dev/storage/ide0 init=/bin/busybox
     boot
 }

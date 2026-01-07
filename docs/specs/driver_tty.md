@@ -1,7 +1,7 @@
 # /dev/tty Specification
 
 ## Overview
-`/dev/tty` is a pseudo-device that represents the controlling terminal of the current process. In TestUnix, it currently maps to the combined input of the PS/2 keyboard and the output of the VGA/Framebuffer console.
+`/dev/tty` is a pseudo-device that represents the controlling terminal of the current process. In Substrate, it currently maps to the combined input of the PS/2 keyboard and the output of the VGA/Framebuffer console.
 
 ## Implementation
 - **Read:** Pops characters from the global keyboard circular buffer. Non-blocking (returns 0 if empty).

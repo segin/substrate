@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project Description
-This is an operating system project targeting x86 32-bit architecture (with x86_64 plans). The goal is to build a Unix-like system with a kernel, standard utilities, and libraries, capable of running native, Linux, and FreeBSD binaries via personality emulation.
+This is the Substrate operating system project targeting x86 32-bit architecture (with x86_64 plans). The goal is to build a Unix-like system with a kernel, standard utilities, and libraries, capable of running native, Linux, and FreeBSD binaries via personality emulation.
 
 ## Technical Constraints & Standards
 - **Architecture:** x86 32-bit (primary), x86 64-bit (planned/stubbed).

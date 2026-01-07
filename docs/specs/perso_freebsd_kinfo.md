@@ -5,7 +5,7 @@
 
 ## Design
 - **ABI Stability:** The structure layout (offsets and sizes) must strictly match the FreeBSD 14.3 `sys/sys/user.h` definition.
-- **Data Mapping:** Fields from the native TestUnix `process_t` are mapped to the corresponding `ki_*` fields.
+- **Data Mapping:** Fields from the native Substrate `process_t` are mapped to the corresponding `ki_*` fields.
 - **Completeness:** Includes all spare fields and substructures (e.g., `timeval`, `sigset`) required for binary compatibility.
 
 ## API (Internal)

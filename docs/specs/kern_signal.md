@@ -1,7 +1,7 @@
 # Kernel Signal Specification
 
 ## Overview
-TestUnix implements a POSIX-like signal mechanism for asynchronous event notification. Signals can be sent to processes or threads and are delivered when the target thread returns to user-mode from an interrupt or system call.
+Substrate implements a POSIX-like signal mechanism for asynchronous event notification. Signals can be sent to processes or threads and are delivered when the target thread returns to user-mode from an interrupt or system call.
 
 ## Signal Delivery
 - **Check:** Before returning to user-mode, the kernel checks `current_thread->sig_pending` against `current_thread->sig_mask`.

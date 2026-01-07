@@ -1,7 +1,7 @@
 # Legacy Video Drivers Specification
 
 ## Overview
-TestUnix provides support for legacy video hardware, including CGA, Hercules, and EGA adapters. These drivers allow the system to function on older x86 machines.
+Substrate provides support for legacy video hardware, including CGA, Hercules, and EGA adapters. These drivers allow the system to function on older x86 machines.
 
 ## Drivers
 - **CGA (Color Graphics Adapter):**

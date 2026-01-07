@@ -13,7 +13,7 @@
 *.exe
 *.com
 *.out
-testunix.iso
+substrate.iso
 
 # System Kernel
 sys/kernel.bin

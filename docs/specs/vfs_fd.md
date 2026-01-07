@@ -1,7 +1,7 @@
 # VFS File Descriptor Management Specification
 
 ## Overview
-TestUnix uses a reference-counted model for managing file descriptors (FDs). This allows multiple descriptors to point to the same open file structure, supporting operations like `dup()` and `dup2()`.
+Substrate uses a reference-counted model for managing file descriptors (FDs). This allows multiple descriptors to point to the same open file structure, supporting operations like `dup()` and `dup2()`.
 
 ## Implementation
 - **File Structure (`file_t`):**

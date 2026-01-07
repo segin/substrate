@@ -1,17 +1,17 @@
-# TestUnix Toolchain Configuration
+# Substrate Toolchain Configuration
 
-This directory contains the necessary components to build a TestUnix cross-compiler.
+This directory contains the necessary components to build a Substrate cross-compiler.
 
 ## Targets
-- `i386-unknown-testunix`
-- `x86_64-unknown-testunix`
+- `i386-unknown-substrate`
+- `x86_64-unknown-substrate`
 
 ## Components
 - **LLVM/Clang:** Used as the primary compiler.
 - **Binutils:** (or LLVM equivalents like `llvm-objdump`) for binary manipulation.
 
 ## Configuration (Draft)
-The TestUnix target is defined as a derivative of the Generic Unix target, using System V ABI for x86 and i386.
+The Substrate target is defined as a derivative of the Generic Unix target, using System V ABI for x86 and i386.
 
 ### ELF OSABI
 `ELFOSABI_TESTUNIX` = 64

@@ -1,7 +1,7 @@
 # Kernel Locking Specification (Spinlocks)
 
 ## Overview
-Spinlocks are the primary synchronization primitive for short-duration mutual exclusion in the TestUnix kernel, especially in SMP environments. They use atomic hardware instructions to ensure only one CPU core can hold the lock at a time.
+Spinlocks are the primary synchronization primitive for short-duration mutual exclusion in the Substrate kernel, especially in SMP environments. They use atomic hardware instructions to ensure only one CPU core can hold the lock at a time.
 
 ## Design
 - **Structure (`spinlock_t`):**

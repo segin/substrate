@@ -1,4 +1,4 @@
-# TestUnix Component Registry
+# Substrate Component Registry
 
 This database tracks the engineering artifacts and verification status for every system component.
 

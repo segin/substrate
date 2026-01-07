@@ -1,7 +1,7 @@
 # 9P (9P2000.L) Client Specification
 
 ## Overview
-The 9P client enables TestUnix to access remote filesystems over a network or virtualized transport (e.g., VirtIO-9P). It follows the 9P2000.L protocol extension.
+The 9P client enables Substrate to access remote filesystems over a network or virtualized transport (e.g., VirtIO-9P). It follows the 9P2000.L protocol extension.
 
 ## Implementation
 - **VFS Integration:** Translates VFS calls into 9P messages (`TWALK`, `TOPEN`, `TREAD`, etc.).

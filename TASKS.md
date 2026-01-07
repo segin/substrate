@@ -1,8 +1,8 @@
 # TASKS.md
 
-## TestUnix Implementation Roadmap
+## Substrate Operating System - Development Tasks
 
-This document tracks the progress and remaining tasks for the TestUnix operating system.
+This document tracks the progress and remaining tasks for the Substrate operating system.
 
 ### 1. Kernel Core (`sys/core`, `sys/kern`)
 - [ ] **Memory Management:**
@@ -933,8 +933,8 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Map Image Base and Sections.
             - [ ] **EFI Support:**
                 - [ ] Implement IAT (Import Address Table) patching.
-            - [ ] **TestUnix Native PE:**
-                - [ ] Define Subsystem ID for TestUnix (e.g., in `sys/pe.h`).
+            - [ ] **Substrate Native PE:**
+                - [ ] Define Subsystem ID for Substrate (e.g., in `sys/pe.h`).
                 - [ ] **Native Syscalls:** Thunks for syscall instruction directly in PE text.
                 - [ ] **Relocations:** Full `.reloc` processing (Base Relocations) for ASLR/PIC.
         - [ ] **a.out Loader (Legacy/Multi-OS):**
@@ -1075,7 +1075,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Rounding & Manipulation:**
             - [ ] `rint()` / `nearbyint()`: Use `frndint` (Round to integer according to CW).
             - [ ] `scalbn()` / `ldexp()`: Use `fscale` (exponent manipulation).
-- [ ] **Dynamic Linker (`ld.so` / `ld-testunix.so`):**
+- [ ] **Dynamic Linker (`ld.so` / `ld-substrate.so`):**
     - [ ] **Kernel ELF Loader Support:**
         - [ ] Parse `PT_INTERP` program header to identify dynamic linker path.
         - [ ] Load dynamic linker ELF into memory alongside main executable.
@@ -1229,7 +1229,7 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] **Data Sources:**
             - [ ] **`sysctl` MIBs (System Control) - Detailed:**
                 - [ ] **`kern` (Kernel):**
-                    - [ ] `kern.ostype` (string): OS Name (e.g. "TestUnix").
+                    - [ ] `kern.ostype` (string): OS Name (e.g. "Substrate").
                     - [ ] `kern.osrelease` (string): Release version.
                     - [ ] `kern.osrevision` (int): Revision number.
                     - [ ] `kern.version` (string): Full version string.

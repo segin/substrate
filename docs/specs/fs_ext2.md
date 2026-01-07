@@ -1,7 +1,7 @@
 # EXT2 Filesystem Specification
 
 ## Overview
-EXT2 is the native filesystem for TestUnix. It uses a block-based allocation scheme with block groups.
+EXT2 is the native filesystem for Substrate. It uses a block-based allocation scheme with block groups.
 
 ## Implementation
 - **Superblock:** Contains global filesystem information (total blocks, inodes, etc.).

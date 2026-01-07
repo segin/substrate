@@ -1,7 +1,7 @@
 # VFS Chroot Specification
 
 ## Overview
-TestUnix supports per-process root directories via the `chroot()` system call. This allows a process and its children to see a specific subdirectory as the root of the filesystem.
+Substrate supports per-process root directories via the `chroot()` system call. This allows a process and its children to see a specific subdirectory as the root of the filesystem.
 
 ## Implementation
 - **Process State:** The `process_t` structure includes a `root_node` field (pointer to a `fs_node_t`).

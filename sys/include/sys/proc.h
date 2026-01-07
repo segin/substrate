@@ -57,7 +57,7 @@ typedef struct process {
     
     // mmap regions
     struct vm_area *vm_areas;  // Linked list of mapped regions
-    struct vm_map *vm_map;    // TestUnix VM Map
+    struct vm_map *vm_map;    // Substrate VM Map
     struct pmap *pmap;         // Pmap (Page Table) handle
     
     // Resource limits, FDs, etc. would go here

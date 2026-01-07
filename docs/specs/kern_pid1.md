@@ -1,7 +1,7 @@
 # PID 1 (Init) Handling Specification
 
 ## Overview
-The process with PID 1 (init) is the ancestor of all other processes in TestUnix. it has special protections to ensure system stability.
+The process with PID 1 (init) is the ancestor of all other processes in Substrate. it has special protections to ensure system stability.
 
 ## Protections
 - **Immunity to Signals:** `sys_kill()` prevents sending termination signals (`SIGKILL`, `SIGTERM`) or stop signals (`SIGSTOP`) to PID 1.

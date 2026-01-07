@@ -1,5 +1,5 @@
-# Simple termcap for TestUnix
-testunix|TestUnix Console:\
+# Simple termcap for Substrate
+substrate|Substrate Console:\
 	:co#80:li#25:\
 	:am:bs:mi:ms:\
 	:cl=\E[2J:cm=\E[%i%d;%dH:ce=\E[K:\

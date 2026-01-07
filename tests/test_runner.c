@@ -153,7 +153,7 @@ int main() {
     vm_page_init();
     sched_init();
 
-    printf("Starting TestUnix Unit Tests...\n");
+    printf("Starting Substrate Unit Tests...\n");
     printf("--------------------------------\n");
 
     for (int i = 0; tests[i].name != NULL; i++) {

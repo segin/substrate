@@ -1,6 +1,6 @@
 # Kernel Test Framework
 
-The TestUnix kernel includes a built-in test framework for running unit tests, property tests, and regression tests directly within the kernel environment. Tests typically run during boot before the scheduler fully activates or init is spawned.
+The Substrate kernel includes a built-in test framework for running unit tests, property tests, and regression tests directly within the kernel environment. Tests typically run during boot before the scheduler fully activates or init is spawned.
 
 ## Running Tests
 

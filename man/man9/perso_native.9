@@ -1,9 +1,9 @@
 .\" Process this file with
 .\" groff -man -Tascii perso_native.9
 .\"
-.TH PERSO_NATIVE 9 "January 2026" "TestUnix Kernel" "Kernel Developer's Manual"
+.TH PERSO_NATIVE 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
 .SH NAME
-perso_native \- Native TestUnix kernel personality
+perso_native \- Native Substrate kernel personality
 .SH SYNOPSIS
 .B #include <sys/exec/perso/personality.h>
 .PP
@@ -11,7 +11,7 @@ perso_native \- Native TestUnix kernel personality
 .SH DESCRIPTION
 The
 .B perso_native
-personality implements the canonical system call interface for the TestUnix operating system. It allows native applications (compiled specifically for this kernel) to interact with the hardware and kernel services.
+personality implements the canonical system call interface for the Substrate operating system. It allows native applications (compiled specifically for this kernel) to interact with the hardware and kernel services.
 .PP
 This personality uses the Reference Syscall Table, which is largely inspired by standard Unix System V and Linux numbering but may diverge for new, custom features.
 .SH SYSCALLS

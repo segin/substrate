@@ -6,7 +6,7 @@ set -e
 TOP="$(cd "$(dirname "$0")" && pwd)"
 DIST="$TOP/dist"
 
-echo "Building TestUnix root filesystem..."
+echo "Building Substrate root filesystem..."
 
 # Clean dist directory
 rm -rf "$DIST"
@@ -64,7 +64,7 @@ cat > "$DIST/sbin/init" << 'EOF'
 #!/bin/sh
 # System initialization script
 
-echo "TestUnix initializing..."
+echo "Substrate initializing..."
 
 # Mount filesystems
 mount -t proc proc /proc

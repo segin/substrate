@@ -1,7 +1,7 @@
 /*
  * property_pmap_protect.c - Property-based tests for pmap_protect/pmap_copy
  * 
- * Copyright (c) 2026, testunix project
+ * Copyright (c) 2026, substrate project
  * SPDX-License-Identifier: ISC
  */
 
