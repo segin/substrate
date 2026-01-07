@@ -836,6 +836,46 @@ void pmap_shootdown_all(void) {
     shootdown_pending = 0;
 }
 
+// Deferred shootdown: accumulate pages for batch invalidation
+static uint32_t deferred_pages[16];
+static int deferred_count = 0;
+
+void pmap_shootdown_defer(uint32_t va) {
+    if (deferred_count < 16) {
+        deferred_pages[deferred_count++] = va;
+    } else {
+        // Overflow: flush all instead
+        pmap_shootdown_all();
+        deferred_count = 0;
+    }
+}
+
+void pmap_shootdown_commit(void) {
+    if (deferred_count == 0) return;
+    
+    if (deferred_count > 4) {
+        // Too many: full flush is cheaper
+        pmap_shootdown_all();
+    } else {
+        for (int i = 0; i < deferred_count; i++) {
+            pmap_shootdown_page(deferred_pages[i]);
+        }
+    }
+    deferred_count = 0;
+}
+
+// Wait for all shootdown acknowledgments
+void pmap_shootdown_wait(int expected_cpus) {
+    if (expected_cpus <= 0) return;
+    
+    // Spin waiting for ACKs (with timeout)
+    int timeout = 1000000;
+    while (shootdown_ack_count < expected_cpus && timeout > 0) {
+        __asm__ volatile("pause");
+        timeout--;
+    }
+}
+
 // Include vm_page.h for vm_page_t
 #include "../../vm/vm_page.h"
 

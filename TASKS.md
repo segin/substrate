@@ -245,8 +245,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] `pmap_shootdown_page(va)`: Invalidate single page on all CPUs.
                     - [x] `pmap_shootdown_range(va, len)`: Invalidate range.
                     - [x] `pmap_shootdown_all()`: Full TLB flush on all CPUs.
-                    - [ ] Defer shootdown for batch operations.
-                    - [ ] Shootdown completion barrier.
+                    - [x] Defer shootdown for batch operations.
+                    - [x] Shootdown completion barrier.
                 - [ ] **INVPCID (Future x86_64):**
                     - [ ] Detect INVPCID support via CPUID.
                     - [ ] Use INVPCID for targeted TLB invalidation.

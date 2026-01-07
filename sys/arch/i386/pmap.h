@@ -115,6 +115,9 @@ void pmap_shootdown_page(uint32_t va);
 void pmap_shootdown_range(uint32_t va, uint32_t len);
 void pmap_shootdown_all(void);
 void pmap_shootdown_handler(void);  // Called by IPI handler
+void pmap_shootdown_defer(uint32_t va);  // Batch accumulator
+void pmap_shootdown_commit(void);        // Flush accumulated pages
+void pmap_shootdown_wait(int expected_cpus);  // Completion barrier
 
 // Page reference/modification tracking
 int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva);
