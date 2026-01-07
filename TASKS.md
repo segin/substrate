@@ -1320,6 +1320,20 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Compatibility tests against BSD `libkvm` applications.
         - [ ] Performance benchmarks for high-frequency queries.
         - [ ] Thread safety stress tests.
+    - [ ] **User Authentication Library (`libauth`):**
+        - [ ] **Password Database (`/etc/passwd`):**
+            - [ ] `getpwnam(const char *name)` - Get user by name.
+            - [ ] `getpwuid(uid_t uid)` - Get user by ID.
+            - [ ] `setpwent()`, `getpwent()`, `endpwent()` - Iterate users.
+            - [ ] Parse v7 format: `user:pwd:uid:gid:gecos:home:shell`.
+        - [ ] **Shadow Database (`/etc/shadow`):**
+            - [ ] `getspnam(const char *name)` - Get shadow entry.
+            - [ ] Secure checking (root only).
+        - [ ] **Cryptography:**
+            - [ ] Implement `crypt(key, salt)`.
+            - [ ] Support DES (legacy) and MD5/SHA variants.
+        - [ ] **High-Level API:**
+            - [ ] `auth_check_user(const char *user, const char *pass)` - Validation helper.
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
@@ -1431,15 +1445,15 @@ This document tracks the progress and remaining tasks for the TestUnix operating
     - [ ] **Graphical Login (`login.gui`):**
         - [ ] GUI session starter.
         - [ ] Reads username/password.
-        - [ ] Authenticates against `/etc/passwd` and `/etc/shadow`.
+        - [ ] Reads username/password.
+        - [ ] Authenticates using `libauth` (no direct file access).
         - [ ] Starts the default Desktop Environment shell on success.
     - [ ] **`login` (CLI Auth):**
-        - [ ] **Phase 1: Classic Unix Auth (`/etc/passwd`):**
+        - [ ] **Phase 1: Classic Unix Auth (`libauth`):**
             - [ ] Display generic "login:" prompt.
             - [ ] Disable TTY echo for password input.
-            - [ ] Parse `/etc/passwd` (v7 format: user:pwd:uid:gid:gecos:home:shell).
-            - [ ] Verify functionality with empty/plaintext passwords first, then `crypt()`.
-            - [ ] Check file ownership/permissions of `/etc/passwd` (must be root owned).
+            - [ ] Use `libauth` to validate credentials (validates against `/etc/passwd`).
+            - [ ] Handle generic authentication failures.
         - [ ] **Phase 2: Session Setup:**
             - [ ] Initialize Environment (`HOME`, `SHELL`, `USER`, `LOGNAME`, `PATH`, `TERM`).
             - [ ] Set Process Group / Session ID (`setsid`).
