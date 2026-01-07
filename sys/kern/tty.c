@@ -57,6 +57,10 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
     return tty;
 }
 
+void tty_free(struct tty *tty) {
+    if (tty) kmfree(tty);
+}
+
 // Minimal ring buffer ops
 static void tty_buf_put(tty_buffer_t *tb, char c) {
     int next = (tb->head + 1) % TTY_BUF_SIZE;
@@ -105,7 +109,7 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         int sig = 0;
         if (c == tty->termios.c_cc[VINTR]) { // ^C
             sig = SIGINT;
-        } else if (c == tty->termios.c_cc[VQUIT]) { // ^\ 
+        } else if (c == tty->termios.c_cc[VQUIT]) { // Control-Quit
             sig = SIGQUIT;
         } else if (c == tty->termios.c_cc[VSUSP]) { // ^Z
             sig = SIGTSTP;
@@ -217,11 +221,6 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     return -1;
 }
 
-void tty_register_device(struct tty *tty, char *name) {
-    (void)tty; (void)name;
-    // Wrapper for devfs registration
-    // Not implemented fully yet, need fs_node creation
-}
 
 int tty_open(struct tty *tty) {
     if (!tty) return -1;

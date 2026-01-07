@@ -47,24 +47,19 @@ void file_free(file_t *f) {
 }
 
 int sys_write(int fd, const char *buf, int len) {
-    if (fd == 1 || fd == 2) {
-        console_write(buf, len);
-        uart_write(buf, len);
-        return len;
-    }
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
-    // VFS write not fully implemented for files yet, stub
+    
+    // Check for console node if write_fs isn't fully generic yet
+    if (f->node && f->node->write) {
+        return write_fs(f->node, f->offset, len, (uint8_t*)buf);
+    }
+    
     return 0;
 }
 
 int sys_read(int fd, char *buf, int len) {
-    if (fd == 0) {
-        // Stdin - read from console input buffer (keyboard)
-        extern int console_read(char *data, size_t len);
-        return console_read(buf, len);
-    }
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f) return -1;

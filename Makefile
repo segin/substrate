@@ -32,6 +32,7 @@ clean:
 		echo ">>> Cleaning $$dir"; \
 		$(MAKE) -C $$dir clean; \
 	done
+	rm -rf $(DESTDIR)
 
 install:
 	@mkdir -p $(DESTDIR)/bin
