@@ -38,12 +38,15 @@
 #define SYS_GETEUID 49
 #define SYS_GETEGID 50
 #define SYS_ACCT    51
+#define SYS_IOCTL   54
 #define SYS_DUP2    63
 #define SYS_TIMES   43
 #define SYS_GETTIMEOFDAY 78
 #define SYS_MMAP    90
 #define SYS_MUNMAP  91
 #define SYS_STAT    106
+#define SYS_LSTAT   107
+#define SYS_FSTAT   108
 #define SYS_NANOSLEEP 162
 #define SYS_CLOCK_GETTIME 265
 #define SYS_CLONE   120

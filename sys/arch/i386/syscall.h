@@ -25,7 +25,10 @@
 #define SYS_MKNOD   14
 #define SYS_CHMOD   15
 #define SYS_LCHOWN  16
+#define SYS_IOCTL   54
 #define SYS_DUP     41
+#define SYS_LSTAT   107
+#define SYS_FSTAT   108
 #define SYS_CLONE   120
 #define SYS_FUTEX   240
 #define SYS_GET_COW_STATS 241
