@@ -1,0 +1,26 @@
+.\" Process this file with
+.\" groff -man -Tascii clock_gettime.2
+.\"
+.TH CLOCK_GETTIME 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+clock_gettime \- retrieve the time of the specified clock
+.SH SYNOPSIS
+.B #include <time.h>
+.PP
+.BI "int clock_gettime(clockid_t " clk_id ", struct timespec *" tp ");"
+.SH DESCRIPTION
+.B clock_gettime
+() retrieves the time of the specified clock
+.IR clk_id .
+The
+.I clk_id
+argument is the identifier of the particular clock on which to act.
+A clock may be system-wide to all processes or per-process.
+.SH RETURN VALUE
+On success, 0 is returned. On error, -1 is returned.
+.SH ERRORS
+.TP
+.B EINVAL
+The 
+.I clk_id
+specified is not supported on this system.
