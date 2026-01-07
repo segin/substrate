@@ -690,8 +690,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Define `udf_fid` (File Identifier Descriptor).
         - [x] Define `udf_short_ad`/`udf_long_ad` (Allocation Descriptors).
     - [ ] **Read-Only Support (`sys/fs/udf/udf.c`):**
-        - [ ] Implement `udf_read_tag()` - Tag CRC verification.
-        - [ ] Implement `udf_find_avdp()` - Locate Anchor at sector 256.
+        - [x] Implement `udf_read_tag()` - Tag CRC verification.
+        - [x] Implement `udf_find_avdp()` - Locate Anchor at sector 256.
         - [ ] Implement `udf_read_vds()` - Parse Volume Descriptor Sequence.
         - [ ] Implement `udf_read_partition()` - Parse Partition Descriptor.
         - [ ] Implement `udf_read_lvd()` - Parse Logical Volume Descriptor.
