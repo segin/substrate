@@ -1439,7 +1439,16 @@ This document tracks the progress and remaining tasks for the TestUnix operating
 
 ### 8. LibC & Build System (User Requests)
 - [ ] **LibC Improvements:**
-    - [ ] Implement `getopt_long` natively (GNU compatible).
+    - [ ] **Implement `getopt_long` (GNU Compatible):**
+        - [ ] Define `struct option` (name, has_arg, flag, val).
+        - [ ] Implement `getopt_long()` function signature.
+        - [ ] Implement `getopt_long_only()` variant.
+        - [ ] Handle argument parsing (`--arg`, `--arg=val`).
+        - [ ] Handle `no_argument`, `required_argument`, `optional_argument`.
+        - [ ] Internal state management (`optind`, `opterr`, `optopt`, `optarg`).
+        - [ ] Error reporting and `?` / `:` return codes.
+        - [ ] Support for non-option argument reordering (swapping argv elements).
+        - [ ] Test against GNU `getopt_long` behavior.
 - [ ] **Build System:**
     - [ ] Implement `native_dist` target to build usermode tools for the host OS (skipping libc/libm etc).
     - [ ] **Filesystem Tools (`sbin/`):**
