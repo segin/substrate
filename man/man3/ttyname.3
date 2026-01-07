@@ -1,0 +1,23 @@
+.\" Process this file with
+.\" groff -man -Tascii ttyname.3
+.\"
+.TH TTYNAME 3 "January 2026" "Substrate Standard C Library" "Library Calls Manual"
+.SH NAME
+ttyname \- return name of a terminal
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "char *ttyname(int " fd ");"
+.SH DESCRIPTION
+The function
+.B ttyname
+() returns a pointer to the null-terminated pathname of the terminal
+device that is open on the file descriptor
+.IR fd ,
+or NULL on error (for example, if
+.I fd
+is not connected to a terminal).
+.SH RETURN VALUE
+The function
+.B ttyname
+() returns a pointer to a pathname on success. On error, NULL is returned.
