@@ -128,6 +128,31 @@ void test_pmap_pse(void) {
     kprint("  PASS\n");
 }
 
+// Test 6: pmap_check consistency check
+void test_pmap_check(void) {
+    kprint("Test: pmap_check consistency\n");
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    int ret = pmap_check(pmap);
+    TEST_ASSERT(ret == 0, "pmap_check returns 0 for valid pmap");
+
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
+// Test 7: pmap_dump smoke test (just verify no crash)
+void test_pmap_dump(void) {
+    kprint("Test: pmap_dump smoke test\n");
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    pmap_dump(pmap);  // Should not crash
+
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
 void run_pmap_tests(void) {
     kprint("\n=== PMAP Unit Tests ===\n");
     
@@ -136,6 +161,8 @@ void run_pmap_tests(void) {
     test_kernel_pmap_protection();
     test_null_pmap();
     test_pmap_pse();
+    test_pmap_check();
+    test_pmap_dump();
     test_memory_leak();
     
     kprint("\nResults: ");

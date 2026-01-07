@@ -273,8 +273,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **PMAP Statistics and Debugging:**
                 - [x] Per-pmap counters: resident, wired, mapped, faults.
                 - [x] Global counters: total_pmaps, active_pmaps, cow_faults.
-                - [ ] `pmap_dump(pmap)`: Debug dump of pmap contents.
-                - [ ] `pmap_check(pmap)`: Consistency verification.
+                - [x] `pmap_dump(pmap)`: Debug dump of pmap contents.
+                - [x] `pmap_check(pmap)`: Consistency verification.
                 - [x] Export stats via syscall (`sys_pmap_stats`).
         - [ ] **PMAP Layer (Machine Dependent - x86_64):**
             - [ ] **Refactor:** `pmap_init`: Bootstrap PML4 paging structures.

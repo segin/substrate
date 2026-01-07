@@ -28,6 +28,10 @@ pmap \- machine-dependent virtual memory interface
 .BI "void pmap_protect(pmap_t " pmap ", uint32_t " sva ", uint32_t " eva ", uint32_t " prot ");"
 .br
 .BI "int pmap_copy(pmap_t " dst ", pmap_t " src ", uint32_t " sva ", uint32_t " eva ", int " cow ");"
+.br
+.BI "void pmap_dump(pmap_t " pmap ");"
+.br
+.BI "int pmap_check(pmap_t " pmap ");"
 .SH DESCRIPTION
 The
 .B pmap

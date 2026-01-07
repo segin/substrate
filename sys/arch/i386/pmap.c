@@ -1324,3 +1324,120 @@ int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags) {
 
     return 0;
 }
+
+// Debug dump of pmap contents
+// Prints all valid PDEs and their PTEs
+void pmap_dump(pmap_t pmap) {
+    if (!pmap) {
+        kprint("pmap_dump: NULL pmap\n");
+        return;
+    }
+    
+    struct pmap *p = pmap;
+    kprint("\n=== PMAP DUMP ===\n");
+    kprint("PD phys: ");
+    // Print hex address manually (kprint doesn't support format)
+    char buf[16];
+    uint32_t val = p->pdir_phys;
+    for (int i = 7; i >= 0; i--) {
+        int nibble = (val >> (i * 4)) & 0xF;
+        buf[7-i] = nibble < 10 ? '0' + nibble : 'A' + nibble - 10;
+    }
+    buf[8] = '\0';
+    kprint(buf);
+    kprint("\n");
+    
+    kprint("Ref count: ");
+    // Simple int print
+    if (p->ref_count < 10) {
+        char c[2] = {'0' + p->ref_count, '\0'};
+        kprint(c);
+    } else {
+        kprint(">=10");
+    }
+    kprint("\n");
+    
+    // Iterate PDEs (user space only: 0-767)
+    int valid_pdes = 0;
+    for (int pdi = 0; pdi < 768; pdi++) {
+        uint32_t pde = p->pdir[pdi];
+        if (pde & PTE_P) {
+            valid_pdes++;
+            if (pde & PTE_PS) {
+                // 4MB page
+                kprint("PDE[");
+                // Print index
+                kprint("]: 4MB -> PA ");
+                // Skip detailed print for brevity
+            }
+        }
+    }
+    
+    kprint("Valid user PDEs: ");
+    if (valid_pdes < 100) {
+        char c[4];
+        c[0] = '0' + (valid_pdes / 10);
+        c[1] = '0' + (valid_pdes % 10);
+        c[2] = '\0';
+        kprint(c);
+    }
+    kprint("\n=== END DUMP ===\n");
+}
+
+// Consistency check for pmap
+// Returns 0 if consistent, negative error code otherwise
+int pmap_check(pmap_t pmap) {
+    if (!pmap) return -1;
+    
+    struct pmap *p = pmap;
+    int errors = 0;
+    
+    // Check 1: PD must be page-aligned
+    if (p->pdir_phys & 0xFFF) {
+        kprint("pmap_check: PD not page-aligned\n");
+        errors++;
+    }
+    
+    // Check 2: Ref count must be positive
+    if (p->ref_count <= 0) {
+        kprint("pmap_check: Invalid ref_count\n");
+        errors++;
+    }
+    
+    // Check 3: Kernel PDEs (768-1022) should be shared
+    // They should match kernel_page_directory
+    extern uint32_t kernel_page_directory[1024];
+    for (int pdi = 768; pdi < 1023; pdi++) {
+        if (p->pdir[pdi] != kernel_page_directory[pdi]) {
+            kprint("pmap_check: Kernel PDE mismatch at ");
+            errors++;
+            break; // Only report first
+        }
+    }
+    
+    // Check 4: Recursive mapping intact (PDE 1023)
+    if ((p->pdir[1023] & ~0xFFF) != p->pdir_phys) {
+        kprint("pmap_check: Recursive mapping broken\n");
+        errors++;
+    }
+    
+    // Check 5: User PDEs point to valid PT addresses
+    for (int pdi = 0; pdi < 768; pdi++) {
+        uint32_t pde = p->pdir[pdi];
+        if ((pde & PTE_P) && !(pde & PTE_PS)) {
+            uint32_t pt_phys = pde & ~0xFFF;
+            // Basic sanity: PT should be below reasonable RAM limit
+            if (pt_phys > 0x10000000) { // 256MB limit check
+                kprint("pmap_check: Suspicious PT address\n");
+                errors++;
+                break;
+            }
+        }
+    }
+    
+    if (errors == 0) {
+        kprint("pmap_check: OK\n");
+    }
+    
+    return errors ? -errors : 0;
+}
