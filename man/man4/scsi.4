@@ -1,0 +1,37 @@
+.TH SCSI 4 "January 2026" "TestUnix Kernel" "Kernel Interfaces"
+.SH NAME
+scsi \- SCSI subsystem interface
+.SH SYNOPSIS
+.B #include <sys/scsi.h>
+.SH DESCRIPTION
+The
+.B scsi
+driver provides a unified interface for accessing SCSI devices, including disks, optical drives, and generic passthrough devices.
+
+.SS Device Nodes
+The SCSI subsystem exposes the following device nodes under
+.BR /dev/storage/ :
+.TP
+.B /dev/storage/scsi/B:T:L
+Direct generic access to a specific SCSI device addressed by Bus (\fIB\fP), Target (\fIT\fP), and LUN (\fIL\fP). This interface accepts generic SCSI CDBs via ioctl.
+.TP
+.B /dev/storage/scsi/B
+The bus controller node for bus \fIB\fP. This node accepts ioctls for bus management, such as device enumeration and rescanning.
+.TP
+.B /dev/storage/scsiN
+Legacy-style or high-level block device alias (e.g., \fIscsi0\fP) mapping to the \fIN\fP-th detected block device (disk or CD-ROM). This serves as the primary interface for filesystems.
+
+.SH IOCTLS
+.TP
+.B SCSI_IOCTL_SEND_COMMAND
+Send a raw CDB to the device.
+.TP
+.B SCSI_IOCTL_GET_ID
+Retrieve the Bus:Target:LUN triplet for the file descriptor.
+.TP
+.B SCSI_IOCTL_RESCAN_BUS
+(Bus controller only) Trigger a scan of the SCSI bus for new devices.
+
+.SH SEE ALSO
+.BR sd (4),
+.BR sr (4)

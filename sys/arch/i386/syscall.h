@@ -28,6 +28,7 @@
 #define SYS_DUP     41
 #define SYS_CLONE   120
 #define SYS_FUTEX   240
+#define SYS_GET_COW_STATS 241
 // ... add more as needed
 
 void syscall_init(void);

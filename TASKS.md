@@ -198,6 +198,14 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [x] **`pmap_clear_modify(pmap, va)` - Clear Dirty Bit:**
                     - [x] Locate PTE and clear D bit.
                     - [x] Invalidate TLB entry.
+            - [x] **COW Statistics & Reporting:**
+                - [x] **Track COW Stats:**
+                    - [x] `cow_faults` (Total COW faults handled).
+                    - [x] `cow_pages_mapped` (Pages shared via COW).
+                    - [x] `protection_upgrades`/`downgrades`.
+                - [x] **Expose Stats:**
+                    - [x] Native Syscall `SYS_GET_COW_STATS` (241).
+                    - [x] Procfs entry `/proc/cow_stats` matching Linux-style text format.
                     - [x] **Usage:** Track pages that need writeback to swap/file.
                 - [x] **Page Aging Algorithm Integration:**
                     - [x] Periodic scanning of all resident pages.
@@ -508,16 +516,19 @@ This document tracks the progress and remaining tasks for the TestUnix operating
                 - [ ] Timeout management and retries.
                 - [ ] Error Handling: Sense Data definition and parsing (SPC-3).
         - [ ] **High-Level Device Drivers:**
-            - [ ] **Disk (`sd`):**
-                - [ ] Read/Write support (READ_10, READ_16, WRITE_10, etc.).
-                - [ ] Capacity and Geometry detection (`READ CAPACITY`).
-                - [ ] Cache Flush (`SYNCHRONIZE CACHE`).
-                - [ ] Integration with GEOM/VFS for partition table parsing.
-            - [ ] **CD-ROM (`sr`):**
-                - [ ] Sector size switching (2048 vs 512).
-                - [ ] `READ TOC` support for track info.
-                - [ ] Media presence detection (`TEST UNIT READY`).
-                - [ ] **ioctls:** Eject, Lock Door, Play Audio.
+            - [ ] **Unified Userspace Interface:**
+                - [ ] **Device Nodes:**
+                    - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`) - Direct generic SCSI access (Bus:Target:LUN).
+                    - [ ] `/dev/storage/scsi/B` (e.g., `0`) - Bus controller ioctl endpoint (Enumeration/Rescan).
+                    - [ ] `/dev/storage/scsiN` (e.g., `scsi0`) - High-level Block Device alias (e.g., first disk).
+                - [ ] **Drivers (`sd`/`sr` unified):**
+                    - [ ] **Command Translation:** Map high-level Block I/O to SCSI READ/WRITE CDBs.
+                    - [ ] **Device Type Handling:**
+                        - [ ] **Direct Access (Disk):** Capacity/Geometry, Cache Flush.
+                        - [ ] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking.
+                - [ ] **Integration:**
+                    - [ ] Register with DevFS using the schematic above.
+                    - [ ] Implement `ioctl` for Bus Enumeration on controller nodes.
         - [ ] **Transport/HBA Drivers (Low-Level):**
             - [ ] **ATAPI (Legacy):**
                 - [ ] Encapsulate SCSI CDBs into ATA Packet Commands used by IDE/PATA.
@@ -602,16 +613,34 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [x] Abstract `input_event` structure (type, code, value).
         - [x] `/dev/input` interface for userspace access.
 - [ ] **Console Subsystem (`sys/console`):**
-    - [ ] **Core Abstraction:**
-        - [ ] **Virtual Terminal:** State machine for ANSI/VT102 escape sequences.
-        - [ ] **Generic API:** `console_write`, `console_read`, `console_ioctl`.
-        - [ ] **TTY Integration:** Discipline hook for termios line processing.
-    - [ ] **Backend Drivers (Pluggable):**
-        - [ ] **VGA Text Mode:**
-            - [ ] Direct memory writing (0xB8000).
-            - [ ] Hardware cursor control / text attribute handling.
-            - [ ] **Mode Probing:** Detect hardware-supported configurations via BIOS/VESA.
-            - [ ] **All Supported Modes:** Enable any mode the hardware offers (80x25, 80x50, 132x60, etc.).
+    - [ ] **TTY Subsystem (Core):**
+        - [ ] **Structures (`tty_t`):**
+            - [ ] **Buffers:** Input (raw), Output (tty), Canonical (cooked).
+            - [ ] **State:** `termios` (c_lflag, c_iflag, etc.), `winsize`.
+            - [ ] **Line Discipline (`ldisc`):**
+                - [ ] `n_tty_read`: Canonical (line-buffered) vs Raw mode.
+                - [ ] `n_tty_write`: Output processing (ONLCR, etc.).
+                - [ ] `echo`: Handling `ECHO`, `ECHOE` (backspace), `ECHONL`.
+                - [ ] `signals`: `ISIG` handling (`CTRL+C`->SIGINT, `CTRL+Z`->SIGTSTP).
+            - [ ] **Driver Hooks:** `put_char`, `flush_chars`, `write`, `ioctl`.
+            - [ ] **Session/PGRP:** Pointer to `session` and foreground `pgrp`.
+        - [ ] **API:**
+            - [ ] `tty_init()`: Initialize subsystem.
+            - [ ] `tty_alloc()`: Create a new TTY device.
+            - [ ] `tty_register_device()`: Register with DevFS `/dev/ttyX`.
+            - [ ] `tty_open`, `tty_close`: Refcounting and session logic.
+            - [ ] `tty_read`, `tty_write`: Dispatch to ldisc.
+            - [ ] `tty_ioctl`:
+                - [ ] `TIOCSCTTY`: Become controlling TTY.
+                - [ ] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group.
+                - [ ] `TCGETS` / `TCSETS`: Termios get/set.
+                - [ ] `TIOCGWINSZ`: Window size.
+    - [ ] **Virtual Terminal (VT) Layer:**
+        - [ ] **VT Management:** Array of `tty_t` structures (tty0..ttyN).
+        - [ ] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`).
+        - [ ] **Emulation:** VT102 state machine (escape codes).
+    - [ ] **Backend Drivers:**
+        - [ ] **VGA/Keyboard:** Bind keyboard input + VGA output to a TTY.
         - [ ] **Framebuffer Console (Graphical):**
             - [ ] Drivers: VESA, UEFI GOP, BGA, VirtIO-GPU.
             - [ ] Rendering: PSF Bitmap font support, Software Blitting, Scrolling.
@@ -840,7 +869,10 @@ This document tracks the progress and remaining tasks for the TestUnix operating
         - [ ] Complete `thr_new` implementation.
         - [ ] **FreeBSD 14.3 Compatibility (i386):**
             - [x] Implement `struct kinfo_proc` (FreeBSD 14.3 layout).
-            - [ ] Implement `libkvm` backend for FreeBSD personality.
+            - [ ] **Binary Compatibility:**
+                - [ ] Investigate need for virtual `/dev/kmem` emulation for legacy binaries.
+            - [ ] **Native Porting:**
+                - [ ] Implement `libkvm` shim in `libsys` for porting BSD tools to native ABI.
             - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`.
     - [ ] **BSD Family (NetBSD/OpenBSD):**
         - [ ] Implement `__sysctl` (MIB-based configuration).
@@ -940,30 +972,64 @@ This document tracks the progress and remaining tasks for the TestUnix operating
             - [ ] Space ignored if "+" is present.
 - [ ] **String/Mem:**
     - [x] Optimize `memcpy`, `memset`, `memmove`.
-- [ ] **Math Library (`lib/m/`):**
-    - [ ] **Architecture:**
-        - [ ] **Headers:** `math.h` (constants `M_PI`, `NAN`, `INFINITY`, prototypes).
-        - [ ] **Error Handling:** `math_errhandling` (errno `EDOM`/`ERANGE` vs exceptions).
-        - [ ] **IEEE 754:** Handling of Denormals, NaNs, and Infinities.
-    - [ ] **Classification & Comparison:**
-        - [ ] `fpclassify`, `isfinite`, `isinf`, `isnan`, `isnormal`, `signbit`.
-        - [ ] `isgreater`, `isless`, etc. (avoiding FPU exceptions).
-    - [ ] **Basic Arithmetic:**
-        - [ ] `fabs`, `fmod`, `remainder`, `fmax`, `fmin`, `fdim`.
-        - [ ] **Rounding:** `ceil`, `floor`, `trunc`, `round`, `rint`.
-    - [ ] **Exponential & Power:**
-        - [ ] `exp`, `exp2`, `expm1`.
-        - [ ] `log`, `log2`, `log10`, `log1p`.
-        - [ ] `pow`, `sqrt`, `cbrt`, `hypot`.
-    - [ ] **Trigonometric:**
-        - [ ] `sin`, `cos`, `tan`.
-        - [ ] `asin`, `acos`, `atan`, `atan2`.
-    - [ ] **Hyperbolic:**
-        - [ ] `sinh`, `cosh`, `tanh`.
-        - [ ] `asinh`, `acosh`, `atanh`.
-    - [ ] **Floating Point Logic:**
-        - [ ] `frexp`, `ldexp`, `modf`, `scalbn`.
-        - [ ] `nextafter`, `copysign`.
+    - [ ] **Math Library (`lib/m/`):**
+        - [ ] **Architecture:**
+            - [ ] `math.h` header definition.
+            - [ ] `math_errhandling` (errno support).
+            - [ ] `__fpclassify` internal helper.
+        - [ ] **Classification:**
+            - [ ] `fpclassify()`
+            - [ ] `isfinite()`
+            - [ ] `isinf()`
+            - [ ] `isnan()`
+            - [ ] `isnormal()`
+            - [ ] `signbit()`
+        - [ ] **Basic Arithmetic:**
+            - [ ] `fabs()`
+            - [ ] `fmod()`
+            - [ ] `remainder()`
+            - [ ] `fmax()`
+            - [ ] `fmin()`
+            - [ ] `fdim()`
+            - [ ] `ceil()`
+            - [ ] `floor()`
+            - [ ] `trunc()`
+            - [ ] `round()`
+            - [ ] `rint()`
+        - [ ] **Exponential & Power:**
+            - [ ] `exp()`
+            - [ ] `exp2()`
+            - [ ] `expm1()`
+            - [ ] `log()`
+            - [ ] `log2()`
+            - [ ] `log10()`
+            - [ ] `log1p()`
+            - [ ] `pow()`
+            - [ ] `sqrt()`
+            - [ ] `cbrt()`
+            - [ ] `hypot()`
+        - [ ] **Trigonometric:**
+            - [ ] `sin()`
+            - [ ] `cos()`
+            - [ ] `tan()`
+            - [ ] `asin()`
+            - [ ] `acos()`
+            - [ ] `atan()`
+            - [ ] `atan2()`
+        - [ ] **Hyperbolic:**
+            - [ ] `sinh()`
+            - [ ] `cosh()`
+            - [ ] `tanh()`
+            - [ ] `asinh()`
+            - [ ] `acosh()`
+            - [ ] `atanh()`
+        - [ ] **Manipulation:**
+            - [ ] `frexp()`
+            - [ ] `ldexp()`
+            - [ ] `modf()`
+            - [ ] `scalbn()`
+            - [ ] `nextafter()`
+            - [ ] `copysign()`
     - [ ] **Optimizations (i386/x87):**
         - [ ] Inline Assembly for `fsin`, `fcos`, `fsqrt`, `fyl2x`.
         - [ ] `sincos` optimization.

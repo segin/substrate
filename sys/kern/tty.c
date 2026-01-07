@@ -19,10 +19,16 @@ void tty_default_termios(struct termios *t) {
     t->c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE | IEXTEN;
     
     t->c_cc[VINTR] = 3;  // ^C
-    t->c_cc[VQUIT] = 28; // ^\
+    t->c_cc[VQUIT] = 28; // ^\ (Escaped backslash)
     t->c_cc[VERASE] = 127; // DEL
     t->c_cc[VKILL] = 21; // ^U
     t->c_cc[VEOF] = 4;   // ^D
+}
+// ...
+void tty_register_device(struct tty *tty, char *name) {
+    (void)tty; (void)name;
+    // Wrapper for devfs registration
+    // Not implemented fully yet, need fs_node creation
 }
 
 void tty_init(void) {
@@ -202,6 +208,7 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
 }
 
 void tty_register_device(struct tty *tty, char *name) {
+    (void)tty; (void)name;
     // Wrapper for devfs registration
     // Not implemented fully yet, need fs_node creation
 }

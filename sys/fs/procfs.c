@@ -1,5 +1,5 @@
 #include "../vfs/vfs.h"
-#include <sys/proc.h>
+#include "../../include/sys/proc.h"
 #include "../../pm/pm.h"
 #include "../exec/perso/personality.h"
 #include <string.h>
@@ -79,6 +79,28 @@ static uint32_t proc_uptime_read(fs_node_t *node, off_t offset, uint32_t size, u
     return size;
 }
 
+// Node for /proc/cow_stats
+#include "../../arch/i386/pmap.h"
+extern int sys_get_cow_stats(struct pmap_stats *out);
+
+static uint32_t proc_cow_stats_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    struct pmap_stats stats;
+    if (sys_get_cow_stats(&stats) != 0) return 0;
+    
+    char buf[512];
+    sprintf(buf, "Faults:\t%u\nCOW Faults:\t%u\nZero Fills:\t%u\nProt Upgrades:\t%u\nProt Downgrades:\t%u\nCOW Pages Mapped:\t%u\n",
+            stats.faults, stats.cow_faults, stats.zero_fills, 
+            stats.protection_upgrades, stats.protection_downgrades,
+            stats.cow_pages_mapped);
+            
+    uint32_t len = strlen(buf);
+    if (offset >= len) return 0;
+    if (offset + size > len) size = len - offset;
+    memcpy(buffer, buf + offset, size);
+    return size;
+}
+
 // Node for /proc/<pid>/
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint32_t index) {
     (void)node;
@@ -110,8 +132,9 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index) {
     if (index == 2) { strcpy(proc_dirent.name, "cpuinfo"); return &proc_dirent; }
     if (index == 3) { strcpy(proc_dirent.name, "meminfo"); return &proc_dirent; }
     if (index == 4) { strcpy(proc_dirent.name, "uptime"); return &proc_dirent; }
+    if (index == 5) { strcpy(proc_dirent.name, "cow_stats"); return &proc_dirent; }
 
-    int count = 5;
+    int count = 6;
     for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
             if (count == (int)index) {
@@ -150,6 +173,14 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
         up_node.flags = FS_FILE;
         up_node.read = &proc_uptime_read;
         return &up_node;
+    }
+    if (strcmp(name, "cow_stats") == 0) {
+        static fs_node_t cow_node;
+        memset(&cow_node, 0, sizeof(fs_node_t));
+        strcpy(cow_node.name, "cow_stats");
+        cow_node.flags = FS_FILE;
+        cow_node.read = &proc_cow_stats_read;
+        return &cow_node;
     }
 
     int pid = 0;

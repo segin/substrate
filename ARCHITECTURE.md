@@ -101,6 +101,9 @@ These components are essential for booting and basic system operation.
     - `sata`: SATA devices (AHCI).
     - `ide`: Legacy IDE devices.
     - `scsi`: SCSI devices.
+        - `/dev/storage/scsi/B:T:L`: Generic SCSI access (Bus:Target:LUN).
+        - `/dev/storage/scsi/B`: Bus controller (ioctl enumeration).
+        - `/dev/storage/scsiN`: High-level block device alias (e.g., `scsi0` -> first disk).
     - `usb`: USB Mass Storage.
     - `nvme`: NVMe Namespaces (e.g., `nvme0`).
     - `floppy`: Floppy Disk.

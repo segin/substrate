@@ -39,6 +39,8 @@ extern int sys_execve(const char*, char**, char**);
 extern int sys_fork(void);
 extern int sys_vfork(void);
 extern int sys_link(const char*, const char*);
+struct pmap_stats;
+extern int sys_get_cow_stats(struct pmap_stats*);
 
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
@@ -76,6 +78,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [141] = &sys_getdents, 
     [162] = &sys_nanosleep,
     [183] = &sys_getcwd,
+    [241] = &sys_get_cow_stats,
     [455] = &sys_thr_new,
 };
 

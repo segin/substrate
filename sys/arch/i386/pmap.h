@@ -38,7 +38,11 @@ struct pmap_stats {
     uint32_t zero_fills;           // Zero-fill page faults
     uint32_t protection_upgrades;  // Protection upgrades (read→write)
     uint32_t protection_downgrades; // Protection downgrades (write→read)
+    uint32_t cow_pages_mapped;     // Total pages initially shared as COW
 };
+
+// Syscall to get stats
+int sys_get_cow_stats(struct pmap_stats *out);
 
 // Linked list entry for global pmap list
 struct pmap_list_entry {

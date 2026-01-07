@@ -16,7 +16,9 @@ void run_unlink_tests(void);
 void run_unlink_property_tests(void);
 void run_link_tests(void);
 void run_link_property_tests(void);
+void run_link_property_tests(void);
 void run_tty_tests(void);
+void run_cow_stats_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -37,9 +39,9 @@ void run_kernel_tests(void) {
         run_pid_tests();
         run_unlink_tests();
         run_unlink_property_tests();
-        run_link_tests();
         run_link_property_tests();
         run_tty_tests();
+        run_cow_stats_tests();
     }
     
     if (all || strcmp(test_arg, "mmap") == 0) {
