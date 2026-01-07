@@ -75,6 +75,9 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         page_copy(m->phys_addr, new_m->phys_addr);
         new_m->flags |= PG_VALID | PG_DIRTY;
         
+        // Decrement refcount on original shared page
+        vm_page_unhold(m);
+        
         m = new_m; // Use the new page
         vm_object_add_page(first_obj, m);
     }

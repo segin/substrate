@@ -345,11 +345,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [ ] **Copy-on-Write (COW):**
                         - [x] **Write-Protection:** Mark pages read-only (`!PTE_RW`) in child on fork.
                         - [ ] **Fault Handling:**
-                             - [ ] Detect write fault on present, read-only CoW page.
-                             - [ ] Allocate new frame.
-                             - [ ] Copy content from original frame.
-                             - [ ] Update PTE to point to new frame with `PTE_RW`.
-                             - [ ] Decrement refcount on original frame.
+                             - [x] Detect write fault on present, read-only CoW page.
+                             - [x] Allocate new frame.
+                             - [x] Copy content from original frame.
+                             - [x] Update PTE to point to new frame with `PTE_RW`.
+                             - [x] Decrement refcount on original frame.
                     - [ ] **Lazy Faulting Improvements:**
                         - [ ] **Demand Paging:** Only allocate frames when accessed (Zero-fill on demand).
                         - [ ] **Prefaulting:** Heuristic to load surrounding pages during IO to reduce disk seeks.
