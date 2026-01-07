@@ -24,3 +24,23 @@ On success, 0 is returned. On error, -1 is returned.
 The 
 .I clk_id
 specified is not supported on this system.
+.SH EXAMPLES
+.B Program source
+.nf
+
+#include <time.h>
+#include <stdio.h>
+
+int main(void) {
+    struct timespec ts;
+    // Get the current time from the system-wide real-time clock
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        printf("Current time: %ld seconds, %ld nanoseconds\\n",
+               (long)ts.tv_sec, ts.tv_nsec);
+    } else {
+        perror("clock_gettime");
+        return 1;
+    }
+    return 0;
+}
+.fi
