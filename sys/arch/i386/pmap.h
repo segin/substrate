@@ -42,6 +42,8 @@ struct pmap_stats {
     uint32_t cow_pages_mapped;     // Total pages initially shared as COW
     uint32_t cow_duplications;     // Pages physically duplicated during COW
     uint32_t pages_saved_by_cow;   // Pages never duplicated (process exited clean)
+    uint32_t tlb_invlpg_count;     // Single-page TLB invalidations (invlpg)
+    uint32_t tlb_full_flush_count; // Full TLB flushes (CR3 reload)
 };
 
 // Syscall to get stats

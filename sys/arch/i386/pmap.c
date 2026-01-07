@@ -745,6 +745,7 @@ int pmap_page_is_cow(pmap_t pmap, uint32_t va) {
 
 void pmap_invalidate_page(uint32_t va) {
     __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
+    __sync_fetch_and_add(&global_pmap_stats.tlb_invlpg_count, 1);
 }
 
 // Include vm_page.h for vm_page_t

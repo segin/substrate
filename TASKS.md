@@ -237,7 +237,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Track COW page duplications.
             - [ ] **TLB Management:**
                 - [ ] **Single CPU TLB:**
-                    - [ ] `invlpg(va)`: Invalidate single page.
+                    - [x] `invlpg(va)`: Invalidate single page.
                     - [ ] CR3 reload: Flush entire TLB (expensive).
                     - [ ] Track flush statistics.
                 - [ ] **SMP TLB Shootdown:**
