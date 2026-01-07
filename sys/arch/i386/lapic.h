@@ -23,8 +23,13 @@
 
 #define LAPIC_SVR_ENABLE    0x0100
 
+// TLB Shootdown IPI vector (must not conflict with hardware IRQs)
+#define TLB_SHOOTDOWN_VECTOR    0xFE
+
 void lapic_init(void);
 void lapic_send_eoi(void);
 uint32_t lapic_get_id(void);
+void lapic_send_ipi(uint8_t dest_cpu, uint8_t vector);
+void lapic_send_ipi_all_excl_self(uint8_t vector);
 
 #endif

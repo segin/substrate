@@ -241,7 +241,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] CR3 reload: Flush entire TLB (expensive).
                     - [x] Track flush statistics.
                 - [ ] **SMP TLB Shootdown:**
-                    - [ ] IPI (Inter-Processor Interrupt) mechanism.
+                    - [x] IPI (Inter-Processor Interrupt) mechanism.
                     - [ ] `pmap_shootdown_page(va)`: Invalidate single page on all CPUs.
                     - [ ] `pmap_shootdown_range(va, len)`: Invalidate range.
                     - [ ] `pmap_shootdown_all()`: Full TLB flush on all CPUs.
