@@ -33,3 +33,20 @@ already exists and is not empty.
 .B ENOENT
 .I oldpath
 does not exist.
+.SH EXAMPLES
+.B Program source
+.nf
+
+#include <stdio.h>
+
+int main(void) {
+    // Rename a file from "old.txt" to "new.txt"
+    if (rename("old.txt", "new.txt") == 0) {
+        printf("File renamed successfully.\\n");
+    } else {
+        perror("rename");
+        return 1;
+    }
+    return 0;
+}
+.fi
