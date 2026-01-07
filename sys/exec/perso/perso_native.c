@@ -21,6 +21,8 @@ extern int sys_mount(const char*, const char*, const char*, unsigned long, void*
 extern int sys_umount(const char*);
 extern int sys_access(const char*, int);
 extern int sys_stat(const char*, void*);
+extern int sys_lstat(const char*, void*);
+extern int sys_fstat(int, void*);
 extern int sys_nanosleep(void*, void*);
 extern int sys_sync(void);
 extern int sys_kill(int, int);
@@ -40,7 +42,8 @@ extern int sys_fork(void);
 extern int sys_vfork(void);
 extern int sys_link(const char*, const char*);
 struct pmap_stats;
-extern int sys_get_cow_stats(struct pmap_stats*);
+extern int sys_pmap_stats(struct pmap_stats*);
+extern int sys_ioctl(int, uint32_t, void*);
 
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
@@ -67,6 +70,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [40] = &sys_rmdir,
     [42] = &sys_pipe,
     [46] = &sys_setgid,
+    [SYS_IOCTL] = &sys_ioctl,
     [47] = &sys_getgid,
     [48] = &sys_signal,
     [49] = &sys_geteuid,
@@ -74,11 +78,13 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [51] = &sys_acct,
     [63] = &sys_dup2,
     [106] = &sys_stat,
+    [SYS_LSTAT] = &sys_lstat,
+    [SYS_FSTAT] = &sys_fstat,
     [122] = &sys_uname,
     [141] = &sys_getdents, 
     [162] = &sys_nanosleep,
     [183] = &sys_getcwd,
-    [241] = &sys_get_cow_stats,
+    [241] = &sys_pmap_stats,
     [455] = &sys_thr_new,
 };
 
