@@ -6,20 +6,24 @@
 struct stat {
     dev_t          st_dev;
     unsigned long  st_ino;
-    mode_t         st_mode;
-    unsigned short st_nlink;
-    uid_t          st_uid;
-    gid_t          st_gid;
+    uint16_t       st_mode;
+    uint16_t       st_nlink;
+    uint16_t       st_uid;
+    uint16_t       st_gid;
     dev_t          st_rdev;
     off_t          st_size;
     unsigned long  st_blksize;
+    uint32_t       st_pad1;
     blkcnt_t       st_blocks;
     time_t         st_atime;
     unsigned long  st_atime_nsec;
+    uint32_t       st_pad2;
     time_t         st_mtime;
     unsigned long  st_mtime_nsec;
+    uint32_t       st_pad3;
     time_t         st_ctime;
     unsigned long  st_ctime_nsec;
+    uint32_t       st_pad4;
 };
 
 #define S_IFMT  0170000
@@ -41,6 +45,8 @@ struct stat {
 
 int mkdir(const char *pathname, int mode);
 int stat(const char *pathname, struct stat *statbuf);
+int fstat(int fd, struct stat *statbuf);
+int lstat(const char *pathname, struct stat *statbuf);
 int mknod(const char *pathname, mode_t mode, dev_t dev);
 
 #endif
