@@ -127,8 +127,76 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [243] = &sys_set_thread_area,
 };
 
+static const char *linux_names[MAX_SYSCALLS] = {
+    [1] = "exit",
+    [3] = "read",
+    [4] = "write",
+    [5] = "open",
+    [6] = "close",
+    [11] = "execve",
+    [12] = "chdir",
+    [13] = "time",
+    [19] = "lseek",
+    [20] = "getpid",
+    [21] = "mount",
+    [33] = "access",
+    [36] = "sync",
+    [37] = "kill",
+    [39] = "mkdir",
+    [41] = "dup",
+    [42] = "pipe",
+    [45] = "brk",
+    [54] = "ioctl",
+    [57] = "setpgid",
+    [63] = "dup2",
+    [106] = "stat",
+    [108] = "fstat",
+    [122] = "uname",
+    [141] = "getdents",
+    [174] = "rt_sigaction",
+    [175] = "rt_sigprocmask",
+    [183] = "getcwd",
+    [192] = "mmap2",
+    [195] = "stat64",
+    [197] = "fstat64",
+    [220] = "getdents64",
+    [221] = "fcntl64",
+};
+
+static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {
+    [1] = { 1, { ARG_INT } }, // exit
+    [3] = { 3, { ARG_INT, ARG_PTR, ARG_INT } }, // read
+    [4] = { 3, { ARG_INT, ARG_STR, ARG_INT } }, // write
+    [5] = { 3, { ARG_STR, ARG_HEX, ARG_HEX } }, // open
+    [6] = { 1, { ARG_INT } }, // close
+    [11] = { 3, { ARG_STR, ARG_PTR, ARG_PTR } }, // execve
+    [12] = { 1, { ARG_STR } }, // chdir
+    [19] = { 3, { ARG_INT, ARG_INT, ARG_INT } }, // lseek
+    [33] = { 2, { ARG_STR, ARG_HEX } }, // access
+    [37] = { 2, { ARG_INT, ARG_INT } }, // kill
+    [39] = { 2, { ARG_STR, ARG_HEX } }, // mkdir
+    [42] = { 1, { ARG_PTR } }, // pipe
+    [45] = { 1, { ARG_HEX } }, // brk
+    [54] = { 3, { ARG_INT, ARG_HEX, ARG_HEX } }, // ioctl
+    [57] = { 2, { ARG_INT, ARG_INT } }, // setpgid
+    [63] = { 2, { ARG_INT, ARG_INT } }, // dup2
+    [106] = { 2, { ARG_STR, ARG_PTR } }, // stat
+    [108] = { 2, { ARG_INT, ARG_PTR } }, // fstat
+    [122] = { 1, { ARG_PTR } }, // uname
+    [141] = { 3, { ARG_INT, ARG_PTR, ARG_INT } }, // getdents
+    [174] = { 4, { ARG_INT, ARG_PTR, ARG_PTR, ARG_INT } }, // rt_sigaction
+    [175] = { 4, { ARG_INT, ARG_PTR, ARG_PTR, ARG_INT } }, // rt_sigprocmask
+    [183] = { 2, { ARG_PTR, ARG_INT } }, // getcwd
+    [192] = { 6, { ARG_PTR, ARG_INT, ARG_HEX, ARG_HEX, ARG_INT, ARG_HEX } }, // mmap2
+    [195] = { 2, { ARG_STR, ARG_PTR } }, // stat64
+    [197] = { 2, { ARG_INT, ARG_PTR } }, // fstat64
+    [220] = { 3, { ARG_INT, ARG_PTR, ARG_INT } }, // getdents64
+};
+
 struct personality personality_linux = {
     .name = "Linux",
     .syscall_table = linux_syscalls,
+    .syscall_names = linux_names,
+    .syscall_fmts = linux_fmts,
     .syscall_count = MAX_SYSCALLS
 };

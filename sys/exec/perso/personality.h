@@ -3,9 +3,22 @@
 
 #include <stdint.h>
 
+// Argument Types for Tracing
+#define ARG_HEX 0
+#define ARG_INT 1
+#define ARG_STR 2
+#define ARG_PTR 3
+
+struct syscall_fmt {
+    int nargs;
+    int arg_types[6];
+};
+
 struct personality {
     const char *name;
     void **syscall_table;
+    const char **syscall_names;
+    struct syscall_fmt *syscall_fmts;
     uint32_t syscall_count;
 };
 

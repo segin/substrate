@@ -215,7 +215,8 @@ int sys_uname(struct utsname *buf) {
 
 int sys_exit(int code) {
     if (current_process->pid == 1) {
-        panic("Attempted to exit init process!");
+        kprint("Warning: Init process exited. System Halted (idle).\n");
+        while(1) { __asm__ volatile("hlt"); }
     }
     
     current_process->exit_code = code;
@@ -339,57 +340,77 @@ void syscall_handler(registers_t *regs) {
     syscall_regs = regs;
     
     struct personality *p = current_process->pers;
+    uint32_t syscall_num = regs->eax;
 
-    uint32_t arg1, arg2, arg3, arg4, arg5, arg6;
-    int is_stack_abi = 0;
+    uint32_t args[6];
+
 
     // Detect ABI (FreeBSD/Native i386 uses stack passing)
     if (p && p->name && (strcmp(p->name, "FreeBSD") == 0 || strcmp(p->name, "testunix") == 0 || strcmp(p->name, "AT&T UNIX SVR4") == 0)) {
-        is_stack_abi = 1;
-        // FreeBSD args are on stack just above return address (ESP+4)
-        // We assume 32-bit pointers
+        // FreeBSD/Native args are on stack just above return address (ESP+4)
         uint32_t *user_stack = (uint32_t *)(uintptr_t)regs->useresp;
-        // Check for validity/mapping ideally, but for now strict debug
-        // Note: user_stack[0] is return address (usually)
-        arg1 = user_stack[1];
-        arg2 = user_stack[2];
-        arg3 = user_stack[3];
-        arg4 = user_stack[4];
-        arg5 = user_stack[5];
-        arg6 = user_stack[6];
+        args[0] = user_stack[1];
+        args[1] = user_stack[2];
+        args[2] = user_stack[3];
+        args[3] = user_stack[4];
+        args[4] = user_stack[5];
+        args[5] = user_stack[6];
     } else {
         // Default / Linux ABI (Registers)
-        arg1 = regs->ebx;
-        arg2 = regs->ecx;
-        arg3 = regs->edx;
-        arg4 = regs->esi;
-        arg5 = regs->edi;
-        arg6 = regs->ebp;
+        args[0] = regs->ebx;
+        args[1] = regs->ecx;
+        args[2] = regs->edx;
+        args[3] = regs->esi;
+        args[4] = regs->edi;
+        args[5] = regs->ebp;
     }
 
     if (syscall_trace_enabled) {
-        char buf[256];
-        if (is_stack_abi) {
-            sprintf(buf, "SYSCALL: %d (PID=%d, %s) STACK Args: %08X %08X %08X %08X %08X %08X\n", 
-                    (unsigned int)regs->eax, current_process->pid, p->name,
-                    arg1, arg2, arg3, arg4, arg5, arg6);
-            kprint(buf);
+        char buf[512];
+        const char *name = (p->syscall_names && syscall_num < p->syscall_count) ? p->syscall_names[syscall_num] : NULL;
+        struct syscall_fmt *fmt = (p->syscall_fmts && syscall_num < p->syscall_count) ? &p->syscall_fmts[syscall_num] : NULL;
+
+        // Print Header
+        // "SYSCALL: PID=1, Personality=Linux"
+        char *pers_name = p->name ? (char*)p->name : "Unknown";
+        sprintf(buf, "SYSCALL: PID=%d, Personality=%s\n", current_process->pid, pers_name);
+        kprint(buf);
+
+        // Print Call start
+        // "sys_write(0, "val", 14)"
+        int len = 0;
+        if (name) len += sprintf(buf + len, "sys_%s(", name);
+        else len += sprintf(buf + len, "sys_%d(", syscall_num);
+        
+        if (fmt && fmt->nargs > 0) {
+            for (int i = 0; i < fmt->nargs; i++) {
+                if (i > 0) len += sprintf(buf + len, ", ");
+                switch (fmt->arg_types[i]) {
+                    case ARG_INT: len += sprintf(buf + len, "%d", (int)args[i]); break;
+                    case ARG_HEX: len += sprintf(buf + len, "0x%x", (unsigned int)args[i]); break;
+                    case ARG_PTR: len += sprintf(buf + len, "*%08x", (unsigned int)args[i]); break;
+                    case ARG_STR: 
+                        // Safe(ish) string print
+                        if (args[i] && args[i] > 0x1000) { 
+                            char quote[64];
+                            char *usr = (char*)args[i];
+                            int q = 0;
+                            for(; q < 60 && usr[q]; q++) quote[q] = usr[q];
+                            quote[q] = 0;
+                            len += sprintf(buf + len, "\"%s%s\"", quote, q >= 60 ? "..." : "");
+                        } else {
+                            len += sprintf(buf + len, "NULL");
+                        }
+                        break;
+                    default: len += sprintf(buf + len, "%x", (unsigned int)args[i]); break;
+                }
+            }
         } else {
-            // Header
-            sprintf(buf, "SYSCALL: %d (PID=%d, %s)\n", 
-                    (unsigned int)regs->eax, current_process->pid, p->name);
-            kprint(buf);
-            
-            // Registers Line 1
-            sprintf(buf, "    EBX: %08X  ECX: %08X  EDX: %08X\n", 
-                    arg1, arg2, arg3);
-            kprint(buf);
-            
-            // Registers Line 2
-            sprintf(buf, "    ESI: %08X  EDI: %08X  EBP: %08X\n", 
-                    arg4, arg5, arg6);
-            kprint(buf);
+             // Fallback
+             len += sprintf(buf + len, "0x%x, 0x%x, 0x%x", args[0], args[1], args[2]);
         }
+        len += sprintf(buf + len, ")");
+        kprint(buf); // Print the call part (no newline yet)
     }
     
     // Check if syscall number is out of range
@@ -405,11 +426,8 @@ void syscall_handler(registers_t *regs) {
     
     void *location = p->syscall_table[regs->eax];
     
-    // Check if syscall handler is NULL (not implemented)
     if (!location) {
-        if (syscall_trace_enabled) {
-             // ...
-        }
+        if (syscall_trace_enabled) kprint("SYSCALL: Not Implemented\n");
         regs->eax = -38; // ENOSYS
         return;
     }
@@ -417,28 +435,21 @@ void syscall_handler(registers_t *regs) {
     typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
     
-    // Dispatch with the fetched arguments (ABI-agnostic dispatch)
-    int64_t ret = func(arg1, arg2, arg3, arg4, arg5, arg6);
+    // Dispatch
+    int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5]);
     regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
     regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
 
     if (syscall_trace_enabled) {
-        // Log return value? Maybe too noisy. 
-        // kprint("SYSCALL: Returned\n");
+        char buf[64];
+        sprintf(buf, " ret %d\n", (int)regs->eax);
+        kprint(buf);
     }
 
     signal_handle_pending(regs);
     
-    // Check for ESP corruption (Kernel Stack bleeding into User Regs)
-    // Only if returning to User Mode (CS=0x1B)
     if (regs->cs == 0x1B && regs->useresp >= 0xC0000000) {
-        kprint("SYSCALL RET: Bad User ESP: 0x");
-        char hex[16];
-        uint32_t val = regs->useresp;
-        for(int i=7; i>=0; i--) { int v=(val>>(i*4))&0xF; hex[7-i]=v<10?'0'+v:'A'+v-10; }
-        hex[8]=0;
-        kprint(hex);
-        kprint("\n");
+        kprint("SYSCALL RET: Bad User ESP detected!\n");
         panic("Syscall returning with Kernel ESP in User Frame");
     }
 }

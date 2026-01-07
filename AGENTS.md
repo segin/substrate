@@ -26,6 +26,8 @@ This is an operating system project targeting x86 32-bit architecture (with x86_
 - **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0`, numeric width, and conversions: d/i/u/o/x/X/p/s/c for improved debug output
 - **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant. Added Process Group (`pgrp`) and Session support.
 - **TTY Signals:** Implemented signal generation from TTY (`SIGINT`, `SIGQUIT`, `SIGTSTP`) and group signal delivery (`signal_send_group`).
+- **Syscall Tracing:** Enhanced `syscall_trace` with names, typed arguments (int/hex/ptr/str), return values, and Personality details.
+- **Init Safety:** Kernel now catches `init` process exit (e.g., from detached stdin) and enters an idle loop instead of panicking.
 - **Build System:** Fixed `dist` directory generation to include standard Unix hierarchy (`usr/include`, `usr/local`, etc.) and ensured `vmunix` installation.
 - **Boot/Init:** Cleaned up `sbin` build process; kernel now boots correctly with `root=/dev/hda` for external root filesystems, attempting fallback to `init` search path.
 
