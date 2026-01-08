@@ -1,0 +1,125 @@
+.\" Process this file with
+.\" groff -man -Tascii errno.3
+.\"
+.TH ERRNO 3 "January 2026" "Substrate Kernel" "Library Functions Manual"
+.SH NAME
+errno \- number of last error
+.SH LIBRARY
+Standard C library (libc, -lc)
+.SH SYNOPSIS
+.B #include <errno.h>
+.PP
+.B extern int errno;
+.SH DESCRIPTION
+The
+.I errno
+variable is set by system calls and some library functions in the event of an error to indicate what went wrong.
+.PP
+The symbolic constants for `errno` values are defined in
+.BR <errno.h> .
+.SH "LIST OF ERROR NAMES"
+.TP
+.B EPERM
+Operation not permitted
+.TP
+.B ENOENT
+No such file or directory
+.TP
+.B ESRCH
+No such process
+.TP
+.B EINTR
+Interrupted system call
+.TP
+.B EIO
+I/O error
+.TP
+.B ENXIO
+No such device or address
+.TP
+.B E2BIG
+Argument list too long
+.TP
+.B ENOEXEC
+Exec format error
+.TP
+.B EBADF
+Bad file number
+.TP
+.B ECHILD
+No child processes
+.TP
+.B EAGAIN
+Try again
+.TP
+.B ENOMEM
+Out of memory
+.TP
+.B EACCES
+Permission denied
+.TP
+.B EFAULT
+Bad address
+.TP
+.B ENOTBLK
+Block device required
+.TP
+.B EBUSY
+Device or resource busy
+.TP
+.B EEXIST
+File exists
+.TP
+.B EXDEV
+Cross-device link
+.TP
+.B ENODEV
+No such device
+.TP
+.B ENOTDIR
+Not a directory
+.TP
+.B EISDIR
+Is a directory
+.TP
+.B EINVAL
+Invalid argument
+.TP
+.B ENFILE
+File table overflow
+.TP
+.B EMFILE
+Too many open files
+.TP
+.B ENOTTY
+Not a typewriter
+.TP
+.B ETXTBSY
+Text file busy
+.TP
+.B EFBIG
+File too large
+.TP
+.B ENOSPC
+No space left on device
+.TP
+.B ESPIPE
+Illegal seek
+.TP
+.B EROFS
+Read-only file system
+.TP
+.B EMLINK
+Too many links
+.TP
+.B EPIPE
+Broken pipe
+.TP
+.B EDOM
+Math argument out of domain of func
+.TP
+.B ERANGE
+Math result not representable
+.SH "SEE ALSO"
+.BR perror (3),
+.BR strerror (3)
