@@ -58,7 +58,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     // If we want to WRITE, and the page is in a shared object (ref_count > 1) 
     // OR it's not in the top-level object, we need to copy it.
     bool needs_copy = false;
-    if (prot & VM_PROT_WRITE) {
+    if ((prot & VM_PROT_WRITE) && (entry->inheritance != VM_INHERIT_SHARE)) {
         if (m && (obj != first_obj || obj->ref_count > 1)) {
             needs_copy = true;
         } else if (!m && first_obj->ref_count > 1) {
@@ -90,12 +90,45 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         if (!m) return VM_FAULT_ERROR;
 
         if (first_obj->pager && vm_pager_has_page(first_obj->pager, pindex)) {
-            if (vm_pager_get_pages(first_obj->pager, &m, 1, true) != 0) {
-                // Pager failed (IO error?)
-                vm_page_free(m);
-                return VM_FAULT_ERROR;
+            vm_page_t *pages[2] = { m, NULL };
+            int count = 1;
+
+            // Prefaulting: Try to read next page too
+            uint64_t next_idx = pindex + 1;
+            if (vm_pager_has_page(first_obj->pager, next_idx)) {
+                // Check if not resident
+                if (!vm_object_lookup_page(first_obj, next_idx)) {
+                     vm_page_t *m2 = vm_page_alloc(first_obj, next_idx, 0);
+                     if (m2) {
+                         pages[1] = m2;
+                         count++;
+                     }
+                }
             }
-            m->flags |= PG_VALID; // Pager sets valid
+
+            if (vm_pager_get_pages(first_obj->pager, pages, count, true) != 0) {
+                // Pager failed (IO error?)
+                // If double fetch failed, try just the single urgent page
+                if (count > 1) {
+                    vm_page_free(pages[1]);
+                    count = 1;
+                    if (vm_pager_get_pages(first_obj->pager, &m, 1, true) != 0) {
+                        vm_page_free(m);
+                        return VM_FAULT_ERROR;
+                    }
+                } else {
+                    vm_page_free(m);
+                    return VM_FAULT_ERROR;
+                }
+            }
+            
+            m->flags |= PG_VALID;
+            // Add prefaulted page if successful
+            if (count > 1 && pages[1]) {
+                pages[1]->flags |= PG_VALID;
+                vm_object_add_page(first_obj, pages[1]);
+                vm_page_deactivate(pages[1]); // Move to inactive queue immediately (heuristically)
+            }
         } else if (first_obj->type == VM_OBJ_TYPE_DEFAULT) {
             page_zero(m->phys_addr);
             m->flags |= PG_ZERO | PG_VALID;
@@ -110,8 +143,9 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     
     // 6. Enter mapping
     // If it's a COW mapping (read-only view of shared page), reduce permissions
+    // If it's a COW mapping (read-only view of shared page), reduce permissions
     uint8_t enter_prot = entry->protection;
-    if ((prot & VM_PROT_WRITE) == 0 && (obj->ref_count > 1)) {
+    if ((prot & VM_PROT_WRITE) == 0 && (obj->ref_count > 1) && (entry->inheritance != VM_INHERIT_SHARE)) {
        enter_prot &= ~VM_PROT_WRITE; // Force Read-Only for COW
     }
 

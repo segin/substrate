@@ -341,7 +341,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [ ] **Reference Counting & Shared Memory:**
                         - [x] **vm_page_t Refcounts:** Track number of mappings pointing to physical frames.
                         - [x] **vm_object Refcounts:** Track number of regions sharing the same backing store.
-                        - [ ] **Shared Mappings (`MAP_SHARED`):** write-through logic for multi-process memory sharing.
+                        - [x] **Shared Mappings (`MAP_SHARED`):** write-through logic for multi-process memory sharing.
                     - [ ] **Copy-on-Write (COW):**
                         - [x] **Write-Protection:** Mark pages read-only (`!PTE_RW`) in child on fork.
                         - [ ] **Fault Handling:**
@@ -352,7 +352,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                              - [x] Decrement refcount on original frame.
                     - [ ] **Lazy Faulting Improvements:**
                         - [x] **Demand Paging:** Only allocate frames when accessed (Zero-fill on demand).
-                        - [ ] **Prefaulting:** Heuristic to load surrounding pages during IO to reduce disk seeks.
+                        - [x] **Prefaulting:** Heuristic to load surrounding pages during IO to reduce disk seeks.
     - [ ] **Kernel Allocator (UMA/Zone):**
     - [ ] **Kernel Allocator (UMA/Slab Refactor):**
         - [ ] **UMA Core (`uma_core.c`):**
