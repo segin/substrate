@@ -1,0 +1,542 @@
+/*
+ * uma_core.c - Universal Memory Allocator Core
+ * 
+ * Implements FreeBSD-style slab allocator with per-CPU caches.
+ */
+
+#include "uma.h"
+#include "../arch/i386/pmm.h"
+#include "../kern/console.h"
+#include <stddef.h>
+#include <string.h>
+
+/* Global list of all zones */
+static uma_zone_t *uma_zones = NULL;
+
+/* Number of CPUs (TODO: detect at runtime) */
+#define UMA_NCPU    1
+
+/* Bootstrap zone pool */
+#define UMA_BOOTSTRAP_ZONES 32
+static uint8_t uma_bootstrap_mem[UMA_BOOTSTRAP_ZONES * sizeof(uma_zone_t)];
+static int uma_bootstrap_idx = 0;
+static bool uma_booted = false;
+
+/* Bucket pool */
+#define UMA_BUCKET_POOL_SIZE 64
+static struct uma_bucket uma_bucket_pool[UMA_BUCKET_POOL_SIZE];
+static int uma_bucket_idx = 0;
+
+/* Forward declarations */
+static uma_slab_t *uma_slab_alloc(uma_zone_t *zone);
+static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab);
+static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab);
+static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item);
+
+/*
+ * Initialize UMA subsystem
+ */
+void uma_startup(void) {
+    uma_bootstrap_idx = 0;
+    uma_bucket_idx = 0;
+    uma_zones = NULL;
+    uma_booted = true;
+    kprint("UMA: subsystem initialized\n");
+}
+
+/*
+ * Allocate a bucket from the pool
+ */
+static struct uma_bucket *uma_bucket_alloc(void) {
+    if (uma_bucket_idx >= UMA_BUCKET_POOL_SIZE) {
+        return NULL;
+    }
+    struct uma_bucket *b = &uma_bucket_pool[uma_bucket_idx++];
+    b->ub_cnt = 0;
+    return b;
+}
+
+/*
+ * Create a new zone
+ */
+uma_zone_t *uma_zcreate(
+    const char *name,
+    size_t size,
+    uma_ctor ctor,
+    uma_dtor dtor,
+    uma_init init,
+    uma_fini fini,
+    int align,
+    uint32_t flags
+) {
+    uma_zone_t *zone;
+    
+    /* Allocate zone structure */
+    if (uma_bootstrap_idx < UMA_BOOTSTRAP_ZONES) {
+        zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * sizeof(uma_zone_t)];
+        uma_bootstrap_idx++;
+    } else {
+        /* TODO: Allocate from kmalloc after bootstrap */
+        return NULL;
+    }
+    
+    /* Initialize zone */
+    memset(zone, 0, sizeof(uma_zone_t));
+    zone->uz_name = name;
+    zone->uz_size = size;
+    zone->uz_flags = flags;
+    
+    /* Alignment: minimum of requested or natural alignment */
+    if (align == 0) {
+        /* Default to word alignment */
+        zone->uz_align = sizeof(void *);
+    } else {
+        /* Round up to power of 2 */
+        zone->uz_align = align;
+    }
+    
+    /* Cache line alignment for performance */
+    if (zone->uz_align < 64 && size >= 64) {
+        zone->uz_align = 64;
+    }
+    
+    /* Calculate real size with redzone padding */
+    zone->uz_rsize = size;
+    if (flags & UMA_ZONE_REDZONE) {
+        zone->uz_rsize += UMA_REDZONE_SIZE * 2;
+    }
+    
+    /* Ensure size is at least pointer-sized for free list */
+    if (zone->uz_rsize < sizeof(void *)) {
+        zone->uz_rsize = sizeof(void *);
+    }
+    
+    /* Round up to alignment */
+    zone->uz_rsize = (zone->uz_rsize + zone->uz_align - 1) & ~(zone->uz_align - 1);
+    
+    /* Calculate items per slab (4k pages) */
+    zone->uz_ipers = 4096 / zone->uz_rsize;
+    if (zone->uz_ipers == 0) {
+        zone->uz_ipers = 1; /* Large objects get 1 per page */
+    }
+    
+    /* Set callbacks */
+    zone->uz_ctor = ctor;
+    zone->uz_dtor = dtor;
+    zone->uz_init = init;
+    zone->uz_fini = fini;
+    zone->uz_arg = NULL;
+    
+    /* Initialize per-CPU cache */
+    for (int i = 0; i < UMA_NCPU; i++) {
+        zone->uz_cpu[i].uc_freebucket = NULL;
+        zone->uz_cpu[i].uc_allocbucket = NULL;
+        zone->uz_cpu[i].uc_allocs = 0;
+        zone->uz_cpu[i].uc_frees = 0;
+    }
+    
+    /* Initialize slab lists */
+    zone->uz_full_slabs = NULL;
+    zone->uz_part_slabs = NULL;
+    zone->uz_free_slabs = NULL;
+    
+    /* Link to global zone list */
+    zone->uz_next = uma_zones;
+    uma_zones = zone;
+    
+    return zone;
+}
+
+/*
+ * Destroy a zone
+ */
+void uma_zdestroy(uma_zone_t *zone) {
+    if (!zone) return;
+    
+    /* Free all slabs */
+    uma_slab_t *slab, *next;
+    
+    for (slab = zone->uz_full_slabs; slab; slab = next) {
+        next = slab->us_next;
+        uma_slab_free(zone, slab);
+    }
+    for (slab = zone->uz_part_slabs; slab; slab = next) {
+        next = slab->us_next;
+        uma_slab_free(zone, slab);
+    }
+    for (slab = zone->uz_free_slabs; slab; slab = next) {
+        next = slab->us_next;
+        uma_slab_free(zone, slab);
+    }
+    
+    /* Remove from global list */
+    if (uma_zones == zone) {
+        uma_zones = zone->uz_next;
+    } else {
+        for (uma_zone_t *z = uma_zones; z; z = z->uz_next) {
+            if (z->uz_next == zone) {
+                z->uz_next = zone->uz_next;
+                break;
+            }
+        }
+    }
+}
+
+/*
+ * Allocate a slab page and carve into objects
+ */
+static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
+    /* Allocate raw page from PMM */
+    void *page = pmm_alloc_block();
+    if (!page) return NULL;
+    
+    /* Slab header is at the end of the page (for small objects) */
+    uma_slab_t *slab;
+    size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
+    
+    if (zone->uz_rsize * zone->uz_ipers + slab_overhead <= 4096) {
+        /* On-page slab header */
+        slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
+    } else {
+        /* TODO: Off-page slab header for large objects */
+        pmm_free_block(page);
+        return NULL;
+    }
+    
+    slab->us_data = page;
+    slab->us_freecount = zone->uz_ipers;
+    slab->us_firstfree = 0;
+    slab->us_next = NULL;
+    
+    /* Initialize free list (sequential indices) */
+    slab->us_freelist = (uint8_t *)(slab + 1);
+    for (uint32_t i = 0; i < zone->uz_ipers; i++) {
+        slab->us_freelist[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;
+    }
+    
+    /* Call init callback on each object */
+    if (zone->uz_init) {
+        for (uint32_t i = 0; i < zone->uz_ipers; i++) {
+            void *obj = (void *)((uintptr_t)page + i * zone->uz_rsize);
+            zone->uz_init(obj, zone->uz_size, 0);
+        }
+    }
+    
+    return slab;
+}
+
+/*
+ * Free a slab back to PMM
+ */
+static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
+    /* Call fini callback on each object */
+    if (zone->uz_fini) {
+        for (uint32_t i = 0; i < zone->uz_ipers; i++) {
+            void *obj = (void *)((uintptr_t)slab->us_data + i * zone->uz_rsize);
+            zone->uz_fini(obj, zone->uz_size);
+        }
+    }
+    
+    pmm_free_block(slab->us_data);
+}
+
+/*
+ * Allocate one item from a slab
+ */
+static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab) {
+    if (slab->us_freecount == 0) return NULL;
+    
+    uint32_t idx = slab->us_firstfree;
+    void *obj = (void *)((uintptr_t)slab->us_data + idx * zone->uz_rsize);
+    
+    /* Update free list */
+    slab->us_firstfree = slab->us_freelist[idx];
+    slab->us_freelist[idx] = 0xFF; /* Mark as allocated */
+    slab->us_freecount--;
+    
+    /* Handle redzone offset */
+    if (zone->uz_flags & UMA_ZONE_REDZONE) {
+        obj = (void *)((uintptr_t)obj + UMA_REDZONE_SIZE);
+    }
+    
+    return obj;
+}
+
+/*
+ * Free one item back to a slab
+ */
+static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item) {
+    /* Handle redzone offset */
+    if (zone->uz_flags & UMA_ZONE_REDZONE) {
+        item = (void *)((uintptr_t)item - UMA_REDZONE_SIZE);
+    }
+    
+    /* Calculate index */
+    uint32_t idx = ((uintptr_t)item - (uintptr_t)slab->us_data) / zone->uz_rsize;
+    
+    /* Add to free list */
+    slab->us_freelist[idx] = slab->us_firstfree;
+    slab->us_firstfree = idx;
+    slab->us_freecount++;
+}
+
+/*
+ * Find which slab contains an item
+ */
+static uma_slab_t *uma_find_slab(uma_zone_t *zone, void *item) {
+    uintptr_t page = (uintptr_t)item & ~0xFFF;
+    
+    /* Check partial slabs */
+    for (uma_slab_t *s = zone->uz_part_slabs; s; s = s->us_next) {
+        if ((uintptr_t)s->us_data == page) return s;
+    }
+    /* Check full slabs */
+    for (uma_slab_t *s = zone->uz_full_slabs; s; s = s->us_next) {
+        if ((uintptr_t)s->us_data == page) return s;
+    }
+    
+    return NULL;
+}
+
+/*
+ * Remove slab from a list
+ */
+static void uma_slab_unlink(uma_slab_t **list, uma_slab_t *slab) {
+    if (*list == slab) {
+        *list = slab->us_next;
+    } else {
+        for (uma_slab_t *s = *list; s; s = s->us_next) {
+            if (s->us_next == slab) {
+                s->us_next = slab->us_next;
+                break;
+            }
+        }
+    }
+    slab->us_next = NULL;
+}
+
+/*
+ * Allocate from zone (slow path - slab layer)
+ */
+static void *uma_zalloc_slab(uma_zone_t *zone, int flags) {
+    void *item = NULL;
+    uma_slab_t *slab;
+    
+    /* Try partial slabs first */
+    if (zone->uz_part_slabs) {
+        slab = zone->uz_part_slabs;
+        item = uma_slab_alloc_item(zone, slab);
+        
+        /* Move to full list if exhausted */
+        if (slab->us_freecount == 0) {
+            uma_slab_unlink(&zone->uz_part_slabs, slab);
+            slab->us_next = zone->uz_full_slabs;
+            zone->uz_full_slabs = slab;
+        }
+    }
+    
+    /* Try free slabs */
+    if (!item && zone->uz_free_slabs) {
+        slab = zone->uz_free_slabs;
+        uma_slab_unlink(&zone->uz_free_slabs, slab);
+        slab->us_next = zone->uz_part_slabs;
+        zone->uz_part_slabs = slab;
+        item = uma_slab_alloc_item(zone, slab);
+    }
+    
+    /* Allocate new slab */
+    if (!item) {
+        if (flags & M_NOWAIT) {
+            return NULL;
+        }
+        
+        slab = uma_slab_alloc(zone);
+        if (!slab) return NULL;
+        
+        slab->us_next = zone->uz_part_slabs;
+        zone->uz_part_slabs = slab;
+        item = uma_slab_alloc_item(zone, slab);
+    }
+    
+    return item;
+}
+
+/*
+ * Free to zone (slow path - slab layer)
+ */
+static void uma_zfree_slab(uma_zone_t *zone, void *item) {
+    uma_slab_t *slab = uma_find_slab(zone, item);
+    if (!slab) return;
+    
+    bool was_full = (slab->us_freecount == 0);
+    uma_slab_free_item(zone, slab, item);
+    
+    /* Transition from full to partial */
+    if (was_full) {
+        uma_slab_unlink(&zone->uz_full_slabs, slab);
+        slab->us_next = zone->uz_part_slabs;
+        zone->uz_part_slabs = slab;
+    }
+    
+    /* Transition from partial to free */
+    if (slab->us_freecount == zone->uz_ipers) {
+        uma_slab_unlink(&zone->uz_part_slabs, slab);
+        
+        if (zone->uz_flags & UMA_ZONE_NOFREE) {
+            /* Keep slab cached */
+            slab->us_next = zone->uz_free_slabs;
+            zone->uz_free_slabs = slab;
+        } else {
+            /* Return to PMM */
+            uma_slab_free(zone, slab);
+        }
+    }
+}
+
+/*
+ * Get current CPU ID (stub for uniprocessor)
+ */
+static inline int uma_curcpu(void) {
+    return 0;
+}
+
+/*
+ * Allocate from zone
+ */
+void *uma_zalloc(uma_zone_t *zone, int flags) {
+    if (!zone) return NULL;
+    
+    void *item = NULL;
+    int cpu = uma_curcpu();
+    uma_cache_t *cache = &zone->uz_cpu[cpu];
+    
+    /* Fast path: try per-CPU cache */
+    if (!(zone->uz_flags & UMA_ZONE_NOBUCKET) && cache->uc_allocbucket) {
+        struct uma_bucket *bucket = cache->uc_allocbucket;
+        if (bucket->ub_cnt > 0) {
+            item = bucket->ub_bucket[--bucket->ub_cnt];
+            cache->uc_allocs++;
+            goto out;
+        }
+    }
+    
+    /* Slow path: allocate from slab */
+    item = uma_zalloc_slab(zone, flags);
+    if (!item) return NULL;
+    
+    zone->uz_allocs++;
+    zone->uz_count++;
+    if (zone->uz_count > zone->uz_max) {
+        zone->uz_max = zone->uz_count;
+    }
+    
+out:
+    if (item) {
+        /* Debug: poison allocated memory */
+        uma_debug_poison_alloc(zone, item);
+        
+        /* Zero if requested */
+        if (flags & M_ZERO) {
+            memset(item, 0, zone->uz_size);
+        } else if (zone->uz_flags & UMA_ZONE_ZINIT) {
+            memset(item, 0, zone->uz_size);
+        }
+        
+        /* Call constructor */
+        if (zone->uz_ctor) {
+            if (zone->uz_ctor(item, zone->uz_size, zone->uz_arg, flags) != 0) {
+                uma_zfree(zone, item);
+                return NULL;
+            }
+        }
+    }
+    
+    return item;
+}
+
+/*
+ * Free to zone
+ */
+void uma_zfree(uma_zone_t *zone, void *item) {
+    if (!zone || !item) return;
+    
+    /* Call destructor */
+    if (zone->uz_dtor) {
+        zone->uz_dtor(item, zone->uz_size, zone->uz_arg);
+    }
+    
+    /* Debug: check redzone before free */
+    uma_debug_check_redzone(zone, item);
+    
+    /* Debug: poison freed memory */
+    uma_debug_poison_free(zone, item);
+    
+    int cpu = uma_curcpu();
+    uma_cache_t *cache = &zone->uz_cpu[cpu];
+    
+    /* Fast path: try per-CPU cache */
+    if (!(zone->uz_flags & UMA_ZONE_NOBUCKET)) {
+        if (!cache->uc_freebucket) {
+            cache->uc_freebucket = uma_bucket_alloc();
+        }
+        
+        if (cache->uc_freebucket && cache->uc_freebucket->ub_cnt < UMA_CACHE_BUCKET_SIZE) {
+            cache->uc_freebucket->ub_bucket[cache->uc_freebucket->ub_cnt++] = item;
+            cache->uc_frees++;
+            return;
+        }
+    }
+    
+    /* Slow path: free to slab */
+    uma_zfree_slab(zone, item);
+    zone->uz_frees++;
+    zone->uz_count--;
+}
+
+/*
+ * Reclaim memory from all zones
+ */
+void uma_reclaim(void) {
+    for (uma_zone_t *zone = uma_zones; zone; zone = zone->uz_next) {
+        if (zone->uz_flags & UMA_ZONE_NOFREE) continue;
+        
+        /* Free all completely free slabs */
+        uma_slab_t *slab, *next;
+        for (slab = zone->uz_free_slabs; slab; slab = next) {
+            next = slab->us_next;
+            uma_slab_free(zone, slab);
+        }
+        zone->uz_free_slabs = NULL;
+    }
+}
+
+/*
+ * Zone statistics
+ */
+void uma_zone_stat(uma_zone_t *zone, uint64_t *allocs, uint64_t *frees, int *cur) {
+    if (allocs) *allocs = zone->uz_allocs;
+    if (frees) *frees = zone->uz_frees;
+    if (cur) *cur = zone->uz_count;
+}
+
+int uma_zone_get_cur(uma_zone_t *zone) {
+    return zone->uz_count;
+}
+
+void uma_zone_set_max(uma_zone_t *zone, int max) {
+    (void)zone;
+    (void)max;
+    /* TODO: Implement zone limits */
+}
+
+int uma_zone_reserve(uma_zone_t *zone, int count) {
+    int reserved = 0;
+    while (reserved < count) {
+        uma_slab_t *slab = uma_slab_alloc(zone);
+        if (!slab) break;
+        slab->us_next = zone->uz_free_slabs;
+        zone->uz_free_slabs = slab;
+        reserved += zone->uz_ipers;
+    }
+    return reserved;
+}

@@ -352,16 +352,16 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **Lazy Faulting Improvements:**
                     - [x] **Demand Paging:** Only allocate frames when accessed (Zero-fill on demand).
                     - [x] **Prefaulting:** Heuristic to load surrounding pages during IO to reduce disk seeks.
-    - [ ] **Kernel Allocator (UMA/Zone):**
-    - [ ] **Kernel Allocator (UMA/Slab Refactor):**
-        - [ ] **UMA Core (`uma_core.c`):**
-            - [ ] **Per-CPU Caches:** Implement "magazine" layer for lockless fast-path allocations.
-            - [ ] **Alignment/Coloring:** CPU cache line alignment and page coloring.
-            - [ ] **Constructors/Destructors:** Callbacks for object initialization/teardown.
-            - [ ] **Reclamation:** Shrinker callbacks to free unused slabs under memory pressure.
-        - [ ] **Debugging & Safety:**
-            - [ ] **Redzones:** Guard bytes to detect buffer checking.
-            - [ ] **Poisoning:** Fill freed memory with patterns (0xDEADBEEF) to catch use-after-free.
+    - [x] **Kernel Allocator (UMA/Zone):**
+    - [x] **Kernel Allocator (UMA/Slab Refactor):**
+        - [x] **UMA Core (`uma_core.c`):**
+            - [x] **Per-CPU Caches:** Implement "magazine" layer for lockless fast-path allocations.
+            - [x] **Alignment/Coloring:** CPU cache line alignment and page coloring.
+            - [x] **Constructors/Destructors:** Callbacks for object initialization/teardown.
+            - [x] **Reclamation:** Shrinker callbacks to free unused slabs under memory pressure.
+        - [x] **Debugging & Safety:**
+            - [x] **Redzones:** Guard bytes to detect buffer checking.
+            - [x] **Poisoning:** Fill freed memory with patterns (0xDEADBEEF) to catch use-after-free.
             - [ ] **Leak Detection:** Tracking active allocations.
         - [ ] **General Allocator (`kmem` / `malloc`):**
             - [ ] **Power-of-Two Zones:** Back `malloc` with UMA zones for sizes 16, 32, ... 4096.
