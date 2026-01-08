@@ -398,15 +398,17 @@ pmap_t pmap_fork(pmap_t src_pmap) {
         uint32_t *src_pt = (uint32_t *)(src_pt_phys + 0xC0000000);
         
         // Allocate page table for child (checkbox 141)
-        void *dst_pt_mem = pmm_alloc_block();
-        if (!dst_pt_mem) {
+        // pmm_alloc_block returns virtual address
+        void *dst_pt_virt = pmm_alloc_block();
+        if (!dst_pt_virt) {
             pmap_destroy(dst_pmap);
             return 0;
         }
-        uint32_t dst_pt_phys = (uint32_t)(uintptr_t)dst_pt_mem;
-        uint32_t *dst_pt = (uint32_t *)(dst_pt_phys + 0xC0000000);
+        // Convert virtual to physical for PDE
+        uint32_t dst_pt_phys = (uint32_t)(uintptr_t)dst_pt_virt - 0xC0000000;
+        uint32_t *dst_pt = (uint32_t *)dst_pt_virt;
         
-        // Set up child PDE
+        // Set up child PDE with physical address
         dst_pd[pdi] = dst_pt_phys | (src_pd[pdi] & 0xFFF);
         
         // Walk all PTEs in this page table (checkbox 141-143)
@@ -472,12 +474,15 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
 
     // Allocate page table on demand if not present
     if (!(V_PD[pdi] & PTE_P)) {
-        void *pt_phys = pmm_alloc_block();
-        if (!pt_phys) return -1;
+        void *pt_virt = pmm_alloc_block();
+        if (!pt_virt) return -1;
+        // Convert virtual to physical for PDE (pmm_alloc_block returns virtual)
+        uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
         // PDE always gets W and U so PT can control actual permissions
-        V_PD[pdi] = (uint32_t)pt_phys | PTE_P | PTE_W | PTE_U;
+        V_PD[pdi] = pt_phys | PTE_P | PTE_W | PTE_U;
         pmap_invalidate_page((uint32_t)V_PT(pdi));
-        uint32_t *pt = V_PT(pdi);
+        // Zero the page table using virtual address
+        uint32_t *pt = (uint32_t *)pt_virt;
         for (int i = 0; i < 1024; i++) pt[i] = 0;
     }
 
@@ -517,11 +522,14 @@ void pmap_kenter(uint32_t va, uint32_t pa) {
 
     // Allocate page table on demand if not present
     if (!(V_PD[pdi] & PTE_P)) {
-        void *pt_phys = pmm_alloc_block();
-        if (!pt_phys) return;  // OOM - should not happen for kernel
-        V_PD[pdi] = (uint32_t)pt_phys | PTE_P | PTE_W;
+        void *pt_virt = pmm_alloc_block();
+        if (!pt_virt) return;  // OOM - should not happen for kernel
+        // Convert virtual to physical for PDE
+        uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
+        V_PD[pdi] = pt_phys | PTE_P | PTE_W;
         pmap_invalidate_page((uint32_t)V_PT(pdi));
-        uint32_t *pt = V_PT(pdi);
+        // Zero using virtual address
+        uint32_t *pt = (uint32_t *)pt_virt;
         for (int i = 0; i < 1024; i++) pt[i] = 0;
     }
 
@@ -684,10 +692,13 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
         
         // Ensure destination page table exists
         if (!(dst_pd[pdi] & PTE_P)) {
-            void *pt_phys = pmm_alloc_block();
-            if (!pt_phys) return -1;
-            dst_pd[pdi] = (uint32_t)pt_phys | PTE_P | PTE_W | PTE_U;
-            uint32_t *new_pt = (uint32_t *)((uint32_t)pt_phys + 0xC0000000);
+            void *pt_virt = pmm_alloc_block();
+            if (!pt_virt) return -1;
+            // Convert virtual to physical for PDE
+            uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
+            dst_pd[pdi] = pt_phys | PTE_P | PTE_W | PTE_U;
+            // Zero using virtual address
+            uint32_t *new_pt = (uint32_t *)pt_virt;
             for (int i = 0; i < 1024; i++) new_pt[i] = 0;
         }
         
@@ -698,19 +709,20 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
         // Handle private vs shared mappings
         if (is_private) {
             // Private mapping: allocate new page and copy contents
-            void *new_page = pmm_alloc_block();
-            if (!new_page) return -1;
+            void *new_page_virt = pmm_alloc_block();
+            if (!new_page_virt) return -1;
             
-            // Copy page contents
+            // Copy page contents (both are virtual addresses)
             uint32_t *src_data = (uint32_t *)(page_pa + 0xC0000000);
-            uint32_t *dst_data = (uint32_t *)((uint32_t)new_page + 0xC0000000);
+            uint32_t *dst_data = (uint32_t *)new_page_virt;
             for (int i = 0; i < 1024; i++) dst_data[i] = src_data[i];
             
-            // Set destination PTE with new physical page
-            dst_pt[pti] = (uint32_t)new_page | (src_pte & 0xFFF);
+            // Set destination PTE with physical address
+            uint32_t new_page_phys = (uint32_t)(uintptr_t)new_page_virt - 0xC0000000;
+            dst_pt[pti] = new_page_phys | (src_pte & 0xFFF);
             
             // Mark new page as private too
-            vm_page_t *new_pg = pmm_get_page((uint32_t)new_page);
+            vm_page_t *new_pg = pmm_get_page(new_page_phys);
             if (new_pg) new_pg->flags |= PG_PRIVATE;
         } else {
             // Shared mapping: use COW if requested
