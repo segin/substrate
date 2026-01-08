@@ -102,10 +102,8 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     void *kstack_base2 = pmm_alloc_block();
     if (!kstack_base || !kstack_base2) return -1;
     
-    // Stack is at top of these pages (converted to virtual)
-    // In higher-half kernel, physical needs to be converted
-    #define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
-    uint32_t *kstack = (uint32_t *)((uint32_t)P2V(kstack_base2) + 0x1000);
+    // Stack is at top of these pages - pmm_alloc_block returns virtual addresses
+    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base2 + 0x1000);
     t->kstack_top = (uintptr_t)kstack;
 
     // Build IRET frame on child's kernel stack

@@ -321,6 +321,7 @@ static void uma_slab_unlink(uma_slab_t **list, uma_slab_t *slab) {
 static void *uma_zalloc_slab(uma_zone_t *zone, int flags) {
     void *item = NULL;
     uma_slab_t *slab;
+    (void)flags; /* M_NOWAIT/M_WAITOK handled at pmm layer */
     
     /* Try partial slabs first */
     if (zone->uz_part_slabs) {
@@ -346,10 +347,8 @@ static void *uma_zalloc_slab(uma_zone_t *zone, int flags) {
     
     /* Allocate new slab */
     if (!item) {
-        if (flags & M_NOWAIT) {
-            return NULL;
-        }
-        
+        /* M_NOWAIT means "don't sleep", not "don't allocate" 
+         * We still try to allocate, but pmm_alloc won't block */
         slab = uma_slab_alloc(zone);
         if (!slab) return NULL;
         

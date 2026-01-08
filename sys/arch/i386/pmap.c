@@ -191,11 +191,12 @@ pmap_t pmap_kernel(void) {
 pmap_t pmap_create(void) {
     // 1. Allocate page for struct pmap
     // We waste a whole page for a tiny struct, but we don't have kmalloc yet
+    // NOTE: pmm_alloc_block returns virtual address (kernel direct mapping)
     void *pmap_mem = pmm_alloc_block();
     if (!pmap_mem) return 0;
     
-    // Convert to Kernel Virtual Address
-    pmap_t pmap = (pmap_t)((uintptr_t)pmap_mem + 0xC0000000);
+    // Already a Kernel Virtual Address
+    pmap_t pmap = (pmap_t)pmap_mem;
     
     // 2. Allocate Page Directory
     void *pd_mem = pmm_alloc_block();
@@ -204,7 +205,9 @@ pmap_t pmap_create(void) {
         return 0;
     }
     
-    uint32_t pd_phys = (uint32_t)(uintptr_t)pd_mem;
+    // Convert virtual to physical for CR3 (subtract kernel base)
+    uint32_t pd_virt = (uint32_t)(uintptr_t)pd_mem;
+    uint32_t pd_phys = pd_virt - 0xC0000000;
     
     // Edge case: Validate physical address alignment
     if (pd_phys & 0xFFF) {
@@ -215,7 +218,7 @@ pmap_t pmap_create(void) {
     
     // Setup struct
     pmap->pdir_phys = pd_phys;
-    pmap->pdir = (uint32_t *)(pd_phys + 0xC0000000); // Linear map
+    pmap->pdir = (uint32_t *)pd_mem; // Already virtual
     pmap->ref_count = 1;
     pmap->resident_count = 0;
     pmap->wired_count = 0;
@@ -345,12 +348,11 @@ void pmap_destroy(pmap_t pmap) {
     // 3. Remove from global pmap list
     pmap_list_remove(pmap);
     
-    // 4. Free page directory
-    pmm_free_block((void *)(uintptr_t)pd_phys);
+    // 4. Free page directory (convert physical to virtual for pmm_free_block)
+    pmm_free_block((void *)(uintptr_t)(pd_phys + 0xC0000000));
     
-    // 5. Free the pmap struct itself
-    void *pmap_phys = (void *)((uintptr_t)pmap - 0xC0000000);
-    pmm_free_block(pmap_phys);
+    // 5. Free the pmap struct itself (pmap is already virtual)
+    pmm_free_block((void *)pmap);
 }
 
 void pmap_reference(pmap_t pmap) {

@@ -88,7 +88,6 @@ int sched_fork_process(process_t *parent, void *stack) {
 }
 
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
-    #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
     extern void *pmm_alloc_block(void);
     extern struct personality personality_native;
     extern int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
@@ -100,15 +99,15 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     // 2. Set Name
     strcpy(child->comm, "(kinit)"); 
 
-    // 3. Allocate Stack (4KB)
-    void *stack_phys = pmm_alloc_block();
-    if (!stack_phys) {
+    // 3. Allocate Stack (4KB) - pmm_alloc_block returns virtual address
+    void *stack = pmm_alloc_block();
+    if (!stack) {
         return -1;
     }
-    void *stack_virt = (uint8_t*)VIRTUAL_d(stack_phys) + 4096;
+    void *stack_top = (uint8_t*)stack + 4096;
     
     // 4. Create Thread
-    int tid = sched_create_thread(child, entry, stack_virt, arg);
+    int tid = sched_create_thread(child, entry, stack_top, arg);
     
     return tid;
 }

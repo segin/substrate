@@ -497,10 +497,11 @@ void* pmm_alloc_block(void) {
         // Still track in bitmap for safety/diagnostic compatibility
         pmm_mark_used(page->phys_addr);
         
-        uint32_t addr = page->phys_addr;
+        uint32_t phys_addr = page->phys_addr;
         spinlock_release(&pmm_lock);
         intr_restore(flags);
-        return (void*)(uintptr_t)addr;
+        // Return virtual address (kernel direct mapping at 0xC0000000)
+        return (void*)(uintptr_t)(phys_addr + 0xC0000000);
     }
     
     spinlock_release(&pmm_lock);
@@ -509,16 +510,19 @@ void* pmm_alloc_block(void) {
 }
 
 void pmm_free_block(void* p) {
-    uint32_t addr = (uint32_t)(uintptr_t)p;
-    if (addr == 0) return; 
+    uint32_t virt_addr = (uint32_t)(uintptr_t)p;
+    if (virt_addr == 0) return;
+    
+    // Convert virtual to physical (kernel direct mapping)
+    uint32_t phys_addr = virt_addr - 0xC0000000;
     
     uint32_t flags = intr_disable();
     spinlock_acquire(&pmm_lock);
 
-    vm_page_t *page = pmm_get_page(addr);
+    vm_page_t *page = pmm_get_page(phys_addr);
     if (page && !(page->flags & PG_FREE)) {
         // Update bitmap for diagnostics
-        pmm_mark_free(addr);
+        pmm_mark_free(phys_addr);
         // Free to buddy system
         pmm_buddy_free_locked(page, 0);
     }
@@ -568,10 +572,11 @@ void* pmm_alloc_contiguous(size_t count) {
             pmm_mark_used(page->phys_addr + (i * PMM_BLOCK_SIZE));
         }
         
-        uint32_t addr = page->phys_addr;
+        uint32_t phys_addr = page->phys_addr;
         spinlock_release(&pmm_lock);
         intr_restore(flags);
-        return (void*)(uintptr_t)addr;
+        // Return virtual address (kernel direct mapping at 0xC0000000)
+        return (void*)(uintptr_t)(phys_addr + 0xC0000000);
     }
 
     spinlock_release(&pmm_lock);
@@ -582,12 +587,14 @@ void* pmm_alloc_contiguous(size_t count) {
 void pmm_free_contiguous(void* p, size_t count) {
     if (!p || count == 0) return;
     int order = pmm_get_order(count);
-    uint32_t addr = (uint32_t)(uintptr_t)p;
+    uint32_t virt_addr = (uint32_t)(uintptr_t)p;
+    // Convert virtual to physical (kernel direct mapping)
+    uint32_t phys_addr = virt_addr - 0xC0000000;
 
     uint32_t flags = intr_disable();
     spinlock_acquire(&pmm_lock);
 
-    vm_page_t *page = pmm_get_page(addr);
+    vm_page_t *page = pmm_get_page(phys_addr);
     if (page) {
          // Mark all pages as free in bitmap
         for (size_t i = 0; i < (1UL << order); i++) {
@@ -596,7 +603,7 @@ void pmm_free_contiguous(void* p, size_t count) {
             // Actually, pmm_mark_free currently calls pmm_buddy_free_locked(page, 0).
             // If we are freeing a contiguous block of order N, we should call buddy_free(page, N).
             
-            uint32_t p_addr = addr + (i * PMM_BLOCK_SIZE);
+            uint32_t p_addr = phys_addr + (i * PMM_BLOCK_SIZE);
             uint32_t block = p_addr / PMM_BLOCK_SIZE;
             uint32_t idx = block / 8;
             uint32_t bit = block % 8;

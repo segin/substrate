@@ -34,6 +34,7 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **UMA Integration:** Integrated FreeBSD-style Universal Memory Allocator (UMA) for kernel memory allocation. `kmalloc`/`kfree` now backed by UMA zones via `vm_kmem.c`. Added `uma_startup()` before `kmem_init()`.
 - **Early Boot Debugging:** Added early GDT+IDT handler in `main.c` using `early_uart_print()` for exception debugging before full console is available. Prints exception number and halts on any early fault.
 - **LAPIC Early Mapping:** Added LAPIC identity-mapping (0xFEC00000-0xFFFFFFFF) in `boot.S` page tables with PCD flag for MMIO. Entry 1019 (offset 4076) covers LAPIC at 0xFEE00000.
+- **PMM Virtual Address API:** `pmm_alloc_block()` and `pmm_alloc_contiguous()` now return kernel virtual addresses (phys + 0xC0000000) instead of physical addresses. `pmm_free_block()` and `pmm_free_contiguous()` expect virtual addresses. Updated all callers in: `pmap.c`, `elf.c`, `sched.c`, `process.c`.
 
 
 ## Current Status
@@ -43,6 +44,7 @@ This is the Substrate operating system project targeting x86 32-bit architecture
     - Bootstrap Watermark Allocator for early boot.
     - Dynamic Metadata sizing (no static limit).
     - Low Memory safeguards active.
+    - **API:** `pmm_alloc_block()` returns kernel virtual address (0xC0000000+), NOT physical.
 - **User process foundation complete (pmap layer):**
     - Recursive paging and global page support.
     - `pmap_protect` and `pmap_copy` with Copy-on-Write (COW).
@@ -124,11 +126,10 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 
 ## Known Issues
 - Interrupt responsiveness: `Ctrl+F9` debug dump sometimes fails during idle states.
-- **TLS Template Access:** After PT_TLS setup, some code accesses PT_TLS template (0x0811EE18) instead of using GS-relative addressing.
 - **PMAP Memory Overhead:** 32 identity-mapped kernel PDEs (0-31) in userspace consume 128KB+ per process.
 
 ## Next Steps
-- Debug remaining TLS access issue (ESI=0x0811EE18 crash)
+- Debug remaining console OOM issue (kmalloc returning NULL during std fd init)
 - Refactor PMAP to dynamically allocate page tables (reduce 128KB overhead)
 - Implement mmap() syscall with personality driver integration
 - Flesh out 9P filesystem logic implementation

@@ -175,7 +175,9 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                 }
                 
                 // Map with permissions from segment header
-                if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, prot, 0) < 0) {
+                // pmap_enter expects physical address, convert virtual to physical
+                uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
+                if (pmap_enter(pmap, va, pa_phys, prot, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
                     return 0;
                 }
@@ -187,9 +189,8 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                     num_pages++;
                 }
                 
-                // Zero the page using PA mapped to kernel space
-                #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
-                memset(VIRTUAL_d(pa), 0, 0x1000);
+                // Zero the page - pa is already virtual from pmm_alloc_block
+                memset(pa, 0, 0x1000);
             }
             
             
@@ -232,8 +233,8 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                         // Offset into segment data
                         uint32_t offset_in_segment = copy_start_va - segment_va;
                         
-                        // Copy to kernel-mapped page
-                        uint8_t *dest = (uint8_t *)VIRTUAL_d(page_maps[pi].pa) + offset_in_page;
+                        // Copy to kernel-mapped page (pa is already virtual)
+                        uint8_t *dest = (uint8_t *)page_maps[pi].pa + offset_in_page;
                         memcpy(dest, segment_buffer + offset_in_segment, copy_size);
                         bytes_copied += copy_size;
                     }
@@ -408,16 +409,17 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
             return -1;
         }
         // Map with user access and WRITE permission for stack operations
-        if (pmap_enter(pmap, va, (uint32_t)(uintptr_t)pa, VM_PROT_WRITE, 0) < 0) {
+        // pmap_enter expects physical address, convert virtual to physical
+        uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
+        if (pmap_enter(pmap, va, pa_phys, VM_PROT_WRITE, 0) < 0) {
             kprint("execve: Failed to map user stack\n");
             return -1;
         }
         stack_pages[i].va = va;
         stack_pages[i].pa = pa;
         
-        // Zero via kernel mapping
-        #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
-        memset(VIRTUAL_d(pa), 0, 0x1000);
+        // Zero the page - pa is already virtual from pmm_alloc_block
+        memset(pa, 0, 0x1000);
     }
     
     // Build minimal stack: just argc and argv[0] = path
@@ -431,7 +433,8 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         uint32_t page_idx = ((user_va) - user_stack_base) / 0x1000; \
         uint32_t offset = ((user_va) - user_stack_base) % 0x1000; \
         if (page_idx < user_stack_size) { \
-            uint32_t *kptr = (uint32_t*)((uint8_t*)VIRTUAL_d(stack_pages[page_idx].pa) + offset); \
+            /* stack_pages[].pa is already virtual from pmm_alloc_block */ \
+            uint32_t *kptr = (uint32_t*)((uint8_t*)stack_pages[page_idx].pa + offset); \
             *kptr = (val); \
         } \
     } while(0)
@@ -455,7 +458,8 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
             uint32_t page_idx = (addr - user_stack_base) / 0x1000; \
             uint32_t offset = (addr - user_stack_base) % 0x1000; \
             if (page_idx < user_stack_size) { \
-                uint8_t *kptr = (uint8_t*)VIRTUAL_d(stack_pages[page_idx].pa) + offset; \
+                /* stack_pages[].pa is already virtual from pmm_alloc_block */ \
+                uint8_t *kptr = (uint8_t*)stack_pages[page_idx].pa + offset; \
                 *kptr = s[i]; \
             } \
         } \
@@ -612,7 +616,8 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         uint32_t page_idx = (addr - user_stack_base) / 0x1000;
         uint32_t offset = (addr - user_stack_base) % 0x1000;
         if (page_idx < user_stack_size) {
-            uint8_t *kptr = (uint8_t*)VIRTUAL_d(stack_pages[page_idx].pa) + offset;
+            /* stack_pages[].pa is already virtual from pmm_alloc_block */
+            uint8_t *kptr = (uint8_t*)stack_pages[page_idx].pa + offset;
             *kptr = platform_str[i];
         }
     }
