@@ -34,6 +34,7 @@ typedef struct uma_cache uma_cache_t;
 #define UMA_ZONE_TRASH      0x1000  /* Fill free/alloc with patterns */
 #define UMA_ZONE_REDZONE    0x2000  /* Add guard bytes around objects */
 #define UMA_ZONE_VTOSLAB    0x4000  /* Track slab from virtual address */
+#define UMA_ZONE_LEAK       0x8000  /* Enable leak tracking for this zone */
 
 /*
  * Allocation flags (passed to uma_zalloc)
@@ -173,6 +174,12 @@ int uma_zone_reserve(uma_zone_t *zone, int count);
 
 /* Zone statistics */
 void uma_zone_stat(uma_zone_t *zone, uint64_t *allocs, uint64_t *frees, int *cur);
+
+/* Leak detection: report zones with outstanding allocations */
+void uma_leak_report(void);
+
+/* Check if a specific zone has leaks */
+int uma_zone_check_leaks(uma_zone_t *zone);
 
 /*
  * Debug support

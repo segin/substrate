@@ -362,7 +362,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Debugging & Safety:**
             - [x] **Redzones:** Guard bytes to detect buffer checking.
             - [x] **Poisoning:** Fill freed memory with patterns (0xDEADBEEF) to catch use-after-free.
-            - [ ] **Leak Detection:** Tracking active allocations.
+            - [x] **Leak Detection:** Tracking active allocations.
         - [ ] **General Allocator (`kmem` / `malloc`):**
             - [ ] **Power-of-Two Zones:** Back `malloc` with UMA zones for sizes 16, 32, ... 4096.
             - [ ] **Large Allocations:** Bypass UMA for >4KB allocs (direct `vm_map` allocation).

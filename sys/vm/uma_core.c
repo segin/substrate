@@ -540,3 +540,74 @@ int uma_zone_reserve(uma_zone_t *zone, int count) {
     }
     return reserved;
 }
+
+/*
+ * Leak detection: check if a zone has outstanding allocations
+ */
+int uma_zone_check_leaks(uma_zone_t *zone) {
+    if (!zone) return 0;
+    return zone->uz_count;
+}
+
+/*
+ * Leak detection: report all zones with outstanding allocations
+ */
+void uma_leak_report(void) {
+    int total_leaks = 0;
+    
+    kprint("UMA Leak Report:\n");
+    
+    for (uma_zone_t *zone = uma_zones; zone; zone = zone->uz_next) {
+        if (zone->uz_count > 0) {
+            kprint("  Zone '");
+            kprint(zone->uz_name);
+            kprint("': ");
+            // Print count (simple decimal conversion)
+            char buf[16];
+            int n = zone->uz_count;
+            int i = 0;
+            if (n == 0) {
+                buf[i++] = '0';
+            } else {
+                char tmp[16];
+                int j = 0;
+                while (n > 0) {
+                    tmp[j++] = '0' + (n % 10);
+                    n /= 10;
+                }
+                while (j > 0) {
+                    buf[i++] = tmp[--j];
+                }
+            }
+            buf[i] = '\0';
+            kprint(buf);
+            kprint(" outstanding allocations\n");
+            total_leaks += zone->uz_count;
+        }
+    }
+    
+    if (total_leaks == 0) {
+        kprint("  No leaks detected.\n");
+    } else {
+        kprint("  Total: ");
+        char buf[16];
+        int n = total_leaks;
+        int i = 0;
+        if (n == 0) {
+            buf[i++] = '0';
+        } else {
+            char tmp[16];
+            int j = 0;
+            while (n > 0) {
+                tmp[j++] = '0' + (n % 10);
+                n /= 10;
+            }
+            while (j > 0) {
+                buf[i++] = tmp[--j];
+            }
+        }
+        buf[i] = '\0';
+        kprint(buf);
+        kprint(" leaked objects\n");
+    }
+}
