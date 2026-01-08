@@ -29,7 +29,7 @@ void test_vm_fault_simple(void) {
     vm_map_t *map = vm_map_create(pmap, 0x1000, 0x100000);
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x2000);
     
-    vm_map_insert(map, obj, 0, 0x10000, 0x12000);
+    vm_map_insert(map, obj, 0, 0x10000, 0x12000, 7, 7, 1);
     
     // Simulate read fault
     int ret = vm_fault(map, 0x10000, VM_PROT_READ);
@@ -57,7 +57,7 @@ void test_vm_fault_cow(void) {
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x1000);
     
     // 1. Populate initial page
-    vm_map_insert(map, obj, 0, 0x10000, 0x11000);
+    vm_map_insert(map, obj, 0, 0x10000, 0x11000, 7, 7, 1);
     vm_fault(map, 0x10000, VM_PROT_WRITE); // Allocate writeable page
     vm_page_t *original_page = vm_object_lookup_page(obj, 0);
     
@@ -66,7 +66,7 @@ void test_vm_fault_cow(void) {
     
     // 3. Remap with shadow object
     vm_map_remove(map, 0x10000, 0x11000);
-    vm_map_insert(map, shadow, 0, 0x10000, 0x11000);
+    vm_map_insert(map, shadow, 0, 0x10000, 0x11000, 5, 7, 1);
     
     // 4. Read fault should map original page (Read-Only)
     // Note: pmap_extract permissions check not easily available here, assuming pmap handled it

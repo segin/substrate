@@ -27,7 +27,7 @@ void test_vm_map_fork_cow(void) {
     vm_map_t *parent_map = vm_map_create(parent_pmap, 0x1000, 0x100000);
     
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x1000);
-    vm_map_insert(parent_map, obj, 0, 0x10000, 0x11000);
+    vm_map_insert(parent_map, obj, 0, 0x10000, 0x11000, 7, 7, 1);
     
     // Set to Copy-on-Write
     vm_map_entry_t *entry = vm_map_lookup(parent_map, 0x10000);

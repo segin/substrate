@@ -62,7 +62,7 @@ static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **en
     return false;
 }
 
-int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end) {
+int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end, uint8_t prot, uint8_t max_prot, uint8_t inheritance) {
     vm_map_entry_t *prev_entry;
     
     // Check for overlap
@@ -82,6 +82,13 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     new_entry->end = end;
     new_entry->object = obj;
     new_entry->offset = offset;
+    
+    // Initialize protection and inheritance
+    new_entry->protection = prot;
+    new_entry->max_protection = max_prot;
+    new_entry->inheritance = inheritance;
+    new_entry->flags = 0;
+    new_entry->wire_count = 0;
     
     // Insert into sorted list
     new_entry->prev = prev_entry;
@@ -285,16 +292,14 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
             new_obj = NULL; // Lazy allocation
         }
         
-        if (vm_map_insert(dst_map, new_obj, new_offset, src_entry->start, src_entry->end) != 0) {
+        if (vm_map_insert(dst_map, new_obj, new_offset, src_entry->start, src_entry->end, src_entry->protection, src_entry->max_protection, src_entry->inheritance) != 0) {
             vm_map_destroy(dst_map);
             return NULL;
         }
         
+        // Copy flags (excluding wired state)
         vm_map_entry_t *dst_entry = vm_map_lookup(dst_map, src_entry->start);
         if (dst_entry) {
-            dst_entry->protection = src_entry->protection;
-            dst_entry->max_protection = src_entry->max_protection;
-            dst_entry->inheritance = src_entry->inheritance;
             dst_entry->flags = src_entry->flags & ~VME_WIRED; 
         }
     }

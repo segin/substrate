@@ -47,7 +47,7 @@ void test_vm_map_insert_lookup(void) {
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x2000);
     TEST_ASSERT(obj != NULL, "object allocated");
     
-    int ret = vm_map_insert(map, obj, 0, 0x10000, 0x12000);
+    int ret = vm_map_insert(map, obj, 0, 0x10000, 0x12000, 7, 7, 1);
     TEST_ASSERT(ret == 0, "insert succeeded");
     TEST_ASSERT(map->nentries == 1, "one entry");
     
@@ -76,7 +76,7 @@ void test_vm_map_find_space(void) {
     TEST_ASSERT(addr == 0x1000, "found at min_offset");
     
     // Insert something and try again
-    vm_map_insert(map, NULL, 0, 0x1000, 0x5000);
+    vm_map_insert(map, NULL, 0, 0x1000, 0x5000, 7, 7, 1);
     
     ret = vm_map_find_space(map, &addr, 0x2000);
     TEST_ASSERT(ret == 0, "find_space after insert");
@@ -93,7 +93,7 @@ void test_vm_map_remove(void) {
     pmap_t pmap = pmap_create();
     vm_map_t *map = vm_map_create(pmap, 0x1000, 0x100000);
     
-    vm_map_insert(map, NULL, 0, 0x10000, 0x20000);
+    vm_map_insert(map, NULL, 0, 0x10000, 0x20000, 7, 7, 1);
     TEST_ASSERT(map->nentries == 1, "one entry after insert");
     
     int ret = vm_map_remove(map, 0x10000, 0x20000);
@@ -112,7 +112,7 @@ void test_vm_map_entry_flags(void) {
     vm_map_t *map = vm_map_create(pmap, 0x1000, 0x100000);
     
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x2000);
-    vm_map_insert(map, obj, 0, 0x10000, 0x12000);
+    vm_map_insert(map, obj, 0, 0x10000, 0x12000, 7, 7, 1);
     
     vm_map_entry_t *entry = vm_map_lookup(map, 0x10000);
     TEST_ASSERT(entry != NULL, "entry found");
@@ -134,7 +134,7 @@ void test_vm_map_wire(void) {
     
     pmap_t pmap = pmap_create();
     vm_map_t *map = vm_map_create(pmap, 0x1000, 0x100000);
-    vm_map_insert(map, NULL, 0, 0x10000, 0x20000);
+    vm_map_insert(map, NULL, 0, 0x10000, 0x20000, 7, 7, 1);
     
     int ret = vm_map_wire(map, 0x10000, 0x20000);
     TEST_ASSERT(ret == 0, "wire succeeded");

@@ -45,7 +45,13 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, length);
     if (!obj) return (void *)-1;
 
-    if (vm_map_insert(map, obj, 0, v_addr, v_addr + length) != 0) {
+    // Determine inheritance based on sharing
+    uint8_t inheritance = VM_INHERIT_COPY;
+    if (flags & MAP_SHARED) {
+        inheritance = VM_INHERIT_SHARE;
+    }
+
+    if (vm_map_insert(map, obj, 0, v_addr, v_addr + length, vm_prot, vm_prot, inheritance) != 0) {
         vm_object_deallocate(obj);
         return (void *)-1;
     }
