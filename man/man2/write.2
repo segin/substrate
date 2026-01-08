@@ -4,6 +4,8 @@
 .TH WRITE 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 write \- write to a file descriptor
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -32,3 +34,6 @@ is outside your accessible address space.
 The device containing the file referred to by
 .I fd
 has no room for the data.
+
+.SH SEE ALSO
+.BR intro(2)

@@ -4,6 +4,8 @@
 .TH SETGID 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 setgid \- set group identity
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <sys/types.h>
 .br
@@ -21,3 +23,6 @@ On success, zero is returned. On error, -1 is returned.
 The user is not privileged and
 .I gid
 does not match the real GID or saved set-group-ID of the calling process.
+
+.SH SEE ALSO
+.BR intro(2)

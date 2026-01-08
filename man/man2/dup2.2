@@ -4,6 +4,8 @@
 .TH DUP2 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 dup2 \- duplicate a file descriptor
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -24,3 +26,6 @@ On success, the new file descriptor is returned. On error, -1 is returned.
 .B EBADF
 .I oldfd
 is not an open file descriptor.
+
+.SH SEE ALSO
+.BR intro(2)

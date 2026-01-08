@@ -4,6 +4,8 @@
 .TH GETUID 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 getuid, geteuid \- get user identity
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .br
@@ -20,3 +22,6 @@ returns the real user ID of the calling process.
 returns the effective user ID of the calling process.
 .SH RETURN VALUE
 These functions are always successful.
+
+.SH SEE ALSO
+.BR intro(2)

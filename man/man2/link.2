@@ -4,6 +4,8 @@
 .TH LINK 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 link \- make a new name for a file
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -20,3 +22,6 @@ On success, zero is returned. On error, -1 is returned.
 and
 .I newpath
 are not on the same mounted filesystem.
+
+.SH SEE ALSO
+.BR intro(2)

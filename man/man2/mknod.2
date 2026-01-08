@@ -4,6 +4,8 @@
 .TH MKNOD 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 mknod \- create a special or ordinary file
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <sys/stat.h>
 .PP
@@ -23,3 +25,6 @@ On success, zero is returned. On error, -1 is returned.
 .B EEXIST
 .I pathname
 already exists.
+
+.SH SEE ALSO
+.BR intro(2)

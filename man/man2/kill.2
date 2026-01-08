@@ -4,6 +4,8 @@
 .TH KILL 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 kill \- send signal to a process
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <sys/types.h>
 .br
@@ -23,3 +25,6 @@ An invalid signal was specified.
 .TP
 .B ESRCH
 The process or process group does not exist.
+
+.SH SEE ALSO
+.BR intro(2)

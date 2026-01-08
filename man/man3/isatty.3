@@ -4,6 +4,8 @@
 .TH ISATTY 3 "January 2026" "Substrate Standard C Library" "Library Calls Manual"
 .SH NAME
 isatty \- test whether a file descriptor refers to a terminal
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -35,3 +37,7 @@ int main(void) {
     return 0;
 }
 .fi
+
+.SH SEE ALSO
+.BR intro(2),
+.BR errno(3)

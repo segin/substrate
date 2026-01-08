@@ -4,6 +4,8 @@
 .TH EXECVE 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 execve \- execute program
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -34,3 +36,6 @@ The file or a script interpreter does not exist.
 .TP
 .B ENOEXEC
 An executable is not in a recognized format, is for the wrong architecture, or has some other format error.
+
+.SH SEE ALSO
+.BR intro(2)

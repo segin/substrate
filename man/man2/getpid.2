@@ -4,6 +4,8 @@
 .TH GETPID 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 getpid, getppid \- get process identification
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -18,3 +20,6 @@ returns the process ID (PID) of the calling process.
 returns the process ID of the parent of the calling process.
 .SH RETURN VALUE
 These functions are always successful.
+
+.SH SEE ALSO
+.BR intro(2)

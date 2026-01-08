@@ -4,6 +4,8 @@
 .TH NANOSLEEP 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 nanosleep \- high-resolution sleep
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <time.h>
 .PP
@@ -15,3 +17,6 @@ suspends the execution of the calling thread until either at least the time spec
 has elapsed, or the delivery of a signal triggers the invocation of a handler.
 .SH RETURN VALUE
 On success, zero is returned. On error, -1 is returned.
+
+.SH SEE ALSO
+.BR intro(2)

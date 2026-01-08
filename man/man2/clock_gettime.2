@@ -4,6 +4,8 @@
 .TH CLOCK_GETTIME 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 clock_gettime \- retrieve the time of the specified clock
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <time.h>
 .PP
@@ -44,3 +46,6 @@ int main(void) {
     return 0;
 }
 .fi
+
+.SH SEE ALSO
+.BR intro(2)

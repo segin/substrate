@@ -4,6 +4,8 @@
 .TH STAT 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 stat, fstat, lstat \- get file status
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <sys/types.h>
 .br
@@ -29,3 +31,6 @@ Search permission is denied for one of the directories in the path prefix of
 .TP
 .B ENOENT
 The file does not exist.
+
+.SH SEE ALSO
+.BR intro(2)

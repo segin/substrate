@@ -4,6 +4,8 @@
 .TH GETCWD 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 getcwd \- get current working directory
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -18,3 +20,6 @@ which is of length
 On success,
 .I buf
 is returned. On error, NULL is returned.
+
+.SH SEE ALSO
+.BR intro(2)

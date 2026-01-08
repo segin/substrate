@@ -4,6 +4,8 @@
 .TH MOUNT 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 mount \- mount filesystem
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <sys/mount.h>
 .PP
@@ -23,3 +25,6 @@ The caller does not have the required privileges.
 .TP
 .B ENODEV
 Filesystem type not supported.
+
+.SH SEE ALSO
+.BR intro(2)

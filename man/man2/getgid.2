@@ -4,6 +4,8 @@
 .TH GETGID 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 getgid, getegid \- get group identity
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .br
@@ -20,3 +22,6 @@ returns the real group ID of the calling process.
 returns the effective group ID of the calling process.
 .SH RETURN VALUE
 These functions are always successful.
+
+.SH SEE ALSO
+.BR intro(2)

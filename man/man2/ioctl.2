@@ -4,6 +4,8 @@
 .TH IOCTL 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 ioctl \- control device
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <sys/ioctl.h>
 .PP
@@ -57,3 +59,6 @@ int main(void) {
     return 0;
 }
 .fi
+
+.SH SEE ALSO
+.BR intro(2)

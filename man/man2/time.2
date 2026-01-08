@@ -4,6 +4,8 @@
 .TH TIME 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 time \- get time in seconds
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <time.h>
 .PP
@@ -18,3 +20,6 @@ is non-NULL, the return value is also stored in the memory pointed to by
 .IR tloc .
 .SH RETURN VALUE
 On success, the value of time in seconds since the Epoch is returned. On error, ((time_t) -1) is returned.
+
+.SH SEE ALSO
+.BR intro(2)

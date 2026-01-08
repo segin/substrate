@@ -4,6 +4,8 @@
 .TH THR_NEW 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 thr_new \- create new thread
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <sys/thr.h>
 .PP
@@ -13,3 +15,6 @@ thr_new \- create new thread
 creates a new kernel-scheduled thread of execution within the current process context.
 .SH RETURN VALUE
 On success, zero is returned. On error, -1 is returned.
+
+.SH SEE ALSO
+.BR intro(2)

@@ -4,6 +4,8 @@
 .TH CLOSE 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 close \- close a file descriptor
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -18,3 +20,6 @@ On success, zero is returned. On error, -1 is returned.
 .B EBADF
 .I fd
 is not a valid open file descriptor.
+
+.SH SEE ALSO
+.BR intro(2)

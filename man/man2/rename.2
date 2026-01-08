@@ -4,6 +4,8 @@
 .TH RENAME 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 rename \- change the name or location of a file
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <stdio.h>
 .PP
@@ -50,3 +52,6 @@ int main(void) {
     return 0;
 }
 .fi
+
+.SH SEE ALSO
+.BR intro(2)

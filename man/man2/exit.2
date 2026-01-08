@@ -4,6 +4,8 @@
 .TH EXIT 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 exit \- terminate the calling process
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -20,3 +22,6 @@ is returned to the parent process as the process's exit status, and can be colle
 .BR wait (2).
 .SH RETURN VALUE
 This function does not return.
+
+.SH SEE ALSO
+.BR intro(2)

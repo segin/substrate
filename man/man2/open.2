@@ -4,6 +4,8 @@
 .TH OPEN 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 open \- open and possibly create a file
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <fcntl.h>
 .PP
@@ -44,3 +46,6 @@ were specified, and the file exists.
 .TP
 .B ENOENT
 The file does not exist.
+
+.SH SEE ALSO
+.BR intro(2)

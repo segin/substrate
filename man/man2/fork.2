@@ -4,6 +4,8 @@
 .TH FORK 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 fork \- create a child process
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -24,3 +26,6 @@ A system-imposed limit on the number of threads was encountered.
 .TP
 .B ENOMEM
 Failed to allocate the necessary kernel structures or memory for the new process.
+
+.SH SEE ALSO
+.BR intro(2)

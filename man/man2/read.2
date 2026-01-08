@@ -4,6 +4,8 @@
 .TH READ 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 read \- read from a file descriptor
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -31,3 +33,28 @@ is outside your accessible address space.
 .B EINVAL
 .I fd
 is attached to an object which is unsuitable for reading.
+.SH EXAMPLE
+.B Program source
+.nf
+
+#include <unistd.h>
+#include <stdlib.h>
+
+#define BUF_SIZE 128
+
+int main(void) {
+    char buf[BUF_SIZE];
+    ssize_t n = read(STDIN_FILENO, buf, BUF_SIZE);
+    if (n == -1) {
+        // Handle error
+        return 1;
+    }
+    // Echo back
+    write(STDOUT_FILENO, buf, n);
+    return 0;
+}
+.fi
+.SH SEE ALSO
+.BR write (2),
+.BR open (2),
+.BR close (2)

@@ -4,6 +4,8 @@
 .TH ACCT 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 acct \- switch process accounting on or off
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -18,3 +20,6 @@ If
 is NULL, accounting is turned off.
 .SH RETURN VALUE
 On success, zero is returned. On error, -1 is returned.
+
+.SH SEE ALSO
+.BR intro(2)

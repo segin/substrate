@@ -4,6 +4,8 @@
 .TH GETDENTS 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 getdents \- get directory entries
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .br
@@ -20,3 +22,6 @@ into the buffer pointed to by
 .IR dirp .
 .SH RETURN VALUE
 On success, the number of bytes read is returned. On end of directory, 0 is returned. On error, -1 is returned.
+
+.SH SEE ALSO
+.BR intro(2)

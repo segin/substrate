@@ -4,6 +4,8 @@
 .TH ACCESS 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 access \- check user's permissions for a file
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -31,3 +33,6 @@ The requested access would be denied to the file, or search permission is denied
 .TP
 .B ENOENT
 The file does not exist.
+
+.SH SEE ALSO
+.BR intro(2)

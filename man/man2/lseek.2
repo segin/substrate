@@ -4,6 +4,8 @@
 .TH LSEEK 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 lseek \- reposition read/write file offset
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -20,3 +22,6 @@ according to the directive
 Upon successful completion,
 .B lseek()
 returns the resulting offset location as measured in bytes from the beginning of the file. On error, the value (off_t) -1 is returned.
+
+.SH SEE ALSO
+.BR intro(2)

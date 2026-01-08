@@ -4,6 +4,8 @@
 .TH SYNC 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 sync \- commit buffer cache to disk
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -14,3 +16,6 @@ causes all pending modifications to filesystem metadata and data to be written t
 .SH RETURN VALUE
 .B sync()
 is always successful.
+
+.SH SEE ALSO
+.BR intro(2)

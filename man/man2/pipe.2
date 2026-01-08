@@ -4,6 +4,8 @@
 .TH PIPE 2 "January 2026" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 pipe \- create pipe
+.SH LIBRARY
+Standard C library (libc, -lc)
 .SH SYNOPSIS
 .B #include <unistd.h>
 .PP
@@ -24,3 +26,6 @@ On success, zero is returned. On error, -1 is returned.
 .B EFAULT
 .I pipefd
 is not valid.
+
+.SH SEE ALSO
+.BR intro(2)
