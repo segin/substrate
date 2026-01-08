@@ -70,6 +70,28 @@ _start:
 	or $3, %eax
 	mov %eax, 3076(%edx)
 
+	# Entry 1019 (0x3FB*4=4076): LAPIC page table (0xFEC00000-0xFFFFF000)
+	# This maps the Local APIC at 0xFEE00000
+	mov $(boot_page_table_lapic - 0xC0000000), %eax
+	or $3, %eax
+	mov %eax, 4076(%edx)
+
+	# Fill LAPIC page table - identity map 0xFEC00000-0xFFFFFFFF
+	mov $(boot_page_table_lapic - 0xC0000000), %edi
+	mov $0xFEC00, %esi          # Start at page 0xFEC00 (0xFEC00000 >> 12)
+	mov $1024, %ecx
+3:
+	mov %esi, %edx
+	shl $12, %edx
+	or $0x13, %edx              # Present + RW + PCD (no-cache for MMIO)
+	mov %edx, (%edi)
+	add $4, %edi
+	inc %esi
+	loop 3b
+	
+	# Restore page directory pointer
+	mov $(boot_page_directory - 0xC0000000), %edx
+
 	# 3. Enable Paging
 	mov %edx, %cr3
 	mov %cr0, %eax
@@ -120,6 +142,8 @@ boot_page_directory:
 boot_page_table1:
 	.skip 4096
 boot_page_table2:
+	.skip 4096
+boot_page_table_lapic:
 	.skip 4096
 .align 16
 stack_bottom:

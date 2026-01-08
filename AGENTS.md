@@ -31,6 +31,9 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **Build System:** Fixed `dist` directory generation to include standard Unix hierarchy (`usr/include`, `usr/local`, etc.) and ensured `vmunix` installation.
 - **Boot/Init:** Cleaned up `sbin` build process; kernel now boots correctly with `root=/dev/hda` for external root filesystems, attempting fallback to `init` search path.
 - **UDF Filesystem Driver:** Complete read-write UDF (Universal Disk Format) driver per ECMA-167/OSTA spec. On-disk structures in `udf.h`, read-only support in `udf.c`, write support in `udf_write.c`, with unit tests and man pages (`udf.4`, `udf.5`).
+- **UMA Integration:** Integrated FreeBSD-style Universal Memory Allocator (UMA) for kernel memory allocation. `kmalloc`/`kfree` now backed by UMA zones via `vm_kmem.c`. Added `uma_startup()` before `kmem_init()`.
+- **Early Boot Debugging:** Added early GDT+IDT handler in `main.c` using `early_uart_print()` for exception debugging before full console is available. Prints exception number and halts on any early fault.
+- **LAPIC Early Mapping:** Added LAPIC identity-mapping (0xFEC00000-0xFFFFFFFF) in `boot.S` page tables with PCD flag for MMIO. Entry 1019 (offset 4076) covers LAPIC at 0xFEE00000.
 
 
 ## Current Status
@@ -88,6 +91,33 @@ This is the Substrate operating system project targeting x86 32-bit architecture
     - `pthreads/`: Threading support.
     - `dbm/`: Database library.
 - `sbin/`: System binaries.
+
+### Kernel Debugging
+When debugging kernel crashes (including triple faults):
+
+1. **QEMU with GDB:**
+   ```bash
+   # Terminal 1: Start QEMU with debugging, -no-reboot stops on triple fault
+   qemu-system-i386 -kernel sys/kernel.bin -no-reboot -s -S
+   
+   # Terminal 2: Connect GDB
+   gdb -ex "file sys/kernel.bin" -ex "target remote :1234"
+   ```
+
+2. **Single-Step Debugging:**
+   - Use `si` (step instruction) one at a time in gdb
+   - Use `break <function>` to set breakpoints
+   - Use `info registers` to check CPU state
+   - When QEMU hits triple fault with `-no-reboot`, it halts and gdb shows connection closed
+
+3. **Exception Trapping:**
+   - Set breakpoints on IDT handlers: `break isr_common_stub`, `break double_fault_handler`
+   - Use QEMU monitor (`Ctrl+Alt+2`) for low-level CPU inspection
+
+4. **Debugging Principles:**
+   - **Never recreate code** - always restore from git history when reverting changes
+   - **Single-step from crash point** - triple faults don't return to gdb, so step one instruction at a time
+   - **Check BSS/stack** - large static arrays can cause stack overflow or memory corruption
 
 ### Debugging Note
 If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be masked at the PIC or the controller state is stuck.
