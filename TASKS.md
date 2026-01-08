@@ -333,26 +333,25 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **Backing Store:** Support swap files or partitions.
                 - [x] **Policy:** Implement page replacement algorithm (Clock/LRU).
             - [x] **Rewrite:** **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
-            - [ ] **Advanced Features:**
-                - [ ] **Advanced Features:**
-                    - [x] **File-backed mmap (`MAP_FILE`):**
-                        - [x] **VNode Pager:** Interface to trigger VFS `read` operations on missing pages.
-                        - [x] **Write-back:** Track dirty pages and implement `msync` to flush to disk.
-                    - [x] **Reference Counting & Shared Memory:**
-                        - [x] **vm_page_t Refcounts:** Track number of mappings pointing to physical frames.
-                        - [x] **vm_object Refcounts:** Track number of regions sharing the same backing store.
-                        - [x] **Shared Mappings (`MAP_SHARED`):** write-through logic for multi-process memory sharing.
-                    - [ ] **Copy-on-Write (COW):**
-                        - [x] **Write-Protection:** Mark pages read-only (`!PTE_RW`) in child on fork.
-                        - [x] **Fault Handling:**
-                             - [x] Detect write fault on present, read-only CoW page.
-                             - [x] Allocate new frame.
-                             - [x] Copy content from original frame.
-                             - [x] Update PTE to point to new frame with `PTE_RW`.
-                             - [x] Decrement refcount on original frame.
-                    - [x] **Lazy Faulting Improvements:**
-                        - [x] **Demand Paging:** Only allocate frames when accessed (Zero-fill on demand).
-                        - [x] **Prefaulting:** Heuristic to load surrounding pages during IO to reduce disk seeks.
+            - [x] **Advanced Features:**
+                - [x] **File-backed mmap (`MAP_FILE`):**
+                    - [x] **VNode Pager:** Interface to trigger VFS `read` operations on missing pages.
+                    - [x] **Write-back:** Track dirty pages and implement `msync` to flush to disk.
+                - [x] **Reference Counting & Shared Memory:**
+                    - [x] **vm_page_t Refcounts:** Track number of mappings pointing to physical frames.
+                    - [x] **vm_object Refcounts:** Track number of regions sharing the same backing store.
+                    - [x] **Shared Mappings (`MAP_SHARED`):** write-through logic for multi-process memory sharing.
+                - [x] **Copy-on-Write (COW):**
+                    - [x] **Write-Protection:** Mark pages read-only (`!PTE_RW`) in child on fork.
+                    - [x] **Fault Handling:**
+                        - [x] Detect write fault on present, read-only CoW page.
+                        - [x] Allocate new frame.
+                        - [x] Copy content from original frame.
+                        - [x] Update PTE to point to new frame with `PTE_RW`.
+                        - [x] Decrement refcount on original frame.
+                - [x] **Lazy Faulting Improvements:**
+                    - [x] **Demand Paging:** Only allocate frames when accessed (Zero-fill on demand).
+                    - [x] **Prefaulting:** Heuristic to load surrounding pages during IO to reduce disk seeks.
     - [ ] **Kernel Allocator (UMA/Zone):**
     - [ ] **Kernel Allocator (UMA/Slab Refactor):**
         - [ ] **UMA Core (`uma_core.c`):**
