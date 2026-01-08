@@ -326,3 +326,59 @@ char *strchr(const char *s, int c) {
     }
     return (char *)s;
 }
+
+/*
+ * 64-bit division/modulo helpers for i386
+ * 
+ * GCC emits calls to these when performing 64-bit arithmetic on 32-bit.
+ * We implement them here to avoid libgcc dependency, which can have
+ * multilib configuration issues across different systems.
+ */
+
+uint64_t __udivdi3(uint64_t num, uint64_t den) {
+    uint64_t quot = 0, qbit = 1;
+    
+    if (den == 0) return 0; /* Division by zero - return 0 or could panic */
+    
+    /* Left-justify denominator and count quotient bits */
+    while ((int64_t)den >= 0) {
+        den <<= 1;
+        qbit <<= 1;
+    }
+    
+    /* Standard binary long division */
+    while (qbit) {
+        if (den <= num) {
+            num -= den;
+            quot += qbit;
+        }
+        den >>= 1;
+        qbit >>= 1;
+    }
+    
+    return quot;
+}
+
+uint64_t __umoddi3(uint64_t num, uint64_t den) {
+    return num - __udivdi3(num, den) * den;
+}
+
+int64_t __divdi3(int64_t num, int64_t den) {
+    int neg = 0;
+    
+    if (num < 0) { num = -num; neg = !neg; }
+    if (den < 0) { den = -den; neg = !neg; }
+    
+    uint64_t result = __udivdi3((uint64_t)num, (uint64_t)den);
+    return neg ? -(int64_t)result : (int64_t)result;
+}
+
+int64_t __moddi3(int64_t num, int64_t den) {
+    int neg = (num < 0);
+    
+    if (num < 0) num = -num;
+    if (den < 0) den = -den;
+    
+    int64_t result = (int64_t)__umoddi3((uint64_t)num, (uint64_t)den);
+    return neg ? -result : result;
+}
