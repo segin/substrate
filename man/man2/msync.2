@@ -24,7 +24,17 @@ or
 .BR MS_INVALIDATE .
 .SH RETURN VALUE
 On success, 0 is returned. On error, -1 is returned.
-.SH EXAMPLES
+.SH ERRORS
+.TP
+.B EBADF
+The file descriptor is not valid.
+.TP
+.B EINVAL
+flags was invalid.
+.TP
+.B ENOMEM
+Insufficient memory available.
+.SH EXAMPLE
 .B Program source
 .nf
 
@@ -60,3 +70,6 @@ int main(void) {
     return 0;
 }
 .fi
+.SH SEE ALSO
+.BR mmap (2),
+.BR sysconf (3)
