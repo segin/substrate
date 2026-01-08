@@ -2,7 +2,7 @@ include ../Makefile.inc
 
 # Default to i386 if not specified
 ARCH ?= i386
-LIBGCC := $(shell $(CC) -m32 -print-libgcc-file-name)
+# Note: No libgcc needed - we implement our own 64-bit helpers in kern/lib.c
 
 .PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi tests
 
@@ -25,8 +25,7 @@ kernel.bin: arch_kernel kern pm drivers fs exec vfs exec_perso vm tests
 		fs/exec/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
-		tests/tests.o \
-		$(LIBGCC)
+		tests/tests.o
 	@echo "Linked kernel.bin"
 
 kernel.multiboot: kernel.bin
