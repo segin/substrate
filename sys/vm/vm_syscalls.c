@@ -63,18 +63,18 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     }
 
     // Allocate and map pages
-    #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
+    // NOTE: pmm_alloc_block() returns virtual address (kernel direct mapping)
     uint64_t file_offset = offset;
 
     for (uintptr_t va = v_addr; va < v_addr + length; va += 0x1000) {
-        void *pa = pmm_alloc_block();
-        if (!pa) {
+        void *pa_virt = pmm_alloc_block();  // Returns virtual address
+        if (!pa_virt) {
             // Partial failure - pages before this are mapped
             break;
         }
 
-        // Zero the page first
-        memset(VIRTUAL_d(pa), 0, 0x1000);
+        // Zero the page - pa_virt is already virtual
+        memset(pa_virt, 0, 0x1000);
 
         // If file-backed, read data into page
         if (file && file->node && file->node->read) {
@@ -83,12 +83,13 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
             if (va + 0x1000 > v_addr + length) {
                 bytes_to_read = (v_addr + length) - va;
             }
-            file->node->read(file->node, file_offset, bytes_to_read, (uint8_t *)VIRTUAL_d(pa));
+            file->node->read(file->node, file_offset, bytes_to_read, (uint8_t *)pa_virt);
             file_offset += bytes_to_read;
         }
 
-        // Map page with requested protection
-        pmap_enter(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), va, (uint32_t)(uintptr_t)pa, vm_prot, 0);
+        // Convert virtual to physical for pmap_enter
+        uint32_t pa_phys = (uint32_t)(uintptr_t)pa_virt - 0xC0000000;
+        pmap_enter(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), va, pa_phys, vm_prot, 0);
     }
 
     return (void *)v_addr;

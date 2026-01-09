@@ -47,7 +47,11 @@ void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     uint16_t q_size = inw(v9p.io_base + VIRTIO_REG_QUEUE_SIZE);
     v9p.q_size = q_size;
     
-    void *q_mem = pmm_alloc_block();
+    void *q_mem = pmm_alloc_block();  // Returns virtual address
+    if (!q_mem) {
+        kprint("VirtIO-9P: Failed to allocate queue memory!\n");
+        return;
+    }
     memset(q_mem, 0, 4096);
     
     v9p.desc_page = q_mem;
@@ -64,7 +68,9 @@ void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     
     v9p.used = (struct vring_used *)((char*)q_mem + used_ring_offset);
     
-    outl(v9p.io_base + VIRTIO_REG_QUEUE_ADDR, (uint32_t)q_mem / 4096);
+    // Write PFN - MUST be physical address!
+    uint32_t q_phys = (uint32_t)(uintptr_t)q_mem - 0xC0000000;
+    outl(v9p.io_base + VIRTIO_REG_QUEUE_ADDR, q_phys / 4096);
     
     outb(v9p.io_base + VIRTIO_REG_DEVICE_STATUS, 
          VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_DRIVER_OK);

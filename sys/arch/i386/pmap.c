@@ -321,14 +321,15 @@ void pmap_destroy(pmap_t pmap) {
                     if (page_phys != 0 && !(page_phys & 0xFFF)) {
                         // Don't free kernel pages (>= 0xC0000000 virtual)
                         if (page_phys < 0x40000000) {  // Reasonable upper bound for user pages
-                            pmm_free_block((void *)(uintptr_t)page_phys);
+                            // Convert physical to virtual for pmm_free_block
+                            pmm_free_block((void *)(uintptr_t)(page_phys + 0xC0000000));
                         }
                     }
                 }
             }
             
-            // Free page table itself
-            pmm_free_block((void *)(uintptr_t)pt_phys);
+            // Free page table itself (convert physical to virtual)
+            pmm_free_block((void *)(uintptr_t)(pt_phys + 0xC0000000));
             
             // Clear PDE to prevent double-free
             pd[i] = 0;
