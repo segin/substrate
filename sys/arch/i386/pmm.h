@@ -12,6 +12,12 @@
 #define PMM_BLOCK_SIZE 4096
 #define PMM_BLOCKS_PER_BYTE 8
 
+typedef uint32_t phys_addr_t;
+
+/* Iterator callback for memory regions */
+typedef void (*pmm_region_callback)(phys_addr_t start, phys_addr_t len, void *arg);
+void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback cb, void *arg);
+
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length);
 void pmm_init_e820(e820_entry_t *map, uint32_t count);
 void* pmm_alloc_block(void);
