@@ -140,8 +140,8 @@ void *sys_brk(void *addr) {
     if (new_page_end > old_page_end) {
         // Allocate and map new pages
         for (uint32_t va = old_page_end; va < new_page_end; va += 0x1000) {
-            void *pa = pmm_alloc_block();
-            if (!pa) {
+            void *pa_virt = pmm_alloc_block();
+            if (!pa_virt) {
                 extern int syscall_trace_enabled;
                 if (syscall_trace_enabled) {
                     extern void kprint(const char*);
@@ -150,8 +150,11 @@ void *sys_brk(void *addr) {
                 return (void *)old_brk; // Out of memory
             }
             
+            // Convert virtual to physical for pmap_enter
+            uint32_t pa_phys = (uint32_t)(uintptr_t)pa_virt - 0xC0000000;
+            
             // Map page with Read/Write permissions (USER handled by pmap for user addresses)
-            if (pmap_enter(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(), va, (uint32_t)(uintptr_t)pa, VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
+            if (pmap_enter(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(), va, pa_phys, VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
                  extern int syscall_trace_enabled;
                  if (syscall_trace_enabled) {
                      extern void kprint(const char*);
@@ -159,9 +162,8 @@ void *sys_brk(void *addr) {
                  }
                  return (void *)old_brk;
             }
-            // Zero via kernel mapping
-            #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
-            memset(VIRTUAL_d(pa), 0, 0x1000);
+            // Zero the page - pa_virt is already virtual, use directly
+            memset(pa_virt, 0, 0x1000);
         }
     }
     // If shrinking, we leak pages for now (lazy unmap). 
