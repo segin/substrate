@@ -54,6 +54,7 @@
 #define SYS_UNAME   122
 #define SYS_GETDENTS 141
 #define SYS_GETCWD 183
+#define SYS_READLINK 85
 #define SYS_THR_NEW 455
 
 #endif

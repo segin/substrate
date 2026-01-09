@@ -1,0 +1,76 @@
+.\"
+.\" READLINK(2) - Substrate Native Personality
+.\"
+.TH READLINK 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+readlink \- read value of a symbolic link
+.SH SYNOPSIS
+.nf
+.B #include <unistd.h>
+.PP
+.BI "ssize_t readlink(const char *" pathname ", char *" buf ", size_t " bufsiz ");
+.fi
+.SH DESCRIPTION
+.BR readlink ()
+places the contents of the symbolic link
+.I pathname
+in the buffer
+.IR buf ,
+which has size
+.IR bufsiz .
+.BR readlink ()
+does not append a terminating null byte to
+.IR buf .
+It will (silently) truncate the contents if the buffer is too small
+to hold all of the contents.
+.SH RETURN VALUE
+On success,
+.BR readlink ()
+returns the number of bytes placed in
+.IR buf .
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B ENOENT
+.I pathname
+does not exist.
+.TP
+.B EINVAL
+.I pathname
+is not a symbolic link.
+.TP
+.B EFAULT
+.I buf
+extends outside the process's allocated address space.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 85
+Arguments:      pathname, buf, bufsiz (on stack)
+.fi
+.SS Usage
+The returned value does not include a null terminator.
+Applications must ensure
+.I bufsiz
+is at least
+.I PATH_MAX
+to avoid truncation.
+.SH EXAMPLE
+.nf
+char target[256];
+ssize_t len = readlink("/usr/bin/foo", target, sizeof(target) - 1);
+if (len != -1) {
+    target[len] = '\\0';
+    printf("Link points to: %s\\n", target);
+}
+.fi
+.SH SEE ALSO
+.BR lstat (2),
+.BR stat (2),
+.BR symlink (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

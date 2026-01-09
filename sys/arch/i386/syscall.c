@@ -677,6 +677,24 @@ int sys_link(const char *oldpath, const char *newpath) {
     return link_fs(parent, source, file);
 }
 
+int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
+    if (!pathname || !buf || bufsiz == 0) return -14; // EFAULT
+    
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    
+    // Lookup the symlink (using lstat-like behavior)
+    fs_node_t *node = vfs_lookup(cwd, pathname);
+    if (!node) return -2; // ENOENT
+    
+    // Check if it's a symlink
+    if (!(node->flags & FS_SYMLINK)) return -22; // EINVAL - not a symlink
+    
+    // Read the link target
+    int ret = readlink_fs(node, buf, bufsiz);
+    return ret;
+}
+
 int sys_access(const char *path, int mode) {
     if (!path) return -1;
 

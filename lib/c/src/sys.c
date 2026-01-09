@@ -192,6 +192,10 @@ int fstat(int fd, struct stat *buf) {
     return (int)_syscall2(SYS_FSTAT, fd, (int)buf);
 }
 
+ssize_t readlink(const char *pathname, char *buf, size_t bufsiz) {
+    return (ssize_t)_syscall3(SYS_READLINK, (int)pathname, (int)buf, bufsiz);
+}
+
 time_t time(time_t *tloc) {
     return (time_t)_syscall1(SYS_TIME, (int)tloc);
 }

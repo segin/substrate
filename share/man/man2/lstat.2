@@ -1,0 +1,74 @@
+.\"
+.\" LSTAT(2) - Substrate Native Personality
+.\"
+.TH LSTAT 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+lstat \- get file status without following symlinks
+.SH SYNOPSIS
+.nf
+.B #include <sys/stat.h>
+.PP
+.BI "int lstat(const char *" pathname ", struct stat *" statbuf ");
+.fi
+.SH DESCRIPTION
+.BR lstat ()
+is identical to
+.BR stat (2),
+except that if
+.I pathname
+is a symbolic link, then it returns information about the link itself,
+not the file that the link refers to.
+.PP
+This is the key difference from
+.BR stat (2):
+.IP \(bu 3
+.BR stat ()
+follows symbolic links.
+.IP \(bu 3
+.BR lstat ()
+does not follow symbolic links.
+.SH RETURN VALUE
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B ENOENT
+A component of
+.I pathname
+does not exist.
+.TP
+.B EFAULT
+Bad address.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 107 (SYS_LSTAT)
+Arguments:      pathname, statbuf (on stack)
+.fi
+.SS Symlink Detection
+To detect if a file is a symbolic link, use
+.BR lstat ()
+and check if
+.I "(st_mode & S_IFMT) == S_IFLNK" .
+Then use
+.BR readlink (2)
+to read the link target.
+.SH EXAMPLE
+.nf
+struct stat st;
+if (lstat("/usr/bin/foo", &st) == 0) {
+    if ((st.st_mode & S_IFMT) == S_IFLNK) {
+        printf("It's a symbolic link\\n");
+    }
+}
+.fi
+.SH SEE ALSO
+.BR stat (2),
+.BR fstat (2),
+.BR readlink (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

@@ -27,6 +27,7 @@ int close(int fd);
 int unlink(const char *pathname);
 int rmdir(const char *pathname);
 int link(const char *oldpath, const char *newpath);
+ssize_t readlink(const char *pathname, char *buf, size_t bufsiz);
 int chdir(const char *path);
 char *getcwd(char *buf, size_t size);
 
