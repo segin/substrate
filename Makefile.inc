@@ -12,6 +12,9 @@ AS ?= as
 
 TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
+# Branding utility for native Substrate binaries
+BRANDELF = $(TOP)/usr.bin/brandelf/brandelf
+
 # Default install destination
 DESTDIR ?= $(TOP)/dist
 
@@ -32,3 +35,9 @@ FREESTANDING_LDFLAGS = -m elf_i386 -nostdlib
 USER_CFLAGS = $(CFLAGS)
 USER_LDFLAGS = -m32 -nostdlib -fno-pie
 LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
+
+# Macro to brand a binary as Substrate native (OSABI=64)
+# Usage: $(call BRAND_SUBSTRATE,binary_name)
+define BRAND_SUBSTRATE
+	@if [ -x $(BRANDELF) ]; then $(BRANDELF) -t Substrate $(1); fi
+endef
