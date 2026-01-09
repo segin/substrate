@@ -1,5 +1,6 @@
 #include "personality.h"
 #include <stddef.h>
+#include <sys/termios.h>
 #include "../../arch/i386/syscall.h"
 
 extern int sys_exit(int);
@@ -58,6 +59,77 @@ extern int sys_unlink(const char*);
 extern int sys_link(const char*, const char*);
 extern int sys_sigprocmask(int, const void*, void*);
 
+/* Linux i386 termios structure - different from native Substrate termios */
+#define LINUX_NCCS 19
+struct linux_termios {
+    uint32_t c_iflag;
+    uint32_t c_oflag;
+    uint32_t c_cflag;
+    uint32_t c_lflag;
+    uint8_t  c_line;
+    uint8_t  c_cc[LINUX_NCCS];
+    uint32_t c_ispeed;
+    uint32_t c_ospeed;
+};
+
+/* Linux ioctl numbers for termios */
+#define LINUX_TCGETS    0x5401
+#define LINUX_TCSETS    0x5402
+#define LINUX_TCSETSW   0x5403
+#define LINUX_TCSETSF   0x5404
+
+/* Linux ioctl wrapper - translates termios between native and Linux format */
+static int linux_sys_ioctl(int fd, uint32_t request, void *arg) {
+    /* For termios ioctls, translate between native and Linux format */
+    switch (request) {
+        case LINUX_TCGETS: {
+            /* Get native termios, translate to Linux format */
+            struct termios native;
+            int ret = sys_ioctl(fd, request, &native);
+            if (ret == 0 && arg) {
+                struct linux_termios *lt = (struct linux_termios *)arg;
+                lt->c_iflag = native.c_iflag;
+                lt->c_oflag = native.c_oflag;
+                lt->c_cflag = native.c_cflag;
+                lt->c_lflag = native.c_lflag;
+                lt->c_line = native.c_line;
+                /* Copy only LINUX_NCCS control chars */
+                for (int i = 0; i < LINUX_NCCS; i++) {
+                    lt->c_cc[i] = native.c_cc[i];
+                }
+                lt->c_ispeed = native.c_ispeed;
+                lt->c_ospeed = native.c_ospeed;
+            }
+            return ret;
+        }
+        case LINUX_TCSETS:
+        case LINUX_TCSETSW:
+        case LINUX_TCSETSF: {
+            /* Translate Linux termios to native, then set */
+            if (!arg) return -1;
+            struct linux_termios *lt = (struct linux_termios *)arg;
+            struct termios native;
+            /* Zero the native struct to clear extra c_cc entries */
+            extern void *memset(void*, int, size_t);
+            memset(&native, 0, sizeof(native));
+            native.c_iflag = lt->c_iflag;
+            native.c_oflag = lt->c_oflag;
+            native.c_cflag = lt->c_cflag;
+            native.c_lflag = lt->c_lflag;
+            native.c_line = lt->c_line;
+            for (int i = 0; i < LINUX_NCCS; i++) {
+                native.c_cc[i] = lt->c_cc[i];
+            }
+            native.c_ispeed = lt->c_ispeed;
+            native.c_ospeed = lt->c_ospeed;
+            return sys_ioctl(fd, request, &native);
+        }
+        default:
+            /* Pass through other ioctls unchanged */
+            return sys_ioctl(fd, request, arg);
+    }
+}
+
 static void *linux_syscalls[MAX_SYSCALLS] = {
     [1] = &sys_exit,
     [2] = &sys_fork,
@@ -92,7 +164,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [49] = &sys_geteuid,
     [50] = &sys_getegid,
     [51] = &sys_acct,
-    [54] = &sys_ioctl,
+    [54] = &linux_sys_ioctl,
     [57] = &sys_setpgid,
     [63] = &sys_dup2,
     [64] = &sys_getppid,
