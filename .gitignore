@@ -44,7 +44,6 @@ sbin/*/
 !sbin/*/*.h
 !sbin/*/*.S
 
-usr.bin/*/
 !usr.bin/*/Makefile
 !usr.bin/*/*.c
 !usr.bin/*/*.h
