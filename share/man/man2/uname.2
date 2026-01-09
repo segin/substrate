@@ -1,0 +1,66 @@
+.\"
+.\" UNAME(2) - Substrate Native Personality
+.\"
+.TH UNAME 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+uname \- get name and information about current kernel
+.SH SYNOPSIS
+.nf
+.B #include <sys/utsname.h>
+.PP
+.BI "int uname(struct utsname *" buf ");
+.fi
+.SH DESCRIPTION
+.BR uname ()
+returns system information in the structure pointed to by
+.IR buf .
+.SS The utsname structure
+.nf
+struct utsname {
+    char sysname[65];     /* Operating system name */
+    char nodename[65];    /* Network node hostname */
+    char release[65];     /* Operating system release */
+    char version[65];     /* Operating system version */
+    char machine[65];     /* Hardware identifier */
+    char domainname[65];  /* NIS domain name */
+};
+.fi
+.PP
+For Substrate, typical values are:
+.IP \(bu 3
+.BR sysname :
+"Substrate"
+.IP \(bu 3
+.BR release :
+"0.1.0"
+.IP \(bu 3
+.BR machine :
+"i386"
+.SH RETURN VALUE
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EFAULT
+.I buf
+is not valid.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 122
+Arguments:      buf (on stack)
+
+    push buf
+    push $0
+    mov eax, 122
+    int $0x80
+    add esp, 8
+.fi
+.SH SEE ALSO
+.BR hostname (1),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

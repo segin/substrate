@@ -1,0 +1,61 @@
+.\"
+.\" MOUNT(2) - Substrate Native Personality
+.\"
+.TH MOUNT 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+mount, umount \- mount and unmount filesystems
+.SH SYNOPSIS
+.nf
+.B #include <sys/mount.h>
+.PP
+.BI "int mount(const char *" source ", const char *" target ","
+.BI "          const char *" filesystemtype ", unsigned long " mountflags ","
+.BI "          const void *" data ");
+.PP
+.BI "int umount(const char *" target ");
+.fi
+.SH DESCRIPTION
+.BR mount ()
+attaches the filesystem specified by
+.I source
+(often a pathname referring to a device) to the location specified by
+.IR target .
+.PP
+.I filesystemtype
+is a string identifying the filesystem type (e.g., "ext2", "minix").
+.PP
+.BR umount ()
+removes the attachment of the (topmost) filesystem mounted on
+.IR target .
+.SH RETURN VALUE
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EBUSY
+.I target
+is still busy.
+.TP
+.B ENOENT
+A pathname was empty or had a nonexistent component.
+.TP
+.B ENOTBLK
+.I source
+is not a block device (when a device was required).
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+mount:  Syscall Number: 21
+umount: Syscall Number: 22
+.fi
+.SS Supported Filesystems
+Substrate supports: ext2, minix, exfat, udf.
+.SH SEE ALSO
+.BR mount (8),
+.BR umount (8),
+.BR substrate (7)
+.SH STANDARDS
+Linux-specific.

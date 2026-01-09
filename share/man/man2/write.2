@@ -1,0 +1,67 @@
+.\"
+.\" WRITE(2) - Substrate Native Personality
+.\"
+.TH WRITE 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+write \- write to a file descriptor
+.SH SYNOPSIS
+.nf
+.B #include <unistd.h>
+.PP
+.BI "ssize_t write(int " fd ", const void *" buf ", size_t " count ");
+.fi
+.SH DESCRIPTION
+.BR write ()
+writes up to
+.I count
+bytes from the buffer starting at
+.I buf
+to the file referred to by the file descriptor
+.IR fd .
+.PP
+On files that support seeking, the write starts at the file offset,
+which is incremented by the number of bytes written.
+.SH RETURN VALUE
+On success, the number of bytes written is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EBADF
+.I fd
+is not a valid file descriptor or is not open for writing.
+.TP
+.B EFAULT
+.I buf
+is outside your accessible address space.
+.TP
+.B ENOSPC
+The device has no room for the data.
+.TP
+.B EPIPE
+.I fd
+is connected to a pipe whose reading end is closed.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 4 (SYS_WRITE)
+Arguments:      fd, buf, count (on stack)
+
+    push count
+    push buf
+    push fd
+    push $0
+    mov eax, 4
+    int $0x80
+    add esp, 16
+.fi
+.SH SEE ALSO
+.BR read (2),
+.BR open (2),
+.BR close (2),
+.BR pipe (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

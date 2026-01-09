@@ -1,0 +1,153 @@
+.\"
+.\" SUBSTRATE(7) - Substrate Native Personality Overview
+.\"
+.TH SUBSTRATE 7 "January 2026" "Substrate OS" "Miscellaneous"
+.SH NAME
+substrate \- Substrate native kernel personality overview
+.SH DESCRIPTION
+The Substrate operating system implements a Unix-like kernel with support for
+multiple binary compatibility layers called "personalities". The
+.B native
+personality (also called "substrate") is the primary execution environment
+designed specifically for Substrate.
+.PP
+The native personality uses a stack-based syscall ABI similar to FreeBSD,
+where syscall arguments are passed on the stack rather than in registers
+(as used by Linux i386).
+.SH SYSCALL ABI
+.SS Invocation
+System calls are invoked via
+.B int $0x80
+with the syscall number in
+.BR EAX .
+Arguments are pushed onto the user stack in reverse order (rightmost first),
+followed by a dummy return address placeholder.
+.PP
+.nf
+    push arg3
+    push arg2
+    push arg1
+    push $0           ; dummy return address
+    mov eax, SYSCALL_NUMBER
+    int $0x80
+    add esp, 16       ; clean up stack
+.fi
+.SS Return Values
+.IP \(bu 3
+Success: Return value in
+.BR EAX .
+For 64-bit return values,
+.B EDX
+contains the high 32 bits.
+.IP \(bu 3
+Error: Negative errno value in
+.BR EAX .
+.SH SYSCALL TABLE
+The following system calls are implemented in the native personality:
+.PP
+.TS
+tab(;) allbox;
+lb lb lb
+r l l.
+Number;Name;Description
+1;exit;terminate the calling process
+2;fork;create a child process
+3;read;read from a file descriptor
+4;write;write to a file descriptor
+5;open;open a file
+6;close;close a file descriptor
+9;link;create a hard link
+13;time;get time in seconds
+14;mknod;create a filesystem node
+19;lseek;reposition file offset
+20;getpid;get process ID
+21;mount;mount a filesystem
+22;umount;unmount a filesystem
+23;setuid;set user identity
+24;getuid;get user identity
+33;access;check access permissions
+36;sync;synchronize filesystem caches
+37;kill;send signal to process
+39;mkdir;create a directory
+40;rmdir;remove a directory
+42;pipe;create a pipe
+46;setgid;set group identity
+47;getgid;get group identity
+48;signal;ANSI C signal handling
+49;geteuid;get effective user ID
+50;getegid;get effective group ID
+51;acct;enable/disable process accounting
+54;ioctl;device control
+63;dup2;duplicate a file descriptor
+66;vfork;create child process (vfork)
+106;stat;get file status
+107;lstat;get file status (no symlink follow)
+108;fstat;get file status by descriptor
+11;execve;execute a program
+122;uname;get system information
+141;getdents;get directory entries
+144;msync;synchronize memory with storage
+162;nanosleep;high-resolution sleep
+183;getcwd;get current working directory
+241;pmap_stats;get pmap statistics (Substrate-specific)
+455;thr_new;create new thread (BSD-style)
+.TE
+.SH ELF BRANDING
+Native Substrate executables are identified by ELF branding:
+.IP \(bu 3
+.B e_ident[EI_OSABI]
+= 64 (ELFOSABI_TESTUNIX / Substrate)
+.PP
+The
+.BR brandelf (1)
+utility can be used to set or query the ELF ABI:
+.PP
+.nf
+    brandelf -t Substrate myprogram
+.fi
+.SH PERSONALITY DETECTION
+The kernel detects the personality from the ELF header at exec time.
+If
+.B ELFOSABI
+is 64 (Substrate/TesUnix), the native personality is selected.
+Otherwise, Linux (3), FreeBSD (9), or SVR4 (0) personalities are used
+as appropriate.
+.SH DIFFERENCES FROM LINUX
+.IP \(bu 3
+Syscall arguments passed on stack, not in registers
+.IP \(bu 3
+.B struct termios
+has NCCS=32 (Linux i386 has NCCS=19)
+.IP \(bu 3
+.B time_t
+is 64-bit signed
+.IP \(bu 3
+Some syscall numbers differ from Linux
+.SH DIFFERENCES FROM FREEBSD
+.IP \(bu 3
+Syscall numbers may differ
+.IP \(bu 3
+Thread creation uses
+.BR thr_new (2)
+with BSD-compatible parameters
+.SH FILES
+.TP
+.B /proc/self/personality
+(planned) Current process personality
+.SH SEE ALSO
+.BR exit (2),
+.BR fork (2),
+.BR read (2),
+.BR write (2),
+.BR open (2),
+.BR close (2),
+.BR execve (2),
+.BR ioctl (2),
+.BR stat (2),
+.BR uname (2)
+.SH AUTHORS
+Substrate kernel team.
+.SH HISTORY
+The Substrate native personality was designed to provide a clean,
+modern Unix-like syscall interface while maintaining compatibility
+concepts from both BSD and Linux traditions.

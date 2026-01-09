@@ -1,0 +1,48 @@
+.\"
+.\" EXIT(2) - Substrate Native Personality
+.\"
+.TH EXIT 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+exit, _exit \- terminate the calling process
+.SH SYNOPSIS
+.nf
+.B #include <stdlib.h>
+.PP
+.BI "void exit(int " status ");
+.BI "void _exit(int " status ");
+.fi
+.SH DESCRIPTION
+The
+.BR exit ()
+function terminates the calling process immediately, returning
+.I status
+to the parent process.
+.PP
+The low-order 8 bits of
+.I status
+are available to the parent process via
+.BR wait (2)
+or
+.BR waitpid (2).
+.SH RETURN VALUE
+These functions do not return.
+.SH ERRORS
+None.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 1 (SYS_EXIT)
+Arguments:      status (on stack)
+
+    push status
+    push $0
+    mov eax, 1
+    int $0x80
+.fi
+.SH SEE ALSO
+.BR wait (2),
+.BR waitpid (2),
+.BR fork (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

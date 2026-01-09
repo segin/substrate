@@ -1,0 +1,86 @@
+.\"
+.\" EXECVE(2) - Substrate Native Personality
+.\"
+.TH EXECVE 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+execve \- execute program
+.SH SYNOPSIS
+.nf
+.B #include <unistd.h>
+.PP
+.BI "int execve(const char *" pathname ", char *const " argv "[],"
+.BI "           char *const " envp "[]);
+.fi
+.SH DESCRIPTION
+.BR execve ()
+executes the program referred to by
+.IR pathname .
+This causes the program that is currently being run by the calling
+process to be replaced with a new program, with newly initialized
+stack, heap, and (initialized and uninitialized) data segments.
+.PP
+.I pathname
+must be either a binary executable or a script starting with a line
+of the form:
+.PP
+.in +4n
+.nf
+#!\fIinterpreter\fP [\fIoptional-arg\fP]
+.fi
+.in
+.PP
+.I argv
+is an array of pointers to strings passed to the new program as its
+command-line arguments. The first element should be the filename of
+the executed program.
+.PP
+.I envp
+is an array of pointers to strings, conventionally of the form
+.BR key=value ,
+which are passed as the environment of the new program.
+.SH RETURN VALUE
+On success,
+.BR execve ()
+does not return.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B ENOENT
+.I pathname
+does not exist.
+.TP
+.B EACCES
+Execute permission is denied.
+.TP
+.B ENOEXEC
+.I pathname
+is not in a recognized executable format.
+.TP
+.B ENOMEM
+Insufficient kernel memory was available.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 11 (SYS_EXECVE)
+Arguments:      pathname, argv, envp (on stack)
+
+    push envp
+    push argv
+    push pathname
+    push $0
+    mov eax, 11
+    int $0x80
+.fi
+.SS ELF Personality Detection
+Substrate detects the executable personality from the ELF header's
+.B e_ident[EI_OSABI]
+field and selects the appropriate syscall table.
+.SH SEE ALSO
+.BR fork (2),
+.BR exit (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

@@ -1,0 +1,58 @@
+.\"
+.\" PMAP_STATS(2) - Substrate Native Personality
+.\"
+.TH PMAP_STATS 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+pmap_stats \- get virtual memory statistics
+.SH SYNOPSIS
+.nf
+.B #include <sys/pmap.h>
+.PP
+.BI "int pmap_stats(struct pmap_stats *" stats ");
+.fi
+.SH DESCRIPTION
+.BR pmap_stats ()
+is a Substrate-specific system call that retrieves virtual memory
+management statistics into the buffer pointed to by
+.IR stats .
+.SS The pmap_stats structure
+.nf
+struct pmap_stats {
+    uint32_t page_faults;         /* Total page faults */
+    uint32_t cow_duplications;    /* COW page copies made */
+    uint32_t cow_pages_mapped;    /* COW pages mapped */
+    uint32_t pages_mapped;        /* Total pages mapped */
+    uint32_t pages_unmapped;      /* Total pages unmapped */
+    uint32_t tlb_shootdowns;      /* TLB invalidations */
+};
+.fi
+.PP
+Global statistics can be retrieved by passing a special flag.
+.SH RETURN VALUE
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EFAULT
+.I stats
+is not a valid pointer.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 241 (SYS_GET_COW_STATS)
+Arguments:      stats (on stack)
+.fi
+.SS Copy-on-Write Monitoring
+This syscall is useful for debugging memory usage and monitoring
+the effectiveness of copy-on-write after
+.BR fork (2)
+operations.
+.SH SEE ALSO
+.BR fork (2),
+.BR mmap (2),
+.BR substrate (7)
+.SH HISTORY
+Substrate-specific, not available on other Unix systems.

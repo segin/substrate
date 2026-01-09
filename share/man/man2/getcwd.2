@@ -1,0 +1,49 @@
+.\"
+.\" GETCWD(2) - Substrate Native Personality
+.\"
+.TH GETCWD 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+getcwd \- get current working directory
+.SH SYNOPSIS
+.nf
+.B #include <unistd.h>
+.PP
+.BI "char *getcwd(char *" buf ", size_t " size ");
+.fi
+.SH DESCRIPTION
+.BR getcwd ()
+copies an absolute pathname of the current working directory to the
+array pointed to by
+.IR buf ,
+which is of length
+.IR size .
+.SH RETURN VALUE
+On success,
+.BR getcwd ()
+returns a pointer to
+.IR buf .
+.PP
+On error, NULL is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B ERANGE
+.I size
+is less than the length of the pathname plus one.
+.TP
+.B EFAULT
+.I buf
+points to a bad address.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 183
+Arguments:      buf, size (on stack)
+.fi
+.SH SEE ALSO
+.BR chdir (2),
+.BR pwd (1),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.
