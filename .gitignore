@@ -80,3 +80,5 @@ klog
 qemu.out
 qemu.pid
 boot_output.txt
+bin_dirs.txt
+debug_tls.gdb
