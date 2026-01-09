@@ -7,7 +7,8 @@ typedef uint32_t tcflag_t;
 typedef uint8_t  cc_t;
 typedef uint32_t speed_t;
 
-#define NCCS 32
+/* Linux i386 uses NCCS=19 - keep compatible for personality emulation */
+#define NCCS 19
 
 struct termios {
     tcflag_t c_iflag; // Input flags
