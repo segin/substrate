@@ -1811,8 +1811,45 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Display Process List (Sortable by CPU/Mem).
             - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
 
-### 8. LibC & Build System (User Requests)
-- [ ] **LibC Improvements:**
+### 8. LibC & Build System (User Requests & Audit)
+- [ ] **LibC Core Compliance (Audit Findings):**
+    - [ ] **Critical Headers (Missing Files):**
+        - [ ] Create `string.h` (functions exist in `string.c` but header is missing).
+        - [ ] Create `limits.h`, `setjmp.h`, `locale.h`.
+        - [ ] Create `stddef.h`, `stdint.h`, `stdarg.h` (wrapping GCC builtins).
+    - [ ] **String Manipulation (`<string.h>`):**
+        - [ ] `strndup()`: Bounded string duplication.
+        - [ ] `stpcpy()` / `stpncpy()`: Copy returning end pointer.
+        - [ ] `strpbrk()`: Search for any of a set of chars.
+        - [ ] `strcoll()` / `strxfrm()`: Locale-aware comparison stubs.
+    - [ ] **Standard Library (`<stdlib.h>`):**
+        - [ ] `strtol()` / `strtoul()` / `strtoll()` / `strtoull()`: Robust string-to-integer conversion.
+        - [ ] `strtod()` / `strtof()`: String to float implementation (currently `atof` is a stub).
+        - [ ] `div()` / `ldiv()` / `lldiv()`: Combined quotient/remainder.
+        - [ ] `atexit()`: Exit handlers (currently `at_quick_exit` is a stub).
+        - [ ] `mbstowcs()` / `wcstombs()`: Multibyte conversion stubs.
+    - [ ] **Standard I/O (`<stdio.h>`):**
+        - [ ] **CRITICAL:** `sscanf()` / `scanf()` / `fscanf()`: Input parsing implementation.
+        - [ ] `snprintf()`: Add wrapper around `vsnprintf`.
+        - [ ] `freopen()`: Reopen stream with new mode.
+        - [ ] `setvbuf()` / `setbuf()`: Buffering mode control.
+        - [ ] `tmpfile()` / `tmpnam()`: Temporary file support.
+        - [ ] `fileno()`: Get fd from `FILE*`.
+    - [ ] **POSIX System Interface (`<unistd.h>`):**
+        - [ ] `dup()`: Duplicate fd (wrapper around `SYS_DUP` or `fcntl`).
+        - [ ] `getppid()`: Get parent PID.
+        - [ ] `setsid()` / `getsid()`: Session ID management.
+        - [ ] `getpgrp()` / `setpgid()`: Process group management.
+        - [ ] `symlink()`: Create symbolic link.
+        - [ ] `ftruncate()` / `truncate()`: Truncate file size.
+        - [ ] `fsync()` / `fdatasync()`: Flush file changes.
+    - [ ] **Time & Date (`<time.h>`):**
+        - [ ] `gmtime()` / `localtime()`: Timestamp to struct tm.
+        - [ ] `mktime()`: Struct tm to timestamp.
+        - [ ] `strftime()` / `strptime()`: Time formatting/parsing.
+        - [ ] `difftime()`: Time difference.
+        - [ ] `ctime()` / `asctime()`: Time to string.
+- [ ] **LibC Features (User Requests):**
     - [ ] **Implement `getopt_long` (GNU Compatible):**
         - [ ] Define `struct option` (name, has_arg, flag, val).
         - [ ] Implement `getopt_long()` function signature.
