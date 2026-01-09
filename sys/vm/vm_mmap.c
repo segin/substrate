@@ -103,18 +103,19 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t 
         if (prot & PROT_WRITE) pte_flags |= PTE_W;
         
         for (uint32_t virt = start_addr; virt < start_addr + length; virt += 0x1000) {
-            void *page = pmm_alloc_block();
-            if (!page) {
+            void *page_virt = pmm_alloc_block();  // Returns virtual address
+            if (!page_virt) {
                 // TODO: Cleanup partial mapping
                 return MAP_FAILED;
             }
             
-            // Zero the page
-            uint32_t *page_virt = (uint32_t *)((uint32_t)page + 0xC0000000);
-            for (int i = 0; i < 1024; i++) page_virt[i] = 0;
+            // Zero the page - pmm_alloc_block already returns virtual address
+            uint32_t *pg = (uint32_t *)page_virt;
+            for (int i = 0; i < 1024; i++) pg[i] = 0;
             
-            // Map it
-            pmap_enter(current_process->pmap, virt, (uint32_t)page, pte_flags);
+            // Convert virtual to physical for pmap_enter
+            uint32_t page_phys = (uint32_t)(uintptr_t)page_virt - 0xC0000000;
+            pmap_enter(current_process->pmap, virt, page_phys, pte_flags);
         }
     }
     
@@ -140,7 +141,9 @@ int sys_munmap(void *addr, size_t length) {
                 if (virt >= start && virt < end) {
                     uint32_t phys = pmap_extract(current_process->pmap, virt);
                     if (phys) {
-                        pmm_free_block((void *)phys);
+                        // Convert physical to virtual for pmm_free_block
+                        void *page_virt = (void *)(phys + 0xC0000000);
+                        pmm_free_block(page_virt);
                         pmap_remove(current_process->pmap, virt);
                     }
                 }
