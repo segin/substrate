@@ -45,6 +45,34 @@ This is the Substrate operating system project targeting x86 32-bit architecture
     - Dynamic Metadata sizing (no static limit).
     - Low Memory safeguards active.
     - **API:** `pmm_alloc_block()` returns kernel virtual address (0xC0000000+), NOT physical.
+    
+### PMM API Usage (CRITICAL)
+**`pmm_alloc_block()` returns VIRTUAL address (kernel direct-mapped):**
+```c
+void *page_virt = pmm_alloc_block();  // Returns 0xC0000000+
+
+// For memory access: use directly
+memset(page_virt, 0, 4096);           // CORRECT
+*((uint32_t*)page_virt) = 0xDEADBEEF; // CORRECT
+
+// For pmap_enter/hardware: convert to physical
+uint32_t page_phys = (uint32_t)page_virt - 0xC0000000;  // REQUIRED
+pmap_enter(pmap, user_va, page_phys, flags);
+
+// WRONG patterns:
+memset((void*)((uint32_t)page + 0xC0000000), ...);  // Double offset!
+pmap_enter(pmap, va, (uint32_t)page_virt, ...);     // Virtual to pmap!
+```
+
+**`pmm_free_block()` expects VIRTUAL address:**
+```c
+pmm_free_block(page_virt);  // CORRECT - pass virtual
+
+// If you have physical (e.g., from pmap_extract):
+uint32_t phys = pmap_extract(pmap, va);
+void *virt = (void*)(phys + 0xC0000000);
+pmm_free_block(virt);  // CORRECT - convert first
+```
 - **User process foundation complete (pmap layer):**
     - Recursive paging and global page support.
     - `pmap_protect` and `pmap_copy` with Copy-on-Write (COW).
