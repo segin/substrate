@@ -1,9 +1,0 @@
-/*
- * test_framework_status.txt
- * Status of test frameworks check requested by user.
- */
-Unit Testing: EXISTS (sys/tests/test_runner.c, sys/tests/tests.h)
-Property Testing: EXISTS (sys/tests/property_pmap.c, sys/tests/property_link.c, etc.)
-Fuzzing: EXISTS (sys/tests/fuzz_pmap.c, sys/tests/fuzz_mmap.c, python generators)
-
-Frameworks are set up and active.

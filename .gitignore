@@ -77,3 +77,6 @@ sys/symbols_start.txt
 # Distribution root filesystem
 dist/
 klog
+qemu.out
+qemu.pid
+boot_output.txt

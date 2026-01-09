@@ -91,7 +91,14 @@ void *kmalloc(size_t size) {
     /* Small allocation via UMA zone */
     int idx = kmem_zone_index(size);
     if (idx >= 0) {
-        return uma_zalloc(kmem_zones[idx], M_NOWAIT);
+        void *result = uma_zalloc(kmem_zones[idx], M_NOWAIT);
+        if (!result) {
+            extern void kprint(const char*);
+            kprint("kmalloc: uma_zalloc failed for zone ");
+            kprint(kmem_zone_names[idx]);
+            kprint("\n");
+        }
+        return result;
     }
     
     /* Large allocation: bypass UMA, allocate pages directly */
