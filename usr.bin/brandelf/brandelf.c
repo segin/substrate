@@ -116,7 +116,9 @@ static struct ELFtypes elftypes[] = {
 	{ "Solaris",	ELFOSABI_SOLARIS },
 	{ "SVR4",	ELFOSABI_SYSV },
     { "TesUnix", ELFOSABI_TESTUNIX },
-    { "SysV", ELFOSABI_SYSV }
+    { "SysV", ELFOSABI_SYSV },
+    { "Substrate", ELFOSABI_TESTUNIX }, /* Native Substrate uses same as TesUnix */
+    { "Native", ELFOSABI_TESTUNIX }
 };
 
 int
