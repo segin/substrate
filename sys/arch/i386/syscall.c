@@ -189,11 +189,16 @@ struct utsname {
 
 int sys_uname(struct utsname *buf) {
     if (!buf) return -1;
-    strcpy(buf->sysname, "Substrate");
-    strcpy(buf->nodename, "localhost");
-    strcpy(buf->release, "0.1");
-    strcpy(buf->version, "Kernel");
-    strcpy(buf->machine, "i386");
+    strncpy(buf->sysname, "Substrate", 64);
+    buf->sysname[64] = '\0';
+    strncpy(buf->nodename, "localhost", 64);
+    buf->nodename[64] = '\0';
+    strncpy(buf->release, "0.1", 64);
+    buf->release[64] = '\0';
+    strncpy(buf->version, "Kernel", 64);
+    buf->version[64] = '\0';
+    strncpy(buf->machine, "i386", 64);
+    buf->machine[64] = '\0';
     buf->domainname[0] = '\0';
     return 0;
 }
