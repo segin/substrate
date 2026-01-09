@@ -114,8 +114,12 @@ uma_zone_t *uma_zcreate(
     /* Round up to alignment */
     zone->uz_rsize = (zone->uz_rsize + zone->uz_align - 1) & ~(zone->uz_align - 1);
     
-    /* Calculate items per slab (4k pages) */
-    zone->uz_ipers = 4096 / zone->uz_rsize;
+    /* Calculate items per slab (4k pages), accounting for slab overhead */
+    /* Slab header and freelist go at end of page */
+    /* Formula: uz_ipers * uz_rsize + sizeof(uma_slab_t) + uz_ipers <= 4096 */
+    /* Simplified: uz_ipers * (uz_rsize + 1) + sizeof(uma_slab_t) <= 4096 */
+    size_t per_item = zone->uz_rsize + 1; /* +1 for freelist byte */
+    zone->uz_ipers = (4096 - sizeof(uma_slab_t)) / per_item;
     if (zone->uz_ipers == 0) {
         zone->uz_ipers = 1; /* Large objects get 1 per page */
     }
