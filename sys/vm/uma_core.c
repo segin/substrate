@@ -188,7 +188,11 @@ void uma_zdestroy(uma_zone_t *zone) {
 static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     /* Allocate raw page from PMM */
     void *page = pmm_alloc_block();
-    if (!page) return NULL;
+    if (!page) {
+        extern void kprint(const char*);
+        kprint("uma_slab_alloc: pmm_alloc_block failed!\n");
+        return NULL;
+    }
     
     /* Slab header is at the end of the page (for small objects) */
     uma_slab_t *slab;
@@ -199,6 +203,8 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
     } else {
         /* TODO: Off-page slab header for large objects */
+        extern void kprint(const char*);
+        kprint("uma_slab_alloc: slab too large for on-page header!\n");
         pmm_free_block(page);
         return NULL;
     }
@@ -403,7 +409,11 @@ static inline int uma_curcpu(void) {
  * Allocate from zone
  */
 void *uma_zalloc(uma_zone_t *zone, int flags) {
-    if (!zone) return NULL;
+    if (!zone) {
+        extern void kprint(const char*);
+        kprint("uma_zalloc: zone is NULL!\n");
+        return NULL;
+    }
     
     void *item = NULL;
     int cpu = uma_curcpu();
@@ -421,7 +431,13 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
     
     /* Slow path: allocate from slab */
     item = uma_zalloc_slab(zone, flags);
-    if (!item) return NULL;
+    if (!item) {
+        extern void kprint(const char*);
+        kprint("uma_zalloc: slab alloc failed for ");
+        kprint(zone->uz_name);
+        kprint("\n");
+        return NULL;
+    }
     
     zone->uz_allocs++;
     zone->uz_count++;
