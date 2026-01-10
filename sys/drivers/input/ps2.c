@@ -1,5 +1,5 @@
 #include "ps2.h"
-#include "../../arch/i386/io.h"
+#include "../../arch/x86-common/include/io.h"
 #include "../../kern/console.h"
 #include <stdio.h>
 

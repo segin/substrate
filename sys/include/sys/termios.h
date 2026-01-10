@@ -127,6 +127,7 @@ struct termios {
 #define TIOCSSOFTCAR 0x541A
 #define FIONREAD    0x541B
 #define TIOCINQ     FIONREAD
+#define TIOCNOTTY   0x5422
 
 struct winsize {
     unsigned short ws_row;

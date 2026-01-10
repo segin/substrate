@@ -48,7 +48,7 @@ uint32_t pci_read_config(uint32_t dev, int offset) {
 // Usually unit tests here are kernel modules or userspace mocks.
 // sys/tests/ seems to be kernel-built tests or userspace tests.
 // Let's assume userspace test harness for now.
-// But `bga.c` includes `../../arch/i386/io.h` which has inline assembly.
+// But `bga.c` includes `../../arch/x86-common/include/io.h` which has inline assembly.
 // We can't include that in a host test.
 // So we must either mock the header or build as a kernel module.
 // Given previous `test_fb.c` was userspace code running ON the OS, this is tricky for drivers.

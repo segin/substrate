@@ -27,6 +27,38 @@ static bool uma_booted = false;
 static struct uma_bucket uma_bucket_pool[UMA_BUCKET_POOL_SIZE];
 static int uma_bucket_idx = 0;
 
+/* Global Slab Hash Table */
+#define UMA_HASH_SHIFT  12
+#define UMA_HASH_SIZE   4096
+#define UMA_HASH_MASK   (UMA_HASH_SIZE - 1)
+
+static uma_slab_t *uma_page_hash[UMA_HASH_SIZE];
+
+static inline uint32_t uma_hash(void *addr) {
+    uintptr_t p = (uintptr_t)addr >> UMA_HASH_SHIFT;
+    return (uint32_t)(p & UMA_HASH_MASK);
+}
+
+static void uma_hash_insert(uma_slab_t *slab) {
+    uint32_t bucket = uma_hash(slab->us_data);
+    slab->us_hnext = uma_page_hash[bucket];
+    uma_page_hash[bucket] = slab;
+}
+
+static void uma_hash_remove(uma_slab_t *slab) {
+    uint32_t bucket = uma_hash(slab->us_data);
+    uma_slab_t **pp = &uma_page_hash[bucket];
+    
+    while (*pp) {
+        if (*pp == slab) {
+            *pp = slab->us_hnext;
+            slab->us_hnext = NULL;
+            return;
+        }
+        pp = &(*pp)->us_hnext;
+    }
+}
+
 /* Forward declarations */
 static uma_slab_t *uma_slab_alloc(uma_zone_t *zone);
 static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab);
@@ -40,6 +72,7 @@ void uma_startup(void) {
     uma_bootstrap_idx = 0;
     uma_bucket_idx = 0;
     uma_zones = NULL;
+    memset(uma_page_hash, 0, sizeof(uma_page_hash));
     uma_booted = true;
     kprint("UMA: subsystem initialized\n");
 }
@@ -214,9 +247,13 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     }
     
     slab->us_data = page;
+    slab->us_zone = zone;
     slab->us_freecount = zone->uz_ipers;
     slab->us_firstfree = 0;
     slab->us_next = NULL;
+    
+    /* Insert into global hash */
+    uma_hash_insert(slab);
     
     /* Initialize free list (sequential indices) */
     slab->us_freelist = (uint8_t *)(slab + 1);
@@ -228,6 +265,13 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     if (zone->uz_init) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
             void *obj = (void *)((uintptr_t)page + i * zone->uz_rsize);
+             
+            /* Initialize redzone pattern */
+            if (zone->uz_flags & UMA_ZONE_REDZONE) {
+               uint8_t *rz = (uint8_t *)((uintptr_t)obj + zone->uz_size);
+               for(int r=0; r<UMA_REDZONE_SIZE; r++) rz[r] = UMA_REDZONE_BYTE;
+            }
+            
             zone->uz_init(obj, zone->uz_size, 0);
         }
     }
@@ -247,6 +291,9 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
         }
     }
     
+    /* Remove from global hash */
+    uma_hash_remove(slab);
+
     pmm_free_block(slab->us_data);
 }
 
@@ -293,16 +340,22 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item) {
 /*
  * Find which slab contains an item
  */
+/*
+ * Find which slab contains an item
+ */
 static uma_slab_t *uma_find_slab(uma_zone_t *zone, void *item) {
-    uintptr_t page = (uintptr_t)item & ~0xFFF;
+    uintptr_t page_addr = (uintptr_t)item & ~(uintptr_t)0xFFF;
+    uint32_t bucket = uma_hash((void*)page_addr);
     
-    /* Check partial slabs */
-    for (uma_slab_t *s = zone->uz_part_slabs; s; s = s->us_next) {
-        if ((uintptr_t)s->us_data == page) return s;
-    }
-    /* Check full slabs */
-    for (uma_slab_t *s = zone->uz_full_slabs; s; s = s->us_next) {
-        if ((uintptr_t)s->us_data == page) return s;
+    for (uma_slab_t *s = uma_page_hash[bucket]; s; s = s->us_hnext) {
+        if ((uintptr_t)s->us_data == page_addr) {
+            if (s->us_zone != zone) {
+                extern void kprint(const char*); // Temporary debug
+                kprint("uma_find_slab: slab zone mismatch!\n");
+                return NULL;
+            }
+            return s;
+        }
     }
     
     return NULL;
@@ -519,6 +572,25 @@ void uma_reclaim(void) {
     for (uma_zone_t *zone = uma_zones; zone; zone = zone->uz_next) {
         if (zone->uz_flags & UMA_ZONE_NOFREE) continue;
         
+        /* Drain per-CPU buckets */
+        for (int cpu = 0; cpu < UMA_NCPU; cpu++) {
+            uma_cache_t *cache = &zone->uz_cpu[cpu];
+            
+            if (cache->uc_allocbucket) {
+                struct uma_bucket *b = cache->uc_allocbucket;
+                while (b->ub_cnt > 0) {
+                     uma_zfree_slab(zone, b->ub_bucket[--b->ub_cnt]);
+                }
+            }
+            
+            if (cache->uc_freebucket) {
+                struct uma_bucket *b = cache->uc_freebucket;
+                while (b->ub_cnt > 0) {
+                     uma_zfree_slab(zone, b->ub_bucket[--b->ub_cnt]);
+                }
+            }
+        }
+
         /* Free all completely free slabs */
         uma_slab_t *slab, *next;
         for (slab = zone->uz_free_slabs; slab; slab = next) {

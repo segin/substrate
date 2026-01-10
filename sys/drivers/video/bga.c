@@ -1,6 +1,6 @@
 #include <sys/types.h>
 #include <sys/file.h>
-#include "../../arch/i386/io.h"
+#include "../../arch/x86-common/include/io.h"
 #include "fb.h"
 #include "../../kern/console.h"
 

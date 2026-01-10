@@ -24,8 +24,8 @@
 #include "../arch/i386/pci.h"
 #include "../arch/i386/syscall.h"
 #include "../arch/i386/fpu/fpu_emu.h"
-#include "../arch/i386/rtc.h"
-#include "../arch/i386/multiboot.h"
+#include "../arch/x86-common/include/rtc.h"
+#include "../arch/x86-common/include/multiboot.h"
 
 #include "../pm/pm.h"
 #include "../vfs/vfs.h"

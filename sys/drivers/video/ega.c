@@ -1,4 +1,4 @@
-#include "../../arch/i386/io.h"
+#include "../../arch/x86-common/include/io.h"
 #include <stdint.h>
 #include <stddef.h>
 

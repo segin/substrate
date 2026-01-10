@@ -72,7 +72,7 @@ uint32_t pci_read_config(uint32_t dev, int offset) {
 
 #define _SYS_TYPES_H // Prevent sys/types.h
 #define _SYS_FILE_H  // Prevent sys/file.h
-#define _IO_H        // Prevent arch/i386/io.h
+#define _IO_H        // Prevent arch/x86-common/include/io.h
 #define _FB_H        // Prevent fb.h
 #define _CONSOLE_H   // Prevent kern/console.h
 

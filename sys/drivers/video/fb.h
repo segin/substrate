@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "../../arch/i386/multiboot.h"
+#include "../../arch/x86-common/include/multiboot.h"
 
 typedef struct {
     uint32_t *addr;

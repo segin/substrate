@@ -1,6 +1,6 @@
 #include "virtio.h"
 #include "../../arch/i386/pci.h"
-#include "../../arch/i386/io.h"
+#include "../../arch/x86-common/include/io.h"
 #include <kern/console.h>
 #include <stdio.h>
 

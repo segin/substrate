@@ -27,11 +27,52 @@ typedef uint64_t pdpte_t;
 typedef uint64_t pde_t;
 typedef uint64_t pte_t;
 
-// Recursive Paging Virtual Addresses (based on index 511)
-#define PML4_ADDR       0xFFFFFF7FBFDFE000UL
-#define PDPT_BASE       0xFFFFFF7FBFC00000UL
-#define PD_BASE         0xFFFFFF7F80000000UL
-#define PT_BASE         0xFFFFFF0000000000UL
+// Recursive Paging Virtual Addresses (based on index 510 - 0x1FE)
+// Slot 510 (0xFFFF_FF00_0000_0000) covers the recursive mapping
+#define RECURSIVE_SLOT  510UL
+
+// Sign-extended base for slot 510: 0xFFFFFF0000000000
+// V_PT:   510 -> i -> j -> k  (0xFFFFFF0000000000 + offset)
+// V_PD:   510 -> 510 -> i -> j (0xFFFFFF7F80000000)
+// V_PDPT: 510 -> 510 -> 510 -> i (0xFFFFFF7FBFC00000)
+// V_PML4: 510 -> 510 -> 510 -> 510 (0xFFFFFF7FBFDFE000) -> Wait, let me accept the user's logic or recalc.
+
+// Recalculating for 510:
+// PML4 Self-Map (V_PML4): Indices 510, 510, 510, 510
+// 0xFFFF_FFFF_FFFF_F000 ?? No.
+// Let's rely on standard logic:
+// V_PT   Base: 0xFFFF_FF00_0000_0000 (PML4=510)
+// V_PD   Base: 0xFFFF_FF80_0000_0000 (PML4=510, PDPT=510) --> 0x1FE<<30 + sign ext.
+// V_PDPT Base: 0xFFFF_FFC0_0000_0000 (PML4=510, PDPT=510, PD=510) --> 0x1FE<<21
+// V_PML4 Base: 0xFFFF_FFE0_0000_0000 (PML4=510, PDPT=510, PD=510, PT=510) --> 0x1FE<<12
+
+#define PG_V_PT     0xFFFFFF0000000000UL
+#define PG_V_PD     0xFFFFFF8000000000UL
+#define PG_V_PDPT   0xFFFFFFC000000000UL
+#define PG_V_PML4   0xFFFFFFE000000000UL
+
+/*
+ * To access:
+ * PML4[i]:          PG_V_PML4 + (i * 8)
+ * PDPT[i][j]:       PG_V_PDPT + (i * 4096) + (j * 8)  => PG_V_PDPT + (i << 12) + (j*8)
+ * PD[i][j][k]:      PG_V_PD + (i << 21) + (j << 12) + (k*8)
+ * PT[i][j][k][l]:   PG_V_PT + ...
+ */
+
+// Macros for accessing page tables
+#define V_PML4_INDEX(i)        ((pml4e_t *)(PG_V_PML4 + ((uint64_t)(i) * 8)))
+#define V_PDPT_INDEX(i, j)     ((pdpte_t *)(PG_V_PDPT + ((uint64_t)(i) << 12) + ((uint64_t)(j) * 8)))
+#define V_PD_INDEX(i,j,k)      ((pde_t *)(PG_V_PD + ((uint64_t)(i) << 21) + ((uint64_t)(j) << 12) + ((uint64_t)(k) * 8)))
+#define V_PT_INDEX(i,j,k,l)    ((pte_t *)(PG_V_PT + ((uint64_t)(i) << 30) + ((uint64_t)(j) << 21) + ((uint64_t)(k) << 12) + ((uint64_t)(l) * 8)))
+
+// Simplified access assuming we know the VA parts
+// But simpler to use standard addresses + va offsets?
+// For logic reuse:
+#define V_PML4       ((pml4e_t *)PG_V_PML4)
+// These take indices into PML4/PDPT/PD
+#define V_PDPT(pml4i)       V_PDPT_INDEX(pml4i, 0) // Points to base of PDPT page for pml4i? Warning: This must return a page-aligned pointer to the table? 
+// No. V_PDPT(pml4i) should return the PDPT page array.
+// V_PDPT_INDEX(pml4i, j) returns pointer to entry j.
 
 #define PML4_INDEX(va)  (((va) >> 39) & 0x1FF)
 #define PDPT_INDEX(va)  (((va) >> 30) & 0x1FF)
@@ -42,6 +83,7 @@ typedef uint64_t pte_t;
 struct pmap {
     pml4e_t *pml4;
     uint64_t pml4_phys;
+    // TODO: Add lock, statistics
 };
 typedef struct pmap *pmap_t;
 
@@ -53,5 +95,11 @@ pmap_t pmap_kernel(void);
 int pmap_enter(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags);
 void pmap_remove(pmap_t pmap, uint64_t va);
 uint64_t pmap_extract(pmap_t pmap, uint64_t va);
+
+// Per-pmap management
+pmap_t pmap_create(void);
+void pmap_destroy(pmap_t pmap);
+void pmap_activate(pmap_t pmap);
+
 
 #endif

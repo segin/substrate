@@ -217,13 +217,56 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     
     // Echo
     if (tty->termios.c_lflag & ECHO) {
-        ttyoutput(c, tty); // Echoes through canonical output processing!
+    ttyoutput(c, tty); // Echoes through canonical output processing!
         ttstart(tty);
     }
 }
 
+// Job Control Checks
+static int tty_check_read(struct tty *tty) {
+    if (!tty) return -1;
+    if (tty->pgrp <= 0) return 0; // No foreground group
+    
+    // Check if current process is in background
+    if (current_process->pgrp != tty->pgrp) {
+        // Send SIGTTIN
+        // In POSIX, if process is ignored/blocked SIGTTIN, read returns EIO?
+        // For now, simpler implementation:
+        if (tty->pgrp > 0)
+            signal_send_group(current_process->pgrp, SIGTTIN);
+        // We should suspend here or return error so signal handler runs
+        return 1; // Signal sent
+    }
+    return 0; 
+}
+
+static int tty_check_write(struct tty *tty) {
+    if (!tty) return -1;
+    if (tty->pgrp <= 0) return 0;
+    
+    // TOSTOP flag check
+    if (!(tty->termios.c_lflag & TOSTOP)) return 0;
+    
+    if (current_process->pgrp != tty->pgrp) {
+        if (tty->pgrp > 0)
+            signal_send_group(current_process->pgrp, SIGTTOU);
+        return 1; // Signal sent
+    }
+    return 0;
+}
+
 int tty_read(struct tty *tty, char *buf, int len) {
     if (!tty || len <= 0) return 0;
+    
+    if (tty_check_read(tty)) {
+        // Should restart syscall or return EINTR
+        // For now return 0 or -1?
+        // Returning 0 might be interpreted as EOF.
+        // Returning -1 and setting errno = EINTR is correct.
+        // But we don't have errno access here easily.
+        // Assume syscall wrapper handles signal interruption.
+        return -1; 
+    }
     
     // If read_buf is empty, canonicalize a line
     // Loop helps handle partial reads or retries
@@ -238,10 +281,7 @@ int tty_read(struct tty *tty, char *buf, int len) {
             char c;
             if (tty_buf_get(&tty->read_buf, &c)) {
                 buf[count++] = c;
-                // Since this is canonical, we return as soon as valid data is moved?
-                // Standard TTY read returns when request satisfied or EOL.
-                // If canonical, canon() ensures we have a line.
-                // We shouldn't block for MORE lines if we have one.
+                // In canonical mode, return on newline
                 if ((tty->termios.c_lflag & ICANON) && c == '\n') return count;
             } else {
                 break; // read_buf empty, need more canon
@@ -260,6 +300,10 @@ int tty_read(struct tty *tty, char *buf, int len) {
 
 int tty_write(struct tty *tty, const char *buf, int len) {
     if (!tty) return 0;
+    
+    if (tty_check_write(tty)) {
+        return -1;
+    }
     
     for (int i = 0; i < len; i++) {
         ttyoutput(buf[i], tty);
@@ -289,7 +333,38 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         case TIOCGPGRP:
             if (arg) *(int*)arg = tty->pgrp;
             return 0;
-        // ...
+        case TIOCSCTTY:
+            // Set controlling TTY
+            // Arg: 0 or 1. If 1, steal from another session.
+            if (current_process->session != current_process->pid) {
+                // Must be session leader
+                // return EPERM;
+                return -1;
+            }
+            // If already has ctty and arg!=1, fail?
+            // Simplified: Just set it.
+            if (current_process->tty == NULL || arg == 1) {
+                // Assuming we can map tty structure to fs_node?
+                // This function gets 'struct tty'. We need 'fs_node'.
+                // Ideally tty_register has linked them.
+                // For now, we set the session ID in tty logic.
+                tty->session = current_process->session;
+                tty->pgrp = current_process->pgrp;
+                // current_process->tty = fs_node... (Cannot set fs_node here directly without context)
+                // Assuming VFS layer calls this and updates process->tty if success.
+                return 0;
+            }
+            return -1;
+        
+        case TIOCNOTTY:
+            // Detach ctty
+            if (tty->session == current_process->session) {
+                tty->session = 0;
+                tty->pgrp = 0;
+                // current_process->tty = NULL;
+                return 0;
+            }
+            return -1;
     }
     return -1;
 }

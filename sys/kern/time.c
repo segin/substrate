@@ -2,7 +2,7 @@
 #include <sys/types.h>
 #include <sys/math.h>
 #include "time.h"
-#include "../arch/i386/io.h"
+#include "time.h"
 
 int64_t boot_time = 0;
 

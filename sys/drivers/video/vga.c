@@ -1,7 +1,7 @@
 #include "vga.h"
 #include "fb.h"
 #include "../../kern/console.h"
-#include "../../arch/i386/io.h"
+#include "../../arch/x86-common/include/io.h"
 
 extern int fb_active;
 extern int serial_debug_enabled;
