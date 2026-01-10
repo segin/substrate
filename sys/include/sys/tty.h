@@ -59,6 +59,7 @@ struct tty {
     // Synchronization
     // TODO: Add mutex/spinlock
     int buf_lock;
+    int delct; // Delimiter count in raw_buf
     
     // Wait queues
     void *read_wait;

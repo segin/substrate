@@ -67,6 +67,7 @@ struct termios {
 #define ONLRET  0000040
 #define OFILL   0000100
 #define OFDEL   0000200
+#define OXTABS  0006000
 
 // c_cflag
 #define CSIZE   0000060
