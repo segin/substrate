@@ -23,8 +23,14 @@ typedef struct uma_cache uma_cache_t;
 #define UMA_ZONE_ZINIT      0x0001  /* Zero-fill on allocation */
 #define UMA_ZONE_NOFREE     0x0002  /* Never free slabs back to VM */
 #define UMA_ZONE_NODUMP     0x0004  /* Don't include in crash dumps */
-#define UMA_ZONE_PCPU       0x0008  /* Per-CPU private zone */
-#define UMA_ZONE_OFFPAGE    0x0010  /* Slab header stored off-page */
+#define UMA_CACHE_SIZE      32      /* Max per-CPU cache size */
+#define UMA_CACHE_MIN       16      /* Min items to keep in cache */
+
+/* Redzone/poison patterns */
+#define UMA_REDZONE_BYTE    0xFE
+#define UMA_POISON_FREE     0xDEADBEEF
+#define UMA_POISON_ALLOC    0xBAADF00D
+#define UMA_REDZONE_SIZE    8
 #define UMA_ZONE_MALLOC     0x0020  /* For malloc() buckets */
 #define UMA_ZONE_NOTOUCH    0x0040  /* Don't touch freed memory */
 #define UMA_ZONE_MAXBUCKET  0x0080  /* Use maximum bucket size */
@@ -85,6 +91,8 @@ struct uma_cache {
  */
 struct uma_slab {
     struct uma_slab     *us_next;       /* Next slab in list */
+    struct uma_slab     *us_hnext;      /* Next slab in hash chain */
+    uma_zone_t          *us_zone;       /* Owner zone (for safety) */
     void                *us_data;       /* Base of object memory */
     uint32_t            us_freecount;   /* Free objects in slab */
     uint32_t            us_firstfree;   /* Index of first free object */
@@ -189,15 +197,47 @@ void uma_debug_check_redzone(uma_zone_t *zone, void *item);
 void uma_debug_poison_free(uma_zone_t *zone, void *item);
 void uma_debug_poison_alloc(uma_zone_t *zone, void *item);
 #else
-#define uma_debug_check_redzone(z, i) ((void)0)
-#define uma_debug_poison_free(z, i) ((void)0)
-#define uma_debug_poison_alloc(z, i) ((void)0)
+
+/*
+ * Validates UMA redzone (0xFE pattern at end of object)
+ */
+static inline void uma_debug_check_redzone(uma_zone_t *zone, void *item) {
+    if ((zone->uz_flags & UMA_ZONE_REDZONE) == 0) return;
+    
+    // Pattern should be at item + size
+    uint8_t *redzone = (uint8_t *)((uintptr_t)item + zone->uz_size);
+    for (int i = 0; i < UMA_REDZONE_SIZE; i++) {
+        if (redzone[i] != UMA_REDZONE_BYTE) {
+             extern void kprint(const char*);
+             extern void panic(const char*);
+             kprint("UMA: Redzone corruption detected!\n");
+             kprint("Zone: "); kprint(zone->uz_name); kprint("\n");
+             // kprint("Obj: "); kprint_hex(item); kprint("\n"); // Format hex TODO
+             panic("UMA Redzone Violation");
+        }
+    }
+}
+
+static inline void uma_debug_poison_free(uma_zone_t *zone, void *item) {
+    if (zone->uz_flags & UMA_ZONE_TRASH) {
+        // Fill memory with 0xDEADBEEF
+        uint32_t *p = (uint32_t *)item;
+        int count = zone->uz_size / 4;
+        for (int i = 0; i < count; i++) p[i] = UMA_POISON_FREE;
+    }
+}
+
+static inline void uma_debug_poison_alloc(uma_zone_t *zone, void *item) {
+     if (zone->uz_flags & UMA_ZONE_TRASH) {
+        // Fill memory with 0xBAADF00D
+        uint32_t *p = (uint32_t *)item;
+        int count = zone->uz_size / 4;
+        for (int i = 0; i < count; i++) p[i] = UMA_POISON_ALLOC;
+    }
+}
+
 #endif
 
-/* Redzone/poison patterns */
-#define UMA_REDZONE_BYTE    0xFE
-#define UMA_POISON_FREE     0xDEADBEEF
-#define UMA_POISON_ALLOC    0xBAADF00D
-#define UMA_REDZONE_SIZE    8
+
 
 #endif /* _VM_UMA_H */

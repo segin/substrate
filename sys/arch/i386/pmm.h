@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "e820.h"
+#include "../x86-common/include/e820.h"
 
 // Simple Bitmap Physical Memory Manager
 // Assumes 32-bit address space
