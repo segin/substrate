@@ -47,9 +47,13 @@ extern int sys_ioctl(int, uint32_t, void*);
 extern int sys_msync(void*, size_t, int);
 extern int sys_readlink(const char*, char*, size_t);
 
+extern int sys_poll(void*, unsigned int, int);
+
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
     [SYS_FORK] = &sys_fork,
+    // ...
+    [SYS_POLL] = &sys_poll,
     [SYS_READ] = &sys_read,
     [SYS_WRITE] = &sys_write,
     [SYS_OPEN] = &sys_open,

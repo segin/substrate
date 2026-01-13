@@ -265,7 +265,7 @@ int tty_read(struct tty *tty, char *buf, int len) {
         // Returning -1 and setting errno = EINTR is correct.
         // But we don't have errno access here easily.
         // Assume syscall wrapper handles signal interruption.
-        return -1; 
+        return -4; // EINTR 
     }
     
     // If read_buf is empty, canonicalize a line
@@ -302,7 +302,7 @@ int tty_write(struct tty *tty, const char *buf, int len) {
     if (!tty) return 0;
     
     if (tty_check_write(tty)) {
-        return -1;
+        return -4; // EINTR
     }
     
     for (int i = 0; i < len; i++) {

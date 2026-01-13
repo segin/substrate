@@ -2,7 +2,7 @@
 #include <string.h>
 #include "../kern/console.h"
 #include <stdio.h>
-
+#include <sys/poll.h>
 fs_node_t *fs_root = 0; 
 
 static filesystem_t *filesystems = NULL;
@@ -157,17 +157,19 @@ struct dirent *readdir_fs(fs_node_t *node, uint32_t index) {
         return 0;
 }
 
-// Forward declaration for symlink resolution with depth tracking
-static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth);
+
+
+// Internal with follow control
+static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks);
 
 fs_node_t *finddir_fs(fs_node_t *node, char *name) {
-    return finddir_fs_internal(node, name, 0);
+    return finddir_fs_internal(node, name, 0, 1);
 }
 
 // Maximum symlink recursion depth to prevent infinite loops
 #define MAX_SYMLINK_DEPTH 8
 
-static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth) {
+static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks) {
     if (!node) return 0; // Safety
     
     // If this is a mountpoint, cross into the mounted filesystem
@@ -178,8 +180,11 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth) {
     if ((node->flags & 0x7) == FS_DIRECTORY && node->finddir != 0) {
         fs_node_t *result = node->finddir(node, name);
         
-        // Resolve symlinks automatically (with depth limit)
+        // Resolve symlinks (with depth limit)
         if (result && (result->flags & 0x7) == FS_SYMLINK && result->readlink) {
+            // Check if we should follow symlinks
+            if (!follow_symlinks) return result;
+
             // Check recursion depth limit
             if (depth >= MAX_SYMLINK_DEPTH) {
                 // Too many symlink levels - return the symlink node itself (ELOOP)
@@ -197,14 +202,16 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth) {
                     // Absolute symlink - start from root
                     target = vfs_lookup(fs_root, link_target);
                 } else {
-                    // Relative symlink - recurse with incremented depth
-                    target = finddir_fs_internal(node, link_target, depth + 1);
+                    // Relative symlink - recurse
+                    target = finddir_fs_internal(node, link_target, depth + 1, 1); // Follow nested
                 }
                 
                 if (target) {
                     return target;
                 }
-                // If symlink resolution fails, return the symlink node itself
+                // If symlink resolution fails, return the symlink node itself (or NULL? Linux returns ENOENT)
+                // Returning result roughly mimics getting the link itself so we can see it exists but is broken?
+                // Correct behavior is usually ENOENT, but returning the node is safer for some "ls" ops.
             }
         }
         return result;
@@ -231,7 +238,6 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         component[i] = '\0';
         
         if (i == 0) {
-            // Empty component (double slash)
             if (*p == '/') p++;
             continue;
         }
@@ -246,6 +252,44 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     
     return current;
 }
+
+fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
+    if (!path || !root) return NULL;
+    if (path[0] == '/') path++; // Skip leading /
+    if (path[0] == '\0') return root; // Root itself
+    
+    fs_node_t *current = root;
+    static char component[256];
+    const char *p = path;
+    
+    while (*p) {
+        // Extract next path component
+        int i = 0;
+        while (*p && *p != '/' && i < 255) {
+            component[i++] = *p++;
+        }
+        component[i] = '\0';
+        
+        if (i == 0) {
+            if (*p == '/') p++;
+            continue;
+        }
+        
+        // Check if this is the last component
+        int is_last = (*p == '\0');
+        
+        // Lookup this component
+        // If last, DO NOT follow symlinks
+        current = finddir_fs_internal(current, component, 0, !is_last);
+        if (!current) return NULL;
+        
+        // Skip trailing slash
+        if (*p == '/') p++;
+    }
+    
+    return current;
+}
+
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode) {
     if (uid == 0) return 0; // Root always has access
@@ -302,5 +346,20 @@ void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, o
         return node->mmap(node, addr, length, prot, flags, offset);
     }
     return (void *)-1;
+}
+
+int poll_fs(fs_node_t *node, void *waiter) {
+    if (!node) return POLLNVAL;
+    
+    if (node->poll) {
+        return node->poll(node, waiter);
+    }
+    
+    // Default behavior: Regular files and directories are always readable/writable
+    if ((node->flags & 0x7) == FS_FILE || (node->flags & 0x7) == FS_DIRECTORY) {
+        return POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM; 
+    }
+    
+    return 0;
 }
 

@@ -74,23 +74,24 @@ int sys_kill(int pid, int sig) {
         int found_threads = 0;
         for (int i = 0; i < MAX_THREADS; i++) {
             if (threads[i].tid != -1 && threads[i].proc == target) {
-                // Determine if we should interrupt this thread
-                bool deliver = true;
-                
-                // For logic simplicity, we deliver to ALL threads of the process
-                // This ensures if one is blocked, others might handle it, 
-                // or if it's a kill, everyone dies.
-                
-                if (deliver) {
-                    threads[i].sig_pending |= sigmask(sig);
-                    
-                    // Wake up if sleeping interruptibly
-                    if (threads[i].state == THREAD_BLOCKED) {
-                        // We wake on the pending mask address which sigsuspend/sleep uses
-                        sched_wakeup(&threads[i].sig_pending);
+                // SIGCONT Special handling: Wake up stopped threads
+                if (sig == SIGCONT) {
+                    if (threads[i].state == THREAD_STOPPED) {
+                        threads[i].state = THREAD_READY;
+                        found_threads++;
                     }
-                    found_threads++;
+                    // Continue to deliver SIGCONT to pending as well? 
+                    // Usually yes, so it can be caught.
                 }
+
+                threads[i].sig_pending |= sigmask(sig);
+                
+                // Wake up if sleeping interruptibly
+                if (threads[i].state == THREAD_BLOCKED) {
+                    // We wake on the pending mask address which sigsuspend/sleep uses
+                    sched_wakeup(&threads[i].sig_pending);
+                }
+                found_threads++;
             }
         }
         
@@ -174,6 +175,18 @@ void signal_handle_pending(registers_t *regs) {
             // In a real OS, call sys_exit
             panic("Process signal termination");
         }
+        
+        // Job Control Stops
+        if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
+             // Stop the thread
+             // kprint("Process stopped by signal\n");
+             current_thread->state = THREAD_STOPPED;
+             current_thread->wait_reason = "Signal";
+             sched_yield();
+             return;
+        }
+        
+        // Ignore others by default (like SIGCHLD, SIGCONT if not stopped)
         return;
     }
 

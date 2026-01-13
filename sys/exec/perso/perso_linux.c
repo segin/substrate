@@ -56,8 +56,12 @@ extern int sys_getpgid(int);
 extern int sys_setpgid(int, int);
 extern int sys_getpgrp(void);
 extern int sys_unlink(const char*);
+extern int sys_readlink(const char*, char*, size_t);
 extern int sys_link(const char*, const char*);
 extern int sys_sigprocmask(int, const void*, void*);
+extern int sys_setsid(void);
+extern int sys_waitpid(int, int*, int);
+extern int sys_poll(void*, unsigned int, int);
 
 /* Linux i386 termios structure - different from native Substrate termios */
 #define LINUX_NCCS 19
@@ -68,8 +72,6 @@ struct linux_termios {
     uint32_t c_lflag;
     uint8_t  c_line;
     uint8_t  c_cc[LINUX_NCCS];
-    uint32_t c_ispeed;
-    uint32_t c_ospeed;
 };
 
 /* Linux ioctl numbers for termios */
@@ -97,8 +99,9 @@ static int linux_sys_ioctl(int fd, uint32_t request, void *arg) {
                 for (int i = 0; i < LINUX_NCCS; i++) {
                     lt->c_cc[i] = native.c_cc[i];
                 }
-                lt->c_ispeed = native.c_ispeed;
-                lt->c_ospeed = native.c_ospeed;
+                // Linux 'struct termios' for TCGETS does NOT have speed fields!
+                // Speeds are only in termios2 (TCGETS2).
+                // Writing them here overflows user stack by 8 bytes.
             }
             return ret;
         }
@@ -120,8 +123,9 @@ static int linux_sys_ioctl(int fd, uint32_t request, void *arg) {
             for (int i = 0; i < LINUX_NCCS; i++) {
                 native.c_cc[i] = lt->c_cc[i];
             }
-            native.c_ispeed = lt->c_ispeed;
-            native.c_ospeed = lt->c_ospeed;
+            // No speeds in TCSETS struct termios
+            native.c_ispeed = 0;
+            native.c_ospeed = 0;
             return sys_ioctl(fd, request, &native);
         }
         default:
@@ -137,6 +141,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [4] = &sys_write,
     [5] = &sys_open,
     [6] = &sys_close,
+    [7] = &sys_waitpid,  // waitpid
     [9] = &sys_link,
     [10] = &sys_unlink,
     [11] = &sys_execve,
@@ -169,7 +174,9 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [63] = &sys_dup2,
     [64] = &sys_getppid,
     [65] = &sys_getpgrp,
+    [66] = &sys_setsid,
     [84] = &sys_lstat,
+    [85] = &sys_readlink,
     [90] = &sys_mmap,  // mmap
     [106] = &sys_stat,
     [107] = &sys_lstat,
@@ -180,6 +187,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [133] = &sys_fchdir,
     [141] = &sys_getdents,
     [162] = &sys_nanosleep,
+    [168] = &sys_poll, // poll
     [174] = &sys_sigaction, // rt_sigaction
     [175] = &sys_sigprocmask, // rt_sigprocmask
     [183] = &sys_getcwd,
@@ -197,6 +205,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [221] = &sys_fcntl,  // fcntl64
     [240] = &sys_futex,
     [243] = &sys_set_thread_area,
+    [252] = &sys_exit,   // exit_group (map to exit for now)
 };
 
 static const char *linux_names[MAX_SYSCALLS] = {
@@ -205,6 +214,7 @@ static const char *linux_names[MAX_SYSCALLS] = {
     [4] = "write",
     [5] = "open",
     [6] = "close",
+    [7] = "waitpid",
     [11] = "execve",
     [12] = "chdir",
     [13] = "time",
@@ -221,10 +231,13 @@ static const char *linux_names[MAX_SYSCALLS] = {
     [54] = "ioctl",
     [57] = "setpgid",
     [63] = "dup2",
+    [66] = "setsid",
+    [85] = "readlink",
     [106] = "stat",
     [108] = "fstat",
     [122] = "uname",
     [141] = "getdents",
+    [168] = "poll",
     [174] = "rt_sigaction",
     [175] = "rt_sigprocmask",
     [183] = "getcwd",
@@ -233,6 +246,7 @@ static const char *linux_names[MAX_SYSCALLS] = {
     [197] = "fstat64",
     [220] = "getdents64",
     [221] = "fcntl64",
+    [252] = "exit_group",
 };
 
 static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {

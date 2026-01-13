@@ -26,6 +26,7 @@ typedef struct dirent * (*readdir_type_t)(struct fs_node*, uint32_t);
 typedef struct fs_node * (*finddir_type_t)(struct fs_node*, char *name);
 typedef int (*ioctl_type_t)(struct fs_node*, uint32_t, void*);
 typedef void * (*mmap_type_t)(struct fs_node*, void *addr, size_t length, int prot, int flags, off_t offset);
+typedef int (*poll_type_t)(struct fs_node*, void *waiter);
 
 // Symlink Operations
 typedef int (*readlink_type_t)(struct fs_node*, char *buf, size_t size);
@@ -56,6 +57,7 @@ typedef struct fs_node {
     finddir_type_t finddir;
     ioctl_type_t ioctl;
     mmap_type_t mmap;
+    poll_type_t poll;
     readlink_type_t readlink;
     symlink_type_t symlink;
     link_type_t link;
@@ -93,6 +95,7 @@ struct dirent *readdir_fs(fs_node_t *node, uint32_t index);
 fs_node_t *finddir_fs(fs_node_t *node, char *name);
 int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
+int poll_fs(fs_node_t *node, void *waiter);
 int readlink_fs(fs_node_t *node, char *buf, size_t size);
 int symlink_fs(fs_node_t *parent, const char *target, const char *name);
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name);
@@ -103,6 +106,7 @@ int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode)
 void vfs_register_filesystem(filesystem_t *fs);
 int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
+fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
 void vfs_init(void);
 
 void devfs_init(void);

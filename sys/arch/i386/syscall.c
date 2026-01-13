@@ -147,35 +147,58 @@ struct linux_dirent {
     char           d_name[];
 };
 
+// Linux dirent structure for getdents
+struct linux_dirent {
+    unsigned long  d_ino;
+    unsigned long  d_off;
+    unsigned short d_reclen;
+    char           d_name[];
+};
+
 int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
     if (fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
     
-    struct linux_dirent *ld = (struct linux_dirent*)dirp;
+    char *buf = (char*)dirp;
     unsigned int bpos = 0;
     
-    // Read one entry
-    struct dirent *d = readdir_fs(f->node, f->offset);
-    if (!d) return 0;
+    while (bpos < count) {
+        // Read one entry
+        struct dirent *d = readdir_fs(f->node, f->offset);
+        if (!d) {
+            // EOF
+            if (bpos == 0) return 0; // EOF on first try
+            break; // Return what we have
+        }
+        
+        // Calculate size
+        int name_len = 0;
+        while(d->name[name_len]) name_len++;
+        
+        int reclen = sizeof(unsigned long) * 2 + sizeof(unsigned short) + name_len + 1;
+        reclen = (reclen + 3) & ~3; // Align to 4 bytes
+        
+        if (bpos + reclen > count) {
+            // Buffer full
+            if (bpos == 0) return -22; // EINVAL (Buffer too small for even one)
+            break; 
+        }
+        
+        struct linux_dirent *ld = (struct linux_dirent*)(buf + bpos);
+        ld->d_ino = d->ino;
+        ld->d_off = f->offset + 1; // Offset of NEXT entry
+        ld->d_reclen = reclen;
+        for(int i=0; i<name_len; i++) ld->d_name[i] = d->name[i];
+        ld->d_name[name_len] = 0;
+        // Zero pad if needed for alignment
+        // (already done by simple pointer math for next entry, but maybe nice to clear garbage)
+        
+        bpos += reclen;
+        f->offset++;
+    }
     
-    // Calculate size
-    int name_len = 0;
-    while(d->name[name_len]) name_len++;
-    
-    int reclen = sizeof(unsigned long) * 2 + sizeof(unsigned short) + name_len + 1;
-    reclen = (reclen + 3) & ~3; // Align
-    
-    if (bpos + reclen > count) return -1; // Buffer too small for even one
-    
-    ld->d_ino = d->ino;
-    ld->d_off = f->offset + 1;
-    ld->d_reclen = reclen;
-    for(int i=0; i<name_len; i++) ld->d_name[i] = d->name[i];
-    ld->d_name[name_len] = 0;
-    
-    f->offset++;
-    return reclen;
+    return bpos;
 }
 
 struct utsname {
@@ -562,10 +585,106 @@ int sys_stat(const char *path, struct stat *buf) {
     return 0; 
 }
 
+
 int sys_lstat(const char *path, struct stat *buf) {
-    // Same as stat for now - symlinks are auto-resolved
-    // TODO: Implement no-follow version
-    return sys_stat(path, buf);
+    if (!path || !buf) return -1;
+    
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    // Use vfs_lookup_lstat which avoids following the final symlink
+    fs_node_t *node = vfs_lookup_lstat(root, path);
+    
+    if (!node) return -1;
+    fill_stat(buf, node);
+    return 0;
+}
+
+// poll() implementation
+#include <sys/poll.h>
+
+int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
+    // Sanity check
+    if (nfds > 1024) return -22; // EINVAL
+    
+    // Copy fds from user if needed? 
+    // They are in user memory, we can access directly (assuming kernel has access)
+    // but strict separation requires copy or verify. Substrate has shared addr space roughly.
+    // We should copy to be safe/correct if we modify revents.
+    
+    // Allocate kernel buffer for safety (avoid TOCTOU or paging issues if pmap changes in loop)
+    // For now, assume direct access is fine as we only write revents.
+    
+    // Timeout loop
+    // Convert timeout (ms) to ticks or similar.
+    // Since we don't have full wait queues, we'll do a busy-wait/yield loop 
+    // if no events are ready immediately. This is not efficient but provides the "behavior".
+    
+
+    // extern unsigned long get_ticks(void); // Assuming this exists or similar
+    
+    int ready = 0;
+    
+    // POLL Loop
+    // 1. Scan all FDs
+    // 2. If any ready, return count.
+    // 3. If none ready and timeout expired, return 0.
+    // 4. If none ready types, yield/sleep and retry.
+    
+    // For "Infrastructure", we pass a dummy 'waiter' for now since
+    // we don't have the wait queue object.
+    void *waiter = NULL; 
+    
+    while (1) {
+        ready = 0;
+        for (unsigned int i = 0; i < nfds; i++) {
+            if (fds[i].fd < 0) {
+                fds[i].revents = 0;
+                continue;
+            }
+            
+            file_t *f = (fds[i].fd < MAX_FD) ? current_process->fds[fds[i].fd] : NULL;
+            short mask = 0;
+            
+            if (f && f->node) {
+                mask = poll_fs(f->node, waiter);
+                
+                // Mask against requested events
+                // Always return ERR/HUP/NVAL
+                short ret_mask = mask & (fds[i].events | POLLERR | POLLHUP | POLLNVAL);
+                
+                // If the node reported nothing, but we requested generic read/write, 
+                // and it didn't support poll (0), poll_fs might return 0.
+                
+                fds[i].revents = ret_mask;
+            } else {
+                fds[i].revents = POLLNVAL;
+            }
+            
+            if (fds[i].revents) ready++;
+        }
+        
+        if (ready > 0) return ready;
+        if (timeout == 0) return 0;
+        
+        // Timeout handling (simplified)
+        // If timeout > 0, we should decrement or check time.
+        // For now, just return 0 to prevent hanging the shell if it expects instant response.
+        // Busybox shell usually polls with -1 (infinite) for input.
+        // If we return 0 immediately, it will spin 100% CPU.
+        // So we MUST yield at least once.
+        if (timeout > 0 && timeout != -1) {
+             timeout -= 10; // Approx 10ms per yield?
+             if (timeout <= 0) return 0;
+        }
+        
+        // Wait/Yield
+        // Ideally: sched_sleep(waiter);
+        // But since drivers don't wake us, we yield.
+        sched_yield();
+        
+        // Avoid infinite hang if drivers never change state:
+        // Checking for signals?
+        // if (current_thread->sig_pending) return -4; // EINTR
+    }
 }
 
 int sys_fstat(int fd, struct stat *buf) {
@@ -589,6 +708,23 @@ int sys_ioctl(int fd, uint32_t request, void *arg) {
     // Default: not supported
     return -1;
 }
+
+int sys_setsid(void) {
+    // Check if we are already a process group leader
+    if (current_process->pgrp == current_process->pid) return -1;
+    
+    // Create new session
+    current_process->session = current_process->pid;
+    current_process->pgrp = current_process->pid;
+    
+    // Detach controlling terminal
+    // Ideally we should decrement reference on old tty?
+    // For now dealing with raw pointer/id
+    current_process->tty = NULL;
+    
+    return current_process->session;
+}
+
 int sys_unlink(const char *path) {
     if (!path) return -1;
     
@@ -674,7 +810,7 @@ int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
     
     // Lookup the symlink (using lstat-like behavior)
-    fs_node_t *node = vfs_lookup(cwd, pathname);
+    fs_node_t *node = vfs_lookup_lstat(cwd, pathname);
     if (!node) return -2; // ENOENT
     
     // Check if it's a symlink

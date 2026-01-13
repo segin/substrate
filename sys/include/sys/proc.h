@@ -68,7 +68,8 @@ typedef enum {
     THREAD_READY,
     THREAD_RUNNING,
     THREAD_BLOCKED,
-    THREAD_ZOMBIE
+    THREAD_ZOMBIE,
+    THREAD_STOPPED
 } thread_state_t;
 
 // Scheduling Classes

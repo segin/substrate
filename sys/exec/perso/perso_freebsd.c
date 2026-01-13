@@ -39,6 +39,7 @@ extern int sys_dup2(int, int);
 extern int sys_pipe(int*);
 extern int sys_getcwd(char*, size_t);
 extern int sys_fchdir(int);
+extern int sys_poll(void*, unsigned int, int);
 
 // FreeBSD syscall numbers (from sys/syscall.h)
 static void *freebsd_syscalls[MAX_SYSCALLS] = {
@@ -80,6 +81,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [188] = &sys_stat,   // FreeBSD: stat
     [189] = &sys_fstat,  // FreeBSD: fstat
     [190] = &sys_lstat,  // FreeBSD: lstat
+    [209] = &sys_poll,   // FreeBSD: poll
     [326] = &sys_getcwd,
 };
 

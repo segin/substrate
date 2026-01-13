@@ -33,6 +33,7 @@
 #define SYS_FUTEX   240
 #define SYS_MSYNC   144
 #define SYS_GET_COW_STATS 241
+#define SYS_POLL    209
 // ... add more as needed
 
 void syscall_init(void);
