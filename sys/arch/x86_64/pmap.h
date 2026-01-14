@@ -119,6 +119,7 @@ pmap_t pmap_kernel(void);
 int pmap_enter(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags);
 void pmap_remove(pmap_t pmap, uint64_t va);
 uint64_t pmap_extract(pmap_t pmap, uint64_t va);
+int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot);
 
 // Per-pmap management
 pmap_t pmap_create(void);

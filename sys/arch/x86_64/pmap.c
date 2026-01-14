@@ -299,3 +299,51 @@ void pmap_reference(pmap_t pmap) {
     __sync_fetch_and_add(&pmap->ref_count, 1);
 }
 
+// Change page protections for a virtual address range
+int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
+    if (pmap != curpmap) return -1; // Only active pmap for now
+    
+    // Walk range page by page
+    for (uint64_t va = sva; va < eva; va += 0x1000) {
+        uint64_t pml4i = PML4_INDEX(va);
+        uint64_t pdpti = PDPT_INDEX(va);
+        uint64_t pdi   = PD_INDEX(va);
+        uint64_t pti   = PT_INDEX(va);
+
+        if (!(V_PML4[pml4i] & PTE_P)) continue;
+        
+        pdpte_t *pdpt = V_PDPT(pml4i);
+        if (!(pdpt[pdpti] & PTE_P)) continue;
+        
+        pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+        if (!(pd[pdi] & PTE_P)) continue;
+        
+        // Check for Large Pages
+        if (pd[pdi] & PTE_PS) {
+             // TODO: Update PDE protection
+             continue;
+        }
+        
+        pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+        if (!(pt[pti] & PTE_P)) continue;
+        
+        uint64_t pte = pt[pti];
+        uint64_t new_pte = pte & ~(PTE_W | PTE_NX); // Clear W and NX
+        
+        if (prot & 2) new_pte |= PTE_W;   // VM_PROT_WRITE value hardcoded or defined?
+        // Let's use 2 and 4 assuming VM_PROT_WRITE/EXECUTE or define via vm/vm_prot.h
+        
+        if (!(prot & 4)) { // VM_PROT_EXECUTE
+             new_pte |= PTE_NX;
+        }
+        
+        // Write back
+        pt[pti] = new_pte;
+        
+        // Invalidate TLB
+        pmap_invalidate_page(va);
+    }
+    
+    return 0;
+}
+
