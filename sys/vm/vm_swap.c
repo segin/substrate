@@ -70,19 +70,41 @@ static void swap_pager_dealloc(struct vm_pager *p) {
     kfree(pager, sizeof(swap_pager_t));
 }
 
+// Global swap state
+struct fs_node *swap_node = NULL;
+// static spinlock_t swap_lock = SPINLOCK_INIT; // TODO: Locking
+
+// External VFS helper
+extern uint32_t read_fs(struct fs_node*, int64_t, uint32_t, uint8_t*);
+extern uint32_t write_fs(struct fs_node*, int64_t, uint32_t, uint8_t*);
+#define P2V(x) ((uintptr_t)(x) + 0xC0000000)
+
 static int swap_pager_getpage(struct vm_pager *p, vm_page_t *m, bool sync) {
     (void)sync;
     swap_pager_t *pager = (swap_pager_t *)p;
     uint64_t pindex = m->pindex;
     
     if (pindex >= pager->max_pages) return -1;
+    
+    // Lock?
     uint32_t block = pager->swp_blocks[pindex];
-    if (block == SWAP_BLOCK_NONE) return -1; // Block not on disk
+    if (block == SWAP_BLOCK_NONE) return -1; // Block not on disk (freshly allocated?)
     
-    // TODO: Read from swap device (block * 4096)
-    // block_read(swap_dev, block, m->phys_addr);
+    // Check if swap file is active
+    if (!swap_node) return -1;
     
-    // For now, simulate zero-fill (data lost without real disk)
+    // Calculate offset in swap file
+    uint64_t offset = (uint64_t)block * 4096;
+    uint8_t *buf = (uint8_t *)P2V(m->phys_addr);
+    
+    uint32_t bytes = read_fs(swap_node, (int64_t)offset, 4096, buf);
+    
+    if (bytes != 4096) {
+        // Partial read - corrupted swap? Zero fill rest
+        for (uint32_t i = bytes; i < 4096; i++) buf[i] = 0;
+        return -1; // Error for now
+    }
+    
     return 0; 
 }
 
@@ -98,9 +120,19 @@ static int swap_pager_putpage(struct vm_pager *p, vm_page_t *m, bool sync) {
         int new_block = alloc_swap_block();
         if (new_block == -1) return -1; // Swap full
         pager->swp_blocks[pindex] = (uint32_t)new_block;
+        block = (uint32_t)new_block;
     }
     
-    // TODO: Write to swap device
+    if (!swap_node) return -1;
+    
+    // Calculate offset
+    uint64_t offset = (uint64_t)block * 4096;
+    uint8_t *buf = (uint8_t *)P2V(m->phys_addr);
+    
+    uint32_t bytes = write_fs(swap_node, (int64_t)offset, 4096, buf);
+    
+    if (bytes != 4096) return -1;
+    
     return 0;
 }
 
