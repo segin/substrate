@@ -484,9 +484,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Send `SIGCHLD` to parent.
             - [x] Wakeup parent if waiting (`sleepq_wake(&parent->p_children)`).
 
-    - [ ] **Wait Subsystem (`wait4`, `waitpid`):**
-        - [ ] **Search Logic (`find_zombie`):**
-            - [ ] Match based on `pid` argument:
+    - [x] **Wait Subsystem (`wait4`, `waitpid`):**
+        - [x] **Search Logic (`find_zombie`):** <!-- Now find_waitable_child -->
+            - [x] Match based on `pid` argument:
                 - [x] `pid > 0`: Wait for specific child.
                 - [x] `pid == -1`: Wait for any child.
                 - [x] `pid == 0`: Wait for any child in same process group.
