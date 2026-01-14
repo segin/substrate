@@ -426,10 +426,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Context Switching:**
         - [x] **FPU Lazy Save:** `Unordered` exception logic for FPU context.
         - [x] **PCB:** Refine Process Control Block for thread/process split.
-    - [ ] **Kernel Process (PID 0):**
-        - [ ] **Swapper/Idle:** The kernel itself is PID 0.
-        - [ ] **Responsibilities:** Pageout daemon work, Scheduler idle loop.
-        - [ ] **Context:** Ensures a valid process context always exists (never switch to NULL).
+    - [x] **Kernel Process (PID 0):**
+        - [x] **Swapper/Idle:** The kernel itself is PID 0.
+        - [x] **Responsibilities:** Pageout daemon work, Scheduler idle loop.
+        - [x] **Context:** Ensures a valid process context always exists (never switch to NULL).
 - [ ] **Synchronization:**
     - [x] Implement Spinlocks, Mutexes, and Semaphores.
     - [ ] **Userspace Synchronization (Futex):**
