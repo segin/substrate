@@ -112,16 +112,22 @@ int sys_open(const char *path, int flags, int mode) {
     return fd;
 }
 
-int sys_close(int fd) {
-    if (fd < 0 || fd >= MAX_FD) return -1;
-    file_t *f = current_process->fds[fd];
-    if (!f) return -1;
-    
+// Helper for internal use (and userspace via sys_close)
+void file_close_ptr(file_t *f) {
+    if (!f) return;
     f->ref_count--;
     if (f->ref_count <= 0) {
         close_fs(f->node);
         file_free(f);
     }
+}
+
+int sys_close(int fd) {
+    if (fd < 0 || fd >= MAX_FD) return -1;
+    file_t *f = current_process->fds[fd];
+    if (!f) return -1;
+    
+    file_close_ptr(f);
     current_process->fds[fd] = 0;
     return 0;
 }
@@ -140,12 +146,7 @@ int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int w) {
     return f->offset;
 }
 
-struct linux_dirent {
-    unsigned long  d_ino;
-    unsigned long  d_off;
-    unsigned short d_reclen;
-    char           d_name[];
-};
+
 
 // Linux dirent structure for getdents
 struct linux_dirent {
@@ -226,28 +227,10 @@ int sys_uname(struct utsname *buf) {
     return 0;
 }
 
+extern void proc_exit(int code);
+
 int sys_exit(int code) {
-    if (current_process->pid == 1) {
-        kprint("Warning: Init process exited. System Halted (idle).\n");
-        while(1) { __asm__ volatile("hlt"); }
-    }
-    
-    current_process->exit_code = code;
-    acct_process(code);
-    
-    // Mark all threads of this process as zombie (simplified)
-    for (int i = 0; i < 64; i++) {
-        if (threads[i].proc == current_process && threads[i].tid != -1) {
-            threads[i].state = THREAD_ZOMBIE;
-        }
-    }
-    
-    // Wake up parent
-    sched_wakeup(&current_process->ppid);
-    
-    while(1) {
-        sched_yield();
-    }
+    proc_exit(code);
     return 0;
 }
 

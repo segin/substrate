@@ -463,48 +463,92 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `psignal(p, sig)`: Send signal to process.
         - [x] `pgsignal(pgrp, sig)`: Send signal to process group.
         - [x] `trapsignal(p, sig, code)`: Send synchronous trap signal.
-- [ ] **Process Lifecycle:**
-    - [ ] **Wait Subsystem (`wait4`/`waitpid`):**
-        - [ ] **State Transitions:**
-            - [ ] **ZOMBIE State:** Preserve `p_xstat` and `p_rusage` until reaped.
-            - [ ] **State Lock:** Protect state transitions (`p_stat`).
-        - [ ] **Reparenting:**
-            - [ ] Scan children array on exit.
-            - [ ] Reassign to `init` (PID 1) or next valid reaper.
-        - [ ] **Statistics (`rusage`):**
-            - [ ] `ru_utime`, `ru_stime`: User/System CPU time.
-            - [ ] `ru_maxrss`: Max resident set size.
-            - [ ] `ru_minflt`, `ru_majflt`: Page faults.
-            - [ ] Propagate child rusage to parent on wait.
-        - [ ] **Flags Support:**
-            - [ ] `WNOHANG`: Return immediately if no child has state change.
-            - [ ] `WUNTRACED`: Return if child has stopped (job control).
-            - [ ] `WCONTINUED`: Return if child has continued (SIGCONT).
-        - [ ] **Wait6:** Implement BSD `wait6` for advanced filtering (P_PID, P_PGID, P_ALL).
+- [ ] **Process Lifecycle & Job Control:**
+    - [ ] **Process Termination (`exit`, `_exit`):**
+        - [ ] **Resource Release:**
+            - [ ] Close all open file descriptors (`fd_close_all`).
+            - [ ] Release Virtual Memory Map (`vm_map_remove`).
+            - [ ] Release System V Semaphores/Shm.
+            - [ ] Decrement current working directory reference.
+        - [ ] **State Transition (DYING -> ZOMBIE):**
+            - [ ] Set `p_stat` to `SZOMB`.
+            - [ ] Record exit code (`p_xstat`).
+            - [ ] Calculate final `rusage` (user + system time).
+        - [ ] **Orphan Reparenting:**
+            - [ ] Acquire `proctree_lock`.
+            - [ ] Iterate over children of exiting process.
+            - [ ] Reparent each child to `init` (PID 1).
+            - [ ] If `init` is dying, reparent to `swapper` (PID 0) or panic.
+            - [x] Unlock `proctree_lock`.
+        - [ ] **Notification:**
+            - [ ] Send `SIGCHLD` to parent.
+            - [ ] Wakeup parent if waiting (`sleepq_wake(&parent->p_children)`).
+
+    - [ ] **Wait Subsystem (`wait4`, `waitpid`):**
+        - [ ] **Search Logic (`find_zombie`):**
+            - [ ] Match based on `pid` argument:
+                - [ ] `pid > 0`: Wait for specific child.
+                - [ ] `pid == -1`: Wait for any child.
+                - [ ] `pid == 0`: Wait for any child in same process group.
+                - [ ] `pid < -1`: Wait for any child in group `|pid|`.
+        - [ ] **Non-Blocking Check (`WNOHANG`):**
+            - [ ] If no zombies match but children exist, return 0 immediately.
+            - [ ] If no children exist, return `ECHILD`.
+        - [ ] **Blocking Wait:**
+            - [ ] Implementation: `sleepq_wait(&current_proc->p_children, Priority)`.
+            - [ ] Handle `EINTR` (interrupted by signal).
+            - [ ] Re-scan children list on wakeup.
+        - [ ] **Reaping (ZOMBIE -> FREE):**
+            - [ ] Copy `p_xstat` and `p_rusage` to user buffer.
+            - [ ] Remove from siblings list.
+            - [ ] Remove from process group.
+            - [ ] Free `struct process` memory (`uma_zfree`).
+        - [ ] **Job Control Integration (`WUNTRACED`, `WCONTINUED`):**
+            - [ ] Check `p_stat` for `SSTOP` (stopped).
+            - [ ] Use `p_flag` for `P_CONTINUED` status.
+            - [ ] Reset `P_CONTINUED` flag after reporting.
+
     - [ ] **Process Groups & Sessions (Job Control):**
-        - [ ] **Infrastructure:**
-            - [ ] `struct pgrp`: List of processes, pointer to session.
-            - [ ] `struct session`: List of process groups, pointer to leader, ctty vnode ref.
-            - [ ] **Refcounting:** Ensure structures persist while referenced.
-        - [ ] **Session API:**
-            - [ ] `sys_setsid()`: New session, become leader, detach ctty.
-            - [ ] `sys_getsid()`: Get session ID.
-        - [ ] **Group API:**
-            - [ ] `sys_setpgid()`: Set process group ID (join/create).
-            - [ ] `sys_getpgid()`: Get process group ID.
-            - [ ] **Orphaned Groups:** Detect groups where parent of every member is in a different session.
+        - [ ] **Core Structures:**
+            - [ ] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr).
+            - [ ] `struct session`: `s_id`, `s_leader` (ptr), `s_ttyvp` (vnode), `s_login` (name).
+            - [ ] **Invariants:**
+                - [ ] Every process belongs to exactly one group.
+                - [ ] Every group belongs to exactly one session.
+                - [ ] Session leader determines the Controlling TTY (CTTY).
+        - [ ] **Session Management:**
+            - [ ] `sys_setsid()`:
+                - [ ] Check: Return `EPERM` if already a group leader.
+                - [ ] Allocate new `struct session` and `struct pgrp`.
+                - [ ] Set `p_pgid` = `p_pid`, `s_sid` = `p_pid`.
+                - [ ] Detach current CTTY (if any).
+            - [ ] `sys_getsid(pid)`: Return session ID of process.
+        - [ ] **Group Management:**
+            - [ ] `sys_setpgid(pid, pgid)`:
+                - [ ] Logic: Join existing group or create new one.
+                - [ ] Constraint: Must be in same session.
+                - [ ] Constraint: Cannot change if `exec` call pending (rare race).
+            - [ ] `sys_getpgid(pid)`: Return process group ID.
         - [ ] **Controlling Terminal (CTTY):**
-            - [ ] `TIOCSCTTY`: Set controlling terminal (session leader only).
-            - [ ] `TIOCNOTTY`: Detach controlling terminal.
-            - [ ] `sys_tcgetpgrp()`: Get foreground process group.
-            - [ ] `sys_tcsetpgrp()`: Set foreground process group (SIGTTOU check).
-            - [ ] **Carrier Loss:** Send `SIGHUP` to session leader on carrier drop.
+            - [ ] **Assignment (`TIOCSCTTY`):**
+                - [ ] Caller must be session leader.
+                - [ ] Session must not already have CTTY.
+                - [ ] TTY must not already be owned by another session.
+            - [ ] **Release (`TIOCNOTTY`):**
+                - [ ] Clear `s_ttyvp` in session.
+                - [ ] Send `SIGHUP` / `SIGCONT` to foreground group.
+            - [ ] **Foreground Group (`tcsetpgrp`/`tcgetpgrp`):**
+                - [ ] TTY driver stores `t_pgrp`.
+                - [ ] Check `SIGTTOU` if background process tries `tcsetpgrp`.
         - [ ] **Job Control Signals:**
-            - [ ] **Stop:** `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU` (default action: suspend).
-            - [ ] **Continue:** `SIGCONT` (wake up, discard pending stop signals).
-            - [ ] **Background I/O:**
-                - [x] `SIGTTIN`: Generated by TTY read from background group.
-                - [x] `SIGTTOU`: Generated by TTY write from background group (if `TOSTOP` set).
+            - [ ] **Stop generation:** `SIGTSTP` (Ctrl-Z), `SIGSTOP`.
+            - [ ] **TTY Signals:**
+                - [x] `SIGINT` (Ctrl-C), `SIGQUIT` (Ctrl-\).
+                - [x] `SIGTTIN`: Background read.
+                - [x] `SIGTTOU`: Background write (if `TOSTOP` set).
+            - [ ] **Orphaned Process Groups:**
+                - [ ] Definition: A group where no member has a parent in a different group in the same session.
+                - [ ] Action: If a group becomes orphaned and has stopped members, send `SIGHUP` + `SIGCONT`.
 
 ### 2. Architecture (`sys/arch`)
 - [ ] **i386:**

@@ -4,6 +4,17 @@
 #include <stdint.h>
 #include <sys/acct.h>
 #include <sys/signal.h>
+#include <sys/resource.h>
+
+// Process States (BSD style)
+#define SIDL   1 // Process being created by fork
+#define SRUN   2 // Currently runnable
+#define SSLEEP 3 // Sleeping on an address
+#define SSTOP  4 // Process suspended/stopped
+#define SZOMB  5 // Process exited but not reaped
+#define SDYING 6 // Process is dying (in exit path)
+
+typedef uint8_t process_state_t;
 
 // Forward declarations
 struct personality;
@@ -35,10 +46,21 @@ typedef struct process {
     // Signals
     struct sigaction sig_actions[NSIG];
     
+    // Process State
+    uint8_t state; // process_state_t
+    
+    // Hierarchy
+    struct process *p_parent;     // Parent process
+    struct process *p_children;   // Head of children list
+    struct process *p_sibling;    // Next sibling (in parent's children list)
+    
     // Accounting & Credentials
     char comm[AC_COMM_LEN];
     uint32_t start_time;
-    uint32_t utime;
+    struct rusage rusage;         // Resource usage stats
+    struct rusage rusage_children;// Child resource usage stats (accumulated)
+    
+    uint32_t utime; // Legacy ticks (keep for now, or sync with rusage)
     uint32_t stime;
     uint32_t uid;
     uint32_t gid;

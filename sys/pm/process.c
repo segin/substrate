@@ -1,6 +1,7 @@
 #include "pm.h"
 #include <sys/acct.h>
 #include <sys/file.h>
+#include <kern/console.h>
 #include <kern/sched.h> // For MAX_THREADS, thread creation
 #include <stddef.h>
 #include <string.h>
@@ -126,4 +127,112 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     int tid = sched_create_thread(child, entry, stack_top, arg);
     
     return tid;
+}
+
+// Close all FDs for a process
+void fd_close_all(process_t *p) {
+    if (!p) return;
+    for (int i = 0; i < MAX_FD; i++) {
+        if (p->fds[i]) {
+            // Check refs? sys_close does that.
+            // But we need to call file_close / decref logic.
+            // Since we don't have direct access to sys_close here (it's in syscall.c),
+            // we should duplicate the decrement logic or expose a helper.
+            // syscall.c 'sys_close' calls 'close_fs' and 'file_free'.
+            // We'll declare an external helper or move implementation.
+            // For now, let's assume we can call an external 'file_close(file_t*)'
+            extern void file_close_ptr(file_t *f); // Need to add this to syscall.c or file.c
+            file_close_ptr(p->fds[i]);
+            p->fds[i] = NULL;
+        }
+    }
+}
+
+// Reparent children to init
+void proc_reparent_children(process_t *p) {
+    // Lock?
+    if (!p->p_children) return;
+    
+    process_t *init = &processes[1]; // Assume PID 1 is index 1 or we search
+    if (init->state == SDYING || init->state == SZOMB) {
+        // init is dying, reparent to swapper?
+        init = &processes[0];
+    }
+    
+    process_t *child = p->p_children;
+    while (child) {
+        process_t *next = child->p_sibling;
+        
+        // Remove from p's list (conceptually done by iterating)
+        child->p_parent = init;
+        
+        // Add to init's list
+        child->p_sibling = init->p_children;
+        init->p_children = child;
+        
+        child = next;
+    }
+    p->p_children = NULL;
+    
+    // Wakeup init if it was waiting for children
+    sched_wakeup(&init->p_children);
+}
+
+void proc_exit(int code) {
+    if (current_process->pid == 1) {
+        kprint("Warning: Init process exited. System Halted (idle).\n");
+        while(1) { __asm__ volatile("hlt"); }
+    }
+    
+    // 1. Set State
+    current_process->state = SDYING;
+    current_process->exit_code = code;
+    extern void acct_process(int code);
+    acct_process(code);
+    
+    // 2. Resource Release
+    fd_close_all(current_process);
+    
+    if (current_process->vm_map) {
+        // VM Map release
+    }
+    
+    if (current_process->pmap && current_process->pmap != pmap_kernel()) {
+        pmap_release(current_process->pmap);
+        current_process->pmap = pmap_kernel(); // Switch to kernel map safe fallback?
+        // Actually cr3 switch happens on context switch.
+        // We shouldn't free pmap if we are running on it?
+        // Traditionally, we switch to swapper's pmap or kernel pmap before freeing.
+        // But for now, just decrement ref.
+    }
+    
+    // 3. Reparent Children
+    proc_reparent_children(current_process);
+    
+    // 4. Notify Parent
+    if (current_process->p_parent) {
+        // SIGCHLD
+        extern void psignal(process_t *p, int sig);
+        psignal(current_process->p_parent, SIGCHLD);
+        
+        // Wakeup parent (waiting on p_children address usually)
+        sched_wakeup(&current_process->p_parent->p_children);
+    } else {
+        // No parent? (swapper/init special case)
+        // If PID > 1, should have parent.
+        // Fallback: Wakeup swapper?
+        sched_wakeup(&processes[1].p_children); // Wake init just in case
+    }
+    
+    // 5. Final State
+    current_process->state = SZOMB;
+    
+    // 6. Reschedule (never returns)
+    // Mark current thread as zombie too?
+    current_thread->state = THREAD_ZOMBIE;
+    
+    sched_yield();
+    
+    // Should not reach here
+    while(1);
 }
