@@ -291,3 +291,11 @@ void pmap_destroy(pmap_t pmap) {
     kfree(pmap, sizeof(struct pmap));
 }
 
+void pmap_reference(pmap_t pmap) {
+    if (!pmap) return;
+    if (pmap == kernel_pmap_ptr) return; // Never release kernel pmap
+    
+    // Atomic increment
+    __sync_fetch_and_add(&pmap->ref_count, 1);
+}
+
