@@ -498,11 +498,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Implementation: `sleepq_wait(&current_proc->p_children, Priority)` (Used `sched_sleep`).
             - [x] Handle `EINTR` (interrupted by signal).
             - [x] Re-scan children list on wakeup.
-        - [ ] **Reaping (ZOMBIE -> FREE):**
+        - [x] **Reaping (ZOMBIE -> FREE):**
             - [x] Copy `p_xstat` and `p_rusage` to user buffer. <!-- Implemented rusage accumulation to parent -->
             - [x] Remove from siblings list. <!-- Already implemented in wait.c lines 103-110 -->
             - [x] Remove from process group. <!-- Clears pgrp/session fields; full struct pgrp later -->
-            - [ ] Free `struct process` memory (`uma_zfree`).
+            - [x] Free `struct process` memory (`uma_zfree`). <!-- Uses static array with pid=-1 marking (BSD style) -->
         - [ ] **Job Control Integration (`WUNTRACED`, `WCONTINUED`):**
             - [ ] Check `p_stat` for `SSTOP` (stopped).
             - [ ] Use `p_flag` for `P_CONTINUED` status.
