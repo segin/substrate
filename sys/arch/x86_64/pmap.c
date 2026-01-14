@@ -205,6 +205,20 @@ pmap_t pmap_create(void) {
     // Recursive mapping for the new pmap
     pmap->pml4[RECURSIVE_SLOT] = pmap->pml4_phys | PTE_P | PTE_W;
     
+    // Initialize fields
+    pmap->ref_count = 1;
+    pmap->resident_count = 0;
+    pmap->wired_count = 0;
+    pmap->lock = 0;
+    pmap->asid = 0; // TODO: Allocate from pool
+    
+    memset(&pmap->stats, 0, sizeof(struct pmap_stats));
+    
+    pmap->list_entry.next = NULL;
+    pmap->list_entry.prev = NULL;
+    
+    // TODO: Add to global pmap list
+    
     return pmap;
 }
 

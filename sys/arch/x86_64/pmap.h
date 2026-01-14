@@ -80,10 +80,34 @@ typedef uint64_t pte_t;
 #define PT_INDEX(va)    (((va) >> 12) & 0x1FF)
 
 // PMAP handle
+// Breakdown of pmap statistics
+struct pmap_stats {
+    uint64_t faults;
+    uint64_t cow_faults;
+    uint64_t zero_fills;
+    uint64_t cow_pages_mapped;
+    uint64_t protection_upgrades;
+    uint64_t protection_downgrades;
+};
+
+// PMAP handle
 struct pmap {
-    pml4e_t *pml4;
-    uint64_t pml4_phys;
-    // TODO: Add lock, statistics
+    pml4e_t *pml4;         // Virtual address of PML4
+    uint64_t pml4_phys;    // Physical address of PML4
+    
+    int ref_count;         // Reference count (for COW/sharing)
+    int resident_count;    // Resident page count
+    int wired_count;       // Wired page count
+    
+    struct pmap_stats stats; // Per-pmap statistics
+    
+    int lock;              // SMP lock
+    int asid;              // Address Space ID
+    
+    struct {
+        struct pmap *next;
+        struct pmap *prev;
+    } list_entry;          // Global pmap list
 };
 typedef struct pmap *pmap_t;
 
