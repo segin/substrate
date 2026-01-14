@@ -71,6 +71,38 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
             return ret;
         }
 
+        case FUTEX_REQUEUE:
+        case FUTEX_CMP_REQUEUE: {
+            // val: threads to wake
+            // timeout (as int): threads to requeue
+            // uaddr2: destination address
+            // val3: expected value (CMP only)
+            
+            if (cmd == FUTEX_CMP_REQUEUE) {
+                // Atomic check current value
+                int current_val = *uaddr;
+                if (current_val != val3) {
+                    return -EAGAIN;
+                }
+            }
+            
+            if (!uaddr2 || !validate_uaddr((uintptr_t)uaddr2)) {
+                return -EFAULT;
+            }
+            
+            void *key2 = futex_get_key((uintptr_t)uaddr2);
+            if (!key2) return -EFAULT;
+            
+            // "timeout" argument is repurposed as "val2" (requeue limit)
+            int requeue_limit = (int)(uintptr_t)timeout;
+            
+            // Forward declaration
+            extern int sleepq_requeue(void *src, void *dst, int wake_n, int requeue_n);
+            
+            int ret = sleepq_requeue(key, key2, val, requeue_limit);
+            return ret;
+        }
+
         default:
             return -ENOSYS;
     }

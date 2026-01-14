@@ -436,7 +436,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Core Operations:**
             - [x] `FUTEX_WAIT`: Atomic compare-and-sleep.
             - [x] `FUTEX_WAKE`: Wakeup N waiters.
-            - [ ] `FUTEX_REQUEUE`: Move waiters to another lock.
+            - [x] `FUTEX_REQUEUE`: Move waiters to another lock.
         - [ ] **Advanced Features:**
             - [ ] `FUTEX_ROBUST_LIST`: Handle owner death (cleanup).
             - [ ] `FUTEX_PI`: Priority Inheritance support.

@@ -257,3 +257,97 @@ int sleepq_has_waiters(void *chan) {
     sq_unlock(hash);
     return has;
 }
+
+// Requeue waiters from src_chan to dst_chan
+// wake_n: number of threads to wake from src
+// requeue_n: number of threads to move from src to dst
+// Returns: number of threads woken
+int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
+    if (!src_chan || !dst_chan) return 0;
+    
+    int src_hash = sleepq_hash_func(src_chan);
+    int dst_hash = sleepq_hash_func(dst_chan);
+    
+    // Lock ordering to prevent deadlock (lower hash first)
+    if (src_hash < dst_hash) {
+        sq_lock(src_hash);
+        sq_lock(dst_hash);
+    } else if (src_hash > dst_hash) {
+        sq_lock(dst_hash);
+        sq_lock(src_hash);
+    } else {
+        sq_lock(src_hash); // Same bucket
+    }
+    
+    // 1. Wake phase
+    sleepq_t *src_sq = sleepq_lookup(src_chan, src_hash);
+    int woken_count = 0;
+    
+    if (src_sq && src_sq->sq_count > 0) {
+        // Wake up to wake_n threads
+        while (src_sq->sq_head && woken_count < wake_n) {
+            thread_t *t = src_sq->sq_head;
+            src_sq->sq_head = t->next;
+            if (!src_sq->sq_head) src_sq->sq_tail = NULL;
+            src_sq->sq_count--;
+            
+            t->next = NULL;
+            t->wait_chan = NULL;
+            t->state = THREAD_READY;
+            woken_count++;
+        }
+    }
+    
+    // 2. Requeue phase
+    if (src_sq && src_sq->sq_count > 0 && requeue_n > 0) {
+        // Prepare destination queue
+        sleepq_t *dst_sq = sleepq_lookup(dst_chan, dst_hash);
+        if (!dst_sq) {
+            dst_sq = sleepq_alloc();
+            if (dst_sq) {
+                dst_sq->sq_chan = dst_chan;
+                sleepq_insert(dst_sq, dst_hash);
+            }
+        }
+        
+        if (dst_sq) {
+            int moved_count = 0;
+            while (src_sq->sq_head && moved_count < requeue_n) {
+                thread_t *t = src_sq->sq_head;
+                src_sq->sq_head = t->next;
+                if (!src_sq->sq_head) src_sq->sq_tail = NULL;
+                src_sq->sq_count--;
+                
+                // Add to dst queue
+                t->next = NULL;
+                if (dst_sq->sq_tail) {
+                    dst_sq->sq_tail->next = t;
+                } else {
+                    dst_sq->sq_head = t;
+                }
+                dst_sq->sq_tail = t;
+                dst_sq->sq_count++;
+                
+                // Update thread wait channel
+                t->wait_chan = dst_chan;
+                
+                moved_count++;
+            }
+        }
+    }
+    
+    // Cleanup empty src queue
+    if (src_sq && src_sq->sq_count == 0) {
+        sleepq_remove(src_sq, src_hash);
+    }
+    
+    // Unlock
+    if (src_hash != dst_hash) {
+        sq_unlock(dst_hash);
+        sq_unlock(src_hash);
+    } else {
+        sq_unlock(src_hash);
+    }
+    
+    return woken_count;
+}
