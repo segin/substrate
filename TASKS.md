@@ -373,14 +373,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Redzones:** Enhance redzones with canary values for corruption detection.
             - [x] **Reclamation:** Implement bucket draining back to slabs.
             - [x] **Pressure:** Implement true memory pressure feedback (active reclamation).
-    - [ ] **User Memory:**
+    - [x] **User Memory:**
         - [x] Implement `mmap`, `munmap`, `brk` system calls.
-    - [ ] **SMP & Interrupts:**
+    - [x] **SMP & Interrupts:**
         - [x] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
-        - [ ] **Local APIC (LAPIC):**
+        - [x] **Local APIC (LAPIC):****
             - [x] **Initialization:** Map LAPIC MMIO base (usually 0xFEE00000).
             - [x] **Spurious Interrupts:** Set Spurious Interrupt Vector Register (SVR).
-            - [ ] **Timer:**
+            - [x] **Timer:****
                 - [x] Calibrate against PIT or ACPI PM Timer.
                 - [x] Set Divider Configuration Register (DCR).
                 - [x] Implement Periodic Mode (for scheduler).
