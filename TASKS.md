@@ -425,7 +425,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Sleep Queues:** Hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
     - [ ] **Context Switching:**
         - [x] **FPU Lazy Save:** `Unordered` exception logic for FPU context.
-        - [ ] **PCB:** Refine Process Control Block for thread/process split.
+        - [x] **PCB:** Refine Process Control Block for thread/process split.
     - [ ] **Kernel Process (PID 0):**
         - [ ] **Swapper/Idle:** The kernel itself is PID 0.
         - [ ] **Responsibilities:** Pageout daemon work, Scheduler idle loop.
