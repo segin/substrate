@@ -3,15 +3,14 @@
 #include <sys/errno.h>
 #include "tests.h"
 
-// Externs from sys/pm/wait.c (we need to compile it or link against pm.o)
-// But sys_wait4 uses current_process global. We need to mock it.
+// Externs from sys/pm/wait.c
 extern int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 extern process_t *current_process;
 extern int printf(const char *format, ...);
 
 #define TEST_ASSERT(cond) do { \
     if (!(cond)) { \
-        printf("FAILED: %s (in Test %d?)\n", #cond, 9); \
+        printf("FAILED: %s\n", #cond); \
         panic("Assertion failed"); \
     } else { \
         kprint("PASS: " #cond "\n"); \
@@ -43,110 +42,103 @@ void sched_sleep(void *chan) {
     }
 }
 
-void test_wait_logic(void) {
-    // Setup Mock Process Tree
-    mock_parent.pid = 100;
-    mock_parent.pgrp = 100;
+// Helper to reset mocks
+void setup_mocks(void) {
+    mock_parent.pid = 100; mock_parent.pgrp = 100;
     
-    mock_child1.pid = 101;
-    mock_child1.pgrp = 100;
-    mock_child1.state = SZOMB;
-    mock_child1.p_sibling = &mock_child2;
-    mock_child1.p_parent = &mock_parent;
-    mock_child1.exit_code = 10;
+    // Child 1: Zombie, Group 100, Exit 10
+    mock_child1.pid = 101; mock_child1.pgrp = 100; mock_child1.state = SZOMB; 
+    mock_child1.p_sibling = &mock_child2; mock_child1.p_parent = &mock_parent; mock_child1.exit_code = 10;
+    
+    // Child 2: Running, Group 100, Exit 0 (will change)
+    mock_child2.pid = 102; mock_child2.pgrp = 100; mock_child2.state = SRUN; 
+    mock_child2.p_sibling = &mock_child3; mock_child2.p_parent = &mock_parent; mock_child2.exit_code = 0;
 
-    mock_child2.pid = 102;
-    mock_child2.pgrp = 100;
-    mock_child2.state = SRUN;
-    mock_child2.p_sibling = &mock_child3;
-    mock_child2.p_parent = &mock_parent;
-
-    mock_child3.pid = 103;
-    mock_child3.pgrp = 200;
-    mock_child3.state = SZOMB;
-    mock_child3.p_sibling = NULL;
-    mock_child3.p_parent = &mock_parent;
-    mock_child3.exit_code = 20;
+    // Child 3: Zombie, Group 200, Exit 20
+    mock_child3.pid = 103; mock_child3.pgrp = 200; mock_child3.state = SZOMB; 
+    mock_child3.p_sibling = NULL; mock_child3.p_parent = &mock_parent; mock_child3.exit_code = 20;
 
     mock_parent.p_children = &mock_child1;
-    current_process = &mock_parent; // Mock current!
+    current_process = &mock_parent;
+    
+    // Reset test checks
+    sched_sleep_calls = 0;
+    sched_sleep_mode = 0;
+    current_thread->sig_pending = 0;
+}
 
+void test_wait_logic(void) {
     int status;
     int ret;
 
     // Test 1: Wait for specific PID (Zombie)
+    setup_mocks();
     ret = sys_wait4(101, &status, WNOHANG, NULL);
     TEST_ASSERT(ret == 101);
     TEST_ASSERT(WEXITSTATUS(status) == 10);
-
+    // Verify Reaping (101 removed)
+    TEST_ASSERT(mock_parent.p_children == &mock_child2); // child1 removed from head
+    
     // Test 2: Wait for any child (-1)
-    // Should find 101 or 103. First one in list is 101.
+    setup_mocks();
     ret = sys_wait4(-1, &status, WNOHANG, NULL);
-    TEST_ASSERT(ret == 101); // 101 is first in list and zombie
-
+    TEST_ASSERT(ret == 101); // First zombie found
+    
     // Test 3: Wait for process group (0) -> Same as parent (100)
-    // 101 is in 100.
+    setup_mocks();
     ret = sys_wait4(0, &status, WNOHANG, NULL);
-    TEST_ASSERT(ret == 101); 
-
+    TEST_ASSERT(ret == 101); // 101 is in group 100
+    
     // Test 4: Wait for specific process group (-200)
-    // 103 is in 200.
+    setup_mocks();
     ret = sys_wait4(-200, &status, WNOHANG, NULL);
-    TEST_ASSERT(ret == 103);
+    TEST_ASSERT(ret == 103); // 103 is in group 200
     TEST_ASSERT(WEXITSTATUS(status) == 20);
-
+    
     // Test 5: Wait for non-existent PID
+    setup_mocks();
     ret = sys_wait4(999, &status, WNOHANG, NULL);
-    TEST_ASSERT(ret == -ECHILD); // find_zombie returns NULL, any_exists=0 since no match
-
+    TEST_ASSERT(ret == -ECHILD);
+    
     // Test 6: Wait for running process (102) -> WNOHANG should return 0
+    setup_mocks();
     ret = sys_wait4(102, &status, WNOHANG, NULL);
     TEST_ASSERT(ret == 0);
-
+    
     // Test 7: WNOHANG with no zombies (make all running)
+    setup_mocks();
     mock_child1.state = SRUN;
     mock_child3.state = SRUN;
     ret = sys_wait4(-1, &status, WNOHANG, NULL);
-    TEST_ASSERT(ret == 0); // Children exist, but none are zombies
-
+    TEST_ASSERT(ret == 0);
+    
     // Test 8: No children at all (ECHILD)
+    setup_mocks();
     mock_parent.p_children = NULL; // Clear list
     ret = sys_wait4(-1, &status, WNOHANG, NULL);
     TEST_ASSERT(ret == -ECHILD);
-
-    // Restore children for blocking tests
-    mock_parent.p_children = &mock_child1;
-
-    // Test 9: Blocking Wait (Simulate Sleep -> Wakeup -> Zombie)
-    // Setup: Child 102 is SRUN. Wait for 102.
-    // Logic: test_sched_sleep callback will change 102 to SZOMB.
-    mock_child2.state = SRUN;
-    mock_child2.pid = 102;
-    mock_child2.exit_code = 30;
     
-    // Reset call count
-    sched_sleep_calls = 0;
+    // Test 9: Blocking Wait (Simulate Sleep -> Wakeup -> Zombie)
+    setup_mocks();
+    mock_child2.exit_code = 30; // Set for this test
     
     ret = sys_wait4(102, &status, 0, NULL);
-    if (ret != 102) {
-        printf("DEBUG: Test 9 failed. ret=%d, calls=%d, child2.state=%d\n", ret, sched_sleep_calls, mock_child2.state);
-    }
     TEST_ASSERT(ret == 102);
     TEST_ASSERT(WEXITSTATUS(status) == 30);
     TEST_ASSERT(sched_sleep_calls == 1);
-
-    // Test 10: Blocking Wait Interrupted (EINTR)
-    // Setup: Wait for 102 (SRUN). Simulation will set sig_pending.
-    mock_child2.state = SRUN;
-    sched_sleep_calls = 0;
     
-    // Set callback mode to SIGNAL
-    sched_sleep_mode = 1; 
-
+    // Verify Reaping of 102 (Middle of list removal)
+    // list was 101 -> 102 -> 103.
+    // 102 removed. 101->p_sibling should be 103.
+    TEST_ASSERT(mock_child1.p_sibling == &mock_child3);
+    TEST_ASSERT(mock_child2.pid == -1);
+    TEST_ASSERT(mock_child2.state == 0);
+    
+    // Test 10: Blocking Wait Interrupted (EINTR)
+    setup_mocks();
+    sched_sleep_mode = 1; // Signal mode
+    
     ret = sys_wait4(102, &status, 0, NULL);
     TEST_ASSERT(ret == -EINTR);
     TEST_ASSERT(sched_sleep_calls == 1);
-    
-    // Clear signal for next tests
-    current_thread->sig_pending = 0;
 }

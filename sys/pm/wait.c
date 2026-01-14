@@ -70,19 +70,35 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
         target = find_zombie(pid, cur, &any_exists);
 
         if (target) {
-            // Found a zombie!
-            // TODO: Reaping logic (next task)
+            // Found a zombie! Reaping Logic.
             
-            // Temporary return for testing search logic
+            // 1. Return Status
             if (status) *status = (target->exit_code << 8); // Simple WEXITSTATUS
             
-            // Remove from lists (Stub for now, to enable loop breaking if called repeatedly)
-            // But we shouldn't modify global state if we are just testing search logic in isolation?
-            // "Task: Match based on pid argument / Reaping" are separate.
-            // But if I don't reap, the test loop will run forever finding the same zombie.
-            // For this specific commit (Search Logic), I just need to match correctly.
-            // I'll return the PID.
-            return target->pid;
+            // 2. Handle Rusage (Stubbed accumulator for now)
+            if (rusage) *rusage = target->rusage;
+            
+            // Accumulate to parent (Simple stub)
+            // cur->rusage_children.ru_utime += target->rusage.ru_utime;
+            // cur->rusage_children.ru_stime += target->rusage.ru_stime;
+
+            // 3. Unlink from Parent's List
+            if (cur->p_children == target) {
+                cur->p_children = target->p_sibling;
+            } else {
+                process_t *prev = cur->p_children;
+                while (prev && prev->p_sibling != target) prev = prev->p_sibling;
+                if (prev) prev->p_sibling = target->p_sibling;
+            }
+            
+            // 4. Free Process Slot
+            pid_t pid_val = target->pid;
+            target->pid = -1; // Mark as free
+            target->p_parent = NULL;
+            target->p_sibling = NULL;
+            target->state = 0; // FREE/SIDL
+            
+            return pid_val;
         }
 
         if (!any_exists) {
