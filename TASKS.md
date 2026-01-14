@@ -385,7 +385,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Set Divider Configuration Register (DCR).
                 - [x] Implement Periodic Mode (for scheduler).
                 - [x] Implement One-Shot Mode (for high-res sleeps).
-            - [ ] **Error Handling:** Setup Error Status Register (ESR) and LVT Error vector.
+            - [x] **Error Handling:** Setup Error Status Register (ESR) and LVT Error vector.
             - [ ] **IPI:** Implement ICR (Interrupt Command Register) writing logic.
         - [ ] **IO-APIC:**
             - [ ] **Enumeration:** Find IO-APIC(s) from MADT.

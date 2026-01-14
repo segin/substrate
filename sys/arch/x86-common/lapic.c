@@ -270,6 +270,55 @@ uint32_t lapic_timer_ticks_per_ms(void) {
     return lapic_ticks_per_ms;
 }
 
+// ==================== LAPIC Error Handling ====================
+
+// Setup LAPIC error handling
+void lapic_setup_error(uint8_t error_vector) {
+    if (!lapic_base) return;
+    
+    // Clear any existing errors by writing to ESR (write triggers clear)
+    lapic_write(LAPIC_ESR, 0);
+    lapic_write(LAPIC_ESR, 0);  // Write twice per Intel specs
+    
+    // Configure LVT Error to deliver on specified vector
+    lapic_write(LAPIC_ERROR, error_vector);
+    
+    kprint("LAPIC: Error handler configured on vector 0x");
+    char buf[3];
+    buf[0] = (error_vector >> 4) < 10 ? '0' + (error_vector >> 4) : 'A' + (error_vector >> 4) - 10;
+    buf[1] = (error_vector & 0xF) < 10 ? '0' + (error_vector & 0xF) : 'A' + (error_vector & 0xF) - 10;
+    buf[2] = '\0';
+    kprint(buf);
+    kprint("\n");
+}
+
+// Read and clear ESR (returns error codes)
+uint32_t lapic_get_error(void) {
+    if (!lapic_base) return 0;
+    
+    // Write to ESR to latch errors, then read
+    lapic_write(LAPIC_ESR, 0);
+    return lapic_read(LAPIC_ESR);
+}
+
+// Decode and print ESR error bits
+void lapic_print_error(uint32_t esr) {
+    kprint("LAPIC ESR: ");
+    if (esr == 0) {
+        kprint("No errors\n");
+        return;
+    }
+    if (esr & 0x01) kprint("[Send Checksum Error] ");
+    if (esr & 0x02) kprint("[Receive Checksum Error] ");
+    if (esr & 0x04) kprint("[Send Accept Error] ");
+    if (esr & 0x08) kprint("[Receive Accept Error] ");
+    if (esr & 0x10) kprint("[Redirectable IPI] ");
+    if (esr & 0x20) kprint("[Send Illegal Vector] ");
+    if (esr & 0x40) kprint("[Receive Illegal Vector] ");
+    if (esr & 0x80) kprint("[Illegal Register Address] ");
+    kprint("\n");
+}
+
 void lapic_send_eoi(void) {
     lapic_write(LAPIC_EOI, 0);
 }

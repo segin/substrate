@@ -94,6 +94,11 @@ void lapic_timer_oneshot(uint8_t vector, uint32_t ticks);
 void lapic_timer_stop(void);
 uint32_t lapic_timer_ticks_per_ms(void);
 
+// Error Handling
+void lapic_setup_error(uint8_t error_vector);
+uint32_t lapic_get_error(void);
+void lapic_print_error(uint32_t esr);
+
 // EOI
 void lapic_send_eoi(void);
 
