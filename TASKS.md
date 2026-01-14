@@ -300,8 +300,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Define macros for accessing PML4/PDPT/PD/PT via recursive window
                 - [x] V_PML4, V_PDPT(n), V_PD(n), V_PT(n) macros
             - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management
-                - [ ] `pmap_create()`: Allocate new PML4, copy kernel mappings (entries 256-511)
-                - [ ] `pmap_destroy()`: Free all user page table levels and PML4
+                - [x] `pmap_create()`: Allocate new PML4, copy kernel mappings (entries 256-511)
+                - [x] `pmap_destroy()`: Free all user page table levels and PML4
                 - [ ] `pmap_reference()`: Increment pmap reference count
             - [ ] `pmap_protect`: Change page protections
                 - [ ] Walk range and update PTE protection bits (R/W, NX, U/S)

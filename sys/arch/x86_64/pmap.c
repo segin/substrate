@@ -222,10 +222,72 @@ pmap_t pmap_create(void) {
     return pmap;
 }
 
+// Helper to free a page table page (convert phys to virt first)
+static void free_table_phys(uint64_t pa) {
+    void *va = pmap_ptokv(pa);
+    pmm_free_block(va);
+}
+
 void pmap_destroy(pmap_t pmap) {
     if (!pmap) return;
-    // TODO: Free user pages...
+    
+    // 1. Decrement ref count
+    // TODO: Atomic decrement
+    pmap->ref_count--;
+    if (pmap->ref_count > 0) return;
+    
+    // 2. Free user pages (PML4 entries 0-255)
+    // pmap->pml4 is accessible (virtual)
+    pml4e_t *pml4 = pmap->pml4;
+    
+    for (int i = 0; i < 256; i++) {
+        if (pml4[i] & PTE_P) {
+            uint64_t pdpt_phys = pml4[i] & PTE_ADDR_MASK;
+            pdpte_t *pdpt = (pdpte_t *)pmap_ptokv(pdpt_phys);
+            
+            for (int j = 0; j < 512; j++) {
+                if (pdpt[j] & PTE_P) {
+                    uint64_t pd_phys = pdpt[j] & PTE_ADDR_MASK;
+                    
+                    // Check for 1GB pages (PDPTE.PS)
+                    if (pdpt[j] & PTE_PS) {
+                        // Huge page, no PD underneath
+                        continue; 
+                    }
+                    
+                    pde_t *pd = (pde_t *)pmap_ptokv(pd_phys);
+                    
+                    for (int k = 0; k < 512; k++) {
+                        if (pd[k] & PTE_P) {
+                            uint64_t pt_phys = pd[k] & PTE_ADDR_MASK;
+                            
+                            // Check for 2MB pages (PDE.PS)
+                            if (pd[k] & PTE_PS) {
+                                // Large page, no PT underneath
+                                continue;
+                            }
+                            
+                            pte_t *pt = (pte_t *)pmap_ptokv(pt_phys);
+                            
+                            // Decrement refcounts for pages? 
+                            // For now just free the PT itself
+                            // (We assume user pages are managed by VM objects, 
+                            // but we should probably update their refcounts here if we were fully integrated)
+                            
+                            free_table_phys(pt_phys);
+                        }
+                    }
+                    free_table_phys(pd_phys);
+                }
+            }
+            free_table_phys(pdpt_phys);
+        }
+    }
+    
+    // 3. Free PML4
     pmm_free_block(pmap->pml4);
+    
+    // 4. Free struct
     kfree(pmap, sizeof(struct pmap));
 }
 
