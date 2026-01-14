@@ -52,7 +52,13 @@ The kernel is the core of the operating system, structured as follows:
     - **`exec/`**: Binary loaders (ELF, PE).
         - **`perso/`**: Execution Personalities (Native, Linux, FreeBSD) handling syscall translation.
 - **`sys/kern/`**: Kernel subsystems.
-    - **Scheduling**: 1:1 Threading model (`sched.c`), Process/Thread management.
+    - **Scheduling**:
+      - **Algorithm:** Multilevel Feedback Queue (MLFQ) with Realtime, Timeshare, and Idle priority classes.
+      - **SMP Support:** Per-CPU Runqueues, Work Stealing load balancing, CPU Affinity, and IPI preemption.
+      - **Synchronization:**
+        - **Spinlocks:** SMP-safe locking.
+        - **Turnstiles:** Priority Inheritance for Mutexes.
+        - **Sleep Queues:** Hashed O(1) wait queues.
     - **Process Model**:
       - **PID 0 (TID 0):** Swapper/Idle task.
       - **PID 1 (TID 1):** Init process (spawned by kernel).
