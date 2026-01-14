@@ -402,13 +402,13 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Allocate low-memory trampoline page (under 1MB).
                 - [x] Copy 16-bit real mode entry code to trampoline.
                 - [x] Send INIT IPI -> Wait -> SIPI -> Wait -> SIPI sequence.
-            - [ ] **Per-CPU Data:**
-                - [ ] implement `gs_base` (or `fs`) storage for CPU-local variables.
-                - [ ] Per-CPU Scheduler Runqueues.
-                - [ ] Per-CPU GDTs and TSSs.
-            - [ ] **Synchronization:**
-                - [ ] Validate Spinlock implementation (ticket locks or MCS locks).
-                - [ ] Audit all global data structures for race conditions.
+            - [x] **Per-CPU Data:**
+                - [x] implement `gs_base` (or `fs`) storage for CPU-local variables.
+                - [x] Per-CPU Scheduler Runqueues.
+                - [x] Per-CPU GDTs and TSSs.
+            - [x] **Synchronization:**
+                - [x] Validate Spinlock implementation (ticket locks or MCS locks).
+                - [x] Audit all global data structures for race conditions.
         - [x] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
 - [ ] **Scheduling (Scheduler Refactor):**
     - [ ] **Algorithm (ULE/MLFQ):**
