@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include "../vm/vm_kmem.h" // for kmalloc
 #include "../kern/sched.h" // for sched_wakeup, sleep
+#include <sys/poll.h>
 
 #define TTY_MAGIC 0x5401
 
@@ -382,4 +383,47 @@ void tty_close(struct tty *tty) {
     if (tty->count <= 0) {
         if (tty->driver->close) tty->driver->close(tty);
     }
+}
+
+int tty_poll(struct tty *tty, void *waiter) {
+    if (!tty) return POLLNVAL;
+    (void)waiter; // No wait queue support yet
+    
+    int events = 0;
+    
+    // Check for input
+    // If ICANON, check read_buf (canonical lines).
+    // If !ICANON, check raw_buf (or whatever logic tty_read uses).
+    // Logic in tty_read:
+    // If read_buf.head != read_buf.tail, we have data.
+    // If !ICANON, scanning raw_buf might be needed? 
+    // Wait, canon() moves raw -> read.
+    // Actually, tty_read checks read_buf. If empty, calls canon().
+    // canon() waits for delimiter.
+    
+    // So POLLIN is true if:
+    // 1. read_buf is not empty.
+    // 2. OR (if !ICANON) raw_buf is not empty? 
+    //    tty_flip_buffer_push puts to raw_buf.
+    //    If !ICANON, canon() passes through immediately logic?
+    //    Let's check tty_read again. 
+    //    tty_read calls canon() if read_buf empty.
+    //    canon() waits for delimiter.
+    //    Use tty->delct? tty->delct > 0 means we have a line/delimiter.
+    
+    if (tty->read_buf.head != tty->read_buf.tail) {
+        events |= POLLIN | POLLRDNORM;
+    } else if (tty->delct > 0) {
+        // We have a delimiter in raw buf, so read will succeed (after canon runs).
+        // Since we can't run canon here (it might block?), we assume readable.
+        // Actually, if we are here, we should trigger canon? 
+        // No, poll shouldn't change state.
+        // But if delct > 0, it means we HAVE a line ready to be processed.
+        events |= POLLIN | POLLRDNORM;
+    }
+    
+    // Always writable for now
+    events |= POLLOUT | POLLWRNORM;
+    
+    return events;
 }

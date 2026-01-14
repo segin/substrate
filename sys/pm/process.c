@@ -4,6 +4,7 @@
 #include <kern/sched.h> // For MAX_THREADS, thread creation
 #include <stddef.h>
 #include <string.h>
+#include "../arch/i386/pmap.h"
 
 process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
@@ -55,6 +56,21 @@ process_t *proc_create(struct personality *pers) {
 int proc_fork(process_t *parent, void *stack) {
     process_t *child_proc = proc_create(parent->pers);
     if (!child_proc) return -1;
+    
+    // Clone parent's address space with COW
+    if (parent->pmap) {
+        child_proc->pmap = pmap_fork(parent->pmap);
+        if (!child_proc->pmap) {
+            // Failed to clone pmap
+            child_proc->pid = -1; // Mark as free
+            return -1;
+        }
+    } else {
+        child_proc->pmap = NULL; // Kernel process (shouldn't fork)
+    }
+    
+    // Copy cwd_node
+    child_proc->cwd_node = parent->cwd_node;
     
     // Copy parent resources (FDs)
     for(int j=0; j<MAX_FD; j++) {

@@ -109,12 +109,19 @@ static int console_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     return tty_ioctl(console_tty, request, (unsigned long)arg);
 }
 
+static int console_node_poll(fs_node_t *node, void *waiter) {
+    (void)node;
+    if (!console_tty) return 0; // POLLNVAL?
+    return tty_poll(console_tty, waiter);
+}
+
 static fs_node_t console_node = {
     .name = "console",
     .flags = FS_CHARDEVICE,
     .read = console_node_read,
     .write = console_node_write,
-    .ioctl = console_node_ioctl
+    .ioctl = console_node_ioctl,
+    .poll = console_node_poll
 };
 
 fs_node_t *console_get_node(void) {

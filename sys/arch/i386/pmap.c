@@ -503,13 +503,76 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
     return 0;
 }
 
+// Map a 4MB page (Single PDE, no Page Table)
+// Requires PSE to be enabled
+int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
+    (void)flags;
+    
+    // Validate alignment (4MB)
+    if ((va & 0x3FFFFF) || (pa & 0x3FFFFF)) return -1;
+    
+    // Must be active address space
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return -1;
+
+    uint32_t pdi = PD_INDEX(va);
+
+    // Check if existing mapping is conflicting
+    if (V_PD[pdi] & PTE_P) {
+        if (V_PD[pdi] & PTE_PS) {
+            // Already a large page, just overwrite
+        } else {
+            // It's a page table. We don't support converting PT -> Large Page yet (requires freeing PT)
+            // TODO: Implement PT freeing/eviction
+            return -1;
+        }
+    }
+
+    // Build PDE flags
+    // PTE_PS (bit 7) must be set
+    uint32_t pde_flags = PTE_P | PTE_PS;
+    if (prot & VM_PROT_WRITE) pde_flags |= PTE_W;
+    
+    // PTE_U only if below kernel split (though usually large pages are for kernel buffers)
+    if (va < 0xC0000000) pde_flags |= PTE_U;
+    
+    // Global flag if supported and kernel space
+    uint32_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    if ((cr4 & 0x80) && va >= 0xC0000000) {
+        pde_flags |= PTE_G;
+    }
+
+    // Write PDE
+    V_PD[pdi] = pa | pde_flags;
+    
+    // Invalidate broad range (4MB) - INVLPG only invalidates one 4KB page usually?
+    // Usage of INVLPG on a large page address should invalidate the TLB entry for that large page.
+    pmap_invalidate_page(va);
+    
+    return 0;
+}
+
 void pmap_remove(pmap_t pmap, uint32_t va) {
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return;
+    
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
+    
     if (!(V_PD[pdi] & PTE_P)) return;
+    
+    // Check for Large Page
+    if (V_PD[pdi] & PTE_PS) {
+        // Align VA to 4MB boundary for check (optional but safe)
+        // Remove the entire 4MB mapping
+        V_PD[pdi] = 0;
+        pmap_invalidate_page(va); // INVLPG invalidates the large page entry
+        return;
+    }
+    
     uint32_t *pt = V_PT(pdi);
     pt[pti] = 0;
     pmap_invalidate_page(va);
@@ -561,9 +624,18 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
+    
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
+    
     if (!(V_PD[pdi] & PTE_P)) return 0;
+    
+    // Check for Large Page (4MB)
+    if (V_PD[pdi] & PTE_PS) {
+        // Physical address is (PDE & mask) + (VA & 0x3FFFFF)
+        return (V_PD[pdi] & 0xFFC00000) + (va & 0x3FFFFF);
+    }
+    
     uint32_t *pt = V_PT(pdi);
     if (!(pt[pti] & PTE_P)) return 0;
     return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);

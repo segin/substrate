@@ -514,6 +514,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Ensure PTE_USER bit set for all user-accessible pages
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
     - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
+    - [ ] **Advanced Diagnostics (Missing):**
+        - [ ] **Stack Trace:** Unwind stack frames (EBP chain) on panic.
+        - [ ] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file).
+        - [ ] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities.
+        - [ ] **Invalid Opcode Decoding:** Dump instruction bytes at EIP.
     - [ ] **VM86 Mode (i386 only):**
         - [ ] **Initialization:**
             - [ ] Set `EFLAGS.VM` bit.
@@ -707,9 +712,20 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Backend Drivers:**
         - [ ] **VGA/Keyboard:** Bind keyboard input + VGA output to a TTY.
         - [ ] **Framebuffer Console (Graphical):**
-            - [ ] Drivers: VESA, UEFI GOP, BGA, VirtIO-GPU.
-            - [ ] Rendering: PSF Bitmap font support, Software Blitting, Scrolling.
-            - [ ] Emulation: VT102 compatible rendering on pixel buffer.
+            - [ ] **Drivers:**
+                - [ ] VESA VBE (Linear Framebuffer).
+                - [ ] UEFI GOP (Graphics Output Protocol).
+                - [ ] Bochs Graphics Adapter (BGA).
+                - [ ] VirtIO-GPU (2D acceleration hooks).
+            - [ ] **Rendering:**
+                - [ ] PSF1/PSF2 Bitmap font parser and renderer.
+                - [ ] Software Blitting (RectFill, BitBlt, CopyArea).
+                - [ ] Double Buffering (optional, for smoothness).
+                - [ ] Hardware Hardware Cursor support (if available).
+            - [ ] **Emulation:**
+                - [ ] VT102 / ANSI escape sequence parser.
+                - [ ] Cursor positioning and attributes (color, bold, reverse).
+                - [ ] Scrolling (hardware panning or software copy).
         - [ ] **Serial Console (Headless):**
             - [ ] VT102 Pass-through (allow host terminal to handle rendering).
     - [ ] **Features:**
@@ -727,7 +743,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
             - [ ] `v_writecount` (writers count), `v_flag` (VROOT, VTEXT, VSYSTEM, etc.).
             - [ ] `v_lock` (exclusive/shared lock).
-            - [ ] **Life Cycle:** `getnewvnode()`, `vref()`, `vrele()`, `vput()`, `vget()`, `vgone()`, `vclean()`.
+            - [ ] **Life Cycle:**
+                - [ ] `getnewvnode()`: Allocate new vnode from zone, recycle LRU if full.
+                - [ ] `vref()`: Increment use count.
+                - [ ] `vrele()`: Decrement use count, trigger inactive/reclaim if zero.
+                - [ ] `vput()`: Unlock and vrele.
+                - [ ] `vget()`: Lock and vref.
+                - [ ] `vgone()`: Mark vnode for doom/destruction.
+                - [ ] `vclean()`: Disassociate vnode from filesystem data.
         - [ ] **`struct mount`:**
             - [ ] `mnt_vnodecovered` (vnode mounted on).
             - [ ] `mnt_op` (VFS ops vector).
@@ -888,36 +911,40 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] **Documentation:**
         - [x] Create `man/man5/udf.5` (filesystem description).
         - [x] Create `man/man4/udf.4` (kernel driver).
-    - [ ] **DevFS (`/dev`):**
-        - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
-        - [x] **VFS Glue:** Auto-generate VFS nodes when registering devices.
-        - [ ] **Nodes:**
-            - [x] Support `null`.
-            - [x] Support `zero`.
-            - [x] Support `full`.
-            - [x] Support `random`.
-            - [x] Support `tty` (proxy to current process TTY).
-    - [ ] **ProcFS (`/proc`):**
-        - [ ] **Process Info:**
-            - [x] Expose `cmdline`.
-            - [x] Expose `maps`.
-            - [x] Expose `status`.
-            - [x] Expose `fd` per PID.
-        - [ ] **System Info:**
-            - [x] Expose `cpuinfo`.
-            - [x] Expose `meminfo`.
-            - [x] Expose `uptime`.
-        - [x] **Dynamic generation:** Generate content on `read()` (virtual files).
-        - [x] **Personality Awareness:** Detect caller personality (Linux/FreeBSD) and adjust file contents/formats dynamically (e.g., `status` file structure).
-    - [ ] **SysFS (`/sys`):**
-        - [x] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
-        - [x] **Attributes:** Map kernel variables to readable/writable files.
-    - [ ] **FUSE (`/dev/fuse`):**
-        - [x] **Device Interface:** Implement `/dev/fuse` char device for control.
-        - [ ] **Protocol Dispatch:**
-            - [ ] Opcode dispatch loop
-            - [ ] User-kernel shared memory buffer
-        - [x] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
+- [ ] **DevFS (`/dev`):**
+    - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
+    - [x] **VFS Glue:** Auto-generate VFS nodes when registering devices.
+    - [ ] **Nodes:**
+        - [x] Support `null`.
+        - [x] Support `zero`.
+        - [x] Support `full`.
+        - [x] Support `random`.
+        - [x] Support `tty` (proxy to current process TTY).
+        - [ ] Support `mem` / `kmem` (Physical/Kernel memory access).
+        - [ ] Support `port` (I/O port access).
+        - [ ] Support `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/X`).
+        - [ ] Support `urandom` (CSPRNG vs true RNG).
+- [ ] **ProcFS (`/proc`):**
+    - [ ] **Process Info:**
+        - [x] Expose `cmdline`.
+        - [x] Expose `maps`.
+        - [x] Expose `status`.
+        - [x] Expose `fd` per PID.
+    - [ ] **System Info:**
+        - [x] Expose `cpuinfo`.
+        - [x] Expose `meminfo`.
+        - [x] Expose `uptime`.
+    - [x] **Dynamic generation:** Generate content on `read()` (virtual files).
+    - [x] **Personality Awareness:** Detect caller personality (Linux/FreeBSD) and adjust file contents/formats dynamically (e.g., `status` file structure).
+- [ ] **SysFS (`/sys`):**
+    - [x] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
+    - [x] **Attributes:** Map kernel variables to readable/writable files.
+- [ ] **FUSE (`/dev/fuse`):**
+    - [x] **Device Interface:** Implement `/dev/fuse` char device for control.
+    - [ ] **Protocol Dispatch:**
+        - [ ] Opcode dispatch loop
+        - [ ] User-kernel shared memory buffer
+    - [x] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
     - [ ] **Network Filesystems:**
         - [ ] **9P (9P2000.L):**
             - [x] **Client:** Implement 9P client for VFS integration.
@@ -1010,12 +1037,45 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] **Event Notification:**
                 - [ ] **`sys_select` / `sys_poll`:**
                     - [ ] `select_wait` queueing logic.
+                        - [ ] Define `struct poll_table` (wait queue list).
+                        - [ ] Implement `poll_initwait()` / `poll_freewait()`.
+                        - [ ] Per-FD `poll` method calls `poll_wait(wait_queue, poll_table)`.
                     - [ ] Timeout handling (sleep with timeout).
+                        - [ ] Convert `struct timeval` / `int timeout_ms` to kernel ticks.
+                        - [ ] Use `sched_sleep_timeout(chan, ticks)` or similar.
+                        - [ ] Handle `EINTR` on signal during sleep.
                     - [ ] Bitmask/Revents populating.
+                        - [ ] `select`: Populate `readfds`, `writefds`, `exceptfds` bitmasks.
+                        - [ ] `poll`: Populate `revents` field in each `struct pollfd`.
+                        - [ ] Return count of ready FDs.
+                    - [ ] **Wait Queue Infrastructure:**
+                        - [ ] Define `struct wait_queue_head` (spinlock + list head).
+                        - [ ] Define `struct wait_queue_entry` (thread ref + callback).
+                        - [ ] Implement `init_waitqueue_head()`.
+                        - [ ] Implement `add_wait_queue()` / `remove_wait_queue()`.
+                        - [ ] Implement `wake_up()` / `wake_up_interruptible()`.
+                    - [ ] **Driver Integration:**
+                        - [ ] Add `poll` method to `fs_node_t` (already done).
+                        - [ ] TTY: Wake readers on `tty_flip_buffer_push`.
+                        - [ ] Pipe: Wake readers/writers on data availability.
+                        - [ ] Socket: Wake on connection/data events.
                 - [ ] **`sys_epoll`:**
                     - [ ] `epoll_create`: Allocate event context.
+                        - [ ] Define `struct eventpoll` (rb-tree of interests, ready list).
+                        - [ ] Allocate anonymous FD pointing to `eventpoll`.
+                        - [ ] Initialize spinlock and wait queue.
                     - [ ] `epoll_ctl`: Add/Modify/Remove file descriptors (O(1) logic).
+                        - [ ] `EPOLL_CTL_ADD`: Insert into rb-tree, register callback with target FD.
+                        - [ ] `EPOLL_CTL_MOD`: Update event mask in existing entry.
+                        - [ ] `EPOLL_CTL_DEL`: Remove from rb-tree, unregister callback.
+                        - [ ] Handle `EEXIST`/`ENOENT` error cases.
                     - [ ] `epoll_wait`: Block on event list.
+                        - [ ] Check ready list (events already triggered).
+                        - [ ] If empty, sleep on eventpoll wait queue.
+                        - [ ] Copy ready events to userspace `struct epoll_event` array.
+                        - [ ] Handle `maxevents` limit and timeout.
+                        - [ ] Edge-triggered (`EPOLLET`): Remove from ready list after report.
+                        - [ ] Level-triggered: Keep in ready list if still active.
             - [ ] **`sys_execve` (Loader Dispatch):**
                 - [ ] Path lookup and permission check.
                 - [ ] Read first 128 bytes (Shebang/Magic detection).
@@ -1078,18 +1138,51 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [ ] Pointer to symbol table / Number of symbols.
                 - [ ] **Optional Header (`aouthdr`):**
                     - [ ] Magic: 0x10B (ZMAGIC - Demand Paged).
+                        - [ ] Define `AOUT_ZMAGIC` constant (0x10B).
+                        - [ ] Validate magic number, reject unsupported types (OMAGIC, NMAGIC).
                     - [ ] `tsize` (Text size), `dsize` (Data size), `bsize` (BSS size).
+                        - [ ] Parse `tsize` from offset 4 (uint32_t).
+                        - [ ] Parse `dsize` from offset 8 (uint32_t).
+                        - [ ] Parse `bsize` from offset 12 (uint32_t).
+                        - [ ] Validate sizes are reasonable (< 2GB, page-aligned for ZMAGIC).
                     - [ ] `entry` (Entry point virtual address).
+                        - [ ] Parse `entry` from offset 16 (uint32_t).
+                        - [ ] Validate entry is within `.text` segment bounds.
                     - [ ] `text_start`, `data_start`.
+                        - [ ] Parse `text_start` from offset 20 (uint32_t).
+                        - [ ] Parse `data_start` from offset 24 (uint32_t).
+                        - [ ] Validate `text_start` < `data_start` or handle BSS-only cases.
                 - [ ] **Section Headers (`scnhdr`):**
                     - [ ] Name (`.text`, `.data`, `.bss`, `.lib`).
+                        - [ ] Parse 8-byte section name (may be NUL-padded).
+                        - [ ] Handle long names (pointer to string table, `/offset` format).
+                        - [ ] Identify special sections (`.lib`, `.comment`, `.debug`).
                     - [ ] `paddr` (Physical), `vaddr` (Virtual).
+                        - [ ] Parse `paddr` from offset 8 (uint32_t).
+                        - [ ] Parse `vaddr` from offset 12 (uint32_t).
+                        - [ ] Validate `vaddr` is user-space address (< 0xC0000000).
                     - [ ] `size`, `scnptr` (File offset).
+                        - [ ] Parse `size` from offset 16 (uint32_t).
+                        - [ ] Parse `scnptr` from offset 20 (uint32_t).
+                        - [ ] Validate `scnptr + size` <= file size.
                     - [ ] Flags (`STYP_TEXT`, `STYP_DATA`, `STYP_BSS`).
+                        - [ ] Define flag constants: `STYP_TEXT=0x20`, `STYP_DATA=0x40`, `STYP_BSS=0x80`.
+                        - [ ] Map flags to pmap protections (RX, RW, RW-zero).
+                        - [ ] Handle `STYP_LIB` (0x800) for shared library sections.
                 - [ ] **SCO Shared Libraries (`.lib` section):**
                     - [ ] Parse `.lib` section header.
+                        - [ ] Locate section with name `.lib` or flag `STYP_LIB`.
+                        - [ ] Read section content from `scnptr` offset.
                     - [ ] **Path entries:** Absolute path to shared library.
+                        - [ ] Parse path table offset from `.lib` header.
+                        - [ ] Iterate path entries (NUL-terminated strings).
+                        - [ ] Resolve library path (search `/shlib`, `/usr/shlib`).
+                        - [ ] Load and map referenced shared libraries recursively.
                     - [ ] **Offset entries:** Import method (static jump table).
+                        - [ ] Parse import table offset and count.
+                        - [ ] Build jump table at fixed address (`0x08000000` typical).
+                        - [ ] Populate jump stubs (`jmp [addr]`) for each import.
+                        - [ ] Handle import ordinals vs. named imports.
             - [ ] **OMF (Intel Object Module Format) - 286/386:**
                 - [ ] **Record Types:**
                     - [ ] `0x80` (`THEADR`): Module Name.

@@ -89,7 +89,8 @@ pmap_t pmap_fork(pmap_t src_pmap); // Fork with COW
 // Mapping Operations
 // Returns 0 on success, < 0 on error
 int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
-int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags);
+int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags); // Deprecated name match
+int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
 void pmap_remove(pmap_t pmap, uint32_t va);
 uint32_t pmap_extract(pmap_t pmap, uint32_t va); // Get PA from VA
 
