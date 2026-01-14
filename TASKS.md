@@ -410,20 +410,20 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Validate Spinlock implementation (ticket locks or MCS locks).
                 - [x] Audit all global data structures for race conditions.
         - [x] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
-- [ ] **Scheduling (Scheduler Refactor):**
-    - [ ] **Algorithm (ULE/MLFQ):**
+- [x] **Scheduling (Scheduler Refactor):**
+    - [x] **Algorithm (ULE/MLFQ):****
         - [x] **Multilevel Queues:** Separate queues for Realtime, Timeshare, and Idle priority classes.
         - [x] **Interactiveness:** Heuristics to boost interactive I/O-bound threads.
         - [x] **Decay:** Handling priority decay for CPU handling threads.
-    - [ ] **SMP Scalability:**
+    - [x] **SMP Scalability:****
         - [x] **Per-CPU Runqueues:** Remove global scheduler lock; lock individual runqueues.
         - [x] **Load Balancing:** "Work Stealing" logic when a CPU goes idle.
         - [x] **Affinity:** Respect `sched_setaffinity` masks.
         - [x] **IPI:** Inter-Processor Interrupts for preemption of remote CPUs.
-    - [ ] **Synchronization Primitives:**
+    - [x] **Synchronization Primitives:****
         - [x] **Turnstiles:** Priority Inheritance implementation for Mutexes (prevent inversion).
         - [x] **Sleep Queues:** Hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
-    - [ ] **Context Switching:**
+    - [x] **Context Switching:****
         - [x] **FPU Lazy Save:** `Unordered` exception logic for FPU context.
         - [x] **PCB:** Refine Process Control Block for thread/process split.
     - [x] **Kernel Process (PID 0):**
