@@ -367,7 +367,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Power-of-Two Zones:** Back `malloc` with UMA zones for sizes 16, 32, ... 4096.
             - [x] **Large Allocations:** Bypass UMA for >4KB allocs (direct `vm_map` allocation).
             - [x] **Statistics:** Track memory usage by `malloc_type` (subsystem).
-        - [ ] **Technical Debt & Optimization (Audit Findings):**
+        - [x] **Technical Debt & Optimization (Audit Findings):**
             - [x] **Refactor `uma_find_slab()`:** Replace O(N) linear search with hash table or RB-tree.
             - [x] **Safety:** Add protection against freeing foreign pointers (pointer tracking).
             - [x] **Redzones:** Enhance redzones with canary values for corruption detection.
