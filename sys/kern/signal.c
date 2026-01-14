@@ -190,22 +190,7 @@ void signal_handle_pending(registers_t *regs) {
         return;
     }
 
-    // Deliver signal: Set up user stack frame
-    // 1. Push current registers onto user stack
-    // 2. Push signal number
-    // 3. Push return address (trampoline)
-    // 4. Set EIP to handler
-    
-    uint32_t esp = regs->useresp;
-    
-    // Push registers_t (simplified)
-    esp -= sizeof(registers_t);
-    // Note: We need to be careful about mapping here. 
-    // For now, assume user stack is accessible.
-    // memcpy((void*)esp, regs, sizeof(registers_t));
-    
-    // For this prototype, we'll just log and panic if a handler is set, 
-    // as full user-mode signal delivery is complex.
-    kprint("Signal handler delivery not fully implemented in prototype\n");
-    panic("Signal handler delivery");
+    // Deliver signal via architecture-specific sendsig
+    extern void sendsig(sig_t handler, int sig, uint32_t mask, registers_t *regs);
+    sendsig(act->sa_handler, sig, current_thread->sig_mask, regs);
 }

@@ -449,7 +449,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Implement PID 1 protection and safe exit handling.
     - [ ] **Delivery & context:**
         - [ ] **Debug Delivery:**
-            - [ ] Isolate logic for frame pushing (remove panic).
+            - [x] Isolate logic for frame pushing (remove panic).
             - [ ] Create architecture-dependent `struct sigframe`.
             - [ ] Copy frame to aligned user stack pointer.
             - [ ] Set `EIP` to trampoline, `ESP` to frame.
