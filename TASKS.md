@@ -414,7 +414,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Algorithm (ULE/MLFQ):**
         - [x] **Multilevel Queues:** Separate queues for Realtime, Timeshare, and Idle priority classes.
         - [x] **Interactiveness:** Heuristics to boost interactive I/O-bound threads.
-        - [ ] **Decay:** Handling priority decay for CPU handling threads.
+        - [x] **Decay:** Handling priority decay for CPU handling threads.
     - [ ] **SMP Scalability:**
         - [ ] **Per-CPU Runqueues:** Remove global scheduler lock; lock individual runqueues.
         - [ ] **Load Balancing:** "Work Stealing" logic when a CPU goes idle.
