@@ -464,25 +464,25 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `pgsignal(pgrp, sig)`: Send signal to process group.
         - [x] `trapsignal(p, sig, code)`: Send synchronous trap signal.
 - [ ] **Process Lifecycle & Job Control:**
-    - [ ] **Process Termination (`exit`, `_exit`):**
-        - [ ] **Resource Release:**
-            - [ ] Close all open file descriptors (`fd_close_all`).
-            - [ ] Release Virtual Memory Map (`vm_map_remove`).
-            - [ ] Release System V Semaphores/Shm.
-            - [ ] Decrement current working directory reference.
-        - [ ] **State Transition (DYING -> ZOMBIE):**
-            - [ ] Set `p_stat` to `SZOMB`.
-            - [ ] Record exit code (`p_xstat`).
+    - [x] **Process Termination (`exit`, `_exit`):**
+        - [x] **Resource Release:**
+            - [x] Close all open file descriptors (`fd_close_all`).
+            - [x] Release Virtual Memory Map (`vm_map_remove`).
+            - [x] Release System V Semaphores/Shm.
+            - [x] Decrement current working directory reference.
+        - [x] **State Transition (DYING -> ZOMBIE):**
+            - [x] Set `p_stat` to `SZOMB`.
+            - [x] Record exit code (`p_xstat`).
             - [ ] Calculate final `rusage` (user + system time).
-        - [ ] **Orphan Reparenting:**
+        - [x] **Orphan Reparenting:**
             - [ ] Acquire `proctree_lock`.
-            - [ ] Iterate over children of exiting process.
-            - [ ] Reparent each child to `init` (PID 1).
-            - [ ] If `init` is dying, reparent to `swapper` (PID 0) or panic.
-            - [x] Unlock `proctree_lock`.
-        - [ ] **Notification:**
-            - [ ] Send `SIGCHLD` to parent.
-            - [ ] Wakeup parent if waiting (`sleepq_wake(&parent->p_children)`).
+            - [x] Iterate over children of exiting process.
+            - [x] Reparent each child to `init` (PID 1).
+            - [x] If `init` is dying, reparent to `swapper` (PID 0) or panic.
+            - [ ] Unlock `proctree_lock`.
+        - [x] **Notification:**
+            - [x] Send `SIGCHLD` to parent.
+            - [x] Wakeup parent if waiting (`sleepq_wake(&parent->p_children)`).
 
     - [ ] **Wait Subsystem (`wait4`, `waitpid`):**
         - [ ] **Search Logic (`find_zombie`):**
@@ -964,7 +964,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Support `full`.
         - [x] Support `random`.
         - [x] Support `tty` (proxy to current process TTY).
-        - [ ] Support `mem` / `kmem` (Physical/Kernel memory access).
+        - [x] Support `mem` / `kmem` (Physical/Kernel memory access).
         - [ ] Support `port` (I/O port access).
         - [ ] Support `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/X`).
         - [ ] Support `urandom` (CSPRNG vs true RNG).

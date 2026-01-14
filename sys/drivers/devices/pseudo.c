@@ -72,6 +72,58 @@ static uint32_t tty_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return size;
 }
 
+// /dev/mem
+static uint32_t mem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    // Limit to 1GB (Direct Map size)
+    if (offset > 0x3FFFFFFF) return 0; // EOF or Error? EOF for now.
+    
+    // Physical to Virtual (Kernel Direct Map)
+    // 0x00000000 (Phys) -> 0xC0000000 (Virt)
+    uint8_t *src = (uint8_t*)((uintptr_t)offset + 0xC0000000);
+    
+    // Check bounds vs 1GB
+    if (offset + size > 0x40000000) {
+        size = 0x40000000 - offset;
+    }
+    
+    memcpy(buffer, src, size);
+    return size;
+}
+
+static uint32_t mem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    if (offset > 0x3FFFFFFF) return 0;
+    
+    uint8_t *dst = (uint8_t*)((uintptr_t)offset + 0xC0000000);
+    
+    if (offset + size > 0x40000000) {
+        size = 0x40000000 - offset;
+    }
+    
+    memcpy(dst, buffer, size);
+    return size;
+}
+
+// /dev/kmem
+static uint32_t kmem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    // Access arbitrary virtual address.
+    // DANGEROUS: If offset is unmapped, we panic.
+    // For now, naive implementation as is standard for kmem in simple kernels.
+    
+    void *src = (void*)(uintptr_t)offset;
+    memcpy(buffer, src, size);
+    return size;
+}
+
+static uint32_t kmem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    void *dst = (void*)(uintptr_t)offset;
+    memcpy(dst, buffer, size);
+    return size;
+}
+
 static fs_node_t null_node;
 
 static fs_node_t zero_node;
@@ -143,15 +195,27 @@ void pseudo_init(void) {
 
 
     memset(&tty_node, 0, sizeof(fs_node_t));
-
     strcpy(tty_node.name, "tty");
-
     tty_node.flags = FS_CHARDEVICE;
-
     tty_node.read = &tty_read;
-
     tty_node.write = &tty_write;
-
     devfs_register_device(&tty_node);
 
+    // /dev/mem
+    static fs_node_t mem_node;
+    memset(&mem_node, 0, sizeof(fs_node_t));
+    strcpy(mem_node.name, "mem");
+    mem_node.flags = FS_CHARDEVICE;
+    mem_node.read = &mem_read;
+    mem_node.write = &mem_write;
+    devfs_register_device(&mem_node);
+
+    // /dev/kmem
+    static fs_node_t kmem_node;
+    memset(&kmem_node, 0, sizeof(fs_node_t));
+    strcpy(kmem_node.name, "kmem");
+    kmem_node.flags = FS_CHARDEVICE;
+    kmem_node.read = &kmem_read;
+    kmem_node.write = &kmem_write;
+    devfs_register_device(&kmem_node);
 }
