@@ -14,6 +14,12 @@
 #define SZOMB  5 // Process exited but not reaped
 #define SDYING 6 // Process is dying (in exit path)
 
+// Process Flags (p_flag)
+#define P_CONTINUED  0x0001  // Process has been continued (for WCONTINUED)
+#define P_TRACED     0x0002  // Being traced (ptrace)
+#define P_WAITED     0x0004  // Stopped state already reported
+
+
 typedef uint8_t process_state_t;
 
 // Forward declarations
@@ -48,6 +54,7 @@ typedef struct process {
     
     // Process State
     uint8_t state; // process_state_t
+    uint16_t p_flag; // Process flags (P_CONTINUED, P_TRACED, etc.)
     
     // Hierarchy
     struct process *p_parent;     // Parent process

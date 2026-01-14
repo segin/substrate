@@ -8,30 +8,33 @@ extern thread_t *current_thread;
 extern void sched_sleep(void *chan);
 
 /*
- * find_zombie: Search for a zombie child matching the PID criteria.
+ * find_waitable_child: Search for a child matching the wait criteria.
+ * 
+ * Matches zombie children, stopped children (if WUNTRACED), and continued children (if WCONTINUED).
  * 
  * Arguments:
  *   pid: Search criteria
- *     > 0: Wait for specific child with PID = pid.
- *     = -1: Wait for any child.
- *     = 0: Wait for any child in the caller's process group.
- *     < -1: Wait for any child in process group = -pid.
  *   parent: The process whose children to search.
- *   out_any_exists: Output pointer, set to 1 if any child matches the criteria (even if not zombie).
+ *   options: Wait options (WNOHANG, WUNTRACED, WCONTINUED)
+ *   out_any_exists: Output pointer, set to 1 if any child matches the PID criteria.
+ *   out_reason: Output: 0=zombie, 1=stopped, 2=continued
  * 
  * Returns:
- *   Pointer to the matching zombie process_t, or NULL if no zombie found.
+ *   Pointer to the matching child process_t, or NULL if none found.
  */
-static process_t *find_zombie(pid_t pid, process_t *parent, int *out_any_exists) {
+static process_t *find_waitable_child(pid_t pid, process_t *parent, int options, 
+                                       int *out_any_exists, int *out_reason) {
     if (!parent) return NULL;
 
     process_t *child = parent->p_children;
     process_t *found = NULL;
     int exists = 0;
+    int reason = 0;
 
     while (child) {
         int match = 0;
 
+        // PID matching logic
         if (pid > 0) {
             if (child->pid == pid) match = 1;
         } else if (pid == -1) {
@@ -41,89 +44,123 @@ static process_t *find_zombie(pid_t pid, process_t *parent, int *out_any_exists)
         } else if (pid < -1) {
             if (child->pgrp == -pid) match = 1;
         }
-        // Other cases to be implemented
-
 
         if (match) {
             exists = 1;
+            
+            // Check for zombie (always reported)
             if (child->state == SZOMB) {
                 found = child;
-                // BSD/Linux returns the *first* zombie found?
-                // Or allows any. We pick the first one.
-                break; 
+                reason = 0; // Zombie
+                break;
+            }
+            
+            // Check for stopped (WUNTRACED must be set)
+            if ((options & WUNTRACED) && child->state == SSTOP) {
+                // Only report if not already reported (P_WAITED not set)
+                if (!(child->p_flag & P_WAITED)) {
+                    found = child;
+                    reason = 1; // Stopped
+                    break;
+                }
+            }
+            
+            // Check for continued (WCONTINUED must be set)
+            if ((options & WCONTINUED) && (child->p_flag & P_CONTINUED)) {
+                found = child;
+                reason = 2; // Continued
+                break;
             }
         }
         child = child->p_sibling;
     }
 
     if (out_any_exists) *out_any_exists = exists;
+    if (out_reason) *out_reason = reason;
     return found;
 }
+
 
 int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
     process_t *cur = current_process;
     process_t *target = NULL;
     int any_exists = 0;
+    int reason = 0;
 
     while (1) {
-        // 1. Search Logic
-        target = find_zombie(pid, cur, &any_exists);
+        // 1. Search Logic - now handles zombies, stopped, and continued
+        target = find_waitable_child(pid, cur, options, &any_exists, &reason);
 
         if (target) {
-            // Found a zombie! Reaping Logic.
-            
-            // 1. Return Status
-            if (status) *status = (target->exit_code << 8); // Simple WEXITSTATUS
-            
-            // 2. Handle Rusage - Copy to user buffer and accumulate to parent
-            if (rusage) *rusage = target->rusage;
-            
-            // Accumulate child's rusage into parent's rusage_children (BSD semantics)
-            cur->rusage_children.ru_utime.tv_sec += target->rusage.ru_utime.tv_sec;
-            cur->rusage_children.ru_utime.tv_usec += target->rusage.ru_utime.tv_usec;
-            // Normalize microseconds
-            if (cur->rusage_children.ru_utime.tv_usec >= 1000000) {
-                cur->rusage_children.ru_utime.tv_sec++;
-                cur->rusage_children.ru_utime.tv_usec -= 1000000;
-            }
-            cur->rusage_children.ru_stime.tv_sec += target->rusage.ru_stime.tv_sec;
-            cur->rusage_children.ru_stime.tv_usec += target->rusage.ru_stime.tv_usec;
-            if (cur->rusage_children.ru_stime.tv_usec >= 1000000) {
-                cur->rusage_children.ru_stime.tv_sec++;
-                cur->rusage_children.ru_stime.tv_usec -= 1000000;
-            }
-            // Also accumulate grandchildren's usage (recursive)
-            cur->rusage_children.ru_maxrss = (target->rusage_children.ru_maxrss > cur->rusage_children.ru_maxrss) 
-                ? target->rusage_children.ru_maxrss : cur->rusage_children.ru_maxrss;
-            cur->rusage_children.ru_minflt += target->rusage.ru_minflt + target->rusage_children.ru_minflt;
-            cur->rusage_children.ru_majflt += target->rusage.ru_majflt + target->rusage_children.ru_majflt;
-            cur->rusage_children.ru_nvcsw += target->rusage.ru_nvcsw + target->rusage_children.ru_nvcsw;
-            cur->rusage_children.ru_nivcsw += target->rusage.ru_nivcsw + target->rusage_children.ru_nivcsw;
-
-            // 3. Unlink from Parent's List
-            if (cur->p_children == target) {
-                cur->p_children = target->p_sibling;
-            } else {
-                process_t *prev = cur->p_children;
-                while (prev && prev->p_sibling != target) prev = prev->p_sibling;
-                if (prev) prev->p_sibling = target->p_sibling;
-            }
-            
-            // 4. Remove from process group (clear membership)
-            // Note: Full struct pgrp infrastructure will be added later
-            // For now, just clear the pgrp ID to indicate no group membership
-            target->pgrp = 0;
-            target->session = 0;
-            
-            // 5. Free Process Slot
             pid_t pid_val = target->pid;
-            target->pid = -1; // Mark as free
-            target->p_parent = NULL;
-            target->p_sibling = NULL;
-            target->state = 0; // FREE/SIDL
             
-            return pid_val;
+            switch (reason) {
+            case 0: // Zombie - reap it
+                // Return Status (exited: low 7 bits = 0, high 8 bits = exit code)
+                if (status) *status = (target->exit_code << 8);
+                
+                // Handle Rusage - Copy to user buffer and accumulate to parent
+                if (rusage) *rusage = target->rusage;
+                
+                // Accumulate child's rusage into parent's rusage_children (BSD semantics)
+                cur->rusage_children.ru_utime.tv_sec += target->rusage.ru_utime.tv_sec;
+                cur->rusage_children.ru_utime.tv_usec += target->rusage.ru_utime.tv_usec;
+                if (cur->rusage_children.ru_utime.tv_usec >= 1000000) {
+                    cur->rusage_children.ru_utime.tv_sec++;
+                    cur->rusage_children.ru_utime.tv_usec -= 1000000;
+                }
+                cur->rusage_children.ru_stime.tv_sec += target->rusage.ru_stime.tv_sec;
+                cur->rusage_children.ru_stime.tv_usec += target->rusage.ru_stime.tv_usec;
+                if (cur->rusage_children.ru_stime.tv_usec >= 1000000) {
+                    cur->rusage_children.ru_stime.tv_sec++;
+                    cur->rusage_children.ru_stime.tv_usec -= 1000000;
+                }
+                // Also accumulate grandchildren's usage
+                cur->rusage_children.ru_maxrss = (target->rusage_children.ru_maxrss > cur->rusage_children.ru_maxrss) 
+                    ? target->rusage_children.ru_maxrss : cur->rusage_children.ru_maxrss;
+                cur->rusage_children.ru_minflt += target->rusage.ru_minflt + target->rusage_children.ru_minflt;
+                cur->rusage_children.ru_majflt += target->rusage.ru_majflt + target->rusage_children.ru_majflt;
+                cur->rusage_children.ru_nvcsw += target->rusage.ru_nvcsw + target->rusage_children.ru_nvcsw;
+                cur->rusage_children.ru_nivcsw += target->rusage.ru_nivcsw + target->rusage_children.ru_nivcsw;
+
+                // Unlink from Parent's List
+                if (cur->p_children == target) {
+                    cur->p_children = target->p_sibling;
+                } else {
+                    process_t *prev = cur->p_children;
+                    while (prev && prev->p_sibling != target) prev = prev->p_sibling;
+                    if (prev) prev->p_sibling = target->p_sibling;
+                }
+                
+                // Clear process group membership
+                target->pgrp = 0;
+                target->session = 0;
+                
+                // Free Process Slot
+                target->pid = -1;
+                target->p_parent = NULL;
+                target->p_sibling = NULL;
+                target->state = 0;
+                
+                return pid_val;
+                
+            case 1: // Stopped (WUNTRACED)
+                // Return stopped status: 0x7f in low byte, stop signal in high byte
+                // For now, use SIGSTOP (19) as the default stop signal
+                if (status) *status = 0x7f | (19 << 8); // WIFSTOPPED will be true
+                // Mark as reported so we don't report again
+                target->p_flag |= P_WAITED;
+                return pid_val;
+                
+            case 2: // Continued (WCONTINUED)
+                // Return continued status: 0xffff
+                if (status) *status = 0xffff; // WIFCONTINUED will be true
+                // Clear P_CONTINUED flag so we don't report again
+                target->p_flag &= ~P_CONTINUED;
+                return pid_val;
+            }
         }
+
 
         if (!any_exists) {
             return -ECHILD;

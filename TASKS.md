@@ -503,10 +503,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Remove from siblings list. <!-- Already implemented in wait.c lines 103-110 -->
             - [x] Remove from process group. <!-- Clears pgrp/session fields; full struct pgrp later -->
             - [x] Free `struct process` memory (`uma_zfree`). <!-- Uses static array with pid=-1 marking (BSD style) -->
-        - [ ] **Job Control Integration (`WUNTRACED`, `WCONTINUED`):**
-            - [ ] Check `p_stat` for `SSTOP` (stopped).
-            - [ ] Use `p_flag` for `P_CONTINUED` status.
-            - [ ] Reset `P_CONTINUED` flag after reporting.
+        - [x] **Job Control Integration (`WUNTRACED`, `WCONTINUED`):** <!-- Implemented in find_waitable_child -->
+            - [x] Check `p_stat` for `SSTOP` (stopped). <!-- find_waitable_child checks child->state == SSTOP -->
+            - [x] Use `p_flag` for `P_CONTINUED` status. <!-- Added P_CONTINUED flag to proc.h, checked in find_waitable_child -->
+            - [x] Reset `P_CONTINUED` flag after reporting. <!-- sys_wait4 clears P_CONTINUED after returning -->
+
 
     - [ ] **Process Groups & Sessions (Job Control):**
         - [ ] **Core Structures:**
