@@ -98,7 +98,8 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va); // Get PA from VA
 #define VM_PROT_READ    0x01
 #define VM_PROT_WRITE   0x02
 #define VM_PROT_EXEC    0x04
-#define VM_PROT_ALL     (VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXEC)
+#define VM_PROT_USER    0x08
+#define VM_PROT_ALL     (VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXEC|VM_PROT_USER)
 
 // Kernel-only fast paths (no locking, assumes kernel pmap active)
 void pmap_kenter(uint32_t va, uint32_t pa);

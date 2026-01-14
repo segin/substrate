@@ -5,6 +5,9 @@
 
 #define NSIG 32
 
+// Forward declaration
+struct process;
+
 #define SIGHUP     1
 #define SIGINT     2
 #define SIGQUIT    3

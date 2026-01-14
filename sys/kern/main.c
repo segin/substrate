@@ -493,6 +493,10 @@ void kmain(unsigned long magic, unsigned long addr) {
 
     // Initialize PMAP (Paging) - maps LAPIC and sets up recursive paging
     pmap_bootstrap();
+    
+    // Map Signal Trampoline Page (VDSO)
+    extern void pmap_map_trampoline(void);
+    pmap_map_trampoline();
 
     // Initialize Scheduler
     sched_init();

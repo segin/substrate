@@ -34,6 +34,8 @@
 #define SYS_MSYNC   144
 #define SYS_GET_COW_STATS 241
 #define SYS_POLL    209
+#define SYS_SIGRETURN 119
+#define SYS_SIGALTSTACK 186
 // ... add more as needed
 
 void syscall_init(void);

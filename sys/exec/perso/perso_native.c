@@ -46,6 +46,9 @@ extern int sys_pmap_stats(struct pmap_stats*);
 extern int sys_ioctl(int, uint32_t, void*);
 extern int sys_msync(void*, size_t, int);
 extern int sys_readlink(const char*, char*, size_t);
+extern int sys_unlink(const char*);
+extern int sys_sigreturn(void*);
+extern int sys_sigaltstack(const void*, void*);
 
 extern int sys_poll(void*, unsigned int, int);
 
@@ -59,10 +62,11 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_OPEN] = &sys_open,
     [SYS_CLOSE] = &sys_close,
     [SYS_EXECVE] = &sys_execve,
-    [9] = &sys_link,
-    [13] = &sys_time,
-    [14] = &sys_mknod,
-    [66] = &sys_vfork,  // BSD/Linux vfork syscall number
+    [10] = (void*)sys_unlink,
+    // [11] handled by SYS_EXECVE above
+    [13] = (void*)sys_time,
+    [119] = (void*)sys_sigreturn,
+    [186] = (void*)sys_sigaltstack,
     [19] = &sys_lseek,
     [20] = &sys_getpid,
     [21] = &sys_mount,

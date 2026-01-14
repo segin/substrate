@@ -47,9 +47,6 @@ int sys_sigsuspend(const uint32_t *mask) {
     return -1; // Always returns -1 (EINTR)
 }
 
-    return (count > 0) ? 0 : -1;
-}
-
 // Send signal to valid process
 void psignal(process_t *p, int sig) {
     if (!p || sig <= 0 || sig > NSIG) return;
@@ -102,6 +99,7 @@ void pgsignal(int pgrp, int sig) {
 
 // Send synchronous trap signal (e.g. from exception)
 void trapsignal(process_t *p, int sig, int code) {
+    (void)code; // Unused for now
     // TODO: Pass code via siginfo (SA_SIGINFO)
     psignal(p, sig);
 }

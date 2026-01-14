@@ -443,12 +443,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Performance:**
             - [ ] Validated user-space access (CMPXCHG).
             - [ ] Hash table bucketing for wait queues.
-- [ ] **Signals:**
+- [x] **Signals:**
     - [x] Implement Signal delivery mechanism (trampoline, context saving).
     - [x] Implement `kill`, `sigaction`, `sigprocmask`.
     - [x] Implement PID 1 protection and safe exit handling.
-    - [ ] **Delivery & context:**
-        - [ ] **Debug Delivery:**
+    - [x] **Delivery & context:**
+        - [x] **Debug Delivery:**
             - [x] Isolate logic for frame pushing (remove panic).
             - [x] Create architecture-dependent `struct sigframe`.
             - [x] Copy frame to aligned user stack pointer.

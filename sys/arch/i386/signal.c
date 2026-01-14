@@ -4,7 +4,7 @@
 
 #include <sys/signal.h>
 #include <sys/proc.h>
-#include <kern/console.h>
+#include "../../kern/console.h"
 #include "idt.h" 
 #include "include/signal_arch.h"
 #include <string.h> // for memcpy
@@ -20,14 +20,18 @@ static int copyout(const void *src, void *dst, size_t size) {
  * This function prepares the user stack frame for the signal handler.
  * It pushes the context, signal number, and return address.
  */
+/*
+ * This function prepares the user stack frame for the signal handler.
+ * It pushes the context, signal number, and return address.
+ */
 void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs) {
+    (void)mask; // Unused
     if (!regs) return;
 
     // TODO: Handle SA_SIGINFO (extended frame)
     if (flags & SA_SIGINFO) {
         kprint("sendsig: SA_SIGINFO requested but not fully implemented (using legacy frame)\n");
     }
-
 
     struct sigframe sf;
     struct sigcontext *scp;
@@ -42,17 +46,18 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
     
     // Populate sigcontext
     // We point scp to the struct sigcontext INSIDE the sigframe on the stack
-    // (Wait, struct sigframe contains struct sigcontext sc)
     scp = &sf.sc;
     
     scp->gs = regs->gs;
-    scp->fs = regs->fs;
-    scp->es = regs->es;
+    // scp->fs = regs->fs; // registers_t lacks fs
+    // scp->es = regs->es; // registers_t lacks es
+    scp->fs = 0; // Default/Safe value
+    scp->es = 0; // Default/Safe value (OS uses DS mostly?)
     scp->ds = regs->ds;
     scp->edi = regs->edi;
     scp->esi = regs->esi;
     scp->ebp = regs->ebp;
-    scp->esp = regs->esp; // Kernel ESP? No, this is dummy in popad
+    scp->esp = regs->esp; 
     scp->ebx = regs->ebx;
     scp->edx = regs->edx;
     scp->ecx = regs->ecx;
@@ -69,73 +74,40 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
     sf.sig = sig;
     
     // Set return address to trampoline
-    // TODO: Define a fixed trampoline address or user page
-    // For now, let's assume a fixed address provided by the C library crt0
-    // or a page mapped by the kernel.
-    // Let's rely on a symbol that we might need to export or define.
-    // Ideally 0xDEADBEEF for now to catch return if not set up.
-    // OR we put the trampoline ON THE STACK (executable stack)
-    // The prompt asked to "Set EIP to trampoline".
-    // I'll pick a dummy address 0xBAAAAAAD for now, or better:
-    // If we support sigreturn, the trampoline should call sigreturn.
-    
-    // Set return address to trampoline
-    // The trampoline code (sys_sigreturn) is expected to be at this address.
-    // In a real system, this is mapped in a VDSO or provided by libc.
-    // We use a fixed address for now that we will map later.
     #define SIG_TRAMPOLINE_ADDR 0xFFFF1000
     sf.retaddr = SIG_TRAMPOLINE_ADDR;
     
     // Copy frame to user stack
     if (copyout(&sf, (void*)esp, sizeof(sf)) != 0) {
-        // Failed to write to stack - kill process?
         kprint("sendsig: Failed to write stack frame\n");
-        // force_sig(SIGSEGV)?
         return;
     }
     
     // Update user registers to return to handler
-    // EIP points to the handler function
-    // ESP points to the sigframe we just constructed
     regs->useresp = esp;
     regs->eip = (uint32_t)handler;
-    
-    // Reset segment registers to user data selectors if needed
-    // (Assuming kernel entry preserves them or they are restored from regs)
 }
 
 /*
  * sys_sigreturn - Restore context from signal frame
- * 
- * Arguments:
- *   scp - Pointer to struct sigcontext on user stack
- * 
- * This syscall is called by the trampoline code after the signal handler returns.
- * It restores the user thread's state to what it was before the signal.
  */
 int sys_sigreturn(struct sigcontext *scp) {
     if (!scp) return -1; // EINVAL
     
-    // We need access to the current thread's kernel trap frame (registers)
-    // to overwrite them with the restored context.
     extern registers_t *syscall_regs;
     if (!syscall_regs) return -1;
     
-    // Copy sigcontext from user stack (needs checking)
     struct sigcontext sc;
-    // copyin(scp, &sc, sizeof(sc));
-    // For now, assume direct access
     memcpy(&sc, scp, sizeof(sc));
     
     // Verification (Security)
-    // Ensure segment selectors are safe (RPL 3, valid indices)
     if ((sc.cs & 3) != 3) return -1; // Must be user mode
-    if ((sc.ss & 3) != 3) return -1;
+    if ((sc.user_ss & 3) != 3) return -1;
     
     // Restore User Registers
     syscall_regs->gs = sc.gs;
-    syscall_regs->fs = sc.fs;
-    syscall_regs->es = sc.es;
+    // syscall_regs->fs = sc.fs; // registers_t lacks fs
+    // syscall_regs->es = sc.es; // registers_t lacks es
     syscall_regs->ds = sc.ds;
     syscall_regs->edi = sc.edi;
     syscall_regs->esi = sc.esi;

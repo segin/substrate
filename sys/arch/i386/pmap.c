@@ -1,5 +1,6 @@
 #include "pmap.h"
 #include "pmm.h"
+#include "../x86-common/include/lapic.h"
 #include "../../vm/vm_page.h"
 #include "../../kern/panic.h"
 #include "../../kern/console.h"
@@ -278,7 +279,7 @@ void pmap_destroy(pmap_t pmap) {
     // If refcount > 0, pmap is still in use by COW children (checkpoint 124)
     if (pmap->ref_count > 0) return;
     
-    uint32_t pd_phys = (uint32_t)pmap;
+    uint32_t pd_phys = (uint32_t)(uintptr_t)pmap;
     
     // Edge case: Check if this is the currently active pmap
     uint32_t current_cr3;
@@ -406,7 +407,8 @@ pmap_t pmap_fork(pmap_t src_pmap) {
             return 0;
         }
         // Convert virtual to physical for PDE
-        uint32_t dst_pt_phys = (uint32_t)(uintptr_t)dst_pt_virt - 0xC0000000;
+        // Explicit cast to avoid size warning
+        uint32_t dst_pt_phys = (uint32_t)((uintptr_t)dst_pt_virt) - 0xC0000000;
         uint32_t *dst_pt = (uint32_t *)dst_pt_virt;
         
         // Set up child PDE with physical address
@@ -492,8 +494,8 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
     if (prot & VM_PROT_WRITE) {
         pte_flags |= PTE_W;
     }
-    if (va < 0xC0000000) {
-        pte_flags |= PTE_U;  // User accessible if in user space
+    if ((va < 0xC0000000) || (prot & VM_PROT_USER)) {
+        pte_flags |= PTE_U;  // User accessible if in user space or requested
     }
     // Note: i386 doesn't have NX bit in standard mode
 
@@ -501,6 +503,39 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
     pt[pti] = (pa & 0xFFFFF000) | pte_flags;
     pmap_invalidate_page(va);
     return 0;
+}
+
+// Trampoline Support
+extern unsigned char sig_trampoline_code[];
+extern unsigned int sig_trampoline_size;
+
+void pmap_map_trampoline(void) {
+    // 1. Allocate a page for the trampoline
+    void *page = pmm_alloc_block();
+    if (!page) {
+        panic("PMAP: Failed to allocate trampoline page");
+    }
+    
+    // 2. Copy the trampoline code
+    // (page is a kernel virtual address)
+    memcpy(page, sig_trampoline_code, sig_trampoline_size);
+    
+    // 3. Map it at SIG_TRAMPOLINE_ADDR (0xFFFF1000)
+    // Use VM_PROT_USER to allow Ring 3 execution
+    #define SIG_TRAMPOLINE_ADDR 0xFFFF1000
+    
+    // Convert to physical
+    uint32_t pa = (uint32_t)(uintptr_t)page - 0xC0000000;
+    
+    // Map into kernel pmap (visible to all)
+    int ret = pmap_enter(pmap_kernel(), SIG_TRAMPOLINE_ADDR, pa, 
+                         VM_PROT_READ | VM_PROT_EXEC | VM_PROT_USER, 0);
+                         
+    if (ret != 0) {
+        panic("PMAP: Failed to map trampoline page");
+    }
+    
+    kprint("PMAP: Mapped Signal Trampoline at 0xFFFF1000\n");
 }
 
 // Map a 4MB page (Single PDE, no Page Table)
@@ -589,7 +624,8 @@ void pmap_kenter(uint32_t va, uint32_t pa) {
         void *pt_virt = pmm_alloc_block();
         if (!pt_virt) return;  // OOM - should not happen for kernel
         // Convert virtual to physical for PDE
-        uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
+        // Explicit cast to uintptr_t first to avoid size warning
+        uint32_t pt_phys = (uint32_t)((uintptr_t)pt_virt) - 0xC0000000;
         V_PD[pdi] = pt_phys | PTE_P | PTE_W;
         pmap_invalidate_page((uint32_t)V_PT(pdi));
         // Zero using virtual address
