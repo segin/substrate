@@ -1,21 +1,24 @@
 #include <sys/proc.h>
 #include <sys/wait.h>
-#include <sys/errno.h>
+#include <errno.h>
+#include <stddef.h>
 #include "tests.h"
 
 // Externs from sys/pm/wait.c
 extern int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 extern process_t *current_process;
-extern int printf(const char *format, ...);
+extern void panic(const char *msg);
+extern void kprint(const char *msg);
 
 #define TEST_ASSERT(cond) do { \
     if (!(cond)) { \
-        printf("FAILED: %s\n", #cond); \
+        kprint("FAILED: " #cond "\n"); \
         panic("Assertion failed"); \
     } else { \
         kprint("PASS: " #cond "\n"); \
     } \
 } while(0)
+
 
 // Mocks
 static process_t mock_parent;
@@ -30,6 +33,7 @@ extern thread_t *current_thread;
 
 // Mock sched_sleep
 void sched_sleep(void *chan) {
+    (void)chan; // Unused parameter
     sched_sleep_calls++;
     if (sched_sleep_mode == 0) {
         // Change target child to Zombie to simulate wakeup by exit
@@ -41,6 +45,7 @@ void sched_sleep(void *chan) {
         current_thread->sig_pending = 1; // Set arbitrary bit
     }
 }
+
 
 // Helper to reset mocks
 void setup_mocks(void) {

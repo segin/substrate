@@ -1,6 +1,6 @@
 #include <sys/proc.h>
 #include <sys/wait.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <stddef.h>
 #include <kern/sched.h> // for sched_sleep
 

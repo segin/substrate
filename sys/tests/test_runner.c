@@ -18,7 +18,9 @@ void run_link_tests(void);
 void run_link_property_tests(void);
 void run_link_property_tests(void);
 void run_tty_tests(void);
+void run_tty_tests(void);
 void run_cow_stats_tests(void);
+// void test_wait_logic(void); // Host-only test via verify_wait_host.sh
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -61,6 +63,11 @@ void run_kernel_tests(void) {
          extern void test_futex(void);
          test_futex();
     }
+
+    // Wait logic tests are run on host via verify_wait_host.sh
+    // if (all || strcmp(test_arg, "wait") == 0) {
+    //     test_wait_logic();
+    // }
 
     kprint("=== TESTS COMPLETE ===\n\n");
     
