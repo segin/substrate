@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <string.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -261,4 +262,18 @@ char *ttyname(int fd) {
     static char buf[32];
     sprintf(buf, "/dev/tty%d", fd);
     return buf;
+}
+
+int gethostname(char *name, size_t len) {
+    struct utsname u;
+    if (uname(&u) < 0) return -1;
+    strncpy(name, u.nodename, len);
+    name[len - 1] = '\0';
+    return 0;
+}
+
+int sethostname(const char *name, size_t len) {
+    (void)name; (void)len;
+    errno = ENOSYS;
+    return -1;
 }

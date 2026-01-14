@@ -1257,17 +1257,55 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `at()` syscalls family support.
         - [ ] **Networking (`socketcall`):**
             - [ ] Multiplexer syscall 102 (`sys_socketcall`).
-            - [ ] Subcalls: `SYS_SOCKET`, `SYS_BIND`, `SYS_CONNECT`, `SYS_LISTEN`, `SYS_ACCEPT`, `SYS_GETSOCKNAME`, `SYS_GETPEERNAME`, `SYS_SOCKETPAIR`, `SYS_SEND`, `SYS_RECV`, `SYS_SENDTO`, `SYS_RECVFROM`, `SYS_SHUTDOWN`, `SYS_SETSOCKOPT`, `SYS_GETSOCKOPT`, `SYS_SENDMSG`, `SYS_RECVMSG`.
+            - [ ] **Socket Creation & Binding:**
+                - [ ] `SYS_SOCKET`: Validate domain/type/proto, allocate socket.
+                - [ ] `SYS_BIND`: Copy address from user, call internal bind.
+                - [ ] `SYS_CONNECT`: Copy address, initiate connection.
+            - [ ] **Data Flow:**
+                - [ ] `SYS_SEND`/`SYS_RECV`: Simple IO wrappers.
+                - [ ] `SYS_SENDTO`/`SYS_RECVFROM`: UDP/Connectionless wrappers.
+                - [ ] `SYS_SENDMSG`/`SYS_RECVMSG`: Complex message structure scatter/gather.
+            - [ ] **State & Options:**
+                - [ ] `SYS_LISTEN`: Set backlog.
+                - [ ] `SYS_ACCEPT`: New socket file descriptor creation.
+                - [ ] `SYS_GETSOCKNAME`/`SYS_GETPEERNAME`: Address retrieval.
+                - [ ] `SYS_SETSOCKOPT`/`SYS_GETSOCKOPT`: Option translation (Linux <-> Native).
+                - [ ] `SYS_SHUTDOWN`: Connection termination.
+                - [ ] `SYS_SOCKETPAIR`: Connected pair creation.
         - [ ] **IPC Multiplexer (`sys_ipc`):**
             - [ ] Multiplexer syscall 117.
-            - [ ] Subcalls: `SEMOP`, `SEMGET`, `SEMCTL`, `MSGSND`, `MSGRCV`, `MSGGET`, `MSGCTL`, `SHMAT`, `SHMDT`, `SHMGET`, `SHMCTL`.
+            - [ ] **Semaphores (`sem*`):**
+                - [ ] `SEMOP`: Atomic array operations.
+                - [ ] `SEMGET`: Get/Create semaphore set.
+                - [ ] `SEMCTL`: Control operations (GETVAL, SETVAL, IPC_RMID).
+            - [ ] **Message Queues (`msg*`):**
+                - [ ] `MSGSND`: Send message with priority.
+                - [ ] `MSGRCV`: Receive message (blocking/non-blocking).
+                - [ ] `MSGGET`: Get/Create message queue.
+                - [ ] `MSGCTL`: Control operations.
+            - [ ] **Shared Memory (`shm*`):**
+                - [ ] `SHMAT`: Attach segment to address space.
+                - [ ] `SHMDT`: Detach segment.
+                - [ ] `SHMGET`: Get/Create shared memory segment.
+                - [ ] `SHMCTL`: Control operations (lock/unlock/remove).
         - [ ] **Ioctls (`sys_ioctl`):**
-            - [ ] **Termios:** `TCGETS`, `TCSETS`, `TCSETSW`, `TCSETSF` (Linux layouts).
-            - [ ] **Sockio:** `SIOCGIFNAME`, `SIOCGIFADDR`, `SIOCGIFBRDADDR`, `SIOCGIFNETMASK`.
+            - [ ] **Termios:**
+                - [ ] `TCGETS`: Translate native termios to Linux termios.
+                - [ ] `TCSETS`/`TCSETSW`/`TCSETSF`: Translate Linux termios to native.
+            - [ ] **Sockio:**
+                - [ ] `SIOCGIFNAME`: Get interface name by index.
+                - [ ] `SIOCGIFADDR`: Get interface IP address.
+                - [ ] `SIOCGIFBRDADDR`: Get broadcast address.
+                - [ ] `SIOCGIFNETMASK`: Get network mask.
         - [ ] **Process Creation (`sys_clone` extended):**
-            - [ ] `CLONE_PARENT_SETTID`: Write TID to parent.
-            - [ ] `CLONE_CHILD_CLEARTID`: Clear TID in child on exit (futex wake).
-            - [ ] `CLONE_SETTLS`: TLS setup on thread creation.
+            - [ ] **Flags Handling:**
+                - [ ] `CLONE_PARENT_SETTID`: Store Child TID at `parent_tidptr`.
+                - [ ] `CLONE_CHILD_CLEARTID`: Store Child TID at `child_tidptr` and clear on exit.
+                - [ ] `CLONE_SETTLS`: Set GDT/FS/GS base for Thread Local Storage.
+                - [ ] `CLONE_FILES`: Share file descriptor table (refcounting).
+                - [ ] `CLONE_FS`: Share filesystem info (cwd, root).
+                - [ ] `CLONE_SIGHAND`: Share signal handlers.
+                - [ ] `CLONE_VM`: Share address space (threads).
     - [ ] **Minix/386:**
         - [ ] Implement `send`/`receive` message passing syscalls.
         - [ ] Map Minix 3 kernel messages to native calls.
@@ -1440,20 +1478,28 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Optimizations (i386/x87 Inline Assembly):**
         - [ ] **Trigonometric Functions:**
             - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
-            - [ ] `sincos()`: Use `fsincos` (compute both simultaneously).
-            - [ ] `tan()`: Use `fptan` (partial tangent) and handle stack pop.
-            - [ ] **Range Reduction:** x87 fails for |x| > 2^63. Implement `fprem` / `fprem1` loop for accurate argument reduction.
+            - [ ] `sincos()`: Use `fsincos` if supported, else combine.
+            - [ ] `tan()`: Use `fptan`; push `1.0` then `fptan`, ignore the 1.0.
+            - [ ] `atan2()`: Use `fpatan`.
+            - [ ] **Range Reduction:** Implement `fprem1` loop for arguments > 2^63 (Intel Manual reduction).
         - [ ] **Logarithms & Exponentials:**
-            - [ ] `log()` / `log10()` / `log2()`: Use `fyl2x` (y * log2(x)) with y=1.
-            - [ ] `pow(x, y)`: Use `fyl2x` to compute y*log2(x), then `f2xm1` and `fscale`.
-            - [ ] `exp()` / `exp2()`: Use `f2xm1` (2^x - 1) and `fscale`.
+            - [ ] `log2(x)`: Load 1.0, load x, use `fyl2x`.
+            - [ ] `log(x)`: Load ln(2), load x, use `fyl2x`.
+            - [ ] `log10(x)`: Load log10(2), load x, use `fyl2x`.
+            - [ ] `pow(x, y)`:
+                - [ ] If y is integer, use binary exponentiation.
+                - [ ] Else: `y * log2(x)` -> `frndint` -> `f2xm1` -> `fscale`.
+            - [ ] `exp2(x)`: `f2xm1` (for -1 < x < 1) with `fscale` for integer part.
         - [ ] **Basic Arithmetic:**
-            - [ ] `sqrt()`: Use `fsqrt` (IEEE 754 compliant).
-            - [ ] `fabs()`: Use `fabs` (Absolute value).
-            - [ ] `fmod()` / `remainder()`: Use `fprem` / `fprem1`.
+            - [ ] `sqrt()`: `fsqrt`.
+            - [ ] `fabs()`: `fabs`.
+            - [ ] `fmod()`: `fprem`.
+            - [ ] `remainder()`: `fprem1` (IEEE compliant remainder).
         - [ ] **Rounding & Manipulation:**
-            - [ ] `rint()` / `nearbyint()`: Use `frndint` (Round to integer according to CW).
-            - [ ] `scalbn()` / `ldexp()`: Use `fscale` (exponent manipulation).
+            - [ ] `rint()`: `frndint` (honors current CW rounding mode).
+            - [ ] `nearbyint()`: `frndint` (without raising inexact exception).
+            - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
+            - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
 - [ ] **Dynamic Linker (`/sbin/ld.so`):**
     - [ ] **Kernel ELF Loader Support:**
         - [ ] Parse `PT_INTERP` program header to identify dynamic linker path.
@@ -1741,173 +1787,867 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Compatibility tests against BSD `libkvm` applications.
         - [ ] Performance benchmarks for high-frequency queries.
         - [ ] Thread safety stress tests.
-    - [ ] **User Authentication Library (`libauth`):**
+    - [ ] **User Authentication Library (`lib/auth/`):**
         - [ ] **Password Database (`/etc/passwd`):**
-            - [ ] `getpwnam(const char *name)` - Get user by name.
-            - [ ] `getpwuid(uid_t uid)` - Get user by ID.
-            - [ ] `setpwent()`, `getpwent()`, `endpwent()` - Iterate users.
-            - [ ] Parse v7 format: `user:pwd:uid:gid:gecos:home:shell`.
+            - [ ] **Structures:** Define `struct passwd`.
+            - [ ] **Parser:** Tokenize `user:pwd:uid:gid:gecos:home:shell`.
+            - [ ] **Lookup API:**
+                - [ ] `getpwnam(const char *name)`: Map name to struct.
+                - [ ] `getpwuid(uid_t uid)`: Map ID to struct.
+            - [ ] **Iteration API:** `setpwent()`, `getpwent()`, `endpwent()`.
+            - [ ] **Thread Safety:** Implement `_r` reentrant variants.
         - [ ] **Shadow Database (`/etc/shadow`):**
-            - [ ] `getspnam(const char *name)` - Get shadow entry.
-            - [ ] Secure checking (root only).
-        - [ ] **Cryptography:**
-            - [ ] Implement `crypt(key, salt)`.
-            - [ ] Support DES (legacy) and MD5/SHA variants.
-        - [ ] **High-Level API:**
-            - [ ] `auth_check_user(const char *user, const char *pass)` - Validation helper (Requires Root / Shadow Access).
+            - [ ] **Structures:** Define `struct spwd`.
+            - [ ] **Parser:** Tokenize `user:hash:lastchg:min:max:warn:inact:expire:flag`.
+            - [ ] **API:** `getspnam()`, `setspent()`, `endspent()`.
+            - [ ] **Security:** Ensure file open fails if euid != 0.
+        - [ ] **Cryptography (Password Hashing):**
+            - [ ] **`crypt(key, salt)` Interface:**
+                - [ ] Detect hash type by salt prefix ($1$, $5$, $6$).
+                - [ ] Fallback to DES for legacy salts.
+            - [ ] **Algorithms:**
+                - [ ] **DES:** Legacy support (optional).
+                - [ ] **MD5 ($1$):** Standard Unix MD5.
+                - [ ] **SHA-256 ($5$) / SHA-512 ($6$):** Modern standard.
+        - [ ] **High-Level Authentication:**
+            - [ ] `auth_verify_password(user, clear_text)`:
+                - [ ] Retrieve shadow entry (requires privileges).
+                - [ ] Extract salt.
+                - [ ] Hash clear_text with extracted salt.
+                - [ ] Constant-time comparison of hashes.
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
-    - [ ] **Command Parsing & Execution:**
-        - [ ] Environment variable expansion (`$VAR`, `${VAR}`).
-        - [ ] Command substitution (`$(cmd)`, `` `cmd` ``).
-        - [ ] Exit status (`$?`).
-    - [ ] **IO Redirection:**
-        - [ ] Output redirection (`>`, `>>`).
-        - [ ] Input redirection (`<`).
-        - [ ] Pipes (`|`).
-        - [ ] File descriptor duplication (`2>&1`).
+    - [ ] **Lexer (Tokenizer):**
+        - [ ] Handle delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
+        - [ ] Handle quoting (`'` single, `"` double) and escaping (`\`).
+        - [ ] Handle operators (`&&`, `||`, `>>`, `<<`).
+        - [ ] Variable recognition (`$PROMPT`, `${VAR}`).
+    - [ ] **Parser (AST Generation):**
+        - [ ] **Simple Commands:** List of arguments + redirections.
+        - [ ] **Pipelines:** Chain of simple commands connected by pipes.
+        - [ ] **Lists:** Sequences (`cmd1 ; cmd2`) and Logic (`cmd1 && cmd2`).
+        - [ ] **Compound Commands:**
+            - [ ] `IfClause`: `if` list `then` list `else` list `fi`.
+            - [ ] `WhileClause`: `while` list `do` list `done`.
+            - [ ] `ForClause`: `for` name `in` words `do` list `done`.
+            - [ ] `FunctionDef`: `name() { list; }`.
+    - [ ] **Expansion (WordExp):**
+        - [ ] Tilde Expansion (`~` -> `$HOME`).
+        - [ ] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
+        - [ ] Command Substitution (`$(cmd)`).
+        - [ ] Arithmetic Expansion (`$(( 1 + 2 ))`).
+        - [ ] Globbing (`*`, `?`, `[...]` file matching).
+    - [ ] **Execution Engine:**
+        - [ ] **Builtins:**
+            - [ ] `cd`: Change directory ($HOME default).
+            - [ ] `exit`: Terminate shell.
+            - [ ] `export`: precise environment variable support.
+            - [ ] `unset`: Remove variables.
+            - [ ] `exec`: Replace shell process.
+            - [ ] `eval`: Parse and execute arguments.
+            - [ ] `shift`: Shift positional parameters.
+        - [ ] **External Commands:**
+            - [ ] `fork()` / `execve()` search path (`$PATH`).
+            - [ ] `waitpid()` for synchronous execution.
     - [ ] **Job Control:**
-        - [ ] Background execution (`&`).
-        - [ ] `jobs` builtin.
-        - [ ] `fg` / `bg` builtins.
-        - [ ] Signal handling (SIGINT, SIGTSTP).
-    - [ ] **Control Structures:**
-        - [ ] `if` / `then` / `else` / `fi`.
-        - [ ] `for` loops.
-        - [ ] `while` loops.
-        - [ ] Function definitions.
+        - [ ] **Process Groups:** Set pgid for pipelines.
+        - [ ] **Foreground/Background:** `tcsetpgrp` management.
+        - [ ] **Job Table:** Track status (Running, Stopped, Done).
+        - [ ] **Signals:** `SIGINT`, `SIGTSTP`, `SIGCHLD` handler.
+    - [ ] **Redirection:**
+        - [ ] `dup2` management for `<`, `>`, `>>`, `2>`, `2>&1`.
+        - [ ] Here-Documents (`<< EOF`).
 - [ ] **Core Utilities:**
     - [ ] **`ls` - List directory contents:**
-        - [ ] `-a`, `--all`: List all files including hidden ones.
-        - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
-        - [ ] `-l`: Long listing format (permissions, ownership, size, time).
-        - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
-        - [ ] `-R`, `--recursive`: List subdirectories recursively.
-        - [ ] `-r`, `--reverse`: Reverse order while sorting.
-        - [ ] `-S`: Sort by file size.
-        - [ ] `-t`: Sort by modification time.
-        - [ ] `--color`: Colorize output.
+        - [ ] **Purpose:** List information about the FILEs (the current directory by default).
+        - [ ] **Standards:** POSIX.1-2017, BSD Extensions (color).
+        - [ ] **Operands:**
+            - [ ] `-a`, `--all`: List all files including hidden ones.
+            - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
+            - [ ] `-l`: Long listing format (permissions, ownership, size, time).
+            - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+            - [ ] `-R`, `--recursive`: List subdirectories recursively.
+            - [ ] `-r`, `--reverse`: Reverse order while sorting.
+            - [ ] `-S`: Sort by file size.
+            - [ ] `-t`: Sort by modification time.
+            - [ ] `--color`: Colorize output (auto/always/never).
+        - [ ] **Runtime:**
+            - [ ] Column width calculation for multi-column output.
+            - [ ] Date formatting (recent vs old files).
+            - [ ] User/Group name caching.
+        - [ ] **Library dependencies:**
+            - [ ] `xopendir`, `xreaddir`, `xstat`, `xclosedir`, `humanize_number`, `pwcache`, `groupcache` or `getpwuid`/`getgrgid`
+        - [ ] **Acceptance tests:**
+            - [ ] `ls` empty directory -> empty output
+            - [ ] `ls -a` -> shows `.` and `..`
+            - [ ] `ls -l` -> correct permissions and ownership columns
+            - [ ] `ls -R` -> descends into subdirectories
     - [ ] **`cp` - Copy files and directories:**
-        - [ ] `-r`, `-R`, `--recursive`: Copy directories recursively.
-        - [ ] `-f`, `--force`: Force overwrite.
-        - [ ] `-i`, `--interactive`: Prompt before overwrite.
-        - [ ] `-p`: Preserve file attributes (mode, ownership, timestamps).
-        - [ ] `-v`, `--verbose`: Explain what is being done.
+        - [ ] **Purpose:** Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-r`, `-R`, `--recursive`: Copy directories recursively.
+            - [ ] `-f`, `--force`: Force overwrite.
+            - [ ] `-i`, `--interactive`: Prompt before overwrite.
+            - [ ] `-p`: Preserve file attributes (mode, ownership, timestamps).
+            - [ ] `-v`, `--verbose`: Explain what is being done.
+        - [ ] **Runtime:**
+            - [ ] Handle `EISDIR` (source is dir, target is not).
+            - [ ] Handle self-copy attempts.
+        - [ ] **Library dependencies:**
+            - [ ] `xopen`, `safe_read`, `safe_write`, `xclose`, `utimensat`, `chown`
+        - [ ] **Acceptance tests:**
+            - [ ] `cp file1 file2` -> file2 identical to file1
+            - [ ] `cp -r dir1 dir2` -> dir2 contains copy of dir1 structure
+            - [ ] `cp -i existing` -> prompts user (mock input)
     - [ ] **`mv` - Move (rename) files:**
-        - [ ] `-f`, `--force`: Do not prompt before overwriting.
-        - [ ] `-i`, `--interactive`: Prompt before overwrite.
-        - [ ] `-v`, `--verbose`: Verbose output.
+        - [ ] **Purpose:** Rename SOURCE to DEST, or move SOURCE(s) to DIRECTORY.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-f`, `--force`: Do not prompt before overwriting.
+            - [ ] `-i`, `--interactive`: Prompt before overwrite.
+            - [ ] `-v`, `--verbose`: Verbose output.
+        - [ ] **Runtime:**
+            - [ ] Try `rename()` syscall first.
+            - [ ] Fallback to `cp` + `rm` if cross-device link (`EXDEV`).
+        - [ ] **Library dependencies:**
+            - [ ] `rename`, `xread`, `xwrite`, `unlink`
+        - [ ] **Acceptance tests:**
+            - [ ] `mv file1 file2` -> file1 gone, file2 exists
+            - [ ] `mv file dir/` -> dir/file exists
+            - [ ] `mv` across filesystems -> invokes copy mechanism
     - [ ] **`rm` - Remove files or directories:**
-        - [ ] `-r`, `-R`, `--recursive`: Remove directories and their contents recursively.
-        - [ ] `-f`, `--force`: Ignore nonexistent files and arguments, never prompt.
-        - [ ] `-i`: Prompt before every removal.
-        - [ ] `-v`, `--verbose`: Verbose output.
+        - [ ] **Purpose:** Remove (unlink) the FILE(s).
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-r`, `-R`, `--recursive`: Remove directories and their contents recursively.
+            - [ ] `-f`, `--force`: Ignore nonexistent files and arguments, never prompt.
+            - [ ] `-i`: Prompt before every removal.
+            - [ ] `-v`, `--verbose`: Verbose output.
+        - [ ] **Runtime:**
+            - [ ] Depth-first traversal for `-r`.
+            - [ ] Handling of `.` and `..` (skip).
+        - [ ] **Library dependencies:**
+            - [ ] `unlink`, `rmdir`, `fstatat`, `openat`
+        - [ ] **Acceptance tests:**
+            - [ ] `rm file` -> file removed
+            - [ ] `rm -r dir` -> dir and contents removed
+            - [ ] `rm -f nonexist` -> no error
     - [ ] **`mkdir` - Make directories:**
-        - [ ] `-p`, `--parents`: No error if existing, make parent directories as needed.
-        - [ ] `-m`, `--mode=MODE`: Set file mode (as in chmod).
-        - [ ] `-v`, `--verbose`: Print a message for each created directory.
+        - [ ] **Purpose:** Create the DIRECTORY(ies), if they do not already exist.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-p`, `--parents`: No error if existing, make parent directories as needed.
+            - [ ] `-m`, `--mode=MODE`: Set file mode (as in chmod).
+            - [ ] `-v`, `--verbose`: Print a message for each created directory.
+        - [ ] **Runtime:**
+            - [ ] set umask before creation if `-m` not specified (default behavior).
+            - [ ] parsing mode strings (e.g., `a+rwx`).
+        - [ ] **Library dependencies:**
+            - [ ] `mkdir`, `mkdirat`, `chmod`, `parse_mode`
+        - [ ] **Acceptance tests:**
+            - [ ] `mkdir dir` -> dir exists
+            - [ ] `mkdir -p a/b/c` -> creates deep path
+            - [ ] `mkdir exists` -> fails (unless -p)
     - [ ] **`rmdir` - Remove empty directories:**
-        - [ ] `-p`, `--parents`: Remove explicit parent directories if being emptied.
+        - [ ] **Purpose:** Remove the DIRECTORY(ies), if they are empty.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-p`, `--parents`: Remove explicit parent directories if being emptied.
+            - [ ] `-v`, `--verbose`: Verbose output.
+        - [ ] **Runtime:**
+            - [ ] Fail if not empty (`ENOTEMPTY`).
+        - [ ] **Library dependencies:**
+            - [ ] `rmdir`
+        - [ ] **Acceptance tests:**
+            - [ ] `rmdir empty_dir` -> succeeds
+            - [ ] `rmdir non_empty_dir` -> fails
+            - [ ] `rmdir -p a/b/c` -> removes c, then b, then a
     - [ ] **`cat` - Concatenate files and print on standard output:**
-        - [ ] `-n`, `--number`: Number all output lines.
-        - [ ] `-E`, `--show-ends`: Display `$` at end of each line.
+        - [ ] **Purpose:** Concatenate FILE(s) to standard output.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-n`, `--number`: Number all output lines.
+            - [ ] `-E`, `--show-ends`: Display `$` at end of each line.
+            - [ ] `-` (dash): Read from stdin.
+        - [ ] **Runtime:**
+            - [ ] Unbuffered vs Buffered I/O considerations.
+            - [ ] Error handling (continue to next file on error).
+        - [ ] **Library dependencies:**
+            - [ ] `xopen`, `safe_read`, `safe_write`
+        - [ ] **Acceptance tests:**
+            - [ ] `cat file` -> prints contents
+            - [ ] `cat file1 file2` -> prints concatenated
+            - [ ] `cat -n file` -> lines numbered
     - [ ] **`echo` - Display a line of text:**
-        - [ ] `-n`: Do not output the trailing newline.
-        - [ ] `-e`: Enable interpretation of backslash escapes.
+        - [ ] **Purpose:** Display a line of text.
+        - [ ] **Standards:** POSIX.1-2017 / XSI.
+        - [ ] **Operands:**
+            - [ ] `-n`: Do not output the trailing newline.
+            - [ ] `-e`: Enable interpretation of backslash escapes (`\n`, `\t`, `\\`, `\0NNN`).
+            - [ ] `-E`: Disable interpretation of backslash escapes (default).
+        - [ ] **Runtime:**
+            - [ ] Print all arguments separated by space.
+        - [ ] **Library dependencies:**
+            - [ ] `printf` or `write`
+        - [ ] **Acceptance tests:**
+            - [ ] `echo hello` -> prints "hello\n"
+            - [ ] `echo -n hello` -> prints "hello" (no newline)
+            - [ ] `echo -e "a\tb"` -> prints "a    b"
     - [ ] **`touch` - Change file timestamps:**
-        - [ ] `-a`: Change only the access time.
-        - [ ] `-m`: Change only the modification time.
-        - [ ] `-c`, `--no-create`: Do not create any files.
+        - [ ] **Purpose:** Update the access and modification times of each FILE to the current time.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-a`: Change only the access time.
+            - [ ] `-m`: Change only the modification time.
+            - [ ] `-c`, `--no-create`: Do not create any files.
+            - [ ] `-d`, `--date=STRING`: Parse STRING and use it instead of current time.
+            - [ ] `-r`, `--reference=FILE`: Use this file's times instead of current time.
+        - [ ] **Runtime:**
+            - [ ] Create empty file if not exists (unless `-c`).
+            - [ ] Update times using `utimensat`.
+        - [ ] **Library dependencies:**
+            - [ ] `open` (O_CREAT), `utimensat`, `parse_time`
+        - [ ] **Acceptance tests:**
+            - [ ] `touch newfile` -> file created
+            - [ ] `touch existing` -> mtime updated
+            - [ ] `touch -c nonexist` -> file not created
     - [ ] **`chmod` - Change file mode bits:**
-        - [ ] `-R`, `--recursive`: Change files and directories recursively.
-        - [ ] Symbolic mode support (e.g., `u+x`).
-        - [ ] Octal mode support (e.g., `755`).
+        - [ ] **Purpose:** Change the mode of each FILE to MODE.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-R`, `--recursive`: Change files and directories recursively.
+            - [ ] `-v`, `--verbose`: Diagnostic for every file processed.
+            - [ ] Symbolic mode support (e.g., `u+x,g-w`).
+            - [ ] Octal mode support (e.g., `755`).
+        - [ ] **Runtime:**
+            - [ ] Recursive traversal logic for `-R`.
+            - [ ] Parsing complex symbolic mode strings.
+        - [ ] **Library dependencies:**
+            - [ ] `chmod`, `fchmodat`, `parse_mode_string`
+        - [ ] **Acceptance tests:**
+            - [ ] `chmod 755 file` -> mode is 755
+            - [ ] `chmod +x file` -> executable bit set
+            - [ ] `chmod -R a-w dir` -> dir and contents read-only
     - [ ] **`chown` - Change file owner and group:**
-        - [ ] `-R`, `--recursive`: Operate on files and directories recursively.
+        - [ ] **Purpose:** Change the owner and/or group of each FILE to OWNER and/or GROUP.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-R`, `--recursive`: Operate on files and directories recursively.
+            - [ ] `-h`, `--no-dereference`: Affect symbolic links instead of referenced file.
+            - [ ] `[OWNER][:[GROUP]]`: Owner/Group specifier.
+        - [ ] **Runtime:**
+            - [ ] Name-to-ID resolution (`getpwnam`, `getgrnam`).
+            - [ ] Handling numeric IDs.
+        - [ ] **Library dependencies:**
+            - [ ] `chown`, `lchown`, `fchownat`, `id_resolve`
+        - [ ] **Acceptance tests:**
+            - [ ] `chown user file` -> owner changed
+            - [ ] `chown :group file` -> group changed
+            - [ ] `chown -R user:group dir` -> recurse change
     - [ ] **`ln` - Make links between files:**
-        - [ ] `-s`, `--symbolic`: Make symbolic links instead of hard links.
-        - [ ] `-f`, `--force`: Remove existing destination files.
+        - [ ] **Purpose:** Make links between files.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-s`, `--symbolic`: Make symbolic links instead of hard links.
+            - [ ] `-f`, `--force`: Remove existing destination files.
+            - [ ] `-n`, `--no-dereference`: Treat LINK_NAME as a normal file if it is a directory link.
+        - [ ] **Runtime:**
+            - [ ] Hard link creation (`link`).
+            - [ ] Symlink creation (`symlink`).
+            - [ ] Overwrite logic for `-f`.
+        - [ ] **Library dependencies:**
+            - [ ] `link`, `symlink`, `unlink`
+        - [ ] **Acceptance tests:**
+            - [ ] `ln target link` -> hard link created
+            - [ ] `ln -s target link` -> symlink created
+            - [ ] `ln -sf new old` -> overwrites old with new symlink
     - [ ] **`wc` - Print newline, word, and byte counts:**
-        - [ ] `-c`, `--bytes`: Print the byte counts.
-        - [ ] `-l`, `--lines`: Print the newline counts.
-        - [ ] `-w`, `--words`: Print the word counts.
+        - [ ] **Purpose:** Print newline, word, and byte counts for each FILE.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-c`, `--bytes`: Print the byte counts.
+            - [ ] `-l`, `--lines`: Print the newline counts.
+            - [ ] `-w`, `--words`: Print the word counts.
+            - [ ] `-m`, `--chars`: Print the character counts.
+        - [ ] **Runtime:**
+            - [ ] Buffered read loop.
+            - [ ] State machine for word counting (whitespace transition).
+        - [ ] **Library dependencies:**
+            - [ ] `safe_read`, `isspace`
+        - [ ] **Acceptance tests:**
+            - [ ] `wc file` -> prints lines, words, bytes
+            - [ ] `echo "a b" | wc -w` -> prints 2
+            - [ ] `wc -c` -> prints byte count
     - [ ] **`head` - Output the first part of files:**
-        - [ ] `-n`, `--lines`: Print the first K lines.
-        - [ ] `-c`, `--bytes`: Print the first K bytes.
+        - [ ] **Purpose:** Print the first 10 lines of each FILE to standard output.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-n`, `--lines=[-]K`: Print the first K lines; or all but the last K lines.
+            - [ ] `-c`, `--bytes=[-]K`: Print the first K bytes; or all but the last K bytes.
+            - [ ] `-q`, `--quiet`: Never print headers giving file names.
+            - [ ] `-v`, `--verbose`: Always print headers.
+        - [ ] **Runtime:**
+            - [ ] Line counting loop.
+            - [ ] Byte counting loop.
+        - [ ] **Library dependencies:**
+            - [ ] `safe_read`, `parse_num_suffix`
+        - [ ] **Acceptance tests:**
+            - [ ] `head -n 5 file` -> prints first 5 lines
+            - [ ] `head -c 10 file` -> prints first 10 bytes
+            - [ ] `head file1 file2` -> prints headers and content
     - [ ] **`tail` - Output the last part of files:**
-        - [ ] `-n`, `--lines`: Output the last K lines.
-        - [ ] `-f`, `--follow`: Output appended data as the file grows.
+        - [ ] **Purpose:** Print the last 10 lines of each FILE to standard output.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-n`, `--lines=[+]K`: Output the last K lines; or start from line K.
+            - [ ] `-c`, `--bytes=[+]K`: Output the last K bytes; or start from byte K.
+            - [ ] `-f`, `--follow`: Output appended data as the file grows.
+        - [ ] **Runtime:**
+            - [ ] Circular buffer or seek-to-end logic for last K lines/bytes.
+            - [ ] `inotify` or polling loop for `-f`.
+        - [ ] **Library dependencies:**
+            - [ ] `lseek`, `safe_read`, `poll`/`inotify`
+        - [ ] **Acceptance tests:**
+            - [ ] `tail -n 5 file` -> last 5 lines
+            - [ ] `tail -f log` -> prints new data appended
+            - [ ] `tail -c 10 file` -> last 10 bytes
+    - [ ] **`dd` - Convert and copy a file:**
+        - [ ] **Purpose:** Low-level file copying and conversion.
+        - [ ] **Standards:** POSIX.1-2017, BSD Extensions.
+        - [ ] **Operands:**
+            - [ ] `if=file`: Input file (default stdin).
+            - [ ] `of=file`: Output file (default stdout).
+            - [ ] `ibs=n`: Input block size (default 512).
+            - [ ] `obs=n`: Output block size (default 512).
+            - [ ] `bs=n`: Set both ibs and obs.
+            - [ ] `cbs=n`: Conversion buffer size.
+            - [ ] `skip=n`: Skip n blocks from input start.
+            - [ ] `seek=n`: Skip n blocks from output start.
+            - [ ] `count=n`: Copy only n input blocks.
+            - [ ] `status=level`: `noxfer`, `none`, `progress`.
+            - [ ] `conv=value[,value...]`:
+                - [ ] `ascii`, `ebcdic`: Encoding conversion.
+                - [ ] `block`, `unblock`: Fixed-length record conversion.
+                - [ ] `lcase`, `ucase`: Case folding.
+                - [ ] `swab`: Swap byte pairs.
+                - [ ] `noerror`: Continue after read error.
+                - [ ] `notrunc`: Do not truncate output file.
+                - [ ] `sync`: Pad blocks with NULs (or spaces if `block`/`unblock`).
+                - [ ] `fdatasync`, `fsync`: Sync before exit (extension).
+        - [ ] **Runtime:**
+            - [ ] `SIGINFO`/`SIGUSR1` handler for progress stats.
+            - [ ] Summary output (records in/out, bytes, speed) to stderr.
+    - [ ] **`df` - Report file system disk space usage:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Options:**
+            - [ ] `-a`: Include all file systems (including size 0, pseudo-FS).
+            - [ ] `-h`: Human-readable output (base 2: K, M, G).
+            - [ ] `-H`: Human-readable output (base 10: KB, MB, GB).
+            - [ ] `-k`: 1024-byte blocks (default is often 512 in legacy).
+            - [ ] `-P`: Portable output format (strict single line).
+            - [ ] `-i`: Include inode usage info (Used, Free, %IUsed).
+            - [ ] `-l`: Local file systems only (no network mounts).
+            - [ ] `-t type`: Filter by file system type (e.g., `ext2`, `procfs`).
+        - [ ] **Implementation:**
+            - [ ] `getmntinfo()` or `setfsent()` loop.
+            - [ ] `statvfs()`/`getfsstat()` calls for block/inode data.
+            - [ ] Dynamic width calculation for aligned columns (Filesystem, Blocks, Used, Avail, Capacity, Mounted on).
+            - [ ] Handle Access Denied gracefully.
+    - [ ] **`pwd` - Return working directory name:**
+        - [ ] **Purpose:** Print the value of the current working directory.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-L`: Logical path (from environment PWD).
+            - [ ] `-P`: Physical path (resolve symlinks).
+        - [ ] **Runtime:**
+            - [ ] `getcwd()` usage.
+            - [ ] Fallback to `..` traversal if `getcwd` fails/absent.
+        - [ ] **Library dependencies:**
+            - [ ] `getcwd`, `getenv`
+        - [ ] **Acceptance tests:**
+            - [ ] `pwd` -> prints valid path
+            - [ ] `cd /tmp; pwd` -> prints /tmp
+            - [ ] `pwd -P` vs `pwd -L` inside symlinked dir
+    - [ ] **`sync` - Synchronize cached writes:**
+        - [ ] **Purpose:** Write any data buffered in memory out to disk.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:** None.
+        - [ ] **Runtime:**
+            - [ ] Invoke `sync()` syscall.
+        - [ ] **Library dependencies:**
+            - [ ] `sync`
+        - [ ] **Acceptance tests:**
+            - [ ] `sync` -> returns 0
+            - [ ] `sync --help` -> usage (optional)
+    - [ ] **`mknod` - Make block or character special files:**
+        - [ ] **Purpose:** Create a device special file.
+        - [ ] **Standards:** XSI (Legacy/Extension).
+        - [ ] **Operands:**
+            - [ ] `name`: File to create.
+            - [ ] `type`: `b` (block), `c` or `u` (char), `p` (fifo).
+            - [ ] `major`: Device major number (for b/c).
+            - [ ] `minor`: Device minor number (for b/c).
+        - [ ] **Runtime:**
+            - [ ] Use `mknod()` syscall (or `mkfifo()`).
+            - [ ] Validate permissions/ownership creation.
+        - [ ] **Library dependencies:**
+            - [ ] `mknod`, `mkfifo`, `strtol`
+        - [ ] **Acceptance tests:**
+            - [ ] `mknod pipe p` -> FIFO created
+            - [ ] `mknod dev c 1 3` -> char device created (requires root)
+    - [ ] **`mktemp` - Make temporary file or directory:**
+        - [ ] **Purpose:** Create a temporary file or directory.
+        - [ ] **Standards:** BSD/GNU Extension.
+        - [ ] **Operands:**
+            - [ ] `-d`, `--directory`: Create directory.
+            - [ ] `-u`, `--dry-run`: Do not create, just print name (unsafe).
+            - [ ] `-q`, `--quiet`: Fail silently.
+            - [ ] `-t prefix`: Use template in `TMPDIR`.
+            - [ ] `[TEMPLATE]`: Template string (ending in XXXXXX).
+        - [ ] **Runtime:**
+            - [ ] `mkstemp()` / `mkdtemp()` usage.
+        - [ ] **Library dependencies:**
+            - [ ] `mkstemp`, `mkdtemp`
+        - [ ] **Acceptance tests:**
+            - [ ] `mktemp` -> creates file in tmp
+            - [ ] `mktemp -d` -> creates dir
+            - [ ] `mktemp t.XXXXXX` -> replaces Xs
+    - [ ] **`readlink` - Print value of a symbolic link:**
+        - [ ] **Purpose:** Display information about a symbolic link.
+        - [ ] **Standards:** BSD/GNU Extension.
+        - [ ] **Operands:**
+            - [ ] `-f`: Canonicalize by following every symlink in every component.
+            - [ ] `-n`: Do not output trailing newline.
+        - [ ] **Runtime:**
+            - [ ] call `readlink()` syscall.
+            - [ ] logic for `-f` (realpath iteration).
+        - [ ] **Library dependencies:**
+            - [ ] `readlink`, `realpath` (for -f)
+        - [ ] **Acceptance tests:**
+            - [ ] `readlink symlink` -> prints target
+            - [ ] `readlink -f symlink` -> prints absolute path
+            - [ ] `readlink regularfile` -> fails (unless -f)
+    - [ ] **`realpath` - Print resolved path:**
+        - [ ] **Purpose:** Print the resolved path.
+        - [ ] **Standards:** POSIX.1-2024 (New), GNU/BSD compatible.
+        - [ ] **Operands:**
+            - [ ] `-e`: Require all components to exist.
+            - [ ] `-m`: No components required to exist.
+            - [ ] `-L`: Resolve logical (PWD).
+            - [ ] `-P`: Resolve physical (Symlinks).
+        - [ ] **Runtime:**
+            - [ ] `realpath()` function.
+        - [ ] **Library dependencies:**
+            - [ ] `realpath`
+        - [ ] **Acceptance tests:**
+            - [ ] `realpath .` -> absolute path
+            - [ ] `realpath symlink` -> resolved path
+            - [ ] `realpath -m missing/path` -> prints resolved path
+    - [ ] **`tee` - Duplicate standard input:**
+        - [ ] **Purpose:** Read from standard input and write to standard output and files.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-a`, `--append`: Append to files instead of overwriting.
+            - [ ] `-i`, `--ignore-interrupts`: Ignore SIGINT.
+        - [ ] **Runtime:**
+            - [ ] Open all files (O_CREAT | O_WRONLY | [O_TRUNC|O_APPEND]).
+            - [ ] Read stdin -> Write to stdout + all files.
+            - [ ] Handle write errors gracefully (continue other files).
+        - [ ] **Library dependencies:**
+            - [ ] `xopen`, `safe_read`, `safe_write`, `signal`
+        - [ ] **Acceptance tests:**
+            - [ ] `echo hi | tee file` -> file has "hi", stdout has "hi"
+            - [ ] `tee -a file` -> appends
+            - [ ] `tee -i` -> ignores interrupt
+    - [ ] **`date` - Write the date and time:**
+        - [ ] **Purpose:** Print or set the system date and time.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-u`: Display/Set UTC time.
+            - [ ] `-r file`: Display modification time of file.
+            - [ ] `-d date` / `--date=str`: Display string description of time (GNU Extension).
+            - [ ] `+format`: Format string (strftime compatible).
+        - [ ] **Runtime:**
+            - [ ] `clock_gettime()` / `gettimeofday()`.
+            - [ ] `settimeofday()` for setting time (superuser).
+            - [ ] `strftime()` for formatting.
+        - [ ] **Library dependencies:**
+            - [ ] `clock_gettime`, `localtime`, `gmtime`, `strftime`, `parse_date`
+        - [ ] **Acceptance tests:**
+            - [ ] `date` -> prints date
+            - [ ] `date +%Y` -> prints year
+            - [ ] `date -u` -> prints UTC
+    - [ ] **`hostname` - Show or set the system's host name:**
+        - [ ] **Purpose:** Show or set the system's host name.
+        - [ ] **Standards:** Legacy / LSB.
+        - [ ] **Operands:**
+            - [ ] `-f`: Long host name (FQDN).
+            - [ ] `-s`: Short host name.
+            - [ ] `-i`: IP address.
+            - [ ] `-y`: YP/NIS domain name.
+            - [ ] `[name]`: Set hostname (superuser).
+        - [ ] **Runtime:**
+            - [ ] `gethostname()` / `sethostname()`.
+            - [ ] `getaddrinfo()` for FQDN resolution.
+        - [ ] **Library dependencies:**
+            - [ ] `gethostname`, `sethostname`, `getaddrinfo`
+        - [ ] **Acceptance tests:**
+            - [ ] `hostname` -> prints name
+            - [ ] `hostname newname` -> sets name (if root)
+            - [ ] `hostname -f` -> prints FQDN
+    - [ ] **`uname` - Print system information:**
+        - [ ] **Purpose:** Print system info.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-a`: Print all info.
+            - [ ] `-s`: Kernel name.
+            - [ ] `-n`: Node name.
+            - [ ] `-r`: Kernel release.
+            - [ ] `-v`: Kernel version.
+            - [ ] `-m`: Machine hardware name.
+            - [ ] `-p`: Processor type (GNU extension).
+            - [ ] `-i`: Hardware platform (GNU extension).
+            - [ ] `-o`: Operating system (GNU extension).
+        - [ ] **Runtime:**
+            - [ ] `uname()` syscall.
+        - [ ] **Library dependencies:**
+            - [ ] `uname`
+        - [ ] **Acceptance tests:**
+            - [ ] `uname` -> prints kernel name
+            - [ ] `uname -a` -> prints all fields
+            - [ ] `uname -m` -> prints arch
+    - [ ] **`kill` - Terminate or signal processes:**
+        - [ ] **Purpose:** Send a signal to a process.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-s signal`, `-signal`: Specify signal name/number.
+            - [ ] `-l [status]`: List signals or translate exit status.
+            - [ ] `pid...`: Target processes.
+        - [ ] **Runtime:**
+            - [ ] `kill()` syscall.
+            - [ ] `strtol()` for PID parsing.
+            - [ ] Signal name resolution (`SIGTERM`, etc).
+        - [ ] **Library dependencies:**
+            - [ ] `kill`, `strtol`, `strsignal`
+        - [ ] **Acceptance tests:**
+            - [ ] `kill pid` -> sends SIGTERM
+            - [ ] `kill -9 pid` -> sends SIGKILL
+            - [ ] `kill -l` -> lists signals
+    - [ ] **`sleep` - Suspend execution for an interval:**
+        - [ ] **Purpose:** Pause execution.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `time`: Non-negative integer.
+            - [ ] Extension: Floating point support.
+            - [ ] Extension: Suffixes (s, m, h, d).
+        - [ ] **Runtime:**
+            - [ ] `nanosleep()` usage.
+        - [ ] **Library dependencies:**
+            - [ ] `nanosleep`, `strtod`
+        - [ ] **Acceptance tests:**
+            - [ ] `sleep 1` -> pauses 1s
+            - [ ] `sleep 0.1` -> pauses 100ms
+            - [ ] `sleep invalid` -> reports error
+    - [ ] **`true` - Return true value:**
+        - [ ] **Purpose:** Do nothing, successfully.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:** Ignored.
+        - [ ] **Runtime:** Exit code 0.
+        - [ ] **Library dependencies:** None.
+        - [ ] **Acceptance tests:**
+            - [ ] `true` -> exit status 0
+            - [ ] `true args` -> exit status 0
+    - [ ] **`false` - Return false value:**
+        - [ ] **Purpose:** Do nothing, unsuccessfully.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:** Ignored.
+        - [ ] **Runtime:** Exit code 1.
+        - [ ] **Library dependencies:** None.
+        - [ ] **Acceptance tests:**
+            - [ ] `false` -> exit status 1
+            - [ ] `false args` -> exit status 1
+    - [ ] **`test` / `[` - Evaluate expression:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **File Type Operators:**
+            - [ ] `-b file`: True if block special file.
+            - [ ] `-c file`: True if character special file.
+            - [ ] `-d file`: True if directory.
+            - [ ] `-e file`: True if file exists.
+            - [ ] `-f file`: True if regular file.
+            - [ ] `-g file`: True if set-group-ID flag is set.
+            - [ ] `-h` / `-L file`: True if symbolic link.
+            - [ ] `-k file`: True if sticky bit is set.
+            - [ ] `-p file`: True if FIFO (named pipe).
+            - [ ] `-r file`: True if readable.
+            - [ ] `-S file`: True if socket.
+            - [ ] `-s file`: True if size is greater than 0.
+            - [ ] `-u file`: True if set-user-ID flag is set.
+            - [ ] `-w file`: True if writable.
+            - [ ] `-x file`: True if executable.
+        - [ ] **String Operators:**
+            - [ ] `-z string`: True if string length is 0.
+            - [ ] `-n string`: True if string length is not 0.
+            - [ ] `s1 = s2`: True if strings are identical.
+            - [ ] `s1 != s2`: True if strings are not identical.
+        - [ ] **Integer Operators:**
+            - [ ] `n1 -eq n2`: Equal.
+            - [ ] `n1 -ne n2`: Not equal.
+            - [ ] `n1 -gt n2`: Greater than.
+            - [ ] `n1 -ge n2`: Greater than or equal.
+            - [ ] `n1 -lt n2`: Less than.
+            - [ ] `n1 -le n2`: Less than or equal.
+        - [ ] **Logic & Control:**
+            - [ ] `! expr`: Negate expression.
+            - [ ] `( expr )`: Grouping precedence.
+            - [ ] `expr1 -a expr2`: Logical AND (Binary).
+            - [ ] `expr1 -o expr2`: Logical OR (Binary).
+        - [ ] **Parsing & Runtime:**
+            - [ ] Recursive descent parser implementation.
+            - [ ] Handle 3-argument vs 4-argument ambiguity (POSIX rules).
+            - [ ] Detect `[` invocation name and require matching `]`.
+            - [ ] Use `lstat` for `-L`/`-h`, `stat` for others.
+            - [ ] Handle numeric parsing errors gracefully.
+    - [ ] **`expr` - Evaluate arguments as an expression:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Arithmetic Operators:**
+            - [ ] `+`: Addition (Integer).
+            - [ ] `-`: Subtraction (Integer).
+            - [ ] `*`: Multiplication (Integer).
+            - [ ] `/`: Integer division.
+            - [ ] `%`: Integer modulus.
+        - [ ] **Relational Operators (String & Integer support):**
+            - [ ] `=`: Equal.
+            - [ ] `!=`: Not equal.
+            - [ ] `>`: Greater than.
+            - [ ] `>=`: Greater than or equal.
+            - [ ] `<`: Less than.
+            - [ ] `<=`: Less than or equal.
+        - [ ] **Boolean Operators:**
+            - [ ] `|`: Logical OR (returns first non-null/non-zero arg, else 0).
+            - [ ] `&`: Logical AND (returns first arg if both non-null/non-zero, else 0).
+        - [ ] **String Matching:**
+            - [ ] `:`: Pattern matching (Anchored Regex).
+        - [ ] **Parsing:**
+            - [ ] Argument shifting logic.
+            - [ ] `regex.h` integration for `:` operator.
+            - [ ] Precedence handling: `( ... )` (if supported extension) or standard operator precedence.
+            - [ ] Robust detection of operators vs operands (e.g., `expr 1 + 1` vs `expr + 1`).
+    - [ ] **`printf` - Write formatted output:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Escape Sequences (Format String):**
+            - [ ] `\\`: Backslash.
+            - [ ] `\a`: Alert (bell).
+            - [ ] `\b`: Backspace.
+            - [ ] `\f`: Form feed.
+            - [ ] `\n`: Newline.
+            - [ ] `\r`: Carriage return.
+            - [ ] `\t`: Tab.
+            - [ ] `\v`: Vertical tab.
+            - [ ] `\0ooo`: Octal value (1-3 digits).
+        - [ ] **Format Specifiers:**
+            - [ ] `d`, `i`: Signed decimal.
+            - [ ] `o`: Unsigned octal.
+            - [ ] `u`: Unsigned decimal.
+            - [ ] `x`, `X`: Unsigned hexadecimal (lower/upper).
+            - [ ] `f`, `F`: Decimal floating point.
+            - [ ] `e`, `E`: Exponential floating point.
+            - [ ] `g`, `G`: General floating point (shortest).
+            - [ ] `a`, `A`: Hexadecimal floating point.
+            - [ ] `c`: Character.
+            - [ ] `s`: String.
+            - [ ] `p`: Pointer address (impl defined).
+            - [ ] `%`: Literal percent.
+        - [ ] **Special Specifiers:**
+            - [ ] `%b`: Expand escape sequences in the corresponding argument string.
+        - [ ] **Flags & Precision:**
+            - [ ] Width (e.g., `%5d`).
+            - [ ] Precision (e.g., `%.2f`, `%.5s`).
+            - [ ] `-`: Left-justify.
+            - [ ] `+`: Force sign.
+            - [ ] ` ` (space): Space if no sign.
+            - [ ] `#`: Alternate form (0x prefix, etc).
+            - [ ] `0`: Zero padding.
+        - [ ] **Behavior:**
+            - [ ] Argument recycling: Reuse format string if arguments remain.
+            - [ ] Default values: treat missing args as 0 (int) or "" (string).
+    - [ ] **`stty` - Set options for a terminal:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Options:**
+            - [ ] `-a`: All settings.
+            - [ ] `-g`: Saveable string.
+        - [ ] **Settings:**
+            - [ ] **Control Modes (`c_cflag`):**
+                - [ ] `parenb`, `parodd`, `-parenb`: Parity generation.
+                - [ ] `cs5`, `cs6`, `cs7`, `cs8`: Character size bits.
+                - [ ] `hupcl`: Hangup on last close.
+                - [ ] `cstopb`: Two stop bits.
+                - [ ] `cread`: Enable receiver.
+                - [ ] `clocal`: Ignore modem control lines.
+            - [ ] **Input Modes (`c_iflag`):**
+                - [ ] `ignbrk`, `brkint`: Break condition handling.
+                - [ ] `ignpar`, `parmrk`, `inpck`: Parity checking.
+                - [ ] `istrip`: Strip 8th bit.
+                - [ ] `inlcr`, `igncr`, `icrnl`: CR/NL mapping.
+                - [ ] `ixon`, `ixoff`: XON/XOFF flow control.
+            - [ ] **Output Modes (`c_oflag`):**
+                - [ ] `opost`: Post-process output.
+                - [ ] `onlcr`: Map NL to CR-NL.
+                - [ ] `ocrnl`: Map CR to NL.
+            - [ ] **Local Modes (`c_lflag`):**
+                - [ ] `isig`: Enable signals (INTR, QUIT, SUSP).
+                - [ ] `icanon`: Canonical mode (line buffering).
+                - [ ] `echo`, `echoe` (erase), `echok` (kill), `echonl`.
+                - [ ] `noflsh`: Disable flushing on signal.
+                - [ ] `tostop`: Stop background jobs on write.
+            - [ ] **Special Characters (`c_cc`):**
+                - [ ] `erase` (DEL/BS).
+                - [ ] `kill` (^U).
+                - [ ] `intr` (^C).
+                - [ ] `quit` (^\).
+                - [ ] `eof` (^D).
+                - [ ] `susp` (^Z).
+                - [ ] `start`/`stop` (^Q/^S).
+                - [ ] `min`/`time` (Non-canonical read control).
+            - [ ] **Combination Settings:**
+                - [ ] `sane`: Reset all to reasonable defaults.
+                - [ ] `raw`: Disable all processing (pass-through).
+                - [ ] `cooked`: Re-enable processing.
+                - [ ] `size`: Print terminal rows and columns.
+                - [ ] `rows N`, `cols N`: Set window size manually.
+    - [ ] **`tty` - Return user's terminal name:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Options:**
+            - [ ] `-s`: Silent mode.
+        - [ ] **Implementation:**
+            - [ ] `ttyname(STDIN_FILENO)`.
 - [x] Fix `pmap_dump` memory access logic (use `sys/proc.h` correctly) <!-- id: 4 -->
 - [x] Fix `init=` command line parsing <!-- id: 5 -->
 - [x] Fix `run_kernel_tests` linker error in EFI build <!-- id: 6 -->
 - [x] Add `syscall_log` kernel parameter for debugging <!-- id: 7 -->
 - [x] Investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 -->
 - [x] Investigate Page Fault at `0x08065d2b` (accessing `0x08124000`) <!-- id: 9 -->
-- [ ] **Editors:**
-    - [ ] **`vi` Clone:**
-        - [ ] Command mode parser.
-        - [ ] Insert/Replace modes.
-        - [ ] Basic `ex` command support (`:w`, `:q`).
-    - [ ] **TUI Editor (Pico/Nano-like):**
-        - [ ] Model-less text entry.
-        - [ ] On-screen command bar.
-        - [ ] Search/Replace functionality.
-    - [ ] **GUI Editor (Notepad-like):**
-        - [ ] Basic menu bar (File, Edit).
-        - [ ] `libg` and Widget Toolkit integration.
+    - [ ] **Editors:**
+        - [ ] **`vi` Clone (Tiny/Busybox-like):**
+            - [ ] **Buffer Management:**
+                - [ ] Gap buffer or Line-based linked list structure.
+                - [ ] File loading/saving (`:w`, `:e`).
+            - [ ] **Modes:**
+                - [ ] Normal Mode (Command processing).
+                - [ ] Insert Mode (Text input).
+                - [ ] Command-Line Mode (`:` prompts).
+            - [ ] **Navigation (Normal Mode):**
+                - [ ] `h`, `j`, `k`, `l`: Character cursor movement.
+                - [ ] `w`, `b`, `e`: Word movement.
+                - [ ] `0`, `^`, `$`: Line start/end.
+                - [ ] `G`, `gg`: Go to line.
+                - [ ] `Ctrl+F`, `Ctrl+B`: Page scrolling.
+            - [ ] **Editing Operations:**
+                - [ ] `i`, `a`, `o`, `O`: Enter insert mode.
+                - [ ] `x`, `X`: Delete character.
+                - [ ] `dd`, `dw`: Delete line/word.
+                - [ ] `yy`, `yw`: Yank (copy) line/word.
+                - [ ] `p`, `P`: Paste.
+                - [ ] `u`: Undo (Simplex implementation).
+            - [ ] **Search:**
+                - [ ] `/pattern`: Forward search.
+                - [ ] `n`, `N`: Next/Previous match.
+            - [ ] **Ex Commands:**
+                - [ ] `:q`, `:q!`: Quit.
+                - [ ] `:w`, `:wq`: Write/Save.
+                - [ ] `:set nu` / `:set nonu`: Line numbering.
+        - [ ] **TUI Editor (Nano-like):**
+            - [ ] **UI Rendering:**
+                - [ ] Top status bar (Version, File status).
+                - [ ] Bottom help bar (Key shortcuts ^G, ^X, etc).
+                - [ ] Main text area with scrolling.
+            - [ ] **Input Handling:**
+                - [ ] Modeless text entry (always insert).
+                - [ ] Control key handling (`^X` Exit, `^O` Save).
+                - [ ] Home/End/PageUp/PageDown navigation.
+            - [ ] **Features:**
+                - [ ] Search (`^W`) and Replace (`^\`).
+                - [ ] Cut (`^K`) and Uncut (`^U`) lines.
+                - [ ] Goto Line (`^_`).
+        - [ ] **GUI Editor (Notepad-like):**
+            - [ ] **Core Components:**
+                - [ ] `GWindow`: Main application window.
+                - [ ] `GTextArea`: Multi-line text widget with scrollbar.
+                - [ ] `GMenuBar`: Top menu (File, Edit, Format).
+            - [ ] **File Operations:**
+                - [ ] New: Clear buffer.
+                - [ ] Open: Launch `GFileChooser` dialog.
+                - [ ] Save / Save As: Launch `GFileChooser` (Save mode).
+            - [ ] **Edit Operations:**
+                - [ ] Cut/Copy/Paste via Clipboard API.
+                - [ ] Select All.
+                - [ ] Undo/Redo stack.
+            - [ ] **Preferences:**
+                - [ ] Font selection dialog.
+                - [ ] Word wrap toggle.
 - [ ] **System Utils:**
     - [ ] **`init` (PID 1):**
-        - [ ] **Stage 1 (Basic):**
+        - [ ] **Stage 1 (Boot):**
+            - [ ] Mask all signals except `SIGCHLD`.
+            - [ ] Mount `/proc`, `/sys`, `/dev` if not mounted by kernel.
             - [ ] Parse `/etc/rc` shell script.
             - [ ] Check `/etc/system.conf` for `GRAPHICAL_LOGIN=yes`.
-            - [ ] Spawn `getty` on TTYs or start `login.gui`.
-            - [ ] Reap zombie processes (wait loop).
+        - [ ] **Stage 2 (Run Loop):**
+            - [ ] Spawn `getty` on TTYs (`tty1`...`tty6`) or start `login.gui`.
+            - [ ] Handle `SIGCHLD`: `waitpid(-1, ...)` to reap orphans.
+            - [ ] Respawn died critical services (like `getty`).
+            - [ ] Handle `SIGINT`/`SIGPWR` for shutdown/reboot.
     - [ ] **Graphical Login (`login.gui`):**
-        - [ ] GUI session starter.
-        - [ ] Reads username/password.
-        - [ ] Reads username/password.
-        - [ ] Authenticates using `libauth` (no direct file access).
-        - [ ] Starts the default Desktop Environment shell on success.
+        - [ ] **UI:**
+            - [ ] Simple window with User/Pass fields.
+            - [ ] Shutdown/Restart buttons.
+        - [ ] **Auth:**
+            - [ ] Reads username/password.
+            - [ ] Authenticates using `libauth` (no direct file access).
+        - [ ] **Session:**
+            - [ ] Starts the default Desktop Environment shell on success.
+            - [ ] Hand off control using `execve` inside a `fork`ed child.
     - [ ] **`login` (CLI Auth):**
         - [ ] **Phase 1: Classic Unix Auth (`libauth`):**
             - [ ] Display generic "login:" prompt.
             - [ ] Disable TTY echo for password input.
             - [ ] Use `libauth` to validate credentials (validates against `/etc/passwd`).
-            - [ ] Handle generic authentication failures.
+            - [ ] Handle generic authentication failures (delay 3s).
         - [ ] **Phase 2: Session Setup:**
             - [ ] Initialize Environment (`HOME`, `SHELL`, `USER`, `LOGNAME`, `PATH`, `TERM`).
             - [ ] Set Process Group / Session ID (`setsid`).
-            - [ ] Apply Group IDs (`setgid`, `initgroups`).
+            - [ ] Apply Group IDs (`setgid`, `initgroups` for supplementary).
             - [ ] Apply User ID (`setuid`).
             - [ ] Change to user's home directory (`chdir`).
-            - [ ] Display `/etc/motd`.
-            - [ ] Execute Shell (`execve`).
+            - [ ] Display `/etc/motd` (Message of the Day).
+            - [ ] Execute Shell (`execve` of `pw_shell`).
         - [ ] **Phase 3: Security & Logging:**
             - [ ] Implement account expiration checking.
             - [ ] Record login in `/var/run/utmp` and `/var/log/wtmp`.
-            - [ ] Handle login failures (delay, syslog).
+            - [ ] Handle login failures (syslog LOG_AUTH).
     - [ ] **`ps` (Process Status):**
         - [ ] **Data Gathering:**
             - [ ] Iterate over `/proc/[pid]` directories.
-            - [ ] Parse `/proc/[pid]/stat` for state, ppid, pgrp, session, tty.
-            - [ ] Parse `/proc/[pid]/cmdline` or `comm` for process name.
-            - [ ] Parse `/proc/[pid]/status` for UID/GID mappings.
+            - [ ] Parse `/proc/[pid]/stat` for state (`R`, `S`, `Z`), ppid, pgrp, session, tty.
+            - [ ] Parse `/proc/[pid]/cmdline` for full arguments.
+            - [ ] Parse `/proc/[pid]/status` for real/effective UID/GID.
         - [ ] **Formatting & Output:**
-            - [ ] Resolve TTY major/minor to device names (`/dev/tty1`).
-            - [ ] Calculate %CPU and %MEM (requires global stats).
-            - [ ] Format columns (PID, TTY, TIME, CMD).
+            - [ ] Resolve TTY major/minor to device names (`/dev/tty1`, `?`).
+            - [ ] Calculate %CPU (utime+stime / uptime delta).
+            - [ ] Calculate %MEM (rss * pagesize / total_ram).
+            - [ ] Format columns (PID, TTY, STAT, TIME, COMMAND).
             - [ ] Support BSD syntax (`aux`) vs SysV syntax (`-ef`).
     - [ ] **`top` (Real-time Monitor):**
         - [ ] **Backend:**
             - [ ] Efficiently scan `/proc` (snapshotting).
-            - [ ] Calculate CPU delta usage between samples.
+            - [ ] Calculate CPU delta usage between samples (Prev/Curr ticks).
             - [ ] Read global stats (`/proc/stat`, `/proc/meminfo`).
         - [ ] **UI / Display:**
             - [ ] Initialize terminal (raw mode, no echo).
             - [ ] Handle VT100 control sequences (clear screen, cursor positioning).
             - [ ] Display Header (Uptime, Load Avg, CPU states, Mem/Swap).
-            - [ ] Display Process List (Sortable by CPU/Mem).
+            - [ ] Display Process List (Sortable by CPU/Mem, clamped to screen height).
             - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
 
 ### 8. LibC & Build System (User Requests & Audit)
@@ -1959,6 +2699,406 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Error reporting and `?` / `:` return codes.
         - [ ] Support for non-option argument reordering (swapping argv elements).
         - [ ] Test against GNU `getopt_long` behavior.
+- [ ] **Low-Level Helpers (LibC Extension):**
+    - [ ] `xmalloc(size)`: Safe memory allocation.
+        - [ ] **Prototype:** `void *xmalloc(size_t size)`
+        - [ ] **Purpose:** Allocate memory, aborting on failure.
+        - [ ] **Standards:** Common extension (Busybox/GNU coreutils style).
+        - [ ] **Syscalls / Kernel interfaces:** `malloc` -> `brk`/`mmap`.
+        - [ ] **Signal-safety / async-signal-safe:** no — calls `malloc`.
+        - [ ] **Reentrancy / thread-safety:** Thread-safe (if `malloc` is).
+        - [ ] **Error semantics:** Returns valid pointer or exits program (never returns NULL).
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xmalloc(1024)` -> returns pointer
+            - [ ] `xmalloc(huge)` -> prints error and exits (mock/limit env)
+        - [ ] **Implementation notes:** Wrapper around `malloc`.
+        - [ ] **Priority:** high
+    - [ ] `xopen(path, flags, mode)`: Safe file open.
+        - [ ] **Prototype:** `int xopen(const char *path, int flags, mode_t mode)`
+        - [ ] **Purpose:** Open file, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Syscalls / Kernel interfaces:** `open` / `openat`.
+        - [ ] **Signal-safety / async-signal-safe:** yes (if error handler is simple).
+        - [ ] **Reentrancy / thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns valid fd or exits program.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopen("exist", O_RDONLY)` -> returns fd
+            - [ ] `xopen("noexist", O_RDONLY)` -> prints error and exits
+        - [ ] **Priority:** high
+    - [ ] `xrealloc(ptr, size)`: Safe memory reallocation.
+        - [ ] **Prototype:** `void *xrealloc(void *ptr, size_t size)`
+        - [ ] **Purpose:** Reallocate memory, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `malloc` / `free` -> `brk`/`mmap`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe (if Underlying allocator is).
+        - [ ] **Error semantics:** Exits program on failure.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xrealloc(NULL, 10)` -> equivalent to xmalloc
+            - [ ] `xrealloc(ptr, 20)` -> preserves data, returns new ptr
+        - [ ] **Implementation notes:** `realloc(ptr, 0)` behavior check.
+        - [ ] **Priority:** high
+    - [ ] `xcalloc(nmemb, size)`: Safe zero-initialized allocation.
+        - [ ] **Prototype:** `void *xcalloc(size_t nmemb, size_t size)`
+        - [ ] **Purpose:** Allocate zeroed memory, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `calloc`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits program on failure, check overflow.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xcalloc(10, 10)` -> returns zeroed buffer
+            - [ ] `xcalloc(MAX, MAX)` -> overflow check and exit
+        - [ ] **Implementation notes:** Check for multiplication overflow.
+        - [ ] **Priority:** high
+    - [ ] `xstrdup(s)`: Safe string duplication.
+        - [ ] **Prototype:** `char *xstrdup(const char *s)`
+        - [ ] **Purpose:** Duplicate string, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `malloc`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits program on failure.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xstrdup("foo")` -> returns copy
+        - [ ] **Implementation notes:** Wrapper around `strdup`.
+        - [ ] **Priority:** high
+    - [ ] `xread(fd, buf, count)`: Read exact amount or fail.
+        - [ ] **Prototype:** `size_t xread(int fd, void *buf, size_t count)`
+        - [ ] **Purpose:** Read requested bytes, looping on partials/EINTR, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `read`.
+        - [ ] **Signal-safety:** yes (if error handler is simple).
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns count read (may be < requested if EOF), exits on IO error.
+        - [ ] **Memory ownership:** generic buffer.
+        - [ ] **Acceptance tests:**
+            - [ ] `xread` full buffer -> returns count
+            - [ ] `xread` partial -> loops or returns short on EOF
+        - [ ] **Implementation notes:** Distinguish short read (EOF) vs error.
+        - [ ] **Priority:** high
+    - [ ] `xwrite(fd, buf, count)`: Write exact amount or fail.
+        - [ ] **Prototype:** `void xwrite(int fd, const void *buf, size_t count)`
+        - [ ] **Purpose:** Write all bytes, looping on partials/EINTR, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `write`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits if write fails or incomplete.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xwrite` full buffer -> succeeds
+            - [ ] `xwrite` to full disk -> exits
+        - [ ] **Implementation notes:** Loop until all written.
+        - [ ] **Priority:** high
+    - [ ] `xstat(path, buf)`: Safe file status.
+        - [ ] **Prototype:** `void xstat(const char *path, struct stat *buf)`
+        - [ ] **Purpose:** Get file status, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `stat`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** caller provides struct.
+        - [ ] **Acceptance tests:**
+            - [ ] `xstat("exist", &sb)` -> success
+            - [ ] `xstat("noexist", &sb)` -> exits
+        - [ ] **Implementation notes:** Used when file is expected to exist.
+        - [ ] **Priority:** medium
+    - [ ] `xaccess(path, mode)`: Safe access check.
+        - [ ] **Prototype:** `void xaccess(const char *path, int mode)`
+        - [ ] **Purpose:** Check file access, exit on error (permission denied is error).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `access`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits if check fails.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xaccess` readable -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `xopendir(path)`: Safe directory open.
+        - [ ] **Prototype:** `DIR *xopendir(const char *path)`
+        - [ ] **Purpose:** Open directory, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `open`, `fstat`, `mmap` (via `opendir`).
+        - [ ] **Signal-safety:** no (allocates).
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns valid DIR* or exits.
+        - [ ] **Memory ownership:** Caller calls closedir.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopendir(".")` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** high
+    - [ ] `xclosedir(dirp)`: Safe directory close.
+        - [ ] **Prototype:** `void xclosedir(DIR *dirp)`
+        - [ ] **Purpose:** Close directory, warn/exit on failure? usually just wrapper.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `close`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits on error (unlikely).
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xclosedir` -> success
+        - [ ] **Implementation notes:** Check return code.
+        - [ ] **Priority:** medium
+    - [ ] `xfork()`: Safe process creation.
+        - [ ] **Prototype:** `pid_t xfork(void)`
+        - [ ] **Purpose:** Fork process, exit on failure (EAGAIN usually).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `fork`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns pid or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xfork()` -> parent gets pid, child gets 0
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** high
+    - [ ] `xwaitpid(pid, status, options)`: Safe wait.
+        - [ ] **Prototype:** `pid_t xwaitpid(pid_t pid, int *status, int options)`
+        - [ ] **Purpose:** Wait for process, loop on EINTR, exit on other error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `waitpid`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns pid.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xwaitpid` -> reaps zombie
+        - [ ] **Implementation notes:** Handle EINTR internally.
+        - [ ] **Priority:** high
+    - [ ] `xexecvp(file, argv)`: Safe execute.
+        - [ ] **Prototype:** `void xexecvp(const char *file, char *const argv[])`
+        - [ ] **Purpose:** Execute program, exit on failure (print error).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `execvp`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Does not return on success; exits on fail.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xexecvp("true", ...)` -> runs true
+            - [ ] `xexecvp("noexist", ...)` -> prints error, exits
+        - [ ] **Implementation notes:** Should print "cannot execute <file>: <strerror>".
+        - [ ] **Priority:** high
+    - [ ] `xsignal(signum, handler)`: Safe signal handler install.
+        - [ ] **Prototype:** `sighandler_t xsignal(int signum, sighandler_t handler)`
+        - [ ] **Purpose:** Set signal handler using `sigaction` (SA_RESTART), exit on error.
+        - [ ] **Standards:** BSD/Common.
+        - [ ] **Underlying syscalls:** `sigaction`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns old handler or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xsignal` -> handler set
+        - [ ] **Implementation notes:** Ensure portable sigaction usage.
+        - [ ] **Priority:** medium
+    - [ ] `humanize_number(buf, len, number, suffix, scale, flags)`: Format number.
+        - [ ] **Prototype:** `int humanize_number(char *buf, size_t len, int64_t number, const char *suffix, int scale, int flags)`
+        - [ ] **Purpose:** Format number with SI prefixes (k, M, G).
+        - [ ] **Standards:** NetBSD / BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns length or -1.
+        - [ ] **Memory ownership:** writes to buf.
+        - [ ] **Acceptance tests:**
+            - [ ] 1024 -> "1K"
+        - [ ] **Implementation notes:** Port from NetBSD/OpenBSD.
+        - [ ] **Priority:** medium
+    - [ ] `parse_mode(mode_str, old_mode)`: Parse mode string.
+        - [ ] **Prototype:** `mode_t parse_mode(const char *str, mode_t old)`
+        - [ ] **Purpose:** Parse chmod-style symbolic mode (u+x).
+        - [ ] **Standards:** Custom / BSD-like.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns new mode or -1/exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] "u+x" -> adds executable bit
+        - [ ] **Implementation notes:** State machine for symbolic parsing.
+        - [ ] **Priority:** medium
+    - [ ] `strlcpy(dst, src, size)`: Safe string copy.
+        - [ ] **Prototype:** `size_t strlcpy(char *dst, const char *src, size_t size)`
+        - [ ] **Purpose:** Copy string with NUL termination guarantee.
+        - [ ] **Standards:** OpenBSD / Common.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns total length of src.
+        - [ ] **Memory ownership:** writes dst.
+        - [ ] **Acceptance tests:**
+            - [ ] Truncation check.
+        - [ ] **Implementation notes:** Standard BSD behavior.
+        - [ ] **Priority:** high
+    - [ ] `strlcat(dst, src, size)`: Safe string cat.
+        - [ ] **Prototype:** `size_t strlcat(char *dst, const char *src, size_t size)`
+        - [ ] **Purpose:** Concatenate string with NUL termination guarantee.
+        - [ ] **Standards:** OpenBSD / Common.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns total length.
+        - [ ] **Memory ownership:** writes dst.
+        - [ ] **Acceptance tests:**
+            - [ ] Truncation check.
+        - [ ] **Implementation notes:** Standard BSD behavior.
+        - [ ] **Priority:** high
+    - [ ] `warn(fmt, ...)`: Print warning.
+        - [ ] **Prototype:** `void warn(const char *fmt, ...)`
+        - [ ] **Purpose:** Print "progname: fmt: strerror(errno)\n" to stderr.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** `write` / `fprintf`.
+        - [ ] **Signal-safety:** no (stdio).
+        - [ ] **Thread-safety:** locked (stdio).
+        - [ ] **Error semantics:** None.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `warn("fail")` -> prints message + errno
+        - [ ] **Implementation notes:** Use `vfprintf`.
+        - [ ] **Priority:** high
+    - [ ] `err(eval, fmt, ...)`: Print error and exit.
+        - [ ] **Prototype:** `void err(int eval, const char *fmt, ...)`
+        - [ ] **Purpose:** Print warning and exit with `eval`.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** `write`, `exit`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** N/A (exits).
+        - [ ] **Error semantics:** Exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `err(1, "fail")` -> exits 1, prints msg
+        - [ ] **Implementation notes:** Calls `warn` then `exit`.
+        - [ ] **Priority:** high
+    - [ ] `setprogname(name)` / `getprogname()`: Program name.
+        - [ ] **Prototype:** `void setprogname(const char *name)`, `const char *getprogname(void)`
+        - [ ] **Purpose:** Store/retrieve program name for diagnostics.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes (atomic ptr read/write).
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** N/A.
+        - [ ] **Memory ownership:** static/copy.
+        - [ ] **Acceptance tests:**
+            - [ ] set/get match
+        - [ ] **Implementation notes:** `basename` of argv[0].
+        - [ ] **Priority:** high
+    - [ ] `basename(path)`: Thread-safe path component extraction.
+        - [ ] **Prototype:** `char *basename(char *path)`
+        - [ ] **Purpose:** Return last component of path.
+        - [ ] **Standards:** POSIX.1-2008.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** yes (modifies path or returns static constant).
+        - [ ] **Error semantics:** Returns "." or "/".
+        - [ ] **Memory ownership:** May modify input (POSIX).
+        - [ ] **Acceptance tests:**
+            - [ ] `basename("/usr/bin/ls")` -> "ls"
+            - [ ] `basename("/")` -> "/"
+        - [ ] **Implementation notes:** Handle trailing slashes.
+        - [ ] **Priority:** medium
+    - [ ] `dirname(path)`: Thread-safe directory component extraction.
+        - [ ] **Prototype:** `char *dirname(char *path)`
+        - [ ] **Purpose:** Return parent directory of path.
+        - [ ] **Standards:** POSIX.1-2008.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** yes (modifies path).
+        - [ ] **Error semantics:** Returns "." or "/".
+        - [ ] **Memory ownership:** May modify input.
+        - [ ] **Acceptance tests:**
+            - [ ] `dirname("/usr/bin/ls")` -> "/usr/bin"
+        - [ ] **Implementation notes:** Handle trailing slashes.
+        - [ ] **Priority:** medium
+    - [ ] `xchmod(path, mode)`: Safe chmod.
+        - [ ] **Prototype:** `void xchmod(const char *path, mode_t mode)`
+        - [ ] **Purpose:** Change mode, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `chmod`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xchmod` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `xchown(path, owner, group)`: Safe chown.
+        - [ ] **Prototype:** `void xchown(const char *path, uid_t owner, gid_t group)`
+        - [ ] **Purpose:** Change ownership, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `chown`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xchown` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `strtonum(numstr, minval, maxval, errstrp)`: Safe number parsing.
+        - [ ] **Prototype:** `long long strtonum(const char *nptr, long long minval, long long maxval, const char **errstr)`
+        - [ ] **Purpose:** Parse number with bounds checking and strict validation.
+        - [ ] **Standards:** OpenBSD / BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns 0 on error and sets errstr.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `strtonum("10", 0, 100, &err)` -> 10, err=NULL
+            - [ ] `strtonum("101", 0, 100, &err)` -> 0, err="too large"
+        - [ ] **Implementation notes:** Strict parsing (no trailing garbage).
+        - [ ] **Priority:** high
+    - [ ] `xgetenv(name)`: Safe environment get.
+        - [ ] **Prototype:** `char *xgetenv(const char *name)`
+        - [ ] **Purpose:** Get environment variable, maybe exit if missing? Or just standard `getenv` wrapper? Usually just `getenv` is fine, but maybe `safe_getenv` for setuid?
+        - [ ] **Standards:** Internal.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe (usually).
+        - [ ] **Error semantics:** Returns value or NULL.
+        - [ ] **Memory ownership:** environment owned.
+        - [ ] **Acceptance tests:**
+            - [ ] Get existing var.
+        - [ ] **Implementation notes:** Maybe strict version `xgetenv_required`?
+        - [ ] **Priority:** low
+    - [ ] `xopenat(dirfd, path, flags, mode)`: Safe relative open.
+        - [ ] **Prototype:** `int xopenat(int dirfd, const char *path, int flags, mode_t mode)`
+        - [ ] **Purpose:** Open file relative to dir, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `openat`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns fd or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopenat` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** medium
+    - [ ] `xisatty(fd)`: Safe tty check.
+        - [ ] **Prototype:** `int xisatty(int fd)`
+        - [ ] **Purpose:** Check if fd is a tty, handle errno? Just `isatty` wrapper?
+        - [ ] **Standards:** POSIX.
+        - [ ] **Underlying syscalls:** `ioctl`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns 1/0.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xisatty(0)` -> 1 (if tty)
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
 - [ ] **Build System:**
     - [ ] Implement `native_dist` target to build usermode tools for the host OS (skipping libc/libm etc).
     - [ ] **Filesystem Tools (`sbin/`):**
@@ -2010,31 +3150,53 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Layer 1: Network Interface Drivers (Kernel):**
     - [ ] **Driver Compliance:** All drivers must implement `struct ifnet` methods.
     - [ ] **Loopback:** Virtual interface implementation.
-    - [ ] **NE1000:** ISA, 8-bit, 8390 NIC core.
-    - [ ] **NE2000:** ISA/PCI, 8390 NIC core, PIO/DMA data transfer.
-    - [ ] **3Com 3c509:** ISA, EtherLink III, PIO data transfer.
-    - [ ] **3Com 3c905:** PCI, EtherLink XL, Bus Master DMA (Boomerang).
-    - [ ] **Intel PRO/100 (i8255x):** PCI, 10/100 Mbps, Bus Master DMA.
-    - [ ] **Broadcom BCM57xx (Tigon3):** PCI/PCIe Gigabit, Ring buffer management.
-    - [ ] **RTL8139:** Basic send/receive, interrupt handling.
-    - [ ] **E1000:** Intel Gigabit Ethernet support.
-    - [ ] **VirtIO Net:** Optimized network driver for QEMU/KVM.
+    - [ ] **NE2000:**
+        - [ ] ISA/PCI attachment.
+        - [ ] 8390 NIC core logic (Ring buffer management).
+        - [ ] PIO data transfer (ports 0x10, 0x300).
+        - [ ] IRQ handling (ISR/IMR).
+    - [ ] **RTL8139:**
+        - [ ] PCI Bus Mastering.
+        - [ ] C+ Mode (Descriptor-based) optimized support.
+        - [ ] Rx/Tx DMA integration.
+    - [ ] **E1000 (Intel Pro/1000):**
+        - [ ] PCI/PCI-X/PCIe support.
+        - [ ] Advanced Descriptor rings.
+        - [ ] Interrupt Throttling.
+    - [ ] **VirtIO Net:**
+        - [ ] Virtqueue setup (Rx/Tx/Control).
+        - [ ] Feature negotiation (CSUM, TSO, etc.).
 - [ ] **Layer 2: Packet Interface Layer**
-    - [ ] Define abstract packet structure (like `sk_buff` or `mbuf`).
-    - [ ] Implement packet queuing and dispatching to protocol drivers.
-    - [ ] Implement `ifconfig` style interface management (up/down/flags).
+    - [ ] Define abstract packet structure (`mbuf`).
+    - [ ] Implement packet queuing (`if_snd`, `if_fastq`) and dispatching.
+    - [ ] Implement `ifconfig` style interface management (up/down/flags/mtu).
 - [ ] **Layer 3: Protocol Drivers (Kernel Stack)**
-    - [ ] **Ethernet (L2):** Frame parsing and encapsulation.
-    - [ ] **ARP (L2.5):** Resolution, caching, and timeout logic.
-    - [ ] **IPv4 (L3):** Packet processing, routing table, fragmentation/reassembly.
+    - [ ] **Ethernet (L2):**
+        - [ ] Frame parsing (EtherType dispatch).
+        - [ ] ARP/RARP encapsulation.
+    - [ ] **ARP (L2.5):**
+        - [ ] Resolution (IP -> MAC).
+        - [ ] Caching (Hash table with timeout).
+        - [ ] Gratuitous ARP on up.
+    - [ ] **IPv4 (L3):**
+        - [ ] Packet validation (Checksum, Version, HL).
+        - [ ] Routing table lookup (LPM - Longest Prefix Match).
+        - [ ] Fragmentation/Reassembly logic.
     - [ ] **IPv6 (L3):**
         - [ ] Packet parsing and extension headers.
-        - [ ] Neighbor Discovery Protocol (NDP) (replaces ARP).
-        - [ ] SLAAC/DHCPv6 for address autoconfiguration.
-        - [ ] Dual-stack socket support.
-    - [ ] **ICMPv4/v6 (L3):** Echo request/reply and error messages.
-    - [ ] **UDP (L4):** Datagram sending/receiving.
-    - [ ] **TCP (L4):** Connection state machine, window management, congestion control.
+        - [ ] NDP (Neighbor Discovery) state machine.
+        - [ ] SLAAC autoconfiguration.
+    - [ ] **ICMPv4/v6 (L3):**
+        - [ ] Echo Request/Reply (Ping).
+        - [ ] Destination Unreachable / Time Exceeded.
+    - [ ] **UDP (L4):**
+        - [ ] PCB list (Port binding).
+        - [ ] Datagram sending/receiving.
+    - [ ] **TCP (L4):**
+        - [ ] **State Machine:** LISTEN, SYN_SENT, SYN_RCVD, ESTABLISHED, FIN_WAIT...
+        - [ ] **Window Management:** Sliding window, Flow control.
+        - [ ] **Congestion Control:** Slow Start, Congestion Avoidance.
+        - [ ] **Timers:** Retransmission, Keepalive, TIME_WAIT.
 - [ ] **Layer 4: Socket API**
     - [ ] **VFS Integration:** Map sockets to file descriptors.
     - [ ] **Syscalls:** `socket`, `bind`, `connect`, `listen`, `accept`, `setsockopt`.
@@ -2061,38 +3223,28 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 ### 10. Hardware Support & Peripherals
 - [ ] **USB Subsystem:**
     - [ ] **Host Controllers:**
-        - [ ] **UHCI (Universal Host Controller Interface):** Intel/VIA USB 1.1 support.
-        - [ ] **OHCI (Open Host Controller Interface):** Compaq/Microsoft USB 1.1 support.
-        - [ ] **EHCI (Enhanced Host Controller Interface):** USB 2.0 support.
-        - [ ] **xHCI (eXtensible Host Controller Interface):** USB 3.0+ support.
-    
+        - [ ] **UHCI:** IO-port based, Frame List management.
+        - [ ] **OHCI:** Memory-mapped, Endpoint Descriptor (ED) / Transfer Descriptor (TD) lists.
+        - [ ] **EHCI:** Memory-mapped, Async/Periodic Schedule, QH/qTD structures.
+        - [ ] **xHCI:** Command Ring, Event Ring, Doorbell mechanisms.
     - [ ] **Core Stack:**
-        - [ ] Bus management and root hub enumeration.
-        - [ ] URB (USB Request Block) infrastructure.
-        - [ ] Pipe management (Control, Bulk, Interrupt, Isochronous).
-        - [ ] Device descriptor parsing and configuration management.
-        - [ ] Hub support and port status monitoring.
-    
+        - [ ] **Enumeration:** Set Address, Get Descriptor (Device, Config, Interface, Endpoint).
+        - [ ] **Hub Driver:** Port status change interrupts, Port Reset/Power logic.
+        - [ ] **Buffers:** URB (USB Request Block) lifecycle management.
     - [ ] **Class Drivers:**
-        - [ ] **HID (Human Interface Device):** Support for USB keyboards and mice.
-        - [ ] **Mass Storage (UMSS/BOT):** Bulk-Only Transport for flash drives.
-        - [ ] **ACM (Abstract Control Model):** USB CDC serial ports.
-        - [ ] **Audio:** Support for USB audio output.
+        - [ ] **HID:** Report parsing (Keyboard scancodes, Mouse relative motion).
+        - [ ] **Mass Storage (MSC):** SCSI over Bulk-Only Transport (BOT).
+        - [ ] **CDC-ACM:** Serial emulation (Line Coding, Control Lines).
 - [ ] **Audio:**
-        - [ ] **Native API (Sun AudioIO):**
-            - [ ] Implement `/dev/audio` and `/dev/audioctl` character devices.
-            - [ ] Define `audio_info_t` structure and standard ioctls (`AUDIO_GETINFO`, `AUDIO_SETINFO`).
-            - [ ] Support u-law (mu-law), a-law, and linear PCM formats.
-        - [ ] **Compatibility:**
-            - [ ] **OSS Emulation:** Map `/dev/dsp` ioctls to native AudioIO calls.
-        - [ ] **Controllers:**
-            - [ ] **Sound Blaster 16/32:** DSP programming, DMA (ISA), Mixer.
-            - [ ] **Ensoniq AudioPCI (ES1370/1371):** PCI, Bus Master DMA, AC97-like.
-            - [ ] AC97
-            - [ ] Intel HDA
-        - [ ] **Subsystem:**
-            - [ ] Mixer interface
-            - [ ] `/dev/dsp` or `/dev/snd/*` nodes
+        - [ ] **Native API (Sun/NetBSD AudioIO):**
+            - [ ] Character devices: `/dev/audio` (rw), `/dev/audioctl` (ioctl only), `/dev/mixer`.
+            - [ ] Structure `audio_info_t`: encapsulating sample rate, channels, precision, encoding.
+            - [ ] Ioctls: `AUDIO_GETINFO`, `AUDIO_SETINFO`, `AUDIO_DRAIN`, `AUDIO_FLUSH`.
+        - [ ] **Driver Implementation:**
+            - [ ] **Circular DMA Buffers:** Ring buffer management for continuous playback.
+            - [ ] **Mixer:** Volume control, Mute, Source selection (Mic/Line).
+            - [ ] **AC97:** Codec IO, Link interface.
+            - [ ] **Intel HDA:** CORB/RIRB, Stream Descriptor setup.
     
 - [ ] **Power Management (ACPI):**
     - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser.

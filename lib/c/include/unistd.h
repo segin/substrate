@@ -56,4 +56,8 @@ off_t lseek(int fd, off_t offset, int whence);
 
 unsigned int sleep(unsigned int seconds);
 
+int gethostname(char *name, size_t len);
+int sethostname(const char *name, size_t len);
+
+
 #endif
