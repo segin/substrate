@@ -491,9 +491,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `pid == -1`: Wait for any child.
                 - [x] `pid == 0`: Wait for any child in same process group.
                 - [x] `pid < -1`: Wait for any child in group `|pid|`.
-        - [ ] **Non-Blocking Check (`WNOHANG`):**
-            - [ ] If no zombies match but children exist, return 0 immediately.
-            - [ ] If no children exist, return `ECHILD`.
+        - [x] **Non-Blocking Check (`WNOHANG`):**
+            - [x] If no zombies match but children exist, return 0 immediately.
+            - [x] If no children exist, return `ECHILD`.
         - [ ] **Blocking Wait:**
             - [ ] Implementation: `sleepq_wait(&current_proc->p_children, Priority)`.
             - [ ] Handle `EINTR` (interrupted by signal).

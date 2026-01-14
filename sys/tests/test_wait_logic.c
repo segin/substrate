@@ -81,5 +81,16 @@ void test_wait_logic(void) {
 
     // Test 6: Wait for running process (102) -> WNOHANG should return 0
     ret = sys_wait4(102, &status, WNOHANG, NULL);
-    TEST_ASSERT(ret == 0); 
+    TEST_ASSERT(ret == 0);
+
+    // Test 7: WNOHANG with no zombies (make all running)
+    mock_child1.state = SRUN;
+    mock_child3.state = SRUN;
+    ret = sys_wait4(-1, &status, WNOHANG, NULL);
+    TEST_ASSERT(ret == 0); // Children exist, but none are zombies
+
+    // Test 8: No children at all (ECHILD)
+    mock_parent.p_children = NULL; // Clear list
+    ret = sys_wait4(-1, &status, WNOHANG, NULL);
+    TEST_ASSERT(ret == -ECHILD);
 }
