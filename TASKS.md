@@ -387,15 +387,15 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Implement One-Shot Mode (for high-res sleeps).
             - [x] **Error Handling:** Setup Error Status Register (ESR) and LVT Error vector.
             - [x] **IPI:** Implement ICR (Interrupt Command Register) writing logic.
-        - [ ] **IO-APIC:**
-            - [ ] **Enumeration:** Find IO-APIC(s) from MADT.
-            - [ ] **Access:** Implement `ioapic_read`/`ioapic_write` (Index/Window registers).
-            - [ ] **Redirection Table:**
-                - [ ] Mask/Unmask IRQs.
-                - [ ] Set Delivery Mode (Fixed/Lowest Priority).
-                - [ ] Set Destination (Physical/Logical).
-                - [ ] Set Polarity and Trigger Mode (Active High/Low, Edge/Level).
-            - [ ] **Legacy Mapping:** Map ISA IRQs (0-15) to Global System Interrupts (GSIs).
+        - [x] **IO-APIC:**
+            - [x] **Enumeration:** Find IO-APIC(s) from MADT.
+            - [x] **Access:** Implement `ioapic_read`/`ioapic_write` (Index/Window registers).
+            - [x] **Redirection Table:**
+                - [x] Mask/Unmask IRQs.
+                - [x] Set Delivery Mode (Fixed/Lowest Priority).
+                - [x] Set Destination (Physical/Logical).
+                - [x] Set Polarity and Trigger Mode (Active High/Low, Edge/Level).
+            - [x] **Legacy Mapping:** Map ISA IRQs (0-15) to Global System Interrupts (GSIs).
         - [ ] **SMP Support:**
             - [ ] **Boot Logic:** Ensure Single Processor (BSP) boot works flawlessly by default.
             - [ ] **AP Bootstrap:**
