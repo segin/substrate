@@ -501,7 +501,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Reaping (ZOMBIE -> FREE):**
             - [x] Copy `p_xstat` and `p_rusage` to user buffer. <!-- Implemented rusage accumulation to parent -->
             - [x] Remove from siblings list. <!-- Already implemented in wait.c lines 103-110 -->
-            - [ ] Remove from process group.
+            - [x] Remove from process group. <!-- Clears pgrp/session fields; full struct pgrp later -->
             - [ ] Free `struct process` memory (`uma_zfree`).
         - [ ] **Job Control Integration (`WUNTRACED`, `WCONTINUED`):**
             - [ ] Check `p_stat` for `SSTOP` (stopped).

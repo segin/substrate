@@ -109,7 +109,13 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 if (prev) prev->p_sibling = target->p_sibling;
             }
             
-            // 4. Free Process Slot
+            // 4. Remove from process group (clear membership)
+            // Note: Full struct pgrp infrastructure will be added later
+            // For now, just clear the pgrp ID to indicate no group membership
+            target->pgrp = 0;
+            target->session = 0;
+            
+            // 5. Free Process Slot
             pid_t pid_val = target->pid;
             target->pid = -1; // Mark as free
             target->p_parent = NULL;
