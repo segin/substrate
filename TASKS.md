@@ -458,7 +458,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Verification: Check `ss` and `cs` integrity on return.
         - [x] **Frame Management:**
             - [x] `sigaltstack`: Support alternative signal stack.
-            - [ ] `SA_SIGINFO`: Extended `siginfo_t` support.
+            - [x] `SA_SIGINFO`: Extended `siginfo_t` support.
     - [ ] **Generation:**
         - [ ] `psignal(p, sig)`: Send signal to process.
         - [ ] `pgsignal(pgrp, sig)`: Send signal to process group.

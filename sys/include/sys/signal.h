@@ -40,6 +40,20 @@ struct sigaction {
     int       sa_flags;
 };
 
+#define SA_SIGINFO 0x0040
+
+typedef struct {
+    int      si_signo;    /* Signal number */
+    int      si_errno;    /* An errno value */
+    int      si_code;     /* Signal code */
+    int      si_pid;      /* Sending process ID */
+    unsigned int si_uid;  /* Real user ID of sending process */
+    void    *si_addr;     /* Memory location which caused fault */
+    int      si_status;   /* Exit value or signal */
+    // Padding to 128 bytes usually
+    int      _pad[26];
+} siginfo_t;
+
 // Signal bits
 #define sigmask(sig) (1 << ((sig) - 1))
 

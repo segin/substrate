@@ -17,13 +17,17 @@ static int copyout(const void *src, void *dst, size_t size) {
 }
 
 /*
- * sendsig - Deliver a signal to a user process
- * 
  * This function prepares the user stack frame for the signal handler.
  * It pushes the context, signal number, and return address.
  */
-void sendsig(sig_t handler, int sig, uint32_t mask, registers_t *regs) {
+void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs) {
     if (!regs) return;
+
+    // TODO: Handle SA_SIGINFO (extended frame)
+    if (flags & SA_SIGINFO) {
+        kprint("sendsig: SA_SIGINFO requested but not fully implemented (using legacy frame)\n");
+    }
+
 
     struct sigframe sf;
     struct sigcontext *scp;

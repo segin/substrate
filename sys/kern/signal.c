@@ -191,8 +191,8 @@ void signal_handle_pending(registers_t *regs) {
     }
 
     // Deliver signal via architecture-specific sendsig
-    extern void sendsig(sig_t handler, int sig, uint32_t mask, registers_t *regs);
-    sendsig(act->sa_handler, sig, current_thread->sig_mask, regs);
+    extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
+    sendsig(act->sa_handler, sig, current_thread->sig_mask, act->sa_flags, regs);
 }
 
 int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
