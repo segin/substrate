@@ -64,12 +64,12 @@ void test_wait_logic(void) {
     ret = sys_wait4(-1, &status, WNOHANG, NULL);
     TEST_ASSERT(ret == 101); // 101 is first in list and zombie
 
-    /*
     // Test 3: Wait for process group (0) -> Same as parent (100)
     // 101 is in 100.
     ret = sys_wait4(0, &status, WNOHANG, NULL);
     TEST_ASSERT(ret == 101); 
 
+    /*
     // Test 4: Wait for specific process group (-200)
     // 103 is in 200.
     ret = sys_wait4(-200, &status, WNOHANG, NULL);
