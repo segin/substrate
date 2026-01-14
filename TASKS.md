@@ -421,7 +421,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Affinity:** Respect `sched_setaffinity` masks.
         - [x] **IPI:** Inter-Processor Interrupts for preemption of remote CPUs.
     - [ ] **Synchronization Primitives:**
-        - [ ] **Turnstiles:** Priority Inheritance implementation for Mutexes (prevent inversion).
+        - [x] **Turnstiles:** Priority Inheritance implementation for Mutexes (prevent inversion).
         - [ ] **Sleep Queues:** Hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
     - [ ] **Context Switching:**
         - [ ] **FPU Lazy Save:** `Unordered` exception logic for FPU context.
