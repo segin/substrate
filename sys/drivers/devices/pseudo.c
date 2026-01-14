@@ -57,6 +57,36 @@ static uint32_t port_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t
     return count;
 }
 
+// /dev/stdin -> /proc/self/fd/0
+static int stdin_readlink(fs_node_t *node, char *buf, size_t size) {
+    (void)node;
+    const char *target = "/proc/self/fd/0";
+    size_t len = strlen(target);
+    if (len > size) len = size;
+    memcpy(buf, target, len);
+    return len;
+}
+
+// /dev/stdout -> /proc/self/fd/1
+static int stdout_readlink(fs_node_t *node, char *buf, size_t size) {
+    (void)node;
+    const char *target = "/proc/self/fd/1";
+    size_t len = strlen(target);
+    if (len > size) len = size;
+    memcpy(buf, target, len);
+    return len;
+}
+
+// /dev/stderr -> /proc/self/fd/2
+static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
+    (void)node;
+    const char *target = "/proc/self/fd/2";
+    size_t len = strlen(target);
+    if (len > size) len = size;
+    memcpy(buf, target, len);
+    return len;
+}
+
 // /dev/random (very simple PRNG)
 static uint32_t random_state = 123456789;
 static uint32_t random_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
@@ -255,4 +285,28 @@ void pseudo_init(void) {
     port_node.read = &port_read;
     port_node.write = &port_write;
     devfs_register_device(&port_node);
+
+    // /dev/stdin
+    static fs_node_t stdin_node;
+    memset(&stdin_node, 0, sizeof(fs_node_t));
+    strcpy(stdin_node.name, "stdin");
+    stdin_node.flags = FS_SYMLINK;
+    stdin_node.readlink = &stdin_readlink;
+    devfs_register_device(&stdin_node);
+
+    // /dev/stdout
+    static fs_node_t stdout_node;
+    memset(&stdout_node, 0, sizeof(fs_node_t));
+    strcpy(stdout_node.name, "stdout");
+    stdout_node.flags = FS_SYMLINK;
+    stdout_node.readlink = &stdout_readlink;
+    devfs_register_device(&stdout_node);
+
+    // /dev/stderr
+    static fs_node_t stderr_node;
+    memset(&stderr_node, 0, sizeof(fs_node_t));
+    strcpy(stderr_node.name, "stderr");
+    stderr_node.flags = FS_SYMLINK;
+    stderr_node.readlink = &stderr_readlink;
+    devfs_register_device(&stderr_node);
 }

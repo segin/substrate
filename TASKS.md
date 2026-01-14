@@ -966,7 +966,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Support `tty` (proxy to current process TTY).
         - [x] Support `mem` / `kmem` (Physical/Kernel memory access).
         - [x] Support `port` (I/O port access).
-        - [ ] Support `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/X`).
+        - [x] Support `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/X`).
         - [ ] Support `urandom` (CSPRNG vs true RNG).
 - [ ] **ProcFS (`/proc`):**
     - [ ] **Process Info:**
