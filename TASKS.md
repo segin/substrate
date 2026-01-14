@@ -396,12 +396,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Set Destination (Physical/Logical).
                 - [x] Set Polarity and Trigger Mode (Active High/Low, Edge/Level).
             - [x] **Legacy Mapping:** Map ISA IRQs (0-15) to Global System Interrupts (GSIs).
-        - [ ] **SMP Support:**
-            - [ ] **Boot Logic:** Ensure Single Processor (BSP) boot works flawlessly by default.
-            - [ ] **AP Bootstrap:**
-                - [ ] Allocate low-memory trampoline page (under 1MB).
-                - [ ] Copy 16-bit real mode entry code to trampoline.
-                - [ ] Send INIT IPI -> Wait -> SIPI -> Wait -> SIPI sequence.
+        - [x] **SMP Support:**
+            - [x] **Boot Logic:** Ensure Single Processor (BSP) boot works flawlessly by default.
+            - [x] **AP Bootstrap:**
+                - [x] Allocate low-memory trampoline page (under 1MB).
+                - [x] Copy 16-bit real mode entry code to trampoline.
+                - [x] Send INIT IPI -> Wait -> SIPI -> Wait -> SIPI sequence.
             - [ ] **Per-CPU Data:**
                 - [ ] implement `gs_base` (or `fs`) storage for CPU-local variables.
                 - [ ] Per-CPU Scheduler Runqueues.

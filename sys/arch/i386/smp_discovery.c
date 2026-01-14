@@ -98,32 +98,118 @@ extern void trampoline_end(void);
 
 #define TRAMPOLINE_ADDR 0x8000
 
+// Per-AP stack (static for now, should be dynamically allocated per AP)
+static char ap_stacks[MAX_CPUS][4096] __attribute__((aligned(16)));
+static volatile int aps_ready = 0;
+
 void smp_ap_entry(void) {
-    kprint("SMP: AP Core started.\n");
-    while(1) __asm__ volatile("hlt");
+    // Signal that we've started
+    __sync_fetch_and_add(&aps_ready, 1);
+    
+    kprint("SMP: AP Core online (LAPIC ID: ");
+    // Get and print LAPIC ID
+    extern uint32_t lapic_get_id(void);
+    uint32_t id = lapic_get_id();
+    char buf[4];
+    buf[0] = '0' + (id % 10);
+    buf[1] = '\0';
+    kprint(buf);
+    kprint(")\n");
+    
+    // Enable LAPIC on this AP
+    extern void lapic_enable(uint8_t);
+    lapic_enable(0xFF);  // Spurious vector
+    
+    // TODO: Initialize AP-local state (GDT, TSS, IDT, scheduler)
+    
+    // Halt and wait for work
+    while(1) {
+        __asm__ volatile("hlt");
+    }
 }
 
-void smp_boot_ap(uint8_t apic_id) {
-    (void)apic_id;
+// Boot a single AP
+int smp_boot_ap(uint8_t apic_id) {
+    extern void lapic_send_init(uint8_t);
+    extern void lapic_send_sipi(uint8_t, uint8_t);
+    
     // 1. Copy trampoline to low memory
     size_t len = (uintptr_t)trampoline_end - (uintptr_t)trampoline_start;
-    memcpy((void*)TRAMPOLINE_ADDR, trampoline_start, len);
+    memcpy((void*)TRAMPOLINE_ADDR, (void*)trampoline_start, len);
 
     // 2. Set stack and entry point in trampoline
-    // (Offsets match the .S file)
-    uint32_t *stk_ptr = (uint32_t*)(TRAMPOLINE_ADDR + (len - 8));
-    uint32_t *ent_ptr = (uint32_t*)(TRAMPOLINE_ADDR + (len - 4));
+    // Find offsets (they're at the end of the trampoline)
+    uint32_t *stk_ptr = (uint32_t*)(TRAMPOLINE_ADDR + len - 8);
+    uint32_t *ent_ptr = (uint32_t*)(TRAMPOLINE_ADDR + len - 4);
     
-    static char ap_stack[4096];
-    *stk_ptr = (uint32_t)ap_stack + 4096;
+    // Find CPU index for this APIC ID
+    int cpu_idx = -1;
+    for (int i = 0; i < cpu_count; i++) {
+        if (cpus[i].lapic_id == apic_id) {
+            cpu_idx = i;
+            break;
+        }
+    }
+    if (cpu_idx < 0) return -1;
+    
+    *stk_ptr = (uint32_t)&ap_stacks[cpu_idx][4096];
     *ent_ptr = (uint32_t)smp_ap_entry;
 
-    // 3. Send INIT IPI
-    // (Requires lapic_write from lapic.c)
-    // lapic_write(LAPIC_ICRHI, apic_id << 24);
-    // lapic_write(LAPIC_ICRLO, 0x00004500); // INIT
+    int old_ready = aps_ready;
 
-    // 4. Send STARTUP IPI
-    // lapic_write(LAPIC_ICRHI, apic_id << 24);
-    // lapic_write(LAPIC_ICRLO, 0x00004600 | (TRAMPOLINE_ADDR >> 12));
+    // 3. Send INIT IPI -> Wait 10ms -> SIPI -> Wait 200us -> SIPI
+    lapic_send_init(apic_id);
+    
+    // Delay ~10ms (simple busy wait - TODO: use proper timer)
+    for (volatile int i = 0; i < 1000000; i++) { }
+    
+    // First SIPI
+    lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
+    
+    // Delay ~200us
+    for (volatile int i = 0; i < 20000; i++) { }
+    
+    // Second SIPI (per Intel spec)
+    lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
+    
+    // Wait for AP to signal readiness (timeout ~100ms)
+    for (volatile int i = 0; i < 10000000 && aps_ready == old_ready; i++) { }
+    
+    if (aps_ready > old_ready) {
+        return 0;  // Success
+    }
+    
+    kprint("SMP: AP ");
+    char buf[4];
+    buf[0] = '0' + (apic_id % 10);
+    buf[1] = '\0';
+    kprint(buf);
+    kprint(" did not respond!\n");
+    return -1;
 }
+
+// Boot all APs
+void smp_boot_all_aps(void) {
+    kprint("SMP: Booting ");
+    char buf[4];
+    int ap_count = cpu_count - 1;  // Exclude BSP
+    buf[0] = '0' + (ap_count % 10);
+    buf[1] = '\0';
+    kprint(buf);
+    kprint(" Application Processor(s)...\n");
+    
+    for (int i = 1; i < cpu_count; i++) {  // Skip BSP (index 0)
+        smp_boot_ap(cpus[i].lapic_id);
+    }
+    
+    kprint("SMP: ");
+    buf[0] = '0' + (aps_ready % 10);
+    buf[1] = '\0';
+    kprint(buf);
+    kprint(" AP(s) online.\n");
+}
+
+int smp_get_cpu_count(void) {
+    return cpu_count;
+}
+

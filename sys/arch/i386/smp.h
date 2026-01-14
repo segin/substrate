@@ -16,5 +16,7 @@ extern int cpu_count;
 
 void smp_discover_cores(void);
 int smp_get_cpu_count(void);
+int smp_boot_ap(uint8_t apic_id);
+void smp_boot_all_aps(void);
 
 #endif
