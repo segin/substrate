@@ -194,3 +194,20 @@ void signal_handle_pending(registers_t *regs) {
     extern void sendsig(sig_t handler, int sig, uint32_t mask, registers_t *regs);
     sendsig(act->sa_handler, sig, current_thread->sig_mask, regs);
 }
+
+int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
+    if (oss) {
+        *oss = current_thread->sig_alt_stack;
+    }
+    
+    if (ss) {
+        if (ss->ss_flags & SS_DISABLE) {
+            current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
+        } else {
+            current_thread->sig_alt_stack = *ss;
+            // Validate size?
+            if (ss->ss_size < MINSIGSTKSZ) return -1; // ENOMEM
+        }
+    }
+    return 0;
+}

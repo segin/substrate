@@ -46,4 +46,20 @@ struct sigaction {
 int sys_kill(int pid, int sig);
 int signal_send_group(int pgrp, int sig);
 
+#include <stddef.h> // for size_t
+
+// Alternative signal stack structure
+typedef struct stack {
+    void     *ss_sp;       // Stack base or pointer
+    int       ss_flags;    // Flags
+    size_t    ss_size;     // Stack size
+} stack_t;
+
+#define SS_ONSTACK 1
+#define SS_DISABLE 2
+#define MINSIGSTKSZ 2048
+#define SIGSTKSZ    8192
+
+int sys_sigaltstack(const stack_t *ss, stack_t *oss);
+
 #endif

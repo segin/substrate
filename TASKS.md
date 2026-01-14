@@ -456,8 +456,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Trampoline:**
             - [x] `sys_sigreturn`: Restore keys registers from stack frame.
             - [x] Verification: Check `ss` and `cs` integrity on return.
-        - [ ] **Frame Management:**
-            - [ ] `sigaltstack`: Support alternative signal stack.
+        - [x] **Frame Management:**
+            - [x] `sigaltstack`: Support alternative signal stack.
             - [ ] `SA_SIGINFO`: Extended `siginfo_t` support.
     - [ ] **Generation:**
         - [ ] `psignal(p, sig)`: Send signal to process.

@@ -116,6 +116,7 @@ typedef struct thread {
     // Signals
     uint32_t      sig_pending;
     uint32_t      sig_mask;
+    stack_t       sig_alt_stack;
     
     thread_state_t state;
     struct thread *next;
