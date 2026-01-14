@@ -34,4 +34,8 @@ int vm_pager_get_pages(vm_pager_t *pager, vm_page_t **m, int count, bool sync);
 int vm_pager_put_pages(vm_pager_t *pager, vm_page_t **m, int count, bool sync);
 bool vm_pager_has_page(vm_pager_t *pager, uint64_t pindex);
 
+// Swap management
+int vm_swapon(void *node);
+
 #endif
+

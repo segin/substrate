@@ -150,3 +150,28 @@ vm_pager_ops_t swap_pager_ops = {
     .putpage = swap_pager_putpage,
     .haspage = swap_pager_haspage
 };
+
+// Set the file/node to use for swap
+// Returns 0 on success, error code otherwise
+int vm_swapon(void *node) {
+    if (!node) return -1;
+    
+    // TODO: Acquire lock
+    if (swap_node) {
+        // Swap already active
+        return -1; 
+    }
+    
+    // TODO: Validate node is a file and writable
+    
+    swap_node = (struct fs_node *)node;
+    
+    // TODO: Calculate swap size from file size
+    // For now, fixed bitmap size
+    
+    extern void kprint(const char *);
+    kprint("Swap enabled.\n");
+    
+    return 0;
+}
+
