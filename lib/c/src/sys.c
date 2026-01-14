@@ -277,3 +277,7 @@ int sethostname(const char *name, size_t len) {
     errno = ENOSYS;
     return -1;
 }
+
+int futex(int *uaddr, int op, int val, const struct timespec *timeout, int *uaddr2, int val3) {
+    return _syscall6(240, (int)uaddr, op, val, (int)timeout, (int)uaddr2, val3);
+}

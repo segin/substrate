@@ -57,6 +57,11 @@ void run_kernel_tests(void) {
         // run_mmap_tests(); // Uncomment when ready
     }
 
+    if (all || strcmp(test_arg, "futex") == 0) {
+         extern void test_futex(void);
+         test_futex();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested

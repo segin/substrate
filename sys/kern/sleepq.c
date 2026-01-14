@@ -98,7 +98,7 @@ static void sleepq_remove(sleepq_t *sq, int hash) {
 // Initialize sleep queue subsystem
 void sleepq_init(void) {
     memset(sleepq_hash, 0, sizeof(sleepq_hash));
-    memset(sleepq_locks, 0, sizeof(sleepq_locks));
+    memset((void*)sleepq_locks, 0, sizeof(sleepq_locks));
     sleepq_pool_next = 0;
 }
 
