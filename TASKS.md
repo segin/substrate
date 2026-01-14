@@ -419,7 +419,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Per-CPU Runqueues:** Remove global scheduler lock; lock individual runqueues.
         - [x] **Load Balancing:** "Work Stealing" logic when a CPU goes idle.
         - [x] **Affinity:** Respect `sched_setaffinity` masks.
-        - [ ] **IPI:** Inter-Processor Interrupts for preemption of remote CPUs.
+        - [x] **IPI:** Inter-Processor Interrupts for preemption of remote CPUs.
     - [ ] **Synchronization Primitives:**
         - [ ] **Turnstiles:** Priority Inheritance implementation for Mutexes (prevent inversion).
         - [ ] **Sleep Queues:** Hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
