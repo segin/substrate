@@ -499,7 +499,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Handle `EINTR` (interrupted by signal).
             - [x] Re-scan children list on wakeup.
         - [ ] **Reaping (ZOMBIE -> FREE):**
-            - [ ] Copy `p_xstat` and `p_rusage` to user buffer.
+            - [x] Copy `p_xstat` and `p_rusage` to user buffer. <!-- Implemented rusage accumulation to parent -->
             - [ ] Remove from siblings list.
             - [ ] Remove from process group.
             - [ ] Free `struct process` memory (`uma_zfree`).

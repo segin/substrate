@@ -75,12 +75,30 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
             // 1. Return Status
             if (status) *status = (target->exit_code << 8); // Simple WEXITSTATUS
             
-            // 2. Handle Rusage (Stubbed accumulator for now)
+            // 2. Handle Rusage - Copy to user buffer and accumulate to parent
             if (rusage) *rusage = target->rusage;
             
-            // Accumulate to parent (Simple stub)
-            // cur->rusage_children.ru_utime += target->rusage.ru_utime;
-            // cur->rusage_children.ru_stime += target->rusage.ru_stime;
+            // Accumulate child's rusage into parent's rusage_children (BSD semantics)
+            cur->rusage_children.ru_utime.tv_sec += target->rusage.ru_utime.tv_sec;
+            cur->rusage_children.ru_utime.tv_usec += target->rusage.ru_utime.tv_usec;
+            // Normalize microseconds
+            if (cur->rusage_children.ru_utime.tv_usec >= 1000000) {
+                cur->rusage_children.ru_utime.tv_sec++;
+                cur->rusage_children.ru_utime.tv_usec -= 1000000;
+            }
+            cur->rusage_children.ru_stime.tv_sec += target->rusage.ru_stime.tv_sec;
+            cur->rusage_children.ru_stime.tv_usec += target->rusage.ru_stime.tv_usec;
+            if (cur->rusage_children.ru_stime.tv_usec >= 1000000) {
+                cur->rusage_children.ru_stime.tv_sec++;
+                cur->rusage_children.ru_stime.tv_usec -= 1000000;
+            }
+            // Also accumulate grandchildren's usage (recursive)
+            cur->rusage_children.ru_maxrss = (target->rusage_children.ru_maxrss > cur->rusage_children.ru_maxrss) 
+                ? target->rusage_children.ru_maxrss : cur->rusage_children.ru_maxrss;
+            cur->rusage_children.ru_minflt += target->rusage.ru_minflt + target->rusage_children.ru_minflt;
+            cur->rusage_children.ru_majflt += target->rusage.ru_majflt + target->rusage_children.ru_majflt;
+            cur->rusage_children.ru_nvcsw += target->rusage.ru_nvcsw + target->rusage_children.ru_nvcsw;
+            cur->rusage_children.ru_nivcsw += target->rusage.ru_nivcsw + target->rusage_children.ru_nivcsw;
 
             // 3. Unlink from Parent's List
             if (cur->p_children == target) {
