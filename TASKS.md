@@ -969,12 +969,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Support `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/X`).
         - [x] Support `urandom` (CSPRNG vs true RNG).
 - [ ] **ProcFS (`/proc`):**
-    - [ ] **Process Info:**
+    - [x] **Process Info:**
         - [x] Expose `cmdline`.
         - [x] Expose `maps`.
         - [x] Expose `status`.
         - [x] Expose `fd` per PID.
-    - [ ] **System Info:**
+    - [x] **System Info:**
         - [x] Expose `cpuinfo`.
         - [x] Expose `meminfo`.
         - [x] Expose `uptime`.
