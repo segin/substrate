@@ -328,7 +328,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Rewrite:** **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
             - [x] **Rewrite:** **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
             - [x] **Rewrite:** **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
-            - [ ] **Rewrite:** **Swap Subsystem:**
+            - [x] **Rewrite:** **Swap Subsystem:**
                 - [x] **Pager:** Implement a swap pager to move pages to/from disk.
                 - [x] **Backing Store:** Support swap files or partitions.
                 - [x] **Policy:** Implement page replacement algorithm (Clock/LRU).
@@ -368,7 +368,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Large Allocations:** Bypass UMA for >4KB allocs (direct `vm_map` allocation).
             - [x] **Statistics:** Track memory usage by `malloc_type` (subsystem).
         - [ ] **Technical Debt & Optimization (Audit Findings):**
-            - [ ] **Refactor `uma_find_slab()`:** Replace O(N) linear search with hash table or RB-tree.
+            - [x] **Refactor `uma_find_slab()`:** Replace O(N) linear search with hash table or RB-tree.
             - [ ] **Safety:** Add protection against freeing foreign pointers (pointer tracking).
             - [ ] **Redzones:** Enhance redzones with canary values for corruption detection.
             - [ ] **Reclamation:** Implement bucket draining back to slabs.
