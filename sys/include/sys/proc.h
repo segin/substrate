@@ -91,10 +91,24 @@ typedef struct thread {
     uintptr_t kstack_top; // Top of Kernel Stack (for TSS esp0)
     uintptr_t instr_ptr;  // Instruction Pointer (EIP/RIP) - for context switching
     
-    // Scheduling
+    // Scheduling - Basic
     int           priority;
     int           base_priority;
     sched_class_t sched_class;
+    
+    // Scheduling - Interactivity (ULE-style)
+    uint32_t      sleep_time;     // Accumulated sleep/wait time (ticks)
+    uint32_t      run_time;       // Accumulated CPU time this epoch (ticks)
+    int16_t       interactivity;  // Interactivity score (-128 to +127), positive = interactive
+    uint16_t      time_slice;     // Remaining time slice (ticks)
+    uint16_t      time_slice_max; // Full time slice for this priority
+    
+    // Scheduling - Runqueue linkage
+    struct thread *rq_next;       // Next in runqueue level
+    struct thread *rq_prev;       // Prev in runqueue level
+    uint32_t       cpu_affinity;  // CPU affinity mask (bitmask)
+    uint8_t        on_runqueue;   // Is thread currently on a runqueue?
+    uint8_t        needs_resched; // Set by IPI to trigger reschedule
     
     void         *wait_chan; // Channel thread is sleeping on
     const char   *wait_reason; // Description of wait event

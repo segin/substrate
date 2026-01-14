@@ -413,7 +413,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Scheduling (Scheduler Refactor):**
     - [ ] **Algorithm (ULE/MLFQ):**
         - [x] **Multilevel Queues:** Separate queues for Realtime, Timeshare, and Idle priority classes.
-        - [ ] **Interactiveness:** Heuristics to boost interactive I/O-bound threads.
+        - [x] **Interactiveness:** Heuristics to boost interactive I/O-bound threads.
         - [ ] **Decay:** Handling priority decay for CPU handling threads.
     - [ ] **SMP Scalability:**
         - [ ] **Per-CPU Runqueues:** Remove global scheduler lock; lock individual runqueues.
