@@ -381,10 +381,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Initialization:** Map LAPIC MMIO base (usually 0xFEE00000).
             - [x] **Spurious Interrupts:** Set Spurious Interrupt Vector Register (SVR).
             - [ ] **Timer:**
-                - [ ] Calibrate against PIT or ACPI PM Timer.
-                - [ ] Set Divider Configuration Register (DCR).
-                - [ ] Implement Periodic Mode (for scheduler).
-                - [ ] Implement One-Shot Mode (for high-res sleeps).
+                - [x] Calibrate against PIT or ACPI PM Timer.
+                - [x] Set Divider Configuration Register (DCR).
+                - [x] Implement Periodic Mode (for scheduler).
+                - [x] Implement One-Shot Mode (for high-res sleeps).
             - [ ] **Error Handling:** Setup Error Status Register (ESR) and LVT Error vector.
             - [ ] **IPI:** Implement ICR (Interrupt Command Register) writing logic.
         - [ ] **IO-APIC:**

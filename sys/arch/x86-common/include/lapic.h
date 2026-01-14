@@ -86,6 +86,14 @@ bool lapic_is_initialized(void);
 void lapic_enable(uint8_t spurious_vector);
 void lapic_disable(void);
 
+// Timer
+uint32_t lapic_timer_calibrate(void);
+void lapic_timer_set_divider(uint8_t divider);
+void lapic_timer_periodic(uint8_t vector, uint32_t ticks);
+void lapic_timer_oneshot(uint8_t vector, uint32_t ticks);
+void lapic_timer_stop(void);
+uint32_t lapic_timer_ticks_per_ms(void);
+
 // EOI
 void lapic_send_eoi(void);
 

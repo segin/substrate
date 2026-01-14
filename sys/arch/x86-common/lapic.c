@@ -128,6 +128,148 @@ void lapic_disable(void) {
     kprint("LAPIC: Disabled\n");
 }
 
+// ==================== LAPIC Timer ====================
+
+// Timer calibration data
+static uint32_t lapic_timer_frequency = 0;  // Hz
+static uint32_t lapic_ticks_per_ms = 0;
+
+// PIT frequency (standard 8254 PIT)
+#define PIT_FREQUENCY   1193182
+
+// I/O ports for PIT
+#define PIT_CHANNEL0    0x40
+#define PIT_CHANNEL2    0x42
+#define PIT_COMMAND     0x43
+
+static inline void outb(uint16_t port, uint8_t val) {
+    __asm__ volatile("outb %0, %1" :: "a"(val), "Nd"(port));
+}
+
+static inline uint8_t inb(uint16_t port) {
+    uint8_t ret;
+    __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
+// Calibrate LAPIC timer against PIT
+// Returns: ticks per millisecond
+uint32_t lapic_timer_calibrate(void) {
+    if (!lapic_base) return 0;
+    
+    kprint("LAPIC: Calibrating timer against PIT...\n");
+    
+    // Set LAPIC timer divider to 16
+    lapic_write(LAPIC_TDCR, LAPIC_TDCR_DIV16);
+    
+    // Configure PIT channel 2 for one-shot mode
+    // Mode 0 (interrupt on terminal count), binary counting
+    outb(PIT_COMMAND, 0xB0);  // Channel 2, lobyte/hibyte, mode 0
+    
+    // Set PIT to count down from ~10ms worth of ticks
+    // 10ms = 1193182 / 100 = 11932 ticks
+    uint16_t pit_count = 11932;
+    outb(PIT_CHANNEL2, pit_count & 0xFF);
+    outb(PIT_CHANNEL2, (pit_count >> 8) & 0xFF);
+    
+    // Set LAPIC timer to max count
+    lapic_write(LAPIC_TICR, 0xFFFFFFFF);
+    
+    // Gate the PIT channel 2 (start counting)
+    // Read port 0x61, set bit 0, clear bit 1
+    uint8_t gate = inb(0x61);
+    outb(0x61, (gate & ~0x02) | 0x01);
+    
+    // Wait for PIT to count down (poll bit 5 of port 0x61)
+    while (!(inb(0x61) & 0x20)) {
+        __asm__ volatile("pause");
+    }
+    
+    // Read LAPIC timer current count
+    uint32_t lapic_end = lapic_read(LAPIC_TCCR);
+    
+    // Stop LAPIC timer
+    lapic_write(LAPIC_TIMER, LAPIC_LVT_MASKED);
+    
+    // Calculate ticks elapsed
+    uint32_t lapic_ticks = 0xFFFFFFFF - lapic_end;
+    
+    // Calculate frequency: ticks / 10ms = ticks * 100 per second
+    lapic_timer_frequency = lapic_ticks * 100;
+    lapic_ticks_per_ms = lapic_ticks / 10;
+    
+    kprint("LAPIC: Timer frequency ~");
+    // Print MHz
+    uint32_t mhz = lapic_timer_frequency / 1000000;
+    char buf[16];
+    int i = 0;
+    if (mhz == 0) { buf[i++] = '0'; }
+    else {
+        char tmp[16]; int j = 0;
+        while (mhz > 0) { tmp[j++] = '0' + (mhz % 10); mhz /= 10; }
+        while (j > 0) { buf[i++] = tmp[--j]; }
+    }
+    buf[i] = '\0';
+    kprint(buf);
+    kprint(" MHz (");
+    // Print ticks/ms
+    i = 0;
+    uint32_t tpm = lapic_ticks_per_ms;
+    if (tpm == 0) { buf[i++] = '0'; }
+    else {
+        char tmp[16]; int j = 0;
+        while (tpm > 0) { tmp[j++] = '0' + (tpm % 10); tpm /= 10; }
+        while (j > 0) { buf[i++] = tmp[--j]; }
+    }
+    buf[i] = '\0';
+    kprint(buf);
+    kprint(" ticks/ms)\n");
+    
+    return lapic_ticks_per_ms;
+}
+
+// Set LAPIC timer divider
+void lapic_timer_set_divider(uint8_t divider) {
+    if (!lapic_base) return;
+    lapic_write(LAPIC_TDCR, divider);
+}
+
+// Configure LAPIC timer in periodic mode
+void lapic_timer_periodic(uint8_t vector, uint32_t ticks) {
+    if (!lapic_base) return;
+    
+    // Set LVT Timer: periodic mode, vector
+    lapic_write(LAPIC_TIMER, LAPIC_TIMER_PERIODIC | vector);
+    
+    // Set initial count
+    lapic_write(LAPIC_TICR, ticks);
+}
+
+// Configure LAPIC timer in one-shot mode
+void lapic_timer_oneshot(uint8_t vector, uint32_t ticks) {
+    if (!lapic_base) return;
+    
+    // Set LVT Timer: one-shot mode, vector
+    lapic_write(LAPIC_TIMER, LAPIC_TIMER_ONESHOT | vector);
+    
+    // Set initial count
+    lapic_write(LAPIC_TICR, ticks);
+}
+
+// Stop LAPIC timer
+void lapic_timer_stop(void) {
+    if (!lapic_base) return;
+    
+    // Mask the timer
+    lapic_write(LAPIC_TIMER, LAPIC_LVT_MASKED);
+    lapic_write(LAPIC_TICR, 0);
+}
+
+// Get calibrated ticks per millisecond
+uint32_t lapic_timer_ticks_per_ms(void) {
+    return lapic_ticks_per_ms;
+}
+
 void lapic_send_eoi(void) {
     lapic_write(LAPIC_EOI, 0);
 }
