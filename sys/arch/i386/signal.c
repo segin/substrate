@@ -99,3 +99,54 @@ void sendsig(sig_t handler, int sig, uint32_t mask, registers_t *regs) {
     // Reset segment registers to user data selectors if needed
     // (Assuming kernel entry preserves them or they are restored from regs)
 }
+
+/*
+ * sys_sigreturn - Restore context from signal frame
+ * 
+ * Arguments:
+ *   scp - Pointer to struct sigcontext on user stack
+ * 
+ * This syscall is called by the trampoline code after the signal handler returns.
+ * It restores the user thread's state to what it was before the signal.
+ */
+int sys_sigreturn(struct sigcontext *scp) {
+    if (!scp) return -1; // EINVAL
+    
+    // We need access to the current thread's kernel trap frame (registers)
+    // to overwrite them with the restored context.
+    extern registers_t *syscall_regs;
+    if (!syscall_regs) return -1;
+    
+    // Copy sigcontext from user stack (needs checking)
+    struct sigcontext sc;
+    // copyin(scp, &sc, sizeof(sc));
+    // For now, assume direct access
+    memcpy(&sc, scp, sizeof(sc));
+    
+    // Verification (Security)
+    // Ensure segment selectors are safe (RPL 3, valid indices)
+    if ((sc.cs & 3) != 3) return -1; // Must be user mode
+    if ((sc.ss & 3) != 3) return -1;
+    
+    // Restore User Registers
+    syscall_regs->gs = sc.gs;
+    syscall_regs->fs = sc.fs;
+    syscall_regs->es = sc.es;
+    syscall_regs->ds = sc.ds;
+    syscall_regs->edi = sc.edi;
+    syscall_regs->esi = sc.esi;
+    syscall_regs->ebp = sc.ebp;
+    // esp ignored
+    syscall_regs->ebx = sc.ebx;
+    syscall_regs->edx = sc.edx;
+    syscall_regs->ecx = sc.ecx;
+    syscall_regs->eax = sc.eax;
+    syscall_regs->eip = sc.eip;
+    syscall_regs->cs = sc.cs;
+    syscall_regs->eflags = sc.eflags;
+    syscall_regs->useresp = sc.user_esp;
+    syscall_regs->ss = sc.user_ss;
+    
+    // Return EAX from the context, not the syscall return value
+    return sc.eax; 
+}

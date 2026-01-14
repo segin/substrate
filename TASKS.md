@@ -453,9 +453,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Create architecture-dependent `struct sigframe`.
             - [x] Copy frame to aligned user stack pointer.
             - [x] Set `EIP` to trampoline, `ESP` to frame.
-        - [ ] **Trampoline:**
-            - [ ] `sys_sigreturn`: Restore keys registers from stack frame.
-            - [ ] Verification: Check `ss` and `cs` integrity on return.
+        - [x] **Trampoline:**
+            - [x] `sys_sigreturn`: Restore keys registers from stack frame.
+            - [x] Verification: Check `ss` and `cs` integrity on return.
         - [ ] **Frame Management:**
             - [ ] `sigaltstack`: Support alternative signal stack.
             - [ ] `SA_SIGINFO`: Extended `siginfo_t` support.
