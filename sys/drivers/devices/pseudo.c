@@ -3,6 +3,7 @@
 #include "../../kern/console.h"
 #include <sys/proc.h>
 #include <string.h>
+#include "../../arch/x86-common/include/io.h"
 
 // /dev/null
 static uint32_t null_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
@@ -26,7 +27,34 @@ static uint32_t zero_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
 static uint32_t full_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
     // Always return error (ENOSPC is usually 28)
-    return -28; 
+    return size;
+}
+
+// /dev/port
+static uint32_t port_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+    if (offset >= 65536) return 0;
+    
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < size; i++) {
+        if (offset + i >= 65536) break;
+        buffer[i] = inb((uint16_t)(offset + i));
+        count++;
+    }
+    return count;
+}
+
+static uint32_t port_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+    (void)node;
+     if (offset >= 65536) return 0;
+    
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < size; i++) {
+        if (offset + i >= 65536) break;
+        outb((uint16_t)(offset + i), buffer[i]);
+        count++;
+    }
+    return count;
 }
 
 // /dev/random (very simple PRNG)
@@ -218,4 +246,13 @@ void pseudo_init(void) {
     kmem_node.read = &kmem_read;
     kmem_node.write = &kmem_write;
     devfs_register_device(&kmem_node);
+
+    // /dev/port
+    static fs_node_t port_node;
+    memset(&port_node, 0, sizeof(fs_node_t));
+    strcpy(port_node.name, "port");
+    port_node.flags = FS_CHARDEVICE;
+    port_node.read = &port_read;
+    port_node.write = &port_write;
+    devfs_register_device(&port_node);
 }
