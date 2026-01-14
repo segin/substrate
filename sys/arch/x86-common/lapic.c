@@ -327,31 +327,101 @@ uint32_t lapic_get_id(void) {
     return lapic_read(LAPIC_ID) >> 24;
 }
 
-// Send IPI to a specific CPU
-// dest_cpu: target LAPIC ID (0xFF = all CPUs including self)
-// vector: interrupt vector to send
-void lapic_send_ipi(uint8_t dest_cpu, uint8_t vector) {
-    // Wait for any pending IPI to complete
-    while (lapic_read(LAPIC_ICRLO) & (1 << 12)) {
+// ==================== LAPIC IPI ====================
+
+// Wait for ICR to be ready
+static void lapic_ipi_wait(void) {
+    while (lapic_read(LAPIC_ICRLO) & LAPIC_ICR_PENDING) {
         __asm__ volatile("pause");
     }
+}
+
+// Send IPI to a specific CPU with full control
+// dest_cpu: target LAPIC ID
+// vector: interrupt vector (ignored for some delivery modes)
+// delivery_mode: LAPIC_ICR_FIXED, LAPIC_ICR_INIT, LAPIC_ICR_SIPI, etc.
+void lapic_send_ipi_ex(uint8_t dest_cpu, uint8_t vector, uint32_t delivery_mode) {
+    if (!lapic_base) return;
+    
+    lapic_ipi_wait();
     
     // Set destination CPU in ICRHI
     lapic_write(LAPIC_ICRHI, ((uint32_t)dest_cpu) << 24);
     
-    // Set vector and send (fixed delivery, level assert, physical mode)
-    lapic_write(LAPIC_ICRLO, vector);
+    // Build ICR low: vector | delivery_mode | level assert
+    uint32_t icr = vector | delivery_mode | LAPIC_ICR_ASSERT;
+    lapic_write(LAPIC_ICRLO, icr);
 }
 
-// Send IPI to all other CPUs (excluding self)
+// Send Fixed IPI to a specific CPU
+void lapic_send_ipi(uint8_t dest_cpu, uint8_t vector) {
+    lapic_send_ipi_ex(dest_cpu, vector, LAPIC_ICR_FIXED);
+}
+
+// Send Fixed IPI to all CPUs excluding self
 void lapic_send_ipi_all_excl_self(uint8_t vector) {
-    // Wait for any pending IPI to complete
-    while (lapic_read(LAPIC_ICRLO) & (1 << 12)) {
-        __asm__ volatile("pause");
-    }
+    if (!lapic_base) return;
     
-    // All excluding self: dest shorthand = 3 (bits 18:19)
-    // Physical mode, fixed delivery, level assert
-    lapic_write(LAPIC_ICRLO, vector | (3 << 18));
+    lapic_ipi_wait();
+    
+    // All excluding self shorthand, fixed delivery
+    uint32_t icr = vector | LAPIC_ICR_FIXED | LAPIC_ICR_ALL_EXCL_SELF | LAPIC_ICR_ASSERT;
+    lapic_write(LAPIC_ICRLO, icr);
 }
 
+// Send INIT IPI to a specific CPU (for SMP bootstrap)
+void lapic_send_init(uint8_t dest_cpu) {
+    if (!lapic_base) return;
+    
+    lapic_ipi_wait();
+    
+    // Set destination
+    lapic_write(LAPIC_ICRHI, ((uint32_t)dest_cpu) << 24);
+    
+    // INIT IPI: level assert
+    uint32_t icr = LAPIC_ICR_INIT | LAPIC_ICR_LEVEL | LAPIC_ICR_ASSERT;
+    lapic_write(LAPIC_ICRLO, icr);
+    
+    lapic_ipi_wait();
+    
+    // INIT de-assert (required for some CPUs)
+    icr = LAPIC_ICR_INIT | LAPIC_ICR_LEVEL | LAPIC_ICR_DEASSERT;
+    lapic_write(LAPIC_ICRLO, icr);
+}
+
+// Send Startup IPI (SIPI) to a specific CPU
+// start_page: physical address >> 12 (must be < 1MB, hence 8-bit)
+void lapic_send_sipi(uint8_t dest_cpu, uint8_t start_page) {
+    if (!lapic_base) return;
+    
+    lapic_ipi_wait();
+    
+    // Set destination
+    lapic_write(LAPIC_ICRHI, ((uint32_t)dest_cpu) << 24);
+    
+    // SIPI: vector = start page (physical addr >> 12)
+    uint32_t icr = start_page | LAPIC_ICR_SIPI | LAPIC_ICR_ASSERT;
+    lapic_write(LAPIC_ICRLO, icr);
+}
+
+// Send NMI to a specific CPU
+void lapic_send_nmi(uint8_t dest_cpu) {
+    if (!lapic_base) return;
+    
+    lapic_ipi_wait();
+    
+    lapic_write(LAPIC_ICRHI, ((uint32_t)dest_cpu) << 24);
+    
+    uint32_t icr = LAPIC_ICR_NMI | LAPIC_ICR_ASSERT;
+    lapic_write(LAPIC_ICRLO, icr);
+}
+
+// Broadcast NMI to all CPUs excluding self
+void lapic_send_nmi_all_excl_self(void) {
+    if (!lapic_base) return;
+    
+    lapic_ipi_wait();
+    
+    uint32_t icr = LAPIC_ICR_NMI | LAPIC_ICR_ALL_EXCL_SELF | LAPIC_ICR_ASSERT;
+    lapic_write(LAPIC_ICRLO, icr);
+}

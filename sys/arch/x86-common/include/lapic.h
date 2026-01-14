@@ -105,8 +105,13 @@ void lapic_send_eoi(void);
 // ID
 uint32_t lapic_get_id(void);
 
-// IPI
+// IPI (Inter-Processor Interrupts)
 void lapic_send_ipi(uint8_t dest_cpu, uint8_t vector);
+void lapic_send_ipi_ex(uint8_t dest_cpu, uint8_t vector, uint32_t delivery_mode);
 void lapic_send_ipi_all_excl_self(uint8_t vector);
+void lapic_send_init(uint8_t dest_cpu);
+void lapic_send_sipi(uint8_t dest_cpu, uint8_t start_page);
+void lapic_send_nmi(uint8_t dest_cpu);
+void lapic_send_nmi_all_excl_self(void);
 
 #endif /* _ARCH_X86_LAPIC_H */
