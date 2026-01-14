@@ -412,7 +412,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
 - [ ] **Scheduling (Scheduler Refactor):**
     - [ ] **Algorithm (ULE/MLFQ):**
-        - [ ] **Multilevel Queues:** Separate queues for Realtime, Timeshare, and Idle priority classes.
+        - [x] **Multilevel Queues:** Separate queues for Realtime, Timeshare, and Idle priority classes.
         - [ ] **Interactiveness:** Heuristics to boost interactive I/O-bound threads.
         - [ ] **Decay:** Handling priority decay for CPU handling threads.
     - [ ] **SMP Scalability:**
