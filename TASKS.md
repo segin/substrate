@@ -422,7 +422,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **IPI:** Inter-Processor Interrupts for preemption of remote CPUs.
     - [ ] **Synchronization Primitives:**
         - [x] **Turnstiles:** Priority Inheritance implementation for Mutexes (prevent inversion).
-        - [ ] **Sleep Queues:** Hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
+        - [x] **Sleep Queues:** Hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
     - [ ] **Context Switching:**
         - [ ] **FPU Lazy Save:** `Unordered` exception logic for FPU context.
         - [ ] **PCB:** Refine Process Control Block for thread/process split.
