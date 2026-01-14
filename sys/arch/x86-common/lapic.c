@@ -1,35 +1,91 @@
-#include "lapic.h"
-#include "pmap.h"
+#include "include/lapic.h"
+#include "../i386/pmap.h"
 #include "../../kern/console.h"
 
-// Virtual address where LAPIC is mapped
-static uintptr_t lapic_base = 0xFEE00000; 
+// Default LAPIC physical address (can be overridden by MADT)
+#define LAPIC_DEFAULT_BASE  0xFEE00000
 
+// Virtual address where LAPIC is mapped 
+static uintptr_t lapic_base = 0;
+static uint32_t lapic_phys_base = LAPIC_DEFAULT_BASE;
+static bool lapic_initialized = false;
+
+// Read LAPIC register
 static inline uint32_t lapic_read(uint32_t reg) {
+    if (!lapic_base) return 0;
     return *((volatile uint32_t*)(lapic_base + reg));
 }
 
+// Write LAPIC register
 static inline void lapic_write(uint32_t reg, uint32_t val) {
+    if (!lapic_base) return;
     *((volatile uint32_t*)(lapic_base + reg)) = val;
 }
 
+// Set LAPIC base address (called from MADT parsing)
+void lapic_set_base(uint32_t phys_addr) {
+    lapic_phys_base = phys_addr;
+}
+
+// Get LAPIC base physical address
+uint32_t lapic_get_base(void) {
+    return lapic_phys_base;
+}
+
 void lapic_init(void) {
-    kprint("LAPIC: Initializing...\n");
+    kprint("LAPIC: Initializing at physical 0x");
+    // Print hex (simple for now)
+    char buf[9];
+    uint32_t n = lapic_phys_base;
+    for (int i = 7; i >= 0; i--) {
+        int d = n & 0xF;
+        buf[i] = (d < 10) ? ('0' + d) : ('A' + d - 10);
+        n >>= 4;
+    }
+    buf[8] = '\0';
+    kprint(buf);
+    kprint("...\n");
 
-    // 1. Ensure LAPIC is mapped in PMAP
-    // pmap_enter(pmap_kernel(), lapic_base, lapic_phys, VM_PROT_READ|VM_PROT_WRITE, 0);
-
-    // 2. Set Spurious Interrupt Vector (and enable APIC)
-    // Use vector 0xFF for spurious interrupts
-    lapic_write(LAPIC_SVR, lapic_read(LAPIC_SVR) | LAPIC_SVR_ENABLE | 0xFF);
-
-    // 3. Configure Timer (Divide by 16)
-    lapic_write(LAPIC_TDCR, 0x03);
+    // 1. Map LAPIC MMIO region
+    // The LAPIC is typically identity-mapped in early boot or needs explicit mapping.
+    // For i386 with higher-half kernel, use direct physical access if identity mapped,
+    // or map via pmap. For simplicity, assume identity-mapped in low 4GB (common for MMIO).
+    // On x86, LAPIC at 0xFEE00000 is usually accessible directly.
+    lapic_base = lapic_phys_base;  // Identity map assumption
     
-    // 4. Set Initial Count
-    // lapic_write(LAPIC_TICF, 10000000); 
+    // Alternatively, map if needed:
+    // extern pmap_t pmap_kernel(void);
+    // pmap_enter(pmap_kernel(), lapic_phys_base, lapic_phys_base, 
+    //            VM_PROT_READ | VM_PROT_WRITE, PTE_PCD);
+    // lapic_base = lapic_phys_base;
 
-    kprint("LAPIC: Enabled.\n");
+    // 2. Verify LAPIC is present by reading version register
+    uint32_t ver = lapic_read(LAPIC_VER);
+    uint8_t version = ver & 0xFF;
+    uint8_t max_lvt = ((ver >> 16) & 0xFF) + 1;
+    
+    kprint("LAPIC: Version 0x");
+    buf[0] = (version >> 4) < 10 ? '0' + (version >> 4) : 'A' + (version >> 4) - 10;
+    buf[1] = (version & 0xF) < 10 ? '0' + (version & 0xF) : 'A' + (version & 0xF) - 10;
+    buf[2] = '\0';
+    kprint(buf);
+    kprint(", Max LVT entries: ");
+    if (max_lvt >= 10) { kprint("1"); buf[0] = '0' + (max_lvt - 10); buf[1] = '\0'; }
+    else { buf[0] = '0' + max_lvt; buf[1] = '\0'; }
+    kprint(buf);
+    kprint("\n");
+
+    // 3. Enable LAPIC via SVR (will be done in separate task)
+    // 4. Configure timer (separate task)
+    // 5. Setup error handling (separate task)
+
+    lapic_initialized = true;
+    kprint("LAPIC: Initialized successfully.\n");
+}
+
+// Check if LAPIC is initialized
+bool lapic_is_initialized(void) {
+    return lapic_initialized;
 }
 
 void lapic_send_eoi(void) {

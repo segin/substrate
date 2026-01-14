@@ -378,7 +378,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **SMP & Interrupts:**
         - [x] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
         - [ ] **Local APIC (LAPIC):**
-            - [ ] **Initialization:** Map LAPIC MMIO base (usually 0xFEE00000).
+            - [x] **Initialization:** Map LAPIC MMIO base (usually 0xFEE00000).
             - [ ] **Spurious Interrupts:** Set Spurious Interrupt Vector Register (SVR).
             - [ ] **Timer:**
                 - [ ] Calibrate against PIT or ACPI PM Timer.
