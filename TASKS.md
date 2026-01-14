@@ -417,7 +417,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Decay:** Handling priority decay for CPU handling threads.
     - [ ] **SMP Scalability:**
         - [x] **Per-CPU Runqueues:** Remove global scheduler lock; lock individual runqueues.
-        - [ ] **Load Balancing:** "Work Stealing" logic when a CPU goes idle.
+        - [x] **Load Balancing:** "Work Stealing" logic when a CPU goes idle.
         - [ ] **Affinity:** Respect `sched_setaffinity` masks.
         - [ ] **IPI:** Inter-Processor Interrupts for preemption of remote CPUs.
     - [ ] **Synchronization Primitives:**

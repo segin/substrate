@@ -178,3 +178,126 @@ int sched_needs_load_balance(void) {
     // Consider imbalance if difference > 2
     return (max_load - min_load) > 2;
 }
+
+// ==================== Load Balancing (Work Stealing) ====================
+
+// Find busiest CPU
+static int find_busiest_cpu(int exclude_cpu) {
+    int busiest = -1;
+    uint32_t max_load = 0;
+    
+    for (int i = 0; i < num_cpus; i++) {
+        if (i == exclude_cpu) continue;
+        if (cpu_runqueues[i].total_threads > max_load) {
+            max_load = cpu_runqueues[i].total_threads;
+            busiest = i;
+        }
+    }
+    
+    return busiest;
+}
+
+// Try to steal a thread from another CPU's runqueue
+thread_t *sched_steal_thread(int target_cpu) {
+    runqueue_t *rq = &cpu_runqueues[target_cpu];
+    thread_t *stolen = NULL;
+    
+    // Lock target runqueue
+    while (__sync_lock_test_and_set(&rq->lock, 1)) {
+        while (rq->lock) __asm__ volatile("pause");
+    }
+    
+    // Only steal if they have enough threads
+    if (rq->total_threads < 2) {
+        __sync_lock_release(&rq->lock);
+        return NULL;
+    }
+    
+    // Steal from lowest priority (idle) queues first to minimize impact
+    // Work backwards from idle queue
+    for (int level = RQ_TOTAL_LEVELS - 1; level >= RQ_TIMESHARE_BASE; level--) {
+        runqueue_level_t *q = &rq->queues[level];
+        if (q->count == 0) continue;
+        
+        // Get a thread (from tail to minimize cache impact)
+        thread_t *t = q->tail;
+        if (!t) continue;
+        
+        // Check CPU affinity - can we run this thread?
+        extern int percpu_get_cpu_id(void);
+        int my_cpu = percpu_get_cpu_id();
+        if (t->cpu_affinity != 0 && !(t->cpu_affinity & (1U << my_cpu))) {
+            continue;  // Thread can't run on our CPU
+        }
+        
+        // Steal this thread
+        runqueue_remove(rq, t);
+        t->on_runqueue = 0;
+        stolen = t;
+        break;
+    }
+    
+    __sync_lock_release(&rq->lock);
+    return stolen;
+}
+
+// Perform load balancing for current CPU
+// Returns: thread stolen, or NULL if none
+thread_t *sched_load_balance(void) {
+    extern int percpu_get_cpu_id(void);
+    int my_cpu = percpu_get_cpu_id();
+    
+    // Find busiest CPU
+    int busiest = find_busiest_cpu(my_cpu);
+    if (busiest < 0) return NULL;
+    
+    // Check if imbalance is significant
+    uint32_t my_load = cpu_runqueues[my_cpu].total_threads;
+    uint32_t their_load = cpu_runqueues[busiest].total_threads;
+    
+    // Only steal if they have at least 2 more threads than us
+    if (their_load < my_load + 2) return NULL;
+    
+    // Try to steal
+    return sched_steal_thread(busiest);
+}
+
+// Called when a CPU becomes idle - try to find work
+thread_t *sched_idle_balance(void) {
+    extern int percpu_get_cpu_id(void);
+    int my_cpu = percpu_get_cpu_id();
+    
+    // First, check our own runqueue
+    runqueue_t *my_rq = sched_get_runqueue(my_cpu);
+    if (my_rq && !runqueue_empty(my_rq)) {
+        return sched_pick_next();
+    }
+    
+    // Try to steal from each CPU in turn
+    for (int i = 0; i < num_cpus; i++) {
+        if (i == my_cpu) continue;
+        
+        thread_t *t = sched_steal_thread(i);
+        if (t) return t;
+    }
+    
+    return NULL;
+}
+
+// Periodic load balancing (called from timer)
+void sched_periodic_balance(void) {
+    if (num_cpus <= 1) return;
+    if (!sched_needs_load_balance()) return;
+    
+    // Only rebalance occasionally to avoid overhead
+    static uint32_t balance_counter = 0;
+    balance_counter++;
+    if (balance_counter % 100 != 0) return;
+    
+    // Each CPU checks if it should steal
+    thread_t *t = sched_load_balance();
+    if (t) {
+        // Re-enqueue stolen thread to our runqueue
+        sched_enqueue(t);
+    }
+}
