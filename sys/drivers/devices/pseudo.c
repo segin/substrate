@@ -309,4 +309,13 @@ void pseudo_init(void) {
     stderr_node.flags = FS_SYMLINK;
     stderr_node.readlink = &stderr_readlink;
     devfs_register_device(&stderr_node);
+
+    // /dev/urandom (alias to random for now)
+    static fs_node_t urandom_node;
+    memset(&urandom_node, 0, sizeof(fs_node_t));
+    strcpy(urandom_node.name, "urandom");
+    urandom_node.flags = FS_CHARDEVICE;
+    urandom_node.read = &random_read;
+    urandom_node.write = &null_write;
+    devfs_register_device(&urandom_node);
 }

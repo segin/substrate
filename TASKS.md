@@ -967,7 +967,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Support `mem` / `kmem` (Physical/Kernel memory access).
         - [x] Support `port` (I/O port access).
         - [x] Support `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/X`).
-        - [ ] Support `urandom` (CSPRNG vs true RNG).
+        - [x] Support `urandom` (CSPRNG vs true RNG).
 - [ ] **ProcFS (`/proc`):**
     - [ ] **Process Info:**
         - [x] Expose `cmdline`.
