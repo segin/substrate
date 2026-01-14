@@ -500,7 +500,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Re-scan children list on wakeup.
         - [ ] **Reaping (ZOMBIE -> FREE):**
             - [x] Copy `p_xstat` and `p_rusage` to user buffer. <!-- Implemented rusage accumulation to parent -->
-            - [ ] Remove from siblings list.
+            - [x] Remove from siblings list. <!-- Already implemented in wait.c lines 103-110 -->
             - [ ] Remove from process group.
             - [ ] Free `struct process` memory (`uma_zfree`).
         - [ ] **Job Control Integration (`WUNTRACED`, `WCONTINUED`):**
