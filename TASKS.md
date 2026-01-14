@@ -442,7 +442,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `FUTEX_PI`: Priority Inheritance support.
         - [ ] **Performance:**
             - [ ] Validated user-space access (CMPXCHG).
-            - [ ] Hash table bucketing for wait queues.
+            - [x] Hash table bucketing for wait queues.
 - [x] **Signals:**
     - [x] Implement Signal delivery mechanism (trampoline, context saving).
     - [x] Implement `kill`, `sigaction`, `sigprocmask`.
