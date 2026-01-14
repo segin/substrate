@@ -435,7 +435,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Userspace Synchronization (Futex):**
         - [ ] **Core Operations:**
             - [x] `FUTEX_WAIT`: Atomic compare-and-sleep.
-            - [ ] `FUTEX_WAKE`: Wakeup N waiters.
+            - [x] `FUTEX_WAKE`: Wakeup N waiters.
             - [ ] `FUTEX_REQUEUE`: Move waiters to another lock.
         - [ ] **Advanced Features:**
             - [ ] `FUTEX_ROBUST_LIST`: Handle owner death (cleanup).
