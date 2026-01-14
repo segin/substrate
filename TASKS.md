@@ -370,7 +370,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Technical Debt & Optimization (Audit Findings):**
             - [x] **Refactor `uma_find_slab()`:** Replace O(N) linear search with hash table or RB-tree.
             - [x] **Safety:** Add protection against freeing foreign pointers (pointer tracking).
-            - [ ] **Redzones:** Enhance redzones with canary values for corruption detection.
+            - [x] **Redzones:** Enhance redzones with canary values for corruption detection.
             - [ ] **Reclamation:** Implement bucket draining back to slabs.
             - [ ] **Pressure:** Implement true memory pressure feedback (active reclamation).
     - [ ] **User Memory:**
