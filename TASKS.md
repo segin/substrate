@@ -490,7 +490,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `pid > 0`: Wait for specific child.
                 - [x] `pid == -1`: Wait for any child.
                 - [x] `pid == 0`: Wait for any child in same process group.
-                - [ ] `pid < -1`: Wait for any child in group `|pid|`.
+                - [x] `pid < -1`: Wait for any child in group `|pid|`.
         - [ ] **Non-Blocking Check (`WNOHANG`):**
             - [ ] If no zombies match but children exist, return 0 immediately.
             - [ ] If no children exist, return `ECHILD`.

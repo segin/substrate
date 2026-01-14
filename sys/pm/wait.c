@@ -34,6 +34,8 @@ static process_t *find_zombie(pid_t pid, process_t *parent, int *out_any_exists)
             match = 1;
         } else if (pid == 0) {
             if (child->pgrp == parent->pgrp) match = 1;
+        } else if (pid < -1) {
+            if (child->pgrp == -pid) match = 1;
         }
         // Other cases to be implemented
 
