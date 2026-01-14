@@ -487,7 +487,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Wait Subsystem (`wait4`, `waitpid`):**
         - [ ] **Search Logic (`find_zombie`):**
             - [ ] Match based on `pid` argument:
-                - [ ] `pid > 0`: Wait for specific child.
+                - [x] `pid > 0`: Wait for specific child.
                 - [ ] `pid == -1`: Wait for any child.
                 - [ ] `pid == 0`: Wait for any child in same process group.
                 - [ ] `pid < -1`: Wait for any child in group `|pid|`.
@@ -775,6 +775,29 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Features:**
         - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles.
         - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.
+- [ ] **RNG Subsystem (`/dev/random`):**
+    - [ ] **API & Data Structures:**
+        - [ ] **Data Structures:** Define `struct entropy_pool`, `chacha_ctx`; locking (`spinlock_t`). (Files: `sys/include/sys/random.h`, `sys/kern/random_core.c`; Tests: `sys/tests/test_rng_structs.c` (compile/sizeof); Criteria: Headers build).
+        - [ ] **CSPRNG Algo:** Implement ChaCha20 block function and mixing logic. (Files: `sys/kern/chacha20.c`; Tests: `sys/tests/test_chacha_vectors.c`; Criteria: RFC 7539 test vectors pass).
+        - [ ] **Seeding API:** Implement `random_add_entropy(const void *data, size_t len, int quality)` and internal reseed logic. (Files: `sys/kern/random_core.c`; Tests: `sys/tests/test_rng_seeding.c`; Criteria: State changes after seeding).
+    - [ ] **Entropy Sources:**
+        - [ ] **Harvesting Infrastructure:** Create `random_harvest_fast(void *data, size_t len)` for ISRs. (Files: `sys/kern/random_harvest.c`; Tests: `test_rng_harvest.c`; Criteria: Calling harvester increments entropy counter).
+        - [ ] **Sources:** Hook into `pit_handler`, `keyboard_handler`, `virtio_input` for timing jitter. (Files: `sys/arch/i386/intr.c`, drivers; Tests: `native_test` (dmesg check); Criteria: Entropy increases on interaction).
+        - [ ] **HWRNG:** Implement RDRAND/RDSEED support in `sys/arch/i386`. (Files: `sys/arch/i386/hwrng.c`; Tests: `test_hwrng.c`; Criteria: `cpuid` detection and fast path usage).
+    - [ ] **Blocking & Interfaces:**
+        - [ ] **Blocking Logic:** Implement `random_read_blocking` with wait queue for `/dev/random`. (Files: `sys/kern/random_dev.c`; Tests: `test_rng_block.c`; Criteria: Read blocks until seed status ok).
+        - [ ] **Non-blocking Logic:** Implement `/dev/urandom` reads (CSPRNG stream). (Files: `sys/kern/random_dev.c`; Tests: `native_test` (`dd if=/dev/urandom`); Criteria: High throughput, no block).
+        - [ ] **Internal API:** Implement `getrandom(void *buf, size_t len, unsigned int flags)`. (Files: `sys/kern/random_api.c`; Tests: `sys/tests/test_getrandom.c`; Criteria: Kernel consumers can get randomness).
+    - [ ] **IOCTLs & Admin:**
+        - [ ] **IOCTLs:** Implement `RNDGETENTCNT` and `RNDADDENTROPY`. (Files: `sys/kern/random_ioctl.c`, `sys/include/sys/random.h`; Tests: `native_test` (ioctl call); Criteria: `ioctl` returns standard Linux-like entropy count).
+    - [ ] **Security & Correctness:**
+        - [ ] **Fork Safety:** Implement `random_reseed_on_fork()` hook in `proc_fork`. (Files: `sys/pm/process.c`; Tests: `test_rng_fork.c` (child vs parent output); Criteria: Child gets different stream).
+        - [ ] **Memory Protection:** Add explicit `explicit_bzero` or separate pool clearing on release. (Files: `sys/kern/random_core.c`; Tests: Code audit; Criteria: Sensitive state wiped).
+        - [ ] **Wipe on Exec:** Ensure userspace RNG state (if any shared) is reset/wiped. (Files: `sys/fs/exec/exec.c`; Tests: `test_rng_exec.c`; Criteria: Clean state on new image).
+    - [ ] **Performance:**
+        - [ ] **Microbenchmarks:** Create `tests/bench_rng.c` for throughput. (Files: `sys/tests/bench_rng.c`; Criteria: Measure MB/s).
+    - [ ] **Documentation:**
+        - [ ] **Manpage:** Create `man/kernel/random.4`. (Files: `man/kernel/random.4`; Criteria: Documented behaviors match helper).
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS Subsystem Refactor (BSD-style):**
@@ -2693,6 +2716,88 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Display Header (Uptime, Load Avg, CPU states, Mem/Swap).
             - [ ] Display Process List (Sortable by CPU/Mem, clamped to screen height).
             - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
+    - [ ] **Documentation Utils:**
+        - [ ] **`roff` / `nroff` (Typesetting Engine):**
+            - [ ] **Core Engine & Parsing:**
+                - [ ] Implement input stream buffering (pushback support).
+                - [ ] Implement tokenizer (requests vs text vs escapes).
+                - [ ] Implement escape sequence parser (`\e`, `\(xx`, `\*`, `\n`).
+                - [ ] Implement numeric register parser with scaling units (`n`, `v`, `p`, `m`).
+                - [ ] Implement string register expansion (`\*[string]`).
+                - [ ] Implement conditional parsing (`.if`, `.ie`, `.el`).
+                - [ ] Implement loop/while parsing (`.while`).
+                - [ ] Implement macro definition parser (`.de`, `.am`, `..`).
+                - [ ] Implement diversion support (`.di`, `.da`, boxes).
+                - [ ] Implement environment switching (`.ev`).
+                - [ ] Implement `.so` (source file) handling.
+                - [ ] Implement error handling and line number tracking.
+            - [ ] **Formatting & Layout:**
+                - [ ] Implement current state tracking (font, size, fill mode).
+                - [ ] Implement line filling and adjustment logic.
+                - [ ] Implement hyphenation hooks (knuth-plass or simple pattern).
+                - [ ] Implement page control (`.pl`, `.po`, `.tl`).
+                - [ ] Implement traps (page location, input line).
+                - [ ] Implement tab stop calculations.
+            - [ ] **Macro Packages:**
+                - [ ] **`-man` (Manpages):**
+                    - [ ] Implement `.TH`, `.SH`, `.SS` structure.
+                    - [ ] Implement `.TP`, `.IP`, `.HP` indentation/lists.
+                    - [ ] Implement font macros (`.B`, `.I`, `.BI`, etc.).
+                - [ ] **`-mdoc` (Semantic Manpages):**
+                    - [ ] Implement structural macros (`.Dd`, `.Dt`, `.Os`).
+                    - [ ] Implement block macros (`.Bl`, `.It`, `.El`).
+                    - [ ] Implement in-line semantic macros (`.Op`, `.Fl`, `.Ar`).
+                - [ ] **`-ms` (Manuscripts - Minimal):**
+                    - [ ] Implement paragraph macros (`.PP`, `.LP`).
+                    - [ ] Implement heading macros (`.NH`, `.SH`).
+            - [ ] **Output Backends:**
+                - [ ] **ASCII / TTY:**
+                    - [ ] Implement basic character output.
+                    - [ ] Implement overstriking for bold/underline (backspace hacking).
+                    - [ ] Handle TTY control codes (if opts enabled).
+                - [ ] **Future/Stub:**
+                    - [ ] Define device-independent output interface (GROFF-like troff).
+            - [ ] **Compatibility:**
+                - [ ] Align behavior with Heirloom Troff / Mandoc where possible.
+                - [ ] Document deviations from GNU Groff.
+                - [ ] Test against traditional V7 manual sources.
+        - [ ] **`man` (Manual Pager):**
+            - [ ] **Page Discovery:**
+                - [ ] Implement `MANPATH` environment parsing.
+                - [ ] Implement default system paths (`/usr/share/man`, `/usr/man`).
+                - [ ] Implement section search order (1, n, p, 8, 2, 3...).
+                - [ ] Implement locale-specific subdirectories handling.
+                - [ ] Support compressed sources (`.gz`, `.bz2`, `.xz`) via decompressors.
+            - [ ] **Preprocessing Pipeline:**
+                - [ ] Detect macro format (`-man` vs `-mdoc`) via first-line scan.
+                - [ ] Construct `roff` pipeline command.
+                - [ ] Handle preprocessors if flagged (`tbl`, `eqn`, `pic` - stubs).
+            - [ ] **User Interface:**
+                - [ ] Implement CLI flags (`-a`, `-f`, `-k`, `-w`, `-s`).
+                - [ ] Implement pager integration (`$PAGER` or `less`).
+                - [ ] Handle exit codes (0 found, 1 missing, >1 error).
+            - [ ] **Caching & Performance:**
+                - [ ] Implement `catman` style preformatted cache directory support.
+                - [ ] Implement cache invalidation (timestamp check vs source).
+                - [ ] Implement security checks (don't write to cache as user).
+            - [ ] **Diagnostics:**
+                - [ ] Report "No manual entry for..." clearly.
+                - [ ] Report ambiguous matches properly.
+        - [ ] **Testing & Quality (Roff/Man):**
+            - [ ] **Unit Tests:**
+                - [ ] Test register arithmetic logic.
+                - [ ] Test macro argument expansion (`$1`, `$*`).
+                - [ ] Test conditional nesting.
+            - [ ] **Property Tests:**
+                - [ ] Fuzz macro parser with random line noise.
+                - [ ] Randomize nested environment creation.
+            - [ ] **Integration Tests:**
+                - [ ] Render all system manpages and check for crashes.
+                - [ ] Compare output against reference implementation (groff/mandoc) for diffs.
+        - [ ] **Documentation:**
+            - [ ] Write `roff(7)` language reference.
+            - [ ] Write `man(1)` user manual.
+            - [ ] Write `mandoc_impl.md` developer design doc.
 
 ### 8. LibC & Build System (User Requests & Audit)
 - [ ] **LibC Core Compliance (Audit Findings):**
@@ -3314,3 +3419,4 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Testing & Quality:**
     - [ ] **Regression Tests:** Ensure `make test` (or equivalent) passes before committing.
     - [ ] **Code Style:** adhere to kernel coding standards (KNF/Linux-style).
+
