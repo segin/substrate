@@ -82,6 +82,10 @@ void lapic_set_base(uint32_t phys_addr);
 uint32_t lapic_get_base(void);
 bool lapic_is_initialized(void);
 
+// Enable/Disable
+void lapic_enable(uint8_t spurious_vector);
+void lapic_disable(void);
+
 // EOI
 void lapic_send_eoi(void);
 

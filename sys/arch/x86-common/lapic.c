@@ -88,6 +88,46 @@ bool lapic_is_initialized(void) {
     return lapic_initialized;
 }
 
+// Enable LAPIC and set Spurious Interrupt Vector
+void lapic_enable(uint8_t spurious_vector) {
+    if (!lapic_base) return;
+    
+    // The spurious vector must have bits 0-3 set (vector 0xXF recommended)
+    // Common choice is 0xFF
+    if ((spurious_vector & 0x0F) != 0x0F) {
+        kprint("LAPIC: Warning - spurious vector low nibble should be 0xF\n");
+    }
+    
+    // Read current SVR
+    uint32_t svr = lapic_read(LAPIC_SVR);
+    
+    // Set spurious vector and enable APIC
+    svr &= ~0xFF;  // Clear vector bits
+    svr |= spurious_vector;
+    svr |= LAPIC_SVR_ENABLE;
+    
+    lapic_write(LAPIC_SVR, svr);
+    
+    kprint("LAPIC: Enabled with spurious vector 0x");
+    char buf[3];
+    buf[0] = (spurious_vector >> 4) < 10 ? '0' + (spurious_vector >> 4) : 'A' + (spurious_vector >> 4) - 10;
+    buf[1] = (spurious_vector & 0xF) < 10 ? '0' + (spurious_vector & 0xF) : 'A' + (spurious_vector & 0xF) - 10;
+    buf[2] = '\0';
+    kprint(buf);
+    kprint("\n");
+}
+
+// Disable LAPIC
+void lapic_disable(void) {
+    if (!lapic_base) return;
+    
+    uint32_t svr = lapic_read(LAPIC_SVR);
+    svr &= ~LAPIC_SVR_ENABLE;
+    lapic_write(LAPIC_SVR, svr);
+    
+    kprint("LAPIC: Disabled\n");
+}
+
 void lapic_send_eoi(void) {
     lapic_write(LAPIC_EOI, 0);
 }
