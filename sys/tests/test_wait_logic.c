@@ -7,10 +7,11 @@
 // But sys_wait4 uses current_process global. We need to mock it.
 extern int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 extern process_t *current_process;
+extern int printf(const char *format, ...);
 
 #define TEST_ASSERT(cond) do { \
     if (!(cond)) { \
-        kprint("FAILED: " #cond "\n"); \
+        printf("FAILED: %s (in Test %d?)\n", #cond, 9); \
         panic("Assertion failed"); \
     } else { \
         kprint("PASS: " #cond "\n"); \
@@ -22,6 +23,25 @@ static process_t mock_parent;
 static process_t mock_child1;
 static process_t mock_child2;
 static process_t mock_child3;
+
+// Test globals
+static int sched_sleep_calls = 0;
+static int sched_sleep_mode = 0; // 0=Wait->Zombie, 1=Signal
+extern thread_t *current_thread;
+
+// Mock sched_sleep
+void sched_sleep(void *chan) {
+    sched_sleep_calls++;
+    if (sched_sleep_mode == 0) {
+        // Change target child to Zombie to simulate wakeup by exit
+        if (mock_child2.pid == 102 && mock_child2.state == SRUN) {
+             mock_child2.state = SZOMB;
+        }
+    } else if (sched_sleep_mode == 1) {
+        // Simulate Signal
+        current_thread->sig_pending = 1; // Set arbitrary bit
+    }
+}
 
 void test_wait_logic(void) {
     // Setup Mock Process Tree
@@ -93,4 +113,40 @@ void test_wait_logic(void) {
     mock_parent.p_children = NULL; // Clear list
     ret = sys_wait4(-1, &status, WNOHANG, NULL);
     TEST_ASSERT(ret == -ECHILD);
+
+    // Restore children for blocking tests
+    mock_parent.p_children = &mock_child1;
+
+    // Test 9: Blocking Wait (Simulate Sleep -> Wakeup -> Zombie)
+    // Setup: Child 102 is SRUN. Wait for 102.
+    // Logic: test_sched_sleep callback will change 102 to SZOMB.
+    mock_child2.state = SRUN;
+    mock_child2.pid = 102;
+    mock_child2.exit_code = 30;
+    
+    // Reset call count
+    sched_sleep_calls = 0;
+    
+    ret = sys_wait4(102, &status, 0, NULL);
+    if (ret != 102) {
+        printf("DEBUG: Test 9 failed. ret=%d, calls=%d, child2.state=%d\n", ret, sched_sleep_calls, mock_child2.state);
+    }
+    TEST_ASSERT(ret == 102);
+    TEST_ASSERT(WEXITSTATUS(status) == 30);
+    TEST_ASSERT(sched_sleep_calls == 1);
+
+    // Test 10: Blocking Wait Interrupted (EINTR)
+    // Setup: Wait for 102 (SRUN). Simulation will set sig_pending.
+    mock_child2.state = SRUN;
+    sched_sleep_calls = 0;
+    
+    // Set callback mode to SIGNAL
+    sched_sleep_mode = 1; 
+
+    ret = sys_wait4(102, &status, 0, NULL);
+    TEST_ASSERT(ret == -EINTR);
+    TEST_ASSERT(sched_sleep_calls == 1);
+    
+    // Clear signal for next tests
+    current_thread->sig_pending = 0;
 }

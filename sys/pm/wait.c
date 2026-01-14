@@ -2,6 +2,10 @@
 #include <sys/wait.h>
 #include <sys/errno.h>
 #include <stddef.h>
+#include <kern/sched.h> // for sched_sleep
+
+extern thread_t *current_thread;
+extern void sched_sleep(void *chan);
 
 /*
  * find_zombie: Search for a zombie child matching the PID criteria.
@@ -89,7 +93,14 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
             return 0;
         }
 
-        // Blocking (stub)
-        return -EINTR; // Fallback so we don't hang in this initial commit
+        // Blocking Wait
+        // Check for signals first (EINTR)
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            return -EINTR;
+        }
+
+        // Sleep on p_children channel
+        // current_process->p_children address is unique to this process
+        sched_sleep(&cur->p_children);
     }
 }

@@ -494,10 +494,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Non-Blocking Check (`WNOHANG`):**
             - [x] If no zombies match but children exist, return 0 immediately.
             - [x] If no children exist, return `ECHILD`.
-        - [ ] **Blocking Wait:**
-            - [ ] Implementation: `sleepq_wait(&current_proc->p_children, Priority)`.
-            - [ ] Handle `EINTR` (interrupted by signal).
-            - [ ] Re-scan children list on wakeup.
+        - [x] **Blocking Wait:**
+            - [x] Implementation: `sleepq_wait(&current_proc->p_children, Priority)` (Used `sched_sleep`).
+            - [x] Handle `EINTR` (interrupted by signal).
+            - [x] Re-scan children list on wakeup.
         - [ ] **Reaping (ZOMBIE -> FREE):**
             - [ ] Copy `p_xstat` and `p_rusage` to user buffer.
             - [ ] Remove from siblings list.
