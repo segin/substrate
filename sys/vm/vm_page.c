@@ -335,6 +335,10 @@ void vm_pageout(void) {
     int target = vm_page_free_target - vm_stat_free_count;
     if (target < 0) target = 0;
     
+    // Phase 0: Reclaim kernel memory (UMA, etc.)
+    extern void uma_reclaim(void);
+    uma_reclaim();
+    
     // Phase 1: Scan active queue, move cold pages to inactive
     vm_pageout_scan(target * 2);
     

@@ -372,7 +372,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Safety:** Add protection against freeing foreign pointers (pointer tracking).
             - [x] **Redzones:** Enhance redzones with canary values for corruption detection.
             - [x] **Reclamation:** Implement bucket draining back to slabs.
-            - [ ] **Pressure:** Implement true memory pressure feedback (active reclamation).
+            - [x] **Pressure:** Implement true memory pressure feedback (active reclamation).
     - [ ] **User Memory:**
         - [x] Implement `mmap`, `munmap`, `brk` system calls.
     - [ ] **SMP & Interrupts:**
