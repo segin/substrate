@@ -459,10 +459,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Frame Management:**
             - [x] `sigaltstack`: Support alternative signal stack.
             - [x] `SA_SIGINFO`: Extended `siginfo_t` support.
-    - [ ] **Generation:**
-        - [ ] `psignal(p, sig)`: Send signal to process.
-        - [ ] `pgsignal(pgrp, sig)`: Send signal to process group.
-        - [ ] `trapsignal(p, sig, code)`: Send synchronous trap signal.
+    - [x] **Generation:**
+        - [x] `psignal(p, sig)`: Send signal to process.
+        - [x] `pgsignal(pgrp, sig)`: Send signal to process group.
+        - [x] `trapsignal(p, sig, code)`: Send synchronous trap signal.
 - [ ] **Process Lifecycle:**
     - [ ] **Wait Subsystem (`wait4`/`waitpid`):**
         - [ ] **State Transitions:**

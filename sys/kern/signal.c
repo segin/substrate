@@ -47,16 +47,70 @@ int sys_sigsuspend(const uint32_t *mask) {
     return -1; // Always returns -1 (EINTR)
 }
 
+    return (count > 0) ? 0 : -1;
+}
+
+// Send signal to valid process
+void psignal(process_t *p, int sig) {
+    if (!p || sig <= 0 || sig > NSIG) return;
+    
+    // Init Protection
+    if (p->pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
+        return;
+    }
+
+    // Deliver signal to threads of the target
+    int found_threads = 0;
+    
+    // TODO: Improve thread lookup (process should have thread list)
+    // For now, scan global thread list
+    extern thread_t threads[MAX_THREADS];
+    
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 && threads[i].proc == p) {
+            // SIGCONT Special handling: Wake up stopped threads
+            if (sig == SIGCONT) {
+                if (threads[i].state == THREAD_STOPPED) {
+                    threads[i].state = THREAD_READY;
+                    found_threads++;
+                }
+            }
+
+            threads[i].sig_pending |= sigmask(sig);
+            
+            // Wake up if sleeping interruptibly
+            if (threads[i].state == THREAD_BLOCKED) {
+                // We wake on the pending mask address which sigsuspend/sleep uses
+                sched_wakeup(&threads[i].sig_pending);
+            }
+            found_threads++;
+        }
+    }
+}
+
+// Send signal to process group
+void pgsignal(int pgrp, int sig) {
+    if (pgrp <= 0 || sig <= 0 || sig > NSIG) return;
+
+    extern process_t processes[];
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (processes[i].pid != -1 && processes[i].pgrp == pgrp) {
+            psignal(&processes[i], sig);
+        }
+    }
+}
+
+// Send synchronous trap signal (e.g. from exception)
+void trapsignal(process_t *p, int sig, int code) {
+    // TODO: Pass code via siginfo (SA_SIGINFO)
+    psignal(p, sig);
+}
+
 int sys_kill(int pid, int sig) {
     if (sig < 0 || sig > NSIG) return -1; // EINVAL
 
     // Handle PID > 0: Send to specific process
     if (pid > 0) {
-        // Init Protection
-        if (pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
-            return -1; // EPERM
-        }
-
         process_t *target = NULL;
         // Search process list
         for (int i = 0; i < MAX_PROCS; i++) {
@@ -67,78 +121,37 @@ int sys_kill(int pid, int sig) {
         }
 
         if (!target) return -1; // ESRCH
-
         if (sig == 0) return 0; // Existence check
 
-        // Deliver signal to threads of the target
-        int found_threads = 0;
-        for (int i = 0; i < MAX_THREADS; i++) {
-            if (threads[i].tid != -1 && threads[i].proc == target) {
-                // SIGCONT Special handling: Wake up stopped threads
-                if (sig == SIGCONT) {
-                    if (threads[i].state == THREAD_STOPPED) {
-                        threads[i].state = THREAD_READY;
-                        found_threads++;
-                    }
-                    // Continue to deliver SIGCONT to pending as well? 
-                    // Usually yes, so it can be caught.
-                }
-
-                threads[i].sig_pending |= sigmask(sig);
-                
-                // Wake up if sleeping interruptibly
-                if (threads[i].state == THREAD_BLOCKED) {
-                    // We wake on the pending mask address which sigsuspend/sleep uses
-                    sched_wakeup(&threads[i].sig_pending);
-                }
-                found_threads++;
-            }
-        }
-        
-        // If no threads found (zombie process?), maybe allow?
-        // But the process exists.
+        psignal(target, sig);
         return 0;
     }
     else if (pid == 0) {
         // Send to current process group
         if (!current_process) return -1;
-        return signal_send_group(current_process->pgrp, sig);
+        pgsignal(current_process->pgrp, sig);
+        return 0;
     }
     else if (pid == -1) {
         // Send to all processes (except Init)
-        // Requires privilege check in real OS
         for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid > 1) {
-                 // Recursively call for single PID (simplifies logic)
-                 sys_kill(processes[i].pid, sig);
+                 psignal(&processes[i], sig);
             }
         }
         return 0;
     }
     else {
         // pid < -1: Send to process group -pid
-        return signal_send_group(-pid, sig);
+        pgsignal(-pid, sig);
+        return 0;
     }
-
-    return -1;
 }
 
 int signal_send_group(int pgrp, int sig) {
-    if (sig < 0 || sig > NSIG) return -1;
-    if (pgrp <= 0) return -1;
-
-    extern process_t processes[];
-    int count = 0;
-
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid != -1 && processes[i].pgrp == pgrp) {
-            sys_kill(processes[i].pid, sig);
-            count++;
-        }
-    }
-    return (count > 0) ? 0 : -1;
+    pgsignal(pgrp, sig);
+    return 0;
 }
-
 
 void signal_handle_pending(registers_t *regs) {
     if (!current_thread || !current_process) return;
@@ -146,6 +159,7 @@ void signal_handle_pending(registers_t *regs) {
     // Only deliver signals when returning to user mode
     // (Assuming Ring 3 is 0x1B or similar, but for now we check if cs != 0x08)
     if (regs->cs == 0x08) return; 
+ 
 
     uint32_t pending = current_thread->sig_pending & ~current_thread->sig_mask;
     if (pending == 0) return;
