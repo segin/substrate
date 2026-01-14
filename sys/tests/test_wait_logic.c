@@ -59,12 +59,12 @@ void test_wait_logic(void) {
     TEST_ASSERT(ret == 101);
     TEST_ASSERT(WEXITSTATUS(status) == 10);
 
-    /*
     // Test 2: Wait for any child (-1)
     // Should find 101 or 103. First one in list is 101.
     ret = sys_wait4(-1, &status, WNOHANG, NULL);
     TEST_ASSERT(ret == 101); // 101 is first in list and zombie
 
+    /*
     // Test 3: Wait for process group (0) -> Same as parent (100)
     // 101 is in 100.
     ret = sys_wait4(0, &status, WNOHANG, NULL);

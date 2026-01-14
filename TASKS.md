@@ -488,7 +488,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Search Logic (`find_zombie`):**
             - [ ] Match based on `pid` argument:
                 - [x] `pid > 0`: Wait for specific child.
-                - [ ] `pid == -1`: Wait for any child.
+                - [x] `pid == -1`: Wait for any child.
                 - [ ] `pid == 0`: Wait for any child in same process group.
                 - [ ] `pid < -1`: Wait for any child in group `|pid|`.
         - [ ] **Non-Blocking Check (`WNOHANG`):**
