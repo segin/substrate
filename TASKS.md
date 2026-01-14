@@ -452,7 +452,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Isolate logic for frame pushing (remove panic).
             - [x] Create architecture-dependent `struct sigframe`.
             - [x] Copy frame to aligned user stack pointer.
-            - [ ] Set `EIP` to trampoline, `ESP` to frame.
+            - [x] Set `EIP` to trampoline, `ESP` to frame.
         - [ ] **Trampoline:**
             - [ ] `sys_sigreturn`: Restore keys registers from stack frame.
             - [ ] Verification: Check `ss` and `cs` integrity on return.

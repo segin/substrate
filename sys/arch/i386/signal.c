@@ -75,7 +75,12 @@ void sendsig(sig_t handler, int sig, uint32_t mask, registers_t *regs) {
     // I'll pick a dummy address 0xBAAAAAAD for now, or better:
     // If we support sigreturn, the trampoline should call sigreturn.
     
-    sf.retaddr = 0xDEADBEEF; // Placeholder
+    // Set return address to trampoline
+    // The trampoline code (sys_sigreturn) is expected to be at this address.
+    // In a real system, this is mapped in a VDSO or provided by libc.
+    // We use a fixed address for now that we will map later.
+    #define SIG_TRAMPOLINE_ADDR 0xFFFF1000
+    sf.retaddr = SIG_TRAMPOLINE_ADDR;
     
     // Copy frame to user stack
     if (copyout(&sf, (void*)esp, sizeof(sf)) != 0) {
@@ -86,9 +91,11 @@ void sendsig(sig_t handler, int sig, uint32_t mask, registers_t *regs) {
     }
     
     // Update user registers to return to handler
+    // EIP points to the handler function
+    // ESP points to the sigframe we just constructed
     regs->useresp = esp;
     regs->eip = (uint32_t)handler;
     
-    // Reset segment registers if needed (e.g. ds/es/fs/gs to user selectors)
-    // Assuming they are already correct from the interrupt
+    // Reset segment registers to user data selectors if needed
+    // (Assuming kernel entry preserves them or they are restored from regs)
 }
