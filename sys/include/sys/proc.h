@@ -29,6 +29,8 @@ typedef struct fs_node fs_node_t;
 struct file;
 typedef struct file file_t;
 struct pmap;
+struct pgrp;
+struct session;
 
 #define MAX_FD 32
 
@@ -43,8 +45,8 @@ typedef struct process {
     int pid;
     int ppid; // Parent PID
     int exit_code;
-    int pgrp;     // Process Group ID
-    int session;  // Session ID
+    struct pgrp *p_pgrp;       // Process group (NULL = none)
+    struct process *p_pgrp_link; // Next process in same pgrp (linked list)
     struct personality *pers;
     file_t *fds[MAX_FD]; // File Descriptor Table
     fs_node_t *root_node; // Per-process root (for chroot)
