@@ -46,11 +46,20 @@ struct tss_entry_struct {
     uint32_t gs;
     uint32_t ldt;
     uint16_t trap;
-    uint16_t iomap_base;
+    uint16_t iomap_base;    /* Offset to I/O permission bitmap */
+    /* I/O Permission Bitmap: 8192 bytes = 65536 ports (1 bit per port) */
+    /* 0 = allow, 1 = deny (trap to GPF) */
+    uint8_t iomap[8192];
+    uint8_t iomap_end;      /* Must be 0xFF (terminator byte) */
 } __attribute__((packed));
 typedef struct tss_entry_struct tss_entry_t;
 
 void gdt_init();
 void set_kernel_stack(uint32_t stack);
+
+/* TSS I/O Bitmap control (TASKS.md L570) */
+void tss_iomap_init(void);              /* Initialize I/O bitmap (deny all) */
+void tss_set_iomap(uint16_t port, int allow);  /* Allow/deny single port */
+void tss_set_iomap_range(uint16_t start, uint16_t end, int allow); /* Allow/deny range */
 
 #endif

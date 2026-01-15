@@ -567,7 +567,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **VM86 Mode (i386 only):**
         - [ ] **Initialization:**
             - [x] Set `EFLAGS.VM` bit. <!-- vm86.c:47 sets 0x20000 -->
-            - [ ] Setup TSS I/O Bitmap (allow/deny ports).
+            - [x] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range -->
         - [ ] **GPF Handler:**
             - [ ] Detect if fault occurred in VM86 mode.
             - [ ] **Opcode Emulation:**

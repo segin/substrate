@@ -38,6 +38,19 @@ static void write_tss(int32_t num, uint16_t ss0, uint32_t esp0) {
     // These are our kernel segments.
     tss_entry.cs   = 0x08;
     tss_entry.ss = tss_entry.ds = tss_entry.es = tss_entry.fs = tss_entry.gs = 0x10;
+    
+    // Initialize I/O bitmap (TASKS.md L570)
+    // iomap_base is offset from start of TSS to I/O bitmap
+    // offsetof(tss_entry_struct, iomap) would be ideal but we calculate manually
+    tss_entry.iomap_base = (uint16_t)((uintptr_t)&tss_entry.iomap - (uintptr_t)&tss_entry);
+    
+    // Initialize all ports to 1 (deny access)
+    for (int i = 0; i < 8192; i++) {
+        tss_entry.iomap[i] = 0xFF;
+    }
+    
+    // Terminator byte must be 0xFF
+    tss_entry.iomap_end = 0xFF;
 }
 
 void gdt_init() {
@@ -63,4 +76,48 @@ void gdt_init() {
 
 void set_kernel_stack(uint32_t stack) {
     tss_entry.esp0 = stack;
+}
+
+/*
+ * tss_iomap_init - Initialize I/O permission bitmap
+ *
+ * Sets all ports to denied (1). Called during TSS setup.
+ */
+void tss_iomap_init(void) {
+    for (int i = 0; i < 8192; i++) {
+        tss_entry.iomap[i] = 0xFF;  // All bits 1 = deny
+    }
+    tss_entry.iomap_end = 0xFF;
+}
+
+/*
+ * tss_set_iomap - Allow or deny access to a single I/O port
+ *
+ * @port: Port number (0-65535)
+ * @allow: 1 to allow, 0 to deny
+ *
+ * For VM86 mode: allows real-mode code to access specific ports.
+ */
+void tss_set_iomap(uint16_t port, int allow) {
+    int byte_idx = port / 8;
+    int bit_idx = port % 8;
+    
+    if (allow) {
+        tss_entry.iomap[byte_idx] &= ~(1 << bit_idx);  // Clear bit = allow
+    } else {
+        tss_entry.iomap[byte_idx] |= (1 << bit_idx);   // Set bit = deny
+    }
+}
+
+/*
+ * tss_set_iomap_range - Allow or deny access to a range of I/O ports
+ *
+ * @start: First port number
+ * @end: Last port number (inclusive)
+ * @allow: 1 to allow, 0 to deny
+ */
+void tss_set_iomap_range(uint16_t start, uint16_t end, int allow) {
+    for (uint32_t port = start; port <= end; port++) {
+        tss_set_iomap((uint16_t)port, allow);
+    }
 }
