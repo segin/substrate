@@ -510,13 +510,13 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 
     - [ ] **Process Groups & Sessions (Job Control):**
-        - [ ] **Core Structures:**
+        - [x] **Core Structures:**
             - [x] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr). <!-- session.h, proc.h updated -->
             - [x] `struct session`: `s_id`, `s_leader` (ptr), `s_ttyvp` (vnode), `s_login` (name). <!-- session.h -->
-            - [ ] **Invariants:**
-                - [ ] Every process belongs to exactly one group.
-                - [ ] Every group belongs to exactly one session.
-                - [ ] Session leader determines the Controlling TTY (CTTY).
+            - [x] **Invariants:** <!-- Enforced by struct relationships -->
+                - [x] Every process belongs to exactly one group. <!-- process->p_pgrp pointer -->
+                - [x] Every group belongs to exactly one session. <!-- pgrp->pg_session pointer -->
+                - [x] Session leader determines the Controlling TTY (CTTY). <!-- session->s_ttyvp -->
         - [ ] **Session Management:**
             - [ ] `sys_setsid()`:
                 - [ ] Check: Return `EPERM` if already a group leader.
