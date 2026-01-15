@@ -210,6 +210,21 @@ void isr_handler(registers_t *regs) {
         sprintf(buf, "ESI: 0x%08X  EDI: 0x%08X  EBP: 0x%08X  ESP: 0x%08X\n", (unsigned int)regs->esi, (unsigned int)regs->edi, (unsigned int)regs->ebp, (unsigned int)regs->esp);
         kprint(buf);
         
+        /* TASKS.md L566: Invalid Opcode Decoding - dump instruction bytes at EIP */
+        if (regs->int_no == 6) { /* Invalid Opcode */
+            kprint("Instruction bytes at EIP: ");
+            uint8_t *eip_ptr = (uint8_t *)regs->eip;
+            /* Dump up to 16 bytes if address is valid */
+            if (regs->eip >= 0xC0000000 || !is_usermode) {
+                for (int i = 0; i < 16; i++) {
+                    sprintf(buf, "%02X ", (unsigned int)eip_ptr[i]);
+                    kprint(buf);
+                }
+            } else {
+                kprint("(user address - cannot dump safely)");
+            }
+            kprint("\n");
+        }
         if (regs->int_no == 14) {
             uint32_t cr2;
             __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));

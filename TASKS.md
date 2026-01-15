@@ -559,11 +559,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
     - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
-    - [ ] **Advanced Diagnostics (Missing):**
+    - [x] **Advanced Diagnostics (Missing):** <!-- All items complete -->
         - [x] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it -->
         - [x] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() -->
         - [x] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() -->
-        - [ ] **Invalid Opcode Decoding:** Dump instruction bytes at EIP.
+        - [x] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 -->
     - [ ] **VM86 Mode (i386 only):**
         - [ ] **Initialization:**
             - [ ] Set `EFLAGS.VM` bit.
