@@ -1,5 +1,5 @@
 #include "panic.h"
-#include "panic.h"
+#include "stacktrace.h"
 #include "../drivers/video/vga.h"
 #include "console.h"
 #include <string.h>
@@ -7,7 +7,10 @@
 extern int fb_active;
 
 void panic(const char *msg) {
-    // Set high-visibility color but DON'T clear screen - preserve debug output
+    /* Disable interrupts immediately to prevent further corruption */
+    __asm__ volatile("cli");
+    
+    /* Set high-visibility color but DON'T clear screen - preserve debug output */
     if (!fb_active) {
         vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_RED);
     }
@@ -22,12 +25,14 @@ void panic(const char *msg) {
         console_write("Reason: Unknown error\n", 22);
     }
 
+    /* Print stack trace for debugging */
+    stack_trace();
+
     console_write("\nSystem Halted.", 15);
     
-    // Disable interrupts and halt
-    // We use a tight loop with hlt to prevent rebooting
-    // and keep the CPU power usage low.
+    /* Halt - interrupts already disabled above */
     while(1) {
-        __asm__ volatile("cli; hlt");
+        __asm__ volatile("hlt");
     }
 }
+

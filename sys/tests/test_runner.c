@@ -21,6 +21,7 @@ void run_tty_tests(void);
 void run_tty_tests(void);
 void run_cow_stats_tests(void);
 extern void test_pte_user(void);
+extern void test_stacktrace(void);
 // void test_wait_logic(void); // Host-only test via verify_wait_host.sh
 
 void run_kernel_tests(void) {
@@ -46,6 +47,7 @@ void run_kernel_tests(void) {
         run_tty_tests();
         run_cow_stats_tests();
         test_pte_user();
+        test_stacktrace();
     }
 
     if (all || strcmp(test_arg, "vm") == 0) {

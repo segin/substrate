@@ -560,7 +560,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
     - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
     - [ ] **Advanced Diagnostics (Missing):**
-        - [ ] **Stack Trace:** Unwind stack frames (EBP chain) on panic.
+        - [x] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it -->
         - [ ] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file).
         - [ ] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities.
         - [ ] **Invalid Opcode Decoding:** Dump instruction bytes at EIP.
