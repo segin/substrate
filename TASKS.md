@@ -566,7 +566,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 -->
     - [ ] **VM86 Mode (i386 only):**
         - [ ] **Initialization:**
-            - [ ] Set `EFLAGS.VM` bit.
+            - [x] Set `EFLAGS.VM` bit. <!-- vm86.c:47 sets 0x20000 -->
             - [ ] Setup TSS I/O Bitmap (allow/deny ports).
         - [ ] **GPF Handler:**
             - [ ] Detect if fault occurred in VM86 mode.
