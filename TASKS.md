@@ -512,7 +512,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Process Groups & Sessions (Job Control):**
         - [ ] **Core Structures:**
             - [x] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr). <!-- session.h, proc.h updated -->
-            - [ ] `struct session`: `s_id`, `s_leader` (ptr), `s_ttyvp` (vnode), `s_login` (name).
+            - [x] `struct session`: `s_id`, `s_leader` (ptr), `s_ttyvp` (vnode), `s_login` (name). <!-- session.h -->
             - [ ] **Invariants:**
                 - [ ] Every process belongs to exactly one group.
                 - [ ] Every group belongs to exactly one session.
