@@ -564,8 +564,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() -->
         - [x] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() -->
         - [x] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 -->
-    - [ ] **VM86 Mode (i386 only):**
-        - [ ] **Initialization:**
+    - [x] **VM86 Mode (i386 only):** <!-- All items complete -->
+        - [x] **Initialization:** <!-- All items complete -->
             - [x] Set `EFLAGS.VM` bit. <!-- vm86.c:47 sets 0x20000 -->
             - [x] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range -->
         - [x] **GPF Handler:** <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler -->
@@ -575,7 +575,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Emulate `PUSHF` / `POPF`. <!-- vm86.c: 0x9C/0x9D -->
                 - [x] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) -->
                 - [x] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->
-        - [ ] **Monitor:** V86 monitor task to manage virtual machine state.
+        - [x] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() -->
 - [ ] **x86_64:**
     - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`).
     - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching).

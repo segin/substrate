@@ -11,6 +11,66 @@
 extern struct process *current_process;
 extern struct thread *current_thread;
 
+/*
+ * VM86 Monitor Structure (TASKS.md L578)
+ *
+ * The V86 monitor manages the virtual machine state for real-mode emulation.
+ * It tracks the virtual CPU state, provides interrupt reflection, and handles
+ * I/O port virtualization.
+ */
+struct vm86_monitor {
+    uint32_t vflags;        /* Virtual EFLAGS (includes VIF, VIP) */
+    uint32_t pending_int;   /* Pending interrupt number, or -1 if none */
+    int in_vm86;            /* Currently in VM86 mode */
+    
+    /* I/O port virtualization callbacks (optional, for advanced use) */
+    void *io_context;       /* Opaque context for I/O handlers */
+    
+    /* Monitor communication (unhandled instructions signal monitor) */
+    int signal_pending;     /* Signal monitor for unhandled opcode */
+    uint32_t fault_eip;     /* EIP of faulting instruction */
+    uint32_t fault_opcode;  /* Opcode that triggered fault */
+};
+
+/* Per-process VM86 monitor (NULL if not using VM86) */
+static struct vm86_monitor *current_vm86_monitor;
+
+/*
+ * vm86_monitor_init - Initialize VM86 monitor for current process
+ *
+ * Call before entering VM86 mode to set up virtualization state.
+ */
+void vm86_monitor_init(struct vm86_monitor *mon) {
+    if (!mon) return;
+    
+    mon->vflags = 0x200;    /* IF set by default */
+    mon->pending_int = (uint32_t)-1;
+    mon->in_vm86 = 0;
+    mon->io_context = NULL;
+    mon->signal_pending = 0;
+    mon->fault_eip = 0;
+    mon->fault_opcode = 0;
+    
+    current_vm86_monitor = mon;
+}
+
+/*
+ * vm86_monitor_get - Get current VM86 monitor
+ */
+struct vm86_monitor *vm86_monitor_get(void) {
+    return current_vm86_monitor;
+}
+
+/*
+ * vm86_monitor_signal_fault - Signal monitor that we have unhandled opcode
+ */
+void vm86_monitor_signal_fault(uint32_t eip, uint32_t opcode) {
+    if (current_vm86_monitor) {
+        current_vm86_monitor->signal_pending = 1;
+        current_vm86_monitor->fault_eip = eip;
+        current_vm86_monitor->fault_opcode = opcode;
+    }
+}
 // Access to the syscall return registers (mapped in syscall.c)
 /*
  * sys_vm86: Enter virtual 8086 mode.
