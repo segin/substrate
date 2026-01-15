@@ -199,6 +199,7 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         int sig = 0;
         if (c == tty->termios.c_cc[VINTR]) sig = SIGINT;
         else if (c == tty->termios.c_cc[VQUIT]) sig = SIGQUIT;
+        else if (c == tty->termios.c_cc[VSUSP]) sig = SIGTSTP; /* Job control stop (Ctrl-Z) */
         
         if (sig) {
             if (tty->pgrp > 0) signal_send_group(tty->pgrp, sig);

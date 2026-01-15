@@ -509,7 +509,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Reset `P_CONTINUED` flag after reporting. <!-- sys_wait4 clears P_CONTINUED after returning -->
 
 
-    - [ ] **Process Groups & Sessions (Job Control):**
+    - [x] **Process Groups & Sessions (Job Control):** <!-- Implemented in pgrp.c, tty.c, signal.c -->
         - [x] **Core Structures:**
             - [x] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr). <!-- session.h, proc.h updated -->
             - [x] `struct session`: `s_id`, `s_leader` (ptr), `s_ttyvp` (vnode), `s_login` (name). <!-- session.h -->
@@ -541,15 +541,15 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Foreground Group (`tcsetpgrp`/`tcgetpgrp`):** <!-- TIOCSPGRP/TIOCGPGRP -->
                 - [x] TTY driver stores `t_pgrp`. <!-- tty->pgrp field, tty.c:334-338 -->
                 - [x] Check `SIGTTOU` if background process tries `tcsetpgrp`. <!-- tty_check_write L248-257 -->
-        - [ ] **Job Control Signals:**
-            - [ ] **Stop generation:** `SIGTSTP` (Ctrl-Z), `SIGSTOP`.
-            - [ ] **TTY Signals:**
+        - [x] **Job Control Signals:** <!-- tty.c, signal.c, pgrp.c -->
+            - [x] **Stop generation:** `SIGTSTP` (Ctrl-Z), `SIGSTOP`. <!-- tty.c:202 VSUSP, signal.c:192 handles SIGSTOP -->
+            - [x] **TTY Signals:**
                 - [x] `SIGINT` (Ctrl-C), `SIGQUIT` (Ctrl-\).
                 - [x] `SIGTTIN`: Background read.
                 - [x] `SIGTTOU`: Background write (if `TOSTOP` set).
-            - [ ] **Orphaned Process Groups:**
-                - [ ] Definition: A group where no member has a parent in a different group in the same session.
-                - [ ] Action: If a group becomes orphaned and has stopped members, send `SIGHUP` + `SIGCONT`.
+            - [x] **Orphaned Process Groups:** <!-- pgrp.c:386-403, 411-431 -->
+                - [x] Definition: A group where no member has a parent in a different group in the same session. <!-- pgrp_is_orphaned -->
+                - [x] Action: If a group becomes orphaned and has stopped members, send `SIGHUP` + `SIGCONT`. <!-- pgrp_check_orphan -->
 
 ### 2. Architecture (`sys/arch`)
 - [ ] **i386:**
