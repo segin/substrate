@@ -556,7 +556,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Complete GDT/TSS setup for user-mode switching.
     - [ ] **Verification:**
         - [x] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
-        - [ ] Ensure PTE_USER bit set for all user-accessible pages
+        - [x] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
     - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
     - [ ] **Advanced Diagnostics (Missing):**
