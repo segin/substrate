@@ -562,7 +562,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Advanced Diagnostics (Missing):**
         - [x] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it -->
         - [x] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() -->
-        - [ ] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities.
+        - [x] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() -->
         - [ ] **Invalid Opcode Decoding:** Dump instruction bytes at EIP.
     - [ ] **VM86 Mode (i386 only):**
         - [ ] **Initialization:**

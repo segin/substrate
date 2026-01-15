@@ -134,4 +134,11 @@ int pmap_test_and_clear_modify(pmap_t pmap, uint32_t va);
 void pmap_dump(pmap_t pmap);
 int pmap_check(pmap_t pmap);
 
+// NULL Protection (TASKS.md L565)
+void pmap_null_protect(void);   // Unmap page 0 for NULL pointer protection
+void pmap_null_allow(int enable); // Re-map page 0 for VM86/legacy mode
+
+// Signal Trampoline
+void pmap_map_trampoline(void);
+
 #endif

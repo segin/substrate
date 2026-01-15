@@ -183,6 +183,50 @@ void pmap_bootstrap(void) {
     __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));
     
     kprint("PMAP: Paging Enabled (Higher Half, 128MB mapped)\n");
+    
+    // Unmap page 0 for NULL pointer protection (L565)
+    pmap_null_protect();
+}
+
+/*
+ * pmap_null_protect - Unmap page 0 for NULL pointer protection
+ *
+ * TASKS.md L565: Ensure page 0 is unmapped by default to catch NULL
+ * pointer dereferences early. VM86 mode can re-enable via pmap_null_allow().
+ */
+void pmap_null_protect(void) {
+    /* Page 0 is in PT index 0, PTE index 0 */
+    uint32_t *pt = kernel_page_tables[0];
+    pt[0] = 0;  /* Clear present bit */
+    
+    /* Invalidate TLB for page 0 */
+    __asm__ volatile("invlpg (%0)" :: "r"((uint32_t)0));
+    
+    kprint("PMAP: Page 0 unmapped (NULL protection enabled)\n");
+}
+
+/*
+ * pmap_null_allow - Allow access to page 0 for VM86/legacy mode
+ *
+ * @enable: 1 to map page 0, 0 to unmap
+ *
+ * Called by VM86 mode to enable access to real-mode IVT at 0x00000000.
+ * Should only be enabled for specific processes running legacy code.
+ */
+void pmap_null_allow(int enable) {
+    uint32_t *pt = kernel_page_tables[0];
+    
+    if (enable) {
+        /* Map page 0 as present, writable, user-accessible */
+        pt[0] = 0x00000000 | PTE_P | PTE_W | PTE_U;
+        kprint("PMAP: Page 0 mapped (VM86/legacy mode)\n");
+    } else {
+        pt[0] = 0;  /* Clear present bit */
+        kprint("PMAP: Page 0 unmapped (NULL protection restored)\n");
+    }
+    
+    /* Invalidate TLB for page 0 */
+    __asm__ volatile("invlpg (%0)" :: "r"((uint32_t)0));
 }
 
 pmap_t pmap_kernel(void) {
