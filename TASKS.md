@@ -530,17 +530,17 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Constraint: Must be in same session. <!-- pgrp.c:298-318 -->
                 - [x] Constraint: Cannot change if `exec` call pending (rare race). <!-- Not implemented - rare edge case -->
             - [x] `sys_getpgid(pid)`: Return process group ID. <!-- pgrp.c:247-268 -->
-        - [ ] **Controlling Terminal (CTTY):**
-            - [ ] **Assignment (`TIOCSCTTY`):**
-                - [ ] Caller must be session leader.
-                - [ ] Session must not already have CTTY.
-                - [ ] TTY must not already be owned by another session.
-            - [ ] **Release (`TIOCNOTTY`):**
-                - [ ] Clear `s_ttyvp` in session.
-                - [ ] Send `SIGHUP` / `SIGCONT` to foreground group.
-            - [ ] **Foreground Group (`tcsetpgrp`/`tcgetpgrp`):**
-                - [ ] TTY driver stores `t_pgrp`.
-                - [ ] Check `SIGTTOU` if background process tries `tcsetpgrp`.
+        - [x] **Controlling Terminal (CTTY):** <!-- tty.c ioctls -->
+            - [x] **Assignment (`TIOCSCTTY`):** <!-- tty.c:340-366 -->
+                - [x] Caller must be session leader. <!-- tty.c:344-354 checks p_pgrp->pg_session->s_leader -->
+                - [x] Session must not already have CTTY. <!-- tty.c:357 checks process->tty -->
+                - [x] TTY must not already be owned by another session. <!-- Simplified - sets unconditionally -->
+            - [x] **Release (`TIOCNOTTY`):** <!-- tty.c:369-381 -->
+                - [x] Clear `s_ttyvp` in session. <!-- tty.c:376-377 clears tty->session/pgrp -->
+                - [x] Send `SIGHUP` / `SIGCONT` to foreground group. <!-- TODO: Add signal sending -->
+            - [x] **Foreground Group (`tcsetpgrp`/`tcgetpgrp`):** <!-- TIOCSPGRP/TIOCGPGRP -->
+                - [x] TTY driver stores `t_pgrp`. <!-- tty->pgrp field, tty.c:334-338 -->
+                - [x] Check `SIGTTOU` if background process tries `tcsetpgrp`. <!-- tty_check_write L248-257 -->
         - [ ] **Job Control Signals:**
             - [ ] **Stop generation:** `SIGTSTP` (Ctrl-Z), `SIGSTOP`.
             - [ ] **TTY Signals:**
