@@ -1,5 +1,6 @@
 #include <sys/signal.h>
 #include <sys/proc.h>
+#include <sys/session.h>
 #include "sched.h"
 #include "../arch/i386/idt.h"
 #include "console.h"
@@ -86,14 +87,16 @@ void psignal(process_t *p, int sig) {
 }
 
 // Send signal to process group
-void pgsignal(int pgrp, int sig) {
-    if (pgrp <= 0 || sig <= 0 || sig > NSIG) return;
-
-    extern process_t processes[];
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid != -1 && processes[i].pgrp == pgrp) {
-            psignal(&processes[i], sig);
-        }
+void pgsignal(int pgrp_id, int sig) {
+    if (pgrp_id <= 0 || sig <= 0 || sig > NSIG) return;
+    
+    /* Use new struct pgrp API from pgrp.c */
+    extern struct pgrp *pgrp_find(int pgid);
+    extern void pgrp_signal(struct pgrp *pgrp, int sig);
+    
+    struct pgrp *pgrp = pgrp_find(pgrp_id);
+    if (pgrp) {
+        pgrp_signal(pgrp, sig);
     }
 }
 
@@ -126,8 +129,8 @@ int sys_kill(int pid, int sig) {
     }
     else if (pid == 0) {
         // Send to current process group
-        if (!current_process) return -1;
-        pgsignal(current_process->pgrp, sig);
+        if (!current_process || !current_process->p_pgrp) return -1;
+        pgsignal(current_process->p_pgrp->pg_id, sig);
         return 0;
     }
     else if (pid == -1) {

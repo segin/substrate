@@ -1,5 +1,6 @@
 #include <sys/acct.h>
 #include <sys/proc.h>
+#include <sys/session.h>
 #include "../vfs/vfs.h"
 #include "../drivers/video/vga.h"
 #include "../kern/sched.h"
@@ -82,32 +83,9 @@ void acct_process(int exitcode) {
 }
 
 int sys_getpgrp(void) {
-    if (!current_process) return -1;
-    return current_process->pgrp;
+    if (!current_process || !current_process->p_pgrp) return -1;
+    return current_process->p_pgrp->pg_id;
 }
 
-int sys_setpgid(int pid, int pgid) {
-    if (pgid < 0) return -1;
-    
-    process_t *target = NULL;
-    if (pid == 0) {
-        target = current_process;
-    } else {
-        // Find process by PID (TODO: Move find_process to common helper)
-        extern process_t processes[];
-        for (int i = 0; i < 16; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
-    }
-    
-    if (!target) return -1; // ESRCH
-    
-    // Simplistic permission check (must be same session, etc - omitted for prototype)
-    if (pgid == 0) target->pgrp = target->pid;
-    else target->pgrp = pgid;
-    
-    return 0;
-}
+/* sys_setpgid is now implemented in pm/pgrp.c */
+extern int sys_setpgid(int pid, int pgid);

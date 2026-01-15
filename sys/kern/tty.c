@@ -1,5 +1,6 @@
 #include <sys/tty.h>
 #include <sys/proc.h>
+#include <sys/session.h>
 #include <sys/signal.h>
 #include <string.h>
 #include <stdio.h>
@@ -229,12 +230,13 @@ static int tty_check_read(struct tty *tty) {
     if (tty->pgrp <= 0) return 0; // No foreground group
     
     // Check if current process is in background
-    if (current_process->pgrp != tty->pgrp) {
+    int cur_pgrp = (current_process->p_pgrp) ? current_process->p_pgrp->pg_id : 0;
+    if (cur_pgrp != tty->pgrp) {
         // Send SIGTTIN
         // In POSIX, if process is ignored/blocked SIGTTIN, read returns EIO?
         // For now, simpler implementation:
-        if (tty->pgrp > 0)
-            signal_send_group(current_process->pgrp, SIGTTIN);
+        if (tty->pgrp > 0 && cur_pgrp > 0)
+            signal_send_group(cur_pgrp, SIGTTIN);
         // We should suspend here or return error so signal handler runs
         return 1; // Signal sent
     }
@@ -248,9 +250,10 @@ static int tty_check_write(struct tty *tty) {
     // TOSTOP flag check
     if (!(tty->termios.c_lflag & TOSTOP)) return 0;
     
-    if (current_process->pgrp != tty->pgrp) {
-        if (tty->pgrp > 0)
-            signal_send_group(current_process->pgrp, SIGTTOU);
+    int cur_pgrp = (current_process->p_pgrp) ? current_process->p_pgrp->pg_id : 0;
+    if (cur_pgrp != tty->pgrp) {
+        if (tty->pgrp > 0 && cur_pgrp > 0)
+            signal_send_group(cur_pgrp, SIGTTOU);
         return 1; // Signal sent
     }
     return 0;
@@ -334,10 +337,17 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         case TIOCGPGRP:
             if (arg) *(int*)arg = tty->pgrp;
             return 0;
-        case TIOCSCTTY:
+        case TIOCSCTTY: {
             // Set controlling TTY
             // Arg: 0 or 1. If 1, steal from another session.
-            if (current_process->session != current_process->pid) {
+            // Must be session leader: check if p_pgrp->pg_session->s_leader == self
+            int is_session_leader = 0;
+            if (current_process->p_pgrp && 
+                current_process->p_pgrp->pg_session &&
+                current_process->p_pgrp->pg_session->s_leader == current_process) {
+                is_session_leader = 1;
+            }
+            if (!is_session_leader) {
                 // Must be session leader
                 // return EPERM;
                 return -1;
@@ -345,27 +355,31 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             // If already has ctty and arg!=1, fail?
             // Simplified: Just set it.
             if (current_process->tty == NULL || arg == 1) {
-                // Assuming we can map tty structure to fs_node?
-                // This function gets 'struct tty'. We need 'fs_node'.
-                // Ideally tty_register has linked them.
-                // For now, we set the session ID in tty logic.
-                tty->session = current_process->session;
-                tty->pgrp = current_process->pgrp;
+                int cur_sid = current_process->p_pgrp->pg_session->s_sid;
+                int cur_pgrp = current_process->p_pgrp->pg_id;
+                tty->session = cur_sid;
+                tty->pgrp = cur_pgrp;
                 // current_process->tty = fs_node... (Cannot set fs_node here directly without context)
                 // Assuming VFS layer calls this and updates process->tty if success.
                 return 0;
             }
             return -1;
+        }
         
-        case TIOCNOTTY:
+        case TIOCNOTTY: {
             // Detach ctty
-            if (tty->session == current_process->session) {
+            int cur_sid = 0;
+            if (current_process->p_pgrp && current_process->p_pgrp->pg_session) {
+                cur_sid = current_process->p_pgrp->pg_session->s_sid;
+            }
+            if (tty->session == cur_sid) {
                 tty->session = 0;
                 tty->pgrp = 0;
                 // current_process->tty = NULL;
                 return 0;
             }
             return -1;
+        }
     }
     return -1;
 }

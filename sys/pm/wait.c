@@ -1,5 +1,6 @@
 #include <sys/proc.h>
 #include <sys/wait.h>
+#include <sys/session.h>
 #include <errno.h>
 #include <stddef.h>
 #include <kern/sched.h> // for sched_sleep
@@ -40,9 +41,14 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
         } else if (pid == -1) {
             match = 1;
         } else if (pid == 0) {
-            if (child->pgrp == parent->pgrp) match = 1;
+            /* Match if child in same process group as parent */
+            int child_pg = child->p_pgrp ? child->p_pgrp->pg_id : 0;
+            int parent_pg = parent->p_pgrp ? parent->p_pgrp->pg_id : 0;
+            if (child_pg == parent_pg && child_pg != 0) match = 1;
         } else if (pid < -1) {
-            if (child->pgrp == -pid) match = 1;
+            /* Match if child in process group = |pid| */
+            int child_pg = child->p_pgrp ? child->p_pgrp->pg_id : 0;
+            if (child_pg == -pid) match = 1;
         }
 
         if (match) {
@@ -133,8 +139,8 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 }
                 
                 // Clear process group membership
-                target->pgrp = 0;
-                target->session = 0;
+                extern void pgrp_remove_proc(struct process *proc);
+                pgrp_remove_proc(target);
                 
                 // Free Process Slot
                 target->pid = -1;

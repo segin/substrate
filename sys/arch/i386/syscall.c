@@ -692,21 +692,9 @@ int sys_ioctl(int fd, uint32_t request, void *arg) {
     return -1;
 }
 
-int sys_setsid(void) {
-    // Check if we are already a process group leader
-    if (current_process->pgrp == current_process->pid) return -1;
-    
-    // Create new session
-    current_process->session = current_process->pid;
-    current_process->pgrp = current_process->pid;
-    
-    // Detach controlling terminal
-    // Ideally we should decrement reference on old tty?
-    // For now dealing with raw pointer/id
-    current_process->tty = NULL;
-    
-    return current_process->session;
-}
+/* sys_setsid is now implemented in pm/pgrp.c */
+extern int sys_setsid(void);
+
 
 int sys_unlink(const char *path) {
     if (!path) return -1;
@@ -917,10 +905,9 @@ int sys_fcntl(int fd, int cmd, int arg) {
     return 0;
 }
 
-int sys_getpgid(int pid) { 
-    if (pid == 0) return current_process->pid;
-    return pid; 
-}
+/* sys_getpgid is now implemented in pm/pgrp.c */
+extern int sys_getpgid(int pid);
+
 
 int sys_creat(const char *path, int mode) {
     return sys_open(path, 0x40 | 0x01 | 0x08, mode); // O_CREAT|O_WRONLY|O_TRUNC

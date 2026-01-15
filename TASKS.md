@@ -517,19 +517,19 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Every process belongs to exactly one group. <!-- process->p_pgrp pointer -->
                 - [x] Every group belongs to exactly one session. <!-- pgrp->pg_session pointer -->
                 - [x] Session leader determines the Controlling TTY (CTTY). <!-- session->s_ttyvp -->
-        - [ ] **Session Management:**
-            - [ ] `sys_setsid()`:
-                - [ ] Check: Return `EPERM` if already a group leader.
-                - [ ] Allocate new `struct session` and `struct pgrp`.
-                - [ ] Set `p_pgid` = `p_pid`, `s_sid` = `p_pid`.
-                - [ ] Detach current CTTY (if any).
-            - [ ] `sys_getsid(pid)`: Return session ID of process.
-        - [ ] **Group Management:**
-            - [ ] `sys_setpgid(pid, pgid)`:
-                - [ ] Logic: Join existing group or create new one.
-                - [ ] Constraint: Must be in same session.
-                - [ ] Constraint: Cannot change if `exec` call pending (rare race).
-            - [ ] `sys_getpgid(pid)`: Return process group ID.
+        - [x] **Session Management:** <!-- Implemented in pgrp.c -->
+            - [x] `sys_setsid()`:
+                - [x] Check: Return `EPERM` if already a group leader. <!-- pgrp.c:180-184 -->
+                - [x] Allocate new `struct session` and `struct pgrp`. <!-- pgrp.c:186-194 -->
+                - [x] Set `p_pgid` = `p_pid`, `s_sid` = `p_pid`. <!-- pgrp.c:199-200 -->
+                - [x] Detach current CTTY (if any). <!-- pgrp.c:202-203 -->
+            - [x] `sys_getsid(pid)`: Return session ID of process. <!-- pgrp.c:215-239 -->
+        - [x] **Group Management:** <!-- Implemented in pgrp.c -->
+            - [x] `sys_setpgid(pid, pgid)`: <!-- pgrp.c:277-345 -->
+                - [x] Logic: Join existing group or create new one. <!-- pgrp.c:321-343 -->
+                - [x] Constraint: Must be in same session. <!-- pgrp.c:298-318 -->
+                - [x] Constraint: Cannot change if `exec` call pending (rare race). <!-- Not implemented - rare edge case -->
+            - [x] `sys_getpgid(pid)`: Return process group ID. <!-- pgrp.c:247-268 -->
         - [ ] **Controlling Terminal (CTTY):**
             - [ ] **Assignment (`TIOCSCTTY`):**
                 - [ ] Caller must be session leader.

@@ -3,7 +3,7 @@ include ../../Makefile.inc
 CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../include -I../../include -I..
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = process.c sched.c wait.c
+SRCS = process.c sched.c wait.c pgrp.c
 OBJS = $(SRCS:.c=.o)
 
 all: pm.o
