@@ -571,7 +571,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **GPF Handler:** <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler -->
             - [x] Detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) -->
             - [ ] **Opcode Emulation:**
-                - [ ] Emulate `CLI` / `STI` (modify virtual interrupt flag).
+                - [x] Emulate `CLI` / `STI` (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF -->
                 - [ ] Emulate `PUSHF` / `POPF`.
                 - [ ] Emulate `INT n` / `IRET`.
                 - [ ] Emulate `IN` / `OUT` instructions (store/load from emulated ports).

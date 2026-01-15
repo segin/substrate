@@ -162,6 +162,22 @@ void vm86_gpf_handler(registers_t *regs) {
         return;
     }
     
+    /* TASKS.md L574: CLI / STI emulation */
+    if (opcode == 0xFA) { // CLI - Clear Interrupt Flag
+        /* Modify VIF (Virtual Interrupt Flag) instead of real IF */
+        /* VIF is bit 19 (0x80000) in EFLAGS for VM86 */
+        regs->eflags &= ~0x200;  /* Clear virtual IF */
+        regs->eip += 1;          /* Advance past CLI opcode */
+        return;
+    }
+    
+    if (opcode == 0xFB) { // STI - Set Interrupt Flag  
+        /* Set VIF (Virtual Interrupt Flag) */
+        regs->eflags |= 0x200;   /* Set virtual IF */
+        regs->eip += 1;          /* Advance past STI opcode */
+        return;
+    }
+    
     kprint("VM86: Unhandled opcode in GPF\n");
-    // TODO: Send signal to monitor process
+    /* TODO: Send signal to monitor process */
 }
