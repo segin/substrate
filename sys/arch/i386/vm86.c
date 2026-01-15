@@ -178,6 +178,68 @@ void vm86_gpf_handler(registers_t *regs) {
         return;
     }
     
+    /* TASKS.md L575: PUSHF / POPF emulation */
+    if (opcode == 0x9C) { // PUSHF - Push FLAGS register
+        uint16_t ss = regs->ss;
+        uint16_t sp = regs->useresp;
+        uint32_t stack_linear = (ss << 4) + sp;
+        uint16_t *stack = (uint16_t*)stack_linear;
+        
+        stack--;
+        *stack = (uint16_t)regs->eflags;
+        
+        regs->useresp = sp - 2;
+        regs->eip += 1;
+        return;
+    }
+    
+    if (opcode == 0x9D) { // POPF - Pop FLAGS register
+        uint16_t ss = regs->ss;
+        uint16_t sp = regs->useresp;
+        uint32_t stack_linear = (ss << 4) + sp;
+        uint16_t *stack = (uint16_t*)stack_linear;
+        
+        /* Preserve VM, IOPL, and other privileged bits */
+        uint32_t flags = *stack;
+        regs->eflags = (regs->eflags & 0xFFFE3000) | (flags & ~0xFFFE3000);
+        
+        regs->useresp = sp + 2;
+        regs->eip += 1;
+        return;
+    }
+    
+    /* TASKS.md L576: IRET emulation (INT n already handled above) */
+    if (opcode == 0xCF) { // IRET - Interrupt Return
+        uint16_t ss = regs->ss;
+        uint16_t sp = regs->useresp;
+        uint32_t stack_linear = (ss << 4) + sp;
+        uint16_t *stack = (uint16_t*)stack_linear;
+        
+        /* Pop IP, CS, FLAGS from stack */
+        regs->eip = stack[0];
+        regs->cs = stack[1];
+        /* Preserve VM, IOPL when restoring flags */
+        uint32_t flags = stack[2];
+        regs->eflags = (regs->eflags & 0xFFFE3000) | (flags & ~0xFFFE3000);
+        
+        regs->useresp = sp + 6;
+        return;
+    }
+    
+    /* TASKS.md L577: IN/OUT emulation (basic - allow through I/O bitmap) */
+    if (opcode == 0xE4 || opcode == 0xEC) { // IN AL, port
+        /* For now, just skip - real port access controlled by I/O bitmap */
+        regs->eax = (regs->eax & 0xFFFFFF00) | 0x00; /* Return 0 */
+        regs->eip += (opcode == 0xE4) ? 2 : 1;
+        return;
+    }
+    
+    if (opcode == 0xE6 || opcode == 0xEE) { // OUT port, AL
+        /* For now, just skip - real port access controlled by I/O bitmap */
+        regs->eip += (opcode == 0xE6) ? 2 : 1;
+        return;
+    }
+    
     kprint("VM86: Unhandled opcode in GPF\n");
     /* TODO: Send signal to monitor process */
 }

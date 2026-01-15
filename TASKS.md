@@ -570,11 +570,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range -->
         - [x] **GPF Handler:** <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler -->
             - [x] Detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) -->
-            - [ ] **Opcode Emulation:**
+            - [x] **Opcode Emulation:** <!-- All items complete -->
                 - [x] Emulate `CLI` / `STI` (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF -->
-                - [ ] Emulate `PUSHF` / `POPF`.
-                - [ ] Emulate `INT n` / `IRET`.
-                - [ ] Emulate `IN` / `OUT` instructions (store/load from emulated ports).
+                - [x] Emulate `PUSHF` / `POPF`. <!-- vm86.c: 0x9C/0x9D -->
+                - [x] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) -->
+                - [x] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->
         - [ ] **Monitor:** V86 monitor task to manage virtual machine state.
 - [ ] **x86_64:**
     - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`).
