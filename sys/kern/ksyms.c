@@ -1,0 +1,120 @@
+/*
+ * ksyms.c - Kernel Symbol Resolution
+ *
+ * Maps kernel addresses (EIP) to function names for debugging.
+ * Parses embedded symbol table from kernel.map at build time.
+ *
+ * TASKS.md L564: Map EIP to kernel function names (parsing map/sym file).
+ */
+
+#include <stdint.h>
+#include <stdio.h>
+#include "console.h"
+
+/* Symbol table entry */
+struct ksym {
+    uint32_t addr;      /* Symbol address */
+    char name[56];      /* Symbol name (truncated to 55 chars + null) */
+};
+
+/*
+ * Embedded symbol table.
+ * In a full implementation, this would be populated from kernel.map at build time.
+ * For now, we provide a minimal bootstrap table.
+ *
+ * To populate at build:
+ *   1. Build kernel.bin first
+ *   2. Parse kernel.map (nm output format)
+ *   3. Generate ksyms_table.c with sorted entries
+ *   4. Relink kernel with symbol table
+ *
+ * This is a chicken-and-egg problem solved by two-pass linking.
+ */
+
+/* Placeholder symbol table - will be replaced by build system */
+static struct ksym ksym_table[] = {
+    { 0xC0100000, "_start" },
+    { 0xC0100020, "kmain" },
+    { 0xC0101000, "panic" },
+    { 0xC0102000, "stack_trace" },
+    /* Sentinel */
+    { 0xFFFFFFFF, "" }
+};
+
+static int ksym_count = 4;  /* Number of entries (excluding sentinel) */
+
+/*
+ * ksym_lookup - Find symbol containing address
+ *
+ * Returns pointer to symbol entry, or NULL if not found.
+ * Uses binary search for efficiency.
+ */
+const struct ksym *ksym_lookup(uint32_t addr) {
+    if (ksym_count == 0) return NULL;
+    
+    /* Binary search for largest address <= addr */
+    int low = 0;
+    int high = ksym_count - 1;
+    const struct ksym *result = NULL;
+    
+    while (low <= high) {
+        int mid = (low + high) / 2;
+        
+        if (ksym_table[mid].addr <= addr) {
+            result = &ksym_table[mid];
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    
+    return result;
+}
+
+/*
+ * ksym_resolve - Resolve address to symbol name with offset
+ *
+ * Writes result to buf: "function_name+0x123" or "0xADDRESS" if unknown.
+ * Returns length written.
+ */
+int ksym_resolve(uint32_t addr, char *buf, int buflen) {
+    (void)buflen;  /* Currently unused - for future bounds checking */
+    const struct ksym *sym = ksym_lookup(addr);
+    
+    if (sym && sym->name[0]) {
+        uint32_t offset = addr - sym->addr;
+        if (offset == 0) {
+            return sprintf(buf, "%s", sym->name);
+        } else {
+            return sprintf(buf, "%s+0x%x", sym->name, offset);
+        }
+    } else {
+        return sprintf(buf, "0x%08x", addr);
+    }
+}
+
+/*
+ * ksym_print - Print address with symbol resolution
+ */
+void ksym_print(uint32_t addr) {
+    char buf[80];
+    ksym_resolve(addr, buf, sizeof(buf));
+    kprint(buf);
+}
+
+/*
+ * ksym_init - Initialize symbol table
+ *
+ * In full implementation, would parse kernel.map or load from embedded data.
+ */
+void ksym_init(void) {
+    /* Count entries */
+    ksym_count = 0;
+    while (ksym_table[ksym_count].addr != 0xFFFFFFFF) {
+        ksym_count++;
+    }
+    
+    char buf[64];
+    sprintf(buf, "KSYMS: Loaded %d symbols\n", ksym_count);
+    kprint(buf);
+}

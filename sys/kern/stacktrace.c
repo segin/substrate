@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "console.h"
+#include "ksyms.h"
 
 /* Maximum number of frames to trace */
 #define MAX_STACK_FRAMES 16
@@ -27,6 +28,7 @@ struct stack_frame {
 void stack_trace(void) {
     struct stack_frame *frame;
     char buf[80];
+    char sym_buf[64];
     int depth = 0;
     
     /* Get current EBP */
@@ -49,8 +51,9 @@ void stack_trace(void) {
             break;
         }
         
-        sprintf(buf, "  #%d: EIP=0x%08x  EBP=0x%08x\n", 
-                depth, frame->eip, (uint32_t)frame->ebp);
+        /* Resolve symbol for EIP */
+        ksym_resolve(frame->eip, sym_buf, sizeof(sym_buf));
+        sprintf(buf, "  #%d: %s\n", depth, sym_buf);
         kprint(buf);
         
         /* Move to previous frame */
@@ -75,12 +78,14 @@ void stack_trace(void) {
 void stack_trace_from(uint32_t ebp, uint32_t eip) {
     struct stack_frame *frame = (struct stack_frame *)ebp;
     char buf[80];
+    char sym_buf[64];
     int depth = 0;
     
     kprint("\n--- Stack Trace ---\n");
     
-    /* Print the faulting address first */
-    sprintf(buf, "  #%d: EIP=0x%08x (faulting address)\n", depth, eip);
+    /* Print the faulting address first with symbol */
+    ksym_resolve(eip, sym_buf, sizeof(sym_buf));
+    sprintf(buf, "  #%d: %s (faulting address)\n", depth, sym_buf);
     kprint(buf);
     depth++;
     
@@ -98,8 +103,9 @@ void stack_trace_from(uint32_t ebp, uint32_t eip) {
             break;
         }
         
-        sprintf(buf, "  #%d: EIP=0x%08x  EBP=0x%08x\n", 
-                depth, frame->eip, (uint32_t)frame->ebp);
+        /* Resolve symbol */
+        ksym_resolve(frame->eip, sym_buf, sizeof(sym_buf));
+        sprintf(buf, "  #%d: %s\n", depth, sym_buf);
         kprint(buf);
         
         frame = frame->ebp;
