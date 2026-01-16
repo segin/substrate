@@ -99,28 +99,120 @@ static int pmm_is_usable_type(uint32_t type) {
             type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE);
 }
 
-// Clamp 64-bit address to 32-bit
-static phys_addr_t pmm_clamp_addr(uint64_t addr) {
-    if (addr > 0xFFFFFFFF) return 0xFFFFFFFF;
-    return (phys_addr_t)addr;
+/*
+ * pmm_validate_mmap_entry - Validate a multiboot memory map entry
+ *
+ * Returns 0 if entry is valid and usable, non-zero to skip.
+ * Validates: type, non-zero length, address range within 32-bit.
+ */
+static int pmm_validate_mmap_entry(const multiboot_mmap_entry_t *entry,
+                                   phys_addr_t *out_start, phys_addr_t *out_end) {
+    /* Check for usable memory types */
+    if (!pmm_is_usable_type(entry->type)) {
+        return -1; /* Not usable type */
+    }
+    
+    /* Skip zero-length entries */
+    if (entry->len == 0) {
+        return -2; /* Zero length */
+    }
+    
+    /* Clamp 64-bit addresses to 32-bit address space */
+    uint64_t start64 = entry->addr;
+    uint64_t end64 = entry->addr + entry->len;
+    
+    /* Check for 64-bit wrap-around */
+    if (end64 < start64) {
+        return -3; /* Wrap-around detected */
+    }
+    
+    /* Skip entries entirely above 4GB (32-bit limit) */
+    if (start64 >= 0x100000000ULL) {
+        return -4; /* Above 32-bit space */
+    }
+    
+    /* Clamp end to 4GB boundary */
+    if (end64 > 0xFFFFFFFFULL) {
+        end64 = 0xFFFFFFFFULL;
+    }
+    
+    phys_addr_t start = (phys_addr_t)start64;
+    phys_addr_t end = (phys_addr_t)end64;
+    
+    /* Final sanity check */
+    if (end <= start) {
+        return -5; /* Invalid after clamping */
+    }
+    
+    *out_start = start;
+    *out_end = end;
+    return 0; /* Valid */
 }
 
+/*
+ * pmm_walk_mmap - Iterate over multiboot memory map entries
+ *
+ * Walks the multiboot memory map, validates each entry, and calls
+ * the callback for each valid usable region.
+ *
+ * @mmap_addr: Physical address of memory map (kernel-mapped)
+ * @mmap_length: Total length of memory map in bytes
+ * @cb: Callback function for each valid region
+ * @arg: Opaque argument passed to callback
+ *
+ * Safety features:
+ * - Validates entry size field to prevent infinite loops
+ * - Skips zero-length entries
+ * - Clamps 64-bit addresses to 32-bit
+ * - Detects wrap-around in entry iteration
+ */
 void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback cb, void *arg) {
-    if (!mmap_addr || !mmap_length || !cb) return;
+    if (!mmap_addr || !mmap_length || !cb) {
+        return;
+    }
 
-    multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
-    uint32_t end_of_map = mmap_addr + mmap_length;
+    /* Validate map address is in kernel space (already mapped) */
+    if (mmap_addr < 0xC0000000) {
+        /* Physical address - need to add kernel offset */
+        mmap_addr += 0xC0000000;
+    }
 
-    while ((uint32_t)(uintptr_t)mmap < end_of_map) {
-        if (pmm_is_usable_type(mmap->type)) {
-            phys_addr_t start = pmm_clamp_addr(mmap->addr);
-            phys_addr_t end = pmm_clamp_addr(mmap->addr + mmap->len);
-            
-            if (end > start) {
-                cb(start, end - start, arg);
-            }
+    const uint8_t *map_start = (const uint8_t *)(uintptr_t)mmap_addr;
+    const uint8_t *map_end = map_start + mmap_length;
+    const uint8_t *ptr = map_start;
+    
+    uint32_t entries_processed = 0;
+    const uint32_t max_entries = 256; /* Sanity limit */
+
+    while (ptr < map_end && entries_processed < max_entries) {
+        const multiboot_mmap_entry_t *entry = (const multiboot_mmap_entry_t *)ptr;
+        
+        /* Validate entry size field (must be at least the structure minus size field) */
+        uint32_t entry_size = entry->size + sizeof(entry->size);
+        if (entry_size < sizeof(multiboot_mmap_entry_t)) {
+            /* Malformed entry - stop processing */
+            break;
         }
-        mmap = (multiboot_mmap_entry_t*)((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
+        
+        /* Prevent infinite loop from zero-size entry */
+        if (entry->size == 0) {
+            break;
+        }
+        
+        /* Validate and process entry */
+        phys_addr_t start, end;
+        if (pmm_validate_mmap_entry(entry, &start, &end) == 0) {
+            cb(start, end - start, arg);
+        }
+        
+        /* Advance to next entry */
+        ptr += entry_size;
+        entries_processed++;
+        
+        /* Detect wrap-around in pointer */
+        if (ptr < map_start) {
+            break;
+        }
     }
 }
 

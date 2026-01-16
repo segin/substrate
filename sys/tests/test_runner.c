@@ -23,6 +23,7 @@ void run_cow_stats_tests(void);
 extern void test_pte_user(void);
 extern void test_stacktrace(void);
 extern void test_ksyms(void);
+extern void test_mmap_parsing(void);
 // void test_wait_logic(void); // Host-only test via verify_wait_host.sh
 
 void run_kernel_tests(void) {
@@ -50,6 +51,7 @@ void run_kernel_tests(void) {
         test_pte_user();
         test_stacktrace();
         test_ksyms();
+        test_mmap_parsing();
     }
 
     if (all || strcmp(test_arg, "vm") == 0) {
