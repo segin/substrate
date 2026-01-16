@@ -11,9 +11,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Parse Multiboot Memory Map (mmap). <!-- pmm.c:pmm_walk_mmap with pmm_validate_mmap_entry, test_mmap_parsing.c -->
             - [x] Parse e820 Memory Map (legacy BIOS). <!-- pmm.c:pmm_init_e820, pmm_walk_e820, test_e820_parsing.c -->
             - [x] **Hardening (Phase 1):**
-                - [x] Sanitize memory map entries (validate type, clamp to 32-bit).
-                - [x] Calculate and report total usable RAM.
-                - [x] Properly identify kernel physical bounds from linker symbols.
+                - [x] Sanitize memory map entries (validate type, clamp to 32-bit). <!-- pmm_validate_mmap_entry, pmm_validate_e820_entry -->
+                - [x] Calculate and report total usable RAM. <!-- pmm_cb_stats with 64-bit total_usable -->
+                - [x] Properly identify kernel physical bounds from linker symbols. <!-- _kernel_end in pmm_watermark_init, pmm_cb_init_buddy -->
         - [x] **Core Allocator Rewrite:**
             - [x] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures.
             - [x] **Dynamic Metadata:** Calculate and allocate `vm_page_t` array or bitmaps based on *actual* detected RAM (remove 128MB static limit).
