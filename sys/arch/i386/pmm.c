@@ -383,3 +383,212 @@ void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
         mmap = (multiboot_mmap_entry_t*) ((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
     }
 }
+
+/* ==================== E820 Memory Map Support ==================== */
+
+/*
+ * pmm_is_e820_usable_type - Check if e820 type is usable memory
+ */
+static int pmm_is_e820_usable_type(uint32_t type) {
+    return (type == E820_USABLE || type == E820_ACPI);
+}
+
+/*
+ * pmm_validate_e820_entry - Validate an e820 memory map entry
+ *
+ * Returns 0 if entry is valid and usable, non-zero to skip.
+ * Validates: type, non-zero length, address range within 32-bit.
+ */
+static int pmm_validate_e820_entry(const e820_entry_t *entry,
+                                   phys_addr_t *out_start, phys_addr_t *out_end) {
+    /* Check for usable memory types */
+    if (!pmm_is_e820_usable_type(entry->type)) {
+        return -1; /* Not usable type */
+    }
+    
+    /* Skip zero-length entries */
+    if (entry->len == 0) {
+        return -2; /* Zero length */
+    }
+    
+    /* Clamp 64-bit addresses to 32-bit address space */
+    uint64_t start64 = entry->addr;
+    uint64_t end64 = entry->addr + entry->len;
+    
+    /* Check for 64-bit wrap-around */
+    if (end64 < start64) {
+        return -3; /* Wrap-around detected */
+    }
+    
+    /* Skip entries entirely above 4GB (32-bit limit) */
+    if (start64 >= 0x100000000ULL) {
+        return -4; /* Above 32-bit space */
+    }
+    
+    /* Clamp end to 4GB boundary */
+    if (end64 > 0xFFFFFFFFULL) {
+        end64 = 0xFFFFFFFFULL;
+    }
+    
+    phys_addr_t start = (phys_addr_t)start64;
+    phys_addr_t end = (phys_addr_t)end64;
+    
+    /* Final sanity check */
+    if (end <= start) {
+        return -5; /* Invalid after clamping */
+    }
+    
+    *out_start = start;
+    *out_end = end;
+    return 0; /* Valid */
+}
+
+/*
+ * pmm_walk_e820 - Iterate over e820 memory map entries
+ *
+ * Walks the e820 memory map (array of fixed-size entries), validates
+ * each entry, and calls the callback for each valid usable region.
+ *
+ * @map: Pointer to e820 entry array
+ * @count: Number of entries in the array
+ * @cb: Callback function for each valid region
+ * @arg: Opaque argument passed to callback
+ *
+ * Safety features:
+ * - Validates each entry before processing
+ * - Skips zero-length entries
+ * - Clamps 64-bit addresses to 32-bit
+ * - Limits to max 256 entries
+ */
+void pmm_walk_e820(const e820_entry_t *map, uint32_t count, 
+                   pmm_region_callback cb, void *arg) {
+    if (!map || !count || !cb) {
+        return;
+    }
+    
+    /* Sanity limit on entry count */
+    if (count > 256) {
+        count = 256;
+    }
+    
+    for (uint32_t i = 0; i < count; i++) {
+        phys_addr_t start, end;
+        if (pmm_validate_e820_entry(&map[i], &start, &end) == 0) {
+            cb(start, end - start, arg);
+        }
+    }
+}
+
+/*
+ * pmm_dump_e820 - Print e820 memory map for debugging
+ */
+void pmm_dump_e820(const e820_entry_t *map, uint32_t count) {
+    kprint("E820 Memory Map:\n");
+    
+    for (uint32_t i = 0; i < count && i < 64; i++) {
+        char buf[128];
+        const char *type_str = "unknown";
+        
+        switch (map[i].type) {
+        case E820_USABLE:   type_str = "usable"; break;
+        case E820_RESERVED: type_str = "reserved"; break;
+        case E820_ACPI:     type_str = "ACPI data"; break;
+        case E820_NVS:      type_str = "ACPI NVS"; break;
+        case E820_BAD:      type_str = "bad RAM"; break;
+        }
+        
+        uint64_t start = map[i].addr;
+        uint64_t end = map[i].addr + map[i].len - 1;
+        
+        sprintf(buf, " [0x%08x%08x - 0x%08x%08x] %s\n", 
+            (uint32_t)(start >> 32), (uint32_t)(start & 0xFFFFFFFF),
+            (uint32_t)(end >> 32), (uint32_t)(end & 0xFFFFFFFF),
+            type_str);
+        kprint(buf);
+    }
+}
+
+/*
+ * pmm_init_e820 - Initialize PMM from e820 memory map
+ *
+ * This is the entry point for legacy BIOS systems that provide
+ * memory information via INT 15h E820 instead of Multiboot.
+ *
+ * @map: Pointer to e820 entry array
+ * @count: Number of entries in the array
+ */
+void pmm_init_e820(e820_entry_t *map, uint32_t count) {
+    if (!map || count == 0) {
+        kprint("PMM: No e820 map provided, using fallback 16MB\n");
+        extern uint32_t _kernel_end;
+        uint32_t k_end = ((uint32_t)(uintptr_t)&_kernel_end - 0xC0000000);
+        k_end = (k_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+        
+        pmm_watermark_init(16 * 1024 * 1024);
+        
+        /* Minimal init */
+        size_t total_blocks = (16 * 1024 * 1024) / PMM_BLOCK_SIZE;
+        size_t bitmap_bytes = (total_blocks + 7) / 8;
+        uint8_t *pmm_bitmap = (uint8_t *)pmm_watermark_alloc(bitmap_bytes);
+        
+        if (!pmm_bitmap) {
+            pmm_bitmap = pmm_bitmap_static;
+            bitmap_bytes = sizeof(pmm_bitmap_static);
+            total_blocks = bitmap_bytes * 8;
+        }
+        
+        vm_phys_early_init(pmm_bitmap, bitmap_bytes, NULL, total_blocks);
+        vm_phys_add_range(k_end, 16 * 1024 * 1024);
+        pmm_reserve_kernel();
+        return;
+    }
+    
+    /* Debug dump */
+    pmm_dump_e820(map, count);
+    
+    /* Pass 1: Find limits */
+    struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0 };
+    pmm_walk_e820(map, count, pmm_cb_stats, &stats);
+    
+    /* Init Watermark */
+    pmm_watermark_init((uint32_t)stats.max_phys);
+    
+    uint32_t max_phys_addr = (uint32_t)stats.max_phys;
+    if (max_phys_addr & (PMM_BLOCK_SIZE - 1)) {
+        max_phys_addr = (max_phys_addr + PMM_BLOCK_SIZE) & ~(PMM_BLOCK_SIZE - 1);
+    }
+    
+    size_t total_blocks = max_phys_addr / PMM_BLOCK_SIZE;
+    size_t bitmap_bytes = (total_blocks + 7) / 8;
+    
+    uint8_t *pmm_bitmap = (uint8_t *)pmm_watermark_alloc(bitmap_bytes);
+    size_t array_bytes = total_blocks * sizeof(vm_page_t);
+    vm_page_t *pmm_page_array = (vm_page_t *)pmm_watermark_alloc(array_bytes);
+    
+    if (!pmm_bitmap) {
+        kprint("PMM: Warn - using static bitmap.\n");
+        pmm_bitmap = pmm_bitmap_static;
+        bitmap_bytes = sizeof(pmm_bitmap_static);
+        total_blocks = bitmap_bytes * 8;
+        pmm_page_array = NULL;
+    }
+    
+    /* Init Generic PMM */
+    vm_phys_early_init(pmm_bitmap, bitmap_bytes, pmm_page_array, total_blocks);
+    
+    char buf[64];
+    sprintf(buf, "%u MB RAM detected.\n", max_phys_addr / (1024 * 1024));
+    kprint(buf);
+    
+    /* Reserve kernel and add usable ranges */
+    pmm_reserve_kernel();
+    pmm_walk_e820(map, count, pmm_cb_init_buddy, NULL);
+    pmm_reserve_kernel(); /* Re-safety */
+    
+    /* Mark watermark as used */
+    uint32_t wm_start = watermark_base;
+    uint32_t wm_end_val = watermark_ptr;
+    for (uint32_t a = wm_start; a < wm_end_val; a += PMM_BLOCK_SIZE) {
+        vm_phys_mark_used(a);
+    }
+}

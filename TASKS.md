@@ -9,7 +9,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] **Physical Memory Manager (PMM Refactor):**
         - [x] **Boot Memory Detection:**
             - [x] Parse Multiboot Memory Map (mmap). <!-- pmm.c:pmm_walk_mmap with pmm_validate_mmap_entry, test_mmap_parsing.c -->
-            - [x] Parse e820 Memory Map (legacy BIOS).
+            - [x] Parse e820 Memory Map (legacy BIOS). <!-- pmm.c:pmm_init_e820, pmm_walk_e820, test_e820_parsing.c -->
             - [x] **Hardening (Phase 1):**
                 - [x] Sanitize memory map entries (validate type, clamp to 32-bit).
                 - [x] Calculate and report total usable RAM.
