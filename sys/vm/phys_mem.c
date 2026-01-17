@@ -13,13 +13,8 @@ static vm_page_t *vm_phys_free_lists[PMM_MAX_ORDER];
 static size_t vm_phys_free_count;
 
 static spinlock_t vm_phys_lock;
-static uint8_t *vm_phys_bitmap;
-static size_t vm_phys_bitmap_size;
 static vm_page_t *vm_phys_page_array;
 static size_t vm_phys_page_count;
-
-// Diagnostics
-static size_t vm_phys_used_blocks;
 
 // Internal Helpers
 static void vm_phys_buddy_enqueue(int order, vm_page_t *page) {
@@ -53,30 +48,6 @@ vm_page_t *vm_phys_paddr_to_page(uintptr_t pa) {
         return &vm_phys_page_array[idx];
     }
     return NULL;
-}
-
-static void vm_phys_mark_used_bit(uintptr_t pa) {
-    uint32_t block = pa / PMM_BLOCK_SIZE;
-    uint32_t idx = block / 8;
-    uint32_t bit = block % 8;
-    if (vm_phys_bitmap && idx < vm_phys_bitmap_size) {
-        if (!(vm_phys_bitmap[idx] & (1 << bit))) {
-            vm_phys_bitmap[idx] |= (1 << bit);
-            vm_phys_used_blocks++;
-        }
-    }
-}
-
-static void vm_phys_mark_free_bit(uintptr_t pa) {
-    uint32_t block = pa / PMM_BLOCK_SIZE;
-    uint32_t idx = block / 8;
-    uint32_t bit = block % 8;
-    if (vm_phys_bitmap && idx < vm_phys_bitmap_size) {
-        if (vm_phys_bitmap[idx] & (1 << bit)) {
-            vm_phys_bitmap[idx] &= ~(1 << bit);
-            vm_phys_used_blocks--;
-        }
-    }
 }
 
 static vm_page_t* vm_phys_alloc_locked(int order) {
@@ -128,17 +99,13 @@ static void vm_phys_free_locked(vm_page_t *page, int order) {
 // Public APIs
 
 void vm_phys_early_init(void *bitmap, size_t bitmap_size, vm_page_t *pages, size_t page_count) {
+    (void)bitmap;       /* Bitmap parameter kept for API compat, but unused */
+    (void)bitmap_size;
+    
     spinlock_init(&vm_phys_lock, "vm_phys");
-    vm_phys_bitmap = bitmap;
-    vm_phys_bitmap_size = bitmap_size;
     vm_phys_page_array = pages;
     vm_phys_page_count = page_count;
-    
-    // Mark all used
-    if (bitmap) {
-        memset(bitmap, 0xFF, bitmap_size);
-    }
-    vm_phys_used_blocks = page_count;
+    vm_phys_free_count = 0;  /* Will be set by vm_phys_add_range */
     
     // Init page array with magic canaries
     if (pages) {
@@ -147,7 +114,7 @@ void vm_phys_early_init(void *bitmap, size_t bitmap_size, vm_page_t *pages, size
             pages[i].magic_head = VM_PAGE_MAGIC;
             pages[i].magic_tail = VM_PAGE_MAGIC;
             pages[i].phys_addr = i * PMM_BLOCK_SIZE;
-            pages[i].flags = PG_FREE; // Temporarily FREE flag but not in list
+            pages[i].flags = 0;  /* Not free yet - will be added by add_range */
         }
     }
 }
@@ -174,10 +141,6 @@ void vm_phys_add_range(uintptr_t start, uintptr_t end) {
         
         vm_page_t *page = vm_phys_paddr_to_page(addr);
         if (page) {
-             // Clear bitmap bits
-             for (size_t i = 0; i < (1U << order); i++) {
-                 vm_phys_mark_free_bit(addr + i * PMM_BLOCK_SIZE);
-             }
              vm_phys_buddy_enqueue(order, page);
              vm_phys_free_count += (1 << order);
         }
@@ -194,9 +157,6 @@ vm_page_t *vm_phys_alloc_page(void) {
     spinlock_acquire(&vm_phys_lock);
     
     vm_page_t *page = vm_phys_alloc_locked(0);
-    if (page) {
-        vm_phys_mark_used_bit(page->phys_addr);
-    }
     
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
@@ -208,9 +168,8 @@ void vm_phys_free_page(vm_page_t *page) {
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
     
-    // Check if double free or not used?
+    // Check if double free
     if (!(page->flags & PG_FREE)) {
-        vm_phys_mark_free_bit(page->phys_addr);
         vm_phys_free_locked(page, 0);
     }
     
@@ -228,11 +187,6 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
     spinlock_acquire(&vm_phys_lock);
     
     vm_page_t *page = vm_phys_alloc_locked(order);
-    if (page) {
-         for (size_t i = 0; i < (1UL << order); i++) {
-             vm_phys_mark_used_bit(page->phys_addr + i * PMM_BLOCK_SIZE);
-         }
-    }
     
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
@@ -247,12 +201,7 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
      uint32_t flags = intr_disable();
      spinlock_acquire(&vm_phys_lock);
      
-     if (page) {
-         for (size_t i = 0; i < (1UL << order); i++) {
-             // Logic to mark free in bitmap is tricky if we do it bit by bit, 
-             // but we just need to ensure consistency.
-             vm_phys_mark_free_bit(page->phys_addr + i * PMM_BLOCK_SIZE);
-         }
+     if (!(page->flags & PG_FREE)) {
          vm_phys_free_locked(page, order);
      }
      
@@ -261,17 +210,29 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
 }
 
 size_t vm_phys_get_free(void) {
-    return vm_phys_free_count; // Atomic read usually fine
+    return vm_phys_free_count;
 }
 
 size_t vm_phys_get_used(void) {
-    return vm_phys_used_blocks;
+    /* Derive from total - free (no bitmap needed) */
+    return vm_phys_page_count - vm_phys_free_count;
 }
 
 void vm_phys_mark_used(uintptr_t pa) {
+    /* Mark page as used by removing from buddy if free */
+    vm_page_t *page = vm_phys_paddr_to_page(pa);
+    if (!page) return;
+    
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
-    vm_phys_mark_used_bit(pa);
+    
+    if (page->flags & PG_FREE) {
+        /* Page is in buddy - this is a reservation during boot */
+        /* For now, just mark the flag - proper removal would need buddy surgery */
+        page->flags &= ~PG_FREE;
+        if (vm_phys_free_count > 0) vm_phys_free_count--;
+    }
+    
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
 }
