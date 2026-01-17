@@ -34,6 +34,12 @@
 /* VM86 syscall (Linux-compatible number) */
 #define SYS_vm86        113
 
+/* Memory management syscalls */
+#define SYS_brk         45
+#define SYS_mmap        90
+#define SYS_munmap      91
+#define SYS_mprotect    125
+
 /* Raw syscall interface */
 long syscall(long number, ...);
 

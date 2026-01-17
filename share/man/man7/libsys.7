@@ -1,0 +1,109 @@
+.\" libsys.7 - System Call Wrapper Library
+.TH LIBSYS 7 "January 2026" "Substrate" "Substrate Programmer's Manual"
+.SH NAME
+libsys \- C language interface to Substrate system calls
+.SH SYNOPSIS
+.nf
+.B #include <sys/syscall.h>
+.PP
+.BI "long syscall(long " number ", ...);"
+.fi
+.SH DESCRIPTION
+.B libsys
+is a static library providing the C language interface to the Substrate
+kernel's system call interface. It serves as the lowest-level userspace
+mechanism for invoking kernel services.
+.PP
+The library provides:
+.IP \(bu 3
+.BR syscall ()
+\- A variadic function for invoking any system call by number.
+.IP \(bu 3
+Typed wrapper functions for commonly used system calls.
+.IP \(bu 3
+System call number definitions (SYS_* constants).
+.SS System Call Mechanism
+On i386, system calls are invoked via software interrupt 0x80.
+Arguments are passed in registers:
+.IP \(bu 3
+System call number: EAX
+.IP \(bu 3
+Argument 1: EBX
+.IP \(bu 3
+Argument 2: ECX
+.IP \(bu 3
+Argument 3: EDX
+.IP \(bu 3
+Argument 4: ESI
+.IP \(bu 3
+Argument 5: EDI
+.IP \(bu 3
+Argument 6: EBP
+.PP
+Return value is placed in EAX. Negative values indicate errors (negated errno).
+.SS Available Wrapper Functions
+.TP
+.BR vm86 (2)
+Enter Virtual 8086 mode for legacy BIOS calls.
+.SS Memory Management System Calls
+The following syscalls are available for memory management:
+.TP
+.BI "void *mmap(void *" addr ", size_t " len ", int " prot ", int " flags ", int " fd ", off_t " offset ");"
+Map files or anonymous memory into address space.
+.TP
+.BI "int munmap(void *" addr ", size_t " len ");"
+Unmap a memory region.
+.TP
+.BI "int mprotect(void *" addr ", size_t " len ", int " prot ");"
+Change memory protection flags.
+.TP
+.BI "void *brk(void *" addr ");"
+Change the program break (data segment end).
+.SH USAGE
+Link with
+.B \-lsys
+and include the appropriate headers:
+.PP
+.nf
+#include <sys/syscall.h>
+
+int main(void) {
+    /* Direct syscall invocation */
+    long pid = syscall(SYS_getpid);
+    
+    /* Using typed wrapper */
+    int ret = vm86(&info);
+    return 0;
+}
+.fi
+.SH FILES
+.TP
+.I lib/sys/libsys.a
+Static library archive.
+.TP
+.I lib/sys/include/sys/syscall.h
+System call numbers and prototypes.
+.SH NOTES
+.B libsys
+is separate from
+.BR libc (7)
+to allow minimal programs to invoke system calls without linking the
+full C library. Programs using standard I/O or other libc features
+should link with
+.B \-lc
+instead or in addition.
+.PP
+The calling convention matches the Linux i386 syscall ABI for
+compatibility with the Linux personality emulation layer.
+.SH SEE ALSO
+.BR syscall (2),
+.BR vm86 (2),
+.BR mmap (2),
+.BR munmap (2),
+.BR mprotect (2),
+.BR brk (2),
+.BR libc (7),
+.BR substrate (7)
+.SH HISTORY
+.B libsys
+first appeared in Substrate 0.1.

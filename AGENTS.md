@@ -40,6 +40,7 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **Synchronization Primitives:** Implemented Turnstiles (Priority Inheritance) and Hashed Sleep Queues (O(1) lookup).
 - **Context Switching:** Validated FPU Lazy Save and refined PCB for thread/process separation.
 - **Kernel Process:** Implemented Swapper/Idle (PID 0) with pageout daemon and idle loop responsibilities.
+- **libsys Library:** Created `lib/sys/` syscall wrapper library with `syscall.S` (raw i386 int 0x80), `syscall.h` (SYS_* constants), and typed wrappers (`vm86()`). Supports mmap, munmap, mprotect, brk syscalls.
 
 
 ## Current Status
@@ -123,6 +124,7 @@ pmm_free_block(virt);  // CORRECT - convert first
 - `bin/`: User-space utilities (`ls`, `sh`, `vi`, etc.).
 - `lib/`:
     - `c/`: LibC implementation.
+    - `sys/`: System call wrapper library (libsys). Raw `syscall()` and typed wrappers.
     - `pthreads/`: Threading support.
     - `dbm/`: Database library.
 - `sbin/`: System binaries.

@@ -78,6 +78,7 @@ These components are essential for booting and basic system operation.
 - **`bin/`**: Fundamental Unix utilities (`sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, `kill`, `sync`, etc.).
 - **`lib/`**:
     - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.
+    - **`sys/`**: System call wrapper library (libsys). Provides raw `syscall()` function and typed wrappers for kernel syscalls. See `libsys(7)`.
     - **`m/`**: Math library.
     - **`dl/`**: Dynamic linker.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
