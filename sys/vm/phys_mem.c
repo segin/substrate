@@ -140,10 +140,12 @@ void vm_phys_early_init(void *bitmap, size_t bitmap_size, vm_page_t *pages, size
     }
     vm_phys_used_blocks = page_count;
     
-    // Init page array
+    // Init page array with magic canaries
     if (pages) {
         memset(pages, 0, page_count * sizeof(vm_page_t));
         for (size_t i = 0; i < page_count; i++) {
+            pages[i].magic_head = VM_PAGE_MAGIC;
+            pages[i].magic_tail = VM_PAGE_MAGIC;
             pages[i].phys_addr = i * PMM_BLOCK_SIZE;
             pages[i].flags = PG_FREE; // Temporarily FREE flag but not in list
         }

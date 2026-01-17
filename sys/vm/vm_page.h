@@ -10,6 +10,10 @@ struct vm_object;
 // VM Page Structure
 // Tracks the state of a single physical page of memory.
 typedef struct vm_page {
+    // Magic canary for corruption detection (must be VM_PAGE_MAGIC)
+    uint32_t magic_head;
+    #define VM_PAGE_MAGIC 0x50414745  /* "PAGE" in ASCII */
+
     // Linked list pointers for various queues (free, active, inactive)
     struct vm_page *next;
     struct vm_page *prev;
@@ -54,7 +58,16 @@ typedef struct vm_page {
     // Pmap backlinks for TLB shootdown
     // Each entry tracks a (pmap, va) pair that maps this page
     struct pv_entry *pv_list;  // Head of PV entry list
+
+    // Tail canary for buffer overflow detection
+    uint32_t magic_tail;
 } vm_page_t;
+
+/* Validate vm_page_t magic canaries - returns 1 if valid, 0 if corrupted */
+static inline int vm_page_valid(const vm_page_t *m) {
+    if (!m) return 0;
+    return (m->magic_head == VM_PAGE_MAGIC && m->magic_tail == VM_PAGE_MAGIC);
+}
 
 // PV Entry: Tracks a single mapping (pmap, va) for a physical page
 struct pv_entry {

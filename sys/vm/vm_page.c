@@ -80,12 +80,17 @@ vm_page_t *vm_page_alloc(struct vm_object *object, uint64_t pindex, int req) {
 void vm_page_free(vm_page_t *m) {
     if (!m) return;
     
-    // Sanity check: detect obviously corrupted pointers
-    // Valid kernel pointers should be in higher half (>= 0xC0000000)
-    if ((uintptr_t)m < 0xC0000000 || (uintptr_t)m >= 0xF0000000) {
-        // Corrupted pointer - log and return to avoid crash
+    /* Validate magic canary - detects corruption and invalid pointers */
+    if (!vm_page_valid(m)) {
         extern void kprint(const char *);
-        kprint("vm_page_free: corrupted page pointer detected!\n");
+        kprint("vm_page_free: corrupted page detected (magic canary invalid)!\n");
+        return;
+    }
+    
+    /* Detect double-free: page shouldn't already be free */
+    if (m->flags & PG_FREE) {
+        extern void kprint(const char *);
+        kprint("vm_page_free: double-free detected!\n");
         return;
     }
 
