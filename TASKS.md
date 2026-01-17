@@ -25,7 +25,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Locking:** Fine-grained spinlocks for SMP access.
             - [x] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues.
     - [ ] **Memory Management (BSD/Mach Design):**
-        - [ ] **Physical Memory (Machine Independent):**
+        - [x] **Physical Memory (Machine Independent):**
             - [x] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page.
                 - [x] **Fields:** `phys_addr`, `flags`, `wire_count`, `ref_count`, `order` (buddy), `object`, `pindex`
                 - [x] **State Flags:** `PG_BUSY`, `PG_VALID`, `PG_DIRTY`, `PG_ACTIVE`, `PG_INACTIVE`, `PG_FREE`, `PG_ZERO`, `PG_SWAPPED`
