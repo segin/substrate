@@ -1884,6 +1884,60 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Hash clear_text with extracted salt.
                 - [ ] Constant-time comparison of hashes.
 
+### 6a. System Call Wrapper Library (`lib/sys`)
+- [x] **Foundation:**
+    - [x] Create `lib/sys/` directory structure.
+    - [x] Implement `syscall.S`: Raw i386 `int $0x80` entry (6 args via ebx-ebp).
+    - [x] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype.
+    - [x] Add to `lib/Makefile` SUBDIRS.
+- [ ] **VM Information Syscalls:**
+    - [ ] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
+        - [ ] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
+        - [ ] `lib/sys/sysinfo.c`: Wrapper function.
+        - [ ] Man page: `sysinfo(2)`.
+    - [ ] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
+        - [ ] `lib/sys/getpagesize.c`: Wrapper function.
+        - [ ] Man page: `getpagesize(2)`.
+    - [ ] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
+        - [ ] `lib/sys/mlock.c`: Wrapper functions.
+        - [ ] Man pages: `mlock(2)`, `munlock(2)`.
+- [ ] **Process Information Syscalls:**
+    - [ ] `getpid()`/`getppid()` wrappers.
+        - [ ] `lib/sys/getpid.c`: Wrapper functions.
+        - [ ] Man pages: `getpid(2)`, `getppid(2)`.
+    - [ ] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers.
+        - [ ] `lib/sys/getuid.c`: Wrapper functions.
+        - [ ] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`.
+    - [ ] `getpgid()`/`setpgid()`/`getpgrp()` wrappers.
+        - [ ] `lib/sys/pgrp.c`: Wrapper functions.
+        - [ ] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`.
+    - [ ] `getsid()`/`setsid()` wrappers.
+        - [ ] `lib/sys/sid.c`: Wrapper functions.
+        - [ ] Man pages: `getsid(2)`, `setsid(2)`.
+    - [ ] `getrusage()` wrapper: Resource usage (user/sys time, memory).
+        - [ ] Kernel: Implement `sys_getrusage()` returning `struct rusage`.
+        - [ ] `lib/sys/getrusage.c`: Wrapper function.
+        - [ ] Man page: `getrusage(2)`.
+    - [ ] `times()` wrapper: Process times (user, sys, children).
+        - [ ] Kernel: Implement `sys_times()`.
+        - [ ] `lib/sys/times.c`: Wrapper function.
+        - [ ] Man page: `times(2)`.
+- [ ] **Special-Purpose Syscalls:**
+    - [x] `vm86()` wrapper (SYS_vm86): Enter VM86 mode.
+        - [x] `lib/sys/vm86.c`: Typed wrapper.
+        - [ ] Man page: `vm86(2)`.
+    - [ ] `ptrace()` wrapper: Process tracing.
+        - [ ] `lib/sys/ptrace.c`: Wrapper function.
+        - [ ] Man page: `ptrace(2)`.
+    - [ ] `reboot()` wrapper: System reboot/power off.
+        - [ ] `lib/sys/reboot.c`: Wrapper function.
+        - [ ] Man page: `reboot(2)`.
+- [ ] **Sysctl Interface:**
+    - [ ] `sysctl()` wrapper: Kernel tunable access.
+        - [ ] Kernel: Implement `sys_sysctl()` MIB tree.
+        - [ ] `lib/sys/sysctl.c`: Wrapper function.
+        - [ ] Man page: `sysctl(2)`.
+
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
     - [ ] **Lexer (Tokenizer):**
