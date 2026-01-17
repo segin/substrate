@@ -76,6 +76,7 @@ The kernel is the core of the operating system, structured as follows:
 ### Core Userland (`bin/`, `lib/`)
 These components are essential for booting and basic system operation.
 - **`bin/`**: Fundamental Unix utilities (`sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, `kill`, `sync`, etc.).
+- **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:
     - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.
     - **`sys/`**: System call wrapper library (libsys). Provides raw `syscall()` function and typed wrappers for kernel syscalls. See `libsys(7)`.

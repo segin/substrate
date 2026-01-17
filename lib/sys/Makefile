@@ -2,7 +2,7 @@ include ../../Makefile.inc
 
 CC = gcc
 AR = ar
-CFLAGS := -m32 -Wall -fno-builtin -nostdinc -I../c/include -Iinclude -I../../sys/include
+CFLAGS := -m32 -Wall -fno-builtin -nostdinc -I../../include -I../../sys/include
 ASFLAGS := -m32
 
 OBJS = syscall.o vm86.o

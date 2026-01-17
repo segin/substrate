@@ -20,11 +20,11 @@ DESTDIR ?= $(TOP)/dist
 
 # Base flags for 32-bit x86
 COMMON_FLAGS = -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx
-LIBC_INCLUDE = $(TOP)/lib/c/include
+USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include)
-CFLAGS += $(COMMON_FLAGS) -std=c23 -nostdinc -I$(LIBC_INCLUDE) -I$(SYS_INCLUDE) -I$(GCC_INCLUDE)
-CXXFLAGS += $(COMMON_FLAGS) -std=c++23 -nostdinc -I$(LIBC_INCLUDE) -I$(SYS_INCLUDE) -I$(GCC_INCLUDE)
+CFLAGS += $(COMMON_FLAGS) -std=c23 -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(GCC_INCLUDE)
+CXXFLAGS += $(COMMON_FLAGS) -std=c++23 -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(GCC_INCLUDE)
 
 # Freestanding flags (for kernel and standalone utils)
 FREESTANDING_CFLAGS = $(CFLAGS) -ffreestanding -nostdlib -fno-builtin -fno-pie

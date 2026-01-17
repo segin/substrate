@@ -3,7 +3,7 @@
  *
  * Provides a typed wrapper for the VM86 system call.
  */
-#include "include/sys/syscall.h"
+#include <sys/syscall.h>
 #include <sys/vm86.h>
 
 int vm86(struct vm86_struct *info) {

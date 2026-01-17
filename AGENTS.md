@@ -122,6 +122,7 @@ pmm_free_block(virt);  // CORRECT - convert first
     - `exec/perso/`: Personality implementations.
     - `sys/`: System headers (`proc.h`).
 - `bin/`: User-space utilities (`ls`, `sh`, `vi`, etc.).
+- `include/`: Userspace C library headers (shared by all libraries).
 - `lib/`:
     - `c/`: LibC implementation.
     - `sys/`: System call wrapper library (libsys). Raw `syscall()` and typed wrappers.

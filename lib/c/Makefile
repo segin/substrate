@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-CFLAGS := $(CFLAGS) -Iinclude
+CFLAGS := $(CFLAGS) -I../../include
 LDFLAGS := $(USER_LDFLAGS)
 
 SRCS = src/sys.c src/stdlib.c src/string.c src/ctype.c src/assert.c src/dirent.c \
