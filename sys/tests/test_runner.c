@@ -26,6 +26,7 @@ extern void test_ksyms(void);
 extern void test_mmap_parsing(void);
 extern void test_e820_parsing(void);
 extern void test_vm_phys(void);
+extern void test_vm_page_queue(void);
 // void test_wait_logic(void); // Host-only test via verify_wait_host.sh
 
 void run_kernel_tests(void) {
@@ -56,6 +57,7 @@ void run_kernel_tests(void) {
         test_mmap_parsing();
         test_e820_parsing();
         test_vm_phys();
+        test_vm_page_queue();
     }
 
     if (all || strcmp(test_arg, "vm") == 0) {
