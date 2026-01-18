@@ -171,4 +171,17 @@ int pmap_clear_global(pmap_t pmap, uint64_t va);
 void pmap_invalidate_global(void);
 void pmap_mark_kernel_global(pmap_t pmap, uint64_t sva, uint64_t eva);
 
+// PCID support (Process Context Identifiers)
+int cpuid_check_pcid(void);
+int cpuid_check_invpcid(void);
+void pmap_pcid_enable(void);
+int pmap_pcid_alloc(pmap_t pmap);
+void pmap_pcid_free(pmap_t pmap);
+void pmap_activate_pcid(pmap_t pmap, int noflush);
+void pmap_invpcid(int type, int pcid, uint64_t va);
+void pmap_invpcid_single(uint64_t va);
+void pmap_invpcid_context(int pcid);
+void pmap_invpcid_all(void);
+void pmap_invpcid_all_global(void);
+
 #endif

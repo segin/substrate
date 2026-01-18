@@ -1230,3 +1230,175 @@ void pmap_mark_kernel_global(pmap_t pmap, uint64_t sva, uint64_t eva) {
         pmap_set_global(pmap, va);
     }
 }
+
+// ========== PCID Support (Process Context Identifiers) ==========
+
+// PCID pool management
+#define PCID_MAX 4096  // 12-bit PCID on x86_64
+static uint16_t pcid_next = 1; // 0 is reserved for kernel/default
+static uint16_t pcid_pool[PCID_MAX];
+static int pcid_pool_count = 0;
+
+/*
+ * cpuid_check_pcid - Check if PCID is supported
+ * 
+ * Returns: 1 if supported (CPUID.01H:ECX[17]), 0 otherwise.
+ */
+int cpuid_check_pcid(void) {
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
+    return (ecx >> 17) & 1;
+}
+
+/*
+ * cpuid_check_invpcid - Check if INVPCID instruction is supported
+ * 
+ * Returns: 1 if supported (CPUID.07H:EBX[10]), 0 otherwise.
+ */
+int cpuid_check_invpcid(void) {
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
+    return (ebx >> 10) & 1;
+}
+
+/*
+ * pmap_pcid_enable - Enable PCID support
+ *
+ * Sets CR4.PCIDE (bit 17) to enable Process Context Identifiers.
+ * PCID allows TLB entries to be tagged with an address space ID,
+ * avoiding full TLB flushes on context switch.
+ */
+void pmap_pcid_enable(void) {
+    if (!cpuid_check_pcid()) return;
+    
+    uint64_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= (1UL << 17); // CR4.PCIDE
+    __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+}
+
+/*
+ * pmap_pcid_alloc - Allocate a PCID for a pmap
+ *
+ * Returns an unused PCID, or recycles one if pool is exhausted.
+ */
+int pmap_pcid_alloc(pmap_t pmap) {
+    if (!cpuid_check_pcid()) return 0;
+    
+    // Try to reuse from pool
+    if (pcid_pool_count > 0) {
+        uint16_t pcid = pcid_pool[--pcid_pool_count];
+        pmap->asid = pcid;
+        return pcid;
+    }
+    
+    // Allocate new PCID
+    if (pcid_next < PCID_MAX) {
+        pmap->asid = pcid_next++;
+        return pmap->asid;
+    }
+    
+    // Pool exhausted, flush and reuse PCID 1
+    // (Real implementation would use LRU or clock)
+    pmap_invalidate_all();
+    pmap->asid = 1;
+    return 1;
+}
+
+/*
+ * pmap_pcid_free - Release a PCID back to the pool
+ */
+void pmap_pcid_free(pmap_t pmap) {
+    if (!cpuid_check_pcid()) return;
+    if (pmap->asid == 0) return; // Kernel PCID
+    
+    if (pcid_pool_count < PCID_MAX) {
+        pcid_pool[pcid_pool_count++] = pmap->asid;
+    }
+    pmap->asid = 0;
+}
+
+/*
+ * pmap_activate_pcid - Activate pmap with PCID in CR3
+ *
+ * When PCID is enabled, CR3 format is:
+ *   CR3[11:0]  = PCID (12 bits)
+ *   CR3[63]    = NOFLUSH (if set, don't flush old TLB entries)
+ *   CR3[51:12] = PML4 physical address
+ */
+void pmap_activate_pcid(pmap_t pmap, int noflush) {
+    if (!cpuid_check_pcid()) {
+        pmap_activate(pmap);
+        return;
+    }
+    
+    uint64_t new_cr3 = pmap->pml4_phys & PTE_ADDR_MASK;
+    new_cr3 |= (uint64_t)(pmap->asid & 0xFFF);
+    
+    if (noflush) {
+        new_cr3 |= (1ULL << 63); // NOFLUSH bit
+    }
+    
+    __asm__ volatile("mov %0, %%cr3" :: "r"(new_cr3) : "memory");
+    curpmap = pmap;
+}
+
+/*
+ * pmap_invpcid - Use INVPCID instruction for targeted TLB invalidation
+ *
+ * Types:
+ *   0 = Individual address (invalidate VA in specified PCID)
+ *   1 = Single context (invalidate all entries for PCID)
+ *   2 = All contexts (invalidate all entries except global)
+ *   3 = All contexts including global
+ */
+void pmap_invpcid(int type, int pcid, uint64_t va) {
+    if (!cpuid_check_invpcid()) {
+        // Fallback
+        if (type == 0) {
+            pmap_invalidate_page(va);
+        } else {
+            pmap_invalidate_all();
+        }
+        return;
+    }
+    
+    struct {
+        uint64_t pcid;
+        uint64_t addr;
+    } __attribute__((packed)) descriptor = { (uint64_t)pcid, va };
+    
+    __asm__ volatile("invpcid %0, %1" :: "m"(descriptor), "r"((uint64_t)type) : "memory");
+}
+
+/*
+ * pmap_invpcid_single - Invalidate single address in current context
+ */
+void pmap_invpcid_single(uint64_t va) {
+    if (curpmap) {
+        pmap_invpcid(0, curpmap->asid, va);
+    } else {
+        pmap_invalidate_page(va);
+    }
+}
+
+/*
+ * pmap_invpcid_context - Invalidate all entries for a specific PCID
+ */
+void pmap_invpcid_context(int pcid) {
+    pmap_invpcid(1, pcid, 0);
+}
+
+/*
+ * pmap_invpcid_all - Invalidate all TLB entries except global
+ */
+void pmap_invpcid_all(void) {
+    pmap_invpcid(2, 0, 0);
+}
+
+/*
+ * pmap_invpcid_all_global - Invalidate all TLB entries including global
+ */
+void pmap_invpcid_all_global(void) {
+    pmap_invpcid(3, 0, 0);
+}

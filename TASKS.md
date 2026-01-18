@@ -318,10 +318,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Global page support (PGE) <!-- pmap.c:1050-1196 -->
                 - [x] Set CR4.PGE to enable global pages <!-- pmap.c:1072-1080 pmap_pge_enable -->
                 - [x] Mark kernel pages with PG_G <!-- pmap.c:1113-1196 pmap_set_global, pmap_mark_kernel_global -->
-            - [ ] PCID support (Process Context Identifiers)
-                - [ ] Detect PCID via CPUID
-                - [ ] Allocate PCIDs to processes
-                - [ ] Use INVPCID for targeted TLB flushes
+            - [x] PCID support (Process Context Identifiers) <!-- pmap.c:1198-1370 -->
+                - [x] Detect PCID via CPUID <!-- pmap.c:1216-1222 cpuid_check_pcid, cpuid_check_invpcid -->
+                - [x] Allocate PCIDs to processes <!-- pmap.c:1262-1292 pmap_pcid_alloc, pmap_pcid_free -->
+                - [x] Use INVPCID for targeted TLB flushes <!-- pmap.c:1330-1370 pmap_invpcid* functions -->
         - [x] **VM Subsystem (Machine Independent - Massive Refactor):** <!-- vm_map.c (309), vm_fault.c (157), vm_object.c (3039), vm_page.c (17685), vm_pager.c (4915), vm_swap.c (4972), uma_core.c (705) -->
             - [x] **Rewrite:** **VM Map:** `vm_map` structure representing an address space.
             - [x] **Rewrite:** **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
