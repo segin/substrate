@@ -439,7 +439,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `FUTEX_REQUEUE`: Move waiters to another lock.
         - [ ] **Advanced Features:**
             - [x] `FUTEX_ROBUST_LIST`: Handle owner death (cleanup). <!-- futex.c:futex_exit_cleanup, sys_set_robust_list, sys_get_robust_list -->
-            - [ ] `FUTEX_PI`: Priority Inheritance support.
+            - [x] `FUTEX_PI`: Priority Inheritance support. <!-- futex.c:futex_lock_pi, futex_unlock_pi, pi_boost_owner, pi_deboost_owner -->
         - [ ] **Performance:**
             - [ ] Validated user-space access (CMPXCHG).
             - [x] Hash table bucketing for wait queues.

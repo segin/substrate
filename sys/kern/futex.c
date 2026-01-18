@@ -364,12 +364,188 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
 }
 
 /*
- * Priority Inheritance futex lock (stub implementation)
+ * ============================================================
+ * Priority Inheritance (PI) Futex Implementation
+ * ============================================================
  *
- * Full PI requires:
- * 1. Tracking owner in kernel
- * 2. Priority boosting blocked owner to waiter's priority
- * 3. Priority chain propagation
+ * PI futexes prevent priority inversion:
+ * - When a high-priority thread blocks on a mutex held by a
+ *   low-priority thread, the low-priority owner is temporarily
+ *   boosted to the waiter's priority.
+ * - Priority boosting propagates through lock chains.
+ *
+ * State tracked per PI futex:
+ * - Owner TID in user word (FUTEX_TID_MASK)
+ * - Kernel tracks waiters with their priorities
+ */
+
+/* PI waiter state (kernel-side tracking) */
+typedef struct pi_waiter {
+    thread_t          *task;       /* Waiting thread */
+    int                priority;   /* Priority at time of wait */
+    struct pi_waiter  *next;       /* Next in waiter list */
+    void              *key;        /* Futex key */
+} pi_waiter_t;
+
+/* PI futex state (kernel-side) */
+typedef struct pi_state {
+    void              *key;        /* Futex key (physical addr) */
+    thread_t          *owner;      /* Current owner thread */
+    int                owner_prio; /* Owner's original priority */
+    pi_waiter_t       *waiters;    /* Priority-sorted waiter list */
+    int                boosted_prio; /* Current boosted priority */
+    struct pi_state   *next;       /* Hash chain link */
+} pi_state_t;
+
+#define PI_HASH_SIZE 64
+#define PI_HASH_MASK (PI_HASH_SIZE - 1)
+static pi_state_t *pi_hash[PI_HASH_SIZE];
+static volatile uint32_t pi_lock = 0;
+
+#define PI_POOL_SIZE 32
+static pi_state_t pi_pool[PI_POOL_SIZE];
+static pi_waiter_t waiter_pool[PI_POOL_SIZE * 4];
+static int pi_pool_idx = 0;
+static int waiter_pool_idx = 0;
+
+static inline void pi_spinlock(void) {
+    while (__sync_lock_test_and_set(&pi_lock, 1))
+        while (pi_lock) __asm__ volatile("pause");
+}
+
+static inline void pi_unlock(void) {
+    __sync_lock_release(&pi_lock);
+}
+
+static inline int pi_hash_func(void *key) {
+    return ((uintptr_t)key >> 3) & PI_HASH_MASK;
+}
+
+static pi_state_t *pi_state_alloc(void) {
+    if (pi_pool_idx >= PI_POOL_SIZE) return NULL;
+    pi_state_t *ps = &pi_pool[pi_pool_idx++];
+    ps->key = NULL;
+    ps->owner = NULL;
+    ps->owner_prio = 0;
+    ps->waiters = NULL;
+    ps->boosted_prio = 0;
+    ps->next = NULL;
+    return ps;
+}
+
+static pi_waiter_t *pi_waiter_alloc(void) {
+    if (waiter_pool_idx >= PI_POOL_SIZE * 4) return NULL;
+    pi_waiter_t *pw = &waiter_pool[waiter_pool_idx++];
+    pw->task = NULL;
+    pw->priority = 0;
+    pw->next = NULL;
+    pw->key = NULL;
+    return pw;
+}
+
+static pi_state_t *pi_lookup(void *key) {
+    int hash = pi_hash_func(key);
+    pi_state_t *ps = pi_hash[hash];
+    while (ps) {
+        if (ps->key == key) return ps;
+        ps = ps->next;
+    }
+    return NULL;
+}
+
+static pi_state_t *pi_get_or_create(void *key) {
+    int hash = pi_hash_func(key);
+    pi_state_t *ps = pi_lookup(key);
+    if (ps) return ps;
+    
+    ps = pi_state_alloc();
+    if (!ps) return NULL;
+    
+    ps->key = key;
+    ps->next = pi_hash[hash];
+    pi_hash[hash] = ps;
+    return ps;
+}
+
+/* Insert waiter in priority order (highest first) */
+static void pi_insert_waiter(pi_state_t *ps, pi_waiter_t *pw) {
+    if (!ps->waiters || pw->priority > ps->waiters->priority) {
+        pw->next = ps->waiters;
+        ps->waiters = pw;
+    } else {
+        pi_waiter_t *cur = ps->waiters;
+        while (cur->next && cur->next->priority >= pw->priority) {
+            cur = cur->next;
+        }
+        pw->next = cur->next;
+        cur->next = pw;
+    }
+}
+
+/* Remove a waiter from the list */
+static void pi_remove_waiter(pi_state_t *ps, thread_t *t) {
+    pi_waiter_t **pp = &ps->waiters;
+    while (*pp) {
+        if ((*pp)->task == t) {
+            *pp = (*pp)->next;
+            return;
+        }
+        pp = &(*pp)->next;
+    }
+}
+
+/* Get highest priority among waiters */
+static int pi_top_waiter_prio(pi_state_t *ps) {
+    if (!ps->waiters) return 0;
+    return ps->waiters->priority;
+}
+
+/*
+ * Boost owner's priority to at least waiter's level
+ */
+static void pi_boost_owner(pi_state_t *ps) {
+    if (!ps->owner) return;
+    
+    int top_prio = pi_top_waiter_prio(ps);
+    if (top_prio <= ps->boosted_prio) return;
+    
+    /* Save original priority on first boost */
+    if (ps->boosted_prio == 0) {
+        ps->owner_prio = ps->owner->priority;
+    }
+    
+    /* Set boosted priority */
+    ps->boosted_prio = top_prio;
+    sched_set_priority(ps->owner->tid, ps->owner->sched_class, top_prio);
+}
+
+/*
+ * Restore owner's original priority
+ */
+static void pi_deboost_owner(pi_state_t *ps) {
+    if (!ps->owner) return;
+    if (ps->boosted_prio == 0) return;
+    
+    /* Check if still need boost from remaining waiters */
+    int top_prio = pi_top_waiter_prio(ps);
+    if (top_prio > 0 && top_prio > ps->owner_prio) {
+        /* Still need some boost */
+        ps->boosted_prio = top_prio;
+        sched_set_priority(ps->owner->tid, ps->owner->sched_class, top_prio);
+    } else {
+        /* Restore original */
+        sched_set_priority(ps->owner->tid, ps->owner->sched_class, ps->owner_prio);
+        ps->boosted_prio = 0;
+    }
+}
+
+/*
+ * Priority Inheritance futex lock
+ *
+ * 1. Try atomic acquire (CAS 0 -> TID)
+ * 2. If contended, add to PI waiters and boost owner
+ * 3. Sleep until woken
+ * 4. On wake, retry acquire
  */
 int futex_lock_pi(int *uaddr, int detect, int trylock) {
     (void)detect;
@@ -380,17 +556,16 @@ int futex_lock_pi(int *uaddr, int detect, int trylock) {
     int err;
     int oldval, newval;
     
-    /* Try to acquire: CAS 0 -> our_tid */
+    /* Fast path: try uncontended acquire */
     oldval = futex_cmpxchg_user(uaddr, 0, tid, &err);
     if (err) return err;
     
     if (oldval == 0) {
-        /* Successfully acquired */
+        /* Successfully acquired - no contention */
         return 0;
     }
     
     if (trylock) {
-        /* Non-blocking and failed */
         return -EWOULDBLOCK;
     }
     
@@ -398,53 +573,132 @@ int futex_lock_pi(int *uaddr, int detect, int trylock) {
     if (oldval & FUTEX_OWNER_DIED) {
         newval = tid | (oldval & FUTEX_WAITERS);
         if (futex_cmpxchg_user(uaddr, oldval, newval, &err) == oldval) {
-            return -EOWNERDEAD;  /* Success, but previous owner died */
+            return -EOWNERDEAD;
         }
         if (err) return err;
     }
     
-    /* Must wait - set WAITERS bit and sleep */
+    /* Slow path: contended - need PI handling */
     void *key = futex_get_key((uintptr_t)uaddr);
     if (!key) return -EFAULT;
     
+    pi_spinlock();
+    
+    pi_state_t *ps = pi_get_or_create(key);
+    if (!ps) {
+        pi_unlock();
+        return -ENOMEM;
+    }
+    
+    /* Track owner if not already tracked */
+    if (!ps->owner) {
+        int owner_tid = oldval & FUTEX_TID_MASK;
+        thread_t *owner = sched_get_thread(owner_tid);
+        if (owner) {
+            ps->owner = owner;
+            ps->owner_prio = owner->priority;
+        }
+    }
+    
+    /* Create waiter entry */
+    pi_waiter_t *pw = pi_waiter_alloc();
+    if (!pw) {
+        pi_unlock();
+        return -ENOMEM;
+    }
+    
+    pw->task = current_thread;
+    pw->priority = current_thread->priority;
+    pw->key = key;
+    
+    pi_insert_waiter(ps, pw);
+    
+    /* Boost owner's priority */
+    pi_boost_owner(ps);
+    
+    pi_unlock();
+    
+    /* Loop until we acquire */
     for (;;) {
-        if (futex_read_user(uaddr, &oldval) != 0) return -EFAULT;
+        if (futex_read_user(uaddr, &oldval) != 0) {
+            pi_spinlock();
+            pi_remove_waiter(ps, current_thread);
+            pi_unlock();
+            return -EFAULT;
+        }
         
-        /* Set WAITERS bit if not already set */
+        /* Ensure WAITERS bit is set */
         if (!(oldval & FUTEX_WAITERS)) {
             newval = oldval | FUTEX_WAITERS;
             if (futex_cmpxchg_user(uaddr, oldval, newval, &err) != oldval) {
-                if (err) return err;
-                continue;  /* Retry */
+                if (err) {
+                    pi_spinlock();
+                    pi_remove_waiter(ps, current_thread);
+                    pi_unlock();
+                    return err;
+                }
+                continue;
             }
         }
         
-        /* TODO: Boost owner priority here */
-        
-        /* Sleep waiting for unlock */
+        /* Sleep */
         sched_sleep(key);
         
-        /* Woken up - try to acquire again */
+        /* Woken: try to acquire */
         oldval = futex_cmpxchg_user(uaddr, 0, tid, &err);
-        if (err) return err;
+        if (err) {
+            pi_spinlock();
+            pi_remove_waiter(ps, current_thread);
+            pi_unlock();
+            return err;
+        }
         
         if (oldval == 0) {
-            return 0;  /* Got it */
+            /* Got it! */
+            pi_spinlock();
+            pi_remove_waiter(ps, current_thread);
+            ps->owner = current_thread;
+            ps->owner_prio = current_thread->priority;
+            ps->boosted_prio = 0;
+            pi_unlock();
+            return 0;
         }
         
         if (oldval & FUTEX_OWNER_DIED) {
             newval = tid | (oldval & FUTEX_WAITERS);
             if (futex_cmpxchg_user(uaddr, oldval, newval, &err) == oldval) {
+                pi_spinlock();
+                pi_remove_waiter(ps, current_thread);
+                ps->owner = current_thread;
+                ps->owner_prio = current_thread->priority;
+                ps->boosted_prio = 0;
+                pi_unlock();
                 return -EOWNERDEAD;
             }
         }
         
-        /* Lost race, go back to sleep */
+        /* Lost race, loop back and re-boost if needed */
+        pi_spinlock();
+        int owner_tid = oldval & FUTEX_TID_MASK;
+        if (owner_tid && (!ps->owner || ps->owner->tid != owner_tid)) {
+            thread_t *new_owner = sched_get_thread(owner_tid);
+            if (new_owner) {
+                ps->owner = new_owner;
+                ps->owner_prio = new_owner->priority;
+                pi_boost_owner(ps);
+            }
+        }
+        pi_unlock();
     }
 }
 
 /*
  * Priority Inheritance futex unlock
+ *
+ * 1. Verify ownership
+ * 2. Release lock atomically
+ * 3. Deboost priority
+ * 4. Wake highest priority waiter
  */
 int futex_unlock_pi(int *uaddr) {
     if (!current_thread) return -EFAULT;
@@ -453,34 +707,47 @@ int futex_unlock_pi(int *uaddr) {
     int err;
     int oldval, newval;
     
-    /* Read current value */
     if (futex_read_user(uaddr, &oldval) != 0) return -EFAULT;
     
-    /* Verify we own it */
+    /* Verify ownership */
     if ((oldval & FUTEX_TID_MASK) != (uint32_t)tid) {
         return -EPERM;
     }
     
-    /* If no waiters, just clear */
+    void *key = futex_get_key((uintptr_t)uaddr);
+    if (!key) return -EFAULT;
+    
+    pi_spinlock();
+    
+    pi_state_t *ps = pi_lookup(key);
+    
+    /* Deboost before releasing */
+    if (ps) {
+        pi_deboost_owner(ps);
+        ps->owner = NULL;
+    }
+    
+    pi_unlock();
+    
+    /* Release the lock */
     if (!(oldval & FUTEX_WAITERS)) {
+        /* No waiters, simple clear */
         if (futex_cmpxchg_user(uaddr, oldval, 0, &err) == oldval) {
             return 0;
         }
         if (err) return err;
-        /* Value changed, retry read */
+        /* Retry with fresh value */
         if (futex_read_user(uaddr, &oldval) != 0) return -EFAULT;
     }
     
-    /* Have waiters - clear and wake one */
+    /* Have waiters: clear lock and wake one */
     newval = 0;
     if (futex_cmpxchg_user(uaddr, oldval, newval, &err) == oldval) {
-        void *key = futex_get_key((uintptr_t)uaddr);
-        if (key) {
-            /* TODO: Wake highest priority waiter and give them lock */
-            sleepq_wake_n(key, 1);
-        }
+        /* Wake highest priority waiter */
+        sleepq_wake_n(key, 1);
         return 0;
     }
     
     return err ? err : -EAGAIN;
 }
+
