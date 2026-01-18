@@ -614,30 +614,30 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 3. Drivers (`sys/drivers`)
 - [ ] **Storage Subsystem (Unified SCSI Stack):**
-    - [ ] **Core Architecture (CAM/Mid-layer):**
+    - [x] **Core Architecture (CAM/Mid-layer):** <!-- scsi.h, scsi.c, scsi_dev.c, scsi_ctl.c -->**
         - [x] **Data Structures:** Define `scsi_request`, `scsi_device`, `scsi_link` (transport linkage). <!-- scsi.h, scsi.c, test_scsi.c -->
-        - [ ] **Discovery:**
+        - [x] **Discovery:** <!-- scsi.c:scsi_scan_bus, scsi_probe_lun, scsi_report_luns -->
             - [x] Implement Bus Scanning logic (HBA enumeration). <!-- scsi.c:scsi_scan_bus, scsi_probe_lun -->
             - [x] Implement `REPORT LUNS` and `INQUIRY` probing. <!-- scsi.c:scsi_report_luns, scsi_scan_bus -->
             - [x] Device Registry: registration of found targets/LUNs. <!-- scsi.c:scsi_device_register, scsi_device_lookup -->
-        - [ ] **Command Handling:**
+        - [x] **Command Handling:** <!-- scsi.c timeout/retry, sense parsing -->
             - [x] Asynchronous command queueing (completion callbacks). <!-- scsi.c:scsi_queue_request, scsi_complete_request -->
             - [x] Timeout management and retries. <!-- scsi.c:scsi_execute (retry loop) -->
             - [x] Error Handling: Sense Data definition and parsing (SPC-3). <!-- scsi.c:scsi_sense_key, scsi_sense_string -->
     - [ ] **High-Level Device Drivers:**
         - [ ] **Unified Userspace Interface:**
-            - [ ] **Device Nodes:**
-                - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`) - Direct generic SCSI access (Bus:Target:LUN).
-                - [ ] `/dev/storage/scsi/B` (e.g., `0`) - Bus controller ioctl endpoint (Enumeration/Rescan).
-                - [ ] `/dev/storage/scsiN` (e.g., `scsi0`) - High-level Block Device alias (e.g., first disk).
-            - [ ] **Drivers (`sd`/`sr` unified):**
-                - [x] **Command Translation:** Map high-level Block I/O to SCSI READ/WRITE CDBs. <!-- sd.c:sd_read, sd_write -->
+            - [x] **Device Nodes:** <!-- scsi_ctl.c:scsi_create_generic_node, scsi_create_bus_node -->
+                - [x] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`) - Direct generic SCSI access (Bus:Target:LUN). <!-- scsi_ctl.c:sg_ioctl -->
+                - [x] `/dev/storage/scsi/B` (e.g., `0`) - Bus controller ioctl endpoint (Enumeration/Rescan). <!-- scsi_ctl.c:bus_ioctl -->
+                - [x] `/dev/storage/scsiN` (e.g., `scsi0`) - High-level Block Device alias (e.g., first disk). <!-- scsi_dev.c:scsi_dev_attach -->
+            - [x] **Unified SCSI Driver:** <!-- scsi_dev.c -->
+                - [x] **Command Translation:** Map high-level Block I/O to SCSI READ/WRITE CDBs. <!-- scsi_dev.c:scsi_blk_read, scsi_blk_write -->
                 - [x] **Device Type Handling:**
-                    - [x] **Direct Access (Disk):** Capacity/Geometry, Cache Flush. <!-- sd.c:sd_attach -->
-                    - [x] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking. <!-- sr.c:sr_read_toc, sr_lock_door -->
+                    - [x] **Direct Access (Disk):** Capacity/Geometry, Cache Flush. <!-- scsi_dev.c:scsi_dev_attach -->
+                    - [x] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking. <!-- scsi_dev.c:scsi_read_toc, scsi_lock_door -->
             - [x] **Integration:**
                 - [x] Register with DevFS using the schematic above. <!-- blkdev.c:blkdev_register -> devfs_register_device -->
-                - [ ] Implement `ioctl` for Bus Enumeration on controller nodes.
+                - [x] Implement `ioctl` for Bus Enumeration on controller nodes. <!-- scsi_ctl.c:bus_ioctl -->
     - [ ] **Transport/HBA Drivers (Low-Level):**
         - [ ] **ATAPI (Legacy):**
             - [ ] Encapsulate SCSI CDBs into ATA Packet Commands used by IDE/PATA.
