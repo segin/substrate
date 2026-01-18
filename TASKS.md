@@ -430,9 +430,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Swapper/Idle:** The kernel itself is PID 0.
         - [x] **Responsibilities:** Pageout daemon work, Scheduler idle loop.
         - [x] **Context:** Ensures a valid process context always exists (never switch to NULL).
-- [ ] **Synchronization:**
+- [x] **Synchronization:** <!-- Spinlocks, Mutexes, Semaphores, Futex all complete -->
     - [x] Implement Spinlocks, Mutexes, and Semaphores.
-    - [ ] **Userspace Synchronization (Futex):**
+    - [x] **Userspace Synchronization (Futex):** <!-- Core, Advanced, Performance all complete -->
         - [x] **Core Operations:** <!-- FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE all implemented in futex.c -->
             - [x] `FUTEX_WAIT`: Atomic compare-and-sleep.
             - [x] `FUTEX_WAKE`: Wakeup N waiters.
@@ -440,7 +440,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Advanced Features:** <!-- ROBUST_LIST and PI implemented in futex.c -->
             - [x] `FUTEX_ROBUST_LIST`: Handle owner death (cleanup). <!-- futex.c:futex_exit_cleanup, sys_set_robust_list, sys_get_robust_list -->
             - [x] `FUTEX_PI`: Priority Inheritance support. <!-- futex.c:futex_lock_pi, futex_unlock_pi, pi_boost_owner, pi_deboost_owner -->
-        - [ ] **Performance:**
+        - [x] **Performance:** <!-- validated CMPXCHG and hash table bucketing -->
             - [x] Validated user-space access (CMPXCHG). <!-- futex.c:futex_cmpxchg_user, futex_read_user, validate_uaddr -->
             - [x] Hash table bucketing for wait queues.
 - [x] **Signals:**
