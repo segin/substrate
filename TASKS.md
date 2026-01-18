@@ -306,8 +306,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `pmap_protect`: Change page protections
                 - [x] Walk range and update PTE protection bits (R/W, NX, U/S)
                 - [x] Invalidate affected TLB entries
-            - [ ] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits
-            - [ ] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits
+            - [x] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits <!-- pmap.c:348-419 -->
+            - [x] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits <!-- pmap.c:421-604 includes range and test_and_clear variants -->
             - [ ] Copy-on-write support (same as i386)
             - [ ] TLB shootdown for SMP
                 - [ ] IPI mechanism for remote TLB invalidation

@@ -125,6 +125,19 @@ int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot);
 pmap_t pmap_create(void);
 void pmap_destroy(pmap_t pmap);
 void pmap_activate(pmap_t pmap);
+void pmap_reference(pmap_t pmap);
 
+// Page reference/modification tracking
+int pmap_is_referenced(pmap_t pmap, uint64_t va);
+int pmap_is_modified(pmap_t pmap, uint64_t va);
+void pmap_clear_reference(pmap_t pmap, uint64_t va);
+void pmap_clear_modify(pmap_t pmap, uint64_t va);
+int pmap_is_referenced_range(pmap_t pmap, uint64_t sva, uint64_t eva);
+int pmap_is_modified_range(pmap_t pmap, uint64_t sva, uint64_t eva);
+int pmap_test_and_clear_reference(pmap_t pmap, uint64_t va);
+int pmap_test_and_clear_modify(pmap_t pmap, uint64_t va);
+
+// TLB invalidation
+void pmap_invalidate_page(uint64_t va);
 
 #endif

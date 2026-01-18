@@ -1,6 +1,5 @@
 #include "pmap.h"
 #include "../i386/pmm.h"
-#include "../../kern/panic.h"
 #include "../../vm/vm_kmem.h" // For kmalloc/kfree
 #include <string.h> // for memset
 
@@ -66,7 +65,7 @@ void pmap_activate(pmap_t pmap) {
     curpmap = pmap;
 }
 
-static void pmap_invalidate_page(uint64_t va) {
+void pmap_invalidate_page(uint64_t va) {
     __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
 }
 
@@ -330,8 +329,7 @@ int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
         uint64_t pte = pt[pti];
         uint64_t new_pte = pte & ~(PTE_W | PTE_NX); // Clear W and NX
         
-        if (prot & 2) new_pte |= PTE_W;   // VM_PROT_WRITE value hardcoded or defined?
-        // Let's use 2 and 4 assuming VM_PROT_WRITE/EXECUTE or define via vm/vm_prot.h
+        if (prot & 2) new_pte |= PTE_W;   // VM_PROT_WRITE
         
         if (!(prot & 4)) { // VM_PROT_EXECUTE
              new_pte |= PTE_NX;
@@ -347,3 +345,260 @@ int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
     return 0;
 }
 
+// ========== Page Reference/Modification Tracking ==========
+
+/*
+ * pmap_is_referenced - Check if page at VA was accessed
+ *
+ * Returns 1 if the PTE Accessed (A) bit is set, 0 otherwise.
+ * The CPU sets the A bit automatically on first access.
+ */
+int pmap_is_referenced(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return 0;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return 0;
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return 0;
+    
+    // Handle 2MB large pages
+    if (pd[pdi] & PTE_PS) {
+        return (pd[pdi] & PTE_A) ? 1 : 0;
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return 0;
+    
+    return (pt[pti] & PTE_A) ? 1 : 0;
+}
+
+/*
+ * pmap_is_modified - Check if page at VA was written
+ *
+ * Returns 1 if the PTE Dirty (D) bit is set, 0 otherwise.
+ * The CPU sets the D bit automatically on first write.
+ */
+int pmap_is_modified(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return 0;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return 0;
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return 0;
+    
+    // Handle 2MB large pages
+    if (pd[pdi] & PTE_PS) {
+        return (pd[pdi] & PTE_D) ? 1 : 0;
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return 0;
+    
+    return (pt[pti] & PTE_D) ? 1 : 0;
+}
+
+/*
+ * pmap_clear_reference - Clear Accessed bit for page at VA
+ *
+ * Clears the A bit and invalidates TLB so next access will re-set it.
+ * Used by page replacement algorithms (Clock, LRU).
+ */
+void pmap_clear_reference(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return;
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return;
+    
+    // Handle 2MB large pages
+    if (pd[pdi] & PTE_PS) {
+        pd[pdi] &= ~PTE_A;
+        pmap_invalidate_page(va);
+        return;
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return;
+    
+    pt[pti] &= ~PTE_A;
+    pmap_invalidate_page(va);
+}
+
+/*
+ * pmap_clear_modify - Clear Dirty bit for page at VA
+ *
+ * Clears the D bit and invalidates TLB so next write will re-set it.
+ * Used for tracking pages that need writeback to backing store.
+ */
+void pmap_clear_modify(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return;
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return;
+    
+    // Handle 2MB large pages
+    if (pd[pdi] & PTE_PS) {
+        pd[pdi] &= ~PTE_D;
+        pmap_invalidate_page(va);
+        return;
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return;
+    
+    pt[pti] &= ~PTE_D;
+    pmap_invalidate_page(va);
+}
+
+/*
+ * pmap_is_referenced_range - Batch query for referenced pages in range
+ *
+ * Returns count of pages with A bit set in [sva, eva).
+ */
+int pmap_is_referenced_range(pmap_t pmap, uint64_t sva, uint64_t eva) {
+    if (pmap != curpmap) return 0;
+    
+    int count = 0;
+    for (uint64_t va = sva; va < eva; va += 0x1000) {
+        if (pmap_is_referenced(pmap, va)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/*
+ * pmap_is_modified_range - Batch query for modified pages in range
+ *
+ * Returns count of pages with D bit set in [sva, eva).
+ */
+int pmap_is_modified_range(pmap_t pmap, uint64_t sva, uint64_t eva) {
+    if (pmap != curpmap) return 0;
+    
+    int count = 0;
+    for (uint64_t va = sva; va < eva; va += 0x1000) {
+        if (pmap_is_modified(pmap, va)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/*
+ * pmap_test_and_clear_reference - Atomically test and clear A bit
+ *
+ * Returns 1 if page was referenced (and is now cleared), 0 otherwise.
+ */
+int pmap_test_and_clear_reference(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return 0;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return 0;
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return 0;
+    
+    // Handle 2MB large pages
+    if (pd[pdi] & PTE_PS) {
+        if (pd[pdi] & PTE_A) {
+            pd[pdi] &= ~PTE_A;
+            pmap_invalidate_page(va);
+            return 1;
+        }
+        return 0;
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return 0;
+    
+    if (pt[pti] & PTE_A) {
+        pt[pti] &= ~PTE_A;
+        pmap_invalidate_page(va);
+        return 1;
+    }
+    return 0;
+}
+
+/*
+ * pmap_test_and_clear_modify - Atomically test and clear D bit
+ *
+ * Returns 1 if page was modified (and is now cleared), 0 otherwise.
+ */
+int pmap_test_and_clear_modify(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return 0;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return 0;
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return 0;
+    
+    // Handle 2MB large pages
+    if (pd[pdi] & PTE_PS) {
+        if (pd[pdi] & PTE_D) {
+            pd[pdi] &= ~PTE_D;
+            pmap_invalidate_page(va);
+            return 1;
+        }
+        return 0;
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return 0;
+    
+    if (pt[pti] & PTE_D) {
+        pt[pti] &= ~PTE_D;
+        pmap_invalidate_page(va);
+        return 1;
+    }
+    return 0;
+}
