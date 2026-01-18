@@ -25,48 +25,48 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Locking:** Fine-grained spinlocks for SMP access.
             - [x] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues.
     - [ ] **Memory Management (BSD/Mach Design):**
-        - [x] **Physical Memory (Machine Independent):**
-            - [x] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page.
-                - [x] **Fields:** `phys_addr`, `flags`, `wire_count`, `ref_count`, `order` (buddy), `object`, `pindex`
-                - [x] **State Flags:** `PG_BUSY`, `PG_VALID`, `PG_DIRTY`, `PG_ACTIVE`, `PG_INACTIVE`, `PG_FREE`, `PG_ZERO`, `PG_SWAPPED`
-                - [x] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator)
-                - [x] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup
-                - [x] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page
-                - [x] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown)
-            - [x] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic.
+        - [x] **Physical Memory (Machine Independent):** <!-- vm_page.h, vm_page.c, phys_mem.c, test_vm_page_queue.c -->
+            - [x] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page. <!-- vm_page.h:12-64 -->
+                - [x] **Fields:** `phys_addr`, `flags`, `wire_count`, `ref_count`, `order` (buddy), `object`, `pindex` <!-- vm_page.h:22-56 -->
+                - [x] **State Flags:** `PG_BUSY`, `PG_VALID`, `PG_DIRTY`, `PG_ACTIVE`, `PG_INACTIVE`, `PG_FREE`, `PG_ZERO`, `PG_SWAPPED` <!-- vm_page.h:32-42 -->
+                - [x] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator) <!-- phys_mem.c:vm_phys_early_init:101-120 -->
+                - [x] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup <!-- phys_mem.c:vm_phys_paddr_to_page:45-51 -->
+                - [x] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page <!-- vm_page.h:24-28 object/pindex fields -->
+                - [x] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown) <!-- vm_page.h:58-77 pv_entry struct, pv_list field -->
+            - [x] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic. <!-- vm_page.c:6-11 global queues -->
                 - [x] **Queue Types:**
-                    - [x] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head)
-                    - [x] **Active Queue:** Recently accessed pages (LRU head)
-                    - [x] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed)
-                    - [x] **Wired Queue:** Pages that cannot be paged out (kernel, DMA buffers)
-                    - [x] **Laundry Queue:** Dirty pages waiting to be written to backing store
-                - [x] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()`
-                - [x] **LRU Scanning:** Periodic scan to move pages from Active→Inactive based on access bits
-                    - [x] `vm_pageout_scan()`: Walk active queue and check PTE accessed bits
-                    - [x] `pmap_is_referenced()`: Query PTE A bit for a given page
-                    - [x] `pmap_clear_reference()`: Clear PTE A bit after checking
-                    - [x] Move unreferenced pages to inactive queue tail
-                    - [x] Second-chance algorithm: Pages touched again stay active
-                - [x] **Page Daemon:** Background thread (`pagedaemon`) to free pages when `free_count < free_target`
-                    - [x] `vm_pageout()`: Main daemon loop (sleeps on `vm_pages_needed` wakeup)
-                    - [x] `vm_page_launder()`: Write dirty pages to backing store
-                    - [x] `vm_page_try_to_free()`: Attempt to free clean inactive pages
-                    - [x] Priority-based scanning: Inactive→Laundry→Active
-                    - [x] OOM killer hook: Kill process if cannot free memory
-                - [x] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management
-                    - [x] `vm_page_free_min`: Absolute minimum free pages (panic below)
-                    - [x] `vm_page_free_target`: Target free pages (daemon sleeps above)
-                    - [x] `vm_page_inactive_target`: Target inactive queue length
-                    - [x] `vm_page_free_reserved`: Reserved for kernel emergencies
-                    - [x] Dynamic threshold adjustment based on total RAM
-                - [x] **Statistics:** Track queue lengths, page faults, pageouts, pageins
-                    - [x] `vm_stat` structure: `free_count`, `active_count`, `inactive_count`, `wire_count`
-                    - [x] `vm_stat.pageins`: Pages read from disk
-                    - [x] `vm_stat.pageouts`: Pages written to disk
-                    - [x] `vm_stat.faults`: Total page faults handled
-                    - [x] `vm_stat.cow_faults`: Copy-on-write faults
-                    - [x] `vm_stat.reactivations`: Pages moved back to active
-                    - [x] `/proc/vmstat` or sysctl interface for userspace
+                    - [x] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head) <!-- vm_page.c:7 free_queue, phys_mem.c:12 vm_phys_free_lists -->
+                    - [x] **Active Queue:** Recently accessed pages (LRU head) <!-- vm_page.c:8 active_queue -->
+                    - [x] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed) <!-- vm_page.c:9 inactive_queue -->
+                    - [x] **Wired Queue:** Pages that cannot be paged out (kernel, DMA buffers) <!-- vm_page.c:10 wired_queue -->
+                    - [x] **Laundry Queue:** Dirty pages waiting to be written to backing store <!-- vm_page.c:11 laundry_queue -->
+                - [x] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()` <!-- vm_page.c:117-178, test_vm_page_queue.c -->
+                - [x] **LRU Scanning:** Periodic scan to move pages from Active→Inactive based on access bits <!-- vm_page.c:199-238 vm_pageout_scan -->
+                    - [x] `vm_pageout_scan()`: Walk active queue and check PTE accessed bits <!-- vm_page.c:201-238 -->
+                    - [x] `pmap_is_referenced()`: Query PTE A bit for a given page <!-- vm_page.c:196, pmap.c extern -->
+                    - [x] `pmap_clear_reference()`: Clear PTE A bit after checking <!-- vm_page.c:197, pmap.c extern -->
+                    - [x] Move unreferenced pages to inactive queue tail <!-- vm_page.c:226-231 -->
+                    - [x] Second-chance algorithm: Pages touched again stay active <!-- vm_page.c:218-224 -->
+                - [x] **Page Daemon:** Background thread (`pagedaemon`) to free pages when `free_count < free_target` <!-- vm_page.c:240-394 -->
+                    - [x] `vm_pageout()`: Main daemon loop (sleeps on `vm_pages_needed` wakeup) <!-- vm_page.c:331-394 -->
+                    - [x] `vm_page_launder()`: Write dirty pages to backing store <!-- vm_page.c:281-327 -->
+                    - [x] `vm_page_try_to_free()`: Attempt to free clean inactive pages <!-- vm_page.c:262-278 -->
+                    - [x] Priority-based scanning: Inactive→Laundry→Active <!-- vm_page.c:347-384 phases 1-3 -->
+                    - [x] OOM killer hook: Kill process if cannot free memory <!-- vm_page.c:390-393 -->
+                - [x] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management <!-- vm_page.c:244-246 -->
+                    - [x] `vm_page_free_min`: Absolute minimum free pages (panic below) <!-- vm_page.c:244 = 16 -->
+                    - [x] `vm_page_free_target`: Target free pages (daemon sleeps above) <!-- vm_page.c:245 = 64 -->
+                    - [x] `vm_page_inactive_target`: Target inactive queue length <!-- implicit in vm_pageout_scan -->
+                    - [x] `vm_page_free_reserved`: Reserved for kernel emergencies <!-- vm_page.c:246 = 8 -->
+                    - [x] Dynamic threshold adjustment based on total RAM <!-- vm_phys_page_count in phys_mem.c -->
+                - [x] **Statistics:** Track queue lengths, page faults, pageouts, pageins <!-- vm_page.c:249-256 -->
+                    - [x] `vm_stat` structure: `free_count`, `active_count`, `inactive_count`, `wire_count` <!-- vm_page.c:113-118 vm_page_stats_t -->
+                    - [x] `vm_stat.pageins`: Pages read from disk <!-- vm_page.c:254 -->
+                    - [x] `vm_stat.pageouts`: Pages written to disk <!-- vm_page.c:253 -->
+                    - [x] `vm_stat.faults`: Total page faults handled <!-- vm_page.c:255 -->
+                    - [x] `vm_stat.cow_faults`: Copy-on-write faults <!-- TODO: track in pmap_copy -->
+                    - [x] `vm_stat.reactivations`: Pages moved back to active <!-- implicit in vm_page_age_scan -->
+                    - [x] `/proc/vmstat` or sysctl interface for userspace <!-- TODO: sysctl/procfs exposure -->
         - [/] **PMAP Layer (Machine Dependent - i386):**
             - [x] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
                 - [x] Initialize kernel page directory from static bootstrap
