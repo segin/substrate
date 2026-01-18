@@ -149,6 +149,10 @@ typedef struct thread {
     uint32_t      sig_mask;
     stack_t       sig_alt_stack;
     
+    // Robust futex list (for owner death cleanup)
+    struct robust_list_head *robust_list;
+    size_t                   robust_list_len;
+    
     thread_state_t state;
     struct thread *next;
 } thread_t;

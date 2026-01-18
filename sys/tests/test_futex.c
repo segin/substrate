@@ -1,94 +1,267 @@
-#include <sys/futex.h>
-#include <errno.h>
-#include <sys/proc.h>
-#include <arch/i386/pmap.h>
-#include <pmm.h>
-#include <kern/console.h>
-#include <stdio.h>
+/*
+ * test_futex.c - Futex Subsystem Tests
+ *
+ * Tests for:
+ * - Basic FUTEX_WAIT/WAKE operations
+ * - FUTEX_REQUEUE functionality
+ * - Robust list registration/cleanup
+ * - Priority Inheritance operations
+ * - Edge cases and error handling
+ */
+
+#include "../include/sys/futex.h"
+#include <stdint.h>
 #include <string.h>
-#include "tests.h"
 
-// Declaration of sys_futex (not in header usually)
-extern int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3);
+/* Test framework macros */
+#define TEST_ASSERT(cond, msg) do { \
+    if (!(cond)) { \
+        test_fail(__func__, __LINE__, msg); \
+        return 1; \
+    } \
+} while(0)
 
-void test_futex(void) {
-    kprint("TEST: futex\n");
+#define TEST_PASS() do { test_pass(__func__); return 0; } while(0)
+
+static int tests_passed = 0;
+static int tests_failed = 0;
+
+extern void kprint(const char *s);
+static void test_pass(const char *name) {
+    (void)name;
+    tests_passed++;
+}
+
+static void test_fail(const char *name, int line, const char *msg) {
+    (void)name;
+    (void)line;
+    (void)msg;
+    tests_failed++;
+}
+
+/* ========== Unit Tests ========== */
+
+/*
+ * Test: validate_uaddr rejects kernel addresses
+ */
+static int test_futex_validate_kernel_addr(void) {
+    /* Kernel addresses should return -EFAULT from sys_futex */
+    int kernel_addr = 0xC0001000;  /* In kernel space */
+    int result = sys_futex((int *)(uintptr_t)kernel_addr, FUTEX_WAKE, 1, 
+                           NULL, NULL, 0);
+    TEST_ASSERT(result == -14 /* EFAULT */, "Should reject kernel address");
+    TEST_PASS();
+}
+
+/*
+ * Test: validate_uaddr rejects unaligned addresses
+ */
+static int test_futex_validate_unaligned(void) {
+    /* Unaligned addresses should fail */
+    char buf[8] __attribute__((aligned(4)));
+    int result = sys_futex((int *)(buf + 1), FUTEX_WAKE, 1, NULL, NULL, 0);
+    TEST_ASSERT(result == -14 /* EFAULT */, "Should reject unaligned address");
+    TEST_PASS();
+}
+
+/*
+ * Test: FUTEX_WAKE on non-contended futex returns 0
+ */
+static int test_futex_wake_empty(void) {
+    int futex_word = 0;
+    int result = sys_futex(&futex_word, FUTEX_WAKE, 100, NULL, NULL, 0);
+    TEST_ASSERT(result == 0, "Wake on empty queue should return 0");
+    TEST_PASS();
+}
+
+/*
+ * Test: FUTEX_WAIT with non-matching value returns -EAGAIN
+ */
+static int test_futex_wait_mismatch(void) {
+    int futex_word = 42;
+    int result = sys_futex(&futex_word, FUTEX_WAIT, 0, NULL, NULL, 0);
+    TEST_ASSERT(result == -11 /* EAGAIN */, "Wait with wrong val should return EAGAIN");
+    TEST_PASS();
+}
+
+/*
+ * Test: Robust list registration
+ */
+static int test_futex_set_robust_list(void) {
+    struct robust_list_head head;
+    memset(&head, 0, sizeof(head));
+    head.list.next = &head.list;  /* Empty circular list */
+    head.futex_offset = 0;
     
-    // 1. Allocate a page to act as user memory
-    void *page = pmm_alloc_block();
-    if (!page) {
-        kprint("  [FAIL] OOM allocating page\n");
-        return;
+    int result = sys_set_robust_list(&head, sizeof(head));
+    TEST_ASSERT(result == 0, "set_robust_list should succeed");
+    
+    /* Clear it */
+    result = sys_set_robust_list(NULL, sizeof(head));
+    TEST_ASSERT(result == 0, "set_robust_list(NULL) should succeed");
+    
+    TEST_PASS();
+}
+
+/*
+ * Test: Robust list with wrong size fails
+ */
+static int test_futex_set_robust_list_badsize(void) {
+    struct robust_list_head head;
+    int result = sys_set_robust_list(&head, 1);  /* Wrong size */
+    TEST_ASSERT(result == -22 /* EINVAL */, "Wrong size should fail");
+    TEST_PASS();
+}
+
+/*
+ * Test: get_robust_list for current thread
+ */
+static int test_futex_get_robust_list(void) {
+    struct robust_list_head head;
+    memset(&head, 0, sizeof(head));
+    head.list.next = &head.list;
+    
+    /* Set the list */
+    int result = sys_set_robust_list(&head, sizeof(head));
+    TEST_ASSERT(result == 0, "set should succeed");
+    
+    /* Get it back */
+    struct robust_list_head *out_head = NULL;
+    size_t out_len = 0;
+    result = sys_get_robust_list(0, &out_head, &out_len);
+    TEST_ASSERT(result == 0, "get should succeed");
+    TEST_ASSERT(out_head == &head, "Should return same pointer");
+    TEST_ASSERT(out_len == sizeof(head), "Should return correct size");
+    
+    /* Clear */
+    sys_set_robust_list(NULL, sizeof(head));
+    
+    TEST_PASS();
+}
+
+/*
+ * Test: Unknown futex operation returns -ENOSYS
+ */
+static int test_futex_unknown_op(void) {
+    int futex_word = 0;
+    int result = sys_futex(&futex_word, 9999, 0, NULL, NULL, 0);
+    TEST_ASSERT(result == -38 /* ENOSYS */, "Unknown op should return ENOSYS");
+    TEST_PASS();
+}
+
+/*
+ * Test: FUTEX_CMP_REQUEUE with wrong compare value
+ */
+static int test_futex_cmp_requeue_mismatch(void) {
+    int futex1 = 100;
+    int futex2 = 0;
+    
+    /* val3 (compare value) doesn't match current value */
+    int result = sys_futex(&futex1, FUTEX_CMP_REQUEUE, 1, (void *)1, 
+                           &futex2, 0);  /* val3=0, but *futex1=100 */
+    TEST_ASSERT(result == -11 /* EAGAIN */, "Compare mismatch should fail");
+    TEST_PASS();
+}
+
+/*
+ * Test: PI unlock without owning returns -EPERM
+ */
+static int test_futex_unlock_pi_not_owner(void) {
+    int futex_word = 999;  /* Owned by TID 999 */
+    
+    int result = sys_futex(&futex_word, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
+    TEST_ASSERT(result == -1 /* EPERM */, "Non-owner unlock should fail");
+    TEST_PASS();
+}
+
+/*
+ * Test: FUTEX_TRYLOCK_PI when already locked
+ */
+static int test_futex_trylock_pi_contended(void) {
+    int futex_word = 999;  /* Already locked by TID 999 */
+    
+    int result = sys_futex(&futex_word, FUTEX_TRYLOCK_PI, 0, NULL, NULL, 0);
+    /* Should return -EWOULDBLOCK since it's already locked */
+    TEST_ASSERT(result == -11 /* EWOULDBLOCK/EAGAIN */, 
+                "Trylock on locked should fail");
+    TEST_PASS();
+}
+
+/* ========== Property Tests ========== */
+
+/*
+ * Property: Wake always returns <= val
+ */
+static int test_futex_wake_prop_bounded(void) {
+    int futex_word = 0;
+    
+    for (int i = 0; i < 100; i++) {
+        int wake_count = i % 20;
+        int result = sys_futex(&futex_word, FUTEX_WAKE, wake_count, 
+                               NULL, NULL, 0);
+        TEST_ASSERT(result >= 0 && result <= wake_count,
+                    "Wake count should be bounded");
+    }
+    TEST_PASS();
+}
+
+/*
+ * Property: Robust list survives multiple set operations
+ */
+static int test_futex_robust_list_prop_multiset(void) {
+    struct robust_list_head heads[10];
+    
+    for (int i = 0; i < 10; i++) {
+        memset(&heads[i], 0, sizeof(heads[i]));
+        heads[i].list.next = &heads[i].list;
+        
+        int result = sys_set_robust_list(&heads[i], sizeof(heads[i]));
+        TEST_ASSERT(result == 0, "Each set should succeed");
     }
     
-    // 2. Map it at a user address (e.g., 0x20000000 = 512MB)
-    // Ensure it doesn't conflict (kernel test env usually clean)
-    uintptr_t uaddr = 0x20000000;
-    uint32_t pa = (uint32_t)((uintptr_t)page - 0xC0000000);
+    /* Verify last one is active */
+    struct robust_list_head *out;
+    size_t len;
+    sys_get_robust_list(0, &out, &len);
+    TEST_ASSERT(out == &heads[9], "Last set should be active");
     
-    // Map with User permissions
-    // Note: pmap_enter usually flushes TLB
-    pmap_enter(pmap_kernel(), uaddr, pa, VM_PROT_READ | VM_PROT_WRITE, 0); // User is implicit if < KernelBase? No, need US bit?
-    // pmap_enter implementation adds PTE_U if < 0xC0000000 automatically.
+    sys_set_robust_list(NULL, sizeof(heads[0]));
+    TEST_PASS();
+}
+
+/* ========== Test Runner ========== */
+
+typedef int (*test_fn)(void);
+
+struct test_case {
+    const char *name;
+    test_fn fn;
+};
+
+static struct test_case futex_tests[] = {
+    {"futex_validate_kernel_addr", test_futex_validate_kernel_addr},
+    {"futex_validate_unaligned", test_futex_validate_unaligned},
+    {"futex_wake_empty", test_futex_wake_empty},
+    {"futex_wait_mismatch", test_futex_wait_mismatch},
+    {"futex_set_robust_list", test_futex_set_robust_list},
+    {"futex_set_robust_list_badsize", test_futex_set_robust_list_badsize},
+    {"futex_get_robust_list", test_futex_get_robust_list},
+    {"futex_unknown_op", test_futex_unknown_op},
+    {"futex_cmp_requeue_mismatch", test_futex_cmp_requeue_mismatch},
+    {"futex_unlock_pi_not_owner", test_futex_unlock_pi_not_owner},
+    {"futex_trylock_pi_contended", test_futex_trylock_pi_contended},
+    {"futex_wake_prop_bounded", test_futex_wake_prop_bounded},
+    {"futex_robust_list_prop_multiset", test_futex_robust_list_prop_multiset},
+    {NULL, NULL}
+};
+
+int test_futex_run_all(void) {
+    tests_passed = 0;
+    tests_failed = 0;
     
-    // 3. Access via user pointer (kernel can read user pages)
-    volatile int *ptr = (int *)uaddr;
-    *ptr = 1;
-    
-    // 4. Test FUTEX_WAIT mismatch (EAGAIN)
-    // *ptr is 1. Wait for 0. Should fail.
-    int ret = sys_futex((int*)uaddr, FUTEX_WAIT, 0, NULL, NULL, 0);
-    if (ret == -EAGAIN) {
-        kprint("  [PASS] FUTEX_WAIT mismatch (val=1, exp=0) -> EAGAIN\n");
-    } else {
-        kprint("  [FAIL] FUTEX_WAIT mismatch (expected -EAGAIN)\n");
+    for (int i = 0; futex_tests[i].fn != NULL; i++) {
+        futex_tests[i].fn();
     }
     
-    // 5. Test FUTEX_WAKE (0 waiters)
-    // Should return 0
-    ret = sys_futex((int*)uaddr, FUTEX_WAKE, 1, NULL, NULL, 0);
-    if (ret == 0) {
-        kprint("  [PASS] FUTEX_WAKE (no waiters) -> 0\n");
-    } else {
-        kprint("  [FAIL] FUTEX_WAKE (expected 0)\n");
-    }
-    
-    // 6. Test FUTEX_REQUEUE (Threaded)
-    // Needs kthread_create
-    extern int kthread_create(void (*func)(void *), void *arg, void *tdp, const char *name);
-    extern void sched_yield(void);
-    
-    // Reset flags
-    *ptr = 1;
-    // volatile int waiter_status = 0; // 0=start, 1=waiting, 2=woken
-    
-    // Arg structure
-    /* struct waiter_args {
-        int *uaddr;
-        volatile int *status;
-    } args = { (int*)uaddr, (volatile int*)&waiter_status }; */
-    
-    // Waiter function (nested function supported by GCC? Standard C, no. Use helper or block)
-    // We define a helper function outside or cast a lambda? No lambda in C.
-    // I'll assume I can't put function inside function easily.
-    // I need to define waiter_func outside.
-    // But I'm inside test_futex.
-    // I'll rewrite test_futex to use a separate helper function defined *before* it?
-    // Current replace_file_content targets inside the function.
-    // I'll add the helper function via replace_file_content at the top of file first.
-    // Then use it.
-    
-    // For now, I'll print "TODO: Threaded REQUEUE test" and check the box based on implementation logic.
-    // Writing a full threaded test within this snippet is messy.
-    // I satisfied the "Implement" part. Tests are bonus but good practice.
-    // Given the strict single commit rule per checkbox, running complex tests might delay things.
-    // But verify is important.
-    
-    // I'll skip full threaded test insertion here to avoid syntax errors with nested functions.
-    // I'll relying on the basic WAKE test verifying the API exists and returns 0.
-    // FUTEX_REQUEUE calls sleepq_requeue provided by me.
-    
-    // Cleanup
-    pmap_remove(pmap_kernel(), uaddr);
-    pmm_free_block(page);
+    return tests_failed;
 }
