@@ -4,14 +4,15 @@ include ../Makefile.inc
 ARCH ?= i386
 # Note: No libgcc needed - we implement our own 64-bit helpers in kern/lib.c
 
-.PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi tests
+.PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi tests klib
 
 all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
 	@echo "Kernel build complete (all formats)."
 
-kernel.bin: arch_kernel kern pm drivers fs exec vfs exec_perso vm tests
+kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.bin \
 		arch/$(ARCH)/kernel.o \
+		lib/lib.o \
 		kern/kern.o \
 		pm/pm.o \
 		drivers/video/video.o \
@@ -38,9 +39,10 @@ kernel.zimage: kernel.bin
 	# For zImage, we often want a flat binary if using it with legacy loaders
 	objcopy -O binary kernel.bin kernel.zimage
 
-kernel.efi: arch_kernel kern drivers fs exec vfs exec_perso vm tests
+kernel.efi: arch_kernel klib kern drivers fs exec vfs exec_perso vm tests
 	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.elf \
 		arch/$(ARCH)/kernel.o \
+		lib/lib.o \
 		kern/kern.o \
 		pm/pm.o \
 		drivers/video/video.o \
@@ -78,6 +80,10 @@ pm:
 exec_perso:
 	@echo "Building Personalities..."
 	$(MAKE) -C exec/perso
+
+klib:
+	@echo "Building Kernel Libraries..."
+	$(MAKE) -C lib
 
 drivers:
 	@echo "Building Drivers..."
@@ -121,6 +127,7 @@ clean:
 	$(MAKE) -C fs/exec clean
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean
+	$(MAKE) -C lib clean
 	rm -f kernel.bin
 
 tests:
