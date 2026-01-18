@@ -619,15 +619,15 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **VirtIO-SCSI:**
             - [ ] Pass-through driver mapping request queues to virtqueues.
             - [ ] Event queue handling (hot-plug).
-- [ ] **ATA/IDE (Legacy):**
+- [x] **ATA/IDE (Legacy):** <!-- ide.c complete with PIO, DMA, LBA48, ATAPI -->
     - [x] Implement PIO Mode transfers.
-    - [ ] **DMA Transfers:**
-        - [ ] Bus Master Register access
-        - [ ] PRDT (Physical Region Descriptor Table) setup
+    - [x] **DMA Transfers:** <!-- ide.c:ide_dma_read, ide_dma_write -->
+        - [x] Bus Master Register access <!-- ide.c:ide_bm_* functions -->
+        - [x] PRDT (Physical Region Descriptor Table) setup <!-- ide.c:ide_prdt_setup, prdt_entry_t -->
     - [x] Implement LBA48 support.
-    - [ ] **ATAPI (SCSI Transport):**
-        - [ ] Packet command transmission standard (hooks into SCSI stack)
-        - [ ] CD-ROM support
+    - [x] **ATAPI (SCSI Transport):** <!-- ide.c:ide_atapi_packet, SCSI commands -->
+        - [x] Packet command transmission standard (hooks into SCSI stack) <!-- ide.c:ide_atapi_packet -->
+        - [x] CD-ROM support <!-- ide.c:ide_atapi_read_sectors, ide_atapi_read_capacity, ide_atapi_read_toc -->
     - [x] Support Primary/Secondary channels.
     - [x] Support Master/Slave drives.
 - [ ] **AHCI:**
