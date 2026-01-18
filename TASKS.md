@@ -576,12 +576,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) -->
                 - [x] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->
         - [x] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() -->
-- [ ] **x86_64:**
-    - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`).
-    - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching).
-    - [ ] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode.
-    - [ ] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR).
-    - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp).
+- [x] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S -->
+    - [x] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup -->
+    - [x] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks -->
+    - [x] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC -->
+    - [x] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub -->
+    - [x] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 -->
 
 ### 3. Drivers (`sys/drivers`)
 - [ ] **Storage Subsystem (Unified SCSI Stack):**
