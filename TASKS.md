@@ -619,7 +619,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Discovery:**
             - [x] Implement Bus Scanning logic (HBA enumeration). <!-- scsi.c:scsi_scan_bus, scsi_probe_lun -->
             - [x] Implement `REPORT LUNS` and `INQUIRY` probing. <!-- scsi.c:scsi_report_luns, scsi_scan_bus -->
-            - [ ] Device Registry: registration of found targets/LUNs.
+            - [x] Device Registry: registration of found targets/LUNs. <!-- scsi.c:scsi_device_register, scsi_device_lookup -->
         - [ ] **Command Handling:**
             - [ ] Asynchronous command queueing (completion callbacks).
             - [ ] Timeout management and retries.
