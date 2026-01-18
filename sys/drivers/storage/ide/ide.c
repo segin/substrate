@@ -996,10 +996,11 @@ void ide_init(void) {
                 blkdev_t *bdev = &ide_blkdevs[ide_device_count];
                 memset(bdev, 0, sizeof(blkdev_t));
                 
-                bdev->name[0] = 'h';
+                bdev->name[0] = 'i';
                 bdev->name[1] = 'd';
-                bdev->name[2] = 'a' + ide_device_count;
-                bdev->name[3] = '\0';
+                bdev->name[2] = 'e';
+                bdev->name[3] = '0' + ide_device_count;
+                bdev->name[4] = '\0';
                 
                 bdev->sector_size = 512;
                 bdev->total_sectors = total_sectors;
