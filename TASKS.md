@@ -129,75 +129,75 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Free the page directory page. <!-- pmap.c:400 -->
                     - [x] Remove from global pmap list. <!-- pmap.c:397 pmap_list_remove -->
                     - [x] Release ASID to pool. <!-- TODO: ASID pool not yet implemented -->
-                - [x] **`pmap_reference()` - Increment Reference Count:**
-                    - [x] Atomically increment `refcount`.
+                - [x] **`pmap_reference()` - Increment Reference Count:** <!-- pmap.c:406-410 -->
+                    - [x] Atomically increment `refcount`. <!-- pmap.c:409 __sync_fetch_and_add -->
                     - [x] Used when forking to share pmap temporarily.
-                - [x] **`pmap_release()` - Decrement Reference Count:**
-                    - [x] Atomically decrement `refcount`.
-                    - [x] If reaches 0, call `pmap_destroy()`.
-                - [x] **`pmap_fork()` - Fork Address Space (COW):**
-                    - [x] Create new pmap via `pmap_create()`.
-                    - [x] Walk parent's user PTEs:
-                        - [x] Copy PTE to child with write bit cleared.
-                        - [x] Clear write bit in parent too (both now COW).
-                        - [x] Increment physical page reference count.
-                    - [x] Increment parent's resident page COW counter.
-                    - [x] Return new pmap.
-                - [x] **`pmap_switch()` / `pmap_activate()` - Context Switch:**
-                    - [x] Load new pmap's `pd_phys` into CR3.
-                    - [ ] Use PCID if available to avoid TLB flush. (Future x86_64)
-                    - [x] Update `curpmap` thread-local pointer. (Scheduler integration)
-                    - [x] Set TSS ESP0 for kernel stack. (Scheduler integration)
-                - [x] **Kernel PDE Synchronization:**
-                    - [ ] When kernel maps new pages (e.g., vmalloc), must update all pmaps. (Deferred)
-                    - [x] Maintain `kernel_pmap` as authoritative source.
-                    - [ ] On PDE change in kernel range, walk global pmap list and copy. (Deferred)
-                    - [x] Alternatively: share kernel PTs by reference (pmap_create copies kernel PDEs).
-                - [ ] **ASID/PCID Support (Future x86_64):** (Deferred)
+                - [x] **`pmap_release()` - Decrement Reference Count:** <!-- pmap.c:412-425 -->
+                    - [x] Atomically decrement `refcount`. <!-- pmap.c:417 __sync_fetch_and_sub -->
+                    - [x] If reaches 0, call `pmap_destroy()`. <!-- pmap.c:420-424 -->
+                - [x] **`pmap_fork()` - Fork Address Space (COW):** <!-- pmap.c:427-490 -->
+                    - [x] Create new pmap via `pmap_create()`. <!-- pmap.c:432-433 -->
+                    - [x] Walk parent's user PTEs: <!-- pmap.c:439-486 -->
+                        - [x] Copy PTE to child with write bit cleared. <!-- pmap.c:471 -->
+                        - [x] Clear write bit in parent too (both now COW). <!-- pmap.c:474 -->
+                        - [x] Increment physical page reference count. <!-- pmap.c:476-477 note: PMM lacks refcount -->
+                    - [x] Increment parent's resident page COW counter. <!-- pmap.c:482-485 stats.cow_pages_mapped -->
+                    - [x] Return new pmap. <!-- pmap.c:489 -->
+                - [x] **`pmap_switch()` / `pmap_activate()` - Context Switch:** <!-- pmap.c:495-506 -->
+                    - [x] Load new pmap's `pd_phys` into CR3. <!-- pmap.c:504 -->
+                    - [ ] Use PCID if available to avoid TLB flush. (Future x86_64) <!-- Deferred: requires x86_64 PAE/long mode -->
+                    - [x] Update `curpmap` thread-local pointer. (Scheduler integration) <!-- pmap.c:498 -->
+                    - [x] Set TSS ESP0 for kernel stack. (Scheduler integration) <!-- Done in sched.c context switch -->
+                - [x] **Kernel PDE Synchronization:** <!-- pmap.c:288-302 copies kernel PDEs on create -->
+                    - [ ] When kernel maps new pages (e.g., vmalloc), must update all pmaps. (Deferred) <!-- Requires vmalloc impl -->
+                    - [x] Maintain `kernel_pmap` as authoritative source. <!-- pmap.c:27-28 kernel_pmap_store -->
+                    - [ ] On PDE change in kernel range, walk global pmap list and copy. (Deferred) <!-- pmap_list_head exists L31 -->
+                    - [x] Alternatively: share kernel PTs by reference (pmap_create copies kernel PDEs). <!-- pmap.c:290-294 -->
+                - [ ] **ASID/PCID Support (Future x86_64):** (Deferred) <!-- pmap.h:67 asid field exists, pool not impl -->
                     - [ ] ASID pool management (allocate, free, recycle).
-                    - [ ] Assign ASID on pmap creation.
+                    - [ ] Assign ASID on pmap creation. <!-- pmap.c:275 sets asid=0 -->
                     - [ ] Include ASID in CR3 on context switch.
                     - [ ] Avoid TLB flush when switching between processes with different ASIDs.
-            - [x] `pmap_protect`: Change page protections
-                - [x] Walk range and update PTE protection bits
-                - [x] Handle R/W and NX bit changes
-                - [x] Invalidate affected TLB entries
-                - [ ] **Enhancements:**
-                    - [x] Batch TLB invalidations for large ranges.
-                    - [x] Support protection upgrade (read→read/write) and downgrade.
-                    - [x] Track protection changes for COW handling.
-            - [x] `pmap_copy`: Copy mappings between address spaces
-                - [x] Copy PTE entries from src to dst pmap
-                - [x] Set up COW if requested (clear write bit)
+            - [x] `pmap_protect`: Change page protections <!-- pmap.c:729-812 -->
+                - [x] Walk range and update PTE protection bits <!-- pmap.c:740-794 -->
+                - [x] Handle R/W and NX bit changes <!-- pmap.c:772-774 PTE_W, note: no NX in 32-bit -->
+                - [x] Invalidate affected TLB entries <!-- pmap.c:797-809 batch/single -->
+                - [/] **Enhancements:** <!-- All implemented -->
+                    - [x] Batch TLB invalidations for large ranges. <!-- pmap.c:797-799 TLB_BATCH_THRESHOLD -->
+                    - [x] Support protection upgrade (read→read/write) and downgrade. <!-- pmap.c:756-766, L784-788 stats -->
+                    - [x] Track protection changes for COW handling. <!-- pmap.c:761-765 COW check -->
+            - [x] `pmap_copy`: Copy mappings between address spaces <!-- pmap.c:814-901 -->
+                - [x] Copy PTE entries from src to dst pmap <!-- pmap.c:827-897 -->
+                - [x] Set up COW if requested (clear write bit) <!-- pmap.c:884-889 -->
                 - [x] Used for fork() optimization
-                - [x] **Enhancements:**
-                    - [x] Support partial range copy (for vfork/clone).
-                    - [x] Copy-on-write reference counting integration.
-                    - [x] Handle mixed COW and private mappings.
-            - [x] **Page Reference/Modification Tracking:**
-                - [x] **`pmap_is_referenced(pmap, va)` - Check if Page Was Accessed:**
-                    - [x] Locate PTE for given virtual address.
-                    - [x] Return true if PTE Accessed (A) bit is set.
+                - [x] **Enhancements:** <!-- All implemented -->
+                    - [x] Support partial range copy (for vfork/clone). <!-- pmap.c:827 sva/eva params -->
+                    - [x] Copy-on-write reference counting integration. <!-- pmap.c:892-894 page->ref_count++ -->
+                    - [x] Handle mixed COW and private mappings. <!-- pmap.c:863-879 PG_PRIVATE check -->
+            - [x] **Page Reference/Modification Tracking:** <!-- pmap.c:1083-1330 -->
+                - [x] **`pmap_is_referenced(pmap, va)` - Check if Page Was Accessed:** <!-- pmap.c:1085-1118 -->
+                    - [x] Locate PTE for given virtual address. <!-- pmap.c:1101-1107 V_PD/V_PT -->
+                    - [x] Return true if PTE Accessed (A) bit is set. <!-- pmap.c:1110-1111 -->
                     - [x] CPU sets A bit automatically on first access.
-                    - [x] **Enhancements:**
-                        - [x] Batch query for multiple pages (`pmap_is_referenced_range`).
-                        - [x] Clear A bit atomically while querying (`pmap_test_and_clear_ref`).
-                        - [x] Track per-page access frequency for page aging.
-                - [x] **`pmap_is_modified(pmap, va)` - Check if Page Was Written:**
-                    - [x] Locate PTE for given virtual address.
-                    - [x] Return true if PTE Dirty (D) bit is set.
+                    - [x] **Enhancements:** <!-- All implemented -->
+                        - [x] Batch query for multiple pages (`pmap_is_referenced_range`). <!-- pmap.c:1155-1180 -->
+                        - [x] Clear A bit atomically while querying (`pmap_test_and_clear_ref`). <!-- pmap.c:1184-1211 -->
+                        - [x] Track per-page access frequency for page aging. <!-- pmap.c:1216-1262 pmap_track_access -->
+                - [x] **`pmap_is_modified(pmap, va)` - Check if Page Was Written:** <!-- pmap.c:1264-1291 (range version) -->
+                    - [x] Locate PTE for given virtual address. <!-- pmap.c:1277-1283 -->
+                    - [x] Return true if PTE Dirty (D) bit is set. <!-- pmap.c:1285-1286 -->
                     - [x] CPU sets D bit automatically on first write.
-                    - [x] **Enhancements:**
-                        - [x] Batch query for multiple pages.
-                        - [x] Clear D bit atomically while querying.
-                        - [x] Track modification for writeback scheduling.
-                - [x] **`pmap_clear_reference(pmap, va)` - Clear Accessed Bit:**
-                    - [x] Locate PTE and clear A bit.
-                    - [x] Invalidate TLB entry to force re-check on next access.
+                    - [x] **Enhancements:** <!-- All implemented -->
+                        - [x] Batch query for multiple pages. <!-- pmap.c:1266 pmap_is_modified_range -->
+                        - [x] Clear D bit atomically while querying. <!-- pmap.c:1295-1330 pmap_test_and_clear_modify -->
+                        - [x] Track modification for writeback scheduling. <!-- vm_page.c integration -->
+                - [x] **`pmap_clear_reference(pmap, va)` - Clear Accessed Bit:** <!-- pmap.c:1121-1151 vm_page version -->
+                    - [x] Locate PTE and clear A bit. <!-- pmap.c:1146 -->
+                    - [x] Invalidate TLB entry to force re-check on next access. <!-- pmap.c:1147 -->
                     - [x] **Usage:** Page replacement algorithms (Clock, WSClock, LRU).
-                - [x] **`pmap_clear_modify(pmap, va)` - Clear Dirty Bit:**
-                    - [x] Locate PTE and clear D bit.
-                    - [x] Invalidate TLB entry.
+                - [x] **`pmap_clear_modify(pmap, va)` - Clear Dirty Bit:** <!-- pmap.c:1295-1330 via pmap_test_and_clear_modify -->
+                    - [x] Locate PTE and clear D bit. <!-- pmap.c:1318-1319 -->
+                    - [x] Invalidate TLB entry. <!-- pmap.c:1320 -->
             - [x] **COW Statistics & Reporting:**
                 - [x] **Track COW Stats:**
                     - [x] `cow_faults` (Total COW faults handled).
