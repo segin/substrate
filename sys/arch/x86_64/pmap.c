@@ -1073,3 +1073,160 @@ void pmap_remove_1gb(pmap_t pmap, uint64_t va) {
     
     pmap->resident_count -= 262144;
 }
+
+// ========== Global Page Support (PGE) ==========
+
+/*
+ * cpuid_check_pge - Check if Global Pages (PGE) are supported
+ * 
+ * Returns: 1 if supported (CPUID.01H:EDX[13]), 0 otherwise.
+ */
+int cpuid_check_pge(void) {
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
+    return (edx >> 13) & 1;
+}
+
+/*
+ * pmap_pge_enable - Enable Global Page support
+ *
+ * Sets CR4.PGE (bit 7) to enable global pages.
+ * Global pages (PTE.G=1) survive CR3 reloads,
+ * reducing TLB misses for kernel mappings.
+ */
+void pmap_pge_enable(void) {
+    if (!cpuid_check_pge()) return;
+    
+    uint64_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= (1UL << 7); // CR4.PGE
+    __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+}
+
+/*
+ * pmap_pge_disable - Disable Global Page support
+ *
+ * Clears CR4.PGE. Used when needing to flush global pages
+ * (toggle CR4.PGE off then on, or use INVPCID).
+ */
+void pmap_pge_disable(void) {
+    uint64_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    cr4 &= ~(1UL << 7);
+    __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+}
+
+/*
+ * pmap_set_global - Mark a page as global
+ *
+ * Sets PTE.G flag. Used for kernel pages that should
+ * not be flushed on context switch.
+ */
+int pmap_set_global(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return -1;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return -1;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return -1;
+    
+    // Handle 1GB huge pages
+    if (pdpt[pdpti] & PTE_PS) {
+        pdpt[pdpti] |= PTE_G;
+        pmap_invalidate_page(va);
+        return 0;
+    }
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return -1;
+    
+    // Handle 2MB large pages
+    if (pd[pdi] & PTE_PS) {
+        pd[pdi] |= PTE_G;
+        pmap_invalidate_page(va);
+        return 0;
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return -1;
+    
+    pt[pti] |= PTE_G;
+    pmap_invalidate_page(va);
+    return 0;
+}
+
+/*
+ * pmap_clear_global - Remove global flag from a page
+ */
+int pmap_clear_global(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return -1;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return -1;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return -1;
+    
+    if (pdpt[pdpti] & PTE_PS) {
+        pdpt[pdpti] &= ~PTE_G;
+        pmap_invalidate_page(va);
+        return 0;
+    }
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return -1;
+    
+    if (pd[pdi] & PTE_PS) {
+        pd[pdi] &= ~PTE_G;
+        pmap_invalidate_page(va);
+        return 0;
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return -1;
+    
+    pt[pti] &= ~PTE_G;
+    pmap_invalidate_page(va);
+    return 0;
+}
+
+/*
+ * pmap_invalidate_global - Flush global TLB entries
+ *
+ * Global pages survive CR3 reload. To flush them:
+ * 1. Toggle CR4.PGE off then on, or
+ * 2. Use INVPCID (if available)
+ *
+ * This uses the CR4 toggle method for compatibility.
+ */
+void pmap_invalidate_global(void) {
+    uint64_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    
+    // Toggle PGE off
+    __asm__ volatile("mov %0, %%cr4" :: "r"(cr4 & ~(1UL << 7)) : "memory");
+    
+    // Toggle PGE back on
+    __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+}
+
+/*
+ * pmap_mark_kernel_global - Mark kernel range as global
+ *
+ * Typically called during boot to mark all kernel mappings
+ * (upper canonical half) as global.
+ */
+void pmap_mark_kernel_global(pmap_t pmap, uint64_t sva, uint64_t eva) {
+    for (uint64_t va = sva; va < eva; va += 0x1000) {
+        pmap_set_global(pmap, va);
+    }
+}

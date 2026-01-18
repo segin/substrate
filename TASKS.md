@@ -315,9 +315,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Large page support <!-- pmap.c:884-1048 -->
                 - [x] 2MB pages (PDE with PS bit) <!-- pmap.c:910-978 pmap_enter_2mb, pmap_remove_2mb -->
                 - [x] 1GB pages (PDPTE with PS bit, if supported) <!-- pmap.c:980-1048 pmap_enter_1gb, pmap_remove_1gb, cpuid_check_1gb_pages -->
-            - [ ] Global page support (PGE)
-                - [ ] Set CR4.PGE to enable global pages
-                - [ ] Mark kernel pages with PG_G
+            - [x] Global page support (PGE) <!-- pmap.c:1050-1196 -->
+                - [x] Set CR4.PGE to enable global pages <!-- pmap.c:1072-1080 pmap_pge_enable -->
+                - [x] Mark kernel pages with PG_G <!-- pmap.c:1113-1196 pmap_set_global, pmap_mark_kernel_global -->
             - [ ] PCID support (Process Context Identifiers)
                 - [ ] Detect PCID via CPUID
                 - [ ] Allocate PCIDs to processes

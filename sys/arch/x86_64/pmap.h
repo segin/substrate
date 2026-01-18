@@ -162,4 +162,13 @@ int pmap_enter_1gb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_
 void pmap_remove_2mb(pmap_t pmap, uint64_t va);
 void pmap_remove_1gb(pmap_t pmap, uint64_t va);
 
+// Global page support (PGE)
+int cpuid_check_pge(void);
+void pmap_pge_enable(void);
+void pmap_pge_disable(void);
+int pmap_set_global(pmap_t pmap, uint64_t va);
+int pmap_clear_global(pmap_t pmap, uint64_t va);
+void pmap_invalidate_global(void);
+void pmap_mark_kernel_global(pmap_t pmap, uint64_t sva, uint64_t eva);
+
 #endif
