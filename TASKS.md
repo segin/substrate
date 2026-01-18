@@ -276,7 +276,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `pmap_dump(pmap)`: Debug dump of pmap contents.
                 - [x] `pmap_check(pmap)`: Consistency verification.
                 - [x] Export stats via syscall (`sys_pmap_stats`).
-        - [ ] **PMAP Layer (Machine Dependent - x86_64):**
+        - [x] **PMAP Layer (Machine Dependent - x86_64):** <!-- pmap.c 1370 lines, pmap.h 188 lines -->
             - [x] **Refactor:** `pmap_init`: Bootstrap PML4 paging structures.
                 - [x] Initialize kernel PML4 from static bootstrap
                 - [x] Set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000)
@@ -290,16 +290,16 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `pmap_kremove(va)`: Kernel-only removal
                 - [x] Allocate page tables on demand when entry is empty
                 - [x] Handle NX (No Execute) bit for memory protection
-                - [ ] Support 2MB large pages (PDE.PS) and 1GB huge pages (PDPTE.PS)
+                - [x] Support 2MB large pages (PDE.PS) and 1GB huge pages (PDPTE.PS) <!-- pmap.c:pmap_enter_2mb, pmap_enter_1gb -->
             - [x] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading).
                 - [x] Load pmap->pml4_phys into CR3
-                - [ ] Handle PCID if available (Process Context Identifiers)
+                - [x] Handle PCID if available (Process Context Identifiers) <!-- pmap.c:pmap_activate_pcid -->
                 - [x] Maintain `curpmap` pointer
             - [x] **Refactor:** **Recursive Paging:** Efficient 4-level page table mapping.
                 - [x] Reserve PML4 entry 510 for self-referencing
                 - [x] Define macros for accessing PML4/PDPT/PD/PT via recursive window
                 - [x] V_PML4, V_PDPT(n), V_PD(n), V_PT(n) macros
-            - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management
+            - [x] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management <!-- pmap.c:185-292 -->
                 - [x] `pmap_create()`: Allocate new PML4, copy kernel mappings (entries 256-511)
                 - [x] `pmap_destroy()`: Free all user page table levels and PML4
                 - [x] `pmap_reference()`: Increment pmap reference count
