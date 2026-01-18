@@ -631,10 +631,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `/dev/storage/scsi/B` (e.g., `0`) - Bus controller ioctl endpoint (Enumeration/Rescan).
                 - [ ] `/dev/storage/scsiN` (e.g., `scsi0`) - High-level Block Device alias (e.g., first disk).
             - [ ] **Drivers (`sd`/`sr` unified):**
-                - [ ] **Command Translation:** Map high-level Block I/O to SCSI READ/WRITE CDBs.
-                - [ ] **Device Type Handling:**
-                    - [ ] **Direct Access (Disk):** Capacity/Geometry, Cache Flush.
-                    - [ ] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking.
+                - [x] **Command Translation:** Map high-level Block I/O to SCSI READ/WRITE CDBs. <!-- sd.c:sd_read, sd_write -->
+                - [x] **Device Type Handling:**
+                    - [x] **Direct Access (Disk):** Capacity/Geometry, Cache Flush. <!-- sd.c:sd_attach -->
+                    - [x] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking. <!-- sr.c:sr_read_toc, sr_lock_door -->
             - [ ] **Integration:**
                 - [ ] Register with DevFS using the schematic above.
                 - [ ] Implement `ioctl` for Bus Enumeration on controller nodes.
