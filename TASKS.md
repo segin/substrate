@@ -623,7 +623,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Command Handling:**
             - [x] Asynchronous command queueing (completion callbacks). <!-- scsi.c:scsi_queue_request, scsi_complete_request -->
             - [x] Timeout management and retries. <!-- scsi.c:scsi_execute (retry loop) -->
-            - [ ] Error Handling: Sense Data definition and parsing (SPC-3).
+            - [x] Error Handling: Sense Data definition and parsing (SPC-3). <!-- scsi.c:scsi_sense_key, scsi_sense_string -->
     - [ ] **High-Level Device Drivers:**
         - [ ] **Unified Userspace Interface:**
             - [ ] **Device Nodes:**
