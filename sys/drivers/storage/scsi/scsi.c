@@ -14,6 +14,12 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Kernel time function - stub until real timer API implemented */
+static inline uint64_t kernel_time_ms(void) {
+    /* TODO: Use real kernel timer when available */
+    return 0;
+}
+
 /*
  * ============================================================
  * Static Storage
@@ -267,26 +273,51 @@ int scsi_execute(scsi_request_t *req) {
     }
     
     scsi_link_t *link = req->device->link;
+    int ret = -1;
+    uint32_t attempts = req->retries + 1;  /* At least 1 attempt */
     
-    req->state = SCSI_REQ_STATE_ACTIVE;
-    link->commands_issued++;
-    
-    /* Execute via transport */
-    int ret = link->execute(link, req);
-    
-    if (ret < 0) {
+    while (attempts > 0) {
+        req->state = SCSI_REQ_STATE_ACTIVE;
+        link->commands_issued++;
+        
+        /* Record start time for timeout tracking */
+        req->start_time = kernel_time_ms();
+        
+        /* Execute via transport */
+        ret = link->execute(link, req);
+        
+        /* Calculate elapsed time */
+        req->elapsed_ms = kernel_time_ms() - req->start_time;
+        
+        if (ret >= 0) {
+            req->state = SCSI_REQ_STATE_COMPLETE;
+            
+            /* Update statistics */
+            if (req->flags & SCSI_REQ_READ) {
+                link->bytes_read += req->data_xfer;
+            } else if (req->flags & SCSI_REQ_WRITE) {
+                link->bytes_written += req->data_xfer;
+            }
+            break;  /* Success */
+        }
+        
+        /* Check if retryable error */
+        if (req->status == SCSI_STATUS_BUSY ||
+            req->status == SCSI_STATUS_TASK_SET_FULL) {
+            /* Wait a bit and retry */
+            attempts--;
+            if (attempts > 0) {
+                /* Simple delay - could use scheduler sleep later */
+                for (volatile int i = 0; i < 10000; i++);
+            }
+            continue;
+        }
+        
+        /* Non-retryable error */
         req->state = SCSI_REQ_STATE_ERROR;
         req->error = ret;
         link->commands_failed++;
-    } else {
-        req->state = SCSI_REQ_STATE_COMPLETE;
-        
-        /* Update statistics */
-        if (req->flags & SCSI_REQ_READ) {
-            link->bytes_read += req->data_xfer;
-        } else if (req->flags & SCSI_REQ_WRITE) {
-            link->bytes_written += req->data_xfer;
-        }
+        break;
     }
     
     /* Handle CHECK CONDITION */

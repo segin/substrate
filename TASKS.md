@@ -622,7 +622,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Device Registry: registration of found targets/LUNs. <!-- scsi.c:scsi_device_register, scsi_device_lookup -->
         - [ ] **Command Handling:**
             - [x] Asynchronous command queueing (completion callbacks). <!-- scsi.c:scsi_queue_request, scsi_complete_request -->
-            - [ ] Timeout management and retries.
+            - [x] Timeout management and retries. <!-- scsi.c:scsi_execute (retry loop) -->
             - [ ] Error Handling: Sense Data definition and parsing (SPC-3).
     - [ ] **High-Level Device Drivers:**
         - [ ] **Unified Userspace Interface:**

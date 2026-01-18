@@ -224,6 +224,8 @@ typedef struct scsi_request {
     
     /* Timing */
     uint64_t submit_time;           /* Submission timestamp */
+    uint64_t start_time;            /* Execution start timestamp */
+    uint32_t elapsed_ms;            /* Time spent in execution */
 } scsi_request_t;
 
 /*
