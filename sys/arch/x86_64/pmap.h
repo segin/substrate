@@ -145,4 +145,14 @@ pmap_t pmap_fork(pmap_t src_pmap);
 int pmap_page_is_cow(pmap_t pmap, uint64_t va);
 void pmap_release(pmap_t pmap);
 
+// TLB shootdown for SMP
+void pmap_invalidate_all(void);
+void pmap_shootdown_handler(void);
+void pmap_shootdown_page(uint64_t va);
+void pmap_shootdown_range(uint64_t va, uint64_t len);
+void pmap_shootdown_all(void);
+void pmap_shootdown_defer(uint64_t va);
+void pmap_shootdown_commit(void);
+void pmap_shootdown_wait(int expected_cpus);
+
 #endif

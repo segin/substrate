@@ -758,3 +758,144 @@ void pmap_release(pmap_t pmap) {
         pmap_destroy(pmap);
     }
 }
+
+// ========== TLB Shootdown for SMP ==========
+
+// External LAPIC functions (defined in lapic.c)
+extern void lapic_send_eoi(void);
+extern void lapic_send_ipi_all_excl_self(int vector);
+
+// TLB shootdown IPI vector
+#define TLB_SHOOTDOWN_VECTOR 0xFC
+
+// Shootdown state (shared between CPUs)
+static volatile uint64_t shootdown_va;
+static volatile uint64_t shootdown_len;
+static volatile int shootdown_all;
+static volatile int shootdown_ack_count;
+static volatile int shootdown_pending;
+
+/*
+ * pmap_invalidate_all - Flush entire TLB by reloading CR3
+ */
+void pmap_invalidate_all(void) {
+    uint64_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+}
+
+/*
+ * pmap_shootdown_handler - Handle TLB shootdown IPI
+ *
+ * Called from interrupt context when receiving shootdown IPI.
+ * Invalidates the specified page(s) and acknowledges completion.
+ */
+void pmap_shootdown_handler(void) {
+    if (shootdown_all) {
+        pmap_invalidate_all();
+    } else if (shootdown_len > 0) {
+        for (uint64_t va = shootdown_va; va < shootdown_va + shootdown_len; va += 0x1000) {
+            pmap_invalidate_page(va);
+        }
+    } else {
+        pmap_invalidate_page(shootdown_va);
+    }
+    __sync_fetch_and_add((int*)&shootdown_ack_count, 1);
+    lapic_send_eoi();
+}
+
+/*
+ * pmap_shootdown_page - Invalidate single page on all CPUs
+ */
+void pmap_shootdown_page(uint64_t va) {
+    // Local invalidation first
+    pmap_invalidate_page(va);
+    
+    // Set up shootdown state
+    shootdown_va = va;
+    shootdown_len = 0;
+    shootdown_all = 0;
+    shootdown_ack_count = 0;
+    shootdown_pending = 1;
+    __sync_synchronize();
+    
+    // Send IPI to all other CPUs
+    lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
+    shootdown_pending = 0;
+}
+
+/*
+ * pmap_shootdown_range - Invalidate range on all CPUs
+ */
+void pmap_shootdown_range(uint64_t va, uint64_t len) {
+    // Local invalidation first
+    for (uint64_t addr = va; addr < va + len; addr += 0x1000) {
+        pmap_invalidate_page(addr);
+    }
+    
+    shootdown_va = va;
+    shootdown_len = len;
+    shootdown_all = 0;
+    shootdown_ack_count = 0;
+    shootdown_pending = 1;
+    __sync_synchronize();
+    
+    lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
+    shootdown_pending = 0;
+}
+
+/*
+ * pmap_shootdown_all - Full TLB flush on all CPUs
+ */
+void pmap_shootdown_all(void) {
+    pmap_invalidate_all();
+    
+    shootdown_va = 0;
+    shootdown_len = 0;
+    shootdown_all = 1;
+    shootdown_ack_count = 0;
+    shootdown_pending = 1;
+    __sync_synchronize();
+    
+    lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
+    shootdown_pending = 0;
+}
+
+// Deferred shootdown: accumulate pages for batch invalidation
+static uint64_t deferred_pages[16];
+static int deferred_count = 0;
+
+void pmap_shootdown_defer(uint64_t va) {
+    if (deferred_count < 16) {
+        deferred_pages[deferred_count++] = va;
+    } else {
+        pmap_shootdown_all();
+        deferred_count = 0;
+    }
+}
+
+void pmap_shootdown_commit(void) {
+    if (deferred_count == 0) return;
+    
+    if (deferred_count > 4) {
+        pmap_shootdown_all();
+    } else {
+        for (int i = 0; i < deferred_count; i++) {
+            pmap_shootdown_page(deferred_pages[i]);
+        }
+    }
+    deferred_count = 0;
+}
+
+/*
+ * pmap_shootdown_wait - Wait for all shootdown acknowledgments
+ */
+void pmap_shootdown_wait(int expected_cpus) {
+    if (expected_cpus <= 0) return;
+    
+    int timeout = 1000000;
+    while (shootdown_ack_count < expected_cpus && timeout > 0) {
+        __asm__ volatile("pause");
+        timeout--;
+    }
+}

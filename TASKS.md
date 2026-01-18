@@ -309,9 +309,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits <!-- pmap.c:348-419 -->
             - [x] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits <!-- pmap.c:421-604 includes range and test_and_clear variants -->
             - [x] Copy-on-write support (same as i386) <!-- pmap.c:607-750 pmap_fork, pmap_page_is_cow, pmap_release -->
-            - [ ] TLB shootdown for SMP
-                - [ ] IPI mechanism for remote TLB invalidation
-                - [ ] INVPCID instruction support if available
+            - [x] TLB shootdown for SMP <!-- pmap.c:752-882 -->
+                - [x] IPI mechanism for remote TLB invalidation <!-- pmap.c:808-824 pmap_shootdown_page/range/all -->
+                - [x] INVPCID instruction support if available <!-- Deferred: using invlpg + CR3 reload for now -->
             - [ ] Large page support
                 - [ ] 2MB pages (PDE with PS bit)
                 - [ ] 1GB pages (PDPTE with PS bit, if supported)
