@@ -692,7 +692,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] PRP (Physical Region Page) List construction for data buffers.
         - [ ] Issue Read/Write NVM commands.
 - [ ] **Partitioning & DevFS:**
-    - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables.
+    - [x] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c -->
     - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS.
 - [ ] **Input:**
     - [ ] **Keyboard (PS/2):**

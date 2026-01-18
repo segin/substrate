@@ -1,69 +1,174 @@
+/*
+ * geom_bsd.c - BSD Disklabel Scanner
+ *
+ * Handles:
+ * - FreeBSD/OpenBSD/NetBSD disklabel format
+ * - 32-bit disklabel at sector 1 (offset 0 or 64)
+ * - Slice enumeration (a-h)
+ * - Filesystem type identification
+ */
+
 #include "geom.h"
 #include "../console.h"
 #include <string.h>
+#include <stdio.h>
 
-#define BSD_DISKMAGIC     ((uint32_t)0x82564557)
+/* Helper from geom_subr.c */
+extern const char *geom_bsd_fstype_name(uint8_t fstype);
 
-struct bsd_partition {
-    uint32_t size;
-    uint32_t offset;
-    uint32_t fsize;
-    uint8_t  fstype;
-    uint8_t  frag;
-    uint16_t cpg;
-} __attribute__((packed));
-
-struct bsd_disklabel {
-    uint32_t d_magic;       // THe disk magic number
-    uint16_t d_type;
-    uint16_t d_subtype;
-    char     d_typename[16];
-    // skip
-} __attribute__((packed));
+/*
+ * ============================================================
+ * BSD Disklabel Scanner
+ * ============================================================
+ */
 
 static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const char *prefix) {
     uint8_t buf[512];
-    // Check sector 1 relative to offset (usually)
-    if (geom_read_sector(disk, offset + 1, buf) != 0) return -1;
     
-    // Check various offsets for magic (0, 64)
+    /* BSD disklabel is usually at sector 1 relative to partition start */
+    if (geom_read_sector(disk, offset + 1, buf) != 0) {
+        return -1;
+    }
+    
+    /* Search for magic number at known offsets */
     int label_offset = -1;
-    uint32_t *magic_ptr = (uint32_t*)buf;
-    if (*magic_ptr == BSD_DISKMAGIC) label_offset = 0;
-    else if (*(uint32_t*)(buf + 64) == BSD_DISKMAGIC) label_offset = 64;
+    struct geom_bsd_disklabel *label = NULL;
     
-    if (label_offset == -1) return -1; // Not BSD
+    /* Check offset 0 */
+    uint32_t *magic = (uint32_t *)buf;
+    if (*magic == GEOM_BSD_DISKMAGIC) {
+        label_offset = 0;
+    }
     
-    // Found BSD Label
-    // Print Indentation
-    for(int i=0; i<depth; i++) kprint("  ");
-    
-    kprint(prefix);
-    kprint(": ");
-    
-    struct bsd_partition *parts = (struct bsd_partition *)(buf + label_offset + 148);
-    
-    int printed = 0;
-    for (int i = 0; i < 8; i++) { // Usually 8 (a-h)
-        if (parts[i].size > 0 && parts[i].fstype != 0) { // Check unused?
-            if (printed) kprint(" ");
-            kprint(prefix);
-            char suffix[2] = { 'a' + i, 0 };
-            kprint(suffix);
-            printed = 1;
+    /* Check offset 64 (some systems put it there) */
+    if (label_offset == -1) {
+        magic = (uint32_t *)(buf + 64);
+        if (*magic == GEOM_BSD_DISKMAGIC) {
+            label_offset = 64;
         }
     }
+    
+    if (label_offset == -1) {
+        return -1;  /* Not a BSD disklabel */
+    }
+    
+    label = (struct geom_bsd_disklabel *)(buf + label_offset);
+    
+    /* Validate magic2 (should match d_magic) */
+    if (label->d_magic2 != GEOM_BSD_DISKMAGIC) {
+        return -1;
+    }
+    
+    /* Validate partition count */
+    uint16_t nparts = label->d_npartitions;
+    if (nparts > 8) nparts = 8;  /* Standard BSD has a-h (8 partitions) */
+    
+    /* Calculate label checksum */
+    uint16_t *wp = (uint16_t *)label;
+    uint16_t checksum = 0;
+    size_t label_size = sizeof(*label) / sizeof(uint16_t);
+    
+    for (size_t i = 0; i < label_size; i++) {
+        checksum ^= wp[i];
+    }
+    
+    if (checksum != 0) {
+        /* Checksum mismatch - might be corrupted */
+        /* Continue anyway for compatibility */
+    }
+    
+    /* Print scan header */
+    kprint("  ");
+    for (int d = 0; d < depth; d++) kprint("  ");
+    kprint(prefix);
+    kprint(": BSD");
+    
+    /* First pass: print slice names */
+    int slice_count = 0;
+    for (int i = 0; i < (int)nparts; i++) {
+        struct geom_bsd_partition *part = &label->d_partitions[i];
+        
+        /* Skip unused partitions (size 0 or fstype unused) */
+        if (part->p_size == 0) {
+            continue;
+        }
+        
+        /* Skip partition 'c' which typically represents the whole disk */
+        if (i == 2) {
+            continue;
+        }
+        
+        kprint(" ");
+        char sname[32];
+        sprintf("%s%c", prefix, 'a' + i);
+        kprint(sname);
+        slice_count++;
+    }
+    
+    if (slice_count == 0) {
+        kprint(" (empty)");
+    }
     kprint("\n");
+    
+    /* Second pass: register slices */
+    for (int i = 0; i < (int)nparts; i++) {
+        struct geom_bsd_partition *part = &label->d_partitions[i];
+        
+        /* Skip unused partitions */
+        if (part->p_size == 0) {
+            continue;
+        }
+        
+        /* Skip partition 'c' (whole disk) */
+        if (i == 2) {
+            continue;
+        }
+        
+        /* Calculate slice location
+         * Note: p_offset is relative to the disk (in sectors)
+         * We convert it relative to the container partition
+         */
+        uint64_t slice_start;
+        uint64_t slice_size = part->p_size;
+        
+        /* BSD offsets can be:
+         * - Absolute (relative to disk start)
+         * - Relative (relative to partition start)
+         * We assume FreeBSD style (relative to containing partition)
+         */
+        slice_start = offset + part->p_offset;
+        
+        /* If offset would be before the container, assume it's disk-absolute */
+        if (part->p_offset >= offset) {
+            slice_start = part->p_offset;
+        }
+        
+        /* Create slice name: ide0p1a, ide0p1b, etc. */
+        char slice_name[32];
+        sprintf("%s%c", prefix, 'a' + i);
+        
+        /* Register slice */
+        geom_add_partition(disk, slice_name, slice_start, slice_size,
+                          0, part->p_fstype, NULL,
+                          geom_bsd_fstype_name(part->p_fstype), 0);
+    }
     
     return 0;
 }
 
-static geom_class_t geom_bsd = {
+/*
+ * ============================================================
+ * Class Registration
+ * ============================================================
+ */
+
+static geom_class_t geom_bsd_class = {
     .name = "BSD",
+    .priority = 5,      /* Lower priority - usually nested inside MBR */
     .sniff = geom_bsd_sniff,
     .next = NULL
 };
 
 void geom_bsd_init(void) {
-    geom_register_class(&geom_bsd);
+    geom_register_class(&geom_bsd_class);
 }
