@@ -163,6 +163,19 @@ struct scsi_read_capacity_10 {
 
 /*
  * ============================================================
+ * REPORT LUNS Response (SPC-3 6.21)
+ * ============================================================
+ */
+#define SCSI_MAX_LUNS_RESPONSE  64  /* Max LUNs in single response */
+
+struct scsi_report_luns_data {
+    uint32_t length;            /* LUN list length in bytes (big-endian) */
+    uint32_t reserved;
+    uint64_t luns[SCSI_MAX_LUNS_RESPONSE];  /* LUN descriptors (big-endian) */
+} __attribute__((packed));
+
+/*
+ * ============================================================
  * Forward Declarations
  * ============================================================
  */
@@ -322,6 +335,7 @@ int scsi_inquiry(scsi_device_t *dev, struct scsi_inquiry_data *inq);
 int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_size);
 int scsi_request_sense(scsi_device_t *dev, uint8_t *sense, uint8_t len);
 int scsi_start_stop(scsi_device_t *dev, int start, int load_eject);
+int scsi_report_luns(scsi_device_t *dev, struct scsi_report_luns_data *luns);
 
 /* Sense Data Parsing */
 int scsi_sense_key(const uint8_t *sense, uint8_t len);

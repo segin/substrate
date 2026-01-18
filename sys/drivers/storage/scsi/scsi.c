@@ -373,6 +373,27 @@ int scsi_start_stop(scsi_device_t *dev, int start, int load_eject) {
 }
 
 /*
+ * REPORT LUNS (SPC-3 6.21)
+ * Returns list of LUNs available on target
+ */
+int scsi_report_luns(scsi_device_t *dev, struct scsi_report_luns_data *luns) {
+    if (!dev || !luns) return -1;
+    
+    uint8_t cdb[12];
+    memset(cdb, 0, 12);
+    cdb[0] = SCSI_CMD_REPORT_LUNS;
+    /* Select report type 0 = all LUNs */
+    cdb[2] = 0x00;
+    /* Allocation length (big-endian, 4 bytes at offset 6) */
+    uint32_t alloc_len = sizeof(struct scsi_report_luns_data);
+    scsi_put_be32(&cdb[6], alloc_len);
+    
+    memset(luns, 0, sizeof(struct scsi_report_luns_data));
+    
+    return scsi_execute_sync(dev, cdb, 12, luns, alloc_len, SCSI_REQ_READ, 10000);
+}
+
+/*
  * ============================================================
  * Sense Data Parsing
  * ============================================================
@@ -636,15 +657,52 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
      * - If LUN 0 responds, optionally probe more LUNs (REPORT LUNS in L621)
      */
     for (uint8_t target = 0; target < SCSI_MAX_TARGETS; target++) {
-        /* Probe LUN 0 */
+        /* Probe LUN 0 first */
         if (scsi_probe_lun(link, bus, target, 0) == 0) {
             devices_found++;
             
             /*
-             * LUN 0 found - could probe additional LUNs here
-             * Full REPORT LUNS implementation in L621 will handle this
-             * For now, just note that additional LUNs may exist
+             * LUN 0 found - use REPORT LUNS to discover additional LUNs
+             * If REPORT LUNS fails (not supported), continue with just LUN 0
              */
+            scsi_device_t *lun0_dev = scsi_device_lookup(bus, target, 0);
+            if (lun0_dev) {
+                struct scsi_report_luns_data luns_data;
+                if (scsi_report_luns(lun0_dev, &luns_data) == 0) {
+                    uint32_t list_len = scsi_be32((uint8_t*)&luns_data.length);
+                    uint32_t num_luns = list_len / 8;  /* Each LUN is 8 bytes */
+                    
+                    /* Cap at reasonable limit */
+                    if (num_luns > SCSI_MAX_LUNS_RESPONSE) {
+                        num_luns = SCSI_MAX_LUNS_RESPONSE;
+                    }
+                    
+                    /* Probe each reported LUN (skip LUN 0, already probed) */
+                    for (uint32_t i = 0; i < num_luns; i++) {
+                        /*
+                         * LUN descriptor format (SPC-3 6.21.2):
+                         * Bytes 0-1: Address method and LUN
+                         * For simple single-level LUNs, byte 1 is the LUN number
+                         */
+                        uint64_t lun_desc = luns_data.luns[i];
+                        /* Extract LUN from first two bytes (big-endian) */
+                        uint16_t lun = (uint16_t)((lun_desc >> 48) & 0xFFFF);
+                        /* Simple addressing: second byte is LUN number */
+                        uint8_t lun_num = (lun >> 8) & 0xFF;
+                        if ((lun & 0xC000) == 0) {
+                            /* Peripheral device addressing */
+                            lun_num = lun & 0xFF;
+                        }
+                        
+                        if (lun_num != 0) {  /* Skip LUN 0, already done */
+                            if (scsi_probe_lun(link, bus, target, lun_num) == 0) {
+                                devices_found++;
+                            }
+                        }
+                    }
+                }
+                /* REPORT LUNS failure is OK - device just doesn't support it */
+            }
         }
     }
     

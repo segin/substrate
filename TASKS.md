@@ -618,7 +618,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Data Structures:** Define `scsi_request`, `scsi_device`, `scsi_link` (transport linkage). <!-- scsi.h, scsi.c, test_scsi.c -->
         - [ ] **Discovery:**
             - [x] Implement Bus Scanning logic (HBA enumeration). <!-- scsi.c:scsi_scan_bus, scsi_probe_lun -->
-            - [ ] Implement `REPORT LUNS` and `INQUIRY` probing.
+            - [x] Implement `REPORT LUNS` and `INQUIRY` probing. <!-- scsi.c:scsi_report_luns, scsi_scan_bus -->
             - [ ] Device Registry: registration of found targets/LUNs.
         - [ ] **Command Handling:**
             - [ ] Asynchronous command queueing (completion callbacks).
