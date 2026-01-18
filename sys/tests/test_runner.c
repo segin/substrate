@@ -78,6 +78,11 @@ void run_kernel_tests(void) {
          test_futex();
     }
 
+    if (all || strcmp(test_arg, "ntsync") == 0) {
+         extern void test_ntsync(void);
+         test_ntsync();
+    }
+
     // Wait logic tests are run on host via verify_wait_host.sh
     // if (all || strcmp(test_arg, "wait") == 0) {
     //     test_wait_logic();

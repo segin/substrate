@@ -3,7 +3,7 @@ include ../../../Makefile.inc
 CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../arch/i386
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = pseudo.c
+SRCS = pseudo.c ntsync.c
 OBJS = $(SRCS:.c=.o)
 
 all: devices.o

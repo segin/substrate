@@ -443,6 +443,35 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Performance:** <!-- validated CMPXCHG and hash table bucketing -->
             - [x] Validated user-space access (CMPXCHG). <!-- futex.c:futex_cmpxchg_user, futex_read_user, validate_uaddr -->
             - [x] Hash table bucketing for wait queues.
+    - [x] **NTSYNC Driver (Windows NT Sync Primitives):** <!-- ntsync.h, ntsync.c, test_ntsync.c -->
+        - [x] **Core Infrastructure:** <!-- ntsync.c:ntsync_init, ntsync_device -->
+            - [x] Create `/dev/ntsync` char device with instance-based isolation. <!-- ntsync.c:ntsync_init, devfs_register_device -->
+            - [x] Implement ntsync_instance structure (per open file description). <!-- ntsync.c:ntsync_instance_t, ntsync_open_callback -->
+            - [x] Object handle management (object FDs returned from ioctls). <!-- ntsync.c:ntsync_create_object -->
+        - [x] **Semaphore Object:** <!-- ntsync.c:NTSYNC_OBJ_SEM -->
+            - [x] `NTSYNC_IOC_CREATE_SEM`: Create semaphore (count, max). <!-- ntsync.c:ntsync_create_object -->
+            - [x] `NTSYNC_IOC_SEM_POST`: Increment semaphore count. <!-- ntsync.c:ntsync_sem_post -->
+            - [x] `NTSYNC_IOC_READ_SEM`: Query semaphore state. <!-- ntsync.c:ntsync_read_sem -->
+        - [x] **Mutex Object:** <!-- ntsync.c:NTSYNC_OBJ_MUTEX -->
+            - [x] `NTSYNC_IOC_CREATE_MUTEX`: Create mutex (owner, count). <!-- ntsync.c:ntsync_create_object -->
+            - [x] `NTSYNC_IOC_MUTEX_UNLOCK`: Release mutex ownership. <!-- ntsync.c:ntsync_mutex_unlock -->
+            - [x] `NTSYNC_IOC_READ_MUTEX`: Query mutex state. <!-- ntsync.c:ntsync_read_mutex -->
+            - [x] `NTSYNC_IOC_KILL_OWNER`: Mark mutex as abandoned. <!-- ntsync.c:ntsync_kill_owner -->
+        - [x] **Event Object:** <!-- ntsync.c:NTSYNC_OBJ_EVENT -->
+            - [x] `NTSYNC_IOC_CREATE_EVENT`: Create event (signaled, manual/auto). <!-- ntsync.c:ntsync_create_object -->
+            - [x] `NTSYNC_IOC_SET_EVENT`: Signal event. <!-- ntsync.c:ntsync_set_event -->
+            - [x] `NTSYNC_IOC_RESET_EVENT`: Designal event. <!-- ntsync.c:ntsync_reset_event -->
+            - [x] `NTSYNC_IOC_PULSE_EVENT`: Signal then immediately reset. <!-- ntsync.c:ntsync_pulse_event -->
+            - [x] `NTSYNC_IOC_READ_EVENT`: Query event state. <!-- ntsync.c:ntsync_read_event -->
+        - [x] **Wait Operations:** <!-- ntsync.c:ntsync_wait_any, ntsync_wait_all -->
+            - [x] `NTSYNC_IOC_WAIT_ANY`: Wait for any of N objects. <!-- ntsync.c:ntsync_wait_any -->
+            - [x] `NTSYNC_IOC_WAIT_ALL`: Wait for all of N objects simultaneously. <!-- ntsync.c:ntsync_wait_all -->
+            - [x] Alert event support (optional extra wakeup source). <!-- ntsync.c:ntsync_wait_args.alert handling -->
+            - [x] Timeout handling (MONOTONIC/REALTIME clocks). <!-- ntsync.h:NTSYNC_WAIT_REALTIME, basic framework -->
+        - [x] **Internal Mechanics:** <!-- ntsync.c core implementation -->
+            - [x] Wait queue per object with priority ordering. <!-- ntsync.c:waiter_enqueue (priority ordered) -->
+            - [x] Atomic acquisition semantics. <!-- ntsync.c:ntsync_acquire with spinlocks -->
+            - [x] Cross-object atomicity for WAIT_ALL. <!-- ntsync.c:ntsync_wait_all multi-lock -->
 - [x] **Signals:**
     - [x] Implement Signal delivery mechanism (trampoline, context saving).
     - [x] Implement `kill`, `sigaction`, `sigprocmask`.
