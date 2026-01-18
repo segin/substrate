@@ -437,7 +437,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `FUTEX_WAIT`: Atomic compare-and-sleep.
             - [x] `FUTEX_WAKE`: Wakeup N waiters.
             - [x] `FUTEX_REQUEUE`: Move waiters to another lock.
-        - [ ] **Advanced Features:**
+        - [x] **Advanced Features:** <!-- ROBUST_LIST and PI implemented in futex.c -->
             - [x] `FUTEX_ROBUST_LIST`: Handle owner death (cleanup). <!-- futex.c:futex_exit_cleanup, sys_set_robust_list, sys_get_robust_list -->
             - [x] `FUTEX_PI`: Priority Inheritance support. <!-- futex.c:futex_lock_pi, futex_unlock_pi, pi_boost_owner, pi_deboost_owner -->
         - [ ] **Performance:**
