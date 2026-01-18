@@ -693,7 +693,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Issue Read/Write NVM commands.
 - [ ] **Partitioning & DevFS:**
     - [x] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c -->
-    - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS.
+    - [x] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c -->
 - [ ] **Input:**
     - [ ] **Keyboard (PS/2):**
         - [ ] **Controller:**

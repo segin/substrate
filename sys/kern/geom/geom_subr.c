@@ -10,6 +10,7 @@
 
 #include "geom.h"
 #include "../console.h"
+#include "../../drivers/storage/blkdev.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -127,6 +128,35 @@ int geom_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count, void *buf) 
  * ============================================================
  */
 
+/*
+ * Partition Block Device Wrappers
+ */
+
+static int geom_part_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer) {
+    geom_partition_t *part = (geom_partition_t *)dev->priv;
+    if (!part || !part->disk) return -1;
+    
+    /* Bounds check */
+    if (sector + count > part->size_sectors) return -1;
+    
+    /* Delegate to parent disk with offset */
+    return part->disk->read(part->disk, part->start_lba + sector, count, buffer);
+}
+
+static int geom_part_write(blkdev_t *dev, uint64_t sector, uint32_t count, const void *buffer) {
+    geom_partition_t *part = (geom_partition_t *)dev->priv;
+    if (!part || !part->disk) return -1;
+    
+    /* Bounds check */
+    if (sector + count > part->size_sectors) return -1;
+    
+    /* Delegate to parent disk with offset */
+    if (part->disk->write) {
+        return part->disk->write(part->disk, part->start_lba + sector, count, buffer);
+    }
+    return -1;
+}
+
 geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,
                                       uint64_t start, uint64_t size,
                                       uint8_t mbr_type, uint8_t bsd_fstype,
@@ -168,6 +198,20 @@ geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,
         memcpy(global_copy, part, sizeof(*part));
         global_copy->next = geom_all_partitions;
         geom_all_partitions = global_copy;
+    }
+    
+    /* Register as block device in /dev/storage/ */
+    blkdev_t *bdev = kmalloc(sizeof(blkdev_t));
+    if (bdev) {
+        memset(bdev, 0, sizeof(*bdev));
+        strncpy(bdev->name, name, sizeof(bdev->name) - 1);
+        bdev->sector_size = disk->sector_size;
+        bdev->total_sectors = size;
+        bdev->priv = part;
+        bdev->read = geom_part_read;
+        bdev->write = geom_part_write;
+        
+        blkdev_register(bdev);
     }
     
     return part;
