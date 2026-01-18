@@ -1,0 +1,288 @@
+/*
+ * test_scsi.c - SCSI Mid-Layer Unit Tests
+ *
+ * Tests core SCSI data structures, CDB construction, and sense parsing.
+ */
+
+#include "../kern/console.h"
+#include "../drivers/storage/scsi/scsi.h"
+#include <stdio.h>
+#include <string.h>
+#include "tests.h"
+
+/* Mock transport execute function */
+static int mock_execute_calls = 0;
+static int mock_execute_return = 0;
+
+static int mock_execute(scsi_link_t *link, scsi_request_t *req) {
+    (void)link;
+    mock_execute_calls++;
+    req->status = SCSI_STATUS_GOOD;
+    req->data_xfer = req->data_len;
+    return mock_execute_return;
+}
+
+static scsi_link_t mock_link = {
+    .name = "mock",
+    .execute = mock_execute,
+    .reset_device = NULL,
+    .reset_bus = NULL,
+    .priv = NULL
+};
+
+void test_scsi(void) {
+    char buf[128];
+    int pass = 0, fail = 0;
+    
+    kprint("=== SCSI Mid-Layer Tests ===\n");
+    
+    /* Re-initialize SCSI layer for clean state */
+    scsi_init();
+    
+    /*
+     * Test 1: CDB construction - TEST UNIT READY
+     */
+    {
+        uint8_t cdb[6];
+        scsi_cdb_test_unit_ready(cdb);
+        if (cdb[0] == SCSI_CMD_TEST_UNIT_READY && 
+            cdb[1] == 0 && cdb[2] == 0 && cdb[3] == 0 && cdb[4] == 0 && cdb[5] == 0) {
+            kprint("PASS: CDB TEST UNIT READY\n");
+            pass++;
+        } else {
+            kprint("FAIL: CDB TEST UNIT READY\n");
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 2: CDB construction - INQUIRY
+     */
+    {
+        uint8_t cdb[6];
+        scsi_cdb_inquiry(cdb, 36);
+        if (cdb[0] == SCSI_CMD_INQUIRY && cdb[4] == 36) {
+            kprint("PASS: CDB INQUIRY\n");
+            pass++;
+        } else {
+            kprint("FAIL: CDB INQUIRY\n");
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 3: CDB construction - READ(10)
+     */
+    {
+        uint8_t cdb[10];
+        scsi_cdb_read_10(cdb, 0x12345678, 0x00FF);
+        if (cdb[0] == SCSI_CMD_READ_10 &&
+            cdb[2] == 0x12 && cdb[3] == 0x34 && cdb[4] == 0x56 && cdb[5] == 0x78 &&
+            cdb[7] == 0x00 && cdb[8] == 0xFF) {
+            kprint("PASS: CDB READ(10) big-endian\n");
+            pass++;
+        } else {
+            sprintf(buf, "FAIL: CDB READ(10) [%02x %02x %02x %02x %02x %02x]\n",
+                    cdb[2], cdb[3], cdb[4], cdb[5], cdb[7], cdb[8]);
+            kprint(buf);
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 4: CDB construction - WRITE(10)
+     */
+    {
+        uint8_t cdb[10];
+        scsi_cdb_write_10(cdb, 0xAABBCCDD, 0x0102);
+        if (cdb[0] == SCSI_CMD_WRITE_10 &&
+            cdb[2] == 0xAA && cdb[3] == 0xBB && cdb[4] == 0xCC && cdb[5] == 0xDD &&
+            cdb[7] == 0x01 && cdb[8] == 0x02) {
+            kprint("PASS: CDB WRITE(10) big-endian\n");
+            pass++;
+        } else {
+            kprint("FAIL: CDB WRITE(10) big-endian\n");
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 5: Byte order helpers
+     */
+    {
+        uint8_t data[4] = {0x12, 0x34, 0x56, 0x78};
+        uint16_t v16 = scsi_be16(data);
+        uint32_t v32 = scsi_be32(data);
+        
+        if (v16 == 0x1234 && v32 == 0x12345678) {
+            kprint("PASS: scsi_be16/be32\n");
+            pass++;
+        } else {
+            sprintf(buf, "FAIL: scsi_be16=%04x scsi_be32=%08x\n", v16, (unsigned)v32);
+            kprint(buf);
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 6: scsi_put_be16/be32
+     */
+    {
+        uint8_t data[4] = {0, 0, 0, 0};
+        scsi_put_be16(data, 0xABCD);
+        scsi_put_be32(data, 0xDEADBEEF);
+        
+        if (data[0] == 0xDE && data[1] == 0xAD && data[2] == 0xBE && data[3] == 0xEF) {
+            kprint("PASS: scsi_put_be32\n");
+            pass++;
+        } else {
+            kprint("FAIL: scsi_put_be32\n");
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 7: Device allocation
+     */
+    {
+        scsi_device_t *dev = scsi_device_alloc();
+        if (dev != NULL) {
+            kprint("PASS: scsi_device_alloc\n");
+            pass++;
+            scsi_device_free(dev);
+        } else {
+            kprint("FAIL: scsi_device_alloc returned NULL\n");
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 8: Request allocation
+     */
+    {
+        scsi_request_t *req = scsi_request_alloc();
+        if (req != NULL && req->state == SCSI_REQ_STATE_PENDING) {
+            kprint("PASS: scsi_request_alloc\n");
+            pass++;
+            scsi_request_free(req);
+        } else {
+            kprint("FAIL: scsi_request_alloc\n");
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 9: Transport registration
+     */
+    {
+        int ret = scsi_register_link(&mock_link);
+        if (ret == 0) {
+            kprint("PASS: scsi_register_link\n");
+            pass++;
+        } else {
+            kprint("FAIL: scsi_register_link\n");
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 10: Device registration and lookup
+     */
+    {
+        scsi_device_t *dev = scsi_device_alloc();
+        dev->bus = 0;
+        dev->target = 1;
+        dev->lun = 2;
+        dev->type = SCSI_TYPE_DISK;
+        strcpy(dev->vendor, "TEST");
+        strcpy(dev->product, "DEVICE");
+        dev->link = &mock_link;
+        
+        int ret = scsi_device_register(dev);
+        scsi_device_t *found = scsi_device_lookup(0, 1, 2);
+        
+        if (ret == 0 && found == dev) {
+            kprint("PASS: scsi_device_register/lookup\n");
+            pass++;
+        } else {
+            kprint("FAIL: scsi_device_register/lookup\n");
+            fail++;
+        }
+        
+        scsi_device_unregister(dev);
+        scsi_device_free(dev);
+    }
+    
+    /*
+     * Test 11: Sense key parsing (fixed format)
+     */
+    {
+        uint8_t sense[18] = {0x70, 0, 0x05, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0x24, 0x00};
+        int key = scsi_sense_key(sense, 18);
+        int asc = scsi_sense_asc(sense, 18);
+        int ascq = scsi_sense_ascq(sense, 18);
+        
+        if (key == SCSI_SENSE_ILLEGAL_REQUEST && asc == 0x24 && ascq == 0x00) {
+            kprint("PASS: Sense parsing (fixed format)\n");
+            pass++;
+        } else {
+            sprintf(buf, "FAIL: Sense parsing key=%d asc=%02x ascq=%02x\n", key, asc, ascq);
+            kprint(buf);
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 12: Sense string lookup
+     */
+    {
+        const char *str = scsi_sense_string(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
+        if (strcmp(str, "Medium Error") == 0) {
+            kprint("PASS: scsi_sense_string\n");
+            pass++;
+        } else {
+            sprintf(buf, "FAIL: scsi_sense_string returned '%s'\n", str);
+            kprint(buf);
+            fail++;
+        }
+    }
+    
+    /*
+     * Test 13: Command execution via mock transport
+     */
+    {
+        scsi_device_t *dev = scsi_device_alloc();
+        dev->bus = 0;
+        dev->target = 2;
+        dev->lun = 0;
+        dev->link = &mock_link;
+        scsi_device_register(dev);
+        
+        mock_execute_calls = 0;
+        mock_execute_return = 0;
+        
+        uint8_t cdb[6];
+        scsi_cdb_test_unit_ready(cdb);
+        int ret = scsi_execute_sync(dev, cdb, 6, NULL, 0, 0, 5000);
+        
+        if (ret == 0 && mock_execute_calls == 1) {
+            kprint("PASS: scsi_execute_sync\n");
+            pass++;
+        } else {
+            sprintf(buf, "FAIL: scsi_execute_sync ret=%d calls=%d\n", ret, mock_execute_calls);
+            kprint(buf);
+            fail++;
+        }
+        
+        scsi_device_unregister(dev);
+        scsi_device_free(dev);
+    }
+    
+    /* Summary */
+    sprintf(buf, "=== SCSI Tests: %d passed, %d failed ===\n", pass, fail);
+    kprint(buf);
+}
+
+void run_scsi_tests(void) {
+    test_scsi();
+}

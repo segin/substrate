@@ -615,7 +615,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 ### 3. Drivers (`sys/drivers`)
 - [ ] **Storage Subsystem (Unified SCSI Stack):**
     - [ ] **Core Architecture (CAM/Mid-layer):**
-        - [ ] **Data Structures:** Define `scsi_request`, `scsi_device`, `scsi_link` (transport linkage).
+        - [x] **Data Structures:** Define `scsi_request`, `scsi_device`, `scsi_link` (transport linkage). <!-- scsi.h, scsi.c, test_scsi.c -->
         - [ ] **Discovery:**
             - [ ] Implement Bus Scanning logic (HBA enumeration).
             - [ ] Implement `REPORT LUNS` and `INQUIRY` probing.
@@ -889,7 +889,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] **Creation/Deletion:**
                 - [ ] `vop_create(dvp, vpp, cnp, vap)`: Create regular file.
                 - [ ] `vop_mknod(dvp, vpp, cnp, vap)`: Create device node.
-                - [ ] `vop_mkdir(dvp, vpp, cnp, vap)`: Create directory.
+                - [x] `vop_mkdir(dvp, vpp, cnp, vap)`: Create directory. <!-- vfs.h, vfs.c, udf.c -->
                 - [ ] `vop_whiteout(dvp, cnp, flags)`: UnionFS whiteout support.
                 - [ ] `vop_remove(dvp, vp, cnp)`: Remove directory entry (unlink).
                 - [ ] `vop_rmdir(dvp, vp, cnp)`: Remove directory.
