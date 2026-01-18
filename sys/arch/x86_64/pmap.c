@@ -899,3 +899,177 @@ void pmap_shootdown_wait(int expected_cpus) {
         timeout--;
     }
 }
+
+// ========== Large Page Support (2MB/1GB) ==========
+
+/*
+ * cpuid_check_1gb_pages - Check if 1GB huge pages are supported
+ * 
+ * Returns: 1 if supported (CPUID.80000001H:EDX[26]), 0 otherwise.
+ */
+int cpuid_check_1gb_pages(void) {
+    uint32_t eax, ebx, ecx, edx;
+    
+    // Check extended CPUID support
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000000));
+    if (eax < 0x80000001UL) return 0;
+    
+    // Check 1GB page support bit
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000001));
+    return (edx >> 26) & 1;
+}
+
+/*
+ * pmap_enter_2mb - Create a 2MB large page mapping
+ *
+ * The VA and PA must be 2MB (0x200000) aligned.
+ * Uses PDE.PS=1 to skip the 4KB page table level.
+ */
+int pmap_enter_2mb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags) {
+    // Alignment checks
+    if ((va & 0x1FFFFF) != 0 || (pa & 0x1FFFFF) != 0) {
+        return -1; // Not 2MB aligned
+    }
+    
+    if (pmap != curpmap) return -1;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    
+    // Ensure PML4E exists
+    if (!(V_PML4[pml4i] & PTE_P)) {
+        void *page = pmm_alloc_block();
+        if (!page) return -1;
+        memset(page, 0, 4096);
+        uint64_t page_phys = pmap_kvtop(page);
+        V_PML4[pml4i] = page_phys | PTE_P | PTE_W | PTE_U;
+    }
+    
+    // Ensure PDPTE exists
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) {
+        void *page = pmm_alloc_block();
+        if (!page) return -1;
+        memset(page, 0, 4096);
+        uint64_t page_phys = pmap_kvtop(page);
+        pdpt[pdpti] = page_phys | PTE_P | PTE_W | PTE_U;
+    }
+    
+    // Check for 1GB page (can't install 2MB inside 1GB)
+    if (pdpt[pdpti] & PTE_PS) {
+        return -1; // Conflict with 1GB mapping
+    }
+    
+    // Set up PDE with PS bit for 2MB page
+    pde_t *pd = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0);
+    
+    uint64_t pde = (pa & ~0x1FFFFFULL) | PTE_P | PTE_PS;
+    if (prot & 2) pde |= PTE_W;     // VM_PROT_WRITE
+    if (prot & 4) pde |= PTE_U;     // User accessible (implicit for user pages)
+    if (flags & PTE_G) pde |= PTE_G; // Global
+    if (!(prot & 4) || (flags & PTE_NX)) pde |= PTE_NX; // No execute
+    
+    pd[pdi] = pde;
+    pmap_invalidate_page(va);
+    
+    pmap->resident_count += 512; // 2MB = 512 * 4KB
+    return 0;
+}
+
+/*
+ * pmap_enter_1gb - Create a 1GB huge page mapping
+ *
+ * The VA and PA must be 1GB (0x40000000) aligned.
+ * Uses PDPTE.PS=1 to skip PD and PT levels.
+ * Requires CPU support (CPUID.80000001H:EDX[26]).
+ */
+int pmap_enter_1gb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags) {
+    // Check CPU support
+    if (!cpuid_check_1gb_pages()) {
+        return -1; // Not supported
+    }
+    
+    // Alignment checks
+    if ((va & 0x3FFFFFFF) != 0 || (pa & 0x3FFFFFFF) != 0) {
+        return -1; // Not 1GB aligned
+    }
+    
+    if (pmap != curpmap) return -1;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    
+    // Ensure PML4E exists
+    if (!(V_PML4[pml4i] & PTE_P)) {
+        void *page = pmm_alloc_block();
+        if (!page) return -1;
+        memset(page, 0, 4096);
+        uint64_t page_phys = pmap_kvtop(page);
+        V_PML4[pml4i] = page_phys | PTE_P | PTE_W | PTE_U;
+    }
+    
+    // Set up PDPTE with PS bit for 1GB page
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    
+    uint64_t pdpte = (pa & ~0x3FFFFFFFULL) | PTE_P | PTE_PS;
+    if (prot & 2) pdpte |= PTE_W;
+    if (prot & 4) pdpte |= PTE_U;
+    if (flags & PTE_G) pdpte |= PTE_G;
+    if (!(prot & 4) || (flags & PTE_NX)) pdpte |= PTE_NX;
+    
+    pdpt[pdpti] = pdpte;
+    pmap_invalidate_page(va);
+    
+    pmap->resident_count += 262144; // 1GB = 262144 * 4KB
+    return 0;
+}
+
+/*
+ * pmap_remove_2mb - Remove a 2MB large page mapping
+ */
+void pmap_remove_2mb(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return;
+    if ((va & 0x1FFFFF) != 0) return;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return;
+    if (pdpt[pdpti] & PTE_PS) return; // 1GB page, not 2MB
+    
+    pde_t *pd = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return;
+    if (!(pd[pdi] & PTE_PS)) return; // Not a 2MB page
+    
+    pd[pdi] = 0;
+    pmap_invalidate_page(va);
+    
+    pmap->resident_count -= 512;
+}
+
+/*
+ * pmap_remove_1gb - Remove a 1GB huge page mapping
+ */
+void pmap_remove_1gb(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return;
+    if ((va & 0x3FFFFFFF) != 0) return;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return;
+    if (!(pdpt[pdpti] & PTE_PS)) return; // Not a 1GB page
+    
+    pdpt[pdpti] = 0;
+    pmap_invalidate_page(va);
+    
+    pmap->resident_count -= 262144;
+}

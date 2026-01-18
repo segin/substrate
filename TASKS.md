@@ -312,9 +312,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] TLB shootdown for SMP <!-- pmap.c:752-882 -->
                 - [x] IPI mechanism for remote TLB invalidation <!-- pmap.c:808-824 pmap_shootdown_page/range/all -->
                 - [x] INVPCID instruction support if available <!-- Deferred: using invlpg + CR3 reload for now -->
-            - [ ] Large page support
-                - [ ] 2MB pages (PDE with PS bit)
-                - [ ] 1GB pages (PDPTE with PS bit, if supported)
+            - [x] Large page support <!-- pmap.c:884-1048 -->
+                - [x] 2MB pages (PDE with PS bit) <!-- pmap.c:910-978 pmap_enter_2mb, pmap_remove_2mb -->
+                - [x] 1GB pages (PDPTE with PS bit, if supported) <!-- pmap.c:980-1048 pmap_enter_1gb, pmap_remove_1gb, cpuid_check_1gb_pages -->
             - [ ] Global page support (PGE)
                 - [ ] Set CR4.PGE to enable global pages
                 - [ ] Mark kernel pages with PG_G

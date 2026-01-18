@@ -155,4 +155,11 @@ void pmap_shootdown_defer(uint64_t va);
 void pmap_shootdown_commit(void);
 void pmap_shootdown_wait(int expected_cpus);
 
+// Large page support (2MB/1GB)
+int cpuid_check_1gb_pages(void);
+int pmap_enter_2mb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags);
+int pmap_enter_1gb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags);
+void pmap_remove_2mb(pmap_t pmap, uint64_t va);
+void pmap_remove_1gb(pmap_t pmap, uint64_t va);
+
 #endif
