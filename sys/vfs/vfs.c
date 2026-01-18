@@ -365,3 +365,58 @@ int poll_fs(fs_node_t *node, void *waiter) {
     return 0;
 }
 
+
+// Helper to find last occurrence of character
+static char *vfs_strrchr(const char *s, int c) {
+    const char *last = NULL;
+    while (*s) {
+        if (*s == c) last = s;
+        s++;
+    }
+    if (*s == c) last = s; // check terminator... unlikely but standard logic
+    return (char *)last;
+}
+
+int vfs_mkdir(const char *path, uint16_t permission) {
+    if (!path) return -1;
+    
+    char path_buf[256];
+    strncpy(path_buf, path, sizeof(path_buf));
+    path_buf[255] = '\0';
+    
+    // Split path into parent and name
+    char *last_slash = vfs_strrchr(path_buf, '/');
+    char *name = NULL;
+    fs_node_t *parent_node = NULL;
+    
+    if (last_slash) {
+        *last_slash = '\0';
+        name = last_slash + 1;
+        
+        // Check for trailing slash case: /foo/bar/ -> name=""
+        if (*name == '\0') return -1; // Trailing slash not supported yet
+        
+        if (path_buf[0] == '\0') {
+            // Path was "/foo", parent became "" (meaning root)
+            parent_node = fs_root;
+        } else {
+            // Find parent
+            // TODO: Use current_process->cwd if relative? 
+            // For now assuming full path or we rely on caller to resolve.
+            parent_node = vfs_lookup(fs_root, path_buf);
+        }
+    } else {
+        // No slash: "foo" -> imply root if no CWD support yet
+        parent_node = fs_root;
+        name = path_buf;
+    }
+    
+    if (!parent_node) return -1; // Parent not found
+    
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -1; // Not a directory
+    
+    if (!parent_node->mkdir) return -1; // FS doesn't support mkdir
+    
+    return parent_node->mkdir(parent_node, name, permission);
+}
+

@@ -33,6 +33,7 @@ typedef int (*readlink_type_t)(struct fs_node*, char *buf, size_t size);
 typedef int (*symlink_type_t)(struct fs_node*, const char *target, const char *name);
 typedef int (*link_type_t)(struct fs_node*, struct fs_node*, const char*);
 typedef int (*unlink_type_t)(struct fs_node*, const char *name);
+typedef int (*mkdir_type_t)(struct fs_node*, const char *name, uint16_t permission);
 
 typedef struct fs_node {
     char name[128];
@@ -62,6 +63,7 @@ typedef struct fs_node {
     symlink_type_t symlink;
     link_type_t link;
     unlink_type_t unlink;
+    mkdir_type_t mkdir;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
 } fs_node_t;
 
@@ -100,6 +102,7 @@ int readlink_fs(fs_node_t *node, char *buf, size_t size);
 int symlink_fs(fs_node_t *parent, const char *target, const char *name);
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name);
 int unlink_fs(fs_node_t *node, const char *name);
+int vfs_mkdir(const char *path, uint16_t permission);
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
 

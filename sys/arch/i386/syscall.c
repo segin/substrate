@@ -533,7 +533,11 @@ int sys_chroot(const char *path) {
     return 0;
 }
 
-int sys_mkdir(const char *p, int m) { (void)p; (void)m; return 0; }
+extern int vfs_mkdir(const char *path, uint16_t permission);
+int sys_mkdir(const char *p, int m) {
+    if (!p) return -1;
+    return vfs_mkdir(p, (uint16_t)m);
+}
 int sys_rmdir(const char *p) { (void)p; return 0; }
 int sys_getuid(void) { return current_process->uid; }
 int sys_getgid(void) { return current_process->gid; }

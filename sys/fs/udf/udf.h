@@ -61,6 +61,14 @@ struct udf_extent_ad {
 } __attribute__((packed));
 
 /*
+ * Short Allocation Descriptor (ECMA-167 4/14.14.1)
+ */
+struct udf_short_ad {
+    uint32_t length;                /* Extent length + type in upper 2 bits */
+    uint32_t position;              /* Logical block position */
+} __attribute__((packed));
+
+/*
  * Entity Identifier / Registration ID (ECMA-167 1/7.4)
  */
 struct udf_regid {
@@ -135,13 +143,29 @@ struct udf_pvd {
 /*
  * Partition Descriptor (ECMA-167 3/10.5)
  */
+/*
+ * Partition Header Descriptor (ECMA-167 4/14.3)
+ * Found in contents_use field of Partition Descriptor
+ */
+struct udf_partition_header_desc {
+    struct udf_short_ad unalloc_space_table;
+    struct udf_short_ad unalloc_space_bitmap;
+    struct udf_short_ad partition_integrity_table;
+    struct udf_short_ad freed_space_table;
+    struct udf_short_ad freed_space_bitmap;
+    uint8_t  reserved[88];
+} __attribute__((packed));
+
+/*
+ * Partition Descriptor (ECMA-167 3/10.5)
+ */
 struct udf_pd {
     struct udf_tag tag;
     uint32_t vds_number;
     uint16_t partition_flags;
     uint16_t partition_number;
     struct udf_regid partition_contents;
-    uint8_t  contents_use[128];     /* For UDF: contains partition header */
+    uint8_t  contents_use[128];     /* Contains udf_partition_header_desc */
     uint32_t access_type;           /* 1=read-only, 3=rewritable */
     uint32_t partition_start;       /* First sector of partition */
     uint32_t partition_length;      /* Length in sectors */
@@ -204,13 +228,7 @@ struct udf_fsd {
     uint8_t  reserved[32];
 } __attribute__((packed));
 
-/*
- * Short Allocation Descriptor (ECMA-167 4/14.14.1)
- */
-struct udf_short_ad {
-    uint32_t length;                /* Extent length + type in upper 2 bits */
-    uint32_t position;              /* Logical block position */
-} __attribute__((packed));
+
 
 /* ICB Tag (ECMA-167 4/14.6) - Common header for file entries */
 struct udf_icb_tag {

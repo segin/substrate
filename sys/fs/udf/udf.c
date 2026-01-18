@@ -10,7 +10,8 @@
 #include <string.h>
 
 /* UDF filesystem context (single mount for now) */
-static struct udf_fs {
+/* UDF filesystem context (single mount for now) */
+struct udf_fs {
     fs_node_t *device;              /* Block device */
     uint32_t sector_size;           /* Usually 2048 */
     uint32_t partition_start;       /* First sector of partition */
@@ -306,9 +307,19 @@ static fs_node_t udf_root;
 static udf_node_t udf_root_ctx;
 
 /* Forward declarations for VFS operations */
+/* Forward declarations for VFS operations */
 static uint32_t udf_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
 static struct dirent *udf_vfs_readdir(fs_node_t *node, uint32_t index);
 static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name);
+static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permission);
+
+/* External functions from udf_write.c */
+extern int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
+extern uint32_t udf_alloc_block(void);
+extern int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type, uint32_t uid, uint32_t gid, uint32_t permissions);
+extern int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics);
+
+extern struct process *current_process;
 
 static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, struct udf_fe *fe) {
     int idx = udf_node_cache_idx++ % UDF_NODE_CACHE_SIZE;
@@ -330,6 +341,7 @@ static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, str
         node->flags = FS_DIRECTORY;
         node->readdir = udf_vfs_readdir;
         node->finddir = udf_vfs_finddir;
+        node->mkdir = udf_vfs_mkdir;
     } else {
         node->flags = FS_FILE;
         node->read = udf_vfs_read;
@@ -440,6 +452,55 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
     return NULL;
 }
 
+static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permission) {
+    if (!parent || !name) return -1;
+    
+    udf_node_t *pctx = (udf_node_t *)(uintptr_t)parent->impl;
+    struct udf_fs *fs = pctx->fs;
+    
+    /* Allocate block for new directory */
+    uint32_t block = udf_alloc_block();
+    if (block == 0) return -1; // No space
+    
+    // Get current process credentials
+    uint32_t uid = current_process ? current_process->uid : 0;
+    uint32_t gid = current_process ? current_process->gid : 0;
+    
+    /* Create new directory FE */
+    if (udf_create_fe(fs->device, block, UDF_FILETYPE_DIR, uid, gid, permission) != 0) {
+        // TODO: Free block
+        return -1;
+    }
+    
+    /* Create ICB to point to new directory */
+    struct udf_long_ad new_icb;
+    new_icb.length = 2048; // Length of FE
+    new_icb.block = block;
+    new_icb.partition = pctx->icb.partition;
+    memset(new_icb.impl_use, 0, 6);
+    
+    /* Add entry to parent directory */
+    if (udf_add_fid(fs->device, &pctx->fe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
+        return -1;
+    }
+    
+    /* Add . and .. to new directory */
+    struct udf_fe new_fe;
+    struct udf_long_ad fe_icb = new_icb;
+    // Read the newly created FE so we can add to it
+    if (udf_read_fe(fs, &fe_icb, &new_fe) != 0) return -1;
+    
+    // Add .. (parent)
+    if (udf_add_fid(fs->device, &new_fe, block, "..", &pctx->icb, UDF_FID_DIRECTORY | UDF_FID_PARENT) != 0) {
+        // Warning?
+    }
+    
+    // Update parent node size
+    parent->length = (uint32_t)pctx->fe.info_length;
+    
+    return 0;
+}
+
 /* VFS filesystem structure */
 static filesystem_t udf_filesystem = {
     .name = "udf",
@@ -479,6 +540,17 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
     udf_ctx.partition_length = pd.partition_length;
     udf_ctx.logical_block_size = lvd.logical_block_size;
     
+    /* Initialize Space Bitmap */
+    struct udf_partition_header_desc *phd = (struct udf_partition_header_desc *)pd.contents_use;
+    if (phd->unalloc_space_bitmap.length > 0) {
+        // Bitmap exists
+        udf_read_space_bitmap(dev, pd.partition_start, 
+                              phd->unalloc_space_bitmap.position, 
+                              phd->unalloc_space_bitmap.length);
+    } else {
+        kprint("UDF: No space bitmap found (ReadOnly?)\n");
+    }
+    
     /* Read File Set Descriptor */
     struct udf_fsd fsd;
     if (udf_read_fsd(dev, &udf_ctx, &lvd, &fsd) != 0) {
@@ -507,6 +579,7 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
     udf_root.impl = (uintptr_t)&udf_root_ctx;
     udf_root.readdir = udf_vfs_readdir;
     udf_root.finddir = udf_vfs_finddir;
+    udf_root.mkdir = udf_vfs_mkdir;
     
     kprint("UDF: Mounted successfully\n");
     return &udf_root;
