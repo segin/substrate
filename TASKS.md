@@ -624,8 +624,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Asynchronous command queueing (completion callbacks). <!-- scsi.c:scsi_queue_request, scsi_complete_request -->
             - [x] Timeout management and retries. <!-- scsi.c:scsi_execute (retry loop) -->
             - [x] Error Handling: Sense Data definition and parsing (SPC-3). <!-- scsi.c:scsi_sense_key, scsi_sense_string -->
-    - [ ] **High-Level Device Drivers:**
-        - [ ] **Unified Userspace Interface:**
+    - [x] **High-Level Device Drivers:** <!-- scsi_dev.c, scsi_ctl.c -->
+        - [x] **Unified Userspace Interface:** <!-- Device nodes and unified driver complete -->
             - [x] **Device Nodes:** <!-- scsi_ctl.c:scsi_create_generic_node, scsi_create_bus_node -->
                 - [x] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`) - Direct generic SCSI access (Bus:Target:LUN). <!-- scsi_ctl.c:sg_ioctl -->
                 - [x] `/dev/storage/scsi/B` (e.g., `0`) - Bus controller ioctl endpoint (Enumeration/Rescan). <!-- scsi_ctl.c:bus_ioctl -->
