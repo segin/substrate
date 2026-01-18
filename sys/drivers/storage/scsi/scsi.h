@@ -325,6 +325,12 @@ int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
                       void *data, uint32_t data_len, uint16_t flags,
                       uint32_t timeout_ms);
 
+/* Async Queue Management */
+int scsi_queue_request(scsi_request_t *req);   /* Queue for async execution */
+int scsi_process_queue(scsi_device_t *dev);    /* Process pending requests */
+int scsi_abort_request(scsi_request_t *req);   /* Abort pending request */
+void scsi_complete_request(scsi_request_t *req, int status);  /* Mark complete */
+
 /* Discovery */
 int scsi_scan_bus(scsi_link_t *link, uint8_t bus);
 int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun);

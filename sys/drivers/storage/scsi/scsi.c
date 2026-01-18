@@ -328,6 +328,133 @@ int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
 
 /*
  * ============================================================
+ * Async Queue Management
+ * ============================================================
+ */
+
+/*
+ * Queue a request for async execution
+ * The request will be processed when the device becomes available
+ */
+int scsi_queue_request(scsi_request_t *req) {
+    if (!req || !req->device) {
+        return -1;
+    }
+    
+    scsi_device_t *dev = req->device;
+    
+    req->state = SCSI_REQ_STATE_PENDING;
+    req->next = NULL;
+    
+    /* Add to device queue tail */
+    if (dev->queue_tail) {
+        dev->queue_tail->next = req;
+        dev->queue_tail = req;
+    } else {
+        dev->queue_head = req;
+        dev->queue_tail = req;
+    }
+    dev->queue_depth++;
+    
+    /* Try to start processing if queue was empty */
+    if (dev->queue_depth == 1) {
+        scsi_process_queue(dev);
+    }
+    
+    return 0;
+}
+
+/*
+ * Process pending requests in device queue
+ * Returns: Number of requests started
+ */
+int scsi_process_queue(scsi_device_t *dev) {
+    if (!dev) return 0;
+    
+    int started = 0;
+    
+    while (dev->queue_head && dev->queue_depth <= dev->max_queue_depth) {
+        scsi_request_t *req = dev->queue_head;
+        
+        /* Remove from queue head */
+        dev->queue_head = req->next;
+        if (!dev->queue_head) {
+            dev->queue_tail = NULL;
+        }
+        req->next = NULL;
+        
+        /* Execute the request */
+        scsi_execute(req);
+        started++;
+    }
+    
+    return started;
+}
+
+/*
+ * Abort a pending request
+ */
+int scsi_abort_request(scsi_request_t *req) {
+    if (!req || !req->device) {
+        return -1;
+    }
+    
+    scsi_device_t *dev = req->device;
+    
+    /* Only abort if pending (not yet started) */
+    if (req->state != SCSI_REQ_STATE_PENDING) {
+        return -1;  /* Can't abort in-flight requests here */
+    }
+    
+    /* Remove from queue */
+    scsi_request_t **pp = &dev->queue_head;
+    while (*pp) {
+        if (*pp == req) {
+            *pp = req->next;
+            if (dev->queue_tail == req) {
+                dev->queue_tail = NULL;
+            }
+            dev->queue_depth--;
+            
+            req->state = SCSI_REQ_STATE_ERROR;
+            req->error = -1;  /* Aborted */
+            
+            /* Invoke callback */
+            if (req->callback) {
+                req->callback(req);
+            }
+            
+            return 0;
+        }
+        pp = &(*pp)->next;
+    }
+    
+    return -1;  /* Not found */
+}
+
+/*
+ * Mark a request as complete and invoke callback
+ */
+void scsi_complete_request(scsi_request_t *req, int status) {
+    if (!req) return;
+    
+    req->state = (status == 0) ? SCSI_REQ_STATE_COMPLETE : SCSI_REQ_STATE_ERROR;
+    req->error = status;
+    
+    /* Invoke callback */
+    if (req->callback) {
+        req->callback(req);
+    }
+    
+    /* Process next queued request */
+    if (req->device) {
+        req->device->queue_depth--;
+        scsi_process_queue(req->device);
+    }
+}
+
+/*
+ * ============================================================
  * Standard Commands
  * ============================================================
  */
