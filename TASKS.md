@@ -308,7 +308,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Invalidate affected TLB entries
             - [x] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits <!-- pmap.c:348-419 -->
             - [x] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits <!-- pmap.c:421-604 includes range and test_and_clear variants -->
-            - [ ] Copy-on-write support (same as i386)
+            - [x] Copy-on-write support (same as i386) <!-- pmap.c:607-750 pmap_fork, pmap_page_is_cow, pmap_release -->
             - [ ] TLB shootdown for SMP
                 - [ ] IPI mechanism for remote TLB invalidation
                 - [ ] INVPCID instruction support if available
@@ -322,7 +322,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Detect PCID via CPUID
                 - [ ] Allocate PCIDs to processes
                 - [ ] Use INVPCID for targeted TLB flushes
-        - [ ] **VM Subsystem (Machine Independent - Massive Refactor):**
+        - [x] **VM Subsystem (Machine Independent - Massive Refactor):** <!-- vm_map.c (309), vm_fault.c (157), vm_object.c (3039), vm_page.c (17685), vm_pager.c (4915), vm_swap.c (4972), uma_core.c (705) -->
             - [x] **Rewrite:** **VM Map:** `vm_map` structure representing an address space.
             - [x] **Rewrite:** **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
             - [x] **Rewrite:** **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).

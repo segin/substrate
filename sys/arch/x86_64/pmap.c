@@ -602,3 +602,159 @@ int pmap_test_and_clear_modify(pmap_t pmap, uint64_t va) {
     }
     return 0;
 }
+
+// ========== Copy-on-Write (COW) Support ==========
+
+/*
+ * pmap_fork - Fork an address space for COW
+ *
+ * Creates a new pmap that shares all user pages with the source pmap
+ * in read-only mode. Both parent and child will fault on write,
+ * triggering COW page duplication.
+ *
+ * Returns: New pmap on success, NULL on failure.
+ */
+pmap_t pmap_fork(pmap_t src_pmap) {
+    if (!src_pmap) return NULL;
+    
+    pmap_t dst_pmap = pmap_create();
+    if (!dst_pmap) return NULL;
+    
+    pml4e_t *src_pml4 = src_pmap->pml4;
+    pml4e_t *dst_pml4 = dst_pmap->pml4;
+    
+    // Walk user space (PML4 entries 0-255)
+    for (int pml4i = 0; pml4i < 256; pml4i++) {
+        if (!(src_pml4[pml4i] & PTE_P)) continue;
+        
+        uint64_t src_pdpt_phys = src_pml4[pml4i] & PTE_ADDR_MASK;
+        pdpte_t *src_pdpt = (pdpte_t *)pmap_ptokv(src_pdpt_phys);
+        
+        void *dst_pdpt_page = pmm_alloc_block();
+        if (!dst_pdpt_page) {
+            pmap_destroy(dst_pmap);
+            return NULL;
+        }
+        memset(dst_pdpt_page, 0, 4096);
+        pdpte_t *dst_pdpt = (pdpte_t *)dst_pdpt_page;
+        uint64_t dst_pdpt_phys = pmap_kvtop(dst_pdpt_page);
+        
+        dst_pml4[pml4i] = dst_pdpt_phys | (src_pml4[pml4i] & 0xFFF);
+        
+        for (int pdpti = 0; pdpti < 512; pdpti++) {
+            if (!(src_pdpt[pdpti] & PTE_P)) continue;
+            
+            // Handle 1GB huge pages
+            if (src_pdpt[pdpti] & PTE_PS) {
+                dst_pdpt[pdpti] = src_pdpt[pdpti] & ~PTE_W;
+                src_pdpt[pdpti] &= ~PTE_W;
+                dst_pmap->resident_count += 262144; // 1GB / 4KB
+                dst_pmap->stats.cow_pages_mapped += 262144;
+                continue;
+            }
+            
+            uint64_t src_pd_phys = src_pdpt[pdpti] & PTE_ADDR_MASK;
+            pde_t *src_pd = (pde_t *)pmap_ptokv(src_pd_phys);
+            
+            void *dst_pd_page = pmm_alloc_block();
+            if (!dst_pd_page) {
+                pmap_destroy(dst_pmap);
+                return NULL;
+            }
+            memset(dst_pd_page, 0, 4096);
+            pde_t *dst_pd = (pde_t *)dst_pd_page;
+            uint64_t dst_pd_phys = pmap_kvtop(dst_pd_page);
+            
+            dst_pdpt[pdpti] = dst_pd_phys | (src_pdpt[pdpti] & 0xFFF);
+            
+            for (int pdi = 0; pdi < 512; pdi++) {
+                if (!(src_pd[pdi] & PTE_P)) continue;
+                
+                // Handle 2MB large pages
+                if (src_pd[pdi] & PTE_PS) {
+                    dst_pd[pdi] = src_pd[pdi] & ~PTE_W;
+                    src_pd[pdi] &= ~PTE_W;
+                    dst_pmap->resident_count += 512; // 2MB / 4KB
+                    dst_pmap->stats.cow_pages_mapped += 512;
+                    continue;
+                }
+                
+                uint64_t src_pt_phys = src_pd[pdi] & PTE_ADDR_MASK;
+                pte_t *src_pt = (pte_t *)pmap_ptokv(src_pt_phys);
+                
+                void *dst_pt_page = pmm_alloc_block();
+                if (!dst_pt_page) {
+                    pmap_destroy(dst_pmap);
+                    return NULL;
+                }
+                memset(dst_pt_page, 0, 4096);
+                pte_t *dst_pt = (pte_t *)dst_pt_page;
+                uint64_t dst_pt_phys = pmap_kvtop(dst_pt_page);
+                
+                dst_pd[pdi] = dst_pt_phys | (src_pd[pdi] & 0xFFF);
+                
+                for (int pti = 0; pti < 512; pti++) {
+                    if (!(src_pt[pti] & PTE_P)) continue;
+                    
+                    // Copy PTE with write bit cleared for COW
+                    dst_pt[pti] = src_pt[pti] & ~PTE_W;
+                    src_pt[pti] &= ~PTE_W;
+                    
+                    dst_pmap->resident_count++;
+                    dst_pmap->stats.cow_pages_mapped++;
+                    src_pmap->stats.cow_pages_mapped++;
+                }
+            }
+        }
+    }
+    
+    return dst_pmap;
+}
+
+/*
+ * pmap_page_is_cow - Check if a page is in COW state
+ *
+ * Returns: 1 if page is present but read-only (COW candidate), 0 otherwise.
+ */
+int pmap_page_is_cow(pmap_t pmap, uint64_t va) {
+    if (pmap != curpmap) return 0;
+    
+    uint64_t pml4i = PML4_INDEX(va);
+    uint64_t pdpti = PDPT_INDEX(va);
+    uint64_t pdi   = PD_INDEX(va);
+    uint64_t pti   = PT_INDEX(va);
+    
+    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    
+    pdpte_t *pdpt = V_PDPT(pml4i);
+    if (!(pdpt[pdpti] & PTE_P)) return 0;
+    
+    if (pdpt[pdpti] & PTE_PS) {
+        return !(pdpt[pdpti] & PTE_W);
+    }
+    
+    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    if (!(pd[pdi] & PTE_P)) return 0;
+    
+    if (pd[pdi] & PTE_PS) {
+        return !(pd[pdi] & PTE_W);
+    }
+    
+    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    if (!(pt[pti] & PTE_P)) return 0;
+    
+    return !(pt[pti] & PTE_W);
+}
+
+/*
+ * pmap_release - Decrement pmap reference count
+ */
+void pmap_release(pmap_t pmap) {
+    if (!pmap) return;
+    if (pmap == kernel_pmap_ptr) return;
+    
+    int old = __sync_fetch_and_sub(&pmap->ref_count, 1);
+    if (old <= 1) {
+        pmap_destroy(pmap);
+    }
+}

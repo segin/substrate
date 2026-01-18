@@ -140,4 +140,9 @@ int pmap_test_and_clear_modify(pmap_t pmap, uint64_t va);
 // TLB invalidation
 void pmap_invalidate_page(uint64_t va);
 
+// Copy-on-Write support
+pmap_t pmap_fork(pmap_t src_pmap);
+int pmap_page_is_cow(pmap_t pmap, uint64_t va);
+void pmap_release(pmap_t pmap);
+
 #endif
