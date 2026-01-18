@@ -14,16 +14,16 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Sanitize memory map entries (validate type, clamp to 32-bit). <!-- pmm_validate_mmap_entry, pmm_validate_e820_entry -->
                 - [x] Calculate and report total usable RAM. <!-- pmm_cb_stats with 64-bit total_usable -->
                 - [x] Properly identify kernel physical bounds from linker symbols. <!-- _kernel_end in pmm_watermark_init, pmm_cb_init_buddy -->
-        - [x] **Core Allocator Rewrite:**
-            - [x] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures.
-            - [x] **Dynamic Metadata:** Calculate and allocate `vm_page_t` array or bitmaps based on *actual* detected RAM (remove 128MB static limit).
-            - [x] **Low Memory (4MiB) Support:** efficient handling of constrained environments.
-            - [x] **Algorithms:**
-                - [x] **Single Page:** O(1) Free List allocation (replace bitmap scan).
-                - [x] **Contiguous:** Implement Buddy Allocator or Bitmap Tree for efficient `pmm_alloc_contiguous`.
-        - [x] **Safety & Integration:**
-            - [x] **Locking:** Fine-grained spinlocks for SMP access.
-            - [x] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues.
+        - [x] **Core Allocator Rewrite:** <!-- pmm.c, phys_mem.c, test_vm_phys.c, test_pmm_buddy.c -->
+            - [x] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures. <!-- pmm.c:21-47 pmm_watermark_init/alloc/used -->
+            - [x] **Dynamic Metadata:** Calculate and allocate `vm_page_t` array or bitmaps based on *actual* detected RAM (remove 128MB static limit). <!-- pmm.c:271-290, pmm_watermark_alloc for page array -->
+            - [x] **Low Memory (4MiB) Support:** efficient handling of constrained environments. <!-- pmm.c:33-34 watermark_end clamping, pmm.c:278-286 fallback to static bitmap -->
+            - [x] **Algorithms:** <!-- phys_mem.c:20-97 buddy enqueue/dequeue/alloc/free -->
+                - [x] **Single Page:** O(1) Free List allocation (replace bitmap scan). <!-- phys_mem.c:155-164 vm_phys_alloc_page, O(1) via free_lists[0] -->
+                - [x] **Contiguous:** Implement Buddy Allocator or Bitmap Tree for efficient `pmm_alloc_contiguous`. <!-- phys_mem.c:180-194 vm_phys_alloc_contiguous, order-based buddy, test_vm_phys.c tests -->
+        - [x] **Safety & Integration:** <!-- phys_mem.c:15 spinlock, vm_page.c integration -->
+            - [x] **Locking:** Fine-grained spinlocks for SMP access. <!-- phys_mem.c:15 vm_phys_lock, intr_disable/restore guards in all APIs -->
+            - [x] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues. <!-- pmm.c:323-347 pmm_alloc/free_block wrappers, vm_page.c:46-78 vm_page_alloc -->
     - [ ] **Memory Management (BSD/Mach Design):**
         - [x] **Physical Memory (Machine Independent):** <!-- vm_page.h, vm_page.c, phys_mem.c, test_vm_page_queue.c -->
             - [x] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page. <!-- vm_page.h:12-64 -->
