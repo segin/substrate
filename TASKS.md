@@ -433,7 +433,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Synchronization:**
     - [x] Implement Spinlocks, Mutexes, and Semaphores.
     - [ ] **Userspace Synchronization (Futex):**
-        - [ ] **Core Operations:**
+        - [x] **Core Operations:** <!-- FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE all implemented in futex.c -->
             - [x] `FUTEX_WAIT`: Atomic compare-and-sleep.
             - [x] `FUTEX_WAKE`: Wakeup N waiters.
             - [x] `FUTEX_REQUEUE`: Move waiters to another lock.
