@@ -635,8 +635,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **Device Type Handling:**
                     - [x] **Direct Access (Disk):** Capacity/Geometry, Cache Flush. <!-- sd.c:sd_attach -->
                     - [x] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking. <!-- sr.c:sr_read_toc, sr_lock_door -->
-            - [ ] **Integration:**
-                - [ ] Register with DevFS using the schematic above.
+            - [x] **Integration:**
+                - [x] Register with DevFS using the schematic above. <!-- blkdev.c:blkdev_register -> devfs_register_device -->
                 - [ ] Implement `ioctl` for Bus Enumeration on controller nodes.
     - [ ] **Transport/HBA Drivers (Low-Level):**
         - [ ] **ATAPI (Legacy):**
