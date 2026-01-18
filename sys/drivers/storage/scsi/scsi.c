@@ -482,18 +482,175 @@ void scsi_cdb_write_10(uint8_t *cdb, uint32_t lba, uint16_t count) {
 
 /*
  * ============================================================
- * Discovery (Stubs - Full implementation in subsequent commits)
+ * Discovery - Bus Scanning (L620)
  * ============================================================
  */
 
-int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
-    (void)link; (void)bus;
-    /* Implemented in L620 */
+/*
+ * Probe a single LUN on a given target
+ * Returns: 0 on success (device found and registered), -1 on failure
+ */
+int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun) {
+    if (!link || !link->execute) {
+        return -1;
+    }
+    
+    /* Allocate temporary device for probing */
+    scsi_device_t *dev = scsi_device_alloc();
+    if (!dev) {
+        return -1;
+    }
+    
+    dev->bus = bus;
+    dev->target = target;
+    dev->lun = lun;
+    dev->link = link;
+    
+    /* Issue TEST UNIT READY to check if target responds */
+    scsi_request_t *req = scsi_request_alloc();
+    if (!req) {
+        scsi_device_free(dev);
+        return -1;
+    }
+    
+    scsi_request_init(req, dev);
+    scsi_cdb_test_unit_ready(req->cdb);
+    req->cdb_len = 6;
+    req->flags = SCSI_REQ_SYNC | SCSI_REQ_QUIET;
+    req->timeout_ms = 2000;  /* Short timeout for probe */
+    req->retries = 1;
+    
+    int ret = link->execute(link, req);
+    
+    /* Allow CHECK CONDITION (device exists but may need attention) */
+    if (ret < 0 && req->status != SCSI_STATUS_CHECK_CONDITION) {
+        scsi_request_free(req);
+        scsi_device_free(dev);
+        return -1;
+    }
+    
+    /* Issue INQUIRY to get device type and identity */
+    scsi_request_init(req, dev);
+    struct scsi_inquiry_data inq;
+    memset(&inq, 0, sizeof(inq));
+    
+    scsi_cdb_inquiry(req->cdb, SCSI_INQUIRY_LEN);
+    req->cdb_len = 6;
+    req->data = &inq;
+    req->data_len = SCSI_INQUIRY_LEN;
+    req->flags = SCSI_REQ_SYNC | SCSI_REQ_READ;
+    req->timeout_ms = 5000;
+    req->retries = 2;
+    
+    ret = link->execute(link, req);
+    scsi_request_free(req);
+    
+    if (ret < 0) {
+        scsi_device_free(dev);
+        return -1;
+    }
+    
+    /* Check device type - 0x1F means no device */
+    uint8_t dtype = inq.device_type & 0x1F;
+    if (dtype == SCSI_TYPE_NO_DEVICE) {
+        scsi_device_free(dev);
+        return -1;
+    }
+    
+    /* Check peripheral qualifier - 0x3 means not connected */
+    uint8_t pq = (inq.device_type >> 5) & 0x7;
+    if (pq == 0x3) {
+        scsi_device_free(dev);
+        return -1;
+    }
+    
+    /* Populate device info from INQUIRY */
+    dev->type = dtype;
+    dev->removable = (inq.rmb & 0x80) ? 1 : 0;
+    
+    /* Copy vendor/product/revision (space-padded in INQUIRY, need null-term) */
+    memcpy(dev->vendor, inq.vendor, 8);
+    dev->vendor[8] = '\0';
+    /* Trim trailing spaces */
+    for (int i = 7; i >= 0 && dev->vendor[i] == ' '; i--) {
+        dev->vendor[i] = '\0';
+    }
+    
+    memcpy(dev->product, inq.product, 16);
+    dev->product[16] = '\0';
+    for (int i = 15; i >= 0 && dev->product[i] == ' '; i--) {
+        dev->product[i] = '\0';
+    }
+    
+    memcpy(dev->revision, inq.revision, 4);
+    dev->revision[4] = '\0';
+    for (int i = 3; i >= 0 && dev->revision[i] == ' '; i--) {
+        dev->revision[i] = '\0';
+    }
+    
+    /* For block devices, get capacity */
+    if (dtype == SCSI_TYPE_DISK || dtype == SCSI_TYPE_ROM || 
+        dtype == SCSI_TYPE_OPTICAL || dtype == SCSI_TYPE_RBC) {
+        uint64_t sectors = 0;
+        uint32_t sector_sz = 0;
+        if (scsi_read_capacity(dev, &sectors, &sector_sz) == 0) {
+            dev->capacity = sectors;
+            dev->sector_size = sector_sz;
+        } else {
+            /* Default to 512-byte sectors if capacity read fails */
+            dev->sector_size = 512;
+        }
+    }
+    
+    dev->online = 1;
+    dev->media_present = 1;  /* Assume present, will be updated by TUR later */
+    
+    /* Register device */
+    if (scsi_device_register(dev) < 0) {
+        scsi_device_free(dev);
+        return -1;
+    }
+    
     return 0;
 }
 
-int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun) {
-    (void)link; (void)bus; (void)target; (void)lun;
-    /* Implemented in L621 */
-    return 0;
+/*
+ * Scan a SCSI bus for all targets and LUNs
+ * Returns: Number of devices found
+ */
+int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
+    if (!link) {
+        return -1;
+    }
+    
+    char buf[64];
+    sprintf(buf, "SCSI: Scanning bus %d via '%s'\n", bus, link->name ? link->name : "unknown");
+    kprint(buf);
+    
+    int devices_found = 0;
+    
+    /*
+     * Standard SCSI bus scan:
+     * - Enumerate targets 0 to SCSI_MAX_TARGETS-1
+     * - For each target, probe LUN 0 first
+     * - If LUN 0 responds, optionally probe more LUNs (REPORT LUNS in L621)
+     */
+    for (uint8_t target = 0; target < SCSI_MAX_TARGETS; target++) {
+        /* Probe LUN 0 */
+        if (scsi_probe_lun(link, bus, target, 0) == 0) {
+            devices_found++;
+            
+            /*
+             * LUN 0 found - could probe additional LUNs here
+             * Full REPORT LUNS implementation in L621 will handle this
+             * For now, just note that additional LUNs may exist
+             */
+        }
+    }
+    
+    sprintf(buf, "SCSI: Bus %d scan complete, %d device(s) found\n", bus, devices_found);
+    kprint(buf);
+    
+    return devices_found;
 }
+

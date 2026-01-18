@@ -617,7 +617,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Core Architecture (CAM/Mid-layer):**
         - [x] **Data Structures:** Define `scsi_request`, `scsi_device`, `scsi_link` (transport linkage). <!-- scsi.h, scsi.c, test_scsi.c -->
         - [ ] **Discovery:**
-            - [ ] Implement Bus Scanning logic (HBA enumeration).
+            - [x] Implement Bus Scanning logic (HBA enumeration). <!-- scsi.c:scsi_scan_bus, scsi_probe_lun -->
             - [ ] Implement `REPORT LUNS` and `INQUIRY` probing.
             - [ ] Device Registry: registration of found targets/LUNs.
         - [ ] **Command Handling:**
