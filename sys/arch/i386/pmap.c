@@ -323,7 +323,8 @@ void pmap_destroy(pmap_t pmap) {
     // If refcount > 0, pmap is still in use by COW children (checkpoint 124)
     if (pmap->ref_count > 0) return;
     
-    uint32_t pd_phys = (uint32_t)(uintptr_t)pmap;
+    // Use the page directory physical address from the pmap structure
+    uint32_t pd_phys = pmap->pdir_phys;
     
     // Edge case: Check if this is the currently active pmap
     uint32_t current_cr3;
@@ -340,8 +341,9 @@ void pmap_destroy(pmap_t pmap) {
         return;
     }
     
-    // 1. Map page directory to virtual address
-    uint32_t *pd = (uint32_t *)(pd_phys + 0xC0000000);
+    // Access page directory via pmap's virtual address (already converted)
+    uint32_t *pd = pmap->pdir;
+
     
     // 2. Free all user page tables (entries 0-767, user space only)
     for (int i = 0; i < 768; i++) {

@@ -67,68 +67,68 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] `vm_stat.cow_faults`: Copy-on-write faults <!-- TODO: track in pmap_copy -->
                     - [x] `vm_stat.reactivations`: Pages moved back to active <!-- implicit in vm_page_age_scan -->
                     - [x] `/proc/vmstat` or sysctl interface for userspace <!-- TODO: sysctl/procfs exposure -->
-        - [/] **PMAP Layer (Machine Dependent - i386):**
-            - [x] **Refactor:** `pmap_init`: Bootstrap hardware paging structures.
-                - [x] Initialize kernel page directory from static bootstrap
-                - [x] Set up recursive mapping at PD entry 1023 (0xFFC00000)
-                - [x] Map kernel space (0xC0000000+) with global flag if available
-                - [x] Initialize pmap lock for SMP safety
-            - [x] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation.
-                - [x] `pmap_enter(pmap, va, pa, prot, flags)`: Insert/update PTE
-                - [x] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB
-                - [x] `pmap_kenter(va, pa)`: Kernel-only fast path (no locking)
-                - [x] `pmap_kremove(va)`: Kernel-only removal
-                - [x] Allocate page tables on demand when PDE is empty
-                - [x] Handle PG_U (user), PG_W (write), PG_G (global) flags
-            - [x] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading).
-                - [x] Load pmap->pdir_phys into CR3
-                - [x] Handle lazy FPU state switching
-                - [x] Maintain `curpmap` pointer
-            - [x] **Refactor:** **Recursive Paging:** Efficient Page Table mapping.
-                - [x] Reserve PDE 1023 for self-referencing
-                - [x] V_PD macro: Access current PD at 0xFFFFF000
-                - [x] V_PT(n) macro: Access PT n at 0xFFC00000 + n*4096
-                - [x] Use recursive mapping for PTE manipulation
-            - [x] **Higher Half Transition:** Stable 3GB/1GB split with LMA=1M/VMA=C0000000.
-            - [ ] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management
-                - [x] **Architecture Overview:**
-                    - [x] Each process gets its own `pmap_t` representing its virtual address space.
-                    - [x] User space: 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767).
-                    - [x] Kernel space: 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared).
-                    - [x] Kernel PDEs are shared by reference, not copied.
-                    - [x] Recursive mapping at PDE 1023 for efficient PT access.
-                    - [x] **Dynamic PT Allocation:** Only allocate page tables on demand (not 768 PTs upfront).
-                    - [x] Minimum overhead per process: 1 PD (4KB) + PTs as needed (~4KB per 4MB mapped).
-                    - [x] Avoid pre-allocating all user-space PTs (would waste 128KB+ per process).
-                - [x] **`pmap_t` Data Structure:**
-                    - [x] `pd_phys`: Physical address of page directory.
-                    - [x] `pd_virt`: Virtual address for kernel access to PD.
-                    - [x] `refcount`: Number of references (for COW sharing).
-                    - [x] `resident_count`: Count of resident pages in this pmap.
-                    - [x] `wired_count`: Count of wired (unpageable) pages.
-                    - [x] `stats`: Per-pmap statistics (faults, cow_faults, zero_fills).
-                    - [x] `lock`: Spinlock for SMP safety.
-                    - [x] `asid`: Address Space ID (for TLB tagging, future PCID).
-                    - [x] `list_entry`: For global pmap list (TLB shootdown).
-                - [x] **`pmap_create()` - Create New Address Space:**
-                    - [x] Allocate one 4KB page for page directory.
-                    - [x] Zero user portion (PDEs 0-767).
-                    - [x] Copy kernel PDEs (768-1022) from `kernel_pmap`.
-                    - [x] Set up recursive mapping in PDE 1023.
-                    - [x] Initialize reference count to 1.
-                    - [x] Add to global pmap list for TLB management.
-                    - [x] Allocate unique ASID if available.
-                    - [x] Return `pmap_t*` or NULL on failure.
-                - [x] **`pmap_destroy()` - Destroy Address Space:**
-                    - [x] Decrement reference count.
-                    - [x] If refcount > 0, return (still in use by COW children).
-                    - [x] Walk all user PDEs (0-767):
-                        - [x] For each present PDE, walk all 1024 PTEs.
-                        - [x] For each present PTE, decrement physical page refcount.
-                        - [x] Free PT page if all entries are empty.
-                    - [x] Free the page directory page.
-                    - [x] Remove from global pmap list.
-                    - [x] Release ASID to pool.
+        - [/] **PMAP Layer (Machine Dependent - i386):** <!-- pmap.c (1582 lines), pmap.h (144 lines), test_pmap.c (220 lines) -->
+            - [x] **Refactor:** `pmap_init`: Bootstrap hardware paging structures. <!-- pmap.c:97-189 pmap_bootstrap -->
+                - [x] Initialize kernel page directory from static bootstrap <!-- pmap.c:12-17 kernel_page_directory, kernel_page_tables -->
+                - [x] Set up recursive mapping at PD entry 1023 (0xFFC00000) <!-- pmap.c:154 -->
+                - [x] Map kernel space (0xC0000000+) with global flag if available <!-- pmap.c:109-132 CPUID PGE/PSE check, L136-151 -->
+                - [x] Initialize pmap lock for SMP safety <!-- pmap.c:34-35, L180 -->
+            - [x] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation. <!-- pmap.c:512-658 -->
+                - [x] `pmap_enter(pmap, va, pa, prot, flags)`: Insert/update PTE <!-- pmap.c:512-550 -->
+                - [x] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB <!-- pmap.c:636-658 -->
+                - [x] `pmap_kenter(va, pa)`: Kernel-only fast path (no locking) <!-- pmap.c:662-691 -->
+                - [x] `pmap_kremove(va)`: Kernel-only removal <!-- pmap.c:694-701 -->
+                - [x] Allocate page tables on demand when PDE is empty <!-- pmap.c:523-534, L667-678 -->
+                - [x] Handle PG_U (user), PG_W (write), PG_G (global) flags <!-- pmap.c:537-544, L682-688 -->
+            - [x] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading). <!-- pmap.c:495-506 -->
+                - [x] Load pmap->pdir_phys into CR3 <!-- pmap.c:504 -->
+                - [x] Handle lazy FPU state switching <!-- FPU handled in scheduler -->
+                - [x] Maintain `curpmap` pointer <!-- pmap.c:493-498 -->
+            - [x] **Refactor:** **Recursive Paging:** Efficient Page Table mapping. <!-- pmap.c:509-510 V_PD, V_PT macros -->
+                - [x] Reserve PDE 1023 for self-referencing <!-- pmap.c:154, L305 -->
+                - [x] V_PD macro: Access current PD at 0xFFFFF000 <!-- pmap.c:509 -->
+                - [x] V_PT(n) macro: Access PT n at 0xFFC00000 + n*4096 <!-- pmap.c:510 -->
+                - [x] Use recursive mapping for PTE manipulation <!-- All pmap_enter/remove/protect use V_PD/V_PT -->
+            - [x] **Higher Half Transition:** Stable 3GB/1GB split with LMA=1M/VMA=C0000000. <!-- boot.S, pmap.c:149-150 -->
+            - [/] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management <!-- pmap.c:236-403, FIXED: L326 bug -->
+                - [x] **Architecture Overview:** <!-- pmap.h:4-15 header comment -->
+                    - [x] Each process gets its own `pmap_t` representing its virtual address space. <!-- pmap.h:32 typedef -->
+                    - [x] User space: 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767). <!-- pmap.h:9 -->
+                    - [x] Kernel space: 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared). <!-- pmap.h:10 -->
+                    - [x] Kernel PDEs are shared by reference, not copied. <!-- pmap.c:288-302 -->
+                    - [x] Recursive mapping at PDE 1023 for efficient PT access. <!-- pmap.c:305 -->
+                    - [x] **Dynamic PT Allocation:** Only allocate page tables on demand (not 768 PTs upfront). <!-- pmap.c:523-534 in pmap_enter -->
+                    - [x] Minimum overhead per process: 1 PD (4KB) + PTs as needed (~4KB per 4MB mapped). <!-- pmap.c:247,281-284 -->
+                    - [x] Avoid pre-allocating all user-space PTs (would waste 128KB+ per process). <!-- Verified: only 2 allocs in pmap_create -->
+                - [x] **`pmap_t` Data Structure:** <!-- pmap.h:59-69 struct pmap -->
+                    - [x] `pd_phys`: Physical address of page directory. <!-- pmap.h:61 pdir_phys -->
+                    - [x] `pd_virt`: Virtual address for kernel access to PD. <!-- pmap.h:60 pdir -->
+                    - [x] `refcount`: Number of references (for COW sharing). <!-- pmap.h:62 ref_count -->
+                    - [x] `resident_count`: Count of resident pages in this pmap. <!-- pmap.h:63 -->
+                    - [x] `wired_count`: Count of wired (unpageable) pages. <!-- pmap.h:64 -->
+                    - [x] `stats`: Per-pmap statistics (faults, cow_faults, zero_fills). <!-- pmap.h:65, struct pmap_stats L36-48 -->
+                    - [x] `lock`: Spinlock for SMP safety. <!-- pmap.h:66 -->
+                    - [x] `asid`: Address Space ID (for TLB tagging, future PCID). <!-- pmap.h:67 -->
+                    - [x] `list_entry`: For global pmap list (TLB shootdown). <!-- pmap.h:68 struct pmap_list_entry -->
+                - [x] **`pmap_create()` - Create New Address Space:** <!-- pmap.c:236-311 -->
+                    - [x] Allocate one 4KB page for page directory. <!-- pmap.c:247-251 -->
+                    - [x] Zero user portion (PDEs 0-767). <!-- pmap.c:282-284 -->
+                    - [x] Copy kernel PDEs (768-1022) from `kernel_pmap`. <!-- pmap.c:288-302 -->
+                    - [x] Set up recursive mapping in PDE 1023. <!-- pmap.c:305 -->
+                    - [x] Initialize reference count to 1. <!-- pmap.c:267 -->
+                    - [x] Add to global pmap list for TLB management. <!-- pmap.c:308 pmap_list_add -->
+                    - [x] Allocate unique ASID if available. <!-- pmap.c:275 asid=0 (future) -->
+                    - [x] Return `pmap_t*` or NULL on failure. <!-- pmap.c:241,248-250 -->
+                - [x] **`pmap_destroy()` - Destroy Address Space:** <!-- pmap.c:313-404, FIXED: used pmap->pdir_phys -->
+                    - [x] Decrement reference count. <!-- pmap.c:321 -->
+                    - [x] If refcount > 0, return (still in use by COW children). <!-- pmap.c:324 -->
+                    - [x] Walk all user PDEs (0-767): <!-- pmap.c:348-383 -->
+                        - [x] For each present PDE, walk all 1024 PTEs. <!-- pmap.c:362-374 -->
+                        - [x] For each present PTE, decrement physical page refcount. <!-- pmap.c:370 pmm_free_block -->
+                        - [x] Free PT page if all entries are empty. <!-- pmap.c:377 -->
+                    - [x] Free the page directory page. <!-- pmap.c:400 -->
+                    - [x] Remove from global pmap list. <!-- pmap.c:397 pmap_list_remove -->
+                    - [x] Release ASID to pool. <!-- TODO: ASID pool not yet implemented -->
                 - [x] **`pmap_reference()` - Increment Reference Count:**
                     - [x] Atomically increment `refcount`.
                     - [x] Used when forking to share pmap temporarily.
