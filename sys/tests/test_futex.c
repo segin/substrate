@@ -265,3 +265,16 @@ int test_futex_run_all(void) {
     
     return tests_failed;
 }
+
+/*
+ * Entry point for test runner
+ */
+void test_futex(void) {
+    kprint("  [FUTEX] Running futex tests...\n");
+    int failed = test_futex_run_all();
+    if (failed == 0) {
+        kprint("  [FUTEX] All tests passed\n");
+    } else {
+        kprint("  [FUTEX] Some tests failed\n");
+    }
+}

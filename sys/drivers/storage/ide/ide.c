@@ -803,34 +803,22 @@ int ide_atapi_read_sectors(uint8_t channel, uint8_t drive,
                            uint32_t lba, uint16_t count, void *buffer) {
     uint8_t packet[12] = {0};
     
-    if (count <= 0xFFFF) {
-        /* READ10 - 10-byte CDB */
-        packet[0] = SCSI_READ_10;
-        packet[1] = 0;
-        /* LBA (big-endian) */
-        packet[2] = (lba >> 24) & 0xFF;
-        packet[3] = (lba >> 16) & 0xFF;
-        packet[4] = (lba >> 8) & 0xFF;
-        packet[5] = lba & 0xFF;
-        /* Reserved */
-        packet[6] = 0;
-        /* Transfer length (big-endian) */
-        packet[7] = (count >> 8) & 0xFF;
-        packet[8] = count & 0xFF;
-        packet[9] = 0;
-    } else {
-        /* READ12 for large transfers */
-        packet[0] = SCSI_READ_12;
-        packet[1] = 0;
-        packet[2] = (lba >> 24) & 0xFF;
-        packet[3] = (lba >> 16) & 0xFF;
-        packet[4] = (lba >> 8) & 0xFF;
-        packet[5] = lba & 0xFF;
-        packet[6] = (count >> 24) & 0xFF;
-        packet[7] = (count >> 16) & 0xFF;
-        packet[8] = (count >> 8) & 0xFF;
-        packet[9] = count & 0xFF;
-    }
+    /* All uint16_t counts fit in READ10 (max 65535 sectors) */
+    /* Use READ10 - 10-byte CDB */
+    packet[0] = SCSI_READ_10;
+    packet[1] = 0;
+    /* LBA (big-endian) */
+    packet[2] = (lba >> 24) & 0xFF;
+    packet[3] = (lba >> 16) & 0xFF;
+    packet[4] = (lba >> 8) & 0xFF;
+    packet[5] = lba & 0xFF;
+    /* Reserved */
+    packet[6] = 0;
+    /* Transfer length (big-endian) */
+    packet[7] = (count >> 8) & 0xFF;
+    packet[8] = count & 0xFF;
+    packet[9] = 0;
+    /* Remaining bytes are zeros */
     
     /* CD-ROM sectors are typically 2048 bytes */
     uint32_t buffer_len = (uint32_t)count * 2048;
