@@ -473,45 +473,298 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Atomic acquisition semantics. <!-- ntsync.c:ntsync_acquire with spinlocks -->
             - [x] Cross-object atomicity for WAIT_ALL. <!-- ntsync.c:ntsync_wait_all multi-lock -->
 - [ ] **Signals:**
-    - [ ] Implement Signal delivery mechanism (trampoline, context saving).
-    - [ ] Implement `kill`, `sigaction`, `sigprocmask`.
-    - [ ] Implement PID 1 protection and safe exit handling.
-    - [ ] **Delivery & context:**
-        - [ ] **Debug Delivery:**
-            - [ ] Isolate logic for frame pushing (remove panic).
-            - [ ] Create architecture-dependent `struct sigframe`.
-            - [ ] Copy frame to aligned user stack pointer.
-            - [ ] Set `EIP` to trampoline, `ESP` to frame.
-        - [ ] **Trampoline:**
-            - [ ] `sys_sigreturn`: Restore keys registers from stack frame.
-            - [ ] Verification: Check `ss` and `cs` integrity on return.
-        - [ ] **Frame Management:**
-            - [ ] `sigaltstack`: Support alternative signal stack.
-            - [ ] `SA_SIGINFO`: Extended `siginfo_t` support.
-    - [ ] **Generation:**
-        - [ ] `psignal(p, sig)`: Send signal to process.
-        - [ ] `pgsignal(pgrp, sig)`: Send signal to process group.
-        - [ ] `trapsignal(p, sig, code)`: Send synchronous trap signal.
+    - [ ] **Signal Infrastructure:**
+        - [ ] **Per-Process Signal State (`process_t`):** <!-- proc.h -->
+            - [ ] `sig_actions[NSIG]`: Array of `struct sigaction` for each signal.
+            - [ ] `sig_catch`: Bitmask of signals with handlers (not SIG_DFL/SIG_IGN).
+            - [ ] `sig_ignore`: Bitmask of signals set to SIG_IGN.
+        - [ ] **Per-Thread Signal State (`thread_t`):** <!-- proc.h -->
+            - [ ] `sig_pending`: Bitmask of pending signals for this thread.
+            - [ ] `sig_mask`: Current signal mask (blocked signals).
+            - [ ] `sig_alt_stack`: Alternative signal stack (`stack_t`).
+            - [ ] `sig_on_stack`: Flag indicating currently executing on alt stack.
+        - [ ] **Signal Properties Table:**
+            - [ ] Default action table: Terminate, Core, Stop, Ignore, Continue.
+            - [ ] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT.
+            - [ ] Unmaskable signals: SIGKILL, SIGSTOP always have effect.
+    - [ ] **Signal Syscalls:**
+        - [ ] **`sys_sigaction(sig, act, oact)`:** <!-- signal.c:14-19 implemented -->
+            - [ ] Validate signal number (1 <= sig <= NSIG, not SIGKILL/SIGSTOP).
+            - [ ] Return old action in `oact` if non-NULL.
+            - [ ] Install new action from `act` if non-NULL.
+            - [ ] Update `sig_catch`/`sig_ignore` bitmasks.
+            - [ ] Handle `SA_RESETHAND` (one-shot handler).
+            - [ ] Handle `SA_NODEFER` (don't block signal during handler).
+            - [ ] Handle `SA_RESTART` (restart interrupted syscalls).
+            - [ ] Handle `SA_NOCLDSTOP` (don't send SIGCHLD for stopped children).
+            - [ ] Handle `SA_NOCLDWAIT` (don't create zombies for children).
+        - [ ] **`sys_sigprocmask(how, set, oset)`:** <!-- signal.c:21-31 implemented -->
+            - [ ] Return old mask in `oset` if non-NULL.
+            - [ ] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK.
+            - [ ] Filter out SIGKILL/SIGSTOP from mask (cannot be blocked).
+        - [ ] **`sys_sigpending(set)`:** <!-- signal.c:33-36 implemented -->
+            - [ ] Return pending & ~masked signals for current thread.
+        - [ ] **`sys_sigsuspend(mask)`:** <!-- signal.c:38-49 implemented -->
+            - [ ] Atomically set mask and sleep until signal arrives.
+            - [ ] Restore original mask on return.
+            - [ ] Always return -1 (EINTR).
+        - [ ] **`sys_sigaltstack(ss, oss)`:** <!-- signal.c:213-228 implemented -->
+            - [ ] Return current alt stack in `oss`.
+            - [ ] Install new alt stack from `ss`.
+            - [ ] Validate `ss_size >= MINSIGSTKSZ`.
+            - [ ] Handle `SS_DISABLE` flag.
+            - [ ] Error if currently executing on alt stack.
+        - [ ] **`sys_kill(pid, sig)`:** <!-- signal.c:110-150 implemented -->
+            - [ ] `pid > 0`: Send to specific process.
+            - [ ] `pid == 0`: Send to current process group.
+            - [ ] `pid == -1`: Send to all processes (except init).
+            - [ ] `pid < -1`: Send to process group `-pid`.
+            - [ ] `sig == 0`: Permission check only (existence check).
+            - [ ] Permission checks: Same UID or CAP_KILL.
+        - [ ] **`sys_sigreturn(scp)`:** <!-- arch/i386/signal.c:94-128 implemented -->
+            - [ ] Validate `sigcontext` pointer is in user space.
+            - [ ] Verify `cs` and `ss` have RPL=3 (user mode).
+            - [ ] Restore all general-purpose registers.
+            - [ ] Restore `eflags` (mask sensitive bits: IOPL, VM, RF).
+            - [ ] Restore `eip` to original program counter.
+            - [ ] Restore signal mask from context.
+        - [ ] **`sys_sigwait(set, sig)`:**
+            - [ ] Wait for any signal in `set` to become pending.
+            - [ ] Remove signal from pending and return it in `sig`.
+            - [ ] Do not invoke handler.
+        - [ ] **`sys_sigtimedwait(set, info, timeout)`:**
+            - [ ] Like `sigwait` but with timeout.
+            - [ ] Fill `siginfo_t` with signal details.
+    - [ ] **Signal Generation:**
+        - [ ] **`psignal(p, sig)` - Send to Process:** <!-- signal.c:52-87 implemented -->
+            - [ ] Validate process pointer and signal number.
+            - [ ] Init protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1.
+            - [ ] For each thread in process:
+                - [ ] If SIGCONT and thread is stopped, wake it up.
+                - [ ] Set pending bit in `thread->sig_pending`.
+                - [ ] If thread is sleeping interruptibly, wake it.
+            - [ ] Select best thread for delivery (not masked).
+        - [ ] **`pgsignal(pgrp, sig)` - Send to Process Group:** <!-- signal.c:90-101 implemented -->
+            - [ ] Look up `struct pgrp` by ID.
+            - [ ] Call `pgrp_signal()` to iterate members.
+            - [ ] Call `psignal()` for each process in group.
+        - [ ] **`trapsignal(p, sig, code)` - Synchronous Trap Signal:** <!-- signal.c:104-108 implemented -->
+            - [ ] Generate signal from exception handler.
+            - [ ] Pass `code` via `siginfo_t` (si_code).
+            - [ ] Force delivery to current thread (not any thread).
+            - [ ] Typical sources: Page Fault (SIGSEGV), Division by Zero (SIGFPE), Illegal Instruction (SIGILL).
+        - [ ] **`sigexit(p, sig)` - Terminate with Signal:**
+            - [ ] Set exit status to indicate signal termination.
+            - [ ] If core dump required (SA_CORE), call `coredump()`.
+            - [ ] Call `proc_exit()` with signal exit status.
+        - [ ] **Terminal Signals (TTY):** <!-- tty.c -->
+            - [ ] `SIGINT`: Ctrl+C to foreground process group.
+            - [ ] `SIGQUIT`: Ctrl+\ to foreground process group.
+            - [ ] `SIGTSTP`: Ctrl+Z to foreground process group.
+            - [ ] `SIGTTIN`: Background process reads from TTY.
+            - [ ] `SIGTTOU`: Background process writes to TTY (if TOSTOP).
+            - [ ] `SIGHUP`: Controlling terminal hangup.
+    - [ ] **Signal Delivery (Architecture-Specific `sendsig`):** <!-- arch/i386/signal.c:27-89 -->
+        - [ ] **Frame Construction:**
+            - [ ] Calculate user stack pointer from `regs->useresp`.
+            - [ ] Subtract `sizeof(struct sigframe)`.
+            - [ ] Align stack to 16-byte boundary (System V ABI).
+        - [ ] **`struct sigframe` Layout:** <!-- signal_arch.h:53-75 -->
+            - [ ] `retaddr`: Return address pointing to trampoline.
+            - [ ] `sig`: Signal number (first argument to handler).
+            - [ ] `sc`: `struct sigcontext` with saved registers.
+        - [ ] **`struct sigcontext` Population:** <!-- signal_arch.h:17-37 -->
+            - [ ] Save all segment registers: gs, fs, es, ds.
+            - [ ] Save general registers: edi, esi, ebp, esp, ebx, edx, ecx, eax.
+            - [ ] Save trap info: trapno, err.
+            - [ ] Save control registers: eip, cs, eflags.
+            - [ ] Save user stack: user_esp, user_ss.
+        - [ ] **Handler Invocation:**
+            - [ ] `copyout()` frame to user stack (with fault handling).
+            - [ ] Set `regs->useresp` to new stack frame address.
+            - [ ] Set `regs->eip` to signal handler address.
+        - [ ] **SA_SIGINFO Extended Frame:**
+            - [ ] Construct `struct siginfo` (si_signo, si_code, si_addr, etc.).
+            - [ ] Construct `struct ucontext` with machine context.
+            - [ ] Pass handler: `void handler(int sig, siginfo_t *info, void *ucontext)`.
+        - [ ] **Alt Stack Handling:**
+            - [ ] If `SA_ONSTACK` and alt stack configured and not already on it:
+                - [ ] Use `sig_alt_stack.ss_sp + ss_size` as stack pointer.
+                - [ ] Set `sig_on_stack` flag.
+    - [ ] **Signal Trampoline:**
+        - [ ] **Trampoline Page:**
+            - [ ] Map trampoline code at fixed address (e.g., 0xFFFF1000).
+            - [ ] Page must be user-readable, executable, not writable.
+            - [ ] Contains minimal code: `mov $SYS_sigreturn, %eax; int $0x80`.
+        - [ ] **Trampoline Code (i386):**
+            - [ ] `lea 4(%esp), %eax` - Get pointer to sigcontext.
+            - [ ] `push %eax` - Push as syscall argument.
+            - [ ] `mov $119, %eax` - SYS_sigreturn.
+            - [ ] `int $0x80` - Invoke kernel.
+        - [ ] **VDSO Integration (Future):**
+            - [ ] Embed trampoline in VDSO page.
+            - [ ] Use `AT_SYSINFO` to locate trampoline.
+    - [ ] **Signal Mask Management:**
+        - [ ] **During Handler Execution:**
+            - [ ] Block current signal (unless SA_NODEFER).
+            - [ ] Block signals in `sa_mask`.
+            - [ ] Restore original mask in `sys_sigreturn`.
+        - [ ] **Inheritance:**
+            - [ ] On `fork()`: Child inherits pending signals and mask.
+            - [ ] On `exec()`: Reset all handlers to SIG_DFL (except SIG_IGN).
+    - [ ] **Signal Checking Points:**
+        - [ ] **Return from Interrupt/Exception:**
+            - [ ] `signal_handle_pending()` called from `isr_handler()` if returning to user mode. <!-- signal.c:157-211, idt.c -->
+        - [ ] **Return from Syscall:**
+            - [ ] Check pending signals after syscall completion.
+            - [ ] If signal pending and syscall interruptible, return EINTR.
+        - [ ] **Sleep Wakeup:**
+            - [ ] `sched_sleep()` returns if signal pending (EINTR-style).
+    - [ ] **Special Signal Handling:**
+        - [ ] **SIGKILL:**
+            - [ ] Cannot be caught, blocked, or ignored.
+            - [ ] Always terminates the process immediately.
+            - [ ] Wake all stopped threads before terminating.
+        - [ ] **SIGSTOP:**
+            - [ ] Cannot be caught, blocked, or ignored.
+            - [ ] Stops all threads in the process.
+            - [ ] Process transitions to SSTOP state.
+        - [ ] **SIGCONT:**
+            - [ ] Resume stopped process.
+            - [ ] Clear pending SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU.
+            - [ ] If handler installed, also deliver to handler.
+            - [ ] Set P_CONTINUED flag for `waitpid(WCONTINUED)`.
+        - [ ] **SIGCHLD:**
+            - [ ] Sent when child exits, stops, or continues.
+            - [ ] If SA_NOCLDSTOP, don't send for stop/continue.
+            - [ ] If SA_NOCLDWAIT, auto-reap children (no zombies).
+        - [ ] **Job Control Stops (SIGTSTP/SIGTTIN/SIGTTOU):**
+            - [ ] Can be caught or ignored.
+            - [ ] Default action: Stop the process.
+            - [ ] Orphaned process groups ignore these signals.
+    - [ ] **PID 1 (Init) Protection:**
+        - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler installed.
+        - [ ] If init exits, system halts or panics.
+        - [ ] Init adopts all orphaned processes.
+    - [ ] **Core Dump (Future):**
+        - [ ] Signals with SA_CORE action: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
+        - [ ] `coredump()`: Write process memory and registers to file.
+        - [ ] Create `/cores/core.PID` with ELF core format.
+        - [ ] Respect `RLIMIT_CORE` resource limit.
 - [ ] **Process Lifecycle & Job Control:**
     - [ ] **Process Termination (`exit`, `_exit`):**
-        - [ ] **Resource Release:**
-            - [ ] Close all open file descriptors (`fd_close_all`).
-            - [ ] Release Virtual Memory Map (`vm_map_remove`).
-            - [ ] Release System V Semaphores/Shm.
-            - [ ] Decrement current working directory reference.
-        - [ ] **State Transition (DYING -> ZOMBIE):**
-            - [ ] Set `p_stat` to `SZOMB`.
-            - [ ] Record exit code (`p_xstat`).
-            - [ ] Calculate final `rusage` (user + system time).
-        - [ ] **Orphan Reparenting:**
-            - [ ] Acquire `proctree_lock`.
-            - [ ] Iterate over children of exiting process.
-            - [ ] Reparent each child to `init` (PID 1).
-            - [ ] If `init` is dying, reparent to `swapper` (PID 0) or panic.
-            - [ ] Unlock `proctree_lock`.
-        - [ ] **Notification:**
-            - [ ] Send `SIGCHLD` to parent.
-            - [ ] Wakeup parent if waiting (`sleepq_wake(&parent->p_children)`).
+        - [ ] **Entry Points:**
+            - [ ] `sys_exit(status)`: Libc-callable exit with cleanup.
+            - [ ] `sys__exit(status)`: Immediate exit, no libc cleanup.
+            - [ ] Both call internal `proc_exit(code)`. <!-- pm/process.c:230-291 -->
+        - [ ] **Phase 1: State Transition (RUNNING → DYING):**
+            - [ ] Set `p_state` to `SDYING`. <!-- process.c:237 -->
+            - [ ] Record exit status in `p_xstat`. <!-- process.c:238 -->
+            - [ ] Prevent further scheduling of process threads.
+        - [ ] **Phase 2: Resource Release (Critical Section):**
+            - [ ] **File Descriptors:**
+                - [ ] `fd_close_all(p)`: Close all open file descriptors. <!-- process.c:163-180, 243 -->
+                - [ ] For each fd: decrement refcount, call `close_fs()` if last ref.
+                - [ ] Clear `fds[]` array.
+            - [ ] **Virtual Memory:**
+                - [ ] Detach from current pmap: `pmap_release(p->pmap)`. <!-- process.c:249-256 -->
+                - [ ] Free all user page tables (pmap garbage collection).
+                - [ ] Switch to kernel pmap before freeing.
+                - [ ] Release `vm_map` and all `vm_map_entry` structures.
+            - [ ] **Current Working Directory:**
+                - [ ] `vnode_rele(p->cwd_node)`: Decrement cwd vnode refcount.
+            - [ ] **Root Directory (chroot):**
+                - [ ] `vnode_rele(p->root_node)`: Decrement root vnode refcount.
+            - [ ] **Controlling Terminal:**
+                - [ ] If session leader: send SIGHUP to foreground group.
+                - [ ] Clear `tty->session` and `tty->pgrp` pointers.
+                - [ ] Revoke TTY access for entire session.
+            - [ ] **Pending Signals:**
+                - [ ] Clear all pending signals (no longer deliverable).
+            - [ ] **Timers:**
+                - [ ] Cancel `ITIMER_REAL`, `ITIMER_VIRTUAL`, `ITIMER_PROF`.
+                - [ ] Cancel any pending `alarm()`.
+            - [ ] **System V IPC:**
+                - [ ] Detach from all shared memory segments (`shmdt`).
+                - [ ] Adjust semaphore values (SEM_UNDO).
+                - [ ] Remove owned message queues if IPC_RMID pending.
+            - [ ] **POSIX IPC:**
+                - [ ] Unlink any POSIX semaphores/shared memory owned.
+            - [ ] **Futex Cleanup:**
+                - [ ] Process robust mutex list.
+                - [ ] Mark owned futexes as FUTEX_OWNER_DIED.
+                - [ ] Wake waiters on robust list entries.
+            - [ ] **Locks Held:**
+                - [ ] Release any kernel mutexes held by threads.
+                - [ ] Cancel pending lock requests.
+        - [ ] **Phase 3: Thread Termination:**
+            - [ ] For each thread in process:
+                - [ ] If not current thread, interrupt and terminate.
+                - [ ] Wait for all threads to reach zombie state.
+                - [ ] Free thread stacks and thread structures.
+            - [ ] Current thread becomes the "reaper thread".
+        - [ ] **Phase 4: Resource Usage Finalization:**
+            - [ ] `rusage_finalize(p)`: Calculate final resource usage. <!-- process.c:277-278 -->
+            - [ ] Accumulate all thread times into `p->rusage`.
+            - [ ] Record max RSS, page faults, context switches.
+            - [ ] Fields: `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`.
+        - [ ] **Phase 5: Orphan Reparenting:**
+            - [ ] `proc_reparent_children(p)`: Handle orphaned children. <!-- process.c:183-228 -->
+            - [ ] Acquire `proctree_lock`. <!-- process.c:191 -->
+            - [ ] Iterate `p->p_children` list.
+            - [ ] For each child:
+                - [ ] Set `child->p_parent = init`.
+                - [ ] Move to `init->p_children` list.
+                - [ ] If child is zombie, wake init immediately.
+            - [ ] Clear `p->p_children`.
+            - [ ] If init is dying, reparent to swapper (PID 0) or panic.
+            - [ ] Unlock `proctree_lock`. <!-- process.c:224 -->
+            - [ ] `sched_wakeup(&init->p_children)`: Wake init if waiting.
+        - [ ] **Phase 6: Process Group and Session Cleanup:**
+            - [ ] Remove process from its process group.
+            - [ ] If last member of pgrp, free `struct pgrp`.
+            - [ ] If session leader:
+                - [ ] Send SIGHUP to foreground pgrp.
+                - [ ] Revoke controlling terminal.
+                - [ ] Mark session as having no leader.
+            - [ ] Check for orphaned process groups (send SIGHUP+SIGCONT).
+        - [ ] **Phase 7: Parent Notification:**
+            - [ ] `psignal(p->p_parent, SIGCHLD)`: Send SIGCHLD to parent. <!-- process.c:264-265 -->
+            - [ ] If SA_NOCLDWAIT in parent, auto-reap (no zombie).
+            - [ ] `sched_wakeup(&parent->p_children)`: Wake parent if waiting. <!-- process.c:268 -->
+        - [ ] **Phase 8: Zombie State (DYING → ZOMBIE):**
+            - [ ] Set `p_state` to `SZOMB`. <!-- process.c:281 -->
+            - [ ] Process slot retained for parent to reap.
+            - [ ] Only `pid`, `ppid`, `p_xstat`, `p_rusage` remain valid.
+            - [ ] All other resources freed.
+        - [ ] **Phase 9: Final Context Switch:**
+            - [ ] Mark `current_thread->state = THREAD_ZOMBIE`. <!-- process.c:285 -->
+            - [ ] `sched_yield()`: Never returns. <!-- process.c:287 -->
+            - [ ] Scheduler will never select zombie thread.
+        - [ ] **Accounting:**
+            - [ ] `acct_process(code)`: Write accounting record. <!-- process.c:239-240 -->
+            - [ ] Record: command name, user time, system time, elapsed time, exit status.
+            - [ ] Write to accounting file if enabled.
+    - [ ] **Edge Cases and Error Handling:**
+        - [ ] **Init (PID 1) Exit:**
+            - [ ] If init exits normally, kernel halts/panics. <!-- process.c:231-234 -->
+            - [ ] Log warning and enter idle loop.
+        - [ ] **Killed by Signal During Exit:**
+            - [ ] Ignore all signals once in SDYING state.
+            - [ ] Cannot be interrupted during exit cleanup.
+        - [ ] **Exit While Holding Locks:**
+            - [ ] Kernel must handle lock abandonment.
+            - [ ] Log warning if locks still held.
+        - [ ] **Out of Memory During Exit:**
+            - [ ] Must not allocate during exit (only free).
+            - [ ] Use pre-allocated structures for notifications.
+        - [ ] **Vfork Exit:**
+            - [ ] Special handling: wake parent immediately.
+            - [ ] Parent was blocked waiting for child exec/exit.
+        - [ ] **Thread Group Exit:**
+            - [ ] If any thread calls exit, entire process exits.
+            - [ ] All threads receive internal "exit" signal.
+            - [ ] Use `exit_group` semantics from Linux.
 
     - [x] **Wait Subsystem (`wait4`, `waitpid`):**
         - [x] **Search Logic (`find_zombie`):** <!-- Now find_waitable_child -->
