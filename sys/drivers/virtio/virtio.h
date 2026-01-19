@@ -75,4 +75,8 @@ void virtio_blk_init(void);
 // VirtIO 9P
 void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func);
 
+// VirtIO SCSI
+void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func);
+void virtio_scsi_poll(void);
+
 #endif

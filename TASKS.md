@@ -645,9 +645,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **USB Mass Storage:**
             - [ ] Implement Bulk-Only Transport (BOT).
             - [ ] Handle Command Block Wrapper (CBW) and Command Status Wrapper (CSW).
-        - [ ] **VirtIO-SCSI:**
-            - [ ] Pass-through driver mapping request queues to virtqueues.
-            - [ ] Event queue handling (hot-plug).
+        - [x] **VirtIO-SCSI:** <!-- virtio_scsi.c -->
+            - [x] Pass-through driver mapping request queues to virtqueues. <!-- virtio_scsi.c:vscsi_execute -->
+            - [x] Event queue handling (hot-plug). <!-- virtio_scsi.c:vscsi_process_events, vscsi_setup_event_buffers -->
 - [x] **ATA/IDE (Legacy):** <!-- ide.c complete with PIO, DMA, LBA48, ATAPI -->
     - [x] Implement PIO Mode transfers.
     - [x] **DMA Transfers:** <!-- ide.c:ide_dma_read, ide_dma_write -->
