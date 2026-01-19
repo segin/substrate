@@ -705,30 +705,30 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Input:**
     - [ ] **Keyboard (PS/2):**
         - [ ] **Controller:**
-            - [x] Initialize PS/2 Controller (i8042).
-            - [x] Disable ports.
-            - [x] Perform self-test.
+            - [ ] Initialize PS/2 Controller (i8042).
+            - [ ] Disable ports.
+            - [ ] Perform self-test.
         - [ ] **Interrupts:**
-            - [x] Handle IRQ1.
-            - [x] Read status/data ports.
+            - [ ] Handle IRQ1.
+            - [ ] Read status/data ports.
         - [ ] **Scancodes:**
-            - [x] Implement state machine for Set 1 (or 2) decoding.
+            - [ ] Implement state machine for Set 1 (or 2) decoding.
         - [ ] **Keymap:**
-            - [x] Map scancodes to ASCII/Unicode characters (US Layout).
-            - [x] Add support for shift, ctrl, alt modifiers.
+            - [ ] Map scancodes to ASCII/Unicode characters (US Layout).
+            - [ ] Add support for shift, ctrl, alt modifiers.
         - [ ] **Buffer:**
-            - [x] Implement a circular buffer for raw keystrokes.
+            - [ ] Implement a circular buffer for raw keystrokes.
         - [ ] **Mouse (PS/2):**
             - [ ] **Initialization:**
-                - [x] Enable auxiliary device (IRQ12).
-                - [x] Set sample rate/resolution.
+                - [ ] Enable auxiliary device (IRQ12).
+                - [ ] Set sample rate/resolution.
         - [ ] **Packet Parsing:**
-            - [x] Decode 3-byte (or 4-byte) movement/button packets.
+            - [ ] Decode 3-byte (or 4-byte) movement/button packets.
         - [ ] **Event Queue:**
-            - [x] Push mouse events (dx, dy, buttons) to a system queue.
+            - [ ] Push mouse events (dx, dy, buttons) to a system queue.
     - [ ] **Input Subsystem:**
-        - [x] Abstract `input_event` structure (type, code, value).
-        - [x] `/dev/input` interface for userspace access.
+        - [ ] Abstract `input_event` structure (type, code, value).
+        - [ ] `/dev/input` interface for userspace access.
 - [ ] **Console Subsystem (`sys/console`):**
     - [ ] **TTY Subsystem (Core):**
         - [ ] **Structures (`tty_t`):**
@@ -736,7 +736,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data.
                 - [x] **Write Buffer (Output):** Queue for driver consumption.
                 - [x] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode.
-                - [ ] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`.
+                - [x] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`.
             - [x] **State Control (`termios`):**
                 - [x] `c_iflag`: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON).
                 - [x] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS).
@@ -792,50 +792,474 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`).
         - [ ] **Emulation:** VT102 state machine (escape codes).
     - [ ] **Backend Drivers:**
-        - [ ] **VGA/Keyboard:** Bind keyboard input + VGA output to a TTY.
+        - [ ] **VGA Text Mode Console:**
+            - [ ] **Initialization:**
+                - [ ] Detect VGA presence (BIOS/PCI enumeration).
+                - [ ] Set 80x25 or 80x50 text mode.
+                - [ ] Map video memory (0xB8000) into kernel address space.
+                - [ ] Initialize attribute byte defaults (white on black).
+            - [ ] **Text Output:**
+                - [ ] Implement `vga_putchar(char c, uint8_t attr)`.
+                - [ ] Handle control characters (CR, LF, BS, TAB, BEL).
+                - [ ] Implement `vga_write(const char *buf, size_t len)`.
+                - [ ] Tab stop handling (configurable tab width).
+            - [ ] **Cursor Control:**
+                - [ ] Read/write hardware cursor position (CRTC registers 0x0E/0x0F).
+                - [ ] Cursor shape control (underline, block, invisible).
+                - [ ] Cursor blink enable/disable.
+            - [ ] **Scrolling:**
+                - [ ] Software scroll (memmove video buffer).
+                - [ ] Hardware scroll (CRTC start address register).
+                - [ ] Scroll region support (VT102 DECSTBM).
+            - [ ] **Attributes:**
+                - [ ] 16-color foreground/background palette.
+                - [ ] Blink/bright background toggle (attribute controller).
+                - [ ] Reverse video, bold, underline emulation.
+            - [ ] **TTY Binding:**
+                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`.
+                - [ ] Implement `tty_driver->write()` callback.
+                - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls.
+        - [ ] **Keyboard Input (PS/2 to TTY):**
+            - [ ] **Input Path:**
+                - [ ] Hook keyboard driver to TTY input queue.
+                - [ ] Convert scancodes to ASCII via keymap.
+                - [ ] Handle modifier keys (Shift, Ctrl, Alt, AltGr).
+                - [ ] Generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A).
+            - [ ] **Special Keys:**
+                - [ ] Function keys (F1-F12) to escape sequences.
+                - [ ] Arrow keys to ANSI escape sequences.
+                - [ ] Insert, Delete, Home, End, PgUp, PgDn sequences.
+                - [ ] Numeric keypad handling (NumLock state).
+            - [ ] **Console Switching:**
+                - [ ] Alt+F1..F12 for virtual console switch.
+                - [ ] Ctrl+Alt+Del for reboot/shutdown hook.
+                - [ ] SysRq key handling (magic SysRq sequences).
+            - [ ] **LED Control:**
+                - [ ] Sync Caps Lock, Num Lock, Scroll Lock LEDs.
+                - [ ] LED state persistence across console switches.
         - [ ] **Framebuffer Console (Graphical):**
+            - [ ] **Core Infrastructure:**
+                - [ ] `struct fb_info` device abstraction.
+                - [ ] Framebuffer registration/deregistration API.
+                - [ ] Memory mapping (physical to kernel virtual).
+                - [ ] `/dev/fb[0-N]` device node creation.
             - [ ] **Drivers:**
-                - [ ] VESA VBE (Linear Framebuffer).
-                - [ ] UEFI GOP (Graphics Output Protocol).
-                - [ ] Bochs Graphics Adapter (BGA).
-                - [ ] VirtIO-GPU (2D acceleration hooks).
+                - [ ] **VESA VBE (Linear Framebuffer):**
+                    - [ ] VBE 2.0+ detection and capability query.
+                    - [ ] Mode enumeration and selection.
+                    - [ ] Linear framebuffer mapping (LFB base address).
+                    - [ ] Protected mode interface (PM32 entry points).
+                    - [ ] EDID retrieval for monitor detection.
+                - [ ] **UEFI GOP (Graphics Output Protocol):**
+                    - [ ] GOP protocol location and initialization.
+                    - [ ] Mode query and switching.
+                    - [ ] Framebuffer base and stride retrieval.
+                    - [ ] EFI runtime services integration.
+                - [ ] **Bochs Graphics Adapter (BGA):**
+                    - [ ] BGA detection (PCI vendor/device ID, I/O ports).
+                    - [ ] VBE DISPI register interface.
+                    - [ ] Mode setting (resolution, bpp, enable LFB).
+                    - [ ] Virtual resolution and display offset.
+                    - [ ] Bank switching (legacy mode fallback).
+                - [ ] **VirtIO-GPU:**
+                    - [ ] VirtIO device discovery and setup.
+                    - [ ] Resource creation (2D scanout).
+                    - [ ] Transfer to host (flush dirty regions).
+                    - [ ] Display info query (resolution, format).
+                    - [ ] Cursor image upload and positioning.
+            - [ ] **Pixel Formats:**
+                - [ ] 8-bit indexed (palette-based).
+                - [ ] 16-bit (RGB565, ARGB1555).
+                - [ ] 24-bit (RGB888, BGR888).
+                - [ ] 32-bit (ARGB8888, XRGB8888, ABGR8888).
+                - [ ] Endianness handling (little/big endian).
+                - [ ] Format conversion routines.
             - [ ] **Rendering:**
-                - [ ] PSF1/PSF2 Bitmap font parser and renderer.
-                - [ ] Software Blitting (RectFill, BitBlt, CopyArea).
-                - [ ] Double Buffering (optional, for smoothness).
-                - [ ] Hardware Hardware Cursor support (if available).
-            - [ ] **Emulation:**
-                - [ ] VT102 / ANSI escape sequence parser.
-                - [ ] Cursor positioning and attributes (color, bold, reverse).
-                - [ ] Scrolling (hardware panning or software copy).
+                - [ ] **Font Support:**
+                    - [ ] PSF1 font parser (256/512 glyphs, fixed width).
+                    - [ ] PSF2 font parser (Unicode table, variable metrics).
+                    - [ ] BDF/PCF font support (optional).
+                    - [ ] Built-in fallback font (8x16 VGA ROM font).
+                    - [ ] Font glyph cache (hash table lookup).
+                    - [ ] Unicode to glyph mapping (cmap).
+                - [ ] **Blitting Operations:**
+                    - [ ] `fb_fillrect()`: Solid color fill with ROP support.
+                    - [ ] `fb_copyarea()`: Screen-to-screen blit.
+                    - [ ] `fb_imageblit()`: Mono/color image to framebuffer.
+                    - [ ] Accelerated ops detection and fallback.
+                    - [ ] Clipping (viewport bounds checking).
+                - [ ] **Character Rendering:**
+                    - [ ] Glyph rendering with foreground/background colors.
+                    - [ ] Bold rendering (shift and OR, or bold font).
+                    - [ ] Italic rendering (shear transform, or italic font).
+                    - [ ] Underline and strikethrough rendering.
+                    - [ ] Reverse video attribute.
+                - [ ] **Performance:**
+                    - [ ] Double buffering (offscreen back buffer).
+                    - [ ] Dirty rectangle tracking.
+                    - [ ] Deferred updates (batch flush on vsync).
+                    - [ ] Write-combining memory type (PAT/MTRR).
+            - [ ] **Cursor:**
+                - [ ] **Software Cursor:**
+                    - [ ] XOR cursor rendering.
+                    - [ ] Cursor save/restore (background preservation).
+                    - [ ] Cursor blink timer integration.
+                - [ ] **Hardware Cursor:**
+                    - [ ] Cursor image upload (ARGB format).
+                    - [ ] Cursor position registers.
+                    - [ ] Hot spot offset configuration.
+                    - [ ] Cursor enable/disable.
+            - [ ] **Emulation (VT102/ANSI):**
+                - [ ] **Parser State Machine:**
+                    - [ ] Ground state (printable characters).
+                    - [ ] Escape state (ESC received).
+                    - [ ] CSI state (ESC [ sequences).
+                    - [ ] OSC state (Operating System Commands).
+                    - [ ] DCS state (Device Control Strings).
+                    - [ ] Parameter accumulation and parsing.
+                - [ ] **Cursor Control Sequences:**
+                    - [ ] CUU/CUD/CUF/CUB (cursor movement).
+                    - [ ] CUP/HVP (absolute positioning).
+                    - [ ] CNL/CPL (next/previous line).
+                    - [ ] CHA/VPA (column/row absolute).
+                    - [ ] SC/RC (save/restore cursor position).
+                    - [ ] DECSC/DECRC (save/restore with attributes).
+                - [ ] **Erase Sequences:**
+                    - [ ] ED (erase display: to end, to start, all).
+                    - [ ] EL (erase line: to end, to start, all).
+                    - [ ] ECH (erase characters).
+                    - [ ] DCH/ICH (delete/insert characters).
+                    - [ ] DL/IL (delete/insert lines).
+                - [ ] **Attribute Sequences (SGR):**
+                    - [ ] Reset (SGR 0).
+                    - [ ] Bold/dim/italic/underline/blink/reverse/hidden.
+                    - [ ] 8-color foreground/background (30-37, 40-47).
+                    - [ ] Bright colors (90-97, 100-107).
+                    - [ ] 256-color mode (38;5;N, 48;5;N).
+                    - [ ] 24-bit true color (38;2;R;G;B, 48;2;R;G;B).
+                - [ ] **Scrolling:**
+                    - [ ] DECSTBM (set top/bottom margins).
+                    - [ ] SU/SD (scroll up/down).
+                    - [ ] IND/RI (index/reverse index).
+                    - [ ] Smooth scroll support (optional).
+                - [ ] **Modes:**
+                    - [ ] DECCKM (cursor key mode: application/normal).
+                    - [ ] DECAWM (auto-wrap mode).
+                    - [ ] DECOM (origin mode: absolute/relative).
+                    - [ ] DECTCEM (cursor visibility).
+                    - [ ] Alternate screen buffer (DECSET 1049).
+                    - [ ] Bracketed paste mode (DECSET 2004).
+                - [ ] **Character Sets:**
+                    - [ ] G0/G1/G2/G3 character set designation.
+                    - [ ] SI/SO (shift in/out for G0/G1).
+                    - [ ] DEC Special Graphics (line drawing).
+                    - [ ] UTF-8 decoding and Unicode support.
+                - [ ] **Tabs:**
+                    - [ ] HTS (horizontal tab set).
+                    - [ ] TBC (tab clear: current, all).
+                    - [ ] CHT/CBT (cursor horizontal tab forward/back).
+                    - [ ] Default tab stops (every 8 columns).
+                - [ ] **Reports:**
+                    - [ ] DSR (device status report).
+                    - [ ] CPR (cursor position report).
+                    - [ ] DA (device attributes).
+                    - [ ] DECID (terminal ID).
+            - [ ] **TTY Binding:**
+                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`.
+                - [ ] `tty_driver->write()` with escape sequence processing.
+                - [ ] `tty_driver->ioctl()` for FB-specific controls.
+                - [ ] Window size tracking (TIOCGWINSZ/TIOCSWINSZ).
         - [ ] **Serial Console (Headless):**
-            - [ ] VT102 Pass-through (allow host terminal to handle rendering).
+            - [ ] **UART Drivers:**
+                - [ ] 8250/16550 UART driver (I/O port and MMIO).
+                - [ ] Baud rate configuration (divisor latch).
+                - [ ] Line control (data bits, parity, stop bits).
+                - [ ] FIFO control (16550A FIFO enable, trigger level).
+                - [ ] Modem control signals (DTR, RTS).
+                - [ ] Modem status signals (CTS, DSR, DCD, RI).
+                - [ ] Interrupt-driven I/O (IRQ handler).
+                - [ ] Polling mode fallback (for early boot).
+            - [ ] **Console Output:**
+                - [ ] VT102 pass-through (raw escape sequences).
+                - [ ] Output buffering and flow control.
+                - [ ] XON/XOFF software flow control.
+                - [ ] RTS/CTS hardware flow control.
+                - [ ] Break signal transmission.
+            - [ ] **Console Input:**
+                - [ ] Character reception and buffering.
+                - [ ] Break signal detection.
+                - [ ] Framing and parity error handling.
+                - [ ] Overrun error handling.
+            - [ ] **TTY Binding:**
+                - [ ] Register as `tty_driver` for `/dev/ttyS[0-N]`.
+                - [ ] `tty_driver->write()` callback.
+                - [ ] `tty_driver->ioctl()` for serial-specific controls.
+                - [ ] `tty_driver->set_termios()` for baud/parity changes.
+            - [ ] **Kernel Console:**
+                - [ ] Early boot console (before TTY init).
+                - [ ] `console=ttyS0,115200n8` kernel parameter parsing.
+                - [ ] Kernel panic output to serial.
+                - [ ] SysRq over serial (break + key).
     - [ ] **Features:**
         - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles.
-        - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.
-- [ ] **RNG Subsystem (`/dev/random`):**
-    - [ ] **API & Data Structures:**
-        - [ ] **Data Structures:** Define `struct entropy_pool`, `chacha_ctx`; locking (`spinlock_t`). (Files: `sys/include/sys/random.h`, `sys/kern/random_core.c`; Tests: `sys/tests/test_rng_structs.c` (compile/sizeof); Criteria: Headers build).
-        - [ ] **CSPRNG Algo:** Implement ChaCha20 block function and mixing logic. (Files: `sys/kern/chacha20.c`; Tests: `sys/tests/test_chacha_vectors.c`; Criteria: RFC 7539 test vectors pass).
-        - [ ] **Seeding API:** Implement `random_add_entropy(const void *data, size_t len, int quality)` and internal reseed logic. (Files: `sys/kern/random_core.c`; Tests: `sys/tests/test_rng_seeding.c`; Criteria: State changes after seeding).
-    - [ ] **Entropy Sources:**
-        - [ ] **Harvesting Infrastructure:** Create `random_harvest_fast(void *data, size_t len)` for ISRs. (Files: `sys/kern/random_harvest.c`; Tests: `test_rng_harvest.c`; Criteria: Calling harvester increments entropy counter).
-        - [ ] **Sources:** Hook into `pit_handler`, `keyboard_handler`, `virtio_input` for timing jitter. (Files: `sys/arch/i386/intr.c`, drivers; Tests: `native_test` (dmesg check); Criteria: Entropy increases on interaction).
-        - [ ] **HWRNG:** Implement RDRAND/RDSEED support in `sys/arch/i386`. (Files: `sys/arch/i386/hwrng.c`; Tests: `test_hwrng.c`; Criteria: `cpuid` detection and fast path usage).
-    - [ ] **Blocking & Interfaces:**
-        - [ ] **Blocking Logic:** Implement `random_read_blocking` with wait queue for `/dev/random`. (Files: `sys/kern/random_dev.c`; Tests: `test_rng_block.c`; Criteria: Read blocks until seed status ok).
-        - [ ] **Non-blocking Logic:** Implement `/dev/urandom` reads (CSPRNG stream). (Files: `sys/kern/random_dev.c`; Tests: `native_test` (`dd if=/dev/urandom`); Criteria: High throughput, no block).
-        - [ ] **Internal API:** Implement `getrandom(void *buf, size_t len, unsigned int flags)`. (Files: `sys/kern/random_api.c`; Tests: `sys/tests/test_getrandom.c`; Criteria: Kernel consumers can get randomness).
-    - [ ] **IOCTLs & Admin:**
-        - [ ] **IOCTLs:** Implement `RNDGETENTCNT` and `RNDADDENTROPY`. (Files: `sys/kern/random_ioctl.c`, `sys/include/sys/random.h`; Tests: `native_test` (ioctl call); Criteria: `ioctl` returns standard Linux-like entropy count).
+        - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.??
+- [ ] **RNG Subsystem (`/dev/random`, `/dev/urandom`):**
+    - [ ] **Core Infrastructure:**
+        - [ ] **Data Structures:**
+            - [ ] Define `struct entropy_pool` (input pool, output pool, counters).
+            - [ ] Define `struct chacha20_ctx` (key, counter, block buffer).
+            - [ ] Define `struct rng_state` (global RNG state, seeded flag, reseed counter).
+            - [ ] Create `spinlock_t entropy_lock` for pool access.
+            - [ ] Create `spinlock_t output_lock` for CSPRNG state.
+            - [ ] Define entropy estimation structures (bits per source).
+        - [ ] **Header Files:**
+            - [ ] Create `sys/include/sys/random.h` (public API).
+            - [ ] Create `sys/kern/random_internal.h` (internal structures).
+            - [ ] Define `GRND_NONBLOCK`, `GRND_RANDOM`, `GRND_INSECURE` flags.
+        - [ ] **Initialization:**
+            - [ ] Implement `random_init()` called from `kmain`.
+            - [ ] Initialize entropy pools to zero.
+            - [ ] Initialize CSPRNG state.
+            - [ ] Set initial seeded flag to false.
+            - [ ] Register `/dev/random` and `/dev/urandom` device nodes.
+    - [ ] **CSPRNG Algorithm (ChaCha20):**
+        - [ ] **Core Implementation:**
+            - [ ] Implement ChaCha20 quarter-round function.
+            - [ ] Implement ChaCha20 column and diagonal rounds.
+            - [ ] Implement ChaCha20 block function (20 rounds).
+            - [ ] Implement keystream generation with counter increment.
+            - [ ] Implement output serialization (little-endian).
+        - [ ] **Key Management:**
+            - [ ] Implement `chacha20_init(ctx, key, nonce)`.
+            - [ ] Implement `chacha20_rekey(ctx)` (fast-key-erasure).
+            - [ ] Implement `chacha20_wipe(ctx)` (secure zeroing).
+        - [ ] **Output Generation:**
+            - [ ] Implement `chacha20_extract(ctx, buf, len)`.
+            - [ ] Buffer partial blocks for efficiency.
+            - [ ] Rekey after every 1MB of output (configurable).
+        - [ ] **Testing:**
+            - [ ] RFC 7539 test vectors (known answer tests).
+            - [ ] Block function correctness tests.
+            - [ ] Counter wraparound handling tests.
+    - [ ] **Entropy Mixing (Input Pool):**
+        - [ ] **Mixing Function:**
+            - [ ] Implement LFSR-based mixing (Linux-style).
+            - [ ] Implement CRC32-based fast mixing.
+            - [ ] Implement SHA-256 compression for extraction.
+            - [ ] Implement twist table for polynomial feedback.
+        - [ ] **Pool Management:**
+            - [ ] Define input pool size (4096 bits / 512 bytes).
+            - [ ] Implement `pool_mix_bytes(pool, data, len)`.
+            - [ ] Implement `pool_extract_bytes(pool, out, len)`.
+            - [ ] Track estimated entropy bits in pool.
+        - [ ] **Entropy Estimation:**
+            - [ ] Conservative entropy crediting (bits per event).
+            - [ ] Overflow protection (cap at pool size).
+            - [ ] Debit entropy on extraction.
+            - [ ] Track total entropy collected since boot.
+    - [ ] **Entropy Sources & Harvesting:**
+        - [ ] **Harvesting Infrastructure:**
+            - [ ] Implement `random_harvest(data, len, bits, source)` (general API).
+            - [ ] Implement `random_harvest_fast(data, len)` (ISR-safe, no lock).
+            - [ ] Implement `random_harvest_direct(data, len, bits)` (high-quality).
+            - [ ] Define `enum entropy_source` (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG).
+            - [ ] Per-source entropy rate limiting.
+        - [ ] **Timing-Based Sources:**
+            - [ ] **Interrupt Timing:**
+                - [ ] Hook `pit_handler` for timer jitter (TSC delta).
+                - [ ] Hook `isr_handler` for interrupt timing.
+                - [ ] Mix TSC low bits on each interrupt.
+                - [ ] Credit ~1 bit per interrupt timing sample.
+            - [ ] **Keyboard/Mouse:**
+                - [ ] Hook `keyboard_handler` (scancode + timing).
+                - [ ] Hook PS/2 mouse driver (movement + timing).
+                - [ ] Credit ~2-4 bits per HID event.
+            - [ ] **Disk I/O:**
+                - [ ] Hook IDE/AHCI/VirtIO completion interrupts.
+                - [ ] Mix seek time / completion jitter.
+                - [ ] Credit ~1 bit per I/O completion.
+            - [ ] **Network:**
+                - [ ] Hook network packet arrival (timing + data).
+                - [ ] Mix packet timing and partial payload.
+                - [ ] Credit ~2 bits per packet timing.
+        - [ ] **Hardware RNG (RDRAND/RDSEED):**
+            - [ ] **Detection:**
+                - [ ] CPUID feature detection for RDRAND (ECX bit 30).
+                - [ ] CPUID feature detection for RDSEED (EBX bit 18).
+                - [ ] Runtime availability flags.
+            - [ ] **Implementation:**
+                - [ ] Implement `rdrand32()`, `rdrand64()` with retry loop.
+                - [ ] Implement `rdseed32()`, `rdseed64()` with failure handling.
+                - [ ] Fallback path when HWRNG unavailable.
+            - [ ] **Integration:**
+                - [ ] Periodic HWRNG harvesting (if available).
+                - [ ] Mix HWRNG output into entropy pool.
+                - [ ] Use HWRNG for fast-path output (XOR with CSPRNG).
+                - [ ] Credit ~32 bits per RDRAND invocation (conservative).
+        - [ ] **Jitter Entropy (CPU Timing):**
+            - [ ] Implement `jitterentropy_collect()` (memory access timing).
+            - [ ] CPU execution jitter measurement.
+            - [ ] Memory access timing variations.
+            - [ ] Minimum samples before crediting.
+        - [ ] **VirtIO Entropy Device:**
+            - [ ] VirtIO RNG device detection (device type 4).
+            - [ ] Request entropy from hypervisor.
+            - [ ] Mix hypervisor-provided randomness.
+            - [ ] Credit appropriately (host-dependent quality).
+    - [ ] **Reseeding & State Management:**
+        - [ ] **Reseed Logic:**
+            - [ ] Implement `random_reseed()` (extract from input pool).
+            - [ ] Minimum entropy threshold before first seed (256 bits).
+            - [ ] Reseed interval (time-based or output-based).
+            - [ ] Reseed on entropy pool reaching threshold.
+        - [ ] **Seeded State Tracking:**
+            - [ ] Track `rng_seeded` boolean.
+            - [ ] Track `reseed_count` for auditing.
+            - [ ] Implement `random_is_seeded()` query.
+            - [ ] Block reads until first seed (for `/dev/random`).
+        - [ ] **Catastrophic Reseed:**
+            - [ ] Full state replacement on seed file load.
+            - [ ] Wipe previous state before new key material.
+            - [ ] Notify waiters after reseed.
+    - [ ] **Device Interfaces:**
+        - [ ] **`/dev/random` (Blocking):**
+            - [ ] Implement `random_dev_open()`.
+            - [ ] Implement `random_dev_read()` with blocking.
+            - [ ] Block until minimum entropy available.
+            - [ ] Wait queue for blocked readers (`random_wait`).
+            - [ ] Wakeup on entropy addition.
+            - [ ] Implement `random_dev_poll()` (POLLIN when seeded).
+        - [ ] **`/dev/urandom` (Non-blocking):**
+            - [ ] Implement `urandom_dev_read()` (always returns data).
+            - [ ] Warn once if read before seeded (dmesg).
+            - [ ] High throughput (CSPRNG stream).
+            - [ ] No entropy debit (unlimited output).
+        - [ ] **Shared Implementation:**
+            - [ ] Device major/minor number allocation.
+            - [ ] `struct file_operations` registration.
+            - [ ] Character device creation.
+            - [ ] Permissions check (world-readable).
+        - [ ] **`getrandom()` Syscall:**
+            - [ ] Implement `sys_getrandom(buf, len, flags)`.
+            - [ ] `GRND_RANDOM` flag (use blocking pool).
+            - [ ] `GRND_NONBLOCK` flag (return EAGAIN if not seeded).
+            - [ ] `GRND_INSECURE` flag (return data even if not seeded).
+            - [ ] Personality support (native, Linux, FreeBSD).
+            - [ ] Register syscall number in all personality tables.
+        - [ ] **Kernel Internal API:**
+            - [ ] Implement `get_random_bytes(buf, len)` (kernel consumers).
+            - [ ] Implement `get_random_u32()`, `get_random_u64()`.
+            - [ ] Implement `get_random_bytes_wait(buf, len)` (blocking).
+            - [ ] Early boot fallback (before seeded).
+    - [ ] **IOCTLs & Administrative Interface:**
+        - [ ] **IOCTL Commands:**
+            - [ ] `RNDGETENTCNT`: Return entropy estimate (bits).
+            - [ ] `RNDADDTOENTCNT`: Add to entropy count (privileged).
+            - [ ] `RNDADDENTROPY`: Add entropy data + credit (privileged).
+            - [ ] `RNDZAPENTCNT`: Zero entropy count (privileged).
+            - [ ] `RNDCLEARPOOL`: Clear entropy pool (privileged).
+            - [ ] `RNDRESEEDCRNG`: Force CSPRNG reseed (privileged).
+        - [ ] **Implementation:**
+            - [ ] Implement `random_dev_ioctl()` dispatcher.
+            - [ ] Privilege checks (CAP_SYS_ADMIN or root).
+            - [ ] Input validation for user-provided entropy.
+            - [ ] Copyin/copyout for userspace buffers.
+        - [ ] **Sysctl Interface (Optional):**
+            - [ ] `kern.random.entropy_avail` (read-only).
+            - [ ] `kern.random.poolsize` (read-only).
+            - [ ] `kern.random.uuid` (read-only, per-read UUID).
+            - [ ] `kern.random.boot_id` (read-only, boot UUID).
     - [ ] **Security & Correctness:**
-        - [ ] **Fork Safety:** Implement `random_reseed_on_fork()` hook in `proc_fork`. (Files: `sys/pm/process.c`; Tests: `test_rng_fork.c` (child vs parent output); Criteria: Child gets different stream).
-        - [ ] **Memory Protection:** Add explicit `explicit_bzero` or separate pool clearing on release. (Files: `sys/kern/random_core.c`; Tests: Code audit; Criteria: Sensitive state wiped).
-        - [ ] **Wipe on Exec:** Ensure userspace RNG state (if any shared) is reset/wiped. (Files: `sys/fs/exec/exec.c`; Tests: `test_rng_exec.c`; Criteria: Clean state on new image).
-    - [ ] **Performance:**
-        - [ ] **Microbenchmarks:** Create `tests/bench_rng.c` for throughput. (Files: `sys/tests/bench_rng.c`; Criteria: Measure MB/s).
+        - [ ] **Fork Safety:**
+            - [ ] Implement `random_reseed_on_fork()` hook.
+            - [ ] Call from `proc_fork()` after child creation.
+            - [ ] Mix PID, timestamp into child's CSPRNG state.
+            - [ ] Ensure parent and child diverge immediately.
+            - [ ] Wipe any copied CSPRNG buffer in child.
+        - [ ] **Exec Safety:**
+            - [ ] Wipe userspace-visible RNG state on `execve`.
+            - [ ] Reset any per-process CSPRNG state.
+            - [ ] Ensure no entropy leakage across exec boundary.
+        - [ ] **Memory Protection:**
+            - [ ] Use `explicit_bzero()` for sensitive state clearing.
+            - [ ] Mark CSPRNG state pages non-swappable.
+            - [ ] Clear key material immediately after rekey.
+            - [ ] Avoid leaving entropy in temporary buffers.
+        - [ ] **Backtracking Resistance:**
+            - [ ] Fast-key-erasure design (rekey after extraction).
+            - [ ] Cannot recover previous output given current state.
+            - [ ] Wipe intermediate state after each operation.
+        - [ ] **Prediction Resistance:**
+            - [ ] Periodic reseed from entropy pool.
+            - [ ] Mix in fresh entropy continuously.
+            - [ ] HWRNG XOR for defense-in-depth.
+        - [ ] **Audit & Logging:**
+            - [ ] Log first seed event.
+            - [ ] Log reseed events (rate-limited).
+            - [ ] Log HWRNG initialization status.
+            - [ ] Log warnings for uninitialized reads.
+    - [ ] **Boot-time Entropy & Seed File:**
+        - [ ] **Early Boot Entropy:**
+            - [ ] Collect BIOS/firmware timestamps.
+            - [ ] Collect Multiboot structure addresses.
+            - [ ] Collect memory map contents.
+            - [ ] Collect interrupt timing during init.
+        - [ ] **Seed File Support:**
+            - [ ] Read seed file from root filesystem on mount.
+            - [ ] Expected path: `/var/db/entropy/seed`.
+            - [ ] Seed file format: raw 256 bytes minimum.
+            - [ ] Mix seed file into entropy pool.
+            - [ ] Immediately overwrite seed file with fresh randomness.
+        - [ ] **Shutdown Handling:**
+            - [ ] Write fresh seed file on clean shutdown.
+            - [ ] Ensure seed file written before unmount.
+            - [ ] Atomic write (write temp, rename).
+    - [ ] **Performance Optimization:**
+        - [ ] **Fast Path:**
+            - [ ] Per-CPU CSPRNG state (avoid lock contention).
+            - [ ] Batch output generation (64-byte blocks).
+            - [ ] Minimize lock hold time.
+            - [ ] Lockless entropy harvesting counters.
+        - [ ] **Benchmarking:**
+            - [ ] Create `sys/tests/bench_rng.c` for throughput.
+            - [ ] Measure `get_random_bytes()` MB/s.
+            - [ ] Measure `read(/dev/urandom)` MB/s.
+            - [ ] Measure entropy harvesting overhead.
+            - [ ] Profile lock contention under load.
+        - [ ] **Optimization Targets:**
+            - [ ] Target: >100 MB/s for `/dev/urandom`.
+            - [ ] Target: <1μs for `get_random_u32()`.
+            - [ ] Target: <100ns for `random_harvest_fast()`.
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] `test_chacha20.c`: RFC 7539 test vectors.
+            - [ ] `test_entropy_pool.c`: Mixing function correctness.
+            - [ ] `test_rng_seeding.c`: Reseed logic validation.
+            - [ ] `test_rng_fork.c`: Parent/child output divergence.
+            - [ ] `test_rng_exec.c`: State wipe on exec.
+            - [ ] `test_getrandom.c`: Syscall interface validation.
+        - [ ] **Statistical Tests:**
+            - [ ] Dieharder test suite integration.
+            - [ ] NIST SP 800-22 test suite.
+            - [ ] TestU01 BigCrush (optional).
+            - [ ] Minimum: Frequency, runs, and chi-square tests.
+        - [ ] **Integration Tests:**
+            - [ ] Boot-to-seeded timing measurement.
+            - [ ] Stress test under heavy read load.
+            - [ ] Multi-process concurrent read test.
+            - [ ] HWRNG fallback path testing.
     - [ ] **Documentation:**
-        - [ ] **Manpage:** Create `man/kernel/random.4`. (Files: `man/kernel/random.4`; Criteria: Documented behaviors match helper).
+        - [ ] **Man Pages:**
+            - [ ] `man4/random.4`: Device interface documentation.
+            - [ ] `man2/getrandom.2`: Syscall documentation.
+            - [ ] Document blocking vs non-blocking behavior.
+            - [ ] Document entropy sources and estimation.
+            - [ ] Document security properties and limitations.
+        - [ ] **Kernel Documentation:**
+            - [ ] Architecture overview in `doc/random.md`.
+            - [ ] Entropy source hookup guide.
+            - [ ] Security model documentation.
+            - [ ] Performance tuning guide.
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS Subsystem Refactor (BSD-style):**
