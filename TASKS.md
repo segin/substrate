@@ -472,46 +472,46 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Wait queue per object with priority ordering. <!-- ntsync.c:waiter_enqueue (priority ordered) -->
             - [x] Atomic acquisition semantics. <!-- ntsync.c:ntsync_acquire with spinlocks -->
             - [x] Cross-object atomicity for WAIT_ALL. <!-- ntsync.c:ntsync_wait_all multi-lock -->
-- [x] **Signals:**
-    - [x] Implement Signal delivery mechanism (trampoline, context saving).
-    - [x] Implement `kill`, `sigaction`, `sigprocmask`.
-    - [x] Implement PID 1 protection and safe exit handling.
-    - [x] **Delivery & context:**
-        - [x] **Debug Delivery:**
-            - [x] Isolate logic for frame pushing (remove panic).
-            - [x] Create architecture-dependent `struct sigframe`.
-            - [x] Copy frame to aligned user stack pointer.
-            - [x] Set `EIP` to trampoline, `ESP` to frame.
-        - [x] **Trampoline:**
-            - [x] `sys_sigreturn`: Restore keys registers from stack frame.
-            - [x] Verification: Check `ss` and `cs` integrity on return.
-        - [x] **Frame Management:**
-            - [x] `sigaltstack`: Support alternative signal stack.
-            - [x] `SA_SIGINFO`: Extended `siginfo_t` support.
-    - [x] **Generation:**
-        - [x] `psignal(p, sig)`: Send signal to process.
-        - [x] `pgsignal(pgrp, sig)`: Send signal to process group.
-        - [x] `trapsignal(p, sig, code)`: Send synchronous trap signal.
+- [ ] **Signals:**
+    - [ ] Implement Signal delivery mechanism (trampoline, context saving).
+    - [ ] Implement `kill`, `sigaction`, `sigprocmask`.
+    - [ ] Implement PID 1 protection and safe exit handling.
+    - [ ] **Delivery & context:**
+        - [ ] **Debug Delivery:**
+            - [ ] Isolate logic for frame pushing (remove panic).
+            - [ ] Create architecture-dependent `struct sigframe`.
+            - [ ] Copy frame to aligned user stack pointer.
+            - [ ] Set `EIP` to trampoline, `ESP` to frame.
+        - [ ] **Trampoline:**
+            - [ ] `sys_sigreturn`: Restore keys registers from stack frame.
+            - [ ] Verification: Check `ss` and `cs` integrity on return.
+        - [ ] **Frame Management:**
+            - [ ] `sigaltstack`: Support alternative signal stack.
+            - [ ] `SA_SIGINFO`: Extended `siginfo_t` support.
+    - [ ] **Generation:**
+        - [ ] `psignal(p, sig)`: Send signal to process.
+        - [ ] `pgsignal(pgrp, sig)`: Send signal to process group.
+        - [ ] `trapsignal(p, sig, code)`: Send synchronous trap signal.
 - [ ] **Process Lifecycle & Job Control:**
-    - [x] **Process Termination (`exit`, `_exit`):**
-        - [x] **Resource Release:**
-            - [x] Close all open file descriptors (`fd_close_all`).
-            - [x] Release Virtual Memory Map (`vm_map_remove`).
-            - [x] Release System V Semaphores/Shm.
-            - [x] Decrement current working directory reference.
-        - [x] **State Transition (DYING -> ZOMBIE):**
-            - [x] Set `p_stat` to `SZOMB`.
-            - [x] Record exit code (`p_xstat`).
-            - [x] Calculate final `rusage` (user + system time).
-        - [x] **Orphan Reparenting:**
-            - [x] Acquire `proctree_lock`.
-            - [x] Iterate over children of exiting process.
-            - [x] Reparent each child to `init` (PID 1).
-            - [x] If `init` is dying, reparent to `swapper` (PID 0) or panic.
-            - [x] Unlock `proctree_lock`.
-        - [x] **Notification:**
-            - [x] Send `SIGCHLD` to parent.
-            - [x] Wakeup parent if waiting (`sleepq_wake(&parent->p_children)`).
+    - [ ] **Process Termination (`exit`, `_exit`):**
+        - [ ] **Resource Release:**
+            - [ ] Close all open file descriptors (`fd_close_all`).
+            - [ ] Release Virtual Memory Map (`vm_map_remove`).
+            - [ ] Release System V Semaphores/Shm.
+            - [ ] Decrement current working directory reference.
+        - [ ] **State Transition (DYING -> ZOMBIE):**
+            - [ ] Set `p_stat` to `SZOMB`.
+            - [ ] Record exit code (`p_xstat`).
+            - [ ] Calculate final `rusage` (user + system time).
+        - [ ] **Orphan Reparenting:**
+            - [ ] Acquire `proctree_lock`.
+            - [ ] Iterate over children of exiting process.
+            - [ ] Reparent each child to `init` (PID 1).
+            - [ ] If `init` is dying, reparent to `swapper` (PID 0) or panic.
+            - [ ] Unlock `proctree_lock`.
+        - [ ] **Notification:**
+            - [ ] Send `SIGCHLD` to parent.
+            - [ ] Wakeup parent if waiting (`sleepq_wake(&parent->p_children)`).
 
     - [x] **Wait Subsystem (`wait4`, `waitpid`):**
         - [x] **Search Logic (`find_zombie`):** <!-- Now find_waitable_child -->
@@ -581,22 +581,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Action: If a group becomes orphaned and has stopped members, send `SIGHUP` + `SIGCONT`. <!-- pgrp_check_orphan -->
 
 ### 2. Architecture (`sys/arch`)
-- [x] **i386:**
+- [ ] **i386:**
     - [x] Complete GDT/TSS setup for user-mode switching.
-    - [x] **Verification:**
-        - [x] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
-        - [x] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->
-
-...
-
-                - [x] **Input Processing (`n_tty_receive_buf`):**
-                    - [ ] Parity checks and [x] stripping.
-                    - [x] Newline translation (CR->NL).
-                    - [x] Software flow control (XON/XOFF detection).
-                    - [x] Signal generation check (`ISIG`).
-    - [x] Implement Exception Handling (Page Fault, GPF, etc.).
-    - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
-    - [x] **Advanced Diagnostics (Missing):** <!-- All items complete -->
+    - [ ] **Verification:**
+        - [ ] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
+        - [ ] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->
+    - [ ] Implement Exception Handling (Page Fault, GPF, etc.).
+    - [ ] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
+    - [ ] **Advanced Diagnostics (Missing):** <!-- All items complete -->
         - [x] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it -->
         - [x] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() -->
         - [x] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() -->
