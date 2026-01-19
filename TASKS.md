@@ -581,7 +581,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Action: If a group becomes orphaned and has stopped members, send `SIGHUP` + `SIGCONT`. <!-- pgrp_check_orphan -->
 
 ### 2. Architecture (`sys/arch`)
-- [ ] **i386:**
+- [x] **i386:**
     - [x] Complete GDT/TSS setup for user-mode switching.
     - [x] **Verification:**
         - [x] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
