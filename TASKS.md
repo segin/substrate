@@ -504,7 +504,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Record exit code (`p_xstat`).
             - [x] Calculate final `rusage` (user + system time).
         - [x] **Orphan Reparenting:**
-            - [ ] Acquire `proctree_lock`.
+            - [x] Acquire `proctree_lock`.
             - [x] Iterate over children of exiting process.
             - [x] Reparent each child to `init` (PID 1).
             - [x] If `init` is dying, reparent to `swapper` (PID 0) or panic.

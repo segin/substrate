@@ -1,6 +1,7 @@
 #include "pm.h"
 #include <sys/acct.h>
 #include <sys/file.h>
+#include <sys/lock.h>
 #include <kern/console.h>
 #include <kern/sched.h> // For MAX_THREADS, thread creation
 #include <stddef.h>
@@ -11,6 +12,18 @@ process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
 static int next_pid = 1;
 
+/*
+ * proctree_lock - Protects the process tree structure
+ *
+ * This mutex must be held when modifying the process hierarchy:
+ * - p_parent, p_children, p_sibling pointers
+ * - Reparenting operations (orphan handling)
+ * - Process group membership changes
+ *
+ * Use mutex (not spinlock) since operations may sleep or take time.
+ */
+mutex_t proctree_lock;
+
 extern uint32_t get_time(void);
 extern fs_node_t *fs_root;
 extern struct personality personality_native;
@@ -18,6 +31,9 @@ extern struct personality personality_native;
 void pm_init(void) {
     next_pid = 1;
     memset(processes, 0, sizeof(processes));
+    
+    /* Initialize the process tree lock */
+    mutex_init(&proctree_lock, "proctree");
     
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
@@ -154,18 +170,29 @@ void fd_close_all(process_t *p) {
 
 // Reparent children to init
 void proc_reparent_children(process_t *p) {
-    // Lock?
-    if (!p->p_children) return;
+    process_t *init;
+    process_t *child, *next;
     
-    process_t *init = &processes[1]; // Assume PID 1 is index 1 or we search
+    /*
+     * Acquire proctree_lock to protect the process hierarchy.
+     * This prevents races with other processes modifying the tree.
+     */
+    mutex_lock(&proctree_lock);
+    
+    if (!p->p_children) {
+        mutex_unlock(&proctree_lock);
+        return;
+    }
+    
+    init = &processes[1]; // Assume PID 1 is index 1 or we search
     if (init->state == SDYING || init->state == SZOMB) {
         // init is dying, reparent to swapper?
         init = &processes[0];
     }
     
-    process_t *child = p->p_children;
+    child = p->p_children;
     while (child) {
-        process_t *next = child->p_sibling;
+        next = child->p_sibling;
         
         // Remove from p's list (conceptually done by iterating)
         child->p_parent = init;
@@ -177,6 +204,13 @@ void proc_reparent_children(process_t *p) {
         child = next;
     }
     p->p_children = NULL;
+    
+    /*
+     * Unlock proctree_lock before waking up init.
+     * This avoids holding the lock while potentially causing
+     * a context switch.
+     */
+    mutex_unlock(&proctree_lock);
     
     // Wakeup init if it was waiting for children
     sched_wakeup(&init->p_children);
