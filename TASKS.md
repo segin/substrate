@@ -508,7 +508,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Iterate over children of exiting process.
             - [x] Reparent each child to `init` (PID 1).
             - [x] If `init` is dying, reparent to `swapper` (PID 0) or panic.
-            - [ ] Unlock `proctree_lock`.
+            - [x] Unlock `proctree_lock`.
         - [x] **Notification:**
             - [x] Send `SIGCHLD` to parent.
             - [x] Wakeup parent if waiting (`sleepq_wake(&parent->p_children)`).
