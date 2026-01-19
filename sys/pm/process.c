@@ -116,6 +116,17 @@ int proc_fork(process_t *parent, void *stack) {
     
     // We'll declare `sched_fork_thread` in sched.h and assume it exists (we'll move it there).
     extern int sched_fork_thread(process_t *proc, void *stack);
+    
+    /* 
+     * Link child into parent's list.
+     * Must hold proctree_lock.
+     */
+    mutex_lock(&proctree_lock);
+    child_proc->p_parent = parent;
+    child_proc->p_sibling = parent->p_children;
+    parent->p_children = child_proc;
+    mutex_unlock(&proctree_lock);
+    
     return sched_fork_thread(child_proc, stack);
 }
 

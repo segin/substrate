@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <kern/sched.h> // for sched_sleep
+#include "pm.h"
 
 extern thread_t *current_thread;
 extern void sched_sleep(void *chan);
@@ -130,6 +131,7 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 cur->rusage_children.ru_nivcsw += target->rusage.ru_nivcsw + target->rusage_children.ru_nivcsw;
 
                 // Unlink from Parent's List
+                mutex_lock(&proctree_lock);
                 if (cur->p_children == target) {
                     cur->p_children = target->p_sibling;
                 } else {
@@ -137,6 +139,7 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                     while (prev && prev->p_sibling != target) prev = prev->p_sibling;
                     if (prev) prev->p_sibling = target->p_sibling;
                 }
+                mutex_unlock(&proctree_lock);
                 
                 // Clear process group membership
                 extern void pgrp_remove_proc(struct process *proc);

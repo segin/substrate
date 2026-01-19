@@ -581,11 +581,19 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Action: If a group becomes orphaned and has stopped members, send `SIGHUP` + `SIGCONT`. <!-- pgrp_check_orphan -->
 
 ### 2. Architecture (`sys/arch`)
-- [ ] **i386:**
+- [x] **i386:**
     - [x] Complete GDT/TSS setup for user-mode switching.
-    - [ ] **Verification:**
+    - [x] **Verification:**
         - [x] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
         - [x] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->
+
+...
+
+                - [x] **Input Processing (`n_tty_receive_buf`):**
+                    - [ ] Parity checks and [x] stripping.
+                    - [x] Newline translation (CR->NL).
+                    - [x] Software flow control (XON/XOFF detection).
+                    - [x] Signal generation check (`ISIG`).
     - [x] Implement Exception Handling (Page Fault, GPF, etc.).
     - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
     - [x] **Advanced Diagnostics (Missing):** <!-- All items complete -->
@@ -734,18 +742,18 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS).
                 - [ ] `c_cflag`: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS).
                 - [x] `c_lflag`: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP).
-                - [x] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME).
+                - [x] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE).
                 - [x] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`.
             - [x] **Line Discipline (`N_TTY`):**
                 - [x] **Input Processing (`n_tty_receive_buf`):**
-                    - [ ] Parity checks and stripping.
+                    - [x] Parity checks and stripping.
                     - [x] Newline translation (CR->NL).
                     - [x] Software flow control (XON/XOFF detection).
                     - [x] Signal generation check (`ISIG`).
                 - [x] **Canonical Editing (`n_tty_read`):**
                     - [x] Backspace/Delete handling (`VERASE`).
                     - [x] Line kill (`VKILL`).
-                    - [ ] Word erase (`VWERASE`).
+                    - [x] Word erase (`VWERASE`).
                     - [x] EOF handling (`VEOF` / Ctrl+D).
                 - [x] **Output Post-processing (`n_tty_write`):**
                     - [x] Newline expansion (NL -> CR/NL).

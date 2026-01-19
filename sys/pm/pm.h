@@ -3,10 +3,13 @@
 
 #include <sys/proc.h>
 
+#include <sys/lock.h>
+
 #define MAX_PROCS 16
 
 extern process_t processes[MAX_PROCS];
 extern process_t *current_process;
+extern mutex_t proctree_lock;
 
 void pm_init(void);
 process_t *proc_create(struct personality *pers);
