@@ -9,6 +9,7 @@
 #include "../blkdev.h"
 #include "../../../kern/console.h"
 #include <string.h>
+#include <stdio.h>
 
 /*
  * ============================================================
@@ -65,7 +66,7 @@ static int scsi_blk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const 
     scsi_device_t *scsi = sbd->scsi_dev;
     
     /* CD-ROMs are typically read-only */
-    if (scsi->type == SCSI_TYPE_CDROM) {
+    if (scsi->type == SCSI_TYPE_ROM) {
         return -1;
     }
     
@@ -102,17 +103,6 @@ int scsi_read_toc(scsi_device_t *dev, void *buffer, uint16_t buflen) {
                               SCSI_REQ_READ, 30000);
 }
 
-/* Eject/Load tray */
-int scsi_start_stop(scsi_device_t *dev, int load, int eject) {
-    if (!dev) return -1;
-    
-    uint8_t cdb[6] = {0};
-    cdb[0] = SCSI_CMD_START_STOP;
-    cdb[4] = (load ? 0x01 : 0) | (eject ? 0x02 : 0);
-    
-    return scsi_execute_sync(dev, cdb, 6, NULL, 0, 0, 30000);
-}
-
 /* Lock/unlock door */
 int scsi_lock_door(scsi_device_t *dev, int lock) {
     if (!dev) return -1;
@@ -138,14 +128,14 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     
     /* Only attach block-capable device types */
     if (scsi_dev->type != SCSI_TYPE_DISK && 
-        scsi_dev->type != SCSI_TYPE_CDROM &&
+        scsi_dev->type != SCSI_TYPE_ROM &&
         scsi_dev->type != SCSI_TYPE_OPTICAL &&
         scsi_dev->type != SCSI_TYPE_WORM) {
         return -1;  /* Not a block device type */
     }
     
     if (scsi_dev_count >= 32) {
-        kprintf("scsi: too many devices\n");
+        kprint("scsi: too many devices\n");
         return -1;
     }
     
@@ -156,10 +146,10 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     sbd->dev_num = scsi_dev_count;
     
     /* Create device name: scsi0, scsi1, etc. */
-    snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", scsi_dev_count);
+    sprintf(sbd->blkdev.name, "scsi%u", scsi_dev_count);
     
     /* Set sector size based on device type */
-    if (scsi_dev->type == SCSI_TYPE_CDROM || scsi_dev->type == SCSI_TYPE_OPTICAL) {
+    if (scsi_dev->type == SCSI_TYPE_ROM || scsi_dev->type == SCSI_TYPE_OPTICAL) {
         sbd->blkdev.sector_size = CD_SECTOR_SIZE;
     } else {
         sbd->blkdev.sector_size = scsi_dev->sector_size ? scsi_dev->sector_size : 512;
@@ -181,17 +171,18 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     const char *type_str = "unknown";
     switch (scsi_dev->type) {
     case SCSI_TYPE_DISK:    type_str = "disk"; break;
-    case SCSI_TYPE_CDROM:   type_str = "cdrom"; break;
+    case SCSI_TYPE_ROM:     type_str = "cdrom"; break;
     case SCSI_TYPE_OPTICAL: type_str = "optical"; break;
     case SCSI_TYPE_WORM:    type_str = "worm"; break;
     }
     
-    kprintf("scsi: attached %s (%s) [%s %s] %lluMB\n",
+    char log_buf[128];
+    sprintf(log_buf, "scsi: attached %s (%s) [%s %s]\n",
             sbd->blkdev.name,
             type_str,
             scsi_dev->vendor,
-            scsi_dev->product,
-            (unsigned long long)(scsi_dev->capacity * sbd->blkdev.sector_size / (1024 * 1024)));
+            scsi_dev->product);
+    kprint(log_buf);
     
     return 0;
 }
@@ -207,7 +198,9 @@ int scsi_dev_detach(scsi_device_t *scsi_dev) {
             scsi_blk_dev_t *sbd = *pp;
             *pp = sbd->next;
             
-            kprintf("scsi: detached %s\n", sbd->blkdev.name);
+            char log_buf[64];
+            sprintf(log_buf, "scsi: detached %s\n", sbd->blkdev.name);
+            kprint(log_buf);
             return 0;
         }
         pp = &(*pp)->next;
@@ -232,12 +225,5 @@ scsi_blk_dev_t *scsi_dev_lookup(const char *name) {
  * Initialize SCSI device subsystem
  */
 void scsi_dev_init(void) {
-    kprintf("scsi: unified SCSI device driver initialized\n");
-}
-
-/*
- * Auto-attach callback - called when SCSI devices are discovered
- */
-void scsi_auto_attach(scsi_device_t *dev) {
-    scsi_dev_attach(dev);
+    kprint("scsi: unified SCSI device driver initialized\n");
 }

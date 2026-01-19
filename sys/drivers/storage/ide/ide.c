@@ -61,19 +61,19 @@ static volatile int ide_irq_complete[MAX_IDE_CHANNELS];
  * ============================================================
  */
 
-static inline void ide_write_reg(uint8_t channel, uint8_t reg, uint8_t data) {
+void ide_write_reg(uint8_t channel, uint8_t reg, uint8_t data) {
     outb(ide_channels[channel].io_base + reg, data);
 }
 
-static inline uint8_t ide_read_reg(uint8_t channel, uint8_t reg) {
+uint8_t ide_read_reg(uint8_t channel, uint8_t reg) {
     return inb(ide_channels[channel].io_base + reg);
 }
 
-static inline void ide_write_ctrl(uint8_t channel, uint8_t data) {
+void ide_write_ctrl(uint8_t channel, uint8_t data) {
     outb(ide_channels[channel].ctrl_base + ATA_REG_CONTROL, data);
 }
 
-static inline uint8_t ide_read_ctrl(uint8_t channel) {
+uint8_t ide_read_ctrl(uint8_t channel) {
     return inb(ide_channels[channel].ctrl_base + ATA_REG_ALTSTATUS);
 }
 

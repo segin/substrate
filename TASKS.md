@@ -639,9 +639,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Register with DevFS using the schematic above. <!-- blkdev.c:blkdev_register -> devfs_register_device -->
                 - [x] Implement `ioctl` for Bus Enumeration on controller nodes. <!-- scsi_ctl.c:bus_ioctl -->
     - [ ] **Transport/HBA Drivers (Low-Level):**
-        - [ ] **ATAPI (Legacy):**
-            - [ ] Encapsulate SCSI CDBs into ATA Packet Commands used by IDE/PATA.
-            - [ ] Handle IRQ and DRQ states for packet transfer.
+        - [x] **ATAPI (Legacy):** <!-- atapi_scsi.c, ide.c:ide_atapi_packet -->
+            - [x] Encapsulate SCSI CDBs into ATA Packet Commands used by IDE/PATA. <!-- atapi_scsi.c:atapi_execute -->
+            - [x] Handle IRQ and DRQ states for packet transfer. <!-- ide.c:ide_atapi_packet (wait_bsy, wait_drq) -->
         - [ ] **USB Mass Storage:**
             - [ ] Implement Bulk-Only Transport (BOT).
             - [ ] Handle Command Block Wrapper (CBW) and Command Status Wrapper (CSW).

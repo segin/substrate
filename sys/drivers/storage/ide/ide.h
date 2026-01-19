@@ -15,6 +15,16 @@
 
 /*
  * ============================================================
+ * Standard I/O Ports
+ * ============================================================
+ */
+#define ATA_PRIMARY_IO      0x1F0   /* Primary channel I/O base */
+#define ATA_SECONDARY_IO    0x170   /* Secondary channel I/O base */
+#define ATA_PRIMARY_CTRL    0x3F6   /* Primary channel control base */
+#define ATA_SECONDARY_CTRL  0x376   /* Secondary channel control base */
+
+/*
+ * ============================================================
  * Standard ATA Registers (offset from I/O base)
  * ============================================================
  */
@@ -223,5 +233,11 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count);
 
 /* IRQ Handler */
 void ide_irq_handler(int irq);
+
+/* Low-Level Register Access */
+void ide_write_reg(uint8_t channel, uint8_t reg, uint8_t data);
+uint8_t ide_read_reg(uint8_t channel, uint8_t reg);
+void ide_write_ctrl(uint8_t channel, uint8_t data);
+uint8_t ide_read_ctrl(uint8_t channel);
 
 #endif /* _IDE_H */

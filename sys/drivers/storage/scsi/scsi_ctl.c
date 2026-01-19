@@ -77,7 +77,7 @@ static scsi_generic_node_t *sg_list = NULL;
 static scsi_generic_node_t sg_pool[64];
 static uint32_t sg_count = 0;
 
-static int sg_ioctl(fs_node_t *node, int request, void *arg) {
+static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     scsi_generic_node_t *sg = (scsi_generic_node_t *)node->impl;
     if (!sg || !sg->dev) return -1;
     
@@ -87,9 +87,9 @@ static int sg_ioctl(fs_node_t *node, int request, void *arg) {
         scsi_ioctl_info_t *info = (scsi_ioctl_info_t *)arg;
         scsi_device_t *dev = sg->dev;
         
-        info->bus = dev->link ? dev->link->id : 0;
+        info->bus = dev->bus;
         info->target = dev->target;
-        info->lun = dev->lun;
+        info->lun = (uint8_t)dev->lun;
         info->type = dev->type;
         strncpy(info->vendor, dev->vendor, 8);
         info->vendor[8] = '\0';
@@ -134,9 +134,8 @@ static int scsi_create_generic_node(scsi_device_t *dev) {
     sg->dev = dev;
     
     /* Name format: B:T:L */
-    uint8_t bus = dev->link ? dev->link->id : 0;
-    snprintf(sg->node.name, sizeof(sg->node.name), "%d:%d:%d",
-             bus, dev->target, dev->lun);
+    sprintf(sg->node.name, "%d:%d:%d",
+             dev->bus, dev->target, dev->lun);
     
     sg->node.flags = FS_CHARDEVICE;
     sg->node.impl = (uint32_t)(uintptr_t)sg;
@@ -161,23 +160,27 @@ static int scsi_create_generic_node(scsi_device_t *dev) {
 typedef struct scsi_bus_node {
     fs_node_t node;
     scsi_link_t *link;
+    uint8_t bus_id;
 } scsi_bus_node_t;
 
 static scsi_bus_node_t bus_nodes[8];
 static uint32_t bus_count = 0;
 
-static int bus_ioctl(fs_node_t *node, int request, void *arg) {
+static int bus_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     scsi_bus_node_t *bn = (scsi_bus_node_t *)node->impl;
     if (!bn || !bn->link) return -1;
     
     switch (request) {
-    case SCSI_IOCTL_SCAN_BUS:
-        kprintf("scsi: rescanning bus %d\n", bn->link->id);
-        scsi_scan_bus(bn->link);
+    case SCSI_IOCTL_SCAN_BUS: {
+        char log_buf[48];
+        sprintf(log_buf, "scsi: rescanning bus %d\n", bn->bus_id);
+        kprint(log_buf);
+        scsi_scan_bus(bn->link, bn->bus_id);
         return 0;
+    }
         
     case SCSI_IOCTL_RESET_BUS:
-        kprintf("scsi: bus reset not yet implemented\n");
+        kprint("scsi: bus reset not yet implemented\n");
         return -1;
         
     case SCSI_IOCTL_GET_COUNT: {
@@ -186,7 +189,7 @@ static int bus_ioctl(fs_node_t *node, int request, void *arg) {
         int count = 0;
         for (uint8_t t = 0; t < 16; t++) {
             for (uint8_t l = 0; l < 8; l++) {
-                if (scsi_device_lookup(bn->link->id, t, l)) count++;
+                if (scsi_device_lookup(bn->bus_id, t, l)) count++;
             }
         }
         *(int *)arg = count;
@@ -201,14 +204,15 @@ static int bus_ioctl(fs_node_t *node, int request, void *arg) {
 /*
  * Create /dev/storage/scsi/B node for a bus
  */
-int scsi_create_bus_node(scsi_link_t *link) {
+int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id) {
     if (!link || bus_count >= 8) return -1;
     
     scsi_bus_node_t *bn = &bus_nodes[bus_count];
     memset(bn, 0, sizeof(*bn));
     
     bn->link = link;
-    snprintf(bn->node.name, sizeof(bn->node.name), "%d", link->id);
+    bn->bus_id = bus_id;
+    sprintf(bn->node.name, "%d", bus_id);
     bn->node.flags = FS_CHARDEVICE;
     bn->node.impl = (uint32_t)(uintptr_t)bn;
     bn->node.ioctl = bus_ioctl;
@@ -216,7 +220,9 @@ int scsi_create_bus_node(scsi_link_t *link) {
     devfs_register_device(&bn->node);
     bus_count++;
     
-    kprintf("scsi: registered bus controller /dev/storage/scsi/%d\n", link->id);
+    char log_buf[64];
+    sprintf(log_buf, "scsi: registered bus controller /dev/storage/scsi/%d\n", bus_id);
+    kprint(log_buf);
     return 0;
 }
 
@@ -228,7 +234,7 @@ int scsi_create_bus_node(scsi_link_t *link) {
 
 void scsi_ctl_init(void) {
     scsi_dev_init();
-    kprintf("scsi: SCSI control interface initialized\n");
+    kprint("scsi: SCSI control interface initialized\n");
 }
 
 /*
