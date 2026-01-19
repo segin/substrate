@@ -762,9 +762,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Special handling: wake parent immediately.
             - [ ] Parent was blocked waiting for child exec/exit.
         - [ ] **Thread Group Exit:**
-            - [ ] If any thread calls exit, entire process exits.
-            - [ ] All threads receive internal "exit" signal.
-            - [ ] Use `exit_group` semantics from Linux.
+            - [ ] If any thread calls `exit()`, entire process exits.
+            - [ ] All threads receive internal termination signal.
+            - [ ] Process-wide exit semantics (BSD `exit()` behavior).
 
     - [x] **Wait Subsystem (`wait4`, `waitpid`):**
         - [x] **Search Logic (`find_zombie`):** <!-- Now find_waitable_child -->
