@@ -9,6 +9,7 @@
 #include <sys/session.h>
 #include <stddef.h>
 #include <string.h>
+#include "pm.h"
 
 extern void *kmalloc(size_t size);
 extern void kfree(void *ptr);
@@ -26,6 +27,9 @@ static struct pgrp *pgrp_hash[PGRP_HASH_SIZE];
 static inline int pgrp_hashval(int pgid) {
     return pgid % PGRP_HASH_SIZE;
 }
+
+static void __pgrp_add_proc(struct pgrp *pgrp, struct process *proc);
+static void __pgrp_remove_proc(struct process *proc);
 
 /*
  * session_alloc - Allocate and initialize a new session
@@ -79,6 +83,7 @@ struct pgrp *pgrp_alloc(struct process *leader, struct session *sess) {
     pgrp->pg_jobc = 0;
     
     /* Add to session's pgrp list */
+    mutex_lock(&proctree_lock);
     pgrp->pg_next = sess->s_pgrps;
     sess->s_pgrps = pgrp;
     
@@ -86,6 +91,7 @@ struct pgrp *pgrp_alloc(struct process *leader, struct session *sess) {
     int hash = pgrp_hashval(pgrp->pg_id);
     pgrp->pg_next = pgrp_hash[hash];
     pgrp_hash[hash] = pgrp;
+    mutex_unlock(&proctree_lock);
     
     return pgrp;
 }
@@ -97,6 +103,7 @@ void pgrp_free(struct pgrp *pgrp) {
     if (!pgrp) return;
     if (pgrp->pg_members != NULL) return; /* Still has members */
     
+    mutex_lock(&proctree_lock);
     /* Remove from hash table */
     int hash = pgrp_hashval(pgrp->pg_id);
     struct pgrp **pp = &pgrp_hash[hash];
@@ -110,6 +117,7 @@ void pgrp_free(struct pgrp *pgrp) {
         while (*sp && *sp != pgrp) sp = &(*sp)->pg_next;
         if (*sp) *sp = pgrp->pg_next;
     }
+    mutex_unlock(&proctree_lock);
     
     kfree(pgrp);
 }
@@ -118,23 +126,31 @@ void pgrp_free(struct pgrp *pgrp) {
  * pgrp_find - Find a process group by ID
  */
 struct pgrp *pgrp_find(int pgid) {
+    mutex_lock(&proctree_lock);
     int hash = pgrp_hashval(pgid);
     struct pgrp *pgrp = pgrp_hash[hash];
     while (pgrp) {
-        if (pgrp->pg_id == pgid) return pgrp;
+        if (pgrp->pg_id == pgid) {
+            mutex_unlock(&proctree_lock);
+            return pgrp;
+        }
         pgrp = pgrp->pg_next;
     }
+    mutex_unlock(&proctree_lock);
     return NULL;
 }
 
 /*
  * pgrp_add_proc - Add a process to a process group
  */
-void pgrp_add_proc(struct pgrp *pgrp, struct process *proc) {
+/*
+ * __pgrp_add_proc - Internal (must hold proctree_lock)
+ */
+static void __pgrp_add_proc(struct pgrp *pgrp, struct process *proc) {
     if (!pgrp || !proc) return;
     
     /* Remove from current group first */
-    pgrp_remove_proc(proc);
+    __pgrp_remove_proc(proc);
     
     /* Add to new group's member list */
     proc->p_pgrp = pgrp;
@@ -142,10 +158,16 @@ void pgrp_add_proc(struct pgrp *pgrp, struct process *proc) {
     pgrp->pg_members = proc;
 }
 
+void pgrp_add_proc(struct pgrp *pgrp, struct process *proc) {
+    mutex_lock(&proctree_lock);
+    __pgrp_add_proc(pgrp, proc);
+    mutex_unlock(&proctree_lock);
+}
+
 /*
- * pgrp_remove_proc - Remove a process from its process group
+ * __pgrp_remove_proc - Internal (must hold proctree_lock)
  */
-void pgrp_remove_proc(struct process *proc) {
+static void __pgrp_remove_proc(struct process *proc) {
     if (!proc || !proc->p_pgrp) return;
     
     struct pgrp *pgrp = proc->p_pgrp;
@@ -166,6 +188,12 @@ void pgrp_remove_proc(struct process *proc) {
     if (pgrp->pg_members == NULL) {
         /* Don't free immediately; let caller decide */
     }
+}
+
+void pgrp_remove_proc(struct process *proc) {
+    mutex_lock(&proctree_lock);
+    __pgrp_remove_proc(proc);
+    mutex_unlock(&proctree_lock);
 }
 
 /*
@@ -193,8 +221,7 @@ int sys_setsid(void) {
         return -1; /* ENOMEM */
     }
     
-    /* Remove from current group (if any) */
-    pgrp_remove_proc(current_process);
+    /* Remove from current group (if any) implicitly handled by pgrp_add_proc */
     
     /* L524: Add to new group (p_pgid = p_pid since we're the leader) */
     pgrp_add_proc(pgrp, current_process);
