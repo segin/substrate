@@ -72,6 +72,7 @@ extern void isr128(void); // Syscall (0x80)
 extern void timer_tick(void);
 extern void sched_yield(void);
 extern void signal_handle_pending(registers_t *regs);
+extern void rusage_add_tick(process_t *p, int is_usermode);
 
 static const char *exception_messages[] = {
     "Division By Zero", "Debug", "Non Maskable Interrupt", "Breakpoint",
@@ -169,6 +170,13 @@ void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
 void isr_handler(registers_t *regs) {
     if (regs->int_no == 32) {
         timer_tick();
+        
+        /* Track user/system time for current process */
+        if (current_process) {
+            int is_usermode = (regs->cs & 0x3) == 3;
+            rusage_add_tick(current_process, is_usermode);
+        }
+        
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
         sched_yield();

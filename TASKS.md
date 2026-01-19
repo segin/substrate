@@ -502,7 +502,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **State Transition (DYING -> ZOMBIE):**
             - [x] Set `p_stat` to `SZOMB`.
             - [x] Record exit code (`p_xstat`).
-            - [ ] Calculate final `rusage` (user + system time).
+            - [x] Calculate final `rusage` (user + system time).
         - [x] **Orphan Reparenting:**
             - [ ] Acquire `proctree_lock`.
             - [x] Iterate over children of exiting process.

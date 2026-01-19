@@ -51,6 +51,10 @@ process_t *proc_create(struct personality *pers) {
     processes[i].uid = current_process ? current_process->uid : 0;
     processes[i].gid = current_process ? current_process->gid : 0;
     
+    // Initialize rusage structures
+    extern void rusage_init(process_t *p);
+    rusage_init(&processes[i]);
+    
     return &processes[i];
 }
 
@@ -224,7 +228,11 @@ void proc_exit(int code) {
         sched_wakeup(&processes[1].p_children); // Wake init just in case
     }
     
-    // 5. Final State
+    // 5. Calculate final rusage (user + system time)
+    extern void rusage_finalize(process_t *p);
+    rusage_finalize(current_process);
+    
+    // 6. Final State
     current_process->state = SZOMB;
     
     // 6. Reschedule (never returns)
