@@ -874,92 +874,454 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Name Cache:** Global hash table (`nchash`) mapping `(directory vnode, name)` -> `target vnode`.
     - [ ] **Operations Vectors:**
         - [ ] **`vfs_ops` (Filesystem-level):**
-            - [ ] `vfs_mount(mp, path, data, ndp, p)`
-            - [ ] `vfs_start(mp, flags, p)`
-            - [ ] `vfs_unmount(mp, mntflags, p)`
-            - [ ] `vfs_root(mp, vpp)`
-            - [ ] `vfs_statfs(mp, sbp, p)`
-            - [ ] `vfs_sync(mp, waitfor, cred, p)`
-            - [ ] `vfs_vget(mp, ino, vpp)`
-            - [ ] `vfs_fhtovp(mp, fhp, vpp)`
+            - [ ] Implement `vfs_mount(mp, path, data, ndp, p)`.
+                - Files: `sys/vfs/vfs_mount.c` (new), `sys/vfs/vfs.h`
+                - API: Mount filesystem at path, parse mount options
+                - Tests: unit (mount success/failure), integration (mount ext2/fat)
+                - Docs: `vfs_mount.9`
+                - Acceptance: Filesystem mounted, accessible via path
+            - [ ] Implement `vfs_start(mp, flags, p)`.
+                - Files: `sys/vfs/vfs_mount.c`
+                - API: Post-mount initialization callback
+                - Tests: unit (callback invoked after mount)
+                - Docs: `vfs_start.9`
+                - Acceptance: Filesystem fully operational after start
+            - [ ] Implement `vfs_unmount(mp, mntflags, p)`.
+                - Files: `sys/vfs/vfs_mount.c`
+                - API: Unmount filesystem, flush buffers, free resources
+                - Flags: `MNT_FORCE` for forced unmount
+                - Tests: unit (clean unmount, busy unmount rejection, force unmount)
+                - Docs: `vfs_unmount.9`
+                - Acceptance: Filesystem detached, resources freed
+            - [ ] Implement `vfs_root(mp, vpp)`.
+                - Files: `sys/vfs/vfs_mount.c`
+                - API: Return root vnode for mounted filesystem
+                - Tests: unit (root vnode returned with correct type)
+                - Docs: `vfs_root.9`
+                - Acceptance: Root vnode valid, ref count incremented
+            - [ ] Implement `vfs_statfs(mp, sbp, p)`.
+                - Files: `sys/vfs/vfs_mount.c`
+                - API: Fill statfs structure with filesystem stats
+                - Fields: `f_blocks`, `f_bfree`, `f_bavail`, `f_files`, `f_ffree`
+                - Tests: unit (stats match filesystem state)
+                - Docs: `vfs_statfs.9`
+                - Acceptance: Correct free space/inode counts
+            - [ ] Implement `vfs_sync(mp, waitfor, cred, p)`.
+                - Files: `sys/vfs/vfs_mount.c`
+                - API: Sync dirty buffers to disk
+                - Flags: `MNT_WAIT` (sync), `MNT_NOWAIT` (async)
+                - Tests: integration (sync flushes dirty data)
+                - Docs: `vfs_sync.9`
+                - Acceptance: All dirty buffers written
+            - [ ] Implement `vfs_vget(mp, ino, vpp)`.
+                - Files: `sys/vfs/vfs_mount.c`
+                - API: Get vnode by inode number
+                - Tests: unit (vnode retrieved, cache hit/miss)
+                - Docs: `vfs_vget.9`
+                - Acceptance: Correct vnode returned for inode
+            - [ ] Implement `vfs_fhtovp(mp, fhp, vpp)`.
+                - Files: `sys/vfs/vfs_mount.c`
+                - API: Convert NFS file handle to vnode
+                - Tests: unit (handle resolution)
+                - Docs: `vfs_fhtovp.9`
+                - Acceptance: Valid vnode from file handle
         - [ ] **`vnode_ops` (File-level):**
             - [ ] **Name Resolution:**
-                - [ ] `vop_lookup(dvp, vpp, cnp)`: Look up component name in directory.
-                - [ ] `vop_cachedlookup(dvp, vpp, cnp)`: Lookup wrapper for name cache interaction.
+                - [ ] Implement `vop_lookup(dvp, vpp, cnp)`.
+                    - Files: `sys/vfs/vnode_ops.c` (new), `sys/vfs/vnode.h`
+                    - API: Look up component name in directory vnode
+                    - Returns: `ENOENT` if not found, `0` + vnode if found
+                    - Tests: unit (found, not found, permission denied)
+                    - Docs: `vop_lookup.9`
+                    - Acceptance: Correct vnode returned for existing entry
+                - [ ] Implement `vop_cachedlookup(dvp, vpp, cnp)`.
+                    - Files: `sys/vfs/vnode_ops.c`, `sys/vfs/namecache.c`
+                    - API: Lookup wrapper interacting with name cache
+                    - Logic: Check cache first, call vop_lookup on miss
+                    - Tests: unit (cache hit, cache miss, negative cache)
+                    - Docs: `vop_cachedlookup.9`
+                    - Acceptance: Cache reduces filesystem lookups
             - [ ] **Creation/Deletion:**
-                - [ ] `vop_create(dvp, vpp, cnp, vap)`: Create regular file.
-                - [ ] `vop_mknod(dvp, vpp, cnp, vap)`: Create device node.
-                - [x] `vop_mkdir(dvp, vpp, cnp, vap)`: Create directory. <!-- vfs.h, vfs.c, udf.c -->
-                - [ ] `vop_whiteout(dvp, cnp, flags)`: UnionFS whiteout support.
-                - [ ] `vop_remove(dvp, vp, cnp)`: Remove directory entry (unlink).
-                - [ ] `vop_rmdir(dvp, vp, cnp)`: Remove directory.
+                - [ ] Implement `vop_create(dvp, vpp, cnp, vap)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Create regular file in directory
+                    - Logic: Allocate inode, create dir entry, return new vnode
+                    - Tests: unit (create success, EEXIST, EACCES, ENOSPC)
+                    - Docs: `vop_create.9`
+                    - Acceptance: New file created with correct attributes
+                - [ ] Implement `vop_mknod(dvp, vpp, cnp, vap)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Create device node (block/char special)
+                    - Attrs: `va_rdev` for device major/minor
+                    - Tests: unit (block device, char device, FIFO, socket)
+                    - Docs: `vop_mknod.9`
+                    - Acceptance: Device node with correct rdev
+                - [x] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
+                    - Files: `sys/vfs/vfs.c`, `sys/fs/udf/udf.c`
+                    - API: Create directory
+                    - Tests: unit (mkdir success, nested mkdir)
+                    - Docs: `vop_mkdir.9`
+                    - Acceptance: Directory created with . and .. entries
+                - [ ] Implement `vop_whiteout(dvp, cnp, flags)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: UnionFS whiteout entry support
+                    - Flags: `CREATE`, `DELETE`, `LOOKUP`
+                    - Tests: unit (create whiteout, delete whiteout)
+                    - Docs: `vop_whiteout.9`
+                    - Acceptance: Whiteout hides lower layer entry
+                - [ ] Implement `vop_remove(dvp, vp, cnp)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Remove directory entry (unlink)
+                    - Logic: Decrement link count, free inode if zero
+                    - Tests: unit (unlink file, unlink with hardlinks, ENOENT)
+                    - Docs: `vop_remove.9`
+                    - Acceptance: Entry removed, inode freed when nlink=0
+                - [ ] Implement `vop_rmdir(dvp, vp, cnp)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Remove empty directory
+                    - Tests: unit (rmdir empty, ENOTEMPTY, EBUSY for .)
+                    - Docs: `vop_rmdir.9`
+                    - Acceptance: Empty directory removed
             - [ ] **Access/Attributes:**
-                - [ ] `vop_access(vp, mode, cred, p)`: Check permissions (r/w/x).
-                - [ ] `vop_getattr(vp, vap, cred, p)`: Get file attributes (stat).
-                - [ ] `vop_setattr(vp, vap, cred, p)`: Set file attributes (chmod/chown/utimes).
-                - [ ] `vop_pathconf(vp, name, retval)`: POSIX pathconf support.
+                - [ ] Implement `vop_access(vp, mode, cred, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Check r/w/x permissions
+                    - Logic: Compare cred uid/gid against vnode owner/group, check mode bits
+                    - Tests: unit (owner access, group access, other access, root bypass)
+                    - Docs: `vop_access.9`
+                    - Acceptance: Permission checks match POSIX semantics
+                - [ ] Implement `vop_getattr(vp, vap, cred, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Get file attributes (stat equivalent)
+                    - Fields: `va_mode`, `va_nlink`, `va_uid`, `va_gid`, `va_size`, `va_atime`, `va_mtime`, `va_ctime`
+                    - Tests: unit (all stat fields correct)
+                    - Docs: `vop_getattr.9`
+                    - Acceptance: All vattr fields populated correctly
+                - [ ] Implement `vop_setattr(vp, vap, cred, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Set file attributes (chmod/chown/utimes)
+                    - Logic: Check permissions, update inode, mark dirty
+                    - Tests: unit (chmod, chown, truncate, utimes)
+                    - Docs: `vop_setattr.9`
+                    - Acceptance: Attributes updated, persisted after sync
+                - [ ] Implement `vop_pathconf(vp, name, retval)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: POSIX pathconf support
+                    - Names: `_PC_LINK_MAX`, `_PC_NAME_MAX`, `_PC_PATH_MAX`, etc.
+                    - Tests: unit (all pathconf values)
+                    - Docs: `vop_pathconf.9`
+                    - Acceptance: Correct limits returned
             - [ ] **I/O Operations:**
-                - [ ] `vop_open(vp, mode, cred, p)`: file open.
-                - [ ] `vop_close(vp, fflag, cred, p)`: file close.
-                - [ ] `vop_read(vp, uio, ioflag, cred)`: Read data.
-                - [ ] `vop_write(vp, uio, ioflag, cred)`: Write data.
-                - [ ] `vop_ioctl(vp, command, data, fflag, cred, p)`: Device control.
-                - [ ] `vop_poll(vp, events, cred, p)`: Select/Poll support.
-                - [ ] `vop_fsync(vp, cred, waitfor, p)`: Flush dirty buffers to disk.
-                - [ ] `vop_bmap(vp, bn, vpp, bnp, runp)`: Logical -> Physical block mapping.
-                - [ ] `vop_strategy(vp, bp)`: Block I/O strategy (buffer cache).
+                - [ ] Implement `vop_open(vp, mode, cred, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: File open callback
+                    - Logic: Check access, increment open count, device-specific init
+                    - Tests: unit (open read, open write, open RW, EACCES)
+                    - Docs: `vop_open.9`
+                    - Acceptance: Vnode ready for I/O
+                - [ ] Implement `vop_close(vp, fflag, cred, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: File close callback
+                    - Logic: Decrement open count, flush if last close
+                    - Tests: unit (close, close last handle triggers sync)
+                    - Docs: `vop_close.9`
+                    - Acceptance: Resources released on last close
+                - [ ] Implement `vop_read(vp, uio, ioflag, cred)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Read data from vnode
+                    - Logic: Use buffer cache, handle EOF, update atime
+                    - Tests: unit (read full, read partial, read at EOF, read past EOF)
+                    - Docs: `vop_read.9`
+                    - Acceptance: Correct data returned, uio updated
+                - [ ] Implement `vop_write(vp, uio, ioflag, cred)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Write data to vnode
+                    - Logic: Extend file if needed, use buffer cache, update mtime
+                    - Flags: `IO_APPEND`, `IO_SYNC`
+                    - Tests: unit (write, append, write extends file, ENOSPC)
+                    - Docs: `vop_write.9`
+                    - Acceptance: Data written, size updated
+                - [ ] Implement `vop_ioctl(vp, command, data, fflag, cred, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Device control operations
+                    - Tests: unit (device-specific ioctls)
+                    - Docs: `vop_ioctl.9`
+                    - Acceptance: Ioctl dispatched to device
+                - [ ] Implement `vop_poll(vp, events, cred, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Select/poll support
+                    - Events: `POLLIN`, `POLLOUT`, `POLLHUP`, `POLLERR`
+                    - Tests: unit (poll ready, poll wait)
+                    - Docs: `vop_poll.9`
+                    - Acceptance: Correct events returned
+                - [ ] Implement `vop_fsync(vp, cred, waitfor, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Flush dirty buffers to disk
+                    - Flags: `MNT_WAIT` (sync), `MNT_NOWAIT` (async)
+                    - Tests: integration (data persisted after fsync)
+                    - Docs: `vop_fsync.9`
+                    - Acceptance: All dirty data written
+                - [ ] Implement `vop_bmap(vp, bn, vpp, bnp, runp)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Logical to physical block mapping
+                    - Returns: Physical block number, run length for readahead
+                    - Tests: unit (contiguous blocks, fragmented blocks)
+                    - Docs: `vop_bmap.9`
+                    - Acceptance: Correct physical block returned
+                - [ ] Implement `vop_strategy(vp, bp)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Block I/O strategy (buffer cache integration)
+                    - Logic: Submit buffer to block device driver
+                    - Tests: integration (read/write via strategy)
+                    - Docs: `vop_strategy.9`
+                    - Acceptance: I/O completed, buffer marked done
             - [ ] **Directories:**
-                - [ ] `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`: Read directory entries.
+                - [ ] Implement `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Read directory entries
+                    - Format: `struct dirent` with d_ino, d_type, d_namlen, d_name
+                    - Tests: unit (read all entries, readdir with seek, eofflag)
+                    - Docs: `vop_readdir.9`
+                    - Acceptance: All entries returned with correct format
             - [ ] **Links:**
-                - [ ] `vop_link(dvp, vp, cnp)`: Create hard link.
-                - [ ] `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`: Rename file/dir.
-                - [ ] `vop_symlink(dvp, vpp, cnp, vap, target)`: Create symbolic link.
-                - [ ] `vop_readlink(vp, uio, cred)`: Read symbolic link target.
-            - [ ] **VM/Memory:**
-                - [ ] `vop_inactive(vp, p)`: Vnode is no longer referenced.
-                - [ ] `vop_reclaim(vp, p)`: Vnode is being reused/freed.
-                - [ ] `vop_lock(vp, flags, p)`: Lock vnode.
-                - [ ] `vop_unlock(vp, flags, p)`: Unlock vnode.
-                - [ ] `vop_islocked(vp, p)`: Query lock status.
-                - [ ] `vop_print(vp)`: Debug print vnode details.
+                - [ ] Implement `vop_link(dvp, vp, cnp)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Create hard link
+                    - Logic: Add dir entry, increment nlink
+                    - Tests: unit (link success, EXDEV cross-device, EMLINK max)
+                    - Docs: `vop_link.9`
+                    - Acceptance: Hard link created, nlink incremented
+                - [ ] Implement `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Rename file/directory
+                    - Logic: Handle same-dir, cross-dir, overwrite existing
+                    - Tests: unit (rename file, rename dir, rename overwrite, EXDEV)
+                    - Docs: `vop_rename.9`
+                    - Acceptance: Entry moved atomically
+                - [ ] Implement `vop_symlink(dvp, vpp, cnp, vap, target)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Create symbolic link
+                    - Logic: Create inode with S_IFLNK, store target path
+                    - Tests: unit (symlink success, long target, ENAMETOOLONG)
+                    - Docs: `vop_symlink.9`
+                    - Acceptance: Symlink created with correct target
+                - [ ] Implement `vop_readlink(vp, uio, cred)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Read symbolic link target
+                    - Tests: unit (read full target, read partial)
+                    - Docs: `vop_readlink.9`
+                    - Acceptance: Correct target string returned
+            - [ ] **VM/Memory Integration:**
+                - [ ] Implement `vop_inactive(vp, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Vnode no longer referenced by any file descriptor
+                    - Logic: Truncate if nlink=0, sync dirty data
+                    - Tests: unit (inactive with nlink>0, inactive with nlink=0)
+                    - Docs: `vop_inactive.9`
+                    - Acceptance: Resources freed when appropriate
+                - [ ] Implement `vop_reclaim(vp, p)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Vnode being recycled from cache
+                    - Logic: Free filesystem-private data, remove from hash
+                    - Tests: unit (reclaim frees private data)
+                    - Docs: `vop_reclaim.9`
+                    - Acceptance: All fs-specific resources freed
+                - [ ] Implement `vop_lock(vp, flags, p)`.
+                    - Files: `sys/vfs/vnode_lock.c` (new)
+                    - API: Lock vnode for exclusive/shared access
+                    - Flags: `LK_SHARED`, `LK_EXCLUSIVE`, `LK_NOWAIT`, `LK_UPGRADE`
+                    - Tests: unit (exclusive lock, shared lock, upgrade, downgrade)
+                    - Docs: `vop_lock.9`
+                    - Acceptance: Lock acquired with correct semantics
+                - [ ] Implement `vop_unlock(vp, flags, p)`.
+                    - Files: `sys/vfs/vnode_lock.c`
+                    - API: Unlock vnode
+                    - Tests: unit (unlock exclusive, unlock shared)
+                    - Docs: `vop_unlock.9`
+                    - Acceptance: Lock released, waiters woken
+                - [ ] Implement `vop_islocked(vp, p)`.
+                    - Files: `sys/vfs/vnode_lock.c`
+                    - API: Query lock status
+                    - Returns: `LK_EXCLUSIVE`, `LK_SHARED`, or 0
+                    - Tests: unit (query locked, query unlocked)
+                    - Docs: `vop_islocked.9`
+                    - Acceptance: Correct status returned
+                - [ ] Implement `vop_print(vp)`.
+                    - Files: `sys/vfs/vnode_ops.c`
+                    - API: Debug print vnode details
+                    - Output: Type, flags, refcount, fs-specific info
+                    - Tests: unit (output contains expected fields)
+                    - Docs: `vop_print.9`
+                    - Acceptance: Human-readable vnode dump
     - [ ] **Buffer Cache Integration (`bio`):**
-        - [ ] **`struct buf`:**
-            - [ ] `b_flags` (B_BUSY, B_DONE, B_ERROR, B_DELWRI, B_PHYS, B_READ, B_WRITE).
-            - [ ] `b_data` (pointer to data), `b_bcount` (byte count).
-            - [ ] `b_blkno` (logical block number), `b_lblkno` (logical block).
-            - [ ] `b_vp` (vnode owner), `b_rcred` / `b_wcred` (credentials).
-            - [ ] `b_resid` (residual bytes).
-        - [ ] **Queues:**
-            - [ ] `bufqueues[HQ_LOCKED]` (Locked buffers).
-            - [ ] `bufqueues[HQ_CLEAN]` (Clean buffers, LRU).
-            - [ ] `bufqueues[HQ_DIRTY]` (Dirty buffers, delayed write).
-            - [ ] `bufqueues[HQ_EMPTY]` (Empty headers).
-        - [ ] **Functions:**
-            - [ ] `getblk(vp, blkno, size, slpflag, slptimeo)`: Get block from cache or allocate.
-            - [ ] `bread(vp, blkno, size, cred, bpp)`: Read block (sync).
-            - [ ] `bwrite(bp)`: Write block (sync).
-            - [ ] `bawrite(bp)`: Write block (async).
-            - [ ] `bdwrite(bp)`: Delayed write (mark dirty, release).
-            - [ ] `brelse(bp)`: Release buffer to free list.
+        - [ ] **`struct buf` Definition:**
+            - [ ] Define `struct buf` in `sys/vfs/buf.h`.
+                - Files: `sys/vfs/buf.h` (new)
+                - Fields: `b_flags`, `b_data`, `b_bcount`, `b_blkno`, `b_lblkno`, `b_vp`, `b_rcred`, `b_wcred`, `b_resid`, `b_iodone`, `b_error`
+                - Flags: `B_BUSY`, `B_DONE`, `B_ERROR`, `B_DELWRI`, `B_PHYS`, `B_READ`, `B_WRITE`, `B_ASYNC`, `B_INVAL`
+                - Tests: unit (struct layout, flag combinations)
+                - Docs: `buf.9`
+                - Acceptance: Header compiles, all fields accessible
+        - [ ] **Buffer Queues:**
+            - [ ] Implement `bufqueues[BQ_LOCKED]` (Locked buffers).
+                - Files: `sys/vfs/bio.c` (new)
+                - Logic: Buffers currently in use, cannot be reused
+                - Tests: unit (locked buffer not evicted)
+                - Docs: `bufqueue.9`
+                - Acceptance: Locked buffers protected
+            - [ ] Implement `bufqueues[BQ_CLEAN]` (Clean LRU).
+                - Files: `sys/vfs/bio.c`
+                - Logic: Clean buffers eligible for reuse, LRU eviction
+                - Tests: unit (LRU eviction order)
+                - Docs: `bufqueue.9`
+                - Acceptance: Oldest clean buffer evicted first
+            - [ ] Implement `bufqueues[BQ_DIRTY]` (Delayed write).
+                - Files: `sys/vfs/bio.c`
+                - Logic: Dirty buffers awaiting writeback
+                - Tests: unit (dirty queue ordering, sync flushes all)
+                - Docs: `bufqueue.9`
+                - Acceptance: Dirty buffers written in order
+            - [ ] Implement `bufqueues[BQ_EMPTY]` (Empty headers).
+                - Files: `sys/vfs/bio.c`
+                - Logic: Free buffer headers without data
+                - Tests: unit (empty header reuse)
+                - Docs: `bufqueue.9`
+                - Acceptance: Headers recycled efficiently
+        - [ ] **Buffer Cache Functions:**
+            - [ ] Implement `getblk(vp, blkno, size, slpflag, slptimeo)`.
+                - Files: `sys/vfs/bio.c`
+                - API: Get buffer from cache or allocate new
+                - Logic: Hash lookup, evict if needed, allocate memory
+                - Tests: unit (cache hit, cache miss, wait for buffer)
+                - Docs: `getblk.9`
+                - Acceptance: Buffer returned ready for use
+            - [ ] Implement `bread(vp, blkno, size, cred, bpp)`.
+                - Files: `sys/vfs/bio.c`
+                - API: Read block synchronously
+                - Logic: getblk + initiate I/O + biowait
+                - Tests: unit (read from disk, cache hit skips I/O)
+                - Docs: `bread.9`
+                - Acceptance: Buffer contains valid data
+            - [ ] Implement `bwrite(bp)`.
+                - Files: `sys/vfs/bio.c`
+                - API: Write buffer synchronously
+                - Logic: Initiate I/O, wait for completion
+                - Tests: unit (sync write completes)
+                - Docs: `bwrite.9`
+                - Acceptance: Data on disk after return
+            - [ ] Implement `bawrite(bp)`.
+                - Files: `sys/vfs/bio.c`
+                - API: Write buffer asynchronously
+                - Logic: Initiate I/O, return immediately
+                - Tests: unit (async write initiated)
+                - Docs: `bawrite.9`
+                - Acceptance: I/O started, buffer released
+            - [ ] Implement `bdwrite(bp)`.
+                - Files: `sys/vfs/bio.c`
+                - API: Delayed write (mark dirty, release)
+                - Logic: Set B_DELWRI, move to dirty queue
+                - Tests: unit (buffer marked dirty, not written yet)
+                - Docs: `bdwrite.9`
+                - Acceptance: Buffer in dirty queue
+            - [ ] Implement `brelse(bp)`.
+                - Files: `sys/vfs/bio.c`
+                - API: Release buffer to appropriate queue
+                - Logic: Move to clean/dirty/empty based on flags
+                - Tests: unit (release clean, release dirty, release invalid)
+                - Docs: `brelse.9`
+                - Acceptance: Buffer available for reuse
         - [ ] **Synchronization:**
-            - [ ] `biowait(bp)`: Sleep until B_DONE.
-            - [ ] `biodone(bp)`: Wakeup waiters, call `b_iodone` callback.
+            - [ ] Implement `biowait(bp)`.
+                - Files: `sys/vfs/bio.c`
+                - API: Sleep until B_DONE set
+                - Logic: Sleep on buffer, check B_ERROR on wake
+                - Tests: unit (wait for completion, error propagation)
+                - Docs: `biowait.9`
+                - Acceptance: Returns after I/O complete
+            - [ ] Implement `biodone(bp)`.
+                - Files: `sys/vfs/bio.c`
+                - API: Mark I/O complete, wake waiters
+                - Logic: Set B_DONE, call b_iodone callback, wakeup
+                - Tests: unit (waiters woken, callback invoked)
+                - Docs: `biodone.9`
+                - Acceptance: Completion signaled correctly
     - [ ] **VM Integration (Unified Buffer Cache):**
         - [ ] **VNode Pager:**
-            - [ ] `vnode_pager_getpages()`: Read pages from vnode.
-            - [ ] `vnode_pager_putpages()`: Write pages to vnode.
-        - [ ] **Page Cache:**
+            - [ ] Implement `vnode_pager_getpages()`.
+                - Files: `sys/vm/vnode_pager.c` (new)
+                - API: Read pages from vnode into vm_page array
+                - Logic: Use VOP_READ or direct buffer cache
+                - Tests: integration (page fault triggers read)
+                - Docs: `vnode_pager.9`
+                - Acceptance: Pages populated from file
+            - [ ] Implement `vnode_pager_putpages()`.
+                - Files: `sys/vm/vnode_pager.c`
+                - API: Write dirty pages to vnode
+                - Logic: Use VOP_WRITE or direct buffer cache
+                - Tests: integration (pageout writes to file)
+                - Docs: `vnode_pager.9`
+                - Acceptance: Dirty pages written to disk
+        - [ ] **Page Cache Integration:**
             - [ ] Use `vm_page_t` for buffer backing store.
-            - [ ] Zero-copy I/O paths for mmap.
+                - Files: `sys/vfs/bio.c`, `sys/vm/vm_page.c`
+                - Logic: Buffer data backed by vm_page, not kmalloc
+                - Tests: unit (buffer uses vm_page, page reclaim works)
+                - Docs: `buffer_vm_integration.9`
+                - Acceptance: Unified memory management
+            - [ ] Implement zero-copy I/O paths for mmap.
+                - Files: `sys/vm/vnode_pager.c`, `sys/vfs/bio.c`
+                - Logic: mmap shares pages with buffer cache
+                - Tests: integration (mmap sees buffer cache data)
+                - Docs: `zero_copy_io.9`
+                - Acceptance: No data copy between mmap and read/write
     - [ ] **Concurrency & Locking:**
         - [ ] **VNode Locks:**
-            - [ ] `lockmgr` implementation (shared/exclusive/upgrade/downgrade).
-            - [ ] `LK_SHARED`: Concurrent readers.
-            - [ ] `LK_EXCLUSIVE`: Single writer.
-            - [ ] `LK_NOWAIT`: Non-blocking acquisition.
-        - [ ] **Interlock:** `v_interlock` mutex for field consistency.
-        - [ ] **Mount Lock:** `mnt_lock` for mount point stability.
-        - [ ] **Namecache Lock:** Reader-writer lock for `nchash`.
+            - [ ] Implement `lockmgr` for vnode locking.
+                - Files: `sys/kern/lockmgr.c` (new), `sys/kern/lock.h`
+                - API: `lockmgr(lkp, flags, interlock, p)`
+                - Modes: shared/exclusive/upgrade/downgrade/drain
+                - Tests: unit (all lock modes, deadlock detection)
+                - Docs: `lockmgr.9`
+                - Acceptance: Lock manager with priority inheritance
+            - [ ] Implement `LK_SHARED` concurrent readers.
+                - Files: `sys/kern/lockmgr.c`
+                - Logic: Multiple readers, block writers
+                - Tests: unit (multiple readers concurrent)
+                - Docs: `lockmgr.9`
+                - Acceptance: Multiple readers allowed
+            - [ ] Implement `LK_EXCLUSIVE` single writer.
+                - Files: `sys/kern/lockmgr.c`
+                - Logic: Single writer, block all others
+                - Tests: unit (exclusive blocks readers and writers)
+                - Docs: `lockmgr.9`
+                - Acceptance: Exclusive access enforced
+            - [ ] Implement `LK_NOWAIT` non-blocking.
+                - Files: `sys/kern/lockmgr.c`
+                - Logic: Return EBUSY instead of blocking
+                - Tests: unit (nowait returns immediately)
+                - Docs: `lockmgr.9`
+                - Acceptance: Non-blocking acquisition works
+        - [ ] **Interlock:**
+            - [ ] Implement `v_interlock` mutex for vnode fields.
+                - Files: `sys/vfs/vnode.h`, `sys/vfs/vnode.c`
+                - Logic: Protect v_usecount, v_flag, v_numoutput
+                - Tests: unit (field update atomicity)
+                - Docs: `vnode_interlock.9`
+                - Acceptance: No race conditions on vnode fields
+        - [ ] **Mount Lock:**
+            - [ ] Implement `mnt_lock` for mount point stability.
+                - Files: `sys/vfs/mount.h`, `sys/vfs/vfs_mount.c`
+                - Logic: Prevent unmount during vnode operations
+                - Tests: unit (mount busy during operations)
+                - Docs: `mount_lock.9`
+                - Acceptance: Mount stable during file access
+        - [ ] **Namecache Lock:**
+            - [ ] Implement reader-writer lock for `nchash`.
+                - Files: `sys/vfs/namecache.c`
+                - Logic: Concurrent lookups, exclusive updates
+                - Tests: unit (concurrent lookups, update blocks lookups)
+                - Docs: `namecache_lock.9`
+                - Acceptance: Namecache scalable under load
 - [ ] **Legacy/Feature Gaps:**
     - [ ] **Write Support:** Ensure all existing FS drivers implement complete write paths.
     - [ ] **FSCK:** Port e2fsprogs or implement native consistency checker.
@@ -3456,28 +3818,576 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 ### 10. Hardware Support & Peripherals
 - [ ] **USB Subsystem:**
     - [ ] **Host Controllers:**
-        - [ ] **UHCI:** IO-port based, Frame List management.
-        - [ ] **OHCI:** Memory-mapped, Endpoint Descriptor (ED) / Transfer Descriptor (TD) lists.
-        - [ ] **EHCI:** Memory-mapped, Async/Periodic Schedule, QH/qTD structures.
-        - [ ] **xHCI:** Command Ring, Event Ring, Doorbell mechanisms.
+        - [ ] **UHCI (Universal Host Controller Interface):**
+            - [ ] Implement UHCI register access.
+                - Files: `sys/drivers/usb/uhci.c` (new), `sys/drivers/usb/uhci.h` (new)
+                - Registers: USBCMD, USBSTS, USBINTR, FRNUM, FLBASEADD, SOFMOD, PORTSC
+                - Tests: integration (register read/write from QEMU UHCI)
+                - Docs: `uhci.4`
+                - Acceptance: Controller detected and accessible
+            - [ ] Implement Frame List allocation and setup.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Logic: 1024-entry frame list (4KB aligned), each entry points to QH/TD
+                - Tests: unit (frame list allocation, alignment)
+                - Docs: `uhci.4`
+                - Acceptance: Frame list in FLBASEADD, HC processing
+            - [ ] Implement Queue Head (QH) management.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Structure: `uhci_qh_t` with horizontal/vertical pointers
+                - Logic: Skeleton QHs for interrupt, control, bulk
+                - Tests: unit (QH linking, traversal)
+                - Docs: `uhci.4`
+                - Acceptance: QH hierarchy operational
+            - [ ] Implement Transfer Descriptor (TD) management.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Structure: `uhci_td_t` with link, status, token, buffer
+                - Tests: unit (TD allocation, status parsing)
+                - Docs: `uhci.4`
+                - Acceptance: TDs processed by HC
+            - [ ] Implement interrupt handling.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Events: USBINT (completion), USBERRINT (error), Resume, Host System Error
+                - Tests: integration (IRQ fires on transfer completion)
+                - Docs: `uhci.4`
+                - Acceptance: Interrupts handled, URBs completed
+        - [ ] **OHCI (Open Host Controller Interface):**
+            - [ ] Implement OHCI register access.
+                - Files: `sys/drivers/usb/ohci.c` (new), `sys/drivers/usb/ohci.h` (new)
+                - Registers: HcRevision, HcControl, HcCommandStatus, HcInterruptStatus, HcHCCA
+                - Tests: integration (MMIO register access)
+                - Docs: `ohci.4`
+                - Acceptance: Controller detected
+            - [ ] Implement HCCA (Host Controller Communications Area).
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: 256-byte aligned, interrupt table, frame number, done head
+                - Tests: unit (HCCA allocation, alignment, done head updates)
+                - Docs: `ohci.4`
+                - Acceptance: HCCA operational
+            - [ ] Implement Endpoint Descriptor (ED) management.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: `ohci_ed_t` with FA, EN, D, S, K, F, MPS, TailP, HeadP, NextED
+                - Logic: Control, bulk, interrupt, isochronous ED lists
+                - Tests: unit (ED creation, list insertion)
+                - Docs: `ohci.4`
+                - Acceptance: EDs processed by HC
+            - [ ] Implement Transfer Descriptor (TD) management.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: `ohci_td_t` with flags, CBP, NextTD, BE
+                - Tests: unit (TD allocation, completion status)
+                - Docs: `ohci.4`
+                - Acceptance: TDs processed correctly
+            - [ ] Implement interrupt and done queue handling.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Logic: Process HccaDoneHead, complete URBs
+                - Tests: integration (URB completion via done queue)
+                - Docs: `ohci.4`
+                - Acceptance: Transfer completion signaled
+        - [ ] **EHCI (Enhanced Host Controller Interface):**
+            - [ ] Implement EHCI capability and operational register access.
+                - Files: `sys/drivers/usb/ehci.c` (new), `sys/drivers/usb/ehci.h` (new)
+                - Capability: CAPLENGTH, HCSPARAMS, HCCPARAMS
+                - Operational: USBCMD, USBSTS, USBINTR, FRINDEX, PERIODICLISTBASE, ASYNCLISTADDR
+                - Tests: integration (capability parsing, operational access)
+                - Docs: `ehci.4`
+                - Acceptance: Controller initialized
+            - [ ] Implement Asynchronous Schedule (Control/Bulk).
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: Queue Head (QH) linked list, ASYNCLISTADDR
+                - Logic: Async schedule enable, reclamation
+                - Tests: integration (async schedule active, control transfers work)
+                - Docs: `ehci.4`
+                - Acceptance: Async schedule operational
+            - [ ] Implement Queue Head (QH) management.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: `ehci_qh_t` with horizontal link, endpoint chars, overlay
+                - Tests: unit (QH allocation, overlay handling)
+                - Docs: `ehci.4`
+                - Acceptance: QHs processed by HC
+            - [ ] Implement Queue Transfer Descriptor (qTD) management.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: `ehci_qtd_t` with next, alt_next, token, buffer pointers
+                - Tests: unit (qTD linking, token status parsing)
+                - Docs: `ehci.4`
+                - Acceptance: qTDs executed correctly
+            - [ ] Implement Periodic Schedule (Interrupt/Isochronous).
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: 1024-entry frame list, interrupt QHs, iTDs/siTDs
+                - Tests: integration (periodic schedule, interrupt transfers)
+                - Docs: `ehci.4`
+                - Acceptance: Periodic transfers work
+            - [ ] Implement interrupt handling.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Events: USB Interrupt, USB Error, Port Change, Frame List Rollover, Host System Error
+                - Tests: integration (transfer completion IRQ)
+                - Docs: `ehci.4`
+                - Acceptance: Interrupts handled correctly
+        - [ ] **xHCI (eXtensible Host Controller Interface):**
+            - [ ] Implement xHCI capability structure parsing.
+                - Files: `sys/drivers/usb/xhci.c` (new), `sys/drivers/usb/xhci.h` (new)
+                - Capability: CAPLENGTH, HCSPARAMS1/2/3, HCCPARAMS1/2, DBOFF, RTSOFF
+                - Extended: Supported Protocol, Legacy Support, Capability IDs
+                - Tests: integration (parse all capabilities from QEMU xHCI)
+                - Docs: `xhci.4`
+                - Acceptance: Capabilities detected correctly
+            - [ ] Implement Command Ring setup and processing.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: TRB ring with Link TRBs, CRCR register
+                - Commands: Enable Slot, Address Device, Configure Endpoint, Evaluate Context
+                - Tests: unit (ring wrap, command completion)
+                - Docs: `xhci.4`
+                - Acceptance: Commands processed by xHC
+            - [ ] Implement Event Ring setup and handling.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: Event Ring Segment Table, ERDP, interrupter registers
+                - Events: Transfer, Command Completion, Port Status Change
+                - Tests: integration (events received on completion)
+                - Docs: `xhci.4`
+                - Acceptance: Events processed correctly
+            - [ ] Implement Transfer Ring management.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: Per-endpoint transfer rings with TRBs
+                - TRB types: Normal, Setup, Data, Status, Isoch, Link
+                - Tests: unit (TRB enqueue, ring wrap)
+                - Docs: `xhci.4`
+                - Acceptance: Transfer TRBs executed
+            - [ ] Implement Doorbell mechanism.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Logic: Ring doorbell to notify xHC of new work
+                - Tests: unit (doorbell write triggers processing)
+                - Docs: `xhci.4`
+                - Acceptance: xHC processes TRBs after doorbell
+            - [ ] Implement Device Context management.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: DCBAA, Device Context, Slot Context, Endpoint Contexts
+                - Logic: Allocate on Enable Slot, configure on Set Address
+                - Tests: integration (device addressed, endpoints configured)
+                - Docs: `xhci.4`
+                - Acceptance: Device contexts properly managed
+            - [ ] Implement Scratchpad Buffer allocation.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Logic: Parse HCSPARAMS2 for scratchpad count, allocate buffers
+                - Tests: unit (scratchpad pages allocated)
+                - Docs: `xhci.4`
+                - Acceptance: xHC has required scratchpad
     - [ ] **Core Stack:**
-        - [ ] **Enumeration:** Set Address, Get Descriptor (Device, Config, Interface, Endpoint).
-        - [ ] **Hub Driver:** Port status change interrupts, Port Reset/Power logic.
-        - [ ] **Buffers:** URB (USB Request Block) lifecycle management.
+        - [ ] **USB Device Abstraction:**
+            - [ ] Define `struct usb_device`.
+                - Files: `sys/kern/usb/usb.h` (new)
+                - Fields: address, speed, state, config, parent, driver, ep0_pipe, descriptors
+                - Tests: unit (struct layout)
+                - Docs: `usb_device.9`
+                - Acceptance: Device structure defined
+            - [ ] Define `struct usb_endpoint`.
+                - Files: `sys/kern/usb/usb.h`
+                - Fields: address, type, direction, maxpacket, interval, toggle
+                - Tests: unit (endpoint descriptor parsing)
+                - Docs: `usb_endpoint.9`
+                - Acceptance: Endpoint structure defined
+            - [ ] Define `struct usb_interface`.
+                - Files: `sys/kern/usb/usb.h`
+                - Fields: number, altsetting, class, subclass, protocol, endpoints, driver
+                - Tests: unit (interface descriptor parsing)
+                - Docs: `usb_interface.9`
+                - Acceptance: Interface structure defined
+        - [ ] **Device Enumeration:**
+            - [ ] Implement USB device state machine.
+                - Files: `sys/kern/usb/usb_core.c` (new)
+                - States: DEFAULT, ADDRESS, CONFIGURED, SUSPENDED
+                - Logic: State transitions on SET_ADDRESS, SET_CONFIGURATION
+                - Tests: integration (device reaches CONFIGURED)
+                - Docs: `usb_state_machine.9`
+                - Acceptance: Proper state transitions
+            - [ ] Implement SET_ADDRESS control transfer.
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Assign address, update HCD data structures
+                - Tests: integration (device responds at new address)
+                - Docs: `usb_set_address.9`
+                - Acceptance: Address assigned successfully
+            - [ ] Implement GET_DESCRIPTOR (Device).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Fields: bcdUSB, bDeviceClass, idVendor, idProduct, bNumConfigurations
+                - Tests: unit (descriptor parsing)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Device descriptor parsed
+            - [ ] Implement GET_DESCRIPTOR (Configuration).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Read wTotalLength, then full config+interface+endpoint tree
+                - Tests: unit (nested descriptor parsing)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Full configuration tree available
+            - [ ] Implement GET_DESCRIPTOR (String).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Language ID query, string index query, UTF-16 to UTF-8
+                - Tests: unit (string descriptor decoding)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Manufacturer/product strings available
+            - [ ] Implement SET_CONFIGURATION.
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Select configuration, enable endpoints
+                - Tests: integration (device ready for class-specific commands)
+                - Docs: `usb_set_configuration.9`
+                - Acceptance: Device configured
+        - [ ] **Hub Driver:**
+            - [ ] Implement hub descriptor parsing.
+                - Files: `sys/drivers/usb/hub.c` (new)
+                - Fields: bNbrPorts, wHubCharacteristics, bPwrOn2PwrGood
+                - Tests: unit (hub descriptor fields)
+                - Docs: `usb_hub.4`
+                - Acceptance: Hub ports detected
+            - [ ] Implement port status change interrupt handling.
+                - Files: `sys/drivers/usb/hub.c`
+                - Logic: Interrupt endpoint polling, status change bitmap parsing
+                - Tests: integration (device connect detected via interrupt)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port changes signaled
+            - [ ] Implement GET_PORT_STATUS.
+                - Files: `sys/drivers/usb/hub.c`
+                - Fields: wPortStatus, wPortChange (connection, enable, suspend, reset)
+                - Tests: unit (status bits parsed)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port status queried
+            - [ ] Implement SET_PORT_FEATURE (power, reset, enable).
+                - Files: `sys/drivers/usb/hub.c`
+                - Features: PORT_POWER, PORT_RESET, PORT_ENABLE, PORT_SUSPEND
+                - Tests: integration (port reset triggers enumeration)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port features controlled
+            - [ ] Implement CLEAR_PORT_FEATURE (change acknowledgment).
+                - Files: `sys/drivers/usb/hub.c`
+                - Features: C_PORT_CONNECTION, C_PORT_ENABLE, C_PORT_RESET
+                - Tests: unit (change bits cleared)
+                - Docs: `usb_hub.4`
+                - Acceptance: Change conditions cleared
+            - [ ] Implement root hub emulation for HCDs.
+                - Files: `sys/kern/usb/usb_roothub.c` (new)
+                - Logic: Translate hub requests to HCD port operations
+                - Tests: integration (root hub appears as normal hub)
+                - Docs: `usb_roothub.9`
+                - Acceptance: Root hub enumerable
+        - [ ] **URB (USB Request Block) Lifecycle:**
+            - [ ] Define `struct urb`.
+                - Files: `sys/kern/usb/urb.h` (new)
+                - Fields: dev, pipe, transfer_buffer, transfer_buffer_length, actual_length, status, complete, context, interval, setup_packet
+                - Tests: unit (struct layout)
+                - Docs: `urb.9`
+                - Acceptance: URB structure defined
+            - [ ] Implement `usb_alloc_urb()`.
+                - Files: `sys/kern/usb/urb.c` (new)
+                - API: Allocate URB from pool/kmalloc
+                - Tests: unit (allocation, free)
+                - Docs: `usb_alloc_urb.9`
+                - Acceptance: URB allocated
+            - [ ] Implement `usb_submit_urb()`.
+                - Files: `sys/kern/usb/urb.c`
+                - API: Submit URB to HCD for processing
+                - Logic: Build pipe info, call HCD urb_enqueue
+                - Tests: integration (URB submitted and completed)
+                - Docs: `usb_submit_urb.9`
+                - Acceptance: URB reaches device
+            - [ ] Implement `usb_unlink_urb()`.
+                - Files: `sys/kern/usb/urb.c`
+                - API: Cancel pending URB
+                - Logic: Call HCD urb_dequeue, complete with -ECONNRESET
+                - Tests: unit (unlink pending URB)
+                - Docs: `usb_unlink_urb.9`
+                - Acceptance: URB cancelled
+            - [ ] Implement URB completion callback mechanism.
+                - Files: `sys/kern/usb/urb.c`
+                - Logic: Call urb->complete from HCD interrupt context or thread
+                - Tests: integration (completion callback invoked)
+                - Docs: `urb_completion.9`
+                - Acceptance: Callback called with correct status
     - [ ] **Class Drivers:**
-        - [ ] **HID:** Report parsing (Keyboard scancodes, Mouse relative motion).
-        - [ ] **Mass Storage (MSC):** SCSI over Bulk-Only Transport (BOT).
-        - [ ] **CDC-ACM:** Serial emulation (Line Coding, Control Lines).
-- [ ] **Audio:**
-        - [ ] **Native API (Sun/NetBSD AudioIO):**
-            - [ ] Character devices: `/dev/audio` (rw), `/dev/audioctl` (ioctl only), `/dev/mixer`.
-            - [ ] Structure `audio_info_t`: encapsulating sample rate, channels, precision, encoding.
-            - [ ] Ioctls: `AUDIO_GETINFO`, `AUDIO_SETINFO`, `AUDIO_DRAIN`, `AUDIO_FLUSH`.
-        - [ ] **Driver Implementation:**
-            - [ ] **Circular DMA Buffers:** Ring buffer management for continuous playback.
-            - [ ] **Mixer:** Volume control, Mute, Source selection (Mic/Line).
-            - [ ] **AC97:** Codec IO, Link interface.
-            - [ ] **Intel HDA:** CORB/RIRB, Stream Descriptor setup.
+        - [ ] **HID (Human Interface Device):**
+            - [ ] Implement HID report descriptor parsing.
+                - Files: `sys/drivers/usb/hid.c` (new), `sys/drivers/usb/hid.h` (new)
+                - Logic: Parse Usage Page, Usage, Collection, Input/Output/Feature items
+                - Tests: unit (keyboard descriptor, mouse descriptor), fuzzer (malformed descriptors)
+                - Docs: `usb_hid.4`
+                - Acceptance: Report fields extracted
+            - [ ] Implement keyboard scancode translation.
+                - Files: `sys/drivers/usb/hid_keyboard.c` (new)
+                - Logic: USB HID Usage to PS/2 scancode mapping
+                - Modifier handling: Shift, Ctrl, Alt, GUI keys
+                - Tests: unit (key press/release events)
+                - Docs: `hid_keyboard.4`
+                - Acceptance: Keyboard input works
+            - [ ] Implement mouse relative motion reporting.
+                - Files: `sys/drivers/usb/hid_mouse.c` (new)
+                - Logic: Parse X/Y relative, button state, wheel
+                - Tests: unit (motion events, button events)
+                - Docs: `hid_mouse.4`
+                - Acceptance: Mouse input works
+            - [ ] Implement HID interrupt IN polling.
+                - Files: `sys/drivers/usb/hid.c`
+                - Logic: Submit interrupt URB, re-submit on completion
+                - Tests: integration (continuous input polling)
+                - Docs: `usb_hid.4`
+                - Acceptance: Events received continuously
+        - [ ] **Mass Storage (MSC):**
+            - [ ] Implement Bulk-Only Transport (BOT) state machine.
+                - Files: `sys/drivers/usb/usb_storage.c` (new), `sys/drivers/usb/usb_storage.h` (new)
+                - States: COMMAND, DATA, STATUS, RESET
+                - Tests: integration (full command sequence)
+                - Docs: `usb_storage.4`
+                - Acceptance: BOT protocol works
+            - [ ] Implement Command Block Wrapper (CBW) construction.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Fields: dCBWSignature, dCBWTag, dCBWDataTransferLength, bmCBWFlags, bCBWLUN, bCBWCBLength, CBWCB
+                - Tests: unit (CBW format correct)
+                - Docs: `usb_storage.4`
+                - Acceptance: CBW accepted by device
+            - [ ] Implement Command Status Wrapper (CSW) parsing.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Fields: dCSWSignature, dCSWTag, dCSWDataResidue, bCSWStatus
+                - Status: PASSED, FAILED, PHASE_ERROR
+                - Tests: unit (CSW parsing, error handling)
+                - Docs: `usb_storage.4`
+                - Acceptance: CSW correctly interpreted
+            - [ ] Implement bulk data transfer (IN/OUT).
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Logic: Submit bulk URBs for data phase
+                - Tests: integration (read/write data)
+                - Docs: `usb_storage.4`
+                - Acceptance: Data transferred correctly
+            - [ ] Implement BOT reset recovery.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Logic: Bulk-Only Mass Storage Reset, Clear Feature HALT
+                - Tests: integration (recovery from stall)
+                - Docs: `usb_storage.4`
+                - Acceptance: Device recovers after error
+            - [ ] Integrate with SCSI mid-layer.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - API: Implement scsi_link_t execute callback
+                - Logic: Wrap SCSI CDBs in CBW, parse CSW status
+                - Tests: integration (SCSI INQUIRY via USB)
+                - Docs: `usb_storage.4`
+                - Acceptance: USB storage appears as SCSI device
+        - [ ] **CDC-ACM (Communications Device Class - Abstract Control Model):**
+            - [ ] Implement CDC functional descriptor parsing.
+                - Files: `sys/drivers/usb/cdc_acm.c` (new)
+                - Descriptors: Header, Call Management, ACM, Union
+                - Tests: unit (descriptor parsing)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Functional descriptors understood
+            - [ ] Implement SET_LINE_CODING.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Fields: dwDTERate, bCharFormat, bParityType, bDataBits
+                - Tests: unit (baud rate setting)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Line coding sent
+            - [ ] Implement GET_LINE_CODING.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Tests: unit (retrieve current settings)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Settings retrieved
+            - [ ] Implement SET_CONTROL_LINE_STATE.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Signals: DTR, RTS
+                - Tests: unit (control signals set)
+                - Docs: `cdc_acm.4`
+                - Acceptance: DTR/RTS toggled
+            - [ ] Implement serial notification handling.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Notifications: SERIAL_STATE (DCD, DSR, RI, break, framing error)
+                - Tests: integration (notifications received)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Modem signals reported
+            - [ ] Integrate with TTY subsystem.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Logic: Register as /dev/ttyUSBN, implement tty_ldisc operations
+                - Tests: integration (cat /dev/ttyUSB0 works)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Serial device usable
+- [ ] **Audio Subsystem:**
+    - [ ] **Native API (Sun/NetBSD AudioIO):**
+        - [ ] **Device Nodes:**
+            - [ ] Create `/dev/audio` character device.
+                - Files: `sys/drivers/audio/audio.c` (new), `sys/drivers/audio/audio.h` (new)
+                - Mode: Read/write, supports playback and recording
+                - Tests: integration (open /dev/audio for playback)
+                - Docs: `audio.4`
+                - Acceptance: Device node accessible
+            - [ ] Create `/dev/audioctl` control-only device.
+                - Files: `sys/drivers/audio/audio.c`
+                - Mode: ioctl only, no read/write data
+                - Tests: unit (ioctl works, read/write fails)
+                - Docs: `audio.4`
+                - Acceptance: Control-only access
+            - [ ] Create `/dev/mixer` mixer device.
+                - Files: `sys/drivers/audio/mixer.c` (new)
+                - Mode: ioctl for volume/source control
+                - Tests: integration (mixer ioctls work)
+                - Docs: `mixer.4`
+                - Acceptance: Mixer accessible
+        - [ ] **`audio_info_t` Structure:**
+            - [ ] Define `audio_info_t` encapsulating audio parameters.
+                - Files: `sys/drivers/audio/audio.h`
+                - Fields: `play` (audio_prinfo_t), `record` (audio_prinfo_t), `monitor_gain`, `blocksize`
+                - Subfields: sample_rate, channels, precision, encoding, gain, port, buffer_size
+                - Tests: unit (struct layout, initialization)
+                - Docs: `audio_info.9`
+                - Acceptance: Structure defined per NetBSD/Sun spec
+            - [ ] Define `AUDIO_ENCODING_*` constants.
+                - Files: `sys/drivers/audio/audio.h`
+                - Values: ULAW, ALAW, PCM8, PCM16, PCM24, PCM32
+                - Tests: unit (encoding constants defined)
+                - Docs: `audio_encoding.9`
+                - Acceptance: Encoding types enumerated
+        - [ ] **Audio Ioctls:**
+            - [ ] Implement `AUDIO_GETINFO` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Return current audio_info_t settings
+                - Tests: unit (getinfo returns valid data)
+                - Docs: `audio.4`
+                - Acceptance: Current settings retrieved
+            - [ ] Implement `AUDIO_SETINFO` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Set audio parameters (sample rate, channels, encoding)
+                - Logic: Validate parameters, reconfigure hardware
+                - Tests: unit (setinfo success, invalid params rejected)
+                - Docs: `audio.4`
+                - Acceptance: Parameters applied to hardware
+            - [ ] Implement `AUDIO_DRAIN` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Block until playback buffer empty
+                - Tests: integration (drain waits for playback)
+                - Docs: `audio.4`
+                - Acceptance: Returns after buffers drained
+            - [ ] Implement `AUDIO_FLUSH` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Discard buffered data, reset pointers
+                - Tests: unit (flush clears buffers)
+                - Docs: `audio.4`
+                - Acceptance: Buffers emptied immediately
+            - [ ] Implement `AUDIO_GETDEV` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Return audio device name/version
+                - Tests: unit (device info returned)
+                - Docs: `audio.4`
+                - Acceptance: Correct device info
+    - [ ] **Driver Implementation:**
+        - [ ] **Circular DMA Buffers:**
+            - [ ] Implement ring buffer management.
+                - Files: `sys/drivers/audio/audio_ring.c` (new)
+                - Structure: Read/write pointers, buffer size, highwater/lowwater marks
+                - Tests: unit (wrap-around, overflow detection, underrun detection)
+                - Docs: `audio_ring.9`
+                - Acceptance: Ring buffer operational
+            - [ ] Implement DMA descriptor chain setup.
+                - Files: `sys/drivers/audio/audio_dma.c` (new)
+                - Logic: Scatter-gather DMA for continuous playback
+                - Tests: integration (continuous audio without gaps)
+                - Docs: `audio_dma.9`
+                - Acceptance: Gapless playback
+            - [ ] Implement buffer interrupt handling.
+                - Files: `sys/drivers/audio/audio_dma.c`
+                - Logic: Refill/drain buffers on DMA completion interrupt
+                - Tests: integration (interrupts keep stream running)
+                - Docs: `audio_dma.9`
+                - Acceptance: Stable interrupt-driven I/O
+        - [ ] **Mixer:**
+            - [ ] Implement `MIXER_READ` ioctl.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Channels: VOLUME, BASS, TREBLE, SYNTH, PCM, SPEAKER, LINE, MIC, CD
+                - Tests: unit (read each channel)
+                - Docs: `mixer.4`
+                - Acceptance: Channel levels retrieved
+            - [ ] Implement `MIXER_WRITE` ioctl.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Logic: Set left/right channel levels (0-100 scale)
+                - Tests: unit (write each channel)
+                - Docs: `mixer.4`
+                - Acceptance: Channel levels set
+            - [ ] Implement mute control.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Logic: Toggle mute per channel
+                - Tests: unit (mute on/off)
+                - Docs: `mixer.4`
+                - Acceptance: Mute works
+            - [ ] Implement source selection.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Sources: Mic, Line In, CD, Aux
+                - Tests: unit (source switch)
+                - Docs: `mixer.4`
+                - Acceptance: Recording source selectable
+        - [ ] **AC97 Codec:**
+            - [ ] Implement AC97 register read/write.
+                - Files: `sys/drivers/audio/ac97.c` (new), `sys/drivers/audio/ac97.h` (new)
+                - Registers: Master Volume, PCM Out Volume, Record Select, Reset, etc.
+                - Tests: unit (register access)
+                - Docs: `ac97.4`
+                - Acceptance: Codec registers accessible
+            - [ ] Implement AC97 codec detection.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Read Vendor ID registers, detect codec type
+                - Tests: integration (codec detected in QEMU)
+                - Docs: `ac97.4`
+                - Acceptance: Codec identified
+            - [ ] Implement AC97 mixer integration.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Map mixer ioctls to AC97 registers
+                - Tests: integration (mixer controls AC97 volumes)
+                - Docs: `ac97.4`
+                - Acceptance: Mixer controls codec
+            - [ ] Implement AC97 link controller interface.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Timing for codec register access via link
+                - Tests: unit (link timing correct)
+                - Docs: `ac97.4`
+                - Acceptance: Stable codec communication
+        - [ ] **Intel High Definition Audio (HDA):**
+            - [ ] Implement HDA controller register access.
+                - Files: `sys/drivers/audio/hda.c` (new), `sys/drivers/audio/hda.h` (new)
+                - Registers: GCAP, VMIN, VMAJ, GCTL, WAKEEN, STATESTS, CORB*, RIRB*, Stream Descriptors
+                - Tests: integration (controller detected)
+                - Docs: `hda.4`
+                - Acceptance: HDA controller accessible
+            - [ ] Implement CORB (Command Output Ring Buffer) setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Allocate CORB memory, set CORBLBASE/CORBUBASE, enable
+                - Tests: unit (CORB operational)
+                - Docs: `hda.4`
+                - Acceptance: Commands can be sent
+            - [ ] Implement RIRB (Response Input Ring Buffer) setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Allocate RIRB memory, set RIRBLBASE/RIRBUBASE, enable
+                - Tests: unit (RIRB receives responses)
+                - Docs: `hda.4`
+                - Acceptance: Responses received
+            - [ ] Implement codec enumeration.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Read STATESTS, probe codec addresses 0-14
+                - Tests: integration (codec detected)
+                - Docs: `hda.4`
+                - Acceptance: Codec found
+            - [ ] Implement widget parsing.
+                - Files: `sys/drivers/audio/hda_codec.c` (new)
+                - Logic: Get Parameter verb to read widget types, connections
+                - Widgets: Audio Output, Audio Input, Audio Mixer, Audio Selector, Pin Complex
+                - Tests: unit (widget graph parsed)
+                - Docs: `hda.4`
+                - Acceptance: Audio path discovered
+            - [ ] Implement Stream Descriptor setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Registers: SDnCTL, SDnSTS, SDnLPIB, SDnCBL, SDnLVI, SDnFMT, SDnBDPL/U
+                - Logic: Configure stream format, buffer descriptor list
+                - Tests: integration (stream configured)
+                - Docs: `hda.4`
+                - Acceptance: Stream ready for data
+            - [ ] Implement Buffer Descriptor List (BDL) management.
+                - Files: `sys/drivers/audio/hda.c`
+                - Structure: Array of (address, length, IOC) entries
+                - Logic: Scatter-gather DMA for audio data
+                - Tests: unit (BDL wrap, IOC interrupts)
+                - Docs: `hda.4`
+                - Acceptance: Audio data transferred
+            - [ ] Implement stream interrupt handling.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Buffer completion, underrun/overrun detection
+                - Tests: integration (continuous playback via interrupts)
+                - Docs: `hda.4`
+                - Acceptance: Stable audio playback
     
 - [ ] **Power Management (ACPI):**
     - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser.
