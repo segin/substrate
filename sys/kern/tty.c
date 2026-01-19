@@ -26,6 +26,8 @@ void tty_default_termios(struct termios *t) {
     t->c_cc[VERASE] = 127; // DEL
     t->c_cc[VKILL] = 21; // ^U
     t->c_cc[VEOF] = 4;   // ^D
+    t->c_cc[VSTART] = 17; // ^Q
+    t->c_cc[VSTOP] = 19;  // ^S
 }
 // ...
 void tty_register_device(struct tty *tty, char *name) {
@@ -118,6 +120,7 @@ void ttyoutput(char c, struct tty *tp) {
 }
 
 void ttstart(struct tty *tp) {
+    if (tp->stopped) return;
     char c;
     while (tty_buf_get(&tp->write_buf, &c)) {
         if (tp->driver->put_char) {
@@ -193,6 +196,19 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     // In v6, flags&RAW checks.
     
     int raw = !(tty->termios.c_lflag & ICANON);
+    
+    // Software flow control (IXON) - Output throttling
+    if (tty->termios.c_iflag & IXON) {
+        if (c == tty->termios.c_cc[VSTOP]) {
+            tty->stopped = 1;
+            return; /* Do not pass VSTOP to application */
+        }
+        if (c == tty->termios.c_cc[VSTART]) {
+            tty->stopped = 0;
+            ttstart(tty); /* Kick output */
+            return; /* Do not pass VSTART to application */
+        }
+    }
     
     // Signal handling
     if (!raw && (tty->termios.c_lflag & ISIG)) {

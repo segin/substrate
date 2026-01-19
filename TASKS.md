@@ -740,7 +740,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **Input Processing (`n_tty_receive_buf`):**
                     - [ ] Parity checks and stripping.
                     - [x] Newline translation (CR->NL).
-                    - [ ] Software flow control (XON/XOFF detection).
+                    - [x] Software flow control (XON/XOFF detection).
                     - [x] Signal generation check (`ISIG`).
                 - [x] **Canonical Editing (`n_tty_read`):**
                     - [x] Backspace/Delete handling (`VERASE`).
