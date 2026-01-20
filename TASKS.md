@@ -479,9 +479,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `sig_catch`: Bitmask of signals with handlers (not SIG_DFL/SIG_IGN). <!-- proc.h:56, signal.c:sys_sigaction -->
             - [x] `sig_ignore`: Bitmask of signals set to SIG_IGN. <!-- proc.h:57, signal.c:sys_sigaction -->
         - [ ] **Per-Thread Signal State (`thread_t`):** <!-- proc.h -->
-            - [ ] `sig_pending`: Bitmask of pending signals for this thread.
-            - [ ] `sig_mask`: Current signal mask (blocked signals).
-            - [ ] `sig_alt_stack`: Alternative signal stack (`stack_t`).
+            - [x] `sig_pending`: Bitmask of pending signals for this thread. <!-- proc.h:150 -->
+            - [x] `sig_mask`: Current signal mask (blocked signals). <!-- proc.h:151 -->
+            - [x] `sig_alt_stack`: Alternative signal stack (`stack_t`). <!-- proc.h:152 -->
             - [ ] `sig_on_stack`: Flag indicating currently executing on alt stack.
         - [ ] **Signal Properties Table:**
             - [ ] Default action table: Terminate, Core, Stop, Ignore, Continue.
