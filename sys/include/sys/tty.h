@@ -66,7 +66,8 @@ struct tty {
     void *write_wait;
     
     // State flags
-    int stopped;
+    int stopped; // Output stopped (IXON)
+    int input_stopped; // Input stopped (IXOFF)
     
     void *driver_data; // Private driver data
 };

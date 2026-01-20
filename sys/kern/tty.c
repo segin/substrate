@@ -28,6 +28,7 @@ void tty_default_termios(struct termios *t) {
     t->c_cc[VEOF] = 4;   // ^D
     t->c_cc[VSTART] = 17; // ^Q
     t->c_cc[VSTOP] = 19;  // ^S
+    t->c_cc[VWERASE] = 23; // ^W
 }
 // ...
 void tty_register_device(struct tty *tty, char *name) {
@@ -88,6 +89,14 @@ static int tty_buf_get(tty_buffer_t *tb, char *c) {
 // Forward declarations
 void ttyoutput(char c, struct tty *tp);
 void ttstart(struct tty *tp);
+
+static void tty_send_xchar(struct tty *tp, char c) {
+    if (tp->driver->put_char) {
+        tp->driver->put_char(tp, c);
+    } else if (tp->driver->write) {
+        tp->driver->write(tp, (const unsigned char*)&c, 1);
+    }
+}
 
 // Unix v6-style output processing
 void ttyoutput(char c, struct tty *tp) {
@@ -161,6 +170,11 @@ static void canon(struct tty *tp) {
                     if (bp > buf) bp--;
                     continue;
                 }
+                if (c == tp->termios.c_cc[VWERASE]) {
+                    while (bp > buf && (*(bp-1) == ' ' || *(bp-1) == '\t')) bp--;
+                    while (bp > buf && (*(bp-1) != ' ' && *(bp-1) != '\t')) bp--;
+                    continue;
+                }
                 if (c == tp->termios.c_cc[VKILL]) {
                     bp = buf;
                     continue;
@@ -185,12 +199,34 @@ static void canon(struct tty *tp) {
     while (p < bp) {
         tty_buf_put(&tp->read_buf, *p++);
     }
+    
+    // Input Flow Control: resume if LWM reached
+    if ((tp->termios.c_iflag & IXOFF) && tp->input_stopped) {
+        if (tp->raw_buf.count <= (TTY_BUF_SIZE / 4)) {
+            tp->input_stopped = 0;
+            tty_send_xchar(tp, tp->termios.c_cc[VSTART]);
+        }
+    }
 }
 
 // Input processing (ISR context usually)
 // Implements 'ttyinput'
 void tty_flip_buffer_push(struct tty *tty, char c) {
     if (!tty) return;
+    
+    /* Input Processing */
+    if (tty->termios.c_iflag & ISTRIP)
+        c &= 0x7F;
+        
+    if (c == '\r') {
+        if (tty->termios.c_iflag & IGNCR)
+            return;
+        if (tty->termios.c_iflag & ICRNL)
+            c = '\n';
+    } else if (c == '\n') {
+        if (tty->termios.c_iflag & INLCR)
+            c = '\r';
+    }
     
     // cooked = !(RAW)
     // In v6, flags&RAW checks.
@@ -226,6 +262,14 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     
     // Put char to raw buffer
     tty_buf_put(&tty->raw_buf, c);
+    
+    // Input Flow Control: stopped if HWM reached
+    if ((tty->termios.c_iflag & IXOFF) && !tty->input_stopped) {
+        if (tty->raw_buf.count >= (TTY_BUF_SIZE * 3 / 4)) {
+            tty->input_stopped = 1;
+            tty_send_xchar(tty, tty->termios.c_cc[VSTOP]);
+        }
+    }
     
     if (raw || c == '\n' || c == tty->termios.c_cc[VEOF]) {
         // Add delimiter

@@ -152,6 +152,11 @@ typedef struct thread {
     stack_t       sig_alt_stack;
     uint8_t       sig_on_stack;   // Nonzero if executing on alternate signal stack
     
+    // Syscall restart support (for SA_RESTART)
+    uint8_t       in_syscall;     // Nonzero if thread is in a syscall
+    uint32_t      syscall_num;    // Syscall number for restart
+    uint32_t      syscall_orig_eax; // Original EAX for restart
+    
     // Robust futex list (for owner death cleanup)
     struct robust_list_head *robust_list;
     size_t                   robust_list_len;

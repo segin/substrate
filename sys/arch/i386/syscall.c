@@ -338,6 +338,13 @@ void syscall_handler(registers_t *regs) {
     struct personality *p = current_process->pers;
     uint32_t syscall_num = regs->eax;
 
+    // Track syscall for SA_RESTART support
+    if (current_thread) {
+        current_thread->in_syscall = 1;
+        current_thread->syscall_num = syscall_num;
+        current_thread->syscall_orig_eax = regs->eax;
+    }
+
     uint32_t args[6];
 
 
@@ -443,6 +450,11 @@ void syscall_handler(registers_t *regs) {
     }
 
     signal_handle_pending(regs);
+    
+    // Clear syscall tracking after signals have been handled
+    if (current_thread) {
+        current_thread->in_syscall = 0;
+    }
     
     if (regs->cs == 0x1B && regs->useresp >= 0xC0000000) {
         kprint("SYSCALL RET: Bad User ESP detected!\n");

@@ -131,15 +131,9 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 cur->rusage_children.ru_nivcsw += target->rusage.ru_nivcsw + target->rusage_children.ru_nivcsw;
 
                 // Unlink from Parent's List
-                mutex_lock(&proctree_lock);
-                if (cur->p_children == target) {
-                    cur->p_children = target->p_sibling;
-                } else {
-                    process_t *prev = cur->p_children;
-                    while (prev && prev->p_sibling != target) prev = prev->p_sibling;
-                    if (prev) prev->p_sibling = target->p_sibling;
-                }
-                mutex_unlock(&proctree_lock);
+                // Unlink from Parent's List
+                extern void proc_remove_child(process_t *parent, process_t *child);
+                proc_remove_child(cur, target);
                 
                 // Clear process group membership
                 extern void pgrp_remove_proc(struct process *proc);

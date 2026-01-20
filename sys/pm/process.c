@@ -28,6 +28,10 @@ extern uint32_t get_time(void);
 extern fs_node_t *fs_root;
 extern struct personality personality_native;
 
+/* Forward declarations */
+void proc_add_child(process_t *parent, process_t *child);
+void proc_remove_child(process_t *parent, process_t *child);
+
 void pm_init(void) {
     next_pid = 1;
     memset(processes, 0, sizeof(processes));
@@ -119,15 +123,33 @@ int proc_fork(process_t *parent, void *stack) {
     
     /* 
      * Link child into parent's list.
-     * Must hold proctree_lock.
      */
-    mutex_lock(&proctree_lock);
-    child_proc->p_parent = parent;
-    child_proc->p_sibling = parent->p_children;
-    parent->p_children = child_proc;
-    mutex_unlock(&proctree_lock);
+    proc_add_child(parent, child_proc);
     
     return sched_fork_thread(child_proc, stack);
+}
+
+void proc_add_child(process_t *parent, process_t *child) {
+    mutex_lock(&proctree_lock);
+    child->p_parent = parent;
+    child->p_sibling = parent->p_children;
+    parent->p_children = child;
+    mutex_unlock(&proctree_lock);
+}
+
+void proc_remove_child(process_t *parent, process_t *child) {
+    if (!parent || !child) return;
+    mutex_lock(&proctree_lock);
+    if (parent->p_children == child) {
+        parent->p_children = child->p_sibling;
+    } else {
+        process_t *prev = parent->p_children;
+        while (prev && prev->p_sibling != child) prev = prev->p_sibling;
+        if (prev) prev->p_sibling = child->p_sibling;
+    }
+    child->p_sibling = NULL;
+    // child->p_parent = NULL; // Optional, called often reassigns
+    mutex_unlock(&proctree_lock);
 }
 
 // Shim for syscalls
@@ -260,12 +282,29 @@ void proc_exit(int code) {
     
     // 4. Notify Parent
     if (current_process->p_parent) {
-        // SIGCHLD
-        extern void psignal(process_t *p, int sig);
-        psignal(current_process->p_parent, SIGCHLD);
-        
-        // Wakeup parent (waiting on p_children address usually)
-        sched_wakeup(&current_process->p_parent->p_children);
+        // Check SA_NOCLDWAIT
+        int nocldwait = 0;
+        if (current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDWAIT) {
+             nocldwait = 1;
+        }
+
+        if (nocldwait) {
+             // Notify parent as required
+             extern void psignal(process_t *p, int sig);
+             psignal(current_process->p_parent, SIGCHLD);
+             
+             // Reparent to Init for automatic reaping
+             process_t *init = &processes[1]; // PID 1
+             if (init != current_process) { // Don't reparent init to itself
+                 proc_remove_child(current_process->p_parent, current_process);
+                 proc_add_child(init, current_process);
+             }
+        } else {
+             extern void psignal(process_t *p, int sig);
+             psignal(current_process->p_parent, SIGCHLD);
+             // Wakeup parent
+             sched_wakeup(&current_process->p_parent->p_children);
+        }
     } else {
         // No parent? (swapper/init special case)
         // If PID > 1, should have parent.

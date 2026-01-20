@@ -495,9 +495,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Update `sig_catch`/`sig_ignore` bitmasks. <!-- signal.c:24-35 -->
             - [x] Handle `SA_RESETHAND` (one-shot handler). <!-- signal.c:237 -->
             - [x] Handle `SA_NODEFER` (don't block signal during handler). <!-- signal.c:231 -->
-            - [ ] Handle `SA_RESTART` (restart interrupted syscalls).
-            - [ ] Handle `SA_NOCLDSTOP` (don't send SIGCHLD for stopped children).
-            - [ ] Handle `SA_NOCLDWAIT` (don't create zombies for children).
+            - [x] Handle `SA_RESTART` (restart interrupted syscalls). <!-- signal.c:278-318, syscall.c:341-347,455-459 -->
+            - [x] Handle `SA_NOCLDSTOP` (don't send SIGCHLD for stopped children). <!-- signal.c:83-86,237-241, process.c:283-296 -->
+            - [x] Handle `SA_NOCLDWAIT` (don't create zombies for children). <!-- process.c:281-303 -->
         - [x] **`sys_sigprocmask(how, set, oset)`:** <!-- signal.c:40-50 implemented -->
             - [x] Return old mask in `oset` if non-NULL. <!-- signal.c:41 -->
             - [x] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK. <!-- signal.c:45-47 -->
