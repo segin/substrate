@@ -356,3 +356,13 @@ void proc_exit(int code) {
     // Should not reach here
     while(1);
 }
+
+void proc_set_bitness(process_t *p, uint8_t bitness) {
+    if (p) {
+        p->bitness = bitness;
+    }
+}
+
+uint8_t proc_get_bitness(process_t *p) {
+    return p ? p->bitness : 0;
+}

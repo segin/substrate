@@ -16,4 +16,8 @@ process_t *proc_create(struct personality *pers);
 int proc_fork(process_t *parent, void *stack);
 void proc_remove_child(process_t *parent, process_t *child);
 
+void proc_set_bitness(process_t *p, uint8_t bitness);
+uint8_t proc_get_bitness(process_t *p);
+
+
 #endif

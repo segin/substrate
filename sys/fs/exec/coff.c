@@ -4,6 +4,8 @@
 #include <string.h>
 #include "../../exec/perso/personality.h"
 #include "../../kern/sched.h"
+#include <sys/sysinfo.h>
+#include "../../pm/pm.h"
 
 int coff_load_file(void *file, uint32_t size) {
     (void)size;
@@ -40,6 +42,7 @@ int coff_load_file(void *file, uint32_t size) {
     // Default to SVR3 for now if we detect a 386 COFF binary
     if (current_process) {
         current_process->pers = &personality_svr3;
+        proc_set_bitness(current_process, BITNESS_32);
     }
 
     kprint("COFF Loader invoked (header parsed).\n");

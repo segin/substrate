@@ -427,6 +427,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **FPU Lazy Save:** `Unordered` exception logic for FPU context.
         - [x] **PCB:** Refine Process Control Block for thread/process split.
     - [x] **Kernel Process (PID 0):**
+    - [x] **Process Bitness Tracking:**
+        - [x] **Definition:** Define `enum proc_bitness` (16/32/64) and add field to process struct. <!-- proc.h, sysinfo.h -->
+        - [x] **API:** Implement `proc_set_bitness()` and `proc_get_bitness()` with permission checks. <!-- pm.h, process.c -->
+        - [x] **Tests:** Unit/Integration tests for bitness inheritance and transitions. <!-- test_bitness.c -->
         - [x] **Swapper/Idle:** The kernel itself is PID 0.
         - [x] **Responsibilities:** Pageout daemon work, Scheduler idle loop.
         - [x] **Context:** Ensures a valid process context always exists (never switch to NULL).
@@ -860,6 +864,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) -->
                 - [x] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->
         - [x] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() -->
+    - [ ] **LDT & 16-bit Support:**
+        - [ ] **API & Design:** Define secure API surface, privilege model (CAP_SYS_ADMIN), and safety constraints.
+        - [ ] **Implementation:** Kernel-side LDT management (`ldt_alloc`/`set`/`free`) and validation.
+        - [ ] **Syscall:** Implement `sys_modify_ldt` with 16-bit flags.
+        - [ ] **Safety:** Context switching support, fork/exec handling, and code hardening.
+        - [ ] **Verification:** Unit tests, fuzzing, and integration with 16-bit emulator.
 - [x] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S -->
     - [x] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup -->
     - [x] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks -->
@@ -2219,6 +2229,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Read first 128 bytes (Shebang/Magic detection).
                 - [ ] Dispatch to correct loader (ELF, Script, COFF, PE).
                 - [ ] Argument/Environment copying to new userspace stack.
+                - [x] **Bitness Integration:** Update loaders (ELF/PE/AOUT) to set process bitness based on binary format.
             - [ ] **IPC Subsystem:**
                 - [ ] **SysV Shared Memory:**
                     - [ ] `shmid_ds` structure and key lookup.
@@ -2842,8 +2853,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `clock_gettime()`: High-resolution system clocks.
         - [ ] **Process Information API (`lib/sys`):**
             - [ ] `sys_proc_count()` - Get total number of processes.
-            - [ ] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
-            - [ ] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info.
+            - [x] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
+            - [x] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info (including `bitness`).
             - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
             - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
             - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
@@ -4378,6 +4389,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Filesystem Tools (`sbin/`):**
         - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
         - [ ] **`fsck`:** Implement `ext2` consistency check.
+
+### 7. Core Utilities (`bin/`)
+- [ ] **Process Tools:**
+    - [x] **`ps`:**
+        - [x] **Bitness Support:** Update to receive bitness via `sys_proc_info` and format output (`-b`).
+        - [ ] **Testing:** Integration tests for output verification.
+- [ ] **LDT Tools:**
+    - [ ] **`setldt` / `ldtctl`:** CLI tool to inspect/manipulate LDT entries.
 
 ### 8. Security and Identity
 - [ ] **User & Group Management:**
@@ -5923,3 +5942,5 @@ Reference: User Request (Step 30690)
         - Files: All `perso_*.c` files
         - Tests: stress/edge-case
         - Acceptance: Robust error propagation, no race conditions in translation layers.
+
+

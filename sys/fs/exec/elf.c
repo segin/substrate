@@ -1,8 +1,9 @@
 #include "elf.h"
-#include "../../drivers/video/vga.h"
+
 #include "../../vfs/vfs.h"
 #include "../../kern/console.h"
-#include "../../pm/pm.h"
+#include <sys/sysinfo.h> // For BITNESS_*
+#include "../../include/sys/proc.h"
 #include "../../kern/panic.h"
 #include <string.h>
 #include "../../vm/vm_map.h"
@@ -285,6 +286,14 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                 current_process->pers = &personality_native;
                 break;
         }
+        
+        // Set Bitness
+        if (ehdr.e_ident[EI_CLASS] == ELFCLASS64) {
+             current_process->bitness = BITNESS_64;
+        } else {
+             current_process->bitness = BITNESS_32;
+        }
+
         
         if (load_base == 0) {
             current_process->brk_start = max_vaddr;

@@ -47,6 +47,11 @@ typedef struct {
 #define ELFMAG2 'L'
 #define ELFMAG3 'F'
 
+#define EI_CLASS 4
+#define ELFCLASSNONE 0
+#define ELFCLASS32 1
+#define ELFCLASS64 2
+
 #define EI_OSABI 7
 #define ELFOSABI_SYSV 0
 #define ELFOSABI_LINUX 3

@@ -103,6 +103,10 @@ void run_kernel_tests(void) {
          run_signal_tests();
     }
 
+    if (all || strcmp(test_arg, "bitness") == 0) {
+         test_bitness();
+    }
+
     // Wait logic tests are run on host via verify_wait_host.sh
     // if (all || strcmp(test_arg, "wait") == 0) {
     //     test_wait_logic();

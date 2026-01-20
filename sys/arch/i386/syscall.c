@@ -11,7 +11,9 @@
 #include "../../include/sys/proc.h"
 #include "../../include/sys/signal.h"
 #include "../../vfs/vfs.h"
+#include "../../vfs/vfs.h"
 #include "../../drivers/serial/uart.h"
+#include "../../include/sys/sysinfo.h"
 #include <sys/types.h>
 #include <string.h>
 #include <stdbool.h>
@@ -1027,6 +1029,78 @@ int sys_getcwd(char *buf, size_t size) {
     // TODO: Proper path tracking
     buf[0] = '/'; buf[1] = 0;
     return 0;
+}
+
+// sys_proc_info - Get detailed info for a single process
+int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
+    if (!info) return -1;
+    
+    // If pid == 0, use current process
+    // If pid > 0, find that process
+    
+    process_t *target = NULL;
+    
+    if (pid == 0) {
+        target = current_process;
+    } else {
+        // Find process by PID
+        for (int i = 0; i < 64; i++) {
+            if (processes[i].pid == pid) {
+                target = &processes[i];
+                break;
+            }
+        }
+    }
+    
+    if (!target) return -1; // ESRCH in real implementation
+    
+    // Populate struct
+    sys_procinfo_t kinfo;
+    memset(&kinfo, 0, sizeof(kinfo));
+    
+    kinfo.pid = target->pid;
+    kinfo.ppid = target->ppid;
+    kinfo.uid = target->uid;
+    kinfo.gid = target->gid;
+    kinfo.state = target->state;
+    kinfo.bitness = target->bitness;
+    kinfo.start_time = target->start_time;
+    // kinfo.user_time = target->rusage.ru_utime.tv_sec; // Simplified
+    // kinfo.sys_time = target->rusage.ru_stime.tv_sec;
+    
+    strncpy(kinfo.name, target->comm, sizeof(kinfo.name)-1);
+    
+    // Copy to user
+    memcpy(info, &kinfo, sizeof(kinfo));
+    
+    return 0;
+}
+
+// sys_proc_list - List all active PIDs
+// Returns count of PIDs written, or total count if pids==NULL
+int sys_proc_list(pid_t *pids, size_t count) {
+    int total_procs = 0;
+    
+    // First pass: count active processes
+    for (int i = 0; i < 64; i++) {
+        if (processes[i].pid != -1) {
+            total_procs++;
+        }
+    }
+    
+    if (!pids || count == 0) {
+        return total_procs;
+    }
+    
+    // Second pass: fill buffer
+    int copied = 0;
+    for (int i = 0; i < 64 && copied < (int)count; i++) {
+        if (processes[i].pid != -1) {
+            pids[copied++] = processes[i].pid;
+        }
+    }
+    
+    return copied;
 }
 
 extern void isr128(void); 

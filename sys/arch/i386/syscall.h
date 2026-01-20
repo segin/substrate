@@ -68,6 +68,8 @@
 #define SYS_FUTEX   240
 #define SYS_PMAP_STATS 241
 #define SYS_THR_NEW 455
+#define SYS_PROC_INFO 242
+#define SYS_PROC_LIST 243
 
 void syscall_init(void);
 
