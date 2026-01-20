@@ -1,0 +1,40 @@
+.\" Process this file with
+.\" groff -man -Tascii full.4
+.\"
+.TH FULL 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+full \- always full device
+.SH SYNOPSIS
+.B /dev/full
+.SH DESCRIPTION
+The
+.B full
+device behaves like
+.B /dev/zero
+when read, returning an endless supply of null bytes.
+However, any attempt to write to
+.B /dev/full
+fails with the error
+.B ENOSPC
+(No space left on device).
+.PP
+This device is useful for testing how programs handle disk-full conditions.
+.SH ERRORS
+.TP
+.B ENOSPC
+Returned for all write operations.
+.SH EXAMPLE
+Test error handling:
+.PP
+.nf
+    echo "test" > /dev/full
+    # Outputs: No space left on device
+.fi
+.SH FILES
+.TP
+.B /dev/full
+The full device special file (character device, major 1, minor 7).
+.SH SEE ALSO
+.BR null (4),
+.BR zero (4),
+.BR intro (4)

@@ -1,0 +1,71 @@
+.\" Process this file with
+.\" groff -man -Tascii fd.4
+.\"
+.TH FD 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+fd, stdin, stdout, stderr \- file descriptor pseudo-devices
+.SH SYNOPSIS
+.B /dev/fd/\fIn\fP
+.br
+.B /dev/stdin
+.br
+.B /dev/stdout
+.br
+.B /dev/stderr
+.SH DESCRIPTION
+The
+.B /dev/fd
+directory provides a mechanism to access open file descriptors by number.
+Opening
+.BI /dev/fd/ n
+is equivalent to duplicating file descriptor
+.I n
+using
+.BR dup (2).
+.PP
+The following symbolic links provide convenient access to the standard
+file descriptors:
+.TP
+.B /dev/stdin
+Symbolic link to
+.BR /dev/fd/0 .
+.TP
+.B /dev/stdout
+Symbolic link to
+.BR /dev/fd/1 .
+.TP
+.B /dev/stderr
+Symbolic link to
+.BR /dev/fd/2 .
+.SH NOTES
+This is the native Substrate interface for file descriptor access.
+Linux processes use
+.B /proc/self/fd
+instead, which is provided via the Linux personality's procfs emulation.
+.PP
+The
+.B /dev/fd
+mechanism is compatible with BSD and POSIX systems.
+.SH EXAMPLE
+Redirect a filter's output to the original standard error:
+.PP
+.nf
+    filter 2>/dev/fd/4 4>&2
+.fi
+.SH FILES
+.TP
+.B /dev/fd/
+Directory of open file descriptors.
+.TP
+.B /dev/stdin
+Symlink to /dev/fd/0.
+.TP
+.B /dev/stdout
+Symlink to /dev/fd/1.
+.TP
+.B /dev/stderr
+Symlink to /dev/fd/2.
+.SH SEE ALSO
+.BR dup (2),
+.BR open (2),
+.BR intro (4)

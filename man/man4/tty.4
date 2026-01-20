@@ -1,0 +1,43 @@
+.\" Process this file with
+.\" groff -man -Tascii tty.4
+.\"
+.TH TTY 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+tty \- controlling terminal
+.SH SYNOPSIS
+.B /dev/tty
+.SH DESCRIPTION
+The special file
+.B /dev/tty
+is a synonym for the controlling terminal of the current process.
+It can be used by programs that need to access the terminal explicitly,
+regardless of standard input/output redirection.
+.PP
+Opening
+.B /dev/tty
+will fail with
+.B ENXIO
+if the process has no controlling terminal (e.g., daemons).
+.SH EXAMPLE
+Prompt user even when stdin is redirected:
+.PP
+.nf
+    #include <fcntl.h>
+    #include <unistd.h>
+
+    int tty_fd = open("/dev/tty", O_RDWR);
+    write(tty_fd, "Password: ", 10);
+    read(tty_fd, buf, sizeof(buf));
+.fi
+.SH ERRORS
+.TP
+.B ENXIO
+The process has no controlling terminal.
+.SH FILES
+.TP
+.B /dev/tty
+Controlling terminal (character device, major 5, minor 0).
+.SH SEE ALSO
+.BR ttyname (3),
+.BR isatty (3),
+.BR intro (4)

@@ -1,0 +1,29 @@
+.\" Process this file with
+.\" groff -man -Tascii null.4
+.\"
+.TH NULL 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+null \- null device (data sink)
+.SH SYNOPSIS
+.B /dev/null
+.SH DESCRIPTION
+The
+.B null
+device accepts and discards all data written to it.
+Reading from
+.B /dev/null
+always returns end-of-file (read returns 0).
+.PP
+This device is commonly used to discard unwanted output, for example:
+.PP
+.nf
+    command > /dev/null 2>&1
+.fi
+.SH FILES
+.TP
+.B /dev/null
+The null device special file (character device, major 1, minor 3).
+.SH SEE ALSO
+.BR zero (4),
+.BR full (4),
+.BR intro (4)

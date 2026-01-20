@@ -1,0 +1,53 @@
+.\" Process this file with
+.\" groff -man -Tascii mem.4
+.\"
+.TH MEM 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+mem, kmem \- physical and kernel virtual memory
+.SH SYNOPSIS
+.B /dev/mem
+.br
+.B /dev/kmem
+.SH DESCRIPTION
+.SS /dev/mem
+The
+.B mem
+device provides access to the computer's physical memory.
+Byte addresses in
+.B /dev/mem
+are interpreted as physical memory addresses.
+.PP
+This device is typically used for:
+.IP \(bu 2
+Accessing memory-mapped I/O regions
+.IP \(bu 2
+Reading BIOS data areas
+.IP \(bu 2
+Hardware diagnostics
+.SS /dev/kmem
+The
+.B kmem
+device provides access to the kernel's virtual address space.
+Byte addresses correspond to kernel virtual addresses.
+.PP
+This device allows inspection of kernel data structures and is primarily
+used by system utilities such as
+.BR ps (1)
+and
+.BR top (1)
+on traditional Unix systems.
+.SH SECURITY
+Access to these devices requires root privileges.
+Reading or writing arbitrary memory can crash the system or compromise security.
+.PP
+Modern security practices recommend disabling these devices or restricting
+access via mandatory access controls.
+.SH FILES
+.TP
+.B /dev/mem
+Physical memory (character device, major 1, minor 1).
+.TP
+.B /dev/kmem
+Kernel virtual memory (character device, major 1, minor 2).
+.SH SEE ALSO
+.BR intro (4)

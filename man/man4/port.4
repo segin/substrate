@@ -1,0 +1,43 @@
+.\" Process this file with
+.\" groff -man -Tascii port.4
+.\"
+.TH PORT 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+port \- I/O port access
+.SH SYNOPSIS
+.B /dev/port
+.SH DESCRIPTION
+The
+.B port
+device provides access to the x86 I/O port address space.
+Reading and writing to byte offsets in this device corresponds to
+.B in
+and
+.B out
+instructions to the respective I/O ports.
+.PP
+For example, reading byte 0x60 from
+.B /dev/port
+reads from I/O port 0x60 (keyboard controller data port).
+.PP
+This device supports only byte-sized (8-bit) I/O operations.
+For word or dword I/O, use the
+.BR ioperm (2)
+or
+.BR iopl (2)
+system calls with inline assembly.
+.SH SECURITY
+Access to
+.B /dev/port
+requires root privileges.
+Arbitrary port I/O can cause hardware damage, system instability,
+or security vulnerabilities.
+.SH FILES
+.TP
+.B /dev/port
+I/O port access (character device, major 1, minor 4).
+.SH SEE ALSO
+.BR ioperm (2),
+.BR iopl (2),
+.BR mem (4),
+.BR intro (4)

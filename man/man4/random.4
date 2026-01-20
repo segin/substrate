@@ -1,0 +1,46 @@
+.\" Process this file with
+.\" groff -man -Tascii random.4
+.\"
+.TH RANDOM 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+random, urandom \- kernel random number generators
+.SH SYNOPSIS
+.B /dev/random
+.br
+.B /dev/urandom
+.SH DESCRIPTION
+The
+.B random
+and
+.B urandom
+devices provide access to the kernel's random number generator.
+.SS /dev/random
+This device provides high-quality random bytes derived from hardware entropy
+sources. On systems with limited entropy,
+.B /dev/random
+may block until sufficient entropy is available.
+.SS /dev/urandom
+This device provides cryptographically secure pseudo-random bytes.
+It will never block and is suitable for most cryptographic purposes.
+After system initialization,
+.B /dev/urandom
+provides output indistinguishable from true random data.
+.PP
+Both devices accept writes, which are mixed into the entropy pool.
+.SH NOTES
+For most applications, including cryptographic key generation,
+.B /dev/urandom
+is the recommended source of randomness.
+.PP
+.B /dev/random
+should only be used when true hardware randomness is specifically required.
+.SH FILES
+.TP
+.B /dev/random
+True random number generator (character device, major 1, minor 8).
+.TP
+.B /dev/urandom
+Cryptographically secure PRNG (character device, major 1, minor 9).
+.SH SEE ALSO
+.BR getrandom (2),
+.BR intro (4)
