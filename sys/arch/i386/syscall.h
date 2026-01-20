@@ -73,6 +73,7 @@
 #define SYS_PROC_COUNT 244
 #define SYS_CPU_COUNT 245
 #define SYS_HOSTNAME 246
+#define SYS_RT_SIGRETURN 247
 
 void syscall_init(void);
 

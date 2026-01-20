@@ -48,6 +48,7 @@ extern int sys_msync(void*, size_t, int);
 extern int sys_readlink(const char*, char*, size_t);
 extern int sys_unlink(const char*);
 extern int sys_sigreturn(void*);
+extern int sys_rt_sigreturn(void*);
 extern int sys_sigaltstack(const void*, void*);
 
 extern int sys_poll(void*, unsigned int, int);
@@ -107,6 +108,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_PROC_COUNT] = &sys_proc_count,
     [SYS_CPU_COUNT] = &sys_cpu_count,
     [SYS_HOSTNAME] = &sys_hostname,
+    [SYS_RT_SIGRETURN] = (void*)sys_rt_sigreturn,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -158,6 +160,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_PROC_COUNT] = "proc_count",
     [SYS_CPU_COUNT] = "cpu_count",
     [SYS_HOSTNAME] = "hostname",
+    [SYS_RT_SIGRETURN] = "rt_sigreturn",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -209,6 +212,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_PROC_COUNT] = { 0, { 0 } },
     [SYS_CPU_COUNT] = { 0, { 0 } },
     [SYS_HOSTNAME] = { 2, { ARG_PTR, ARG_INT } },
+    [SYS_RT_SIGRETURN] = { 1, { ARG_PTR } },
 };
 
 struct personality personality_native = {

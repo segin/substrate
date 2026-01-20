@@ -85,6 +85,7 @@
 #define SYS_proc_count  244
 #define SYS_cpu_count   245
 #define SYS_hostname    246
+#define SYS_rt_sigreturn 247
 
 /* Uppercase aliases for BSD/older code compatibility */
 #define SYS_EXIT        SYS_exit
