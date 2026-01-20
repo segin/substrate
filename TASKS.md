@@ -593,6 +593,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Set `sig_on_stack` flag.
     - [ ] **Signal Trampoline:**
         - [ ] **Trampoline Page:**
+            - [x] Refactor `linux_sys_ioctl` dispatch (TTY, Block, etc.) `[sys/exec/perso/perso_linux.c]`
+- [x] Fix `init` process session/pgrp setup `[sys/kern/main.c]` `[sys/pm/process.c]`
             - [ ] Map trampoline code at fixed address (e.g., 0xFFFF1000).
             - [ ] Page must be user-readable, executable, not writable.
             - [ ] Contains minimal code: `mov $SYS_sigreturn, %eax; int $0x80`.
