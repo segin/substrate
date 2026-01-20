@@ -1,0 +1,38 @@
+.\" Process this file with
+.\" groff -man -Tascii sys_proc_count.2
+.\"
+.TH SYS_PROC_COUNT 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+sys_proc_count \- get total number of active processes
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/syscall.h>
+.PP
+.BI "int sys_proc_count(void);"
+.SH DESCRIPTION
+The
+.B sys_proc_count()
+system call returns the total number of active processes in the system.
+This includes all processes in RUNNING, READY, SLEEPING, and STOPPED states.
+ZOMBIE state processes are excluded from the count.
+.PP
+This call is useful for monitoring system load and for determining how many
+process slots are in use.
+.SH RETURN VALUE
+On success, returns the number of active processes (always >= 1, since at
+least the calling process exists).
+.PP
+This function does not fail under normal circumstances.
+.SH ERRORS
+This system call does not return any errors.
+.SH NOTES
+The returned count is a snapshot at the time of the call.
+The actual number of processes may change immediately after
+.B sys_proc_count()
+returns.
+.SH SEE ALSO
+.BR sys_proc_info (2),
+.BR sys_proc_list (2),
+.BR sys_cpu_count (2),
+.BR intro (2)

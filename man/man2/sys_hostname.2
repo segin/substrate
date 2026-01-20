@@ -1,0 +1,67 @@
+.\" Process this file with
+.\" groff -man -Tascii sys_hostname.2
+.\"
+.TH SYS_HOSTNAME 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+sys_hostname \- get system hostname
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/syscall.h>
+.PP
+.BI "int sys_hostname(char *" buf ", size_t " len ");"
+.SH DESCRIPTION
+The
+.B sys_hostname()
+system call retrieves the system's hostname and stores it in the buffer
+pointed to by
+.IR buf .
+At most
+.I len
+bytes are written to the buffer, including the terminating null byte.
+.PP
+If the hostname is longer than
+.IR len \-1
+characters, it is truncated to fit, and the buffer is always null-terminated.
+.PP
+The hostname is set during kernel initialization and identifies the machine
+on the network.
+.SH RETURN VALUE
+On success, returns 0.
+.PP
+On error, returns \-1 (with errno set appropriately, though this implementation
+does not currently set errno).
+.SH ERRORS
+.TP
+.B EFAULT
+.I buf
+points to an invalid address.
+.SH NOTES
+This is a Substrate-specific system call.
+The portable method to retrieve the hostname is via
+.BR gethostname (3),
+which may be implemented using this system call.
+.PP
+The
+.BR uname (2)
+system call also returns the hostname in its
+.I nodename
+field.
+.SH EXAMPLE
+.nf
+#include <sys/syscall.h>
+#include <stdio.h>
+
+int main(void) {
+    char hostname[256];
+    if (sys_hostname(hostname, sizeof(hostname)) == 0) {
+        printf("Hostname: %s\en", hostname);
+    }
+    return 0;
+}
+.fi
+.SH SEE ALSO
+.BR gethostname (3),
+.BR sethostname (2),
+.BR uname (2),
+.BR intro (2)

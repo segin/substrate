@@ -1,0 +1,90 @@
+.\" Process this file with
+.\" groff -man -Tascii sys_proc_info.2
+.\"
+.TH SYS_PROC_INFO 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+sys_proc_info \- get information about a process
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.br
+.B #include <sys/syscall.h>
+.PP
+.BI "int sys_proc_info(pid_t " pid ", sys_procinfo_t *" info ");"
+.SH DESCRIPTION
+The
+.B sys_proc_info()
+system call retrieves information about the process specified by
+.I pid
+and stores it in the structure pointed to by
+.IR info .
+.PP
+The
+.I sys_procinfo_t
+structure is defined as follows:
+.PP
+.in +4n
+.EX
+typedef struct {
+    pid_t   pid;        /* Process ID */
+    pid_t   ppid;       /* Parent process ID */
+    pid_t   pgid;       /* Process group ID */
+    pid_t   sid;        /* Session ID */
+    uid_t   uid;        /* User ID */
+    gid_t   gid;        /* Group ID */
+    int     state;      /* Process state */
+    uint8_t bitness;    /* Process bitness (16/32/64) */
+    time_t  start_time; /* Start time in ticks */
+    char    name[16];   /* Process name */
+} sys_procinfo_t;
+.EE
+.in
+.PP
+The
+.I state
+field contains one of the following values:
+.TP
+.B PROC_STATE_RUNNING
+Process is currently running on a CPU.
+.TP
+.B PROC_STATE_READY
+Process is ready to run.
+.TP
+.B PROC_STATE_SLEEPING
+Process is blocked waiting for an event.
+.TP
+.B PROC_STATE_STOPPED
+Process has been stopped by a signal.
+.TP
+.B PROC_STATE_ZOMBIE
+Process has terminated but not yet been reaped.
+.PP
+The
+.I bitness
+field contains one of:
+.BR BITNESS_16 ,
+.BR BITNESS_32 ,
+or
+.BR BITNESS_64 .
+.SH RETURN VALUE
+On success, returns 0 and fills in the
+.I info
+structure.
+.PP
+On error, returns \-1.
+.SH ERRORS
+.TP
+.B ESRCH
+No process with the specified
+.I pid
+exists.
+.TP
+.B EFAULT
+.I info
+points to an invalid address.
+.SH SEE ALSO
+.BR sys_proc_list (2),
+.BR sys_proc_count (2),
+.BR getpid (2),
+.BR intro (2)
