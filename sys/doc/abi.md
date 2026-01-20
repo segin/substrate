@@ -116,12 +116,12 @@ Defined in `<sys/utsname.h>`.
 
 | Field        | Type        | Size (bytes) | Description                         |
 | :---         | :---        | :---         | :---                                |
-| `sysname`    | `char[]`    | 65           | Operating System Name ("substrate") |
-| `nodename`   | `char[]`    | 65           | Network Node Name                   |
-| `release`    | `char[]`    | 65           | Release Level                       |
-| `version`    | `char[]`    | 65           | Version Level                       |
-| `machine`    | `char[]`    | 65           | Hardware Type                       |
-| `domainname` | `char[]`    | 65           | NIS Domain Name                     |
+| `sysname`    | `char[]`    | 256          | Operating System Name ("substrate") |
+| `nodename`   | `char[]`    | 256          | Network Node Name                   |
+| `release`    | `char[]`    | 256          | Release Level                       |
+| `version`    | `char[]`    | 256          | Version Level                       |
+| `machine`    | `char[]`    | 256          | Hardware Type                       |
+| `domainname` | `char[]`    | 256          | NIS Domain Name                     |
 
 ### Time Structures
 Defined in `<sys/time.h>`. `time_t` is a 64-bit signed integer.
@@ -152,8 +152,8 @@ Used by `getdents`. Variable length structure.
 
 | Field      | Type             | Size | Description                                  |
 | :---       | :---             | :--- | :---                                         |
-| `d_ino`    | `unsigned long`  | 4    | Inode number                                 |
-| `d_off`    | `unsigned long`  | 4    | Offset to next entry                         |
+| `d_ino`    | `uint64_t`       | 8    | Inode number                                 |
+| `d_off`    | `uint64_t`       | 8    | Offset to next entry                         |
 | `d_reclen` | `unsigned short` | 2    | Length of this record                        |
 | `d_name`   | `char[]`         | Var  | Filename (null-terminated)                   |
 
@@ -175,11 +175,11 @@ Used by `thr_new`.
 ### Signal Stack (`stack_t`)
 Used by `sigaltstack`.
 
-| Field      | Type     | Size | Description        |
-| :---       | :---     | :--- | :---               |
-| `ss_sp`    | `void*`  | 4    | Stack base/pointer |
-| `ss_flags` | `int`    | 4    | Flags (__SS_DISABLE__, etc) |
-| `ss_size`  | `size_t` | 4    | Stack size         |
+| Field      | Type     | Size | Description                 |
+| :---       | :---     | :--- | :---                        |
+| `ss_sp`    | `void*`  | 4    | Stack base/pointer          |
+| `ss_flags` | `int`    | 4    | Flags (`__SS_DISABLE__`...) |
+| `ss_size`  | `size_t` | 4    | Stack size                  |
 
 ---
 
