@@ -52,6 +52,12 @@ extern int sys_sigaltstack(const void*, void*);
 
 extern int sys_poll(void*, unsigned int, int);
 
+extern int sys_proc_info(int, void*);
+extern int sys_proc_list(int*, size_t);
+extern int sys_proc_count(void);
+extern int sys_cpu_count(void);
+extern int sys_hostname(char*, size_t);
+
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
     [SYS_FORK] = &sys_fork,
@@ -96,6 +102,11 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_GETCWD] = &sys_getcwd,
     [SYS_PMAP_STATS] = &sys_pmap_stats,
     [SYS_THR_NEW] = &sys_thr_new,
+    [SYS_PROC_INFO] = &sys_proc_info,
+    [SYS_PROC_LIST] = &sys_proc_list,
+    [SYS_PROC_COUNT] = &sys_proc_count,
+    [SYS_CPU_COUNT] = &sys_cpu_count,
+    [SYS_HOSTNAME] = &sys_hostname,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -142,6 +153,11 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_SIGALTSTACK] = "sigaltstack",
     [SYS_PMAP_STATS] = "pmap_stats",
     [SYS_THR_NEW] = "thr_new",
+    [SYS_PROC_INFO] = "proc_info",
+    [SYS_PROC_LIST] = "proc_list",
+    [SYS_PROC_COUNT] = "proc_count",
+    [SYS_CPU_COUNT] = "cpu_count",
+    [SYS_HOSTNAME] = "hostname",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -188,6 +204,11 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_POLL] = { 3, { ARG_PTR, ARG_INT, ARG_INT } },
     [SYS_PMAP_STATS] = { 1, { ARG_PTR } },
     [SYS_THR_NEW] = { 2, { ARG_PTR, ARG_INT } },
+    [SYS_PROC_INFO] = { 2, { ARG_INT, ARG_PTR } },
+    [SYS_PROC_LIST] = { 2, { ARG_PTR, ARG_INT } },
+    [SYS_PROC_COUNT] = { 0, { 0 } },
+    [SYS_CPU_COUNT] = { 0, { 0 } },
+    [SYS_HOSTNAME] = { 2, { ARG_PTR, ARG_INT } },
 };
 
 struct personality personality_native = {

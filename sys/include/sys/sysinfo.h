@@ -16,6 +16,8 @@ typedef enum {
 typedef struct sys_procinfo {
     pid_t pid;
     pid_t ppid;
+    pid_t pgid;      // Process group ID
+    pid_t sid;       // Session ID
     uid_t uid;
     gid_t gid;
     uint8_t state;

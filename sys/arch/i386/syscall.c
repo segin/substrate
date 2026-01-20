@@ -10,6 +10,7 @@
 #include "../../include/sys/file.h"
 #include "../../include/sys/proc.h"
 #include "../../include/sys/signal.h"
+#include "../../include/sys/session.h"
 #include "../../vfs/vfs.h"
 #include "../../vfs/vfs.h"
 #include "../../drivers/serial/uart.h"
@@ -1060,6 +1061,15 @@ int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
     
     kinfo.pid = target->pid;
     kinfo.ppid = target->ppid;
+    
+    // Process group and session IDs
+    if (target->p_pgrp) {
+        kinfo.pgid = target->p_pgrp->pg_id;
+        if (target->p_pgrp->pg_session) {
+            kinfo.sid = target->p_pgrp->pg_session->s_sid;
+        }
+    }
+    
     kinfo.uid = target->uid;
     kinfo.gid = target->gid;
     kinfo.state = target->state;
@@ -1101,6 +1111,46 @@ int sys_proc_list(pid_t *pids, size_t count) {
     }
     
     return copied;
+}
+
+// sys_proc_count - Get total number of active processes
+int sys_proc_count(void) {
+    int count = 0;
+    for (int i = 0; i < 64; i++) {
+        if (processes[i].pid != -1) {
+            count++;
+        }
+    }
+    return count;
+}
+
+// sys_cpu_count - Get number of CPUs
+// Returns: online CPU count (currently 1 for uniprocessor kernel)
+int sys_cpu_count(void) {
+    // TODO: When SMP is implemented, return actual online CPU count
+    // For now, we're a uniprocessor system
+    return 1;
+}
+
+// sys_hostname - Get system hostname
+// Returns: 0 on success, -1 on error
+int sys_hostname(char *buf, size_t len) {
+    if (!buf || len == 0) return -1;
+    
+    extern char kernel_hostname[65];
+    
+    size_t hlen = 0;
+    while (kernel_hostname[hlen] && hlen < 64) hlen++;
+    
+    if (len < hlen + 1) {
+        // Buffer too small - copy what we can
+        memcpy(buf, kernel_hostname, len - 1);
+        buf[len - 1] = '\0';
+    } else {
+        memcpy(buf, kernel_hostname, hlen + 1);
+    }
+    
+    return 0;
 }
 
 extern void isr128(void); 

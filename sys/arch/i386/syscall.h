@@ -70,6 +70,9 @@
 #define SYS_THR_NEW 455
 #define SYS_PROC_INFO 242
 #define SYS_PROC_LIST 243
+#define SYS_PROC_COUNT 244
+#define SYS_CPU_COUNT 245
+#define SYS_HOSTNAME 246
 
 void syscall_init(void);
 

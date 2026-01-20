@@ -568,33 +568,33 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `SIGTTIN`: Background process reads from TTY. <!-- tty.c:300 -->
             - [x] `SIGTTOU`: Background process writes to TTY (if TOSTOP). <!-- tty.c:317 -->
             - [x] `SIGHUP`: Controlling terminal hangup. <!-- tty.c:472-492 tty_hangup() -->
-    - [ ] **Signal Delivery (Architecture-Specific `sendsig`):** <!-- arch/i386/signal.c:27-89 -->
-        - [ ] **Frame Construction:**
-            - [ ] Calculate user stack pointer from `regs->useresp`.
-            - [ ] Subtract `sizeof(struct sigframe)`.
-            - [ ] Align stack to 16-byte boundary (System V ABI).
-        - [ ] **`struct sigframe` Layout:** <!-- signal_arch.h:53-75 -->
-            - [ ] `retaddr`: Return address pointing to trampoline.
-            - [ ] `sig`: Signal number (first argument to handler).
-            - [ ] `sc`: `struct sigcontext` with saved registers.
-        - [ ] **`struct sigcontext` Population:** <!-- signal_arch.h:17-37 -->
-            - [ ] Save all segment registers: gs, fs, es, ds.
-            - [ ] Save general registers: edi, esi, ebp, esp, ebx, edx, ecx, eax.
-            - [ ] Save trap info: trapno, err.
-            - [ ] Save control registers: eip, cs, eflags.
-            - [ ] Save user stack: user_esp, user_ss.
-        - [ ] **Handler Invocation:**
-            - [ ] `copyout()` frame to user stack (with fault handling).
-            - [ ] Set `regs->useresp` to new stack frame address.
-            - [ ] Set `regs->eip` to signal handler address.
+    - [/] **Signal Delivery (Architecture-Specific `sendsig`):** <!-- arch/i386/signal.c:27-89 -->
+        - [x] **Frame Construction:**
+            - [x] Calculate user stack pointer from `regs->useresp`.
+            - [x] Subtract `sizeof(struct sigframe)`.
+            - [x] Align stack to 16-byte boundary (System V ABI).
+        - [x] **`struct sigframe` Layout:** <!-- signal_arch.h:53-75 -->
+            - [x] `retaddr`: Return address pointing to trampoline.
+            - [x] `sig`: Signal number (first argument to handler).
+            - [x] `sc`: `struct sigcontext` with saved registers.
+        - [x] **`struct sigcontext` Population:** <!-- signal_arch.h:17-37 -->
+            - [x] Save all segment registers: gs, fs, es, ds.
+            - [x] Save general registers: edi, esi, ebp, esp, ebx, edx, ecx, eax.
+            - [x] Save trap info: trapno, err.
+            - [x] Save control registers: eip, cs, eflags.
+            - [x] Save user stack: user_esp, user_ss.
+        - [x] **Handler Invocation:**
+            - [x] `copyout()` frame to user stack (with fault handling).
+            - [x] Set `regs->useresp` to new stack frame address.
+            - [x] Set `regs->eip` to signal handler address.
         - [ ] **SA_SIGINFO Extended Frame:**
             - [ ] Construct `struct siginfo` (si_signo, si_code, si_addr, etc.).
             - [ ] Construct `struct ucontext` with machine context.
             - [ ] Pass handler: `void handler(int sig, siginfo_t *info, void *ucontext)`.
-        - [ ] **Alt Stack Handling:**
-            - [ ] If `SA_ONSTACK` and alt stack configured and not already on it:
-                - [ ] Use `sig_alt_stack.ss_sp + ss_size` as stack pointer.
-                - [ ] Set `sig_on_stack` flag.
+        - [x] **Alt Stack Handling:**
+            - [x] If `SA_ONSTACK` and alt stack configured and not already on it:
+                - [x] Use `sig_alt_stack.ss_sp + ss_size` as stack pointer.
+                - [x] Set `sig_on_stack` flag.
     - [ ] **Signal Trampoline:**
         - [ ] **Trampoline Page:**
             - [x] Refactor `linux_sys_ioctl` dispatch (TTY, Block, etc.) `[sys/exec/perso/perso_linux.c]`
@@ -2851,8 +2851,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `uname()`: System identification.
                 - [ ] `getrlimit()`: Process resource limits.
                 - [ ] `clock_gettime()`: High-resolution system clocks.
-        - [ ] **Process Information API (`lib/sys`):**
-            - [ ] `sys_proc_count()` - Get total number of processes.
+        - [/] **Process Information API (`lib/sys`):**
+            - [x] `sys_proc_count()` - Get total number of processes.
             - [x] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
             - [x] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info (including `bitness`).
             - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
@@ -2868,15 +2868,15 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
             - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
             - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
-        - [ ] **CPU Information API (`lib/sys`):**
-            - [ ] `sys_cpu_count()` - Number of CPUs (online/possible/present).
+        - [/] **CPU Information API (`lib/sys`):**
+            - [x] `sys_cpu_count()` - Number of CPUs (online/possible/present).
             - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
             - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
             - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
-        - [ ] **System Information API (`lib/sys`):**
+        - [/] **System Information API (`lib/sys`):**
             - [ ] `sys_uptime(struct timespec *ts)` - System uptime.
             - [ ] `sys_boottime(struct timespec *ts)` - Boot timestamp.
-            - [ ] `sys_hostname(char *buf, size_t len)` - System hostname.
+            - [x] `sys_hostname(char *buf, size_t len)` - System hostname.
             - [ ] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
             - [ ] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
         - [ ] **Network Information API (`lib/sys`):**
@@ -2884,8 +2884,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
             - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
             - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
-        - [ ] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
-            - [ ] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
+        - [/] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
+            - [x] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
             - [ ] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
             - [ ] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
             - [ ] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.

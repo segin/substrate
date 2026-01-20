@@ -82,6 +82,9 @@
 #define SYS_thr_new     455
 #define SYS_proc_info   242
 #define SYS_proc_list   243
+#define SYS_proc_count  244
+#define SYS_cpu_count   245
+#define SYS_hostname    246
 
 /* Uppercase aliases for BSD/older code compatibility */
 #define SYS_EXIT        SYS_exit
@@ -139,6 +142,9 @@
 #define SYS_THR_NEW     SYS_thr_new
 #define SYS_PROC_INFO   SYS_proc_info
 #define SYS_PROC_LIST   SYS_proc_list
+#define SYS_PROC_COUNT  SYS_proc_count
+#define SYS_CPU_COUNT   SYS_cpu_count
+#define SYS_HOSTNAME    SYS_hostname
 
 /* Raw syscall interface - provided by libsys */
 long syscall(long number, ...);
