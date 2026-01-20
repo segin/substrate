@@ -587,10 +587,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `copyout()` frame to user stack (with fault handling).
             - [x] Set `regs->useresp` to new stack frame address.
             - [x] Set `regs->eip` to signal handler address.
-        - [ ] **SA_SIGINFO Extended Frame:**
-            - [ ] Construct `struct siginfo` (si_signo, si_code, si_addr, etc.).
-            - [ ] Construct `struct ucontext` with machine context.
-            - [ ] Pass handler: `void handler(int sig, siginfo_t *info, void *ucontext)`.
+        - [x] **SA_SIGINFO Extended Frame:** <!-- signal.c:sendsig SA_SIGINFO path, signal_arch.h structures -->
+            - [x] Construct `struct siginfo` (si_signo, si_code, si_addr, etc.). <!-- signal.c:populate_siginfo -->
+            - [x] Construct `struct ucontext` with machine context. <!-- signal.c:populate_ucontext, signal_arch.h:ucontext_t -->
+            - [x] Pass handler: `void handler(int sig, siginfo_t *info, void *ucontext)`. <!-- signal.c:sendsig SA_SIGINFO path -->
         - [x] **Alt Stack Handling:**
             - [x] If `SA_ONSTACK` and alt stack configured and not already on it:
                 - [x] Use `sig_alt_stack.ss_sp + ss_size` as stack pointer.
