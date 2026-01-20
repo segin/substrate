@@ -4,25 +4,25 @@
 #include <sys/types.h>
 
 struct stat {
-    dev_t          st_dev;
-    unsigned long  st_ino;
+    uint32_t       st_dev;
+    uint32_t       st_ino;
     uint16_t       st_mode;
     uint16_t       st_nlink;
     uint16_t       st_uid;
     uint16_t       st_gid;
-    dev_t          st_rdev;
-    off_t          st_size;
-    unsigned long  st_blksize;
-    uint32_t       st_pad1;
-    blkcnt_t       st_blocks;
-    time_t         st_atime;
-    unsigned long  st_atime_nsec;
+    uint32_t       st_rdev;
+    off_t          st_size;    // 64-bit size
+    uint32_t       st_blksize;
+    uint32_t       st_pad1;    // padding
+    blkcnt_t       st_blocks;  // 64-bit block count
+    time_t         st_atime;   // 64-bit time
+    uint32_t       st_atime_nsec;
     uint32_t       st_pad2;
     time_t         st_mtime;
-    unsigned long  st_mtime_nsec;
+    uint32_t       st_mtime_nsec;
     uint32_t       st_pad3;
     time_t         st_ctime;
-    unsigned long  st_ctime_nsec;
+    uint32_t       st_ctime_nsec;
     uint32_t       st_pad4;
 };
 

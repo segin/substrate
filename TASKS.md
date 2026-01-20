@@ -5766,7 +5766,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 Reference: User Request (Step 30668)
 
 - [ ] **ABI Definition & Documentation:**
-    - [ ] Define and document the canonical 64-bit `struct stat` and kernel syscall ABI.
+    - [x] Define and document the canonical 64-bit `struct stat` and kernel syscall ABI.
         - Files: `sys/include/sys/stat.h`, `sys/doc/abi.md`
         - Tests: property (offsets/sizes verification)
         - Docs: Developer guide, `stat.2`
@@ -5778,7 +5778,7 @@ Reference: User Request (Step 30668)
         - Acceptance: Manpage documents 64-bit nature and usage
 
 - [ ] **LibC Updates:**
-    - [ ] Update LibC `stat` wrappers to use canonical 64-bit ABI (all architectures).
+    - [x] Update LibC `stat` wrappers to use canonical 64-bit ABI (all architectures).
         - Files: `lib/c/src/sys.c`, `lib/c/include/sys/stat.h`
         - Tests: unit (struct size validation on i386 and amd64)
         - Docs: LibC internal docs
