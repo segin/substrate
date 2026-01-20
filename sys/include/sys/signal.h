@@ -60,6 +60,18 @@ typedef struct {
 // Signal bits
 #define sigmask(sig) (1 << ((sig) - 1))
 
+/* Signal property flags for sigprop[] array */
+#define SA_KILL     0x0001  /* Default action: terminate process */
+#define SA_CORE     0x0002  /* Default action: terminate + core dump */
+#define SA_STOP     0x0004  /* Default action: stop the process */
+#define SA_IGNORE   0x0008  /* Default action: ignore the signal */
+#define SA_CONT     0x0010  /* Continue if stopped */
+#define SA_TTYSTOP  0x0020  /* Stop from TTY (can be ignored by orphan) */
+#define SA_CANTMASK 0x0040  /* Signal cannot be masked (SIGKILL, SIGSTOP) */
+
+/* Default signal properties array (defined in sigprop.c) */
+extern const uint8_t sigprop[NSIG];
+
 /* Signal syscalls */
 int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset);

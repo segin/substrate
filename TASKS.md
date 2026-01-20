@@ -483,10 +483,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `sig_mask`: Current signal mask (blocked signals). <!-- proc.h:151 -->
             - [x] `sig_alt_stack`: Alternative signal stack (`stack_t`). <!-- proc.h:152 -->
             - [x] `sig_on_stack`: Flag indicating currently executing on alt stack. <!-- proc.h:153 -->
-        - [ ] **Signal Properties Table:**
-            - [ ] Default action table: Terminate, Core, Stop, Ignore, Continue.
-            - [ ] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT.
-            - [ ] Unmaskable signals: SIGKILL, SIGSTOP always have effect.
+        - [x] **Signal Properties Table:** <!-- sigprop.c, signal.h:63-74 -->
+            - [x] Default action table: Terminate, Core, Stop, Ignore, Continue. <!-- sigprop.c:22-52 -->
+            - [x] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT. <!-- signal.h:63-72, sigprop.c:22 -->
+            - [x] Unmaskable signals: SIGKILL, SIGSTOP always have effect. <!-- sigprop.c:33,40 SA_CANTMASK -->
     - [ ] **Signal Syscalls:**
         - [ ] **`sys_sigaction(sig, act, oact)`:** <!-- signal.c:14-19 implemented -->
             - [ ] Validate signal number (1 <= sig <= NSIG, not SIGKILL/SIGSTOP).
