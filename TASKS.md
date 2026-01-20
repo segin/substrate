@@ -5761,3 +5761,98 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: regression (no functionality lost)
         - Docs: Migration notes
         - Acceptance: Codebase cleaner, tests pass
+
+### 14. Native 64-bit Stat ABI Enforcement
+Reference: User Request (Step 30668)
+
+- [ ] **ABI Definition & Documentation:**
+    - [ ] Define and document the canonical 64-bit `struct stat` and kernel syscall ABI.
+        - Files: `sys/include/sys/stat.h`, `sys/doc/abi.md`
+        - Tests: property (offsets/sizes verification)
+        - Docs: Developer guide, `stat.2`
+        - Acceptance: Single 64-bit definition in public header, ABI fully documented
+    - [ ] Create manpages for `stat(2)` explaining single-ABI policy.
+        - Files: `usr/share/man/man2/stat.2`
+        - Tests: doc validation
+        - Docs: `stat.2`
+        - Acceptance: Manpage documents 64-bit nature and usage
+
+- [ ] **LibC Updates:**
+    - [ ] Update LibC `stat` wrappers to use canonical 64-bit ABI (all architectures).
+        - Files: `lib/c/src/sys.c`, `lib/c/include/sys/stat.h`
+        - Tests: unit (struct size validation on i386 and amd64)
+        - Docs: LibC internal docs
+        - Acceptance: Userspace calls map directly to 64-bit kernel structure
+    - [ ] Update `fstat`, `lstat`, `fstatat` to use 64-bit ABI.
+        - Files: `lib/c/src/sys.c`
+        - Tests: property (fd/path consistency)
+        - Docs: `fstat.2`, `lstat.2`
+        - Acceptance: All stat-family functions use new ABI
+
+- [ ] **Kernel Implementation:**
+    - [ ] Expose ONLY canonical 64-bit stat syscalls for native personality.
+        - Files: `sys/exec/perso/perso_native.c`, `sys/arch/i386/syscall.c`
+        - Tests: integration (strace confirms correct syscall usage)
+        - Docs: `native_abi.md`
+        - Acceptance: Native table has no legacy 32-bit stat entries
+    - [ ] Audit and remove "stub-like" stat implementations.
+        - Files: `sys/kern/vfs_syscalls.c` (or equivalent)
+        - Tests: unit (error handling, edge cases)
+        - Docs: Source comments
+        - Acceptance: Full implementation with robust error paths
+    - [ ] Add compatibility shims for non-native personalities (Linux/FreeBSD) only where needed.
+        - Files: `sys/exec/perso/perso_linux.c`, `sys/exec/perso/perso_freebsd.c`
+        - Tests: integration (compat shim translates correctly)
+        - Docs: Personality internal docs
+        - Acceptance: Foreign binaries work, native binaries use clean 64-bit path
+
+- [ ] **Testing & Verification:**
+    - [ ] Create ABI regression tools to assert field offsets and sizes.
+        - Files: `tests/abi/stat_test.c`
+        - Tests: property (offset assert)
+        - Docs: Test README
+        - Acceptance: Tool compiled and running on CI
+    - [ ] Property tests for large files, sparse files, and odd timestamps.
+        - Files: `tests/fs/stat_properties.c`
+        - Tests: property (fuzz inputs)
+        - Docs: Test plan
+        - Acceptance: Tests pass consistently
+    - [ ] Audit and listing of userland tools using `stat`.
+        - Files: `bin/*`
+        - Tests: N/A
+        - Docs: `audit_stat_users.md`
+        - Acceptance: all call sites identified
+    - [ ] Update userland tools to 64-bit stat.
+        - Files: `bin/ls.c`, `bin/tar.c`, etc.
+        - Tests: integration (ls -l correct output)
+        - Docs: N/A
+        - Acceptance: Tools built against new LibC
+
+- [ ] **CI & Tooling:**
+    - [ ] Update CI to build and test both 32-bit and 64-bit targets.
+        - Files: `Makefile`, `.github/workflows/ci.yml`
+        - Tests: CI pipeline
+        - Docs: CI Reference
+        - Acceptance: Both targets green, confirming 64-bit ABI works on 32-bit arch
+
+- [ ] **Extended 64-bit Sycall ABI (Beyond Stat):**
+    - [ ] Standardize `lseek` / `lseek64` to single 64-bit offset ABI.
+        - Files: `sys/arch/i386/syscall.c`
+        - Tests: property (seek beyond 2GB)
+        - Acceptance: `lseek` handles 64-bit offsets natively.
+    - [ ] Standardize `truncate` / `ftruncate` to 64-bit ABI.
+        - Files: `sys/kern/vfs_syscalls.c`
+        - Tests: property (truncate large file)
+        - Acceptance: No `truncate64` syscall needed.
+    - [ ] Standardize `mmap` to handle 64-bit offsets (pgoff).
+        - Files: `sys/arch/i386/syscall.c`
+        - Tests: integration (map large offset)
+        - Acceptance: `mmap` accepts 64-bit offset (or sufficient page count).
+    - [ ] Review `getdents` / `getdents64` dirent structures.
+        - Files: `sys/fs/fs.c`
+        - Tests: integration (read directory with many/large inodes)
+        - Acceptance: Single 64-bit friendly dirent format.
+    - [ ] Standardize `statfs` / `statvfs` to 64-bit block counts.
+        - Files: `sys/vfs/vfs.c`
+        - Tests: integration (df on large volume)
+        - Acceptance: Report correct size for >2TB volumes.
