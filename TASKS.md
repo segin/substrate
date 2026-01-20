@@ -5921,10 +5921,42 @@ Reference: User Request (Step 30690)
         - Files: `sys/exec/perso/perso_svr4.c`, `sys/exec/perso/perso_svr3.c`
         - Tests: integration (legacy binary support)
         - Acceptance: Correct metadata reporting for legacy formats.
+    - [ ] Implement SVR3/SVR4 segment register validation for 286/386 protected mode binaries.
+        - Files: `sys/exec/perso/perso_svr3.c`, `sys/exec/perso/perso_svr4.c`
+        - Tests: unit (segment descriptor validation)
+        - Acceptance: Reject invalid segment configurations; log warnings for suspicious setups.
+    - [ ] Add SVR3 x.out (Xenix) binary format recognition and loader hooks.
+        - Files: `sys/fs/exec/xout.c`, `sys/exec/perso/perso_svr3.c`
+        - Tests: integration (load sample Xenix binary)
+        - Docs: `svr3_xout.md`
+        - Acceptance: Correctly identify x.out magic and dispatch to SVR3 personality.
+    - [ ] Implement SVR4 /dev/zero and /dev/null personality expectations.
+        - Files: `sys/exec/perso/perso_svr4.c`, `sys/drivers/char/mem.c`
+        - Tests: integration (mmap /dev/zero)
+        - Acceptance: SVR4 binaries can use /dev/zero for anonymous mappings.
+    - [ ] Add SVR3 signal number translation (SVR3 uses different signal numbers).
+        - Files: `sys/exec/perso/perso_svr3.c`
+        - Tests: unit (signal mapping table)
+        - Acceptance: SIGTERM/SIGKILL/SIGCHLD correctly translated between ABIs.
     - [ ] Validation tests for SVR compat layers.
         - Files: `tests/perso/svr_test.c`
         - Tests: integration
         - Acceptance: Basic file operations work correctly.
+
+- [ ] **FreeBSD Personality Enhancements:**
+    - [ ] Implement FreeBSD-specific sysctl namespace for personality queries.
+        - Files: `sys/exec/perso/perso_freebsd.c`, `sys/kern/sysctl.c`
+        - Tests: integration (sysctl kern.ostype)
+        - Acceptance: FreeBSD binaries see "FreeBSD" as ostype.
+    - [ ] Add FreeBSD capsicum(4) syscall stubs (return ENOSYS with log).
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit (verify ENOSYS)
+        - Docs: Add capsicum notes to `freebsd_compat.md`
+        - Acceptance: Capsicum calls fail gracefully without crashing.
+    - [ ] Implement FreeBSD jail(2) detection stub (return ENOSYS).
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit
+        - Acceptance: jail(2) returns ENOSYS, does not panic.
 
 - [ ] **Infrastructural Reconciliation:**
     - [ ] Reconcile personality-specific `/proc` and `/dev` expectations.
@@ -5942,5 +5974,273 @@ Reference: User Request (Step 30690)
         - Files: All `perso_*.c` files
         - Tests: stress/edge-case
         - Acceptance: Robust error propagation, no race conditions in translation layers.
+    - [ ] Audit perso_svr3.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_svr3.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
+    - [ ] Audit perso_svr4.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_svr4.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
+    - [ ] Audit perso_freebsd.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
 
+### 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+Reference: User Request (Step 31552)
+
+> [!NOTE]
+> ELKS (Embeddable Linux Kernel Subset) is a 16-bit Linux-like OS for 8086/80286. This personality enables running ELKS binaries on Substrate using LDT-based 16-bit protected mode segments.
+
+- [ ] **Design & Specification:**
+    - [ ] Produce ELKS personality specification document.
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Docs: `elks_spec.md`
+        - Acceptance: Document covers binary format recognition, ABI semantics (syscalls, signal model), data models (near/far pointers), and expected process environment.
+    - [ ] Define ELKS syscall table mapping to Substrate equivalents.
+        - Files: `docs/personality/elks_syscalls.md`, `sys/exec/perso/elks_syscall_table.h`
+        - Tests: N/A (design doc)
+        - Docs: `elks_syscalls.md`
+        - Acceptance: Complete mapping table with supported/unsupported syscalls documented.
+    - [ ] Define ELKS signal model and mapping to POSIX signals.
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Acceptance: Signal numbers and semantics documented.
+    - [ ] Define ELKS memory model (tiny/small/medium/compact/large).
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Acceptance: Each memory model's segment layout documented.
+
+- [ ] **Binary Format Recognition:**
+    - [ ] Implement ELKS a.out binary format detection.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/fs/exec/elks_aout.h`
+        - Tests: unit (magic number detection)
+        - Docs: `elks_aout.4` manpage
+        - Acceptance: Correctly identify ELKS a.out magic (0x0301 for 8086, 0x0302 for 80286).
+    - [ ] Register ELKS loader with exec subsystem.
+        - Files: `sys/fs/exec/exec.c`, `sys/fs/exec/elks_aout.c`
+        - Tests: integration (exec ELKS binary triggers loader)
+        - Acceptance: ELKS binaries dispatched to elks_load() function.
+
+- [ ] **ELKS Exec Loader:**
+    - [ ] Implement `elks_load()` function for ELKS binary loading.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (load sample ELKS binary into memory)
+        - Acceptance: Binary text/data/bss segments loaded correctly.
+    - [ ] Allocate 16-bit LDT segments via LDT API for code/data/stack.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/ldt.c`
+        - Tests: unit (verify LDT entries created)
+        - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).
+    - [ ] Set up ELKS stack segment with correct base and limit.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (stack segment bounds)
+        - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
+    - [ ] Set up ELKS data segment with correct base and limit.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (data segment bounds)
+        - Acceptance: Data accesses beyond limit trigger #GP exception.
+    - [ ] Install syscall gateway trampoline for 16-bit to 32-bit transition.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/elks_gate.S`
+        - Tests: integration (syscall from 16-bit code reaches kernel)
+        - Acceptance: INT 0x80 from 16-bit context transitions to 32-bit kernel handler.
+    - [ ] Handle ELKS environment variables and argv setup.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: integration (argc/argv accessible from ELKS binary)
+        - Acceptance: ELKS main() receives correct argc, argv.
+    - [ ] Set process bitness to BITNESS_16 on ELKS exec.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (verify bitness field after exec)
+        - Acceptance: `current_process->bitness == BITNESS_16` after ELKS load.
+
+- [ ] **Runtime Support & Syscall Translation:**
+    - [ ] Implement ELKS syscall dispatcher.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (dispatch to correct handler)
+        - Acceptance: ELKS syscall numbers correctly mapped to handlers.
+    - [ ] Implement ELKS sys_exit translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (ELKS exit terminates process)
+        - Acceptance: Process exits cleanly with correct exit code.
+    - [ ] Implement ELKS sys_read/sys_write translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (hello world prints to stdout)
+        - Acceptance: Console I/O works correctly.
+    - [ ] Implement ELKS sys_open/sys_close translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (open/read/close file)
+        - Acceptance: File operations work with VFS.
+    - [ ] Implement ELKS sys_brk translation (16-bit heap).
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (heap expansion within segment)
+        - Acceptance: brk works within data segment limit.
+    - [ ] Implement ELKS sys_fork translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (fork returns in both parent and child)
+        - Acceptance: Child inherits LDT segments correctly.
+    - [ ] Implement ELKS sys_execve translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (exec another ELKS binary)
+        - Acceptance: LDT segments properly replaced on exec.
+    - [ ] Implement ELKS sys_waitpid translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (wait for child)
+        - Acceptance: Parent receives child exit status.
+    - [ ] Implement ELKS signal syscalls (sys_signal, sys_kill).
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (signal delivery)
+        - Acceptance: Signals delivered and handlers invoked.
+    - [ ] Return ENOSYS for unsupported ELKS syscalls with kernel log.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (verify ENOSYS return)
+        - Acceptance: Unsupported syscalls return -ENOSYS without crashing.
+    - [ ] Implement 16:16 far pointer to linear address conversion.
+        - Files: `sys/exec/perso/perso_elks.c`, `sys/arch/i386/ldt.c`
+        - Tests: unit (segment:offset to linear)
+        - Acceptance: `LDT[seg].base + offset` computed correctly.
+
+- [ ] **Resource Isolation & Signal Handling:**
+    - [ ] Ensure ELKS processes have isolated LDT (not shared with other processes).
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
+        - Tests: unit (verify LDT per-process)
+        - Acceptance: Each ELKS process gets private LDT.
+    - [ ] Implement signal delivery for 16-bit context.
+        - Files: `sys/arch/i386/signal.c`, `sys/exec/perso/perso_elks.c`
+        - Tests: integration (SIGINT delivery to ELKS process)
+        - Acceptance: Signal handler invoked in 16-bit mode with correct context.
+    - [ ] Implement signal return (sigreturn) for 16-bit context.
+        - Files: `sys/arch/i386/signal.c`
+        - Tests: integration (return from signal handler)
+        - Acceptance: Execution resumes at interrupted point.
+    - [ ] Implement core dump generation for ELKS processes.
+        - Files: `sys/kern/core.c`, `sys/exec/perso/perso_elks.c`
+        - Tests: integration (SIGSEGV generates core)
+        - Docs: `core.5` manpage update
+        - Acceptance: Core dump includes 16-bit register state and segment info.
+
+- [ ] **Safety & Cleanup (LDT Lifecycle):**
+    - [ ] Implement LDT cleanup on process exit.
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
+        - Tests: unit (no leaked LDT entries after exit)
+        - Acceptance: All LDT entries freed when ELKS process exits.
+    - [ ] Implement LDT duplication on fork.
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/fork.c`
+        - Tests: unit (child gets copy of LDT)
+        - Acceptance: Child LDT is independent copy of parent LDT.
+    - [ ] Implement LDT replacement on exec.
+        - Files: `sys/arch/i386/ldt.c`, `sys/fs/exec/exec.c`
+        - Tests: unit (old LDT freed, new LDT installed)
+        - Acceptance: exec clears old LDT and installs new one.
+    - [ ] Add LDT entry validation to prevent privilege escalation.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: fuzz (malformed LDT entries)
+        - Acceptance: DPL must be 3; conforming code segments rejected; call gates rejected.
+    - [ ] Implement LDT limit enforcement during context switch.
+        - Files: `sys/arch/i386/switch.S`, `sys/kern/sched.c`
+        - Tests: unit (LLDT loaded correctly)
+        - Acceptance: LDTR loaded with correct selector on context switch.
+    - [ ] Add kernel log warnings for suspicious LDT usage patterns.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: unit (warning logged)
+        - Acceptance: Unusual patterns (many allocations, odd limits) logged.
+
+- [ ] **Testing & Validation:**
+    - [ ] Create ELKS hello world test binary.
+        - Files: `tests/elks/hello.S`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify output)
+        - Acceptance: "Hello, ELKS!" printed to console.
+    - [ ] Create ELKS sleep test binary.
+        - Files: `tests/elks/sleep.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify delay)
+        - Acceptance: Process sleeps for specified duration.
+    - [ ] Create ELKS file I/O test binary.
+        - Files: `tests/elks/fileio.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify file created)
+        - Acceptance: File created, written, read, and deleted correctly.
+    - [ ] Create ELKS fork test binary.
+        - Files: `tests/elks/fork.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU)
+        - Acceptance: Parent and child both print distinct messages.
+    - [ ] Create automated test harness for ELKS binaries.
+        - Files: `tests/elks/run_tests.sh`, `tests/elks/harness.c`
+        - Tests: CI integration
+        - Acceptance: All ELKS tests pass in automated pipeline.
+    - [ ] Add ELKS syscall fuzzing tests.
+        - Files: `tests/elks/fuzz_syscalls.c`
+        - Tests: fuzz (random syscall args)
+        - Acceptance: No kernel panics; all invalid calls return errors.
+    - [ ] Add LDT bounds violation tests.
+        - Files: `tests/elks/bounds_test.S`
+        - Tests: unit (access beyond segment limit)
+        - Acceptance: #GP exception raised and handled correctly.
+
+- [ ] **Sample ELKS Userland & Build Scripts:**
+    - [ ] Add ELKS cross-compiler toolchain setup script.
+        - Files: `tools/elks/setup_toolchain.sh`
+        - Tests: N/A (build script)
+        - Docs: `tools/elks/README.md`
+        - Acceptance: Script downloads/builds ia16-elf-gcc toolchain.
+    - [ ] Add sample ELKS shell (minimal).
+        - Files: `tests/elks/minish.c`, `tests/elks/Makefile`
+        - Tests: emulation (run commands in QEMU)
+        - Acceptance: Basic command execution works.
+    - [ ] Add sample ELKS cat utility.
+        - Files: `tests/elks/cat.c`, `tests/elks/Makefile`
+        - Tests: emulation
+        - Acceptance: File contents displayed correctly.
+    - [ ] Add sample ELKS ls utility.
+        - Files: `tests/elks/ls.c`, `tests/elks/Makefile`
+        - Tests: emulation
+        - Acceptance: Directory listing displayed.
+    - [ ] Add ELKS binary build Makefile.
+        - Files: `tests/elks/Makefile`
+        - Tests: N/A (build script)
+        - Acceptance: `make -C tests/elks` builds all ELKS test binaries.
+
+- [ ] **Documentation:**
+    - [ ] Create personality-elks(7) developer guide.
+        - Files: `docs/man/man7/personality-elks.7`
+        - Tests: N/A (documentation)
+        - Docs: `personality-elks.7`
+        - Acceptance: Covers architecture, limitations, and usage.
+    - [ ] Create ELKS-compat(4) compatibility notes.
+        - Files: `docs/man/man4/ELKS-compat.4`
+        - Tests: N/A (documentation)
+        - Docs: `ELKS-compat.4`
+        - Acceptance: Documents known limitations and unsupported features.
+    - [ ] Add ELKS personality to ARCHITECTURE.md.
+        - Files: `ARCHITECTURE.md`
+        - Tests: N/A (documentation)
+        - Acceptance: ELKS personality architecture documented.
+    - [ ] Add ELKS syscall reference table.
+        - Files: `docs/personality/elks_syscall_ref.md`
+        - Tests: N/A (documentation)
+        - Acceptance: All syscalls listed with support status.
+    - [ ] Document LDT API usage for personality developers.
+        - Files: `docs/kernel/ldt_api.md`
+        - Tests: N/A (documentation)
+        - Acceptance: API documented with examples.
+
+- [ ] **Quality Audit & Refactoring:**
+    - [ ] Audit perso_elks.c for memory leaks in error paths.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (error path coverage)
+        - Acceptance: All allocated resources freed on error.
+    - [ ] Audit elks_aout.c for unchecked file read errors.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: fuzz (truncated binary files)
+        - Acceptance: Truncated binaries rejected with ENOEXEC.
+    - [ ] Audit ldt.c for race conditions in multi-threaded allocation.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: stress (concurrent LDT alloc/free)
+        - Acceptance: No corrupted LDT state under contention.
+    - [ ] Refactor LDT allocation to use UMA zone for efficiency.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: unit (allocation performance)
+        - Acceptance: LDT allocation O(1) via UMA zone.
+    - [ ] Add static analysis annotations to ELKS personality code.
+        - Files: `sys/exec/perso/perso_elks.c`, `sys/fs/exec/elks_aout.c`
+        - Tests: static analysis (sparse/coverity)
+        - Acceptance: No warnings from static analysis tools.
 
