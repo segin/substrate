@@ -79,16 +79,16 @@ When a new process is started via `execve`, the stack is initialized with argume
 
 The stack grows downwards.
 
-| Content | Description |
-|---|---|
-| Strings | String data for Envp, Argv, Platform, etc. |
-| `AT_NULL` | `{0, 0}` Auxv Terminator |
-| Auxv Entries | Elf Auxiliary Vector entries (Page size, PHDR, Entry, UID/GID, Random, Platform, etc.) |
-| `AT_RANDOM` data | 16 bytes of random data for the canary |
-| `Envp[]` | Array of pointers to environment strings, suffixed with `NULL` |
-| `Argv[]` | Array of pointers to argument strings, suffixed with `NULL` |
-| `Argc` | Integer argument count |
-| **Stack Pointer** | `ESP` points here at entry |
+| Content             | Description                                                                           |
+| :---                | :---                                                                                  |
+| Strings             | String data for Envp, Argv, Platform, etc.                                            |
+| `AT_NULL`           | `{0, 0}` Auxv Terminator                                                              |
+| Auxv Entries        | Elf Auxiliary Vector entries (Page size, PHDR, Entry, UID/GID, Random, Platform, etc.)|
+| `AT_RANDOM` data    | 16 bytes of random data for the canary                                                |
+| `Envp[]`            | Array of pointers to environment strings, suffixed with `NULL`                        |
+| `Argv[]`            | Array of pointers to argument strings, suffixed with `NULL`                           |
+| `Argc`              | Integer argument count                                                                |
+| **Stack Pointer**   | `ESP` points here at entry                                                            |
 
 ## Signal Handling
 
