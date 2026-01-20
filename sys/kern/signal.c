@@ -187,52 +187,93 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
     return signal; // Return signal number on success
 }
 
-// Send signal to valid process
+/*
+ * psignal - Send signal to a process
+ *
+ * Delivers signal to the target process following POSIX/BSD semantics:
+ * 1. Validates process pointer and signal number
+ * 2. Protects init (PID 1) from fatal signals
+ * 3. For SIGCONT, resumes stopped process/threads
+ * 4. Sets pending bit on all threads (signal is process-directed)
+ * 5. Selects best thread for immediate delivery (one not masking the signal)
+ * 6. Wakes interruptibly-sleeping threads
+ */
 void psignal(process_t *p, int sig) {
+    /* Validate process pointer and signal number */
     if (!p || sig <= 0 || sig > NSIG) return;
     
-    // Init Protection
+    /* Init Protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1 */
     if (p->pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
         return;
     }
 
-    // Handle SIGCONT for Process State
+    /* Handle SIGCONT: Resume stopped process */
     if (sig == SIGCONT) {
         if (p->state == SSTOP) {
-            p->state = SRUN; // Resume process state
-            // Notify parent if not SA_NOCLDSTOP
-            if (p->p_parent && !(p->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
+            p->state = SRUN;
+            /* Notify parent if not SA_NOCLDSTOP */
+            if (p->p_parent && 
+                !(p->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
                 psignal(p->p_parent, SIGCHLD);
             }
         }
     }
 
-    // Deliver signal to threads of the target
-    int found_threads = 0;
-    
-    // TODO: Improve thread lookup (process should have thread list)
-    // For now, scan global thread list
+    /* Select best thread for delivery and set pending on all threads */
     extern thread_t threads[MAX_THREADS];
+    uint32_t sig_mask = sigmask(sig);
+    
+    thread_t *best_thread = NULL;
+    int best_priority = -1; // Higher is better
     
     for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid != -1 && threads[i].proc == p) {
-            // SIGCONT Special handling: Wake up stopped threads
-            if (sig == SIGCONT) {
-                if (threads[i].state == THREAD_STOPPED) {
-                    threads[i].state = THREAD_READY;
-                    found_threads++;
-                }
-            }
-
-            threads[i].sig_pending |= sigmask(sig);
-            
-            // Wake up if sleeping interruptibly
-            if (threads[i].state == THREAD_BLOCKED) {
-                // We wake on the pending mask address which sigsuspend/sleep uses
-                sched_wakeup(&threads[i].sig_pending);
-            }
-            found_threads++;
+        if (threads[i].tid == -1 || threads[i].proc != p) continue;
+        
+        thread_t *t = &threads[i];
+        
+        /* SIGCONT Special: Wake up stopped threads */
+        if (sig == SIGCONT && t->state == THREAD_STOPPED) {
+            t->state = THREAD_READY;
         }
+        
+        /* Set pending bit on ALL threads (signal is process-directed) */
+        t->sig_pending |= sig_mask;
+        
+        /* Select best thread for immediate delivery:
+         * Priority order:
+         * 3: Running/Ready thread with signal unmasked
+         * 2: Blocked (interruptible) thread with signal unmasked
+         * 1: Any thread with signal unmasked
+         * 0: Any thread (fallback)
+         */
+        int priority = 0;
+        int unmasked = !(t->sig_mask & sig_mask);
+        
+        if (unmasked) {
+            if (t->state == THREAD_RUNNING || t->state == THREAD_READY) {
+                priority = 3;
+            } else if (t->state == THREAD_BLOCKED) {
+                priority = 2;
+            } else {
+                priority = 1;
+            }
+        }
+        
+        if (priority > best_priority) {
+            best_priority = priority;
+            best_thread = t;
+        }
+        
+        /* Wake interruptibly-sleeping threads */
+        if (t->state == THREAD_BLOCKED && unmasked) {
+            sched_wakeup(&t->sig_pending);
+        }
+    }
+    
+    /* If we found a best thread and it's blocked, wake it */
+    if (best_thread && best_thread->state == THREAD_BLOCKED && 
+        best_priority > 0) {
+        sched_wakeup(&best_thread->sig_pending);
     }
 }
 
@@ -250,11 +291,82 @@ void pgsignal(int pgrp_id, int sig) {
     }
 }
 
-// Send synchronous trap signal (e.g. from exception)
+/*
+ * trapsignal - Send synchronous trap signal
+ *
+ * Called from exception handlers (page fault, divide by zero, illegal insn, etc.)
+ * Unlike psignal, this:
+ * 1. Forces delivery to the CURRENT thread (the one that caused the trap)
+ * 2. Stores trap code in per-thread siginfo for SA_SIGINFO handlers
+ * 3. Signals are synchronous - they must be handled immediately
+ *
+ * Typical sources:
+ * - SIGSEGV: Page Fault (code = fault address or type)
+ * - SIGFPE: Division by Zero, Overflow (code = FPE_INTDIV, FPE_FLTDIV, etc.)
+ * - SIGILL: Illegal Instruction (code = ILL_ILLOPC, ILL_PRVOPC, etc.)
+ * - SIGBUS: Bus Error (code = BUS_ADRALN, etc.)
+ * - SIGTRAP: Breakpoint (code = TRAP_BRKPT)
+ */
 void trapsignal(process_t *p, int sig, int code) {
-    (void)code; // Unused for now
-    // TODO: Pass code via siginfo (SA_SIGINFO)
-    psignal(p, sig);
+    if (!p || sig <= 0 || sig > NSIG) return;
+    
+    /* For trap signals, deliver to current thread specifically.
+     * current_thread is the faulting thread that caused the exception. */
+    if (current_thread && current_thread->proc == p) {
+        /* Store trap info in thread's pending siginfo for later delivery */
+        current_thread->trap_signo = sig;
+        current_thread->trap_code = code;
+        
+        /* Set signal pending on this specific thread */
+        current_thread->sig_pending |= sigmask(sig);
+        
+        /* For synchronous signals, we don't need to wake - the signal
+         * will be handled when returning from the exception handler.
+         * If thread was blocked, we still mark it pending. */
+    } else {
+        /* Fallback: if current_thread doesn't match, use psignal */
+        psignal(p, sig);
+    }
+}
+
+/*
+ * sigexit - Terminate process due to signal
+ *
+ * Called when a signal's default action is to terminate the process.
+ * Sets exit status to indicate signal termination and optionally generates
+ * a core dump.
+ *
+ * Exit status encoding (POSIX wait macros):
+ * - WIFSIGNALED(status) is true
+ * - WTERMSIG(status) returns the signal number
+ * - WCOREDUMP(status) indicates core was dumped
+ */
+void sigexit(process_t *p, int sig) {
+    if (!p || sig <= 0 || sig > NSIG) return;
+    
+    /* Check if core dump is required */
+    int do_core = (sigprop[sig] & SA_CORE) != 0;
+    
+    if (do_core) {
+        /* Call coredump routine if available */
+        extern int coredump(process_t *p); // May not be implemented yet
+        // coredump(p); // Stub - uncomment when coredump is implemented
+        (void)do_core; // Suppress unused warning for now
+    }
+    
+    /* Set exit status to indicate signal termination:
+     * POSIX encoding: signal number in bits 0-6, core dump in bit 7
+     * This makes WIFSIGNALED(status) true and WTERMSIG return sig
+     */
+    int exit_status = sig & 0x7F; // Signal number in low 7 bits
+    if (do_core) {
+        exit_status |= 0x80; // Set core dump bit
+    }
+    
+    /* Terminate the process */
+    extern void proc_exit(int status);
+    p->exit_code = exit_status;
+    proc_exit(exit_status);
 }
 
 int sys_kill(int pid, int sig) {

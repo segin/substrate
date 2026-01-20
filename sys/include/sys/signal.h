@@ -107,5 +107,6 @@ int sys_sigaltstack(const stack_t *ss, stack_t *oss);
 void psignal(struct process *p, int sig);
 void pgsignal(int pgrp, int sig);
 void trapsignal(struct process *p, int sig, int code);
+void sigexit(struct process *p, int sig);
 
 #endif

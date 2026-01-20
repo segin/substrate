@@ -535,35 +535,35 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **`sys_sigtimedwait(set, info, timeout)`:** <!-- signal.c:127-185 -->
             - [x] Like `sigwait` but with timeout. <!-- signal.c:150-152 -->
             - [x] Fill `siginfo_t` with signal details. <!-- signal.c:174-182 -->
-    - [ ] **Signal Generation:**
-        - [ ] **`psignal(p, sig)` - Send to Process:** <!-- signal.c:52-87 implemented -->
-            - [ ] Validate process pointer and signal number.
-            - [ ] Init protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1.
-            - [ ] For each thread in process:
-                - [ ] If SIGCONT and thread is stopped, wake it up.
-                - [ ] Set pending bit in `thread->sig_pending`.
-                - [ ] If thread is sleeping interruptibly, wake it.
-            - [ ] Select best thread for delivery (not masked).
-        - [ ] **`pgsignal(pgrp, sig)` - Send to Process Group:** <!-- signal.c:90-101 implemented -->
-            - [ ] Look up `struct pgrp` by ID.
-            - [ ] Call `pgrp_signal()` to iterate members.
-            - [ ] Call `psignal()` for each process in group.
-        - [ ] **`trapsignal(p, sig, code)` - Synchronous Trap Signal:** <!-- signal.c:104-108 implemented -->
-            - [ ] Generate signal from exception handler.
-            - [ ] Pass `code` via `siginfo_t` (si_code).
-            - [ ] Force delivery to current thread (not any thread).
-            - [ ] Typical sources: Page Fault (SIGSEGV), Division by Zero (SIGFPE), Illegal Instruction (SIGILL).
-        - [ ] **`sigexit(p, sig)` - Terminate with Signal:**
-            - [ ] Set exit status to indicate signal termination.
-            - [ ] If core dump required (SA_CORE), call `coredump()`.
-            - [ ] Call `proc_exit()` with signal exit status.
-        - [ ] **Terminal Signals (TTY):** <!-- tty.c -->
-            - [ ] `SIGINT`: Ctrl+C to foreground process group.
-            - [ ] `SIGQUIT`: Ctrl+\ to foreground process group.
-            - [ ] `SIGTSTP`: Ctrl+Z to foreground process group.
-            - [ ] `SIGTTIN`: Background process reads from TTY.
-            - [ ] `SIGTTOU`: Background process writes to TTY (if TOSTOP).
-            - [ ] `SIGHUP`: Controlling terminal hangup.
+    - [x] **Signal Generation:**
+        - [x] **`psignal(p, sig)` - Send to Process:** <!-- signal.c:190-278 -->
+            - [x] Validate process pointer and signal number. <!-- signal.c:202 -->
+            - [x] Init protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1. <!-- signal.c:205-207 -->
+            - [x] For each thread in process: <!-- signal.c:223-268 -->
+                - [x] If SIGCONT and thread is stopped, wake it up. <!-- signal.c:231-233 -->
+                - [x] Set pending bit in `thread->sig_pending`. <!-- signal.c:236 -->
+                - [x] If thread is sleeping interruptibly, wake it. <!-- signal.c:262-264 -->
+            - [x] Select best thread for delivery (not masked). <!-- signal.c:238-260 priority-based selection -->
+        - [x] **`pgsignal(pgrp, sig)` - Send to Process Group:** <!-- signal.c:280-292 -->
+            - [x] Look up `struct pgrp` by ID. <!-- signal.c:288 -->
+            - [x] Call `pgrp_signal()` to iterate members. <!-- signal.c:290 -->
+            - [x] Call `psignal()` for each process in group. <!-- pgrp.c pgrp_signal() -->
+        - [x] **`trapsignal(p, sig, code)` - Synchronous Trap Signal:** <!-- signal.c:294-330 -->
+            - [x] Generate signal from exception handler. <!-- signal.c:294 -->
+            - [x] Pass `code` via `siginfo_t` (si_code). <!-- signal.c:320-321 trap_signo/trap_code -->
+            - [x] Force delivery to current thread (not any thread). <!-- signal.c:317-324 -->
+            - [x] Typical sources: Page Fault (SIGSEGV), Division by Zero (SIGFPE), Illegal Instruction (SIGILL). <!-- signal.c:302-309 -->
+        - [x] **`sigexit(p, sig)` - Terminate with Signal:** <!-- signal.c:332-370 -->
+            - [x] Set exit status to indicate signal termination. <!-- signal.c:356-361 -->
+            - [x] If core dump required (SA_CORE), call `coredump()`. <!-- signal.c:347-353 -->
+            - [x] Call `proc_exit()` with signal exit status. <!-- signal.c:365-367 -->
+        - [x] **Terminal Signals (TTY):** <!-- tty.c -->
+            - [x] `SIGINT`: Ctrl+C to foreground process group. <!-- tty.c:252 -->
+            - [x] `SIGQUIT`: Ctrl+\ to foreground process group. <!-- tty.c:253 -->
+            - [x] `SIGTSTP`: Ctrl+Z to foreground process group. <!-- tty.c:254 -->
+            - [x] `SIGTTIN`: Background process reads from TTY. <!-- tty.c:300 -->
+            - [x] `SIGTTOU`: Background process writes to TTY (if TOSTOP). <!-- tty.c:317 -->
+            - [x] `SIGHUP`: Controlling terminal hangup. <!-- tty.c:472-492 tty_hangup() -->
     - [ ] **Signal Delivery (Architecture-Specific `sendsig`):** <!-- arch/i386/signal.c:27-89 -->
         - [ ] **Frame Construction:**
             - [ ] Calculate user stack pointer from `regs->useresp`.

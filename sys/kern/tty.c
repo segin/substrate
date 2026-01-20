@@ -460,6 +460,33 @@ void tty_close(struct tty *tty) {
     }
 }
 
+/*
+ * tty_hangup - Handle terminal hangup
+ *
+ * Called when the controlling terminal is disconnected (modem hangup,
+ * master side of pty closed, etc.). Sends SIGHUP to the foreground 
+ * process group, then SIGCONT to ensure stopped processes receive it.
+ *
+ * Per POSIX, on terminal hangup:
+ * 1. SIGHUP is sent to the foreground process group
+ * 2. The terminal is disassociated from the session
+ */
+void tty_hangup(struct tty *tty) {
+    if (!tty) return;
+    
+    /* Send SIGHUP to foreground process group */
+    if (tty->pgrp > 0) {
+        signal_send_group(tty->pgrp, SIGHUP);
+        /* Also send SIGCONT to wake any stopped processes so they can
+         * receive SIGHUP (stopped jobs won't process signals until continued) */
+        signal_send_group(tty->pgrp, SIGCONT);
+    }
+    
+    /* Disassociate terminal from session */
+    tty->session = 0;
+    tty->pgrp = 0;
+}
+
 int tty_poll(struct tty *tty, void *waiter) {
     if (!tty) return POLLNVAL;
     (void)waiter; // No wait queue support yet

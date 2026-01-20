@@ -157,6 +157,10 @@ typedef struct thread {
     uint32_t      syscall_num;    // Syscall number for restart
     uint32_t      syscall_orig_eax; // Original EAX for restart
     
+    // Trap signal info (for SA_SIGINFO from trapsignal)
+    int           trap_signo;     // Signal number from trap
+    int           trap_code;      // Trap-specific code (si_code)
+    
     // Robust futex list (for owner death cleanup)
     struct robust_list_head *robust_list;
     size_t                   robust_list_len;
