@@ -2,6 +2,7 @@
 #include <sys/acct.h>
 #include <sys/file.h>
 #include <sys/lock.h>
+#include <sys/session.h>
 #include <kern/console.h>
 #include <kern/sched.h> // For MAX_THREADS, thread creation
 #include <stddef.h>
@@ -104,6 +105,33 @@ int proc_fork(process_t *parent, void *stack) {
             child_proc->fds[j]->ref_count++;
         }
     }
+    
+    // Copy Process Group and Session (inherit from parent)
+    mutex_lock(&proctree_lock);
+    child_proc->p_pgrp = parent->p_pgrp;
+    child_proc->p_pgrp_link = parent->p_pgrp_link; // Wait, we need to link into the group list properly!
+    
+    /* 
+     * Correctly adding to process group:
+     * We can't just copy the pointer 'p_pgrp_link' - that would corrupt the linked list.
+     * We need to add 'child_proc' to the process group's member list.
+     */
+    if (child_proc->p_pgrp) {
+        // Add to head of pgrp list
+        child_proc->p_pgrp_link = child_proc->p_pgrp->pg_members;
+        child_proc->p_pgrp->pg_members = child_proc;
+    } else {
+        child_proc->p_pgrp_link = NULL;
+    }
+    mutex_unlock(&proctree_lock);
+    
+    // Copy Signal Actions (POSIX: inherited on fork)
+    extern void *memcpy(void*, const void*, size_t);
+    memcpy(child_proc->sig_actions, parent->sig_actions, sizeof(parent->sig_actions));
+    child_proc->sig_catch = parent->sig_catch;
+    child_proc->sig_ignore = parent->sig_ignore;
+    
+    // Copy limits, etc. if implemented
     
     // Create Thread for child
     // Implementation of this part relies on sched logic (threading).

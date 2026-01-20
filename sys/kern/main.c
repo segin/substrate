@@ -79,6 +79,12 @@ void kinit_task(void *arg) {
     char *init_path = NULL;
     
     kprint("kinit: Starting init process...\n");
+    
+    // Create new session for init (PID 1)
+    extern int sys_setsid(void);
+    if (sys_setsid() < 0) {
+        kprint("kinit: sys_setsid failed!\n");
+    }
 
     // Attach stdin/stdout/stderr to console directly
     console_attach_std_fds(current_process);
