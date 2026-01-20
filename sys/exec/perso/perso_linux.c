@@ -81,12 +81,50 @@ struct linux_termios {
 #define LINUX_TCSETSF   0x5404
 
 /* Linux ioctl wrapper - translates termios between native and Linux format */
-static int linux_sys_ioctl(int fd, uint32_t request, void *arg) {
-    /* For termios ioctls, translate between native and Linux format */
+/* Linux winsize structure - same as native (4x unsigned short) so we can map directly */
+struct linux_winsize {
+    unsigned short ws_row;
+    unsigned short ws_col;
+    unsigned short ws_xpixel;
+    unsigned short ws_ypixel;
+};
+
+/* Linux TTY ioctl handler - 0x5400-0x54FF range */
+static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
+    /* Handle TIOCGWINSZ / TIOCSWINSZ explicitly */
+    if (request == 0x5413) { // TIOCGWINSZ
+        struct winsize native;
+        int ret = sys_ioctl(fd, request, &native);
+        if (ret == 0 && arg) {
+            /* Copy to Linux layout (compatible) */
+            struct linux_winsize *lw = (struct linux_winsize *)arg;
+            lw->ws_row = native.ws_row;
+            lw->ws_col = native.ws_col;
+            lw->ws_xpixel = native.ws_xpixel;
+            lw->ws_ypixel = native.ws_ypixel;
+        }
+        return ret;
+    }
+    
+    if (request == 0x5414) { // TIOCSWINSZ
+        if (!arg) return -1;
+        struct linux_winsize *lw = (struct linux_winsize *)arg;
+        struct winsize native;
+        native.ws_row = lw->ws_row;
+        native.ws_col = lw->ws_col;
+        native.ws_xpixel = lw->ws_xpixel;
+        native.ws_ypixel = lw->ws_ypixel;
+        return sys_ioctl(fd, request, &native);
+    }
+
+    /* Termios Translation */
     switch (request) {
         case LINUX_TCGETS: {
             /* Get native termios, translate to Linux format */
             struct termios native;
+            extern void *memset(void*, int, size_t);
+            memset(&native, 0, sizeof(native));
+            
             int ret = sys_ioctl(fd, request, &native);
             if (ret == 0 && arg) {
                 struct linux_termios *lt = (struct linux_termios *)arg;
@@ -99,9 +137,6 @@ static int linux_sys_ioctl(int fd, uint32_t request, void *arg) {
                 for (int i = 0; i < LINUX_NCCS; i++) {
                     lt->c_cc[i] = native.c_cc[i];
                 }
-                // Linux 'struct termios' for TCGETS does NOT have speed fields!
-                // Speeds are only in termios2 (TCGETS2).
-                // Writing them here overflows user stack by 8 bytes.
             }
             return ret;
         }
@@ -112,9 +147,9 @@ static int linux_sys_ioctl(int fd, uint32_t request, void *arg) {
             if (!arg) return -1;
             struct linux_termios *lt = (struct linux_termios *)arg;
             struct termios native;
-            /* Zero the native struct to clear extra c_cc entries */
             extern void *memset(void*, int, size_t);
             memset(&native, 0, sizeof(native));
+            
             native.c_iflag = lt->c_iflag;
             native.c_oflag = lt->c_oflag;
             native.c_cflag = lt->c_cflag;
@@ -123,15 +158,38 @@ static int linux_sys_ioctl(int fd, uint32_t request, void *arg) {
             for (int i = 0; i < LINUX_NCCS; i++) {
                 native.c_cc[i] = lt->c_cc[i];
             }
-            // No speeds in TCSETS struct termios
             native.c_ispeed = 0;
             native.c_ospeed = 0;
             return sys_ioctl(fd, request, &native);
         }
-        default:
-            /* Pass through other ioctls unchanged */
-            return sys_ioctl(fd, request, arg);
     }
+    
+    /* Fallback for other TTY ioctls (TIOCSCTTY, TIOCGPGRP, etc.) */
+    /* Most basic TTY ioctls share ABI (int/void arguments) */
+    return sys_ioctl(fd, request, arg);
+}
+
+/* Linux Block Device ioctl handler - 0x1200 range (stub) */
+static int linux_ioctl_blk(int fd, uint32_t request, void *arg) {
+    (void)fd; (void)request; (void)arg;
+    // kprint("Linux BLK ioctl %x not implemented\n", request);
+    return -1; // EINVAL
+}
+
+/* Dispatch ioctls based on type/magic */
+static int linux_sys_ioctl(int fd, uint32_t request, void *arg) {
+    /* 0x54XX = 'T' << 8 (TTY) */
+    if ((request & 0xFF00) == 0x5400) {
+        return linux_ioctl_tty(fd, request, arg);
+    }
+    
+    /* 0x12XX = Block (BLK*) */
+    if ((request & 0xFF00) == 0x1200) {
+        return linux_ioctl_blk(fd, request, arg);
+    }
+    
+    /* Other/Unknown - try native pass-through */
+    return sys_ioctl(fd, request, arg);
 }
 
 static void *linux_syscalls[MAX_SYSCALLS] = {
