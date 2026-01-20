@@ -100,8 +100,77 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [455] = &sys_thr_new,
 };
 
+static const char *native_names[MAX_SYSCALLS] = {
+    [SYS_EXIT] = "exit",
+    [SYS_FORK] = "fork",
+    [SYS_POLL] = "poll",
+    [SYS_READ] = "read",
+    [SYS_WRITE] = "write",
+    [SYS_OPEN] = "open",
+    [SYS_CLOSE] = "close",
+    [SYS_EXECVE] = "execve",
+    [10] = "unlink",
+    [13] = "time",
+    [19] = "lseek",
+    [20] = "getpid",
+    [21] = "mount",
+    [22] = "umount",
+    [23] = "setuid",
+    [24] = "getuid",
+    [33] = "access",
+    [36] = "sync",
+    [37] = "kill",
+    [39] = "mkdir",
+    [40] = "rmdir",
+    [42] = "pipe",
+    [46] = "setgid",
+    [SYS_IOCTL] = "ioctl",
+    [47] = "getgid",
+    [48] = "signal",
+    [49] = "geteuid",
+    [50] = "getegid",
+    [51] = "acct",
+    [63] = "dup2",
+    [85] = "readlink",
+    [106] = "stat",
+    [SYS_LSTAT] = "lstat",
+    [SYS_FSTAT] = "fstat",
+    [119] = "sigreturn",
+    [122] = "uname",
+    [141] = "getdents",
+    [SYS_MSYNC] = "msync",
+    [162] = "nanosleep",
+    [183] = "getcwd",
+    [186] = "sigaltstack",
+    [241] = "pmap_stats",
+    [455] = "thr_new",
+};
+
+static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
+    [SYS_EXIT] = { 1, { ARG_INT } },
+    [SYS_READ] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [SYS_WRITE] = { 3, { ARG_INT, ARG_STR, ARG_INT } },
+    [SYS_OPEN] = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
+    [SYS_CLOSE] = { 1, { ARG_INT } },
+    [SYS_EXECVE] = { 3, { ARG_STR, ARG_PTR, ARG_PTR } },
+    [10] = { 1, { ARG_STR } },  // unlink
+    [19] = { 3, { ARG_INT, ARG_INT, ARG_INT } },  // lseek
+    [33] = { 2, { ARG_STR, ARG_HEX } },  // access
+    [37] = { 2, { ARG_INT, ARG_INT } },  // kill
+    [39] = { 2, { ARG_STR, ARG_HEX } },  // mkdir
+    [42] = { 1, { ARG_PTR } },  // pipe
+    [SYS_IOCTL] = { 3, { ARG_INT, ARG_HEX, ARG_HEX } },
+    [85] = { 3, { ARG_STR, ARG_PTR, ARG_INT } },  // readlink
+    [106] = { 2, { ARG_STR, ARG_PTR } },  // stat
+    [122] = { 1, { ARG_PTR } },  // uname
+    [141] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },  // getdents
+    [183] = { 2, { ARG_PTR, ARG_INT } },  // getcwd
+};
+
 struct personality personality_native = {
     .name = "substrate",
     .syscall_table = native_syscalls,
+    .syscall_names = native_names,
+    .syscall_fmts = native_fmts,
     .syscall_count = MAX_SYSCALLS
 };
