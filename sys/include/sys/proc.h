@@ -150,6 +150,7 @@ typedef struct thread {
     uint32_t      sig_pending;
     uint32_t      sig_mask;
     stack_t       sig_alt_stack;
+    uint8_t       sig_on_stack;   // Nonzero if executing on alternate signal stack
     
     // Robust futex list (for owner death cleanup)
     struct robust_list_head *robust_list;
