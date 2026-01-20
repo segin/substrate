@@ -5856,3 +5856,70 @@ Reference: User Request (Step 30668)
         - Files: `sys/vfs/vfs.c`
         - Tests: integration (df on large volume)
         - Acceptance: Report correct size for >2TB volumes.
+
+### 15. Personality Driver Audit & Refactor
+Reference: User Request (Step 30690)
+
+- [ ] **Audit & Inventory:**
+    - [ ] Scan all personality drivers for syscall wrappers, legacy ABI usage, and hacks.
+        - Files: `sys/exec/perso/*.c`
+        - Tests: N/A
+        - Docs: `docs/personality_audit.md` (Inventory Report)
+        - Acceptance: Complete list of functions needing refactor.
+
+- [ ] **Linux Personality Refactor:**
+    - [ ] Update Linux syscall shims to translate personality types to Native 64-bit ABI.
+        - Files: `sys/exec/perso/perso_linux.c`
+        - Tests: integration (stat/lstat/fstat on Linux binaries)
+        - Docs: `linux_compat.md`
+        - Acceptance: Linux stat64 structs correctly mapped to native 64-bit stat.
+    - [ ] Refactor Linux drivers to remove legacy stat usage.
+        - Files: `sys/exec/perso/perso_linux.c`
+        - Tests: unit (driver functions)
+        - Acceptance: No dependency on 32-bit native types.
+    - [ ] Add explicit validation tests for file metadata and permission semantics.
+        - Files: `tests/perso/linux_test.c`
+        - Tests: integration (chown/chmod/utimes simulation)
+        - Acceptance: Semantics match Linux 5.x expectations.
+
+- [ ] **FreeBSD Personality Refactor:**
+    - [ ] Update FreeBSD syscall shims to translate personality types to Native 64-bit ABI.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: integration (FreeBSD 14.x binary compatibility)
+        - Docs: `freebsd_compat.md`
+        - Acceptance: FreeBSD stat structure correctly populated.
+    - [ ] Refactor FreeBSD drivers to remove legacy dependencies.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit
+        - Acceptance: Clean separation from legacy native types.
+    - [ ] Add explicit validation tests for FreeBSD semantics.
+        - Files: `tests/perso/freebsd_test.c`
+        - Tests: integration
+        - Acceptance: Pass canonical FreeBSD compliance checks (mini-suite).
+
+- [ ] **SVR4 / SVR3 Personality Refactor:**
+    - [ ] Update SVR4/SVR3 syscall shims for Native 64-bit ABI translation.
+        - Files: `sys/exec/perso/perso_svr4.c`, `sys/exec/perso/perso_svr3.c`
+        - Tests: integration (legacy binary support)
+        - Acceptance: Correct metadata reporting for legacy formats.
+    - [ ] Validation tests for SVR compat layers.
+        - Files: `tests/perso/svr_test.c`
+        - Tests: integration
+        - Acceptance: Basic file operations work correctly.
+
+- [ ] **Infrastructural Reconciliation:**
+    - [ ] Reconcile personality-specific `/proc` and `/dev` expectations.
+        - Files: `sys/fs/procfs.c`, `sys/fs/devfs.c`
+        - Tests: integration (cat /proc/cpuinfo, ls -l /dev)
+        - Docs: `compat_fs_layer.md`
+        - Acceptance: Pseudo-filesystems return expected format per-personality OR robust adaptation layer exists.
+
+- [ ] **Quality & Regression:**
+    - [ ] Regression tests for third-party modules / sample drivers.
+        - Files: `tests/modules/*.c`
+        - Tests: regression
+        - Acceptance: Personality changes do not break external native modules.
+    - [ ] Refactor "minimal" shims to production quality (error handling, locking).
+        - Files: All `perso_*.c` files
+        - Tests: stress/edge-case
+        - Acceptance: Robust error propagation, no race conditions in translation layers.
