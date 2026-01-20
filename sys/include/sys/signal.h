@@ -60,6 +60,11 @@ typedef struct {
 // Signal bits
 #define sigmask(sig) (1 << ((sig) - 1))
 
+/* Signal syscalls */
+int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
+int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset);
+int sys_sigpending(uint32_t *set);
+int sys_sigsuspend(const uint32_t *mask);
 int sys_kill(int pid, int sig);
 int signal_send_group(int pgrp, int sig);
 

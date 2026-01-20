@@ -1,0 +1,250 @@
+/*
+ * test_signal.c - Signal Infrastructure Tests
+ *
+ * Kernel tests for signal handling subsystem.
+ */
+
+#include "../kern/console.h"
+#include "../include/sys/signal.h"
+#include "../include/sys/proc.h"
+#include "../kern/sched.h"
+#include <string.h>
+
+/* Test framework macros */
+#define TEST_PASS(name) kprint("[PASS] " name "\n")
+#define TEST_FAIL(name) kprint("[FAIL] " name "\n")
+#define ASSERT(cond, name) do { if (!(cond)) { TEST_FAIL(name); return; } } while(0)
+#define ASSERT_EQ(a, b, name) ASSERT((a) == (b), name)
+#define ASSERT_NE(a, b, name) ASSERT((a) != (b), name)
+
+/* Mock process/thread for testing when current_process is NULL */
+static process_t test_process;
+static thread_t test_thread;
+
+/* Save/restore current process for tests */
+static process_t *saved_process;
+static thread_t *saved_thread;
+
+static void setup_test_context(void) {
+    saved_process = current_process;
+    saved_thread = current_thread;
+    
+    memset(&test_process, 0, sizeof(test_process));
+    memset(&test_thread, 0, sizeof(test_thread));
+    test_process.pid = 999;
+    test_thread.tid = 999;
+    test_thread.proc = &test_process;
+    
+    current_process = &test_process;
+    current_thread = &test_thread;
+}
+
+static void teardown_test_context(void) {
+    current_process = saved_process;
+    current_thread = saved_thread;
+}
+
+/* ========================================================================
+ * sig_actions[NSIG] Tests
+ * ======================================================================== */
+
+/*
+ * Test: sig_actions array exists and has correct size
+ */
+static void test_sig_actions_size(void) {
+    setup_test_context();
+    
+    /* Verify sig_actions is NSIG elements (0 to NSIG-1) */
+    ASSERT_EQ(sizeof(test_process.sig_actions) / sizeof(struct sigaction), 
+              NSIG, "sig_actions size equals NSIG");
+    
+    teardown_test_context();
+    TEST_PASS("test_sig_actions_size");
+}
+
+/*
+ * Test: sig_actions initializes to SIG_DFL by default
+ */
+static void test_sig_actions_default(void) {
+    setup_test_context();
+    
+    /* Zero-initialized process should have all SIG_DFL handlers */
+    for (int i = 0; i < NSIG; i++) {
+        ASSERT_EQ(test_process.sig_actions[i].sa_handler, SIG_DFL,
+                  "sig_actions default handler is SIG_DFL");
+    }
+    
+    teardown_test_context();
+    TEST_PASS("test_sig_actions_default");
+}
+
+/*
+ * Test: sys_sigaction installs handler correctly
+ */
+static void test_sigaction_install_handler(void) {
+    setup_test_context();
+    
+    /* Install a handler for SIGUSR1 */
+    struct sigaction new_act = {0};
+    new_act.sa_handler = (sig_t)0x12345678;
+    new_act.sa_mask = 0;
+    new_act.sa_flags = 0;
+    
+    struct sigaction old_act = {0};
+    old_act.sa_handler = (sig_t)0xDEADBEEF; /* Should be overwritten */
+    
+    int ret = sys_sigaction(SIGUSR1, &new_act, &old_act);
+    ASSERT_EQ(ret, 0, "sys_sigaction returns 0");
+    
+    /* Old action should be SIG_DFL (from memset) */
+    ASSERT_EQ(old_act.sa_handler, SIG_DFL, "old action is SIG_DFL");
+    
+    /* Verify handler was installed */
+    ASSERT_EQ(test_process.sig_actions[SIGUSR1 - 1].sa_handler, 
+              (sig_t)0x12345678, "handler installed correctly");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigaction_install_handler");
+}
+
+/*
+ * Test: sys_sigaction returns old action
+ */
+static void test_sigaction_returns_old(void) {
+    setup_test_context();
+    
+    /* Install initial handler */
+    struct sigaction act1 = { .sa_handler = (sig_t)0x11111111 };
+    sys_sigaction(SIGUSR2, &act1, NULL);
+    
+    /* Install new handler, get old */
+    struct sigaction act2 = { .sa_handler = (sig_t)0x22222222 };
+    struct sigaction old_act;
+    int ret = sys_sigaction(SIGUSR2, &act2, &old_act);
+    
+    ASSERT_EQ(ret, 0, "sys_sigaction returns 0");
+    ASSERT_EQ(old_act.sa_handler, (sig_t)0x11111111, "old handler returned correctly");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigaction_returns_old");
+}
+
+/*
+ * Test: sys_sigaction rejects SIGKILL modifications
+ */
+static void test_sigaction_sigkill_rejected(void) {
+    setup_test_context();
+    
+    struct sigaction act = { .sa_handler = SIG_IGN };
+    int ret = sys_sigaction(SIGKILL, &act, NULL);
+    
+    ASSERT_EQ(ret, -1, "SIGKILL modification rejected");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigaction_sigkill_rejected");
+}
+
+/*
+ * Test: sys_sigaction rejects SIGSTOP modifications
+ */
+static void test_sigaction_sigstop_rejected(void) {
+    setup_test_context();
+    
+    struct sigaction act = { .sa_handler = SIG_IGN };
+    int ret = sys_sigaction(SIGSTOP, &act, NULL);
+    
+    ASSERT_EQ(ret, -1, "SIGSTOP modification rejected");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigaction_sigstop_rejected");
+}
+
+/*
+ * Test: sys_sigaction rejects invalid signal numbers
+ */
+static void test_sigaction_invalid_signal(void) {
+    setup_test_context();
+    
+    struct sigaction act = { .sa_handler = SIG_IGN };
+    
+    /* Signal 0 is invalid */
+    ASSERT_EQ(sys_sigaction(0, &act, NULL), -1, "signal 0 rejected");
+    
+    /* Signal > NSIG is invalid */
+    ASSERT_EQ(sys_sigaction(NSIG + 1, &act, NULL), -1, "signal > NSIG rejected");
+    
+    /* Negative signal numbers are invalid */
+    ASSERT_EQ(sys_sigaction(-1, &act, NULL), -1, "negative signal rejected");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigaction_invalid_signal");
+}
+
+/*
+ * Test: sys_sigaction with NULL act only retrieves
+ */
+static void test_sigaction_query_only(void) {
+    setup_test_context();
+    
+    /* Install handler first */
+    struct sigaction act = { .sa_handler = (sig_t)0xAABBCCDD };
+    sys_sigaction(SIGTERM, &act, NULL);
+    
+    /* Query without modifying */
+    struct sigaction old_act;
+    int ret = sys_sigaction(SIGTERM, NULL, &old_act);
+    
+    ASSERT_EQ(ret, 0, "sys_sigaction with NULL act succeeds");
+    ASSERT_EQ(old_act.sa_handler, (sig_t)0xAABBCCDD, "handler queried correctly");
+    
+    /* Verify not modified */
+    ASSERT_EQ(test_process.sig_actions[SIGTERM - 1].sa_handler, 
+              (sig_t)0xAABBCCDD, "handler not modified");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigaction_query_only");
+}
+
+/*
+ * Test: sigaction mask and flags are stored correctly
+ */
+static void test_sigaction_mask_and_flags(void) {
+    setup_test_context();
+    
+    struct sigaction act = {
+        .sa_handler = (sig_t)0x12345678,
+        .sa_mask = sigmask(SIGINT) | sigmask(SIGQUIT),
+        .sa_flags = SA_SIGINFO
+    };
+    
+    sys_sigaction(SIGHUP, &act, NULL);
+    
+    ASSERT_EQ(test_process.sig_actions[SIGHUP - 1].sa_mask,
+              sigmask(SIGINT) | sigmask(SIGQUIT), "sa_mask stored correctly");
+    ASSERT_EQ(test_process.sig_actions[SIGHUP - 1].sa_flags,
+              SA_SIGINFO, "sa_flags stored correctly");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigaction_mask_and_flags");
+}
+
+/* ========================================================================
+ * Test Runner
+ * ======================================================================== */
+
+void run_signal_tests(void) {
+    kprint("\n--- Signal Tests ---\n");
+    
+    /* sig_actions[NSIG] tests */
+    test_sig_actions_size();
+    test_sig_actions_default();
+    test_sigaction_install_handler();
+    test_sigaction_returns_old();
+    test_sigaction_sigkill_rejected();
+    test_sigaction_sigstop_rejected();
+    test_sigaction_invalid_signal();
+    test_sigaction_query_only();
+    test_sigaction_mask_and_flags();
+    
+    kprint("--- Signal Tests Complete ---\n\n");
+}

@@ -64,8 +64,50 @@ void test_tty_canonical(void) {
     tty_free(tty);
 }
 
+void test_tty_ixoff(void) {
+    struct tty *tty = tty_alloc(&mock_driver, 3);
+    
+    // Enable IXOFF, Disable ECHO/ICANON (prevent echo overflow/blocking)
+    tty->termios.c_iflag |= IXOFF;
+    tty->termios.c_lflag &= ~(ECHO | ICANON);
+    
+    // Reset mock buffer
+    mock_out_len = 0;
+    
+    // Fill past HWM (1536)
+    for (int i = 0; i < 1600; i++) {
+        tty_flip_buffer_push(tty, 'A');
+    }
+    
+    // Check VSTOP (19)
+    int found_stop = 0;
+    for (int i = 0; i < mock_out_len; i++) {
+        if (mock_out_buf[i] == 19) found_stop = 1;
+    }
+    ASSERT(found_stop);
+    ASSERT(tty->input_stopped);
+    
+    // Drain below LWM (512)
+    // Reading 1200 bytes leaves 400 (< 512)
+    char buf[1200];
+    int n = tty_read(tty, buf, 1200);
+    ASSERT(n == 1200);
+    
+    // Check VSTART (17)
+    int found_start = 0;
+    for (int i = 0; i < mock_out_len; i++) {
+        if (mock_out_buf[i] == 17) found_start = 1;
+    }
+    ASSERT(found_start);
+    ASSERT(!tty->input_stopped);
+    
+    tty_free(tty);
+    kprint("test_tty_ixoff passed\n");
+}
+
 void run_tty_tests(void) {
     test_tty_alloc();
     kprint("test_tty_alloc passed\n");
+    test_tty_ixoff();
     // test_tty_canonical(); // Needs thread support/mocking to not hang
 }

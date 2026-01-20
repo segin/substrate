@@ -98,6 +98,11 @@ void run_kernel_tests(void) {
          run_scsi_tests();
     }
 
+    if (all || strcmp(test_arg, "signal") == 0) {
+         extern void run_signal_tests(void);
+         run_signal_tests();
+    }
+
     // Wait logic tests are run on host via verify_wait_host.sh
     // if (all || strcmp(test_arg, "wait") == 0) {
     //     test_wait_logic();
