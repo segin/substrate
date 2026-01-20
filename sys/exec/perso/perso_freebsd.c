@@ -171,9 +171,10 @@ extern void *memset(void *s, int c, size_t n);
 
 int sys_freebsd_uname(struct freebsd_utsname *buf) {
     if (!buf) return -1;
+    extern char kernel_hostname[65];
     memset(buf, 0, sizeof(struct freebsd_utsname));
     strncpy(buf->sysname, "FreeBSD", 256);
-    strncpy(buf->nodename, "localhost", 256);
+    strncpy(buf->nodename, kernel_hostname, 256);
     strncpy(buf->release, "14.3-RELEASE-p5", 256);
     strncpy(buf->version, "FreeBSD 14.3-RELEASE-p5 GENERIC", 256);
     strncpy(buf->machine, "i386", 256);

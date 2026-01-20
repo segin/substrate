@@ -213,9 +213,10 @@ struct utsname {
 
 int sys_uname(struct utsname *buf) {
     if (!buf) return -1;
+    extern char kernel_hostname[65];
     strncpy(buf->sysname, "Substrate", 64);
     buf->sysname[64] = '\0';
-    strncpy(buf->nodename, "localhost", 64);
+    strncpy(buf->nodename, kernel_hostname, 64);
     buf->nodename[64] = '\0';
     strncpy(buf->release, "0.1", 64);
     buf->release[64] = '\0';

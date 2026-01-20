@@ -47,6 +47,7 @@
 // Simple string functions to avoid depending on libc in core if not available
 int serial_debug_enabled = 0;
 int syscall_trace_enabled = 0;
+char kernel_hostname[65] = "localhost";
 
 
 char *strstr(const char *haystack, const char *needle) {
