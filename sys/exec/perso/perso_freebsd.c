@@ -107,9 +107,9 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [33] = "access",
     [36] = "sync",
     [37] = "kill",
-    [38] = "stat",
+    [38] = "stat", /* FreeBSD 4.x stat (legacy 32-bit), we map to native 64-bit stat! Mismatch! */
     [39] = "getppid",
-    [40] = "lstat",
+    [40] = "lstat", /* FreeBSD 4.x lstat */
     [41] = "dup2",
     [42] = "pipe",
     [43] = "getegid",
@@ -121,11 +121,10 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [136] = "mkdir",
     [137] = "rmdir",
     [164] = "uname",
-    [188] = "stat",
-    [189] = "fstat",
-    [190] = "lstat",
+    [189] = "fstat", /* FreeBSD 4.x fstat */
     [209] = "poll",
     [326] = "getcwd",
+    /* Todo: Wrap legacy 32-bit stat calls to convert to 64-bit native struct */
 };
 
 /* FreeBSD syscall formats */
@@ -144,8 +143,8 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [23] = { 1, { ARG_INT } }, // setuid
     [33] = { 2, { ARG_STR, ARG_HEX } }, // access
     [37] = { 2, { ARG_INT, ARG_INT } }, // kill
-    [38] = { 2, { ARG_STR, ARG_PTR } }, // stat
-    [40] = { 2, { ARG_STR, ARG_PTR } }, // lstat
+    [38] = { 2, { ARG_STR, ARG_PTR } }, // stat (legacy)
+    [40] = { 2, { ARG_STR, ARG_PTR } }, // lstat (legacy)
     [41] = { 2, { ARG_INT, ARG_INT } }, // dup2
     [42] = { 1, { ARG_PTR } }, // pipe
     [46] = { 1, { ARG_INT } }, // setgid
@@ -154,9 +153,7 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [136] = { 2, { ARG_STR, ARG_HEX } }, // mkdir
     [137] = { 1, { ARG_STR } }, // rmdir
     [164] = { 1, { ARG_PTR } }, // uname
-    [188] = { 2, { ARG_STR, ARG_PTR } }, // stat
-    [189] = { 2, { ARG_INT, ARG_PTR } }, // fstat
-    [190] = { 2, { ARG_STR, ARG_PTR } }, // lstat
+    [189] = { 2, { ARG_INT, ARG_PTR } }, // fstat (legacy)
     [209] = { 3, { ARG_PTR, ARG_INT, ARG_INT } }, // poll
     [326] = { 2, { ARG_PTR, ARG_INT } }, // getcwd
 };

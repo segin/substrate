@@ -463,28 +463,7 @@ void syscall_handler(registers_t *regs) {
 }
 
 // Local stat def matching userspace
-struct stat {
-    uint32_t       st_dev;
-    uint32_t       st_ino;
-    uint16_t       st_mode;
-    uint16_t       st_nlink;
-    uint16_t       st_uid;
-    uint16_t       st_gid;
-    uint32_t       st_rdev;
-    off_t          st_size;    // 64-bit size
-    uint32_t       st_blksize;
-    uint32_t       st_pad1;    // padding
-    blkcnt_t       st_blocks;  // 64-bit block count
-    time_t         st_atime;   // 64-bit time
-    uint32_t       st_atime_nsec;
-    uint32_t       st_pad2;
-    time_t         st_mtime;
-    uint32_t       st_mtime_nsec;
-    uint32_t       st_pad3;
-    time_t         st_ctime;
-    uint32_t       st_ctime_nsec;
-    uint32_t       st_pad4;
-};
+#include <sys/stat.h>
 
 extern int sys_vm86(void *v);
 extern int sys_sysarch(int op, void *args);
