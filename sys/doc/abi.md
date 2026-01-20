@@ -2,13 +2,88 @@
 
 This document describes the binary interface for the Substrate Native personality.
 
-## File Metadata (`struct stat`)
+## 1. System Calls
 
-The native ABI enforces a single, 64-bit compatible `struct stat` for all file metadata operations. There are no legacy 32-bit `stat` system calls in the native personality.
+### Mechanism
+*   **Interrupt**: `0x80`
+*   **System Call Number**: Passed in `EAX` register.
+*   **Arguments**: Passed on the stack (see Argument Passing).
+*   **Return Value**: Returned in `EAX` register. Negative values in the range `[-4095, -1]` typically indicate errors, though the kernel raw return value is preserved.
 
-### Structure Layout
+### Argument Passing
+Substrate Native uses **Stack Conventions** (similar to FreeBSD/SVR4), distinct from Linux's register-based convention.
 
-Defined in `<sys/stat.h>`. All types are little-endian.
+*   Arguments are pushed onto the user stack.
+*   The kernel expects arguments starting at `ESP + 4`.
+*   The value at `ESP` is ignored by the kernel (conventionally the return address).
+
+**Layout at `int 0x80`:**
+```
+[High Address]
+Argument N
+...
+Argument 2
+Argument 1
+Return Address (Ignored) <--- ESP
+[Low Address]
+```
+
+### Syscall Table
+
+| Number | Name | Description |
+| :---   | :--- | :---        |
+| 1      | `exit`        | Terminate process |
+| 2      | `fork`        | Create new process |
+| 3      | `read`        | Read from file descriptor |
+| 4      | `write`       | Write to file descriptor |
+| 5      | `open`        | Open file |
+| 6      | `close`       | Close file descriptor |
+| 9      | `link`        | Create hard link |
+| 10     | `unlink`      | Remove directory entry |
+| 11     | `execve`      | Execute program |
+| 12     | `chdir`       | Change working directory |
+| 13     | `time`        | Get time (seconds) |
+| 19     | `lseek`       | Reposition read/write offset |
+| 20     | `getpid`      | Get process ID |
+| 21     | `mount`       | Mount filesystem |
+| 22     | `umount`      | Unmount filesystem |
+| 23     | `setuid`      | Set user ID |
+| 24     | `getuid`      | Get user ID |
+| 33     | `access`      | Check file permissions |
+| 36     | `sync`        | Commit buffer cache to disk |
+| 37     | `kill`        | Send signal to process |
+| 39     | `mkdir`       | Create directory |
+| 40     | `rmdir`       | Remove directory |
+| 42     | `pipe`        | Create pipe |
+| 46     | `setgid`      | Set group ID |
+| 47     | `getgid`      | Get group ID |
+| 48     | `signal`      | Install signal handler (Action) |
+| 49     | `geteuid`     | Get effective user ID |
+| 50     | `getegid`     | Get effective group ID |
+| 51     | `acct`        | Process accounting |
+| 54     | `ioctl`       | I/O Control |
+| 63     | `dup2`        | Duplicate file descriptor to specific index |
+| 85     | `readlink`    | Read value of a symbolic link |
+| 106    | `stat`        | Get file status (64-bit) |
+| 107    | `lstat`       | Get link status (64-bit) |
+| 108    | `fstat`       | Get file status by FD (64-bit) |
+| 119    | `sigreturn`   | Return from signal handler |
+| 122    | `uname`       | Get system name/info |
+| 141    | `getdents`    | Get directory entries |
+| 144    | `msync`       | Synchronize memory with file |
+| 162    | `nanosleep`   | High-resolution sleep |
+| 183    | `getcwd`      | Get current working directory |
+| 186    | `sigaltstack` | Set/get alternate signal stack |
+| 209    | `poll`        | Wait for events on FDs |
+| 241    | `pmap_stats`  | Get memory map statistics |
+| 455    | `thr_new`     | Create new thread |
+
+*(Note: Gaps in numbering correspond to reserved or unimplemented legacy slots)*
+
+## 2. Data Structures
+
+### File Metadata (`struct stat`)
+Defined in `<sys/stat.h>`. **Size: 92 bytes.**
 
 | Offset | Field           | Type       | Size | Description                         |
 | :---   | :---            | :---       | :--- | :---                                |
@@ -33,47 +108,11 @@ Defined in `<sys/stat.h>`. All types are little-endian.
 | 84     | `st_ctime_nsec` | `uint32_t` | 4    | Nsecs of last status change         |
 | 88     | `st_pad4`       | `uint32_t` | 4    | Padding                             |
 
-Total Size: 92 bytes.
+---
 
-### Usage
+## 3. Process Initialization
 
-*   Native binaries must link against the updated `libc` which uses this structure.
-*   System calls `SYS_STAT`, `SYS_FSTAT`, `SYS_LSTAT` expect a pointer to this 92-byte structure.
-*   Legacy compatibility for imported binaries (Linux/FreeBSD) is handled via personality translation layers, not by exposing legacy syscalls in the native table.
-
-## System Calls (Native Personality)
-
-### Mechanism
-*   **Interrupt**: `0x80`
-*   **System Call Number**: Passed in `EAX` register.
-*   **Return Value**: Returned in `EAX` register. Clashes with `errno` are typically handled by libc wrappers checking for range usually `[-4095, -1]`.
-
-### Argument Passing
-Substrate Native uses the **Stack Conventions** (similar to FreeBSD and SVR4), differing from the Linux Register convention.
-
-*   Arguments are pushed onto the user stack.
-*   The kernel expects arguments starting at `ESP + 4`.
-*   The value at `ESP` is ignored by the kernel (conventionally the return address from the function call wrapper).
-
-**Layout at `int 0x80`:**
-```
-[High Address]
-Argument N
-...
-Argument 2
-Argument 1
-Return Address (Ignored by kernel) <--- ESP
-[Low Address]
-```
-
-## Process Initialization
-
-When a new process is started via `execve`, the stack is initialized with arguments, environment variables, and the auxiliary vector.
-
-### Registry State at Entry
-*   `EIP`: Entry point of the ELF executable (or dynamic linker).
-*   `ESP`: Points to `argc`.
-*   All other registers are undefined (zeroed).
+When a new process is started `EIP` points to the entry point, `ESP` points to arguments.
 
 ### Stack Layout (Top to Bottom)
 
@@ -90,21 +129,8 @@ The stack grows downwards.
 | `Argc`              | Integer argument count                                                                |
 | **Stack Pointer**   | `ESP` points here at entry                                                            |
 
-## Signal Handling
-
-Signal handlers are invoked by the kernel constructing a specific frame on the user stack and adjusting `EIP`.
+## 4. Signal Handling
 
 ### Signal Frame
-*   **Trampoline**: The return address pushed to the stack points to the signal trampoline page (default: `0xFFFF1000`).
+*   **Trampoline**: The return address pushed to the stack points to the signal trampoline.
 *   **Alignment**: Stack is aligned to 16 bytes.
-
-**Structure (`struct sigframe`):**
-```c (pseudo)
-struct sigframe {
-    int sig;                  // Signal number
-    struct sigcontext sc;     // saved context
-    // ... extended context / alignment padding
-    uint32_t retaddr;         // Return address (Trampoline)
-};
-```
-*Note: This layout is currently subject to change as signal handling matures.*
