@@ -33,53 +33,53 @@ Return Address (Ignored) <--- ESP
 
 ### Syscall Table
 
-| Number | Name | Description |
-| :---   | :--- | :---        |
-| 1      | `exit`        | Terminate process |
-| 2      | `fork`        | Create new process |
-| 3      | `read`        | Read from file descriptor |
-| 4      | `write`       | Write to file descriptor |
-| 5      | `open`        | Open file |
-| 6      | `close`       | Close file descriptor |
-| 9      | `link`        | Create hard link |
-| 10     | `unlink`      | Remove directory entry |
-| 11     | `execve`      | Execute program |
-| 12     | `chdir`       | Change working directory |
-| 13     | `time`        | Get time (seconds) |
-| 19     | `lseek`       | Reposition read/write offset |
-| 20     | `getpid`      | Get process ID |
-| 21     | `mount`       | Mount filesystem |
-| 22     | `umount`      | Unmount filesystem |
-| 23     | `setuid`      | Set user ID |
-| 24     | `getuid`      | Get user ID |
-| 33     | `access`      | Check file permissions |
-| 36     | `sync`        | Commit buffer cache to disk |
-| 37     | `kill`        | Send signal to process |
-| 39     | `mkdir`       | Create directory |
-| 40     | `rmdir`       | Remove directory |
-| 42     | `pipe`        | Create pipe |
-| 46     | `setgid`      | Set group ID |
-| 47     | `getgid`      | Get group ID |
-| 48     | `signal`      | Install signal handler (Action) |
-| 49     | `geteuid`     | Get effective user ID |
-| 50     | `getegid`     | Get effective group ID |
-| 51     | `acct`        | Process accounting |
-| 54     | `ioctl`       | I/O Control |
+| Number | Name          | Description                                 |
+| :---   | :---          | :---                                        |
+| 1      | `exit`        | Terminate process                           |
+| 2      | `fork`        | Create new process                          |
+| 3      | `read`        | Read from file descriptor                   |
+| 4      | `write`       | Write to file descriptor                    |
+| 5      | `open`        | Open file                                   |
+| 6      | `close`       | Close file descriptor                       |
+| 9      | `link`        | Create hard link                            |
+| 10     | `unlink`      | Remove directory entry                      |
+| 11     | `execve`      | Execute program                             |
+| 12     | `chdir`       | Change working directory                    |
+| 13     | `time`        | Get time (seconds)                          |
+| 19     | `lseek`       | Reposition read/write offset                |
+| 20     | `getpid`      | Get process ID                              |
+| 21     | `mount`       | Mount filesystem                            |
+| 22     | `umount`      | Unmount filesystem                          |
+| 23     | `setuid`      | Set user ID                                 |
+| 24     | `getuid`      | Get user ID                                 |
+| 33     | `access`      | Check file permissions                      |
+| 36     | `sync`        | Commit buffer cache to disk                 |
+| 37     | `kill`        | Send signal to process                      |
+| 39     | `mkdir`       | Create directory                            |
+| 40     | `rmdir`       | Remove directory                            |
+| 42     | `pipe`        | Create pipe                                 |
+| 46     | `setgid`      | Set group ID                                |
+| 47     | `getgid`      | Get group ID                                |
+| 48     | `signal`      | Install signal handler (Action)             |
+| 49     | `geteuid`     | Get effective user ID                       |
+| 50     | `getegid`     | Get effective group ID                      |
+| 51     | `acct`        | Process accounting                          |
+| 54     | `ioctl`       | I/O Control                                 |
 | 63     | `dup2`        | Duplicate file descriptor to specific index |
-| 85     | `readlink`    | Read value of a symbolic link |
-| 106    | `stat`        | Get file status (64-bit) |
-| 107    | `lstat`       | Get link status (64-bit) |
-| 108    | `fstat`       | Get file status by FD (64-bit) |
-| 119    | `sigreturn`   | Return from signal handler |
-| 122    | `uname`       | Get system name/info |
-| 141    | `getdents`    | Get directory entries |
-| 144    | `msync`       | Synchronize memory with file |
-| 162    | `nanosleep`   | High-resolution sleep |
-| 183    | `getcwd`      | Get current working directory |
-| 186    | `sigaltstack` | Set/get alternate signal stack |
-| 209    | `poll`        | Wait for events on FDs |
-| 241    | `pmap_stats`  | Get memory map statistics |
-| 455    | `thr_new`     | Create new thread |
+| 85     | `readlink`    | Read value of a symbolic link               |
+| 106    | `stat`        | Get file status (64-bit)                    |
+| 107    | `lstat`       | Get link status (64-bit)                    |
+| 108    | `fstat`       | Get file status by FD (64-bit)              |
+| 119    | `sigreturn`   | Return from signal handler                  |
+| 122    | `uname`       | Get system name/info                        |
+| 141    | `getdents`    | Get directory entries                       |
+| 144    | `msync`       | Synchronize memory with file                |
+| 162    | `nanosleep`   | High-resolution sleep                       |
+| 183    | `getcwd`      | Get current working directory               |
+| 186    | `sigaltstack` | Set/get alternate signal stack              |
+| 209    | `poll`        | Wait for events on FDs                      |
+| 241    | `pmap_stats`  | Get memory map statistics                   |
+| 455    | `thr_new`     | Create new thread                           |
 
 *(Note: Gaps in numbering correspond to reserved or unimplemented legacy slots)*
 
