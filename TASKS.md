@@ -473,8 +473,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Atomic acquisition semantics. <!-- ntsync.c:ntsync_acquire with spinlocks -->
             - [x] Cross-object atomicity for WAIT_ALL. <!-- ntsync.c:ntsync_wait_all multi-lock -->
 - [ ] **Signals:**
-    - [ ] **Signal Infrastructure:**
-        - [ ] **Per-Process Signal State (`process_t`):** <!-- proc.h -->
+    - [x] **Signal Infrastructure:** <!-- proc.h, signal.h, sigprop.c -->
+        - [x] **Per-Process Signal State (`process_t`):** <!-- proc.h:55-57 -->
             - [x] `sig_actions[NSIG]`: Array of `struct sigaction` for each signal. <!-- proc.h:55, test_signal.c -->
             - [x] `sig_catch`: Bitmask of signals with handlers (not SIG_DFL/SIG_IGN). <!-- proc.h:56, signal.c:sys_sigaction -->
             - [x] `sig_ignore`: Bitmask of signals set to SIG_IGN. <!-- proc.h:57, signal.c:sys_sigaction -->
@@ -488,46 +488,46 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT. <!-- signal.h:63-72, sigprop.c:22 -->
             - [x] Unmaskable signals: SIGKILL, SIGSTOP always have effect. <!-- sigprop.c:33,40 SA_CANTMASK -->
     - [ ] **Signal Syscalls:**
-        - [ ] **`sys_sigaction(sig, act, oact)`:** <!-- signal.c:14-19 implemented -->
-            - [ ] Validate signal number (1 <= sig <= NSIG, not SIGKILL/SIGSTOP).
-            - [ ] Return old action in `oact` if non-NULL.
-            - [ ] Install new action from `act` if non-NULL.
-            - [ ] Update `sig_catch`/`sig_ignore` bitmasks.
-            - [ ] Handle `SA_RESETHAND` (one-shot handler).
-            - [ ] Handle `SA_NODEFER` (don't block signal during handler).
+        - [ ] **`sys_sigaction(sig, act, oact)`:** <!-- signal.c:14-37 implemented -->
+            - [x] Validate signal number (1 <= sig <= NSIG, not SIGKILL/SIGSTOP). <!-- signal.c:15 -->
+            - [x] Return old action in `oact` if non-NULL. <!-- signal.c:19 -->
+            - [x] Install new action from `act` if non-NULL. <!-- signal.c:21-22 -->
+            - [x] Update `sig_catch`/`sig_ignore` bitmasks. <!-- signal.c:24-35 -->
+            - [x] Handle `SA_RESETHAND` (one-shot handler). <!-- signal.c:237 -->
+            - [x] Handle `SA_NODEFER` (don't block signal during handler). <!-- signal.c:231 -->
             - [ ] Handle `SA_RESTART` (restart interrupted syscalls).
             - [ ] Handle `SA_NOCLDSTOP` (don't send SIGCHLD for stopped children).
             - [ ] Handle `SA_NOCLDWAIT` (don't create zombies for children).
-        - [ ] **`sys_sigprocmask(how, set, oset)`:** <!-- signal.c:21-31 implemented -->
-            - [ ] Return old mask in `oset` if non-NULL.
-            - [ ] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK.
-            - [ ] Filter out SIGKILL/SIGSTOP from mask (cannot be blocked).
-        - [ ] **`sys_sigpending(set)`:** <!-- signal.c:33-36 implemented -->
-            - [ ] Return pending & ~masked signals for current thread.
-        - [ ] **`sys_sigsuspend(mask)`:** <!-- signal.c:38-49 implemented -->
-            - [ ] Atomically set mask and sleep until signal arrives.
-            - [ ] Restore original mask on return.
-            - [ ] Always return -1 (EINTR).
-        - [ ] **`sys_sigaltstack(ss, oss)`:** <!-- signal.c:213-228 implemented -->
-            - [ ] Return current alt stack in `oss`.
-            - [ ] Install new alt stack from `ss`.
-            - [ ] Validate `ss_size >= MINSIGSTKSZ`.
-            - [ ] Handle `SS_DISABLE` flag.
-            - [ ] Error if currently executing on alt stack.
-        - [ ] **`sys_kill(pid, sig)`:** <!-- signal.c:110-150 implemented -->
-            - [ ] `pid > 0`: Send to specific process.
-            - [ ] `pid == 0`: Send to current process group.
-            - [ ] `pid == -1`: Send to all processes (except init).
-            - [ ] `pid < -1`: Send to process group `-pid`.
-            - [ ] `sig == 0`: Permission check only (existence check).
-            - [ ] Permission checks: Same UID or CAP_KILL.
-        - [ ] **`sys_sigreturn(scp)`:** <!-- arch/i386/signal.c:94-128 implemented -->
-            - [ ] Validate `sigcontext` pointer is in user space.
-            - [ ] Verify `cs` and `ss` have RPL=3 (user mode).
-            - [ ] Restore all general-purpose registers.
-            - [ ] Restore `eflags` (mask sensitive bits: IOPL, VM, RF).
-            - [ ] Restore `eip` to original program counter.
-            - [ ] Restore signal mask from context.
+        - [x] **`sys_sigprocmask(how, set, oset)`:** <!-- signal.c:40-50 implemented -->
+            - [x] Return old mask in `oset` if non-NULL. <!-- signal.c:41 -->
+            - [x] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK. <!-- signal.c:45-47 -->
+            - [x] Filter out SIGKILL/SIGSTOP from mask (cannot be blocked). <!-- signal.c:44 -->
+        - [x] **`sys_sigpending(set)`:** <!-- signal.c:52-55 implemented -->
+            - [x] Return pending & ~masked signals for current thread. <!-- signal.c:53, test_signal.c test_sigpending_masking -->
+        - [x] **`sys_sigsuspend(mask)`:** <!-- signal.c:57-68 implemented -->
+            - [x] Atomically set mask and sleep until signal arrives. <!-- signal.c:62-63 -->
+            - [x] Restore original mask on return. <!-- signal.c:66 -->
+            - [x] Always return -1 (EINTR). <!-- signal.c:67 -->
+        - [x] **`sys_sigaltstack(ss, oss)`:** <!-- signal.c:232-247 implemented -->
+            - [x] Return current alt stack in `oss`. <!-- signal.c:234 -->
+            - [x] Install new alt stack from `ss`. <!-- signal.c:241 -->
+            - [x] Validate `ss_size >= MINSIGSTKSZ`. <!-- signal.c:243 -->
+            - [x] Handle `SS_DISABLE` flag. <!-- signal.c:239 -->
+            - [x] Error if currently executing on alt stack. <!-- signal.c:238 -->
+        - [x] **`sys_kill(pid, sig)`:** <!-- signal.c:129-169 implemented -->
+            - [x] `pid > 0`: Send to specific process. <!-- signal.c:133 -->
+            - [x] `pid == 0`: Send to current process group. <!-- signal.c:149 -->
+            - [x] `pid == -1`: Send to all processes (except init). <!-- signal.c:155 -->
+            - [x] `pid < -1`: Send to process group `-pid`. <!-- signal.c:166 -->
+            - [x] `sig == 0`: Permission check only (existence check). <!-- signal.c:143 -->
+            - [x] Permission checks: Same UID or CAP_KILL. <!-- signal.c:145 -->
+        - [x] **`sys_sigreturn(scp)`:** <!-- arch/i386/signal.c:94-128 implemented -->
+            - [x] Validate `sigcontext` pointer is in user space. <!-- signal.c:96 -->
+            - [x] Verify `cs` and `ss` have RPL=3 (user mode). <!-- signal.c:105 -->
+            - [x] Restore all general-purpose registers. <!-- signal.c:109-120 -->
+            - [x] Restore `eflags` (mask sensitive bits: IOPL, VM, RF). <!-- signal.c:123 -->
+            - [x] Restore `eip` to original program counter. <!-- signal.c:121 -->
+            - [x] Restore signal mask from context. <!-- signal.c:132 -->
         - [ ] **`sys_sigwait(set, sig)`:**
             - [ ] Wait for any signal in `set` to become pending.
             - [ ] Remove signal from pending and return it in `sig`.

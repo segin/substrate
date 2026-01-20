@@ -352,6 +352,50 @@ static void test_sig_bitmasks_multiple_signals(void) {
  * Test Runner
  * ======================================================================== */
 
+/*
+ * Test: sys_sigpending returns masked signals (POSX: blocked and pending)
+ */
+static void test_sigpending_masking(void) {
+    setup_test_context();
+    
+    current_thread->sig_pending = sigmask(SIGUSR1) | sigmask(SIGUSR2);
+    current_thread->sig_mask = sigmask(SIGUSR1); // Block SIGUSR1
+    
+    uint32_t pending = 0;
+    int ret = sys_sigpending(&pending);
+    
+    ASSERT_EQ(ret, 0, "sys_sigpending returns 0");
+    /* sigpending returns pending AND blocked signals */
+    ASSERT_EQ(pending, sigmask(SIGUSR1), "sys_sigpending returns only blocked pending signals");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigpending_masking");
+}
+
+/*
+ * Test: sys_sigaltstack rejects if handling on stack
+ */
+static void test_sigaltstack_eperm_on_stack(void) {
+    setup_test_context();
+    
+    current_thread->sig_on_stack = 1;
+    
+    stack_t ss = {0};
+    ss.ss_size = MINSIGSTKSZ * 2;
+    
+    int ret = sys_sigaltstack(&ss, NULL);
+    
+    ASSERT_EQ(ret, -1, "sys_sigaltstack returns -1 when on stack");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigaltstack_eperm_on_stack");
+}
+
+
+/* ========================================================================
+ * Test Runner
+ * ======================================================================== */
+
 void run_signal_tests(void) {
     kprint("\n--- Signal Tests ---\n");
     
@@ -372,6 +416,10 @@ void run_signal_tests(void) {
     test_sig_catch_cleared_on_sigdfl();
     test_sig_ignore_cleared_on_handler();
     test_sig_bitmasks_multiple_signals();
+
+    /* Syscall logic tests */
+    test_sigpending_masking();
+    test_sigaltstack_eperm_on_stack();
     
     kprint("--- Signal Tests Complete ---\n\n");
 }

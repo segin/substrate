@@ -34,6 +34,7 @@ struct sigcontext {
     uint32_t eflags;
     uint32_t user_esp;
     uint32_t user_ss;
+    uint32_t oldmask;   // Saved signal mask (pre-handler)
 };
 
 /*

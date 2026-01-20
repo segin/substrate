@@ -25,7 +25,6 @@ static int copyout(const void *src, void *dst, size_t size) {
  * It pushes the context, signal number, and return address.
  */
 void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs) {
-    (void)mask; // Unused
     if (!regs) return;
 
     // TODO: Handle SA_SIGINFO (extended frame)
@@ -69,6 +68,7 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
     scp->eflags = regs->eflags;
     scp->user_esp = regs->useresp;
     scp->user_ss = regs->ss;
+    scp->oldmask = mask; // Save signal mask
     
     // Populate sigframe arguments
     sf.sig = sig;
@@ -122,6 +122,11 @@ int sys_sigreturn(struct sigcontext *scp) {
     syscall_regs->eflags = sc.eflags;
     syscall_regs->useresp = sc.user_esp;
     syscall_regs->ss = sc.user_ss;
+    
+    // Restore signal mask
+    if (current_thread) {
+        current_thread->sig_mask = sc.oldmask;
+    }
     
     // Return EAX from the context, not the syscall return value
     return sc.eax; 

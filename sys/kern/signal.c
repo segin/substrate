@@ -50,7 +50,7 @@ int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
 }
 
 int sys_sigpending(uint32_t *set) {
-    if (set) *set = current_thread->sig_pending;
+    if (set) *set = current_thread->sig_pending & current_thread->sig_mask;
     return 0;
 }
 
@@ -143,6 +143,11 @@ int sys_kill(int pid, int sig) {
         if (!target) return -1; // ESRCH
         if (sig == 0) return 0; // Existence check
 
+        // Permission check
+        if (current_process->uid != 0 && current_process->uid != target->uid) {
+            return -1; // EPERM
+        }
+
         psignal(target, sig);
         return 0;
     }
@@ -224,9 +229,30 @@ void signal_handle_pending(registers_t *regs) {
         return;
     }
 
+    // Capture handler config
+    sig_t handler = act->sa_handler;
+    uint32_t flags = act->sa_flags;
+    uint32_t old_mask = current_thread->sig_mask;
+
+    // SA_NODEFER: Block the signal itself unless requested not to
+    uint32_t new_mask = old_mask | act->sa_mask;
+    if (!(flags & SA_NODEFER)) {
+        new_mask |= sigmask(sig);
+    }
+    current_thread->sig_mask = new_mask;
+
+    // SA_RESETHAND: Reset to SIG_DFL
+    if (flags & SA_RESETHAND) {
+        struct sigaction dfl;
+        dfl.sa_handler = SIG_DFL;
+        dfl.sa_flags = 0;
+        dfl.sa_mask = 0;
+        sys_sigaction(sig, &dfl, NULL);
+    }
+
     // Deliver signal via architecture-specific sendsig
     extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
-    sendsig(act->sa_handler, sig, current_thread->sig_mask, act->sa_flags, regs);
+    sendsig(handler, sig, old_mask, flags, regs);
 }
 
 int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
@@ -238,6 +264,7 @@ int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
         if (ss->ss_flags & SS_DISABLE) {
             current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
         } else {
+            if (current_thread->sig_on_stack) return -1; // EPERM
             current_thread->sig_alt_stack = *ss;
             // Validate size?
             if (ss->ss_size < MINSIGSTKSZ) return -1; // ENOMEM
