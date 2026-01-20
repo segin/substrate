@@ -229,6 +229,126 @@ static void test_sigaction_mask_and_flags(void) {
 }
 
 /* ========================================================================
+ * sig_catch / sig_ignore Bitmask Tests
+ * ======================================================================== */
+
+/*
+ * Test: sig_catch is set when custom handler installed
+ */
+static void test_sig_catch_set_on_handler(void) {
+    setup_test_context();
+    
+    /* Initially both bitmasks should be 0 */
+    ASSERT_EQ(test_process.sig_catch, 0, "sig_catch initially 0");
+    ASSERT_EQ(test_process.sig_ignore, 0, "sig_ignore initially 0");
+    
+    /* Install custom handler */
+    struct sigaction act = { .sa_handler = (sig_t)0x12345678 };
+    sys_sigaction(SIGUSR1, &act, NULL);
+    
+    /* sig_catch should have SIGUSR1 bit set */
+    ASSERT_NE(test_process.sig_catch & sigmask(SIGUSR1), 0, "sig_catch has SIGUSR1");
+    ASSERT_EQ(test_process.sig_ignore & sigmask(SIGUSR1), 0, "sig_ignore does not have SIGUSR1");
+    
+    teardown_test_context();
+    TEST_PASS("test_sig_catch_set_on_handler");
+}
+
+/*
+ * Test: sig_ignore is set when SIG_IGN installed
+ */
+static void test_sig_ignore_set_on_sigign(void) {
+    setup_test_context();
+    
+    /* Install SIG_IGN */
+    struct sigaction act = { .sa_handler = SIG_IGN };
+    sys_sigaction(SIGPIPE, &act, NULL);
+    
+    /* sig_ignore should have SIGPIPE bit set */
+    ASSERT_NE(test_process.sig_ignore & sigmask(SIGPIPE), 0, "sig_ignore has SIGPIPE");
+    ASSERT_EQ(test_process.sig_catch & sigmask(SIGPIPE), 0, "sig_catch does not have SIGPIPE");
+    
+    teardown_test_context();
+    TEST_PASS("test_sig_ignore_set_on_sigign");
+}
+
+/*
+ * Test: sig_catch cleared when handler reset to SIG_DFL
+ */
+static void test_sig_catch_cleared_on_sigdfl(void) {
+    setup_test_context();
+    
+    /* Install handler first */
+    struct sigaction act = { .sa_handler = (sig_t)0x12345678 };
+    sys_sigaction(SIGTERM, &act, NULL);
+    ASSERT_NE(test_process.sig_catch & sigmask(SIGTERM), 0, "sig_catch has SIGTERM after handler");
+    
+    /* Reset to SIG_DFL */
+    act.sa_handler = SIG_DFL;
+    sys_sigaction(SIGTERM, &act, NULL);
+    
+    /* Both bitmasks should be cleared for this signal */
+    ASSERT_EQ(test_process.sig_catch & sigmask(SIGTERM), 0, "sig_catch cleared for SIGTERM");
+    ASSERT_EQ(test_process.sig_ignore & sigmask(SIGTERM), 0, "sig_ignore cleared for SIGTERM");
+    
+    teardown_test_context();
+    TEST_PASS("test_sig_catch_cleared_on_sigdfl");
+}
+
+/*
+ * Test: sig_ignore cleared when replaced by custom handler
+ */
+static void test_sig_ignore_cleared_on_handler(void) {
+    setup_test_context();
+    
+    /* Set to SIG_IGN first */
+    struct sigaction act = { .sa_handler = SIG_IGN };
+    sys_sigaction(SIGHUP, &act, NULL);
+    ASSERT_NE(test_process.sig_ignore & sigmask(SIGHUP), 0, "sig_ignore has SIGHUP");
+    
+    /* Now install custom handler */
+    act.sa_handler = (sig_t)0xABCDEF01;
+    sys_sigaction(SIGHUP, &act, NULL);
+    
+    /* sig_ignore should be cleared, sig_catch should be set */
+    ASSERT_EQ(test_process.sig_ignore & sigmask(SIGHUP), 0, "sig_ignore cleared for SIGHUP");
+    ASSERT_NE(test_process.sig_catch & sigmask(SIGHUP), 0, "sig_catch set for SIGHUP");
+    
+    teardown_test_context();
+    TEST_PASS("test_sig_ignore_cleared_on_handler");
+}
+
+/*
+ * Test: Multiple signals tracked independently
+ */
+static void test_sig_bitmasks_multiple_signals(void) {
+    setup_test_context();
+    
+    /* Set different handlers for different signals */
+    struct sigaction act_handler = { .sa_handler = (sig_t)0x12345678 };
+    struct sigaction act_ignore = { .sa_handler = SIG_IGN };
+    
+    sys_sigaction(SIGUSR1, &act_handler, NULL);
+    sys_sigaction(SIGUSR2, &act_handler, NULL);
+    sys_sigaction(SIGPIPE, &act_ignore, NULL);
+    sys_sigaction(SIGALRM, &act_ignore, NULL);
+    
+    /* Verify bitmasks */
+    ASSERT_NE(test_process.sig_catch & sigmask(SIGUSR1), 0, "SIGUSR1 in sig_catch");
+    ASSERT_NE(test_process.sig_catch & sigmask(SIGUSR2), 0, "SIGUSR2 in sig_catch");
+    ASSERT_EQ(test_process.sig_catch & sigmask(SIGPIPE), 0, "SIGPIPE not in sig_catch");
+    ASSERT_EQ(test_process.sig_catch & sigmask(SIGALRM), 0, "SIGALRM not in sig_catch");
+    
+    ASSERT_EQ(test_process.sig_ignore & sigmask(SIGUSR1), 0, "SIGUSR1 not in sig_ignore");
+    ASSERT_EQ(test_process.sig_ignore & sigmask(SIGUSR2), 0, "SIGUSR2 not in sig_ignore");
+    ASSERT_NE(test_process.sig_ignore & sigmask(SIGPIPE), 0, "SIGPIPE in sig_ignore");
+    ASSERT_NE(test_process.sig_ignore & sigmask(SIGALRM), 0, "SIGALRM in sig_ignore");
+    
+    teardown_test_context();
+    TEST_PASS("test_sig_bitmasks_multiple_signals");
+}
+
+/* ========================================================================
  * Test Runner
  * ======================================================================== */
 
@@ -245,6 +365,13 @@ void run_signal_tests(void) {
     test_sigaction_invalid_signal();
     test_sigaction_query_only();
     test_sigaction_mask_and_flags();
+    
+    /* sig_catch / sig_ignore bitmask tests */
+    test_sig_catch_set_on_handler();
+    test_sig_ignore_set_on_sigign();
+    test_sig_catch_cleared_on_sigdfl();
+    test_sig_ignore_cleared_on_handler();
+    test_sig_bitmasks_multiple_signals();
     
     kprint("--- Signal Tests Complete ---\n\n");
 }

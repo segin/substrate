@@ -53,6 +53,8 @@ typedef struct process {
     
     // Signals
     struct sigaction sig_actions[NSIG];
+    uint32_t sig_catch;   // Bitmask: signals with custom handlers (not SIG_DFL/SIG_IGN)
+    uint32_t sig_ignore;  // Bitmask: signals set to SIG_IGN
     
     // Process State
     uint8_t state; // process_state_t

@@ -476,8 +476,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Signal Infrastructure:**
         - [ ] **Per-Process Signal State (`process_t`):** <!-- proc.h -->
             - [x] `sig_actions[NSIG]`: Array of `struct sigaction` for each signal. <!-- proc.h:55, test_signal.c -->
-            - [ ] `sig_catch`: Bitmask of signals with handlers (not SIG_DFL/SIG_IGN).
-            - [ ] `sig_ignore`: Bitmask of signals set to SIG_IGN.
+            - [x] `sig_catch`: Bitmask of signals with handlers (not SIG_DFL/SIG_IGN). <!-- proc.h:56, signal.c:sys_sigaction -->
+            - [x] `sig_ignore`: Bitmask of signals set to SIG_IGN. <!-- proc.h:57, signal.c:sys_sigaction -->
         - [ ] **Per-Thread Signal State (`thread_t`):** <!-- proc.h -->
             - [ ] `sig_pending`: Bitmask of pending signals for this thread.
             - [ ] `sig_mask`: Current signal mask (blocked signals).

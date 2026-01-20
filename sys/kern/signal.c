@@ -13,8 +13,27 @@ extern thread_t threads[MAX_THREADS];
 // Signal System Calls
 int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
     if (sig <= 0 || sig > NSIG || sig == SIGKILL || sig == SIGSTOP) return -1;
+    
+    uint32_t mask = sigmask(sig);
+    
     if (oact) *oact = current_process->sig_actions[sig - 1];
-    if (act) current_process->sig_actions[sig - 1] = *act;
+    
+    if (act) {
+        current_process->sig_actions[sig - 1] = *act;
+        
+        /* Update sig_catch and sig_ignore bitmasks */
+        if (act->sa_handler == SIG_IGN) {
+            current_process->sig_ignore |= mask;
+            current_process->sig_catch &= ~mask;
+        } else if (act->sa_handler == SIG_DFL) {
+            current_process->sig_ignore &= ~mask;
+            current_process->sig_catch &= ~mask;
+        } else {
+            /* Custom handler */
+            current_process->sig_ignore &= ~mask;
+            current_process->sig_catch |= mask;
+        }
+    }
     return 0;
 }
 
