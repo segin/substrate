@@ -111,6 +111,76 @@ Defined in `<sys/stat.h>`. **Size: 92 bytes.**
 | 84     | `st_ctime_nsec` | `uint32_t` | 4    | Nsecs of last status change         |
 | 88     | `st_pad4`       | `uint32_t` | 4    | Padding                             |
 
+### System Info (`struct utsname`)
+Defined in `<sys/utsname.h>`.
+
+| Field        | Type        | Size (bytes) | Description                         |
+| :---         | :---        | :---         | :---                                |
+| `sysname`    | `char[]`    | 65           | Operating System Name ("substrate") |
+| `nodename`   | `char[]`    | 65           | Network Node Name                   |
+| `release`    | `char[]`    | 65           | Release Level                       |
+| `version`    | `char[]`    | 65           | Version Level                       |
+| `machine`    | `char[]`    | 65           | Hardware Type                       |
+| `domainname` | `char[]`    | 65           | NIS Domain Name                     |
+
+### Time Structures
+Defined in `<sys/time.h>`. `time_t` is a 64-bit signed integer.
+
+**`struct timespec`**
+| Field     | Type     | Size | Description |
+| :---      | :---     | :--- | :---        |
+| `tv_sec`  | `time_t` | 8    | Seconds     |
+| `tv_nsec` | `long`   | 4    | Nanoseconds |
+
+**`struct timeval`**
+| Field     | Type          | Size | Description  |
+| :---      | :---          | :--- | :---         |
+| `tv_sec`  | `time_t`      | 8    | Seconds      |
+| `tv_usec` | `suseconds_t` | 4    | Microseconds |
+
+### Polling (`struct pollfd`)
+Defined in `<sys/poll.h>`.
+
+| Field     | Type    | Size | Description      |
+| :---      | :---    | :--- | :---             |
+| `fd`      | `int`   | 4    | File Descriptor  |
+| `events`  | `short` | 2    | Requested Events |
+| `revents` | `short` | 2    | Returned Events  |
+
+### Directory Entry (`struct dirent`)
+Used by `getdents`. Variable length structure.
+
+| Field      | Type             | Size | Description                                  |
+| :---       | :---             | :--- | :---                                         |
+| `d_ino`    | `unsigned long`  | 4    | Inode number                                 |
+| `d_off`    | `unsigned long`  | 4    | Offset to next entry                         |
+| `d_reclen` | `unsigned short` | 2    | Length of this record                        |
+| `d_name`   | `char[]`         | Var  | Filename (null-terminated)                   |
+
+### Thread Creation (`struct thr_param`)
+Used by `thr_new`.
+
+| Field        | Type        | Size | Description                      |
+| :---         | :---        | :--- | :---                             |
+| `start_func` | `ptr`       | 4    | Entry point function             |
+| `arg`        | `ptr`       | 4    | Argument for entry point         |
+| `stack_base` | `ptr`       | 4    | Stack base address               |
+| `stack_size` | `size_t`    | 4    | Stack size in bytes              |
+| `tls_base`   | `ptr`       | 4    | TLS segment base address         |
+| `tls_size`   | `size_t`    | 4    | TLS segment size                 |
+| `child_tid`  | `long*`     | 4    | Address to write Child TID       |
+| `parent_tid` | `long*`     | 4    | Address to write Parent TID      |
+| `flags`      | `int`       | 4    | Creation flags                   |
+
+### Signal Stack (`stack_t`)
+Used by `sigaltstack`.
+
+| Field      | Type     | Size | Description        |
+| :---       | :---     | :--- | :---               |
+| `ss_sp`    | `void*`  | 4    | Stack base/pointer |
+| `ss_flags` | `int`    | 4    | Flags (__SS_DISABLE__, etc) |
+| `ss_size`  | `size_t` | 4    | Stack size         |
+
 ---
 
 ## 3. Process Initialization
