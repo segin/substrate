@@ -8,7 +8,10 @@ This document describes the binary interface for the Substrate Native personalit
 *   **Interrupt**: `0x80`
 *   **System Call Number**: Passed in `EAX` register.
 *   **Arguments**: Passed on the stack (see Argument Passing).
-*   **Return Value**: Returned in `EAX` register. Negative values in the range `[-4095, -1]` typically indicate errors, though the kernel raw return value is preserved.
+*   **Return Value**: Returned in `EAX` register. 
+    *   **Success**: Non-negative value (or specific valid negative pointers).
+    *   **Error**: Negative value in the range `[-4095, -1]`. The absolute value corresponds to the `errno` code.
+    *   **libc Responsibility**: The C library wrapper is responsible for checking this range, negating the value to set `errno`, and returning `-1` to the application.
 
 ### Argument Passing
 Substrate Native uses **Stack Conventions** (similar to FreeBSD/SVR4), distinct from Linux's register-based convention.
