@@ -391,6 +391,160 @@ static void test_sigaltstack_eperm_on_stack(void) {
     TEST_PASS("test_sigaltstack_eperm_on_stack");
 }
 
+/* ========================================================================
+ * sys_sigwait Tests
+ * ======================================================================== */
+
+/*
+ * Test: sys_sigwait returns immediately if signal already pending
+ */
+static void test_sigwait_immediate(void) {
+    setup_test_context();
+    
+    /* Make SIGUSR1 pending */
+    current_thread->sig_pending = sigmask(SIGUSR1);
+    
+    uint32_t wait_set = sigmask(SIGUSR1);
+    int sig = 0;
+    
+    int ret = sys_sigwait(&wait_set, &sig);
+    
+    ASSERT_EQ(ret, 0, "sys_sigwait returns 0 on success");
+    ASSERT_EQ(sig, SIGUSR1, "sys_sigwait returns correct signal");
+    ASSERT_EQ(current_thread->sig_pending & sigmask(SIGUSR1), 0, 
+              "signal removed from pending");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigwait_immediate");
+}
+
+/*
+ * Test: sys_sigwait rejects NULL arguments
+ */
+static void test_sigwait_null_args(void) {
+    setup_test_context();
+    
+    uint32_t wait_set = sigmask(SIGUSR1);
+    int sig = 0;
+    
+    ASSERT_EQ(sys_sigwait(NULL, &sig), 22, "sys_sigwait rejects NULL set");
+    ASSERT_EQ(sys_sigwait(&wait_set, NULL), 22, "sys_sigwait rejects NULL sig");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigwait_null_args");
+}
+
+/*
+ * Test: sys_sigwait filters SIGKILL/SIGSTOP from wait set
+ */
+static void test_sigwait_filters_cantmask(void) {
+    setup_test_context();
+    
+    /* Try to wait only for SIGKILL - should fail */
+    uint32_t wait_set = sigmask(SIGKILL);
+    int sig = 0;
+    
+    int ret = sys_sigwait(&wait_set, &sig);
+    ASSERT_EQ(ret, 22, "sys_sigwait rejects SIGKILL-only set");
+    
+    /* Try to wait only for SIGSTOP - should fail */
+    wait_set = sigmask(SIGSTOP);
+    ret = sys_sigwait(&wait_set, &sig);
+    ASSERT_EQ(ret, 22, "sys_sigwait rejects SIGSTOP-only set");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigwait_filters_cantmask");
+}
+
+/*
+ * Test: sys_sigwait selects first signal when multiple pending
+ */
+static void test_sigwait_selects_first(void) {
+    setup_test_context();
+    
+    /* Make multiple signals pending */
+    current_thread->sig_pending = sigmask(SIGUSR1) | sigmask(SIGUSR2) | sigmask(SIGALRM);
+    
+    uint32_t wait_set = sigmask(SIGUSR1) | sigmask(SIGUSR2) | sigmask(SIGALRM);
+    int sig = 0;
+    
+    int ret = sys_sigwait(&wait_set, &sig);
+    
+    ASSERT_EQ(ret, 0, "sys_sigwait returns 0");
+    /* Should return the lowest numbered signal */
+    ASSERT_EQ(sig, SIGUSR1, "sys_sigwait returns lowest pending signal");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigwait_selects_first");
+}
+
+/* ========================================================================
+ * sys_sigtimedwait Tests
+ * ======================================================================== */
+
+/*
+ * Test: sys_sigtimedwait returns signal immediately if pending
+ */
+static void test_sigtimedwait_immediate(void) {
+    setup_test_context();
+    
+    current_thread->sig_pending = sigmask(SIGTERM);
+    
+    uint32_t wait_set = sigmask(SIGTERM);
+    siginfo_t info = {0};
+    
+    int ret = sys_sigtimedwait(&wait_set, &info, NULL);
+    
+    ASSERT_EQ(ret, SIGTERM, "sys_sigtimedwait returns signal number");
+    ASSERT_EQ(info.si_signo, SIGTERM, "siginfo.si_signo filled correctly");
+    ASSERT_EQ(current_thread->sig_pending & sigmask(SIGTERM), 0,
+              "signal removed from pending");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigtimedwait_immediate");
+}
+
+/*
+ * Test: sys_sigtimedwait with timeout and no signal returns EAGAIN
+ */
+static void test_sigtimedwait_timeout(void) {
+    setup_test_context();
+    
+    current_thread->sig_pending = 0; /* No signals pending */
+    
+    uint32_t wait_set = sigmask(SIGUSR1);
+    int timeout_placeholder = 1; /* Non-NULL means timeout */
+    
+    int ret = sys_sigtimedwait(&wait_set, NULL, &timeout_placeholder);
+    
+    ASSERT_EQ(ret, -11, "sys_sigtimedwait returns -EAGAIN on timeout");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigtimedwait_timeout");
+}
+
+/*
+ * Test: sys_sigtimedwait fills siginfo properly
+ */
+static void test_sigtimedwait_siginfo(void) {
+    setup_test_context();
+    
+    current_thread->sig_pending = sigmask(SIGALRM);
+    
+    uint32_t wait_set = sigmask(SIGALRM);
+    siginfo_t info;
+    info.si_signo = 999; /* Should be overwritten */
+    
+    int ret = sys_sigtimedwait(&wait_set, &info, NULL);
+    
+    ASSERT_EQ(ret, SIGALRM, "sys_sigtimedwait returns signal");
+    ASSERT_EQ(info.si_signo, SIGALRM, "si_signo set correctly");
+    ASSERT_EQ(info.si_errno, 0, "si_errno is 0");
+    
+    teardown_test_context();
+    TEST_PASS("test_sigtimedwait_siginfo");
+}
+
 
 /* ========================================================================
  * Test Runner
@@ -420,6 +574,17 @@ void run_signal_tests(void) {
     /* Syscall logic tests */
     test_sigpending_masking();
     test_sigaltstack_eperm_on_stack();
+    
+    /* sys_sigwait tests */
+    test_sigwait_immediate();
+    test_sigwait_null_args();
+    test_sigwait_filters_cantmask();
+    test_sigwait_selects_first();
+    
+    /* sys_sigtimedwait tests */
+    test_sigtimedwait_immediate();
+    test_sigtimedwait_timeout();
+    test_sigtimedwait_siginfo();
     
     kprint("--- Signal Tests Complete ---\n\n");
 }

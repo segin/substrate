@@ -18,6 +18,11 @@ struct itimerval {
     struct timeval it_value;    /* current value */
 };
 
+struct timespec {
+    time_t tv_sec;     /* seconds */
+    long   tv_nsec;    /* nanoseconds */
+};
+
 // FD_SET macros are often in sys/select.h, but historically here too.
 // For now, minimal.
 

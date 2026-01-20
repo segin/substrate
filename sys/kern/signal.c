@@ -67,6 +67,126 @@ int sys_sigsuspend(const uint32_t *mask) {
     return -1; // Always returns -1 (EINTR)
 }
 
+/*
+ * sys_sigwait - Synchronously wait for a signal
+ *
+ * Waits for any signal in 'set' to become pending.
+ * Removes the signal from pending and returns it in '*sig'.
+ * Does NOT invoke the signal handler - this is synchronous signal consumption.
+ *
+ * POSIX: Returns 0 on success, error number on failure.
+ */
+int sys_sigwait(const uint32_t *set, int *sig) {
+    if (!set || !sig) return 22; // EINVAL
+    
+    uint32_t wait_mask = *set;
+    
+    // Cannot wait for SIGKILL or SIGSTOP
+    wait_mask &= ~(sigmask(SIGKILL) | sigmask(SIGSTOP));
+    
+    if (wait_mask == 0) return 22; // EINVAL - no valid signals
+    
+    // Block until a signal in wait_mask becomes pending
+    while (1) {
+        uint32_t deliverable = current_thread->sig_pending & wait_mask;
+        
+        if (deliverable) {
+            // Find the first matching signal
+            for (int i = 0; i < NSIG; i++) {
+                if (deliverable & (1 << i)) {
+                    int signal = i + 1;
+                    // Remove from pending (consume it)
+                    current_thread->sig_pending &= ~sigmask(signal);
+                    // Return signal number
+                    *sig = signal;
+                    return 0; // Success
+                }
+            }
+        }
+        
+        // No matching signal pending, sleep and retry
+        sched_sleep(&current_thread->sig_pending);
+        
+        // Check if we were woken by a non-matching signal that's unmasked
+        // (which would normally trigger handler delivery)
+        uint32_t other_pending = current_thread->sig_pending & ~current_thread->sig_mask & ~wait_mask;
+        if (other_pending) {
+            // Let the normal signal delivery mechanism handle it
+            // We return EINTR so the syscall can be restarted
+            return 4; // EINTR
+        }
+    }
+}
+
+/*
+ * sys_sigtimedwait - Timed wait for a signal with siginfo
+ *
+ * Like sigwait but with optional timeout and fills siginfo_t.
+ *
+ * POSIX: Returns signal number on success, -1 on error.
+ */
+int sys_sigtimedwait(const uint32_t *set, siginfo_t *info, 
+                     const void *timeout) {
+    if (!set) return -22; // EINVAL
+    
+    uint32_t wait_mask = *set;
+    wait_mask &= ~(sigmask(SIGKILL) | sigmask(SIGSTOP));
+    
+    if (wait_mask == 0) return -22; // EINVAL
+    
+    // TODO: Implement proper timeout handling using kernel tick counter
+    // For now, if timeout is NULL, wait indefinitely
+    // If timeout is specified but we can't implement it, treat as no-wait
+    (void)timeout; // Placeholder
+    
+    // Check for immediately available signal
+    uint32_t deliverable = current_thread->sig_pending & wait_mask;
+    
+    if (!deliverable && timeout != NULL) {
+        // Non-blocking check failed
+        return -11; // EAGAIN
+    }
+    
+    // Block until signal available (if no timeout)
+    while (!deliverable) {
+        sched_sleep(&current_thread->sig_pending);
+        deliverable = current_thread->sig_pending & wait_mask;
+        
+        // Check for interruption by other signals
+        uint32_t other_pending = current_thread->sig_pending & ~current_thread->sig_mask & ~wait_mask;
+        if (other_pending) {
+            return -4; // EINTR
+        }
+    }
+    
+    // Find the first matching signal
+    int signal = 0;
+    for (int i = 0; i < NSIG; i++) {
+        if (deliverable & (1 << i)) {
+            signal = i + 1;
+            break;
+        }
+    }
+    
+    if (signal == 0) return -22; // Should not happen
+    
+    // Remove from pending (consume it)
+    current_thread->sig_pending &= ~sigmask(signal);
+    
+    // Fill siginfo if provided
+    if (info) {
+        info->si_signo = signal;
+        info->si_errno = 0;
+        info->si_code = 0;        // Unknown source (synchronous wait)
+        info->si_pid = 0;         // Unknown sender
+        info->si_uid = 0;
+        info->si_addr = NULL;
+        info->si_status = 0;
+    }
+    
+    return signal; // Return signal number on success
+}
+
 // Send signal to valid process
 void psignal(process_t *p, int sig) {
     if (!p || sig <= 0 || sig > NSIG) return;

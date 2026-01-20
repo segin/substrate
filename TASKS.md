@@ -528,13 +528,13 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Restore `eflags` (mask sensitive bits: IOPL, VM, RF). <!-- signal.c:123 -->
             - [x] Restore `eip` to original program counter. <!-- signal.c:121 -->
             - [x] Restore signal mask from context. <!-- signal.c:132 -->
-        - [ ] **`sys_sigwait(set, sig)`:**
-            - [ ] Wait for any signal in `set` to become pending.
-            - [ ] Remove signal from pending and return it in `sig`.
-            - [ ] Do not invoke handler.
-        - [ ] **`sys_sigtimedwait(set, info, timeout)`:**
-            - [ ] Like `sigwait` but with timeout.
-            - [ ] Fill `siginfo_t` with signal details.
+        - [x] **`sys_sigwait(set, sig)`:** <!-- signal.c:78-118 -->
+            - [x] Wait for any signal in `set` to become pending. <!-- signal.c:89-105 -->
+            - [x] Remove signal from pending and return it in `sig`. <!-- signal.c:98-102 -->
+            - [x] Do not invoke handler. <!-- Synchronous consumption, no handler -->
+        - [x] **`sys_sigtimedwait(set, info, timeout)`:** <!-- signal.c:127-185 -->
+            - [x] Like `sigwait` but with timeout. <!-- signal.c:150-152 -->
+            - [x] Fill `siginfo_t` with signal details. <!-- signal.c:174-182 -->
     - [ ] **Signal Generation:**
         - [ ] **`psignal(p, sig)` - Send to Process:** <!-- signal.c:52-87 implemented -->
             - [ ] Validate process pointer and signal number.

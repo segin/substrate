@@ -85,6 +85,8 @@ int sys_sigpending(uint32_t *set);
 int sys_sigsuspend(const uint32_t *mask);
 int sys_kill(int pid, int sig);
 int signal_send_group(int pgrp, int sig);
+int sys_sigwait(const uint32_t *set, int *sig);
+int sys_sigtimedwait(const uint32_t *set, siginfo_t *info, const void *timeout);
 
 #include <stddef.h> // for size_t
 
