@@ -6,35 +6,36 @@
 /*
  * FreeBSD 14.3 kinfo_proc layout for i386 stability.
  * Values and offsets match the standard FreeBSD 14.3 ABI.
+ * All symbols prefixed with FREEBSD_ to avoid namespace pollution.
  */
 
-#define KI_NSPARE_INT   10
-#define KI_NSPARE_INT64 12
-#define KI_NSPARE_PTR   8
-#define KI_NGROUPS      16
-#define COMMLEN         19
-#define TDNAMLEN        16
-#define WMESGLEN        8
-#define LOGNAMELEN      17
-#define LOCKNAMELEN     8
-#define MAXCOMLEN       19
-#define KI_EMULNAMELEN  16
-#define LOGINCLASSLEN   17
+#define FREEBSD_KI_NSPARE_INT   10
+#define FREEBSD_KI_NSPARE_INT64 12
+#define FREEBSD_KI_NSPARE_PTR   8
+#define FREEBSD_KI_NGROUPS      16
+#define FREEBSD_COMMLEN         19
+#define FREEBSD_TDNAMLEN        16
+#define FREEBSD_WMESGLEN        8
+#define FREEBSD_LOGNAMELEN      17
+#define FREEBSD_LOCKNAMELEN     8
+#define FREEBSD_MAXCOMLEN       19
+#define FREEBSD_KI_EMULNAMELEN  16
+#define FREEBSD_LOGINCLASSLEN   17
 
-typedef int32_t  f_pid_t;
-typedef uint32_t f_uid_t;
-typedef uint32_t f_gid_t;
-typedef uint32_t f_vm_size_t;
-typedef uint32_t f_segsz_t;
-typedef uint32_t f_fixpt_t;
-typedef uint32_t f_sigset_t; // Simplified for layout
+typedef int32_t  freebsd_pid_t;
+typedef uint32_t freebsd_uid_t;
+typedef uint32_t freebsd_gid_t;
+typedef uint32_t freebsd_vm_size_t;
+typedef uint32_t freebsd_segsz_t;
+typedef uint32_t freebsd_fixpt_t;
+typedef uint32_t freebsd_sigset_t; // Simplified for layout
 
-struct f_timeval {
+struct freebsd_timeval {
     int32_t tv_sec;
     int32_t tv_usec;
 };
 
-struct kinfo_proc {
+struct freebsd_kinfo_proc {
     int ki_structsize;      /* size of this structure */
     int ki_layout;          /* reserved: layout identifier */
     void *ki_args;          /* address of command arguments */
@@ -46,43 +47,43 @@ struct kinfo_proc {
     void *ki_vmspace;       /* pointer to kernel vmspace struct */
     const char *__deprecated_kiflag_names;
     const char *ki_wchan;   /* sleep address */
-    f_pid_t ki_pid;         /* Process identifier */
-    f_pid_t ki_ppid;        /* parent process id */
-    f_pid_t ki_pgid;        /* process group id */
-    f_pid_t ki_tpgid;        /* tty process group id */
-    f_pid_t ki_sid;         /* Process session ID */
-    f_pid_t ki_tsid;        /* Terminal session ID */
+    freebsd_pid_t ki_pid;         /* Process identifier */
+    freebsd_pid_t ki_ppid;        /* parent process id */
+    freebsd_pid_t ki_pgid;        /* process group id */
+    freebsd_pid_t ki_tpgid;       /* tty process group id */
+    freebsd_pid_t ki_sid;         /* Process session ID */
+    freebsd_pid_t ki_tsid;        /* Terminal session ID */
     short ki_jobc;          /* job control counter */
     short ki_spare_short1;
     uint32_t ki_tdev_freebsd11;
-    f_sigset_t ki_siglist;
-    f_sigset_t ki_sigmask;
-    f_sigset_t ki_sigignore;
-    f_sigset_t ki_sigcatch;
-    f_uid_t ki_uid;
-    f_uid_t ki_ruid;
-    f_uid_t ki_svuid;
-    f_gid_t ki_rgid;
-    f_gid_t ki_svgid;
+    freebsd_sigset_t ki_siglist;
+    freebsd_sigset_t ki_sigmask;
+    freebsd_sigset_t ki_sigignore;
+    freebsd_sigset_t ki_sigcatch;
+    freebsd_uid_t ki_uid;
+    freebsd_uid_t ki_ruid;
+    freebsd_uid_t ki_svuid;
+    freebsd_gid_t ki_rgid;
+    freebsd_gid_t ki_svgid;
     short ki_ngroups;
     short ki_spare_short2;
-    f_gid_t ki_groups[KI_NGROUPS];
-    f_vm_size_t ki_size;
-    f_segsz_t ki_rssize;
-    f_segsz_t ki_swrss;
-    f_segsz_t ki_tsize;
-    f_segsz_t ki_dsize;
-    f_segsz_t ki_ssize;
+    freebsd_gid_t ki_groups[FREEBSD_KI_NGROUPS];
+    freebsd_vm_size_t ki_size;
+    freebsd_segsz_t ki_rssize;
+    freebsd_segsz_t ki_swrss;
+    freebsd_segsz_t ki_tsize;
+    freebsd_segsz_t ki_dsize;
+    freebsd_segsz_t ki_ssize;
     uint16_t ki_xstat;
     uint16_t ki_acflag;
-    f_fixpt_t ki_pctcpu;
+    freebsd_fixpt_t ki_pctcpu;
     uint32_t ki_estcpu;
     uint32_t ki_slptime;
     uint32_t ki_swtime;
     uint32_t ki_cow;
     uint64_t ki_runtime;
-    struct f_timeval ki_start;
-    struct f_timeval ki_childtime;
+    struct freebsd_timeval ki_start;
+    struct freebsd_timeval ki_childtime;
     long ki_flag;
     long ki_kiflag;
     int ki_traceflag;
@@ -92,18 +93,18 @@ struct kinfo_proc {
     char ki_rqindex;
     uint8_t ki_oncpu_old;
     uint8_t ki_lastcpu_old;
-    char ki_tdname[TDNAMLEN+1];
-    char ki_wmesg[WMESGLEN+1];
-    char ki_login[LOGNAMELEN+1];
-    char ki_lockname[LOCKNAMELEN+1];
-    char ki_comm[COMMLEN+1];
-    char ki_emul[KI_EMULNAMELEN+1];
-    char ki_loginclass[LOGINCLASSLEN+1];
-    char ki_moretdname[MAXCOMLEN-TDNAMLEN+1];
+    char ki_tdname[FREEBSD_TDNAMLEN+1];
+    char ki_wmesg[FREEBSD_WMESGLEN+1];
+    char ki_login[FREEBSD_LOGNAMELEN+1];
+    char ki_lockname[FREEBSD_LOCKNAMELEN+1];
+    char ki_comm[FREEBSD_COMMLEN+1];
+    char ki_emul[FREEBSD_KI_EMULNAMELEN+1];
+    char ki_loginclass[FREEBSD_LOGINCLASSLEN+1];
+    char ki_moretdname[FREEBSD_MAXCOMLEN-FREEBSD_TDNAMLEN+1];
     char ki_sparestrings[100];
-    int ki_spareints[KI_NSPARE_INT];
-    int64_t ki_spareint64s[KI_NSPARE_INT64];
-    void *ki_spareptrs[KI_NSPARE_PTR];
+    int ki_spareints[FREEBSD_KI_NSPARE_INT];
+    int64_t ki_spareint64s[FREEBSD_KI_NSPARE_INT64];
+    void *ki_spareptrs[FREEBSD_KI_NSPARE_PTR];
     void *ki_filedesc;
     void *ki_vmentry;
     void *ki_cred;

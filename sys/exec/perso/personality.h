@@ -27,5 +27,8 @@ extern struct personality personality_freebsd;
 extern struct personality personality_linux;
 extern struct personality personality_svr3;
 extern struct personality personality_svr4;
+extern struct personality personality_netbsd;
+extern struct personality personality_openbsd;
+extern struct personality personality_sunos;
 
 #endif
