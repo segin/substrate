@@ -2,6 +2,266 @@
 #include <stddef.h>
 #include <sys/termios.h>
 #include "../../arch/i386/syscall.h"
+#include "compat_syscalls.h"
+
+/* Forward declarations for syscalls used in translation functions */
+extern int sys_stat(const char*, void*);
+extern int sys_lstat(const char*, void*);
+extern int sys_fstat(int, void*);
+
+/* Native stat structure (from sys/stat.h) */
+struct native_stat {
+    uint32_t st_dev;
+    uint32_t st_ino;      /* Native uses 32-bit but will become 64-bit */
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint16_t st_uid;
+    uint16_t st_gid;
+    uint32_t st_rdev;
+    int64_t  st_size;     /* 64-bit */
+    uint32_t st_blksize;
+    uint32_t st_pad1;
+    int64_t  st_blocks;   /* 64-bit */
+    int64_t  st_atime;    /* 64-bit */
+    uint32_t st_atime_nsec;
+    uint32_t st_pad2;
+    int64_t  st_mtime;
+    uint32_t st_mtime_nsec;
+    uint32_t st_pad3;
+    int64_t  st_ctime;
+    uint32_t st_ctime_nsec;
+    uint32_t st_pad4;
+};
+
+/*
+ * Linux i386 oldstat structure (syscall 18) - 36 bytes
+ * Used by very old binaries (pre-1993)
+ */
+struct linux_oldstat {
+    uint16_t st_dev;
+    uint16_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint16_t st_uid;
+    uint16_t st_gid;
+    uint16_t st_rdev;
+    uint32_t st_size;
+    uint32_t st_atime;
+    uint32_t st_mtime;
+    uint32_t st_ctime;
+};
+
+/*
+ * Linux i386 stat structure (syscalls 106/107/108) - ~64 bytes
+ * Standard 32-bit stat used by most Linux binaries
+ */
+struct linux_stat {
+    uint32_t st_dev;
+    uint32_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint16_t st_uid;
+    uint16_t st_gid;
+    uint32_t st_rdev;
+    uint32_t st_size;     /* 32-bit, limited to 2GB files */
+    uint32_t st_blksize;
+    uint32_t st_blocks;
+    uint32_t st_atime;
+    uint32_t st_atime_nsec;
+    uint32_t st_mtime;
+    uint32_t st_mtime_nsec;
+    uint32_t st_ctime;
+    uint32_t st_ctime_nsec;
+    uint32_t __unused4;
+    uint32_t __unused5;
+};
+
+/*
+ * Linux i386 stat64 structure (syscalls 195/196/197) - ~96 bytes
+ * Large File Support stat for >2GB files
+ */
+struct linux_stat64 {
+    uint64_t st_dev;
+    uint32_t __pad1;
+    uint32_t __st_ino;    /* Old 32-bit ino for compat */
+    uint32_t st_mode;
+    uint32_t st_nlink;
+    uint32_t st_uid;
+    uint32_t st_gid;
+    uint64_t st_rdev;
+    uint32_t __pad2;
+    int64_t  st_size;
+    uint32_t st_blksize;
+    uint64_t st_blocks;
+    uint32_t st_atime;
+    uint32_t st_atime_nsec;
+    uint32_t st_mtime;
+    uint32_t st_mtime_nsec;
+    uint32_t st_ctime;
+    uint32_t st_ctime_nsec;
+    uint64_t st_ino;      /* Real 64-bit ino */
+};
+
+/* Linux stat translation: native -> linux_stat */
+static int linux_sys_stat(const char *path, struct linux_stat *buf) {
+    struct native_stat native;
+    int ret = sys_stat(path, &native);
+    if (ret < 0) return ret;
+    
+    buf->st_dev = native.st_dev;
+    buf->st_ino = native.st_ino;
+    buf->st_mode = native.st_mode;
+    buf->st_nlink = native.st_nlink;
+    buf->st_uid = native.st_uid;
+    buf->st_gid = native.st_gid;
+    buf->st_rdev = native.st_rdev;
+    buf->st_size = (uint32_t)(native.st_size & 0xFFFFFFFF);  /* Truncate! */
+    buf->st_blksize = native.st_blksize;
+    buf->st_blocks = (uint32_t)(native.st_blocks & 0xFFFFFFFF);
+    buf->st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
+    buf->st_atime_nsec = native.st_atime_nsec;
+    buf->st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
+    buf->st_mtime_nsec = native.st_mtime_nsec;
+    buf->st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
+    buf->st_ctime_nsec = native.st_ctime_nsec;
+    buf->__unused4 = 0;
+    buf->__unused5 = 0;
+    return 0;
+}
+
+static int linux_sys_lstat(const char *path, struct linux_stat *buf) {
+    struct native_stat native;
+    int ret = sys_lstat(path, &native);
+    if (ret < 0) return ret;
+    
+    buf->st_dev = native.st_dev;
+    buf->st_ino = native.st_ino;
+    buf->st_mode = native.st_mode;
+    buf->st_nlink = native.st_nlink;
+    buf->st_uid = native.st_uid;
+    buf->st_gid = native.st_gid;
+    buf->st_rdev = native.st_rdev;
+    buf->st_size = (uint32_t)(native.st_size & 0xFFFFFFFF);
+    buf->st_blksize = native.st_blksize;
+    buf->st_blocks = (uint32_t)(native.st_blocks & 0xFFFFFFFF);
+    buf->st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
+    buf->st_atime_nsec = native.st_atime_nsec;
+    buf->st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
+    buf->st_mtime_nsec = native.st_mtime_nsec;
+    buf->st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
+    buf->st_ctime_nsec = native.st_ctime_nsec;
+    buf->__unused4 = 0;
+    buf->__unused5 = 0;
+    return 0;
+}
+
+static int linux_sys_fstat(int fd, struct linux_stat *buf) {
+    struct native_stat native;
+    int ret = sys_fstat(fd, &native);
+    if (ret < 0) return ret;
+    
+    buf->st_dev = native.st_dev;
+    buf->st_ino = native.st_ino;
+    buf->st_mode = native.st_mode;
+    buf->st_nlink = native.st_nlink;
+    buf->st_uid = native.st_uid;
+    buf->st_gid = native.st_gid;
+    buf->st_rdev = native.st_rdev;
+    buf->st_size = (uint32_t)(native.st_size & 0xFFFFFFFF);
+    buf->st_blksize = native.st_blksize;
+    buf->st_blocks = (uint32_t)(native.st_blocks & 0xFFFFFFFF);
+    buf->st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
+    buf->st_atime_nsec = native.st_atime_nsec;
+    buf->st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
+    buf->st_mtime_nsec = native.st_mtime_nsec;
+    buf->st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
+    buf->st_ctime_nsec = native.st_ctime_nsec;
+    buf->__unused4 = 0;
+    buf->__unused5 = 0;
+    return 0;
+}
+
+/* Linux stat64 translation: native -> linux_stat64 */
+static int linux_sys_stat64(const char *path, struct linux_stat64 *buf) {
+    struct native_stat native;
+    int ret = sys_stat(path, &native);
+    if (ret < 0) return ret;
+    
+    buf->st_dev = native.st_dev;
+    buf->__pad1 = 0;
+    buf->__st_ino = native.st_ino;  /* 32-bit compat ino */
+    buf->st_mode = native.st_mode;
+    buf->st_nlink = native.st_nlink;
+    buf->st_uid = native.st_uid;
+    buf->st_gid = native.st_gid;
+    buf->st_rdev = native.st_rdev;
+    buf->__pad2 = 0;
+    buf->st_size = native.st_size;  /* Full 64-bit */
+    buf->st_blksize = native.st_blksize;
+    buf->st_blocks = native.st_blocks;
+    buf->st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
+    buf->st_atime_nsec = native.st_atime_nsec;
+    buf->st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
+    buf->st_mtime_nsec = native.st_mtime_nsec;
+    buf->st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
+    buf->st_ctime_nsec = native.st_ctime_nsec;
+    buf->st_ino = native.st_ino;  /* Full 64-bit ino */
+    return 0;
+}
+
+static int linux_sys_lstat64(const char *path, struct linux_stat64 *buf) {
+    struct native_stat native;
+    int ret = sys_lstat(path, &native);
+    if (ret < 0) return ret;
+    
+    buf->st_dev = native.st_dev;
+    buf->__pad1 = 0;
+    buf->__st_ino = native.st_ino;
+    buf->st_mode = native.st_mode;
+    buf->st_nlink = native.st_nlink;
+    buf->st_uid = native.st_uid;
+    buf->st_gid = native.st_gid;
+    buf->st_rdev = native.st_rdev;
+    buf->__pad2 = 0;
+    buf->st_size = native.st_size;
+    buf->st_blksize = native.st_blksize;
+    buf->st_blocks = native.st_blocks;
+    buf->st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
+    buf->st_atime_nsec = native.st_atime_nsec;
+    buf->st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
+    buf->st_mtime_nsec = native.st_mtime_nsec;
+    buf->st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
+    buf->st_ctime_nsec = native.st_ctime_nsec;
+    buf->st_ino = native.st_ino;
+    return 0;
+}
+
+static int linux_sys_fstat64(int fd, struct linux_stat64 *buf) {
+    struct native_stat native;
+    int ret = sys_fstat(fd, &native);
+    if (ret < 0) return ret;
+    
+    buf->st_dev = native.st_dev;
+    buf->__pad1 = 0;
+    buf->__st_ino = native.st_ino;
+    buf->st_mode = native.st_mode;
+    buf->st_nlink = native.st_nlink;
+    buf->st_uid = native.st_uid;
+    buf->st_gid = native.st_gid;
+    buf->st_rdev = native.st_rdev;
+    buf->__pad2 = 0;
+    buf->st_size = native.st_size;
+    buf->st_blksize = native.st_blksize;
+    buf->st_blocks = native.st_blocks;
+    buf->st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
+    buf->st_atime_nsec = native.st_atime_nsec;
+    buf->st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
+    buf->st_mtime_nsec = native.st_mtime_nsec;
+    buf->st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
+    buf->st_ctime_nsec = native.st_ctime_nsec;
+    buf->st_ino = native.st_ino;
+    return 0;
+}
 
 extern int sys_exit(int);
 extern int sys_write(int, const char*, int);
@@ -206,14 +466,14 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [12] = &sys_chdir,
     [13] = &sys_time,
     [14] = &sys_mknod,
-    [18] = &sys_stat,
+    [18] = (void*)linux_sys_stat,  /* oldstat - use Linux wrapper */
     [19] = &sys_lseek,
     [20] = &sys_getpid,
     [21] = &sys_mount,
     [22] = &sys_umount,
     [23] = &sys_setuid,
     [24] = &sys_getuid,
-    [28] = &sys_fstat,
+    [28] = (void*)linux_sys_fstat, /* oldfstat */
     [33] = &sys_access,
     [36] = &sys_sync,
     [37] = &sys_kill,
@@ -233,12 +493,12 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [64] = &sys_getppid,
     [65] = &sys_getpgrp,
     [66] = &sys_setsid,
-    [84] = &sys_lstat,
+    [84] = (void*)linux_sys_lstat, /* oldlstat */
     [85] = &sys_readlink,
     [90] = &sys_mmap,  // mmap
-    [106] = &sys_stat,
-    [107] = &sys_lstat,
-    [108] = &sys_fstat,
+    [106] = (void*)linux_sys_stat,  /* stat - Linux 32-bit struct */
+    [107] = (void*)linux_sys_lstat, /* lstat - Linux 32-bit struct */
+    [108] = (void*)linux_sys_fstat, /* fstat - Linux 32-bit struct */
     [120] = &sys_clone,
     [122] = &sys_uname,
     [132] = &sys_getpgid,
@@ -251,9 +511,9 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [183] = &sys_getcwd,
     [190] = &sys_vfork,
     [192] = &sys_mmap,  // mmap2 (same as mmap, offset already in bytes)
-    [195] = &sys_stat,   // stat64
-    [196] = &sys_lstat,  // lstat64
-    [197] = &sys_fstat,  // fstat64
+    [195] = (void*)linux_sys_stat64,  /* stat64 - Linux LFS struct */
+    [196] = (void*)linux_sys_lstat64, /* lstat64 - Linux LFS struct */
+    [197] = (void*)linux_sys_fstat64, /* fstat64 - Linux LFS struct */
     [199] = &sys_getuid, 
     [200] = &sys_getgid,
     [201] = &sys_geteuid,
