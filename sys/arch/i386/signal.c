@@ -70,41 +70,49 @@ static int validate_user_addr(const void *addr, size_t size) {
  * copyout - Copy data from kernel space to user space
  *
  * Safely copies 'size' bytes from kernel buffer 'src' to user-space
- * address 'dst'. Validates the destination address before copying.
+ * address 'dst'. Uses on_fault handler to catch page faults.
  *
  * Returns:
  *   0 on success
- *  -1 on invalid address (EFAULT equivalent)
+ *  -1 on invalid address (EFAULT)
  */
 static int copyout(const void *src, void *dst, size_t size) {
-    /* Validate destination is in user space */
+    /* Validate destination is in user space (basic bounds check) */
     if (validate_user_addr(dst, size) != 0) {
         return -1;  /* EFAULT */
     }
     
-    /*
-     * In a full implementation, we would:
-     * 1. Temporarily allow kernel to write to user pages
-     * 2. Use page fault handler to catch access violations
-     * 3. Return error if page fault during copy
-     *
-     * For now, we rely on the pmap layer having mapped the user stack
-     * as writable. If the copy faults, the page fault handler will
-     * terminate the process with SIGSEGV.
-     */
-    memcpy(dst, src, size);
+    /* Set up fault handler */
+    current_thread->on_fault = (uintptr_t)&&fault;
+    
+    /* Perform copy using inline assembly (rep movsb) */
+    /* If a page fault occurs, the IDT handler will redirect us to 'fault' */
+    __asm__ volatile (
+        "cld; rep movsb"
+        : "+S"(src), "+D"(dst), "+c"(size)
+        :
+        : "memory"
+    );
+    
+    /* Success - clear fault handler */
+    current_thread->on_fault = 0;
     return 0;
+
+fault:
+    /* Fault occurred - clear handler and return error */
+    current_thread->on_fault = 0;
+    return -1;
 }
 
 /*
  * copyin - Copy data from user space to kernel space
  *
  * Safely copies 'size' bytes from user-space address 'src' to kernel
- * buffer 'dst'. Validates the source address before copying.
+ * buffer 'dst'. Uses on_fault handler to catch page faults.
  *
  * Returns:
  *   0 on success
- *  -1 on invalid address (EFAULT equivalent)
+ *  -1 on invalid address (EFAULT)
  */
 static int copyin(const void *src, void *dst, size_t size) {
     /* Validate source is in user space */
@@ -112,8 +120,25 @@ static int copyin(const void *src, void *dst, size_t size) {
         return -1;  /* EFAULT */
     }
     
-    memcpy(dst, src, size);
+    /* Set up fault handler */
+    current_thread->on_fault = (uintptr_t)&&fault;
+    
+    /* Perform copy using inline assembly (rep movsb) */
+    __asm__ volatile (
+        "cld; rep movsb"
+        : "+S"(src), "+D"(dst), "+c"(size)
+        :
+        : "memory"
+    );
+    
+    /* Success */
+    current_thread->on_fault = 0;
     return 0;
+
+fault:
+    /* Fault occurred */
+    current_thread->on_fault = 0;
+    return -1;
 }
 
 /*
@@ -169,8 +194,8 @@ static void populate_ucontext(ucontext_t *uc, uint32_t mask, registers_t *regs) 
     
     /* Segment registers */
     mc->mc_gs = regs->gs;
-    mc->mc_fs = 0;  /* fs not in registers_t - use safe default */
-    mc->mc_es = 0;  /* es not in registers_t - use safe default */
+    mc->mc_fs = regs->fs;
+    mc->mc_es = regs->es;
     mc->mc_ds = regs->ds;
     
     /* General purpose registers */
@@ -333,9 +358,10 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
     struct sigcontext *scp = &sf.sc;
     
     /* Segment registers */
+    /* Segment registers */
     scp->gs = regs->gs;
-    scp->fs = 0;  /* fs not in registers_t - use safe default */
-    scp->es = 0;  /* es not in registers_t - use safe default */
+    scp->fs = regs->fs;
+    scp->es = regs->es;
     scp->ds = regs->ds;
     
     /* General purpose registers (from pusha) */
@@ -455,7 +481,8 @@ int sys_sigreturn(struct sigcontext *scp) {
      * Restore general-purpose registers
      */
     syscall_regs->gs = sc.gs;
-    /* fs, es not in registers_t */
+    syscall_regs->fs = sc.fs;
+    syscall_regs->es = sc.es;
     syscall_regs->ds = sc.ds;
     syscall_regs->edi = sc.edi;
     syscall_regs->esi = sc.esi;
@@ -570,7 +597,8 @@ int sys_rt_sigreturn(ucontext_t *ucp) {
      * Restore segment registers
      */
     syscall_regs->gs = mc->mc_gs;
-    /* fs, es not in registers_t */
+    syscall_regs->fs = mc->mc_fs;
+    syscall_regs->es = mc->mc_es;
     syscall_regs->ds = mc->mc_ds;
     
     /*

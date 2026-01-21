@@ -6,6 +6,7 @@
 #include <kern/panic.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/random.h>
 
 #define VIRTIO_BLK_F_SIZE_MAX   1
 #define VIRTIO_BLK_F_SEG_MAX    2
@@ -109,6 +110,23 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
 // Synchronous Read
 static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count, void *buf) {
     (void)disk;
+    
+    // Harvest entropy from disk I/O request
+    struct {
+        uint64_t lba;
+        uint32_t count;
+        uint64_t tsc;
+    } __attribute__((packed)) entropy_data;
+    
+    uint64_t tsc;
+    __asm__ volatile("rdtsc" : "=A"(tsc));
+    
+    entropy_data.lba = lba;
+    entropy_data.count = count;
+    entropy_data.tsc = tsc;
+    
+    random_harvest_fast(&entropy_data, sizeof(entropy_data));
+
     // 1. Setup Descriptors
     // We need 3 descriptors: Header (OUT), Data (IN), Status (IN).
     // Simple implementation: Use first 3 descriptors of the ring, assuming single-threaded, sync.

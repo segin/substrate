@@ -83,7 +83,10 @@ void sched_init(void) {
 
 int sched_fork_thread(process_t *proc, void *parent_regs) {
     // Cast parent_regs to registers_t pointer
+    // Cast parent_regs to registers_t pointer
     typedef struct {
+        uint32_t gs;
+        uint32_t fs, es;
         uint32_t ds;
         uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
         uint32_t int_no, err_code;
@@ -126,8 +129,11 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     kstack--; *kstack = regs->esi;
     kstack--; *kstack = regs->edi;
     
-    // Push DS
+    // Push Segment Registers (DS, ES, FS, GS)
     kstack--; *kstack = regs->ds;
+    kstack--; *kstack = regs->es;
+    kstack--; *kstack = regs->fs;
+    kstack--; *kstack = regs->gs;
     
     // Now push the callee-saved registers for switch_to
     // switch_to expects: [ebx, esi, edi, ebp] at stack top

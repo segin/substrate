@@ -167,7 +167,26 @@ void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
     idt_entries[num].flags = flags;
 }
 
+#include <sys/random.h>
+
 void isr_handler(registers_t *regs) {
+    /* Harvest entropy from interrupt timing (TSC) */
+    uint64_t tsc;
+    __asm__ volatile("rdtsc" : "=A"(tsc));
+    
+    /* Mix TSC and interrupt info into pool (fast, no lock) */
+    struct {
+        uint64_t ts;
+        uint32_t vector;
+        uint32_t err;
+    } __attribute__((packed)) entropy_data;
+    
+    entropy_data.ts = tsc;
+    entropy_data.vector = regs->int_no;
+    entropy_data.err = regs->err_code;
+    
+    random_harvest_fast(&entropy_data, sizeof(entropy_data));
+
     if (regs->int_no == 32) {
         timer_tick();
         
@@ -180,6 +199,7 @@ void isr_handler(registers_t *regs) {
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
         sched_yield();
+        signal_handle_pending(regs);
         return;
     }
 
@@ -196,6 +216,14 @@ void isr_handler(registers_t *regs) {
         // Exception - check if from user mode or kernel mode
         int is_usermode = (regs->cs & 0x3) == 3;
         
+        // Fault Recovery (copyin/copyout safe handlers)
+        // If a fault occurs in kernel mode while on_fault is set, resume there.
+        if (!is_usermode && current_thread && current_thread->on_fault) {
+             regs->eip = (uint32_t)current_thread->on_fault;
+             current_thread->on_fault = 0; // Reset to avoid loop if handler faults
+             return;
+        }
+
         // VM86 Mode Check for GPF (13)
         if (regs->int_no == 13 && (regs->eflags & 0x20000)) { // EFLAGS_VM = 0x20000
             extern void vm86_gpf_handler(registers_t *regs);
@@ -283,4 +311,6 @@ void isr_handler(registers_t *regs) {
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
     }
+    
+    signal_handle_pending(regs);
 }

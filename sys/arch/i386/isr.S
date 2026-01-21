@@ -132,9 +132,13 @@ ISR_NOERRCODE 128
 isr_common_stub:
     pusha
     
-    # Save segment registers (DS and GS need separate handling)
+    # Save segment registers
     mov %ds, %ax
     push %eax          # Save DS
+    mov %es, %ax
+    push %eax          # Save ES
+    mov %fs, %ax
+    push %eax          # Save FS
     mov %gs, %ax
     push %eax          # Save GS
     
@@ -152,11 +156,13 @@ isr_common_stub:
     # [ErrCode, IntNo] (ISR Macro)
     # [EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI] (Pusha = 32 bytes)
     # [DS] (4 bytes)
+    # [ES] (4 bytes)
+    # [FS] (4 bytes)
     # [GS] (4 bytes)
     # [Ptr to Stack] <- ESP (4 bytes)
     
-    # int_no offset: 4 (ptr) + 4 (gs) + 4 (ds) + 32 (pusha) = 44
-    mov 44(%esp), %eax
+    # int_no offset: 4 (ptr) + 4 (gs) + 4 (fs) + 4 (es) + 4 (ds) + 32 (pusha) = 52
+    mov 52(%esp), %eax
     
     cmp $128, %eax
     je call_syscall
@@ -172,10 +178,12 @@ isr_exit:
     
     pop %eax           # Restore GS
     mov %ax, %gs
+    pop %eax           # Restore FS
+    mov %ax, %fs
+    pop %eax           # Restore ES
+    mov %ax, %es
     pop %eax           # Restore DS
     mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
     
     popa
     add $8, %esp       # Clean up error code and ISR number
@@ -220,20 +228,21 @@ jump_to_userspace:
     
     # Jump to user mode
     iret
-    
-    # Jump to user mode
-    iret
+
 # fork_child_return - called when child process is scheduled
-# Child's stack already has: DS, pusha regs, int_no, err_code, IRET frame
+# Child's stack already has: GS, FS, ES, DS, pusha regs, int_no, err_code, IRET frame
 # This restores registers and returns to userspace via IRET
 .global fork_child_return
 fork_child_return:
-    # Pop DS and restore data segments
+    # Pop segment registers
+    pop %eax
+    mov %ax, %gs
+    pop %eax
+    mov %ax, %fs
+    pop %eax
+    mov %ax, %es
     pop %eax
     mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
     
     # Restore general registers (popa)
     popa

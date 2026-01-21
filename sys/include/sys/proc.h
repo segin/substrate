@@ -166,6 +166,9 @@ typedef struct thread {
     struct robust_list_head *robust_list;
     size_t                   robust_list_len;
     
+    // Fault Recovery (copyin/copyout)
+    uintptr_t                on_fault;
+    
     thread_state_t state;
     struct thread *next;
 } thread_t;

@@ -7,7 +7,7 @@ extern int sys_write(int, const char*, int);
 extern int sys_read(int, char*, int);
 extern int sys_open(const char*, int, int);
 extern int sys_close(int);
-extern int sys_lseek(int, int, int);
+extern int64_t sys_lseek(int, uint32_t, uint32_t, int);
 extern int sys_getuid(void);
 extern int sys_getgid(void);
 extern int sys_geteuid(void);
@@ -175,7 +175,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_TIME] = { 1, { ARG_PTR } },
     [SYS_SIGRETURN] = { 1, { ARG_PTR } },
     [SYS_SIGALTSTACK] = { 2, { ARG_PTR, ARG_PTR } },
-    [SYS_LSEEK] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [SYS_LSEEK] = { 4, { ARG_INT, ARG_HEX, ARG_HEX, ARG_INT } },
     [SYS_GETPID] = { 0, { 0 } },
     [SYS_MOUNT] = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
     [SYS_UMOUNT] = { 1, { ARG_STR } },

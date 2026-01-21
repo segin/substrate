@@ -107,6 +107,16 @@ void run_kernel_tests(void) {
          test_bitness();
     }
 
+    if (all || strcmp(test_arg, "rng") == 0) {
+         extern void run_rng_tests(void);
+         run_rng_tests();
+    }
+
+    if (all || strcmp(test_arg, "ps2") == 0) {
+         extern void run_ps2_tests(void);
+         run_ps2_tests();
+    }
+
     // Wait logic tests are run on host via verify_wait_host.sh
     // if (all || strcmp(test_arg, "wait") == 0) {
     //     test_wait_logic();

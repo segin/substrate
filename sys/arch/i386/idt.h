@@ -33,6 +33,7 @@ extern void isr1(void);
 // Common handler called from ASM
 typedef struct {
     uint32_t gs;                                    // Pushed second (lower address)
+    uint32_t fs, es;                                // Pushed third and fourth
     uint32_t ds;                                    // Pushed first (higher address)
     uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax; // Pushed by pusha
     uint32_t int_no, err_code;

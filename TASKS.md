@@ -599,14 +599,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Trampoline Page:**
             - [x] Refactor `linux_sys_ioctl` dispatch (TTY, Block, etc.) `[sys/exec/perso/perso_linux.c]`
 - [x] Fix `init` process session/pgrp setup `[sys/kern/main.c]` `[sys/pm/process.c]`
-            - [ ] Map trampoline code at fixed address (e.g., 0xFFFF1000).
-            - [ ] Page must be user-readable, executable, not writable.
-            - [ ] Contains minimal code: `mov $SYS_sigreturn, %eax; int $0x80`.
-        - [ ] **Trampoline Code (i386):**
-            - [ ] `lea 4(%esp), %eax` - Get pointer to sigcontext.
-            - [ ] `push %eax` - Push as syscall argument.
-            - [ ] `mov $119, %eax` - SYS_sigreturn.
-            - [ ] `int $0x80` - Invoke kernel.
+            - [x] Map trampoline code at fixed address (e.g., 0xFFFF1000).
+            - [x] Page must be user-readable, executable, not writable.
+            - [x] Contains minimal code: `mov $SYS_sigreturn, %eax; int $0x80`.
+        - [x] **Trampoline Code (i386):**
+            - [x] `lea 4(%esp), %eax` - Get pointer to sigcontext.
+            - [x] `push %eax` - Push as syscall argument.
+            - [x] `mov $119, %eax` - SYS_sigreturn.
+            - [x] `int $0x80` - Invoke kernel.
         - [ ] **VDSO Integration (Future):**
             - [ ] Embed trampoline in VDSO page.
             - [ ] Use `AT_SYSINFO` to locate trampoline.
@@ -1077,6 +1077,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Implement `tty_driver->write()` callback.
                 - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls.
         - [ ] **Keyboard Input (PS/2 to TTY):**
+            - [x] Fix PS/2 driver build errors (constant mismatches in `test_ps2.c`).
             - [ ] **Input Path:**
                 - [ ] Hook keyboard driver to TTY input queue.
                 - [ ] Convert scancodes to ASCII via keymap.
@@ -1322,19 +1323,19 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Define `enum entropy_source` (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG). <!-- sys/random.h -->
             - [x] Per-source entropy rate limiting. <!-- rng_state.harvest_count[] -->
         - [x] **Timing-Based Sources:**
-            - [ ] **Interrupt Timing:**
-                - [ ] Hook `pit_handler` for timer jitter (TSC delta).
-                - [ ] Hook `isr_handler` for interrupt timing.
-                - [ ] Mix TSC low bits on each interrupt.
-                - [ ] Credit ~1 bit per interrupt timing sample.
+            - [x] **Interrupt Timing:**
+                - [x] Hook `pit_handler` for timer jitter (TSC delta). <!-- via isr_handler(IRQ0) -->
+                - [x] Hook `isr_handler` for interrupt timing. <!-- idt.c:isr_handler -->
+                - [x] Mix TSC low bits on each interrupt. <!-- random_harvest_fast -->
+                - [x] Credit ~1 bit per interrupt timing sample. <!-- using random_harvest_fast (mixing only) -->
             - [x] **Keyboard/Mouse:** <!-- keyboard.c, mouse.c -->
                 - [x] Hook `keyboard_handler` (scancode + timing). <!-- keyboard.c:68-72 -->
                 - [x] Hook PS/2 mouse driver (movement + timing). <!-- mouse.c:54-58 -->
                 - [x] Credit ~2-4 bits per HID event. <!-- Uses random_harvest_fast -->
-            - [ ] **Disk I/O:**
-                - [ ] Hook IDE/AHCI/VirtIO completion interrupts.
-                - [ ] Mix seek time / completion jitter.
-                - [ ] Credit ~1 bit per I/O completion.
+            - [x] **Disk I/O:**
+                - [x] Hook IDE/AHCI/VirtIO completion interrupts. <!-- Hooked virtio_blk (sync), ide -->
+                - [x] Mix seek time / completion jitter.
+                - [x] Credit ~1 bit per I/O completion.
             - [ ] **Network:**
                 - [ ] Hook network packet arrival (timing + data).
                 - [ ] Mix packet timing and partial payload.
@@ -2107,6 +2108,28 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Implement Tclunk
 
 ### 5. System Calls & Personalities
+- [ ] **System Call ABI (64-bit Clean):**
+    - [ ] **Type Definitions:**
+        - [ ] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`.
+        - [ ] Verify alignment requirements (8-byte alignment for 64-bit types on i386 stack).
+    - [ ] **System Call Audit:**
+        - [ ] Audit all existing syscalls for argument types (int vs long vs long long).
+        - [ ] Identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. `lseek`, `truncate`, `mmap`).
+    - [ ] **Kernel Refactoring:**
+        - [x] Native `sys_lseek` takes 64-bit offset (split hi/lo on 32-bit stack).
+        - [ ] Native `sys_ftruncate` takes 64-bit length (split hi/lo on 32-bit stack).
+        - [ ] `sys_mmap` offset is 64-bit (using split words on i386).
+        - [x] `struct stat` uses 64-bit `ino_t`, `off_t`, `blkcnt_t`, `time_t`.
+    - [ ] **LibC Wrappers:**
+        - [ ] Update `lseek` wrapper to pass high/low words on 32-bit.
+        - [ ] Update `ftruncate` wrapper.
+        - [ ] Update `stat`/`fstat` wrappers.
+    - [ ] **Personality Compatibility:**
+        - [ ] Ensure 32-bit Linux personality handles register splitting for 64-bit args correctly.
+        - [ ] Ensure native personality mandates 64-bit types.
+    - [ ] **Testing:**
+        - [ ] **Large File Support (LFS):** Test creating/seeking > 2GB files.
+        - [ ] **Y2038:** Test time_t overflow handling.
 - [ ] **Mechanisms:**
         - [ ] **PTY Subsystem (Unix98/System V) - Massive Expansion:**
             - [ ] **Core PTY Driver (`/dev/pts/` + `/dev/ptmx`):**
@@ -2256,6 +2279,36 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace).
         - [ ] **Serial Console:** Interactive GDB stub over UART.
         - [ ] **DTrace:** (As planned in ideas) Dynamic tracing framework.
+- [ ] **64-bit System Call ABI Enforcement:**
+    - [ ] **Type Definitions & Alignment:**
+        - [ ] Define `off_t`, `time_t`, `ino_t`, `dev_t` as 64-bit integers in all architectures (i386/x86_64).
+        - [ ] Verify `size_t` and `ssize_t` match register width but critical structures use explicit width types (e.g., `uint64_t`).
+        - [ ] Audit `stat`, `statfs` structures for 64-bit alignment and padding.
+        - [ ] Ensure `struct timespec` and `struct timeval` use 64-bit seconds types.
+    - [ ] **System Call Audit:**
+        - [ ] Audit all file system calls (`open`, `seek`, `truncate`, `mmap`) for 64-bit offset support.
+        - [ ] Audit time-related syscalls (`clock_gettime`, `nanosleep`, `utimensat`) for 64-bit timespecs.
+        - [ ] Audit resource limit syscalls (`getrlimit`, `setrlimit`) for 64-bit values.
+        - [ ] Audit `recvmsg`/`sendmsg` for `struct msghdr` compatibility.
+    - [ ] **Kernel Refactoring:**
+        - [ ] Refactor `sys_lseek` to take 64-bit offset (split high/low registers on 32-bit if needed, or use register pairs).
+        - [ ] Refactor `sys_truncate` / `sys_ftruncate` for 64-bit lengths.
+        - [ ] Ensure VFS layer uses 64-bit offsets exclusively.
+        - [ ] Implement `sys_pselect6` / `sys_ppoll` with 64-bit timeout support.
+    - [ ] **LibC Wrappers (`lib/c`):**
+        - [ ] Update `lseek` to pass 64-bit arguments correctly (EDX:EAX on i386).
+        - [ ] Ensure `_FILE_OFFSET_BITS=64` semantics are default.
+        - [ ] Implement `stat` wrapper mapping to 64-bit kernel structure.
+    - [ ] **Personality Compatibility:**
+        - [ ] Implement translation for legacy 32-bit syscalls (Linux `old_mmap`, `stat64` vs `stat`).
+        - [ ] FreeBSD 32-bit shim layer updates per ABI.
+    - [ ] **Testing & Verification:**
+        - [ ] Add regression tests for large file support (>2GB and >4GB).
+        - [ ] Verify time_t overflow behavior (Year 2038 compliance).
+        - [ ] Verify structure layout with `pahole` or offsets test.
+    - [ ] **Documentation:**
+        - [ ] Document the 64-bit ABI in `docs/kernel/syscall_abi.md`.
+        - [ ] Update `man2` pages for affected syscalls.
 - [ ] **Personalities:**
     - [ ] **Xenix & SCO Compatibility (The 6 Flavors):**
         - [ ] **Variants:**

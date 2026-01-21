@@ -18,6 +18,7 @@
 #include <string.h>
 #include "../../../kern/console.h"
 #include "../blkdev.h"
+#include <sys/random.h>
 
 /*
  * ============================================================
@@ -899,6 +900,19 @@ static int ide_blkdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
 
 void ide_irq_handler(int irq) {
     uint8_t channel = (irq == 15) ? 1 : 0;
+    
+    /* Harvest entropy from interrupt */
+    struct {
+        uint64_t tsc;
+        int irq;
+        uint8_t channel;
+    } __attribute__((packed)) entropy;
+    
+    __asm__ volatile("rdtsc" : "=A"(entropy.tsc));
+    entropy.irq = irq;
+    entropy.channel = channel;
+    
+    random_harvest_fast(&entropy, sizeof(entropy));
     
     /* Read status to acknowledge interrupt */
     uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
