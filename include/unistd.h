@@ -53,6 +53,8 @@ int isatty(int fd);
 char *ttyname(int fd);
 
 off_t lseek(int fd, off_t offset, int whence);
+int ftruncate(int fd, off_t length);
+int truncate(const char *path, off_t length);
 
 unsigned int sleep(unsigned int seconds);
 

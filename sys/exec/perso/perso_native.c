@@ -34,7 +34,7 @@ extern int sys_getdents(unsigned int, void*, unsigned int);
 struct thr_param;
 extern int sys_thr_new(struct thr_param*, int);
 extern int sys_acct(const char*);
-extern int sys_time(uint32_t*);
+extern int64_t sys_time(int64_t*);
 extern int sys_getpid(void);
 extern int sys_getcwd(char*, size_t);
 extern int sys_execve(const char*, char**, char**);

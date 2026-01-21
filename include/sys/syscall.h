@@ -38,6 +38,8 @@
 #define SYS_ioctl       54
 #define SYS_readlink    85
 #define SYS_getdents    141
+#define SYS_truncate    92
+#define SYS_ftruncate   93
 
 /* File system */
 #define SYS_link        9

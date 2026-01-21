@@ -225,6 +225,18 @@ int rename(const char *oldpath, const char *newpath) {
     return (int)_syscall2(SYS_RENAME, (int)oldpath, (int)newpath);
 }
 
+int ftruncate(int fd, off_t length) {
+    uint32_t len_lo = (uint32_t)(length & 0xFFFFFFFF);
+    uint32_t len_hi = (uint32_t)((length >> 32) & 0xFFFFFFFF);
+    return (int)_syscall4(SYS_ftruncate, fd, len_lo, len_hi, 0);
+}
+
+int truncate(const char *path, off_t length) {
+    uint32_t len_lo = (uint32_t)(length & 0xFFFFFFFF);
+    uint32_t len_hi = (uint32_t)((length >> 32) & 0xFFFFFFFF);
+    return (int)_syscall5(SYS_truncate, (int)path, len_lo, len_hi, 0, 0);
+}
+
 int uname(struct utsname *buf) {
     return (int)_syscall1(SYS_UNAME, (int)buf);
 }
