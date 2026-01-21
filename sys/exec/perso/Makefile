@@ -1,6 +1,6 @@
 include ../../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../arch/i386
+CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = perso_native.c perso_freebsd.c perso_linux.c perso_svr3.c perso_svr4.c perso_netbsd.c perso_openbsd.c perso_sunos.c compat_syscalls.c

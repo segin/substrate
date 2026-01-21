@@ -30,6 +30,10 @@ CXXFLAGS += $(COMMON_FLAGS) -std=c++23 -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUD
 FREESTANDING_CFLAGS = $(CFLAGS) -ffreestanding -nostdlib -fno-builtin -fno-pie
 FREESTANDING_LDFLAGS = -m elf_i386 -nostdlib
 
+# Kernel source tree for internal includes (enables #include <kern/sched.h>)
+KERNEL_SRC = $(TOP)/sys
+KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) -I$(KERNEL_SRC)
+
 # Userland flags (for standard libraries and utils)
 # These will eventually link against our own libc
 USER_CFLAGS = $(CFLAGS)

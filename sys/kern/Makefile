@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../arch/i386 -I.. -I../include
+CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = acct.c time.c main.c panic.c stacktrace.c ksyms.c spinlock.c mutex.c semaphore.c kthread.c signal.c sigprop.c futex.c lib.c stubs.c input.c kobject.c console.c cmdline.c debug.c tty.c sleepq.c random.c \

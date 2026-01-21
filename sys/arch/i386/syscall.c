@@ -1,20 +1,24 @@
+
+
 #include "syscall.h"
 #include "idt.h"
-#include "../../kern/sched.h"
-#include "../../kern/version.h"
-#include "../../kern/panic.h"
-#include "../../kern/console.h"
-#include "../../exec/perso/personality.h"
-#include "../../include/sys/thr.h"
-#include "../../include/sys/acct.h"
-#include "../../include/sys/file.h"
-#include "../../include/sys/proc.h"
-#include "../../include/sys/signal.h"
-#include "../../include/sys/session.h"
-#include "../../vfs/vfs.h"
-#include "../../vfs/vfs.h"
-#include "../../drivers/serial/uart.h"
-#include "../../include/sys/sysinfo.h"
+
+/* NetBSD-style kernel internal includes */
+#include <kern/sched.h>
+#include <kern/version.h>
+#include <kern/panic.h>
+#include <kern/console.h>
+#include <exec/perso/personality.h>
+#include <include/sys/thr.h>
+#include <include/sys/acct.h>
+#include <include/sys/file.h>
+#include <include/sys/proc.h>
+#include <include/sys/signal.h>
+#include <include/sys/session.h>
+#include <vfs/vfs.h>
+#include <drivers/serial/uart.h>
+#include <include/sys/sysinfo.h>
+
 #include <sys/types.h>
 #include <string.h>
 #include <stdbool.h>
