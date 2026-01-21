@@ -1,31 +1,72 @@
-.\" Process this file with
-.\" groff -man -Tascii fork.2
 .\"
-.TH FORK 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" FORK(2) - Substrate Native Personality
+.\"
+.TH FORK 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
 fork \- create a child process
-.SH LIBRARY
-Standard C library (libc, -lc)
 .SH SYNOPSIS
+.nf
 .B #include <unistd.h>
 .PP
-.BI "pid_t fork(void);"
+.B pid_t fork(void);
+.fi
 .SH DESCRIPTION
-.B fork()
-creates a new process by duplicating the calling process. The new process is referred to as the child process. The calling process is referred to as the parent process.
+.BR fork ()
+creates a new process by duplicating the calling process. The new process
+is referred to as the
+.I child
+process. The calling process is referred to as the
+.I parent
+process.
 .PP
-The child process and the parent process run in separate memory spaces. At the time of
-.B fork()
-both memory spaces have the same content. Memory writes, file mappings, and unmappings performed by one of the processes do not affect the other.
+The child process is an exact duplicate of the parent process except for:
+.IP \(bu 3
+The child has a unique process ID.
+.IP \(bu 3
+The child's parent process ID is the process ID of the parent.
+.IP \(bu 3
+The child does not inherit pending signals.
+.IP \(bu 3
+File locks are not inherited.
+.PP
+Substrate implements Copy-on-Write (COW) for memory pages, so fork is
+efficient even for large processes.
 .SH RETURN VALUE
-On success, the PID of the child process is returned in the parent, and 0 is returned in the child. On failure, -1 is returned in the parent, no child process is created, and errno is set appropriately.
+On success, the PID of the child process is returned in the parent,
+and 0 is returned in the child.
+.PP
+On failure, \-1 is returned in the parent, no child process is created,
+and
+.I errno
+is set appropriately.
 .SH ERRORS
 .TP
 .B EAGAIN
-A system-imposed limit on the number of threads was encountered.
+Cannot allocate sufficient memory or process table entry.
 .TP
 .B ENOMEM
-Failed to allocate the necessary kernel structures or memory for the new process.
+Failed to allocate memory for child process.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 2 (SYS_FORK)
+Arguments:      none
 
+    push $0
+    mov eax, 2
+    int $0x80
+.fi
+.SS Copy-on-Write
+Substrate uses pmap-level COW. When a page is written after fork,
+a page fault triggers duplication. Use
+.BR pmap_stats (2)
+to query COW statistics.
 .SH SEE ALSO
-.BR intro(2)
+.BR vfork (2),
+.BR clone (2),
+.BR execve (2),
+.BR wait (2),
+.BR pmap_stats (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

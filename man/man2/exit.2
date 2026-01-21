@@ -1,27 +1,48 @@
-.\" Process this file with
-.\" groff -man -Tascii exit.2
 .\"
-.TH EXIT 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" EXIT(2) - Substrate Native Personality
+.\"
+.TH EXIT 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
-exit \- terminate the calling process
-.SH LIBRARY
-Standard C library (libc, -lc)
+exit, _exit \- terminate the calling process
 .SH SYNOPSIS
-.B #include <unistd.h>
+.nf
+.B #include <stdlib.h>
 .PP
-.BI "void _exit(int " status ");"
+.BI "void exit(int " status ");
+.BI "void _exit(int " status ");
+.fi
 .SH DESCRIPTION
-.B _exit()
-terminates the calling process "immediately". Any open file descriptors belonging to the process are closed. The process's parent is sent a
-.B SIGCHLD
-signal.
-.PP
-The value
+The
+.BR exit ()
+function terminates the calling process immediately, returning
 .I status
-is returned to the parent process as the process's exit status, and can be collected using
-.BR wait (2).
+to the parent process.
+.PP
+The low-order 8 bits of
+.I status
+are available to the parent process via
+.BR wait (2)
+or
+.BR waitpid (2).
 .SH RETURN VALUE
-This function does not return.
+These functions do not return.
+.SH ERRORS
+None.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 1 (SYS_EXIT)
+Arguments:      status (on stack)
 
+    push status
+    push $0
+    mov eax, 1
+    int $0x80
+.fi
 .SH SEE ALSO
-.BR intro(2)
+.BR wait (2),
+.BR waitpid (2),
+.BR fork (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

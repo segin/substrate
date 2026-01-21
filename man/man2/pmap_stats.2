@@ -1,44 +1,58 @@
-.TH GET_COW_STATS 2 "January 2026" "Substrate Kernel" "System Calls"
+.\"
+.\" PMAP_STATS(2) - Substrate Native Personality
+.\"
+.TH PMAP_STATS 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
-sys_pmap_stats \- get pmap and virtual memory statistics
-.SH LIBRARY
-Standard C library (libc, -lc)
+pmap_stats \- get virtual memory statistics
 .SH SYNOPSIS
-.B #include <sys/arch/i386/pmap.h>
-.LP
-.BI "int sys_pmap_stats(struct pmap_stats *" out ");"
+.nf
+.B #include <sys/pmap.h>
+.PP
+.BI "int pmap_stats(struct pmap_stats *" stats ");
+.fi
 .SH DESCRIPTION
-.B sys_pmap_stats
-retrieves global virtual memory statistics from the kernel.
-.PP
-The
-.I out
-argument points to a
-.B pmap_stats
-structure:
-.PP
-.RS
+.BR pmap_stats ()
+is a Substrate-specific system call that retrieves virtual memory
+management statistics into the buffer pointed to by
+.IR stats .
+.SS The pmap_stats structure
 .nf
 struct pmap_stats {
-    uint32_t faults;                /* Total page faults */
-    uint32_t cow_faults;            /* COW faults */
-    uint32_t zero_fills;            /* Zero-fill faults */
-    uint32_t protection_upgrades;   /* Read->Write upgrades */
-    uint32_t protection_downgrades; /* Write->Read downgrades */
-    uint32_t cow_pages_mapped;      /* Pages shared via COW */
-    uint32_t cow_duplications;      /* Pages duplicated by COW */
-    uint32_t pages_saved_by_cow;    /* Pages saved by COW optimization */
-    uint32_t tlb_invlpg_count;      /* TLB single page flushes */
-    uint32_t tlb_full_flush_count;  /* TLB full flushes */
-    uint32_t total_pmaps;           /* Current allocated pmaps */
+    uint32_t page_faults;         /* Total page faults */
+    uint32_t cow_duplications;    /* COW page copies made */
+    uint32_t cow_pages_mapped;    /* COW pages mapped */
+    uint32_t pages_mapped;        /* Total pages mapped */
+    uint32_t pages_unmapped;      /* Total pages unmapped */
+    uint32_t tlb_shootdowns;      /* TLB invalidations */
 };
 .fi
+.PP
+Global statistics can be retrieved by passing a special flag.
 .SH RETURN VALUE
-On success, zero is returned. On error, -1 is returned.
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
 .SH ERRORS
 .TP
 .B EFAULT
 .I stats
-points to an invalid address.
+is not a valid pointer.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 241 (SYS_GET_COW_STATS)
+Arguments:      stats (on stack)
+.fi
+.SS Copy-on-Write Monitoring
+This syscall is useful for debugging memory usage and monitoring
+the effectiveness of copy-on-write after
+.BR fork (2)
+operations.
 .SH SEE ALSO
-.BR pmap (9)
+.BR fork (2),
+.BR mmap (2),
+.BR substrate (7)
+.SH HISTORY
+Substrate-specific, not available on other Unix systems.

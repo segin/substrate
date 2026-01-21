@@ -1,25 +1,56 @@
-.\" Process this file with
-.\" groff -man -Tascii getpid.2
 .\"
-.TH GETPID 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" GETPID(2) - Substrate Native Personality
+.\"
+.TH GETPID 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
-getpid, getppid \- get process identification
-.SH LIBRARY
-Standard C library (libc, -lc)
+getpid, getppid, getuid, getgid, geteuid, getegid \- get process identification
 .SH SYNOPSIS
+.nf
 .B #include <unistd.h>
 .PP
-.BI "pid_t getpid(void);"
-.br
-.BI "pid_t getppid(void);"
+.B pid_t getpid(void);
+.B pid_t getppid(void);
+.B uid_t getuid(void);
+.B gid_t getgid(void);
+.B uid_t geteuid(void);
+.B gid_t getegid(void);
+.fi
 .SH DESCRIPTION
-.B getpid()
+.BR getpid ()
 returns the process ID (PID) of the calling process.
 .PP
-.B getppid()
+.BR getppid ()
 returns the process ID of the parent of the calling process.
+.PP
+.BR getuid ()
+returns the real user ID of the calling process.
+.PP
+.BR geteuid ()
+returns the effective user ID of the calling process.
+.PP
+.BR getgid ()
+returns the real group ID of the calling process.
+.PP
+.BR getegid ()
+returns the effective group ID of the calling process.
 .SH RETURN VALUE
-These functions are always successful.
-
+These functions always succeed.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+getpid:  Syscall Number: 20
+getuid:  Syscall Number: 24
+getgid:  Syscall Number: 47
+geteuid: Syscall Number: 49
+getegid: Syscall Number: 50
+.fi
+.SS Process IDs
+In Substrate, the init process has PID 1, and the swapper (idle)
+has PID 0.
 .SH SEE ALSO
-.BR intro(2)
+.BR fork (2),
+.BR setuid (2),
+.BR setgid (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

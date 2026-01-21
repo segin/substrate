@@ -1,64 +1,86 @@
-.\" Process this file with
-.\" groff -man -Tascii ioctl.2
 .\"
-.TH IOCTL 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" IOCTL(2) - Substrate Native Personality
+.\"
+.TH IOCTL 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
 ioctl \- control device
-.SH LIBRARY
-Standard C library (libc, -lc)
 .SH SYNOPSIS
+.nf
 .B #include <sys/ioctl.h>
 .PP
-.BI "int ioctl(int " fd ", unsigned long " request ", ...);"
+.BI "int ioctl(int " fd ", unsigned long " request ", ...);
+.fi
 .SH DESCRIPTION
 The
-.B ioctl
-() system call manipulates the underlying device parameters of special
-files. In particular, many operating characteristics of character special
-files (e.g., terminals) may be controlled with
-.B ioctl
-() requests.
+.BR ioctl ()
+system call manipulates the underlying device parameters of special files.
+.PP
+The
+.I request
+argument is a device-dependent request code. The third argument is an
+untyped pointer to memory, traditionally
+.BR "char *argp" .
+.SS Terminal ioctls
+For terminal devices,
+.BR ioctl ()
+supports the following requests:
+.TP
+.B TCGETS (0x5401)
+Get terminal attributes into
+.BR "struct termios" .
+.TP
+.B TCSETS (0x5402)
+Set terminal attributes from
+.BR "struct termios" .
+.TP
+.B TCSETSW (0x5403)
+Set terminal attributes after output drains.
+.TP
+.B TCSETSF (0x5404)
+Set terminal attributes after output drains and flush input.
+.TP
+.B TIOCGWINSZ (0x5413)
+Get window size into
+.BR "struct winsize" .
+.TP
+.B TIOCSPGRP (0x5410)
+Set the foreground process group ID.
+.TP
+.B TIOCGPGRP (0x540F)
+Get the foreground process group ID.
 .SH RETURN VALUE
-Usually, on success zero is returned. A few
-.B ioctl
-() requests use the return value as an output parameter and return a
-non-negative value on success. On error, -1 is returned.
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
 .SH ERRORS
 .TP
 .B EBADF
 .I fd
-is not a valid open file descriptor.
+is not a valid file descriptor.
 .TP
 .B ENOTTY
-The specified request does not apply to the kind of object that the
-file descriptor
 .I fd
-references.
+is not associated with a character special device.
 .TP
 .B EINVAL
 .I request
-or
-.I argp
 is not valid.
-.SH EXAMPLES
-.B Program source
+.SH NOTES
+.SS Substrate Native ABI
 .nf
-
-#include <sys/ioctl.h>
-#include <unistd.h>
-#include <stdio.h>
-
-int main(void) {
-    struct winsize ws;
-    // Get terminal window size
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
-        perror("ioctl");
-        return 1;
-    }
-    printf("Rows: %d, Cols: %d\\n", ws.ws_row, ws.ws_col);
-    return 0;
-}
+Syscall Number: 54 (SYS_IOCTL)
+Arguments:      fd, request, arg (on stack)
 .fi
-
+.SS Native termios
+Substrate's native
+.B struct termios
+uses NCCS=32 control characters. The Linux personality translates
+between this and Linux's NCCS=19 format.
 .SH SEE ALSO
-.BR intro(2)
+.BR termios (4),
+.BR tty (4),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008 (partially).

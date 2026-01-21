@@ -1,31 +1,66 @@
-.\" Process this file with
-.\" groff -man -Tascii pipe.2
 .\"
-.TH PIPE 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" PIPE(2) - Substrate Native Personality
+.\"
+.TH PIPE 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
 pipe \- create pipe
-.SH LIBRARY
-Standard C library (libc, -lc)
 .SH SYNOPSIS
+.nf
 .B #include <unistd.h>
 .PP
-.BI "int pipe(int " pipefd [2]);
+.BI "int pipe(int " pipefd "[2]);
+.fi
 .SH DESCRIPTION
-.B pipe()
-creates a pipe, a unidirectional data channel that can be used for interprocess communication. The array
+.BR pipe ()
+creates a pipe, a unidirectional data channel that can be used for
+interprocess communication.
+.PP
+The array
 .I pipefd
 is used to return two file descriptors referring to the ends of the pipe.
-.I pipefd[0]
+.IR pipefd[0]
 refers to the read end of the pipe.
-.I pipefd[1]
+.IR pipefd[1]
 refers to the write end of the pipe.
+.PP
+Data written to the write end of the pipe is buffered by the kernel
+until it is read from the read end.
 .SH RETURN VALUE
-On success, zero is returned. On error, -1 is returned.
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
 .SH ERRORS
 .TP
 .B EFAULT
 .I pipefd
 is not valid.
-
+.TP
+.B EMFILE
+Too many file descriptors in use by this process.
+.TP
+.B ENOMEM
+Insufficient kernel memory.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 42
+Arguments:      pipefd (on stack)
+.fi
+.SH EXAMPLE
+.nf
+int pipefd[2];
+if (pipe(pipefd) == -1) {
+    perror("pipe");
+    exit(1);
+}
+.fi
 .SH SEE ALSO
-.BR intro(2)
+.BR read (2),
+.BR write (2),
+.BR fork (2),
+.BR dup2 (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

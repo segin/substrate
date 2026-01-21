@@ -1,20 +1,81 @@
-.\" Process this file with
-.\" groff -man -Tascii thr_new.2
 .\"
-.TH THR_NEW 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" THR_NEW(2) - Substrate Native Personality
+.\"
+.TH THR_NEW 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
-thr_new \- create new thread
-.SH LIBRARY
-Standard C library (libc, -lc)
+thr_new \- create a new thread
 .SH SYNOPSIS
+.nf
 .B #include <sys/thr.h>
 .PP
-.BI "int thr_new(struct thr_param *" param ", int " param_size ");"
+.BI "int thr_new(struct thr_param *" param ", int " param_size ");
+.fi
 .SH DESCRIPTION
-.B thr_new()
-creates a new kernel-scheduled thread of execution within the current process context.
+.BR thr_new ()
+creates a new kernel thread in the calling process. This is a
+low-level interface; applications should typically use
+.BR pthread_create (3)
+instead.
+.SS The thr_param structure
+.nf
+struct thr_param {
+    void (*start_func)(void *arg);
+    void *arg;
+    char *stack_base;
+    size_t stack_size;
+    char *tls_base;
+    size_t tls_size;
+    long *child_tid;
+    long *parent_tid;
+    int flags;
+    struct rtprio *rtp;
+};
+.fi
+.TP
+.I start_func
+The function to execute in the new thread.
+.TP
+.I arg
+Argument passed to
+.IR start_func .
+.TP
+.I stack_base
+Base address of the thread's stack.
+.TP
+.I stack_size
+Size of the stack in bytes.
+.TP
+.I tls_base
+Base address of Thread-Local Storage.
+.TP
+.I tls_size
+Size of the TLS area.
 .SH RETURN VALUE
-On success, zero is returned. On error, -1 is returned.
-
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B ENOMEM
+Insufficient memory to create the thread.
+.TP
+.B EINVAL
+Invalid parameters.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 455 (FreeBSD-compatible)
+Arguments:      param, param_size (on stack)
+.fi
+.SS Thread ID
+Each thread has a unique TID within the process. The main thread's
+TID equals the process PID.
 .SH SEE ALSO
-.BR intro(2)
+.BR pthread_create (3),
+.BR clone (2),
+.BR fork (2),
+.BR substrate (7)
+.SH HISTORY
+Based on FreeBSD's thr_new(2) for BSD compatibility.

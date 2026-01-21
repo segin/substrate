@@ -1,21 +1,39 @@
-.\" Process this file with
-.\" groff -man -Tascii sync.2
 .\"
-.TH SYNC 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" SYNC(2) - Substrate Native Personality
+.\"
+.TH SYNC 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
-sync \- commit buffer cache to disk
-.SH LIBRARY
-Standard C library (libc, -lc)
+sync \- commit filesystem caches to disk
 .SH SYNOPSIS
+.nf
 .B #include <unistd.h>
 .PP
-.BI "void sync(void);"
+.B void sync(void);
+.fi
 .SH DESCRIPTION
-.B sync()
-causes all pending modifications to filesystem metadata and data to be written to the underlying filesystems.
+.BR sync ()
+causes all pending modifications to filesystem metadata and cached
+file data to be written to the underlying filesystems.
 .SH RETURN VALUE
-.B sync()
-is always successful.
-
+.BR sync ()
+always succeeds.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 36
+Arguments:      none
+.fi
+.SS Behavior
+.BR sync ()
+schedules writes but may return before the I/O is complete.
+Use
+.BR fsync (2)
+or
+.BR fdatasync (2)
+for synchronous behavior on specific files.
 .SH SEE ALSO
-.BR intro(2)
+.BR fsync (2),
+.BR mount (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

@@ -1,51 +1,89 @@
-.\" Process this file with
-.\" groff -man -Tascii open.2
 .\"
-.TH OPEN 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" OPEN(2) - Substrate Native Personality
+.\"
+.TH OPEN 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
-open \- open and possibly create a file
-.SH LIBRARY
-Standard C library (libc, -lc)
+open, creat \- open and possibly create a file
 .SH SYNOPSIS
+.nf
 .B #include <fcntl.h>
 .PP
-.BI "int open(const char *" pathname ", int " flags ", mode_t " mode ");"
+.BI "int open(const char *" pathname ", int " flags ");
+.BI "int open(const char *" pathname ", int " flags ", mode_t " mode ");
+.BI "int creat(const char *" pathname ", mode_t " mode ");
+.fi
 .SH DESCRIPTION
 The
-.B open()
+.BR open ()
 system call opens the file specified by
-.I pathname
-.
+.IR pathname .
+If the specified file does not exist, it may optionally be created
+(if
+.B O_CREAT
+is specified in
+.IR flags ).
 .PP
 The
 .I flags
 argument must include one of the following access modes:
+.BR O_RDONLY ", " O_WRONLY ", or " O_RDWR .
+.SS Flags
+.TP
 .B O_RDONLY
-,
+Open for reading only.
+.TP
 .B O_WRONLY
-, or
+Open for writing only.
+.TP
 .B O_RDWR
-.
-.PP
-The file created (if
+Open for reading and writing.
+.TP
 .B O_CREAT
-is specified) will have permissions specified by
-.IR mode .
+If the file does not exist, create it.
+.TP
+.B O_TRUNC
+If the file exists, truncate it to length 0.
+.TP
+.B O_APPEND
+Append mode.
 .SH RETURN VALUE
-On success, the new file descriptor is returned. On error, -1 is returned.
+On success, the new file descriptor is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
 .SH ERRORS
 .TP
-.B EACCES
-The requested access to the file is not allowed.
-.TP
-.B EEXIST
-.B O_CREAT
-and
-.B O_EXCL
-were specified, and the file exists.
-.TP
 .B ENOENT
-The file does not exist.
+.I pathname
+does not exist and
+.B O_CREAT
+was not specified.
+.TP
+.B EACCES
+Access denied.
+.TP
+.B EMFILE
+Too many open files.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 5 (SYS_OPEN)
+Arguments:      pathname, flags, mode (on stack)
 
+    push mode
+    push flags
+    push pathname
+    push $0
+    mov eax, 5
+    int $0x80
+    add esp, 16
+.fi
 .SH SEE ALSO
-.BR intro(2)
+.BR close (2),
+.BR read (2),
+.BR write (2),
+.BR stat (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

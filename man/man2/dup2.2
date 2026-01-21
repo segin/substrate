@@ -1,31 +1,56 @@
-.\" Process this file with
-.\" groff -man -Tascii dup2.2
 .\"
-.TH DUP2 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" DUP2(2) - Substrate Native Personality
+.\"
+.TH DUP2 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
 dup2 \- duplicate a file descriptor
-.SH LIBRARY
-Standard C library (libc, -lc)
 .SH SYNOPSIS
+.nf
 .B #include <unistd.h>
 .PP
-.BI "int dup2(int " oldfd ", int " newfd ");"
+.BI "int dup2(int " oldfd ", int " newfd ");
+.fi
 .SH DESCRIPTION
-.B dup2()
-makes
-.I newfd
-be the copy of
+.BR dup2 ()
+creates a copy of the file descriptor
 .IR oldfd ,
-closing
+using the file descriptor number specified in
+.IR newfd .
+If
 .I newfd
-first if necessary.
+was previously open, it is silently closed before being reused.
+.PP
+After a successful return,
+.I oldfd
+and
+.I newfd
+can be used interchangeably. They refer to the same open file
+description and thus share file offset and file status flags.
 .SH RETURN VALUE
-On success, the new file descriptor is returned. On error, -1 is returned.
+On success, the new file descriptor is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
 .SH ERRORS
 .TP
 .B EBADF
 .I oldfd
-is not an open file descriptor.
-
+isn't an open file descriptor.
+.TP
+.B EBADF
+.I newfd
+is out of the allowed range for file descriptors.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 63
+Arguments:      oldfd, newfd (on stack)
+.fi
 .SH SEE ALSO
-.BR intro(2)
+.BR open (2),
+.BR close (2),
+.BR pipe (2),
+.BR substrate (7)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008.

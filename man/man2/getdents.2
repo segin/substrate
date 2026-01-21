@@ -1,27 +1,72 @@
-.\" Process this file with
-.\" groff -man -Tascii getdents.2
 .\"
-.TH GETDENTS 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" GETDENTS(2) - Substrate Native Personality
+.\"
+.TH GETDENTS 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
 getdents \- get directory entries
-.SH LIBRARY
-Standard C library (libc, -lc)
 .SH SYNOPSIS
-.B #include <unistd.h>
-.br
-.B #include <sys/dirent.h>
+.nf
+.B #include <dirent.h>
 .PP
-.BI "int getdents(unsigned int " fd ", struct linux_dirent *" dirp ", unsigned int " count ");"
+.BI "int getdents(unsigned int " fd ", struct dirent *" dirp ","
+.BI "             unsigned int " count ");
+.fi
 .SH DESCRIPTION
-.B getdents()
+.BR getdents ()
 reads several
-.I linux_dirent
+.I dirent
 structures from the directory referred to by the open file descriptor
 .I fd
 into the buffer pointed to by
 .IR dirp .
+The argument
+.I count
+specifies the size of that buffer.
+.SS The dirent structure
+.nf
+struct dirent {
+    unsigned long  d_ino;     /* Inode number */
+    unsigned long  d_off;     /* Offset to next entry */
+    unsigned short d_reclen;  /* Length of this dirent */
+    char           d_name[];  /* Filename (null-terminated) */
+};
+.fi
 .SH RETURN VALUE
-On success, the number of bytes read is returned. On end of directory, 0 is returned. On error, -1 is returned.
-
+On success, the number of bytes read is returned. On end of directory,
+0 is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EBADF
+.I fd
+is not a valid file descriptor opened for reading.
+.TP
+.B ENOTDIR
+.I fd
+does not refer to a directory.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 141
+Arguments:      fd, dirp, count (on stack)
+.fi
+.SS Application Interface
+Applications should use
+.BR opendir (3),
+.BR readdir (3),
+and
+.BR closedir (3)
+rather than calling
+.BR getdents ()
+directly.
 .SH SEE ALSO
-.BR intro(2)
+.BR open (2),
+.BR opendir (3),
+.BR readdir (3),
+.BR closedir (3),
+.BR substrate (7)
+.SH STANDARDS
+Linux-specific, widely adopted.
