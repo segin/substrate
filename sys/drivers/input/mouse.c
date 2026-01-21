@@ -3,6 +3,7 @@
 #include "../../arch/x86-common/include/io.h"
 #include "../../kern/console.h"
 #include <sys/input.h>
+#include <sys/random.h>
 
 static uint8_t mouse_buttons = 0;
 
@@ -48,6 +49,12 @@ void mouse_handler(registers_t *regs) {
     uint8_t status = inb(PS2_STATUS_PORT);
     if (status & 1) {
         uint8_t data = inb(PS2_DATA_PORT);
+        
+        /* Harvest entropy from mouse event timing */
+        uint32_t entropy_data[2];
+        __asm__ volatile("rdtsc" : "=a"(entropy_data[0]), "=d"(entropy_data[1]));
+        entropy_data[1] ^= data; /* Mix in data byte */
+        random_harvest_fast(entropy_data, sizeof(entropy_data));
         
         switch (mouse_cycle) {
             case 0:

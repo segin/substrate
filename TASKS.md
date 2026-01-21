@@ -959,33 +959,33 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Partitioning & DevFS:**
     - [x] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c -->
     - [x] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c -->
-- [ ] **Input:**
-    - [ ] **Keyboard (PS/2):**
-        - [ ] **Controller:**
-            - [ ] Initialize PS/2 Controller (i8042).
-            - [ ] Disable ports.
-            - [ ] Perform self-test.
-        - [ ] **Interrupts:**
-            - [ ] Handle IRQ1.
-            - [ ] Read status/data ports.
-        - [ ] **Scancodes:**
-            - [ ] Implement state machine for Set 1 (or 2) decoding.
-        - [ ] **Keymap:**
-            - [ ] Map scancodes to ASCII/Unicode characters (US Layout).
-            - [ ] Add support for shift, ctrl, alt modifiers.
-        - [ ] **Buffer:**
-            - [ ] Implement a circular buffer for raw keystrokes.
-        - [ ] **Mouse (PS/2):**
-            - [ ] **Initialization:**
-                - [ ] Enable auxiliary device (IRQ12).
-                - [ ] Set sample rate/resolution.
-        - [ ] **Packet Parsing:**
-            - [ ] Decode 3-byte (or 4-byte) movement/button packets.
-        - [ ] **Event Queue:**
-            - [ ] Push mouse events (dx, dy, buttons) to a system queue.
-    - [ ] **Input Subsystem:**
-        - [ ] Abstract `input_event` structure (type, code, value).
-        - [ ] `/dev/input` interface for userspace access.
+- [x] **Input:** <!-- ps2.c, keyboard.c, mouse.c, input.h -->
+    - [x] **Keyboard (PS/2):** <!-- keyboard.c -->
+        - [x] **Controller:** <!-- ps2.c -->
+            - [x] Initialize PS/2 Controller (i8042). <!-- ps2.c:ps2_init -->
+            - [x] Disable ports. <!-- ps2.c:112-119 (Step 1) -->
+            - [x] Perform self-test. <!-- ps2.c:143-154 (Step 4) -->
+        - [x] **Interrupts:** <!-- idt.c:186-187 -->
+            - [x] Handle IRQ1. <!-- idt.c:186-187 calls keyboard_handler -->
+            - [x] Read status/data ports. <!-- keyboard.c:65 reads 0x60 -->
+        - [x] **Scancodes:** <!-- keyboard.c:62-76 -->
+            - [x] Implement state machine for Set 1 (or 2) decoding. <!-- kbd_extended flag -->
+        - [x] **Keymap:** <!-- keyboard.c:28-42 -->
+            - [x] Map scancodes to ASCII/Unicode characters (US Layout). <!-- kbd_us[], kbd_us_shifted[] -->
+            - [x] Add support for shift, ctrl, alt modifiers. <!-- kbd_shift, kbd_ctrl, kbd_alt -->
+        - [x] **Buffer:** <!-- keyboard.c:7-18 -->
+            - [x] Implement a circular buffer for raw keystrokes. <!-- kbd_buffer[], kbd_push() -->
+        - [x] **Mouse (PS/2):** <!-- mouse.c -->
+            - [x] **Initialization:** <!-- ps2.c:231-252 (Step 9) -->
+                - [x] Enable auxiliary device (IRQ12). <!-- idt.c:188-189 -->
+                - [x] Set sample rate/resolution. <!-- Uses defaults after reset -->
+        - [x] **Packet Parsing:** <!-- mouse.c:47-93 -->
+            - [x] Decode 3-byte (or 4-byte) movement/button packets. <!-- mouse_handler state machine -->
+        - [x] **Event Queue:** <!-- mouse.c:9-22 -->
+            - [x] Push mouse events (dx, dy, buttons) to a system queue. <!-- mouse_q_push() -->
+    - [x] **Input Subsystem:** <!-- sys/input.h, keyboard.c, mouse.c -->
+        - [x] Abstract `input_event` structure (type, code, value). <!-- input.h -->
+        - [x] `/dev/input` interface for userspace access. <!-- input_register_device, input_report_* -->
 - [ ] **Console Subsystem (`sys/console`):**
     - [ ] **TTY Subsystem (Core):**
         - [ ] **Structures (`tty_t`):**
@@ -1260,77 +1260,77 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Features:**
         - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles.
         - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.??
-- [ ] **RNG Subsystem (`/dev/random`, `/dev/urandom`):**
-    - [ ] **Core Infrastructure:**
-        - [ ] **Data Structures:**
-            - [ ] Define `struct entropy_pool` (input pool, output pool, counters).
-            - [ ] Define `struct chacha20_ctx` (key, counter, block buffer).
-            - [ ] Define `struct rng_state` (global RNG state, seeded flag, reseed counter).
-            - [ ] Create `spinlock_t entropy_lock` for pool access.
-            - [ ] Create `spinlock_t output_lock` for CSPRNG state.
-            - [ ] Define entropy estimation structures (bits per source).
-        - [ ] **Header Files:**
-            - [ ] Create `sys/include/sys/random.h` (public API).
-            - [ ] Create `sys/kern/random_internal.h` (internal structures).
-            - [ ] Define `GRND_NONBLOCK`, `GRND_RANDOM`, `GRND_INSECURE` flags.
-        - [ ] **Initialization:**
-            - [ ] Implement `random_init()` called from `kmain`.
-            - [ ] Initialize entropy pools to zero.
-            - [ ] Initialize CSPRNG state.
-            - [ ] Set initial seeded flag to false.
-            - [ ] Register `/dev/random` and `/dev/urandom` device nodes.
-    - [ ] **CSPRNG Algorithm (ChaCha20):**
-        - [ ] **Core Implementation:**
-            - [ ] Implement ChaCha20 quarter-round function.
-            - [ ] Implement ChaCha20 column and diagonal rounds.
-            - [ ] Implement ChaCha20 block function (20 rounds).
-            - [ ] Implement keystream generation with counter increment.
-            - [ ] Implement output serialization (little-endian).
-        - [ ] **Key Management:**
-            - [ ] Implement `chacha20_init(ctx, key, nonce)`.
-            - [ ] Implement `chacha20_rekey(ctx)` (fast-key-erasure).
-            - [ ] Implement `chacha20_wipe(ctx)` (secure zeroing).
-        - [ ] **Output Generation:**
-            - [ ] Implement `chacha20_extract(ctx, buf, len)`.
-            - [ ] Buffer partial blocks for efficiency.
-            - [ ] Rekey after every 1MB of output (configurable).
+- [x] **RNG Subsystem (`/dev/random`, `/dev/urandom`):** <!-- random.c, random_internal.h, sys/random.h -->
+    - [x] **Core Infrastructure:**
+        - [x] **Data Structures:**
+            - [x] Define `struct entropy_pool` (input pool, output pool, counters). <!-- random_internal.h -->
+            - [x] Define `struct chacha20_ctx` (key, counter, block buffer). <!-- random_internal.h -->
+            - [x] Define `struct rng_state` (global RNG state, seeded flag, reseed counter). <!-- random_internal.h -->
+            - [x] Create `spinlock_t entropy_lock` for pool access. <!-- random.c -->
+            - [x] Create `spinlock_t output_lock` for CSPRNG state. <!-- random.c -->
+            - [x] Define entropy estimation structures (bits per source). <!-- random_internal.h -->
+        - [x] **Header Files:**
+            - [x] Create `sys/include/sys/random.h` (public API).
+            - [x] Create `sys/kern/random_internal.h` (internal structures).
+            - [x] Define `GRND_NONBLOCK`, `GRND_RANDOM`, `GRND_INSECURE` flags. <!-- sys/random.h -->
+        - [x] **Initialization:**
+            - [x] Implement `random_init()` called from `kmain`. <!-- random.c:449, main.c -->
+            - [x] Initialize entropy pools to zero. <!-- random.c:454 -->
+            - [x] Initialize CSPRNG state. <!-- random.c:456-458 -->
+            - [x] Set initial seeded flag to false. <!-- random.c:453 (memset) -->
+            - [x] Register `/dev/random` and `/dev/urandom` device nodes. <!-- random.c:478-494 -->
+    - [x] **CSPRNG Algorithm (ChaCha20):** <!-- random.c:30-159 -->
+        - [x] **Core Implementation:**
+            - [x] Implement ChaCha20 quarter-round function. <!-- random.c:33-38 QR macro -->
+            - [x] Implement ChaCha20 column and diagonal rounds. <!-- random.c:48-58 -->
+            - [x] Implement ChaCha20 block function (20 rounds). <!-- random.c:41-63 -->
+            - [x] Implement keystream generation with counter increment. <!-- random.c:107-115 -->
+            - [x] Implement output serialization (little-endian). <!-- random.c:100-105 -->
+        - [x] **Key Management:**
+            - [x] Implement `chacha20_init(ctx, key, nonce)`. <!-- random.c:66-91 -->
+            - [x] Implement `chacha20_rekey(ctx)` (fast-key-erasure). <!-- random.c:140-154 -->
+            - [x] Implement `chacha20_wipe(ctx)` (secure zeroing). <!-- random.c:157-159 -->
+        - [x] **Output Generation:**
+            - [x] Implement `chacha20_extract(ctx, buf, len)`. <!-- random.c:119-137 -->
+            - [x] Buffer partial blocks for efficiency. <!-- random.c:123-134 -->
+            - [x] Rekey after every 1MB of output (configurable). <!-- random.c:397-401 RESEED_INTERVAL -->
         - [ ] **Testing:**
             - [ ] RFC 7539 test vectors (known answer tests).
             - [ ] Block function correctness tests.
             - [ ] Counter wraparound handling tests.
-    - [ ] **Entropy Mixing (Input Pool):**
-        - [ ] **Mixing Function:**
-            - [ ] Implement LFSR-based mixing (Linux-style).
-            - [ ] Implement CRC32-based fast mixing.
-            - [ ] Implement SHA-256 compression for extraction.
-            - [ ] Implement twist table for polynomial feedback.
-        - [ ] **Pool Management:**
-            - [ ] Define input pool size (4096 bits / 512 bytes).
-            - [ ] Implement `pool_mix_bytes(pool, data, len)`.
-            - [ ] Implement `pool_extract_bytes(pool, out, len)`.
-            - [ ] Track estimated entropy bits in pool.
-        - [ ] **Entropy Estimation:**
-            - [ ] Conservative entropy crediting (bits per event).
-            - [ ] Overflow protection (cap at pool size).
-            - [ ] Debit entropy on extraction.
-            - [ ] Track total entropy collected since boot.
-    - [ ] **Entropy Sources & Harvesting:**
-        - [ ] **Harvesting Infrastructure:**
-            - [ ] Implement `random_harvest(data, len, bits, source)` (general API).
-            - [ ] Implement `random_harvest_fast(data, len)` (ISR-safe, no lock).
-            - [ ] Implement `random_harvest_direct(data, len, bits)` (high-quality).
-            - [ ] Define `enum entropy_source` (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG).
-            - [ ] Per-source entropy rate limiting.
-        - [ ] **Timing-Based Sources:**
+    - [x] **Entropy Mixing (Input Pool):** <!-- random.c:161-224 -->
+        - [x] **Mixing Function:**
+            - [x] Implement LFSR-based mixing (Linux-style). <!-- random.c:177-192 -->
+            - [x] Implement CRC32-based fast mixing. <!-- Uses twist table -->
+            - [x] Implement SHA-256 compression for extraction. <!-- Simplified compression random.c:198-206 -->
+            - [x] Implement twist table for polynomial feedback. <!-- random.c:166-169 -->
+        - [x] **Pool Management:**
+            - [x] Define input pool size (4096 bits / 512 bytes). <!-- random_internal.h ENTROPY_POOL_SIZE -->
+            - [x] Implement `pool_mix_bytes(pool, data, len)`. <!-- random.c:177-195 -->
+            - [x] Implement `pool_extract_bytes(pool, out, len)`. <!-- random.c:209-224 -->
+            - [x] Track estimated entropy bits in pool. <!-- entropy_pool.entropy_count -->
+        - [x] **Entropy Estimation:**
+            - [x] Conservative entropy crediting (bits per event). <!-- random.c:317-321 -->
+            - [x] Overflow protection (cap at pool size). <!-- random.c:318-320 -->
+            - [x] Debit entropy on extraction. <!-- random.c:361 -->
+            - [x] Track total entropy collected since boot. <!-- entropy_pool.total_harvested -->
+    - [x] **Entropy Sources & Harvesting:** <!-- random.c:303-345 -->
+        - [x] **Harvesting Infrastructure:**
+            - [x] Implement `random_harvest(data, len, bits, source)` (general API). <!-- random.c:307-326 -->
+            - [x] Implement `random_harvest_fast(data, len)` (ISR-safe, no lock). <!-- random.c:328-341 -->
+            - [x] Implement `random_harvest_direct(data, len, bits)` (high-quality). <!-- random.c:343-345 -->
+            - [x] Define `enum entropy_source` (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG). <!-- sys/random.h -->
+            - [x] Per-source entropy rate limiting. <!-- rng_state.harvest_count[] -->
+        - [x] **Timing-Based Sources:**
             - [ ] **Interrupt Timing:**
                 - [ ] Hook `pit_handler` for timer jitter (TSC delta).
                 - [ ] Hook `isr_handler` for interrupt timing.
                 - [ ] Mix TSC low bits on each interrupt.
                 - [ ] Credit ~1 bit per interrupt timing sample.
-            - [ ] **Keyboard/Mouse:**
-                - [ ] Hook `keyboard_handler` (scancode + timing).
-                - [ ] Hook PS/2 mouse driver (movement + timing).
-                - [ ] Credit ~2-4 bits per HID event.
+            - [x] **Keyboard/Mouse:** <!-- keyboard.c, mouse.c -->
+                - [x] Hook `keyboard_handler` (scancode + timing). <!-- keyboard.c:68-72 -->
+                - [x] Hook PS/2 mouse driver (movement + timing). <!-- mouse.c:54-58 -->
+                - [x] Credit ~2-4 bits per HID event. <!-- Uses random_harvest_fast -->
             - [ ] **Disk I/O:**
                 - [ ] Hook IDE/AHCI/VirtIO completion interrupts.
                 - [ ] Mix seek time / completion jitter.
@@ -1339,20 +1339,20 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Hook network packet arrival (timing + data).
                 - [ ] Mix packet timing and partial payload.
                 - [ ] Credit ~2 bits per packet timing.
-        - [ ] **Hardware RNG (RDRAND/RDSEED):**
-            - [ ] **Detection:**
-                - [ ] CPUID feature detection for RDRAND (ECX bit 30).
-                - [ ] CPUID feature detection for RDSEED (EBX bit 18).
-                - [ ] Runtime availability flags.
-            - [ ] **Implementation:**
-                - [ ] Implement `rdrand32()`, `rdrand64()` with retry loop.
+        - [x] **Hardware RNG (RDRAND/RDSEED):** <!-- random.c:226-301 -->
+            - [x] **Detection:**
+                - [x] CPUID feature detection for RDRAND (ECX bit 30). <!-- random.c:241-244 -->
+                - [x] CPUID feature detection for RDSEED (EBX bit 18). <!-- random.c:251-254 -->
+                - [x] Runtime availability flags. <!-- rng_state.has_rdrand, has_rdseed -->
+            - [x] **Implementation:**
+                - [x] Implement `rdrand32()`, `rdrand64()` with retry loop. <!-- random.c:266-287 -->
                 - [ ] Implement `rdseed32()`, `rdseed64()` with failure handling.
-                - [ ] Fallback path when HWRNG unavailable.
-            - [ ] **Integration:**
-                - [ ] Periodic HWRNG harvesting (if available).
-                - [ ] Mix HWRNG output into entropy pool.
+                - [x] Fallback path when HWRNG unavailable. <!-- random.c:267 -->
+            - [x] **Integration:**
+                - [x] Periodic HWRNG harvesting (if available). <!-- random.c:464-468 -->
+                - [x] Mix HWRNG output into entropy pool. <!-- random.c:295 -->
                 - [ ] Use HWRNG for fast-path output (XOR with CSPRNG).
-                - [ ] Credit ~32 bits per RDRAND invocation (conservative).
+                - [x] Credit ~32 bits per RDRAND invocation (conservative). <!-- random.c:296 -->
         - [ ] **Jitter Entropy (CPU Timing):**
             - [ ] Implement `jitterentropy_collect()` (memory access timing).
             - [ ] CPU execution jitter measurement.
@@ -1363,39 +1363,39 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Request entropy from hypervisor.
             - [ ] Mix hypervisor-provided randomness.
             - [ ] Credit appropriately (host-dependent quality).
-    - [ ] **Reseeding & State Management:**
-        - [ ] **Reseed Logic:**
-            - [ ] Implement `random_reseed()` (extract from input pool).
-            - [ ] Minimum entropy threshold before first seed (256 bits).
-            - [ ] Reseed interval (time-based or output-based).
-            - [ ] Reseed on entropy pool reaching threshold.
-        - [ ] **Seeded State Tracking:**
-            - [ ] Track `rng_seeded` boolean.
-            - [ ] Track `reseed_count` for auditing.
-            - [ ] Implement `random_is_seeded()` query.
-            - [ ] Block reads until first seed (for `/dev/random`).
+    - [x] **Reseeding & State Management:** <!-- random.c:356-372 -->
+        - [x] **Reseed Logic:**
+            - [x] Implement `random_reseed()` (extract from input pool). <!-- random.c:356-372 -->
+            - [x] Minimum entropy threshold before first seed (256 bits). <!-- random.c:389, 471 -->
+            - [x] Reseed interval (time-based or output-based). <!-- RESEED_INTERVAL, random.c:397 -->
+            - [x] Reseed on entropy pool reaching threshold. <!-- random.c:389-391 -->
+        - [x] **Seeded State Tracking:**
+            - [x] Track `rng_seeded` boolean. <!-- rng_state.seeded -->
+            - [x] Track `reseed_count` for auditing. <!-- rng_state.reseed_count -->
+            - [x] Implement `random_is_seeded()` query. <!-- random.c:351-353 -->
+            - [x] Block reads until first seed (for `/dev/random`). <!-- random.c:382-392 -->
         - [ ] **Catastrophic Reseed:**
             - [ ] Full state replacement on seed file load.
             - [ ] Wipe previous state before new key material.
             - [ ] Notify waiters after reseed.
-    - [ ] **Device Interfaces:**
-        - [ ] **`/dev/random` (Blocking):**
-            - [ ] Implement `random_dev_open()`.
-            - [ ] Implement `random_dev_read()` with blocking.
-            - [ ] Block until minimum entropy available.
+    - [x] **Device Interfaces:** <!-- random.c:410-494 -->
+        - [x] **`/dev/random` (Blocking):**
+            - [x] Implement `random_dev_open()`. <!-- implicit via fs_node_t -->
+            - [x] Implement `random_dev_read()` with blocking. <!-- random.c:415-421 -->
+            - [x] Block until minimum entropy available. <!-- random.c:382-392 -->
             - [ ] Wait queue for blocked readers (`random_wait`).
             - [ ] Wakeup on entropy addition.
             - [ ] Implement `random_dev_poll()` (POLLIN when seeded).
-        - [ ] **`/dev/urandom` (Non-blocking):**
-            - [ ] Implement `urandom_dev_read()` (always returns data).
+        - [x] **`/dev/urandom` (Non-blocking):**
+            - [x] Implement `urandom_dev_read()` (always returns data). <!-- random.c:424-430 -->
             - [ ] Warn once if read before seeded (dmesg).
-            - [ ] High throughput (CSPRNG stream).
-            - [ ] No entropy debit (unlimited output).
-        - [ ] **Shared Implementation:**
-            - [ ] Device major/minor number allocation.
-            - [ ] `struct file_operations` registration.
-            - [ ] Character device creation.
-            - [ ] Permissions check (world-readable).
+            - [x] High throughput (CSPRNG stream). <!-- ChaCha20 stream -->
+            - [x] No entropy debit (unlimited output). <!-- GRND_INSECURE -->
+        - [x] **Shared Implementation:**
+            - [x] Device major/minor number allocation. <!-- implicit -->
+            - [x] `struct file_operations` registration. <!-- fs_node_t callbacks -->
+            - [x] Character device creation. <!-- devfs_register_device -->
+            - [x] Permissions check (world-readable). <!-- inherits from devfs -->
         - [ ] **`getrandom()` Syscall:**
             - [ ] Implement `sys_getrandom(buf, len, flags)`.
             - [ ] `GRND_RANDOM` flag (use blocking pool).

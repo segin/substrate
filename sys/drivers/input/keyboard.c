@@ -2,6 +2,7 @@
 #include "ps2.h"
 #include "../../arch/x86-common/include/io.h"
 #include <sys/input.h>
+#include <sys/random.h>
 #include "../../kern/console.h"
 
 #define KBD_BUFFER_SIZE 256
@@ -63,6 +64,12 @@ static int kbd_extended = 0;
 
 void keyboard_handler(registers_t *regs) {
     uint8_t scancode = inb(0x60);
+    
+    /* Harvest entropy from keystroke timing and scancode */
+    uint32_t entropy_data[2];
+    __asm__ volatile("rdtsc" : "=a"(entropy_data[0]), "=d"(entropy_data[1])); /* TSC for timing */
+    entropy_data[1] = scancode; /* Mix in scancode */
+    random_harvest_fast(entropy_data, sizeof(entropy_data));
     
     if (scancode == 0xE0) {
         kbd_extended = 1;
