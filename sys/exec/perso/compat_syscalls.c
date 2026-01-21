@@ -6,13 +6,8 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/syscall_impl.h>
 
-/* Native syscall externs */
-extern int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
-extern int sys_stat(const char*, void*);
-extern int sys_lstat(const char*, void*);
-extern int sys_fstat(int, void*);
-extern int64_t sys_time(int64_t*);
 
 /*
  * compat_lseek32 - 32-bit lseek wrapper for foreign personalities

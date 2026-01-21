@@ -2,12 +2,8 @@
 #include <stddef.h>
 #include <sys/termios.h>
 #include "../../arch/i386/syscall.h"
+#include <sys/syscall_impl.h>
 #include "compat_syscalls.h"
-
-/* Forward declarations for syscalls used in translation functions */
-extern int sys_stat(const char*, void*);
-extern int sys_lstat(const char*, void*);
-extern int sys_fstat(int, void*);
 
 /* Native stat structure (from sys/stat.h) */
 struct native_stat {
@@ -262,66 +258,6 @@ static int linux_sys_fstat64(int fd, struct linux_stat64 *buf) {
     buf->st_ino = native.st_ino;
     return 0;
 }
-
-extern int sys_exit(int);
-extern int sys_write(int, const char*, int);
-extern int sys_read(int, char*, int);
-extern int sys_open(const char*, int, int);
-extern int sys_close(int);
-extern int sys_lseek(int, int, int);
-extern int sys_getuid(void);
-extern int sys_getgid(void);
-extern int sys_getppid(void);
-extern int sys_geteuid(void);
-extern int sys_getegid(void);
-extern int sys_setuid(int);
-extern int sys_setgid(int);
-extern int sys_sigaction(int, const void *, void *);
-extern int sys_sigprocmask(int, const void *, void *);
-extern int sys_mkdir(const char*, int);
-extern int sys_rmdir(const char*);
-extern int sys_mknod(const char*, int, int);
-extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
-extern int sys_umount(const char*);
-extern int sys_access(const char*, int);
-extern int sys_stat(const char*, void*);
-extern int sys_nanosleep(void*, void*);
-extern int sys_sync(void);
-extern int sys_kill(int, int);
-extern int sys_signal(int, void*);
-extern int sys_pipe(int*);
-extern int sys_dup2(int, int);
-extern int sys_uname(void*);
-extern int sys_getdents(unsigned int, void*, unsigned int);
-extern int sys_acct(const char*);
-extern int sys_time(uint32_t*);
-extern int sys_getpid(void);
-extern int sys_getcwd(char*, size_t);
-extern int sys_clone(uint32_t, void*, int*, void*, int*);
-extern int sys_futex(int*, int, int, void*, int*, int);
-extern int sys_fork(void);
-extern int sys_vfork(void);
-extern int sys_execve(const char*, char**, char**);
-extern int sys_chdir(const char*);
-extern int sys_fchdir(int);
-extern int sys_brk(uint32_t);
-extern int sys_ioctl(int, uint32_t, void*);
-extern int sys_lstat(const char*, void*);
-extern int sys_fstat(int, void*);
-extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
-
-extern int sys_set_thread_area(void*);
-extern int sys_fcntl(int, int, int);
-extern int sys_getpgid(int);
-extern int sys_setpgid(int, int);
-extern int sys_getpgrp(void);
-extern int sys_unlink(const char*);
-extern int sys_readlink(const char*, char*, size_t);
-extern int sys_link(const char*, const char*);
-extern int sys_sigprocmask(int, const void*, void*);
-extern int sys_setsid(void);
-extern int sys_waitpid(int, int*, int);
-extern int sys_poll(void*, unsigned int, int);
 
 /* Linux i386 termios structure - different from native Substrate termios */
 #define LINUX_NCCS 19
