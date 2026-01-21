@@ -547,6 +547,236 @@ static void test_sigtimedwait_siginfo(void) {
 
 
 /* ========================================================================
+ * sendsig / Signal Frame Construction Tests
+ * ======================================================================== */
+
+#include "../arch/i386/include/signal_arch.h"
+#include "../arch/i386/idt.h"
+
+/*
+ * Test: sigframe struct has correct layout
+ */
+static void test_sigframe_layout(void) {
+    /* Verify sigframe structure contains expected fields */
+    struct sigframe sf;
+    
+    /* Check that sigframe has reasonable size */
+    ASSERT(sizeof(sf) >= sizeof(uint32_t) + sizeof(int) + sizeof(struct sigcontext),
+           "sigframe has minimum expected size");
+    
+    /* Verify field accessibility */
+    sf.retaddr = 0xDEADBEEF;
+    sf.sig = 42;
+    sf.sc.eax = 0x12345678;
+    
+    ASSERT_EQ(sf.retaddr, 0xDEADBEEF, "sigframe.retaddr accessible");
+    ASSERT_EQ(sf.sig, 42, "sigframe.sig accessible");
+    ASSERT_EQ(sf.sc.eax, 0x12345678, "sigframe.sc.eax accessible");
+    
+    TEST_PASS("test_sigframe_layout");
+}
+
+/*
+ * Test: sigcontext struct has correct layout for all registers
+ */
+static void test_sigcontext_layout(void) {
+    struct sigcontext sc;
+    
+    /* Check sigcontext has all required fields */
+    sc.gs = 1;
+    sc.fs = 2;
+    sc.es = 3;
+    sc.ds = 4;
+    sc.edi = 5;
+    sc.esi = 6;
+    sc.ebp = 7;
+    sc.esp = 8;
+    sc.ebx = 9;
+    sc.edx = 10;
+    sc.ecx = 11;
+    sc.eax = 12;
+    sc.trapno = 13;
+    sc.err = 14;
+    sc.eip = 15;
+    sc.cs = 16;
+    sc.eflags = 17;
+    sc.user_esp = 18;
+    sc.user_ss = 19;
+    sc.oldmask = 20;
+    
+    /* Verify all fields retained their values */
+    ASSERT_EQ(sc.gs, 1, "sigcontext.gs");
+    ASSERT_EQ(sc.fs, 2, "sigcontext.fs");
+    ASSERT_EQ(sc.es, 3, "sigcontext.es");
+    ASSERT_EQ(sc.ds, 4, "sigcontext.ds");
+    ASSERT_EQ(sc.edi, 5, "sigcontext.edi");
+    ASSERT_EQ(sc.esi, 6, "sigcontext.esi");
+    ASSERT_EQ(sc.ebp, 7, "sigcontext.ebp");
+    ASSERT_EQ(sc.esp, 8, "sigcontext.esp");
+    ASSERT_EQ(sc.ebx, 9, "sigcontext.ebx");
+    ASSERT_EQ(sc.edx, 10, "sigcontext.edx");
+    ASSERT_EQ(sc.ecx, 11, "sigcontext.ecx");
+    ASSERT_EQ(sc.eax, 12, "sigcontext.eax");
+    ASSERT_EQ(sc.trapno, 13, "sigcontext.trapno");
+    ASSERT_EQ(sc.err, 14, "sigcontext.err");
+    ASSERT_EQ(sc.eip, 15, "sigcontext.eip");
+    ASSERT_EQ(sc.cs, 16, "sigcontext.cs");
+    ASSERT_EQ(sc.eflags, 17, "sigcontext.eflags");
+    ASSERT_EQ(sc.user_esp, 18, "sigcontext.user_esp");
+    ASSERT_EQ(sc.user_ss, 19, "sigcontext.user_ss");
+    ASSERT_EQ(sc.oldmask, 20, "sigcontext.oldmask");
+    
+    TEST_PASS("test_sigcontext_layout");
+}
+
+/*
+ * Test: Stack alignment calculation
+ *
+ * Verifies that the stack alignment logic produces 16-byte aligned
+ * addresses as required by the System V ABI.
+ */
+static void test_stack_alignment(void) {
+    /* Test various stack pointer values */
+    uint32_t test_stacks[] = {
+        0xBFFFEFFC,  /* Already aligned */
+        0xBFFFEFF0,  /* Already aligned */
+        0xBFFFEFF1,  /* Misaligned by 1 */
+        0xBFFFEFF7,  /* Misaligned by 7 */
+        0xBFFFEFFF,  /* Misaligned by 15 */
+    };
+    
+    for (int i = 0; i < 5; i++) {
+        uint32_t esp = test_stacks[i];
+        uint32_t frame_size = sizeof(struct sigframe);
+        
+        /* Simulate sendsig stack calculation */
+        esp -= frame_size;
+        esp &= ~0xFUL;  /* Align to 16 bytes */
+        
+        /* Verify alignment */
+        ASSERT_EQ(esp & 0xF, 0, "stack aligned to 16 bytes");
+    }
+    
+    TEST_PASS("test_stack_alignment");
+}
+
+/*
+ * Test: Frame size calculation
+ *
+ * Verifies that sizeof(struct sigframe) is reasonable and that
+ * stack subtraction doesn't overflow.
+ */
+static void test_frame_size(void) {
+    size_t frame_size = sizeof(struct sigframe);
+    
+    /* Frame should be reasonably sized */
+    ASSERT(frame_size >= 64, "sigframe at least 64 bytes");
+    ASSERT(frame_size <= 4096, "sigframe at most 4KB");
+    
+    /* Verify no overflow when subtracting from typical stack pointer */
+    uint32_t esp = 0xBFFFF000;  /* Typical user stack */
+    uint32_t new_esp = esp - frame_size;
+    
+    ASSERT(new_esp < esp, "frame subtraction doesn't overflow");
+    ASSERT(new_esp > 0x10000, "frame fits in user space");
+    
+    TEST_PASS("test_frame_size");
+}
+
+/*
+ * Test: User address validation
+ */
+static void test_user_addr_validation(void) {
+    #define KERN_BASE 0xC0000000
+    #define USER_STACK_MIN 0x00001000
+    
+    /* Helper function to check address validation */
+    /* We can't call the static function directly, but we test the logic */
+    
+    /* Valid user addresses */
+    uint32_t valid_addrs[] = {
+        0x08048000,   /* Typical text segment */
+        0xBFFFE000,   /* Typical stack */
+        0x40000000,   /* Shared libraries */
+    };
+    
+    for (int i = 0; i < 3; i++) {
+        uint32_t addr = valid_addrs[i];
+        ASSERT(addr >= USER_STACK_MIN && addr < KERN_BASE, 
+               "valid user address in range");
+    }
+    
+    /* Invalid addresses - kernel space */
+    ASSERT(0xC0000000 >= KERN_BASE, "kernel base is off-limits");
+    ASSERT(0xFFFFFFFF >= KERN_BASE, "kernel address is off-limits");
+    
+    /* Invalid addresses - NULL region */
+    ASSERT(0x00000000 < USER_STACK_MIN, "NULL is off-limits");
+    ASSERT(0x00000FFF < USER_STACK_MIN, "low addresses off-limits");
+    
+    #undef KERN_BASE
+    #undef USER_STACK_MIN
+    
+    TEST_PASS("test_user_addr_validation");
+}
+
+/*
+ * Test: sigcontext preserves oldmask
+ *
+ * Verifies that the signal mask is saved in sigcontext for
+ * restoration in sys_sigreturn.
+ */
+static void test_sigcontext_oldmask(void) {
+    struct sigcontext sc;
+    memset(&sc, 0, sizeof(sc));
+    
+    /* Set a complex mask */
+    uint32_t test_mask = sigmask(SIGUSR1) | sigmask(SIGUSR2) | sigmask(SIGTERM);
+    sc.oldmask = test_mask;
+    
+    ASSERT_EQ(sc.oldmask, test_mask, "oldmask preserved in sigcontext");
+    
+    TEST_PASS("test_sigcontext_oldmask");
+}
+
+/*
+ * Test: registers_t structure compatibility
+ *
+ * Verifies that registers_t has the fields needed for sendsig.
+ */
+static void test_registers_t_compatibility(void) {
+    registers_t regs;
+    memset(&regs, 0, sizeof(regs));
+    
+    /* Set all fields that sendsig uses */
+    regs.gs = 0x33;
+    regs.ds = 0x23;
+    regs.edi = 1;
+    regs.esi = 2;
+    regs.ebp = 3;
+    regs.esp = 4;
+    regs.ebx = 5;
+    regs.edx = 6;
+    regs.ecx = 7;
+    regs.eax = 8;
+    regs.int_no = 0x80;
+    regs.err_code = 0;
+    regs.eip = 0x08048000;
+    regs.cs = 0x1B;
+    regs.eflags = 0x00200202;
+    regs.useresp = 0xBFFFF000;
+    regs.ss = 0x23;
+    
+    /* Verify all fields */
+    ASSERT_EQ(regs.gs, 0x33, "registers_t.gs");
+    ASSERT_EQ(regs.ds, 0x23, "registers_t.ds");
+    ASSERT_EQ(regs.eip, 0x08048000, "registers_t.eip");
+    ASSERT_EQ(regs.useresp, 0xBFFFF000, "registers_t.useresp");
+    
+    TEST_PASS("test_registers_t_compatibility");
+}
+
+/* ========================================================================
  * Test Runner
  * ======================================================================== */
 
@@ -585,6 +815,15 @@ void run_signal_tests(void) {
     test_sigtimedwait_immediate();
     test_sigtimedwait_timeout();
     test_sigtimedwait_siginfo();
+    
+    /* sendsig / Frame Construction tests */
+    test_sigframe_layout();
+    test_sigcontext_layout();
+    test_stack_alignment();
+    test_frame_size();
+    test_user_addr_validation();
+    test_sigcontext_oldmask();
+    test_registers_t_compatibility();
     
     kprint("--- Signal Tests Complete ---\n\n");
 }

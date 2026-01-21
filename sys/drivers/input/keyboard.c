@@ -51,9 +51,12 @@ static input_dev_t kbd_dev = {
 };
 
 void keyboard_init(void) {
-    ps2_init();
+    if (ps2_init() != 0) {
+        kprint("Keyboard: PS/2 Controller init failed.\n");
+        return;
+    }
     input_register_device(&kbd_dev);
-    kprint("Keyboard Driver Initialized.\n");
+    // kprint("Keyboard Driver Initialized.\n"); // ps2_init already prints "Controller initialized"
 }
 
 static int kbd_extended = 0;

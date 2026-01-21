@@ -45,6 +45,14 @@ thread_t *sched_alloc_thread(process_t *proc) {
     threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
     threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
     
+    // Initialize Signals
+    threads[i].sig_mask = current_thread ? current_thread->sig_mask : 0;
+    threads[i].sig_pending = 0;
+    threads[i].sig_on_stack = 0;
+    extern void *memset(void *s, int c, size_t n);
+    memset(&threads[i].sig_alt_stack, 0, sizeof(threads[i].sig_alt_stack));
+    threads[i].in_syscall = 0;
+    
     return &threads[i];
 }
 

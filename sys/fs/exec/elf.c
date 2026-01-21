@@ -18,6 +18,37 @@ extern struct personality personality_svr4;
 
 // Globals for userspace transition
 
+/*
+ * exec_reset_signals - Reset signal handlers on exec
+ *
+ * POSIX: On exec(), all signals with handlers are reset to SIG_DFL.
+ * Signals set to SIG_IGN remain ignored. Pending signals are cleared.
+ * Signal mask is preserved (inherited by new program).
+ */
+static void exec_reset_signals(void) {
+    if (!current_process) return;
+    
+    for (int sig = 1; sig <= NSIG; sig++) {
+        struct sigaction *act = &current_process->sig_actions[sig - 1];
+        
+        // If handler is a function pointer (caught signal), reset to default
+        if (act->sa_handler != SIG_IGN && act->sa_handler != SIG_DFL) {
+            act->sa_handler = SIG_DFL;
+            act->sa_mask = 0;
+            act->sa_flags = 0;
+        }
+    }
+    
+    // Clear sig_catch bitmask since all caught signals are now SIG_DFL
+    current_process->sig_catch = 0;
+    // sig_ignore remains unchanged - ignored signals stay ignored
+    
+    // Clear pending signals (POSIX allows this, prevents stale signals)
+    if (current_thread) {
+        current_thread->sig_pending = 0;
+    }
+}
+
 int elf_check_file(Elf32_Ehdr *hdr) {
     if (!hdr) return 0;
     if (hdr->e_ident[0] != ELFMAG0) return 0;
@@ -337,6 +368,9 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     if (current_process) {
         current_process->pmap = (struct pmap *)(uintptr_t)new_pmap;
     }
+    
+    // Reset signal handlers on exec (POSIX requirement)
+    exec_reset_signals();
 
     // Switch to new address space NOW so pmap_enter works (uses recursive mapping of active PD)
     extern void pmap_activate(pmap_t pmap);

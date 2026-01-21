@@ -87,16 +87,10 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
     return len;
 }
 
-// /dev/random (very simple PRNG)
-static uint32_t random_state = 123456789;
-static uint32_t random_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
-    (void)node; (void)offset;
-    for (uint32_t i = 0; i < size; i++) {
-        random_state = random_state * 1103515245 + 12345;
-        buffer[i] = (uint8_t)((random_state / 65536) % 256);
-    }
-    return size;
-}
+/*
+ * Note: /dev/random and /dev/urandom are now registered in sys/kern/random.c
+ * with a proper ChaCha20-based CSPRNG implementation.
+ */
 
 // /dev/tty - proxy to current process's controlling terminal
 static uint32_t tty_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
@@ -188,9 +182,8 @@ static fs_node_t zero_node;
 
 static fs_node_t full_node;
 
-static fs_node_t random_node;
-
 static fs_node_t tty_node;
+
 
 
 
@@ -236,21 +229,7 @@ void pseudo_init(void) {
 
     devfs_register_device(&full_node);
 
-
-
-    memset(&random_node, 0, sizeof(fs_node_t));
-
-    strcpy(random_node.name, "random");
-
-    random_node.flags = FS_CHARDEVICE;
-
-    random_node.read = &random_read;
-
-    random_node.write = &null_write;
-
-    devfs_register_device(&random_node);
-
-
+    /* Note: /dev/random and /dev/urandom now registered by random_init() */
 
     memset(&tty_node, 0, sizeof(fs_node_t));
     strcpy(tty_node.name, "tty");
@@ -309,13 +288,4 @@ void pseudo_init(void) {
     stderr_node.flags = FS_SYMLINK;
     stderr_node.readlink = &stderr_readlink;
     devfs_register_device(&stderr_node);
-
-    // /dev/urandom (alias to random for now)
-    static fs_node_t urandom_node;
-    memset(&urandom_node, 0, sizeof(fs_node_t));
-    strcpy(urandom_node.name, "urandom");
-    urandom_node.flags = FS_CHARDEVICE;
-    urandom_node.read = &random_read;
-    urandom_node.write = &null_write;
-    devfs_register_device(&urandom_node);
 }

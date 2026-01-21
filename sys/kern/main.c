@@ -504,6 +504,10 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Map Signal Trampoline Page (VDSO)
     extern void pmap_map_trampoline(void);
     pmap_map_trampoline();
+    
+    // Initialize Random Number Generator
+    extern void random_init(void);
+    random_init();
 
     // Initialize Scheduler
     sched_init();
