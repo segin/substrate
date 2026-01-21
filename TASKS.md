@@ -2109,8 +2109,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 5. System Calls & Personalities
 - [ ] **System Call ABI (64-bit Clean):**
-    - [ ] **Type Definitions:**
-        - [ ] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`.
+    - [x] **Type Definitions:**
+        - [x] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`.
         - [ ] Verify alignment requirements (8-byte alignment for 64-bit types on i386 stack).
     - [ ] **System Call Audit:**
         - [ ] Audit all existing syscalls for argument types (int vs long vs long long).
@@ -2120,10 +2120,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Native `sys_ftruncate` takes 64-bit length (split hi/lo on 32-bit stack).
         - [ ] `sys_mmap` offset is 64-bit (using split words on i386).
         - [x] `struct stat` uses 64-bit `ino_t`, `off_t`, `blkcnt_t`, `time_t`.
-    - [ ] **LibC Wrappers:**
-        - [ ] Update `lseek` wrapper to pass high/low words on 32-bit.
-        - [ ] Update `ftruncate` wrapper.
-        - [ ] Update `stat`/`fstat` wrappers.
+    - [x] **LibC Wrappers:**
+        - [x] Update `lseek` wrapper to pass high/low words on 32-bit.
+        - [x] Update `ftruncate` wrapper.
+        - [x] Update `stat`/`fstat` wrappers.
     - [ ] **Personality Compatibility:**
         - [ ] Ensure 32-bit Linux personality handles register splitting for 64-bit args correctly.
         - [ ] Ensure native personality mandates 64-bit types.
