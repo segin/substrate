@@ -1,63 +1,20 @@
 #include "personality.h"
 #include <stddef.h>
 #include "../../arch/i386/syscall.h"
+#include <sys/syscall_impl.h>
 
-extern int sys_exit(int);
-extern int sys_write(int, const char*, int);
-extern int sys_read(int, char*, int);
-extern int sys_open(const char*, int, int);
-extern int sys_close(int);
-extern int64_t sys_lseek(int, uint32_t, uint32_t, int);
-extern int sys_getuid(void);
-extern int sys_getgid(void);
-extern int sys_geteuid(void);
-extern int sys_getegid(void);
-extern int sys_setuid(int);
-extern int sys_setgid(int);
-extern int sys_mkdir(const char*, int);
-extern int sys_rmdir(const char*);
-extern int sys_mknod(const char*, int, int);
-extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
-extern int sys_umount(const char*);
-extern int sys_access(const char*, int);
-extern int sys_stat(const char*, void*);
-extern int sys_lstat(const char*, void*);
-extern int sys_fstat(int, void*);
-extern int sys_nanosleep(void*, void*);
-extern int sys_sync(void);
-extern int sys_kill(int, int);
-extern int sys_signal(int, void*);
-extern int sys_pipe(int*);
-extern int sys_dup2(int, int);
-extern int sys_uname(void*);
-extern int sys_getdents(unsigned int, void*, unsigned int);
+/* Native-specific syscalls not in syscall_impl.h */
 struct thr_param;
 extern int sys_thr_new(struct thr_param*, int);
-extern int sys_acct(const char*);
-extern int64_t sys_time(int64_t*);
-extern int sys_getpid(void);
-extern int sys_getcwd(char*, size_t);
-extern int sys_execve(const char*, char**, char**);
-extern int sys_fork(void);
-extern int sys_vfork(void);
-extern int sys_link(const char*, const char*);
 struct pmap_stats;
 extern int sys_pmap_stats(struct pmap_stats*);
-extern int sys_ioctl(int, uint32_t, void*);
-extern int sys_msync(void*, size_t, int);
-extern int sys_readlink(const char*, char*, size_t);
-extern int sys_unlink(const char*);
-extern int sys_sigreturn(void*);
-extern int sys_rt_sigreturn(void*);
-extern int sys_sigaltstack(const void*, void*);
-
-extern int sys_poll(void*, unsigned int, int);
-
 extern int sys_proc_info(int, void*);
 extern int sys_proc_list(int*, size_t);
 extern int sys_proc_count(void);
 extern int sys_cpu_count(void);
 extern int sys_hostname(char*, size_t);
+extern int sys_rt_sigreturn(void*);
+extern int sys_sigreturn(void*);
 
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,

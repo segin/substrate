@@ -1,12 +1,12 @@
 /*
- * syscall_externs.h - Shared syscall extern declarations for personalities
+ * syscall_impl.h - Shared syscall extern declarations for personalities
  *
  * This header provides extern declarations for all kernel syscalls used by
  * personalities. Include this instead of duplicating extern lists.
  */
 
-#ifndef _SYSCALL_EXTERNS_H
-#define _SYSCALL_EXTERNS_H
+#ifndef _SYS_SYSCALL_IMPL_H
+#define _SYS_SYSCALL_IMPL_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -75,6 +75,7 @@ extern int sys_getcwd(char*, size_t);
 extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
 extern int sys_munmap(void*, size_t);
 extern int sys_mprotect(void*, size_t, int);
+extern int sys_msync(void*, size_t, int);
 extern int sys_brk(uint32_t);
 
 /* Signals */
@@ -98,5 +99,7 @@ extern int sys_acct(const char*);
 extern int sys_poll(void*, unsigned int, int);
 extern int sys_futex(int*, int, int, void*, int*, int);
 extern int sys_set_thread_area(void*);
+extern int sys_fsync(int);
+extern int sys_umask(int);
 
-#endif /* _SYSCALL_EXTERNS_H */
+#endif /* _SYS_SYSCALL_IMPL_H */

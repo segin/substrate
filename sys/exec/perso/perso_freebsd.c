@@ -1,45 +1,11 @@
 #include "personality.h"
 #include "../../arch/i386/syscall.h"
 #include <stddef.h>
+#include <sys/syscall_impl.h>
 
-// FreeBSD syscall declarations
-extern int sys_exit(int);
-extern int sys_fork(void);
+/* FreeBSD-specific */
 struct freebsd_utsname;
 int sys_freebsd_uname(struct freebsd_utsname*);
-extern int sys_read(int, char*, int);
-extern int sys_write(int, const char*, int);
-extern int sys_open(const char*, int, int);
-extern int sys_close(int);
-extern int sys_execve(const char*, char**, char**);
-extern int sys_chdir(const char*);
-extern int sys_getpid(void);
-extern int sys_link(const char*, const char*);
-extern int sys_unlink(const char*);
-extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
-extern int sys_umount(const char*);
-extern int sys_getuid(void);
-extern int sys_access(const char*, int);
-extern int sys_sync(void);
-extern int sys_kill(int, int);
-extern int sys_stat(const char*, void*);
-extern int sys_lstat(const char*, void*);
-extern int sys_fstat(int, void*);
-extern int sys_lseek(int, int, int);
-extern int sys_setuid(int);
-extern int sys_getgid(void);
-extern int sys_setgid(int);
-extern int sys_geteuid(void);
-extern int sys_getegid(void);
-extern int sys_ioctl(int, unsigned int, void*);
-extern int sys_vfork(void);
-extern int sys_mkdir(const char*, int);
-extern int sys_rmdir(const char*);
-extern int sys_dup2(int, int);
-extern int sys_pipe(int*);
-extern int sys_getcwd(char*, size_t);
-extern int sys_fchdir(int);
-extern int sys_poll(void*, unsigned int, int);
 
 // FreeBSD syscall numbers (from sys/syscall.h)
 static void *freebsd_syscalls[MAX_SYSCALLS] = {

@@ -8,68 +8,8 @@
 #include "personality.h"
 #include "../../arch/i386/syscall.h"
 #include <stddef.h>
+#include <sys/syscall_impl.h>
 
-/* Syscall declarations */
-extern int sys_exit(int);
-extern int sys_fork(void);
-extern int sys_read(int, char*, int);
-extern int sys_write(int, const char*, int);
-extern int sys_open(const char*, int, int);
-extern int sys_close(int);
-extern int sys_waitpid(int, int*, int);
-extern int sys_creat(const char*, int);
-extern int sys_link(const char*, const char*);
-extern int sys_unlink(const char*);
-extern int sys_execve(const char*, char**, char**);
-extern int sys_chdir(const char*);
-extern int sys_fchdir(int);
-extern int sys_mknod(const char*, int, int);
-extern int sys_chmod(const char*, int);
-/* sys_chown not implemented yet */
-extern int sys_lseek(int, int, int);
-extern int sys_getpid(void);
-extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
-extern int sys_umount(const char*);
-extern int sys_setuid(int);
-extern int sys_getuid(void);
-extern int sys_geteuid(void);
-/* sys_ptrace not implemented yet */
-extern int sys_access(const char*, int);
-extern int sys_sync(void);
-extern int sys_kill(int, int);
-extern int sys_stat(const char*, void*);
-extern int sys_lstat(const char*, void*);
-extern int sys_fstat(int, void*);
-extern int sys_dup(int);
-extern int sys_pipe(int*);
-extern int sys_getegid(void);
-extern int sys_sigaction(int, const void*, void*);
-extern int sys_getgid(void);
-extern int sys_sigprocmask(int, const void*, void*);
-extern int sys_setgid(int);
-extern int sys_acct(const char*);
-extern int sys_sigaltstack(const void*, void*);
-extern int sys_ioctl(int, uint32_t, void*);
-/* sys_symlink not implemented yet */
-extern int sys_readlink(const char*, char*, size_t);
-/* sys_umask not implemented yet */
-extern int sys_chroot(const char*);
-extern int sys_dup2(int, int);
-extern int sys_getpgrp(void);
-extern int sys_setpgid(int, int);
-extern int sys_vfork(void);
-extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
-extern int sys_munmap(void*, size_t);
-extern int sys_mprotect(void*, size_t, int);
-/* sys_getgroups/setgroups not implemented yet */
-extern int sys_mkdir(const char*, int);
-extern int sys_rmdir(const char*);
-extern int sys_setsid(void);
-extern int sys_uname(void*);
-extern int sys_getdents(unsigned int, void*, unsigned int);
-extern int sys_nanosleep(void*, void*);
-extern int sys_poll(void*, unsigned int, int);
-extern int sys_getcwd(char*, size_t);
 
 /* NetBSD syscall table - based on i386 column */
 static void *netbsd_syscalls[MAX_SYSCALLS] = {

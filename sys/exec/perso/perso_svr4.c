@@ -1,77 +1,29 @@
 #include "personality.h"
 #include <stddef.h>
 #include "../../arch/i386/syscall.h"
+#include <sys/syscall_impl.h>
 
-extern int sys_exit(int);
-extern int sys_fork(void);
-extern int sys_read(int, char*, int);
-extern int sys_write(int, const char*, int);
-extern int sys_open(const char*, int, int);
-extern int sys_close(int);
-extern int sys_waitpid(int, int*, int);
-extern int sys_creat(const char*, int);
-extern int sys_link(const char*, const char*);
-extern int sys_unlink(const char*);
-extern int sys_execve(const char*, char**, char**);
-extern int sys_chdir(const char*);
-extern int sys_time(uint32_t*);
-extern int sys_mknod(const char*, int, int);
-extern int sys_chmod(const char*, int);
+/* SVR4-specific externs not in syscall_impl.h */
 extern int sys_lchown(const char*, int, int);
-extern int sys_stat(const char*, void*);
-extern int sys_lseek(int, int, int);
-extern int sys_getpid(void);
-extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
-extern int sys_umount(const char*);
-extern int sys_setuid(int);
-extern int sys_getuid(void);
 extern int sys_stime(uint32_t*);
 extern int sys_ptrace(int, int, int, int);
 extern int sys_alarm(unsigned int);
-extern int sys_fstat(int, void*);
 extern int sys_pause(void);
 extern int sys_utime(const char*, void*);
-extern int sys_access(const char*, int);
 extern int sys_nice(int);
 extern int sys_statfs(const char*, void*);
-extern int sys_sync(void);
-extern int sys_kill(int, int);
 extern int sys_fstatfs(int, void*);
 extern int sys_pgrpsys(int, int, int, int);
-extern int sys_dup(int);
-extern int sys_dup2(int, int);
-extern int sys_pipe(int*);
-extern int sys_times(void*);
-extern int sys_prof(void*, size_t, unsigned long, unsigned int);
-extern int sys_setgid(int);
-extern int sys_getgid(void);
 extern int sys_sigsys(int, void*);
 extern int sys_msgsys(int, int, int, int, int, int);
 extern int sys_sysi86(int, int, int, int);
-extern int sys_acct(const char*);
 extern int sys_shmsys(int, int, int, int);
 extern int sys_semsys(int, int, int, int, int);
-extern int sys_ioctl(int, int, int);
 extern int sys_uadmin(int, int, int);
 extern int sys_utssys(void*, int, int);
-extern int sys_fsync(int);
-extern int sys_umask(int);
-extern int sys_chroot(const char*);
-extern int sys_fcntl(int, int, int);
 extern int sys_ulimit(int, long);
-extern int sys_rmdir(const char*);
-extern int sys_mkdir(const char*, int);
-extern int sys_getdents(unsigned int, void*, unsigned int);
-extern int sys_getcwd(char*, size_t);
-extern int sys_uname(void*);
-extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
-extern int sys_munmap(void*, size_t);
-extern int sys_mprotect(void*, size_t, int);
-extern int sys_sigaction(int, void*, void*);
-extern int sys_sigpending(int, void*);
-extern int sys_sigprocmask(int, void*, void*);
-extern int sys_sigsuspend(void*);
 extern int sys_sigret(void);
+extern int sys_prof(void*, size_t, unsigned long, unsigned int);
 
 static void *svr4_syscalls[MAX_SYSCALLS] = {
     [1] = &sys_exit,
@@ -86,12 +38,12 @@ static void *svr4_syscalls[MAX_SYSCALLS] = {
     [10] = &sys_unlink,
     [11] = &sys_execve,
     [12] = &sys_chdir,
-    [13] = &sys_time,
+    [13] = (void*)sys_time,
     [14] = &sys_mknod,
     [15] = &sys_chmod,
     [16] = &sys_lchown,
     [18] = &sys_stat,
-    [19] = &sys_lseek,
+    [19] = (void*)sys_lseek,
     [20] = &sys_getpid,
     [21] = &sys_mount,
     [22] = &sys_umount,
@@ -118,15 +70,116 @@ static void *svr4_syscalls[MAX_SYSCALLS] = {
     [92] = &sys_munmap,
     [93] = &sys_mprotect,
     [105] = &sys_sigaction,
-    [106] = &sys_sigpending,
+    [106] = (void*)sys_sigpending,
     [107] = &sys_sigprocmask,
-    [108] = &sys_sigsuspend,
+    [108] = (void*)sys_sigsuspend,
     [109] = &sys_sigret,
     [183] = &sys_getcwd,
+};
+
+static const char *svr4_names[MAX_SYSCALLS] = {
+    [1] = "exit",
+    [2] = "fork",
+    [3] = "read",
+    [4] = "write",
+    [5] = "open",
+    [6] = "close",
+    [7] = "wait",
+    [8] = "creat",
+    [9] = "link",
+    [10] = "unlink",
+    [11] = "exec",
+    [12] = "chdir",
+    [13] = "time",
+    [14] = "mknod",
+    [15] = "chmod",
+    [16] = "chown",
+    [18] = "stat",
+    [19] = "lseek",
+    [20] = "getpid",
+    [21] = "mount",
+    [22] = "umount",
+    [23] = "setuid",
+    [24] = "getuid",
+    [33] = "access",
+    [34] = "nice",
+    [36] = "sync",
+    [37] = "kill",
+    [41] = "dup",
+    [42] = "pipe",
+    [46] = "setgid",
+    [47] = "getgid",
+    [51] = "acct",
+    [54] = "ioctl",
+    [59] = "execve",
+    [61] = "chroot",
+    [62] = "fcntl",
+    [63] = "ulimit",
+    [79] = "rmdir",
+    [80] = "mkdir",
+    [81] = "getdents",
+    [91] = "mmap",
+    [92] = "munmap",
+    [93] = "mprotect",
+    [105] = "sigaction",
+    [106] = "sigpending",
+    [107] = "sigprocmask",
+    [108] = "sigsuspend",
+    [109] = "sigret",
+    [183] = "getcwd",
+};
+
+static struct syscall_fmt svr4_fmts[MAX_SYSCALLS] = {
+    [1] = { 1, { ARG_INT } },
+    [3] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [4] = { 3, { ARG_INT, ARG_STR, ARG_INT } },
+    [5] = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
+    [6] = { 1, { ARG_INT } },
+    [7] = { 0, { 0 } },
+    [8] = { 2, { ARG_STR, ARG_HEX } },
+    [9] = { 2, { ARG_STR, ARG_STR } },
+    [10] = { 1, { ARG_STR } },
+    [11] = { 3, { ARG_STR, ARG_PTR, ARG_PTR } },
+    [12] = { 1, { ARG_STR } },
+    [13] = { 1, { ARG_PTR } },
+    [14] = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
+    [15] = { 2, { ARG_STR, ARG_HEX } },
+    [16] = { 3, { ARG_STR, ARG_INT, ARG_INT } },
+    [18] = { 2, { ARG_STR, ARG_PTR } },
+    [19] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [21] = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
+    [22] = { 1, { ARG_STR } },
+    [23] = { 1, { ARG_INT } },
+    [33] = { 2, { ARG_STR, ARG_HEX } },
+    [34] = { 1, { ARG_INT } },
+    [37] = { 2, { ARG_INT, ARG_INT } },
+    [41] = { 1, { ARG_INT } },
+    [42] = { 1, { ARG_PTR } },
+    [46] = { 1, { ARG_INT } },
+    [51] = { 1, { ARG_STR } },
+    [54] = { 3, { ARG_INT, ARG_HEX, ARG_HEX } },
+    [59] = { 3, { ARG_STR, ARG_PTR, ARG_PTR } },
+    [61] = { 1, { ARG_STR } },
+    [62] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [63] = { 2, { ARG_INT, ARG_INT } },
+    [79] = { 1, { ARG_STR } },
+    [80] = { 2, { ARG_STR, ARG_HEX } },
+    [81] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [91] = { 6, { ARG_PTR, ARG_INT, ARG_HEX, ARG_HEX, ARG_INT, ARG_HEX } },
+    [92] = { 2, { ARG_PTR, ARG_INT } },
+    [93] = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
+    [105] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [106] = { 2, { ARG_INT, ARG_PTR } },
+    [107] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [108] = { 1, { ARG_PTR } },
+    [109] = { 0, { 0 } },
+    [183] = { 2, { ARG_PTR, ARG_INT } },
 };
 
 struct personality personality_svr4 = {
     .name = "AT&T UNIX SVR4",
     .syscall_table = svr4_syscalls,
+    .syscall_names = svr4_names,
+    .syscall_fmts = svr4_fmts,
     .syscall_count = MAX_SYSCALLS
 };
