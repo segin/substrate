@@ -1,12 +1,12 @@
 #include "elf.h"
 
-#include "../../vfs/vfs.h"
-#include "../../kern/console.h"
+#include <vfs/vfs.h>
+#include <kern/console.h>
 #include <sys/sysinfo.h> // For BITNESS_*
-#include "../../include/sys/proc.h"
-#include "../../kern/panic.h"
+#include <include/sys/proc.h>
+#include <kern/panic.h>
 #include <string.h>
-#include "../../vm/vm_map.h"
+#include <vm/vm_map.h>
 
 // Forward declarations
 extern process_t *current_process;

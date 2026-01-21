@@ -1,6 +1,6 @@
 include ../../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../arch/i386 -I../../kern
+CFLAGS := $(KERNEL_CFLAGS) -I. -I../../arch/i386 -I../../kern
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = elf.c pe.c coff.c

@@ -1,6 +1,6 @@
 include ../../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../arch/i386
+CFLAGS := $(KERNEL_CFLAGS) -I. -I../../arch/i386
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = pseudo.c ntsync.c

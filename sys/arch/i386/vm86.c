@@ -3,8 +3,8 @@
 #include <sys/sysarch.h>
 #include <string.h>
 #include <errno.h>
-#include "../../kern/console.h"
-#include "../../include/sys/proc.h"
+#include <kern/console.h>
+#include <include/sys/proc.h>
 #include "idt.h" 
 
 // Access to current process/thread

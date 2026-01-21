@@ -1,8 +1,8 @@
-#include "../vfs/vfs.h"
+#include <vfs/vfs.h>
 #include <sys/proc.h>
 #include <sys/file.h>
-#include "../kern/sched.h"
-#include "../../vm/vm_kmem.h"
+#include <kern/sched.h>
+#include <vm/vm_kmem.h>
 #include <string.h>
 #include <stddef.h>
 

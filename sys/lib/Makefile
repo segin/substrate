@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../arch/i386 -I.. -I../include
+CFLAGS := $(KERNEL_CFLAGS) -I. -I../arch/i386 -I.. -I../include
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = crc32.c

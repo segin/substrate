@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../drivers/video -I../vfs
+CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = ext2/ext2.c fat/fat.c exfat/exfat.c minix/minix.c devfs.c procfs.c sysfs.c fuse.c 9p.c pipe.c

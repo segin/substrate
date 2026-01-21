@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../include -I../../include -I..
+CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = process.c sched.c wait.c pgrp.c rusage.c

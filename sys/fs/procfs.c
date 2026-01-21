@@ -5,11 +5,11 @@
  * in procfs_entries[]. Per-process directories are handled separately.
  */
 
-#include "../vfs/vfs.h"
-#include "../../include/sys/proc.h"
-#include "../../pm/pm.h"
-#include "../exec/perso/personality.h"
-#include "../../arch/i386/pmap.h"
+#include <vfs/vfs.h>
+#include <include/sys/proc.h>
+#include <pm/pm.h>
+#include <exec/perso/personality.h>
+#include <arch/i386/pmap.h>
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>

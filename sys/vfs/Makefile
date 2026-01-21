@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I.
+CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = vfs.c

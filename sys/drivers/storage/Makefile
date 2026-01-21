@@ -1,6 +1,6 @@
 include ../../../Makefile.inc
 
-CFLAGS := $(FREESTANDING_CFLAGS) -I. -I../../video -I../../../arch/i386
+CFLAGS := $(KERNEL_CFLAGS) -I. -I../../video -I../../../arch/i386
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = blkdev.c scsi/scsi.c scsi/scsi_dev.c scsi/scsi_ctl.c scsi/atapi_scsi.c ide/ide.c ahci/ahci.c nvme/nvme.c ramdisk.c
