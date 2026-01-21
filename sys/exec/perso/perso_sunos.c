@@ -1,0 +1,306 @@
+/*
+ * perso_sunos.c - SunOS Sun386i Personality
+ *
+ * SunOS 4.x syscall numbers for Sun386i (i386-based Sun workstations).
+ * BSD-derived with Sun extensions.
+ */
+
+#include "personality.h"
+#include "../../arch/i386/syscall.h"
+#include <stddef.h>
+
+/* Syscall declarations */
+extern int sys_exit(int);
+extern int sys_fork(void);
+extern int sys_read(int, char*, int);
+extern int sys_write(int, const char*, int);
+extern int sys_open(const char*, int, int);
+extern int sys_close(int);
+extern int sys_waitpid(int, int*, int);
+extern int sys_creat(const char*, int);
+extern int sys_link(const char*, const char*);
+extern int sys_unlink(const char*);
+extern int sys_execve(const char*, char**, char**);
+extern int sys_chdir(const char*);
+extern int sys_time(uint32_t*);
+extern int sys_mknod(const char*, int, int);
+extern int sys_chmod(const char*, int);
+/* sys_chown not implemented yet */
+extern int sys_stat(const char*, void*);
+extern int sys_lseek(int, int, int);
+extern int sys_getpid(void);
+extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
+extern int sys_umount(const char*);
+extern int sys_setuid(int);
+extern int sys_getuid(void);
+extern int sys_fstat(int, void*);
+/* sys_ptrace not implemented yet */
+extern int sys_access(const char*, int);
+extern int sys_sync(void);
+extern int sys_kill(int, int);
+extern int sys_mkdir(const char*, int);
+extern int sys_rmdir(const char*);
+extern int sys_dup(int);
+extern int sys_pipe(int*);
+extern int sys_times(void*);
+extern int sys_setgid(int);
+extern int sys_getgid(void);
+extern int sys_acct(const char*);
+extern int sys_ioctl(int, uint32_t, void*);
+/* sys_symlink not implemented yet */
+extern int sys_readlink(const char*, char*, size_t);
+/* sys_umask not implemented yet */
+extern int sys_chroot(const char*);
+extern int sys_fstat(int, void*);
+extern int sys_vfork(void);
+extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
+extern int sys_munmap(void*, size_t);
+extern int sys_mprotect(void*, size_t, int);
+/* sys_getgroups/setgroups not implemented yet */
+extern int sys_getpgrp(void);
+extern int sys_setpgid(int, int);
+extern int sys_dup2(int, int);
+extern int sys_uname(void*);
+extern int sys_getdents(unsigned int, void*, unsigned int);
+extern int sys_poll(void*, unsigned int, int);
+extern int sys_getcwd(char*, size_t);
+extern int sys_sigaction(int, const void*, void*);
+
+/* SunOS Sun386i syscall table */
+static void *sunos_syscalls[MAX_SYSCALLS] = {
+    [0] = NULL,             /* indir (syscall) */
+    [1] = &sys_exit,
+    [2] = &sys_fork,
+    [3] = &sys_read,
+    [4] = &sys_write,
+    [5] = &sys_open,
+    [6] = &sys_close,
+    [7] = &sys_waitpid,     /* wait4 */
+    [8] = &sys_creat,
+    [9] = &sys_link,
+    [10] = &sys_unlink,
+    [11] = NULL,            /* execv */
+    [12] = &sys_chdir,
+    [13] = &sys_time,
+    [14] = &sys_mknod,
+    [15] = &sys_chmod,
+    [16] = NULL,            /* chown - not implemented */
+    [17] = NULL,            /* break */
+    [18] = &sys_stat,
+    [19] = &sys_lseek,
+    [20] = &sys_getpid,
+    [21] = &sys_mount,
+    [22] = &sys_umount,     /* unmount */
+    [23] = &sys_setuid,
+    [24] = &sys_getuid,
+    [25] = NULL,            /* stime */
+    [26] = NULL,            /* ptrace - not implemented */
+    [27] = NULL,            /* alarm */
+    [28] = &sys_fstat,
+    [29] = NULL,            /* pause */
+    [30] = NULL,            /* utime */
+    [31] = NULL,            /* stty */
+    [32] = NULL,            /* gtty */
+    [33] = &sys_access,
+    [34] = NULL,            /* nice */
+    [35] = NULL,            /* ftime */
+    [36] = &sys_sync,
+    [37] = &sys_kill,
+    [38] = &sys_stat,
+    [39] = &sys_mkdir,
+    [40] = &sys_rmdir,
+    [41] = &sys_dup,
+    [42] = &sys_pipe,
+    [43] = &sys_times,
+    [44] = NULL,            /* profil */
+    [45] = NULL,            /* brk */
+    [46] = &sys_setgid,
+    [47] = &sys_getgid,
+    [48] = NULL,            /* sigvec */
+    [49] = NULL,            /* sblock */
+    [50] = NULL,            /* sblock */
+    [51] = &sys_acct,
+    [52] = NULL,            /* phys */
+    [53] = NULL,            /* lock */
+    [54] = &sys_ioctl,
+    [55] = NULL,            /* reboot */
+    [56] = NULL,            /* mpx */
+    [57] = NULL,            /* symlink - not implemented */
+    [58] = &sys_readlink,
+    [59] = &sys_execve,
+    [60] = NULL,            /* umask - not implemented */
+    [61] = &sys_chroot,
+    [62] = &sys_fstat,
+    [63] = NULL,            /* unimp */
+    [64] = NULL,            /* getpagesize */
+    [65] = NULL,            /* mremap */
+    [66] = &sys_vfork,
+    [67] = NULL,            /* vread */
+    [68] = NULL,            /* vwrite */
+    [69] = NULL,            /* sbrk */
+    [70] = NULL,            /* sstk */
+    [71] = &sys_mmap,
+    [72] = NULL,            /* vadvise */
+    [73] = &sys_munmap,
+    [74] = &sys_mprotect,
+    [75] = NULL,            /* madvise */
+    [76] = NULL,            /* vhangup */
+    [77] = NULL,            /* vlimit */
+    [78] = NULL,            /* mincore */
+    [79] = NULL,            /* getgroups - not implemented */
+    [80] = NULL,            /* setgroups - not implemented */
+    [81] = &sys_getpgrp,
+    [82] = &sys_setpgid,
+    [83] = NULL,            /* setitimer */
+    [84] = NULL,            /* wait */
+    [85] = NULL,            /* swapon */
+    [86] = NULL,            /* getitimer */
+    [87] = NULL,            /* gethostname */
+    [88] = NULL,            /* sethostname */
+    [89] = NULL,            /* getdtablesize */
+    [90] = &sys_dup2,
+    [91] = NULL,            /* getdopt */
+    [92] = NULL,            /* fcntl */
+    [93] = NULL,            /* select */
+    [94] = NULL,            /* setdopt */
+    [95] = NULL,            /* fsync */
+    [96] = NULL,            /* setpriority */
+    [97] = NULL,            /* socket */
+    [98] = NULL,            /* connect */
+    [99] = NULL,            /* accept */
+    [100] = NULL,           /* getpriority */
+    [101] = NULL,           /* send */
+    [102] = NULL,           /* recv */
+    [103] = NULL,           /* sigreturn */
+    [104] = NULL,           /* bind */
+    [105] = NULL,           /* setsockopt */
+    [106] = NULL,           /* listen */
+    [107] = NULL,           /* vtimes */
+    [108] = NULL,           /* sigvec */
+    [109] = NULL,           /* sigblock */
+    [110] = NULL,           /* sigsetmask */
+    [111] = NULL,           /* sigsuspend */
+    [112] = NULL,           /* sigstack */
+    [113] = NULL,           /* recvmsg */
+    [114] = NULL,           /* sendmsg */
+    [115] = NULL,           /* vtrace */
+    [116] = NULL,           /* gettimeofday */
+    [117] = NULL,           /* getrusage */
+    [118] = NULL,           /* getsockopt */
+    [119] = NULL,           /* resuba */
+};
+
+static const char *sunos_names[MAX_SYSCALLS] = {
+    [0] = "indir",
+    [1] = "exit",
+    [2] = "fork",
+    [3] = "read",
+    [4] = "write",
+    [5] = "open",
+    [6] = "close",
+    [7] = "wait4",
+    [8] = "creat",
+    [9] = "link",
+    [10] = "unlink",
+    [11] = "execv",
+    [12] = "chdir",
+    [13] = "time",
+    [14] = "mknod",
+    [15] = "chmod",
+    [16] = "chown",
+    [17] = "break",
+    [18] = "stat",
+    [19] = "lseek",
+    [20] = "getpid",
+    [21] = "mount",
+    [22] = "unmount",
+    [23] = "setuid",
+    [24] = "getuid",
+    [25] = "stime",
+    [26] = "ptrace",
+    [27] = "alarm",
+    [28] = "fstat",
+    [29] = "pause",
+    [30] = "utime",
+    [31] = "stty",
+    [32] = "gtty",
+    [33] = "access",
+    [34] = "nice",
+    [35] = "ftime",
+    [36] = "sync",
+    [37] = "kill",
+    [38] = "stat",
+    [39] = "mkdir",
+    [40] = "rmdir",
+    [41] = "dup",
+    [42] = "pipe",
+    [43] = "times",
+    [44] = "profil",
+    [45] = "brk",
+    [46] = "setgid",
+    [47] = "getgid",
+    [48] = "sigvec",
+    [51] = "acct",
+    [54] = "ioctl",
+    [57] = "symlink",
+    [58] = "readlink",
+    [59] = "execve",
+    [60] = "umask",
+    [61] = "chroot",
+    [62] = "fstat",
+    [66] = "vfork",
+    [71] = "mmap",
+    [73] = "munmap",
+    [74] = "mprotect",
+    [79] = "getgroups",
+    [80] = "setgroups",
+    [81] = "getpgrp",
+    [82] = "setpgid",
+    [90] = "dup2",
+    [103] = "sigreturn",
+};
+
+static struct syscall_fmt sunos_fmts[MAX_SYSCALLS] = {
+    [1] = { 1, { ARG_INT } },
+    [3] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [4] = { 3, { ARG_INT, ARG_STR, ARG_INT } },
+    [5] = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
+    [6] = { 1, { ARG_INT } },
+    [7] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [8] = { 2, { ARG_STR, ARG_HEX } },
+    [9] = { 2, { ARG_STR, ARG_STR } },
+    [10] = { 1, { ARG_STR } },
+    [12] = { 1, { ARG_STR } },
+    [13] = { 1, { ARG_PTR } },
+    [14] = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
+    [15] = { 2, { ARG_STR, ARG_HEX } },
+    [16] = { 3, { ARG_STR, ARG_INT, ARG_INT } },
+    [18] = { 2, { ARG_STR, ARG_PTR } },
+    [19] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [21] = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
+    [22] = { 1, { ARG_STR } },
+    [23] = { 1, { ARG_INT } },
+    [28] = { 2, { ARG_INT, ARG_PTR } },
+    [33] = { 2, { ARG_STR, ARG_HEX } },
+    [37] = { 2, { ARG_INT, ARG_INT } },
+    [39] = { 2, { ARG_STR, ARG_HEX } },
+    [40] = { 1, { ARG_STR } },
+    [41] = { 1, { ARG_INT } },
+    [42] = { 1, { ARG_PTR } },
+    [46] = { 1, { ARG_INT } },
+    [54] = { 3, { ARG_INT, ARG_HEX, ARG_HEX } },
+    [57] = { 2, { ARG_STR, ARG_STR } },
+    [58] = { 3, { ARG_STR, ARG_PTR, ARG_INT } },
+    [59] = { 3, { ARG_STR, ARG_PTR, ARG_PTR } },
+    [60] = { 1, { ARG_HEX } },
+    [61] = { 1, { ARG_STR } },
+    [90] = { 2, { ARG_INT, ARG_INT } },
+};
+
+struct personality personality_sunos = {
+    .name = "SunOS",
+    .syscall_table = sunos_syscalls,
+    .syscall_names = sunos_names,
+    .syscall_fmts = sunos_fmts,
+    .syscall_count = MAX_SYSCALLS
+};
