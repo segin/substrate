@@ -1,6 +1,6 @@
-#include "vfs.h"
+#include <vfs/vfs.h>
 #include <string.h>
-#include "../kern/console.h"
+#include <kern/console.h>
 #include <stdio.h>
 #include <sys/poll.h>
 fs_node_t *fs_root = 0; 

@@ -4,7 +4,7 @@
  * O(1) scheduler with separate queues for RT, Timeshare, and Idle classes.
  */
 
-#include "runqueue.h"
+#include <kern/runqueue.h>
 #include <string.h>
 
 // Find first set bit (1-indexed, 0 if none)

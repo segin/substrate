@@ -7,8 +7,8 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include "console.h"
-#include "ksyms.h"
+#include <kern/console.h>
+#include <kern/ksyms.h>
 
 /* Maximum number of frames to trace */
 #define MAX_STACK_FRAMES 16

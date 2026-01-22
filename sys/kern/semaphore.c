@@ -1,6 +1,6 @@
 #include <sys/lock.h>
 #include <sys/proc.h>
-#include "sched.h"
+#include <kern/sched.h>
 #include <stddef.h>
 
 void sema_init(semaphore_t *s, int value, const char *name) {

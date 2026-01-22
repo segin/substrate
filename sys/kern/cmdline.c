@@ -1,6 +1,6 @@
-#include "cmdline.h"
+#include <kern/cmdline.h>
 #include <string.h>
-#include "console.h"
+#include <kern/console.h>
 
 static char kernel_cmdline[1024];
 static int initialized = 0;

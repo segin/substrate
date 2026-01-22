@@ -1,5 +1,5 @@
 #include <sys/lock.h>
-#include "panic.h"
+#include <kern/panic.h>
 
 // Forward declaration for CPU ID helper (architecture specific)
 extern uint32_t lapic_get_id(void);

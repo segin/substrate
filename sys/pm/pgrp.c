@@ -9,7 +9,7 @@
 #include <sys/session.h>
 #include <stddef.h>
 #include <string.h>
-#include "pm.h"
+#include <pm/pm.h>
 
 extern void *kmalloc(size_t size);
 extern void kfree(void *ptr);

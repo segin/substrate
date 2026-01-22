@@ -1,4 +1,4 @@
-#include "pm.h"
+#include <pm/pm.h>
 #include <sys/acct.h>
 #include <sys/file.h>
 #include <sys/lock.h>
@@ -7,7 +7,7 @@
 #include <kern/sched.h> // For MAX_THREADS, thread creation
 #include <stddef.h>
 #include <string.h>
-#include "../arch/i386/pmap.h"
+#include <arch/i386/pmap.h>
 
 process_t processes[MAX_PROCS];
 process_t *current_process = NULL;

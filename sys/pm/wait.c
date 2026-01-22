@@ -4,7 +4,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <kern/sched.h> // for sched_sleep
-#include "pm.h"
+#include <pm/pm.h>
 
 extern thread_t *current_thread;
 extern void sched_sleep(void *chan);

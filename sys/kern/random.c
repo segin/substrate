@@ -11,9 +11,9 @@
  */
 
 #include <sys/random.h>
-#include "random_internal.h"
-#include "console.h"
-#include "../vfs/vfs.h"
+#include <kern/random.h>
+#include <kern/console.h>
+#include <vfs/vfs.h>
 #include <string.h>
 
 /* Global RNG state */

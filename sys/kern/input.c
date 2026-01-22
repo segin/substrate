@@ -1,10 +1,10 @@
 #include <sys/input.h>
 #include <sys/file.h>
-#include "../vm/vm_kmem.h"
-#include "../kern/sched.h"
+#include <vm/vm_kmem.h>
+#include <kern/sched.h>
 #include <string.h>
-#include "../kern/console.h" // for kprint
-#include "../vfs/vfs.h"     // for devfs_register
+#include <kern/console.h>
+#include <vfs/vfs.h>
 
 #define INPUT_QUEUE_SIZE 64
 

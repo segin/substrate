@@ -6,7 +6,7 @@
  * remains in arch/i386/syscall.c or equivalent.
  */
 
-/* NetBSD-style kernel internal includes */
+/* Kernel internal includes */
 #include <kern/sched.h>
 #include <kern/version.h>
 #include <kern/panic.h>

@@ -9,7 +9,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include "console.h"
+#include <kern/console.h>
 
 /* Symbol table entry */
 struct ksym {

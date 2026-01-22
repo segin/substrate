@@ -1,10 +1,10 @@
-#include "console.h"
+#include <kern/console.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
 #include <sys/file.h>
-#include "../vfs/vfs.h"
+#include <vfs/vfs.h>
 #include <string.h>
-#include "../vm/vm_kmem.h"
+#include <vm/vm_kmem.h>
 
 // Globals
 static console_backend_t *backends = NULL;

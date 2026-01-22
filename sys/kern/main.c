@@ -5,44 +5,44 @@
 #include <sys/proc.h>
 #include <sys/input.h>
 
-#include "../drivers/video/vga.h"
-#include "../drivers/video/fb.h"
-#include "../drivers/serial/uart.h"
-#include "../drivers/input/keyboard.h"
-#include "../drivers/input/mouse.h"
-#include "../drivers/storage/scsi/scsi.h"
-#include "../drivers/storage/ide/ide.h"
-#include "../drivers/storage/ahci/ahci.h"
-#include "../drivers/storage/nvme/nvme.h"
-#include "../drivers/virtio/virtio.h"
-#include "../drivers/storage/ramdisk.h"
+#include <drivers/video/vga.h>
+#include <drivers/video/fb.h>
+#include <drivers/serial/uart.h>
+#include <drivers/input/keyboard.h>
+#include <drivers/input/mouse.h>
+#include <drivers/storage/scsi/scsi.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/ahci/ahci.h>
+#include <drivers/storage/nvme/nvme.h>
+#include <drivers/virtio/virtio.h>
+#include <drivers/storage/ramdisk.h>
 
-#include "../arch/i386/idt.h"
-#include "../arch/i386/gdt.h"
-#include "../arch/i386/pmm.h"
-#include "../arch/i386/pmap.h"
-#include "../arch/i386/pci.h"
-#include "../arch/i386/syscall.h"
-#include "../arch/i386/fpu/fpu_emu.h"
-#include "../arch/x86-common/include/rtc.h"
-#include "../arch/x86-common/include/multiboot.h"
+#include <arch/i386/idt.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/pmm.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pci.h>
+#include <arch/i386/syscall.h>
+#include <arch/i386/fpu/fpu_emu.h>
+#include <arch/x86-common/include/rtc.h>
+#include <arch/x86-common/include/multiboot.h>
 
-#include "../pm/pm.h"
-#include "../vfs/vfs.h"
-#include "../fs/exec/elf.h"
-#include "../fs/procfs.h"
-#include "../fs/sysfs.h"
-#include "../fs/pseudofs.h"
-#include "../fs/fuse.h"
-#include "../fs/9p.h"
+#include <pm/pm.h>
+#include <vfs/vfs.h>
+#include <fs/exec/elf.h>
+#include <fs/procfs.h>
+#include <fs/sysfs.h>
+#include <fs/pseudofs.h>
+#include <fs/fuse.h>
+#include <fs/9p.h>
 
-#include "../tests/tests.h"
+#include <tests/tests.h>
 
-#include "console.h"
-#include "cmdline.h"
-#include "sched.h"
-#include "version.h"
-#include "panic.h"
+#include <kern/console.h>
+#include <kern/cmdline.h>
+#include <kern/sched.h>
+#include <kern/version.h>
+#include <kern/panic.h>
 
 // Simple string functions to avoid depending on libc in core if not available
 int serial_debug_enabled = 0;

@@ -1,5 +1,5 @@
 #include <kern/sched.h>
-#include "pm.h"
+#include <pm/pm.h>
 #include <stddef.h>
 #include <stdint.h>
 

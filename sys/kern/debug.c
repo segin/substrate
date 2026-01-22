@@ -1,7 +1,7 @@
 #include <sys/proc.h>
-#include "../kern/console.h"
+#include <kern/console.h>
 #include <stdio.h>
-#include "../exec/perso/personality.h"
+#include <exec/perso/personality.h>
 #include <string.h>
 
 extern thread_t threads[];

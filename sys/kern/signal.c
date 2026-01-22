@@ -1,12 +1,12 @@
 #include <sys/signal.h>
 #include <sys/proc.h>
 #include <sys/session.h>
-#include "sched.h"
-#include "../arch/i386/idt.h"
-#include "console.h"
-#include "panic.h"
+#include <kern/sched.h>
+#include <arch/i386/idt.h>
+#include <kern/console.h>
+#include <kern/panic.h>
 #include <stddef.h>
-#include "../pm/pm.h"
+#include <pm/pm.h>
 
 extern thread_t threads[MAX_THREADS];
 

@@ -4,8 +4,8 @@
 #include <sys/signal.h>
 #include <string.h>
 #include <stdio.h>
-#include "../vm/vm_kmem.h" // for kmalloc
-#include "../kern/sched.h" // for sched_wakeup, sleep
+#include <vm/vm_kmem.h>
+#include <kern/sched.h>
 #include <sys/poll.h>
 
 #define TTY_MAGIC 0x5401

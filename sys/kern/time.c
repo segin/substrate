@@ -1,8 +1,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/math.h>
-#include "time.h"
-#include "time.h"
+#include <kern/time.h>
 
 int64_t boot_time = 0;
 

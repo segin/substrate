@@ -1,6 +1,6 @@
 #include <sys/lock.h>
 #include <sys/proc.h>
-#include "sched.h"
+#include <kern/sched.h>
 #include <stddef.h>
 
 // Atomic exchange helper (from spinlock.c logic)

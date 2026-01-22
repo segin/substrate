@@ -1,9 +1,9 @@
 #include <sys/acct.h>
 #include <sys/proc.h>
 #include <sys/session.h>
-#include "../vfs/vfs.h"
-#include "../drivers/video/vga.h"
-#include "../kern/sched.h"
+#include <vfs/vfs.h>
+#include <drivers/video/vga.h>
+#include <kern/sched.h>
 
 static fs_node_t *acct_node = 0;
 

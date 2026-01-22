@@ -1,7 +1,7 @@
-#include "panic.h"
-#include "stacktrace.h"
-#include "../drivers/video/vga.h"
-#include "console.h"
+#include <kern/panic.h>
+#include <kern/stacktrace.h>
+#include <drivers/video/vga.h>
+#include <kern/console.h>
 #include <string.h>
 
 extern int fb_active;
