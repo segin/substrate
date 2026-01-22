@@ -1,6 +1,6 @@
-#include "../kern/console.h"
-#include "../drivers/input/ps2.h"
-#include "../arch/x86-common/include/io.h"
+#include <kern/console.h>
+#include <drivers/input/ps2.h>
+#include <arch/x86-common/include/io.h>
 #include <stdio.h>
 
 void run_ps2_tests(void) {

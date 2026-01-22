@@ -6,8 +6,8 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include "../kern/console.h"
-#include "../kern/stacktrace.h"
+#include <kern/console.h>
+#include <kern/stacktrace.h>
 
 /* Test result tracking */
 static int tests_passed = 0;
