@@ -3,9 +3,9 @@
  * Properties are invariants that should always hold
  */
 
-#include "../arch/i386/pmap.h"
-#include "../arch/i386/pmm.h"
-#include "../kern/console.h"
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <kern/console.h>
 
 static int props_passed = 0;
 static int props_failed = 0;

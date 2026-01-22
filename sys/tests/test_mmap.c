@@ -2,9 +2,9 @@
  * Unit tests for mmap/munmap/mprotect
  */
 
-#include "../vm/vm_area.h"
-#include "../vm/vm_mmap.c"
-#include "../kern/console.h"
+#include <vm/vm_area.h>
+#include <vm/vm_mmap.c>
+#include <kern/console.h>
 #include <sys/mman.h>
 
 static int tests_passed = 0;

@@ -7,7 +7,7 @@
 // Include cmdline implementation directly (hack for testing without linking kernel)
 // We need to mock console.h/kprint though
 void kprint(const char *s) {} 
-#include "../kern/cmdline.c"
+#include <kern/cmdline.c>
 
 void test_cmdline_parsing() {
     // Test 1: Simple key=value

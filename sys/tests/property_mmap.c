@@ -2,9 +2,9 @@
  * Property tests for mmap
  */
 
-#include "../vm/vm_area.h"
+#include <vm/vm_area.h>
 #include <sys/mman.h>
-#include "../kern/console.h"
+#include <kern/console.h>
 
 static int props_passed = 0;
 static int props_failed = 0;

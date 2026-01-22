@@ -1,5 +1,5 @@
-#include "../kern/console.h"
-#include "../pm/pm.h"
+#include <kern/console.h>
+#include <pm/pm.h>
 #include "tests.h"
 
 extern process_t processes[];

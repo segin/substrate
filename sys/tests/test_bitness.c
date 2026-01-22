@@ -2,8 +2,8 @@
 #include <sys/sysinfo.h>
 #include <sys/proc.h>
 #include <string.h>
-#include "../kern/console.h"
-#include "../pm/pm.h"
+#include <kern/console.h>
+#include <pm/pm.h>
 
 // Extern the syscall function (it's in arch/i386/syscall.c)
 extern int sys_proc_info(pid_t pid, sys_procinfo_t *info);
