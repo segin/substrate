@@ -1,4 +1,4 @@
-#include "../kern/console.h"
+#include <kern/console.h>
 #include <stddef.h>
 #include "tests.h"
 

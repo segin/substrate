@@ -1,7 +1,7 @@
 #include <sys/types.h>
 #include <stdint.h>
-#include "../arch/i386/pmap.h"
-#include "../kern/console.h"
+#include <arch/i386/pmap.h>
+#include <kern/console.h>
 #include <string.h>
 
 #define ASSERT(c) if(!(c)) { kprint("Assertion failed: " #c "\n"); return; }

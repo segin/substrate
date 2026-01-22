@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: ISC
  */
 
-#include "../arch/i386/pmap.h"
-#include "../kern/console.h"
+#include <arch/i386/pmap.h>
+#include <kern/console.h>
 #include <stdint.h>
 
 static int tests_passed = 0;

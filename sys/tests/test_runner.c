@@ -2,8 +2,8 @@
  * test_runner.c - Kernel Test Framework Entry Point
  */
 
-#include "../kern/console.h"
-#include "../kern/cmdline.h"
+#include <kern/console.h>
+#include <kern/cmdline.h>
 #include <string.h>
 #include "tests.h"
 

@@ -2,9 +2,9 @@
  * Unit tests for pmap_create/destroy
  */
 
-#include "../arch/i386/pmap.h"
-#include "../arch/i386/pmm.h"
-#include "../kern/console.h"
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <kern/console.h>
 #include <stdint.h>
 
 static int tests_passed = 0;
