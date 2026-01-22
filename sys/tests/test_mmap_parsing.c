@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include "../../kern/console.h"
+#include <kern/console.h>
 
 /* Multiboot mmap entry structure (copied for test isolation) */
 typedef struct test_mmap_entry {

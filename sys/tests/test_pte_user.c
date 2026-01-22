@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include "../kern/console.h"
+#include <kern/console.h>
 
 /* PTE flags from pmap.h */
 #define PTE_P  0x001  /* Present */
