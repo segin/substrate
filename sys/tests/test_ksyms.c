@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "../kern/console.h"
-#include "../kern/ksyms.h"
+#include <kern/console.h>
+#include <kern/ksyms.h>
 
 /* Test result tracking */
 static int tests_passed = 0;

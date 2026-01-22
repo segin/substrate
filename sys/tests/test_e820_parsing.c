@@ -9,8 +9,8 @@
  */
 #include <stdio.h>
 #include <stdint.h>
-#include "../kern/console.h"
-#include "../arch/i386/pmm.h"
+#include <kern/console.h>
+#include <arch/i386/pmm.h>
 
 /* Test context for callback */
 struct e820_test_ctx {
