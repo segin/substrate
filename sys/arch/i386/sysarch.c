@@ -1,7 +1,7 @@
 #include <sys/types.h>
 #include <sys/sysarch.h>
 #include <errno.h>
-#include "../../kern/console.h"
+#include <kern/console.h>
 
 extern int vm86_init_bsd(void *args);
 

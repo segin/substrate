@@ -32,7 +32,7 @@
 
 #include <sys/signal.h>
 #include <sys/proc.h>
-#include "../../kern/console.h"
+#include <kern/console.h>
 #include "idt.h"
 #include "include/signal_arch.h"
 #include <string.h>

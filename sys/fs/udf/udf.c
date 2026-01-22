@@ -5,8 +5,8 @@
  */
 
 #include "udf.h"
-#include "../../vfs/vfs.h"
-#include "../../kern/console.h"
+#include <vfs/vfs.h>
+#include <kern/console.h>
 #include <string.h>
 
 /* UDF filesystem context (single mount for now) */

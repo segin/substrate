@@ -1,12 +1,12 @@
 #include "idt.h"
-#include "../../drivers/video/vga.h"
+#include <drivers/video/vga.h>
 #include "io.h"
 #include <string.h>
 #include <stdio.h>
-#include "../../drivers/input/keyboard.h"
-#include "../../drivers/input/mouse.h"
-#include "../../kern/console.h"
-#include "../../kern/panic.h"
+#include <drivers/input/keyboard.h>
+#include <drivers/input/mouse.h>
+#include <kern/console.h>
+#include <kern/panic.h>
 #include "fpu/fpu_emu.h"
 
 #include <sys/proc.h>

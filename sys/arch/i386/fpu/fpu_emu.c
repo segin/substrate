@@ -1,7 +1,7 @@
 #include "fpu_emu.h"
 #include "../idt.h"
 #include "../io.h"
-#include "../../../kern/console.h"
+#include <kern/console.h>
 #include <sys/proc.h>
 
 extern void isr7(void);

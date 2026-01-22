@@ -1,11 +1,11 @@
 #include "coff.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 #include <stdio.h>
 #include <string.h>
-#include "../../exec/perso/personality.h"
-#include "../../kern/sched.h"
+#include <exec/perso/personality.h>
+#include <kern/sched.h>
 #include <sys/sysinfo.h>
-#include "../../pm/pm.h"
+#include <pm/pm.h>
 
 int coff_load_file(void *file, uint32_t size) {
     (void)size;

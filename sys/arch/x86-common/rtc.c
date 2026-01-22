@@ -1,6 +1,6 @@
 #include "rtc.h"
 #include "io.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 #include <stdint.h>
 
 #define CMOS_ADDRESS 0x70

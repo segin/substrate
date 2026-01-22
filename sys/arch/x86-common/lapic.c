@@ -1,5 +1,5 @@
 #include "include/lapic.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 
 // Default LAPIC physical address (can be overridden by MADT)
 #define LAPIC_DEFAULT_BASE  0xFEE00000

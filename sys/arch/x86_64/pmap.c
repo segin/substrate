@@ -1,6 +1,6 @@
 #include "pmap.h"
 #include "../i386/pmm.h"
-#include "../../vm/vm_kmem.h" // For kmalloc/kfree
+#include <vm/vm_kmem.h> // For kmalloc/kfree
 #include <string.h> // for memset
 
 extern uint64_t boot_pml4[]; // From boot.S

@@ -1,6 +1,6 @@
 // Debug function to dump process memory mappings
 #include "pmap.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 #include <stdio.h>
 #include <sys/proc.h>
 

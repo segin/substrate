@@ -1,6 +1,6 @@
 #include "pci.h"
 #include "io.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 #include <stdio.h>
 
 #define PCI_CONFIG_ADDRESS 0xCF8

@@ -1,6 +1,6 @@
 #include "syscall.h"
-#include "../../drivers/video/vga.h" // Warning: VGA might need porting/mapping for 64-bit high half
-#include "../../arch/i386/sched.h" // Reusing task structures
+#include <drivers/video/vga.h> // Warning: VGA might need porting/mapping for 64-bit high half
+#include <arch/i386/sched.h> // Reusing task structures
 
 // MSRs
 #define MSR_STAR      0xC0000081

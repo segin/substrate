@@ -1,5 +1,5 @@
 #include "pe.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 
 int pe_load_file(void *file, uint32_t size) {
     // Stub

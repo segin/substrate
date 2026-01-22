@@ -7,7 +7,7 @@
 #include "percpu.h"
 #include "gdt.h"
 #include "smp.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 #include <string.h>
 
 // Per-CPU data array

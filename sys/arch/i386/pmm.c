@@ -2,12 +2,12 @@
 #include "../x86-common/include/multiboot.h"
 #include "../x86-common/include/e820.h" // Updated path
 #include "intr.h"
-#include "../../vm/vm_page.h"
-#include "../../vm/phys_mem.h" // Generic PMM
+#include <vm/vm_page.h>
+#include <vm/phys_mem.h> // Generic PMM
 #include <string.h>
 #include <stdio.h>
 #include <sys/lock.h>
-#include "../../kern/console.h"
+#include <kern/console.h>
 
 // Note: pmm_lock is no longer needed if we delegate strictly to vm_phys
 // However, if we have local state, we might need it.

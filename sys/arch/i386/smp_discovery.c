@@ -1,5 +1,5 @@
 #include "smp.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 #include <string.h>
 #include <stdint.h>
 

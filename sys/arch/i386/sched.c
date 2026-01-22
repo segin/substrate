@@ -1,5 +1,5 @@
-#include "../../kern/sched.h"
-#include "../../pm/pm.h"
+#include <kern/sched.h>
+#include <pm/pm.h>
 #include <sys/acct.h>
 #include <stddef.h>
 #include <stdint.h>

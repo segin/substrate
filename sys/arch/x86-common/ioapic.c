@@ -5,7 +5,7 @@
  */
 
 #include "include/ioapic.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 
 // Maximum number of IO-APICs supported
 #define MAX_IOAPICS 8
