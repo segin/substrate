@@ -1,5 +1,5 @@
 #include "fat.h"
-#include "../../drivers/video/vga.h"
+#include <drivers/video/vga.h>
 
 void fat_init(void) {
     // Initialized by VFS or dev driver

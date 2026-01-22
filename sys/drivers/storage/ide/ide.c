@@ -14,9 +14,9 @@
  */
 
 #include "ide.h"
-#include "../../../arch/x86-common/include/io.h"
+#include <arch/x86-common/include/io.h>
 #include <string.h>
-#include "../../../kern/console.h"
+#include <kern/console.h>
 #include "../blkdev.h"
 #include <sys/random.h>
 

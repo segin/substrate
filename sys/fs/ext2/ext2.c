@@ -1,6 +1,6 @@
 #include "ext2.h"
-#include "../../vfs/vfs.h"
-#include "../../kern/console.h"
+#include <vfs/vfs.h>
+#include <kern/console.h>
 #include <string.h>
 
 // Static filesystem context (single mount for now)

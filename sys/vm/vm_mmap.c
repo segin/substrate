@@ -1,7 +1,7 @@
 #include "vm_area.h"
-#include "../arch/i386/pmap.h"
-#include "../arch/i386/pmm.h"
-#include "../kern/console.h"
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <kern/console.h>
 #include <sys/mman.h>
 #include <sys/proc.h>
 #include <sys/file.h>

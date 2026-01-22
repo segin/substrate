@@ -1,7 +1,7 @@
 #include "fb.h"
 #include "font.h"
 #include "font.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 #include <sys/fb.h>
 #include <sys/file.h>
 #include "../../vfs/vfs.h"

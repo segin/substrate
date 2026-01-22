@@ -5,8 +5,8 @@
  */
 
 #include "uma.h"
-#include "../arch/i386/pmm.h"
-#include "../kern/console.h"
+#include <arch/i386/pmm.h>
+#include <kern/console.h>
 #include <stddef.h>
 #include <string.h>
 

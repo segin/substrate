@@ -1,4 +1,4 @@
-#include "../vfs/vfs.h"
+#include <vfs/vfs.h>
 #include <sys/kobject.h>
 #include <string.h>
 #include <stddef.h>

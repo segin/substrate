@@ -1,6 +1,6 @@
-#include "../vfs/vfs.h"
+#include <vfs/vfs.h>
 #include <sys/fuse.h>
-#include "../kern/sched.h"
+#include <kern/sched.h>
 #include <string.h>
 #include <stddef.h>
 

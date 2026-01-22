@@ -6,8 +6,8 @@
  */
 
 #include "ps2.h"
-#include "../../arch/x86-common/include/io.h"
-#include "../../kern/console.h"
+#include <arch/x86-common/include/io.h>
+#include <kern/console.h>
 #include <stdio.h>
 
 #define PS2_TIMEOUT 100000

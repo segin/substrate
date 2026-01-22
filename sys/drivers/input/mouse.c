@@ -1,7 +1,7 @@
 #include "mouse.h"
 #include "ps2.h"
-#include "../../arch/x86-common/include/io.h"
-#include "../../kern/console.h"
+#include <arch/x86-common/include/io.h>
+#include <kern/console.h>
 #include <sys/input.h>
 #include <sys/random.h>
 

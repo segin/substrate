@@ -2,7 +2,7 @@
 #include "vm_object.h"
 #include "vm_page.h"
 #include "vm_pager.h"
-#include "../arch/i386/pmap.h"
+#include <arch/i386/pmap.h>
 #include <stddef.h>
 
 #define P2V(x) ((uintptr_t)(x) + 0xC0000000)

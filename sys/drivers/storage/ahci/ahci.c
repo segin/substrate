@@ -1,6 +1,6 @@
 #include "ahci.h"
-#include "../../../kern/console.h"
-#include "../../../arch/i386/pci.h"
+#include <kern/console.h>
+#include <arch/i386/pci.h>
 
 void ahci_init(void) {
     kprint("AHCI Driver Initialized.\n");

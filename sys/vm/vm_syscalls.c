@@ -1,12 +1,12 @@
 #include "vm_map.h"
 #include "vm_object.h"
 #include "vm_fault.h"
-#include "../include/sys/proc.h"
-#include "../include/sys/file.h"
+#include <sys/proc.h>
+#include <sys/file.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-#include "../arch/i386/pmm.h"
+#include <arch/i386/pmm.h>
 #include "vm_kmem.h"
 
 // mman.h flag definitions (duplicated here for kernel use)

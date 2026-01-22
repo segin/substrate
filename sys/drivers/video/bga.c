@@ -1,8 +1,8 @@
 #include <sys/types.h>
 #include <sys/file.h>
-#include "../../arch/x86-common/include/io.h"
+#include <arch/x86-common/include/io.h>
 #include "fb.h"
-#include "../../kern/console.h"
+#include <kern/console.h>
 
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF

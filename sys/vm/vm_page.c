@@ -1,7 +1,7 @@
 #include "vm_page.h"
 #include "vm_pager.h"
 #include <stddef.h>
-#include "../arch/i386/pmm.h" // For pmm_alloc_block
+#include <arch/i386/pmm.h> // For pmm_alloc_block
 
 // Global page queues
 static vm_page_t *free_queue = NULL;

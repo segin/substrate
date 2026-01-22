@@ -1,6 +1,6 @@
 #include "nvme.h"
-#include "../../../kern/console.h"
-#include "../../../arch/i386/pci.h"
+#include <kern/console.h>
+#include <arch/i386/pci.h>
 
 void nvme_init(void) {
     kprint("NVMe Driver Initialized.\n");

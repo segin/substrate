@@ -6,7 +6,7 @@
  */
 
 #include "uma.h"
-#include "../kern/console.h"
+#include <kern/console.h>
 #include <stdint.h>
 #include <string.h>
 

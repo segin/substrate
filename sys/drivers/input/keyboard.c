@@ -1,9 +1,9 @@
 #include "keyboard.h"
 #include "ps2.h"
-#include "../../arch/x86-common/include/io.h"
+#include <arch/x86-common/include/io.h>
 #include <sys/input.h>
 #include <sys/random.h>
-#include "../../kern/console.h"
+#include <kern/console.h>
 
 #define KBD_BUFFER_SIZE 256
 static char kbd_buffer[KBD_BUFFER_SIZE];

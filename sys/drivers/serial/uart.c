@@ -1,7 +1,7 @@
 #include "uart.h"
-#include "../../arch/x86-common/include/io.h"
-#include "../../kern/console.h"
-#include "../../arch/i386/idt.h"
+#include <arch/x86-common/include/io.h>
+#include <kern/console.h>
+#include <arch/i386/idt.h>
 
 int uart_received(void);
 

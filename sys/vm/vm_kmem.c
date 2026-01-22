@@ -7,7 +7,7 @@
 
 #include "vm_kmem.h"
 #include "uma.h"
-#include "../arch/i386/pmm.h"
+#include <arch/i386/pmm.h>
 #include <stdint.h>
 #include <string.h>
 
