@@ -4,10 +4,11 @@
 #include <stdint.h>
 
 // Argument Types for Tracing
-#define ARG_HEX 0
-#define ARG_INT 1
-#define ARG_STR 2
-#define ARG_PTR 3
+#define ARG_HEX  0
+#define ARG_INT  1
+#define ARG_STR  2
+#define ARG_PTR  3
+#define ARG_LONG 4  /* 64-bit value (consumes 2 slots on i386) */
 
 struct syscall_fmt {
     int nargs;
