@@ -35,6 +35,12 @@ static fat_fs_t fat_global_fs;
 static fs_node_t fat_root_node;
 static fat_node_t fat_root_ctx;
 
+// Node cache for dynamically allocated nodes
+#define FAT_NODE_CACHE_SIZE 64
+static fat_node_t fat_node_cache[FAT_NODE_CACHE_SIZE];
+static fs_node_t fat_fs_node_cache[FAT_NODE_CACHE_SIZE];
+static int fat_node_cache_idx = 0;
+
 // Forward declarations
 static size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static struct dirent *fat_readdir(fs_node_t *node, uint64_t index);
@@ -238,17 +244,90 @@ static struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
     return NULL;
 }
 
+// Allocate a new node from cache
+static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint32_t first_cluster, uint32_t size, uint8_t attr) {
+    int idx = fat_node_cache_idx++ % FAT_NODE_CACHE_SIZE;
+    
+    fat_node_t *ctx = &fat_node_cache[idx];
+    fs_node_t *node = &fat_fs_node_cache[idx];
+    
+    ctx->fs = fs;
+    ctx->first_cluster = first_cluster;
+    ctx->size = size;
+    ctx->attr = attr;
+    
+    memset(node, 0, sizeof(fs_node_t));
+    strncpy(node->name, name, 127);
+    node->name[127] = '\0';
+    node->impl = (uint32_t)(uintptr_t)ctx;
+    node->length = size;
+    
+    if (attr & FAT_ATTR_DIRECTORY) {
+        node->flags = FS_DIRECTORY;
+        node->readdir = fat_readdir;
+        node->finddir = fat_finddir;
+    } else {
+        node->flags = FS_FILE;
+        node->read = fat_file_read;
+    }
+    
+    return node;
+}
+
 // Find directory entry by name
 static fs_node_t *fat_finddir(fs_node_t *node, char *name) {
-    uint64_t idx = 0;
-    struct dirent *ent;
+    fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
+    fat_fs_t *fs = ctx->fs;
     
-    while ((ent = fat_readdir(node, idx++)) != NULL) {
-        if (strcmp(ent->name, name) == 0) {
-            // TODO: Create and return fs_node_t for this entry
-            // This requires reading the directory entry again to get attributes
-            return NULL;  // Stub for now
+    uint32_t cluster = ctx->first_cluster;
+    uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
+    
+    static uint8_t dir_buf[32768];
+    static char lfn_buffer[256];
+    int lfn_len = 0;
+    
+    while (cluster < 0x0FFFFFFF) {
+        uint32_t sector = fat_cluster_to_sector(fs, cluster);
+        if (fat_read_sectors(fs, sector, fs->bpb.sectors_per_cluster, dir_buf) != 0) {
+            return NULL;
         }
+        
+        for (uint32_t i = 0; i < cluster_size; i += 32) {
+            fat_dirent_t *entry = (fat_dirent_t *)(dir_buf + i);
+            
+            if (entry->name[0] == 0x00) return NULL;  // End of directory
+            if (entry->name[0] == 0xE5) continue;      // Deleted entry
+            
+            // Check for LFN entry
+            if (entry->attr == FAT_ATTR_LFN) {
+                fat_lfn_t *lfn = (fat_lfn_t *)entry;
+                lfn_len = fat_parse_lfn(lfn, lfn_buffer);
+                continue;
+            }
+            
+            // Skip volume labels
+            if (entry->attr & FAT_ATTR_VOLUME_ID) continue;
+            
+            // Build name and compare
+            char entry_name[128];
+            if (lfn_len > 0) {
+                lfn_buffer[lfn_len] = '\0';
+                strncpy(entry_name, lfn_buffer, 127);
+                entry_name[127] = '\0';
+            } else {
+                fat_parse_short_name(entry->name, entry_name);
+            }
+            
+            if (strcmp(entry_name, name) == 0) {
+                // Found it - create and return node
+                uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
+                return fat_alloc_node(fs, entry_name, cluster_num, entry->file_size, entry->attr);
+            }
+            
+            lfn_len = 0;
+        }
+        
+        cluster = fat_get_next_cluster(fs, cluster);
     }
     
     return NULL;
@@ -302,9 +381,19 @@ static fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     fs->first_data_sector = fs->bpb.reserved_sectors + (fs->bpb.fat_count * fat_size) + root_dir_sectors;
     fs->total_clusters = total_clusters;
     
-    // TODO: Cache FAT table for better performance
-    // fs->fat_table = kmalloc(fat_size * fs->bpb.bytes_per_sector);
-    // fat_read_sectors(fs, fs->fat_start_sector, fat_size, fs->fat_table);
+    // Cache FAT table for better performance
+    extern void *kmalloc(size_t size);
+    uint32_t fat_table_size = fat_size * fs->bpb.bytes_per_sector;
+    fs->fat_table = (uint8_t *)kmalloc(fat_table_size);
+    if (fs->fat_table) {
+        if (fat_read_sectors(fs, fs->fat_start_sector, fat_size, fs->fat_table) != 0) {
+            kprint("FAT: Warning - failed to cache FAT table\n");
+            // Continue without cache, get_next_cluster will fail gracefully
+        }
+    } else {
+        kprint("FAT: Warning - could not allocate FAT table cache\n");
+        // Continue without cache
+    }
     
     // Setup root directory node
     fat_root_ctx.fs = fs;
