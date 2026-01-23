@@ -17,8 +17,8 @@ static int ext2_node_cache_idx = 0;
 
 // Forward declarations
 static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
-static uint32_t ext2_file_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
-static struct dirent *ext2_readdir(fs_node_t *node, uint32_t index);
+static size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *ext2_finddir(fs_node_t *node, char *name);
 static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size);
 
@@ -328,13 +328,13 @@ static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size) {
 }
 
 // File read operation
-static uint32_t ext2_file_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     return ext2_inode_read(ctx->fs, &ctx->inode, offset, size, buffer);
 }
 
 // File write operation
-static uint32_t ext2_file_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
+static size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
@@ -354,7 +354,7 @@ static struct dirent ext2_dirent;
 static uint8_t ext2_dir_buf[4096];
 
 // Read directory entry at index
-static struct dirent *ext2_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     

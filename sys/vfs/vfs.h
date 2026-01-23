@@ -18,11 +18,11 @@ struct fs_node;
 
 /* ... */
 
-typedef uint32_t (*read_type_t)(struct fs_node*, off_t, uint32_t, uint8_t*);
-typedef uint32_t (*write_type_t)(struct fs_node*, off_t, uint32_t, uint8_t*);
+typedef size_t (*read_type_t)(struct fs_node*, off_t, size_t, uint8_t*);
+typedef size_t (*write_type_t)(struct fs_node*, off_t, size_t, const uint8_t*);
 typedef void (*open_type_t)(struct fs_node*);
 typedef void (*close_type_t)(struct fs_node*);
-typedef struct dirent * (*readdir_type_t)(struct fs_node*, uint32_t);
+typedef struct dirent * (*readdir_type_t)(struct fs_node*, uint64_t);
 typedef struct fs_node * (*finddir_type_t)(struct fs_node*, char *name);
 typedef int (*ioctl_type_t)(struct fs_node*, uint32_t, void*);
 typedef void * (*mmap_type_t)(struct fs_node*, void *addr, size_t length, int prot, int flags, off_t offset);
@@ -41,7 +41,7 @@ typedef struct fs_node {
     uint32_t uid;         // The owning user.
     uint32_t gid;         // The owning group.
     uint32_t flags;       // Includes the node type.
-    uint32_t inode;       // This is device-specific - provides a way for a filesystem to identify files.
+    uint64_t inode;       // This is device-specific - provides a way for a filesystem to identify files.
     off_t    length;      // Size of the file, in bytes (64-bit).
     uint32_t impl;        // An implementation-defined number.
     
@@ -69,7 +69,7 @@ typedef struct fs_node {
 
 struct dirent {
     char name[128];
-    uint32_t ino;
+    uint64_t ino;
 };
 
 typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
@@ -89,11 +89,11 @@ typedef struct vfs_mount {
 /* ... */
 
 // Standard VFS functions
-uint32_t read_fs(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
-uint32_t write_fs(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
+size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
 void open_fs(fs_node_t *node, uint8_t read, uint8_t write);
 void close_fs(fs_node_t *node);
-struct dirent *readdir_fs(fs_node_t *node, uint32_t index);
+struct dirent *readdir_fs(fs_node_t *node, uint64_t index);
 fs_node_t *finddir_fs(fs_node_t *node, char *name);
 int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
