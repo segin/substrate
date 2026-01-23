@@ -1,4 +1,4 @@
-#include "elf.h"
+#include <fs/exec/elf.h>
 
 #include <vfs/vfs.h>
 #include <kern/console.h>

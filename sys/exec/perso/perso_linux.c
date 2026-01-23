@@ -1,7 +1,7 @@
 #include "personality.h"
 #include <stddef.h>
 #include <sys/termios.h>
-#include "../../arch/i386/syscall.h"
+#include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 #include "compat_syscalls.h"
 

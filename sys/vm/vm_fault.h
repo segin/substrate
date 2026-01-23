@@ -2,7 +2,7 @@
 #define _VM_FAULT_H
 
 #include <stdint.h>
-#include "vm_map.h"
+#include <vm/vm_map.h>
 
 // VM Fault Types/Results
 #define VM_FAULT_SUCCESS    0

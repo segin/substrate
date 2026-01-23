@@ -1,8 +1,8 @@
-#include "vm_map.h"
-#include "vm_object.h"
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
 #include <stddef.h>
 
-#include "vm_kmem.h"
+#include <vm/vm_kmem.h>
 
 static vm_map_entry_t *alloc_entry(void) {
     return kmalloc(sizeof(vm_map_entry_t));

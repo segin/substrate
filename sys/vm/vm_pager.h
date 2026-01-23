@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "vm_page.h"
-#include "vm_object.h"
+#include <vm/vm_object.h>
 
 // Pager Operations
 typedef struct vm_pager_ops {

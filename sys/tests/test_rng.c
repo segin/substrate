@@ -1,5 +1,5 @@
 #include <sys/random.h>
-#include "../kern/console.h"
+#include <kern/console.h>
 #include <string.h>
 #include <stdio.h>
 

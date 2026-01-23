@@ -2,7 +2,7 @@
 #include <sys/termios.h>
 #include "tests.h"
 #include <string.h>
-#include "../kern/console.h"
+#include <kern/console.h>
 
 #define ASSERT(x) do { if (!(x)) { kprint("ASSERT FAILED: " #x "\n"); } } while (0)
 

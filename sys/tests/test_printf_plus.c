@@ -1,5 +1,5 @@
-#include "../kern/panic.h"
-#include "../kern/console.h"
+#include <kern/panic.h>
+#include <kern/console.h>
 #include \u003cstdio.h\u003e
 #include \u003cstring.h\u003e
 

@@ -2,7 +2,7 @@
 #define _FAT_H
 
 #include <stdint.h>
-#include "../../vfs/vfs.h"
+#include <vfs/vfs.h>
 
 typedef struct {
     uint8_t  jmp[3];

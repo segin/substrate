@@ -1,5 +1,5 @@
-#include "vm_pager.h"
-#include "vm_kmem.h"
+#include <vm/vm_pager.h>
+#include <vm/vm_kmem.h>
 #include <stddef.h>
 
 vm_pager_t *vm_pager_allocate(vm_object_type_t type, void *handle, size_t size, uint8_t prot, uint64_t offset) {

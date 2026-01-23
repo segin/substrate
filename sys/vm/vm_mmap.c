@@ -1,4 +1,4 @@
-#include "vm_area.h"
+#include <vm/vm_area.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
 #include <kern/console.h>

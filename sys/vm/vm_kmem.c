@@ -5,8 +5,8 @@
  * Provides kmalloc/kfree for general kernel allocations.
  */
 
-#include "vm_kmem.h"
-#include "uma.h"
+#include <vm/vm_kmem.h>
+#include <vm/uma.h>
 #include <arch/i386/pmm.h>
 #include <stdint.h>
 #include <string.h>

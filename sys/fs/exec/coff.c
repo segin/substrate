@@ -1,4 +1,4 @@
-#include "coff.h"
+#include <fs/exec/coff.h>
 #include <kern/console.h>
 #include <stdio.h>
 #include <string.h>

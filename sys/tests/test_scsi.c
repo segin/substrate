@@ -4,8 +4,8 @@
  * Tests core SCSI data structures, CDB construction, and sense parsing.
  */
 
-#include "../kern/console.h"
-#include "../drivers/storage/scsi/scsi.h"
+#include <kern/console.h>
+#include <drivers/storage/scsi/scsi.h>
 #include <stdio.h>
 #include <string.h>
 #include "tests.h"

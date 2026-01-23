@@ -9,7 +9,7 @@
  */
 
 #include "geom.h"
-#include "../console.h"
+#include <kern/console.h>
 #include <string.h>
 #include <stdio.h>
 

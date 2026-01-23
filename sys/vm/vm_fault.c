@@ -1,7 +1,7 @@
-#include "vm_fault.h"
-#include "vm_object.h"
-#include "vm_page.h"
-#include "vm_pager.h"
+#include <vm/vm_fault.h>
+#include <vm/vm_object.h>
+#include <vm/vm_page.h>
+#include <vm/vm_pager.h>
 #include <arch/i386/pmap.h>
 #include <stddef.h>
 

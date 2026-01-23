@@ -1,5 +1,5 @@
-#include "vm_page.h"
-#include "vm_pager.h"
+#include <vm/vm_page.h>
+#include <vm/vm_pager.h>
 #include <stddef.h>
 #include <arch/i386/pmm.h> // For pmm_alloc_block
 

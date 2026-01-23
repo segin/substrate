@@ -2,7 +2,7 @@
 #define _VM_AREA_H
 
 #include <stdint.h>
-#include "../vfs/vfs.h"
+#include <vfs/vfs.h>
 
 // VM area flags
 #define VM_READ    0x1

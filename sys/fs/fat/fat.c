@@ -1,4 +1,4 @@
-#include "fat.h"
+#include <fs/fat/fat.h>
 #include <drivers/video/vga.h>
 
 void fat_init(void) {

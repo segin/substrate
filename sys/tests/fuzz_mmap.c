@@ -2,9 +2,9 @@
  * Auto-generated fuzzing test for mmap
  */
 
-#include "../vm/vm_area.h"
+#include <vm/vm_area.h>
 #include <sys/mman.h>
-#include "../kern/console.h"
+#include <kern/console.h>
 
 void run_mmap_fuzz_test(void) {
     kprint("\n=== MMAP Fuzzing Test ===\n");

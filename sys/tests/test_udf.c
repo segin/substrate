@@ -7,7 +7,7 @@
 #include <assert.h>
 
 /* Include UDF header for structure definitions */
-#include "../fs/udf/udf.h"
+#include <fs/udf/udf.h>
 
 /* Test structure sizes match ECMA-167 specifications */
 static void test_structure_sizes(void) {

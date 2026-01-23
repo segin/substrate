@@ -1,13 +1,13 @@
-#include "vm_map.h"
-#include "vm_object.h"
-#include "vm_fault.h"
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
+#include <vm/vm_fault.h>
 #include <sys/proc.h>
 #include <sys/file.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmm.h>
-#include "vm_kmem.h"
+#include <vm/vm_kmem.h>
 
 // mman.h flag definitions (duplicated here for kernel use)
 #define PROT_NONE  0x0

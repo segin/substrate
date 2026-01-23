@@ -9,8 +9,8 @@
  */
 
 #include "geom.h"
-#include "../console.h"
-#include "../../drivers/storage/blkdev.h"
+#include <kern/console.h>
+#include <drivers/storage/blkdev.h>
 #include <string.h>
 #include <stdio.h>
 

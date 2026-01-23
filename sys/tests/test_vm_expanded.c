@@ -1,6 +1,6 @@
 #include <stdint.h>
-#include "../arch/i386/pmap.h"
-#include "../kern/console.h"
+#include <arch/i386/pmap.h>
+#include <kern/console.h>
 #include "tests.h"
 #include <string.h>
 

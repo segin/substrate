@@ -1,6 +1,6 @@
 #include "personality.h"
 #include <stddef.h>
-#include "../../arch/i386/syscall.h"
+#include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 
 /* SVR4-specific externs not in syscall_impl.h */

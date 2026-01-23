@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "../../vfs/vfs.h"
+#include <vfs/vfs.h>
 
 // EXT2 Magic Number
 #define EXT2_SUPER_MAGIC 0xEF53

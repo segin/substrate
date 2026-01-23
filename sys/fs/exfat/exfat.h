@@ -2,7 +2,7 @@
 #define _EXFAT_H
 
 #include <stdint.h>
-#include "../../vfs/vfs.h"
+#include <vfs/vfs.h>
 
 void exfat_init(void);
 

@@ -1,5 +1,5 @@
-#include "vm_object.h"
-#include "vm_kmem.h"
+#include <vm/vm_object.h>
+#include <vm/vm_kmem.h>
 #include <stddef.h>
 
 // Static pool for bootstrap objects (until kmalloc is ready)

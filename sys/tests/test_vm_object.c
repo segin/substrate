@@ -3,8 +3,8 @@
  */
 
 #include <stdint.h>
-#include "../vm/vm_object.h"
-#include "../kern/console.h"
+#include <vm/vm_object.h>
+#include <kern/console.h>
 
 static int tests_passed = 0;
 static int tests_failed = 0;

@@ -4,7 +4,7 @@
  * Implements FreeBSD-style slab allocator with per-CPU caches.
  */
 
-#include "uma.h"
+#include <vm/uma.h>
 #include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <stddef.h>

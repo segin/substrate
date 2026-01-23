@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "vm_page.h"
-#include "../arch/i386/pmap.h" // Note: This should ideally be abstracted
+#include <vm/vm_page.h>
+#include <arch/i386/pmap.h> // Note: This should ideally be abstracted
 
 // Forward declarations
 struct vm_object;

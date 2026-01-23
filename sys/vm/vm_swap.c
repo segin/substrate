@@ -2,8 +2,8 @@
  * Swap Pager Implementation
  */
 
-#include "vm_pager.h"
-#include "vm_kmem.h"
+#include <vm/vm_pager.h>
+#include <vm/vm_kmem.h>
 #include <stddef.h>
 
 // Simple bitmap-based swap allocator

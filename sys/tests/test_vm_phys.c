@@ -9,9 +9,9 @@
  */
 #include <stdio.h>
 #include <stdint.h>
-#include "../kern/console.h"
-#include "../vm/phys_mem.h"
-#include "../vm/vm_page.h"
+#include <kern/console.h>
+#include <vm/phys_mem.h>
+#include <vm/vm_page.h>
 
 static int passed = 0;
 static int failed = 0;

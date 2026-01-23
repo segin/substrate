@@ -4,10 +4,10 @@
  * Kernel tests for signal handling subsystem.
  */
 
-#include "../kern/console.h"
-#include "../include/sys/signal.h"
-#include "../include/sys/proc.h"
-#include "../kern/sched.h"
+#include <kern/console.h>
+#include <sys/signal.h>
+#include <sys/proc.h>
+#include <kern/sched.h>
 #include <string.h>
 
 /* Test framework macros */

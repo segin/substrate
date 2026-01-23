@@ -1,5 +1,5 @@
 #include "personality.h"
-#include "../../arch/i386/syscall.h"
+#include <arch/i386/syscall.h>
 #include <stddef.h>
 #include <sys/syscall_impl.h>
 

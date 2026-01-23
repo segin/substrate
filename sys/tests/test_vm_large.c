@@ -1,7 +1,7 @@
 #include <sys/types.h>
 #include <sys/klog.h>
 #include <sys/mm.h>
-#include "../arch/i386/pmap.h"
+#include <arch/i386/pmap.h>
 
 // Define PTE_PS if not visible (it is in pmap.h usually)
 #ifndef PTE_PS
