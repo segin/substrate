@@ -308,8 +308,8 @@ static udf_node_t udf_root_ctx;
 
 /* Forward declarations for VFS operations */
 /* Forward declarations for VFS operations */
-static uint32_t udf_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
-static struct dirent *udf_vfs_readdir(fs_node_t *node, uint32_t index);
+static size_t udf_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name);
 static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permission);
 
@@ -350,7 +350,7 @@ static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, str
     return node;
 }
 
-static uint32_t udf_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t udf_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
     return udf_read_file(ctx->fs, &ctx->fe, (uint32_t)offset, size, buffer);
 }
@@ -358,7 +358,7 @@ static uint32_t udf_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8
 /*
  * Iterate directory entries (FIDs)
  */
-static struct dirent *udf_vfs_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
     static uint8_t dir_buf[4096];
     
