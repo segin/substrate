@@ -5,7 +5,7 @@
  * BSD-derived with Sun extensions.
  */
 
-#include "personality.h"
+#include <exec/perso/personality.h>
 #include <arch/i386/syscall.h>
 #include <stddef.h>
 #include <sys/syscall_impl.h>

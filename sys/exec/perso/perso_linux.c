@@ -1,9 +1,9 @@
-#include "personality.h"
+#include <exec/perso/personality.h>
 #include <stddef.h>
 #include <sys/termios.h>
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
-#include "compat_syscalls.h"
+#include <exec/perso/compat_syscalls.h>
 
 /* Native stat structure (from sys/stat.h) */
 struct native_stat {
