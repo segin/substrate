@@ -1,6 +1,6 @@
-#include "pmap.h"
-#include "pmm.h"
-#include "../x86-common/include/lapic.h"
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <arch/x86-common/include/lapic.h>
 #include <vm/vm_page.h>
 #include <kern/panic.h>
 #include <kern/console.h>
@@ -1080,7 +1080,7 @@ void pmap_shootdown_wait(int expected_cpus) {
 }
 
 // Include vm_page.h for vm_page_t
-#include "../../vm/vm_page.h"
+#include <vm/vm_page.h>
 
 // Check if page was accessed (PTE A bit set)
 // Walks all PV entries for this page and checks PTE A bits

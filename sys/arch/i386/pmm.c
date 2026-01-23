@@ -1,6 +1,6 @@
-#include "pmm.h"
-#include "../x86-common/include/multiboot.h"
-#include "../x86-common/include/e820.h" // Updated path
+#include <arch/i386/pmm.h>
+#include <arch/x86-common/include/multiboot.h>
+#include <arch/x86-common/include/e820.h>
 #include "intr.h"
 #include <vm/vm_page.h>
 #include <vm/phys_mem.h> // Generic PMM

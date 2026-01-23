@@ -1,5 +1,5 @@
-#include "pmap.h"
-#include "../i386/pmm.h"
+#include <arch/x86_64/pmap.h>
+#include <arch/i386/pmm.h>
 #include <vm/vm_kmem.h> // For kmalloc/kfree
 #include <string.h> // for memset
 
