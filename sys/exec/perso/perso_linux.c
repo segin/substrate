@@ -6,7 +6,6 @@
 #include <sys/termios.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/linux/linux_syscalls.h>
-
 #include <exec/perso/linux/linux_user.h>
 
 /* Linux TTY ioctl handler - 0x5400-0x54FF range */
