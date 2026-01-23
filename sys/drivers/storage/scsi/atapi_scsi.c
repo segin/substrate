@@ -7,10 +7,10 @@
  * Transport path: SCSI mid-layer -> scsi_link -> atapi_execute -> ide_atapi_packet
  */
 
-#include "scsi.h"
-#include "../ide/ide.h"
-#include "../../../kern/console.h"
-#include "../../../arch/x86-common/include/io.h"
+#include <drivers/storage/scsi/scsi.h>
+#include <drivers/storage/ide/ide.h>
+#include <kern/console.h>
+#include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdio.h>
 
