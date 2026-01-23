@@ -19,5 +19,16 @@ void proc_remove_child(process_t *parent, process_t *child);
 void proc_set_bitness(process_t *p, uint8_t bitness);
 uint8_t proc_get_bitness(process_t *p);
 
+/*
+ * proc_find - Find a process by PID
+ *
+ * Returns a pointer to the process structure for the given PID,
+ * or NULL if no such process exists.
+ *
+ * Note: The returned pointer is valid only while proctree_lock is held
+ * or when called from interrupt context with interrupts disabled.
+ */
+process_t *proc_find(int pid);
+
 
 #endif

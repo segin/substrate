@@ -55,6 +55,10 @@ void vfs_register_filesystem(filesystem_t *fs) {
     filesystems = fs;
 }
 
+filesystem_t *vfs_get_filesystems(void) {
+    return filesystems;
+}
+
 int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
     // Find filesystem type
     filesystem_t *fs = filesystems;

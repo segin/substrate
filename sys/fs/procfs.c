@@ -17,6 +17,9 @@
 /* External declarations */
 extern uint32_t get_time(void);
 extern void cmdline_get(char *buf, size_t buf_len);
+extern uint32_t pmm_get_total_memory(void);    /* from PMM */
+extern uint32_t pmm_get_free_memory(void);     /* from PMM */
+extern filesystem_t *vfs_get_filesystems(void); /* from VFS */
 
 /* Forward declarations */
 static uint32_t procfs_generic_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
@@ -48,14 +51,20 @@ static uint32_t gen_cpuinfo(char *buf, size_t size __attribute__((unused))) {
 }
 
 static uint32_t gen_meminfo(char *buf, size_t size __attribute__((unused))) {
-    /* TODO: Get real values from PMM */
+    /* Get real values from PMM when available */
+    uint32_t total_kb = pmm_get_total_memory() / 1024;
+    uint32_t free_kb = pmm_get_free_memory() / 1024;
+    uint32_t used_kb = total_kb - free_kb;
+    
     return sprintf(buf,
-        "MemTotal:       65536 kB\n"
-        "MemFree:        32768 kB\n"
+        "MemTotal:    %8u kB\n"
+        "MemFree:     %8u kB\n"
+        "MemUsed:     %8u kB\n"
         "Buffers:            0 kB\n"
-        "Cached:          8192 kB\n"
+        "Cached:             0 kB\n"
         "SwapTotal:          0 kB\n"
-        "SwapFree:           0 kB\n");
+        "SwapFree:           0 kB\n",
+        total_kb, free_kb, used_kb);
 }
 
 static uint32_t gen_uptime(char *buf, size_t size __attribute__((unused))) {
@@ -120,11 +129,25 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size) {
 }
 
 static uint32_t gen_filesystems(char *buf, size_t size __attribute__((unused))) {
-    return sprintf(buf,
-        "nodev\tprocfs\n"
-        "\text2\n"
-        "\tminix\n"
-        "\tfat\n");
+    /* Dynamically generate from VFS registry */
+    int off = 0;
+    filesystem_t *fs = vfs_get_filesystems();
+    
+    while (fs && off < (int)size - 32) {
+        /* Check if this is a pseudo-filesystem (no device required) */
+        int nodev = (strcmp(fs->name, "procfs") == 0 ||
+                    strcmp(fs->name, "devfs") == 0 ||
+                    strcmp(fs->name, "sysfs") == 0 ||
+                    strcmp(fs->name, "tmpfs") == 0);
+        
+        if (nodev) {
+            off += sprintf(buf + off, "nodev\t%s\n", fs->name);
+        } else {
+            off += sprintf(buf + off, "\t%s\n", fs->name);
+        }
+        fs = fs->next;
+    }
+    return off;
 }
 
 /*
@@ -210,14 +233,7 @@ static uint32_t proc_pid_status_read(fs_node_t *node, off_t offset, uint32_t siz
 
 static uint32_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     int pid = node->inode;
-    process_t *p = NULL;
-    
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid == pid) {
-            p = &processes[i];
-            break;
-        }
-    }
+    process_t *p = proc_find(pid);
     if (!p) return 0;
     
     /* Return process command name (comm) as cmdline */

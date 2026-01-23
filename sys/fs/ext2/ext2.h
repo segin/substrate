@@ -139,10 +139,6 @@ void ext2_init(void);
 // Internal helpers (exposed for testing)
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer);
-#include <sys/types.h>
-
-/* ... */
-
 uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, void *buffer);
 
 #endif

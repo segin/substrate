@@ -53,6 +53,21 @@ void pm_init(void) {
     // Or we provide a function to allocate the first one.
 }
 
+/*
+ * proc_find - Find a process by PID
+ *
+ * Searches the process table for a process with the given PID.
+ * Returns NULL if no active process with that PID exists.
+ */
+process_t *proc_find(int pid) {
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (processes[i].pid == pid) {
+            return &processes[i];
+        }
+    }
+    return NULL;
+}
+
 process_t *proc_create(struct personality *pers) {
     int i;
     for (i = 0; i < MAX_PROCS; i++) {
