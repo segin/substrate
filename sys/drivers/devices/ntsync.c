@@ -13,9 +13,9 @@
  *   - Objects are automatically destroyed when all FDs are closed
  */
 
-#include "../../vfs/vfs.h"
-#include "../../kern/console.h"
-#include "../../kern/sched.h"
+#include <vfs/vfs.h>
+#include <kern/console.h>
+#include <kern/sched.h>
 #include <sys/ntsync.h>
 #include <sys/proc.h>
 #include <string.h>

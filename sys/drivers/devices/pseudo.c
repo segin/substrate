@@ -1,9 +1,9 @@
-#include "../../vfs/vfs.h"
-#include "../input/keyboard.h"
-#include "../../kern/console.h"
+#include <vfs/vfs.h>
+#include <drivers/input/keyboard.h>
+#include <kern/console.h>
 #include <sys/proc.h>
 #include <string.h>
-#include "../../arch/x86-common/include/io.h"
+#include <arch/x86-common/include/io.h>
 
 // /dev/null
 static uint32_t null_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
