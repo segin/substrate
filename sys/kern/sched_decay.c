@@ -7,14 +7,7 @@
 #include <kern/sched.h>
 #include <sys/proc.h>
 
-// Decay constants
-#define DECAY_PERIOD        100     // Ticks between decay passes
-#define DECAY_AMOUNT        1       // Priority penalty per period for running threads
-#define RECALC_PERIOD       1000    // Ticks between full priority recalculation
-
-// Anti-starvation constants
-#define STARVATION_LIMIT    500     // Ticks before boosting starved thread
-#define STARVATION_BOOST    5       // Priority boost for starved thread
+/* Decay and anti-starvation constants defined in sched.h */
 
 // Last decay tick (global for simplicity, should be per-CPU for SMP)
 static uint32_t last_decay_tick = 0;

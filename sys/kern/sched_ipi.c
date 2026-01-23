@@ -8,8 +8,7 @@
 #include <sys/proc.h>
 #include <stdint.h>
 
-// IPI vector for scheduler preemption (must match IDT setup)
-#define SCHED_IPI_VECTOR    0xFD
+/* IPI vector defined in sched.h */
 
 // Forward declarations for LAPIC
 extern void lapic_send_ipi(uint8_t dest_cpu, uint8_t vector);

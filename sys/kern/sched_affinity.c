@@ -8,8 +8,7 @@
 #include <sys/proc.h>
 #include <string.h>
 
-// Maximum CPUs supported (must match sched_smp.c)
-#define MAX_CPUS 32
+/* MAX_CPUS defined in sched.h */
 
 extern int num_cpus;
 

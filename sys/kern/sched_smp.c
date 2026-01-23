@@ -9,8 +9,7 @@
 #include <sys/proc.h>
 #include <string.h>
 
-// Maximum CPUs supported
-#define MAX_CPUS 32
+/* MAX_CPUS defined in sched.h */
 
 // Per-CPU runqueues
 static runqueue_t cpu_runqueues[MAX_CPUS];
