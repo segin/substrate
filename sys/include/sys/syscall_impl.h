@@ -24,6 +24,9 @@ extern int sys_getpgrp(void);
 extern int sys_setpgid(int, int);
 extern int sys_getpgid(int);
 extern int sys_clone(uint32_t, void*, int*, void*, int*);
+extern int sys_ptrace(int, int, int, int);
+extern int sys_ulimit(int, long);
+extern int sys_prof(void*, size_t, unsigned long, unsigned int);
 
 /* User/group management */
 extern int sys_getuid(void);
@@ -45,6 +48,7 @@ extern int sys_pipe(int*);
 extern int sys_fcntl(int, int, int);
 extern int sys_ioctl(int, uint32_t, void*);
 extern int sys_readlink(const char*, char*, size_t);
+extern int sys_lchown(const char*, int, int);
 
 /* lseek - NATIVE uses 64-bit offset split into hi/lo */
 extern int64_t sys_lseek(int, uint32_t, uint32_t, int);
@@ -53,6 +57,8 @@ extern int64_t sys_lseek(int, uint32_t, uint32_t, int);
 extern int sys_stat(const char*, void*);
 extern int sys_lstat(const char*, void*);
 extern int sys_fstat(int, void*);
+extern int sys_statfs(const char*, void*);
+extern int sys_fstatfs(int, void*);
 
 /* File system operations */
 extern int sys_link(const char*, const char*);
@@ -65,6 +71,7 @@ extern int sys_chdir(const char*);
 extern int sys_fchdir(int);
 extern int sys_chroot(const char*);
 extern int sys_access(const char*, int);
+extern int sys_utime(const char*, void*);
 extern int sys_sync(void);
 extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
 extern int sys_umount(const char*);
@@ -86,9 +93,14 @@ extern int sys_sigprocmask(int, const void*, void*);
 extern int sys_sigaltstack(const void*, void*);
 extern int sys_sigpending(void*);
 extern int sys_sigsuspend(const void*);
+extern int sys_sigret(void);
+extern int sys_alarm(unsigned int);
+extern int sys_pause(void);
+extern int sys_nice(int);
 
 /* Time */
 extern int64_t sys_time(int64_t*);
+extern int sys_stime(uint32_t*);
 extern int sys_times(void*);
 extern int sys_nanosleep(void*, void*);
 extern int sys_gettimeofday(void*, void*);

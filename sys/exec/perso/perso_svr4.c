@@ -3,27 +3,7 @@
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 
-/* SVR4-specific externs not in syscall_impl.h */
-extern int sys_lchown(const char*, int, int);
-extern int sys_stime(uint32_t*);
-extern int sys_ptrace(int, int, int, int);
-extern int sys_alarm(unsigned int);
-extern int sys_pause(void);
-extern int sys_utime(const char*, void*);
-extern int sys_nice(int);
-extern int sys_statfs(const char*, void*);
-extern int sys_fstatfs(int, void*);
-extern int sys_pgrpsys(int, int, int, int);
-extern int sys_sigsys(int, void*);
-extern int sys_msgsys(int, int, int, int, int, int);
-extern int sys_sysi86(int, int, int, int);
-extern int sys_shmsys(int, int, int, int);
-extern int sys_semsys(int, int, int, int, int);
-extern int sys_uadmin(int, int, int);
-extern int sys_utssys(void*, int, int);
-extern int sys_ulimit(int, long);
-extern int sys_sigret(void);
-extern int sys_prof(void*, size_t, unsigned long, unsigned int);
+
 
 static void *svr4_syscalls[MAX_SYSCALLS] = {
     [1] = &sys_exit,
