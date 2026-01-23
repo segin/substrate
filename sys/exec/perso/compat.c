@@ -1,10 +1,12 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <errno.h>
-#include "../../include/sys/syscall_impl.h"
-#include "../../include/sys/stat.h"
-#include "compat.h"
-#include "freebsd/freebsd_user.h"
+#include <sys/syscall_impl.h>
+#include <sys/stat.h>
+#include <exec/perso/compat.h>
+#include <exec/perso/freebsd/freebsd_user.h>
+#include <exec/perso/freebsd/freebsd_syscalls.h>
+
 
 
 
@@ -128,6 +130,12 @@ int sys_freebsd_fstat(int fd, struct freebsd_stat *buf) {
     if (ret == 0) translate_stat_to_freebsd(&native, buf);
     return ret;
 }
+
+int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
+    (void)pad;
+    return sys_lseek(fd, off_lo, off_hi, whence);
+}
+
 
 /* FreeBSD mmap translation 
  * FreeBSD i386: mmap(addr, len, prot, flags, fd, pad, offset_lo, offset_hi)

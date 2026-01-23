@@ -60,6 +60,15 @@ struct freebsd_stat {
     struct freebsd_timespec st_birthtim;
 };
 
+struct freebsd_utsname {
+    char sysname[256];
+    char nodename[256];
+    char release[256];
+    char version[256];
+    char machine[256];
+};
+
+
 
 struct freebsd_kinfo_proc {
     int ki_structsize;      /* size of this structure */

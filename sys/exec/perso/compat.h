@@ -25,6 +25,8 @@ int sys_freebsd_stat(const char *path, struct freebsd_stat *buf);
 int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf);
 int sys_freebsd_fstat(int fd, struct freebsd_stat *buf);
 int sys_freebsd_uname(void *buf);
+int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence);
 void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, int pad, uint32_t off_lo, uint32_t off_hi);
 
 #endif /* _COMPAT_H */
+

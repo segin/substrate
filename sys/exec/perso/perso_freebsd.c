@@ -1,5 +1,9 @@
-#include "../../../include/sys/syscall_impl.h"
-#include "freebsd/freebsd_syscalls.h"
+#include <exec/perso/personality.h>
+#include <arch/i386/syscall.h>
+#include <sys/syscall_impl.h>
+#include <exec/perso/freebsd/freebsd_syscalls.h>
+
+
 
 
 
@@ -19,8 +23,9 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [15] = &sys_chmod,
     [16] = &sys_lchown,  /* FreeBSD chown */
     [17] = NULL,         /* FreeBSD: break (unimplemented stub) */
-    [19] = &sys_lseek,   /* FreeBSD off_t is 64-bit, layout matches sys_lseek on i386 */
+    [19] = &sys_freebsd_lseek, /* FreeBSD i386 has a 4-byte pad before off_t */
     [20] = &sys_getpid,
+
     [21] = &sys_mount,
     [22] = &sys_umount,
     [23] = &sys_setuid,
@@ -137,18 +142,11 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [326] = { 2, { ARG_PTR, ARG_INT } }, // getcwd
 };
 
-struct freebsd_utsname {
-    char sysname[256];
-    char nodename[256];
-    char release[256];
-    char version[256];
-    char machine[256];
-};
-
 extern char *strncpy(char *dest, const char *src, size_t n);
 extern void *memset(void *s, int c, size_t n);
 
-int sys_freebsd_uname(struct freebsd_utsname *buf) {
+int sys_freebsd_uname(void *vbuf) {
+    struct freebsd_utsname *buf = vbuf;
     if (!buf) return -1;
     extern char kernel_hostname[65];
     memset(buf, 0, sizeof(struct freebsd_utsname));
@@ -159,6 +157,8 @@ int sys_freebsd_uname(struct freebsd_utsname *buf) {
     strncpy(buf->machine, "i386", 256);
     return 0;
 }
+
+
 
 struct personality personality_freebsd = {
     .name = "FreeBSD",
