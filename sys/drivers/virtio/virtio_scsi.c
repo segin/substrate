@@ -10,10 +10,10 @@
  *   2+: Request queues (SCSI commands)
  */
 
-#include "virtio.h"
-#include "../storage/scsi/scsi.h"
-#include "../../arch/x86-common/include/io.h"
-#include "../../arch/i386/pmm.h"
+#include <drivers/virtio/virtio.h>
+#include <drivers/storage/scsi/scsi.h>
+#include <arch/x86-common/include/io.h>
+#include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <string.h>
 #include <stdio.h>

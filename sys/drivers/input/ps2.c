@@ -5,7 +5,7 @@
  * Supports dual-channel operation (keyboard on port 1, mouse on port 2).
  */
 
-#include "ps2.h"
+#include <drivers/input/ps2.h>
 #include <arch/x86-common/include/io.h>
 #include <kern/console.h>
 #include <stdio.h>

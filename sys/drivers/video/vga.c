@@ -1,5 +1,5 @@
-#include "vga.h"
-#include "fb.h"
+#include <drivers/video/vga.h>
+#include <drivers/video/fb.h>
 #include <kern/console.h>
 #include <arch/x86-common/include/io.h>
 

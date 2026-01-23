@@ -1,11 +1,10 @@
-#include "fb.h"
-#include "font.h"
-#include "font.h"
+#include <drivers/video/fb.h>
+#include <drivers/video/font.h>
 #include <kern/console.h>
 #include <sys/fb.h>
 #include <sys/file.h>
-#include "../../vfs/vfs.h"
-#include "../../arch/i386/pmap.h"
+#include <vfs/vfs.h>
+#include <arch/i386/pmap.h>
 #include <sys/proc.h>
 #include <string.h>
 #include <stddef.h>

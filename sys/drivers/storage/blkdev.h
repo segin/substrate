@@ -1,9 +1,7 @@
 #ifndef _BLKDEV_H
 #define _BLKDEV_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include "../../vfs/vfs.h"
+#include <vfs/vfs.h>
 
 // Block device structure
 typedef struct blkdev {

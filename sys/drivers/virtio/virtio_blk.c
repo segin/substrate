@@ -1,8 +1,8 @@
-#include "virtio.h"
-#include "../../arch/x86-common/include/io.h"
-#include "../../kern/geom/geom.h"
+#include <drivers/virtio/virtio.h>
+#include <arch/x86-common/include/io.h>
+#include <kern/geom/geom.h>
 #include <kern/console.h>
-#include "../../arch/i386/pmm.h"
+#include <arch/i386/pmm.h>
 #include <kern/panic.h>
 #include <string.h>
 #include <stdio.h>

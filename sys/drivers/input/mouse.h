@@ -2,7 +2,7 @@
 #define _MOUSE_H
 
 #include <stdint.h>
-#include "../../arch/i386/idt.h"
+#include <arch/i386/idt.h>
 
 typedef struct {
     int32_t dx;
