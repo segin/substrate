@@ -3,8 +3,8 @@
  * Tests random sequences of create/destroy
  */
 
-#include "../arch/i386/pmap.h"
-#include "../kern/console.h"
+#include <arch/i386/pmap.h>
+#include <kern/console.h>
 
 void run_pmap_fuzz_test(void) {
     kprint("\n=== PMAP Fuzzing Test ===\n");

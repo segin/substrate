@@ -35,6 +35,32 @@ struct freebsd_timeval {
     int32_t tv_usec;
 };
 
+struct freebsd_timespec {
+    int32_t tv_sec;
+    int32_t tv_nsec;
+};
+
+struct freebsd_stat {
+    uint32_t st_dev;
+    uint32_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint32_t st_uid;
+    uint32_t st_gid;
+    uint32_t st_rdev;
+    struct freebsd_timespec st_atim;
+    struct freebsd_timespec st_mtim;
+    struct freebsd_timespec st_ctim;
+    int64_t  st_size;
+    int64_t  st_blocks;
+    uint32_t st_blksize;
+    uint32_t st_flags;
+    uint32_t st_gen;
+    int32_t  st_lspare;
+    struct freebsd_timespec st_birthtim;
+};
+
+
 struct freebsd_kinfo_proc {
     int ki_structsize;      /* size of this structure */
     int ki_layout;          /* reserved: layout identifier */

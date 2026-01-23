@@ -550,8 +550,10 @@ static void test_sigtimedwait_siginfo(void) {
  * sendsig / Signal Frame Construction Tests
  * ======================================================================== */
 
-#include "../arch/i386/include/signal_arch.h"
-#include "../arch/i386/idt.h"
+#if defined(__i386__)
+#include <arch/i386/include/signal_arch.h>
+#include <arch/i386/idt.h>
+#endif
 
 /*
  * Test: sigframe struct has correct layout

@@ -1,11 +1,7 @@
-#include <exec/perso/personality.h>
-#include <arch/i386/syscall.h>
-#include <stddef.h>
-#include <sys/syscall_impl.h>
+#include "../../../include/sys/syscall_impl.h"
+#include "freebsd/freebsd_syscalls.h"
 
-/* FreeBSD-specific */
-struct freebsd_utsname;
-int sys_freebsd_uname(struct freebsd_utsname*);
+
 
 // FreeBSD syscall numbers (from sys/syscall.h)
 static void *freebsd_syscalls[MAX_SYSCALLS] = {
@@ -19,7 +15,11 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [10] = &sys_unlink,
     [12] = &sys_chdir,
     [13] = &sys_fchdir,
-    [17] = &sys_getuid,  // FreeBSD: old break
+    [14] = &sys_mknod,
+    [15] = &sys_chmod,
+    [16] = &sys_lchown,  /* FreeBSD chown */
+    [17] = NULL,         /* FreeBSD: break (unimplemented stub) */
+    [19] = &sys_lseek,   /* FreeBSD off_t is 64-bit, layout matches sys_lseek on i386 */
     [20] = &sys_getpid,
     [21] = &sys_mount,
     [22] = &sys_umount,
@@ -27,11 +27,13 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [24] = &sys_getuid,
     [25] = &sys_geteuid,
     [33] = &sys_access,
+
+
     [36] = &sys_sync,
     [37] = &sys_kill,
-    [38] = &sys_stat,
+    [38] = &sys_freebsd_stat,
     [39] = &sys_getpid,  // FreeBSD: getppid
-    [40] = &sys_lstat,
+    [40] = &sys_freebsd_lstat,
     [41] = &sys_dup2,
     [42] = &sys_pipe,
     [43] = &sys_getegid,
@@ -44,11 +46,12 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [136] = &sys_mkdir,
     [137] = &sys_rmdir,
     [164] = &sys_freebsd_uname,
-    [188] = &sys_stat,   // FreeBSD: stat
-    [189] = &sys_fstat,  // FreeBSD: fstat
-    [190] = &sys_lstat,  // FreeBSD: lstat
+    [188] = &sys_freebsd_stat,   // FreeBSD: stat
+    [189] = &sys_freebsd_fstat,  // FreeBSD: fstat
+    [190] = &sys_freebsd_lstat,  // FreeBSD: lstat
     [209] = &sys_poll,   // FreeBSD: poll
     [326] = &sys_getcwd,
+
 };
 
 /* FreeBSD syscall names */
@@ -64,6 +67,7 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [12] = "chdir",
     [13] = "fchdir",
     [17] = "break",
+    [19] = "lseek",
     [20] = "getpid",
     [21] = "mount",
     [22] = "umount",
@@ -87,9 +91,12 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [136] = "mkdir",
     [137] = "rmdir",
     [164] = "uname",
+    [188] = "stat",
     [189] = "fstat", /* FreeBSD 4.x fstat */
+    [190] = "lstat",
     [209] = "poll",
     [326] = "getcwd",
+
     /* Todo: Wrap legacy 32-bit stat calls to convert to 64-bit native struct */
 };
 
@@ -104,10 +111,16 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [10] = { 1, { ARG_STR } }, // unlink
     [12] = { 1, { ARG_STR } }, // chdir
     [13] = { 1, { ARG_INT } }, // fchdir
+    [14] = { 3, { ARG_STR, ARG_INT, ARG_INT } }, // mknod
+    [15] = { 2, { ARG_STR, ARG_INT } }, // chmod
+    [16] = { 3, { ARG_STR, ARG_INT, ARG_INT } }, // chown
     [21] = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } }, // mount
     [22] = { 1, { ARG_STR } }, // umount
     [23] = { 1, { ARG_INT } }, // setuid
+    [24] = { 0, { 0 } }, // getuid
+    [25] = { 0, { 0 } }, // geteuid
     [33] = { 2, { ARG_STR, ARG_HEX } }, // access
+
     [37] = { 2, { ARG_INT, ARG_INT } }, // kill
     [38] = { 2, { ARG_STR, ARG_PTR } }, // stat (legacy)
     [40] = { 2, { ARG_STR, ARG_PTR } }, // lstat (legacy)

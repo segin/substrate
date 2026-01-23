@@ -8,7 +8,7 @@
  * - Partition naming conventions
  */
 
-#include "../kern/geom/geom.h"
+#include <kern/geom/geom.h>
 #include <stdint.h>
 #include <string.h>
 

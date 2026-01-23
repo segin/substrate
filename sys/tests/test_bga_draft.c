@@ -1,6 +1,6 @@
 #include <sys/types.h>
 #include <stdio.h>
-#include "../drivers/video/bga.h"
+#include <drivers/video/bga.h>
 
 // Mock I/O functions for testing
 uint16_t inw(uint16_t port) {

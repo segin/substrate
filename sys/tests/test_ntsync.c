@@ -8,7 +8,7 @@
  * - Wait operations (wait_any, wait_all)
  */
 
-#include "../include/sys/ntsync.h"
+#include <sys/ntsync.h>
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>

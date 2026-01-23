@@ -9,7 +9,7 @@
  * - Edge cases and error handling
  */
 
-#include "../include/sys/futex.h"
+#include <sys/futex.h>
 #include <stdint.h>
 #include <string.h>
 

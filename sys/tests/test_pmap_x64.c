@@ -2,9 +2,9 @@
  * Unit tests for x86_64 pmap
  */
 
-#include "../arch/x86_64/pmap.h"
-#include "../arch/i386/pmm.h"
-#include "../kern/console.h"
+#include <arch/x86_64/pmap.h>
+#include <arch/i386/pmm.h>
+#include <kern/console.h>
 #include <stdint.h>
 
 static int tests_passed = 0;
