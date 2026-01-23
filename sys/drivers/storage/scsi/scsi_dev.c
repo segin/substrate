@@ -5,11 +5,11 @@
  * No artificial sd/sr split - just SCSI devices with type-specific handling.
  */
 
-#include <drivers/storage/scsi/scsi.h>
-#include <drivers/storage/blkdev.h>
-#include <kern/console.h>
 #include <string.h>
 #include <stdio.h>
+#include <kern/console.h>
+#include <drivers/storage/blkdev.h>
+#include <drivers/storage/scsi/scsi.h>
 
 /*
  * ============================================================

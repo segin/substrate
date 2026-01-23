@@ -1,297 +1,116 @@
-#include <drivers/video/vga.h>
-#include <drivers/video/fb.h>
 #include <kern/console.h>
+#include <drivers/video/vga.h>
 #include <arch/x86-common/include/io.h>
+#include <stdint.h>
+#include <string.h>
 
-extern int fb_active;
-extern int serial_debug_enabled;
+// VGA Mode 13h Memory
+static uint8_t* const VGA_GRAPHICS_MEMORY = (uint8_t*) 0xA0000;
+static const int VGA_GFX_WIDTH = 320;
+static const int VGA_GFX_HEIGHT = 200;
 
-static size_t VGA_WIDTH = 80;
-static size_t VGA_HEIGHT = 25;
-static uint16_t* const VGA_MEMORY = (uint16_t*) 0xC00B8000;
+// Standard VGA Registers
+#define VGA_MISC_WRITE      0x3C2
+#define VGA_CRTC_INDEX      0x3D4
+#define VGA_CRTC_DATA       0x3D5
+#define VGA_SEQ_INDEX       0x3C4
+#define VGA_SEQ_DATA        0x3C5
+#define VGA_GC_INDEX        0x3CE
+#define VGA_GC_DATA         0x3CF
+#define VGA_AC_INDEX        0x3C0
+#define VGA_AC_WRITE        0x3C0
+#define VGA_AC_READ         0x3C1
 
-static size_t terminal_row;
-static size_t terminal_column;
-static uint8_t terminal_color;
-static uint16_t* terminal_buffer;
+void vga_write_regs(unsigned char *regs) {
+    unsigned int i;
 
-// ANSI Parser State
-enum ansi_state {
-    ANSI_NORMAL,
-    ANSI_ESC,
-    ANSI_CSI,
-    ANSI_PARAM
+    // write MISCELLANEOUS reg
+    outb(VGA_MISC_WRITE, *regs);
+    regs++;
+
+    // write SEQUENCER regs
+    for (i = 0; i < 5; i++) {
+        outb(VGA_SEQ_INDEX, i);
+        outb(VGA_SEQ_DATA, *regs);
+        regs++;
+    }
+
+    // unlock CRTC registers
+    outb(VGA_CRTC_INDEX, 0x03);
+    outb(VGA_CRTC_DATA, inb(VGA_CRTC_DATA) | 0x80);
+    outb(VGA_CRTC_INDEX, 0x11);
+    outb(VGA_CRTC_DATA, inb(VGA_CRTC_DATA) & ~0x80);
+
+    // make sure they remain unlocked
+    regs[0x03] |= 0x80;
+    regs[0x11] &= ~0x80;
+
+    // write CRTC regs
+    for (i = 0; i < 25; i++) {
+        outb(VGA_CRTC_INDEX, i);
+        outb(VGA_CRTC_DATA, *regs);
+        regs++;
+    }
+
+    // write GRAPHICS CONTROLLER regs
+    for (i = 0; i < 9; i++) {
+        outb(VGA_GC_INDEX, i);
+        outb(VGA_GC_DATA, *regs);
+        regs++;
+    }
+
+    // write ATTRIBUTE CONTROLLER regs
+    for (i = 0; i < 21; i++) {
+        (void)inb(0x3DA);
+        outb(VGA_AC_INDEX, i);
+        outb(VGA_AC_WRITE, *regs);
+        regs++;
+    }
+
+    (void)inb(0x3DA);
+    outb(VGA_AC_INDEX, 0x20);
+}
+
+// Mode 13h (320x200x256) Register Values
+unsigned char g_320x200x256[] = {
+    // MISC
+    0x63,
+    // SEQ
+    0x03, 0x01, 0x0F, 0x00, 0x0E,
+    // CRTC
+    0x5F, 0x4F, 0x50, 0x82, 0x54, 0x80, 0xBF, 0x1F,
+    0x00, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x9C, 0x0E, 0x8F, 0x28, 0x40, 0x96, 0xB9, 0xA3,
+    0xFF,
+    // GC
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x05, 0x0F,
+    0xFF,
+    // AC
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+    0x41, 0x00, 0x0F, 0x00, 0x00
 };
-
-static enum ansi_state state = ANSI_NORMAL;
-static int ansi_params[16];
-static int ansi_param_count = 0;
-
-static inline uint8_t vga_entry_color(enum vga_color fg, enum vga_color bg) {
-    return fg | bg << 4;
-}
-
-static inline uint16_t vga_entry(unsigned char uc, uint8_t color) {
-    return (uint16_t) uc | (uint16_t) color << 8;
-}
-
-// Initial vga_init removed, new one at bottom registers console backend
-
-
-void vga_set_color(uint8_t fg, uint8_t bg) {
-    terminal_color = vga_entry_color(fg, bg);
-}
-
-void vga_clear_screen(void) {
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            const size_t index = y * VGA_WIDTH + x;
-            terminal_buffer[index] = vga_entry(' ', terminal_color);
-        }
-    }
-}
-
-static void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
-    const size_t index = y * VGA_WIDTH + x;
-    terminal_buffer[index] = vga_entry(c, color);
-}
-
-// Update VGA hardware cursor position to match software cursor
-static void vga_update_cursor(void) {
-    uint16_t pos = terminal_row * VGA_WIDTH + terminal_column;
-    
-    // CRT Controller: Cursor Location High Register (0x0E)
-    outb(0x3D4, 0x0E);
-    outb(0x3D5, (pos >> 8) & 0xFF);
-    
-    // CRT Controller: Cursor Location Low Register (0x0F)
-    outb(0x3D4, 0x0F);
-    outb(0x3D5, pos & 0xFF);
-}
-
-static void terminal_scroll() {
-    for (size_t y = 0; y < VGA_HEIGHT - 1; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            terminal_buffer[y * VGA_WIDTH + x] = terminal_buffer[(y + 1) * VGA_WIDTH + x];
-        }
-    }
-    for (size_t x = 0; x < VGA_WIDTH; x++) {
-        terminal_buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
-    }
-}
-
-static void handle_csi(char c) {
-    switch (c) {
-        case 'm': // SGR - Select Graphic Rendition
-            if (ansi_param_count == 0) {
-                // Reset
-                terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-            } else {
-                for (int i = 0; i < ansi_param_count; i++) {
-                    int p = ansi_params[i];
-                    if (p == 0) {
-                         terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-                    } else if (p >= 30 && p <= 37) {
-                        // Foreground
-                        uint8_t bg = terminal_color >> 4;
-                        terminal_color = vga_entry_color(p - 30, bg);
-                    } else if (p >= 40 && p <= 47) {
-                        // Background
-                        uint8_t fg = terminal_color & 0x0F;
-                        terminal_color = vga_entry_color(fg, p - 40);
-                    } else if (p == 1) {
-                         // Bold (Bright) - hacky implementation: add 8 to FG if < 8
-                         uint8_t fg = terminal_color & 0x0F;
-                         if (fg < 8) terminal_color = (terminal_color & 0xF0) | (fg + 8);
-                    }
-                }
-            }
-            break;
-        case 'J': // Erase in Display
-            if (ansi_param_count > 0 && ansi_params[0] == 2) {
-                vga_clear_screen();
-                terminal_row = 0;
-                terminal_column = 0;
-            }
-            break;
-        case 'H': // Cursor Position
-            {
-                int row = (ansi_param_count > 0) ? ansi_params[0] : 1;
-                int col = (ansi_param_count > 1) ? ansi_params[1] : 1;
-                if (row < 1) row = 1;
-                if (col < 1) col = 1;
-                terminal_row = row - 1;
-                terminal_column = col - 1;
-                if (terminal_row >= VGA_HEIGHT) terminal_row = VGA_HEIGHT - 1;
-                if (terminal_column >= VGA_WIDTH) terminal_column = VGA_WIDTH - 1;
-            }
-            break;
-        case 'A': // Cursor Up
-        case 'B': // Cursor Down
-        case 'C': // Cursor Forward
-        case 'D': // Cursor Backward
-            {
-                int n = (ansi_param_count > 0) ? ansi_params[0] : 1;
-                if (n < 1) n = 1;
-                if (c == 'A') terminal_row = (terminal_row >= (size_t)n) ? terminal_row - n : 0;
-                else if (c == 'B') terminal_row = (terminal_row + n < VGA_HEIGHT) ? terminal_row + n : VGA_HEIGHT - 1;
-                else if (c == 'C') terminal_column = (terminal_column + n < VGA_WIDTH) ? terminal_column + n : VGA_WIDTH - 1;
-                else if (c == 'D') terminal_column = (terminal_column >= (size_t)n) ? terminal_column - n : 0;
-            }
-            break;
-        case 'K': // Erase in Line
-            {
-                int n = (ansi_param_count > 0) ? ansi_params[0] : 0;
-                if (n == 0) { // Erase from cursor to end
-                    for (size_t x = terminal_column; x < VGA_WIDTH; x++)
-                        terminal_putentryat(' ', terminal_color, x, terminal_row);
-                } else if (n == 1) { // Erase from start to cursor
-                    for (size_t x = 0; x <= terminal_column; x++)
-                        terminal_putentryat(' ', terminal_color, x, terminal_row);
-                } else if (n == 2) { // Erase whole line
-                    for (size_t x = 0; x < VGA_WIDTH; x++)
-                        terminal_putentryat(' ', terminal_color, x, terminal_row);
-                }
-            }
-            break;
-    }
-}
-
-void vga_putc(char c) {
-    if (state == ANSI_NORMAL) {
-        if (c == '\x1b') {
-            state = ANSI_ESC;
-        } else if (c == '\n') {
-            terminal_column = 0;
-            if (++terminal_row == VGA_HEIGHT) {
-                terminal_row--;
-                terminal_scroll();
-            }
-        } else if (c == '\r') {
-            terminal_column = 0;
-        } else if (c == '\b') {
-            if (terminal_column > 0) terminal_column--;
-        } else if (c == '\t') {
-             terminal_column = (terminal_column + 8) & ~7;
-             if (terminal_column >= VGA_WIDTH) {
-                 terminal_column = 0;
-                 if (++terminal_row == VGA_HEIGHT) {
-                    terminal_row--;
-                    terminal_scroll();
-                 }
-             }
-        } else {
-            terminal_putentryat(c, terminal_color, terminal_column, terminal_row);
-            if (++terminal_column == VGA_WIDTH) {
-                terminal_column = 0;
-                if (++terminal_row == VGA_HEIGHT) {
-                    terminal_row--;
-                    terminal_scroll();
-                }
-            }
-        }
-    } else if (state == ANSI_ESC) {
-        if (c == '[') {
-            state = ANSI_CSI;
-            ansi_param_count = 0;
-            ansi_params[0] = 0;
-        } else {
-            state = ANSI_NORMAL; // Malformed, drop it
-            vga_putc(c);
-        }
-    } else if (state == ANSI_CSI) {
-        if (c >= '0' && c <= '9') {
-            state = ANSI_PARAM;
-            ansi_params[ansi_param_count] = c - '0';
-            ansi_param_count = 1; // At least one param started
-        } else if (c == ';') {
-             // invalid start?
-        } else if (c >= 0x40 && c <= 0x7E) {
-            handle_csi(c);
-            state = ANSI_NORMAL;
-        }
-    } else if (state == ANSI_PARAM) {
-        if (c >= '0' && c <= '9') {
-            ansi_params[ansi_param_count - 1] = ansi_params[ansi_param_count - 1] * 10 + (c - '0');
-        } else if (c == ';') {
-            if (ansi_param_count < 16) {
-                ansi_param_count++;
-                ansi_params[ansi_param_count - 1] = 0;
-            }
-        } else if (c >= 0x40 && c <= 0x7E) {
-            handle_csi(c);
-            state = ANSI_NORMAL;
-        }
-    }
-    
-    // Update hardware cursor to current position
-    vga_update_cursor();
-}
-
-// Helper for console abstraction
-static void vga_console_write(const char *data, size_t len) {
-    if (fb_active) {
-        fb_write(data, len);
-    }
-    for (size_t i = 0; i < len; i++)
-        vga_putc(data[i]);
-}
-
-static void vga_console_clear(void) {
-    vga_clear_screen();
-}
-
-static console_backend_t vga_console = {
-    .name = "vga",
-    .write = vga_console_write,
-    .putchar = vga_putc,
-    .clear = vga_console_clear,
-    .next = NULL
-};
-
-// Deprecated direct write (kept for headers compatibility if needed temporarily)
-// But we should use console_write everywhere.
-void vga_write(const char* data, size_t size) {
-    vga_console_write(data, size);
-}
 
 void vga_set_mode(int width, int height) {
-    if (width == 80 && (height == 50 || height == 60 || height == 25)) {
-        VGA_WIDTH = width;
-        VGA_HEIGHT = height;
-        
-        // standard VGA registers for 80x50/60 often involve adjusting 
-        // the Maximum Scan Line register in the CRT controller.
-        // For 80x50, we want 8x8 font.
-        if (height == 50) {
-            // Set max scanline to 7 (8 pixels high)
-            outb(0x3D4, 0x09);
-            uint8_t val = inb(0x3D5);
-            val &= ~0x1F;
-            val |= 0x07;
-            outb(0x3D5, val);
-        } else if (height == 25) {
-            // Restore default (max scanline 15 -> 16 pixels high)
-            outb(0x3D4, 0x09);
-            uint8_t val = inb(0x3D5);
-            val &= ~0x1F;
-            val |= 0x0F;
-            outb(0x3D5, val);
-        }
-        // 60 and 132 would need more complex SVGA/VESA logic or custom VGA timings.
-        // For this prototype, we'll support 80x25 and 80x50.
+    if (width == 320 && height == 200) {
+        vga_write_regs(g_320x200x256);
+        return;
     }
+    // Fallback or text mode requested?
+    // If text mode (80x25) is requested, we should probably reset to text mode values.
+    // For now, this function focuses on switching TO graphics.
+}
+
+void vga_putpixel(int x, int y, uint8_t color) {
+    if (x < 0 || x >= VGA_GFX_WIDTH || y < 0 || y >= VGA_GFX_HEIGHT)
+        return;
+        
+    unsigned int offset = VGA_GFX_WIDTH * y + x;
+    VGA_GRAPHICS_MEMORY[offset] = color;
 }
 
 void vga_init(void) {
-    terminal_row = 0;
-    terminal_column = 0;
-    terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    terminal_buffer = VGA_MEMORY;
-    vga_clear_screen();
-    vga_update_cursor();
-    
-    // Register backend
-    console_register(&vga_console);
+    kprint("VGA: Logic initialized (Graphics-ready). Text mode handled by vga_text.\n");
+    // We do NOT switch mode here automatically. 
+    // It should be driven by kernel cmdline or user request.
 }
-

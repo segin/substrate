@@ -40,9 +40,17 @@ struct freebsd_timespec {
     int32_t tv_nsec;
 };
 
+/*
+ * FreeBSD stat structure.
+ *
+ * NOTE: FreeBSD 14 uses 64-bit inodes (st_ino).
+ * The layout differs significantly between i386 and amd64.
+ */
+
+#if defined(__i386__)
 struct freebsd_stat {
     uint32_t st_dev;
-    uint32_t st_ino;
+    uint64_t st_ino;        /* 64-bit inode on FreeBSD 12+ (i386) */
     uint16_t st_mode;
     uint16_t st_nlink;
     uint32_t st_uid;
@@ -51,14 +59,44 @@ struct freebsd_stat {
     struct freebsd_timespec st_atim;
     struct freebsd_timespec st_mtim;
     struct freebsd_timespec st_ctim;
+    struct freebsd_timespec st_birthtim;
     int64_t  st_size;
     int64_t  st_blocks;
     uint32_t st_blksize;
     uint32_t st_flags;
-    uint32_t st_gen;
-    int32_t  st_lspare;
-    struct freebsd_timespec st_birthtim;
+    uint64_t st_gen;
+    int32_t  st_lspare;     /* Padding/Spare */
+    int64_t  st_qspare[2];  /* Spares */
 };
+#elif defined(__x86_64__)
+struct freebsd_stat {
+    uint32_t st_dev;
+    uint32_t st_ino;        /* Legacy/padding? No, typically 32-bit hole or similar? 
+                               Actually FreeBSD amd64 uses 'ino_t' which is 64-bit, 
+                               but alignment might strictly follow 64-bit boundaries. 
+                               Let's use the standard definition. */
+    uint64_t st_nlink;
+    uint16_t st_mode;
+    int16_t  st_padding0;   /* Padding for alignment */
+    uint32_t st_uid;
+    uint32_t st_gid;
+    int32_t  st_padding1;
+    uint32_t st_rdev;
+    int32_t  st_padding2;
+    struct freebsd_timespec st_atim;
+    struct freebsd_timespec st_mtim;
+    struct freebsd_timespec st_ctim;
+    struct freebsd_timespec st_birthtim;
+    int64_t  st_size;
+    int64_t  st_blocks;
+    uint32_t st_blksize;
+    uint32_t st_flags;
+    uint64_t st_gen;
+    int64_t  st_spare[10];
+};
+#else
+#error "Unsupported architecture for FreeBSD personality"
+#endif
 
 struct freebsd_utsname {
     char sysname[256];

@@ -23,7 +23,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
 		fs/fs.o \
-		fs/exec/exec.o \
+		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
 		tests/tests.o
@@ -53,7 +53,7 @@ kernel.efi: arch_kernel klib kern drivers fs exec vfs exec_perso vm tests
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
 		fs/fs.o \
-		fs/exec/exec.o \
+		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
 		tests/tests.o \
@@ -109,7 +109,7 @@ fs:
 
 exec:
 	@echo "Building Exec Loaders..."
-	$(MAKE) -C fs/exec
+	$(MAKE) -C exec/formats
 
 clean:
 	@echo "Cleaning Kernel..."
@@ -124,7 +124,7 @@ clean:
 	$(MAKE) -C drivers/virtio clean
 	$(MAKE) -C vfs clean
 	$(MAKE) -C fs clean
-	$(MAKE) -C fs/exec clean
+	$(MAKE) -C exec/formats clean
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean
 	$(MAKE) -C lib clean

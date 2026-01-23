@@ -6,7 +6,7 @@
 
 extern fs_node_t *console_get_node(void);
 
-static uint32_t tty_read_proxy(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t tty_read_proxy(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     // Proxies to current process's TTY or default console
     fs_node_t *tty = current_process ? current_process->tty : NULL;
@@ -15,7 +15,7 @@ static uint32_t tty_read_proxy(fs_node_t *node, off_t offset, uint32_t size, uin
     return 0;
 }
 
-static uint32_t tty_write_proxy(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t tty_write_proxy(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     fs_node_t *tty = current_process ? current_process->tty : NULL;
     if (!tty) tty = console_get_node();
@@ -65,9 +65,9 @@ void devfs_register_device(fs_node_t *node) {
 static struct dirent dev_dirent;
 
 // /dev/storage directory operations
-static struct dirent *storage_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *storage_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
-    if (index < (uint32_t)storage_device_count) {
+    if (index < (uint64_t)storage_device_count) {
         strcpy(dev_dirent.name, storage_devices[index]->name);
         dev_dirent.ino = index + 1;
         return &dev_dirent;
@@ -93,7 +93,7 @@ static fs_node_t storage_dir_node = {
 };
 
 // /dev root directory operations
-static struct dirent *devfs_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *devfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     // First entry: storage subdirectory
     if (index == 0) {
@@ -108,8 +108,8 @@ static struct dirent *devfs_readdir(fs_node_t *node, uint32_t index) {
         return &dev_dirent;
     }
     // Then char devices
-    uint32_t char_idx = index - 2;
-    if (char_idx < (uint32_t)char_device_count) {
+    uint64_t char_idx = index - 2;
+    if (char_idx < (uint64_t)char_device_count) {
         strcpy(dev_dirent.name, char_devices[char_idx]->name);
         dev_dirent.ino = char_idx + 3;
         return &dev_dirent;

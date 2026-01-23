@@ -114,4 +114,17 @@ extern int sys_set_thread_area(void*);
 extern int sys_fsync(int);
 extern int sys_umask(int);
 
+/* Native specific */
+struct thr_param;
+extern int sys_thr_new(struct thr_param*, int);
+struct pmap_stats;
+extern int sys_pmap_stats(struct pmap_stats*);
+extern int sys_proc_info(int, void*);
+extern int sys_proc_list(int*, size_t);
+extern int sys_proc_count(void);
+extern int sys_cpu_count(void);
+extern int sys_hostname(char*, size_t);
+extern int sys_rt_sigreturn(void*);
+extern int sys_sigreturn(void*);
+
 #endif /* _SYS_SYSCALL_IMPL_H */

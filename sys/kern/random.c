@@ -412,25 +412,25 @@ int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
  */
 
 /* /dev/random read - blocks until sufficient entropy */
-static uint32_t random_dev_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t random_dev_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     (void)offset;
     
     int ret = random_get_bytes_flags(buffer, size, GRND_RANDOM);
-    return (ret > 0) ? (uint32_t)ret : 0;
+    return (ret > 0) ? (size_t)ret : 0;
 }
 
 /* /dev/urandom read - never blocks */
-static uint32_t urandom_dev_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t urandom_dev_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     (void)offset;
     
     int ret = random_get_bytes_flags(buffer, size, GRND_INSECURE);
-    return (ret > 0) ? (uint32_t)ret : 0;
+    return (ret > 0) ? (size_t)ret : 0;
 }
 
 /* Write to /dev/random or /dev/urandom adds entropy */
-static uint32_t random_dev_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t random_dev_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     (void)offset;
     

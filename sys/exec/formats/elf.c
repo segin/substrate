@@ -1,20 +1,14 @@
-#include <fs/exec/elf.h>
-
+#include <exec/formats/elf.h>
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <sys/sysinfo.h> // For BITNESS_*
-#include <include/sys/proc.h>
+#include <sys/proc.h>
 #include <kern/panic.h>
 #include <string.h>
 #include <vm/vm_map.h>
+#include <exec/perso/personality.h>
 
-// Forward declarations
-extern process_t *current_process;
-extern fs_node_t *fs_root;
-extern struct personality personality_native;
-extern struct personality personality_linux;
-extern struct personality personality_freebsd;
-extern struct personality personality_svr4;
+
 
 // Globals for userspace transition
 
@@ -293,7 +287,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     (void)tls_filesz;
     
     // Detect personality based on OSABI
-    int detected_os = ELFOSABI_TESTUNIX;
+    int detected_os = ELFOSABI_SUBSTRATE;
     if (ehdr.e_ident[EI_OSABI] == ELFOSABI_FREEBSD) {
         detected_os = ELFOSABI_FREEBSD;
     } else if (ehdr.e_ident[EI_OSABI] == ELFOSABI_LINUX) {

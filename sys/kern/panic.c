@@ -6,13 +6,20 @@
 
 extern int fb_active;
 
+// Forward decl
+void vga_text_set_color(uint8_t fg, uint8_t bg);
+
 void panic(const char *msg) {
-    /* Disable interrupts immediately to prevent further corruption */
+    /* Disable interrupts immediately */
     __asm__ volatile("cli");
     
-    /* Set high-visibility color but DON'T clear screen - preserve debug output */
+    /* Set high-visibility color but DON'T clear screen */
+#include <drivers/video/hw_text.h>
+
+// ...
+
     if (!fb_active) {
-        vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_RED);
+        hw_text_set_color(VGA_COLOR_WHITE, VGA_COLOR_RED);
     }
 
     if (msg) {
@@ -25,14 +32,13 @@ void panic(const char *msg) {
         console_write("Reason: Unknown error\n", 22);
     }
 
-    /* Print stack trace for debugging */
+    /* Print stack trace */
     stack_trace();
 
     console_write("\nSystem Halted.", 15);
     
-    /* Halt - interrupts already disabled above */
+    /* Halt */
     while(1) {
         __asm__ volatile("hlt");
     }
 }
-

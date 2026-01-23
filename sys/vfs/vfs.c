@@ -424,3 +424,37 @@ int vfs_mkdir(const char *path, uint16_t permission) {
     return parent_node->mkdir(parent_node, name, permission);
 }
 
+int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
+    if (!path) return -1;
+    
+    char path_buf[256];
+    strncpy(path_buf, path, sizeof(path_buf));
+    path_buf[255] = '\0';
+    
+    // Split path
+    char *last_slash = vfs_strrchr(path_buf, '/');
+    char *name = NULL;
+    fs_node_t *parent_node = NULL;
+    
+    if (last_slash) {
+        *last_slash = '\0';
+        name = last_slash + 1;
+        if (*name == '\0') return -1; // Trailing slash invalid for node creation
+        
+        if (path_buf[0] == '\0') {
+            parent_node = fs_root;
+        } else {
+            parent_node = vfs_lookup(fs_root, path_buf);
+        }
+    } else {
+        parent_node = fs_root;
+        name = path_buf;
+    }
+    
+    if (!parent_node) return -1;
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -1;
+    
+    if (!parent_node->mknod) return -1;
+    
+    return parent_node->mknod(parent_node, name, mode, dev);
+}

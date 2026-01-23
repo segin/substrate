@@ -29,7 +29,7 @@
 
 #include <pm/pm.h>
 #include <vfs/vfs.h>
-#include <fs/exec/elf.h>
+#include <exec/formats/elf.h>
 #include <fs/procfs.h>
 #include <fs/sysfs.h>
 #include <fs/pseudofs.h>

@@ -1,3 +1,6 @@
+#ifndef _FREEBSD_SYSCALLS_H
+#define _FREEBSD_SYSCALLS_H
+
 #include <exec/perso/freebsd/freebsd_user.h>
 
 struct freebsd_stat;

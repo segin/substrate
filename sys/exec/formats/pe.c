@@ -1,5 +1,6 @@
-#include <fs/exec/pe.h>
+#include <exec/formats/pe.h>
 #include <kern/console.h>
+#include <exec/formats/mz.h>
 
 int pe_load_file(void *file, uint32_t size) {
     // Stub

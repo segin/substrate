@@ -1,18 +1,20 @@
-#include <drivers/video/fb.h>
-#include <drivers/video/font.h>
+#include <string.h>
+#include <stddef.h>
 #include <kern/console.h>
-#include <sys/fb.h>
+#include <sys/proc.h>
 #include <sys/file.h>
 #include <vfs/vfs.h>
 #include <arch/i386/pmap.h>
-#include <sys/proc.h>
-#include <string.h>
-#include <stddef.h>
+#include <drivers/video/fb.h>
+#include <drivers/video/font.h>
+#include <sys/fb.h>
 
 static fb_info_t fb;
 static int cursor_x = 0;
 static int cursor_y = 0;
 int fb_active = 0;
+
+static void linear_fb_putpixel(int x, int y, uint32_t color);
 
 static console_backend_t fb_console_backend = {
     .name = "framebuffer",
@@ -104,7 +106,9 @@ void fb_init(multiboot_info_t *mbi) {
 
     // Check for native driver override via command line
     #include "../../kern/cmdline.h"
+    #include "../../kern/cmdline.h"
     #include "bga.h"
+    #include "hercules.h"
     
     char vid[32];
     if (cmdline_get("video", vid, 32) == 0) {
@@ -117,6 +121,12 @@ void fb_init(multiboot_info_t *mbi) {
             } else {
                 kprint("FB: BGA initialization failed. Falling back to Multiboot FB.\n");
             }
+        } else if (strcmp(vid, "hercules") == 0) {
+             fb_info_t herc_fb;
+             if (herc_init(&herc_fb) == 0) {
+                 fb = herc_fb;
+                 kprint("FB: Switched to Hercules framebuffer.\n");
+             }
         }
     }
 
@@ -150,10 +160,12 @@ void fb_init(multiboot_info_t *mbi) {
     fb_node.mmap = fb_fs_mmap;
     devfs_register_device(&fb_node);
     
+    fb.putpixel = linear_fb_putpixel;
+    
     kprint("FB: Initialized framebuffer and /dev/fb0.\n");
 }
 
-void fb_putpixel(int x, int y, uint32_t color) {
+static void linear_fb_putpixel(int x, int y, uint32_t color) {
     if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
     
     uint8_t *pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x * (fb.bpp / 8));
@@ -192,6 +204,12 @@ void fb_putpixel(int x, int y, uint32_t color) {
         default:
             // Unsupported
             break;
+    }
+}
+
+void fb_putpixel(int x, int y, uint32_t color) {
+    if (fb.putpixel) {
+        fb.putpixel(x, y, color);
     }
 }
 

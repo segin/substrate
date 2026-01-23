@@ -11,6 +11,7 @@ typedef struct {
     uint32_t height;
     uint32_t pitch;
     uint8_t  bpp;
+    void (*putpixel)(int x, int y, uint32_t color);
 } fb_info_t;
 
 void fb_init(multiboot_info_t *mbi);

@@ -1,11 +1,10 @@
-#include <exec/perso/personality.h>
 #include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
+#include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_syscalls.h>
-
-
-
-
+#include <exec/perso/personality.h>
+#include <kern/version.h>
+#include <stddef.h>
+#include <sys/syscall_impl.h>
 
 // FreeBSD syscall numbers (from sys/syscall.h)
 static void *freebsd_syscalls[MAX_SYSCALLS] = {
@@ -148,13 +147,16 @@ extern void *memset(void *s, int c, size_t n);
 int sys_freebsd_uname(void *vbuf) {
     struct freebsd_utsname *buf = vbuf;
     if (!buf) return -1;
-    extern char kernel_hostname[65];
     memset(buf, 0, sizeof(struct freebsd_utsname));
     strncpy(buf->sysname, "FreeBSD", 256);
     strncpy(buf->nodename, kernel_hostname, 256);
     strncpy(buf->release, "14.3-RELEASE-p5", 256);
     strncpy(buf->version, "FreeBSD 14.3-RELEASE-p5 GENERIC", 256);
+#if defined(__x86_64__)
+    strncpy(buf->machine, "amd64", 256);
+#else
     strncpy(buf->machine, "i386", 256);
+#endif
     return 0;
 }
 
