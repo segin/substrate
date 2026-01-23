@@ -1,0 +1,63 @@
+.TH PROC_FIND 9 "January 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+proc_find \- find a process by PID
+.SH SYNOPSIS
+.B #include <pm/pm.h>
+.LP
+.BI "process_t *proc_find(int " pid ");
+.SH DESCRIPTION
+The
+.B proc_find
+function searches the kernel's process table for a process with the
+specified process identifier
+.IR pid .
+.PP
+This function provides a safe, centralized way to look up processes
+by PID, replacing the previous pattern of iterating through the
+.B processes[]
+array directly.
+.SH RETURN VALUES
+On success,
+.B proc_find
+returns a pointer to the
+.I process_t
+structure for the requested process.
+.PP
+If no process with the given PID exists (or if the slot is unused),
+.B proc_find
+returns NULL.
+.SH NOTES
+.IP \[bu] 2
+The returned pointer is valid only as long as the process exists.
+For safe access across context switches or when the process might
+exit, callers should hold
+.B proctree_lock
+or disable interrupts.
+.IP \[bu]
+The function does not acquire any locks; the caller is responsible
+for locking if required.
+.IP \[bu]
+A process slot with
+.B pid == -1
+is considered free/unused.
+.IP \[bu]
+The maximum number of processes is defined by
+.B MAX_PROCS
+in
+.IR <pm/pm.h> .
+.SH EXAMPLES
+.nf
+#include <pm/pm.h>
+
+/* Find and print process name */
+process_t *p = proc_find(target_pid);
+if (p) {
+    kprint("Process %d: %s\\n", p->pid, p->comm);
+} else {
+    kprint("Process %d not found\\n", target_pid);
+}
+.fi
+.SH SEE ALSO
+.BR proc_create (9),
+.BR proc_fork (9),
+.BR pm_init (9)

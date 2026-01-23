@@ -71,6 +71,11 @@ The kernel is the core of the operating system, structured as follows:
       - **Implementation:** `signal.c` handles delivery and state.
       - **Group Signaling:** `signal_send_group` allows targeting all processes in a `pgrp`.
       - **TTY Integration:** Key presses (`^C`, `^\`, `^Z`) trigger signals (`SIGINT`, `SIGQUIT`, `SIGTSTP`) to the foreground process group.
+    - **Process Management (`pm/`)**:
+      - **`proc_find(pid)`:** Kernel API to look up a process by PID. Returns `process_t*` or NULL. See `proc_find(9)`.
+      - **`proc_create(pers)`:** Create a new process with given personality.
+      - **`proc_fork(parent, stack)`:** Fork a process with COW address space.
+      - **`proctree_lock`:** Mutex protecting process hierarchy modifications.
 - **`sys/sys/`**: System-wide header definitions (`proc.h`, `file.h`, `acct.h`, `thr.h`, `termios.h`, `signal.h`).
 
 ### Core Userland (`bin/`, `lib/`)
