@@ -57,6 +57,48 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     return 0;
 }
 
+// Write a block to the device
+uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer) {
+    if (!fs || !fs->device || !fs->device->write) return 0;
+    off_t offset = (off_t)block_num * fs->block_size;
+    return fs->device->write(fs->device, offset, fs->block_size, (uint8_t *)buffer);
+}
+
+// Write an inode back to disk
+int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
+    if (!fs || inode_num == 0) return -1;
+    
+    // Calculate which block group the inode is in
+    uint32_t group = (inode_num - 1) / fs->inodes_per_group;
+    uint32_t index = (inode_num - 1) % fs->inodes_per_group;
+    
+    if (group >= fs->group_count) return -1;
+    
+    // Get inode table location from block group descriptor
+    uint32_t inode_table_block = fs->bgd[group].bg_inode_table;
+    
+    // Calculate which block and offset within the inode table
+    uint32_t inodes_per_block = fs->block_size / fs->inode_size;
+    uint32_t block_offset = index / inodes_per_block;
+    uint32_t inode_offset = (index % inodes_per_block) * fs->inode_size;
+    
+    // Read the block containing the inode
+    static uint8_t block_buf[4096]; // Max block size
+    if (ext2_read_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
+        return -1;
+    }
+    
+    // Update the inode data
+    memcpy(block_buf + inode_offset, inode, sizeof(ext2_inode_t));
+    
+    // Write the block back to disk
+    if (ext2_write_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
+        return -1;
+    }
+    
+    return 0;
+}
+
 // Get block number for a given file block index (handles indirect blocks)
 static uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx) {
     uint32_t ptrs_per_block = fs->block_size / 4;
@@ -134,6 +176,97 @@ uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint3
     return total_read;
 }
 
+// Allocate and add a block to an inode
+static int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx) {
+    uint32_t ptrs_per_block = fs->block_size / 4;
+    static uint32_t indirect_buf[1024];
+    
+    // Direct blocks (0-11)
+    if (block_idx < 12) {
+        uint32_t new_block = ext2_alloc_block(fs);
+        if (new_block == 0) return -1;
+        inode->i_block[block_idx] = new_block;
+        return 0;
+    }
+    block_idx -= 12;
+    
+    // Indirect block (12)
+    if (block_idx < ptrs_per_block) {
+        // Allocate indirect block if not present
+        if (inode->i_block[12] == 0) {
+            uint32_t new_indirect = ext2_alloc_block(fs);
+            if (new_indirect == 0) return -1;
+            inode->i_block[12] = new_indirect;
+            memset(indirect_buf, 0, fs->block_size);
+            ext2_write_block(fs, new_indirect, indirect_buf);
+        }
+        
+        // Allocate data block
+        ext2_read_block(fs, inode->i_block[12], indirect_buf);
+        uint32_t new_block = ext2_alloc_block(fs);
+        if (new_block == 0) return -1;
+        indirect_buf[block_idx] = new_block;
+        ext2_write_block(fs, inode->i_block[12], indirect_buf);
+        return 0;
+    }
+    
+    // Double indirect and beyond not implemented
+    return -1;
+}
+
+// Write data to an inode at a given offset
+uint32_t ext2_inode_write(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, const void *buffer) {
+    static uint8_t block_buf[4096];
+    const uint8_t *buf = (const uint8_t *)buffer;
+    uint32_t total_written = 0;
+    
+    while (size > 0) {
+        uint32_t block_idx = (uint32_t)(offset / fs->block_size);
+        uint32_t block_offset = (uint32_t)(offset % fs->block_size);
+        uint32_t block_num = ext2_get_block_num(fs, inode, block_idx);
+        
+        // Allocate block if it doesn't exist
+        if (block_num == 0) {
+            if (ext2_alloc_inode_block(fs, inode, block_idx) != 0) {
+                return total_written; // Out of space
+            }
+            block_num = ext2_get_block_num(fs, inode, block_idx);
+            if (block_num == 0) return total_written;
+            
+            // Zero the newly allocated block
+            memset(block_buf, 0, fs->block_size);
+            ext2_write_block(fs, block_num, block_buf);
+        }
+        
+        // Read block if we're doing a partial write
+        if (block_offset != 0 || size < fs->block_size) {
+            ext2_read_block(fs, block_num, block_buf);
+        }
+        
+        uint32_t to_copy = fs->block_size - block_offset;
+        if (to_copy > size) to_copy = size;
+        
+        memcpy(block_buf + block_offset, buf, to_copy);
+        ext2_write_block(fs, block_num, block_buf);
+        
+        buf += to_copy;
+        total_written += to_copy;
+        offset += to_copy;
+        size -= to_copy;
+    }
+    
+    // Update file size if we extended it
+    if ((uint32_t)offset > inode->i_size) {
+        inode->i_size = (uint32_t)offset;
+    }
+    
+    // Update modification time
+    extern int64_t get_time(void);
+    inode->i_mtime = (uint32_t)get_time();
+    
+    return total_written;
+}
+
 // Allocate a node from the cache
 static fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     int idx = ext2_node_cache_idx++ % EXT2_NODE_CACHE_SIZE;
@@ -162,6 +295,7 @@ static fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_
     } else if (type == EXT2_S_IFREG) {
         node->flags = FS_FILE;
         node->read = ext2_file_read;
+        node->write = ext2_file_write;
     } else if (type == EXT2_S_IFLNK) {
         node->flags = FS_SYMLINK;
         node->readlink = ext2_readlink_fn;
@@ -197,6 +331,22 @@ static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size) {
 static uint32_t ext2_file_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     return ext2_inode_read(ctx->fs, &ctx->inode, offset, size, buffer);
+}
+
+// File write operation
+static uint32_t ext2_file_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    ext2_fs_t *fs = ctx->fs;
+    
+    uint32_t written = ext2_inode_write(fs, &ctx->inode, offset, size, buffer);
+    
+    // Write updated inode back to disk
+    if (written > 0) {
+        ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
+        node->length = ctx->inode.i_size; // Update VFS node size
+    }
+    
+    return written;
 }
 
 // Directory iteration state
@@ -369,14 +519,342 @@ void ext2_init(void) {
     vfs_register_filesystem(&ext2_filesystem);
 }
 
-// Stubs for allocation (not implemented yet)
-uint32_t ext2_alloc_block(void) { return 0; }
-void ext2_free_block(uint32_t block) { (void)block; }
-uint32_t ext2_alloc_inode(void) { return 0; }
-void ext2_free_inode(uint32_t inode) { (void)inode; }
-int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) { 
-    (void)dir; (void)name; (void)inode; return -1; 
+// Allocate a block from the filesystem
+uint32_t ext2_alloc_block(ext2_fs_t *fs) {
+    if (!fs) return 0;
+    
+    static uint8_t bitmap_buf[4096];
+    
+    // Search each block group for a free block
+    for (uint32_t group = 0; group < fs->group_count; group++) {
+        if (fs->bgd[group].bg_free_blocks_count == 0) continue;
+        
+        // Read the block bitmap
+        if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf) != fs->block_size) {
+            continue;
+        }
+        
+        // Find the first free bit
+        uint32_t bits_in_group = fs->blocks_per_group;
+        for (uint32_t i = 0; i < bits_in_group; i++) {
+            uint32_t byte_idx = i / 8;
+            uint32_t bit_idx = i % 8;
+            
+            if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) {
+                // Found free block - allocate it
+                bitmap_buf[byte_idx] |= (1 << bit_idx);
+                
+                // Write bitmap back
+                ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
+                
+                // Update block group descriptor
+                fs->bgd[group].bg_free_blocks_count--;
+                
+                // Calculate absolute block number
+                uint32_t block_num = group * fs->blocks_per_group + i + fs->sb.s_first_data_block;
+                
+                // Update superblock free blocks count
+                fs->sb.s_free_blocks_count--;
+                
+                return block_num;
+            }
+        }
+    }
+    
+    return 0; // No free blocks
 }
-int ext2_remove_entry(fs_node_t *dir, const char *name) { 
-    (void)dir; (void)name; return -1; 
+
+// Free a block
+void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
+    if (!fs || block_num == 0) return;
+    
+    // Calculate which group this block belongs to
+    uint32_t group = (block_num - fs->sb.s_first_data_block) / fs->blocks_per_group;
+    uint32_t index = (block_num - fs->sb.s_first_data_block) % fs->blocks_per_group;
+    
+    if (group >= fs->group_count) return;
+    
+    static uint8_t bitmap_buf[4096];
+    
+    // Read the block bitmap
+    if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf) != fs->block_size) {
+        return;
+    }
+    
+    uint32_t byte_idx = index / 8;
+    uint32_t bit_idx = index % 8;
+    
+    // Clear the bit
+    bitmap_buf[byte_idx] &= ~(1 << bit_idx);
+    
+    // Write bitmap back
+    ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
+    
+    // Update block group descriptor
+    fs->bgd[group].bg_free_blocks_count++;
+    
+    // Update superblock
+    fs->sb.s_free_blocks_count++;
+}
+
+// Allocate an inode
+uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
+    if (!fs) return 0;
+    
+    static uint8_t bitmap_buf[4096];
+    
+    // Search each block group for a free inode
+    for (uint32_t group = 0; group < fs->group_count; group++) {
+        if (fs->bgd[group].bg_free_inodes_count == 0) continue;
+        
+        // Read the inode bitmap
+        if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf) != fs->block_size) {
+            continue;
+        }
+        
+        // Find the first free bit (skip reserved inodes in first group)
+        uint32_t start = (group == 0) ? fs->sb.s_first_ino : 0;
+        uint32_t bits_in_group = fs->inodes_per_group;
+        
+        for (uint32_t i = start; i < bits_in_group; i++) {
+            uint32_t byte_idx = i / 8;
+            uint32_t bit_idx = i % 8;
+            
+            if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) {
+                // Found free inode - allocate it
+                bitmap_buf[byte_idx] |= (1 << bit_idx);
+                
+                // Write bitmap back
+                ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf);
+                
+                // Update block group descriptor
+                fs->bgd[group].bg_free_inodes_count--;
+                if (is_dir) {
+                    fs->bgd[group].bg_used_dirs_count++;
+                }
+                
+                // Calculate absolute inode number
+                uint32_t inode_num = group * fs->inodes_per_group + i + 1;
+                
+                // Update superblock
+                fs->sb.s_free_inodes_count--;
+                
+                // Initialize the inode
+                ext2_inode_t inode;
+                memset(&inode, 0, sizeof(ext2_inode_t));
+                extern int64_t get_time(void);
+                uint32_t now = (uint32_t)get_time();
+                inode.i_ctime = now;
+                inode.i_mtime = now;
+                inode.i_atime = now;
+                
+                ext2_write_inode(fs, inode_num, &inode);
+                
+                return inode_num;
+            }
+        }
+    }
+    
+    return 0; // No free inodes
+}
+
+// Free an inode
+void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
+    if (!fs || inode_num == 0) return;
+    
+    // Calculate which group this inode belongs to
+    uint32_t group = (inode_num - 1) / fs->inodes_per_group;
+    uint32_t index = (inode_num - 1) % fs->inodes_per_group;
+    
+    if (group >= fs->group_count) return;
+    
+    static uint8_t bitmap_buf[4096];
+    
+    // Read the inode bitmap
+    if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf) != fs->block_size) {
+        return;
+    }
+    
+    uint32_t byte_idx = index / 8;
+    uint32_t bit_idx = index % 8;
+    
+    // Clear the bit
+    bitmap_buf[byte_idx] &= ~(1 << bit_idx);
+    
+    // Write bitmap back
+    ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf);
+    
+    // Update block group descriptor
+    fs->bgd[group].bg_free_inodes_count++;
+    if (was_dir) {
+        fs->bgd[group].bg_used_dirs_count--;
+    }
+    
+    // Update superblock
+    fs->sb.s_free_inodes_count++;
+}
+
+// Add directory entry
+int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) {
+    if (!dir || !name || inode == 0) return -1;
+    
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
+    ext2_fs_t *fs = ctx->fs;
+    
+    uint32_t name_len = strlen(name);
+    if (name_len > 255) return -1;
+    
+    // Calculate required entry size (aligned to 4 bytes)
+    uint32_t required_size = ((8 + name_len + 3) / 4) * 4;
+    
+    static uint8_t block_buf[4096];
+    uint32_t dir_size = ctx->inode.i_size;
+    uint32_t pos = 0;
+    
+    // Search for space in existing blocks
+    while (pos < dir_size) {
+        uint32_t block_idx = pos / fs->block_size;
+        uint32_t block_off = pos % fs->block_size;
+        uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx);
+        
+        if (block_num == 0) break;
+        ext2_read_block(fs, block_num, block_buf);
+        
+        while (block_off < fs->block_size && pos < dir_size) {
+            ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
+            
+            if (de->rec_len == 0) break;
+            
+            // Calculate actual size needed by this entry
+            uint32_t actual_size = ((8 + de->name_len + 3) / 4) * 4;
+            uint32_t slack = de->rec_len - actual_size;
+            
+            // Can we fit the new entry in the slack space?
+            if (slack >= required_size && de->inode != 0) {
+                // Split this entry
+                de->rec_len = actual_size;
+                
+                ext2_dirent_t *new_de = (ext2_dirent_t *)(block_buf + block_off + actual_size);
+                new_de->inode = inode;
+                new_de->rec_len = slack;
+                new_de->name_len = name_len;
+                new_de->file_type = 0; // Unknown for now
+                memcpy(new_de->name, name, name_len);
+                
+                ext2_write_block(fs, block_num, block_buf);
+                return 0;
+            }
+            
+            // Can we reuse a deleted entry?
+            if (de->inode == 0 && de->rec_len >= required_size) {
+                de->inode = inode;
+                de->name_len = name_len;
+                de->file_type = 0;
+                memcpy(de->name, name, name_len);
+                
+                ext2_write_block(fs, block_num, block_buf);
+                return 0;
+            }
+            
+            block_off += de->rec_len;
+            pos += de->rec_len;
+        }
+    }
+    
+    // No space found - need to allocate a new block
+    uint32_t new_block = ext2_alloc_block(fs);
+    if (new_block == 0) return -1; // Out of space
+    
+    // Zero the new block
+    memset(block_buf, 0, fs->block_size);
+    
+    // Create the new entry
+    ext2_dirent_t *de = (ext2_dirent_t *)block_buf;
+    de->inode = inode;
+    de->rec_len = fs->block_size; // Entry spans entire block
+    de->name_len = name_len;
+    de->file_type = 0;
+    memcpy(de->name, name, name_len);
+    
+    ext2_write_block(fs, new_block, block_buf);
+    
+    // Add block to directory inode
+    uint32_t new_block_idx = dir_size / fs->block_size;
+    if (new_block_idx < 12) {
+        ctx->inode.i_block[new_block_idx] = new_block;
+    } else {
+        // Would need indirect block support
+        ext2_free_block(fs, new_block);
+        return -1;
+    }
+    
+    // Update directory size
+    ctx->inode.i_size += fs->block_size;
+    ctx->inode.i_blocks += (fs->block_size / 512);
+    
+    extern int64_t get_time(void);
+    ctx->inode.i_mtime = (uint32_t)get_time();
+    
+    ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
+    
+    return 0;
+}
+
+// Remove directory entry
+int ext2_remove_entry(fs_node_t *dir, const char *name) {
+    if (!dir || !name) return -1;
+    
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
+    ext2_fs_t *fs = ctx->fs;
+    
+    static uint8_t block_buf[4096];
+    uint32_t dir_size = ctx->inode.i_size;
+    uint32_t pos = 0;
+    
+    while (pos < dir_size) {
+        uint32_t block_idx = pos / fs->block_size;
+        uint32_t block_off = pos % fs->block_size;
+        uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx);
+        
+        if (block_num == 0) break;
+        ext2_read_block(fs, block_num, block_buf);
+        
+        ext2_dirent_t *prev_de = NULL;
+        uint32_t prev_off = 0;
+        
+        while (block_off < fs->block_size && pos < dir_size) {
+            ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
+            
+            if (de->rec_len == 0) break;
+            
+            // Is this the entry to remove?
+            if (de->inode != 0 && de->name_len == strlen(name) &&
+                strncmp(de->name, name, de->name_len) == 0) {
+                
+                // Merge with previous entry if possible
+                if (prev_de) {
+                    prev_de->rec_len += de->rec_len;
+                } else {
+                    // First entry in block - just mark as deleted
+                    de->inode = 0;
+                }
+                
+                ext2_write_block(fs, block_num, block_buf);
+                
+                // Update directory mtime
+                extern int64_t get_time(void);
+                ctx->inode.i_mtime = (uint32_t)get_time();
+                ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
+                
+                return 0;
+            }
+            
+            prev_de = de;
+            prev_off = block_off;
+            block_off += de->rec_len;
+            pos += de->rec_len;
+        }
+    }
+    
+    return -1; // Not found
 }
