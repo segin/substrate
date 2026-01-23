@@ -129,8 +129,34 @@ static uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t 
         ext2_read_block(fs, dindirect_buf[indirect_idx], indirect_buf);
         return indirect_buf[direct_idx];
     }
+    block_idx -= ptrs_per_block * ptrs_per_block;
     
-    // Triple indirect not implemented (files > 4GB+)
+    // Triple indirect block (14)
+    if (block_idx < ptrs_per_block * ptrs_per_block * ptrs_per_block) {
+        if (inode->i_block[14] == 0) return 0;
+        
+        // Read triple indirect block
+        static uint32_t tindirect_buf[1024];
+        ext2_read_block(fs, inode->i_block[14], tindirect_buf);
+        
+        // Calculate indices for triple indirection
+        uint32_t tindirect_idx = block_idx / (ptrs_per_block * ptrs_per_block);
+        uint32_t remaining = block_idx % (ptrs_per_block * ptrs_per_block);
+        uint32_t dindirect_idx = remaining / ptrs_per_block;
+        uint32_t indirect_idx = remaining % ptrs_per_block;
+        
+        // Read double indirect block
+        if (tindirect_buf[tindirect_idx] == 0) return 0;
+        ext2_read_block(fs, tindirect_buf[tindirect_idx], dindirect_buf);
+        
+        // Read indirect block
+        if (dindirect_buf[dindirect_idx] == 0) return 0;
+        ext2_read_block(fs, dindirect_buf[dindirect_idx], indirect_buf);
+        
+        return indirect_buf[indirect_idx];
+    }
+    
+    // Beyond triple indirect
     return 0;
 }
 
