@@ -2,35 +2,6 @@
 #include <kern/console.h>
 #include <string.h>
 
-#define FAT_ATTR_READ_ONLY 0x01
-#define FAT_ATTR_HIDDEN    0x02
-#define FAT_ATTR_SYSTEM    0x04
-#define FAT_ATTR_VOLUME_ID 0x08
-#define FAT_ATTR_DIRECTORY 0x10
-#define FAT_ATTR_ARCHIVE   0x20
-#define FAT_ATTR_LFN       0x0F
-
-// FAT filesystem context
-typedef struct {
-    fs_node_t *device;
-    fat_bpb_t bpb;
-    fat32_ext_bpb_t ext_bpb;
-    uint32_t fat_type;  // 12, 16, or 32
-    uint32_t fat_start_sector;
-    uint32_t data_start_sector;
-    uint32_t root_dir_sectors;
-    uint32_t first_data_sector;
-    uint32_t total_clusters;
-    uint8_t *fat_table;  // Cached FAT
-} fat_fs_t;
-
-typedef struct {
-    fat_fs_t *fs;
-    uint32_t first_cluster;
-    uint32_t size;
-    uint8_t attr;
-} fat_node_t;
-
 static fat_fs_t fat_global_fs;
 static fs_node_t fat_root_node;
 static fat_node_t fat_root_ctx;
