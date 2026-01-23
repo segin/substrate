@@ -2,7 +2,7 @@
 #define _FILE_H
 
 #include <stdint.h>
-#include "../../vfs/vfs.h"
+#include <vfs/vfs.h>
 
 #define R_OK 4
 #define W_OK 2

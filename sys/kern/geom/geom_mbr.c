@@ -8,7 +8,7 @@
  * - GPT protective MBR detection (type 0xEE)
  */
 
-#include "geom.h"
+#include <kern/geom/geom.h>
 #include <kern/console.h>
 #include <string.h>
 #include <stdio.h>

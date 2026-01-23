@@ -8,7 +8,7 @@
  * - Filesystem type identification
  */
 
-#include "geom.h"
+#include <kern/geom/geom.h>
 #include <kern/console.h>
 #include <string.h>
 #include <stdio.h>

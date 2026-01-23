@@ -8,7 +8,7 @@
  * - Sector I/O helpers
  */
 
-#include "geom.h"
+#include <kern/geom/geom.h>
 #include <kern/console.h>
 #include <drivers/storage/blkdev.h>
 #include <string.h>
