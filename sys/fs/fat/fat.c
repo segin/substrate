@@ -1,26 +1,342 @@
 #include <fs/fat/fat.h>
-#include <drivers/video/vga.h>
+#include <kern/console.h>
+#include <string.h>
+
+#define FAT_ATTR_READ_ONLY 0x01
+#define FAT_ATTR_HIDDEN    0x02
+#define FAT_ATTR_SYSTEM    0x04
+#define FAT_ATTR_VOLUME_ID 0x08
+#define FAT_ATTR_DIRECTORY 0x10
+#define FAT_ATTR_ARCHIVE   0x20
+#define FAT_ATTR_LFN       0x0F
+
+// FAT filesystem context
+typedef struct {
+    fs_node_t *device;
+    fat_bpb_t bpb;
+    fat32_ext_bpb_t ext_bpb;
+    uint32_t fat_type;  // 12, 16, or 32
+    uint32_t fat_start_sector;
+    uint32_t data_start_sector;
+    uint32_t root_dir_sectors;
+    uint32_t first_data_sector;
+    uint32_t total_clusters;
+    uint8_t *fat_table;  // Cached FAT
+} fat_fs_t;
+
+typedef struct {
+    fat_fs_t *fs;
+    uint32_t first_cluster;
+    uint32_t size;
+    uint8_t attr;
+} fat_node_t;
+
+static fat_fs_t fat_global_fs;
+static fs_node_t fat_root_node;
+static fat_node_t fat_root_ctx;
+
+// Forward declarations
+static size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static struct dirent *fat_readdir(fs_node_t *node, uint64_t index);
+static fs_node_t *fat_finddir(fs_node_t *node, char *name);
+static fs_node_t *fat_mount(const char *device, uint32_t flags, void *data);
+
+// Read sectors from device
+static int fat_read_sectors(fat_fs_t *fs, uint32_t sector, uint32_t count, void *buffer) {
+    if (!fs->device || !fs->device->read) return -1;
+    off_t offset = (off_t)sector * fs->bpb.bytes_per_sector;
+    size_t size = count * fs->bpb.bytes_per_sector;
+    size_t read = fs->device->read(fs->device, offset, size, (uint8_t *)buffer);
+    return (read == size) ? 0 : -1;
+}
+
+// Get next cluster from FAT table
+uint32_t fat_get_next_cluster(fat_fs_t *fs, uint32_t cluster) {
+    if (!fs->fat_table) return 0x0FFFFFFF;
+    
+    if (fs->fat_type == 32) {
+        uint32_t *fat32 = (uint32_t *)fs->fat_table;
+        uint32_t next = fat32[cluster] & 0x0FFFFFFF;
+        if (next >= 0x0FFFFFF8) return 0x0FFFFFFF; // EOC
+        return next;
+    } else if (fs->fat_type == 16) {
+        uint16_t *fat16 = (uint16_t *)fs->fat_table;
+        uint16_t next = fat16[cluster];
+        if (next >= 0xFFF8) return 0x0FFFFFFF; // EOC
+        return next;
+    } else if (fs->fat_type == 12) {
+        uint32_t offset = cluster + (cluster / 2);
+        uint16_t value = *(uint16_t *)(fs->fat_table + offset);
+        if (cluster & 1) {
+            value >>= 4;
+        } else {
+            value &= 0x0FFF;
+        }
+        if (value >= 0x0FF8) return 0x0FFFFFFF; // EOC
+        return value;
+    }
+    
+    return 0x0FFFFFFF;
+}
+
+// Convert cluster to sector
+static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster) {
+    return fs->first_data_sector + (cluster - 2) * fs->bpb.sectors_per_cluster;
+}
+
+// Parse short filename (8.3 format)
+static void fat_parse_short_name(const char *fat_name, char *output) {
+    int i, j = 0;
+    
+    // Copy name part (8 chars)
+    for (i = 0; i < 8 && fat_name[i] != ' '; i++) {
+        output[j++] = fat_name[i];
+    }
+    
+    // Add extension if present
+    if (fat_name[8] != ' ') {
+        output[j++] = '.';
+        for (i = 8; i < 11 && fat_name[i] != ' '; i++) {
+            output[j++] = fat_name[i];
+        }
+    }
+    
+    output[j] = '\0';
+}
+
+// Parse long filename entry
+int fat_parse_lfn(fat_lfn_t *lfn, char *buffer) {
+    int idx = ((lfn->order & 0x3F) - 1) * 13;  // Each LFN holds 13 chars
+    
+    // Extract name1 (5 chars)
+    for (int i = 0; i < 5; i++) {
+        uint16_t c = lfn->name1[i];
+        if (c == 0 || c == 0xFFFF) return idx;
+        buffer[idx++] = (c < 256) ? (char)c : '?';  // Simple UTF-16 to ASCII
+    }
+    
+    // Extract name2 (6 chars)
+    for (int i = 0; i < 6; i++) {
+        uint16_t c = lfn->name2[i];
+        if (c == 0 || c == 0xFFFF) return idx;
+        buffer[idx++] = (c < 256) ? (char)c : '?';
+    }
+    
+    // Extract name3 (2 chars)
+    for (int i = 0; i < 2; i++) {
+        uint16_t c = lfn->name3[i];
+        if (c == 0 || c == 0xFFFF) return idx;
+        buffer[idx++] = (c < 256) ? (char)c : '?';
+    }
+    
+    return idx;
+}
+
+// Read file data
+static size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
+    fat_fs_t *fs = ctx->fs;
+    
+    if ((uint32_t)offset >= ctx->size) return 0;
+    if (offset + size > ctx->size) size = ctx->size - offset;
+    
+    uint32_t cluster = ctx->first_cluster;
+    uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
+    uint32_t total_read = 0;
+    
+    // Skip to starting cluster
+    uint32_t skip_clusters = offset / cluster_size;
+    uint32_t cluster_offset = offset % cluster_size;
+    
+    for (uint32_t i = 0; i < skip_clusters; i++) {
+        cluster = fat_get_next_cluster(fs, cluster);
+        if (cluster >= 0x0FFFFFFF) return 0;
+    }
+    
+    // Read data
+    static uint8_t cluster_buf[32768]; // Max cluster size
+    while (size > 0 && cluster < 0x0FFFFFFF) {
+        uint32_t sector = fat_cluster_to_sector(fs, cluster);
+        
+        if (fat_read_sectors(fs, sector, fs->bpb.sectors_per_cluster, cluster_buf) != 0) {
+            break;
+        }
+        
+        uint32_t to_copy = cluster_size - cluster_offset;
+        if (to_copy > size) to_copy = size;
+        
+        memcpy(buffer + total_read, cluster_buf + cluster_offset, to_copy);
+        total_read += to_copy;
+        size -= to_copy;
+        cluster_offset = 0;
+        
+        cluster = fat_get_next_cluster(fs, cluster);
+    }
+    
+    return total_read;
+}
+
+// Read directory entries
+static struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
+    fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
+    fat_fs_t *fs = ctx->fs;
+    
+    static struct dirent dirent;
+    static uint8_t dir_buf[32768];
+    static char lfn_buffer[256];
+    
+    uint32_t cluster = ctx->first_cluster;
+    uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
+    uint64_t current_idx = 0;
+    int lfn_len = 0;
+    
+    while (cluster < 0x0FFFFFFF) {
+        uint32_t sector = fat_cluster_to_sector(fs, cluster);
+        if (fat_read_sectors(fs, sector, fs->bpb.sectors_per_cluster, dir_buf) != 0) {
+            return NULL;
+        }
+        
+        for (uint32_t i = 0; i < cluster_size; i += 32) {
+            fat_dirent_t *entry = (fat_dirent_t *)(dir_buf + i);
+            
+            if (entry->name[0] == 0x00) return NULL;  // End of directory
+            if (entry->name[0] == 0xE5) continue;      // Deleted entry
+            
+            // Check for LFN entry
+            if (entry->attr == FAT_ATTR_LFN) {
+                fat_lfn_t *lfn = (fat_lfn_t *)entry;
+                lfn_len = fat_parse_lfn(lfn, lfn_buffer);
+                continue;
+            }
+            
+            // Skip volume labels
+            if (entry->attr & FAT_ATTR_VOLUME_ID) continue;
+            
+            // Found a valid entry
+            if (current_idx == index) {
+                if (lfn_len > 0) {
+                    lfn_buffer[lfn_len] = '\0';
+                    strncpy(dirent.name, lfn_buffer, 127);
+                    dirent.name[127] = '\0';
+                    lfn_len = 0;
+                } else {
+                    fat_parse_short_name(entry->name, dirent.name);
+                }
+                
+                uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
+                dirent.ino = cluster_num;
+                return &dirent;
+            }
+            
+            current_idx++;
+            lfn_len = 0;
+        }
+        
+        cluster = fat_get_next_cluster(fs, cluster);
+    }
+    
+    return NULL;
+}
+
+// Find directory entry by name
+static fs_node_t *fat_finddir(fs_node_t *node, char *name) {
+    uint64_t idx = 0;
+    struct dirent *ent;
+    
+    while ((ent = fat_readdir(node, idx++)) != NULL) {
+        if (strcmp(ent->name, name) == 0) {
+            // TODO: Create and return fs_node_t for this entry
+            // This requires reading the directory entry again to get attributes
+            return NULL;  // Stub for now
+        }
+    }
+    
+    return NULL;
+}
+
+// Mount FAT filesystem
+static fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
+    (void)device; (void)flags;
+    
+    fs_node_t *dev = (fs_node_t *)data;
+    if (!dev || !dev->read) {
+        kprint("FAT: No device or read function\n");
+        return NULL;
+    }
+    
+    fat_fs_t *fs = &fat_global_fs;
+    fs->device = dev;
+    
+    // Read boot sector
+    if (fat_read_sectors(fs, 0, 1, &fs->bpb) != 0) {
+        kprint("FAT: Failed to read boot sector\n");
+        return NULL;
+    }
+    
+    // Determine FAT type
+    uint32_t root_dir_sectors = ((fs->bpb.root_entries * 32) + (fs->bpb.bytes_per_sector - 1)) / fs->bpb.bytes_per_sector;
+    uint32_t fat_size = (fs->bpb.fat_size_16 != 0) ? fs->bpb.fat_size_16 : 0;
+    
+    // Read FAT32 extended BPB if needed
+    if (fat_size == 0) {
+        off_t ext_offset = sizeof(fat_bpb_t);
+        dev->read(dev, ext_offset, sizeof(fat32_ext_bpb_t), (uint8_t *)&fs->ext_bpb);
+        fat_size = fs->ext_bpb.fat_size_32;
+    }
+    
+    uint32_t total_sectors = (fs->bpb.total_sectors_16 != 0) ? fs->bpb.total_sectors_16 : fs->bpb.total_sectors_32;
+    uint32_t data_sectors = total_sectors - (fs->bpb.reserved_sectors + (fs->bpb.fat_count * fat_size) + root_dir_sectors);
+    uint32_t total_clusters = data_sectors / fs->bpb.sectors_per_cluster;
+    
+    // Determine FAT type
+    if (total_clusters < 4085) {
+        fs->fat_type = 12;
+    } else if (total_clusters < 65525) {
+        fs->fat_type = 16;
+    } else {
+        fs->fat_type = 32;
+    }
+    
+    fs->fat_start_sector = fs->bpb.reserved_sectors;
+    fs->root_dir_sectors = root_dir_sectors;
+    fs->first_data_sector = fs->bpb.reserved_sectors + (fs->bpb.fat_count * fat_size) + root_dir_sectors;
+    fs->total_clusters = total_clusters;
+    
+    // TODO: Cache FAT table for better performance
+    // fs->fat_table = kmalloc(fat_size * fs->bpb.bytes_per_sector);
+    // fat_read_sectors(fs, fs->fat_start_sector, fat_size, fs->fat_table);
+    
+    // Setup root directory node
+    fat_root_ctx.fs = fs;
+    if (fs->fat_type == 32) {
+        fat_root_ctx.first_cluster = fs->ext_bpb.root_cluster;
+    } else {
+        fat_root_ctx.first_cluster = 0;  // FAT12/16 use fixed root dir
+    }
+    fat_root_ctx.attr = FAT_ATTR_DIRECTORY;
+    
+    memset(&fat_root_node, 0, sizeof(fs_node_t));
+    strcpy(fat_root_node.name, "/");
+    fat_root_node.flags = FS_DIRECTORY;
+    fat_root_node.impl = (uint32_t)(uintptr_t)&fat_root_ctx;
+    fat_root_node.readdir = fat_readdir;
+    fat_root_node.finddir = fat_finddir;
+    
+    kprint("FAT: Mounted successfully (FAT");
+    if (fs->fat_type == 12) kprint("12");
+    else if (fs->fat_type == 16) kprint("16");
+    else kprint("32");
+    kprint(")\n");
+    
+    return &fat_root_node;
+}
+
+static filesystem_t fat_filesystem = {
+    .name = "fat",
+    .mount = fat_mount,
+};
 
 void fat_init(void) {
-    // Initialized by VFS or dev driver
+    kprint("Initializing FAT Driver...\n");
+    vfs_register_filesystem(&fat_filesystem);
 }
-
-uint32_t fat_get_next_cluster(uint32_t cluster) {
-    // In a real driver, we would:
-    // 1. Calculate sector containing this cluster's FAT entry.
-    // 2. Read the sector from disk.
-    // 3. Extract the entry (16-bit or 32-bit).
-    // 4. Return the next cluster index.
-    (void)cluster;
-    return 0x0FFFFFFF; // EOC stub
-}
-
-int fat_parse_lfn(fat_lfn_t *lfn, char *buffer) {
-    // In a real driver, we would:
-    // 1. Extract characters from name1, name2, name3.
-    // 2. Decode UTF-16 to ASCII or UTF-8.
-    // 3. Concatenate based on the order field.
-    (void)lfn; (void)buffer;
-    return 0; // Stub
-}
-

@@ -63,8 +63,10 @@ typedef struct {
     uint16_t name3[2];
 } __attribute__((packed)) fat_lfn_t;
 
+// Forward declaration for filesystem context
+typedef struct fat_fs fat_fs_t;
+
 void fat_init(void);
-uint32_t fat_get_next_cluster(uint32_t cluster);
 int fat_parse_lfn(fat_lfn_t *lfn, char *buffer);
 
 #endif
