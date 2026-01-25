@@ -83,29 +83,28 @@ void keyboard_handler(registers_t *regs) {
     }
 
     // Handle modifiers
-    if (scancode == 0x2A || scancode == 0x36) { // LShift, RShift pressed
-        kbd_shift = 1;
-        goto out;
-    }
-    if (scancode == 0xAA || scancode == 0xB6) { // LShift, RShift released
-        kbd_shift = 0;
-        goto out;
-    }
-    if (scancode == 0x1D) { // Ctrl pressed
-        kbd_ctrl = 1;
-        goto out;
-    }
-    if (scancode == 0x9D) { // Ctrl released
-        kbd_ctrl = 0;
-        goto out;
-    }
-    if (scancode == 0x38) { // Alt pressed
-        kbd_alt = 1;
-        goto out;
-    }
-    if (scancode == 0xB8) { // Alt released
-        kbd_alt = 0;
-        goto out;
+    // Handle modifiers
+    switch (scancode) {
+        case 0x2A: /* LShift Pressed */
+        case 0x36: /* RShift Pressed */
+            kbd_shift = 1;
+            goto out;
+        case 0xAA: /* LShift Released */
+        case 0xB6: /* RShift Released */
+            kbd_shift = 0;
+            goto out;
+        case 0x1D: /* Ctrl Pressed */
+            kbd_ctrl = 1;
+            goto out;
+        case 0x9D: /* Ctrl Released */
+            kbd_ctrl = 0;
+            goto out;
+        case 0x38: /* Alt Pressed */
+            kbd_alt = 1;
+            goto out;
+        case 0xB8: /* Alt Released */
+            kbd_alt = 0;
+            goto out;
     }
 
     // Ignore keyups for now (bit 7 set)
