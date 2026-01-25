@@ -384,7 +384,7 @@ static int vga_set_mode_internal(int mode_id) {
 static int vga_probe(void) { return 0; }
 
 static int vga_init_driver(fb_info_t *info) {
-    kprint("VGA: Initializing Unified Driver [VGA/EGA/CGA/MDA]\n");
+    kprint("VGA: Initializing Unified Driver [VGA/EGA/CGA/Hercules]\n");
     /* Default Mode 12h (640x480x16) */
     if (vga_set_mode_internal(12) == 0) {
         *info = fb; 
