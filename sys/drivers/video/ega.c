@@ -5,19 +5,66 @@
 #include <stddef.h>
 
 // Standard EGA register values for 640x350 16-color (Mode 0x10)
+// Seq: Reset, Clock Mode, Mask, Char Map, Mem Mode
 static uint8_t ega_seq_regs[] = { 0x03, 0x01, 0x0F, 0x00, 0x06 }; 
+
+// CRTC: HTotal, HDisplay, HBlank, ...
 static uint8_t ega_crtc_regs[] = { 
     0x5B, 0x4F, 0x53, 0x37, 0x52, 0x00, 0x6C, 0x1F,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x5E, 0x2B, 0x5D, 0x28, 0x0F, 0x96, 0xB9, 0xA3, 
     0xFF 
 };
+
+// GC: Set/Reset, En, Color Cmp, Rotate, Read Map, Mode, Misc, Color care, Bit Mask
 static uint8_t ega_gc_regs[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x0E, 0x00, 0xFF };
+
+// AC: Palette 0-15, Mode, Overscan, Color Plane En, HPan
 static uint8_t ega_ac_regs[] = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x14, 0x07,
     0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 
     0x01, 0x00, 0x0F, 0x00 
 };
+
+// ... [Skipping to putpixel] ...
+
+void ega_putpixel(int x, int y, uint8_t color) {
+    if (x < 0 || x >= 640 || y < 0 || y >= 350) return;
+
+    /* EGA Write Mode 2:
+     * 1. Set Write Mode 2 in GC Mode Register (Index 5).
+     * 2. Set Bit Mask (Index 8) to select the pixel within the byte.
+     * 3. Read the byte (to load latches).
+     * 4. Write color index as data (GC expands it to planes).
+     */
+     
+    unsigned int offset = (y * 640 + x) / 8;
+    unsigned int bit_index = 7 - (x % 8);
+    uint8_t mask = 1 << bit_index;
+    
+    volatile uint8_t *mem = (volatile uint8_t *)(EGA_MEM_BASE + offset);
+    
+    /* Set Write Mode 2 (Bits 0-1 = 10) */
+    outb(EGA_GC_INDEX, 0x05);
+    outb(EGA_GC_DATA, 0x02);
+    
+    /* Set Bit Mask */
+    outb(EGA_GC_INDEX, 0x08);
+    outb(EGA_GC_DATA, mask);
+    
+    /* Read-Modify-Write */
+    volatile uint8_t dummy = *mem;
+    (void)dummy;
+    *mem = color; // Content of write is the color index in Mode 2
+    
+    /* Restore defaults (Write Mode 0, Bit Mask 0xFF) for other ops? */
+    /* Only if expecting mixed usage. For now, we leave it or reset per op.
+       Optimization: Don't verify every time if single threaded. */
+    outb(EGA_GC_INDEX, 0x05);
+    outb(EGA_GC_DATA, 0x00);
+    outb(EGA_GC_INDEX, 0x08); 
+    outb(EGA_GC_DATA, 0xFF);
+}
 
 static void ega_write_regs(void) {
     // Sequencer
@@ -82,8 +129,3 @@ void ega_init(void) {
     for (int i = 0; i < 32000; i++) vram[i] = 0; // Approx clear
 }
 
-void ega_putpixel(int x, int y, uint8_t color) {
-    // EGA uses 4 color planes
-    // Select planes and write to memory at 0xA0000
-    (void)x; (void)y; (void)color;
-}

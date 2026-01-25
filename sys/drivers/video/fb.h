@@ -22,6 +22,8 @@ void fb_clear(uint32_t color);
 /* Console operations are in fb_console.h */
 #include "fb_console.h"
 
+#include <sys/fb.h>
+
 /* Video Driver Interface */
 typedef struct video_driver {
     const char *name;
@@ -30,6 +32,10 @@ typedef struct video_driver {
     int (*probe)(void);
     /* Init: Initialize hardware and populate fb buffer info. Returns 0 on success. */
     int (*init)(fb_info_t *fb);
+    /* Mode Setting */
+    int (*list_modes)(struct video_mode_info *modes, int max_count);
+    int (*set_mode)(int mode_id);
+    
     struct video_driver *next;
 } video_driver_t;
 
