@@ -33,10 +33,12 @@ void spinlock_acquire(spinlock_t *lock) {
 
     // Spin until acquired
     while (xchg(&lock->locked, 1) != 0) {
+        while (*(volatile uint32_t *)&lock->locked) {
 #ifndef HOST_TEST
-        // Pause instruction for power saving during spin
-        __asm__ volatile("pause");
+            // Pause instruction for power saving during spin
+            __asm__ volatile("pause");
 #endif
+        }
     }
 
     lock->cpu_id = id;
