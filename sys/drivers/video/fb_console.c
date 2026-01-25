@@ -59,15 +59,14 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
     } else if (c == '\r') {
         cursor_x = 0;
     } else {
-        if (c >= 32 && c <= 126) {
-            const uint8_t *glyph = font_8x16[c - 32];
-            for (int y = 0; y < FB_FONT_HEIGHT; y++) {
-                for (int x = 0; x < FB_FONT_WIDTH; x++) {
-                    if (glyph[y] & (0x80 >> x)) {
-                        fb_putpixel(cursor_x + x, cursor_y + y, fg);
-                    } else if (bg != FB_COLOR_TRANSPARENT) {
-                        fb_putpixel(cursor_x + x, cursor_y + y, bg);
-                    }
+        /* Draw Character */
+        const uint8_t *glyph = &font_8x16[(unsigned char)c * 16];
+        for (int y = 0; y < FB_FONT_HEIGHT; y++) {
+            for (int x = 0; x < FB_FONT_WIDTH; x++) {
+                if (glyph[y] & (0x80 >> x)) {
+                    fb_putpixel(cursor_x + x, cursor_y + y, fg);
+                } else if (bg != FB_COLOR_TRANSPARENT) {
+                    fb_putpixel(cursor_x + x, cursor_y + y, bg);
                 }
             }
         }
