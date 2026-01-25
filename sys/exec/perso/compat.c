@@ -152,7 +152,7 @@ void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, int 
 int sys_nice(int inc) { (void)inc; return -ENOSYS; }
 int sys_mprotect(void *addr, size_t len, int prot) { (void)addr; (void)len; (void)prot; return -ENOSYS; }
 int sys_sigret(void) { return -ENOSYS; }
-int sys_lchown(const char *path, int owner, int group) { (void)path; (void)owner; (void)group; return -ENOSYS; }
+/* int sys_lchown(const char *path, int owner, int group) { (void)path; (void)owner; (void)group; return -ENOSYS; } */
 int sys_stime(uint32_t *t) { (void)t; return -ENOSYS; }
 int sys_ptrace(int req, int pid, int addr, int data) { (void)req; (void)pid; (void)addr; (void)data; return -ENOSYS; }
 int sys_alarm(unsigned int sec) { (void)sec; return 0; } /* Special case: alarm(0) is success */
@@ -172,4 +172,3 @@ int sys_shmsys(int a, int b, int c, int d) { (void)a; (void)b; (void)c; (void)d;
 int sys_semsys(int a, int b, int c, int d, int e) { (void)a; (void)b; (void)c; (void)d; (void)e; return -ENOSYS; }
 int sys_uadmin(int a, int b, int c) { (void)a; (void)b; (void)c; return -ENOSYS; }
 int sys_utssys(void *a, int b, int c) { (void)a; (void)b; (void)c; return -ENOSYS; }
-

@@ -79,7 +79,7 @@ typedef struct process {
     uint8_t  is_kernel_task; // 1 if kernel thread, 0 if user process
     uint8_t  bitness;        // Process execution mode (16/32/64)
     
-    fs_node_t *tty;      // Controlling Terminal
+    struct tty *tty;      // Controlling Terminal
     fs_node_t *cwd_node; // Current working directory
     
     // Memory management

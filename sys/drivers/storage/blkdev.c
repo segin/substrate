@@ -5,14 +5,14 @@
 static blkdev_t *blkdev_list = NULL;
 
 // VFS read wrapper - translates byte reads to sector reads
-static uint32_t blkdev_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t blkdev_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     blkdev_t *dev = (blkdev_t *)node->impl;
     if (!dev || !dev->read) return 0;
     return blkdev_read_bytes(dev, offset, size, buffer);
 }
 
 // VFS write wrapper
-static uint32_t blkdev_vfs_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t blkdev_vfs_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     blkdev_t *dev = (blkdev_t *)node->impl;
     if (!dev || !dev->write) return 0;
     return blkdev_write_bytes(dev, offset, size, buffer);

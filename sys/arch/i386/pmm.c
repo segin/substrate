@@ -508,6 +508,14 @@ void pmm_dump_e820(const e820_entry_t *map, uint32_t count) {
     }
 }
 
+uint32_t pmm_get_free_memory(void) {
+    return vm_phys_get_free() * PMM_BLOCK_SIZE;
+}
+
+uint32_t pmm_get_total_memory(void) {
+    return (vm_phys_get_free() + vm_phys_get_used()) * PMM_BLOCK_SIZE;
+}
+
 /*
  * pmm_init_e820 - Initialize PMM from e820 memory map
  *

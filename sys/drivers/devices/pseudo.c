@@ -4,39 +4,40 @@
 #include <sys/proc.h>
 #include <string.h>
 #include <arch/x86-common/include/io.h>
+#include <sys/tty.h>
 
 // /dev/null
-static uint32_t null_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t null_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)size; (void)buffer;
     return 0; // EOF
 }
 
-static uint32_t null_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t null_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer;
     return size; // Discarded
 }
 
 // /dev/zero
-static uint32_t zero_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     memset(buffer, 0, size);
     return size;
 }
 
 // /dev/full
-static uint32_t full_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t full_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
     // Always return error (ENOSPC is usually 28)
     return size;
 }
 
 // /dev/port
-static uint32_t port_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t port_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     if (offset >= 65536) return 0;
     
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < size; i++) {
+    size_t count = 0;
+    for (size_t i = 0; i < size; i++) {
         if (offset + i >= 65536) break;
         buffer[i] = inb((uint16_t)(offset + i));
         count++;
@@ -44,12 +45,12 @@ static uint32_t port_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return count;
 }
 
-static uint32_t port_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t port_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
      if (offset >= 65536) return 0;
     
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < size; i++) {
+    size_t count = 0;
+    for (size_t i = 0; i < size; i++) {
         if (offset + i >= 65536) break;
         outb((uint16_t)(offset + i), buffer[i]);
         count++;
@@ -93,16 +94,16 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
  */
 
 // /dev/tty - proxy to current process's controlling terminal
-static uint32_t tty_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t dev_tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
-    if (current_process && current_process->tty && current_process->tty->read) {
-        return current_process->tty->read(current_process->tty, offset, size, buffer);
+    if (current_process && current_process->tty) {
+         return tty_read(current_process->tty, (char*)buffer, (int)size);
     }
     
     // Fallback to keyboard if no TTY assigned
-    uint32_t count = 0;
+    size_t count = 0;
     while (count < size) {
         char c = keyboard_getc();
         if (c == 0) break;
@@ -111,12 +112,12 @@ static uint32_t tty_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *
     return count;
 }
 
-static uint32_t tty_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t dev_tty_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
-    if (current_process && current_process->tty && current_process->tty->write) {
-        return current_process->tty->write(current_process->tty, offset, size, buffer);
+    if (current_process && current_process->tty) {
+         return tty_write(current_process->tty, (const char*)buffer, (int)size);
     }
     
     // Fallback to console
@@ -125,7 +126,7 @@ static uint32_t tty_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
 }
 
 // /dev/mem
-static uint32_t mem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     // Limit to 1GB (Direct Map size)
     if (offset > 0x3FFFFFFF) return 0; // EOF or Error? EOF for now.
@@ -143,7 +144,7 @@ static uint32_t mem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *
     return size;
 }
 
-static uint32_t mem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     if (offset > 0x3FFFFFFF) return 0;
     
@@ -158,7 +159,7 @@ static uint32_t mem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
 }
 
 // /dev/kmem
-static uint32_t kmem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     // Access arbitrary virtual address.
     // DANGEROUS: If offset is unmapped, we panic.
@@ -169,7 +170,7 @@ static uint32_t kmem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return size;
 }
 
-static uint32_t kmem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     void *dst = (void*)(uintptr_t)offset;
     memcpy(dst, buffer, size);
@@ -184,8 +185,11 @@ static fs_node_t full_node;
 
 static fs_node_t tty_node;
 
+static fs_node_t mem_node;
 
+static fs_node_t kmem_node;
 
+static fs_node_t port_node;
 
 void pseudo_init(void) {
 
@@ -234,12 +238,11 @@ void pseudo_init(void) {
     memset(&tty_node, 0, sizeof(fs_node_t));
     strcpy(tty_node.name, "tty");
     tty_node.flags = FS_CHARDEVICE;
-    tty_node.read = &tty_read;
-    tty_node.write = &tty_write;
+    tty_node.read = &dev_tty_read;
+    tty_node.write = &dev_tty_write;
     devfs_register_device(&tty_node);
 
     // /dev/mem
-    static fs_node_t mem_node;
     memset(&mem_node, 0, sizeof(fs_node_t));
     strcpy(mem_node.name, "mem");
     mem_node.flags = FS_CHARDEVICE;
@@ -248,7 +251,6 @@ void pseudo_init(void) {
     devfs_register_device(&mem_node);
 
     // /dev/kmem
-    static fs_node_t kmem_node;
     memset(&kmem_node, 0, sizeof(fs_node_t));
     strcpy(kmem_node.name, "kmem");
     kmem_node.flags = FS_CHARDEVICE;
@@ -257,7 +259,6 @@ void pseudo_init(void) {
     devfs_register_device(&kmem_node);
 
     // /dev/port
-    static fs_node_t port_node;
     memset(&port_node, 0, sizeof(fs_node_t));
     strcpy(port_node.name, "port");
     port_node.flags = FS_CHARDEVICE;

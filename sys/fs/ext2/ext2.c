@@ -18,9 +18,11 @@ static int ext2_node_cache_idx = 0;
 // Forward declarations
 static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
 static size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
 static struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *ext2_finddir(fs_node_t *node, char *name);
 static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size);
+uint32_t ext2_alloc_block(ext2_fs_t *fs);
 
 // Read a block from the device
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
@@ -846,7 +848,6 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
         ext2_read_block(fs, block_num, block_buf);
         
         ext2_dirent_t *prev_de = NULL;
-        uint32_t prev_off = 0;
         
         while (block_off < fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
@@ -876,7 +877,6 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
             }
             
             prev_de = de;
-            prev_off = block_off;
             block_off += de->rec_len;
             pos += de->rec_len;
         }
