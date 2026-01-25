@@ -16,6 +16,7 @@
 #include <drivers/storage/ide.h>
 #include <arch/x86-common/include/io.h>
 #include <string.h>
+#include <stdio.h>
 #include <kern/console.h>
 #include <drivers/blkdev.h>
 #include <sys/random.h>
@@ -265,9 +266,9 @@ void ide_dma_init(uint16_t bm_base_primary, uint16_t bm_base_secondary) {
         ide_channels[0].dma_capable = 1;
         /* Clear status bits */
         ide_bm_clear_interrupt(0);
-        kprint("  IDE Primary: DMA enabled (BM base 0x");
-        /* TODO: Print hex base */
-        kprint(")\n");
+        char buf[64];
+        sprintf(buf, "  IDE Primary: DMA enabled (BM base 0x%x)\n", (unsigned int)bm_base_primary);
+        kprint(buf);
     }
     
     if (bm_base_secondary) {
