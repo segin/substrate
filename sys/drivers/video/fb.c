@@ -29,10 +29,26 @@ extern int hw_text_active;
 
 /* ==================== Pixel Operations ==================== */
 
+/* Simple RGB to CGA/EGA/VGA Palette Index Mapping */
+static uint8_t rgb_to_index(uint32_t color) {
+    uint8_t r = (color >> 16) & 0xFF;
+    uint8_t g = (color >> 8) & 0xFF;
+    uint8_t b = color & 0xFF;
+    
+    /* Threshold for "lit" pixel */
+    uint8_t i = 0;
+    if (r > 64) i |= 4;
+    if (g > 64) i |= 2;
+    if (b > 64) i |= 1;
+    if (r > 128 || g > 128 || b > 128) i |= 8; // Intensity
+    
+    return i;
+}
+
 static void linear_fb_putpixel(int x, int y, uint32_t color) {
     if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
 
-    if (fb.bpp >= 8) {
+    if (fb.bpp >= 15) {
         uint8_t *pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x * (fb.bpp / 8));
         switch (fb.bpp) {
             case 32:
@@ -57,14 +73,17 @@ static void linear_fb_putpixel(int x, int y, uint32_t color) {
                 *(uint16_t *)pixel = c;
                 break;
             }
-            case 8:
-                *pixel = color & 0xFF;
-                break;
-            default:
-                break;
         }
     } else {
-        /* Packed pixel formats (1, 2, 4 bpp) */
+        /* Packed pixel formats (1, 2, 4, 8 bpp) with Palette Adaptation */
+        uint8_t index = rgb_to_index(color);
+        
+        if (fb.bpp == 8) {
+             uint8_t *pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x);
+             *pixel = index;
+             return;
+        }
+        
         uint8_t *pixel;
         uint8_t shift, mask;
         
@@ -73,19 +92,22 @@ static void linear_fb_putpixel(int x, int y, uint32_t color) {
                 pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x / 2);
                 shift = (1 - (x % 2)) * 4;
                 mask = 0xF << shift;
-                *pixel = (*pixel & ~mask) | ((color & 0xF) << shift);
+                *pixel = (*pixel & ~mask) | ((index & 0xF) << shift);
                 break;
             case 2:
                 pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x / 4);
                 shift = (3 - (x % 4)) * 2;
                 mask = 0x3 << shift;
-                *pixel = (*pixel & ~mask) | ((color & 0x3) << shift);
+                // Map VGA index to 2-bit: Black=0, White=3, etc. 
+                // Simple approx: use lower 2 bits of index? 
+                *pixel = (*pixel & ~mask) | ((index & 0x3) << shift);
                 break;
             case 1:
                 pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x / 8);
                 shift = 7 - (x % 8);
                 mask = 1 << shift;
-                if (color & 1) *pixel |= mask;
+                // Index > 0 is "on"
+                if (index) *pixel |= mask;
                 else *pixel &= ~mask;
                 break;
             default:
