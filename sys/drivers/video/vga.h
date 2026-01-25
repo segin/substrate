@@ -108,6 +108,19 @@ typedef struct vga_regs {
     uint8_t ac[VGA_NUM_AC_REGS];
 } vga_regs_t;
 
+/* VGA Mode Definition */
+typedef struct {
+    int width;
+    int height;
+    int bpp;
+    int mode_id;
+    const vga_regs_t *regs; 
+    void (*init_func)(void);
+    void (*putpixel)(int, int, uint32_t);
+    uint32_t mem_base;
+    uint32_t pitch;
+} vga_mode_def_t;
+
 void vga_install(void);
 
 #endif

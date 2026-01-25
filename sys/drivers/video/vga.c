@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <string.h>
 
+/* Global framebuffer state (from fb.c) */
+extern fb_info_t fb;
+
 /* ================== Forward Declarations ================== */
 static void vga_putpixel_linear(int x, int y, uint32_t color);
 static void vga_putpixel_planar(int x, int y, uint32_t color);
@@ -12,16 +15,7 @@ static void cga_putpixel(int x, int y, uint32_t color);
 
 /* ================== Mode Definitions ================== */
 
-typedef struct {
-    int width;
-    int height;
-    int bpp;
-    int mode_id;
-    const vga_regs_t *regs; /* If NULL, special handling */
-    void (*putpixel)(int, int, uint32_t);
-    uint32_t mem_base;
-    uint32_t pitch;
-} vga_mode_def_t;
+/* ================== Mode Definitions ================== */
 
 /* Mode 13h Register Data */
 static const vga_regs_t regs_13h = {
@@ -93,15 +87,38 @@ static const vga_regs_t regs_10h = {
     }
 };
 
+/* Custom Init Functions */
+static void init_hercules(void) {
+    /* Hercules 720x348 Graphics Mode Register Values */
+    static const uint8_t regs[] = {
+        0x35, 0x2D, 0x2E, 0x07, 0x5B, 0x02, 0x57, 0x57, 0x02, 0x03, 0x00, 0x00
+    };
+    outb(0x3BF, 0x01); /* Config Switch: Allow Graphics */
+    
+    /* Program 6845 CRT Controller */
+    for (int i = 0; i < 12; i++) {
+        outb(0x3B4, i);
+        outb(0x3B5, regs[i]);
+    }
+    
+    outb(0x3B8, 0x0A); /* Mode Control: Video Enable | Graphics Mode */
+}
+
+static void init_cga(void) {
+    /* CGA Init Stub: We don't program registers yet, assuming BIOS or pre-set */
+    /* Ideally we'd set 320x200x4 (Mode 4) or 640x200x2 (Mode 6) regs */
+    kprint("VGA: CGA initialized (stub).\n");
+}
+
 /* Mode Table */
-/* NULL regs implies special handling */
+/* Prioritize standard VGA modes */
 static const vga_mode_def_t vga_modes[] = {
-    { .width = 320, .height = 200, .bpp = 8, .mode_id = 13, .regs = &regs_13h, .putpixel = vga_putpixel_linear, .mem_base = VGA_GFX_MEM_BASE, .pitch = 320 },
-    { .width = 640, .height = 480, .bpp = 4, .mode_id = 12, .regs = &regs_12h, .putpixel = vga_putpixel_planar, .mem_base = VGA_GFX_MEM_BASE, .pitch = 80 },
-    { .width = 640, .height = 350, .bpp = 4, .mode_id = 10, .regs = &regs_10h, .putpixel = vga_putpixel_planar, .mem_base = VGA_GFX_MEM_BASE, .pitch = 80 },
+    { .width = 640, .height = 480, .bpp = 4, .mode_id = 12, .regs = &regs_12h, .init_func = NULL, .putpixel = vga_putpixel_planar, .mem_base = VGA_GFX_MEM_BASE, .pitch = 80 },
+    { .width = 320, .height = 200, .bpp = 8, .mode_id = 13, .regs = &regs_13h, .init_func = NULL, .putpixel = vga_putpixel_linear, .mem_base = VGA_GFX_MEM_BASE, .pitch = 320 },
+    { .width = 640, .height = 350, .bpp = 4, .mode_id = 10, .regs = &regs_10h, .init_func = NULL, .putpixel = vga_putpixel_planar, .mem_base = VGA_GFX_MEM_BASE, .pitch = 80 },
     /* Legacy / Special Modes */
-    { .width = 720, .height = 348, .bpp = 1, .mode_id = 7,  .regs = NULL,      .putpixel = herc_putpixel,       .mem_base = VGA_HERC_MEM_BASE, .pitch = 90 },
-    { .width = 320, .height = 200, .bpp = 2, .mode_id = 6,  .regs = NULL,      .putpixel = cga_putpixel,        .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 }
+    { .width = 720, .height = 348, .bpp = 1, .mode_id = 7,  .regs = NULL,      .init_func = init_hercules, .putpixel = herc_putpixel,       .mem_base = VGA_HERC_MEM_BASE, .pitch = 90 },
+    { .width = 320, .height = 200, .bpp = 2, .mode_id = 6,  .regs = NULL,      .init_func = init_cga,      .putpixel = cga_putpixel,        .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 }
 };
 
 #define VGA_MODE_COUNT (sizeof(vga_modes) / sizeof(vga_modes[0]))
@@ -114,16 +131,14 @@ static void vga_write_regs(const vga_regs_t *regs) {
     uint16_t crtc_data_port  = (regs->misc & VGA_MISC_IO_ADDR_SEL) ? VGA_CRTC_DATA_COLOR : VGA_CRTC_DATA_MONO;
     uint16_t input_stat_port = (regs->misc & VGA_MISC_IO_ADDR_SEL) ? VGA_INPUT_STAT1_COLOR : VGA_INPUT_STAT1_MONO;
 
-    /* Write MISC */
     outb(VGA_MISC_WRITE, regs->misc);
 
-    /* Write SEQUENCER */
     for (int i = 0; i < VGA_NUM_SEQ_REGS; i++) {
         outb(VGA_SEQ_INDEX, i);
         outb(VGA_SEQ_DATA, regs->seq[i]);
     }
 
-    /* Unlock CRTC registers 0-7 */
+    /* Unlock CRTC */
     outb(crtc_index_port, 0x03);
     uint8_t crtc_03 = inb(crtc_data_port) | 0x80;
     outb(crtc_data_port, crtc_03);
@@ -132,26 +147,22 @@ static void vga_write_regs(const vga_regs_t *regs) {
     uint8_t crtc_11 = inb(crtc_data_port) & ~0x80;
     outb(crtc_data_port, crtc_11);
 
-    /* Write CRTC */
     for (int i = 0; i < VGA_NUM_CRTC_REGS; i++) {
         outb(crtc_index_port, i);
         outb(crtc_data_port, regs->crtc[i]);
     }
 
-    /* Write GRAPHICS CONTROLLER */
     for (int i = 0; i < VGA_NUM_GC_REGS; i++) {
         outb(VGA_GC_INDEX, i);
         outb(VGA_GC_DATA, regs->gc[i]);
     }
 
-    /* Write ATTRIBUTE CONTROLLER */
     for (int i = 0; i < VGA_NUM_AC_REGS; i++) {
-        (void)inb(input_stat_port); // Reset flip-flop to Index
+        (void)inb(input_stat_port); 
         outb(VGA_AC_INDEX, i);
         outb(VGA_AC_WRITE, regs->ac[i]);
     }
 
-    /* Enable Video (AC Index 0x20) */
     (void)inb(input_stat_port);
     outb(VGA_AC_INDEX, 0x20);
 }
@@ -159,50 +170,78 @@ static void vga_write_regs(const vga_regs_t *regs) {
 /* ================== Drawing Primitives ================== */
 
 static void vga_putpixel_linear(int x, int y, uint32_t color) {
-    if (x < 0 || x >= 320 || y < 0 || y >= 200) return;
-    uint8_t *vram = (uint8_t*)VGA_GFX_MEM_BASE;
-    vram[y * 320 + x] = (uint8_t)color;
+    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
+    volatile uint8_t *vram = (volatile uint8_t *)fb.addr;
+    vram[y * fb.pitch + x] = (uint8_t)color;
 }
 
 static void vga_putpixel_planar(int x, int y, uint32_t color) {
-    /* Assumes 640 width logic for offset calculation */
-    /* Ideally should use global width dependent offset */
-    /* But standard modes (12h, 10h) use 640 */
+    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
     
-    unsigned int offset = (y * 640 + x) / 8;
+    /* Planar: 8 pixels per byte */
+    unsigned int offset = y * fb.pitch + (x / 8);
     unsigned int bit = 7 - (x % 8);
     uint8_t mask = 1 << bit;
     
-    volatile uint8_t *mem = (volatile uint8_t *)(VGA_GFX_MEM_BASE + offset);
+    volatile uint8_t *mem = (volatile uint8_t *)((uintptr_t)fb.addr + offset);
     
-    outb(VGA_GC_INDEX, 0x05); outb(VGA_GC_DATA, 0x02); // Write Mode 2
-    outb(VGA_GC_INDEX, 0x08); outb(VGA_GC_DATA, mask); // Bit Mask
+    /* Set Write Mode 2 */
+    outb(VGA_GC_INDEX, VGA_GC_MODE); 
+    outb(VGA_GC_DATA, 0x02); 
     
-    volatile uint8_t dummy = *mem; (void)dummy;
+    /* Set Bit Mask */
+    outb(VGA_GC_INDEX, VGA_GC_BIT_MASK); 
+    outb(VGA_GC_DATA, mask); 
+    
+    /* Read-Modify-Write to latch */
+    volatile uint8_t dummy = *mem; 
+    (void)dummy;
     *mem = (uint8_t)color;
     
-    outb(VGA_GC_INDEX, 0x05); outb(VGA_GC_DATA, 0x00);
-    outb(VGA_GC_INDEX, 0x08); outb(VGA_GC_DATA, 0xFF);
+    /* Restore defaults (Optional, but good practice if mixed 2/0 usage) */
+    outb(VGA_GC_INDEX, VGA_GC_MODE); 
+    outb(VGA_GC_DATA, 0x00);
+    outb(VGA_GC_INDEX, VGA_GC_BIT_MASK); 
+    outb(VGA_GC_DATA, 0xFF);
 }
 
 static void herc_putpixel(int x, int y, uint32_t color) {
-    if (x < 0 || x >= 720 || y < 0 || y >= 348) return;
-    uint8_t *mem = (uint8_t*)VGA_HERC_MEM_BASE;
-    uintptr_t row_offset = (y >> 2) * 90;
+    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
+    
+    /* 4-way Interleave */
+    /* Bank 0: Lines 0, 4... at Base + 0x0000 */
+    /* Bank 1: Lines 1, 5... at Base + 0x2000 */
+    /* Bank 2: Lines 2, 6... at Base + 0x4000 */
+    /* Bank 3: Lines 3, 7... at Base + 0x6000 */
+    
     uintptr_t bank_offset = (y & 3) * 0x2000;
-    uintptr_t global_offset = bank_offset + row_offset + (x >> 3);
+    uintptr_t row_offset = (y >> 2) * fb.pitch;
+    
+    /* x is in bits */
+    uintptr_t byte_offset = x >> 3;
     uint8_t bit_mask = 0x80 >> (x & 7);
-    if (color) mem[global_offset] |= bit_mask;
-    else       mem[global_offset] &= ~bit_mask;
+    
+    volatile uint8_t *mem = (volatile uint8_t *)((uintptr_t)fb.addr + bank_offset + row_offset + byte_offset);
+    
+    if (color) *mem |= bit_mask;
+    else       *mem &= ~bit_mask;
 }
 
 static void cga_putpixel(int x, int y, uint32_t color) {
-    if (x < 0 || x >= 320 || y < 0 || y >= 200) return;
-    int bank = (y % 2) == 0 ? 0 : 1;
-    int offset = (y / 2) * 80 + (x / 4);
-    uint8_t *mem = (uint8_t *)(0xC00B8000 + (bank * 0x2000) + offset);
+    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
+    
+    /* 2-way Interleave */
+    /* Even Lines: Base */
+    /* Odd Lines: Base + 0x2000 */
+    int bank_shift = (y & 1) ? 13 : 0; /* 0x2000 = 1<<13 */
+    uintptr_t offset = (y >> 1) * fb.pitch + (x / 4);
+    
+    volatile uint8_t *mem = (volatile uint8_t *)((uintptr_t)fb.addr + (1 << bank_shift) + offset);
+    
+    /* 2 bits per pixel */
     int shift = 6 - ((x % 4) * 2);
     uint8_t mask = 0x03 << shift;
+    
     *mem = (*mem & ~mask) | ((color & 0x03) << shift);
 }
 
@@ -221,8 +260,7 @@ static int vga_list_modes(struct video_mode_info *modes, int max_count) {
     return count;
 }
 
-static int vga_set_mode_id(int mode_id) {
-    /* Find mode */
+static int vga_set_mode_internal(int mode_id) {
     const vga_mode_def_t *mode = NULL;
     for (unsigned int i = 0; i < VGA_MODE_COUNT; i++) {
         if (vga_modes[i].mode_id == mode_id) {
@@ -233,70 +271,22 @@ static int vga_set_mode_id(int mode_id) {
     
     if (!mode) return -1;
     
-    /* Hardcoded Special Handling for non-VGA regs support (Hercules/CGA stub) */
-    if (mode_id == 7) {
-        /* Hercules Init */
-        static const uint8_t herc_regs[] = {
-            0x35, 0x2D, 0x2E, 0x07, 0x5B, 0x02, 0x57, 0x57, 0x02, 0x03, 0x00, 0x00
-        };
-        outb(0x3BF, 0x01); // Config
-        for(int i=0;i<12;i++) { outb(0x3B4, i); outb(0x3B5, herc_regs[i]); }
-        outb(0x3B8, 0x0A); // Mode Control
-    } else if (mode_id == 6) {
-        kprint("VGA: Setting CGA Mode (Stub). Registers not set.\n");
-    } else {
-        /* Standard VGA/EGA */
-        if (mode->regs) {
-            vga_write_regs(mode->regs);
-        }
+    /* Apply Mode */
+    if (mode->init_func) {
+        mode->init_func();
+    } else if (mode->regs) {
+        vga_write_regs(mode->regs);
     }
     
-    /* Update implementation info (Global 'fb' update logic needed, but here we can only return success?
-       The fb_init caller will notice success. But fb pointers?
-       We need to update the fb_info passed during init? Or a global driver state?
-       The upper layer (fb.c) doesn't query us for fb params after set_mode.
-       It assumes we set them?
-       Wait, fb.c:206 just checks return.
-       We MUST have a way to update the pixel pointer and geometry in the top layer.
-       Current design flaw: set_mode doesn't take fb_info* or return it.
-       Workaround: fb.c relies on list_modes to know geometry, but pixel pointer?
-       We can export a 'vga_get_current_info' or similar?
-       Or fb.c can re-call init or probe?
-       Actually, `vga_init` sets it initially.
-       If we switch mode, `fb.putpixel` might need changing.
-       fb.c uses `current_driver` and `fb` global.
-       Since `vga.c` knows `vga_putpixel_...`, we need to hook it into `fb`.
-       But we don't have access to `fb` here (except in init).
-       We can add `vga_get_fb_info`?
-       For now, I will add a hack: `extern fb_info_t fb;` (It is non-static in fb.c).
-       This is ugly but works for now.
-    */
-    /* Extern hack to update global state */
-    /* Ideally refactor driver API to include context */
+    /* Update Global FB State */
+    fb.width = mode->width;
+    fb.height = mode->height;
+    fb.bpp = mode->bpp;
+    fb.pitch = mode->pitch;
+    fb.addr = (uint32_t*)mode->mem_base;
+    fb.putpixel = mode->putpixel;
     
     return 0;
-}
-
-/* Hack to update global fb state on mode switch. */
-/* See common/fb.c */
-extern fb_info_t fb;
-
-static int vga_set_mode_internal(int mode_id) {
-    if (vga_set_mode_id(mode_id) != 0) return -1;
-    
-    /* Update parameters */
-    for (unsigned int i = 0; i < VGA_MODE_COUNT; i++) {
-        if (vga_modes[i].mode_id == mode_id) {
-            fb.width = vga_modes[i].width;
-            fb.height = vga_modes[i].height;
-            fb.bpp = vga_modes[i].bpp;
-            fb.pitch = vga_modes[i].pitch;
-            fb.addr = (uint32_t*)vga_modes[i].mem_base;
-            fb.putpixel = vga_modes[i].putpixel;
-            return 0;
-        }
-    }
-    return -1;
 }
 
 static int vga_probe(void) { return 0; }
@@ -305,7 +295,6 @@ static int vga_init_driver(fb_info_t *info) {
     kprint("VGA: Initializing Unified Driver [VGA/EGA/CGA/MDA]\n");
     /* Default Mode 13h */
     if (vga_set_mode_internal(13) == 0) {
-        /* Sync info */
         *info = fb; 
         return 0;
     }
