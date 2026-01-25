@@ -9,6 +9,9 @@ int64_t get_time(void);
 // Get uptime in seconds since boot (monotonic)
 int64_t get_uptime(void);
 
+// Get uptime in milliseconds since boot (monotonic)
+int64_t get_uptime_ms(void);
+
 // Timer tick handler (called from PIT/APIC interrupt)
 void timer_tick(void);
 

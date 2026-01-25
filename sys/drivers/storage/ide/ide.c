@@ -13,12 +13,13 @@
  * - Intel PIIX4 Bus Master IDE Controller Datasheet
  */
 
-#include <drivers/storage/ide.h>
+#include "ide.h"
 #include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <kern/console.h>
-#include <drivers/blkdev.h>
+#include <drivers/storage/blkdev.h>
 #include <sys/random.h>
+#include <kern/time.h>
 
 /*
  * ============================================================
@@ -125,15 +126,23 @@ static void ide_wait_drq(uint8_t channel) {
 
 /* Wait with timeout (returns 0 on success, -1 on timeout/error) */
 static int ide_wait_ready(uint8_t channel, int timeout_ms) {
-    (void)timeout_ms; /* TODO: Implement actual timeout */
+    uint64_t start_ms = get_uptime_ms();
     
     /* 400ns delay (read alternate status 4 times) */
     for (int i = 0; i < 4; i++) {
         ide_read_ctrl(channel);
     }
     
-    /* Wait for BSY to clear */
-    ide_wait_bsy(channel);
+    /* Wait for BSY to clear with timeout */
+    while (ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_BSY) {
+        if (timeout_ms >= 0) {
+            uint64_t current_ms = get_uptime_ms();
+            if (current_ms - start_ms > (uint64_t)timeout_ms) {
+                return -1;
+            }
+        }
+        __asm__ volatile("pause");
+    }
     
     /* Check for errors */
     uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);

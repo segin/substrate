@@ -16,6 +16,10 @@ int64_t get_uptime(void) {
     return div64_32(ticks, HZ);
 }
 
+int64_t get_uptime_ms(void) {
+    return ticks * (1000 / HZ);
+}
+
 void set_boot_time(int64_t time) {
     boot_time = time;
 }
