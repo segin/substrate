@@ -1,60 +1,46 @@
+/*
+ * hw_text.c - Hardware Text Mode Driver (VGA)
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
 #include <kern/console.h>
+#include <kern/ansi_handler.h>
+#include <kern/cmdline.h>
 
 #include <arch/x86-common/include/io.h>
 
 #include <drivers/video/hw_text.h>
 #include <drivers/video/vga.h>
 
-// Standard Text Mode Memory
-static uint16_t* terminal_buffer;
-static size_t VGA_WIDTH = 80;
-static size_t VGA_HEIGHT = 25;
-
-static size_t terminal_row;
-static size_t terminal_column;
-static uint8_t terminal_color;
-int hw_text_active = 0;
-
-// ANSI Parser State
-enum ansi_state {
-    ANSI_NORMAL,
-    ANSI_ESC,
-    ANSI_CSI,
-    ANSI_PARAM
+/* Encapsulated Driver State */
+struct hw_text_state {
+    uint16_t* buffer;
+    size_t width;
+    size_t height;
+    
+    /* Cursor */
+    size_t row;
+    size_t col;
+    uint8_t color;
+    
+    /* ANSI Context */
+    struct ansi_ctx ansi;
 };
 
-static enum ansi_state state = ANSI_NORMAL;
-static int ansi_params[16];
-static int ansi_param_count = 0;
+static struct hw_text_state drv;
+int hw_text_active = 0;
 
 static inline uint16_t hw_text_entry(unsigned char uc, uint8_t color) {
     return (uint16_t) uc | (uint16_t) color << 8;
 }
 
-void hw_text_set_color(uint8_t fg, uint8_t bg) {
-    terminal_color = (fg | bg << 4);
-}
-
-void hw_text_clear_screen(void) {
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            const size_t index = y * VGA_WIDTH + x;
-            terminal_buffer[index] = hw_text_entry(' ', terminal_color);
-        }
-    }
-}
-
-static void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
-    const size_t index = y * VGA_WIDTH + x;
-    terminal_buffer[index] = hw_text_entry(c, color);
-}
+/* ==================== Low Level Operations ==================== */
 
 static void hw_text_update_cursor(void) {
-    uint16_t pos = terminal_row * VGA_WIDTH + terminal_column;
+    uint16_t pos = drv.row * drv.width + drv.col;
     
     // CRT Controller: Cursor Location High Register (0x0E)
     outb(0x3D4, 0x0E);
@@ -65,88 +51,113 @@ static void hw_text_update_cursor(void) {
     outb(0x3D5, pos & 0xFF);
 }
 
-static void terminal_scroll(void) {
-    for (size_t y = 0; y < VGA_HEIGHT - 1; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            terminal_buffer[y * VGA_WIDTH + x] = terminal_buffer[(y + 1) * VGA_WIDTH + x];
+static void hw_text_putentryat(char c, uint8_t color, size_t x, size_t y) {
+    const size_t index = y * drv.width + x;
+    drv.buffer[index] = hw_text_entry(c, color);
+}
+
+static void hw_text_scroll(void) {
+    for (size_t y = 0; y < drv.height - 1; y++) {
+        for (size_t x = 0; x < drv.width; x++) {
+            drv.buffer[y * drv.width + x] = drv.buffer[(y + 1) * drv.width + x];
         }
     }
-    for (size_t x = 0; x < VGA_WIDTH; x++) {
-        terminal_buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = hw_text_entry(' ', terminal_color);
+    for (size_t x = 0; x < drv.width; x++) {
+        drv.buffer[(drv.height - 1) * drv.width + x] = hw_text_entry(' ', drv.color);
     }
 }
 
-static void handle_csi(char c) {
-    switch (c) {
-        case 'm': // SGR
-            if (ansi_param_count == 0) {
-                terminal_color = (VGA_COLOR_LIGHT_GREY | VGA_COLOR_BLACK << 4);
-            } else {
-                for (int i = 0; i < ansi_param_count; i++) {
-                    int p = ansi_params[i];
-                    if (p == 0) {
-                         terminal_color = (VGA_COLOR_LIGHT_GREY | VGA_COLOR_BLACK << 4);
-                    } else if (p >= 30 && p <= 37) {
-                        uint8_t bg = terminal_color >> 4;
-                        terminal_color = (p - 30) | (bg << 4);
-                    } else if (p >= 40 && p <= 47) {
-                        uint8_t fg = terminal_color & 0x0F;
-                        terminal_color = fg | ((p - 40) << 4);
-                    } else if (p == 1) {
-                         uint8_t fg = terminal_color & 0x0F;
-                         if (fg < 8) terminal_color = (terminal_color & 0xF0) | (fg + 8);
-                    }
-                }
+/* ==================== ANSI Callbacks ==================== */
+
+static void cb_putc(char c) {
+    if (c == '\n') {
+        drv.col = 0;
+        if (++drv.row == drv.height) {
+            drv.row--;
+            hw_text_scroll();
+        }
+    } else if (c == '\r') {
+        drv.col = 0;
+    } else if (c == '\b') {
+        if (drv.col > 0) drv.col--;
+    } else if (c == '\t') {
+        drv.col = (drv.col + 8) & ~7;
+        if (drv.col >= drv.width) {
+            drv.col = 0;
+            if (++drv.row == drv.height) {
+                drv.row--;
+                hw_text_scroll();
             }
-            break;
-        case 'J': // Erase Display
-            if (ansi_param_count > 0 && ansi_params[0] == 2) {
-                hw_text_clear_screen();
-                terminal_row = 0;
-                terminal_column = 0;
+        }
+    } else {
+        hw_text_putentryat(c, drv.color, drv.col, drv.row);
+        if (++drv.col == drv.width) {
+            drv.col = 0;
+            if (++drv.row == drv.height) {
+                drv.row--;
+                hw_text_scroll();
             }
-            break;
-        case 'H': // Cursor Pos
-            {
-                int row = (ansi_param_count > 0) ? ansi_params[0] : 1;
-                int col = (ansi_param_count > 1) ? ansi_params[1] : 1;
-                if (row < 1) row = 1;
-                if (col < 1) col = 1;
-                terminal_row = row - 1;
-                terminal_column = col - 1;
-                if (terminal_row >= VGA_HEIGHT) terminal_row = VGA_HEIGHT - 1;
-                if (terminal_column >= VGA_WIDTH) terminal_column = VGA_WIDTH - 1;
-            }
-            break;
-        case 'A': // Up
-        case 'B': // Down
-        case 'C': // Fwd
-        case 'D': // Back
-            {
-                int n = (ansi_param_count > 0) ? ansi_params[0] : 1;
-                if (n < 1) n = 1;
-                if (c == 'A') terminal_row = (terminal_row >= (size_t)n) ? terminal_row - n : 0;
-                else if (c == 'B') terminal_row = (terminal_row + n < VGA_HEIGHT) ? terminal_row + n : VGA_HEIGHT - 1;
-                else if (c == 'C') terminal_column = (terminal_column + n < VGA_WIDTH) ? terminal_column + n : VGA_WIDTH - 1;
-                else if (c == 'D') terminal_column = (terminal_column >= (size_t)n) ? terminal_column - n : 0;
-            }
-            break;
-        case 'K': // Erase Line
-            {
-                int n = (ansi_param_count > 0) ? ansi_params[0] : 0;
-                if (n == 0) {
-                    for (size_t x = terminal_column; x < VGA_WIDTH; x++)
-                        terminal_putentryat(' ', terminal_color, x, terminal_row);
-                } else if (n == 1) {
-                    for (size_t x = 0; x <= terminal_column; x++)
-                        terminal_putentryat(' ', terminal_color, x, terminal_row);
-                } else if (n == 2) {
-                    for (size_t x = 0; x < VGA_WIDTH; x++)
-                        terminal_putentryat(' ', terminal_color, x, terminal_row);
-                }
-            }
-            break;
+        }
     }
+}
+
+static void cb_set_color(uint8_t fg, uint8_t bg) {
+    drv.color = (fg | bg << 4);
+}
+
+static void cb_clear_screen(void) {
+    for (size_t y = 0; y < drv.height; y++) {
+        for (size_t x = 0; x < drv.width; x++) {
+            const size_t index = y * drv.width + x;
+            drv.buffer[index] = hw_text_entry(' ', drv.color);
+        }
+    }
+}
+
+static void cb_move_cursor(int row, int col) {
+    if (row < 0) row = 0;
+    if (row >= (int)drv.height) row = drv.height - 1;
+    if (col < 0) col = 0;
+    if (col >= (int)drv.width) col = drv.width - 1;
+    
+    drv.row = row;
+    drv.col = col;
+}
+
+static void cb_get_cursor(int *row, int *col) {
+    *row = drv.row;
+    *col = drv.col;
+}
+
+static void cb_get_dimensions(int *width, int *height) {
+    *width = drv.width;
+    *height = drv.height;
+}
+
+static void cb_get_color(uint8_t *fg, uint8_t *bg) {
+    *fg = drv.color & 0x0F;
+    *bg = (drv.color >> 4) & 0x0F;
+}
+
+static const struct ansi_callbacks ansi_cb = {
+    .putc = cb_putc,
+    .set_color = cb_set_color,
+    .clear_screen = cb_clear_screen,
+    .move_cursor = cb_move_cursor,
+    .scroll = hw_text_scroll, // actually unused by ansi handler but good to have
+    .get_cursor = cb_get_cursor,
+    .get_dimensions = cb_get_dimensions,
+    .get_color = cb_get_color
+};
+
+/* ==================== Public Interface ==================== */
+
+void hw_text_set_color(uint8_t fg, uint8_t bg) {
+    cb_set_color(fg, bg);
+}
+
+void hw_text_clear_screen(void) {
+    cb_clear_screen();
 }
 
 void hw_text_putc(char c) {
@@ -154,75 +165,7 @@ void hw_text_putc(char c) {
     static uint32_t eflags;
     __asm__ volatile("pushfl; popl %0; cli" : "=r"(eflags));
 
-    if (state == ANSI_NORMAL) {
-        if (c == '\x1b') {
-            state = ANSI_ESC;
-        } else if (c == '\n') {
-            terminal_column = 0;
-            if (++terminal_row == VGA_HEIGHT) {
-                terminal_row--;
-                terminal_scroll();
-            }
-        } else if (c == '\r') {
-            terminal_column = 0;
-        } else if (c == '\b') {
-            if (terminal_column > 0) terminal_column--;
-        } else if (c == '\t') {
-             terminal_column = (terminal_column + 8) & ~7;
-             if (terminal_column >= VGA_WIDTH) {
-                 terminal_column = 0;
-                 if (++terminal_row == VGA_HEIGHT) {
-                    terminal_row--;
-                    terminal_scroll();
-                 }
-             }
-        } else {
-            terminal_putentryat(c, terminal_color, terminal_column, terminal_row);
-            if (++terminal_column == VGA_WIDTH) {
-                terminal_column = 0;
-                if (++terminal_row == VGA_HEIGHT) {
-                    terminal_row--;
-                    terminal_scroll();
-                }
-            }
-        }
-    } else if (state == ANSI_ESC) {
-        if (c == '[') {
-            state = ANSI_CSI;
-            ansi_param_count = 0;
-            ansi_params[0] = 0;
-        } else {
-            state = ANSI_NORMAL;
-            // Restore interrupts before recursive call
-            __asm__ volatile("pushl %0; popfl" :: "r"(eflags));
-            hw_text_putc(c);
-            return;
-        }
-    } else if (state == ANSI_CSI) {
-        if (c >= '0' && c <= '9') {
-            state = ANSI_PARAM;
-            ansi_params[ansi_param_count] = c - '0';
-            ansi_param_count = 1;
-        } else if (c == ';') {
-             // invalid start
-        } else if (c >= 0x40 && c <= 0x7E) {
-            handle_csi(c);
-            state = ANSI_NORMAL;
-        }
-    } else if (state == ANSI_PARAM) {
-        if (c >= '0' && c <= '9') {
-            ansi_params[ansi_param_count - 1] = ansi_params[ansi_param_count - 1] * 10 + (c - '0');
-        } else if (c == ';') {
-            if (ansi_param_count < 16) {
-                ansi_param_count++;
-                ansi_params[ansi_param_count - 1] = 0;
-            }
-        } else if (c >= 0x40 && c <= 0x7E) {
-            handle_csi(c);
-            state = ANSI_NORMAL;
-        }
-    }
-    
+    ansi_process(&drv.ansi, c, &ansi_cb);
     hw_text_update_cursor();
 
     // Restore interrupts
@@ -235,7 +178,7 @@ static void hw_text_console_write(const char *data, size_t len) {
 }
 
 static void hw_text_console_clear(void) {
-    hw_text_clear_screen();
+    cb_clear_screen();
 }
 
 static console_backend_t hw_text_console = {
@@ -248,10 +191,13 @@ static console_backend_t hw_text_console = {
 
 void hw_text_init(void) {
     char vid[32];
-    #include <kern/cmdline.h>
     
     // Default to VGA Color Text (0xB8000)
     uint32_t vram_base = 0xC00B8000;
+    
+    // Default Dimensions
+    drv.width = 80;
+    drv.height = 25;
     
     if (cmdline_get("video", vid, 32) == 0) {
         if (strcmp(vid, "cfa") == 0 || strcmp(vid, "cga") == 0) {
@@ -266,12 +212,14 @@ void hw_text_init(void) {
         }
     }
 
-    terminal_row = 0;
-    terminal_column = 0;
-    terminal_color = (VGA_COLOR_LIGHT_GREY | VGA_COLOR_BLACK << 4);
-    terminal_buffer = (uint16_t*)vram_base;
+    drv.row = 0;
+    drv.col = 0;
+    drv.color = (VGA_COLOR_LIGHT_GREY | VGA_COLOR_BLACK << 4);
+    drv.buffer = (uint16_t*)vram_base;
     
-    hw_text_clear_screen();
+    ansi_init(&drv.ansi);
+    
+    cb_clear_screen();
     hw_text_update_cursor();
     
     hw_text_active = 1;
