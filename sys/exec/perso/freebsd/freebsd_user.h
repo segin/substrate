@@ -98,12 +98,44 @@ struct freebsd_stat {
 #error "Unsupported architecture for FreeBSD personality"
 #endif
 
+/*
+ * FreeBSD 11 or older stat structure (32-bit inodes)
+ */
+struct freebsd11_stat {
+    uint32_t st_dev;
+    uint32_t st_ino;        /* 32-bit inode */
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint32_t st_uid;
+    uint32_t st_gid;
+    uint32_t st_rdev;
+    struct freebsd_timespec st_atim;
+    struct freebsd_timespec st_mtim;
+    struct freebsd_timespec st_ctim;
+    int64_t  st_size;
+    int64_t  st_blocks;
+    uint32_t st_blksize;
+    uint32_t st_flags;
+    uint32_t st_gen;
+    int32_t  st_lspare;
+    struct freebsd_timespec st_birthtim;
+};
+
+
 struct freebsd_utsname {
     char sysname[256];
     char nodename[256];
     char release[256];
     char version[256];
     char machine[256];
+};
+
+struct freebsd4_utsname {
+    char sysname[32];
+    char nodename[32];
+    char release[32];
+    char version[32];
+    char machine[32];
 };
 
 

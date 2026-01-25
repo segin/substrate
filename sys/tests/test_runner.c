@@ -127,6 +127,11 @@ void run_kernel_tests(void) {
     //     test_wait_logic();
     // }
 
+    if (all || strcmp(test_arg, "mount") == 0) {
+         extern void run_mount_tests(void);
+         run_mount_tests();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested
@@ -135,3 +140,4 @@ void run_kernel_tests(void) {
         for (;;) __asm__ volatile("hlt");
     }
 }
+

@@ -40,6 +40,7 @@ struct freebsd_stat;
 #define FREEBSD_SYS_getgid     47
 #define FREEBSD_SYS_ioctl      54
 #define FREEBSD_SYS_execve     59
+#define FREEBSD_SYS_fstat      62
 #define FREEBSD_SYS_vfork      66
 #define FREEBSD_SYS_mincore    76
 #define FREEBSD_SYS_mkdir      136
@@ -52,10 +53,15 @@ struct freebsd_stat;
 #define FREEBSD_SYS___getcwd   326
 
 /* FreeBSD-specific system call wrappers/translations */
+struct freebsd11_stat;
 int sys_freebsd_stat(const char *path, struct freebsd_stat *buf);
 int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf);
 int sys_freebsd_fstat(int fd, struct freebsd_stat *buf);
+int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf);
+int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf);
+int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf);
 int sys_freebsd_uname(void *buf);
+int sys_freebsd4_uname(void *buf);
 int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence);
 void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, int pad, uint32_t off_lo, uint32_t off_hi);
 

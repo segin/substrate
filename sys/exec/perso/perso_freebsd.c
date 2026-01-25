@@ -1,6 +1,7 @@
 #include <arch/i386/syscall.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_syscalls.h>
+#include <exec/perso/freebsd/freebsd_user.h>
 #include <exec/perso/personality.h>
 #include <kern/version.h>
 #include <stddef.h>
@@ -32,9 +33,9 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_access]   = &sys_access,
     [FREEBSD_SYS_sync]     = &sys_sync,
     [FREEBSD_SYS_kill]     = &sys_kill,
-    [FREEBSD_SYS_stat]     = &sys_freebsd_stat,
+    [FREEBSD_SYS_stat]     = &sys_freebsd11_stat,
     [FREEBSD_SYS_getppid]  = &sys_getpid,
-    [FREEBSD_SYS_lstat]    = &sys_freebsd_lstat,
+    [FREEBSD_SYS_lstat]    = &sys_freebsd11_lstat,
     [FREEBSD_SYS_dup2]     = &sys_dup2,
     [FREEBSD_SYS_pipe]     = &sys_pipe,
     [FREEBSD_SYS_getegid]  = &sys_getegid,
@@ -42,14 +43,15 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_getgid]   = &sys_getgid,
     [FREEBSD_SYS_ioctl]    = &sys_ioctl,
     [FREEBSD_SYS_execve]   = &sys_execve,
+    [FREEBSD_SYS_fstat]    = &sys_freebsd11_fstat,
     [FREEBSD_SYS_vfork]    = &sys_vfork,
     [FREEBSD_SYS_mincore]  = NULL,
     [FREEBSD_SYS_mkdir]    = &sys_mkdir,
     [FREEBSD_SYS_rmdir]    = &sys_rmdir,
-    [FREEBSD_SYS_freebsd4_uname] = &sys_freebsd_uname,
-    [FREEBSD_SYS_freebsd11_stat]  = &sys_freebsd_stat,
-    [FREEBSD_SYS_freebsd11_fstat] = &sys_freebsd_fstat,
-    [FREEBSD_SYS_freebsd11_lstat] = &sys_freebsd_lstat,
+    [FREEBSD_SYS_freebsd4_uname] = &sys_freebsd4_uname,
+    [FREEBSD_SYS_freebsd11_stat]  = &sys_freebsd11_stat,
+    [FREEBSD_SYS_freebsd11_fstat] = &sys_freebsd11_fstat,
+    [FREEBSD_SYS_freebsd11_lstat] = &sys_freebsd11_lstat,
     [FREEBSD_SYS_poll]     = &sys_poll,
     [FREEBSD_SYS___getcwd] = &sys_getcwd,
 };
@@ -87,6 +89,7 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [FREEBSD_SYS_getgid]   = "getgid",
     [FREEBSD_SYS_ioctl]    = "ioctl",
     [FREEBSD_SYS_execve]   = "execve",
+    [FREEBSD_SYS_fstat]    = "fstat",
     [FREEBSD_SYS_vfork]    = "vfork",
     [FREEBSD_SYS_mkdir]    = "mkdir",
     [FREEBSD_SYS_rmdir]    = "rmdir",
@@ -124,6 +127,7 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_kill]   = { 2, { ARG_INT, ARG_INT } },
     [FREEBSD_SYS_stat]   = { 2, { ARG_STR, ARG_PTR } },
     [FREEBSD_SYS_lstat]  = { 2, { ARG_STR, ARG_PTR } },
+    [FREEBSD_SYS_fstat]  = { 2, { ARG_INT, ARG_PTR } },
     [FREEBSD_SYS_dup2]   = { 2, { ARG_INT, ARG_INT } },
     [FREEBSD_SYS_pipe]   = { 1, { ARG_PTR } },
     [FREEBSD_SYS_setgid] = { 1, { ARG_INT } },
@@ -132,7 +136,9 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_mkdir]  = { 2, { ARG_STR, ARG_HEX } },
     [FREEBSD_SYS_rmdir]  = { 1, { ARG_STR } },
     [FREEBSD_SYS_freebsd4_uname] = { 1, { ARG_PTR } },
+    [FREEBSD_SYS_freebsd11_stat]  = { 2, { ARG_STR, ARG_PTR } },
     [FREEBSD_SYS_freebsd11_fstat] = { 2, { ARG_INT, ARG_PTR } },
+    [FREEBSD_SYS_freebsd11_lstat] = { 2, { ARG_STR, ARG_PTR } },
     [FREEBSD_SYS_poll]   = { 3, { ARG_PTR, ARG_INT, ARG_INT } },
     [FREEBSD_SYS___getcwd] = { 2, { ARG_PTR, ARG_INT } },
 };
@@ -140,18 +146,18 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
 extern char *strncpy(char *dest, const char *src, size_t n);
 extern void *memset(void *s, int c, size_t n);
 
-int sys_freebsd_uname(void *vbuf) {
-    struct freebsd_utsname *buf = vbuf;
+int sys_freebsd4_uname(void *vbuf) {
+    struct freebsd4_utsname *buf = vbuf;
     if (!buf) return -1;
-    memset(buf, 0, sizeof(struct freebsd_utsname));
-    strncpy(buf->sysname, "FreeBSD", 256);
-    strncpy(buf->nodename, kernel_hostname, 256);
-    strncpy(buf->release, "14.3-RELEASE-p5", 256);
-    strncpy(buf->version, "FreeBSD 14.3-RELEASE-p5 GENERIC", 256);
+    memset(buf, 0, sizeof(struct freebsd4_utsname));
+    strncpy(buf->sysname, "FreeBSD", 32);
+    strncpy(buf->nodename, kernel_hostname, 32);
+    strncpy(buf->release, "4.11-RELEASE", 32);
+    strncpy(buf->version, "FreeBSD 4.11-RELEASE #0", 32);
 #if defined(__x86_64__)
-    strncpy(buf->machine, "amd64", 256);
+    strncpy(buf->machine, "amd64", 32);
 #else
-    strncpy(buf->machine, "i386", 256);
+    strncpy(buf->machine, "i386", 32);
 #endif
     return 0;
 }

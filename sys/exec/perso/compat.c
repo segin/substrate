@@ -131,6 +131,52 @@ int sys_freebsd_fstat(int fd, struct freebsd_stat *buf) {
     return ret;
 }
 
+/* FreeBSD 11 Stat Translation */
+static void translate_stat_to_freebsd11(struct stat *native, struct freebsd11_stat *fbsd) {
+    fbsd->st_dev = native->st_dev;
+    fbsd->st_ino = (uint32_t)native->st_ino;
+    fbsd->st_mode = (uint16_t)native->st_mode;
+    fbsd->st_nlink = (uint16_t)native->st_nlink;
+    fbsd->st_uid = native->st_uid;
+    fbsd->st_gid = native->st_gid;
+    fbsd->st_rdev = native->st_rdev;
+    fbsd->st_atim.tv_sec = (int32_t)native->st_atime;
+    fbsd->st_atim.tv_nsec = (int32_t)native->st_atime_nsec;
+    fbsd->st_mtim.tv_sec = (int32_t)native->st_mtime;
+    fbsd->st_mtim.tv_nsec = (int32_t)native->st_mtime_nsec;
+    fbsd->st_ctim.tv_sec = (int32_t)native->st_ctime;
+    fbsd->st_ctim.tv_nsec = (int32_t)native->st_ctime_nsec;
+    fbsd->st_size = native->st_size;
+    fbsd->st_blocks = native->st_blocks;
+    fbsd->st_blksize = native->st_blksize;
+    fbsd->st_flags = 0;
+    fbsd->st_gen = 0;
+    fbsd->st_lspare = 0;
+    fbsd->st_birthtim.tv_sec = 0;
+    fbsd->st_birthtim.tv_nsec = 0;
+}
+
+int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf) {
+    struct stat native;
+    int ret = sys_stat(path, &native);
+    if (ret == 0) translate_stat_to_freebsd11(&native, buf);
+    return ret;
+}
+
+int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf) {
+    struct stat native;
+    int ret = sys_lstat(path, &native);
+    if (ret == 0) translate_stat_to_freebsd11(&native, buf);
+    return ret;
+}
+
+int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf) {
+    struct stat native;
+    int ret = sys_fstat(fd, &native);
+    if (ret == 0) translate_stat_to_freebsd11(&native, buf);
+    return ret;
+}
+
 int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
     (void)pad;
     return sys_lseek(fd, off_lo, off_hi, whence);

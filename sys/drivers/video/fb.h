@@ -14,10 +14,12 @@ typedef struct {
     void (*putpixel)(int x, int y, uint32_t color);
 } fb_info_t;
 
+/* Core framebuffer operations */
 void fb_init(multiboot_info_t *mbi);
 void fb_putpixel(int x, int y, uint32_t color);
 void fb_clear(uint32_t color);
-void fb_putc(char c, uint32_t fg, uint32_t bg);
-void fb_write(const char *s, size_t n);
 
-#endif
+/* Console operations are in fb_console.h */
+#include "fb_console.h"
+
+#endif /* _FB_H */

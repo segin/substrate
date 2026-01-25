@@ -98,15 +98,13 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     thread_t *t = sched_alloc_thread(proc);
     if (!t) return -1;
     
-    // Allocate kernel stack for child (8KB)
-    extern void *pmm_alloc_block(void);
-    // Allocate 2 pages = 8KB kernel stack
-    void *kstack_base = pmm_alloc_block();
-    void *kstack_base2 = pmm_alloc_block();
-    if (!kstack_base || !kstack_base2) return -1;
+    extern void *pmm_alloc_contiguous(size_t);
+    // Allocate 2 pages = 8KB contiguous kernel stack
+    void *kstack_base = pmm_alloc_contiguous(2);
+    if (!kstack_base) return -1;
     
-    // Stack is at top of these pages - pmm_alloc_block returns virtual addresses
-    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base2 + 0x1000);
+    // Stack is at top of these pages (8KB = 0x2000)
+    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x2000);
     t->kstack_top = (uintptr_t)kstack;
 
     // Build IRET frame on child's kernel stack
@@ -135,16 +133,16 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     kstack--; *kstack = regs->fs;
     kstack--; *kstack = regs->gs;
     
-    // Now push the callee-saved registers for switch_to
-    // switch_to expects: [ebx, esi, edi, ebp] at stack top
+    // switch_to expects: [EBX, ESI, EDI, EBP, RetAddr] at stack top
+    // RetAddr is at highest address, EBX is at lowest (where ESP will point)
+    extern void fork_child_return(void);
+    uint32_t fcr_addr = (uint32_t)fork_child_return;
+    kstack--; *kstack = fcr_addr; // Return address for switch_to
+    
     kstack--; *kstack = 0;  // EBP
     kstack--; *kstack = 0;  // EDI  
     kstack--; *kstack = 0;  // ESI
     kstack--; *kstack = 0;  // EBX
-    
-    // Return address for switch_to - point to isr_exit to do the IRET
-    extern void fork_child_return(void);
-    kstack--; *kstack = (uint32_t)fork_child_return;
     
     t->kstack_ptr = (uintptr_t)kstack;
     t->instr_ptr = regs->eip;

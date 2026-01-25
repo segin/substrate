@@ -1347,7 +1347,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Runtime availability flags. <!-- rng_state.has_rdrand, has_rdseed -->
             - [x] **Implementation:**
                 - [x] Implement `rdrand32()`, `rdrand64()` with retry loop. <!-- random.c:266-287 -->
-                - [ ] Implement `rdseed32()`, `rdseed64()` with failure handling.
+                - [x] Implement `rdseed32()`, `rdseed64()` with failure handling.
                 - [x] Fallback path when HWRNG unavailable. <!-- random.c:267 -->
             - [x] **Integration:**
                 - [x] Periodic HWRNG harvesting (if available). <!-- random.c:464-468 -->
@@ -1355,6 +1355,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Use HWRNG for fast-path output (XOR with CSPRNG).
                 - [x] Credit ~32 bits per RDRAND invocation (conservative). <!-- random.c:296 -->
         - [ ] **Jitter Entropy (CPU Timing):**
+            - [ ] Use BogoMIPS calibration loop for jitter measurement.
             - [ ] Implement `jitterentropy_collect()` (memory access timing).
             - [ ] CPU execution jitter measurement.
             - [ ] Memory access timing variations.
@@ -1384,8 +1385,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Implement `random_dev_open()`. <!-- implicit via fs_node_t -->
             - [x] Implement `random_dev_read()` with blocking. <!-- random.c:415-421 -->
             - [x] Block until minimum entropy available. <!-- random.c:382-392 -->
-            - [ ] Wait queue for blocked readers (`random_wait`).
-            - [ ] Wakeup on entropy addition.
+            - [x] Wait queue for blocked readers (`random_wait`).
+            - [x] Wakeup on entropy addition.
             - [ ] Implement `random_dev_poll()` (POLLIN when seeded).
         - [x] **`/dev/urandom` (Non-blocking):**
             - [x] Implement `urandom_dev_read()` (always returns data). <!-- random.c:424-430 -->
@@ -2171,28 +2172,221 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [ ] `VEOF`, `VEOL` (End of file/line).
                     - [ ] `VERASE`, `VKILL` (Editing).
                     - [ ] `VMIN`, `VTIME` (Non-canonical read timing).
+    
+        - [x] **`sys_statvfs`:** Filesystem statistics.
+            - [x] Implement `sys_statvfs`/`sys_fstatvfs`.
+            - [x] Integrate with `vfs_statfs`.
+
+        - [ ] **BSD-style Sys_mount Interface & Mount Framework:**
+            - [ ] **ABI Application Interface:**
+                - [ ] Define `sys_mount` syscall signature (type, source, target, flags, data/len).
+                - [ ] Create `sys/sys/mount.h` with syscall definitions.
+                - [ ] Define `struct mount_args` equivalent for versioned arguments.
+                - [ ] Document calling conventions and flag semantics in comments.
+                - [ ] Add build-time assertions for structure size and alignment.
+            - [ ] **Filesystem Type Registration:**
+                - [ ] Define `struct vfsconf` or equivalent for filesystem metadata.
+                - [ ] Create `vfs_register()` / `vfs_unregister()` API.
+                - [ ] Implement internal hashtable/list for filesystem types.
+                - [ ] Add capability reporting per filesystem type.
+                - [ ] Ensure filesystem names are validated and namespaced.
+            - [ ] **Mount Lifecycle & VFS Integration:**
+                - [ ] Define `struct mount` (kernel generic mount structure).
+                - [ ] Implement `vfs_mount_alloc()` and `vfs_mount_free()`.
+                - [ ] Implement mount binding to VFS namespace (vnode attachment).
+                - [ ] Implement reference counting and busy checks.
+                - [ ] Ensure mounts can be stacked or nested safely.
+            - [ ] **Generic Option Parsing:**
+                - [ ] Design generic mount option parser (key=value string/blob).
+                - [ ] Create API for filesystems to retrieve options.
+                - [ ] Implement type-safe option getters (int, string, bool).
+                - [ ] Validate standard options (ro, nosuid, nodev, noexec) generically.
+                - [ ] Ensure strict validation and copying of userspace data.
+            - [ ] **Virtual Filesystem Support (`/dev`, `/proc`):**
+                - [ ] Define mount handler for `devfs` (mounting `/dev`).
+                - [ ] Define mount handler for `procfs` (mounting `/proc`).
+                - [ ] Implement userspace-driven mounting of virtual filesystems via `sys_mount`.
+                - [ ] Ensure root vnodes are correctly tied to mount points.
+            - [ ] **Privilege & Security Model:**
+                - [ ] Add `suser()` / `cap_check()` for mount syscall.
+                - [ ] Implement `sys_mount` flag validation (detect conflicting flags).
+                - [ ] Ensure mount points are valid directories.
+                - [ ] Prevent mounting over critical system paths without override.
+                - [ ] Audit for mount-related vulnerabilities (symlinks, race conditions).
+            - [ ] **Error Handling & Diagnostics:**
+                - [ ] Define `EUNKNOWNFS` and other specific error codes.
+                - [ ] Propagate errors from filesystem-specific init back to syscall.
+                - [ ] Add kernel logging for failed mount attempts.
+            - [ ] **Unmount Semantics:**
+                - [ ] Define `sys_unmount` syscall signature and flags (FORCE, DETACH).
+                - [ ] Implement VFS layer unmount logic (busy checks).
+                - [ ] Add filesystem-specific `unmount` callback.
+                - [ ] Safe teardown of virtual and real filesystems.
+            - [ ] **Userland Interfaces & Tooling:**
+                - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc.
+                - [ ] Create/Update `mount(8)` utility in `bin/` capable of mounting `/dev`.
+                - [ ] Support `mount -t type dev dir` syntax.
+                - [ ] Update early boot (init) to mount `/dev` and `/proc` explicitly.
+            - [ ] **Testing & Verification:**
+                - [ ] Unit tests for mount argument parsing and validation.
+                - [ ] Integration tests mounting and unmounting `/dev` and `/proc` from userspace.
+                - [ ] Tests for error conditions (invalid FS type, bad options, permission failure).
+                - [ ] Property and fuzz tests targeting mount option parsing.
+            - [ ] **Audit & Refactor:**
+                - [ ] Audit existing VFS code for assumptions preventing userspace mounting.
+                - [ ] Remove hardcoded kernel mounts once userspace tools work.
+                - [ ] Clean up temporary hacks in `vfs_init`.
+            - [ ] **Documentation:**
+                - [ ] Create `man/man2/mount.2` describing syscall ABI and flags.
+                - [ ] Create `man/man2/unmount.2`.
+                - [ ] Write Filesystem Developer Guide describing how to implement a mount handler.
         - [x] Implement `sys_ioctl` framework.
         - [x] Implement `sys_pipe` and `sys_dup2`.
         - [ ] **Compatibility Syscalls (Deep Dive):**
-            - [ ] **`sys_mount` (VFS Integration):**
-                - [ ] **Driver Lookup:**
-                    - [ ] `get_fs_driver(name)`: Find registered filesystem (EXT2, FAT, UDF).
-                    - [ ] Module autoloading trigger (optional).
-                - [ ] **Superblock:**
-                    - [ ] `vfs_mount_alloc()`: Allocate `struct mount`.
-                    - [ ] Call `vfs_mount()` op of the driver.
-                    - [ ] Read superblock from disk (buffer cache).
-                - [ ] **Mount Point Binding:**
-                    - [ ] Lookup mount point vnode (`namei`).
-                    - [ ] Verify directory type and permissions.
-                    - [ ] **Overlay:** Set `v_mountedhere` on cover vnode.
-                    - [ ] Set `mnt_vnodecovered` on new mount structure.
-                - [ ] **Flag Support:**
-                    - [ ] `MS_RDONLY`: Enforce read-only checks on `vop_write`/`vop_create`.
-                    - [ ] `MS_NOEXEC`: Check `VEXEC` permission in `sys_execve`.
-                    - [ ] `MS_NOSUID`: Mask `VSUID`/`VSGID` in `vop_getattr`.
-                    - [ ] `MS_NODEV`: Return error in `vop_open` for device nodes.
-                    - [ ] `MS_SYNCHRONOUS`: Force O_SYNC on all opens.
+            - [ ] **BSD-style `sys_mount` Framework:**
+                - [ ] **Group 1: `sys_mount` ABI Definition**
+                    - [ ] Define canonical `mount(2)` signature with options blob support. <!-- sys/include/sys/syscall.h, sys/kern/syscall.c -->
+                        - Affected: `sys/include/sys/syscall.h`.
+                        - Signature: `int sys_mount(const char *type, const char *path, int flags, void *data, size_t datalen)`.
+                        - Acceptance: Syscall table updated.
+                    - [ ] Implement versioned `struct mount_args` for ABI stability. <!-- include/sys/mount.h -->
+                        - Affected: `include/sys/mount.h`.
+                        - Logic: Include struct size/version field.
+                        - Acceptance: Kernel validates struct boundaries from userspace.
+                    - [ ] Document MNT_* flags and error code semantics (EFAULT, EINVAL, EPERM). <!-- docs/abi/mount.md -->
+                        - Affected: Documentation/ABI guide.
+                        - Acceptance: Developer documentation exists.
+                    - [ ] Add runtime validation for userspace structure alignment and size. <!-- sys/kern/vfs_mount.c -->
+                        - Affected: `sys/kern/vfs_mount.c`.
+                        - Acceptance: Improperly aligned pointers from userland trigger EFAULT.
+                - [ ] **Group 2: Filesystem Type Registration**
+                    - [ ] Implement central `vfs_register` string-to-vfsops registry. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`, `struct vfsconf`.
+                        - Acceptance: `get_vfs_by_name()` returns correct ops vector.
+                    - [ ] Implement `vfs_unregister` for safe filesystem module removal. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`.
+                        - Logic: Prevent unregistering if mounts still exist.
+                        - Acceptance: `rmmod` equivalent is safe.
+                    - [ ] Add capability reporting to `struct vfsops` (e.g. read-only only). <!-- sys/vfs/vfs.h -->
+                        - Affected: `sys/include/vfs/vfs.h`.
+                        - Acceptance: VFS layer rejects writable mount requests for RO-only filesystems.
+                    - [ ] Implement FS name validation and namespacing logic. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`.
+                        - Acceptance: FS names are alphanumeric and unique.
+                - [ ] **Group 3: Mount Lifecycle & VFS Integration**
+                    - [ ] Implement `vfs_mount_alloc()` to initialize `struct mount` instances. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys/vfs/vfs_mount.c`, `struct mount`.
+                        - Acceptance: Mount structure initialized with default refcounts and flags.
+                    - [ ] Implement binding logic to attach root vnode to namespace. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `namei`, `v_mountedhere`.
+                        - Acceptance: `namei` correctly crosses into new mount points.
+                    - [ ] Implement mount reference-counting for safety during unmount. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `struct mount: mnt_ref`.
+                        - Acceptance: Mount structure is not freed while vnodes are active.
+                    - [ ] Implement nested mount support and loop detection. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys_mount` lookup logic.
+                        - Acceptance: Mounting on a directory within another mount works.
+                - [ ] **Group 4: Userspace Mount Option Handling**
+                    - [ ] Implement generic mount option parser for key-value strings. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `sys/vfs/vfs_options.c`.
+                        - Logic: Safe parsing of `key=val,key2=val2`.
+                        - Acceptance: Option blob correctly converted to internal dict/struct.
+                    - [ ] Implement safe copying and validation of userspace option blobs. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `copyin()` in `sys_mount`.
+                        - Acceptance: No direct kernel dereference of user-provided option strings.
+                    - [ ] Support filesystem-specific options passed via the parser. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `vfsops: mount` callback receives parsed options.
+                        - Acceptance: FS-specific flags (e.g., `uid=1000`) reach the driver.
+                    - [ ] Define and document option precedence and fallback behaviors. <!-- man/man2/mount.2 -->
+                        - Affected: `man/man2/mount.2`.
+                        - Acceptance: Clear rules for conflicting flags vs. options.
+                - [ ] **Group 5: Virtual Filesystem Mounting (`/dev`, `/proc`)**
+                    - [ ] Define DevFS mount handler with root vnode generation. <!-- sys/fs/devfs/devfs_vfsops.c -->
+                        - Affected: `sys/fs/devfs/`.
+                        - Acceptance: `/dev` can be mounted via `sys_mount`.
+                    - [ ] Define ProcFS mount handler with dynamic PID-based population. <!-- sys/fs/procfs/procfs_vfsops.c -->
+                        - Affected: `sys/fs/procfs/`.
+                        - Acceptance: `/proc` can be mounted via `sys_mount`.
+                    - [ ] Implement userspace-driven mounting of `/dev` and `/proc` entirely from `init`. <!-- bin/init/main.c -->
+                        - Affected: `init` source, startup sequence.
+                        - Acceptance: `/dev` and `/proc` are established by userspace, not kernel core.
+                    - [ ] Define mandatory mount options for virtual filesystems. <!-- sys/fs/virtual_fs.h -->
+                        - Affected: `devfs`, `procfs` drivers.
+                        - Acceptance: Attempts to mount virtual FS with invalid options are rejected.
+                - [ ] **Group 6: Permission & Security Model**
+                    - [ ] Implement capability-checks (CAP_SYS_ADMIN) for `sys_mount`. <!-- sys/kern/vfs_mount.c -->
+                        - Affected: `sys/kern/vfs_mount.c`, `cap_check()`.
+                        - Acceptance: Non-privileged users cannot execute `mount`.
+                    - [ ] Implement `MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV` enforcement. <!-- sys/vfs/vfs_vnode.c -->
+                        - Affected: VFS permission checks.
+                        - Acceptance: Vnode operations honor mount-level security flags.
+                    - [ ] Audit and harden against mount-point escape attacks. <!-- sys/vfs/vfs_lookup.c -->
+                        - Affected: `namei`, `..` handling across mounts.
+                        - Acceptance: `..` from a mount root stays within the covering directory.
+                    - [ ] Implement mount-point target validation (must be directory, must be owned). <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys_mount` preamble.
+                        - Acceptance: Mounting on files or inaccessible directories fails with ENOTDIR/EPERM.
+                - [ ] **Group 7: Error Handling & Diagnostics**
+                    - [ ] Define granular E* error codes for mount failures (ENODEV, EINVAL, ENOTDIR, EBUSY). <!-- sys/include/sys/errno.h -->
+                        - Affected: `sys/include/sys/errno.h`.
+                        - Acceptance: Errors distinguish between "FS not found" vs "Invalid options".
+                    - [ ] Implement structured kernel logging for mount/unmount operations. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `klog`, `printf`.
+                        - Acceptance: Mount attempts (success/fail) are recorded in dmesg.
+                    - [ ] Ensure clean error propagation from FS driver to userspace. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `vfsops` return values.
+                        - Acceptance: Driver-specific errors reach the syscall return value.
+                - [ ] **Group 8: Unmount Support**
+                    - [ ] Define `sys_unmount(path, flags)` syscall interface. <!-- sys/include/sys/syscall.h -->
+                        - Affected: `sys/kern/vfs_mount.c`.
+                        - Acceptance: Unmount capability exposed to userspace.
+                    - [ ] Implement `vfs_unmount()` core with resource reclamation. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `struct mount`, `vfsops: unmount`.
+                        - Acceptance: Unmounting frees all related kernel memory.
+                    - [ ] Implement `MNT_FORCE` and `MNT_DEFERRED` unmount logic. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `vfs_unmount()`.
+                        - Logic: Force unmount even if busy; Deferred unmount when last ref drops.
+                        - Acceptance: Busy filesystems can be forcefully detached.
+                - [ ] **Group 9: Userland Interfaces & Tooling**
+                    - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc. <!-- lib/libc/sys/mount.S -->
+                        - Affected: `lib/libc/include/sys/mount.h`, wrappers.
+                        - Acceptance: Standard C programs can call `mount()`.
+                    - [ ] Implement basic `mount(8)` utility for shell usage. <!-- bin/mount/mount.c -->
+                        - Affected: `bin/mount/`.
+                        - Acceptance: `mount -t proc proc /proc` works from the shell.
+                    - [ ] Document required invocation patterns for early boot mounting in `/sbin/init`. <!-- docs/boot.md -->
+                        - Affected: Boot documentation.
+                        - Acceptance: Clear guide on establishing `/dev` and `/proc`.
+                - [ ] **Group 10: Testing & Verification**
+                    - [ ] Unit tests for `mount_args` parsing and alignment validation. <!-- sys/tests/test_vfs_mount.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Fuzzed ABI structures are handled safely.
+                    - [ ] Integration test: Mount/unmount sequence for DevFS and ProcFS. <!-- sys/tests/test_vfs_integration.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Real-world virtual FS lifecycle works.
+                    - [ ] Negative tests for error conditions (unknown FS, bad options, permission failure). <!-- sys/tests/test_vfs_errors.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: All edge cases return correct errno.
+                    - [ ] Property and fuzz tests targeting mount option parsing. <!-- sys/tests/test_vfs_fuzz.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Parser handles arbitrarily corrupted strings without crashing kernel.
+                - [ ] **Group 11: Audit & Refactor**
+                    - [ ] Audit existing VFS code for assumptions precluding userspace mounting. <!-- sys/vfs/ -->
+                        - Affected: `vfs` core.
+                        - Acceptance: Refactor any hardcoded kernel-private mount logic.
+                    - [ ] Eliminate existing TODOs in `vfs_mount.c` and `syscall.c`. <!-- sys/kern/syscall.c -->
+                        - Affected: `sys_mount` implementation.
+                        - Acceptance: No placeholder mount paths remain.
+                - [ ] **Group 12: Documentation**
+                    - [ ] Create `mount(2)` manpage describing ABI, flags, and options. <!-- man/man2/mount.2 -->
+                        - Affected: `man/`.
+                        - Acceptance: Complete reference for system programmers.
+                    - [ ] Create Filesystem Developer Guide for `vfsops` implementations. <!-- docs/vfs_dev.md -->
+                        - Affected: `docs/`.
+                        - Acceptance: Guide exists for new FS type authors.
+                    - [ ] Document virtual filesystem mount semantics and expected behaviors. <!-- docs/virtual_fs.md -->
+                        - Affected: `docs/`.
+                        - Acceptance: Behavior of `/dev` and `/proc` is well-defined.
             - [ ] **`sys_clone` (Process/Thread Creation):**
                 - [ ] **Context Duplication:**
                     - [ ] `CLONE_VM`: Share address space (refcount pmap).

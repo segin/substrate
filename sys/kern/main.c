@@ -7,6 +7,7 @@
 
 #include <drivers/video/vga.h>
 #include <drivers/video/fb.h>
+#include <drivers/video/hw_text.h>
 #include <drivers/serial/uart.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/input/mouse.h>
@@ -330,7 +331,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     strcpy(current_process->comm, "(swapper)");
 
     console_init();
-    vga_init(); // Registers VGA console
+    hw_text_init(); // Registers VGA text console
     uart_init(); // Initializes UART hardare
 
     // 1. Address Translation Macros (since we are Higher Half)
@@ -366,10 +367,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     }
     kprint("\n");
 
-    // Initialize Framebuffer Console (if available)
-    if (mboot_info) {
-        fb_init(mboot_info);
-    }
 
     // Check for serial debug
     if (cmdline_has("serial_debug")) {
@@ -515,26 +512,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     
     keyboard_init();
     
-    // 3. Initialize Console Subsystem
-    console_init();
-    
-    // Parse vga mode
-    int v_w = 80, v_h = 25;
-    char vga_buf[32] = {0};
-    if (cmdline_get("vga", vga_buf, sizeof(vga_buf)) == 0) {
-        if (strcmp(vga_buf, "80x50") == 0) { v_w = 80; v_h = 50; }
-        else if (strcmp(vga_buf, "80x60") == 0) { v_w = 80; v_h = 60; }
-        else if (strcmp(vga_buf, "132x50") == 0) { v_w = 132; v_h = 50; }
-        else if (strcmp(vga_buf, "132x60") == 0) { v_w = 132; v_h = 60; }
-    }
-    vga_set_mode(v_w, v_h);
-    vga_init(); // Registers VGA console
-    uart_init(); // Initializes UART hardware
-    
-    // Check for serial debug FIRST so banner goes to serial too
-    if (cmdline_has("serial_debug")) {
-        serial_debug_enabled = 1;
-        console_register(uart_get_console());
+    // Initialize Framebuffer Console (if available) - Defer until paging is up
+    if (mboot_info) {
+        fb_init(mboot_info);
     }
     
     // Display kernel ident banner (first thing user sees)

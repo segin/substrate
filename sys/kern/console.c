@@ -34,6 +34,14 @@ void console_init(void) {
 
 void console_register(console_backend_t *backend) {
     if (!backend) return;
+    
+    // Check if already registered to prevent circular lists
+    console_backend_t *curr = backends;
+    while (curr) {
+        if (curr == backend) return;
+        curr = curr->next;
+    }
+
     backend->next = backends;
     backends = backend;
 }

@@ -14,6 +14,7 @@ static size_t VGA_HEIGHT = 25;
 static size_t terminal_row;
 static size_t terminal_column;
 static uint8_t terminal_color;
+int hw_text_active = 0;
 
 // ANSI Parser State
 enum ansi_state {
@@ -146,6 +147,10 @@ static void handle_csi(char c) {
 }
 
 void hw_text_putc(char c) {
+    // Disable interrupts to prevent reentrancy during register access or state change
+    static uint32_t eflags;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(eflags));
+
     if (state == ANSI_NORMAL) {
         if (c == '\x1b') {
             state = ANSI_ESC;
@@ -185,7 +190,10 @@ void hw_text_putc(char c) {
             ansi_params[0] = 0;
         } else {
             state = ANSI_NORMAL;
+            // Restore interrupts before recursive call
+            __asm__ volatile("pushl %0; popfl" :: "r"(eflags));
             hw_text_putc(c);
+            return;
         }
     } else if (state == ANSI_CSI) {
         if (c >= '0' && c <= '9') {
@@ -213,6 +221,9 @@ void hw_text_putc(char c) {
     }
     
     hw_text_update_cursor();
+
+    // Restore interrupts
+    __asm__ volatile("pushl %0; popfl" :: "r"(eflags));
 }
 
 static void hw_text_console_write(const char *data, size_t len) {
@@ -233,13 +244,34 @@ static console_backend_t hw_text_console = {
 };
 
 void hw_text_init(void) {
+    char vid[32];
+    #include <kern/cmdline.h>
+    
+    // Default to VGA Color Text (0xB8000)
+    uint32_t vram_base = 0xC00B8000;
+    
+    if (cmdline_get("video", vid, 32) == 0) {
+        if (strcmp(vid, "cfa") == 0 || strcmp(vid, "cga") == 0) {
+            vram_base = 0xC00B8000;
+            kprint("Video: CGA Text Mode selected\n");
+        } else if (strcmp(vid, "ega") == 0) {
+            vram_base = 0xC00B8000;
+            kprint("Video: EGA Text Mode selected\n");
+        } else if (strcmp(vid, "hercules") == 0 || strcmp(vid, "mono") == 0) {
+            vram_base = 0xC00B0000;
+            kprint("Video: MDA/Hercules Text Mode selected\n");
+        }
+    }
+
     terminal_row = 0;
     terminal_column = 0;
     terminal_color = (VGA_COLOR_LIGHT_GREY | VGA_COLOR_BLACK << 4);
-    terminal_buffer = VIDEO_MEMORY_COLOR;
+    terminal_buffer = (uint16_t*)vram_base;
+    
     hw_text_clear_screen();
     hw_text_update_cursor();
     
+    hw_text_active = 1;
     console_register(&hw_text_console);
     kprint("Hardware Text Mode Initialized.\n");
 }
