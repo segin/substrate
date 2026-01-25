@@ -44,8 +44,29 @@ int input_register_device(input_dev_t *dev) {
 }
 
 void input_unregister_device(input_dev_t *dev) {
-    // TODO: Implement removal from list
-    (void)dev;
+    if (!dev) return;
+
+    if (input_devices == dev) {
+        input_devices = dev->next;
+        dev->next = NULL;
+        kprint("Input: Unregistered device: ");
+        kprint(dev->name);
+        kprint("\n");
+        return;
+    }
+
+    input_dev_t *curr = input_devices;
+    while (curr) {
+        if (curr->next == dev) {
+            curr->next = dev->next;
+            dev->next = NULL;
+            kprint("Input: Unregistered device: ");
+            kprint(dev->name);
+            kprint("\n");
+            return;
+        }
+        curr = curr->next;
+    }
 }
 
 void input_notify_readers(void) {
