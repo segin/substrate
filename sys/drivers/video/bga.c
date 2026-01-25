@@ -112,3 +112,14 @@ int bga_init(fb_info_t *fb_out) {
     kprint("BGA: Mode set to 1024x768x32.\n");
     return 0;
 }
+
+static video_driver_t bga_driver = {
+    .name = "bga",
+    .priority = 50,
+    .probe = bga_is_available,
+    .init = bga_init
+};
+
+void bga_install(void) {
+    video_register_driver(&bga_driver);
+}

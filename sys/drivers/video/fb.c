@@ -199,56 +199,146 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
 
 static fs_node_t fb_node;
 
+/* ==================== Video Subsystem / Registry ==================== */
+
+static video_driver_t *video_drivers = NULL;
+
+void video_register_driver(video_driver_t *drv) {
+    if (!drv) return;
+    drv->next = video_drivers;
+    video_drivers = drv;
+    // kprint("Video: Registered driver: "); kprint(drv->name); kprint("\n");
+}
+
+/* External install functions for drivers (Since we lack constructors) */
+extern void bga_install(void);
+extern void herc_install(void);
+extern void cga_install(void);
+
+/* Default Multiboot Driver Wrapper */
+static multiboot_info_t *saved_mbi = NULL;
+static int mb_probe(void) {
+    if (saved_mbi && (saved_mbi->flags & (1 << 12))) return 0;
+    return -1;
+}
+static int mb_init(fb_info_t *info) {
+    if (!saved_mbi) return -1;
+    info->addr = (uint32_t *)(uintptr_t)saved_mbi->framebuffer_addr;
+    info->width = saved_mbi->framebuffer_width;
+    info->height = saved_mbi->framebuffer_height;
+    info->pitch = saved_mbi->framebuffer_pitch;
+    info->bpp = saved_mbi->framebuffer_bpp;
+    info->putpixel = linear_fb_putpixel;
+    return 0;
+}
+static video_driver_t mb_driver = {
+    .name = "multiboot",
+    .priority = 10,
+    .probe = mb_probe,
+    .init = mb_init
+};
+
 /* ==================== Initialization ==================== */
 
 void fb_init(multiboot_info_t *mbi) {
-    if (!(mbi->flags & (1 << 12))) {
-        kprint("FB: Multiboot info has no framebuffer.\n");
+    saved_mbi = mbi;
+    
+    /* Register Drivers */
+    video_register_driver(&mb_driver);
+    
+    /* Install other known drivers */
+    /* In a dynamic system, these would self-register or be scanned */
+    #ifdef ENABLE_BGA
+    bga_install();
+    #endif
+    bga_install(); // Always include for now
+    herc_install();
+    cga_install();
+
+    char vid_arg[32];
+    int use_cmdline = 0;
+    if (cmdline_get("video", vid_arg, 32) == 0) {
+        use_cmdline = 1;
+    }
+
+    /* Driver Selection Logic */
+    video_driver_t *best_drv = NULL;
+    video_driver_t *selected_drv = NULL;
+    
+    /* Pass 1: Check command line override */
+    if (use_cmdline) {
+        video_driver_t *curr = video_drivers;
+        while (curr) {
+            if (strcmp(curr->name, vid_arg) == 0) {
+                if (curr->probe() == 0) {
+                    selected_drv = curr;
+                    break;
+                } else {
+                     kprint("Video: Requested driver '");
+                     kprint(vid_arg);
+                     kprint("' not available.\n");
+                }
+            }
+            curr = curr->next;
+        }
+    }
+    
+    /* Pass 2: Pick highest priority available if not selected yet */
+    if (!selected_drv) {
+        video_driver_t *curr = video_drivers;
+        int max_prio = -1;
+        
+        while (curr) {
+            if (curr->probe() == 0) {
+                if (curr->priority > max_prio) {
+                    max_prio = curr->priority;
+                    best_drv = curr;
+                }
+            }
+            curr = curr->next;
+        }
+        selected_drv = best_drv;
+    }
+
+    if (!selected_drv) {
+        kprint("Video: No suitable driver found.\n");
         fb_active = 0;
         return;
     }
 
-    fb.addr = (uint32_t *)(uintptr_t)mbi->framebuffer_addr;
-    fb.width = mbi->framebuffer_width;
-    fb.height = mbi->framebuffer_height;
-    fb.pitch = mbi->framebuffer_pitch;
-    fb.bpp = mbi->framebuffer_bpp;
-
-    /* Check for native driver override via command line */
-    char vid[32];
-    if (cmdline_get("video", vid, 32) == 0) {
-        if (strcmp(vid, "bga") == 0) {
-            kprint("FB: video=bga detected. Attempting BGA initialization...\n");
-            fb_info_t bga_fb;
-            if (bga_init(&bga_fb) == 0) {
-                fb = bga_fb;
-                kprint("FB: Switched to BGA framebuffer.\n");
-            } else {
-                kprint("FB: BGA initialization failed. Falling back to Multiboot FB.\n");
-            }
-        } else if (strcmp(vid, "hercules") == 0) {
-            fb_info_t herc_fb;
-            if (herc_init(&herc_fb) == 0) {
-                fb = herc_fb;
-                kprint("FB: Switched to Hercules framebuffer.\n");
-            }
-        }
+    /* Initialize Selected Driver */
+    kprint("Video: Initializing driver: "); kprint(selected_drv->name); kprint("\n");
+    if (selected_drv->init(&fb) == 0) {
+        fb_active = 1;
+        fb.putpixel = fb.putpixel ? fb.putpixel : linear_fb_putpixel; // Ensure fallback
+        kprint("Video: Initialization success.\n");
+    } else {
+        kprint("Video: Initialization failed.\n");
+        fb_active = 0;
+        return;
     }
 
-    fb_active = 1;
-    fb.putpixel = linear_fb_putpixel;
-
-    /* Register console if hw_text is not active or video override present */
+    /* Register Console (unless hw_text active and not overridden) */
+    /* Logic: If user specifically asked for video=xxx, we assume they want FB console
+       even if hw_text was active. If we just fell back to multiboot/default, and hw_text
+       is active, maybe keep text?
+       Current logic: If hw_text_active, don't clobber unless cmdline requested video.
+    */
     int register_console = 1;
-    if (hw_text_active && cmdline_get("video", vid, 32) != 0) {
-        register_console = 0;
-        kprint("FB: Hardware text mode active, skipping FB console registration.\n");
+    if (hw_text_active && !use_cmdline) {
+        // If we are just using default (e.g. multiboot) but we have text mode working,
+        // we might prefer text mode for speed/stability unless explicit override?
+        // Actually, if we have FB, we probably want FB console?
+        // Previous logic: if (hw_text_active && cmdline != 0) -> skip.
+        // Wait, previous logic was: "Register console if hw_text is not active OR video override present"
+        // So:
+        register_console = (!hw_text_active) || use_cmdline;
     }
 
     if (register_console) {
         fb_console_init();
     }
-
+    
     /* Register /dev/fb0 */
     memset(&fb_node, 0, sizeof(fs_node_t));
     strcpy(fb_node.name, "fb0");
@@ -257,5 +347,5 @@ void fb_init(multiboot_info_t *mbi) {
     fb_node.mmap = fb_fs_mmap;
     devfs_register_device(&fb_node);
 
-    kprint("FB: Initialized framebuffer and /dev/fb0.\n");
+    kprint("FB: Initialized /dev/fb0.\n");
 }

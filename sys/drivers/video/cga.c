@@ -1,10 +1,11 @@
-#include <drivers/video/cga.h>
-#include <arch/x86-common/include/io.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
-#include <string.h> /* For memmove/memset */
 #include <kern/console.h>
+#include <arch/x86-common/include/io.h>
+#include <drivers/video/cga.h>
+#include <drivers/video/fb.h>
 
 void cga_init(void) {
     kprint("CGA: Wrapper initialized (Text mode handled by vga_text).\n");
@@ -12,8 +13,29 @@ void cga_init(void) {
 
 void cga_setup(const char *arg) {
     (void)arg;
-    // CGA setup is now mostly implicit or handled by vga_text for text mode
-    // If we wanted to switch to CGA graphics mode (320x200x4), we would do it here.
+}
+
+static int cga_probe(void) {
+    /* Similar to Hercules, weak probe for now */
+    return 0;
+}
+static int cga_driver_init(fb_info_t *fb) {
+    (void)fb;
+    /* CGA Graphics Init Stubs */
+    /* If we implemented 320x200x4 mode, we'd set fb info here. */
+    kprint("CGA: Graphics mode not fully implemented yet.\n");
+    return -1; 
+}
+
+static video_driver_t cga_driver = {
+    .name = "cga",
+    .priority = 4,
+    .probe = cga_probe,
+    .init = cga_driver_init
+};
+
+void cga_install(void) {
+    video_register_driver(&cga_driver);
 }
 
 // Graphics primitives for CGA High Res / Medium Res would go here
