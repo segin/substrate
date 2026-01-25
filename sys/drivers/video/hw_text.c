@@ -4,9 +4,10 @@
 #include <arch/x86-common/include/io.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 // Standard Text Mode Memory
-static uint16_t* const VIDEO_MEMORY_COLOR = (uint16_t*) 0xC00B8000;
+// Standard Text Mode Memory
 static uint16_t* terminal_buffer;
 static size_t VGA_WIDTH = 80;
 static size_t VGA_HEIGHT = 25;
