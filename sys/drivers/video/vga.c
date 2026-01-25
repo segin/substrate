@@ -4,72 +4,63 @@
 #include <stdint.h>
 #include <string.h>
 
-/* VGA Mode 13h (320x200x256) Register Dump */
-static unsigned char g_320x200x256[] = {
-    // MISC
-    0x63,
-    // SEQ
-    0x03, 0x01, 0x0F, 0x00, 0x0E,
-    // CRTC
-    0x5F, 0x4F, 0x50, 0x82, 0x54, 0x80, 0xBF, 0x1F,
-    0x00, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x9C, 0x0E, 0x8F, 0x28, 0x40, 0x96, 0xB9, 0xA3,
-    0xFF,
-    // GC
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x05, 0x0F,
-    0xFF,
-    // AC
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-    0x41, 0x00, 0x0F, 0x00, 0x00
+/* VGA Mode 13h (320x200x256) Register State */
+static const vga_regs_t mode_13h = {
+    .misc = 0x63,
+    .seq  = { 0x03, 0x01, 0x0F, 0x00, 0x0E },
+    .crtc = {
+        0x5F, 0x4F, 0x50, 0x82, 0x54, 0x80, 0xBF, 0x1F,
+        0x00, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x9C, 0x0E, 0x8F, 0x28, 0x40, 0x96, 0xB9, 0xA3,
+        0xFF
+    },
+    .gc   = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x05, 0x0F, 0xFF },
+    .ac   = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+        0x41, 0x00, 0x0F, 0x00, 0x00
+    }
 };
 
-static void vga_write_regs(unsigned char *regs) {
-    unsigned int i;
+static void vga_write_regs(const vga_regs_t *regs) {
+    /* Write MISC */
+    outb(VGA_MISC_WRITE, regs->misc);
 
-    // write MISCELLANEOUS reg
-    outb(VGA_MISC_WRITE, *regs);
-    regs++;
-
-    // write SEQUENCER regs
-    for (i = 0; i < 5; i++) {
+    /* Write SEQUENCER */
+    for (int i = 0; i < VGA_NUM_SEQ_REGS; i++) {
         outb(VGA_SEQ_INDEX, i);
-        outb(VGA_SEQ_DATA, *regs);
-        regs++;
+        outb(VGA_SEQ_DATA, regs->seq[i]);
     }
 
-    // unlock CRTC registers
+    /* Unlock CRTC registers 0-7 */
     outb(VGA_CRTC_INDEX, 0x03);
-    outb(VGA_CRTC_DATA, inb(VGA_CRTC_DATA) | 0x80);
+    uint8_t crtc_03 = inb(VGA_CRTC_DATA) | 0x80;
+    outb(VGA_CRTC_DATA, crtc_03);
+    
     outb(VGA_CRTC_INDEX, 0x11);
-    outb(VGA_CRTC_DATA, inb(VGA_CRTC_DATA) & ~0x80);
+    uint8_t crtc_11 = inb(VGA_CRTC_DATA) & ~0x80;
+    outb(VGA_CRTC_DATA, crtc_11);
 
-    // make sure they remain unlocked
-    regs[0x03] |= 0x80;
-    regs[0x11] &= ~0x80;
-
-    // write CRTC regs
-    for (i = 0; i < 25; i++) {
+    /* Write CRTC */
+    for (int i = 0; i < VGA_NUM_CRTC_REGS; i++) {
         outb(VGA_CRTC_INDEX, i);
-        outb(VGA_CRTC_DATA, *regs);
-        regs++;
+        outb(VGA_CRTC_DATA, regs->crtc[i]);
     }
 
-    // write GRAPHICS CONTROLLER regs
-    for (i = 0; i < 9; i++) {
+    /* Write GRAPHICS CONTROLLER */
+    for (int i = 0; i < VGA_NUM_GC_REGS; i++) {
         outb(VGA_GC_INDEX, i);
-        outb(VGA_GC_DATA, *regs);
-        regs++;
+        outb(VGA_GC_DATA, regs->gc[i]);
     }
 
-    // write ATTRIBUTE CONTROLLER regs
-    for (i = 0; i < 21; i++) {
-        (void)inb(VGA_INPUT_STAT1);
+    /* Write ATTRIBUTE CONTROLLER */
+    for (int i = 0; i < VGA_NUM_AC_REGS; i++) {
+        (void)inb(VGA_INPUT_STAT1); // Reset flip-flop to Index
         outb(VGA_AC_INDEX, i);
-        outb(VGA_AC_WRITE, *regs);
-        regs++;
+        outb(VGA_AC_WRITE, regs->ac[i]);
     }
 
+    /* Enable Video (AC Index 0x20) */
     (void)inb(VGA_INPUT_STAT1);
     outb(VGA_AC_INDEX, 0x20);
 }
@@ -84,7 +75,7 @@ static void vga_putpixel(int x, int y, uint32_t color) {
 
 static int vga_set_mode(int width, int height) {
     if (width == 320 && height == 200) {
-        vga_write_regs(g_320x200x256);
+        vga_write_regs(&mode_13h);
         return 0;
     }
     kprint("VGA: Unsupported mode requested.\n");
@@ -95,6 +86,7 @@ static int vga_set_mode(int width, int height) {
 
 static int vga_probe(void) {
     /* TODO: Check functionality. Assume standard VGA present for now. */
+    /* Could check for VGA ports presence or BIOS signature if needed. */
     return 0; 
 }
 
@@ -126,10 +118,6 @@ static int vga_list_modes(struct video_mode_info *modes, int max_count) {
 
 static int vga_set_mode_id(int mode_id) {
     if (mode_id == 1) {
-        // vga_set_mode updates hardware but how to update fb_info?
-        // Driver init sets initial, but switching mode later requires updating the global 'fb' or driver state.
-        // Assuming single global fb for now.
-        // TODO: Update fb structure?
         return vga_set_mode(320, 200);
     }
     return -1;
