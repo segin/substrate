@@ -22,7 +22,6 @@
 #include <drivers/video/fb.h>
 #include <drivers/video/fb_console.h>
 #include <drivers/video/font.h>
-#include <drivers/video/hercules.h>
 
 /* ==================== Global State ==================== */
 
@@ -247,8 +246,6 @@ void video_register_driver(video_driver_t *drv) {
 
 /* External install functions for drivers (Since we lack constructors) */
 extern void bga_install(void);
-extern void herc_install(void);
-extern void cga_install(void);
 extern void vga_install(void);
 
 /* Default Multiboot Driver Wrapper */
@@ -288,8 +285,6 @@ void fb_init(multiboot_info_t *mbi) {
     bga_install();
     #endif
     bga_install(); // Always include for now
-    herc_install();
-    cga_install();
     vga_install();
 
     char vid_arg[32];
