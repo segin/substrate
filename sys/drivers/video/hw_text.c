@@ -1,12 +1,14 @@
-#include <kern/console.h>
-#include <drivers/video/vga.h>
-#include <drivers/video/hw_text.h>
-#include <arch/x86-common/include/io.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
-// Standard Text Mode Memory
+#include <kern/console.h>
+
+#include <arch/x86-common/include/io.h>
+
+#include <drivers/video/hw_text.h>
+#include <drivers/video/vga.h>
+
 // Standard Text Mode Memory
 static uint16_t* terminal_buffer;
 static size_t VGA_WIDTH = 80;
