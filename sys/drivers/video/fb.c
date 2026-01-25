@@ -5,20 +5,23 @@
  * and registers /dev/fb0 device node.
  */
 
-#include <string.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <kern/console.h>
+#include <string.h>
+
 #include <kern/cmdline.h>
-#include <sys/proc.h>
-#include <sys/file.h>
+#include <kern/console.h>
 #include <sys/fb.h>
+#include <sys/file.h>
+#include <sys/proc.h>
 #include <vfs/vfs.h>
+
 #include <arch/i386/pmap.h>
+
+#include <drivers/video/bga.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/fb_console.h>
 #include <drivers/video/font.h>
-#include <drivers/video/bga.h>
 #include <drivers/video/hercules.h>
 
 /* ==================== Global State ==================== */
