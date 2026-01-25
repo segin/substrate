@@ -98,16 +98,31 @@ static void linear_fb_putpixel(int x, int y, uint32_t color) {
                 pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x / 4);
                 shift = (3 - (x % 4)) * 2;
                 mask = 0x3 << shift;
-                // Map VGA index to 2-bit: Black=0, White=3, etc. 
-                // Simple approx: use lower 2 bits of index? 
-                *pixel = (*pixel & ~mask) | ((index & 0x3) << shift);
+                
+                /* Calculate Luma (Y = 0.299R + 0.587G + 0.114B) */
+                uint8_t r = (color >> 16) & 0xFF;
+                uint8_t g = (color >> 8) & 0xFF;
+                uint8_t b = color & 0xFF;
+                // Fast approx: (R*77 + G*150 + B*29) >> 8
+                uint8_t luma = (r * 77 + g * 150 + b * 29) >> 8;
+                
+                // Map 0..255 -> 0..3
+                uint8_t val = luma >> 6;
+                
+                *pixel = (*pixel & ~mask) | ((val & 0x3) << shift);
                 break;
             case 1:
                 pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x / 8);
                 shift = 7 - (x % 8);
                 mask = 1 << shift;
-                // Index > 0 is "on"
-                if (index) *pixel |= mask;
+                
+                /* Use Luma for thresholding */
+                uint8_t r1 = (color >> 16) & 0xFF;
+                uint8_t g1 = (color >> 8) & 0xFF;
+                uint8_t b1 = color & 0xFF;
+                uint8_t luma1 = (r1 * 77 + g1 * 150 + b1 * 29) >> 8;
+                
+                if (luma1 > 127) *pixel |= mask;
                 else *pixel &= ~mask;
                 break;
             default:
