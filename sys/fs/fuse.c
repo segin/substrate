@@ -25,7 +25,7 @@ static uint32_t fuse_dev_read(fs_node_t *node, off_t offset, uint32_t size, uint
     return sizeof(struct fuse_in_header);
 }
 
-static uint32_t fuse_dev_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t fuse_dev_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     // Process response from userspace
     struct fuse_out_header *out = (struct fuse_out_header *)buffer;

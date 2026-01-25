@@ -23,7 +23,7 @@ extern filesystem_t *vfs_get_filesystems(void); /* from VFS */
 
 /* Forward declarations */
 static uint32_t procfs_generic_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
-static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index);
+static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *procfs_finddir(fs_node_t *node, char *name);
 
 /*
@@ -244,7 +244,7 @@ static uint32_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, uint32_t si
     return size;
 }
 
-static struct dirent *proc_pid_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     const char *entries[] = { ".", "..", "status", "cmdline", NULL };
     if (index >= 4) return NULL;
@@ -274,7 +274,7 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
 
 /* Root /proc directory operations */
 
-static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     
     /* . and .. */

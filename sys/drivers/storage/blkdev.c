@@ -12,7 +12,7 @@ static uint32_t blkdev_vfs_read(fs_node_t *node, off_t offset, uint32_t size, ui
 }
 
 // VFS write wrapper
-static uint32_t blkdev_vfs_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t blkdev_vfs_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     blkdev_t *dev = (blkdev_t *)node->impl;
     if (!dev || !dev->write) return 0;
     return blkdev_write_bytes(dev, offset, size, buffer);

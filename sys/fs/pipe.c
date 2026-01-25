@@ -36,7 +36,7 @@ static uint32_t pipe_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return i;
 }
 
-static uint32_t pipe_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t pipe_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     pipe_t *p = (pipe_t *)node->impl;
     (void)offset;
 

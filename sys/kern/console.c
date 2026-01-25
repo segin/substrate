@@ -97,7 +97,7 @@ static uint32_t console_node_read(fs_node_t *node, off_t offset, uint32_t size, 
     return tty_read(console_tty, (char*)buffer, size);
 }
 
-static uint32_t console_node_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t console_node_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     if (!console_tty) return 0;
     return tty_write(console_tty, (const char*)buffer, size);

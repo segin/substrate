@@ -421,7 +421,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         // Initialize VM map
         extern vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max);
         if (current_process->vm_map) {
-             // TODO: kfree old map
+             vm_map_destroy(current_process->vm_map);
         }
         // Use the proper pmap pointer (already active)
         current_process->vm_map = vm_map_create((pmap_t)(uintptr_t)current_process->pmap, 0, 0xC0000000); 

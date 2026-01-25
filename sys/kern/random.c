@@ -430,7 +430,7 @@ static uint32_t urandom_dev_read(fs_node_t *node, off_t offset, uint32_t size, u
 }
 
 /* Write to /dev/random or /dev/urandom adds entropy */
-static uint32_t random_dev_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t random_dev_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node;
     (void)offset;
     

@@ -64,12 +64,13 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     if (nparts > 8) nparts = 8;  /* Standard BSD has a-h (8 partitions) */
     
     /* Calculate label checksum */
-    uint16_t *wp = (uint16_t *)label;
     uint16_t checksum = 0;
     size_t label_size = sizeof(*label) / sizeof(uint16_t);
     
     for (size_t i = 0; i < label_size; i++) {
-        checksum ^= wp[i];
+        uint16_t val;
+        memcpy(&val, (uint8_t*)label + i * sizeof(uint16_t), sizeof(uint16_t));
+        checksum ^= val;
     }
     
     if (checksum != 0) {

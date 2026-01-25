@@ -11,7 +11,7 @@ static uint32_t null_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return 0; // EOF
 }
 
-static uint32_t null_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t null_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer;
     return size; // Discarded
 }
@@ -24,7 +24,7 @@ static uint32_t zero_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
 }
 
 // /dev/full
-static uint32_t full_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t full_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
     // Always return error (ENOSPC is usually 28)
     return size;
@@ -44,7 +44,7 @@ static uint32_t port_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return count;
 }
 
-static uint32_t port_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t port_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node;
      if (offset >= 65536) return 0;
     
@@ -111,7 +111,7 @@ static uint32_t tty_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *
     return count;
 }
 
-static uint32_t tty_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t tty_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
@@ -143,7 +143,7 @@ static uint32_t mem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *
     return size;
 }
 
-static uint32_t mem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t mem_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node;
     if (offset > 0x3FFFFFFF) return 0;
     
@@ -169,7 +169,7 @@ static uint32_t kmem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return size;
 }
 
-static uint32_t kmem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t kmem_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
     (void)node;
     void *dst = (void*)(uintptr_t)offset;
     memcpy(dst, buffer, size);

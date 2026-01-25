@@ -350,6 +350,14 @@ size_t pmm_get_used_blocks(void) {
     return vm_phys_get_used();
 }
 
+uint32_t pmm_get_free_memory(void) {
+    return vm_phys_get_free() * 4096;
+}
+
+uint32_t pmm_get_total_memory(void) {
+    return (vm_phys_get_free() + vm_phys_get_used()) * 4096;
+}
+
 void pmm_reclaim_range(uint32_t start, uint32_t end) {
     vm_phys_add_range(start, end);
 }
