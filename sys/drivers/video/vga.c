@@ -51,15 +51,31 @@ static const vga_regs_t regs_13h = {
     }
 };
 
-/* Mode 12h Register Data */
+/* Mode 12h Register Data (VGA 640x480x16) */
 static const vga_regs_t regs_12h = {
-    .misc = VGA_MISC_CLK_25MHZ | VGA_MISC_HSYNC_NEG | VGA_MISC_VSYNC_NEG | VGA_MISC_IO_ADDR_SEL | VGA_MISC_RAM_EN | VGA_MISC_PAGE_ODD_EVEN,
-    .seq  = { 0x03, 0x01, 0x0F, 0x00, VGA_SEQ_MEM_MODE_EXT_MEM },
+    .misc = VGA_MISC_CLK_25MHZ | VGA_MISC_HSYNC_NEG | VGA_MISC_VSYNC_NEG | VGA_MISC_IO_ADDR_SEL | VGA_MISC_RAM_EN | VGA_MISC_PAGE_ODD_EVEN, /* 0xE3 */
+    .seq  = { 0x03, 0x01, 0x0F, 0x00, VGA_SEQ_MEM_MODE_EXT_MEM }, /* 0x02 */
     .crtc = {
-        0x5F, 0x4F, 0x50, 0x82, 0x54, 0x80, 0x0B, 0x3E,
-        0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0xEA, 0x0C, 0xDF, 0x28, 0x00, 0xE7, 0x04, 0xE3,
-        0xFF
+        0x5F, /* 00: HTotal */
+        0x4F, /* 01: HDisplay */
+        0x50, /* 02: HBlankStart */
+        0x82, /* 03: HBlankEnd */
+        0x54, /* 04: HRetraceStart */
+        0x80, /* 05: HRetraceEnd */
+        0x0B, /* 06: VTotal (Low) */
+        0x3E, /* 07: Overflow (VTotal Bit 8/9, VDisp Bit 8/9, VSync Bit 8) */
+        0x00, /* 08: PresetRow */
+        0x40, /* 09: MaxScan */
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* 0A-0F */
+        0xEA, /* 10: VRetraceStart */
+        0x0C, /* 11: VRetraceEnd */
+        0xDF, /* 12: VDisplayEnd */
+        0x28, /* 13: Offset (Width/16) */
+        0x00, /* 14: Underline */
+        0xE7, /* 15: VBlankStart */
+        0x04, /* 16: VBlankEnd */
+        0xE3, /* 17: ModeControl */
+        0xFF  /* 18: LineCompare */
     },
     .gc   = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x0F, 0xFF },
     .ac   = {
@@ -69,15 +85,31 @@ static const vga_regs_t regs_12h = {
     }
 };
 
-/* Mode 10h Register Data (EGA 640x350) */
+/* Mode 10h Register Data (EGA/VGA 640x350x16) */
 static const vga_regs_t regs_10h = {
-    .misc = VGA_MISC_CLK_28MHZ | VGA_MISC_IO_ADDR_SEL | VGA_MISC_RAM_EN | VGA_MISC_PAGE_ODD_EVEN,
+    .misc = VGA_MISC_CLK_28MHZ | VGA_MISC_IO_ADDR_SEL | VGA_MISC_RAM_EN | VGA_MISC_PAGE_ODD_EVEN, /* 0xA7 */
     .seq  = { 0x03, 0x01, 0x0F, 0x00, 0x06 },
     .crtc = { 
-        0x5B, 0x4F, 0x53, 0x37, 0x52, 0x00, 0x6C, 0x1F,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x5E, 0x2B, 0x5D, 0x28, 0x0F, 0x96, 0xB9, 0xA3, 
-        0xFF 
+        0x5B, /* 00: HTotal */
+        0x4F, /* 01: HDisplay */
+        0x53, /* 02: HBlankStart */
+        0x37, /* 03: HBlankEnd */
+        0x52, /* 04: HRetraceStart */
+        0x00, /* 05: HRetraceEnd */
+        0x6C, /* 06: VTotal */
+        0x1F, /* 07: Overflow */
+        0x00, /* 08: PresetRow */
+        0x00, /* 09: MaxScan */
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* 0A-0F */
+        0x5E, /* 10: VRetraceStart */
+        0x2B, /* 11: VRetraceEnd */
+        0x5D, /* 12: VDisplayEnd */
+        0x28, /* 13: Offset */
+        0x0F, /* 14: Underline */
+        0x96, /* 15: VBlankStart */
+        0xB9, /* 16: VBlankEnd */
+        0xA3, /* 17: ModeControl */
+        0xFF  /* 18: LineCompare */
     },
     .gc   = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x0E, 0x00, 0xFF },
     .ac   = {
@@ -89,11 +121,24 @@ static const vga_regs_t regs_10h = {
 
 /* Custom Init Functions */
 static void init_hercules(void) {
-    /* Hercules 720x348 Graphics Mode Register Values */
+    /* Hercules 720x348 Graphics Mode Register Values (Page 0) */
     static const uint8_t regs[] = {
-        0x35, 0x2D, 0x2E, 0x07, 0x5B, 0x02, 0x57, 0x57, 0x02, 0x03, 0x00, 0x00
+        0x35, /* 00: HTotal (53+1 chars? 720/9=80 chars? Herc uses 90?) */
+        0x2D, /* 01: HDisplay (45) */
+        0x2E, /* 02: HSyncPos (46) */
+        0x07, /* 03: SyncWidth (7) */
+        0x5B, /* 04: VTotal (91 rows -> 364 lines) */
+        0x02, /* 05: VAdjust (2 scanlines) */
+        0x57, /* 06: VDisplay (87 rows -> 348 lines) */
+        0x57, /* 07: VSyncPos (87) */
+        0x02, /* 08: Interlace (Mode 2?) */
+        0x03, /* 09: MaxScan (4 scanlines/row) -> 0x03 = 4 lines? */
+        0x00, /* 10: CursorStart */
+        0x00  /* 11: CursorEnd */
     };
-    outb(0x3BF, 0x01); /* Config Switch: Allow Graphics */
+    
+    /* Configuration Switch (0x3BF): Bit 0=Allow Graphics, Bit 1=Page 1 */
+    outb(0x3BF, 0x01); 
     
     /* Program 6845 CRT Controller */
     for (int i = 0; i < 12; i++) {
@@ -101,13 +146,60 @@ static void init_hercules(void) {
         outb(0x3B5, regs[i]);
     }
     
-    outb(0x3B8, 0x0A); /* Mode Control: Video Enable | Graphics Mode */
+    /* Mode Control (0x3B8): 
+       Bit 1: Graphics Mode
+       Bit 3: Video Enable
+       Bit 5: Blink Enable
+       Val 0x0A = 0000 1010 -> Graphics | Video Enable
+    */
+    outb(0x3B8, 0x0A); 
 }
 
 static void init_cga(void) {
-    /* CGA Init Stub: We don't program registers yet, assuming BIOS or pre-set */
-    /* Ideally we'd set 320x200x4 (Mode 4) or 640x200x2 (Mode 6) regs */
-    kprint("VGA: CGA initialized (stub).\n");
+    /* CGA Mode 4 (320x200x4) Register Values */
+    static const uint8_t regs[] = {
+        0x38, /* 00: HTotal (56 chars) */
+        0x28, /* 01: HDisplay (40 chars -> 320 px) */
+        0x2D, /* 02: HSyncPos (45) */
+        0x0A, /* 03: SyncWidth (10) */
+        0x7F, /* 04: VTotal (127 rows -> 128 typically) */
+        0x06, /* 05: VAdjust (6 scanlines) */
+        0x64, /* 06: VDisplay (100 rows -> 200 lines) */
+        0x70, /* 07: VSyncPos (112) */
+        0x02, /* 08: Interlace */
+        0x01, /* 09: MaxScan (1+1 = 2 lines/row) */
+        0x00, /* 10: CursorStart */
+        0x00, /* 11: CursorEnd */
+        0x00, /* 12: StartAddrH */
+        0x00  /* 13: StartAddrL */
+    };
+
+    /* Mode Control (0x3D8): 
+       Bit 0: 40/80 Col (0=40)
+       Bit 1: Graphics (1)
+       Bit 2: Color/BW (0=Color)
+       Bit 3: Video Enable (1)
+       Bit 4: 320/640 (0=320)
+       Bit 5: Blink
+       Val 0x0A = 0000 1010 -> Graphics | Video Enable
+    */
+    outb(0x3D8, 0x0A);
+    
+    /* Program 6845 CRT Controller */
+    for (int i = 0; i < 14; i++) {
+        outb(0x3D4, i);
+        outb(0x3D5, regs[i]);
+    }
+    
+    /* Color Select (0x3D9): 
+       Bit 0-3: Overscan/Background (0)
+       Bit 4: Intensity (1)
+       Bit 5: Palette (1 = Cyan/Magenta/White)
+       Val 0x30 = 0011 0000
+    */
+    outb(0x3D9, 0x30);
+    
+    kprint("VGA: CGA Mode 4 initialized.\n");
 }
 
 /* Mode Table */
@@ -118,7 +210,7 @@ static const vga_mode_def_t vga_modes[] = {
     { .width = 640, .height = 350, .bpp = 4, .mode_id = 10, .regs = &regs_10h, .init_func = NULL, .putpixel = vga_putpixel_planar, .mem_base = VGA_GFX_MEM_BASE, .pitch = 80 },
     /* Legacy / Special Modes */
     { .width = 720, .height = 348, .bpp = 1, .mode_id = 7,  .regs = NULL,      .init_func = init_hercules, .putpixel = herc_putpixel,       .mem_base = VGA_HERC_MEM_BASE, .pitch = 90 },
-    { .width = 320, .height = 200, .bpp = 2, .mode_id = 6,  .regs = NULL,      .init_func = init_cga,      .putpixel = cga_putpixel,        .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 }
+    { .width = 320, .height = 200, .bpp = 2, .mode_id = 4,  .regs = NULL,      .init_func = init_cga,      .putpixel = cga_putpixel,        .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 }
 };
 
 #define VGA_MODE_COUNT (sizeof(vga_modes) / sizeof(vga_modes[0]))
@@ -293,8 +385,8 @@ static int vga_probe(void) { return 0; }
 
 static int vga_init_driver(fb_info_t *info) {
     kprint("VGA: Initializing Unified Driver [VGA/EGA/CGA/MDA]\n");
-    /* Default Mode 13h */
-    if (vga_set_mode_internal(13) == 0) {
+    /* Default Mode 12h (640x480x16) */
+    if (vga_set_mode_internal(12) == 0) {
         *info = fb; 
         return 0;
     }
