@@ -5428,7 +5428,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (refcount increment/decrement, free on zero)
         - Docs: `device_refcount.9`
         - Acceptance: Refcount properly tracks, frees at zero
-    - [ ] Implement `device_find_child()` lookup.
+    - [x] Implement `device_find_child()` lookup.
+        - Note: Implemented device_find_child by iterating parent's sibling list.
         - Files: `sys/kern/device.c`
         - API: `device_t *device_find_child(device_t *parent, const char *name)`
         - Tests: unit (find existing, not found cases)

@@ -201,3 +201,25 @@ void device_put(struct device *dev) {
         }
     }
 }
+
+/*
+ * device_find_child
+ *
+ * Finds a child device by name.
+ */
+struct device *device_find_child(struct device *parent, const char *name) {
+    struct device *curr;
+    
+    if (!parent || !name) return NULL;
+    
+    curr = parent->children;
+    while (curr) {
+        if (curr->name[0] && strcmp(curr->name, name) == 0) {
+            return curr;
+        }
+        curr = curr->sibling;
+    }
+    
+    return NULL;
+}
+
