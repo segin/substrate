@@ -5437,7 +5437,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Acceptance: Returns correct child or NULL
 
 - [ ] **Driver Registration API:**
-    - [ ] Implement `driver_register()`.
+    - [x] Implement `driver_register()`.
+        - Note: Implemented driver_register with duplicate detection and probe auto-trigger.
         - Files: `sys/kern/driver.c` (new)
         - API: `int driver_register(driver_t *drv, bus_type_t *bus)`
         - Tests: unit (registration, probe auto-trigger on existing devices)

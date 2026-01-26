@@ -68,4 +68,12 @@ struct device {
     uint32_t flags;
 };
 
+/* Core Device API */
+struct device *device_create(const char *name, struct device *parent);
+int device_register(struct device *dev, struct bus_type *bus);
+int device_unregister(struct device *dev);
+void device_get(struct device *dev);
+void device_put(struct device *dev);
+struct device *device_find_child(struct device *parent, const char *name);
+
 #endif /* _KERN_DEVICE_H */
