@@ -5369,7 +5369,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 #### 13.1. Kernel Driver Model & Device Lifecycle
 
 - [ ] **Core Data Structures (Headers):**
-    - [ ] Define `struct device` in `sys/kern/device.h`.
+    - [x] Define `struct device` in `sys/kern/device.h`.
+        - Note: Implemented struct device with hierarchical and resource fields.
         - Files: `sys/kern/device.h` (new)
         - Fields: `vendor_id`, `device_id`, `class`, `subclass`, `progif`, `serial[32]`, `guid[16]`, `parent`, `children`, `resources`, `power_state`, `ref_count`, `driver`, `bus`, `flags`
         - Tests: unit (struct layout, alignment)
