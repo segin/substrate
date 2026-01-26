@@ -5368,7 +5368,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 #### 13.1. Kernel Driver Model & Device Lifecycle
 
-- [ ] **Core Data Structures (Headers):**
+- [x] **Core Data Structures (Headers):**
     - [x] Define `struct device` in `sys/kern/device.h`.
         - Note: Implemented struct device with hierarchical and resource fields.
         - Files: `sys/kern/device.h` (new)
@@ -5390,7 +5390,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (struct layout)
         - Docs: `bus.9` manpage
         - Acceptance: Header compiles with list/lock fields
-    - [ ] Define `struct resource` in `sys/kern/resource.h`.
+    - [x] Define `struct resource` in `sys/kern/resource.h`.
+        - Note: Implemented struct resource with types, hierarchy, and static inline overlap helpers.
         - Files: `sys/kern/resource.h` (new)
         - Types: `RES_IO`, `RES_MEM`, `RES_IRQ`, `RES_DMA`
         - Fields: `type`, `start`, `end`, `flags`, `parent`, `children`, `owner`
