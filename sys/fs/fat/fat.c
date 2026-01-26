@@ -177,7 +177,7 @@ static struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
             fat_dirent_t *entry = (fat_dirent_t *)(dir_buf + i);
             
             if (entry->name[0] == 0x00) return NULL;  // End of directory
-            if (entry->name[0] == 0xE5) continue;      // Deleted entry
+            if ((uint8_t)entry->name[0] == 0xE5) continue;      // Deleted entry
             
             // Check for LFN entry
             if (entry->attr == FAT_ATTR_LFN) {
@@ -267,7 +267,7 @@ static fs_node_t *fat_finddir(fs_node_t *node, char *name) {
             fat_dirent_t *entry = (fat_dirent_t *)(dir_buf + i);
             
             if (entry->name[0] == 0x00) return NULL;  // End of directory
-            if (entry->name[0] == 0xE5) continue;      // Deleted entry
+            if ((uint8_t)entry->name[0] == 0xE5) continue;      // Deleted entry
             
             // Check for LFN entry
             if (entry->attr == FAT_ATTR_LFN) {

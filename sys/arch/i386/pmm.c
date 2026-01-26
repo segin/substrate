@@ -319,6 +319,15 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     }
 }
 
+uint32_t pmm_get_total_memory(void) {
+    // vm_phys_get_used() + vm_phys_get_free() = total
+    return (uint32_t)((vm_phys_get_used() + vm_phys_get_free()) * PMM_BLOCK_SIZE);
+}
+
+uint32_t pmm_get_free_memory(void) {
+    return (uint32_t)(vm_phys_get_free() * PMM_BLOCK_SIZE);
+}
+
 // Allocation Hooks
 void* pmm_alloc_block(void) {
     vm_page_t *p = vm_phys_alloc_page();

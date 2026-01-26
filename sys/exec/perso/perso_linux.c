@@ -3,7 +3,6 @@
 #include <sys/termios.h>
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
-#include <exec/perso/compat_syscalls.h>
 
 /* Native stat structure (from sys/stat.h) */
 struct native_stat {

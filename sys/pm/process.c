@@ -79,6 +79,7 @@ process_t *proc_create(struct personality *pers) {
     processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].pers = pers;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
+    processes[i].next_fd = 0; // Reset FD hint
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;
     
     // Acct init

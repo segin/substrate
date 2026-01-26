@@ -49,6 +49,7 @@ typedef struct process {
     struct process *p_pgrp_link; // Next process in same pgrp (linked list)
     struct personality *pers;
     file_t *fds[MAX_FD]; // File Descriptor Table
+    int next_fd;         // Hint for next free FD
     fs_node_t *root_node; // Per-process root (for chroot)
     
     // Signals

@@ -82,15 +82,30 @@ int sys_open(const char *path, int flags, int mode) {
     (void)mode;
     if (!path) return -1;
     
-    // Find free FD
+    // Find free FD using hint
     int fd = -1;
-    for (int i = 0; i < MAX_FD; i++) {
+    int start = current_process->next_fd;
+    if (start < 0 || start >= MAX_FD) start = 0;
+
+    for (int i = start; i < MAX_FD; i++) {
         if (!current_process->fds[i]) {
             fd = i;
             break;
         }
     }
+
+    // Wrap around search
+    if (fd == -1 && start > 0) {
+        for (int i = 0; i < start; i++) {
+            if (!current_process->fds[i]) {
+                fd = i;
+                break;
+            }
+        }
+    }
+
     if (fd == -1) return -1;
+    current_process->next_fd = fd + 1;
 
     // Lookup file
     // Handle absolute/relative. For now assume root relative if starts with /
@@ -138,6 +153,11 @@ int sys_close(int fd) {
     
     file_close_ptr(f);
     current_process->fds[fd] = 0;
+
+    // Update hint if we freed a lower FD
+    if (fd < current_process->next_fd) {
+        current_process->next_fd = fd;
+    }
     return 0;
 }
 
@@ -615,14 +635,29 @@ int sys_pipe(int *fds) {
     pipe_create(&read_node, &write_node);
 
     int f1 = -1, f2 = -1;
-    for (int i = 0; i < MAX_FD; i++) {
+    int start = current_process->next_fd;
+    if (start < 0 || start >= MAX_FD) start = 0;
+
+    // Search from hint
+    for (int i = start; i < MAX_FD; i++) {
         if (!current_process->fds[i]) {
             if (f1 == -1) f1 = i;
             else if (f2 == -1) { f2 = i; break; }
         }
     }
 
+    // Wrap around if needed
+    if (f2 == -1 && start > 0) {
+        for (int i = 0; i < start; i++) {
+            if (!current_process->fds[i]) {
+                if (f1 == -1) f1 = i;
+                else if (f2 == -1) { f2 = i; break; }
+            }
+        }
+    }
+
     if (f1 == -1 || f2 == -1) return -1;
+    current_process->next_fd = f2 + 1;
 
     file_t *rf = file_alloc();
     rf->node = read_node;
@@ -644,15 +679,30 @@ int sys_dup(int oldfd) {
     file_t *f = current_process->fds[oldfd];
     if (!f) return -1;
 
-    // Find free FD
+    // Find free FD with hint
     int newfd = -1;
-    for (int i = 0; i < MAX_FD; i++) {
+    int start = current_process->next_fd;
+    if (start < 0 || start >= MAX_FD) start = 0;
+
+    for (int i = start; i < MAX_FD; i++) {
         if (!current_process->fds[i]) {
             newfd = i;
             break;
         }
     }
+
+    // Wrap around
+    if (newfd == -1 && start > 0) {
+        for (int i = 0; i < start; i++) {
+            if (!current_process->fds[i]) {
+                newfd = i;
+                break;
+            }
+        }
+    }
+
     if (newfd == -1) return -1;
+    current_process->next_fd = newfd + 1;
 
     current_process->fds[newfd] = f;
     f->ref_count++;
