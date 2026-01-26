@@ -5414,7 +5414,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (bus list insertion, duplicate detection)
         - Docs: `device_register.9`
         - Acceptance: Device appears in bus->devices_list
-    - [ ] Implement `device_unregister()` removal.
+    - [x] Implement `device_unregister()` removal.
+        - Note: Implemented device_unregister with safe bus detachment, parent list removal, and child orphaning.
         - Files: `sys/kern/device.c`
         - API: `int device_unregister(device_t *dev)`
         - Tests: unit (list removal, children orphaning check)

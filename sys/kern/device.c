@@ -89,3 +89,83 @@ int device_register(struct device *dev, struct bus_type *bus) {
     
     return 0;
 }
+
+/*
+ * device_unregister
+ *
+ * Removes a device from its bus and parent.
+ * Orphans any children.
+ */
+int device_unregister(struct device *dev) {
+    struct bus_type *bus;
+    struct device *parent;
+    struct device *curr, *prev;
+    
+    if (!dev) return -1;
+    
+    /* 1. Remove from Bus */
+    bus = dev->bus;
+    if (bus) {
+        spinlock_acquire(&bus->lock);
+        
+        curr = bus->devices_list;
+        prev = NULL;
+        while (curr) {
+            if (curr == dev) {
+                if (prev) {
+                    prev->bus_next = curr->bus_next;
+                } else {
+                    bus->devices_list = curr->bus_next;
+                }
+                break;
+            }
+            prev = curr;
+            curr = curr->bus_next;
+        }
+        
+        dev->bus = NULL;
+        dev->bus_next = NULL;
+        
+        spinlock_release(&bus->lock);
+    }
+    
+    /* 2. Remove from Parent */
+    parent = dev->parent;
+    if (parent) {
+        /* Note: Parent list locking not implemented yet, assuming single-thread or external sync for hierarchy changes */
+        /* TODO: Add hierarchy lock if needed */
+        
+        curr = parent->children;
+        prev = NULL;
+        while (curr) {
+            if (curr == dev) {
+                if (prev) {
+                    prev->sibling = curr->sibling;
+                } else {
+                    parent->children = curr->sibling;
+                }
+                break;
+            }
+            prev = curr;
+            curr = curr->sibling;
+        }
+        dev->parent = NULL;
+        dev->sibling = NULL;
+    }
+    
+    /* 3. Handle Children (Orphan them) */
+    curr = dev->children;
+    while (curr) {
+         struct device *next = curr->sibling;
+         curr->parent = NULL;
+         curr->sibling = NULL; /* Detach from sibling list too as they are now top-level orphans? 
+                                  Or keep them linked? 
+                                  Usually orphans are just roots. sibling is used for parent's list.
+                                  If parent is NULL, sibling/children defines structure.
+                                  Let's zero sibling to be safe/clean roots. */
+         curr = next;
+    }
+    dev->children = NULL;
+    
+    return 0;
+}
