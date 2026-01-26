@@ -5383,7 +5383,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (callback signature validation)
         - Docs: `driver.9` manpage
         - Acceptance: Header compiles, all callbacks defined
-    - [ ] Define `struct bus_type` in `sys/kern/bus.h`.
+    - [x] Define `struct bus_type` in `sys/kern/bus.h`.
+        - Note: Implemented struct bus_type with device/driver lists and spinlock protection.
         - Files: `sys/kern/bus.h` (new)
         - Fields: `name`, `match`, `probe`, `remove`, `devices_list`, `drivers_list`, `lock`
         - Tests: unit (struct layout)

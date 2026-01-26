@@ -50,6 +50,7 @@ struct device {
     struct device *parent;
     struct device *children; /* Head of child list */
     struct device *sibling;  /* Next sibling */
+    struct device *bus_next; /* Next device on the same bus */
 
     /* Resources */
     struct resource *resources;

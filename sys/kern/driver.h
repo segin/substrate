@@ -53,6 +53,9 @@ struct driver {
     /* Scheduling/Policy */
     int      priority;
     uint32_t flags;
+    
+    /* List Linkage */
+    struct driver *bus_next;
 };
 
 #endif /* _KERN_DRIVER_H */
