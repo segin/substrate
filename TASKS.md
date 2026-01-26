@@ -5407,7 +5407,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (allocation, parent linking, refcount init)
         - Docs: `device_create.9`
         - Acceptance: Returns valid device, parent->children updated
-    - [ ] Implement `device_register()` into bus.
+    - [x] Implement `device_register()` into bus.
+        - Note: Implemented device_register with duplicate pointer/name detection and spinlock protection.
         - Files: `sys/kern/device.c`
         - API: `int device_register(device_t *dev, bus_type_t *bus)`
         - Tests: unit (bus list insertion, duplicate detection)

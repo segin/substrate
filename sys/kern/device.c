@@ -5,6 +5,8 @@
  */
 
 #include <kern/device.h>
+#include <kern/bus.h>
+#include <sys/lock.h>
 #include <string.h>
 #include <vm/vm_kmem.h> 
 #include <sys/types.h>
@@ -45,4 +47,45 @@ struct device *device_create(const char *name, struct device *parent) {
     }
 
     return dev;
+}
+
+/*
+ * device_register
+ *
+ * Registers a device with a bus.
+ * Checks for duplicates and manages the bus devices list.
+ */
+int device_register(struct device *dev, struct bus_type *bus) {
+    struct device *curr;
+    
+    if (!dev || !bus) return -1;
+    
+    /* Check if already registered */
+    if (dev->bus) return -1;
+    
+    spinlock_acquire(&bus->lock);
+    
+    /* Check for duplicates in the list */
+    curr = bus->devices_list;
+    while (curr) {
+        if (curr == dev) {
+            spinlock_release(&bus->lock);
+            return -1; /* Duplicate pointer */
+        }
+        /* Optional: Check name collision if names are unique per bus */
+        if (curr->name[0] && dev->name[0] && strcmp(curr->name, dev->name) == 0) {
+             spinlock_release(&bus->lock);
+             return -1; /* Duplicate name */
+        }
+        curr = curr->bus_next;
+    }
+    
+    /* Insert at head */
+    dev->bus_next = bus->devices_list;
+    bus->devices_list = dev;
+    dev->bus = bus;
+    
+    spinlock_release(&bus->lock);
+    
+    return 0;
 }
