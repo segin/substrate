@@ -5376,7 +5376,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (struct layout, alignment)
         - Docs: `device.9` manpage
         - Acceptance: Header compiles, struct size verified
-    - [ ] Define `struct driver` in `sys/kern/driver.h`.
+    - [x] Define `struct driver` in `sys/kern/driver.h`.
+        - Note: Implemented struct driver with full lifecycle callbacks and bus binding.
         - Files: `sys/kern/driver.h` (new)
         - Fields: `name`, `bus_type`, `id_table`, `probe`, `attach`, `detach`, `suspend`, `resume`, `shutdown`, `reset`, `match_func`, `priority`, `flags`
         - Tests: unit (callback signature validation)
