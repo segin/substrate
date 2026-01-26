@@ -151,6 +151,10 @@ void kprint(const char *str) {
 
 void console_attach_std_fds(struct process *proc) {
     if (!proc) return;
+    
+    // Only init (PID 1) gets console attached by default.
+    // Others inherit from parent or open explicitly.
+    if (proc->pid != 1) return;
 
     fs_node_t *node = console_get_node();
     if (!node) {
