@@ -5421,7 +5421,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (list removal, children orphaning check)
         - Docs: `device_unregister.9`
         - Acceptance: Device removed, children handled
-    - [ ] Implement `device_get()` / `device_put()` refcounting.
+    - [x] Implement `device_get()` / `device_put()` refcounting.
+        - Note: Implemented device_get/device_put with kfree on zero refcount.
         - Files: `sys/kern/device.c`
         - API: `void device_get(device_t *dev)`, `void device_put(device_t *dev)`
         - Tests: unit (refcount increment/decrement, free on zero)

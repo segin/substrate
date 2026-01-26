@@ -169,3 +169,35 @@ int device_unregister(struct device *dev) {
     
     return 0;
 }
+
+/*
+ * device_get
+ *
+ * Increments the reference count of the device.
+ */
+void device_get(struct device *dev) {
+    if (dev) {
+        /* TODO: atomic increment */
+        dev->ref_count++;
+    }
+}
+
+/*
+ * device_put
+ *
+ * Decrements the reference count.
+ * If zero, frees the device.
+ */
+void device_put(struct device *dev) {
+    if (dev) {
+        /* TODO: atomic decrement */
+        dev->ref_count--;
+        
+        if (dev->ref_count <= 0) {
+            /* Ensure it's unregistered? 
+               Usually safe to assume calling put on a registered device is bad if it hits zero,
+               but we just free memory here. */
+            kfree(dev, sizeof(struct device));
+        }
+    }
+}
