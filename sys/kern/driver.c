@@ -18,86 +18,31 @@
  * Returns 1 if bound, 0 if not.
  */
 static int probe_device(struct driver *drv, struct device *dev) {
-    /* If device already has a driver, skip */
-    if (dev->driver) return 0;
+    int ret;
+
+    if (dev->driver) 
+        return 0;
     
-    /* 
-     * Matching Precedence:
-     * 1. Bus Match (bus->match)
-     * 2. Driver Match (drv->match_func) - optional override
-     */
-     
-    /* Check Bus Match */
+    /* 1. Bus Match */
     if (dev->bus && dev->bus->match) {
-        if (!dev->bus->match(dev, drv)) {
-            return 0; /* Bus says no match */
-        }
+        if (!dev->bus->match(dev, drv))
+            return 0;
     }
     
-    /* Check Driver Match */
+    /* 2. Driver Match */
     if (drv->match_func) {
-        if (!drv->match_func(dev, drv)) {
-            return 0; /* Driver says no match */
-        }
+        if (!drv->match_func(dev, drv))
+            return 0;
     }
     
-    /* 
-     * If we get here, the driver and bus think it's a match.
-     * Call driver Probe.
-     */
+    /* 3. Probe */
     if (drv->probe) {
-        if (drv->probe(dev) != 0) {
-            return 0; /* Probe failed */
-        }
+        ret = drv->probe(dev);
+        if (ret != 0)
+            return 0;
     }
-    
-    /* Probe succeeded? Automatically attach? 
-       The TASK description says "probes called". 
-       "Acceptance: dev->driver set, attach() callback invoked" is for driver_attach().
-       But usually registration triggers probe & attach.
-       Let's assume probe only verifies support. 
-       Usually if probe returns success (0), we verify it works.
-       Wait, strict FreeBSD/Linux: probe returns 0 (success) or error.
-       If success, we might attach.
-       The prompt for driver_register says "probes called".
-       The prompt for driver_attach says "API: driver_attach(drv, dev)".
-       Usually separate. 
-       However, `driver_register` usually triggers the binding process.
-       I will implement the loop calling probe.
-       If probe succeeds, should I attach? 
-       Prompt for `driver_register` acceptance: "Driver in bus->drivers_list, probes called". 
-       It DOES NOT say "devices attached".
-       But `driver_attach` is a separate task.
-       I will stick to just calling probe for now? 
-       Actually, usually `probe` is "check if I can handle this", and if yes, we attach.
-       If I don't attach, the device remains driverless despite a successful probe.
-       Let's look at `driver_register` in other OSs. Usually it triggers attach.
-       
-       However, since `driver_attach` is a separate specific task to implement...
-       I will implement `driver_register` to iterate and call `probe`. 
-       If `probe` returns 0 (success), I *should* probably call `driver_attach` but I haven't implemented it yet!
-       
-       Constraint: "Implement driver_register ... Acceptance: probes called".
-       I will implement the iteration and probe call. 
-       Since I cannot call `driver_attach` yet (it's not implemented), I will just leave it as "probe called".
-       Or I can implement a placeholder `driver_attach`? 
-       No, `driver_attach` is the NEXT task.
-       So I will just iterate and call `probe`. 
-       Wait, if I don't attach, then `dev->driver` isn't set.
-       If I run `driver_register` again, it will probe again.
-       This seems fine for this atomic step.
-       
-       Actually, `driver_register` acceptance says "probes called".
-       `driver_attach` acceptance says "dev->driver set".
-       So for `driver_register`, I just need to verify it walks the list and calls probe.
-    */
-    
-    /* For now, we just return result of probe. */
-    /* Side note: In real kernel, we would call device_attach(dev) which finds best driver.
-       Here we are iterating drivers? No, we are registering ONE driver.
-       So we iterate devices on the bus.
-    */
-     return 1;
+
+    return 1;
 }
 
 /*
@@ -185,6 +130,75 @@ int driver_register(struct driver *drv, struct bus_type *bus) {
         device_put(curr_dev);
         curr_dev = next;
     }
+    
+    return 0;
+}
+
+/*
+ * driver_unregister
+ *
+ * Unregisters a driver and detaches it from all devices.
+ */
+int driver_unregister(struct driver *drv) {
+    struct bus_type *bus;
+    struct driver *curr_drv, *prev_drv;
+    struct device *curr_dev;
+    
+    if (!drv || !drv->bus_type) return -1;
+    
+    bus = drv->bus_type;
+    
+    /* 1. Detach from devices */
+    spinlock_acquire(&bus->lock);
+    curr_dev = bus->devices_list;
+    if (curr_dev) device_get(curr_dev);
+    spinlock_release(&bus->lock);
+    
+    while (curr_dev) {
+        struct device *next;
+        
+        /* Check if bound to this driver */
+        if (curr_dev->driver == drv) {
+            /* Detach */
+            if (drv->detach) {
+                drv->detach(curr_dev);
+            }
+            curr_dev->driver = NULL;
+        }
+        
+        /* Move next */
+        spinlock_acquire(&bus->lock);
+        next = curr_dev->bus_next;
+        if (next) device_get(next);
+        spinlock_release(&bus->lock);
+        
+        device_put(curr_dev);
+        curr_dev = next;
+    }
+    
+    /* 2. Remove from Bus List */
+    spinlock_acquire(&bus->lock);
+    
+    curr_drv = bus->drivers_list;
+    prev_drv = NULL;
+    
+    while (curr_drv) {
+        if (curr_drv == drv) {
+            if (prev_drv) {
+                prev_drv->bus_next = curr_drv->bus_next;
+            } else {
+                bus->drivers_list = curr_drv->bus_next;
+            }
+            break;
+        }
+        prev_drv = curr_drv;
+        curr_drv = curr_drv->bus_next;
+    }
+    
+    drv->bus_type = NULL;
+    drv->bus_next = NULL;
+    
+    spinlock_release(&bus->lock);
     
     return 0;
 }

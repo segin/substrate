@@ -5444,7 +5444,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (registration, probe auto-trigger on existing devices)
         - Docs: `driver_register.9`
         - Acceptance: Driver in bus->drivers_list, probes called
-    - [ ] Implement `driver_unregister()`.
+    - [x] Implement `driver_unregister()`.
+        - Note: Implemented driver_unregister which detaches devices and removes driver from bus.
         - Files: `sys/kern/driver.c`
         - API: `int driver_unregister(driver_t *drv)`
         - Tests: unit (detach all bound devices, list removal)
