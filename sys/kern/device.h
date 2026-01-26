@@ -38,6 +38,7 @@ struct resource;
  */
 struct device {
     /* Identification */
+    char     name[32];
     uint32_t vendor_id;
     uint32_t device_id;
     uint16_t class;

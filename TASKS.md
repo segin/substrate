@@ -5400,7 +5400,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Acceptance: Resource types enumerated, range helpers compile
 
 - [ ] **Device Registration API:**
-    - [ ] Implement `device_create()` allocator.
+    - [x] Implement `device_create()` allocator.
+        - Note: Implemented device_create with name storage, parent linking, and refcount initialization.
         - Files: `sys/kern/device.c` (new)
         - API: `device_t *device_create(const char *name, device_t *parent)`
         - Tests: unit (allocation, parent linking, refcount init)
