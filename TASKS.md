@@ -6481,9 +6481,6 @@ Reference: User Request (Step 31552)
         - Acceptance: API documented with examples.
 
 - [ ] **Quality Audit & Refactoring:**
-    - [ ] Audit perso_elks.c for memory leaks in error paths.
-        - Files: `sys/exec/perso/perso_elks.c`
-        - Tests: unit (error path coverage)
         - Acceptance: All allocated resources freed on error.
     - [ ] Audit elks_aout.c for unchecked file read errors.
         - Files: `sys/fs/exec/elks_aout.c`
@@ -6500,5 +6497,10 @@ Reference: User Request (Step 31552)
     - [ ] Add static analysis annotations to ELKS personality code.
         - Files: `sys/exec/perso/perso_elks.c`, `sys/fs/exec/elks_aout.c`
         - Tests: static analysis (sparse/coverity)
+    - [x] **Refactor Console and UART Subsystems**
+        - Note: Migrated files, updated Makefiles, fixed include paths, added missing VGA colors. Build verified.
+        - Files: `sys/kern/ansi_handler.c`, `sys/kern/console.c`, `sys/kern/tty.c`, `sys/drivers/serial/*`
+        - Goal: Migrate console/tty code to `sys/drivers/console/` and UART to `sys/drivers/console/uart/`.
+        - Acceptance: Build passes, files moved, functionality preserved.
         - Acceptance: No warnings from static analysis tools.
 

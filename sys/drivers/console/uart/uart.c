@@ -1,5 +1,5 @@
 #include <kern/console.h>
-#include <drivers/serial/uart.h>
+#include <drivers/console/uart/uart.h>
 #include <arch/x86-common/include/io.h>
 #include <arch/i386/idt.h>
 

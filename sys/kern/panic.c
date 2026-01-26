@@ -1,6 +1,7 @@
 #include <kern/panic.h>
 #include <kern/stacktrace.h>
 #include <drivers/video/vga.h>
+#include <drivers/video/hw_text.h>
 #include <kern/console.h>
 #include <string.h>
 
@@ -14,9 +15,6 @@ void panic(const char *msg) {
     __asm__ volatile("cli");
     
     /* Set high-visibility color but DON'T clear screen */
-#include <drivers/video/hw_text.h>
-
-// ...
 
     if (!fb_active) {
         hw_text_set_color(VGA_COLOR_WHITE, VGA_COLOR_RED);

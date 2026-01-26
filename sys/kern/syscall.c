@@ -19,7 +19,7 @@
 #include <include/sys/signal.h>
 #include <include/sys/session.h>
 #include <vfs/vfs.h>
-#include <drivers/serial/uart.h>
+#include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
 
 #include <sys/types.h>

@@ -16,8 +16,9 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		kern/kern.o \
 		pm/pm.o \
 		drivers/video/video.o \
-		drivers/serial/serial.o \
 		drivers/input/input.o \
+		drivers/console/console_subsys.o \
+		drivers/console/uart/uart_drv.o \
 		drivers/storage/storage.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
@@ -46,8 +47,9 @@ kernel.efi: arch_kernel klib kern drivers fs exec vfs exec_perso vm tests
 		kern/kern.o \
 		pm/pm.o \
 		drivers/video/video.o \
-		drivers/serial/serial.o \
 		drivers/input/input.o \
+		drivers/console/console_subsys.o \
+		drivers/console/uart/uart_drv.o \
 		drivers/storage/storage.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
@@ -85,14 +87,13 @@ klib:
 	@echo "Building Kernel Libraries..."
 	$(MAKE) -C lib
 
-drivers:
 	@echo "Building Drivers..."
 	$(MAKE) -C drivers/video
-	$(MAKE) -C drivers/serial
 	$(MAKE) -C drivers/input
 	$(MAKE) -C drivers/storage
 	$(MAKE) -C drivers/devices
 	$(MAKE) -C drivers/virtio
+
 
 libs:
 	@echo "Building User Libraries..."
@@ -117,11 +118,12 @@ clean:
 	$(MAKE) -C kern clean
 	$(MAKE) -C pm clean
 	$(MAKE) -C drivers/video clean
-	$(MAKE) -C drivers/serial clean
 	$(MAKE) -C drivers/input clean
 	$(MAKE) -C drivers/storage clean
 	$(MAKE) -C drivers/devices clean
 	$(MAKE) -C drivers/virtio clean
+	$(MAKE) -C drivers/console clean
+	$(MAKE) -C drivers/console/uart clean
 	$(MAKE) -C vfs clean
 	$(MAKE) -C fs clean
 	$(MAKE) -C exec/formats clean

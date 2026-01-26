@@ -8,7 +8,7 @@
 #include <drivers/video/vga.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/hw_text.h>
-#include <drivers/serial/uart.h>
+#include <drivers/console/uart/uart.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/input/mouse.h>
 #include <drivers/storage/scsi/scsi.h>
