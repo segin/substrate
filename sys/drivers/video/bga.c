@@ -1,8 +1,8 @@
 #include <sys/types.h>
 #include <sys/file.h>
-#include <arch/x86-common/include/io.h>
-#include <drivers/video/fb.h>
 #include <kern/console.h>
+#include <drivers/video/fb.h>
+#include <arch/x86-common/include/io.h>
 
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF
@@ -111,4 +111,15 @@ int bga_init(fb_info_t *fb_out) {
 
     kprint("BGA: Mode set to 1024x768x32.\n");
     return 0;
+}
+
+static video_driver_t bga_driver = {
+    .name = "bga",
+    .priority = 50,
+    .probe = bga_is_available,
+    .init = bga_init
+};
+
+void bga_install(void) {
+    video_register_driver(&bga_driver);
 }

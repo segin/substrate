@@ -1,4 +1,4 @@
-#include <drivers/storage/nvme.h>
+#include <drivers/storage/nvme/nvme.h>
 #include <kern/console.h>
 #include <arch/i386/pci.h>
 

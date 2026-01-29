@@ -1,6 +1,6 @@
 #include <arch/i386/fpu/fpu_emu.h>
 #include <arch/i386/idt.h>
-#include <arch/i386/io.h>
+#include <io.h>
 #include <kern/console.h>
 #include <sys/proc.h>
 

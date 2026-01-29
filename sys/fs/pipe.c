@@ -17,15 +17,15 @@ typedef struct {
     void    *wait_write;
 } pipe_t;
 
-static uint32_t pipe_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
-    pipe_t *p = (pipe_t *)node->impl;
+static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    pipe_t *p = (pipe_t *)(uintptr_t)node->impl;
     (void)offset;
 
     while (p->count == 0) {
         sched_sleep(p->wait_read);
     }
 
-    uint32_t i = 0;
+    size_t i = 0;
     while (i < size && p->count > 0) {
         buffer[i++] = p->buffer[p->tail];
         p->tail = (p->tail + 1) % PIPE_SIZE;
@@ -36,15 +36,15 @@ static uint32_t pipe_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return i;
 }
 
-static uint32_t pipe_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
-    pipe_t *p = (pipe_t *)node->impl;
+static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    pipe_t *p = (pipe_t *)(uintptr_t)node->impl;
     (void)offset;
 
     while (p->count + size > PIPE_SIZE) {
         sched_sleep(p->wait_write);
     }
 
-    uint32_t i = 0;
+    size_t i = 0;
     while (i < size) {
         p->buffer[p->head] = buffer[i++];
         p->head = (p->head + 1) % PIPE_SIZE;

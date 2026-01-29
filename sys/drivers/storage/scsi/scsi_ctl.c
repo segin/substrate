@@ -8,12 +8,12 @@
  *   /dev/storage/scsiN      - High-level block device alias
  */
 
-#include "scsi.h"
-#include "../blkdev.h"
-#include "../../../vfs/vfs.h"
-#include "../../../kern/console.h"
 #include <string.h>
 #include <stdio.h>
+#include <kern/console.h>
+#include <vfs/vfs.h>
+#include <drivers/storage/blkdev.h>
+#include "scsi.h"
 
 /* Forward declarations from scsi_dev.c */
 extern int scsi_dev_attach(scsi_device_t *scsi_dev);

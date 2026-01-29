@@ -29,204 +29,230 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/types.h>
+#include <sys/errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <elf.h>
-#include <errno.h>
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
 
-/* Fallback for missing headers on host/target */
+/* Fallback definitions for non-native builds */
 #ifndef ELFOSABI_SYSV
-#define ELFOSABI_SYSV 0
+#define	ELFOSABI_SYSV		0
 #endif
 #ifndef ELFOSABI_LINUX
-#define ELFOSABI_LINUX 3
+#define	ELFOSABI_LINUX		3
 #endif
 #ifndef ELFOSABI_FREEBSD
-#define ELFOSABI_FREEBSD 9
+#define	ELFOSABI_FREEBSD	9
 #endif
 #ifndef ELFOSABI_SOLARIS
-#define ELFOSABI_SOLARIS 6
+#define	ELFOSABI_SOLARIS	6
 #endif
 
-/* Custom TestUnix/SVR4 values */
-#define ELFOSABI_TESTUNIX 64
-#define ELFOSABI_ATT_UNIX 65 
-
-#ifndef nitems
-#define nitems(x) (sizeof((x)) / sizeof((x)[0]))
+/* Substrate Definitions */
+#ifndef ELFOSABI_SUBSTRATE
+#define ELFOSABI_SUBSTRATE	64	/* Generic Substrate (Temporary) */
 #endif
 
-/* Minimal err.h replacement */
-static void err(int eval, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "brandelf: ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, ": %s\n", strerror(errno));
-    va_end(ap);
-    exit(eval);
-}
+#define	PO_SIG	0	/* EI_MAG0 */
+#define	PO_ABI	7	/* EI_OSABI */
 
-static void errx(int eval, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "brandelf: ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
-    exit(eval);
-}
-
-static void warn(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "brandelf: ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, ": %s\n", strerror(errno));
-    va_end(ap);
-}
-
-static void warnx(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "brandelf: ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
-}
-
-static int elftype(const char *);
-static const char *iselftype(int);
+static void usage(void);
 static void printelftypes(void);
-static void usage(void); // __dead2;
 
-struct ELFtypes {
-	const char *str;
+/* Portable err/warn implementation */
+static const char *progname;
+
+static void
+vwarnc(int code, const char *fmt, va_list ap)
+{
+	fprintf(stderr, "%s: ", progname);
+	if (fmt != NULL) {
+		vfprintf(stderr, fmt, ap);
+		fprintf(stderr, ": ");
+	}
+	fprintf(stderr, "%s\n", strerror(code));
+}
+
+static void
+vwarnx(const char *fmt, va_list ap)
+{
+	fprintf(stderr, "%s: ", progname);
+	if (fmt != NULL)
+		vfprintf(stderr, fmt, ap);
+	fprintf(stderr, "\n");
+}
+
+
+
+static void
+errx(int eval, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	vwarnx(fmt, ap);
+	va_end(ap);
+	exit(eval);
+}
+
+static void
+warn(const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	vwarnc(errno, fmt, ap);
+	va_end(ap);
+}
+
+static void
+warnx(const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	vwarnx(fmt, ap);
+	va_end(ap);
+}
+
+struct elftype {
+	const char *name;
 	int value;
 };
 
-static struct ELFtypes elftypes[] = {
+static struct elftype elftypes[] = {
 	{ "FreeBSD",	ELFOSABI_FREEBSD },
 	{ "Linux",	ELFOSABI_LINUX },
 	{ "Solaris",	ELFOSABI_SOLARIS },
 	{ "SVR4",	ELFOSABI_SYSV },
-    { "TesUnix", ELFOSABI_TESTUNIX },
-    { "SysV", ELFOSABI_SYSV },
-    { "Substrate", ELFOSABI_TESTUNIX }, /* Native Substrate uses same as TesUnix */
-    { "Native", ELFOSABI_TESTUNIX }
+	{ "Substrate",  ELFOSABI_SUBSTRATE },
+	{ "SysV",	ELFOSABI_SYSV },
+	{ NULL,		-1 }
 };
 
-int
-main(int argc, char **argv)
+static int
+get_elf_type(const char *name)
 {
-	const char *strtype = "FreeBSD";
-	int ch, flags, retval, type;
-	bool change, force, listed;
+	struct elftype *et;
 
-	type = ELFOSABI_FREEBSD;
-	retval = 0;
-	change = false;
-	force = false;
-	listed = false;
+	for (et = elftypes; et->name != NULL; et++) {
+		if (strcasecmp(name, et->name) == 0)
+			return (et->value);
+	}
+	return (-1);
+}
 
-	while ((ch = getopt(argc, argv, "f:lt:v")) != -1)
+static const char *
+get_elf_name(int value)
+{
+	struct elftype *et;
+
+	for (et = elftypes; et->name != NULL; et++) {
+		if (et->value == value)
+			return (et->name);
+	}
+	return ("Unknown");
+}
+
+int
+main(int argc, char *argv[])
+{
+	const char *type_name = "Substrate";
+	int ch, fd, type;
+	int retval = 0;
+	bool change = false;
+	bool force = false;
+	bool list = false;
+	char buffer[EI_NIDENT];
+
+	progname = argv[0];
+	if ((progname = strrchr(progname, '/')) != NULL)
+		progname++;
+	else
+		progname = argv[0];
+
+	type = ELFOSABI_SUBSTRATE;
+
+	while ((ch = getopt(argc, argv, "f:lt:v")) != -1) {
 		switch (ch) {
 		case 'f':
 			if (change)
-				errx(1, "f option incompatible with t option");
+				errx(1, "-f option is incompatible with -t");
 			force = true;
 			type = atoi(optarg);
-			if (errno == ERANGE || type < 0 || type > 255) {
-				warnx("invalid argument to option f: %s",
-				    optarg);
-				usage();
-			}
+			if (type < 0 || type > 255)
+				errx(1, "invalid argument to -f: %s", optarg);
 			break;
 		case 'l':
-			printelftypes();
-			listed = true;
-			break;
-		case 'v':
-			/* does nothing */
+			list = true;
 			break;
 		case 't':
 			if (force)
-				errx(1, "t option incompatible with f option");
+				errx(1, "-t option is incompatible with -f");
 			change = true;
-			strtype = optarg;
+			type_name = optarg;
+			break;
+		case 'v':
+			/* Verbose ignored for compatibility */
 			break;
 		default:
 			usage();
+		}
 	}
 	argc -= optind;
 	argv += optind;
-	if (argc == 0) {
-		if (listed)
-			exit(0);
-		else {
-			warnx("no file(s) specified");
-			usage();
-		}
+
+	if (list) {
+		printelftypes();
+		return (0);
 	}
 
-	if (!force && (type = elftype(strtype)) == -1) {
-		warnx("invalid ELF type '%s'", strtype);
-		printelftypes();
+	if (argc == 0) {
+		warnx("no files specified");
 		usage();
 	}
 
-	flags = change || force ? O_RDWR : O_RDONLY;
-    // Removed Capsicum/Casper logic
+	if (change) {
+		type = get_elf_type(type_name);
+		if (type == -1) {
+			warnx("invalid ELF type '%s'", type_name);
+			printelftypes();
+			return (1);
+		}
+	}
 
-	while (argc != 0) {
-		int fd;
-		char buffer[EI_NIDENT];
+	for (; *argv != NULL; argv++) {
+		if ((fd = open(*argv, change || force ? O_RDWR : O_RDONLY)) < 0) {
+			warn("cannot open %s", *argv);
+			retval = 1;
+			continue;
+		}
 
-		if ((fd = open(argv[0], flags)) < 0) {
-			warn("error opening file %s", argv[0]);
+		if (read(fd, buffer, sizeof(buffer)) != sizeof(buffer) ||
+		    buffer[EI_MAG0] != ELFMAG0 || buffer[EI_MAG1] != ELFMAG1 ||
+		    buffer[EI_MAG2] != ELFMAG2 || buffer[EI_MAG3] != ELFMAG3) {
+			warnx("%s: not an ELF file", *argv);
 			retval = 1;
-			goto fail;
+			close(fd);
+			continue;
 		}
-		if (read(fd, buffer, EI_NIDENT) < EI_NIDENT) {
-			warnx("file '%s' too short", argv[0]);
-			retval = 1; // goto fail handles close? No, fail label calls close(fd)
-			goto fail;
-		}
-		if (buffer[0] != ELFMAG0 || buffer[1] != ELFMAG1 ||
-		    buffer[2] != ELFMAG2 || buffer[3] != ELFMAG3) {
-			warnx("file '%s' is not ELF format", argv[0]);
-			retval = 1;
-			goto fail;
-		}
+
 		if (!change && !force) {
-			fprintf(stdout,
-				"File '%s' is of brand '%s' (%u).\n",
-				argv[0], iselftype(buffer[EI_OSABI]),
-				buffer[EI_OSABI]);
-			if (!iselftype(type)) {
-				warnx("ELF ABI Brand '%u' is unknown",
-				      type);
-				printelftypes();
-			}
-		}
-		else {
+			printf("File '%s' is of brand '%s' (%u).\n",
+			    *argv, get_elf_name(buffer[EI_OSABI]),
+			    buffer[EI_OSABI]);
+		} else {
 			buffer[EI_OSABI] = type;
-			lseek(fd, 0, SEEK_SET);
-			if (write(fd, buffer, EI_NIDENT) != EI_NIDENT) {
-				warn("error writing %s %d", argv[0], fd);
+			if (lseek(fd, 0, SEEK_SET) == -1 ||
+			    write(fd, buffer, sizeof(buffer)) != sizeof(buffer)) {
+				warn("%s: failed to write ELF header", *argv);
 				retval = 1;
-				goto fail;
 			}
 		}
-fail:
 		close(fd);
-		argc--;
-		argv++;
 	}
 
 	return (retval);
@@ -235,41 +261,17 @@ fail:
 static void
 usage(void)
 {
-	(void)fprintf(stderr,
-	    "usage: brandelf [-lv] [-f ELF_ABI_number] [-t string] file ...\n");
+	fprintf(stderr, "usage: brandelf [-l] [-f abi_numer] [-t string] file ...\n");
 	exit(1);
-}
-
-static const char *
-iselftype(int etype)
-{
-	size_t elfwalk;
-
-	for (elfwalk = 0; elfwalk < nitems(elftypes); elfwalk++)
-		if (etype == elftypes[elfwalk].value)
-			return (elftypes[elfwalk].str);
-	return ("Unknown");
-}
-
-static int
-elftype(const char *elfstrtype)
-{
-	size_t elfwalk;
-
-	for (elfwalk = 0; elfwalk < nitems(elftypes); elfwalk++)
-		if (strcasecmp(elfstrtype, elftypes[elfwalk].str) == 0)
-			return (elftypes[elfwalk].value);
-	return (-1);
 }
 
 static void
 printelftypes(void)
 {
-	size_t elfwalk;
+	struct elftype *et;
 
 	fprintf(stderr, "known ELF types are: ");
-	for (elfwalk = 0; elfwalk < nitems(elftypes); elfwalk++)
-		fprintf(stderr, "%s(%u) ", elftypes[elfwalk].str,
-		    elftypes[elfwalk].value);
+	for (et = elftypes; et->name != NULL; et++)
+		fprintf(stderr, "%s(%u) ", et->name, et->value);
 	fprintf(stderr, "\n");
 }

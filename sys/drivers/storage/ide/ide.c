@@ -13,13 +13,13 @@
  * - Intel PIIX4 Bus Master IDE Controller Datasheet
  */
 
-#include <drivers/storage/ide.h>
-#include <arch/x86-common/include/io.h>
-#include <string.h>
 #include <stdio.h>
-#include <kern/console.h>
-#include <drivers/blkdev.h>
+#include <string.h>
 #include <sys/random.h>
+#include <kern/console.h>
+#include <drivers/storage/blkdev.h>
+#include <drivers/storage/ide/ide.h>
+#include <arch/x86-common/include/io.h>
 
 /*
  * ============================================================

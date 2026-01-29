@@ -46,6 +46,13 @@ static int kbd_shift = 0;
 static int kbd_ctrl  = 0;
 static int kbd_alt   = 0;
 
+static int kbd_lshift = 0;
+static int kbd_rshift = 0;
+static int kbd_lctrl  = 0;
+static int kbd_rctrl  = 0;
+static int kbd_lalt   = 0;
+static int kbd_ralt   = 0;
+
 static input_dev_t kbd_dev = {
     .name = "PS/2 Keyboard",
     .caps = (1 << EV_KEY),
@@ -76,37 +83,47 @@ void keyboard_handler(registers_t *regs) {
         goto out;
     }
 
+    // Handle modifiers
+    switch (scancode) {
+        case 0x2A: kbd_lshift = 1; goto update_mods;
+        case 0x36: kbd_rshift = 1; goto update_mods;
+        case 0xAA: kbd_lshift = 0; goto update_mods;
+        case 0xB6: kbd_rshift = 0; goto update_mods;
+
+        case 0x1D: // Ctrl
+            if (kbd_extended) kbd_rctrl = 1; else kbd_lctrl = 1;
+            if (kbd_extended) kbd_extended = 0;
+            goto update_mods;
+        case 0x9D: // Ctrl Release
+            if (kbd_extended) kbd_rctrl = 0; else kbd_lctrl = 0;
+            if (kbd_extended) kbd_extended = 0;
+            goto update_mods;
+
+        case 0x38: // Alt
+            if (kbd_extended) kbd_ralt = 1; else kbd_lalt = 1;
+            if (kbd_extended) kbd_extended = 0;
+            goto update_mods;
+        case 0xB8: // Alt Release
+            if (kbd_extended) kbd_ralt = 0; else kbd_lalt = 0;
+            if (kbd_extended) kbd_extended = 0;
+            goto update_mods;
+    }
+
     if (kbd_extended) {
-        // Handle extended scancodes
+        // Handle other extended scancodes
         kbd_extended = 0;
         goto out;
     }
 
-    // Handle modifiers
-    if (scancode == 0x2A || scancode == 0x36) { // LShift, RShift pressed
-        kbd_shift = 1;
-        goto out;
-    }
-    if (scancode == 0xAA || scancode == 0xB6) { // LShift, RShift released
-        kbd_shift = 0;
-        goto out;
-    }
-    if (scancode == 0x1D) { // Ctrl pressed
-        kbd_ctrl = 1;
-        goto out;
-    }
-    if (scancode == 0x9D) { // Ctrl released
-        kbd_ctrl = 0;
-        goto out;
-    }
-    if (scancode == 0x38) { // Alt pressed
-        kbd_alt = 1;
-        goto out;
-    }
-    if (scancode == 0xB8) { // Alt released
-        kbd_alt = 0;
-        goto out;
-    }
+    goto process_key;
+
+update_mods:
+    kbd_shift = kbd_lshift | kbd_rshift;
+    kbd_ctrl  = kbd_lctrl  | kbd_rctrl;
+    kbd_alt   = kbd_lalt   | kbd_ralt;
+    goto out;
+
+process_key:
 
     // Ignore keyups for now (bit 7 set)
     if (scancode & 0x80) {

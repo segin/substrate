@@ -99,13 +99,19 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t 
         }
     } else {
         // Map pages immediately for anonymous mappings
-        uint32_t pte_flags = PTE_P | PTE_U;
-        if (prot & PROT_WRITE) pte_flags |= PTE_W;
-        
         for (uint32_t virt = start_addr; virt < start_addr + length; virt += 0x1000) {
             void *page_virt = pmm_alloc_block();  // Returns virtual address
             if (!page_virt) {
-                // TODO: Cleanup partial mapping
+                // Cleanup partial mapping
+                for (uint32_t cleanup_virt = start_addr; cleanup_virt < virt; cleanup_virt += 0x1000) {
+                    uint32_t phys = pmap_extract(current_process->pmap, cleanup_virt);
+                    if (phys) {
+                        void *cleanup_page_virt = (void *)(phys + 0xC0000000);
+                        pmm_free_block(cleanup_page_virt);
+                        pmap_remove(current_process->pmap, cleanup_virt);
+                    }
+                }
+                vm_area_destroy(area);
                 return MAP_FAILED;
             }
             
@@ -115,7 +121,7 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t 
             
             // Convert virtual to physical for pmap_enter
             uint32_t page_phys = (uint32_t)(uintptr_t)page_virt - 0xC0000000;
-            pmap_enter(current_process->pmap, virt, page_phys, pte_flags);
+            pmap_enter(current_process->pmap, virt, page_phys, vm_prot, 0);
         }
     }
     
@@ -177,13 +183,10 @@ int sys_mprotect(void *addr, size_t length, int prot) {
     if (prot & PROT_EXEC) area->vm_prot |= VM_EXEC;
     
     // Update page table entries
-    uint32_t pte_flags = PTE_P | PTE_U;
-    if (prot & PROT_WRITE) pte_flags |= PTE_W;
-    
     for (uint32_t virt = start; virt < end; virt += 0x1000) {
         uint32_t phys = pmap_extract(current_process->pmap, virt);
         if (phys) {
-            pmap_enter(current_process->pmap, virt, phys, pte_flags);
+            pmap_enter(current_process->pmap, virt, phys, area->vm_prot, 0);
         }
     }
     
