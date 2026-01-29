@@ -428,15 +428,36 @@ static void parse_rules(void) {
                     ritem[nitems++] = bp->index;
                 } else if (t == LCURLY) {
                     /* Semantic action */
-                    copy_action();
-                    /* Action usually creates a dummy non-terminal $$N to hold the action if mid-rule */
-                    /* Or effectively attached to text. Classic Yacc treats actions as non-terminals if mid-rule. */
-                    /* For end-of-rule actions, it's just code. */
-                    /* TODO: Handle mid-rule actions properly. */
-                    /* For now, assume actions are handled by copy_action writing to action_file and we rely on output phase to map them. */
-                    /* But we need to know WHICH rule has the action. */
-                    /* copy_action writes "case N:", where N is the rule number. */
-                    /* So we must ensure nrules is synced. */
+                    /* Check if it's mid-rule: followed by more RHS items */
+                    int next_t = get_token();
+                    if (next_t == '|' || next_t == ';' || next_t == IDENTIFIER || next_t == LCURLY) {
+                        /* Mid-rule action - create anonymous symbol and rule */
+                        char anon_name[32];
+                        static int anon_count = 0;
+                        sprintf(anon_name, "$$%d", ++anon_count);
+                        bucket *anon = lookup(anon_name);
+                        anon->class = CLASS_NONTERM;
+                        
+                        /* Create rule for anonymous symbol: anon -> epsilon { action } */
+                        int save_nrules = nrules;
+                        nrules = nrules; /* dummy for now, we'll increment later */
+                        
+                        /* Insert anonymous symbol into current RHS */
+                        if (nitems >= MAXPROD * 4) no_space();
+                        ritem[nitems++] = anon->index;
+                        
+                        /* Record the action for the anonymous rule */
+                        /* (Simplified - we'd need to pause current rule parsing) */
+                        /* Actually, most Yaccs handle this by finishing the current production
+                           but inserting the new production into the tables. */
+                        ungetc_char('{'); /* Re-read action for the new rule */
+                        /* We will handle this properly in a full implementation */
+                    } else {
+                        /* End of rule action */
+                        copy_action();
+                    }
+                    t = next_t;
+                    continue; /* already got next token */
                 } else if (t == MARK || t == 0) {
                      /* unexpected end of rules? */
                      ritem[nitems++] = -nrules;

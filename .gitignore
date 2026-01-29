@@ -82,3 +82,9 @@ qemu.pid
 boot_output.txt
 bin_dirs.txt
 debug_tls.gdb
+
+# Yacc test and generated files
+y.tab.c
+y.tab.h
+y.output
+test_output.txt

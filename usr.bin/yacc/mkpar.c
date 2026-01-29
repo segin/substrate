@@ -24,6 +24,8 @@ static void remove_conflicts(void);
 static void resolve_conflict(int state, action *a, action *b);
 static void total_conflicts(void);
 static void defreds(void);
+static void build_goto_table(void);
+static void build_yytable(void);
 static void free_action_row(action *a);
 
 void make_parser(void) {
@@ -44,16 +46,58 @@ void make_parser(void) {
     remove_conflicts();
     total_conflicts();
     defreds();
+    build_goto_table();
+    build_yytable();
 }
+
 
 static action *parse_actions(int stateno) {
     action *alist = NULL;
+    shifts *sp;
+    reductions *rp;
+    int i;
     
-    /* Add shift actions from shifts for this state */
-    /* Add reduce actions from reductions for this state with lookaheads */
+    /* Find shifts for this state */
+    for (sp = first_shift; sp != NULL; sp = sp->next) {
+        if (sp->number == stateno) {
+            /* Add a shift action for each transition */
+            for (i = 0; i < sp->nshifts; i++) {
+                int dest = sp->shift[i];
+                int symbol = accessing_symbol[dest];
+                if (symbol < ntokens) {  /* Terminal = shift */
+                    alist = add_shift(alist, symbol, dest);
+                }
+            }
+            break;
+        }
+    }
+    
+    /* Find reductions for this state */
+    for (rp = first_reduction; rp != NULL; rp = rp->next) {
+        if (rp->number == stateno) {
+            /* Add reduce action for each rule */
+            for (i = 0; i < rp->nreds; i++) {
+                int ruleno = rp->rules[i];
+                /* For now, reduce on all tokens (LR(0) behavior) */
+                /* LALR would use LA sets here */
+                action *a = (action *)malloc(sizeof(action));
+                if (a == NULL) no_space();
+                a->next = alist;
+                a->symbol = -1;  /* All tokens (default) */
+                a->number = ruleno;
+                a->prec = 0;
+                a->action_code = REDUCE;
+                a->assoc = NO_ASSOC;
+                a->suppressed = 0;
+                alist = a;
+            }
+            break;
+        }
+    }
     
     return alist;
 }
+
 
 static action *add_shift(action *alist, int symbol, int state) {
     action *a;
@@ -98,13 +142,57 @@ static action *add_reduce(action *alist, int ruleno, short *la) {
     return alist;
 }
 
+short *yydgoto;
+short *yygindex;
+static short *goto_base;
+
 static void find_final_state(void) {
-    /* Find the accept state: state reached after shifting start symbol */
-    /* The accept state reduces by rule 0: $accept -> start $end */
-    final_state = -1;
+    int i;
+    shifts *sp;
     
-    /* Search for state where we've recognized the goal */
+    /* State 0 shifts on goal_symbol to final_state */
+    final_state = -1;
+    for (sp = first_shift; sp != NULL; sp = sp->next) {
+        if (sp->number == 0) {
+            for (i = 0; i < sp->nshifts; i++) {
+                int dest = sp->shift[i];
+                if (accessing_symbol[dest] == goal_symbol->index) {
+                    final_state = dest;
+                    return;
+                }
+            }
+        }
+    }
 }
+
+static void build_goto_table(void) {
+    int i, j;
+    shifts *sp;
+    
+    yydgoto = (short *)calloc(nvars, sizeof(short));
+    yygindex = (short *)calloc(nvars, sizeof(short));
+    if (yydgoto == NULL || yygindex == NULL) no_space();
+    
+    /* For each non-terminal, find all states it transitions from */
+    for (i = 0; i < nvars; i++) {
+        int sym = ntokens + i;
+        int default_dest = -1;
+        int max_count = 0;
+        
+        /* Find the most common destination to use as default */
+        /* (Simplified: just find any transition for now) */
+        for (sp = first_shift; sp != NULL; sp = sp->next) {
+            for (j = 0; j < sp->nshifts; j++) {
+                int dest = sp->shift[j];
+                if (accessing_symbol[dest] == sym) {
+                    yydgoto[i] = dest;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 
 static void remove_conflicts(void) {
     int i;
@@ -191,10 +279,203 @@ static void total_conflicts(void) {
     }
 }
 
-static void defreds(void) {
-    /* Compute default reductions for each state */
-    /* If a state has only one reduce action, it can be the default */
+short *yydefred;
+short *yysindex;
+short *yyrindex;
+short *yytable;
+short *yycheck;
+int yytable_size;
+
+static void build_yytable(void) {
+    int i, j;
+    action *a;
+    
+    yytable_size = nstates * 3 + ntokens + 100; /* Conservative guess */
+    yytable = (short *)calloc(yytable_size, sizeof(short));
+    yycheck = (short *)calloc(yytable_size, sizeof(short));
+    yysindex = (short *)calloc(nstates, sizeof(short));
+    yyrindex = (short *)calloc(nstates, sizeof(short));
+    
+    if (yytable == NULL || yycheck == NULL || yysindex == NULL || yyrindex == NULL)
+        no_space();
+    
+    for (i = 0; i < yytable_size; i++) yycheck[i] = -1;
+    
+    /* For each state's shift actions */
+    for (i = 0; i < nstates; i++) {
+        int base = -1;
+        int found = 0;
+        
+        /* Find SHIFTs */
+        int has_shifts = 0;
+        for (a = parser[i]; a != NULL; a = a->next) {
+            if (a->action_code == SHIFT && !a->suppressed) {
+                has_shifts = 1;
+                break;
+            }
+        }
+        
+        if (!has_shifts) {
+            yysindex[i] = 0;
+            continue;
+        }
+        
+        /* Find fit for shifts */
+        for (base = 0; base < yytable_size - ntokens; base++) {
+            int ok = 1;
+            for (a = parser[i]; a != NULL; a = a->next) {
+                if (a->action_code == SHIFT && !a->suppressed) {
+                    if (yycheck[base + a->symbol] != -1) {
+                        ok = 0;
+                        break;
+                    }
+                }
+            }
+            if (ok) {
+                found = 1;
+                break;
+            }
+        }
+        
+        if (found) {
+            yysindex[i] = base;
+            for (a = parser[i]; a != NULL; a = a->next) {
+                if (a->action_code == SHIFT && !a->suppressed) {
+                    yytable[base + a->symbol] = a->number;
+                    yycheck[base + a->symbol] = a->symbol;
+                }
+            }
+        }
+    }
+    
+    /* For each state's reduce actions */
+    for (i = 0; i < nstates; i++) {
+        int base = -1;
+        int found = 0;
+        int defred = yydefred[i];
+        
+        int has_reduces = 0;
+        for (a = parser[i]; a != NULL; a = a->next) {
+            if (a->action_code == REDUCE && !a->suppressed && a->number != defred) {
+                has_reduces = 1;
+                break;
+            }
+        }
+        
+        if (!has_reduces) {
+            yyrindex[i] = 0;
+            continue;
+        }
+        
+        for (base = 0; base < yytable_size - ntokens; base++) {
+            int ok = 1;
+            for (a = parser[i]; a != NULL; a = a->next) {
+                if (a->action_code == REDUCE && !a->suppressed && a->number != defred) {
+                    if (yycheck[base + a->symbol] != -1) {
+                        ok = 0;
+                        break;
+                    }
+                }
+            }
+            if (ok) {
+                found = 1;
+                break;
+            }
+        }
+        
+        if (found) {
+            yyrindex[i] = base;
+            for (a = parser[i]; a != NULL; a = a->next) {
+                if (a->action_code == REDUCE && !a->suppressed && a->number != defred) {
+                    yytable[base + a->symbol] = -a->number;
+                    yycheck[base + a->symbol] = a->symbol;
+                }
+            }
+        }
+    }
+
+    /* For each non-terminal's goto transitions */
+    for (i = 0; i < nvars; i++) {
+        int base = -1;
+        int found = 0;
+        int sym = ntokens + i;
+        
+        /* Check if this variable has any non-default transitions */
+        /* (Simplified - just fit all transitions for now) */
+        for (base = 0; base < yytable_size - nstates; base++) {
+            int ok = 1;
+            shifts *sp;
+            for (sp = first_shift; sp != NULL; sp = sp->next) {
+                for (j = 0; j < sp->nshifts; j++) {
+                    int dest = sp->shift[j];
+                    if (accessing_symbol[dest] == sym) {
+                        if (yycheck[base + sp->number] != -1) {
+                            ok = 0;
+                            break;
+                        }
+                    }
+                }
+                if (!ok) break;
+            }
+            if (ok) {
+                found = 1;
+                break;
+            }
+        }
+
+        if (found) {
+            yygindex[i] = base;
+            shifts *sp;
+            for (sp = first_shift; sp != NULL; sp = sp->next) {
+                for (j = 0; j < sp->nshifts; j++) {
+                    int dest = sp->shift[j];
+                    if (accessing_symbol[dest] == sym) {
+                        yytable[base + sp->number] = dest;
+                        yycheck[base + sp->number] = sp->number;
+                    }
+                }
+            }
+        }
+    }
 }
+
+
+static void defreds(void) {
+    int i;
+    action *a;
+    int reduce_count;
+    int reduce_rule;
+    
+    /* Allocate yydefred array */
+    yydefred = (short *)malloc(nstates * sizeof(short));
+    if (yydefred == NULL) no_space();
+    
+    /* Compute default reductions for each state */
+    for (i = 0; i < nstates; i++) {
+        reduce_count = 0;
+        reduce_rule = 0;
+        
+        /* Count reduce actions (not suppressed) */
+        for (a = parser[i]; a != NULL; a = a->next) {
+            if (a->action_code == REDUCE && !a->suppressed) {
+                if (reduce_count == 0) {
+                    reduce_rule = a->number;
+                    reduce_count = 1;
+                } else if (reduce_rule != a->number) {
+                    reduce_count = 2;  /* Multiple different rules */
+                }
+            }
+        }
+        
+        /* If only one reduce rule, make it the default */
+        if (reduce_count == 1) {
+            yydefred[i] = reduce_rule;
+        } else {
+            yydefred[i] = 0;  /* No default */
+        }
+    }
+}
+
 
 static void free_action_row(action *a) {
     action *next;

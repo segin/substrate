@@ -23,8 +23,8 @@ fail() {
 
 # Test 1: yacc builds successfully
 test_build() {
-    make clean >/dev/null 2>&1
-    if make >/dev/null 2>&1; then
+    make clean
+    if make; then
         pass "yacc builds without errors"
     else
         fail "yacc build failed"

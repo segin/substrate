@@ -17,13 +17,20 @@ int nstates;
 static core **state_set;        /* Hash table for states */
 static core *first_state;       /* Linked list of all states */
 static core *last_state;
-static int nshifts;             /* Number of shifts */
+static int current_nshifts;     /* Number of shifts for current state */
 static short *shift_symbol;     /* Symbols we shift on */
 static short *redset;           /* Reduction set */
 static short *shiftset;         /* Shift set */
 static short *kernel_base;      /* Base of kernel items per state */
 static short *kernel_end;       /* End of kernel items per state */
 static short *kernel_items;     /* Kernel item storage */
+
+/* Global shift/reduction lists */
+shifts *first_shift = NULL;
+shifts *last_shift = NULL;
+reductions *first_reduction = NULL;
+reductions *last_reduction = NULL;
+short *accessing_symbol;        /* Symbol to reach each state */
 
 #define STATE_TABLE_SIZE 1024
 
@@ -97,10 +104,15 @@ static void set_state_table(void) {
     for (i = 0; i < STATE_TABLE_SIZE; i++)
         state_set[i] = NULL;
     
+    /* Allocate accessing_symbol for max states */
+    accessing_symbol = (short *)malloc(MAXSTATE * sizeof(short));
+    if (accessing_symbol == NULL) no_space();
+    
     first_state = NULL;
     last_state = NULL;
     nstates = 0;
 }
+
 
 static void initialize_states(void) {
     int i;
@@ -134,11 +146,13 @@ static void initialize_states(void) {
     
     first_state = sp;
     last_state = sp;
+    accessing_symbol[0] = 0;  /* State 0 reached by nothing */
     nstates = 1;
     
     /* Hash the state (state 0 is special, just store it) */
     state_set[0] = sp;
 }
+
 
 /* Compute GOTO for all symbols from current state's closure */
 static void new_item_sets(void) {
@@ -152,7 +166,7 @@ static void new_item_sets(void) {
         kernel_base[i] = -1;
         kernel_end[i] = -1;
     }
-    nshifts = 0;
+    current_nshifts = 0;
     
     /* Scan closure items - for each item A -> α.Xβ, add A -> αX.β to kernel(X) */
     for (isp = item_set; isp < item_set_end; isp++) {
@@ -163,7 +177,7 @@ static void new_item_sets(void) {
             /* Add item+1 to kernel for symbol */
             if (kernel_base[symbol] < 0) {
                 /* First item for this symbol */
-                shift_symbol[nshifts++] = symbol;
+                shift_symbol[current_nshifts++] = symbol;
                 kernel_base[symbol] = 0;  /* Will be set properly below */
             }
         }
@@ -172,7 +186,7 @@ static void new_item_sets(void) {
     /* Now do a second pass to actually store items */
     /* Reset and accumulate counts first */
     count = 0;
-    for (i = 0; i < nshifts; i++) {
+    for (i = 0; i < current_nshifts; i++) {
         symbol = shift_symbol[i];
         kernel_base[symbol] = count;
         kernel_end[symbol] = count;
@@ -247,11 +261,15 @@ static core *new_state(int symbol) {
     
     sp->next = NULL;
     sp->link = NULL;
-    sp->number = nstates++;
+    sp->number = nstates;
     sp->accessing_symbol = symbol;
     sp->nitems = n;
     sp->items = (short *)malloc(n * sizeof(short));
     if (sp->items == NULL) no_space();
+    
+    /* Record accessing symbol for this state */
+    accessing_symbol[nstates] = symbol;
+    nstates++;
     
     /* Copy kernel items */
     isp1 = kernel_items + kernel_base[symbol];
@@ -266,6 +284,7 @@ static core *new_state(int symbol) {
     last_state = sp;
     
     return sp;
+
 }
 
 static void append_states(void) {
@@ -273,7 +292,7 @@ static void append_states(void) {
     int symbol;
     
     /* For each shift symbol, get or create destination state */
-    for (i = 0; i < nshifts; i++) {
+    for (i = 0; i < current_nshifts; i++) {
         symbol = shift_symbol[i];
         shiftset[i] = get_state(symbol);
     }
@@ -283,18 +302,26 @@ static void save_shifts(void) {
     shifts *sp;
     int i;
     
-    if (nshifts == 0) return;
+    if (current_nshifts == 0) return;
     
-    sp = (shifts *)malloc(sizeof(shifts) + (nshifts - 1) * sizeof(short));
+    sp = (shifts *)malloc(sizeof(shifts) + (current_nshifts - 1) * sizeof(short));
     if (sp == NULL) no_space();
     
+    sp->next = NULL;
     sp->number = nstates - 1;  /* Current state being processed */
-    sp->nshifts = nshifts;
-    for (i = 0; i < nshifts; i++)
+    sp->nshifts = current_nshifts;
+    for (i = 0; i < current_nshifts; i++)
         sp->shift[i] = shiftset[i];
     
-    /* Link into shifts list (to be done - store in global) */
+    /* Link into global shifts list */
+    if (last_shift) {
+        last_shift->next = sp;
+    } else {
+        first_shift = sp;
+    }
+    last_shift = sp;
 }
+
 
 static void save_reductions(void) {
     int count;
@@ -315,13 +342,21 @@ static void save_reductions(void) {
     rp = (reductions *)malloc(sizeof(reductions) + (count - 1) * sizeof(short));
     if (rp == NULL) no_space();
     
+    rp->next = NULL;
     rp->number = nstates - 1;
     rp->nreds = count;
     for (i = 0; i < count; i++)
         rp->rules[i] = redset[i];
     
-    /* Link into reductions list (to be done) */
+    /* Link into global reductions list */
+    if (last_reduction) {
+        last_reduction->next = rp;
+    } else {
+        first_reduction = rp;
+    }
+    last_reduction = rp;
 }
+
 
 static void generate_states(void) {
     core *sp;

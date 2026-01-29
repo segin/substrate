@@ -158,6 +158,27 @@ extern bucket *first_symbol;
 extern bucket *last_symbol;
 extern bucket *symbol_table[];
 
+/* LR(0) shift/reduction lists (defined in lr0.c) */
+extern shifts *first_shift;
+extern shifts *last_shift;
+extern reductions *first_reduction;
+extern reductions *last_reduction;
+extern short *accessing_symbol;  /* Symbol to reach each state */
+
+/* Parser tables (defined in mkpar.c) */
+extern action **parser;          /* ACTION table */
+extern short *yydefred;          /* Default reduction for each state */
+extern short *yydgoto;           /* GOTO table */
+extern short *yysindex;          /* Shift index table */
+extern short *yyrindex;          /* Reduce index table */
+extern short *yygindex;          /* Goto index table */
+extern short *yytable;           /* Compressed action/goto table */
+extern short *yycheck;           /* Check table for compression */
+extern int yytable_size;         /* Size of yytable/yycheck */
+extern short final_state;        /* Accept state */
+extern int SRtotal;              /* Shift/reduce conflict count */
+extern int RRtotal;              /* Reduce/reduce conflict count */
+
 /* Reader state globals if needed */
 
 /* -- Prototypes -- */

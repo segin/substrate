@@ -91,26 +91,60 @@ static void set_nullable(void) {
     } while (changed);
 }
 
-/* Build GOTO map from state transitions */
 static void set_goto_map(void) {
-    int i;
+    int i, j;
+    shifts *sp;
+    int count;
+    short *temp_map;
     
-    /* Count gotos (shifts on non-terminals) */
-    /* For now, estimate based on nstates and nvars */
-    ngotos = nstates * 2;  /* Conservative estimate */
+    /* First pass: count total gotos and gotos per symbol */
+    ngotos = 0;
+    temp_map = (short *)calloc(nvars + 1, sizeof(short));
+    if (temp_map == NULL) no_space();
     
+    for (sp = first_shift; sp != NULL; sp = sp->next) {
+        for (i = 0; i < sp->nshifts; i++) {
+            int dest = sp->shift[i];
+            int sym = accessing_symbol[dest];
+            if (sym >= ntokens) {  /* Non-terminal = GOTO */
+                ngotos++;
+                temp_map[sym - ntokens]++;
+            }
+        }
+    }
+    
+    /* Allocate arrays */
     goto_map = (short *)calloc(nvars + 1, sizeof(short));
     from_state = (short *)malloc(ngotos * sizeof(short));
     to_state = (short *)malloc(ngotos * sizeof(short));
-    
     if (goto_map == NULL || from_state == NULL || to_state == NULL)
         no_space();
     
-    /* In a real implementation, iterate through shift actions
-       on non-terminals to populate these arrays */
-    for (i = 0; i <= nvars; i++)
-        goto_map[i] = 0;
+    /* Build goto_map as cumulative index */
+    count = 0;
+    for (i = 0; i < nvars; i++) {
+        goto_map[i] = count;
+        count += temp_map[i];
+        temp_map[i] = goto_map[i]; /* Reuse temp_map to track current insertion point */
+    }
+    goto_map[nvars] = count;
+    
+    /* Second pass: populate from_state and to_state */
+    for (sp = first_shift; sp != NULL; sp = sp->next) {
+        for (i = 0; i < sp->nshifts; i++) {
+            int dest = sp->shift[i];
+            int sym = accessing_symbol[dest];
+            if (sym >= ntokens) {
+                int index = temp_map[sym - ntokens]++;
+                from_state[index] = sp->number;
+                to_state[index] = dest;
+            }
+        }
+    }
+    
+    free(temp_map);
 }
+
 
 /* Initialize FIRST sets */
 static void initialize_F(void) {
@@ -155,30 +189,133 @@ static void initialize_F(void) {
     } while (changed);
 }
 
-/* Allocate lookahead sets */
+static int nreductions;
+
 static void initialize_LA(void) {
+    int i, j;
+    reductions *rp;
     int nwords;
     
     nwords = WORDSIZE(ntokens);
-    LA = (unsigned *)calloc(nrules * nwords, sizeof(unsigned));
+    nreductions = 0;
+    for (rp = first_reduction; rp != NULL; rp = rp->next) {
+        nreductions += rp->nreds;
+    }
+    
+    LA = (unsigned *)calloc(nreductions * nwords, sizeof(unsigned));
     if (LA == NULL) no_space();
     
-    /* For the accept rule, add $end to lookahead */
-    /* Rule 0: $accept -> start $end */
-    SETBIT(LA, 0);  /* $end is token 0 */
+    /* Initially, only rule 0 (accept) gets $end token if it's there */
+    /* Find which reduction is for rule 0 */
+    int red_idx = 0;
+    for (rp = first_reduction; rp != NULL; rp = rp->next) {
+        for (i = 0; i < rp->nreds; i++) {
+            if (rp->rules[i] == 0) {  /* Rule 0: $accept -> start $end */
+                SETBIT(LA + red_idx * nwords, 0);  /* Token 0 is $end */
+            }
+            red_idx++;
+        }
+    }
 }
 
-/* Build READS and INCLUDES relations */
+
+static int map_goto(int state, int symbol) {
+    shifts *sp;
+    int i;
+    for (sp = first_shift; sp != NULL; sp = sp->next) {
+        if (sp->number == state) {
+            for (i = 0; i < sp->nshifts; i++) {
+                int dest = sp->shift[i];
+                if (accessing_symbol[dest] == symbol)
+                    return dest;
+            }
+            return -1;
+        }
+    }
+    return -1;
+}
+
 static void build_relations(void) {
-    /* READS relation: for gotos, what terminals can follow */
-    /* INCLUDES relation: lookahead propagation through grammar */
+    int i, j, k;
+    reductions *rp;
+    shifts *sp;
+    int nwords = WORDSIZE(ntokens);
     
     /* Allocate relation arrays */
     includes = (short **)calloc(ngotos, sizeof(short *));
-    lookback = (short **)calloc(nrules, sizeof(short *));
+    lookback = (short **)calloc(nreductions, sizeof(short *));
     if (includes == NULL || lookback == NULL)
         no_space();
+    
+    /* For each goto (q, A) -> p */
+    for (i = 0; i < ngotos; i++) {
+        int q = from_state[i];
+        int p = to_state[i];
+        int A = accessing_symbol[p];
+        
+        /* READS relation: terminals that can follow A in this context */
+        /* For each goto (p, B) -> r, if B is nullable, READS includes READS(p, B) */
+        /* Also terminals shifted from p are added to F[i] */
+        shifts *sp;
+        for (sp = first_shift; sp != NULL; sp = sp->next) {
+            if (sp->number == p) {
+                for (j = 0; j < sp->nshifts; j++) {
+                    int dest = sp->shift[j];
+                    int sym = accessing_symbol[dest];
+                    if (sym < ntokens) {
+                        SETBIT(F + i * nwords, sym);
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    /* lookback relation: map reductions to gotos they can propagation-back to */
+    int red_idx = 0;
+    for (rp = first_reduction; rp != NULL; rp = rp->next) {
+        int r = rp->number;
+        for (i = 0; i < rp->nreds; i++) {
+            int ruleno = rp->rules[i];
+            /* Find state q before the reduction: q -> RHS -> r */
+            int q = r;
+            int rhs_start = rrhs[ruleno];
+            int len = 0;
+            while (ritem[rhs_start + len] >= 0) len++;
+            
+            for (j = len - 1; j >= 0; j--) {
+                int sym = ritem[rhs_start + j];
+                /* find p such that p --sym--> q */
+                shifts *tmp_sp;
+                int found = 0;
+                for (tmp_sp = first_shift; tmp_sp != NULL; tmp_sp = tmp_sp->next) {
+                    for (k = 0; k < tmp_sp->nshifts; k++) {
+                        if (tmp_sp->shift[k] == q && accessing_symbol[q] == sym) {
+                            q = tmp_sp->number;
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (found) break;
+                }
+            }
+            
+            /* q is now the state before the rule's RHS. 
+               The reduction corresponds to the goto from q on lhs. */
+            int lhs = plhs[ruleno];
+            for (j = goto_map[lhs - ntokens]; j < goto_map[lhs - ntokens + 1]; j++) {
+                if (from_state[j] == q) {
+                    /* In a full implementation, we'd record this link 
+                       to propagate lookaheads from GOTO j to REDUCTION red_idx. */
+                    break;
+                }
+            }
+            red_idx++;
+        }
+    }
 }
+
+
 
 /* Compute FOLLOW sets using digraph algorithm */
 static void compute_FOLLOWS(void) {
@@ -189,8 +326,22 @@ static void compute_FOLLOWS(void) {
 
 /* Propagate lookaheads to reductions */
 static void compute_lookaheads(void) {
-    /* For each reduction, union lookaheads from lookback gotos */
-    /* LA[rule] = union of F[goto] for all gotos in lookback[rule] */
+    int i, j, k;
+    int nwords = WORDSIZE(ntokens);
+    reductions *rp;
+    int red_idx = 0;
+    
+    for (rp = first_reduction; rp != NULL; rp = rp->next) {
+        for (i = 0; i < rp->nreds; i++) {
+            unsigned *la = LA + red_idx * nwords;
+            /* In a full implementation, we'd union lookaheads from related gotos.
+               For this phase, ensure at least rule 0 has $end. */
+            if (rp->rules[i] == 0) {
+                SETBIT(la, 0);
+            }
+            red_idx++;
+        }
+    }
 }
 
 /* DeRemer-Pennello digraph algorithm for transitive closure */

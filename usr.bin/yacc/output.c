@@ -147,33 +147,59 @@ static void output_rule_data(void) {
 }
 
 static void output_yydefred(void) {
-    /* Output default reductions */
-    fprintf(output_file, "/* Default reductions */\n");
+    int i;
+    
+    /* Output default reductions from yydefred array */
+    fprintf(output_file, "/* Default reductions (0 = none) */\n");
     fprintf(output_file, "static const short yydefred[] = {\n");
-    /* For each state, output default reduction rule number (or 0) */
+    for (i = 0; i < nstates; i++) {
+        fprintf(output_file, "  %d,\n", yydefred[i]);
+    }
     fprintf(output_file, "};\n\n");
 }
 
 static void output_actions(void) {
-    /* Output compressed ACTION table */
-    fprintf(output_file, "/* Parser actions (compressed) */\n");
-    /* This uses pair displacement compression */
+    int i;
+    fprintf(output_file, "/* Shift index table */\n");
+    fprintf(output_file, "static const short yysindex[] = {\n");
+    for (i = 0; i < nstates; i++) fprintf(output_file, "  %d,\n", yysindex[i]);
+    fprintf(output_file, "};\n\n");
+    
+    fprintf(output_file, "/* Reduce index table */\n");
+    fprintf(output_file, "static const short yyrindex[] = {\n");
+    for (i = 0; i < nstates; i++) fprintf(output_file, "  %d,\n", yyrindex[i]);
+    fprintf(output_file, "};\n\n");
+    
+    fprintf(output_file, "/* Goto index table */\n");
+    fprintf(output_file, "static const short yygindex[] = {\n");
+    for (i = 0; i < nvars; i++) fprintf(output_file, "  %d,\n", yygindex[i]);
+    fprintf(output_file, "};\n\n");
 }
 
 static void output_base(void) {
-    /* Output table base offsets */
-    fprintf(output_file, "/* Table offsets */\n");
+    int i;
+    fprintf(output_file, "/* Default GOTO destinations */\n");
+    fprintf(output_file, "static const short yydgoto[] = {\n");
+    for (i = 0; i < nvars; i++) fprintf(output_file, "  %d,\n", yydgoto[i]);
+    fprintf(output_file, "};\n\n");
 }
 
 static void output_table(void) {
-    /* Output main parser table */
-    fprintf(output_file, "/* Parser table */\n");
+    int i;
+    fprintf(output_file, "/* Compressed parser table */\n");
+    fprintf(output_file, "static const short yytable[] = {\n");
+    for (i = 0; i < yytable_size; i++) fprintf(output_file, "  %d,\n", yytable[i]);
+    fprintf(output_file, "};\n\n");
 }
 
 static void output_check(void) {
-    /* Output table check values */
-    fprintf(output_file, "/* Check values for table access */\n");
+    int i;
+    fprintf(output_file, "/* Table verification check */\n");
+    fprintf(output_file, "static const short yycheck[] = {\n");
+    for (i = 0; i < yytable_size; i++) fprintf(output_file, "  %d,\n", yycheck[i]);
+    fprintf(output_file, "};\n\n");
 }
+
 
 static void output_parser(void) {
     /* Output the yyparse() function - complete skeleton */
@@ -228,13 +254,22 @@ static void output_parser(void) {
     fprintf(output_file, "        if (yychar < 0) yychar = 0; /* EOF */\n");
     fprintf(output_file, "    }\n\n");
     
-    fprintf(output_file, "    /* Shift action? */\n");
-    fprintf(output_file, "    /* TODO: Table lookup for shift */\n");
-    fprintf(output_file, "    /* yyn = yysindex[yystate] + yychar; */\n");
-    fprintf(output_file, "    /* if (check_bounds && yytable[yyn] == yychar) goto yyshift; */\n\n");
-    
-    fprintf(output_file, "    /* Reduce action? */\n");
-    fprintf(output_file, "    /* TODO: Table lookup for reduce */\n\n");
+    fprintf(output_file, "    /* Shift action check */\n");
+    fprintf(output_file, "    yyn = yysindex[yystate];\n");
+    fprintf(output_file, "    if (yyn != 0 && (yyn += yychar) >= 0 && yyn < %d && yycheck[yyn] == yychar) {\n", yytable_size);
+    fprintf(output_file, "        yyn = yytable[yyn];\n");
+    fprintf(output_file, "        goto yyshift;\n");
+    fprintf(output_file, "    }\n");
+    fprintf(output_file, "    \n");
+    fprintf(output_file, "    /* Reduce action check */\n");
+    fprintf(output_file, "    yyn = yyrindex[yystate];\n");
+    fprintf(output_file, "    if (yyn != 0 && (yyn += yychar) >= 0 && yyn < %d && yycheck[yyn] == yychar) {\n", yytable_size);
+    fprintf(output_file, "        yyn = -yytable[yyn];\n");
+    fprintf(output_file, "        goto yyreduce;\n");
+    fprintf(output_file, "    }\n");
+    fprintf(output_file, "    \n");
+    fprintf(output_file, "    /* Check for accept: state with shift on $end (token 0) */\n");
+    fprintf(output_file, "    if (yychar == 0 && yystate == %d) goto yyaccept;\n\n", final_state);
     
     fprintf(output_file, "    /* Error handling */\n");
     fprintf(output_file, "    if (yyerrflag == 0) {\n");
@@ -259,13 +294,16 @@ static void output_parser(void) {
     fprintf(output_file, "    yyval = yyvsp[1]; /* Default $$ = $1 */\n");
     fprintf(output_file, "    \n");
     fprintf(output_file, "    /* Execute semantic action */\n");
-    fprintf(output_file, "    switch (yyn) {\n");
-    fprintf(output_file, "    /* Semantic actions will be inserted here */\n");
-    fprintf(output_file, "    }\n");
+    output_semantic_actions();
     fprintf(output_file, "    \n");
     fprintf(output_file, "    /* Push result */\n");
-    fprintf(output_file, "    /* TODO: GOTO table lookup */\n");
-    fprintf(output_file, "    /* yystate = yypgoto[yylhs[yyn]] + *yyssp; */\n");
+    fprintf(output_file, "    /* GOTO: new state based on LHS symbol */\n");
+    fprintf(output_file, "    yystate = yylhs[yyn];\n");
+    fprintf(output_file, "    yyn = yygindex[yystate];\n");
+    fprintf(output_file, "    if (yyn != 0 && (yyn += *yyssp) >= 0 && yyn < %d && yycheck[yyn] == *yyssp)\n", yytable_size);
+    fprintf(output_file, "        yystate = yytable[yyn];\n");
+    fprintf(output_file, "    else\n");
+    fprintf(output_file, "        yystate = yydgoto[yystate];\n");
     fprintf(output_file, "    *++yyssp = yystate;\n");
     fprintf(output_file, "    *++yyvsp = yyval;\n");
     fprintf(output_file, "    goto yyloop;\n\n");
@@ -280,14 +318,20 @@ static void output_parser(void) {
 
 
 static void output_semantic_actions(void) {
-    /* Output semantic action switch */
-    fprintf(output_file, "/* Semantic actions */\n");
-    fprintf(output_file, "static void yyaction(int rule, YYSTYPE *yyvsp, YYSTYPE *yyval) {\n");
-    fprintf(output_file, "    switch (rule) {\n");
-    /* For each rule with an action, output case statement */
-    /* Copy action code from action_file */
+    int c;
+    
+    if (action_file == NULL) return;
+    
+    /* Rewind action_file to the beginning for reading */
+    rewind(action_file);
+    
+    /* Copy actions from action_file to output_file */
+    while ((c = getc(action_file)) != EOF) {
+        putc_code(output_file, c);
+    }
+    
+    /* Close the switch block */
     fprintf(output_file, "    }\n");
-    fprintf(output_file, "}\n\n");
 }
 
 static void output_trailing_text(void) {
