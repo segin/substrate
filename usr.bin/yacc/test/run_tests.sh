@@ -201,7 +201,20 @@ test_yymaxdepth
 test_yylex_extern
 test_yyerror_extern
 test_yyreduce
+# Test 16: Semantic action $$ translation
+test_dollar_dollar() {
+    $YACC $TESTDIR/minimal.y 2>/dev/null
+    if grep -q "yyval" y.tab.c; then
+        pass "Semantic action $$ translated to yyval"
+    else
+        fail "$$ not translated"
+    fi
+}
+
 test_yyshift
+
+# New tests
+test_dollar_dollar
 
 echo ""
 echo "=== Results ==="

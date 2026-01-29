@@ -26,9 +26,15 @@ static void copy_action(void);
 
 /* ... */
 
+/* Track current rule's RHS length for $N translation */
+static int action_rule_len;
+
 static void copy_action(void) {
     int c;
     int depth = 1;
+    
+    /* Calculate rule length from current item position */
+    /* For now, track during RHS parsing */
     
     fprintf(action_file, "case %d:\n", nrules);
     fprintf(action_file, "{");
@@ -47,12 +53,50 @@ static void copy_action(void) {
             return;
         }
         
-        /* TODO: Translate $$ and $n references */
-        
-        putc(c, action_file);
+        /* Translate $$ and $N references */
+        if (c == '$') {
+            c = nextc();
+            if (c == '$') {
+                /* $$ -> yyval */
+                fprintf(action_file, "yyval");
+            } else if (c == '-' || isdigit(c)) {
+                /* $N or $-N -> yyvsp[offset] */
+                int neg = 0;
+                int n = 0;
+                if (c == '-') {
+                    neg = 1;
+                    c = nextc();
+                }
+                while (isdigit(c)) {
+                    n = n * 10 + (c - '0');
+                    c = nextc();
+                }
+                ungetc_char(c);
+                if (neg) n = -n;
+                /* yyvsp[1-rule_len+n] - adjusted for action position */
+                fprintf(action_file, "yyvsp[%d]", n);
+            } else if (c == '<') {
+                /* $<type>N - typed access, skip type for now */
+                while (c != '>' && c != EOF) c = nextc();
+                c = nextc();
+                /* Parse N */
+                int n = 0;
+                while (isdigit(c)) {
+                    n = n * 10 + (c - '0');
+                    c = nextc();
+                }
+                ungetc_char(c);
+                fprintf(action_file, "yyvsp[%d]", n);
+            } else {
+                /* Not a special $ reference */
+                putc('$', action_file);
+                putc(c, action_file);
+            }
+        } else {
+            putc(c, action_file);
+        }
     }
 }
-
 
 /* ... */
 
