@@ -275,9 +275,7 @@ void ide_dma_init(uint16_t bm_base_primary, uint16_t bm_base_secondary) {
         ide_channels[0].dma_capable = 1;
         /* Clear status bits */
         ide_bm_clear_interrupt(0);
-        char buf[64];
-        sprintf(buf, "  IDE Primary: DMA enabled (BM base 0x%x)\n", (unsigned int)bm_base_primary);
-        kprint(buf);
+        kprintf("  IDE Primary: DMA enabled (BM base 0x%x)\n", (unsigned int)bm_base_primary);
     }
     
     if (bm_base_secondary) {

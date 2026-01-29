@@ -34,8 +34,11 @@ void console_clear(void);
 // For /dev/tty proxy
 fs_node_t *console_get_node(void);
 
-// Helper for formatted printing (replaces kprintf later)
+// Helper for formatted printing
 void kprint(const char *str);
+int kprintf(const char *fmt, ...);
+char *kasprintf(const char *fmt, ...);
+char *vasprintf(const char *fmt, __builtin_va_list ap);
 
 struct process;
 // Attach console to a process's FDs 0, 1, 2

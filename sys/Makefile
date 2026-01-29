@@ -93,6 +93,8 @@ klib:
 	$(MAKE) -C drivers/storage
 	$(MAKE) -C drivers/devices
 	$(MAKE) -C drivers/virtio
+	$(MAKE) -C drivers/console
+	$(MAKE) -C drivers/console/uart
 
 
 libs:

@@ -4,7 +4,7 @@
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 #include <sys/ioctl.h>
-#include <sys/termios.h>
+//#include <sys/termios.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/linux/linux_syscalls.h>
 #include <exec/perso/linux/linux_user.h>

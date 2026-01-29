@@ -5,6 +5,8 @@
 #include <vfs/vfs.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 // Globals
 static console_backend_t *backends = NULL;
@@ -147,6 +149,17 @@ void kprint(const char *str) {
     const char *s = str;
     while (*s++) len++;
     backend_write(str, len);
+}
+
+int kprintf(const char *fmt, ...) {
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    int ret = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    kprint(buf);
+    return ret;
 }
 
 void console_attach_std_fds(struct process *proc) {
