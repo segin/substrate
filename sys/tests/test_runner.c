@@ -27,7 +27,8 @@ extern void test_mmap_parsing(void);
 extern void test_e820_parsing(void);
 extern void test_vm_phys(void);
 extern void test_vm_page_queue(void);
-// void test_wait_logic(void); // Host-only test via verify_wait_host.sh
+extern void test_vm_page_queue(void);
+extern void run_minix_mount_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -117,10 +118,19 @@ void run_kernel_tests(void) {
          run_ps2_tests();
     }
 
+    if (all || strcmp(test_arg, "minix") == 0) {
+         run_minix_mount_tests();
+    }
+
     // Wait logic tests are run on host via verify_wait_host.sh
     // if (all || strcmp(test_arg, "wait") == 0) {
     //     test_wait_logic();
     // }
+
+    if (all || strcmp(test_arg, "mount") == 0) {
+         extern void run_mount_tests(void);
+         run_mount_tests();
+    }
 
     kprint("=== TESTS COMPLETE ===\n\n");
     
@@ -130,3 +140,4 @@ void run_kernel_tests(void) {
         for (;;) __asm__ volatile("hlt");
     }
 }
+

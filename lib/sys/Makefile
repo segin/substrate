@@ -5,7 +5,7 @@ AR = ar
 CFLAGS := -m32 -Wall -fno-builtin -nostdinc -I../../include -I../../sys/include
 ASFLAGS := -m32
 
-OBJS = syscall.o vm86.o proc.o
+OBJS = syscall.o vm86.o proc.o sysctl.o
 
 all: libsys.a
 

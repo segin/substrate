@@ -1,0 +1,62 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DEVICE 9
+.Os Substrate
+.Sh NAME
+.Nm struct device
+.Nd generic device abstraction structure
+.Sh SYNOPSIS
+.In kern/device.h
+.Sh DESCRIPTION
+The
+.Vt struct device
+is the core data structure used to represent a hardware device within the kernel's device model. It provides a unified view of the system's hardware topology, resource allocation, and driver binding.
+.Pp
+All devices, regardless of the bus they reside on (PCI, USB, etc.), are represented by an instance of this structure.
+.Sh FIELDS
+.Bl -tag -width "power_state"
+.It Vt uint32_t vendor_id
+The hardware vendor identifier (e.g., PCI Vendor ID).
+.It Vt uint32_t device_id
+The hardware device identifier (e.g., PCI Device ID).
+.It Vt uint16_t class
+The base device class code.
+.It Vt uint16_t subclass
+The device subclass code.
+.It Vt uint8_t progif
+The programming interface code.
+.It Vt char serial[32]
+A string comprising the device's serial number, if available.
+.It Vt uint8_t guid[16]
+A globally unique identifier for the device (e.g., UUID/GUID).
+.It Vt struct device *parent
+Pointer to the parent device (e.g., the bus controller or bridge). NULL for the root device.
+.It Vt struct device *children
+Pointer to the first child device (head of the children list).
+.It Vt struct device *sibling
+Pointer to the next device in the parent's children list.
+.It Vt struct resource *resources
+List of resources (I/O ports, memory ranges, IRQs, DMA channels) assigned to this device.
+.It Vt int power_state
+Current power management state of the device (D0-D3).
+.It Vt int ref_count
+Reference count for the device object's lifecycle.
+.It Vt struct driver *driver
+Pointer to the device driver bound to this device. NULL if no driver is attached.
+.It Vt struct bus_type *bus
+Pointer to the bus type definition that manages this device.
+.It Vt uint32_t flags
+Status flags indicating device state (e.g., initialized, suspended).
+.El
+.Sh SEE ALSO
+.Xr bus 9 ,
+.Xr driver 9 ,
+.Xr resource 9
+.Sh HISTORY
+The
+.Vt struct device
+interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

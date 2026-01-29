@@ -22,8 +22,8 @@ extern uint32_t pmm_get_free_memory(void);     /* from PMM */
 extern filesystem_t *vfs_get_filesystems(void); /* from VFS */
 
 /* Forward declarations */
-static uint32_t procfs_generic_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer);
-static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index);
+static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *procfs_finddir(fs_node_t *node, char *name);
 
 /*
@@ -172,7 +172,7 @@ static struct procfs_entry procfs_entries[] = {
  * Generic read function for table-driven entries
  * The entry pointer is stored in node->impl
  */
-static uint32_t procfs_generic_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     struct procfs_entry *entry = (struct procfs_entry *)(uintptr_t)node->impl;
     if (!entry || !entry->generator) return 0;
     
@@ -189,7 +189,7 @@ static uint32_t procfs_generic_read(fs_node_t *node, off_t offset, uint32_t size
 /* Per-process directory support */
 static struct dirent proc_dirent;
 
-static uint32_t proc_pid_status_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = NULL;
     
@@ -231,7 +231,7 @@ static uint32_t proc_pid_status_read(fs_node_t *node, off_t offset, uint32_t siz
     return size;
 }
 
-static uint32_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = proc_find(pid);
     if (!p) return 0;
@@ -244,7 +244,7 @@ static uint32_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, uint32_t si
     return size;
 }
 
-static struct dirent *proc_pid_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     const char *entries[] = { ".", "..", "status", "cmdline", NULL };
     if (index >= 4) return NULL;
@@ -274,7 +274,7 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
 
 /* Root /proc directory operations */
 
-static struct dirent *procfs_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     
     /* . and .. */

@@ -1,0 +1,41 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt BUS 9
+.Os Substrate
+.Sh NAME
+.Nm struct bus_type
+.Nd generic bus type registration structure
+.Sh SYNOPSIS
+.In kern/bus.h
+.Sh DESCRIPTION
+The
+.Vt struct bus_type
+structure represents a bus architecture (such as PCI, USB, or platform bus) within the kernel driver model. It serves as a container for devices and drivers belonging to that bus type.
+.Sh FIELDS
+.Bl -tag -width "drivers_list"
+.It Vt const char *name
+Name of the bus type.
+.It Vt int (*match)(struct device *, struct driver *)
+Callback to determine if a driver supports a specific device. Returns 1 for match, 0 otherwise.
+.It Vt int (*probe)(struct device *)
+Callback invoked when a device is added to validate presence and initialize.
+.It Vt int (*remove)(struct device *)
+Callback invoked when a device is removed.
+.It Vt struct device *devices_list
+Pointer to the head of the list of devices associated with this bus type.
+.It Vt struct driver *drivers_list
+Pointer to the head of the list of drivers registered for this bus type.
+.It Vt spinlock_t lock
+Lock protecting the device and driver lists.
+.El
+.Sh SEE ALSO
+.Xr device 9 ,
+.Xr driver 9
+.Sh HISTORY
+The
+.Vt struct bus_type
+interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

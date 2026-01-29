@@ -1,0 +1,44 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DRIVER_UNREGISTER 9
+.Os Substrate
+.Sh NAME
+.Nm driver_unregister
+.Nd remove a driver from a bus
+.Sh SYNOPSIS
+.In kern/driver.h
+.Ft int
+.Fn driver_unregister "struct driver *drv"
+.Sh DESCRIPTION
+The
+.Fn driver_unregister
+function removes a device driver from the system.
+.Pp
+It performs the following actions:
+.Bl -enum
+.It
+Iterates over all devices on the driver's bus.
+.It
+For any device bound to this driver, invokes the
+.Fn detach
+callback (if present) and clears the device's driver binding.
+.It
+Removes the driver from the bus's list of registered drivers.
+.El
+.Sh RETURN VALUES
+The
+.Fn driver_unregister
+function returns 0 on success.
+.Pp
+It returns -1 if authentication fails or arguments are invalid.
+.Sh SEE ALSO
+.Xr driver_register 9 ,
+.Xr driver_detach 9
+.Sh HISTORY
+The
+.Fn driver_unregister
+kernel interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

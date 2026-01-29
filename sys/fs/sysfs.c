@@ -5,7 +5,7 @@
 
 static struct dirent sys_dirent;
 
-static struct dirent *sysfs_readdir(fs_node_t *node, uint32_t index) {
+static struct dirent *sysfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     if (index == 0) { strcpy(sys_dirent.name, "."); return &sys_dirent; }
     if (index == 1) { strcpy(sys_dirent.name, ".."); return &sys_dirent; }

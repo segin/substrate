@@ -14,6 +14,7 @@ typedef struct file {
     off_t offset;
     int flags;
     int ref_count;
+    struct file *next_free;
 } file_t;
 
 #endif

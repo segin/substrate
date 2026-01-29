@@ -23,8 +23,8 @@ COMMON_FLAGS = -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-
 USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include)
-CFLAGS += $(COMMON_FLAGS) -std=c23 -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(GCC_INCLUDE)
-CXXFLAGS += $(COMMON_FLAGS) -std=c++23 -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(GCC_INCLUDE)
+CFLAGS += $(COMMON_FLAGS) -std=c2x -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(GCC_INCLUDE)
+CXXFLAGS += $(COMMON_FLAGS) -std=c++2b -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(GCC_INCLUDE)
 
 # Freestanding flags (for kernel and standalone utils)
 FREESTANDING_CFLAGS = $(CFLAGS) -ffreestanding -nostdlib -fno-builtin -fno-pie
@@ -36,8 +36,23 @@ KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) -I$(KERNEL_SRC)
 
 # Userland flags (for standard libraries and utils)
 # These will eventually link against our own libc
-USER_CFLAGS = $(CFLAGS)
-USER_LDFLAGS = -m32 -nostdlib -fno-pie
+# Userland flags (for standard libraries and utils)
+# These will eventually link against our own libc
+ifdef NATIVE_BUILD
+    # Host build configuration
+    HOSTCC ?= cc
+    HOSTCFLAGS ?= -O2 -Wall
+    CC := $(HOSTCC)
+    CFLAGS := $(HOSTCFLAGS)
+    # Start with empty/standard LDFLAGS for host
+    USER_LDFLAGS :=
+    # Ensure no 32-bit override if host is 64-bit (unless HOSTCFLAGS specifies it)
+else
+    # Target build configuration (Substrate i386)
+    USER_CFLAGS = $(CFLAGS)
+    USER_LDFLAGS = -m32 -nostdlib -fno-pie
+endif
+
 LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
 
 # Macro to brand a binary as Substrate native (OSABI=64)

@@ -66,6 +66,7 @@
 #define SYS_SIGALTSTACK 186
 #define SYS_POLL    209
 #define SYS_FUTEX   240
+#define SYS_SYSCTL  202
 #define SYS_PMAP_STATS 241
 #define SYS_THR_NEW 455
 #define SYS_PROC_INFO 242

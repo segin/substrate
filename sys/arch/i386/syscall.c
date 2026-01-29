@@ -16,7 +16,7 @@
 #include <include/sys/signal.h>
 #include <include/sys/session.h>
 #include <vfs/vfs.h>
-#include <drivers/serial/uart.h>
+#include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
 
 #include <sys/types.h>
@@ -178,6 +178,13 @@ void syscall_handler(registers_t *regs) {
                     case ARG_INT: len += sprintf(buf + len, "%d", (int)args[i]); break;
                     case ARG_HEX: len += sprintf(buf + len, "0x%x", (unsigned int)args[i]); break;
                     case ARG_PTR: len += sprintf(buf + len, "*%08x", (unsigned int)args[i]); break;
+                    case ARG_LONG: {
+                        // Combine two 32-bit values into one 64-bit (lo, hi order on i386)
+                        int64_t val64 = ((int64_t)args[i+1] << 32) | args[i];
+                        len += sprintf(buf + len, "%lld", (long long)val64);
+                        i++; // Skip next slot since we consumed it
+                        break;
+                    }
                     case ARG_STR: 
                         // Safe(ish) string print
                         if (args[i] && args[i] > 0x1000) { 
