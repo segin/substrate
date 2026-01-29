@@ -1,0 +1,40 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DEVICE_CREATE 9
+.Os Substrate
+.Sh NAME
+.Nm device_create
+.Nd allocate and initialize a new device structure
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft struct device *
+.Fn device_create "const char *name" "struct device *parent"
+.Sh DESCRIPTION
+The
+.Fn device_create
+function allocates memory for a new
+.Vt struct device
+and initializes it.
+.Pp
+If
+.Fa parent
+is not NULL, the new device is added to the parent's children list.
+.Pp
+The reference count of the new device is initialized to 1.
+.Sh RETURN VALUES
+The
+.Fn device_create
+function returns a pointer to the new device on success, or
+.Dv NULL
+if memory allocation fails.
+.Sh SEE ALSO
+.Xr device 9 ,
+.Xr device_register 9
+.Sh HISTORY
+The
+.Fn device_create
+kernel interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

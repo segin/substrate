@@ -3,7 +3,7 @@ include ../../../Makefile.inc
 CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = vga.c fb.c cga.c hercules.c ega.c font.c bga.c
+SRCS = vga.c fb.c fb_console.c font_8x16.c font_8x8.c bga.c hw_text.c
 OBJS = $(SRCS:.c=.o)
 
 all: video.o

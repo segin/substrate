@@ -1,0 +1,58 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DEVICE_REGISTER 9
+.Os Substrate
+.Sh NAME
+.Nm device_register
+.Nd register a device with a bus
+.Sh SYNOPSIS
+.In kern/device.h
+.In kern/bus.h
+.Ft int
+.Fn device_register "struct device *dev" "struct bus_type *bus"
+.Sh DESCRIPTION
+The
+.Fn device_register
+function registers a device with a specific bus. It adds the device to the bus's list of devices.
+.Pp
+The function performs the following checks:
+.Bl -bullet
+.It
+Verifies that the device is not already registered with a bus.
+.It
+Checks for duplicate device pointers in the bus list.
+.It
+Checks for name collisions with existing devices on the bus.
+.El
+.Pp
+Registration is protected by the bus's spinlock.
+.Sh RETURN VALUES
+The
+.Fn device_register
+function returns 0 on success.
+.Pp
+It returns -1 if:
+.Bl -bullet
+.It
+.Fa dev
+or
+.Fa bus
+is NULL.
+.It
+The device is already registered.
+.It
+A duplicate device or name collision is detected.
+.El
+.Sh SEE ALSO
+.Xr device 9 ,
+.Xr bus 9 ,
+.Xr device_create 9 ,
+.Xr device_unregister 9
+.Sh HISTORY
+The
+.Fn device_register
+kernel interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

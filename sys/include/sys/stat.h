@@ -5,7 +5,7 @@
 
 struct stat {
     uint32_t       st_dev;
-    uint32_t       st_ino;
+    ino_t          st_ino;
     uint16_t       st_mode;
     uint16_t       st_nlink;
     uint16_t       st_uid;

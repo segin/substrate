@@ -13,6 +13,8 @@
 #include <sys/random.h>
 #include <kern/random.h>
 #include <kern/console.h>
+#include <kern/console.h>
+#include <kern/sched.h>
 #include <vfs/vfs.h>
 #include <string.h>
 
@@ -22,6 +24,9 @@ struct rng_state rng_state;
 /* Locks */
 static spinlock_t entropy_lock;
 static spinlock_t output_lock;
+
+/* Wait Channel */
+static int random_wait_channel = 0;
 
 /*
  * ChaCha20 Implementation
@@ -286,12 +291,46 @@ int rdrand64(uint64_t *value) {
     return 1;
 }
 
+/* Get 32-bit random value from RDSEED */
+int rdseed32(uint32_t *value) {
+    if (!rng_state.has_rdseed) return 0;
+    
+    uint8_t success = 0;
+    /* RDSEED may fail more often than RDRAND, minimal retry */
+    for (int retries = 10; retries > 0; retries--) {
+        __asm__ volatile(
+            "rdseed %0\n\t"
+            "setc %1"
+            : "=r"(*value), "=qm"(success)
+        );
+        if (success) return 1;
+        /* Pause to let entropy replenish? pause instruction? */
+        __asm__ volatile("pause");
+    }
+    return 0;
+}
+
+/* Get 64-bit random value from RDSEED (i386: two 32-bit calls) */
+int rdseed64(uint64_t *value) {
+    uint32_t lo, hi;
+    if (!rdseed32(&lo) || !rdseed32(&hi)) return 0;
+    *value = ((uint64_t)hi << 32) | lo;
+    return 1;
+}
+
 /* Harvest entropy from hardware RNG */
 int random_harvest_hwrng(void) {
     uint32_t hw_random;
     int harvested = 0;
     
-    if (rng_state.has_rdrand && rdrand32(&hw_random)) {
+    /* Try RDSEED first (direct entropy) */
+    if (rng_state.has_rdseed && rdseed32(&hw_random)) {
+        pool_mix_bytes(&rng_state.input_pool, &hw_random, sizeof(hw_random));
+        rng_state.input_pool.entropy_count += 32; /* Full 32 bits */
+        harvested = 1;
+    } 
+    /* Fallback/Supplement with RDRAND */
+    else if (rng_state.has_rdrand && rdrand32(&hw_random)) {
         pool_mix_bytes(&rng_state.input_pool, &hw_random, sizeof(hw_random));
         rng_state.input_pool.entropy_count += 32; /* Full 32 bits from HWRNG */
         harvested = 1;
@@ -368,6 +407,12 @@ static void random_reseed(void) {
     rng_state.seeded = 1;
     spinlock_release(&output_lock);
     
+    rng_state.seeded = 1;
+    spinlock_release(&output_lock);
+    
+    /* Wake up any blocked readers */
+    sched_wakeup(&random_wait_channel);
+
     memset(seed, 0, sizeof(seed));
 }
 
@@ -383,11 +428,21 @@ int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
         if (flags & GRND_NONBLOCK) {
             return -11; /* EAGAIN */
         }
-        /* In a real implementation, we would block here */
-        /* For now, just try to harvest from HWRNG */
-        random_harvest_hwrng();
-        if (rng_state.input_pool.entropy_count >= 256) {
-            random_reseed();
+        
+        /* Block until seeded */
+        while (!rng_state.seeded) {
+            /* Try to harvest first */
+            random_harvest_hwrng();
+            if (rng_state.input_pool.entropy_count >= 256) {
+                random_reseed();
+                break;
+            }
+            
+            /* If still unseeded, sleep */
+            if (!rng_state.seeded) {
+                kprint("RNG: Blocking for entropy...\n");
+                sched_sleep(&random_wait_channel);
+            }
         }
     }
     
@@ -412,25 +467,25 @@ int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
  */
 
 /* /dev/random read - blocks until sufficient entropy */
-static uint32_t random_dev_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t random_dev_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     (void)offset;
     
     int ret = random_get_bytes_flags(buffer, size, GRND_RANDOM);
-    return (ret > 0) ? (uint32_t)ret : 0;
+    return (ret > 0) ? (size_t)ret : 0;
 }
 
 /* /dev/urandom read - never blocks */
-static uint32_t urandom_dev_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t urandom_dev_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     (void)offset;
     
     int ret = random_get_bytes_flags(buffer, size, GRND_INSECURE);
-    return (ret > 0) ? (uint32_t)ret : 0;
+    return (ret > 0) ? (size_t)ret : 0;
 }
 
 /* Write to /dev/random or /dev/urandom adds entropy */
-static uint32_t random_dev_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t random_dev_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     (void)offset;
     

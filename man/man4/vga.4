@@ -1,0 +1,72 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt VGA 4
+.Os Substrate
+.Sh NAME
+.Nm vga
+.Nd unified video adapter driver
+.Sh SYNOPSIS
+.Cd "video=vga"
+.Cd "video=cga"
+.Cd "video=ega"
+.Cd "video=hercules"
+.Cd "video=bga"
+.Sh DESCRIPTION
+The
+.Nm
+driver provides support for various IBM PC-compatible video display adapters, including VGA, EGA, CGA, and Hercules Graphics Card (HGC). It handles mode setting, memory mapping, and basic pixel drawing operations for the kernel framebuffer console.
+.Pp
+The driver uses a table-driven approach to initialize the cathode ray tube controller (CRTC) registers (Motorola 6845 for CGA/Hercules, and standard VGA CRTC for others) to establish video timings.
+.Sh HARDWARE SUPPORT
+The following adapters and modes are supported:
+.Bl -tag -width "Hercules"
+.It Standard VGA
+Mode 12h (640x480, 16 colors, planar access).
+Mode 13h (320x200, 256 colors, linear access).
+Mode 10h (640x350, 16 colors, planar access).
+.It CGA
+Mode 4 (320x200, 4 colors). Uses standard BIOS-compatible palette (Cyan/Magenta/White).
+.It Hercules
+720x348 Monochrome graphics. Configures the 6845 CRTC for high-resolution text/graphics.
+.It Bochs BGA
+Bochs Graphics Adapter (Linear Framebuffer). Supports high resolutions (e.g., 1024x768) if enabled via
+.Cd video=bga .
+.El
+.Sh CONFIGURATION
+The driver defaults to Standard VGA Mode 12h (640x480) if no boot argument is specified.
+.Pp
+Specific hardware modes can be enforced via the kernel command line:
+.Bl -tag -width "video=hercules"
+.It Cd video=vga
+Force Standard VGA/EGA detection.
+.It Cd video=cga
+Initialize assuming CGA hardware (Mode 4).
+.It Cd video=hercules
+Initialize assuming Hercules hardware (720x348).
+.It Cd video=bga
+Attempt to use the Bochs Graphics Adapter extensions (virtualization).
+.El
+.Sh FONTS
+The driver includes compiled-in 8x16 and 8x8 fonts (CP437 character set) to ensure text is rendered correctly regardless of the video bandwidth or resolution width.
+.Sh FILES
+.Bl -tag -width "sys/drivers/video/vga.c" -compact
+.It Pa sys/drivers/video/vga.c
+Main driver implementation.
+.It Pa sys/drivers/video/font_8x16.c
+8x16 CP437 font bitmap.
+.It Pa sys/drivers/video/font_8x8.c
+8x8 CP437 font bitmap.
+.It Pa sys/drivers/video/hercules.c
+Legacy Hercules support (now integrated).
+.El
+.Sh SEE ALSO
+.Xr fb 4 ,
+.Xr uda 4
+.Sh HISTORY
+The
+.Nm
+driver first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

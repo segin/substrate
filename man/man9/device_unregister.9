@@ -1,0 +1,45 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DEVICE_UNREGISTER 9
+.Os Substrate
+.Sh NAME
+.Nm device_unregister
+.Nd remove a device from the system
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft int
+.Fn device_unregister "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn device_unregister
+function removes a device from the system topology.
+.Pp
+It performs the following actions:
+.Bl -enum
+.It
+Removes the device from its attached bus (acquiring the bus lock).
+.It
+Removes the device from its parent's children list.
+.It
+Orphans all child devices by setting their parent pointer to NULL.
+.El
+.Pp
+After calling this function, the device structure is still allocated but is effectively detached from the hierarchy.
+.Sh RETURN VALUES
+The
+.Fn device_unregister
+function returns 0 on success, or -1 if
+.Fa dev
+is NULL.
+.Sh SEE ALSO
+.Xr device 9 ,
+.Xr device_register 9 ,
+.Xr device_create 9
+.Sh HISTORY
+The
+.Fn device_unregister
+kernel interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

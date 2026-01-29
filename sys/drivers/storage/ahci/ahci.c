@@ -1,5 +1,5 @@
-#include <drivers/storage/ahci.h>
 #include <kern/console.h>
+#include <drivers/storage/ahci/ahci.h>
 #include <arch/i386/pci.h>
 
 void ahci_init(void) {

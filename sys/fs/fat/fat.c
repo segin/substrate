@@ -6,17 +6,12 @@ static fat_fs_t fat_global_fs;
 static fs_node_t fat_root_node;
 static fat_node_t fat_root_ctx;
 
+
+
 // Node cache for dynamically allocated nodes
-#define FAT_NODE_CACHE_SIZE 64
 static fat_node_t fat_node_cache[FAT_NODE_CACHE_SIZE];
 static fs_node_t fat_fs_node_cache[FAT_NODE_CACHE_SIZE];
 static int fat_node_cache_idx = 0;
-
-// Forward declarations
-static size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
-static struct dirent *fat_readdir(fs_node_t *node, uint64_t index);
-static fs_node_t *fat_finddir(fs_node_t *node, char *name);
-static fs_node_t *fat_mount(const char *device, uint32_t flags, void *data);
 
 // Read sectors from device
 static int fat_read_sectors(fat_fs_t *fs, uint32_t sector, uint32_t count, void *buffer) {
@@ -110,7 +105,7 @@ int fat_parse_lfn(fat_lfn_t *lfn, char *buffer) {
 }
 
 // Read file data
-static size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
     fat_fs_t *fs = ctx->fs;
     
@@ -154,7 +149,7 @@ static size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t 
 }
 
 // Read directory entries
-static struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
+struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
     fat_fs_t *fs = ctx->fs;
     
@@ -177,7 +172,7 @@ static struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
             fat_dirent_t *entry = (fat_dirent_t *)(dir_buf + i);
             
             if (entry->name[0] == 0x00) return NULL;  // End of directory
-            if (entry->name[0] == 0xE5) continue;      // Deleted entry
+            if ((uint8_t)entry->name[0] == 0xE5) continue;      // Deleted entry
             
             // Check for LFN entry
             if (entry->attr == FAT_ATTR_LFN) {
@@ -246,7 +241,7 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint32_t first_
 }
 
 // Find directory entry by name
-static fs_node_t *fat_finddir(fs_node_t *node, char *name) {
+fs_node_t *fat_finddir(fs_node_t *node, char *name) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
     fat_fs_t *fs = ctx->fs;
     
@@ -267,7 +262,7 @@ static fs_node_t *fat_finddir(fs_node_t *node, char *name) {
             fat_dirent_t *entry = (fat_dirent_t *)(dir_buf + i);
             
             if (entry->name[0] == 0x00) return NULL;  // End of directory
-            if (entry->name[0] == 0xE5) continue;      // Deleted entry
+            if ((uint8_t)entry->name[0] == 0xE5) continue;      // Deleted entry
             
             // Check for LFN entry
             if (entry->attr == FAT_ATTR_LFN) {
@@ -305,7 +300,7 @@ static fs_node_t *fat_finddir(fs_node_t *node, char *name) {
 }
 
 // Mount FAT filesystem
-static fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
+fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     (void)device; (void)flags;
     
     fs_node_t *dev = (fs_node_t *)data;

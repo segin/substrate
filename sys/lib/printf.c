@@ -1,0 +1,268 @@
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdarg.h>
+
+// Integer to ASCII with optional sign/space prefix
+static void itoa(char *buf, int val, int force_sign, int space_prefix) {
+    char tmp[16];
+    int i = 0;
+    int is_negative = (val < 0);
+    
+    if (val == 0) {
+        if (force_sign) {
+            buf[0] = '+';
+            buf[1] = '0';
+            buf[2] = '\0';
+        } else if (space_prefix) {
+            buf[0] = ' ';
+            buf[1] = '0';
+            buf[2] = '\0';
+        } else {
+            buf[0] = '0';
+            buf[1] = '\0';
+        }
+        return;
+    }
+    
+    // Handle negative
+    if (is_negative) val = -val;
+    
+    while (val > 0) {
+        tmp[i++] = (val % 10) + '0';
+        val /= 10;
+    }
+    
+    // Add sign or space
+    int j = 0;
+    if (is_negative) {
+        buf[j++] = '-';
+    } else if (force_sign) {
+        buf[j++] = '+';
+    } else if (space_prefix) {
+        buf[j++] = ' ';
+    }
+    
+    // Reverse digits
+    for (int k = 0; k < i; k++) {
+        buf[j++] = tmp[i - k - 1];
+    }
+    buf[j] = '\0';
+}
+
+// Hex conversion helper
+static void utoa_hex(char *buf, unsigned int val, int uppercase, int width) {
+    char tmp[16];
+    const char *digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+    int i = 0;
+    
+    if (val == 0) {
+        tmp[i++] = '0';
+    } else {
+        while (val > 0) {
+            tmp[i++] = digits[val & 0xF];
+            val >>= 4;
+        }
+    }
+    
+    // Pad with zeros
+    while (i < width) tmp[i++] = '0';
+    
+    // Reverse into buf
+    for (int j = 0; j < i; j++) {
+        buf[j] = tmp[i - j - 1];
+    }
+    buf[i] = '\0';
+}
+
+// Octal conversion helper
+static void utoa_oct(char *buf, unsigned int val) {
+    char tmp[16];
+    int i = 0;
+    
+    if (val == 0) {
+        tmp[i++] = '0';
+    } else {
+        while (val > 0) {
+            tmp[i++] = '0' + (val & 7);
+            val >>= 3;
+        }
+    }
+    
+    // Reverse into buf
+    for (int j = 0; j < i; j++) {
+        buf[j] = tmp[i - j - 1];
+    }
+    buf[i] = '\0';
+}
+
+int sprintf(char *str, const char *format, ...) {
+    char *s = str;
+    const char *f = format;
+    __builtin_va_list ap;
+    __builtin_va_start(ap, format);
+
+    while (*f) {
+        if (*f == '%') {
+            f++;
+            
+            // Parse flags
+            int left_align = 0;
+            int force_sign = 0;
+            int space_prefix = 0;
+            int alternate_form = 0;
+            if (*f == '-') { left_align = 1; f++; }
+            if (*f == '+') { force_sign = 1; f++; }
+            if (*f == ' ' && !force_sign) { space_prefix = 1; f++; }
+            if (*f == '#') { alternate_form = 1; f++; }
+            
+            // Parse width (e.g., %08X or %16s)
+            int width = 0;
+            int pad_zero = 0;
+            if (*f == '0' && !left_align) { pad_zero = 1; f++; }
+            while (*f >= '0' && *f <= '9') {
+                width = width * 10 + (*f - '0');
+                f++;
+            }
+            
+            // Parse precision (e.g., %.16s or %5.2f)
+            int precision = -1;
+            if (*f == '.') {
+                f++;
+                precision = 0;
+                while (*f >= '0' && *f <= '9') {
+                    precision = precision * 10 + (*f - '0');
+                    f++;
+                }
+            }
+            (void)pad_zero; // Used implicitly in width
+            
+            switch (*f) {
+                case 'd':
+                case 'i': {
+                    int val = __builtin_va_arg(ap, int);
+                    char tmp[32];
+                    itoa(tmp, val, force_sign, space_prefix);
+                    int len = strlen(tmp);
+                    
+                    // Apply padding if width specified
+                    if (width > len) {
+                        if (pad_zero) {
+                            // Zero-padding: sign first, then zeros
+                            int has_sign = (tmp[0] == '+' || tmp[0] == '-' || tmp[0] == ' ');
+                            if (has_sign) {
+                                *s++ = tmp[0];
+                                for (int i = 0; i < width - len; i++) *s++ = '0';
+                                strcpy(s, tmp + 1);
+                            } else {
+                                for (int i = 0; i < width - len; i++) *s++ = '0';
+                                strcpy(s, tmp);
+                            }
+                        } else if (left_align) {
+                            // Left-align: value first, then spaces
+                            strcpy(s, tmp);
+                            s += len;
+                            for (int i = 0; i < width - len; i++) *s++ = ' ';
+                            *s = '\0';
+                        } else {
+                            // Right-align (default): spaces first, then value
+                            for (int i = 0; i < width - len; i++) *s++ = ' ';
+                            strcpy(s, tmp);
+                        }
+                    } else {
+                        strcpy(s, tmp);
+                    }
+                    s += strlen(s);
+                    break;
+                }
+                case 'u': {
+                    unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    itoa(s, (int)val, 0, 0); // No sign for unsigned
+                    s += strlen(s);
+                    break;
+                }
+                case 'o': {
+                    unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    if (alternate_form && val != 0) {
+                        *s++ = '0'; // Octal prefix
+                    }
+                    utoa_oct(s, val);
+                    s += strlen(s);
+                    break;
+                }
+                case 'x': {
+                    unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    if (alternate_form && val != 0) {
+                        *s++ = '0';
+                        *s++ = 'x';
+                    }
+                    utoa_hex(s, val, 0, width);
+                    s += strlen(s);
+                    break;
+                }
+                case 'X': {
+                    unsigned int val = __builtin_va_arg(ap, unsigned int);
+                    if (alternate_form && val != 0) {
+                        *s++ = '0';
+                        *s++ = 'X';
+                    }
+                    utoa_hex(s, val, 1, width);
+                    s += strlen(s);
+                    break;
+                }
+                case 'p': {
+                    unsigned int val = (unsigned int)(uintptr_t)__builtin_va_arg(ap, void*);
+                    *s++ = '0'; *s++ = 'x';
+                    utoa_hex(s, val, 0, 8);
+                    s += strlen(s);
+                    break;
+                }
+                case 's': {
+                    const char *val = __builtin_va_arg(ap, const char *);
+                    if (!val) val = "(null)";
+                    
+                    // Calculate string length (limited by precision if set)
+                    int len = 0;
+                    const char *p = val;
+                    while (*p && (precision == -1 || len < precision)) {
+                        len++;
+                        p++;
+                    }
+                    
+                    // Handle left-align vs right-align
+                    if (!left_align && width > len) {
+                        // Right-align: add padding before string
+                        for (int i = 0; i < width - len; i++) *s++ = ' ';
+                    }
+                    
+                    // Copy the string (up to precision)
+                    for (int i = 0; i < len; i++) *s++ = val[i];
+                    
+                    // Left-align: add padding after string
+                    if (left_align && width > len) {
+                        for (int i = 0; i < width - len; i++) *s++ = ' ';
+                    }
+                    break;
+                }
+                case 'c': {
+                    char c = (char)__builtin_va_arg(ap, int);
+                    *s++ = c;
+                    break;
+                }
+                case '%':
+                    *s++ = '%';
+                    break;
+                default:
+                    *s++ = '%';
+                    *s++ = *f;
+                    break;
+            }
+            f++;
+        } else {
+            *s++ = *f++;
+        }
+    }
+    *s = '\0';
+    __builtin_va_end(ap);
+    return s - str;
+}

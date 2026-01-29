@@ -9,10 +9,10 @@
  * - CDB construction helpers
  */
 
-#include "scsi.h"
-#include "../../../kern/console.h"
-#include <stdio.h>
 #include <string.h>
+#include <stdio.h>
+#include <kern/console.h>
+#include "scsi.h"
 
 /* Kernel time function - stub until real timer API implemented */
 static inline uint64_t kernel_time_ms(void) {

@@ -1,6 +1,7 @@
 #include <sys/lock.h>
 #include <sys/proc.h>
 #include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <stddef.h>
 
 void sema_init(semaphore_t *s, int value, const char *name) {
@@ -12,11 +13,12 @@ void sema_init(semaphore_t *s, int value, const char *name) {
 void sema_wait(semaphore_t *s) {
     spinlock_acquire(&s->lock);
     while (s->value <= 0) {
-        // We must release the spinlock before sleeping to avoid deadlock,
-        // but we need to ensure atomicity. 
-        // In this simple prototype, sched_sleep will be called after release.
+        // Sleep on the semaphore address
+        sleepq_add(s, current_thread);
         spinlock_release(&s->lock);
-        sched_sleep(s);
+        sched_yield(); // Context switch (will sleep)
+        
+        // Re-acquire lock after waking
         spinlock_acquire(&s->lock);
     }
     s->value--;
@@ -26,8 +28,11 @@ void sema_wait(semaphore_t *s) {
 void sema_post(semaphore_t *s) {
     spinlock_acquire(&s->lock);
     s->value++;
+    if (s->value > 0) {
+        // Wake one waiter
+        sleepq_wake_one(s);
+    }
     spinlock_release(&s->lock);
-    sched_wakeup(s);
 }
 
 int sema_getvalue(semaphore_t *s) {

@@ -4,9 +4,21 @@
 #include <stdint.h>
 
 /* Framebuffer ioctls */
+/* Framebuffer ioctls */
 #define FBIOGET_VSCREENINFO 0x4600
 #define FBIOPUT_VSCREENINFO 0x4601
 #define FBIOGET_FSCREENINFO 0x4602
+#define FBIOGET_VIDEO_MODES 0x4603
+#define FBIOPUT_VIDEO_MODE  0x4604
+
+struct video_mode_info {
+    uint32_t width;
+    uint32_t height;
+    uint32_t bpp;
+    uint32_t mode_id;
+    uint32_t flags;
+    uint32_t reserved[3];
+};
 
 struct fb_var_screeninfo {
     uint32_t xres;          /* visible resolution */

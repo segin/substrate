@@ -3,18 +3,7 @@
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 
-/* Native-specific syscalls not in syscall_impl.h */
-struct thr_param;
-extern int sys_thr_new(struct thr_param*, int);
-struct pmap_stats;
-extern int sys_pmap_stats(struct pmap_stats*);
-extern int sys_proc_info(int, void*);
-extern int sys_proc_list(int*, size_t);
-extern int sys_proc_count(void);
-extern int sys_cpu_count(void);
-extern int sys_hostname(char*, size_t);
-extern int sys_rt_sigreturn(void*);
-extern int sys_sigreturn(void*);
+/* Native-specific syscalls are now in syscall_impl.h */
 
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
@@ -170,10 +159,12 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_CPU_COUNT] = { 0, { 0 } },
     [SYS_HOSTNAME] = { 2, { ARG_PTR, ARG_INT } },
     [SYS_RT_SIGRETURN] = { 1, { ARG_PTR } },
+    [SYS_SYSCTL] = { 6, { ARG_PTR, ARG_INT, ARG_PTR, ARG_PTR, ARG_PTR, ARG_INT } },
 };
 
 struct personality personality_native = {
     .name = "substrate",
+    .id = PERS_NATIVE,
     .syscall_table = native_syscalls,
     .syscall_names = native_names,
     .syscall_fmts = native_fmts,
