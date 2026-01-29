@@ -3295,11 +3295,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
-    - [ ] **Lexer (Tokenizer):**
-        - [ ] Handle delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
-        - [ ] Handle quoting (`'` single, `"` double) and escaping (`\`).
-        - [ ] Handle operators (`&&`, `||`, `>>`, `<<`).
-        - [ ] Variable recognition (`$PROMPT`, `${VAR}`).
+    - [x] **Lexer (Tokenizer):**
+        - [x] Handle delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
+        - [x] Handle quoting (`'` single, `"` double) and escaping (`\`).
+        - [x] Handle operators (`&&`, `||`, `>>`, `<<`).
+        - [x] Variable recognition (`$PROMPT`, `${VAR}`).
     - [ ] **Parser (AST Generation):**
         - [ ] **Simple Commands:** List of arguments + redirections.
         - [ ] **Pipelines:** Chain of simple commands connected by pipes.
