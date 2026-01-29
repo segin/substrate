@@ -7,17 +7,14 @@
 
 #define P2V(x) ((uintptr_t)(x) + 0xC0000000)
 
-// Helper to copy a page (FIXME: Optimize with pmap_copy_page)
+// Helper to copy a page (Optimized with pmap_copy_page)
 static void page_copy(uintptr_t src_pa, uintptr_t dst_pa) {
-    uint32_t *src = (uint32_t *)P2V(src_pa);
-    uint32_t *dst = (uint32_t *)P2V(dst_pa);
-    for (int i = 0; i < 1024; i++) dst[i] = src[i];
+    pmap_copy_page(src_pa, dst_pa);
 }
 
-// Helper to zero a page (FIXME: Optimize with pmap_zero_page)
+// Helper to zero a page (Optimized with pmap_zero_page)
 static void page_zero(uintptr_t pa) {
-    uint32_t *p = (uint32_t *)P2V(pa);
-    for (int i = 0; i < 1024; i++) p[i] = 0;
+    pmap_zero_page(pa);
 }
 
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {

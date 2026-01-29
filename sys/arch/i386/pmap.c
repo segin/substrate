@@ -1521,6 +1521,33 @@ int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags) {
     return 0;
 }
 
+// Optimized page operations
+void pmap_copy_page(uintptr_t src_pa, uintptr_t dst_pa) {
+    void *src = (void *)(src_pa + 0xC0000000);
+    void *dst = (void *)(dst_pa + 0xC0000000);
+    int count = 1024;
+
+    __asm__ volatile (
+        "cld; rep movsl"
+        : "+S"(src), "+D"(dst), "+c"(count)
+        :
+        : "memory"
+    );
+}
+
+void pmap_zero_page(uintptr_t pa) {
+    void *dst = (void *)(pa + 0xC0000000);
+    int count = 1024;
+    int val = 0;
+
+    __asm__ volatile (
+        "cld; rep stosl"
+        : "+D"(dst), "+c"(count)
+        : "a"(val)
+        : "memory"
+    );
+}
+
 // Debug dump of pmap contents
 // Prints all valid PDEs and their PTEs
 // pmap_dump moved to pmap_dump.c
