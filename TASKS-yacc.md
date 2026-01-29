@@ -67,9 +67,9 @@
 - [ ] Default to LHS of first grammar rule if not specified
 
 ### 3.5 Union Declaration
-- [ ] `%union { body }` - Declare YYSTYPE union
-- [ ] Body must not contain unbalanced curly braces
-- [ ] Generate YYSTYPE typedef from union
+- [x] `%union { body }` - Declare YYSTYPE union
+- [x] Body must not contain unbalanced curly braces
+- [x] Generate YYSTYPE typedef from union
 
 ### 3.6 C Code Blocks
 - [ ] `%{ ... %}` - Copy enclosed C code to output file

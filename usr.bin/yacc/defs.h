@@ -131,6 +131,7 @@ extern int nrules;
 extern int nsyms;
 extern int ntokens;
 extern int nvars;
+extern int union_defined;   /* Set if %union was used */
 
 /* extern short *rlhs; -- stored in plhs? No, plhs is array of indices to symbol table? */
 /* Standard yacc: */

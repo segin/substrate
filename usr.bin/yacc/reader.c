@@ -354,6 +354,75 @@ static void parse_declarations(void) {
                      goal_symbol = lookup(token_buffer);
                 }
                 break;
+            
+            case UNION:
+                /* %union { body } - copy body to union_file */
+                {
+                    int c;
+                    int depth = 0;
+                    
+                    /* Skip whitespace to find opening brace */
+                    while ((c = nextc()) != EOF && c != '{') {
+                        if (!isspace(c)) {
+                            fprintf(stderr, "yacc: expected '{' after %%union\n");
+                            done(1);
+                        }
+                    }
+                    
+                    if (c == EOF) {
+                        fprintf(stderr, "yacc: unexpected EOF in %%union\n");
+                        done(1);
+                    }
+                    
+                    /* c is now '{' */
+                    depth = 1;
+                    
+                    while (depth > 0 && (c = nextc()) != EOF) {
+                        if (c == '{') {
+                            depth++;
+                        } else if (c == '}') {
+                            depth--;
+                            if (depth == 0) break;
+                        } else if (c == '/') {
+                            /* Handle comments */
+                            int next = nextc();
+                            if (next == '*') {
+                                putc('/', union_file);
+                                putc('*', union_file);
+                                /* Skip until */ 
+                                int prev = 0;
+                                while ((c = nextc()) != EOF) {
+                                    putc(c, union_file);
+                                    if (prev == '*' && c == '/') break;
+                                    prev = c;
+                                }
+                                continue;
+                            } else {
+                                ungetc_char(next);
+                            }
+                        } else if (c == '\'' || c == '"') {
+                            /* Handle string/char literals */
+                            int quote = c;
+                            putc(c, union_file);
+                            while ((c = nextc()) != EOF && c != quote) {
+                                putc(c, union_file);
+                                if (c == '\\') {
+                                    c = nextc();
+                                    if (c != EOF) putc(c, union_file);
+                                }
+                            }
+                            if (c != EOF) putc(c, union_file);
+                            continue;
+                        }
+                        
+                        if (depth > 0) {
+                            putc(c, union_file);
+                        }
+                    }
+                    
+                    union_defined = 1;
+                }
+                break;
                 
             /* ... other cases ... */
         }

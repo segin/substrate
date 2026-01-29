@@ -33,6 +33,7 @@ int nrules;
 int nsyms;
 int ntokens;
 int nvars;
+int union_defined = 0;
 
 short plhs[MAXPROD];
 short ritem[MAXPROD * 4];

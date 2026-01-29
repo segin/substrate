@@ -251,14 +251,14 @@ test_midrule_grammar() {
 }
 
 # Test 21: Union type definition
-#test_union_type() {
-#    $YACC -d $TESTDIR/calc.y 2>/dev/null
-#    if grep -q "union" y.tab.h; then
-#        pass "YYSTYPE union defined in y.tab.h"
-#    else
-#        fail "Union type not found in y.tab.h"
-#    fi
-#}
+test_union_type() {
+    $YACC -d $TESTDIR/calc.y 2>/dev/null
+    if grep -q "union" y.tab.h; then
+        pass "YYSTYPE union defined in y.tab.h"
+    else
+        fail "Union type not found in y.tab.h"
+    fi
+}
 
 # Test 22: Precedence declarations
 test_precedence_decl() {
@@ -275,8 +275,7 @@ test_calc_grammar
 # test_list_grammar
 test_precedence_grammar
 test_midrule_grammar
-# TODO: Re-enable when %union output is implemented
-# test_union_type
+test_union_type
 test_precedence_decl
 
 echo ""

@@ -48,10 +48,7 @@ void output(void) {
     output_parser();  /* This internally calls output_semantic_actions() */
     output_trailing_text();
     
-    if (dflag) {
-        /* Generate header file */
-        output_defines();
-    }
+    /* Header file is written by output_defines() and output_stype() when dflag is set */
 }
 
 static void output_prefix(void) {
@@ -116,16 +113,42 @@ static void output_defines(void) {
 }
 
 static void output_stype(void) {
+    int c;
+    
     /* Output YYSTYPE definition */
     fprintf(output_file, "/* Semantic value type */\n");
     fprintf(output_file, "#ifndef YYSTYPE\n");
-    fprintf(output_file, "typedef int YYSTYPE;\n");
+    
+    if (union_defined && union_file != NULL) {
+        /* Output union from %union declaration */
+        fprintf(output_file, "typedef union {\n");
+        rewind(union_file);
+        while ((c = getc(union_file)) != EOF) {
+            putc(c, output_file);
+        }
+        fprintf(output_file, "\n} YYSTYPE;\n");
+    } else {
+        /* Default: int */
+        fprintf(output_file, "typedef int YYSTYPE;\n");
+    }
+    
     fprintf(output_file, "#endif\n\n");
     fprintf(output_file, "YYSTYPE yylval;\n\n");
     
     if (dflag && defines_file != NULL) {
         fprintf(defines_file, "#ifndef YYSTYPE\n");
-        fprintf(defines_file, "typedef int YYSTYPE;\n");
+        
+        if (union_defined && union_file != NULL) {
+            fprintf(defines_file, "typedef union {\n");
+            rewind(union_file);
+            while ((c = getc(union_file)) != EOF) {
+                putc(c, defines_file);
+            }
+            fprintf(defines_file, "\n} YYSTYPE;\n");
+        } else {
+            fprintf(defines_file, "typedef int YYSTYPE;\n");
+        }
+        
         fprintf(defines_file, "#endif\n");
         fprintf(defines_file, "extern YYSTYPE yylval;\n\n");
     }
