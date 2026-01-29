@@ -3302,7 +3302,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Variable recognition (`$PROMPT`, `${VAR}`).
     - [ ] **Parser (AST Generation):**
         - [x] **Simple Commands:** List of arguments + redirections.
-        - [ ] **Pipelines:** Chain of simple commands connected by pipes.
+        - [x] **Pipelines:** Chain of simple commands connected by pipes.
         - [ ] **Lists:** Sequences (`cmd1 ; cmd2`) and Logic (`cmd1 && cmd2`).
         - [ ] **Compound Commands:**
             - [ ] `IfClause`: `if` list `then` list `else` list `fi`.
