@@ -82,29 +82,29 @@
 ## 4. Grammar Rules Section
 
 ### 4.1 Rule Syntax
-- [ ] `A : BODY ;` format
-- [ ] `|` for multiple alternatives with same LHS
-- [ ] Empty BODY for epsilon productions
-- [ ] Assign unique number to each rule
+- [x] `A : BODY ;` format
+- [x] `|` for multiple alternatives with same LHS
+- [x] Empty BODY for epsilon productions
+- [x] Assign unique number to each rule
 
 ### 4.2 Semantic Actions
-- [ ] `{ C-code }` - Arbitrary C statements
-- [ ] Actions can appear anywhere in rule (mid-rule actions)
-- [ ] Mid-rule actions create anonymous nonterminals
-- [ ] `$$` - Access/set rule result value (translates to `yyval`)
-- [ ] `$N` - Access Nth RHS symbol value (translates to `yyvsp[offset]`)
-- [ ] `$-N` - Access symbol before current rule
-- [ ] `$<tag>N` - Typed access with explicit union member
-- [ ] Default `$$ = $1` if no action specified
+- [x] `{ C-code }` - Arbitrary C statements
+- [x] Actions can appear anywhere in rule (mid-rule actions)
+- [x] Mid-rule actions create anonymous nonterminals
+- [x] `$$` - Access/set rule result value (translates to `yyval`)
+- [x] `$N` - Access Nth RHS symbol value (translates to `yyvsp[offset]`)
+- [x] `$-N` - Access symbol before current rule
+- [x] `$<tag>N` - Typed access with explicit union member
+- [x] Default `$$ = $1` if no action specified
 
 ### 4.3 Precedence Override
-- [ ] `%prec token` - Override rule precedence with token's precedence
-- [ ] Rule precedence defaults to last token/literal in body
+- [x] `%prec token` - Override rule precedence with token's precedence
+- [x] Rule precedence defaults to last token/literal in body
 
 ### 4.4 Error Token
-- [ ] Reserved `error` token for error recovery
-- [ ] Default value 256 (configurable via `%token`)
-- [ ] Lexer should not return `error` value
+- [x] Reserved `error` token for error recovery
+- [x] Default value 256 (configurable via `%token`)
+- [x] Lexer should not return `error` value
 
 ---
 
