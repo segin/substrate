@@ -25,19 +25,19 @@
 ## 2. Input File Format
 
 ### 2.1 Three-Section Structure
-- [ ] Parse declarations section (before first `%%`)
-- [ ] Parse grammar rules section (between `%%` markers)
-- [ ] Parse programs/epilogue section (after second `%%`, optional)
-- [ ] Second `%%` is optional if programs section is empty
+- [x] Parse declarations section (before first `%%`)
+- [x] Parse grammar rules section (between `%%` markers)
+- [x] Parse programs/epilogue section (after second `%%`, optional)
+- [x] Second `%%` is optional if programs section is empty
 
 ### 2.2 Lexical Structure
-- [ ] Ignore `<blank>`, `<newline>`, `<formfeed>` except in names/symbols
-- [ ] Support C-style comments `/* ... */`
-- [ ] Names: letters, `.`, `_`, non-initial digits (arbitrary length)
-- [ ] Case-sensitive names
-- [ ] Character literals: single character in single quotes
-- [ ] Support all ISO C escape sequences in literals (`\n`, `\t`, `\r`, `\\`, `\'`, etc.)
-- [ ] Reject NUL character in grammar rules or literals
+- [x] Ignore `<blank>`, `<newline>`, `<formfeed>` except in names/symbols
+- [x] Support C-style comments `/* ... */`
+- [x] Names: letters, `.`, `_`, non-initial digits (arbitrary length)
+- [x] Case-sensitive names
+- [x] Character literals: single character in single quotes
+- [x] Support all ISO C escape sequences in literals (`\n`, `\t`, `\r`, `\\`, `\'`, etc.)
+- [x] Reject NUL character in grammar rules or literals
 
 ---
 
