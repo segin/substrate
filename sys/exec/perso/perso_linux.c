@@ -342,5 +342,8 @@ struct personality personality_linux = {
     .syscall_table = linux_syscalls,
     .syscall_names = linux_names,
     .syscall_fmts = linux_fmts,
-    .syscall_count = MAX_SYSCALLS
+    .syscall_count = MAX_SYSCALLS,
+    .sendsig = linux_sendsig,
+    .sigreturn = linux_sys_sigreturn,
+    .rt_sigreturn = linux_sys_rt_sigreturn
 };

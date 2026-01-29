@@ -13,6 +13,7 @@ process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
 process_t *kernel_process = NULL;
 static int next_pid = 1;
+extern thread_t threads[MAX_THREADS];
 
 /*
  * proctree_lock - Protects the process tree structure
@@ -362,12 +363,16 @@ void proc_exit(int code) {
     extern void rusage_finalize(process_t *p);
     rusage_finalize(current_process);
     
-    // 6. Final State
+    // 6. Record exit status and set state
+    current_process->exit_code = code;
     current_process->state = SZOMB;
     
-    // 6. Reschedule (never returns)
-    // Mark current thread as zombie too?
-    current_thread->state = THREAD_ZOMBIE;
+    // 7. Prevent further scheduling of ALL process threads
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 && threads[i].proc == current_process) {
+            threads[i].state = THREAD_ZOMBIE;
+        }
+    }
     
     sched_yield();
     

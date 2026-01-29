@@ -298,7 +298,7 @@ int sys_uname(struct utsname *buf) {
         return -14; /* EFAULT */
     }
     
-    extern char kernel_hostname[65];
+    extern char kernel_hostname[MAXHOSTNAMELEN];
     
     /* Build result in kernel buffer first */
     struct utsname kbuf;
@@ -1026,10 +1026,10 @@ int sys_cpu_count(void) {
 int sys_hostname(char *buf, size_t len) {
     if (!buf || len == 0) return -1;
     
-    extern char kernel_hostname[65];
+    extern char kernel_hostname[MAXHOSTNAMELEN];
     
     size_t hlen = 0;
-    while (kernel_hostname[hlen] && hlen < 64) hlen++;
+    while (kernel_hostname[hlen] && hlen < MAXHOSTNAMELEN - 1) hlen++;
     
     if (len < hlen + 1) {
         // Buffer too small - copy what we can

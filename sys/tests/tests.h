@@ -9,6 +9,6 @@ void run_vm_fault_tests(void);
 void run_vm_cow_tests(void);
 void run_vm_pager_tests(void);
 void run_vm_policy_tests(void);
-int test_bitness(void);
+void run_signal_tests(void);
 
 #endif

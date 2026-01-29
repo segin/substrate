@@ -54,6 +54,11 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_PROC_COUNT] = &sys_proc_count,
     [SYS_CPU_COUNT] = &sys_cpu_count,
     [SYS_HOSTNAME] = &sys_hostname,
+    [SYS_GETPPID] = &sys_getppid,
+    [SYS_SIGACTION] = (void*)sys_sigaction,
+    [SYS_SIGPROCMASK] = (void*)sys_sigprocmask,
+    [SYS_SIGPENDING] = (void*)sys_sigpending,
+    [SYS_SIGSUSPEND] = (void*)sys_sigsuspend,
     [SYS_RT_SIGRETURN] = (void*)sys_rt_sigreturn,
 };
 
@@ -106,6 +111,11 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_PROC_COUNT] = "proc_count",
     [SYS_CPU_COUNT] = "cpu_count",
     [SYS_HOSTNAME] = "hostname",
+    [SYS_GETPPID] = "getppid",
+    [SYS_SIGACTION] = "sigaction",
+    [SYS_SIGPROCMASK] = "sigprocmask",
+    [SYS_SIGPENDING] = "sigpending",
+    [SYS_SIGSUSPEND] = "sigsuspend",
     [SYS_RT_SIGRETURN] = "rt_sigreturn",
 };
 
@@ -158,9 +168,18 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_PROC_COUNT] = { 0, { 0 } },
     [SYS_CPU_COUNT] = { 0, { 0 } },
     [SYS_HOSTNAME] = { 2, { ARG_PTR, ARG_INT } },
+    [SYS_GETPPID] = { 0, { 0 } },
+    [SYS_SIGACTION] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_SIGPROCMASK] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_SIGPENDING] = { 1, { ARG_PTR } },
+    [SYS_SIGSUSPEND] = { 1, { ARG_PTR } },
     [SYS_RT_SIGRETURN] = { 1, { ARG_PTR } },
     [SYS_SYSCTL] = { 6, { ARG_PTR, ARG_INT, ARG_PTR, ARG_PTR, ARG_PTR, ARG_INT } },
 };
+
+extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
+extern int sys_sigreturn(void *regs);
+extern int sys_rt_sigreturn(void *regs);
 
 struct personality personality_native = {
     .name = "substrate",
@@ -168,5 +187,8 @@ struct personality personality_native = {
     .syscall_table = native_syscalls,
     .syscall_names = native_names,
     .syscall_fmts = native_fmts,
-    .syscall_count = MAX_SYSCALLS
+    .syscall_count = MAX_SYSCALLS,
+    .sendsig = sendsig,
+    .sigreturn = sys_sigreturn,
+    .rt_sigreturn = sys_rt_sigreturn
 };

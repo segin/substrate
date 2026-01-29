@@ -326,10 +326,17 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS_getdents]       = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
 };
 
+extern void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
+extern int netbsd_sys_sigreturn(void *regs);
+
 struct personality personality_netbsd = {
     .name = "NetBSD",
+    .id = PERS_NETBSD,
     .syscall_table = netbsd_syscalls,
     .syscall_names = netbsd_names,
     .syscall_fmts = netbsd_fmts,
-    .syscall_count = MAX_SYSCALLS
+    .syscall_count = MAX_SYSCALLS,
+    .sendsig = netbsd_sendsig,
+    .sigreturn = netbsd_sys_sigreturn,
+    .rt_sigreturn = NULL
 };

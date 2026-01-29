@@ -137,6 +137,13 @@ void sched_set_priority(int tid, sched_class_t cls, int prio) {
 
 void sched_sleep(void *chan) {
     if (!current_thread) return;
+    
+    // Check for pending signals before sleeping if interruptible
+    if ((current_thread->flags & THREAD_F_INTERRUPTIBLE) && 
+        (current_thread->sig_pending & ~current_thread->sig_mask)) {
+        return;
+    }
+
     current_thread->wait_chan = chan;
     current_thread->state = THREAD_BLOCKED;
     sched_yield();

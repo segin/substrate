@@ -274,6 +274,14 @@ static video_driver_t mb_driver = {
 /* ==================== Initialization ==================== */
 
 void fb_init(multiboot_info_t *mbi) {
+    char vid_arg[32];
+    if (cmdline_get("video", vid_arg, 32) == 0) {
+        if (strcmp(vid_arg, "off") == 0 || strcmp(vid_arg, "none") == 0) {
+            fb_active = 0;
+            return;
+        }
+    }
+
     saved_mbi = mbi;
     
     /* Register Drivers */
@@ -286,8 +294,6 @@ void fb_init(multiboot_info_t *mbi) {
     #endif
     bga_install(); // Always include for now
     vga_install();
-
-    char vid_arg[32];
     int use_cmdline = 0;
     if (cmdline_get("video", vid_arg, 32) == 0) {
         use_cmdline = 1;

@@ -35,7 +35,6 @@ struct sysctl_oid sysctl_debug= { &sysctl__children, NULL, "debug",CTL_DEBUG,CTL
 /* Basic Variables */
 static char kernel_ostype[] = "Substrate";
 static char kernel_osrelease[] = "0.1-ALPHA";
-static int kernel_osrev = 202601;
 static char kernel_version[] = "Substrate 0.1-ALPHA (GENERIC) #0: Tue Jan 27 00:00:00 UTC 2026";
 static int kernel_maxproc = 1000; // placeholder
 static char kernel_hostname[256] = "localhost";
@@ -63,8 +62,13 @@ SYSCTL_INT(hw, HW_PAGESIZE, pagesize, CTLFLAG_RD, &hw_pagesize, 0, "System page 
 /*
  * sysctl_init()
  */
+extern void early_uart_print(const char *s);
+
 void sysctl_init(void) {
+    early_uart_print("sysctl_init: start\n");
     if (sysctl_initialized) return;
+    sysctl_initialized = 1;
+    early_uart_print("sysctl_init: mutex_init\n");
     mutex_init(&sysctl_mutex, "sysctl");
     // Initialize root list
     sysctl__children.slh_first = NULL;
@@ -191,16 +195,6 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     return error;
 }
 
-/*
- * sysctl_init()
- */
-void sysctl_init(void) {
-    if (sysctl_initialized) return;
-    mutex_init(&sysctl_mutex, "sysctl");
-    // Initialize root list
-    sysctl__children.slh_first = NULL;
-    sysctl_initialized = 1;
-}
 
 /*
  * Registration
@@ -211,6 +205,7 @@ void sysctl_register_oid(struct sysctl_oid *oidp) {
 
     if (!sysctl_initialized) sysctl_init();
 
+    early_uart_print("sysctl_register_oid: lock\n");
     mutex_lock(&sysctl_mutex);
 
     // Insert into list (simple prepend or sort? BSD sorts)
@@ -286,6 +281,7 @@ struct sysctl_oid *sysctl_find_oid(int *name, unsigned int namelen, struct sysct
 
 /* helper to copy out data */
 int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
+    (void)oidp;
     int error = 0;
     int val;
 
@@ -314,6 +310,7 @@ int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysc
 }
 
 int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
+    (void)oidp;
     int error = 0;
     char *str = (char *)arg1;
     size_t len = 0;
@@ -329,7 +326,7 @@ int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
 
     if (req->newptr) {
         size_t newlen = req->newlen;
-        if (newlen > arg2) return ENAMETOOLONG; // arg2 is max len for string
+        if (newlen > (size_t)arg2) return ENAMETOOLONG; // arg2 is max len for string
         // Copy in new string
         error = sysctl_copyin(req->newptr, str, newlen);
         if (error) return error;
@@ -339,6 +336,7 @@ int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
 }
 
 int sysctl_handle_opaque(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
+    (void)oidp;
     int error = 0;
     void *data = arg1;
     size_t len = arg2; // Fixed size passed in arg2

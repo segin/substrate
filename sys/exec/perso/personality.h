@@ -34,6 +34,11 @@ struct personality {
     const char **syscall_names;
     struct syscall_fmt *syscall_fmts;
     uint32_t syscall_count;
+
+    /* Signal hooks */
+    void (*sendsig)(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
+    int (*sigreturn)(void *regs);
+    int (*rt_sigreturn)(void *regs);
 };
 
 extern struct personality personality_native;

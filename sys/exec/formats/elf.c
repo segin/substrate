@@ -36,11 +36,6 @@ static void exec_reset_signals(void) {
     // Clear sig_catch bitmask since all caught signals are now SIG_DFL
     current_process->sig_catch = 0;
     // sig_ignore remains unchanged - ignored signals stay ignored
-    
-    // Clear pending signals (POSIX allows this, prevents stale signals)
-    if (current_thread) {
-        current_thread->sig_pending = 0;
-    }
 }
 
 int elf_check_file(Elf32_Ehdr *hdr) {
@@ -311,6 +306,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                 current_process->pers = &personality_native;
                 break;
         }
+        current_process->perso_id = current_process->pers->id;
         
         // Set Bitness
         if (ehdr.e_ident[EI_CLASS] == ELFCLASS64) {

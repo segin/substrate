@@ -11,6 +11,7 @@
 
 
 #include <stdint.h>
+#include <sys/signal.h>
 
 /* Forward declarations */
 struct native_stat;
@@ -142,5 +143,78 @@ int linux_sys_fstat(int fd, struct linux_stat *buf);
 int linux_sys_stat64(const char *path, struct linux_stat64 *buf);
 int linux_sys_lstat64(const char *path, struct linux_stat64 *buf);
 int linux_sys_fstat64(int fd, struct linux_stat64 *buf);
+
+/* Linux i386 sigcontext */
+struct linux_sigcontext {
+    uint16_t gs, __gsh;
+    uint16_t fs, __fsh;
+    uint16_t es, __esh;
+    uint16_t ds, __dsh;
+    uint32_t edi;
+    uint32_t esi;
+    uint32_t ebp;
+    uint32_t esp;
+    uint32_t ebx;
+    uint32_t edx;
+    uint32_t ecx;
+    uint32_t eax;
+    uint32_t trapno;
+    uint32_t err;
+    uint32_t eip;
+    uint16_t cs, __csh;
+    uint32_t eflags;
+    uint32_t esp_at_signal;
+    uint16_t ss, __ssh;
+    uint32_t fpstate;  /* struct _fpstate * */
+    uint32_t oldmask;
+    uint32_t cr2;
+};
+
+/* Linux sigset_t (64 bits) */
+typedef struct {
+    uint32_t sig[2];
+} linux_sigset_t;
+
+/* Linux stack_t */
+struct linux_stack {
+    uint32_t ss_sp;
+    int32_t  ss_flags;
+    uint32_t ss_size;
+};
+
+/* Linux ucontext */
+struct linux_ucontext {
+    uint32_t uc_flags;
+    uint32_t uc_link;
+    struct linux_stack uc_stack;
+    struct linux_sigcontext uc_mcontext;
+    linux_sigset_t uc_sigmask;
+};
+
+/* Linux sigframe (traditional) */
+struct linux_sigframe {
+    uint32_t pretcode;
+    int32_t  sig;
+    struct linux_sigcontext sc;
+    uint32_t fpstate_unused;
+    uint32_t extramask[1];
+    char     retcode[8];
+};
+
+/* Linux rt_sigframe (real-time signals) */
+struct linux_rt_sigframe {
+    uint32_t pretcode;
+    int32_t  sig;
+    uint32_t pinfo;
+    uint32_t puc;
+    siginfo_t info; // We'll need to translate siginfo_t
+    struct linux_ucontext uc;
+    char     retcode[8];
+};
+
+/* Linux signal translation functions */
+void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
+int  linux_sys_sigreturn(void *regs);
+int  linux_sys_rt_sigreturn(void *regs);
 
 #endif /* _LINUX_USER_H */

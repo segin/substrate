@@ -166,8 +166,12 @@ int sys_freebsd4_uname(void *vbuf) {
 
 struct personality personality_freebsd = {
     .name = "FreeBSD",
+    .id = PERS_FREEBSD,
     .syscall_table = freebsd_syscalls,
     .syscall_names = freebsd_names,
     .syscall_fmts = freebsd_fmts,
-    .syscall_count = MAX_SYSCALLS
+    .syscall_count = MAX_SYSCALLS,
+    .sendsig = freebsd_sendsig,
+    .sigreturn = freebsd_sys_sigreturn,
+    .rt_sigreturn = NULL // FreeBSD traditional sigreturn handles both or uses different entries
 };

@@ -64,7 +64,7 @@ typedef struct {
 } siginfo_t;
 
 // Signal bits
-#define sigmask(sig) (1 << ((sig) - 1))
+#define sigmask(sig) (1U << ((sig) - 1))
 
 /* Signal property flags for sigprop[] array */
 #define SA_KILL     0x0001  /* Default action: terminate process */
@@ -78,11 +78,11 @@ typedef struct {
 /* Default signal properties array (defined in sigprop.c) */
 extern const uint8_t sigprop[NSIG];
 
-/* Signal syscalls */
-int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
-int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset);
-int sys_sigpending(uint32_t *set);
-int sys_sigsuspend(const uint32_t *mask);
+/* Signal syscalls - using void* to match syscall_impl.h and avoid circular deps */
+int sys_sigaction(int sig, const void *act, void *oact);
+int sys_sigprocmask(int how, const void *set, void *oset);
+int sys_sigpending(void *set);
+int sys_sigsuspend(const void *mask);
 int sys_kill(int pid, int sig);
 int signal_send_group(int pgrp, int sig);
 int sys_sigwait(const uint32_t *set, int *sig);
@@ -102,7 +102,7 @@ typedef struct stack {
 #define MINSIGSTKSZ 2048
 #define SIGSTKSZ    8192
 
-int sys_sigaltstack(const stack_t *ss, stack_t *oss);
+int sys_sigaltstack(const void *ss, void *oss);
 
 void psignal(struct process *p, int sig);
 void pgsignal(int pgrp, int sig);

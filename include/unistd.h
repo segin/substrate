@@ -36,6 +36,7 @@ int dup2(int oldfd, int newfd);
 void sync(void);
 
 int getpid(void);
+pid_t getppid(void);
 uid_t getuid(void);
 gid_t getgid(void);
 uid_t geteuid(void);
@@ -57,6 +58,7 @@ int ftruncate(int fd, off_t length);
 int truncate(const char *path, off_t length);
 
 unsigned int sleep(unsigned int seconds);
+int usleep(useconds_t usec);
 
 int gethostname(char *name, size_t len);
 int sethostname(const char *name, size_t len);

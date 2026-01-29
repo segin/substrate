@@ -7,11 +7,14 @@
 #include <kern/panic.h>
 #include <stddef.h>
 #include <pm/pm.h>
+#include <exec/perso/personality.h>
 
 extern thread_t threads[MAX_THREADS];
 
 // Signal System Calls
-int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
+int sys_sigaction(int sig, const void *act_ptr, void *oact_ptr) {
+    const struct sigaction *act = (const struct sigaction *)act_ptr;
+    struct sigaction *oact = (struct sigaction *)oact_ptr;
     if (sig <= 0 || sig > NSIG || sig == SIGKILL || sig == SIGSTOP) return -1;
     
     uint32_t mask = sigmask(sig);
@@ -37,7 +40,9 @@ int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) 
     return 0;
 }
 
-int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
+int sys_sigprocmask(int how, const void *set_ptr, void *oset_ptr) {
+    const uint32_t *set = (const uint32_t *)set_ptr;
+    uint32_t *oset = (uint32_t *)oset_ptr;
     if (oset) *oset = current_thread->sig_mask;
     if (set) {
         uint32_t new_set = *set;
@@ -49,12 +54,14 @@ int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
     return 0;
 }
 
-int sys_sigpending(uint32_t *set) {
+int sys_sigpending(void *set_ptr) {
+    uint32_t *set = (uint32_t *)set_ptr;
     if (set) *set = current_thread->sig_pending & current_thread->sig_mask;
     return 0;
 }
 
-int sys_sigsuspend(const uint32_t *mask) {
+int sys_sigsuspend(const void *mask_ptr) {
+    const uint32_t *mask = (const uint32_t *)mask_ptr;
     uint32_t old_mask = current_thread->sig_mask;
     if (mask) current_thread->sig_mask = *mask;
     
@@ -207,14 +214,36 @@ void psignal(process_t *p, int sig) {
         return;
     }
 
-    /* Handle SIGCONT: Resume stopped process */
+    /* Handle SIGCONT: Resume stopped process and clear pending stop signals */
     if (sig == SIGCONT) {
+        uint32_t stop_mask = sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU);
+        
+        // Clear pending stop signals on all threads
+        for (int i = 0; i < MAX_THREADS; i++) {
+            if (threads[i].tid != -1 && threads[i].proc == p) {
+                threads[i].sig_pending &= ~stop_mask;
+                if (threads[i].state == THREAD_STOPPED) {
+                    threads[i].state = THREAD_READY;
+                }
+            }
+        }
+
         if (p->state == SSTOP) {
             p->state = SRUN;
+            p->p_flag |= P_CONTINUED;
             /* Notify parent if not SA_NOCLDSTOP */
             if (p->p_parent && 
                 !(p->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
                 psignal(p->p_parent, SIGCHLD);
+            }
+        }
+    }
+
+    /* For SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, clear SIGCONT */
+    if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
+        for (int i = 0; i < MAX_THREADS; i++) {
+            if (threads[i].tid != -1 && threads[i].proc == p) {
+                threads[i].sig_pending &= ~sigmask(SIGCONT);
             }
         }
     }
@@ -466,6 +495,8 @@ void signal_handle_pending(registers_t *regs) {
     } else if (act->sa_handler == SIG_DFL) {
         // Default actions
         if (sig == SIGINT || sig == SIGTERM || sig == SIGSEGV || sig == SIGILL || sig == SIGFPE) {
+            // Init Protection: PID 1 ignores fatal signals with default action
+            if (current_process->pid == 1) return;
             sigexit(current_process, sig);
             return;
         }
@@ -513,33 +544,32 @@ void signal_handle_pending(registers_t *regs) {
         sys_sigaction(sig, &dfl, NULL);
     }
 
-    // Deliver signal via architecture-specific sendsig
-    extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
-    
-    /*
-     * Check for SA_RESTART: If we're in a syscall that returned EINTR (-4) or 
-     * similar restartable error, and SA_RESTART is set, restart the syscall
-     * by rewinding EIP and restoring EAX.
-     */
-    if ((flags & SA_RESTART) && current_thread->in_syscall) {
-        int32_t ret = (int32_t)regs->eax;
-        if (ret == -4 || ret == -512) {  // EINTR or ERESTARTSYS
-            /* 
-             * Rewind EIP to point back to 'int $0x80' (2 bytes).
-             * Restore original EAX (syscall number).
-             * These changes are reflected in the sigcontext saved by sendsig,
-             * so when the handler returns and sigreturn restores context,
-             * the syscall will be re-executed.
-             */
-            regs->eip -= 2;
+    // SA_RESTART: Restart syscall if it was interrupted and handler has SA_RESTART
+    // EINTR is typically 4 (Linux/Native) or -4/4 (FreeBSD)
+    // On i386, we decrement EIP by 2 (size of INT 0x80) and restore EAX
+    if (current_thread->in_syscall && (int32_t)regs->eax == -4) {
+        if (flags & SA_RESTART) {
             regs->eax = current_thread->syscall_orig_eax;
+            regs->eip -= 2; // Size of INT 0x80 opcode
         }
     }
-    
-    sendsig(handler, sig, old_mask, flags, regs);
+
+    // Deliver signal via personality-specific sendsig
+    if (current_process->pers && current_process->pers->sendsig) {
+        current_process->pers->sendsig((void*)handler, sig, old_mask, flags, regs);
+    } else {
+        // Fallback to native sendsig if no personality hook (should not happen for valid perso)
+        extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
+        sendsig(handler, sig, old_mask, flags, regs);
+    }
+
+    // Set P_CONTINUED was already done in psignal for SIGCONT, 
+    // but if we delivered it to a handler, the app is "officially" continued.
 }
 
-int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
+int sys_sigaltstack(const void *ss_ptr, void *oss_ptr) {
+    const stack_t *ss = (const stack_t *)ss_ptr;
+    stack_t *oss = (stack_t *)oss_ptr;
     if (oss) {
         *oss = current_thread->sig_alt_stack;
     }

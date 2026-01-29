@@ -626,27 +626,27 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **VDSO Integration (Future):**
             - [ ] Embed trampoline in VDSO page.
             - [ ] Use `AT_SYSINFO` to locate trampoline.
-    - [ ] **Signal Mask Management:**
-        - [ ] **During Handler Execution:**
-            - [ ] Block current signal (unless SA_NODEFER).
-            - [ ] Block signals in `sa_mask`.
-            - [ ] Restore original mask in `sys_sigreturn`.
-        - [ ] **Inheritance:**
-            - [ ] On `fork()`: Child inherits pending signals and mask.
-            - [ ] On `exec()`: Reset all handlers to SIG_DFL (except SIG_IGN).
-    - [ ] **Signal Checking Points:**
-        - [ ] **Return from Interrupt/Exception:**
-            - [ ] `signal_handle_pending()` called from `isr_handler()` if returning to user mode. <!-- signal.c:157-211, idt.c -->
-        - [ ] **Return from Syscall:**
-            - [ ] Check pending signals after syscall completion.
-            - [ ] If signal pending and syscall interruptible, return EINTR.
-        - [ ] **Sleep Wakeup:**
-            - [ ] `sched_sleep()` returns if signal pending (EINTR-style).
-    - [ ] **Special Signal Handling:**
-        - [ ] **SIGKILL:**
-            - [ ] Cannot be caught, blocked, or ignored.
-            - [ ] Always terminates the process immediately.
-            - [ ] Wake all stopped threads before terminating.
+    - [x] **Signal Mask Management:**
+        - [x] **During Handler Execution:**
+            - [x] Block current signal (unless SA_NODEFER).
+            - [x] Block signals in `sa_mask`.
+            - [x] Restore original mask in `sys_sigreturn`.
+        - [x] **Inheritance:**
+            - [x] On `fork()`: Child inherits pending signals and mask.
+            - [x] On `exec()`: Reset all handlers to SIG_DFL (except SIG_IGN).
+    - [x] **Signal Checking Points:**
+        - [x] **Return from Interrupt/Exception:**
+            - [x] `signal_handle_pending()` called from `isr_handler()` if returning to user mode. <!-- signal.c:157-211, idt.c -->
+        - [x] **Return from Syscall:**
+            - [x] Check pending signals after syscall completion.
+            - [x] If signal pending and syscall interruptible, return EINTR.
+        - [x] **Sleep Wakeup:**
+            - [x] `sched_sleep()` returns if signal pending (EINTR-style).
+    - [x] **Special Signal Handling:**
+        - [x] **SIGKILL:**
+            - [x] Cannot be caught, blocked, or ignored.
+            - [x] Always terminates the process immediately.
+            - [x] Wake all stopped threads before terminating.
         - [ ] **SIGSTOP:**
             - [ ] Cannot be caught, blocked, or ignored.
             - [ ] Stops all threads in the process.

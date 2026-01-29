@@ -24,6 +24,11 @@
 #define SYS_kill        37
 #define SYS_signal      48
 #define SYS_clone       120
+#define SYS_getppid     64
+#define SYS_sigaction   67
+#define SYS_sigprocmask 126
+#define SYS_sigpending  73
+#define SYS_sigsuspend  72
 
 /* File I/O */
 #define SYS_read        3

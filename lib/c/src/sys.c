@@ -114,6 +114,10 @@ pid_t getpid(void) {
     return (pid_t)_syscall0(SYS_GETPID);
 }
 
+pid_t getppid(void) {
+    return (pid_t)_syscall0(SYS_getppid);
+}
+
 uid_t getuid(void) { return (uid_t)_syscall0(SYS_GETUID); }
 gid_t getgid(void) { return (gid_t)_syscall0(SYS_GETGID); }
 uid_t geteuid(void) { return (uid_t)_syscall0(SYS_GETEUID); }
@@ -139,6 +143,51 @@ int kill(pid_t pid, int sig) {
 
 sighandler_t signal(int signum, sighandler_t handler) {
     return (sighandler_t)(uintptr_t)_syscall2(SYS_SIGNAL, signum, (int)handler);
+}
+
+int sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
+    return (int)_syscall3(SYS_sigaction, sig, (int)act, (int)oact);
+}
+
+int sigprocmask(int how, const sigset_t *set, sigset_t *oset) {
+    return (int)_syscall3(SYS_sigprocmask, how, (int)set, (int)oset);
+}
+
+int sigpending(sigset_t *set) {
+    return (int)_syscall1(SYS_sigpending, (int)set);
+}
+
+int sigsuspend(const sigset_t *mask) {
+    return (int)_syscall1(SYS_sigsuspend, (int)mask);
+}
+
+int sigemptyset(sigset_t *set) {
+    if (!set) { errno = EINVAL; return -1; }
+    *set = 0;
+    return 0;
+}
+
+int sigfillset(sigset_t *set) {
+    if (!set) { errno = EINVAL; return -1; }
+    *set = 0xFFFFFFFF;
+    return 0;
+}
+
+int sigaddset(sigset_t *set, int signo) {
+    if (!set || signo <= 0 || signo > 32) { errno = EINVAL; return -1; }
+    *set |= (1U << (signo - 1));
+    return 0;
+}
+
+int sigdelset(sigset_t *set, int signo) {
+    if (!set || signo <= 0 || signo > 32) { errno = EINVAL; return -1; }
+    *set &= ~(1U << (signo - 1));
+    return 0;
+}
+
+int sigismember(const sigset_t *set, int signo) {
+    if (!set || signo <= 0 || signo > 32) { errno = EINVAL; return -1; }
+    return (*set & (1U << (signo - 1))) != 0;
 }
 
 /* ... */
@@ -246,10 +295,15 @@ int nanosleep(const struct timespec *req, struct timespec *rem) {
 }
 
 unsigned int sleep(unsigned int seconds) {
-    struct timespec req = { .tv_sec = seconds, .tv_nsec = 0 };
+    struct timespec req = { .tv_sec = (time_t)seconds, .tv_nsec = 0 };
     struct timespec rem = { 0 };
     if (nanosleep(&req, &rem) == 0) return 0;
     return (unsigned int)rem.tv_sec;
+}
+
+int usleep(useconds_t usec) {
+    struct timespec req = { .tv_sec = (time_t)(usec / 1000000), .tv_nsec = (long)((usec % 1000000) * 1000) };
+    return nanosleep(&req, NULL);
 }
 
 int clock_gettime(clockid_t clk_id, struct timespec *tp) {

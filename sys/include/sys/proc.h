@@ -138,6 +138,9 @@ typedef struct thread {
     int16_t       interactivity;  // Interactivity score (-128 to +127), positive = interactive
     uint16_t      time_slice;     // Remaining time slice (ticks)
     uint16_t      time_slice_max; // Full time slice for this priority
+    uint32_t      flags;          // Thread flags
+    
+#define THREAD_F_INTERRUPTIBLE 0x0001 // Sleep is interruptible by signals
     
     // Scheduling - Runqueue linkage
     struct thread *rq_next;       // Next in runqueue level

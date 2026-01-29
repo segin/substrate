@@ -239,10 +239,17 @@ static struct syscall_fmt openbsd_fmts[MAX_SYSCALLS] = {
     [OPENBSD_SYS_dup2]           = { 2, { ARG_INT, ARG_INT } },
 };
 
+extern void openbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
+extern int openbsd_sys_sigreturn(void *regs);
+
 struct personality personality_openbsd = {
     .name = "OpenBSD",
+    .id = PERS_OPENBSD,
     .syscall_table = openbsd_syscalls,
     .syscall_names = openbsd_names,
     .syscall_fmts = openbsd_fmts,
-    .syscall_count = MAX_SYSCALLS
+    .syscall_count = MAX_SYSCALLS,
+    .sendsig = openbsd_sendsig,
+    .sigreturn = openbsd_sys_sigreturn,
+    .rt_sigreturn = NULL
 };

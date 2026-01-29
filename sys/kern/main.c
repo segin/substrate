@@ -248,11 +248,13 @@ void kmain(unsigned long magic, unsigned long addr) {
     early_uart_print("KMAIN START\n");
     mboot_orig_addr = addr;
     // 0. Setup Kernel Task IMMEDIATELY
+    early_uart_print("KMAIN: pm_init\n");
     pm_init();
     current_process = &processes[0];
     current_process->pid = 0;
     strcpy(current_process->comm, "(swapper)");
 
+    early_uart_print("KMAIN: console_init\n");
     console_init();
     hw_text_init(); // Registers VGA text console
     uart_init(); // Initializes UART hardare
@@ -302,9 +304,11 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Display kernel ident banner (mirrored if serial_debug_enabled)
     kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
 
+    early_uart_print("KMAIN: init_memory\n");
     // Memory Subsystem Init (PMM, VM, UMA)
     init_memory(mboot_info);
 
+    early_uart_print("KMAIN: gdt_init\n");
     // Initialize GDT
     gdt_init();
     kprint("GDT Initialized.\n");
@@ -326,17 +330,18 @@ void kmain(unsigned long magic, unsigned long addr) {
     extern void pmap_map_trampoline(void);
     pmap_map_trampoline();
     
+    early_uart_print("KMAIN: random_init\n");
     // Initialize Random Number Generator
     extern void random_init(void);
     random_init();
 
-    // Initialize Sysctl Subsystem
-    extern void sysctl_init(void);
-    sysctl_init();
-
     // Initialize Scheduler
     sched_init();
     kprint("Scheduler Initialized.\n");
+
+    // Initialize Sysctl Subsystem
+    extern void sysctl_init(void);
+    sysctl_init();
     
     keyboard_init();
     

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
+#include <sys/tty.h>
 
 // /dev/null
 // /dev/null
@@ -97,12 +98,12 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
 
 // /dev/tty - proxy to current process's controlling terminal
 // /dev/tty - proxy to current process's controlling terminal
-static size_t tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+static size_t dev_tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
-    if (current_process && current_process->tty && current_process->tty->read) {
-        return current_process->tty->read(current_process->tty, offset, size, buffer);
+    if (current_process && current_process->tty) {
+        return tty_read(current_process->tty, (char*)buffer, size);
     }
     
     // Fallback to keyboard if no TTY assigned
@@ -115,12 +116,12 @@ static size_t tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buff
     return count;
 }
 
-static size_t tty_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+static size_t dev_tty_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
-    if (current_process && current_process->tty && current_process->tty->write) {
-        return current_process->tty->write(current_process->tty, offset, size, buffer);
+    if (current_process && current_process->tty) {
+        return tty_write(current_process->tty, (const char*)buffer, size);
     }
     
     // Fallback to console
@@ -238,8 +239,8 @@ void pseudo_init(void) {
     memset(&tty_node, 0, sizeof(fs_node_t));
     strcpy(tty_node.name, "tty");
     tty_node.flags = FS_CHARDEVICE;
-    tty_node.read = &tty_read;
-    tty_node.write = &tty_write;
+    tty_node.read = &dev_tty_read;
+    tty_node.write = &dev_tty_write;
     devfs_register_device(&tty_node);
 
     // /dev/mem

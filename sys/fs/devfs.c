@@ -1,6 +1,7 @@
 #include <vfs/vfs.h>
 #include <pm/pm.h>
 #include <sys/proc.h>
+#include <sys/tty.h>
 #include <string.h>
 #include <stddef.h>
 
@@ -8,26 +9,31 @@ extern fs_node_t *console_get_node(void);
 
 static size_t tty_read_proxy(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
-    // Proxies to current process's TTY or default console
-    fs_node_t *tty = current_process ? current_process->tty : NULL;
-    if (!tty) tty = console_get_node();
-    if (tty && tty->read) return tty->read(tty, offset, size, buffer);
+    if (current_process && current_process->tty) {
+        return tty_read(current_process->tty, (char*)buffer, size);
+    }
+    fs_node_t *cons = console_get_node();
+    if (cons && cons->read) return cons->read(cons, offset, size, buffer);
     return 0;
 }
 
 static size_t tty_write_proxy(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
-    fs_node_t *tty = current_process ? current_process->tty : NULL;
-    if (!tty) tty = console_get_node();
-    if (tty && tty->write) return tty->write(tty, offset, size, buffer);
+    if (current_process && current_process->tty) {
+        return tty_write(current_process->tty, (const char*)buffer, size);
+    }
+    fs_node_t *cons = console_get_node();
+    if (cons && cons->write) return cons->write(cons, offset, size, buffer);
     return 0;
 }
 
 static int tty_ioctl_proxy(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
-    fs_node_t *tty = current_process ? current_process->tty : NULL;
-    if (!tty) tty = console_get_node();
-    if (tty && tty->ioctl) return tty->ioctl(tty, request, arg);
+    if (current_process && current_process->tty) {
+        return tty_ioctl(current_process->tty, request, (unsigned long)arg);
+    }
+    fs_node_t *cons = console_get_node();
+    if (cons && cons->ioctl) return cons->ioctl(cons, request, arg);
     return -1;
 }
 
@@ -47,7 +53,6 @@ static int char_device_count = 0;
 static fs_node_t *storage_devices[MAX_DEVICES];
 static int storage_device_count = 0;
 
-// Register a device - auto-categorize by type
 void devfs_register_device(fs_node_t *node) {
     if (node->flags == FS_BLOCKDEVICE) {
         // Storage devices go under /dev/storage

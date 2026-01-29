@@ -47,7 +47,7 @@
  * Returns 0 if the address range [addr, addr+size) is entirely within
  * valid user address space, -1 otherwise.
  */
-static int validate_user_addr(const void *addr, size_t size) {
+int validate_user_addr(const void *addr, size_t size) {
     uintptr_t start = (uintptr_t)addr;
     uintptr_t end = start + size;
     
@@ -76,7 +76,7 @@ static int validate_user_addr(const void *addr, size_t size) {
  *   0 on success
  *  -1 on invalid address (EFAULT)
  */
-static int copyout(const void *src, void *dst, size_t size) {
+int copyout(const void *src, void *dst, size_t size) {
     /* Validate destination is in user space (basic bounds check) */
     if (validate_user_addr(dst, size) != 0) {
         return -1;  /* EFAULT */
@@ -114,7 +114,7 @@ fault:
  *   0 on success
  *  -1 on invalid address (EFAULT)
  */
-static int copyin(const void *src, void *dst, size_t size) {
+int copyin(const void *src, void *dst, size_t size) {
     /* Validate source is in user space */
     if (validate_user_addr(src, size) != 0) {
         return -1;  /* EFAULT */
@@ -443,7 +443,8 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
  *   state and the subsequent iret returns to the original context.
  *   On error, returns -1 (EFAULT).
  */
-int sys_sigreturn(struct sigcontext *scp) {
+int sys_sigreturn(void *scp_ptr) {
+    struct sigcontext *scp = (struct sigcontext *)scp_ptr;
     if (!scp) {
         return -1;  /* EINVAL */
     }
@@ -561,7 +562,8 @@ int sys_sigreturn(struct sigcontext *scp) {
  *   register state and the subsequent iret returns to the original context.
  *   On error, returns -1 (EFAULT).
  */
-int sys_rt_sigreturn(ucontext_t *ucp) {
+int sys_rt_sigreturn(void *ucp_ptr) {
+    ucontext_t *ucp = (ucontext_t *)ucp_ptr;
     if (!ucp) {
         return -1;  /* EINVAL */
     }
