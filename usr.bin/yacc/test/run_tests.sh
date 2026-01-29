@@ -133,6 +133,56 @@ test_grammar_stats() {
     fi
 }
 
+# Test 11: YYMAXDEPTH defined in output
+test_yymaxdepth() {
+    $YACC $TESTDIR/minimal.y 2>/dev/null
+    if grep -q "YYMAXDEPTH" y.tab.c; then
+        pass "YYMAXDEPTH defined in y.tab.c"
+    else
+        fail "YYMAXDEPTH not found"
+    fi
+}
+
+# Test 12: yylex extern declaration
+test_yylex_extern() {
+    $YACC $TESTDIR/minimal.y 2>/dev/null
+    if grep -q "extern int yylex" y.tab.c; then
+        pass "yylex extern declaration present"
+    else
+        fail "yylex extern not found"
+    fi
+}
+
+# Test 13: yyerror extern declaration
+test_yyerror_extern() {
+    $YACC $TESTDIR/minimal.y 2>/dev/null
+    if grep -q "extern void yyerror" y.tab.c; then
+        pass "yyerror extern declaration present"
+    else
+        fail "yyerror extern not found"
+    fi
+}
+
+# Test 14: Parser has yyreduce label
+test_yyreduce() {
+    $YACC $TESTDIR/minimal.y 2>/dev/null
+    if grep -q "yyreduce:" y.tab.c; then
+        pass "yyreduce label in parser"
+    else
+        fail "yyreduce label not found"
+    fi
+}
+
+# Test 15: Parser has yyshift label
+test_yyshift() {
+    $YACC $TESTDIR/minimal.y 2>/dev/null
+    if grep -q "yyshift:" y.tab.c; then
+        pass "yyshift label in parser"
+    else
+        fail "yyshift label not found"
+    fi
+}
+
 # Run all tests
 echo "=== Yacc Test Suite ==="
 echo ""
@@ -147,9 +197,15 @@ test_multiple_tokens
 test_yystype
 test_yyparse
 test_grammar_stats
+test_yymaxdepth
+test_yylex_extern
+test_yyerror_extern
+test_yyreduce
+test_yyshift
 
 echo ""
 echo "=== Results ==="
+
 echo "Passed: $PASSED"
 echo "Failed: $FAILED"
 

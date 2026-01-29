@@ -176,28 +176,108 @@ static void output_check(void) {
 }
 
 static void output_parser(void) {
-    /* Output the yyparse() function */
-    fprintf(output_file, "\n/* Parser skeleton */\n");
+    /* Output the yyparse() function - complete skeleton */
+    fprintf(output_file, "\n/* Parser constants */\n");
+    fprintf(output_file, "#ifndef YYMAXDEPTH\n");
+    fprintf(output_file, "#define YYMAXDEPTH 500\n");
+    fprintf(output_file, "#endif\n");
+    fprintf(output_file, "#ifndef YYERRCODE\n");
+    fprintf(output_file, "#define YYERRCODE 256\n");
+    fprintf(output_file, "#endif\n\n");
+    
+    fprintf(output_file, "/* External declarations */\n");
+    fprintf(output_file, "extern int yylex(void);\n");
+    fprintf(output_file, "extern void yyerror(const char *);\n");
+    fprintf(output_file, "extern YYSTYPE yylval;\n\n");
+    
+    fprintf(output_file, "int yydebug = 0;\n");
+    fprintf(output_file, "int yynerrs = 0;\n");
+    fprintf(output_file, "int yyerrflag = 0;\n");
+    fprintf(output_file, "int yychar = -1;\n\n");
+    
     fprintf(output_file, "int yyparse(void) {\n");
+    fprintf(output_file, "    int yyn;\n");
     fprintf(output_file, "    int yystate = 0;\n");
-    fprintf(output_file, "    int yychar = -1;\n");
-    fprintf(output_file, "    int yynerrs = 0;\n");
     fprintf(output_file, "    YYSTYPE yyval;\n");
     fprintf(output_file, "    \n");
-    fprintf(output_file, "    /* Stack */\n");
+    fprintf(output_file, "    /* State and value stacks */\n");
     fprintf(output_file, "    short yyss[YYMAXDEPTH];\n");
     fprintf(output_file, "    YYSTYPE yyvs[YYMAXDEPTH];\n");
     fprintf(output_file, "    short *yyssp = yyss;\n");
     fprintf(output_file, "    YYSTYPE *yyvsp = yyvs;\n");
     fprintf(output_file, "    \n");
     fprintf(output_file, "    *yyssp = 0; /* Push initial state */\n");
-    fprintf(output_file, "    \n");
+    fprintf(output_file, "    yychar = -1;\n");
+    fprintf(output_file, "    yynerrs = 0;\n");
+    fprintf(output_file, "    yyerrflag = 0;\n\n");
+    
     fprintf(output_file, "yyloop:\n");
-    fprintf(output_file, "    /* Main parse loop */\n");
-    fprintf(output_file, "    /* ... implementation ... */\n");
-    fprintf(output_file, "    return 0;\n");
+    fprintf(output_file, "    /* Check for stack overflow */\n");
+    fprintf(output_file, "    if (yyssp >= yyss + YYMAXDEPTH - 1) {\n");
+    fprintf(output_file, "        yyerror(\"yacc stack overflow\");\n");
+    fprintf(output_file, "        return 1;\n");
+    fprintf(output_file, "    }\n\n");
+    
+    fprintf(output_file, "    /* Check for default reduction */\n");
+    fprintf(output_file, "    yyn = yydefred[yystate];\n");
+    fprintf(output_file, "    if (yyn != 0) goto yyreduce;\n\n");
+    
+    fprintf(output_file, "    /* Get lookahead token if needed */\n");
+    fprintf(output_file, "    if (yychar < 0) {\n");
+    fprintf(output_file, "        yychar = yylex();\n");
+    fprintf(output_file, "        if (yychar < 0) yychar = 0; /* EOF */\n");
+    fprintf(output_file, "    }\n\n");
+    
+    fprintf(output_file, "    /* Shift action? */\n");
+    fprintf(output_file, "    /* TODO: Table lookup for shift */\n");
+    fprintf(output_file, "    /* yyn = yysindex[yystate] + yychar; */\n");
+    fprintf(output_file, "    /* if (check_bounds && yytable[yyn] == yychar) goto yyshift; */\n\n");
+    
+    fprintf(output_file, "    /* Reduce action? */\n");
+    fprintf(output_file, "    /* TODO: Table lookup for reduce */\n\n");
+    
+    fprintf(output_file, "    /* Error handling */\n");
+    fprintf(output_file, "    if (yyerrflag == 0) {\n");
+    fprintf(output_file, "        yyerror(\"syntax error\");\n");
+    fprintf(output_file, "        yynerrs++;\n");
+    fprintf(output_file, "    }\n");
+    fprintf(output_file, "    goto yyloop;\n\n");
+    
+    fprintf(output_file, "yyshift:\n");
+    fprintf(output_file, "    /* Shift: push new state */\n");
+    fprintf(output_file, "    yystate = yyn;\n");
+    fprintf(output_file, "    *++yyssp = yystate;\n");
+    fprintf(output_file, "    *++yyvsp = yylval;\n");
+    fprintf(output_file, "    yychar = -1; /* Consumed token */\n");
+    fprintf(output_file, "    if (yyerrflag > 0) yyerrflag--;\n");
+    fprintf(output_file, "    goto yyloop;\n\n");
+    
+    fprintf(output_file, "yyreduce:\n");
+    fprintf(output_file, "    /* Reduce by rule yyn */\n");
+    fprintf(output_file, "    yyssp -= yylen[yyn];\n");
+    fprintf(output_file, "    yyvsp -= yylen[yyn];\n");
+    fprintf(output_file, "    yyval = yyvsp[1]; /* Default $$ = $1 */\n");
+    fprintf(output_file, "    \n");
+    fprintf(output_file, "    /* Execute semantic action */\n");
+    fprintf(output_file, "    switch (yyn) {\n");
+    fprintf(output_file, "    /* Semantic actions will be inserted here */\n");
+    fprintf(output_file, "    }\n");
+    fprintf(output_file, "    \n");
+    fprintf(output_file, "    /* Push result */\n");
+    fprintf(output_file, "    /* TODO: GOTO table lookup */\n");
+    fprintf(output_file, "    /* yystate = yypgoto[yylhs[yyn]] + *yyssp; */\n");
+    fprintf(output_file, "    *++yyssp = yystate;\n");
+    fprintf(output_file, "    *++yyvsp = yyval;\n");
+    fprintf(output_file, "    goto yyloop;\n\n");
+    
+    fprintf(output_file, "yyaccept:\n");
+    fprintf(output_file, "    return 0;\n\n");
+    
+    fprintf(output_file, "yyabort:\n");
+    fprintf(output_file, "    return 1;\n");
     fprintf(output_file, "}\n\n");
 }
+
 
 static void output_semantic_actions(void) {
     /* Output semantic action switch */
