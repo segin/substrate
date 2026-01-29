@@ -18,6 +18,7 @@ bool spinlock_is_held(spinlock_t *lock);
 // Sleep Mutex
 typedef struct {
     uint32_t locked;
+    spinlock_t guard; // Protects wait queue/sleep state
     void     *owner; // thread_t*
     const char *name;
 } mutex_t;

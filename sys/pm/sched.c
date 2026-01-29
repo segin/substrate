@@ -157,3 +157,11 @@ void sched_wakeup_n(void *chan, int n) {
         }
     }
 }
+
+void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) {
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1) {
+            callback(&threads[i], arg);
+        }
+    }
+}

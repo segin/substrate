@@ -23,8 +23,6 @@ struct rng_state rng_state;
 
 /* Locks */
 static spinlock_t entropy_lock;
-/* Locks */
-static spinlock_t entropy_lock;
 static spinlock_t output_lock;
 
 /* Wait Channel */

@@ -5,6 +5,7 @@
  * Based on Solaris/FreeBSD turnstile design.
  */
 
+#include <kern/turnstile.h>
 #include <sys/proc.h>
 #include <stdint.h>
 #include <string.h>
@@ -31,13 +32,14 @@ static int turnstile_pool_next = 0;
 
 // Hash function for lock objects
 static inline int turnstile_hash_func(void *lockobj) {
-    return ((uintptr_t)lockobj >> 3) % TURNSTILE_HASH_SIZE;
+    return((uintptr_t)lockobj >> 3) % TURNSTILE_HASH_SIZE;
 }
 
 // Lock the turnstile subsystem
 static inline void ts_lock(void) {
     while (__sync_lock_test_and_set(&turnstile_lock, 1)) {
-        while (turnstile_lock) __asm__ volatile("pause");
+        while (turnstile_lock)
+            __asm__ volatile("pause");
     }
 }
 
@@ -48,10 +50,11 @@ static inline void ts_unlock(void) {
 
 // Allocate a turnstile
 static turnstile_t *turnstile_alloc(void) {
-    if (turnstile_pool_next >= TURNSTILE_POOL_SIZE) return NULL;
+    if (turnstile_pool_next >= TURNSTILE_POOL_SIZE)
+        return(NULL);
     turnstile_t *ts = &turnstile_pool[turnstile_pool_next++];
     memset(ts, 0, sizeof(*ts));
-    return ts;
+    return(ts);
 }
 
 // Find turnstile for a lock object
@@ -59,10 +62,11 @@ static turnstile_t *turnstile_lookup(void *lockobj) {
     int hash = turnstile_hash_func(lockobj);
     turnstile_t *ts = turnstile_hash[hash];
     while (ts) {
-        if (ts->ts_lockobj == lockobj) return ts;
+        if (ts->ts_lockobj == lockobj)
+            return(ts);
         ts = ts->ts_next;
     }
-    return NULL;
+    return(NULL);
 }
 
 // Insert turnstile into hash table
@@ -97,7 +101,8 @@ void turnstile_init(void) {
 // owner: the thread currently holding the lock
 void turnstile_block(void *lockobj, thread_t *owner) {
     extern thread_t *current_thread;
-    if (!current_thread || !owner) return;
+    if (!current_thread || !owner)
+        return;
     
     ts_lock();
     
@@ -147,9 +152,8 @@ void turnstile_release(void *lockobj) {
     }
     
     // Restore original priority if we inherited
-    if (ts->ts_owner && ts->ts_inherited_prio != 0) {
+    if (ts->ts_owner && ts->ts_inherited_prio != 0)
         ts->ts_owner->priority = ts->ts_owner->base_priority;
-    }
     
     // Wake all waiters
     thread_t *waiter = ts->ts_waiters;
@@ -168,7 +172,8 @@ void turnstile_release(void *lockobj) {
 
 // Get inherited priority for a thread
 int turnstile_get_inherited_priority(thread_t *t) {
-    if (!t) return 0;
+    if (!t)
+        return(0);
     
     ts_lock();
     
@@ -179,12 +184,12 @@ int turnstile_get_inherited_priority(thread_t *t) {
             if (ts->ts_owner == t && ts->ts_inherited_prio != 0) {
                 int prio = ts->ts_inherited_prio;
                 ts_unlock();
-                return prio;
+                return(prio);
             }
             ts = ts->ts_next;
         }
     }
     
     ts_unlock();
-    return 0;
+    return(0);
 }

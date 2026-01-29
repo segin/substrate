@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
+#include <sys/ioctl.h>
 #include <sys/termios.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/linux/linux_syscalls.h>
@@ -337,6 +338,7 @@ static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {
 
 struct personality personality_linux = {
     .name = "Linux",
+    .id = PERS_LINUX,
     .syscall_table = linux_syscalls,
     .syscall_names = linux_names,
     .syscall_fmts = linux_fmts,

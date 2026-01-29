@@ -21,13 +21,13 @@ void panic(const char *msg) {
     }
 
     if (msg) {
-        console_write("\n*** KERNEL PANIC ***\n\n", 22);
-        console_write("Reason: ", 8);
+        console_write("\n\n*** KERNEL PANIC ***\n", 22);
+        console_write("Fatal Error: ", 13);
         console_write(msg, strlen(msg));
         console_write("\n", 1);
     } else {
-        console_write("\n*** KERNEL PANIC ***\n\n", 22);
-        console_write("Reason: Unknown error\n", 22);
+        console_write("\n\n*** KERNEL PANIC ***\n", 22);
+        console_write("Fatal Error: Unknown\n", 21);
     }
 
     /* Print stack trace */

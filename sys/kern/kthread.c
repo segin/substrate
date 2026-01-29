@@ -7,8 +7,9 @@
 extern process_t processes[]; // Accessible from sched.c
 
 int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *name) {
-    // 1. All kthreads belong to kernel process (PID 1)
-    process_t *proc = &processes[0]; 
+    // 1. Threads created by kthread_create belong to the Kernel Process (PID 0)
+    extern process_t *kernel_process;
+    process_t *proc = kernel_process ? kernel_process : &processes[0]; 
 
     // 2. Allocate a kernel stack
     void *stack = kmalloc(4096);
