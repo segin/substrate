@@ -1,0 +1,94 @@
+.\"
+.\" Copyright (c) 2026 Substrate Project
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.Dd January 29, 2026
+.Dt YACC 1
+.Os
+.Sh NAME
+.Nm yacc
+.Nd yet another compiler-compiler
+.Sh SYNOPSIS
+.Nm
+.Op Fl dlrtv
+.Op Fl b Ar file_prefix
+.Op Fl p Ar symbol_prefix
+.Ar grammar
+.Sh DESCRIPTION
+The
+.Nm
+utility reads a grammar specification from the file
+.Ar grammar
+and generates a LALR(1) parser for it.
+The parser consists of a set of C source files which can be
+compiled and linked with the
+.Xr lex 1
+library.
+.Pp
+The options are as follows:
+.Bl -tag -width indent
+.It Fl b Ar file_prefix
+Use
+.Ar file_prefix
+instead of
+.Dq y
+as the prefix for all output file names.
+.It Fl d
+Generate the header file
+.Pa y.tab.h
+containing
+.Ic #define
+statements for the token names.
+.It Fl l
+Do not include
+.Ic #line
+directives in the generated code.
+This is useful for debugging the generated parser.
+.It Fl p Ar symbol_prefix
+Use
+.Ar symbol_prefix
+instead of
+.Dq yy
+as the prefix for all external names produced.
+.It Fl r
+Produce separate files for code and tables.
+The code file is named
+.Pa y.code.c ,
+and the tables file is named
+.Pa y.tab.c .
+.It Fl t
+Enable debugging output in the generated parser.
+.It Fl v
+Write a human-readable description of the generated parser to
+.Pa y.output .
+.El
+.Sh FILES
+.Bl -tag -width "y.tab.hXX" -compact
+.It Pa y.tab.c
+The generated parser.
+.It Pa y.tab.h
+Token definitions (if
+.Fl d
+is specified).
+.It Pa y.output
+Parser description (if
+.Fl v
+is specified).
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr lex 1 ,
+.Xr cc 1
+.Sh STANDARDS
+The
+.Nm
+utility is compliant with
+.St -p1003.1-2017 .
+.Sh HISTORY
+The
+.Nm
+utility first appeared in PWB UNIX (1977).
+This implementation was written for the Substrate operating system.
+.Sh AUTHORS
+.An Segin
