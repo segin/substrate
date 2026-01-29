@@ -1,0 +1,33 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DEVICE_FIND_CHILD 9
+.Os Substrate
+.Sh NAME
+.Nm device_find_child
+.Nd lookup a child device by name
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft struct device *
+.Fn device_find_child "struct device *parent" "const char *name"
+.Sh DESCRIPTION
+The
+.Fn device_find_child
+function iterates over the children of the
+.Fa parent
+device to find a child with the specified
+.Fa name .
+.Sh RETURN VALUES
+Returns a pointer to the found
+.Vt struct device
+if successful, or NULL if no child with that name is found.
+.Sh SEE ALSO
+.Xr device 9 ,
+.Xr device_create 9
+.Sh HISTORY
+The
+.Fn device_find_child
+kernel interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

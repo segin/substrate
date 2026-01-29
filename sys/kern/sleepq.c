@@ -41,7 +41,8 @@ static inline int sleepq_hash_func(void *chan) {
 // Lock a hash bucket
 static inline void sq_lock(int hash) {
     while (__sync_lock_test_and_set(&sleepq_locks[hash], 1)) {
-        while (sleepq_locks[hash]) __asm__ volatile("pause");
+        while (sleepq_locks[hash])
+            __asm__ volatile("pause");
     }
 }
 
@@ -53,7 +54,8 @@ static inline void sq_unlock(int hash) {
 // Allocate a sleep queue
 static sleepq_t *sleepq_alloc(void) {
     while (__sync_lock_test_and_set(&pool_lock, 1)) {
-        while (pool_lock) __asm__ volatile("pause");
+        while (pool_lock)
+            __asm__ volatile("pause");
     }
     
     sleepq_t *sq = NULL;
@@ -63,17 +65,18 @@ static sleepq_t *sleepq_alloc(void) {
     }
     
     __sync_lock_release(&pool_lock);
-    return sq;
+    return(sq);
 }
 
 // Find sleep queue for a channel (must hold bucket lock)
 static sleepq_t *sleepq_lookup(void *chan, int hash) {
     sleepq_t *sq = sleepq_hash[hash];
     while (sq) {
-        if (sq->sq_chan == chan) return sq;
+        if (sq->sq_chan == chan)
+            return(sq);
         sq = sq->sq_next;
     }
-    return NULL;
+    return(NULL);
 }
 
 // Insert sleep queue into hash table
@@ -104,7 +107,8 @@ void sleepq_init(void) {
 
 // Add a thread to sleep queue
 void sleepq_add(void *chan, thread_t *t) {
-    if (!chan || !t) return;
+    if (!chan || !t)
+        return;
     
     int hash = sleepq_hash_func(chan);
     sq_lock(hash);
@@ -123,11 +127,11 @@ void sleepq_add(void *chan, thread_t *t) {
     
     // Add thread to tail (FIFO order)
     t->next = NULL;
-    if (sq->sq_tail) {
+    if (sq->sq_tail)
         sq->sq_tail->next = t;
-    } else {
+    else
         sq->sq_head = t;
-    }
+    
     sq->sq_tail = t;
     sq->sq_count++;
     
@@ -141,7 +145,8 @@ void sleepq_add(void *chan, thread_t *t) {
 // Wake one thread from sleep queue
 // Returns: woken thread, or NULL if no waiters
 thread_t *sleepq_wake_one(void *chan) {
-    if (!chan) return NULL;
+    if (!chan)
+        return(NULL);
     
     int hash = sleepq_hash_func(chan);
     sq_lock(hash);
@@ -149,15 +154,14 @@ thread_t *sleepq_wake_one(void *chan) {
     sleepq_t *sq = sleepq_lookup(chan, hash);
     if (!sq || sq->sq_count == 0) {
         sq_unlock(hash);
-        return NULL;
+        return(NULL);
     }
     
     // Remove head thread (FIFO)
     thread_t *t = sq->sq_head;
     sq->sq_head = t->next;
-    if (!sq->sq_head) {
+    if (!sq->sq_head)
         sq->sq_tail = NULL;
-    }
     sq->sq_count--;
     
     // Clear wait state
@@ -172,13 +176,14 @@ thread_t *sleepq_wake_one(void *chan) {
     }
     
     sq_unlock(hash);
-    return t;
+    return(t);
 }
 
 // Wake all threads from sleep queue
 // Returns: number of threads woken
 int sleepq_wake_all(void *chan) {
-    if (!chan) return 0;
+    if (!chan)
+        return(0);
     
     int hash = sleepq_hash_func(chan);
     sq_lock(hash);
@@ -186,7 +191,7 @@ int sleepq_wake_all(void *chan) {
     sleepq_t *sq = sleepq_lookup(chan, hash);
     if (!sq || sq->sq_count == 0) {
         sq_unlock(hash);
-        return 0;
+        return(0);
     }
     
     int woken = 0;
@@ -205,13 +210,15 @@ int sleepq_wake_all(void *chan) {
     // Could return sq to pool
     
     sq_unlock(hash);
-    return woken;
+    return(woken);
 }
 
 // Wake up to N threads from sleep queue
 int sleepq_wake_n(void *chan, int n) {
-    if (!chan || n == 0) return 0;
-    if (n < 0) return sleepq_wake_all(chan);
+    if (!chan || n == 0)
+        return(0);
+    if (n < 0)
+        return(sleepq_wake_all(chan));
     
     int hash = sleepq_hash_func(chan);
     sq_lock(hash);
@@ -219,14 +226,15 @@ int sleepq_wake_n(void *chan, int n) {
     sleepq_t *sq = sleepq_lookup(chan, hash);
     if (!sq || sq->sq_count == 0) {
         sq_unlock(hash);
-        return 0;
+        return(0);
     }
     
     int woken = 0;
     while (sq->sq_head && woken < n) {
         thread_t *t = sq->sq_head;
         sq->sq_head = t->next;
-        if (!sq->sq_head) sq->sq_tail = NULL;
+        if (!sq->sq_head)
+            sq->sq_tail = NULL;
         sq->sq_count--;
         
         t->next = NULL;
@@ -236,17 +244,17 @@ int sleepq_wake_n(void *chan, int n) {
     }
     
     // Remove sleep queue if empty
-    if (sq->sq_count == 0) {
+    if (sq->sq_count == 0)
         sleepq_remove(sq, hash);
-    }
     
     sq_unlock(hash);
-    return woken;
+    return(woken);
 }
 
 // Check if any threads are waiting on a channel
 int sleepq_has_waiters(void *chan) {
-    if (!chan) return 0;
+    if (!chan)
+        return(0);
     
     int hash = sleepq_hash_func(chan);
     sq_lock(hash);
@@ -255,7 +263,7 @@ int sleepq_has_waiters(void *chan) {
     int has = (sq && sq->sq_count > 0);
     
     sq_unlock(hash);
-    return has;
+    return(has);
 }
 
 // Requeue waiters from src_chan to dst_chan
@@ -263,7 +271,8 @@ int sleepq_has_waiters(void *chan) {
 // requeue_n: number of threads to move from src to dst
 // Returns: number of threads woken
 int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
-    if (!src_chan || !dst_chan) return 0;
+    if (!src_chan || !dst_chan)
+        return(0);
     
     int src_hash = sleepq_hash_func(src_chan);
     int dst_hash = sleepq_hash_func(dst_chan);
@@ -288,7 +297,8 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
         while (src_sq->sq_head && woken_count < wake_n) {
             thread_t *t = src_sq->sq_head;
             src_sq->sq_head = t->next;
-            if (!src_sq->sq_head) src_sq->sq_tail = NULL;
+            if (!src_sq->sq_head)
+                src_sq->sq_tail = NULL;
             src_sq->sq_count--;
             
             t->next = NULL;
@@ -315,16 +325,17 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
             while (src_sq->sq_head && moved_count < requeue_n) {
                 thread_t *t = src_sq->sq_head;
                 src_sq->sq_head = t->next;
-                if (!src_sq->sq_head) src_sq->sq_tail = NULL;
+                if (!src_sq->sq_head)
+                    src_sq->sq_tail = NULL;
                 src_sq->sq_count--;
                 
                 // Add to dst queue
                 t->next = NULL;
-                if (dst_sq->sq_tail) {
+                if (dst_sq->sq_tail)
                     dst_sq->sq_tail->next = t;
-                } else {
+                else
                     dst_sq->sq_head = t;
-                }
+                
                 dst_sq->sq_tail = t;
                 dst_sq->sq_count++;
                 
@@ -337,9 +348,8 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
     }
     
     // Cleanup empty src queue
-    if (src_sq && src_sq->sq_count == 0) {
+    if (src_sq && src_sq->sq_count == 0)
         sleepq_remove(src_sq, src_hash);
-    }
     
     // Unlock
     if (src_hash != dst_hash) {
@@ -349,5 +359,5 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
         sq_unlock(src_hash);
     }
     
-    return woken_count;
+    return(woken_count);
 }

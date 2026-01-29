@@ -1,6 +1,8 @@
 #ifndef _BLKDEV_H
 #define _BLKDEV_H
 
+#include <stdint.h>
+#include <stddef.h>
 #include <vfs/vfs.h>
 
 // Block device structure
@@ -26,9 +28,9 @@ void blkdev_register(blkdev_t *dev);
 blkdev_t *blkdev_get(const char *name);
 
 // Read from block device (byte-oriented wrapper)
-uint32_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, uint32_t size, void *buffer);
+size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer);
 
 // Write to block device (byte-oriented wrapper)
-uint32_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, uint32_t size, const void *buffer);
+size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const void *buffer);
 
 #endif

@@ -110,6 +110,10 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot);
 int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int cow);
 int pmap_page_is_cow(pmap_t pmap, uint32_t va);
 
+// Optimized page operations
+void pmap_copy_page(uintptr_t src_pa, uintptr_t dst_pa);
+void pmap_zero_page(uintptr_t pa);
+
 // Helper to flush TLB
 void pmap_invalidate_page(uint32_t va);
 void pmap_invalidate_all(void);  // CR3 reload, flushes entire TLB

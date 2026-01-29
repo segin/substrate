@@ -36,8 +36,23 @@ KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) -I$(KERNEL_SRC)
 
 # Userland flags (for standard libraries and utils)
 # These will eventually link against our own libc
-USER_CFLAGS = $(CFLAGS)
-USER_LDFLAGS = -m32 -nostdlib -fno-pie
+# Userland flags (for standard libraries and utils)
+# These will eventually link against our own libc
+ifdef NATIVE_BUILD
+    # Host build configuration
+    HOSTCC ?= cc
+    HOSTCFLAGS ?= -O2 -Wall
+    CC := $(HOSTCC)
+    CFLAGS := $(HOSTCFLAGS)
+    # Start with empty/standard LDFLAGS for host
+    USER_LDFLAGS :=
+    # Ensure no 32-bit override if host is 64-bit (unless HOSTCFLAGS specifies it)
+else
+    # Target build configuration (Substrate i386)
+    USER_CFLAGS = $(CFLAGS)
+    USER_LDFLAGS = -m32 -nostdlib -fno-pie
+endif
+
 LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
 
 # Macro to brand a binary as Substrate native (OSABI=64)

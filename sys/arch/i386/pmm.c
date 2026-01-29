@@ -16,7 +16,10 @@
 
 // ==================== PMM Data Structures ====================
 // Static bitmap for 128MB (Fallback)
+// Static bitmap for 128MB (Fallback)
 static uint8_t pmm_bitmap_static[4096];
+static uint32_t pmm_total_ram = 0;
+
 
 // ==================== Watermark (Bump) Allocator ====================
 static uint32_t watermark_base;
@@ -366,6 +369,19 @@ struct vm_page *pmm_get_page(uintptr_t pa) {
     return vm_phys_paddr_to_page(pa);
 }
 
+uint32_t pmm_get_total_memory(void) {
+    return pmm_total_ram;
+}
+
+uint32_t pmm_get_free_memory(void) {
+    size_t used_pages = vm_phys_get_used();
+    size_t total_pages = pmm_total_ram / PMM_BLOCK_SIZE;
+    if (used_pages > total_pages) return 0;
+    return (total_pages - used_pages) * PMM_BLOCK_SIZE;
+}
+
+
+
 void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
     // Keep existing dump implementation
     kprint("BIOS-e820 physical RAM map:\n");
@@ -514,6 +530,14 @@ void pmm_dump_e820(const e820_entry_t *map, uint32_t count) {
             type_str);
         kprint(buf);
     }
+}
+
+uint32_t pmm_get_free_memory(void) {
+    return vm_phys_get_free() * PMM_BLOCK_SIZE;
+}
+
+uint32_t pmm_get_total_memory(void) {
+    return (vm_phys_get_free() + vm_phys_get_used()) * PMM_BLOCK_SIZE;
 }
 
 /*

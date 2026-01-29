@@ -1422,16 +1422,19 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         
         // 2. Map new page temporarily to copy
         // Use a fixed kernel virtual address scratch space (assuming single core for now)
-        // 0xFFEFF000 is used as scratch
+        // 0xFFBFF000 is used as scratch (Safe zone below recursive map 0xFFC00000)
+        // WARNING: Do NOT use 0xFFEFF000 (Conflicts with V_PT(767) -> Stack PT)
         
-        pmap_kenter(0xFFEFF000, (uint32_t)phys_new); // Access is RW in kernel by default
-        __asm__ volatile("invlpg 0xFFEFF000");
+        #define COW_SCRATCH_ADDR 0xFFBFF000
+        
+        pmap_kenter(COW_SCRATCH_ADDR, (uint32_t)phys_new); // Access is RW in kernel by default
+        __asm__ volatile("invlpg %0" :: "m" (*(char *)COW_SCRATCH_ADDR));
         
         // Copy from faulting address (readable) to new page (writable)
-        memcpy((void*)0xFFEFF000, (void*)(cr2 & 0xFFFFF000), 0x1000);
+        memcpy((void*)COW_SCRATCH_ADDR, (void*)(cr2 & 0xFFFFF000), 0x1000);
         
-        pmap_kremove(0xFFEFF000);
-        __asm__ volatile("invlpg 0xFFEFF000");
+        pmap_kremove(COW_SCRATCH_ADDR);
+        __asm__ volatile("invlpg %0" :: "m" (*(char *)COW_SCRATCH_ADDR));
 
         // 3. Update mappings
         // Decrement ref count of old page
@@ -1516,6 +1519,33 @@ int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags) {
     __asm__ volatile("invlpg (%0)" :: "r" (va) : "memory");
 
     return 0;
+}
+
+// Optimized page operations
+void pmap_copy_page(uintptr_t src_pa, uintptr_t dst_pa) {
+    void *src = (void *)(src_pa + 0xC0000000);
+    void *dst = (void *)(dst_pa + 0xC0000000);
+    int count = 1024;
+
+    __asm__ volatile (
+        "cld; rep movsl"
+        : "+S"(src), "+D"(dst), "+c"(count)
+        :
+        : "memory"
+    );
+}
+
+void pmap_zero_page(uintptr_t pa) {
+    void *dst = (void *)(pa + 0xC0000000);
+    int count = 1024;
+    int val = 0;
+
+    __asm__ volatile (
+        "cld; rep stosl"
+        : "+D"(dst), "+c"(count)
+        : "a"(val)
+        : "memory"
+    );
 }
 
 // Debug dump of pmap contents

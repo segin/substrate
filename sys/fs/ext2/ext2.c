@@ -16,6 +16,7 @@ static fs_node_t ext2_fs_node_cache[EXT2_NODE_CACHE_SIZE];
 static int ext2_node_cache_idx = 0;
 
 // Forward declarations
+// Forward declarations
 static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
 static size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
@@ -848,6 +849,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
         ext2_read_block(fs, block_num, block_buf);
         
         ext2_dirent_t *prev_de = NULL;
+        // uint32_t prev_off = 0; // Unused
         
         while (block_off < fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
@@ -877,6 +879,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
             }
             
             prev_de = de;
+            // prev_off = block_off;
             block_off += de->rec_len;
             pos += de->rec_len;
         }

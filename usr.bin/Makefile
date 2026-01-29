@@ -2,7 +2,7 @@ include ../Makefile.inc
 
 .PHONY: all clean install
 
-SUBDIRS = brandelf
+SUBDIRS = brandelf yacc
 
 all:
 	@echo "Building User Binaries (usr.bin)..."

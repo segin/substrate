@@ -47,7 +47,8 @@ typedef struct process {
     int exit_code;
     struct pgrp *p_pgrp;       // Process group (NULL = none)
     struct process *p_pgrp_link; // Next process in same pgrp (linked list)
-    struct personality *pers;
+    struct personality *pers; // Pointer to personality definition (internal use)
+    int perso_id; // Stable personality ID (user visible)
     file_t *fds[MAX_FD]; // File Descriptor Table
     fs_node_t *root_node; // Per-process root (for chroot)
     
@@ -79,7 +80,7 @@ typedef struct process {
     uint8_t  is_kernel_task; // 1 if kernel thread, 0 if user process
     uint8_t  bitness;        // Process execution mode (16/32/64)
     
-    fs_node_t *tty;      // Controlling Terminal
+    struct tty *tty;      // Controlling Terminal
     fs_node_t *cwd_node; // Current working directory
     
     // Memory management

@@ -9,7 +9,7 @@ static struct fuse_in_header request_queue[FUSE_QUEUE_SIZE];
 static int fuse_q_head = 0;
 static int fuse_q_tail = 0;
 
-static uint32_t fuse_dev_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t fuse_dev_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     if (size < sizeof(struct fuse_in_header)) return 0;
 
@@ -25,7 +25,7 @@ static uint32_t fuse_dev_read(fs_node_t *node, off_t offset, uint32_t size, uint
     return sizeof(struct fuse_in_header);
 }
 
-static uint32_t fuse_dev_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
+static size_t fuse_dev_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     // Process response from userspace
     struct fuse_out_header *out = (struct fuse_out_header *)buffer;
@@ -47,7 +47,7 @@ void fuse_init(void) {
 }
 
 // VFS Bridge Implementation (Stub)
-static uint32_t fuse_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t fuse_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     // 1. Create FUSE_READ request
     // 2. Enqueue in request_queue
     // 3. Sleep until response arrives

@@ -1,0 +1,47 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DRIVER_REGISTER 9
+.Os Substrate
+.Sh NAME
+.Nm driver_register
+.Nd register a device driver with a bus
+.Sh SYNOPSIS
+.In kern/driver.h
+.Ft int
+.Fn driver_register "struct driver *drv" "struct bus_type *bus"
+.Sh DESCRIPTION
+The
+.Fn driver_register
+function registers a device driver with a specific bus subsystem.
+.Pp
+It checks for duplicate registrations and name collisions. If successful, it adds the driver to the bus's list of drivers.
+.Pp
+After registration, the function iterates over all devices currently attached to the bus and invokes the driver's
+.Fn probe
+callback for each device (if the bus and driver matching functions allow).
+.Sh RETURN VALUES
+The
+.Fn driver_register
+function returns 0 on success.
+.Pp
+It returns -1 if:
+.Bl -bullet
+.It
+Arguments are invalid.
+.It
+The driver is already registered.
+.It
+A name collision occurs.
+.El
+.Sh SEE ALSO
+.Xr driver 9 ,
+.Xr bus 9 ,
+.Xr device_register 9
+.Sh HISTORY
+The
+.Fn driver_register
+kernel interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

@@ -109,7 +109,12 @@ void *kmalloc(size_t size) {
     for (size_t i = 0; i < pages; i++) {
         void *p = pmm_alloc_block();
         if (!p) {
-            /* TODO: Free previously allocated pages on failure */
+            /* Free previously allocated pages on failure */
+            if (mem) {
+                for (size_t j = 0; j < i; j++) {
+                    pmm_free_block((void *)((uintptr_t)mem + j * 4096));
+                }
+            }
             return NULL;
         }
         if (i == 0) mem = p;

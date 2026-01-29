@@ -234,6 +234,13 @@ jump_to_userspace:
 # This restores registers and returns to userspace via IRET
 .global fork_child_return
 fork_child_return:
+    # DEBUG: Output 'C' to serial port to show child reached here
+    mov $0x3F8, %dx
+    mov $'C', %al
+    outb %al, %dx
+    mov $'\n', %al
+    outb %al, %dx
+
     # Pop segment registers
     pop %eax
     mov %ax, %gs

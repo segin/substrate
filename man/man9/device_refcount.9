@@ -1,0 +1,41 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DEVICE_REFCOUNT 9
+.Os Substrate
+.Sh NAME
+.Nm device_get ,
+.Nm device_put
+.Nd manage device reference counts
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft void
+.Fn device_get "struct device *dev"
+.Ft void
+.Fn device_put "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn device_get
+function increments the reference count of a device structure.
+.Pp
+The
+.Fn device_put
+function decrements the reference count. If the reference count reaches zero, the device structure is freed.
+.Pp
+If
+.Fa dev
+is NULL, these functions do nothing.
+.Sh RETURN VALUES
+None.
+.Sh SEE ALSO
+.Xr device 9 ,
+.Xr device_create 9
+.Sh HISTORY
+The
+.Fn device_get
+and
+.Fn device_put
+kernel interfaces first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com
