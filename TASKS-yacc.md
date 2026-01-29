@@ -44,27 +44,27 @@
 ## 3. Declarations Section
 
 ### 3.1 Token Declarations
-- [ ] `%token [<tag>] name [number] [name [number]]...`
-- [ ] Optional `<tag>` for C union member type
-- [ ] Optional `number` to assign explicit token value
-- [ ] Tokens not explicitly numbered get values > 256
+- [x] `%token [<tag>] name [number] [name [number]]...`
+- [x] Optional `<tag>` for C union member type
+- [x] Optional `number` to assign explicit token value
+- [x] Tokens not explicitly numbered get values > 256
 
 ### 3.2 Precedence/Associativity Declarations
-- [ ] `%left [<tag>] name [number]...` - Left associative
-- [ ] `%right [<tag>] name [number]...` - Right associative
-- [ ] `%nonassoc [<tag>] name [number]...` - Non-associative (error on associative use)
-- [ ] Lines in order of increasing precedence
-- [ ] All tokens on same line have same precedence
+- [x] `%left [<tag>] name [number]...` - Left associative
+- [x] `%right [<tag>] name [number]...` - Right associative
+- [x] `%nonassoc [<tag>] name [number]...` - Non-associative (error on associative use)
+- [x] Lines in order of increasing precedence
+- [x] All tokens on same line have same precedence
 
 ### 3.3 Type Declarations
-- [ ] `%type <tag> name...` - Declare non-terminal types
-- [ ] Require `<tag>` for `%type`
-- [ ] Prohibit token numbers or literals with `%type`
-- [ ] Enable type checking when `%type` is used
+- [x] `%type <tag> name...` - Declare non-terminal types
+- [x] Require `<tag>` for `%type`
+- [x] Prohibit token numbers or literals with `%type`
+- [x] Enable type checking when `%type` is used
 
 ### 3.4 Start Symbol
-- [ ] `%start name` - Declare start symbol
-- [ ] Default to LHS of first grammar rule if not specified
+- [x] `%start name` - Declare start symbol
+- [x] Default to LHS of first grammar rule if not specified
 
 ### 3.5 Union Declaration
 - [x] `%union { body }` - Declare YYSTYPE union
@@ -72,10 +72,10 @@
 - [x] Generate YYSTYPE typedef from union
 
 ### 3.6 C Code Blocks
-- [ ] `%{ ... %}` - Copy enclosed C code to output file
-- [ ] Code has global scope in output
-- [ ] Must not contain `%}` outside comment/string/literal
-- [ ] Terminate declarations section with `%%`
+- [x] `%{ ... %}` - Copy enclosed C code to output file
+- [x] Code has global scope in output
+- [x] Must not contain `%}` outside comment/string/literal
+- [x] Terminate declarations section with `%%`
 
 ---
 

@@ -305,47 +305,56 @@ static void parse_declarations(void) {
             case LEFT:
             case RIGHT:
             case NONASSOC:
-                /* Parse token declarations */
-                for (;;) {
-                    t = get_token();
-                    if (t == IDENTIFIER) {
-                        bp = lookup(token_buffer);
-                        if (bp->class == CLASS_TERM && bp->value != 0) {
-                             /* already defined? check for consistency if needed, or redefinition error */
-                             /* For now, just re-apply property */
+                /* Parse token declarations - save directive type first */
+                {
+                    int decl_type = t;
+                    static int prec_level = 0;
+                    char *current_tag = NULL;
+                    
+                    /* Precedence increases with each associativity line */
+                    if (decl_type != TERM) prec_level++;
+                    
+                    for (;;) {
+                        t = get_token();
+                        
+                        /* Check for <tag> */
+                        if (t == '<') {
+                            /* Read type tag */
+                            char tag_buf[MAXTOKEN];
+                            int i = 0;
+                            int c;
+                            while ((c = nextc()) != EOF && c != '>') {
+                                if (i < MAXTOKEN - 1) tag_buf[i++] = c;
+                            }
+                            tag_buf[i] = '\0';
+                            current_tag = strdup(tag_buf);
+                            continue;
                         }
-                        bp->class = CLASS_TERM;
-                        if (t == LEFT) bp->assoc = LEFT_ASSOC;
-                        else if (t == RIGHT) bp->assoc = RIGHT_ASSOC;
-                        else if (t == NONASSOC) bp->assoc = NON_ASSOC;
-                        else if (t == TERM) bp->assoc = NO_ASSOC;
                         
-                        /* Precedence increases with each declaration line */
-                        if (t != TERM) bp->prec = 0; /* TODO: Maintain global precedence counter */
-                        
-                        /* Optional: Check for explicit token value */
-                        /* int validation = get_token(); if (validation == NUMBER) ... */
-                        
-                    } else if (t == ',') {
-                        continue;
-                    } else {
-                        /* Start of next declaration or type tag */
-                        /* If we consumed a token that is NOT an identifier or comma, it is likely the start of the next directive */
-                        /* or the %% marker. We must break the inner loop. */
-                        /* Since we cannot easily put the token back, we rely on the outer loop re-checking 't' if we handle it correctly. */
-                        /* NOTE: The current structure is slightly flawed for lookahead. */
-                        /* Fix: Use a 'saved_token' approach or similar if needed. */
-                        /* For now, assume we break and the outer loop logic needs to not call get_token() if we already have one. */
-                        /* To fix this cleanly: */
-                        break; 
+                        if (t == IDENTIFIER) {
+                            bp = lookup(token_buffer);
+                            bp->class = CLASS_TERM;
+                            
+                            /* Set associativity based on saved directive type */
+                            if (decl_type == LEFT) bp->assoc = LEFT_ASSOC;
+                            else if (decl_type == RIGHT) bp->assoc = RIGHT_ASSOC;
+                            else if (decl_type == NONASSOC) bp->assoc = NON_ASSOC;
+                            else bp->assoc = NO_ASSOC;
+                            
+                            /* Set precedence for associativity declarations */
+                            if (decl_type != TERM) bp->prec = prec_level;
+                            
+                            /* Set type tag if present */
+                            if (current_tag) bp->tag = current_tag;
+                        } else if (t == ',') {
+                            continue;
+                        } else {
+                            /* End of this declaration line */
+                            break;
+                        }
                     }
+                    current_tag = NULL;
                 }
-                /* We broke out of the inner loop with 't' holding the next token. */
-                /* We need to process this 't' in the outer loop. */
-                /* The outer loop does t = get_token() at the top. */
-                /* We need to prevent that if we have a valid 't' already. */
-                /* Hack for now: This skeleton is imperfect. Real implementation needs 'peek'. */
-                /* I will implement 'peek' logic in next step or use unget_token logic if applicable. */
                 continue; 
                 
             case START:
