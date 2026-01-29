@@ -1,4 +1,6 @@
 #include <vfs/vfs.h>
+#include <sys/mount.h>
+
 #include <string.h>
 #include <kern/console.h>
 #include <stdio.h>
@@ -109,10 +111,37 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
     fs_node_t *root = fs->mount(device, flags, dev_node ? dev_node : data);
     if (!root) return -1;
 
-    // Add to mount list
+    // Handle Root Mount
     if (strcmp(path, "/") == 0) {
         fs_root = root;
+    } else {
+        // Handle mount on existing directory
+        // We must lookup the mount point
+        fs_node_t *mountpoint = vfs_lookup(fs_root, path);
+        
+        if (!mountpoint) {
+            kprint("VFS: Mount point not found: ");
+            kprint(path);
+            kprint("\n");
+            // TODO: Free root? Unmount?
+            return -1; 
+        }
+
+        if ((mountpoint->flags & 0x7) != FS_DIRECTORY) {
+             kprint("VFS: Mount point is not a directory: ");
+             kprint(path);
+             kprint("\n");
+             return -1;
+        }
+        
+        // Attach
+        mountpoint->flags |= FS_MOUNTPOINT;
+        mountpoint->ptr = root;
     }
+    
+    // Register in generic mount list (for sys_sync, unmount, etc.)
+    // TODO: Allocate proper struct mount. For now we rely on the implicit tree structure
+    // or we should add it to a list if we want to support unmount by path easily.
 
     return 0;
 }
@@ -422,5 +451,129 @@ int vfs_mkdir(const char *path, uint16_t permission) {
     if (!parent_node->mkdir) return -1; // FS doesn't support mkdir
     
     return parent_node->mkdir(parent_node, name, permission);
+}
+
+int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
+    if (!path) return -1;
+    
+    char path_buf[256];
+    strncpy(path_buf, path, sizeof(path_buf));
+    path_buf[255] = '\0';
+    
+    // Split path
+    char *last_slash = vfs_strrchr(path_buf, '/');
+    char *name = NULL;
+    fs_node_t *parent_node = NULL;
+    
+    if (last_slash) {
+        *last_slash = '\0';
+        name = last_slash + 1;
+        if (*name == '\0') return -1; // Trailing slash invalid for node creation
+        
+        if (path_buf[0] == '\0') {
+            parent_node = fs_root;
+        } else {
+            parent_node = vfs_lookup(fs_root, path_buf);
+        }
+    } else {
+        parent_node = fs_root;
+        name = path_buf;
+    }
+    
+    if (!parent_node) return -1;
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -1;
+    
+    if (!parent_node->mknod) return -1;
+    
+    return parent_node->mknod(parent_node, name, mode, dev);
+}
+
+int vfs_unmount(const char *path) {
+    if (!path) return -1;
+    
+    // Lookup mount point (directory that was mounted ON)
+    // We need to find the node that has FS_MOUNTPOINT flag.
+    // If we use regular lookup, we might traverse into the mounted filesystem.
+    // But we want the COVERED node.
+    
+    // NOTE: vfs_lookup usually traverses mountpoints.
+    // We need a way to lookup without traversing the LAST mountpoint.
+    
+    // For now, let's assume we can match by path string if we had a mount list?
+    // But we didn't implement a global mount list with paths yet (except implicit tree).
+    
+    // Workaround: Use vfs_lookup_lstat? No, that stops at symlinks.
+    // We need to implement a lookup that returns the MOUNTPOINT node, not the root of the fs.
+    
+    // Actually, if we mount on /mnt, the node at /mnt (in root fs) has FS_MOUNTPOINT.
+    // Its 'ptr' points to the new root.
+    // When we lookup "/mnt", check if traversal logic handles it.
+    
+    // In finddir_fs_internal:
+    // if ((node->flags & FS_MOUNTPOINT) && node->ptr) node = node->ptr;
+    
+    // So if we lookup "/mnt", we get the ROOT of the new fs.
+    // We need the node BEFORE the jump.
+    
+    // Strategy: Lookup parent directory, then find entry, but manually check flags
+    // without invoking the automatic traversal (or utilize a specialized finding function).
+    
+    char path_buf[256];
+    strncpy(path_buf, path, sizeof(path_buf));
+    path_buf[255] = '\0';
+    
+    // Split path
+    char *last_slash = vfs_strrchr(path_buf, '/');
+    char *name = NULL;
+    fs_node_t *parent_node = NULL;
+    
+    if (last_slash) {
+        *last_slash = '\0';
+        name = last_slash + 1;
+        if (*name == '\0') return -1; // "foo/" -> invalid for unmount usually
+        
+        if (path_buf[0] == '\0') {
+             // "/foo" -> parent is root
+             parent_node = fs_root;
+        } else {
+             parent_node = vfs_lookup(fs_root, path_buf);
+        }
+    } else {
+        // "foo" -> parent is root (cwd not fully supported here yet)
+        parent_node = fs_root;
+        name = path_buf;
+    }
+    
+    if (!parent_node) return -1;
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -1;
+    
+    // Now find child 'name' in 'parent_node'
+    // But DO NOT traverse if it is a mountpoint.
+    // We need access to the underlying finddir.
+    
+    if (!parent_node->finddir) return -1;
+    
+    fs_node_t *mountpoint = parent_node->finddir(parent_node, name);
+    if (!mountpoint) return -1;
+    
+    // Check if it is a mountpoint
+    if (!(mountpoint->flags & FS_MOUNTPOINT)) {
+        // Not a mountpoint
+        return -22; // EINVAL
+    }
+    
+    // Check if busy? (Refcounts) - TODO
+    
+    // Detach
+    mountpoint->ptr = NULL;
+    mountpoint->flags &= ~FS_MOUNTPOINT;
+    
+    // We should allow the filesystem to unmount (flush caches etc)
+    // But we don't have the fs handle easily here unless we store it in mountpoint->ptr->fs?
+    // mountpoint->ptr IS the root of the fs.
+    
+    // TODO: cleanup fs instance
+    
+    return 0;
 }
 

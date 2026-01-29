@@ -41,6 +41,10 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **Context Switching:** Validated FPU Lazy Save and refined PCB for thread/process separation.
 - **Kernel Process:** Implemented Swapper/Idle (PID 0) with pageout daemon and idle loop responsibilities.
 - **libsys Library:** Created `lib/sys/` syscall wrapper library with `syscall.S` (raw i386 int 0x80), `syscall.h` (SYS_* constants), and typed wrappers (`vm86()`). Supports mmap, munmap, mprotect, brk syscalls.
+- **Kernel Library Refactor:** Modularized `sys/kern/lib.c` into `sys/lib/string.c`, `printf.c`, and `div64.c`.
+- **Synchronization Improvements:** Updated `mutex` and `semaphore` to use `sleepq` for robust thread sleeping (removed ad-hoc `sched_sleep`).
+- **SMP Scheduler Fixes:** Updated `sched_smp.c` to use `percpu_get_cpu_id()` instead of assumption.
+- **Code Quality:** Defined `kernel_process` explicitly for kthreads (fixing PID assumption), improved `panic()` messaging, and cleaned up `random.c` duplicates.
 
 
 ## Current Status

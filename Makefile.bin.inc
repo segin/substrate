@@ -17,9 +17,21 @@ LIBC_DIR = $(TOP)/lib/c
 
 all: $(PROG)
 
+ifdef NATIVE_BUILD
+    # Native build: use host toolchain defaults
+    CRT0 =
+    LIBS =
+    BRAND_CMD =
+else
+    # Substrate build: manual linking
+    CRT0 = $(LIBC_DIR)/crt0.o
+    LIBS = -L$(LIBC_DIR) -lc $(LIBGCC)
+    BRAND_CMD = $(call BRAND_SUBSTRATE,$@)
+endif
+
 $(PROG): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBC_DIR)/crt0.o -L$(LIBC_DIR) -lc $(LIBGCC)
-	$(call BRAND_SUBSTRATE,$@)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(CRT0) $(LIBS) $(LDADD)
+	$(BRAND_CMD)
 
 %.o: %.c
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -27,5 +39,7 @@ $(PROG): $(OBJS)
 clean:
 	rm -f $(PROG) $(OBJS)
 
+BINDIR ?= $(DESTDIR)/bin
+
 install: $(PROG)
-	install -D $(PROG) $(DESTDIR)/bin/$(PROG)
+	install -D $(PROG) $(BINDIR)/$(PROG)

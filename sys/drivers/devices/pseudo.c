@@ -1,42 +1,45 @@
-#include <vfs/vfs.h>
+#include <arch/x86-common/include/io.h>
 #include <drivers/input/keyboard.h>
 #include <kern/console.h>
-#include <sys/proc.h>
 #include <string.h>
-#include <arch/x86-common/include/io.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
 
 // /dev/null
-static uint32_t null_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+// /dev/null
+static size_t null_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)size; (void)buffer;
     return 0; // EOF
 }
 
-static uint32_t null_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t null_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer;
     return size; // Discarded
 }
 
 // /dev/zero
-static uint32_t zero_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     memset(buffer, 0, size);
     return size;
 }
 
 // /dev/full
-static uint32_t full_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+// /dev/full
+static size_t full_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
     // Always return error (ENOSPC is usually 28)
-    return size;
+    return size; // TODO: Should return error code logic if VFS supports it, or 0? VFS write usually returns bytes written.
 }
 
 // /dev/port
-static uint32_t port_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+// /dev/port
+static size_t port_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     if (offset >= 65536) return 0;
     
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < size; i++) {
+    size_t count = 0;
+    for (size_t i = 0; i < size; i++) {
         if (offset + i >= 65536) break;
         buffer[i] = inb((uint16_t)(offset + i));
         count++;
@@ -44,12 +47,12 @@ static uint32_t port_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return count;
 }
 
-static uint32_t port_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t port_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
      if (offset >= 65536) return 0;
     
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < size; i++) {
+    size_t count = 0;
+    for (size_t i = 0; i < size; i++) {
         if (offset + i >= 65536) break;
         outb((uint16_t)(offset + i), buffer[i]);
         count++;
@@ -93,7 +96,8 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
  */
 
 // /dev/tty - proxy to current process's controlling terminal
-static uint32_t tty_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+// /dev/tty - proxy to current process's controlling terminal
+static size_t tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
@@ -102,7 +106,7 @@ static uint32_t tty_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *
     }
     
     // Fallback to keyboard if no TTY assigned
-    uint32_t count = 0;
+    size_t count = 0;
     while (count < size) {
         char c = keyboard_getc();
         if (c == 0) break;
@@ -111,7 +115,7 @@ static uint32_t tty_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *
     return count;
 }
 
-static uint32_t tty_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t tty_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
@@ -125,7 +129,7 @@ static uint32_t tty_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
 }
 
 // /dev/mem
-static uint32_t mem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     // Limit to 1GB (Direct Map size)
     if (offset > 0x3FFFFFFF) return 0; // EOF or Error? EOF for now.
@@ -143,7 +147,7 @@ static uint32_t mem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *
     return size;
 }
 
-static uint32_t mem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     if (offset > 0x3FFFFFFF) return 0;
     
@@ -158,7 +162,7 @@ static uint32_t mem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
 }
 
 // /dev/kmem
-static uint32_t kmem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     // Access arbitrary virtual address.
     // DANGEROUS: If offset is unmapped, we panic.
@@ -169,7 +173,7 @@ static uint32_t kmem_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t 
     return size;
 }
 
-static uint32_t kmem_write(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     void *dst = (void*)(uintptr_t)offset;
     memcpy(dst, buffer, size);

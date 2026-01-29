@@ -19,7 +19,7 @@
 #include <include/sys/signal.h>
 #include <include/sys/session.h>
 #include <vfs/vfs.h>
-#include <drivers/serial/uart.h>
+#include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
 
 #include <sys/types.h>
@@ -220,20 +220,52 @@ struct utsname {
     char domainname[256];
 };
 
+/* Validate user address range is within user space (below kernel) */
+static int validate_user_buffer(const void *buf, size_t size) {
+    uintptr_t start = (uintptr_t)buf;
+    uintptr_t end = start + size;
+    
+    /* NULL check */
+    if (start < 0x1000) return -1;
+    
+    /* Overflow check */
+    if (end < start) return -1;
+    
+    /* Must be below kernel space at 0xC0000000 */
+    if (end > 0xC0000000) return -1;
+    
+    return 0;
+}
+
 int sys_uname(struct utsname *buf) {
-    if (!buf) return -1;
+    if (!buf) return -14; /* EFAULT */
+    
+    /* Validate user buffer can hold entire struct */
+    if (validate_user_buffer(buf, sizeof(struct utsname)) != 0) {
+        return -14; /* EFAULT */
+    }
+    
     extern char kernel_hostname[65];
-    strncpy(buf->sysname, "Substrate", 64);
-    buf->sysname[64] = '\0';
-    strncpy(buf->nodename, kernel_hostname, 64);
-    buf->nodename[64] = '\0';
-    strncpy(buf->release, "0.1", 64);
-    buf->release[64] = '\0';
-    strncpy(buf->version, "Kernel", 64);
-    buf->version[64] = '\0';
-    strncpy(buf->machine, "i386", 64);
-    buf->machine[64] = '\0';
-    buf->domainname[0] = '\0';
+    
+    /* Build result in kernel buffer first */
+    struct utsname kbuf;
+    memset(&kbuf, 0, sizeof(kbuf));
+    
+    strncpy(kbuf.sysname, "Substrate", 255);
+    kbuf.sysname[255] = '\0';
+    strncpy(kbuf.nodename, kernel_hostname, 255);
+    kbuf.nodename[255] = '\0';
+    strncpy(kbuf.release, "0.1", 255);
+    kbuf.release[255] = '\0';
+    strncpy(kbuf.version, "Kernel", 255);
+    kbuf.version[255] = '\0';
+    strncpy(kbuf.machine, "i386", 255);
+    kbuf.machine[255] = '\0';
+    kbuf.domainname[0] = '\0';
+    
+    /* Copy to user space - already validated above */
+    memcpy(buf, &kbuf, sizeof(struct utsname));
+    
     return 0;
 }
 
@@ -752,14 +784,18 @@ int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0
 
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
     if (!target || !fstype) return -1;
-    return vfs_mount(source, target, fstype, flags, data);
+    // TODO: Check permissions (superuser)
+    return vfs_mount(source, target, fstype, (uint32_t)flags, data);
 }
 
+extern int vfs_unmount(const char *path);
+
 int sys_umount(const char *target) { 
-    (void)target; 
-    // TODO: Implement unmount
-    return 0; 
+    if (!target) return -1;
+    // TODO: Check permissions
+    return vfs_unmount(target); 
 }
+
 
 int sys_nanosleep(void *req, void *rem) { (void)req; (void)rem; return 0; }
 
