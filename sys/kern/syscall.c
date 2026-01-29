@@ -40,19 +40,52 @@ extern int sys_sigaction(int sig, const struct sigaction *act, struct sigaction 
 // Simple file structure allocator
 #define MAX_SYSTEM_FILES 128
 static file_t system_files[MAX_SYSTEM_FILES];
+static file_t *file_free_list = NULL;
+static bool file_system_initialized = false;
 
-file_t *file_alloc(void) {
-    for (int i = 0; i < MAX_SYSTEM_FILES; i++) {
-        if (system_files[i].ref_count == 0) {
-            system_files[i].ref_count = 1;
-            return &system_files[i];
-        }
+static void file_init_list(void) {
+    for (int i = 0; i < MAX_SYSTEM_FILES - 1; i++) {
+        system_files[i].next_free = &system_files[i + 1];
     }
-    return 0;
+    system_files[MAX_SYSTEM_FILES - 1].next_free = NULL;
+    file_free_list = &system_files[0];
+    file_system_initialized = true;
+}
+
+/*
+ * file_alloc - Allocate a file structure from the free list.
+ * Note: Assumes external locking or uniprocessor environment.
+ */
+file_t *file_alloc(void) {
+    if (!file_system_initialized) {
+        file_init_list();
+    }
+
+    if (file_free_list) {
+        file_t *f = file_free_list;
+        file_free_list = f->next_free;
+        f->next_free = NULL;
+        f->ref_count = 1;
+        return f;
+    }
+    return NULL;
 }
 
 void file_free(file_t *f) {
+    if (!f) return;
+
+    // Safety check: ensure pointer is within the static array
+    if (f < system_files || f >= system_files + MAX_SYSTEM_FILES) {
+        return;
+    }
+
+    // Prevent double-free
+    if (f->ref_count == 0) return;
+
     f->ref_count = 0;
+    f->node = NULL;
+    f->next_free = file_free_list;
+    file_free_list = f;
 }
 
 int sys_write(int fd, const char *buf, int len) {
