@@ -42,7 +42,7 @@ static void copy_action(void) {
     while (depth > 0) {
         c = nextc();
         if (c == EOF) {
-            fprintf(stderr, "EOF in semantic action\n");
+            fprintf(stderr, "EOF in semantic action at line %d, depth=%d\n", lineno, depth);
             done(1);
         }
         if (c == '{') depth++;
@@ -432,34 +432,18 @@ static void parse_rules(void) {
                     if (nitems >= MAXPROD * 4) no_space();
                     ritem[nitems++] = bp->index;
                 } else if (t == LCURLY) {
-                    /* Semantic action */
-                    /* Check if it's mid-rule: followed by more RHS items */
+                    /* Semantic action - copy action body FIRST, then check what follows */
+                    copy_action();
+                    
+                    /* Now peek at next token to see if this was mid-rule */
                     int next_t = get_token();
-                    if (next_t == '|' || next_t == ';' || next_t == IDENTIFIER || next_t == LCURLY) {
-                        /* Mid-rule action - create anonymous symbol and rule */
-                        char anon_name[32];
-                        static int anon_count = 0;
-                        sprintf(anon_name, "$$%d", ++anon_count);
-                        bucket *anon = lookup(anon_name);
-                        anon->class = CLASS_NONTERM;
-                        
-                        /* Create rule for anonymous symbol: anon -> epsilon { action } */
-                        int save_nrules = nrules;
-                        nrules = nrules; /* dummy for now, we'll increment later */
-                        
-                        /* Insert anonymous symbol into current RHS */
-                        if (nitems >= MAXPROD * 4) no_space();
-                        ritem[nitems++] = anon->index;
-                        
-                        /* Record the action for the anonymous rule */
-                        /* (Simplified - we'd need to pause current rule parsing) */
-                        /* Actually, most Yaccs handle this by finishing the current production
-                           but inserting the new production into the tables. */
-                        ungetc_char('{'); /* Re-read action for the new rule */
-                        /* We will handle this properly in a full implementation */
+                    if (next_t == '|' || next_t == ';' || next_t == MARK || next_t == 0) {
+                        /* End-of-rule action - no special handling needed */
                     } else {
-                        /* End of rule action */
-                        copy_action();
+                        /* Mid-rule action - need to create anonymous symbol */
+                        /* For now, just treat as regular action (simplified) */
+                        /* TODO: Full mid-rule action support requires creating */
+                        /* an anonymous nonterminal and epsilon rule */
                     }
                     t = next_t;
                     continue; /* already got next token */
@@ -528,11 +512,21 @@ void reader(void) {
     parse_rules();
     pack_symbols();
     
-    /* Copy epilogue (C code after second %%) to code_file */
-    if (code_file && !feof(input_file)) {
+    /* Copy epilogue (C code after second %%) to epilogue_file */
+    if (epilogue_file) {
+        /* Flush any remaining characters in the current line buffer */
+        if (cptr) {
+            while (*cptr) {
+                putc(*cptr, epilogue_file);
+                cptr++;
+            }
+            putc('\n', epilogue_file); /* Restore the newline consumed by get_line */
+        }
+        
+        /* Copy remainder of file */
         int c;
         while ((c = fgetc(input_file)) != EOF) {
-            fputc(c, code_file);
+            putc(c, epilogue_file);
         }
     }
     

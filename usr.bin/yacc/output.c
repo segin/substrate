@@ -45,8 +45,7 @@ void output(void) {
     output_base();
     output_table();
     output_check();
-    output_parser();
-    output_semantic_actions();
+    output_parser();  /* This internally calls output_semantic_actions() */
     output_trailing_text();
     
     if (dflag) {
@@ -90,11 +89,13 @@ static void output_defines(void) {
     
     fprintf(output_file, "/* Token definitions */\n");
     
-    /* Output #define for each token */
-    /* Iterate through symbol table */
+    /* Output #define for each token - skip single-char literals */
     for (bp = first_symbol; bp != NULL; bp = bp->next) {
         if (bp->class == CLASS_TERM && bp->value > 256) {
-            fprintf(output_file, "#define %s %d\n", bp->name, bp->value);
+            /* Only output if name starts with letter or underscore (valid C identifier) */
+            if (isalpha((unsigned char)bp->name[0]) || bp->name[0] == '_') {
+                fprintf(output_file, "#define %s %d\n", bp->name, bp->value);
+            }
         }
     }
     fprintf(output_file, "\n");
@@ -105,7 +106,9 @@ static void output_defines(void) {
         fprintf(defines_file, "#define YYTOKENTYPE\n");
         for (bp = first_symbol; bp != NULL; bp = bp->next) {
             if (bp->class == CLASS_TERM && bp->value > 256) {
-                fprintf(defines_file, "#define %s %d\n", bp->name, bp->value);
+                if (isalpha((unsigned char)bp->name[0]) || bp->name[0] == '_') {
+                    fprintf(defines_file, "#define %s %d\n", bp->name, bp->value);
+                }
             }
         }
         fprintf(defines_file, "#endif\n\n");
@@ -218,6 +221,14 @@ static void output_parser(void) {
     fprintf(output_file, "#define YYERRCODE 256\n");
     fprintf(output_file, "#endif\n\n");
     
+    /* Error recovery and control flow macros */
+    fprintf(output_file, "/* Standard yacc macros */\n");
+    fprintf(output_file, "#define yyerrok   (yyerrflag = 0)\n");
+    fprintf(output_file, "#define yyclearin (yychar = -1)\n");
+    fprintf(output_file, "#define YYABORT   goto yyabort\n");
+    fprintf(output_file, "#define YYACCEPT  goto yyaccept\n");
+    fprintf(output_file, "#define YYERROR   goto yyerrlab\n\n");
+    
     fprintf(output_file, "/* External declarations */\n");
     fprintf(output_file, "extern int yylex(void);\n");
     fprintf(output_file, "extern void yyerror(const char *);\n");
@@ -329,6 +340,9 @@ static void output_semantic_actions(void) {
     
     if (action_file == NULL) return;
     
+    /* Open the switch block for semantic actions */
+    fprintf(output_file, "    switch (yyn) {\n");
+    
     /* Rewind action_file to the beginning for reading */
     rewind(action_file);
     
@@ -342,11 +356,18 @@ static void output_semantic_actions(void) {
 }
 
 static void output_trailing_text(void) {
+    int c;
     /* Copy user code section (after second %%) */
     if (!lflag) {
         output_line_directive(output_file, lineno, infile_name);
     }
-    /* Copy remainder of input file */
+    /* Copy remainder of input file from epilogue_file */
+    if (epilogue_file) {
+        rewind(epilogue_file);
+        while ((c = getc(epilogue_file)) != EOF) {
+            putc(c, output_file);
+        }
+    }
 }
 
 static void output_line_directive(FILE *f, int line, const char *file) {

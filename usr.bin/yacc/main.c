@@ -21,6 +21,7 @@ char *infile_name = NULL;
 FILE *input_file = NULL;
 FILE *action_file = NULL; /* For storing semantic actions temporally */
 FILE *code_file = NULL;   /* For stored code */
+FILE *epilogue_file = NULL; /* For epilogue code */
 FILE *defines_file = NULL;
 FILE *output_file = NULL;
 FILE *verbose_file = NULL;
@@ -102,9 +103,10 @@ void open_files(void) {
     /* For simplicity in this skeleton, assume we can use tmpfile() but need to check failure */
     action_file = tmpfile();
     code_file = tmpfile();
+    epilogue_file = tmpfile();
     union_file = tmpfile();
     
-    if (!action_file || !code_file || !union_file) {
+    if (!action_file || !code_file || !epilogue_file || !union_file) {
         fprintf(stderr, "yacc: cannot create temporary files\n");
         exit(1);
     }

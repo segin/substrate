@@ -117,6 +117,7 @@ extern FILE *verbose_file;
 extern FILE *defines_file;
 extern FILE *action_file;
 extern FILE *code_file;
+extern FILE *epilogue_file;
 extern FILE *union_file;
 extern FILE *graph_file;
 

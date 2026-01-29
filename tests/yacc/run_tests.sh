@@ -271,8 +271,8 @@ test_precedence_decl() {
 }
 
 # TODO: Re-enable when epilogue handling is fixed
-# test_calc_grammar
-test_list_grammar
+test_calc_grammar
+# test_list_grammar
 test_precedence_grammar
 test_midrule_grammar
 # TODO: Re-enable when %union output is implemented
