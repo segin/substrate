@@ -50,6 +50,7 @@ typedef struct process {
     struct personality *pers; // Pointer to personality definition (internal use)
     int perso_id; // Stable personality ID (user visible)
     file_t *fds[MAX_FD]; // File Descriptor Table
+    int next_fd;         // Hint for next free FD
     fs_node_t *root_node; // Per-process root (for chroot)
     
     // Signals
