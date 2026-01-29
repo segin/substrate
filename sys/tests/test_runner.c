@@ -133,6 +133,11 @@ void run_kernel_tests(void) {
          run_mount_tests();
     }
 
+    if (all || strcmp(test_arg, "printf_new") == 0) {
+         extern void test_printf_new(void);
+         test_printf_new();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested

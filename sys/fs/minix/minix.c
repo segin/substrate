@@ -144,7 +144,7 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
     // Cache private data (zones) - Allocating for simplicity
     // Note: This leaks if we don't implement close/free callback properly.
     // For VFS refactor context, we accept this.
-    struct minix_inode_v1 *cache = (struct minix_inode_v1 *)kmalloc(sizeof(struct minix_inode_v1));
+    void *cache = kmalloc(sizeof(struct minix_inode_v1));
     if (cache) {
         memcpy(cache, raw, sizeof(struct minix_inode_v1));
         node->ptr = (struct fs_node *)cache;

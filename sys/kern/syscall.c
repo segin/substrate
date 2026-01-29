@@ -35,7 +35,7 @@ extern thread_t threads[256];
 
 extern int sys_acct(const char *path);
 extern int64_t sys_time(int64_t *tloc);
-extern int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
+extern int sys_sigaction(int sig, const void *act, void *oact);
 
 // Simple file structure allocator
 #define MAX_SYSTEM_FILES 128

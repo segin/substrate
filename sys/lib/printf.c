@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
+#include <vm/vm_kmem.h>
 
 // Integer to ASCII with optional sign/space prefix
 static void itoa(char *buf, int val, int force_sign, int space_prefix) {
@@ -50,8 +51,8 @@ static void itoa(char *buf, int val, int force_sign, int space_prefix) {
     buf[j] = '\0';
 }
 
-// Hex conversion helper
-static void utoa_hex(char *buf, unsigned int val, int uppercase, int width) {
+// Hex conversion helper - fixed to not overflow tmp
+static void utoa_hex(char *buf, unsigned int val, int uppercase) {
     char tmp[16];
     const char *digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
     int i = 0;
@@ -64,9 +65,6 @@ static void utoa_hex(char *buf, unsigned int val, int uppercase, int width) {
             val >>= 4;
         }
     }
-    
-    // Pad with zeros
-    while (i < width) tmp[i++] = '0';
     
     // Reverse into buf
     for (int j = 0; j < i; j++) {
@@ -96,11 +94,21 @@ static void utoa_oct(char *buf, unsigned int val) {
     buf[i] = '\0';
 }
 
-int sprintf(char *str, const char *format, ...) {
+int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     char *s = str;
     const char *f = format;
-    __builtin_va_list ap;
-    __builtin_va_start(ap, format);
+    size_t remaining = size;
+
+    // Helper to emit a character
+    #define EMIT(c) do { \
+        if (remaining > 1) { \
+            *s++ = (c); \
+            remaining--; \
+        } \
+        len++; \
+    } while (0)
+
+    size_t len = 0; // Total characters that would be written
 
     while (*f) {
         if (*f == '%') {
@@ -116,7 +124,7 @@ int sprintf(char *str, const char *format, ...) {
             if (*f == ' ' && !force_sign) { space_prefix = 1; f++; }
             if (*f == '#') { alternate_form = 1; f++; }
             
-            // Parse width (e.g., %08X or %16s)
+            // Parse width
             int width = 0;
             int pad_zero = 0;
             if (*f == '0' && !left_align) { pad_zero = 1; f++; }
@@ -125,7 +133,7 @@ int sprintf(char *str, const char *format, ...) {
                 f++;
             }
             
-            // Parse precision (e.g., %.16s or %5.2f)
+            // Parse precision
             int precision = -1;
             if (*f == '.') {
                 f++;
@@ -135,134 +143,248 @@ int sprintf(char *str, const char *format, ...) {
                     f++;
                 }
             }
-            (void)pad_zero; // Used implicitly in width
             
             switch (*f) {
                 case 'd':
                 case 'i': {
-                    int val = __builtin_va_arg(ap, int);
+                    int val = va_arg(ap, int);
                     char tmp[32];
                     itoa(tmp, val, force_sign, space_prefix);
-                    int len = strlen(tmp);
+                    int tmp_len = strlen(tmp);
                     
-                    // Apply padding if width specified
-                    if (width > len) {
+                    if (width > tmp_len) {
                         if (pad_zero) {
-                            // Zero-padding: sign first, then zeros
                             int has_sign = (tmp[0] == '+' || tmp[0] == '-' || tmp[0] == ' ');
                             if (has_sign) {
-                                *s++ = tmp[0];
-                                for (int i = 0; i < width - len; i++) *s++ = '0';
-                                strcpy(s, tmp + 1);
+                                EMIT(tmp[0]);
+                                for (int i = 0; i < width - tmp_len; i++) EMIT('0');
+                                for (int i = 1; i < tmp_len; i++) EMIT(tmp[i]);
                             } else {
-                                for (int i = 0; i < width - len; i++) *s++ = '0';
-                                strcpy(s, tmp);
+                                for (int i = 0; i < width - tmp_len; i++) EMIT('0');
+                                for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
                             }
                         } else if (left_align) {
-                            // Left-align: value first, then spaces
-                            strcpy(s, tmp);
-                            s += len;
-                            for (int i = 0; i < width - len; i++) *s++ = ' ';
-                            *s = '\0';
+                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
                         } else {
-                            // Right-align (default): spaces first, then value
-                            for (int i = 0; i < width - len; i++) *s++ = ' ';
-                            strcpy(s, tmp);
+                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
                         }
                     } else {
-                        strcpy(s, tmp);
+                        for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
                     }
-                    s += strlen(s);
                     break;
                 }
                 case 'u': {
-                    unsigned int val = __builtin_va_arg(ap, unsigned int);
-                    itoa(s, (int)val, 0, 0); // No sign for unsigned
-                    s += strlen(s);
+                    unsigned int val = va_arg(ap, unsigned int);
+                    char tmp[32];
+                    itoa(tmp, (int)val, 0, 0);
+                    int tmp_len = strlen(tmp);
+
+                    if (width > tmp_len) {
+                        if (pad_zero) {
+                             for (int i = 0; i < width - tmp_len; i++) EMIT('0');
+                             for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                        } else if (left_align) {
+                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                        } else {
+                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                        }
+                    } else {
+                        for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                    }
                     break;
                 }
                 case 'o': {
-                    unsigned int val = __builtin_va_arg(ap, unsigned int);
-                    if (alternate_form && val != 0) {
-                        *s++ = '0'; // Octal prefix
+                    unsigned int val = va_arg(ap, unsigned int);
+                    char tmp[32];
+                    char *ptr = tmp;
+                    if (alternate_form && val != 0) *ptr++ = '0';
+                    utoa_oct(ptr, val);
+                    int tmp_len = strlen(tmp);
+
+                    if (width > tmp_len) {
+                        if (pad_zero) {
+                             for (int i = 0; i < width - tmp_len; i++) EMIT('0');
+                             for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                        } else if (left_align) {
+                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                        } else {
+                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                        }
+                    } else {
+                        for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
                     }
-                    utoa_oct(s, val);
-                    s += strlen(s);
                     break;
                 }
-                case 'x': {
-                    unsigned int val = __builtin_va_arg(ap, unsigned int);
-                    if (alternate_form && val != 0) {
-                        *s++ = '0';
-                        *s++ = 'x';
-                    }
-                    utoa_hex(s, val, 0, width);
-                    s += strlen(s);
-                    break;
-                }
+                case 'x':
                 case 'X': {
-                    unsigned int val = __builtin_va_arg(ap, unsigned int);
-                    if (alternate_form && val != 0) {
-                        *s++ = '0';
-                        *s++ = 'X';
+                    unsigned int val = va_arg(ap, unsigned int);
+                    char tmp[32];
+                    utoa_hex(tmp, val, (*f == 'X'));
+                    int len_val = strlen(tmp);
+                    int prefix_len = (alternate_form && val != 0) ? 2 : 0;
+                    int total_len = len_val + prefix_len;
+
+                    if (width > total_len) {
+                        if (pad_zero && !left_align) {
+                            // Zero padding: prefix -> zeros -> value
+                            if (prefix_len) {
+                                EMIT('0');
+                                EMIT((*f == 'X') ? 'X' : 'x');
+                            }
+                            for (int i = 0; i < width - total_len; i++) EMIT('0');
+                            for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
+                        } else if (left_align) {
+                            // Left align: prefix -> value -> spaces
+                            if (prefix_len) {
+                                EMIT('0');
+                                EMIT((*f == 'X') ? 'X' : 'x');
+                            }
+                            for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
+                            for (int i = 0; i < width - total_len; i++) EMIT(' ');
+                        } else {
+                            // Right align: spaces -> prefix -> value
+                            for (int i = 0; i < width - total_len; i++) EMIT(' ');
+                            if (prefix_len) {
+                                EMIT('0');
+                                EMIT((*f == 'X') ? 'X' : 'x');
+                            }
+                            for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
+                        }
+                    } else {
+                        // No padding needed
+                        if (prefix_len) {
+                            EMIT('0');
+                            EMIT((*f == 'X') ? 'X' : 'x');
+                        }
+                        for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
                     }
-                    utoa_hex(s, val, 1, width);
-                    s += strlen(s);
                     break;
                 }
                 case 'p': {
-                    unsigned int val = (unsigned int)(uintptr_t)__builtin_va_arg(ap, void*);
-                    *s++ = '0'; *s++ = 'x';
-                    utoa_hex(s, val, 0, 8);
-                    s += strlen(s);
+                    unsigned int val = (unsigned int)(uintptr_t)va_arg(ap, void*);
+                    char tmp[32];
+                    utoa_hex(tmp, val, 0); // digits only
+                    int len_val = strlen(tmp);
+                    int zeros = 8 - len_val;
+                    if (zeros < 0) zeros = 0;
+
+                    int total_len = 2 + zeros + len_val; // 0x + zeros + digits
+
+                    if (width > total_len && !left_align) {
+                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
+                    }
+
+                    EMIT('0'); EMIT('x');
+                    for (int i = 0; i < zeros; i++) EMIT('0');
+                    for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
+
+                    if (width > total_len && left_align) {
+                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
+                    }
                     break;
                 }
                 case 's': {
-                    const char *val = __builtin_va_arg(ap, const char *);
+                    const char *val = va_arg(ap, const char *);
                     if (!val) val = "(null)";
                     
-                    // Calculate string length (limited by precision if set)
-                    int len = 0;
+                    int s_len = 0;
                     const char *p = val;
-                    while (*p && (precision == -1 || len < precision)) {
-                        len++;
+                    while (*p && (precision == -1 || s_len < precision)) {
+                        s_len++;
                         p++;
                     }
                     
-                    // Handle left-align vs right-align
-                    if (!left_align && width > len) {
-                        // Right-align: add padding before string
-                        for (int i = 0; i < width - len; i++) *s++ = ' ';
+                    if (!left_align && width > s_len) {
+                        for (int i = 0; i < width - s_len; i++) EMIT(' ');
                     }
                     
-                    // Copy the string (up to precision)
-                    for (int i = 0; i < len; i++) *s++ = val[i];
+                    for (int i = 0; i < s_len; i++) EMIT(val[i]);
                     
-                    // Left-align: add padding after string
-                    if (left_align && width > len) {
-                        for (int i = 0; i < width - len; i++) *s++ = ' ';
+                    if (left_align && width > s_len) {
+                         for (int i = 0; i < width - s_len; i++) EMIT(' ');
                     }
                     break;
                 }
                 case 'c': {
-                    char c = (char)__builtin_va_arg(ap, int);
-                    *s++ = c;
+                    char c = (char)va_arg(ap, int);
+                    EMIT(c);
                     break;
                 }
                 case '%':
-                    *s++ = '%';
+                    EMIT('%');
                     break;
                 default:
-                    *s++ = '%';
-                    *s++ = *f;
+                    EMIT('%');
+                    EMIT(*f);
                     break;
             }
             f++;
         } else {
-            *s++ = *f++;
+            EMIT(*f);
+            f++;
         }
     }
-    *s = '\0';
-    __builtin_va_end(ap);
-    return s - str;
+
+    if (size > 0) {
+        if (remaining > 0) {
+            *s = '\0';
+        } else {
+            // Buffer full, ensure null termination at end
+            str[size - 1] = '\0';
+        }
+    }
+
+    return len;
+}
+
+int snprintf(char *str, size_t size, const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    int ret = vsnprintf(str, size, format, ap);
+    va_end(ap);
+    return ret;
+}
+
+int sprintf(char *str, const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    // Use SIZE_MAX to simulate "infinite" buffer, but vsnprintf handles this
+    int ret = vsnprintf(str, SIZE_MAX, format, ap);
+    va_end(ap);
+    return ret;
+}
+
+int vsprintf(char *str, const char *format, va_list ap) {
+    return vsnprintf(str, SIZE_MAX, format, ap);
+}
+
+char *vasprintf(const char *fmt, va_list ap) {
+    va_list ap2;
+    va_copy(ap2, ap);
+
+    // Calculate length (pass NULL and 0 size)
+    int len = vsnprintf(NULL, 0, fmt, ap2);
+    va_end(ap2);
+
+    if (len < 0) return NULL;
+
+    char *str = kmalloc(len + 1);
+    if (!str) return NULL;
+
+    vsnprintf(str, len + 1, fmt, ap);
+    return str;
+}
+
+char *kasprintf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    char *str = vasprintf(fmt, ap);
+    va_end(ap);
+    return str;
 }
