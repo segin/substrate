@@ -4669,6 +4669,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Testing:** Integration tests for output verification.
 - [ ] **LDT Tools:**
     - [ ] **`setldt` / `ldtctl`:** CLI tool to inspect/manipulate LDT entries.
+- [ ] **Calculator Tools:**
+    - [x] **`bc`:** Standalone Interpreter with GNU Extensions (variables, control flow, libbc).
+    - [x] **`dc`:** RPN Interpreter with GNU Extensions (`#` comments, `n` command, libbc).
+    - [x] **`libbc`:** Shared Bignum Library (add, sub, mul, div, mod, pow).
 - [ ] **Filesystem Tools (`sbin/`):**
     - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
     - [ ] **`fsck`:** Implement `ext2` consistency check.

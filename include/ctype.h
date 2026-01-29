@@ -1,7 +1,7 @@
 #ifndef _CTYPE_H
 #define _CTYPE_H
 
-int isisalnum(int c);
+int isalnum(int c);
 int isalpha(int c);
 int iscntrl(int c);
 int isdigit(int c);
