@@ -6537,3 +6537,33 @@ Reference: User Request (Step 31552)
         - Acceptance: Build passes, files moved, functionality preserved.
         - Acceptance: No warnings from static analysis tools.
 
+
+### 6. Userspace/Tools (`usr.bin/yacc`)
+- [ ] **Yacc Implementation (POSIX-Compliant):**
+    - [x] **1. Infrastructure & Symbol Table:**
+        - [x] Create `usr.bin/yacc` directory and Makefile.
+        - [x] Implement `main.c` argument parsing (POSIX options `-d`, `-l`, `-t`, `-v`, `-b`, `-p`).
+        - [x] Implement Symbol Table (buckets, hashing) for tokens and non-terminals.
+    - [ ] **2. Grammar Reader (`reader.c`):**
+        - [x] Implement Lexical Analyzer for Yacc input (C code vs Declarations vs Rules).
+        - [x] Parse Declarations (`%token`, `%type`, `%union`, `%start`, precedence).
+        - [x] Parse Grammar Rules and Actions (handling `{}` blocks).
+    - [ ] **3. LR(0) Construction (`lr0.c`, `closure.c`):**
+        - [ ] Implement Item Set computation.
+        - [ ] Implement Closure algorithm.
+        - [ ] Implement GOTO graph construction.
+    - [ ] **4. LALR(1) Lookahead (`lalr.c`):**
+        - [ ] Compute DR (Direct Read) and READ (Relation) sets.
+        - [ ] Compute Lookaheads for each kernel item (Digraph algorithm).
+    - [ ] **5. Tables & Conflicts (`mkpar.c`):**
+        - [ ] Generate ACTION and GOTO tables.
+        - [ ] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
+        - [ ] Generate Default Reductions.
+    - [ ] **6. Code Generation (`output.c`):**
+        - [ ] generate `y.tab.c` (parser skeleton + user actions).
+        - [ ] generate `y.tab.h` (token defines, `YYSTYPE`).
+        - [ ] generate `y.output` (verbose state descriptions).
+    - [ ] **7. Validation & Tests:**
+        - [ ] Basic Calculator Test (Precedence/Associativity).
+        - [ ] Conflict Reporting Test.
+        - [ ] Error Recovery Test (`error` token).
