@@ -1,0 +1,46 @@
+.Dd January 29, 2026
+.Dt BC 1
+.Os Substrate
+.Sh NAME
+.Nm bc
+.Nd arbitrary precision calculator language
+.Sh SYNOPSIS
+.Nm
+.Op Fl h
+.Sh DESCRIPTION
+.Nm
+is an arbitrary precision calculator language interpreter.
+It supports standard POSIX bc features as well as several GNU extensions.
+.Pp
+The calculator supports numbers with arbitrary precision, limited only by available memory.
+.Sh EXTENSIONS
+.Nm
+implements the following GNU extensions:
+.Bl -tag -width "Comments"
+.It Comments
+Support for
+.Li #
+characters to start a comment that extends to the end of the line.
+.It Control Flow
+Support for
+.Li if (cond) { ... } else { ... }
+syntax, allowing full structured programming.
+.It Input/Output
+The
+.Li print
+statement allows printing a list of strings and expressions, separated by commas.
+For example:
+.Li print "Value: ", a, "\n"
+.It Variables
+Multi-character variable names are supported (e.g.,
+.Li myVar = 10
+).
+.El
+.Sh SEE ALSO
+.Xr dc 1
+.Sh HISTORY
+This implementation of
+.Nm
+was written for the Substrate operating system.
+.Sh AUTHORS
+.An Segin

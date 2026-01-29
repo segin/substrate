@@ -1,5 +1,6 @@
 PROG = bc
-SRCS = bc.c libbc/num.c libbc/arith.c
+SRCS = bc.c
+LDADD = -L../../usr.lib/bc -lbc
 
 include ../../Makefile.inc
 include ../../Makefile.bin.inc

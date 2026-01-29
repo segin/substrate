@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "../bc/libbc/num.h"
+#include "../../usr.lib/bc/num.h"
 
 #define STACK_SIZE 1024
 bc_num *stack[STACK_SIZE];

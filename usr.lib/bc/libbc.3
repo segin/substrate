@@ -1,0 +1,101 @@
+.Dd January 29, 2026
+.Dt LIBBC 3
+.Os Substrate
+.Sh NAME
+.Nm libbc
+.Nd arbitrary precision arithmetic library
+.Sh SYNOPSIS
+.In num.h
+.Ft bc_num *
+.Fn bc_new "void"
+.Ft void
+.Fn bc_free "bc_num *n"
+.Ft bc_num *
+.Fn bc_add "bc_num *a" "bc_num *b"
+.Ft bc_num *
+.Fn bc_sub "bc_num *a" "bc_num *b"
+.Ft bc_num *
+.Fn bc_mul "bc_num *a" "bc_num *b"
+.Ft bc_num *
+.Fn bc_div "bc_num *a" "bc_num *b"
+.Ft bc_num *
+.Fn bc_mod "bc_num *a" "bc_num *b"
+.Ft bc_num *
+.Fn bc_pow "bc_num *a" "bc_num *b"
+.Ft bc_num *
+.Fn bc_dup "bc_num *src"
+.Te
+.Sh DESCRIPTION
+The
+.Nm
+library provides arbitrary precision integer arithmetic.
+It uses a base-100 representation for internal storage.
+.Ss Memory Management
+.Fn bc_new
+allocates a new number initialized to zero.
+.Fn bc_free
+frees the memory associated with a number.
+.Fn bc_dup
+creates a deep copy of a number.
+.Ss Arithmetic
+All arithmetic functions return a new
+.Vt bc_num *
+and do not modify their arguments.
+The caller must free the result.
+.Bl -tag -width "bc_pow"
+.It Fn bc_add "a" "b"
+Returns
+.Va a + b .
+.It Fn bc_sub "a" "b"
+Returns
+.Va a - b .
+.It Fn bc_mul "a" "b"
+Returns
+.Va a * b .
+.It Fn bc_div "a" "b"
+Returns
+.Va a / b .
+.It Fn bc_mod "a" "b"
+Returns
+.Va a % b .
+.It Fn bc_pow "a" "b"
+Returns
+.Va a ^ b .
+.El
+.Ss Comparison & Utils
+.Fn bc_compare
+returns -1 if a < b, 0 if a == b, and 1 if a > b.
+.Fn bc_is_zero
+returns 1 if the number is zero, 0 otherwise.
+.Fn bc_is_neg
+returns 1 if the number is negative.
+.Fn bc_canonicalize
+removes leading/trailing zeros (internal use mostly).
+.Sh EXAMPLES
+.Bd -literal
+#include "num.h"
+
+void example(void) {
+    bc_num *a = bc_from_long(10);
+    bc_num *b = bc_from_long(20);
+    bc_num *c = bc_add(a, b);
+
+    // c is 30
+    bc_print(c); 
+    printf("\\n");
+
+    bc_free(a);
+    bc_free(b);
+    bc_free(c);
+}
+.Ed
+.Sh RETURN VALUES
+Arithmetic functions return a pointer to the result, or
+.Dv NULL
+on error (e.g., division by zero, though currently `bc` handles zero division by printing error and returning 0).
+.Sh SEE ALSO
+.Xr bc 1 ,
+.Xr dc 1
+.Sh HISTORY
+.Nm
+was created for the Substrate project.

@@ -12,7 +12,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include "libbc/num.h"
+#include "../../usr.lib/bc/num.h"
 
 // Token types
 enum {

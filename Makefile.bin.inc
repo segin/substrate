@@ -30,7 +30,7 @@ else
 endif
 
 $(PROG): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(CRT0) $(LIBS) $(LDADD)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(CRT0) $(LDADD) $(LIBS)
 	$(BRAND_CMD)
 
 %.o: %.c
