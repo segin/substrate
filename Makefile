@@ -20,6 +20,24 @@ freebsd:
 zimage:
 	$(MAKE) -C sys kernel.zimage
 
+# Host tools build
+HOSTCC ?= cc
+HOSTCFLAGS ?= -O2 -Wall
+export HOSTCC HOSTCFLAGS
+
+native_dist:
+	@mkdir -p host_dist/bin
+	@mkdir -p host_dist/sbin
+	@mkdir -p host_dist/usr/bin
+	@echo ">>> Building host tools..."
+	$(MAKE) -C bin clean
+	$(MAKE) -C bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	$(MAKE) -C sbin clean
+	$(MAKE) -C sbin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	$(MAKE) -C usr.bin clean
+	$(MAKE) -C usr.bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	@echo ">>> Host tools installed to host_dist"
+
 # Recursive make for each subdirectory
 $(SUBDIRS):
 	@echo ">>> Entering $@"

@@ -598,7 +598,23 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Signal Trampoline:**
         - [ ] **Trampoline Page:**
             - [x] Refactor `linux_sys_ioctl` dispatch (TTY, Block, etc.) `[sys/exec/perso/perso_linux.c]`
-- [x] Fix `init` process session/pgrp setup `[sys/kern/main.c]` `[sys/pm/process.c]`
+    - [x] **Refactor kmain**
+        - [x] Move early i386 boot code to `sys/arch/i386/early_boot.c`
+        - [x] Create `init_memory` helper
+        - [x] Create `init_root_fs` helper
+        - [x] Clean up `kmain` flow
+    - [x] **Kernel Core Maintenance:**
+        - [x] Refactor `spinlock.c` to use GCC C11 atomic builtins.
+        - [x] Rewrite `swapper.c` idle loop (race-free implementation).
+        - [x] Cleanup `sleepq.c` formatting and style.
+        - [x] Remove obsolete `sys/kern/stubs.c`.
+        - [x] Modularize `sys/kern/lib.c` into `sys/lib/`.
+        - [x] Audit `mutex.c` and `semaphore.c` for race conditions (implemented `sleepq`).
+        - [x] Fix `sched_smp.c` CPU ID assumption.
+    - [ ] **Update Kernel Documentation**
+        - [ ] Document Console/UART subsystem changes
+        - [ ] Document kmain initialization flow
+        - [ ] Update ARCHITECTURE.md
             - [x] Map trampoline code at fixed address (e.g., 0xFFFF1000).
             - [x] Page must be user-readable, executable, not writable.
             - [x] Contains minimal code: `mov $SYS_sigreturn, %eax; int $0x80`.
@@ -1844,6 +1860,17 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (output contains expected fields)
                     - Docs: `vop_print.9`
                     - Acceptance: Human-readable vnode dump
+    - [x] **Native Build Integration (`native_dist`):**
+        - [x] Update `native_dist` target to build userspace with `HOSTCC`.
+        - [x] Sanitize `Makefile.inc` for non-cross builds.
+        - [x] Verify `bin/` and `sbin/` builds on host.
+        - [x] Change host output directory to `host_dist`.
+    - [ ] **Compiler Construction Tools (`yacc`/`lex`):**
+        - [/] **`yacc` (Yet Another Compiler Compiler):**
+            - [x] Initial skeleton implementation (`usr.bin/yacc`).
+            - [ ] Implement grammar parsing.
+            - [ ] Implement LALR(1) parser generation.
+            - [ ] Output `y.tab.c` and `y.tab.h`.
     - [ ] **Buffer Cache Integration (`bio`):**
         - [ ] **`struct buf` Definition:**
             - [ ] Define `struct buf` in `sys/vfs/buf.h`.
@@ -4633,9 +4660,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Priority:** low
 - [ ] **Build System:**
     - [ ] Implement `native_dist` target to build usermode tools for the host OS (skipping libc/libm etc).
-    - [ ] **Filesystem Tools (`sbin/`):**
-        - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
-        - [ ] **`fsck`:** Implement `ext2` consistency check.
+
 
 ### 7. Core Utilities (`bin/`)
 - [ ] **Process Tools:**
@@ -4644,6 +4669,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Testing:** Integration tests for output verification.
 - [ ] **LDT Tools:**
     - [ ] **`setldt` / `ldtctl`:** CLI tool to inspect/manipulate LDT entries.
+- [ ] **Filesystem Tools (`sbin/`):**
+    - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
+    - [ ] **`fsck`:** Implement `ext2` consistency check.
 
 ### 8. Security and Identity
 - [ ] **User & Group Management:**
@@ -5529,7 +5557,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Refactor Existing Drivers:**
     - [ ] Refactor `ide.c` to use new driver model.
         - Files: `sys/drivers/storage/ide/ide.c`
-        - Changes: Register as PCI driver, use device_t for state
+        - Changes: Register as PCI driver, use device_t for state.
+        - Note: Ensure ISA-based IDE (e.g., SB16 PnP secondary channels) allows for non-PCI attachment.
         - Tests: integration (IDE still works after refactor)
         - Docs: Update ide.4 manpage
         - Acceptance: IDE enumerated via PCI bus, same functionality
