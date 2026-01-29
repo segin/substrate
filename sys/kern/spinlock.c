@@ -19,10 +19,12 @@ void spinlock_acquire(spinlock_t *lock) {
 
     // Spin until acquired
     while (__atomic_exchange_n(&lock->locked, 1, __ATOMIC_ACQUIRE)) {
+        // TTAS: Spin on read until lock appears free
+        while (__atomic_load_n(&lock->locked, __ATOMIC_RELAXED)) {
 #if defined(__i386__) || defined(__x86_64__)
-        // Pause instruction for power saving during spin
-        __asm__ volatile("pause");
+            __asm__ volatile("pause");
 #endif
+        }
     }
 
     lock->cpu_id = id;
