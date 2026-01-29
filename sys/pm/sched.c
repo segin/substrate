@@ -59,6 +59,8 @@ thread_t *sched_alloc_thread(process_t *proc) {
 void sched_yield(void) {
     if (!current_thread) return;
 
+    extern void kprint(const char *);
+
     thread_t *best_thread = NULL;
     int highest_prio = -1;
     sched_class_t best_class = SCHED_IDLE;
@@ -85,11 +87,6 @@ void sched_yield(void) {
         }
     }
 
-    if (!best_thread) {
-        if (current_thread && current_thread->state == THREAD_RUNNING) return;
-        return; 
-    }
-
     if (best_thread == current_thread && current_thread && current_thread->state == THREAD_RUNNING) return;
 
     // Context Switch
@@ -106,6 +103,13 @@ void sched_yield(void) {
     if (current_thread->kstack_top) {
         arch_set_kernel_stack(current_thread->kstack_top);
     }
+    
+    // Activate new process's address space if switching processes
+    if (prev && prev->proc != next->proc && next->proc && next->proc->pmap) {
+        extern void pmap_activate(void *pmap);
+        pmap_activate(next->proc->pmap);
+    }
+    
     if (prev && prev != next) {
         arch_switch_to(prev, next);
     }
@@ -150,6 +154,14 @@ void sched_wakeup_n(void *chan, int n) {
             threads[i].wait_chan = NULL;
             woken++;
             if (n > 0 && woken >= n) break;
+        }
+    }
+}
+
+void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) {
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1) {
+            callback(&threads[i], arg);
         }
     }
 }

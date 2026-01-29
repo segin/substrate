@@ -6,36 +6,28 @@
 
 extern fs_node_t *console_get_node(void);
 
-#include <sys/tty.h>
-
 static size_t tty_read_proxy(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node; (void)offset;
+    (void)node;
     // Proxies to current process's TTY or default console
-    struct tty *tty = current_process ? current_process->tty : NULL;
-    if (tty) return tty_read(tty, (char*)buffer, size);
-
-    fs_node_t *console = console_get_node();
-    if (console && console->read) return console->read(console, offset, size, buffer);
+    fs_node_t *tty = current_process ? current_process->tty : NULL;
+    if (!tty) tty = console_get_node();
+    if (tty && tty->read) return tty->read(tty, offset, size, buffer);
     return 0;
 }
 
 static size_t tty_write_proxy(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    (void)node; (void)offset;
-    struct tty *tty = current_process ? current_process->tty : NULL;
-    if (tty) return tty_write(tty, (const char*)buffer, size);
-
-    fs_node_t *console = console_get_node();
-    if (console && console->write) return console->write(console, offset, size, buffer);
+    (void)node;
+    fs_node_t *tty = current_process ? current_process->tty : NULL;
+    if (!tty) tty = console_get_node();
+    if (tty && tty->write) return tty->write(tty, offset, size, buffer);
     return 0;
 }
 
 static int tty_ioctl_proxy(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
-    struct tty *tty = current_process ? current_process->tty : NULL;
-    if (tty) return tty_ioctl(tty, request, (unsigned long)arg);
-
-    fs_node_t *console = console_get_node();
-    if (console && console->ioctl) return console->ioctl(console, request, arg);
+    fs_node_t *tty = current_process ? current_process->tty : NULL;
+    if (!tty) tty = console_get_node();
+    if (tty && tty->ioctl) return tty->ioctl(tty, request, arg);
     return -1;
 }
 

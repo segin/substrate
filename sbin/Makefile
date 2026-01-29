@@ -1,7 +1,11 @@
 include ../Makefile.inc
 
 # Subdirectories for system binaries
-SUBDIRS = 
+ifdef NATIVE_BUILD
+SUBDIRS = mkfs fsck
+else
+SUBDIRS = init ld.so mkfs fsck
+endif 
 
 
 .PHONY: all clean install $(SUBDIRS)

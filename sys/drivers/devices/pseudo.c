@@ -1,11 +1,11 @@
-#include <vfs/vfs.h>
+#include <arch/x86-common/include/io.h>
 #include <drivers/input/keyboard.h>
 #include <kern/console.h>
-#include <sys/proc.h>
 #include <string.h>
-#include <arch/x86-common/include/io.h>
-#include <sys/tty.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
 
+// /dev/null
 // /dev/null
 static size_t null_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)size; (void)buffer;
@@ -25,12 +25,14 @@ static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
 }
 
 // /dev/full
+// /dev/full
 static size_t full_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
     // Always return error (ENOSPC is usually 28)
-    return size;
+    return size; // TODO: Should return error code logic if VFS supports it, or 0? VFS write usually returns bytes written.
 }
 
+// /dev/port
 // /dev/port
 static size_t port_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
@@ -94,12 +96,13 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
  */
 
 // /dev/tty - proxy to current process's controlling terminal
-static size_t dev_tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+// /dev/tty - proxy to current process's controlling terminal
+static size_t tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
-    if (current_process && current_process->tty) {
-         return tty_read(current_process->tty, (char*)buffer, (int)size);
+    if (current_process && current_process->tty && current_process->tty->read) {
+        return current_process->tty->read(current_process->tty, offset, size, buffer);
     }
     
     // Fallback to keyboard if no TTY assigned
@@ -112,12 +115,12 @@ static size_t dev_tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *
     return count;
 }
 
-static size_t dev_tty_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+static size_t tty_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     
     // Get current process's TTY
-    if (current_process && current_process->tty) {
-         return tty_write(current_process->tty, (const char*)buffer, (int)size);
+    if (current_process && current_process->tty && current_process->tty->write) {
+        return current_process->tty->write(current_process->tty, offset, size, buffer);
     }
     
     // Fallback to console
@@ -185,11 +188,8 @@ static fs_node_t full_node;
 
 static fs_node_t tty_node;
 
-static fs_node_t mem_node;
 
-static fs_node_t kmem_node;
 
-static fs_node_t port_node;
 
 void pseudo_init(void) {
 
@@ -238,11 +238,12 @@ void pseudo_init(void) {
     memset(&tty_node, 0, sizeof(fs_node_t));
     strcpy(tty_node.name, "tty");
     tty_node.flags = FS_CHARDEVICE;
-    tty_node.read = &dev_tty_read;
-    tty_node.write = &dev_tty_write;
+    tty_node.read = &tty_read;
+    tty_node.write = &tty_write;
     devfs_register_device(&tty_node);
 
     // /dev/mem
+    static fs_node_t mem_node;
     memset(&mem_node, 0, sizeof(fs_node_t));
     strcpy(mem_node.name, "mem");
     mem_node.flags = FS_CHARDEVICE;
@@ -251,6 +252,7 @@ void pseudo_init(void) {
     devfs_register_device(&mem_node);
 
     // /dev/kmem
+    static fs_node_t kmem_node;
     memset(&kmem_node, 0, sizeof(fs_node_t));
     strcpy(kmem_node.name, "kmem");
     kmem_node.flags = FS_CHARDEVICE;
@@ -259,6 +261,7 @@ void pseudo_init(void) {
     devfs_register_device(&kmem_node);
 
     // /dev/port
+    static fs_node_t port_node;
     memset(&port_node, 0, sizeof(fs_node_t));
     strcpy(port_node.name, "port");
     port_node.flags = FS_CHARDEVICE;
