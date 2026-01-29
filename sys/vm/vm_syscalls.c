@@ -70,7 +70,19 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         void *pa_virt = pmm_alloc_block();  // Returns virtual address
         if (!pa_virt) {
             // Partial failure - pages before this are mapped
-            break;
+            // Cleanup partial mapping
+            for (uintptr_t cleanup_va = v_addr; cleanup_va < va; cleanup_va += 0x1000) {
+                uint32_t pa = pmap_extract(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
+                if (pa) {
+                    void *cleanup_kvirt = (void *)(pa + 0xC0000000);
+                    pmm_free_block(cleanup_kvirt);
+                    pmap_remove(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
+                }
+            }
+            // Remove the vm_map entry
+            vm_map_remove(map, v_addr, v_addr + length);
+
+            return (void *)-1;
         }
 
         // Zero the page - pa_virt is already virtual
