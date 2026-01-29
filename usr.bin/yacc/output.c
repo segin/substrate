@@ -52,6 +52,19 @@ void output(void) {
 }
 
 static void output_prefix(void) {
+    /* YYDEBUG conditional compilation per POSIX */
+    fprintf(output_file, "/* Debug mode */\n");
+    fprintf(output_file, "#ifndef YYDEBUG\n");
+    if (tflag) {
+        fprintf(output_file, "#define YYDEBUG 1\n");
+    } else {
+        fprintf(output_file, "#define YYDEBUG 0\n");
+    }
+    fprintf(output_file, "#endif\n");
+    fprintf(output_file, "#if YYDEBUG\n");
+    fprintf(output_file, "int yydebug = 0;\n");
+    fprintf(output_file, "#endif\n\n");
+    
     /* Output any custom prefix definitions */
     if (symbol_prefix && strcmp(symbol_prefix, "yy") != 0) {
         fprintf(output_file, "#define yyparse %sparse\n", symbol_prefix);

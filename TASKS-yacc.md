@@ -5,20 +5,20 @@
 ## 1. Command-Line Interface
 
 ### 1.1 Options
-- [ ] `-b file_prefix` - Use `file_prefix` instead of `y` for output filenames
-- [ ] `-d` - Generate header file (`y.tab.h` or `file_prefix.tab.h`)
-- [ ] `-l` - Suppress `#line` directives in generated code
-- [ ] `-p sym_prefix` - Replace `yy` prefix with `sym_prefix` in external names
-- [ ] `-t` - Enable runtime debugging code compilation (`YYDEBUG`)
-- [ ] `-v` - Generate description file (`y.output` or `file_prefix.output`)
+- [x] `-b file_prefix` - Use `file_prefix` instead of `y` for output filenames
+- [x] `-d` - Generate header file (`y.tab.h` or `file_prefix.tab.h`)
+- [x] `-l` - Suppress `#line` directives in generated code
+- [x] `-p sym_prefix` - Replace `yy` prefix with `sym_prefix` in external names
+- [x] `-t` - Enable runtime debugging code compilation (`YYDEBUG`)
+- [x] `-v` - Generate description file (`y.output` or `file_prefix.output`)
 
 ### 1.2 Operands
-- [ ] Accept single grammar file operand
-- [ ] Report error if no grammar file specified
+- [x] Accept single grammar file operand
+- [x] Report error if no grammar file specified
 
 ### 1.3 Exit Status
-- [ ] Return 0 on successful completion
-- [ ] Return >0 on error
+- [x] Return 0 on successful completion
+- [x] Return >0 on error
 
 ---
 
