@@ -70,12 +70,19 @@ static void output_prefix(void) {
 }
 
 static void output_stored_text(void) {
+    int c;
     /* Output %{ ... %} blocks from grammar file */
     /* These are stored during parsing and copied here */
     if (!lflag) {
         output_line_directive(output_file, 1, infile_name);
     }
-    /* Copy stored text (from code_file or action_file) */
+    /* Copy stored text from code_file */
+    if (code_file) {
+        rewind(code_file);
+        while ((c = getc(code_file)) != EOF) {
+            putc(c, output_file);
+        }
+    }
 }
 
 static void output_defines(void) {

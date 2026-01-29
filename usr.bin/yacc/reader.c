@@ -188,15 +188,20 @@ static int get_token(void) {
         }
         if (c == '{') {
             /* %{ ... %} block - copy to code file */
-            /* Skip for now, just consume until %} */
             for (;;) {
                 c = nextc();
                 if (c == EOF) { fprintf(stderr, "EOF in %%{ block\n"); done(1); }
                 if (c == '%') {
-                    c = nextc();
-                    if (c == '}') break;
+                    int next = nextc();
+                    if (next == '}') break;
+                    /* Not end marker, write % and continue */
+                    if (code_file) putc('%', code_file);
+                    if (code_file) putc(next, code_file);
+                } else {
+                    if (code_file) putc(c, code_file);
                 }
             }
+            if (code_file) putc('\n', code_file);  /* Add newline after block */
             return get_token();  /* Get next token after block */
         }
         /* Keyword after % */
@@ -516,11 +521,20 @@ static void pack_symbols(void) {
 }
 
 void reader(void) {
+    int c;
     create_symbol_table();
     get_line(); /* Prime the pump */
     parse_declarations();
     parse_rules();
     pack_symbols();
+    
+    /* Copy epilogue (C code after second %%) to code_file */
+    if (code_file && !feof(input_file)) {
+        int c;
+        while ((c = fgetc(input_file)) != EOF) {
+            fputc(c, code_file);
+        }
+    }
     
     /* Debug output */
     fprintf(stderr, "yacc: %d tokens, %d nonterminals, %d rules\n", 
