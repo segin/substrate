@@ -1,0 +1,55 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd January 25, 2026
+.Dt DRIVER 9
+.Os Substrate
+.Sh NAME
+.Nm struct driver
+.Nd generic device driver interface
+.Sh SYNOPSIS
+.In kern/driver.h
+.Sh DESCRIPTION
+The
+.Vt struct driver
+structure represents a loadable device driver in the kernel. It defines the interface between the bus infrastructure and the device-specific logic.
+.Pp
+Each driver implements a set of callbacks to handle the lifecycle of devices it supports.
+.Sh FIELDS
+.Bl -tag -width "match_func"
+.It Vt const char *name
+Name of the driver (e.g., "ahci", "ne2000").
+.It Vt struct bus_type *bus_type
+Pointer to the bus type this driver belongs to (e.g., &pci_bus_type).
+.It Vt const void *id_table
+Pointer to a bus-specific table of device IDs supported by this driver.
+.It Vt int (*probe)(struct device *)
+Check if a device is supported and hardware exists. Returns 0 on success.
+.It Vt int (*attach)(struct device *)
+Initialize the device, allocate resources, and register interfaces.
+.It Vt int (*detach)(struct device *)
+Shutdown the device and release resources.
+.It Vt int (*suspend)(struct device *, int)
+Suspend device to the specified power state.
+.It Vt int (*resume)(struct device *)
+Resume device from a suspended state.
+.It Vt void (*shutdown)(struct device *)
+Called during system shutdown/reboot.
+.It Vt int (*reset)(struct device *)
+Reset the device hardware execution state.
+.It Vt int (*match_func)(struct device *, struct driver *)
+Optional custom matching function. Returns non-zero if the driver matches the device.
+.It Vt int priority
+Driver priority level (higher values indicate higher priority).
+.It Vt uint32_t flags
+Driver status and capability flags.
+.El
+.Sh SEE ALSO
+.Xr bus 9 ,
+.Xr device 9
+.Sh HISTORY
+The
+.Vt struct driver
+interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com

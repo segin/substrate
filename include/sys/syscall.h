@@ -77,6 +77,7 @@
 
 /* System information */
 #define SYS_uname       122
+#define SYS_sysctl      202
 #define SYS_acct        51
 
 /* Special-purpose */
@@ -148,6 +149,7 @@
 #define SYS_PROC_COUNT  SYS_proc_count
 #define SYS_CPU_COUNT   SYS_cpu_count
 #define SYS_HOSTNAME    SYS_hostname
+#define SYS_SYSCTL      SYS_sysctl
 
 /* Raw syscall interface - provided by libsys */
 long syscall(long number, ...);

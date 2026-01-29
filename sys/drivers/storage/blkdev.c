@@ -52,15 +52,13 @@ blkdev_t *blkdev_get(const char *name) {
 }
 
 // Byte-oriented read - handles sector alignment
-uint32_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, uint32_t size, void *buffer) {
+size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
     if (!dev || !dev->read || dev->sector_size == 0) return 0;
     
     uint32_t sector_size = dev->sector_size;
-    // Use 32-bit division for i386 compatibility
-    uint32_t offset32 = (uint32_t)offset;
-    uint32_t start_sector = offset32 / sector_size;
-    uint32_t sector_offset = offset32 % sector_size;
-    uint32_t total_read = 0;
+    uint64_t start_sector = offset / sector_size;
+    uint32_t sector_offset = offset % sector_size;
+    size_t total_read = 0;
     uint8_t *buf = (uint8_t *)buffer;
     
     // Temporary sector buffer for unaligned reads
@@ -89,14 +87,13 @@ uint32_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, uint32_t size, void *
 }
 
 // Byte-oriented write - handles sector alignment (read-modify-write for unaligned)
-uint32_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, uint32_t size, const void *buffer) {
+size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const void *buffer) {
     if (!dev || !dev->write || dev->sector_size == 0) return 0;
     
     uint32_t sector_size = dev->sector_size;
-    uint32_t offset32 = (uint32_t)offset;
-    uint32_t start_sector = offset32 / sector_size;
-    uint32_t sector_offset = offset32 % sector_size;
-    uint32_t total_written = 0;
+    uint64_t start_sector = offset / sector_size;
+    uint32_t sector_offset = offset % sector_size;
+    size_t total_written = 0;
     const uint8_t *buf = (const uint8_t *)buffer;
     
     static uint8_t sector_buf[512];

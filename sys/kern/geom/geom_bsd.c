@@ -65,12 +65,11 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     
     /* Calculate label checksum */
     uint16_t checksum = 0;
-    size_t label_size = sizeof(*label) / sizeof(uint16_t);
-    uint8_t *ptr = (uint8_t *)label;
+    uint8_t *bp = (uint8_t *)label;
+    size_t label_bytes = sizeof(*label);
     
-    for (size_t i = 0; i < label_size; i++) {
-        uint16_t val;
-        memcpy(&val, ptr + i * 2, sizeof(uint16_t));
+    for (size_t i = 0; i < label_bytes; i += 2) {
+        uint16_t val = (uint16_t)bp[i] | ((uint16_t)bp[i+1] << 8);
         checksum ^= val;
     }
     

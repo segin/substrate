@@ -76,37 +76,55 @@ void swapper_request_work(void) {
 
 // Idle loop - runs when no other threads are ready
 // NEVER returns
+// Idle loop - runs when no other threads are ready
+// NEVER returns
 void swapper_idle_loop(void) {
+    extern thread_t *current_thread;
+    
     for (;;) {
+        // Disable interrupts to check state atomically
+        __asm__ volatile("cli");
+
         // 1. Check for work to do
         if (idle_work_pending) {
+            // Re-enable interrupts while doing work
+            __asm__ volatile("sti");
+            
             idle_work_pending = 0;
             
             // Run pageout if memory pressure
-            // vm_pageout_daemon();  // TODO: implement
+            // vm_pageout_daemon();
             
             // Reclaim UMA caches
-            // uma_reclaim();  // Already implemented
+            // uma_reclaim();
+            
+            continue;
         }
         
         // 2. Try to find runnable thread
         extern thread_t *sched_idle_balance(void);
         thread_t *next = sched_idle_balance();
         if (next) {
-            // Switch to found thread
+            // Found work - enable interrupts and yield
+            // The yield will happen with interrupts enabled
+            // usually, but we must be careful.
+            // Simplified: just enable and yield.
+            __asm__ volatile("sti");
+            
             extern void sched_yield(void);
             sched_yield();
             continue;
         }
         
         // 3. Nothing to do - halt until interrupt
-        // Check needs_resched before halting
-        extern thread_t *current_thread;
+        // Check needs_resched before halting (with interrupts still disabled)
         if (current_thread && current_thread->needs_resched) {
+            __asm__ volatile("sti");
             continue;
         }
         
-        // Enable interrupts and halt
+        // Safe halt: STI then HLT atomically (standard x86 behavior)
+        // Interrupts will be enabled after HLT executes (or immediately if pending)
         __asm__ volatile(
             "sti\n"
             "hlt\n"

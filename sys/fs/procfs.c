@@ -282,14 +282,14 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     if (index == 1) { strcpy(proc_dirent.name, ".."); return &proc_dirent; }
     
     /* Static entries from table */
-    uint32_t static_idx = index - 2;
+    uint64_t static_idx = index - 2;
     if (static_idx < PROCFS_STATIC_COUNT) {
         strcpy(proc_dirent.name, procfs_entries[static_idx].name);
         return &proc_dirent;
     }
     
     /* Process directories */
-    uint32_t proc_idx = static_idx - PROCFS_STATIC_COUNT;
+    uint64_t proc_idx = static_idx - PROCFS_STATIC_COUNT;
     uint32_t count = 0;
     for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {

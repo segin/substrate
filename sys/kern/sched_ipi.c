@@ -7,12 +7,9 @@
 #include <kern/sched.h>
 #include <sys/proc.h>
 #include <stdint.h>
+#include "../arch/x86-common/include/lapic.h"
 
 /* IPI vector defined in sched.h */
-
-// Forward declarations for LAPIC
-extern void lapic_send_ipi(uint8_t dest_cpu, uint8_t vector);
-extern void lapic_send_ipi_all_excl_self(uint8_t vector);
 
 // Number of CPUs
 extern int num_cpus;

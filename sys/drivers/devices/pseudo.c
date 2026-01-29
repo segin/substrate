@@ -1,10 +1,11 @@
-#include <vfs/vfs.h>
+#include <arch/x86-common/include/io.h>
 #include <drivers/input/keyboard.h>
 #include <kern/console.h>
-#include <sys/proc.h>
 #include <string.h>
-#include <arch/x86-common/include/io.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
 
+// /dev/null
 // /dev/null
 static size_t null_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)size; (void)buffer;
@@ -24,12 +25,14 @@ static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
 }
 
 // /dev/full
+// /dev/full
 static size_t full_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
     // Always return error (ENOSPC is usually 28)
-    return size;
+    return size; // TODO: Should return error code logic if VFS supports it, or 0? VFS write usually returns bytes written.
 }
 
+// /dev/port
 // /dev/port
 static size_t port_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
@@ -92,6 +95,7 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
  * with a proper ChaCha20-based CSPRNG implementation.
  */
 
+// /dev/tty - proxy to current process's controlling terminal
 // /dev/tty - proxy to current process's controlling terminal
 static size_t tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;

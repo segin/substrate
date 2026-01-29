@@ -108,8 +108,8 @@ static struct dirent *devfs_readdir(fs_node_t *node, uint64_t index) {
         return &dev_dirent;
     }
     // Then char devices
-    uint32_t char_idx = index - 2;
-    if (char_idx < (uint32_t)char_device_count) {
+    uint64_t char_idx = index - 2;
+    if (char_idx < (uint64_t)char_device_count) {
         strcpy(dev_dirent.name, char_devices[char_idx]->name);
         dev_dirent.ino = char_idx + 3;
         return &dev_dirent;

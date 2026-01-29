@@ -41,7 +41,13 @@ The kernel is the core of the operating system, structured as follows:
             - **Hardware Mapping:** Identity-maps critical I/O regions like the Local APIC (0xFEE00000) during bootstrap to support safe early-boot spinlock operations once paging is enabled.
             - **Dynamic PT Allocation:** Page tables are allocated on-demand (~4KB per 4MB mapped) to minimize per-process overhead.
 - **`sys/drivers/`**: Hardware drivers.
-    - **`video/`**: VGA text mode driver.
+    - **`video/`**: Unified Video Adapter driver (`vga.c`).
+        - **Supported Hardware:** VGA (Standard), EGA, CGA, Hercules (HGC), BGA (Bochs).
+        - **Modes:** 
+            - Standard VGA: Mode 12h (640x480 16-color planar), Mode 13h (320x200 256-color linear).
+            - Legacy: CGA Mode 4 (320x200 4-color), Hercules (720x348 Monochrome).
+        - **Fonts:** Compiled-in CP437 fonts (`font_8x16.c`, `font_8x8.c`) covering full 256 charsets.
+        - **Architecture:** Table-driven mode setting with specific CRTC register dumps (6845/VGA).
     - **`serial/`**: UART driver.
     - **`input/`**: PS/2 Keyboard and Mouse drivers.
     - **`storage/`**: Drivers for SCSI, IDE, AHCI, NVMe.

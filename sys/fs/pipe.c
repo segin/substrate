@@ -18,7 +18,7 @@ typedef struct {
 } pipe_t;
 
 static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    pipe_t *p = (pipe_t *)node->impl;
+    pipe_t *p = (pipe_t *)(uintptr_t)node->impl;
     (void)offset;
 
     while (p->count == 0) {
@@ -37,7 +37,7 @@ static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
 }
 
 static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    pipe_t *p = (pipe_t *)node->impl;
+    pipe_t *p = (pipe_t *)(uintptr_t)node->impl;
     (void)offset;
 
     while (p->count + size > PIPE_SIZE) {

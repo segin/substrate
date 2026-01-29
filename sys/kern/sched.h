@@ -49,5 +49,6 @@ void sched_wakeup(void *chan);
 void sched_wakeup_n(void *chan, int n);
 process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
+void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 
 #endif

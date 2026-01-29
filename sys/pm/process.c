@@ -11,6 +11,7 @@
 
 process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
+process_t *kernel_process = NULL;
 static int next_pid = 1;
 
 /*
@@ -36,6 +37,7 @@ void proc_remove_child(process_t *parent, process_t *child);
 void pm_init(void) {
     next_pid = 1;
     memset(processes, 0, sizeof(processes));
+    kernel_process = &processes[0];
     
     /* Initialize the process tree lock */
     mutex_init(&proctree_lock, "proctree");
