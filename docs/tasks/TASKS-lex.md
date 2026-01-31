@@ -76,9 +76,9 @@
 ## 4. Rules Section
 
 ### 4.1 Rule Format
-- [ ] `ERE action` - Pattern followed by action
-- [ ] ERE separated from action by one or more blanks
-- [ ] Blanks in ERE: quote entire expression, use brackets, or escape each blank
+- [x] `ERE action` - Pattern followed by action
+- [x] ERE separated from action by one or more blanks
+- [x] Blanks in ERE: quote entire expression, use brackets, or escape each blank
 
 ### 4.2 Pattern Matching
 - [x] Match single longest possible string

@@ -159,7 +159,7 @@ static void read_until_delimiter(void) {
                 return; /* End of block */
             }
             if (c2 == '%') {
-                fprintf(stderr, "Warning: line starting with %%%% inside %%%{ ... %%%} block is prohibited by POSIX\n");
+                fprintf(stderr, "Warning: line starting with %%%% inside %%{ ... %%} block is prohibited by POSIX\n");
             }
             append_def_code('%');
             if (c2 != EOF) {
@@ -417,16 +417,34 @@ static void parse_rules(void) {
         bool in_brackets = false;
         
         while (c != EOF) {
-            if (c == '"') in_quotes = !in_quotes;
-            else if (c == '[' && !in_quotes) in_brackets = true;
-            else if (c == ']' && !in_quotes) in_brackets = false;
-            
-            if (!in_quotes && !in_brackets && (isspace(c))) {
+            if (c == '\\') {
+                pattern[plen++] = c;
+                c = next_char();
+                if (c == EOF) break;
+                pattern[plen++] = c;
+                c = next_char();
+            } else if (c == '"') {
+                in_quotes = !in_quotes;
+                pattern[plen++] = c;
+                c = next_char();
+            } else if (c == '[' && !in_quotes) {
+                in_brackets = true;
+                pattern[plen++] = c;
+                c = next_char();
+            } else if (c == ']' && !in_quotes) {
+                in_brackets = false;
+                pattern[plen++] = c;
+                c = next_char();
+            } else if (!in_quotes && !in_brackets && (c == ' ' || c == '\t')) {
                 break;
+            } else {
+                pattern[plen++] = c;
+                c = next_char();
             }
-            
-            pattern[plen++] = c;
-            c = next_char();
+            if (plen >= 2047) {
+                fprintf(stderr, "Error: pattern too long\n");
+                exit(1);
+            }
         }
         pattern[plen] = '\0';
         
