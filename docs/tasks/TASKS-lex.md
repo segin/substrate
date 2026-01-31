@@ -5,71 +5,71 @@
 ## 1. Command-Line Interface
 
 ### 1.1 Options
-- [ ] `-t` - Write output to stdout instead of `lex.yy.c`
-- [ ] `-n` - Suppress statistics summary
-- [ ] `-v` - Write statistics to stdout/stderr
-- [ ] `-n` implied if no table sizes specified and `-v` not specified
+- [x] `-t` - Write output to stdout instead of `lex.yy.c`
+- [x] `-n` - Suppress statistics summary
+- [x] `-v` - Write statistics to stdout/stderr
+- [x] `-n` implied if no table sizes specified and `-v` not specified
 
 ### 1.2 Operands
-- [ ] Accept zero or more input files
-- [ ] Concatenate multiple files into single lex program
-- [ ] Use stdin if no files specified
-- [ ] Use stdin if file operand is `-`
+- [x] Accept zero or more input files
+- [x] Concatenate multiple files into single lex program
+- [x] Use stdin if no files specified
+- [x] Use stdin if file operand is `-`
 
 ### 1.3 Exit Status
-- [ ] Return 0 on successful completion
-- [ ] Return >0 on error
+- [x] Return 0 on successful completion
+- [x] Return >0 on error
 
 ---
 
 ## 2. Input File Format
 
 ### 2.1 Three-Section Structure
-- [ ] Parse Definitions section (before first `%%`)
-- [ ] Parse Rules section (between `%%` markers)
-- [ ] Parse User Subroutines section (after second `%%`, optional)
-- [ ] First `%%` required; second `%%` required only if subroutines follow
+- [x] Parse Definitions section (before first `%%`)
+- [x] Parse Rules section (between `%%` markers)
+- [x] Parse User Subroutines section (after second `%%`, optional)
+- [x] First `%%` required; second `%%` required only if subroutines follow
 
 ### 2.2 General Requirements
-- [ ] Input is text file
-- [ ] No C-language trigraphs in code
-- [ ] Code within `%{ %}` must not contain lines of only `%}` or `%%`
+- [x] Input is text file
+- [x] No C-language trigraphs in code
+- [x] Code within `%{ %}` must not contain lines of only `%}` or `%%`
 
 ---
 
 ## 3. Definitions Section
 
 ### 3.1 Substitution Strings
-- [ ] `name substitute` - Define named pattern
-- [ ] Name must be valid ISO C identifier
-- [ ] `{name}` expands to `(substitute)` in rules
-- [ ] No expansion within brackets or double-quotes
+- [x] `name substitute` - Define named pattern
+- [x] Name must be valid ISO C identifier
+- [x] `{name}` expands to `(substitute)` in rules
+- [x] No expansion within brackets or double-quotes
 
 ### 3.2 Start Conditions
-- [ ] `%s name...` - Inclusive start conditions
-- [ ] `%x name...` - Exclusive start conditions
-- [ ] In `%s` state, unqualified patterns still active
-- [ ] In `%x` state, only qualified patterns active
-- [ ] Names follow same rules as definition names
+- [x] `%s name...` - Inclusive start conditions
+- [x] `%x name...` - Exclusive start conditions
+- [x] In `%s` state, unqualified patterns still active
+- [x] In `%x` state, only qualified patterns active
+- [x] Names follow same rules as definition names
 
 ### 3.3 yytext Type
-- [ ] `%array` - Declare yytext as `char yytext[]`
-- [ ] `%pointer` - Declare yytext as `char *yytext`
-- [ ] Default type is implementation-defined
-- [ ] Required for external references to yytext
+- [x] `%array` - Declare yytext as `char yytext[]`
+- [x] `%pointer` - Declare yytext as `char *yytext`
+- [x] Default type is implementation-defined
+- [x] Required for external references to yytext
 
 ### 3.4 Table Size Declarations
-- [ ] `%p n` - Number of positions (min 2500)
-- [ ] `%n n` - Number of states (min 500)
-- [ ] `%a n` - Number of transitions (min 2000)
-- [ ] `%e n` - Number of parse tree nodes (min 1000)
-- [ ] `%k n` - Number of packed character classes (min 1000)
-- [ ] `%o n` - Size of output array (min 3000)
+- [x] `%p n` - Number of positions (min 2500)
+- [x] `%n n` - Number of states (min 500)
+- [x] `%a n` - Number of transitions (min 2000)
+- [x] `%e n` - Number of parse tree nodes (min 1000)
+- [x] `%k n` - Number of packed character classes (min 1000)
+- [x] `%o n` - Size of output array (min 3000)
 
 ### 3.5 C Code Blocks
-- [ ] Lines starting with `<blank>` copied to external definitions
-- [ ] `%{ ... %}` blocks copied unchanged to external definitions
-- [ ] Code at Rules section start (before first rule) goes into yylex() local scope
+- [x] Lines starting with `<blank>` copied to external definitions
+- [x] `%{ ... %}` blocks copied unchanged to external definitions
+- [x] Code at Rules section start (before first rule) goes into yylex() local scope
 
 ---
 
@@ -81,10 +81,10 @@
 - [ ] Blanks in ERE: quote entire expression, use brackets, or escape each blank
 
 ### 4.2 Pattern Matching
-- [ ] Match single longest possible string
-- [ ] On ties, choose first rule in source order
-- [ ] Default action: copy unmatched input to output
-- [ ] Minimal `%%` program copies input to output unchanged
+- [x] Match single longest possible string
+- [x] On ties, choose first rule in source order
+- [x] Default action: copy unmatched input to output
+- [x] Minimal `%%` program copies input to output unchanged
 
 ---
 
@@ -97,13 +97,13 @@
 ### 5.2 Lex-Specific ERE Extensions
 
 #### Quoting
-- [ ] `"..."` - Characters within quotes represent themselves
-- [ ] Escape sequences recognized within quotes
+- [x] `"..."` - Characters within quotes represent themselves
+- [x] Escape sequences recognized within quotes
 
 #### Start Conditions
-- [ ] `<state>r` - Match only in specified start condition
-- [ ] `<s1,s2,...>r` - Match in multiple start conditions
-- [ ] Start condition notation only at beginning of ERE
+- [x] `<state>r` - Match only in specified start condition
+- [x] `<s1,s2,...>r` - Match in multiple start conditions
+- [x] Start condition notation only at beginning of ERE
 
 #### Trailing Context
 - [ ] `r/x` - Match `r` only if followed by `x`
@@ -114,21 +114,21 @@
 - [ ] Unspecified if trailing portion of `r` matches beginning of `x`
 
 #### Substitution
-- [ ] `{name}` - Expand named definition
-- [ ] Treated as if enclosed in parentheses
-- [ ] No expansion within brackets or double-quotes
+- [x] `{name}` - Expand named definition
+- [x] Treated as if enclosed in parentheses
+- [x] No expansion within brackets or double-quotes
 
 ### 5.3 Escape Sequences
-- [ ] `\\`, `\a`, `\b`, `\f`, `\n`, `\r`, `\t`, `\v` - Standard escapes
-- [ ] `\digits` - Octal (1-3 digits, NUL undefined)
-- [ ] `\xdigits` - Hexadecimal (NUL undefined)
+- [x] `\\`, `\a`, `\b`, `\f`, `\n`, `\r`, `\t`, `\v` - Standard escapes
+- [x] `\digits` - Octal (1-3 digits, NUL undefined)
+- [x] `\xdigits` - Hexadecimal (NUL undefined)
 - [ ] `\c` - Literal character `c` (for any other `c`)
 
 ### 5.4 Anchoring
-- [ ] `^` - Beginning of line (only at ERE start)
-- [ ] `$` - End of line (only at ERE end, equivalent to `/\n`)
-- [ ] `^` and `$` apply to entire ERE
-- [ ] No embedded anchoring (patterns like `(^abc)|(def$)` undefined)
+- [x] `^` - Beginning of line (only at ERE start)
+- [x] `$` - End of line (only at ERE end, equivalent to `/\n`)
+- [x] `^` and `$` apply to entire ERE
+- [x] No embedded anchoring (patterns like `(^abc)|(def$)` undefined)
 
 ### 5.5 Operator Precedence (High to Low)
 1. Collation symbols: `[= =]`, `[: :]`, `[. .]`
@@ -147,17 +147,17 @@
 ## 6. Actions
 
 ### 6.1 Action Syntax
-- [ ] Single C statement
-- [ ] Multiple statements in `{ ... }` braces
-- [ ] Empty action `;` skips matched input
-- [ ] Absent action is undefined behavior
-- [ ] Braces must be balanced
+- [x] Single C statement
+- [x] Multiple statements in `{ ... }` braces
+- [x] Empty action `;` skips matched input
+- [x] Absent action is undefined behavior
+- [x] Braces must be balanced
 
 ### 6.2 Special Actions
-- [ ] `|` - Use next rule's action (standalone, no semicolon/braces)
-- [ ] `ECHO;` - Write yytext to output
-- [ ] `REJECT;` - Try next matching rule (may not return)
-- [ ] `BEGIN newstate;` - Switch to start condition
+- [x] `|` - Use next rule's action (standalone, no semicolon/braces)
+- [x] `ECHO;` - Write yytext to output
+- [x] `REJECT;` - Try next matching rule (may not return)
+- [x] `BEGIN newstate;` - Switch to start condition
 
 ---
 

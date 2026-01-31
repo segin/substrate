@@ -22,10 +22,17 @@ static int mock_put_char(struct tty *tty, unsigned char c) {
     return mock_write(tty, &c, 1);
 }
 
+static int mock_set_termios_called = 0;
+static void mock_set_termios(struct tty *tty) {
+    (void)tty;
+    mock_set_termios_called++;
+}
+
 static struct tty_driver mock_driver = {
     .name = "mock_tty",
     .write = mock_write,
-    .put_char = mock_put_char
+    .put_char = mock_put_char,
+    .set_termios = mock_set_termios
 };
 
 void test_tty_alloc(void) {
@@ -105,9 +112,35 @@ void test_tty_ixoff(void) {
     kprint("test_tty_ixoff passed\n");
 }
 
+void test_tty_termios(void) {
+    struct tty *tty = tty_alloc(&mock_driver, 4);
+    
+    mock_set_termios_called = 0;
+    
+    struct termios t;
+    memset(&t, 0, sizeof(t));
+    t.c_cflag = CS8 | CSTOPB | PARENB;
+    t.c_ospeed = B115200;
+    
+    // We can't call tty_ioctl easily because it expects user pointer for legacy TCSETS? 
+    // Wait, our implementation in tty.c casts arg to void* and runs memcpy.
+    // Assuming arg is a pointer to kernel memory for this test context is risky if copyin/out is used.
+    // But tty.c currently uses memcpy directly from arg. So kernel pointer is valid.
+    
+    int ret = tty_ioctl(tty, TCSETS, (unsigned long)&t);
+    ASSERT(ret == 0);
+    ASSERT(mock_set_termios_called == 1);
+    ASSERT(tty->termios.c_cflag == (CS8 | CSTOPB | PARENB));
+    ASSERT(tty->termios.c_ospeed == B115200);
+    
+    tty_free(tty);
+    kprint("test_tty_termios passed\n");
+}
+
 void run_tty_tests(void) {
     test_tty_alloc();
     kprint("test_tty_alloc passed\n");
     test_tty_ixoff();
+    test_tty_termios();
     // test_tty_canonical(); // Needs thread support/mocking to not hang
 }
