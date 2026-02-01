@@ -39,4 +39,6 @@ struct bus_type {
     spinlock_t lock;
 };
 
+struct driver *bus_match_device(struct bus_type *bus, struct device *dev);
+
 #endif /* _KERN_BUS_H */

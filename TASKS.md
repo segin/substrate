@@ -5497,7 +5497,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Acceptance: detach() called, dev->driver = NULL
 
 - [ ] **Matching and Binding Logic:**
-    - [ ] Implement `bus_match_device()` generic matcher.
+    - [x] Implement `bus_match_device()` generic matcher.
         - Files: `sys/kern/bus.c` (new)
         - API: `driver_t *bus_match_device(bus_type_t *bus, device_t *dev)`
         - Logic: Iterate drivers, call match() or compare id_table, return highest priority match
