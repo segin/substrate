@@ -3246,10 +3246,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype.
     - [x] Add to `lib/Makefile` SUBDIRS.
 - [ ] **VM Information Syscalls:**
-    - [ ] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
-        - [ ] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
-        - [ ] `lib/sys/sysinfo.c`: Wrapper function.
-        - [ ] Man page: `sysinfo(2)`.
+    - [x] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
+        - [x] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
+        - [x] `lib/sys/sysinfo.c`: Wrapper function.
+        - [x] Man page: `sysinfo(2)`.
     - [ ] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
         - [ ] `lib/sys/getpagesize.c`: Wrapper function.
         - [ ] Man page: `getpagesize(2)`.

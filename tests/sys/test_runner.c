@@ -179,12 +179,10 @@ void run_kernel_tests(void) {
         if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
     }
 
-    /*
     if (all || strcmp(test_arg, "sysinfo") == 0) {
         extern int test_sysinfo(void);
         if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
     }
-    */
 
     kprint("=== TESTS COMPLETE ===\n\n");
     
