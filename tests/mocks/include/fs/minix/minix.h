@@ -60,7 +60,7 @@ struct minix_dirent_v1 {
 } __attribute__((packed));
 
 /* Internal Minix FS node */
-typedef struct {  
+typedef struct {
     struct minix_superblock sb;
     fs_node_t *block_device;
     // Add other internal state if needed
