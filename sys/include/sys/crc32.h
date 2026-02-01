@@ -14,4 +14,11 @@
  */
 uint32_t crc32(const void *data, size_t len);
 
+/*
+ * Initialize the CRC32 lookup table.
+ * Must be called before any calls to crc32().
+ * Safe to call multiple times (idempotent).
+ */
+void crc32_init(void);
+
 #endif
