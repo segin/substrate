@@ -9,6 +9,13 @@
 
 // Find first set bit (1-indexed, 0 if none)
 static inline int ffs64(uint64_t x) {
+#ifdef __GNUC__
+    uint32_t lo = (uint32_t)x;
+    if (lo) return __builtin_ffs(lo);
+    uint32_t hi = (uint32_t)(x >> 32);
+    if (hi) return __builtin_ffs(hi) + 32;
+    return 0;
+#else
     if (x == 0) return 0;
     int n = 1;
     if ((x & 0xFFFFFFFF) == 0) { n += 32; x >>= 32; }
@@ -18,6 +25,7 @@ static inline int ffs64(uint64_t x) {
     if ((x & 0x3) == 0) { n += 2; x >>= 2; }
     if ((x & 0x1) == 0) { n += 1; }
     return n;
+#endif
 }
 
 void runqueue_init(runqueue_t *rq, uint32_t cpu_id) {
