@@ -6153,7 +6153,7 @@ Reference: User Request (Step 30668)
     - [ ] Standardize `truncate` / `ftruncate` to 64-bit ABI.
         - Files: `sys/kern/vfs_syscalls.c`
         - Tests: property (truncate large file)
-        - Acceptance: No `truncate64` syscall needed.
+        - Acceptance: `truncate` / `ftruncate` are natively 64-bit; no `truncate64` syscall needed.
     - [ ] Standardize `mmap` to handle 64-bit offsets (pgoff).
         - Files: `sys/arch/i386/syscall.c`
         - Tests: integration (map large offset)
@@ -6161,7 +6161,7 @@ Reference: User Request (Step 30668)
     - [ ] Review `getdents` / `getdents64` dirent structures.
         - Files: `sys/fs/fs.c`
         - Tests: integration (read directory with many/large inodes)
-        - Acceptance: Single 64-bit friendly dirent format.
+        - Acceptance: Single 64-bit friendly dirent format (`getdents` implies 64-bit inodes/offsets).
     - [ ] Standardize `statfs` / `statvfs` to 64-bit block counts.
         - Files: `sys/vfs/vfs.c`
         - Tests: integration (df on large volume)
