@@ -31,7 +31,7 @@ extern void isr1(void);
 // ... we can add more as needed, just 0-31 for exceptions usually
 
 // Common handler called from ASM
-typedef struct {
+typedef struct registers {
     uint32_t gs;                                    // Pushed second (lower address)
     uint32_t fs, es;                                // Pushed third and fourth
     uint32_t ds;                                    // Pushed first (higher address)
