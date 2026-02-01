@@ -146,6 +146,14 @@ void run_kernel_tests(void) {
         run_udf_write_tests();
     }
 
+    if (all || strcmp(test_arg, "driver") == 0) {
+        extern int test_driver_registration_logic(void);
+        if (test_driver_registration_logic() == 0) kprint("driver_register: PASS\n"); else kprint("driver_register: FAIL\n");
+        
+        extern int test_driver_attach_logic(void);
+        if (test_driver_attach_logic() == 0) kprint("driver_attach: PASS\n"); else kprint("driver_attach: FAIL\n");
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested

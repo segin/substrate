@@ -5483,7 +5483,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (detach all bound devices, list removal)
         - Docs: `driver_unregister.9`
         - Acceptance: All devices detached, driver removed
-    - [ ] Implement `driver_attach()` binding.
+    - [x] Implement `driver_attach()` binding.
         - Files: `sys/kern/driver.c`
         - API: `int driver_attach(driver_t *drv, device_t *dev)`
         - Tests: unit (successful attach, already-bound rejection)
