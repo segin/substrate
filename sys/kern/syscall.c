@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
+#include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -1070,6 +1071,21 @@ int sys_hostname(char *buf, size_t len) {
     } else {
         memcpy(buf, kernel_hostname, hlen + 1);
     }
+    
+    return 0;
+}
+
+int sys_reboot(int cmd) {
+    (void)cmd;
+    // For now, always reboot. 
+    // In a real system we'd check cmd for RB_HALT, RB_POWEROFF etc.
+    // Keyboard controller reset
+    while (inb(0x64) & 0x02);
+    outb(0x64, 0xFE);
+    
+    // Fallback if that fails: Triple fault
+    // (by loading 0-length IDT and causing exception)
+    __asm__ volatile("lidt %0; int3"::"m"((uint16_t[3]){0,0,0}));
     
     return 0;
 }

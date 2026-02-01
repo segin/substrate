@@ -2,9 +2,22 @@
 #include <stddef.h>
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
+#include <sys/resource.h>
+#include <sys/times.h>
 
 extern int sys_mlock(const void *addr, size_t len);
 extern int sys_munlock(const void *addr, size_t len);
+extern int sys_setsid(void);
+extern int sys_getsid(int pid);
+extern int sys_setpgid(int pid, int pgid);
+extern int sys_getpgid(int pid);
+extern int sys_getrusage(int who, struct rusage *usage);
+extern clock_t sys_times(void *buf);
+extern int sys_stime(time_t *t);
+extern int sys_ioctl(int fd, uint32_t request, void *arg);
+extern int sys_ptrace(int req, int pid, int addr, int data);
+extern int sys_reboot(int cmd);
+extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
 /* Native-specific syscalls are now in syscall_impl.h */
 
@@ -22,6 +35,8 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_SIGRETURN] = (void*)sys_sigreturn,
     [SYS_SIGALTSTACK] = (void*)sys_sigaltstack,
     [SYS_LSEEK] = &sys_lseek,
+    [SYS_STIME] = &sys_stime,
+    [SYS_PTRACE] = &sys_ptrace,
     [SYS_GETPID] = &sys_getpid,
     [SYS_MOUNT] = &sys_mount,
     [SYS_UMOUNT] = &sys_umount,
@@ -47,6 +62,8 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_UNAME] = &sys_uname,
     [SYS_MODIFY_LDT] = &sys_modify_ldt,
     [SYS_READLINK] = &sys_readlink,
+    [SYS_REBOOT] = &sys_reboot,
+    [SYS_MMAP] = &sys_mmap,
     [SYS_GETDENTS] = &sys_getdents, 
     [SYS_MSYNC] = &sys_msync,
     [SYS_NANOSLEEP] = &sys_nanosleep,
@@ -64,9 +81,16 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_SIGPENDING] = (void*)sys_sigpending,
     [SYS_SIGSUSPEND] = (void*)sys_sigsuspend,
     [SYS_RT_SIGRETURN] = (void*)sys_rt_sigreturn,
+    [SYS_SYSCTL] = &sys_sysctl,
     [SYS_SYSINFO] = &sys_sysinfo,
     [SYS_mlock] = &sys_mlock,
     [SYS_munlock] = &sys_munlock,
+    [SYS_SETSID] = &sys_setsid,
+    [SYS_GETSID] = &sys_getsid,
+    [SYS_SETPGID] = &sys_setpgid,
+    [SYS_GETPGID] = &sys_getpgid,
+    [SYS_GETRUSAGE] = &sys_getrusage,
+    [SYS_TIMES] = &sys_times,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -81,6 +105,8 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_UNLINK] = "unlink",
     [SYS_TIME] = "time",
     [SYS_LSEEK] = "lseek",
+    [SYS_STIME] = "stime",
+    [SYS_PTRACE] = "ptrace",
     [SYS_GETPID] = "getpid",
     [SYS_MOUNT] = "mount",
     [SYS_UMOUNT] = "umount",
@@ -101,6 +127,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_ACCT] = "acct",
     [SYS_DUP2] = "dup2",
     [SYS_READLINK] = "readlink",
+    [SYS_REBOOT] = "reboot",
     [SYS_STAT] = "stat",
     [SYS_LSTAT] = "lstat",
     [SYS_FSTAT] = "fstat",
@@ -125,9 +152,16 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_SIGPENDING] = "sigpending",
     [SYS_SIGSUSPEND] = "sigsuspend",
     [SYS_RT_SIGRETURN] = "rt_sigreturn",
+    [SYS_SYSCTL] = "sysctl",
     [SYS_SYSINFO] = "sysinfo",
     [SYS_mlock] = "mlock",
     [SYS_munlock] = "munlock",
+    [SYS_SETSID] = "setsid",
+    [SYS_GETSID] = "getsid",
+    [SYS_SETPGID] = "setpgid",
+    [SYS_GETPGID] = "getpgid",
+    [SYS_GETRUSAGE] = "getrusage",
+    [SYS_TIMES] = "times",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -143,6 +177,8 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_SIGRETURN] = { 1, { ARG_PTR } },
     [SYS_SIGALTSTACK] = { 2, { ARG_PTR, ARG_PTR } },
     [SYS_LSEEK] = { 4, { ARG_INT, ARG_HEX, ARG_HEX, ARG_INT } },
+    [SYS_STIME] = { 1, { ARG_PTR } },
+    [SYS_PTRACE] = { 4, { ARG_INT, ARG_INT, ARG_PTR, ARG_INT } },
     [SYS_GETPID] = { 0, { 0 } },
     [SYS_MOUNT] = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
     [SYS_UMOUNT] = { 1, { ARG_STR } },
@@ -163,6 +199,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_ACCT] = { 1, { ARG_STR } },
     [SYS_DUP2] = { 2, { ARG_INT, ARG_INT } },
     [SYS_READLINK] = { 3, { ARG_STR, ARG_PTR, ARG_INT } },
+    [SYS_REBOOT] = { 1, { ARG_INT } },
     [SYS_STAT] = { 2, { ARG_STR, ARG_PTR } },
     [SYS_LSTAT] = { 2, { ARG_STR, ARG_PTR } },
     [SYS_FSTAT] = { 2, { ARG_INT, ARG_PTR } },
@@ -190,6 +227,12 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_SYSINFO] = { 1, { ARG_PTR } },
     [SYS_mlock] = { 2, { ARG_PTR, ARG_INT } },
     [SYS_munlock] = { 2, { ARG_PTR, ARG_INT } },
+    [SYS_SETSID] = { 0, { 0 } },
+    [SYS_GETSID] = { 1, { ARG_INT } },
+    [SYS_SETPGID] = { 2, { ARG_INT, ARG_INT } },
+    [SYS_GETPGID] = { 1, { ARG_INT } },
+    [SYS_GETRUSAGE] = { 2, { ARG_INT, ARG_PTR } },
+    [SYS_TIMES] = { 1, { ARG_PTR } },
 };
 
 extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
