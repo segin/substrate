@@ -3253,9 +3253,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
         - [x] `lib/sys/getpagesize.c`: Wrapper function.
         - [x] Man page: `getpagesize(2)`.
-    - [ ] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
-        - [ ] `lib/sys/mlock.c`: Wrapper functions.
-        - [ ] Man pages: `mlock(2)`, `munlock(2)`.
+    - [x] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
+        - [x] `lib/sys/mlock.c`: Wrapper functions.
+        - [x] Man pages: `mlock(2)`, `munlock(2)`.
 - [ ] **Process Information Syscalls:**
     - [ ] `getpid()`/`getppid()` wrappers.
         - [ ] `lib/sys/getpid.c`: Wrapper functions.

@@ -82,6 +82,9 @@
 #define SYS_CPU_COUNT 245
 #define SYS_HOSTNAME 246
 #define SYS_RT_SIGRETURN 247
+#define SYS_CLOCK_GETTIME 265
+#define SYS_mlock       150
+#define SYS_munlock     151
 
 void syscall_init(void);
 

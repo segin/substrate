@@ -700,6 +700,21 @@ int sys_access(const char *path, int mode) {
     return vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
 }
 
+int sys_mlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    // In the future, this should wire pages in the PMAP to prevent swapping.
+    (void)addr;
+    (void)len;
+    return 0;
+}
+
+int sys_munlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    (void)addr;
+    (void)len;
+    return 0;
+}
+
 int sys_sync(void) {
     // In a real system, we'd iterate over all mounted filesystems
     // and call their sync methods.

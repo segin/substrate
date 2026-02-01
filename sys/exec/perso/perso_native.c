@@ -3,6 +3,9 @@
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 
+extern int sys_mlock(const void *addr, size_t len);
+extern int sys_munlock(const void *addr, size_t len);
+
 /* Native-specific syscalls are now in syscall_impl.h */
 
 static void *native_syscalls[MAX_SYSCALLS] = {
@@ -62,6 +65,8 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_SIGSUSPEND] = (void*)sys_sigsuspend,
     [SYS_RT_SIGRETURN] = (void*)sys_rt_sigreturn,
     [SYS_SYSINFO] = &sys_sysinfo,
+    [SYS_mlock] = &sys_mlock,
+    [SYS_munlock] = &sys_munlock,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -121,6 +126,8 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_SIGSUSPEND] = "sigsuspend",
     [SYS_RT_SIGRETURN] = "rt_sigreturn",
     [SYS_SYSINFO] = "sysinfo",
+    [SYS_mlock] = "mlock",
+    [SYS_munlock] = "munlock",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -181,6 +188,8 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_RT_SIGRETURN] = { 1, { ARG_PTR } },
     [SYS_SYSCTL] = { 6, { ARG_PTR, ARG_INT, ARG_PTR, ARG_PTR, ARG_PTR, ARG_INT } },
     [SYS_SYSINFO] = { 1, { ARG_PTR } },
+    [SYS_mlock] = { 2, { ARG_PTR, ARG_INT } },
+    [SYS_munlock] = { 2, { ARG_PTR, ARG_INT } },
 };
 
 extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
