@@ -647,10 +647,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Cannot be caught, blocked, or ignored.
             - [x] Always terminates the process immediately.
             - [x] Wake all stopped threads before terminating.
-        - [ ] **SIGSTOP:**
-            - [ ] Cannot be caught, blocked, or ignored.
-            - [ ] Stops all threads in the process.
-            - [ ] Process transitions to SSTOP state.
+        - [x] **SIGSTOP:**
+            - [x] Cannot be caught, blocked, or ignored.
+            - [x] Stops all threads in the process.
+            - [x] Process transitions to SSTOP state.
         - [ ] **SIGCONT:**
             - [ ] Resume stopped process.
             - [ ] Clear pending SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU.

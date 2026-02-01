@@ -104,6 +104,8 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "signal") == 0) {
          extern void run_signal_tests(void);
          run_signal_tests();
+         extern void run_sigstop_tests(void);
+         run_sigstop_tests();
     }
 
     if (all || strcmp(test_arg, "bitness") == 0) {
