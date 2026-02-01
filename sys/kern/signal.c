@@ -508,6 +508,12 @@ void signal_handle_pending(registers_t *regs) {
         
         // Job Control Stops
         if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
+             // Orphaned process groups ignore these signals
+             extern int pgrp_is_orphaned(struct pgrp *pgrp);
+             if (current_process->p_pgrp && pgrp_is_orphaned(current_process->p_pgrp)) {
+                 return;
+             }
+
              // Stop the thread and process
              // kprint("Process stopped by signal\n");
              current_thread->state = THREAD_STOPPED;

@@ -651,19 +651,19 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Cannot be caught, blocked, or ignored.
             - [x] Stops all threads in the process.
             - [x] Process transitions to SSTOP state.
-        - [ ] **SIGCONT:**
-            - [ ] Resume stopped process.
-            - [ ] Clear pending SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU.
-            - [ ] If handler installed, also deliver to handler.
-            - [ ] Set P_CONTINUED flag for `waitpid(WCONTINUED)`.
-        - [ ] **SIGCHLD:**
-            - [ ] Sent when child exits, stops, or continues.
-            - [ ] If SA_NOCLDSTOP, don't send for stop/continue.
-            - [ ] If SA_NOCLDWAIT, auto-reap children (no zombies).
-        - [ ] **Job Control Stops (SIGTSTP/SIGTTIN/SIGTTOU):**
-            - [ ] Can be caught or ignored.
-            - [ ] Default action: Stop the process.
-            - [ ] Orphaned process groups ignore these signals.
+        - [x] **SIGCONT:**
+            - [x] Resume stopped process.
+            - [x] Clear pending SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU.
+            - [x] If handler installed, also deliver to handler.
+            - [x] Set P_CONTINUED flag for `waitpid(WCONTINUED)`.
+        - [x] **SIGCHLD:**
+            - [x] Sent when child exits, stops, or continues.
+            - [x] If SA_NOCLDSTOP, don't send for stop/continue.
+            - [x] If SA_NOCLDWAIT, auto-reap children (no zombies).
+        - [x] **Job Control Stops (SIGTSTP/SIGTTIN/SIGTTOU):**
+            - [x] Can be caught or ignored.
+            - [x] Default action: Stop the process.
+            - [x] Orphaned process groups ignore these signals.
     - [x] **PID 1 (Init) Protection:**
         - [x] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler installed.
         - [x] If init exits, system halts or panics.
