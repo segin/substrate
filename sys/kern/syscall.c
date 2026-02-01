@@ -24,6 +24,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/errno.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -875,7 +876,7 @@ extern int vfs_unmount(const char *path);
 
 int sys_umount(const char *target) { 
     if (!target) return -1;
-    // TODO: Check permissions
+    if (current_process->uid != 0) return -EPERM;
     return vfs_unmount(target); 
 }
 
