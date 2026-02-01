@@ -161,6 +161,9 @@ void run_kernel_tests(void) {
 
         extern int test_bus_id_match_logic(void);
         if (test_bus_id_match_logic() == 0) kprint("bus_id_match: PASS\n"); else kprint("bus_id_match: FAIL\n");
+
+        extern int test_bus_compatible_match_logic(void);
+        if (test_bus_compatible_match_logic() == 0) kprint("bus_compatible_match: PASS\n"); else kprint("bus_compatible_match: FAIL\n");
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");

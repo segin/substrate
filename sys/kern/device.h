@@ -46,6 +46,7 @@ struct device {
     uint8_t  progif;
     char     serial[32];
     uint8_t  guid[16];
+    const char *compatible; /* NUL-separated compatible strings */
 
     /* Hierarchy */
     struct device *parent;

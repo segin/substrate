@@ -5511,7 +5511,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (wildcard match, specific match, no match)
         - Docs: `bus_id_match.9`
         - Acceptance: Wildcard and specific IDs match correctly
-    - [ ] Implement `compatible` string matching (DT/ACPI style).
+    - [x] Implement `compatible` string matching (DT/ACPI style).
         - Files: `sys/kern/bus.c`
         - API: `int bus_compatible_match(const char *compat, device_t *dev)`
         - Tests: unit (exact string, multi-value compat)

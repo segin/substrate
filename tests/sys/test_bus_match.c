@@ -183,3 +183,49 @@ int test_bus_id_match_logic(void) {
 
     return 0;
 }
+
+int test_bus_compatible_match_logic(void) {
+    struct device dev = {0};
+    
+    /* Setup compatible list: "ns16550a\0ns16550\0" */
+    char compat_list[] = {'n','s','1','6','5','5','0','a',0, 'n','s','1','6','5','5','0',0, 0};
+    dev.compatible = compat_list;
+
+    /* 1. Match First Entry */
+    if (bus_compatible_match("ns16550a", &dev) != 1) {
+        kprint("FAIL: bus_compatible_match failed on first entry\n");
+        return -1;
+    }
+
+    /* 2. Match Second Entry */
+    if (bus_compatible_match("ns16550", &dev) != 1) {
+        kprint("FAIL: bus_compatible_match failed on second entry\n");
+        return -1;
+    }
+
+    /* 3. No Match */
+    if (bus_compatible_match("pl011", &dev) != 0) {
+        kprint("FAIL: bus_compatible_match matched incorrectly (non-existent)\n");
+        return -1;
+    }
+
+    /* 4. Partial Match Safety (substring check) */
+    if (bus_compatible_match("ns1655", &dev) != 0) {
+        kprint("FAIL: bus_compatible_match matched partial string incorrectly\n");
+        return -1;
+    }
+
+    /* 5. NULL Checks */
+    if (bus_compatible_match(NULL, &dev) != 0) {
+        kprint("FAIL: bus_compatible_match matched NULL compat string\n");
+        return -1;
+    }
+    
+    struct device dev_empty = {0};
+    if (bus_compatible_match("anything", &dev_empty) != 0) {
+        kprint("FAIL: bus_compatible_match matched device with NULL list\n");
+        return -1;
+    }
+
+    return 0;
+}

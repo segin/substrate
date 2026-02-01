@@ -8,6 +8,7 @@
 #include <sys/errno.h>
 #include <sys/spinlock.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "bus.h"
 #include "driver.h"
