@@ -30,6 +30,7 @@
 #include <arch/x86-common/include/multiboot.h>
 
 #include <pm/pm.h>
+#include <sys/crc32.h>
 #include <vfs/vfs.h>
 #include <exec/formats/elf.h>
 #include <fs/procfs.h>
@@ -334,6 +335,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize Random Number Generator
     extern void random_init(void);
     random_init();
+
+    // Initialize CRC32 table (used by storage/GPT)
+    crc32_init();
 
     // Initialize Scheduler
     sched_init();
