@@ -14,6 +14,7 @@ extern void ext2_init(void);
 extern void fat_init(void);
 extern void exfat_init(void);
 extern void minix_init(void);
+extern void udf_init(void);
 extern void devfs_init(void);
 extern void procfs_init(void);
 extern void sysfs_init(void);
@@ -31,6 +32,7 @@ void vfs_init(void) {
     fat_init();
     exfat_init();
     minix_init();
+    udf_init();
     
     // Register pseudo-filesystems
     devfs_init();

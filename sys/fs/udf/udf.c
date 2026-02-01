@@ -8,6 +8,7 @@
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <string.h>
+#include <sys/proc.h>
 
 /* UDF filesystem context (single mount for now) */
 /* UDF filesystem context (single mount for now) */
@@ -58,7 +59,6 @@ static void udf_crc_init(void) {
 }
 
 static uint16_t udf_crc(const uint8_t *data, uint32_t len) {
-    udf_crc_init();
     uint16_t crc = 0;
     for (uint32_t i = 0; i < len; i++) {
         crc = udf_crc_table[((crc >> 8) ^ data[i]) & 0xFF] ^ (crc << 8);
@@ -587,5 +587,6 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
 
 void udf_init(void) {
     kprint("Initializing UDF Driver...\n");
+    udf_crc_init();
     vfs_register_filesystem(&udf_filesystem);
 }
