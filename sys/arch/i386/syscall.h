@@ -56,6 +56,7 @@
 #define SYS_STAT    106
 #define SYS_LSTAT   107
 #define SYS_FSTAT   108
+#define SYS_SYSINFO 116
 #define SYS_SIGRETURN 119
 #define SYS_GETPPID 64
 #define SYS_SIGACTION 67

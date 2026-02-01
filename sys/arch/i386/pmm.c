@@ -408,7 +408,7 @@ void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
  * pmm_is_e820_usable_type - Check if e820 type is usable memory
  */
 static int pmm_is_e820_usable_type(uint32_t type) {
-    return (type == E820_USABLE || type == E820_ACPI);
+    return (type == E820_USABLE);
 }
 
 /*

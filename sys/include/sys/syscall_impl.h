@@ -127,5 +127,7 @@ extern int sys_cpu_count(void);
 extern int sys_hostname(char*, size_t);
 extern int sys_rt_sigreturn(void*);
 extern int sys_sigreturn(void*);
+struct sysinfo;
+extern int sys_sysinfo(struct sysinfo*);
 
 #endif /* _SYS_SYSCALL_IMPL_H */

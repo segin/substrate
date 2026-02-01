@@ -593,17 +593,21 @@ int sys_unlink(const char *path) {
     if (!last_slash) {
         // No slash - parent is CWD
         parent = current_process->cwd_node ? current_process->cwd_node : root;
+        if (strlen(path) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, path);
     } else if (last_slash == path) {
         // Only one slash at the beginning - parent is root
         parent = root;
+        if (strlen(path + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, path + 1);
     } else {
         // Split into dir and file
         size_t dirlen = last_slash - path;
-        if (dirlen >= sizeof(dir)) return -1;
+        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
         memcpy(dir, path, dirlen);
         dir[dirlen] = '\0';
+        
+        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, last_slash + 1);
         
         parent = vfs_lookup(root, dir);
@@ -635,15 +639,19 @@ int sys_link(const char *oldpath, const char *newpath) {
     fs_node_t *parent = NULL;
     if (!last_slash) {
         parent = cwd;
+        if (strlen(newpath) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, newpath);
     } else if (last_slash == newpath) {
         parent = root;
+        if (strlen(newpath + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, newpath + 1);
     } else {
         size_t dirlen = last_slash - newpath;
-        if (dirlen >= sizeof(dir)) return -1;
+        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
         memcpy(dir, newpath, dirlen);
         dir[dirlen] = '\0';
+        
+        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, last_slash + 1);
         parent = vfs_lookup(root, dir);
     }

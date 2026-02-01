@@ -49,6 +49,7 @@ void run_kernel_tests(void) {
         run_pmap_protect_property_tests();
         run_vm_expanded_tests();
         run_pid_tests();
+        run_pid_tests();
         run_unlink_tests();
         run_unlink_property_tests();
         run_link_property_tests();
@@ -61,6 +62,15 @@ void run_kernel_tests(void) {
         test_e820_parsing();
         test_vm_phys();
         test_vm_page_queue();
+    }
+
+    if (all || strcmp(test_arg, "unlink") == 0) {
+        run_unlink_tests();
+        run_unlink_property_tests();
+    }
+
+    if (all || strcmp(test_arg, "e820") == 0) {
+        test_e820_parsing();
     }
 
     if (all || strcmp(test_arg, "vm") == 0) {
@@ -168,6 +178,13 @@ void run_kernel_tests(void) {
         extern int test_driver_override_logic(void);
         if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
     }
+
+    /*
+    if (all || strcmp(test_arg, "sysinfo") == 0) {
+        extern int test_sysinfo(void);
+        if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
+    }
+    */
 
     kprint("=== TESTS COMPLETE ===\n\n");
     

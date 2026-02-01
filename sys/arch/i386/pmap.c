@@ -293,13 +293,9 @@ pmap_t pmap_create(void) {
         }
     }
 
-    // Copy Lower Half Identity Map (0-128MB) if present
-    // Required because kernel allocator currently relies on it
-    for (int i = 0; i < 32; i++) {
-        if (kernel_pd[i] & PTE_P) {
-             pd[i] = kernel_pd[i];
-        }
-    }
+    // Lower Half Identity Map (0-128MB) is NOT copied to user pmaps.
+    // This prevents user processes from accessing physical memory 1:1,
+    // and avoids potential double-free issues in pmap_destroy for shared static tables.
     
     // 5. Set up recursive mapping at entry 1023
     pd[1023] = pd_phys | PTE_P | PTE_W;

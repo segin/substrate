@@ -66,7 +66,7 @@ void fuzz_pmap_enter(void) {
     for (int i = 0; i < 100; i++) {
         seed = seed * 1103515245 + 12345;
         uint32_t va = (seed & 0x3FFFF) << 12; // Random 0..1GB
-        uint32_t pa = (seed >> 10) & 0x7FFFFFF; // Random 0..128MB
+        uint32_t pa = ((seed >> 10) & 0x7FFFFFF) & ~0xFFF; // Random 0..128MB, Page Aligned
         
         if (va < 0xC0000000) {
             pmap_enter(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE, 0);

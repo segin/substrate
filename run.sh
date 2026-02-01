@@ -11,4 +11,4 @@ qemu-system-i386 \
   -display none \
   -serial file:serial.log \
   -drive file=root.img,format=raw,index=0,media=disk \
-  -append "serial_debug root=/dev/storage/ide0"
+  -append "serial_debug root=/dev/storage/ide0 $@"

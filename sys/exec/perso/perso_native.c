@@ -61,6 +61,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_SIGPENDING] = (void*)sys_sigpending,
     [SYS_SIGSUSPEND] = (void*)sys_sigsuspend,
     [SYS_RT_SIGRETURN] = (void*)sys_rt_sigreturn,
+    [SYS_SYSINFO] = &sys_sysinfo,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -119,6 +120,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_SIGPENDING] = "sigpending",
     [SYS_SIGSUSPEND] = "sigsuspend",
     [SYS_RT_SIGRETURN] = "rt_sigreturn",
+    [SYS_SYSINFO] = "sysinfo",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -178,6 +180,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_SIGSUSPEND] = { 1, { ARG_PTR } },
     [SYS_RT_SIGRETURN] = { 1, { ARG_PTR } },
     [SYS_SYSCTL] = { 6, { ARG_PTR, ARG_INT, ARG_PTR, ARG_PTR, ARG_PTR, ARG_INT } },
+    [SYS_SYSINFO] = { 1, { ARG_PTR } },
 };
 
 extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
