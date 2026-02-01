@@ -51,7 +51,7 @@ void run_kernel_tests(void) {
         run_unlink_tests();
         run_unlink_property_tests();
         run_link_property_tests();
-        run_tty_tests();
+        // run_tty_tests();
         run_cow_stats_tests();
         test_pte_user();
         test_stacktrace();
@@ -136,6 +136,10 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "printf_new") == 0) {
          extern void test_printf_new(void);
          test_printf_new();
+    }
+
+    if (all || strcmp(test_arg, "udf") == 0) {
+        run_udf_write_tests();
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");

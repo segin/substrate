@@ -3,7 +3,7 @@ include ../../Makefile.inc
 CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = ext2/ext2.c fat/fat.c exfat/exfat.c minix/minix.c devfs.c procfs.c sysfs.c fuse.c 9p.c pipe.c
+SRCS = ext2/ext2.c fat/fat.c exfat/exfat.c minix/minix.c devfs.c procfs.c sysfs.c fuse.c 9p.c pipe.c udf/udf.c udf/udf_write.c
 
 OBJS = $(SRCS:.c=.o)
 

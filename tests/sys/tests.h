@@ -10,5 +10,6 @@ void run_vm_cow_tests(void);
 void run_vm_pager_tests(void);
 void run_vm_policy_tests(void);
 void run_signal_tests(void);
+void run_udf_write_tests(void);
 
 #endif

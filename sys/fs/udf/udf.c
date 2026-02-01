@@ -8,17 +8,10 @@
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <string.h>
+#include <sys/proc.h>
 
 /* UDF filesystem context (single mount for now) */
-/* UDF filesystem context (single mount for now) */
-struct udf_fs {
-    fs_node_t *device;              /* Block device */
-    uint32_t sector_size;           /* Usually 2048 */
-    uint32_t partition_start;       /* First sector of partition */
-    uint32_t partition_length;      /* Partition length in sectors */
-    uint32_t logical_block_size;    /* From LVD */
-    struct udf_long_ad root_icb;    /* Root directory location */
-} udf_ctx;
+struct udf_fs udf_ctx;
 
 /* Forward declarations */
 static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data);
@@ -26,7 +19,7 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data);
 /*
  * Calculate tag checksum (sum of bytes 0-3 and 5-15)
  */
-static uint8_t udf_tag_checksum(struct udf_tag *tag) {
+uint8_t udf_tag_checksum(struct udf_tag *tag) {
     uint8_t sum = 0;
     uint8_t *p = (uint8_t *)tag;
     for (int i = 0; i < 4; i++) sum += p[i];
@@ -57,7 +50,7 @@ static void udf_crc_init(void) {
     udf_crc_initialized = 1;
 }
 
-static uint16_t udf_crc(const uint8_t *data, uint32_t len) {
+uint16_t udf_crc(const uint8_t *data, uint32_t len) {
     udf_crc_init();
     uint16_t crc = 0;
     for (uint32_t i = 0; i < len; i++) {
