@@ -6,8 +6,8 @@
 
 // Must match kernel definition
 typedef struct input_event {
-    uint32_t time_sec;
-    uint32_t time_usec;
+    uint64_t time_sec;
+    uint64_t time_usec;
     uint16_t type;
     uint16_t code;
     int32_t  value;
