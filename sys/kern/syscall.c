@@ -24,6 +24,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/errno.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -867,7 +868,9 @@ int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0
 
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
     if (!target || !fstype) return -1;
-    // TODO: Check permissions (superuser)
+
+    if (current_process->uid != 0) return -EPERM;
+
     return vfs_mount(source, target, fstype, (uint32_t)flags, data);
 }
 
