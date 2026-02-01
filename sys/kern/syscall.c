@@ -22,6 +22,7 @@
 #include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
 
+#include <sys/smp.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <string.h>
@@ -1014,11 +1015,9 @@ int sys_proc_count(void) {
 }
 
 // sys_cpu_count - Get number of CPUs
-// Returns: online CPU count (currently 1 for uniprocessor kernel)
+// Returns: online CPU count
 int sys_cpu_count(void) {
-    // TODO: When SMP is implemented, return actual online CPU count
-    // For now, we're a uniprocessor system
-    return 1;
+    return smp_get_cpu_count();
 }
 
 // sys_hostname - Get system hostname
