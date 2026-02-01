@@ -4,6 +4,7 @@
 
 #include <vm/vm_pager.h>
 #include <vm/vm_kmem.h>
+#include <sys/lock.h>
 #include <stddef.h>
 
 // Simple bitmap-based swap allocator
@@ -14,6 +15,9 @@
 static uint32_t swap_bitmap[MAX_SWAP_PAGES / 32];
 // Real implementation would have a list of swap devices/files
 
+// TODO: Manual initialization due to missing SPINLOCK_INIT
+static spinlock_t swap_lock = { 0, 0xFFFFFFFF, "swap_lock" };
+
 typedef struct swap_pager {
     vm_pager_t base;
     uint32_t *swp_blocks; // Array mapping pindex -> swap_block
@@ -21,18 +25,23 @@ typedef struct swap_pager {
 } swap_pager_t;
 
 static int alloc_swap_block(void) {
+    spinlock_acquire(&swap_lock);
     for (int i = 0; i < MAX_SWAP_PAGES; i++) {
         if (!(swap_bitmap[i/32] & (1 << (i%32)))) {
             swap_bitmap[i/32] |= (1 << (i%32));
+            spinlock_release(&swap_lock);
             return i;
         }
     }
+    spinlock_release(&swap_lock);
     return -1;
 }
 
 static void free_swap_block(int block) {
+    spinlock_acquire(&swap_lock);
     if (block >= 0 && block < MAX_SWAP_PAGES)
         swap_bitmap[block/32] &= ~(1 << (block%32));
+    spinlock_release(&swap_lock);
 }
 
 static struct vm_pager *swap_pager_alloc(void *handle, size_t size, uint8_t prot, uint64_t offset) {
@@ -72,7 +81,6 @@ static void swap_pager_dealloc(struct vm_pager *p) {
 
 // Global swap state
 struct fs_node *swap_node = NULL;
-// static spinlock_t swap_lock = SPINLOCK_INIT; // TODO: Locking
 
 // External VFS helper
 extern uint32_t read_fs(struct fs_node*, int64_t, uint32_t, uint8_t*);
@@ -156,9 +164,10 @@ vm_pager_ops_t swap_pager_ops = {
 int vm_swapon(void *node) {
     if (!node) return -1;
     
-    // TODO: Acquire lock
+    spinlock_acquire(&swap_lock);
     if (swap_node) {
         // Swap already active
+        spinlock_release(&swap_lock);
         return -1; 
     }
     
@@ -168,10 +177,10 @@ int vm_swapon(void *node) {
     
     // TODO: Calculate swap size from file size
     // For now, fixed bitmap size
+    spinlock_release(&swap_lock);
     
     extern void kprint(const char *);
     kprint("Swap enabled.\n");
     
     return 0;
 }
-
