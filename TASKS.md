@@ -5489,7 +5489,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (successful attach, already-bound rejection)
         - Docs: `driver_attach.9`
         - Acceptance: dev->driver set, attach() callback invoked
-    - [ ] Implement `driver_detach()` unbinding.
+    - [x] Implement `driver_detach()` unbinding.
         - Files: `sys/kern/driver.c`
         - API: `int driver_detach(device_t *dev)`
         - Tests: unit (detach callback, driver pointer cleared)

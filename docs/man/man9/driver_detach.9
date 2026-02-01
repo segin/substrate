@@ -1,0 +1,42 @@
+.Dd February 1, 2026
+.Dt DRIVER_DETACH 9
+.Os
+.Sh NAME
+.Nm driver_detach
+.Nd unbind a driver from a device
+.Sh SYNOPSIS
+.In kern/driver.h
+.Ft int
+.Fn driver_detach "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn driver_detach
+function unbinds the currently attached driver from the device
+.Fa dev .
+.Pp
+The function performs the following steps:
+.Bl -enum
+.It
+Verifies that the device is currently bound to a driver.
+.It
+Calls the
+.Va detach
+callback of the driver (if provided).
+.It
+Clears the
+.Va dev->driver
+pointer, setting it to NULL.
+.El
+.Pp
+If the device is attached to a bus, the bus lock is held during the unbinding process.
+.Sh RETURN VALUES
+The
+.Fn driver_detach
+function returns 0 on success.
+Otherwise, it returns -1 to indicate failure (e.g., invalid arguments, device not bound, or detach callback returned failure).
+.Sh SEE ALSO
+.Xr driver_attach 9 ,
+.Xr driver_register 9 ,
+.Xr device_unregister 9
+.Sh AUTHORS
+.An The Substrate Project
