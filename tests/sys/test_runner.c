@@ -164,6 +164,9 @@ void run_kernel_tests(void) {
 
         extern int test_bus_compatible_match_logic(void);
         if (test_bus_compatible_match_logic() == 0) kprint("bus_compatible_match: PASS\n"); else kprint("bus_compatible_match: FAIL\n");
+
+        extern int test_driver_override_logic(void);
+        if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");

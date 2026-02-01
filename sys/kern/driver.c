@@ -4,12 +4,46 @@
  * Core Driver Management Implementation
  */
 
-#include <kern/driver.h>
-#include <kern/bus.h>
-#include <kern/device.h>
+#include <sys/types.h>
+#include <sys/errno.h>
 #include <sys/lock.h>
 #include <string.h>
 #include <stddef.h>
+
+#include "driver.h"
+#include "bus.h"
+#include "device.h"
+
+#define MAX_BLACKLIST 32
+static const char *driver_blacklist[MAX_BLACKLIST];
+static int blacklist_count = 0;
+static spinlock_t blacklist_lock;
+
+void driver_blacklist_add(const char *name) {
+    spinlock_acquire(&blacklist_lock);
+    if (blacklist_count < MAX_BLACKLIST) {
+        driver_blacklist[blacklist_count++] = name;
+    }
+    spinlock_release(&blacklist_lock);
+}
+
+int driver_is_blacklisted(const char *name) {
+    int i;
+    /* Lockless read safeish for basic check, or add lock */
+    /* Assuming static strings or consistent memory */
+    for (i = 0; i < MAX_BLACKLIST; i++) {
+        if (driver_blacklist[i] && strcmp(driver_blacklist[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void driver_override(struct device *dev, const char *name) {
+    if (dev) {
+        dev->driver_override = name;
+    }
+}
 
 /*
  * probe_device

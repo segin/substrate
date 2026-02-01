@@ -862,9 +862,10 @@ int sys_waitpid(int pid, int *status, int options) {
 
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
 
+#include <sys/exec.h>
+
 int sys_execve(const char *f, char *const a[], char *const e[]) {
-    extern int elf_execve(const char *path, char *const argv[], char *const envp[]);
-    return elf_execve(f, a, e);
+    return exec_dispatch(f, a, e);
 }
 
 /* sys_fork and sys_vfork are arch-specific (need registers_t) - in arch/i386/syscall.c */

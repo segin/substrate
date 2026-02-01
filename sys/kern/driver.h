@@ -68,4 +68,8 @@ struct driver {
     struct driver *bus_next;
 };
 
+void driver_blacklist_add(const char *name);
+void driver_override(struct device *dev, const char *name);
+int driver_is_blacklisted(const char *name);
+
 #endif /* _KERN_DRIVER_H */

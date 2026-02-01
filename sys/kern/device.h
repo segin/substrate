@@ -47,6 +47,7 @@ struct device {
     char     serial[32];
     uint8_t  guid[16];
     const char *compatible; /* NUL-separated compatible strings */
+    const char *driver_override; /* Force binding to specific driver */
 
     /* Hierarchy */
     struct device *parent;

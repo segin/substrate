@@ -6,7 +6,7 @@
 
 #include <sys/types.h>
 #include <sys/errno.h>
-#include <sys/spinlock.h>
+#include <sys/lock.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -43,6 +43,20 @@ struct driver *bus_match_device(struct bus_type *bus, struct device *dev)
 
     drv = bus->drivers_list;
     while (drv) {
+        /* Check Driver Override */
+        if (dev->driver_override) {
+            if (strcmp(drv->name, dev->driver_override) != 0) {
+                drv = drv->bus_next;
+                continue;
+            }
+        } else {
+            /* Check Blacklist */
+            if (driver_is_blacklisted(drv->name)) {
+                drv = drv->bus_next;
+                continue;
+            }
+        }
+
         matched = 0;
 
         /* Prefer driver-specific match override */
@@ -104,4 +118,37 @@ int bus_id_match(const struct device_id *id, struct device *dev)
     }
 
     return 1;
+}
+
+/*
+ * bus_compatible_match - Check if device compatible string matches
+ * @compat: Driver-provided compatible string to search for
+ * @dev: Device to check
+ *
+ * Checks if the provided @compat string exists in the device's
+ * compatible string list. The device's compatible list is expected
+ * to be a sequence of NUL-terminated strings, terminated by an
+ * empty string (double NUL).
+ *
+ * Example dev->compatible: "ns16550a\0ns16550\0"
+ *
+ * Return: 1 if match, 0 if not.
+ */
+int bus_compatible_match(const char *compat, struct device *dev)
+{
+    const char *ptr;
+
+    if (!compat || !dev || !dev->compatible) {
+        return 0;
+    }
+
+    ptr = dev->compatible;
+    while (*ptr) {
+        if (strcmp(ptr, compat) == 0) {
+            return 1;
+        }
+        ptr += strlen(ptr) + 1;
+    }
+
+    return 0;
 }

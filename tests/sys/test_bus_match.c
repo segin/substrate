@@ -103,6 +103,7 @@ int test_bus_match_logic(void) {
     /* Chain specific -> low. Bus match is always. Specific matches only dev2. */
     bus.drivers_list = &drv_specific;
     drv_specific.bus_next = &drv_low;
+    drv_low.bus_next = NULL;
     
     /* dev1: specific fails (custom), low matches (bus default). low is priority 10. */
     if (bus_match_device(&bus, &dev1) != &drv_low) {
