@@ -552,7 +552,7 @@ void ext2_init(void) {
 uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     if (!fs) return 0;
     
-    static uint8_t bitmap_buf[4096];
+    static uint8_t bitmap_buf[4096] __attribute__((aligned(4)));
     
     // Search each block group for a free block
     for (uint32_t group = 0; group < fs->group_count; group++) {
@@ -565,7 +565,20 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
         
         // Find the first free bit
         uint32_t bits_in_group = fs->blocks_per_group;
-        for (uint32_t i = 0; i < bits_in_group; i++) {
+        uint32_t i = 0;
+        uint32_t *bitmap32 = (uint32_t *)bitmap_buf;
+
+        // Fast path: skip full words
+        // We can safely skip only if the word is all ones (0xFFFFFFFF).
+        // This is endian-safe because 0xFFFFFFFF is all ones regardless of endianness.
+        for (; i + 32 <= bits_in_group; i += 32) {
+            if (bitmap32[i / 32] != 0xFFFFFFFF) {
+                break; // Found a word with free bits, fall through to slow path
+            }
+        }
+
+        // Slow path: check remaining bits (and the word we broke on)
+        for (; i < bits_in_group; i++) {
             uint32_t byte_idx = i / 8;
             uint32_t bit_idx = i % 8;
             
