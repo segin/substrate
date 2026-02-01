@@ -35,6 +35,7 @@ typedef int (*link_type_t)(struct fs_node*, struct fs_node*, const char*);
 typedef int (*unlink_type_t)(struct fs_node*, const char *name);
 typedef int (*mkdir_type_t)(struct fs_node*, const char *name, uint16_t permission);
 typedef int (*mknod_type_t)(struct fs_node*, const char *name, uint16_t mode, uint32_t dev);
+typedef int (*unmount_type_t)(struct fs_node*);
 
 typedef struct fs_node {
     char name[128];
@@ -66,6 +67,7 @@ typedef struct fs_node {
     unlink_type_t unlink;
     mkdir_type_t mkdir;
     mknod_type_t mknod;
+    unmount_type_t unmount;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
 } fs_node_t;
 

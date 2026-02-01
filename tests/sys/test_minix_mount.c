@@ -63,6 +63,17 @@ void run_minix_mount_tests(void) {
         } else {
              kprint("FAIL: Minix root inode incorrect\n");
         }
+
+        // Test Unmount
+        if (mount_node->unmount) {
+             if (mount_node->unmount(mount_node) == 0) {
+                 kprint("PASS: Minix unmount success\n");
+             } else {
+                 kprint("FAIL: Minix unmount returned error\n");
+             }
+        } else {
+             kprint("FAIL: Minix unmount callback not set\n");
+        }
     } else {
         kprint("FAIL: Minix mount failed with valid V1 magic\n");
     }

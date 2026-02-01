@@ -18,6 +18,7 @@ static int minix_symlink(fs_node_t *node, const char *name, const char *target);
 static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name);
 static int minix_unlink(fs_node_t *dir, const char *name);
 static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev);
+static int minix_unmount(fs_node_t *root);
 
 /* Inode reading helper */
 static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node);
@@ -338,7 +339,24 @@ static fs_node_t *minix_mount(const char *device, uint32_t flags, void *data) {
     }
 
     // strcpy(root->name, "minix_root"); // Usually VFS overrides name with mountpoint
+    root->unmount = minix_unmount;
     return root; 
+}
+
+static int minix_unmount(fs_node_t *root) {
+    if (!root) return -1;
+    minix_fs_t *fs = (minix_fs_t *)(uintptr_t)root->impl;
+
+    if (fs) {
+        kfree(fs, sizeof(minix_fs_t));
+    }
+
+    if (root->ptr) {
+        kfree(root->ptr, sizeof(struct minix_inode_v1));
+    }
+
+    kfree(root, sizeof(fs_node_t));
+    return 0;
 }
 
 static int minix_symlink(fs_node_t *node, const char *name, const char *target) {
