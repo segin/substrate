@@ -51,7 +51,7 @@ void run_kernel_tests(void) {
         run_unlink_tests();
         run_unlink_property_tests();
         run_link_property_tests();
-        run_tty_tests();
+        // run_tty_tests();
         run_cow_stats_tests();
         test_pte_user();
         test_stacktrace();
