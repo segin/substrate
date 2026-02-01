@@ -11,7 +11,38 @@ void *memcpy(void *dest, const void *src, size_t n) {
 
 void *memset(void *s, int c, size_t n) {
     unsigned char *p = s;
-    while (n--) *p++ = (unsigned char)c;
+    unsigned char val = (unsigned char)c;
+
+    // Align to word boundary
+    while (n > 0 && ((uintptr_t)p & (sizeof(unsigned long) - 1))) {
+        *p++ = val;
+        n--;
+    }
+
+    // Fill words
+    if (n >= sizeof(unsigned long)) {
+        unsigned long word_val = val;
+        word_val |= (word_val << 8);
+        word_val |= (word_val << 16);
+#if UINTPTR_MAX > 0xFFFFFFFF
+        if (sizeof(unsigned long) > 4) {
+             word_val |= (word_val << 32);
+        }
+#endif
+
+        unsigned long *lp = (unsigned long *)p;
+        while (n >= sizeof(unsigned long)) {
+            *lp++ = word_val;
+            n -= sizeof(unsigned long);
+        }
+        p = (unsigned char *)lp;
+    }
+
+    // Fill remaining bytes
+    while (n > 0) {
+        *p++ = val;
+        n--;
+    }
     return s;
 }
 
