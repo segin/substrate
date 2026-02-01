@@ -97,6 +97,10 @@ process_t *proc_create(struct personality *pers) {
     processes[i].start_time = get_time();
     processes[i].uid = current_process ? current_process->uid : 0;
     processes[i].gid = current_process ? current_process->gid : 0;
+    processes[i].euid = current_process ? current_process->euid : 0;
+    processes[i].egid = current_process ? current_process->egid : 0;
+    processes[i].suid = current_process ? current_process->suid : 0;
+    processes[i].sgid = current_process ? current_process->sgid : 0;
     
     // Initialize rusage structures
     extern void rusage_init(process_t *p);

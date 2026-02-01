@@ -77,6 +77,10 @@ typedef struct process {
     uint32_t stime;
     uint32_t uid;
     uint32_t gid;
+    uint32_t euid;
+    uint32_t egid;
+    uint32_t suid;
+    uint32_t sgid;
     uint8_t  ac_flag;
     uint8_t  is_kernel_task; // 1 if kernel thread, 0 if user process
     uint8_t  bitness;        // Process execution mode (16/32/64)
@@ -175,7 +179,7 @@ typedef struct thread {
     uintptr_t                on_fault;
     
     // Syscall registers (for fork/vfork)
-    struct registers *syscall_regs;
+    void *syscall_regs;
 
     thread_state_t state;
     struct thread *next;
