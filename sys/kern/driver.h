@@ -15,6 +15,16 @@ struct device;
 struct bus_type;
 struct device_id;
 
+#define DEVICE_ID_ANY 0xFFFFFFFF
+
+typedef struct device_id {
+    uint32_t vendor_id;
+    uint32_t device_id;
+    uint32_t class_id;  /* Combined class/subclass/progif */
+    uint32_t class_mask;
+    unsigned long driver_data;
+} device_id_t;
+
 /*
  * struct driver
  *

@@ -5504,7 +5504,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (exact match, class match, priority ordering)
         - Docs: `bus_match.9`
         - Acceptance: Correct driver selected by priority
-    - [ ] Implement ID table matching for vendor/device/class.
+    - [x] Implement ID table matching for vendor/device/class.
         - Files: `sys/kern/bus.c`
         - API: `int bus_id_match(const device_id_t *id, device_t *dev)`
         - Wildcards: 0xFFFF for any vendor/device, class mask support

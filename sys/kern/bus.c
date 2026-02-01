@@ -64,3 +64,43 @@ struct driver *bus_match_device(struct bus_type *bus, struct device *dev)
 
     return best_drv;
 }
+
+/*
+ * bus_id_match - Check if a device matches a generic ID entry
+ * @id: ID entry to check against (can contain wildcards)
+ * @dev: Device to check
+ *
+ * Checks vendor_id, device_id, and class against the provided ID entry.
+ * Use DEVICE_ID_ANY (0xFFFFFFFF) as a wildcard for vendor/device.
+ *
+ * Return: 1 if match, 0 if not.
+ */
+int bus_id_match(const struct device_id *id, struct device *dev)
+{
+    if (!id || !dev) return 0;
+
+    /* Check Vendor ID */
+    if (id->vendor_id != DEVICE_ID_ANY) {
+        if (id->vendor_id != dev->vendor_id)
+            return 0;
+    }
+
+    /* Check Device ID */
+    if (id->device_id != DEVICE_ID_ANY) {
+        if (id->device_id != dev->device_id)
+            return 0;
+    }
+
+    /* Check Class (with mask) */
+    if (id->class_mask != 0) {
+        /* Construct device class word: class(16) | subclass(8) | progif(8) */
+        uint32_t dev_class_word = ((uint32_t)dev->class << 16) |
+                                  ((uint32_t)dev->subclass << 8) |
+                                   (uint32_t)dev->progif;
+        
+        if ((dev_class_word & id->class_mask) != (id->class_id & id->class_mask))
+            return 0;
+    }
+
+    return 1;
+}

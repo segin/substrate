@@ -119,3 +119,67 @@ int test_bus_match_logic(void) {
 
     return 0;
 }
+
+int test_bus_id_match_logic(void) {
+    struct device dev = {0};
+    struct device_id id_exact = {0};
+    struct device_id id_wild = {0};
+    struct device_id id_class = {0};
+
+    dev.vendor_id = 0x8086;
+    dev.device_id = 0x1000;
+    dev.class = 0x01;    /* Storage */
+    dev.subclass = 0x01; /* IDE */
+    dev.progif = 0x80;   /* Master */
+
+    /* 1. Exact Match */
+    id_exact.vendor_id = 0x8086;
+    id_exact.device_id = 0x1000;
+    if (bus_id_match(&id_exact, &dev) != 1) {
+        kprint("FAIL: bus_id_match failed on exact match\n");
+        return -1;
+    }
+
+    id_exact.device_id = 0x1001;
+    if (bus_id_match(&id_exact, &dev) != 0) {
+        kprint("FAIL: bus_id_match matched incorrectly (wrong device id)\n");
+        return -1;
+    }
+
+    /* 2. Wildcard Match */
+    id_wild.vendor_id = DEVICE_ID_ANY;
+    id_wild.device_id = 0x1000;
+    if (bus_id_match(&id_wild, &dev) != 1) {
+        kprint("FAIL: bus_id_match failed on vendor wildcard\n");
+        return -1;
+    }
+
+    id_wild.vendor_id = 0x8086;
+    id_wild.device_id = DEVICE_ID_ANY;
+    if (bus_id_match(&id_wild, &dev) != 1) {
+        kprint("FAIL: bus_id_match failed on device wildcard\n");
+        return -1;
+    }
+
+    /* 3. Class Match */
+    /* Match storage class (0x01xxxx) */
+    id_class.vendor_id = DEVICE_ID_ANY;
+    id_class.device_id = DEVICE_ID_ANY;
+    id_class.class_id = 0x010000;
+    id_class.class_mask = 0xFF0000;
+    
+    if (bus_id_match(&id_class, &dev) != 1) {
+        kprint("FAIL: bus_id_match failed on class match\n");
+        return -1;
+    }
+
+    /* Mismatch subclass */
+    id_class.class_id = 0x010200;
+    id_class.class_mask = 0xFFFF00;
+    if (bus_id_match(&id_class, &dev) != 0) {
+        kprint("FAIL: bus_id_match matched incorrectly (wrong subclass)\n");
+        return -1;
+    }
+
+    return 0;
+}
