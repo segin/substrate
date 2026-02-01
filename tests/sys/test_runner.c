@@ -29,6 +29,7 @@ extern void test_vm_phys(void);
 extern void test_vm_page_queue(void);
 extern void test_vm_page_queue(void);
 extern void run_minix_mount_tests(void);
+extern void run_minix_write_tests(void);
 extern void test_bitness(void);
 
 void run_kernel_tests(void) {
@@ -121,6 +122,7 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "minix") == 0) {
          run_minix_mount_tests();
+         run_minix_write_tests();
     }
 
     // Wait logic tests are run on host via verify_wait_host.sh
