@@ -664,10 +664,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Can be caught or ignored.
             - [ ] Default action: Stop the process.
             - [ ] Orphaned process groups ignore these signals.
-    - [ ] **PID 1 (Init) Protection:**
-        - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler installed.
-        - [ ] If init exits, system halts or panics.
-        - [ ] Init adopts all orphaned processes.
+    - [x] **PID 1 (Init) Protection:**
+        - [x] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler installed.
+        - [x] If init exits, system halts or panics.
+        - [x] Init adopts all orphaned processes.
     - [ ] **Core Dump (Future):**
         - [ ] Signals with SA_CORE action: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
         - [ ] `coredump()`: Write process memory and registers to file.

@@ -211,7 +211,12 @@ void psignal(process_t *p, int sig) {
     
     /* Init Protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1 */
     if (p->pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
-        return;
+        // Allow delivery if explicit handler is installed (not SIG_DFL)
+        // Note: SIGKILL/SIGSTOP cannot usually be caught, so they remain blocked here
+        // unless sys_sigaction laws change. SIGTERM can be caught.
+        if (p->sig_actions[sig - 1].sa_handler == SIG_DFL) {
+            return;
+        }
     }
 
     /* Handle SIGCONT: Resume stopped process and clear pending stop signals */
