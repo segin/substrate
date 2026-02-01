@@ -137,8 +137,44 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             map->size -= (cur->end - cur->start);
             free_entry(cur);
         } else if (cur->start < start && cur->end > end) {
-            // Split entry (not implemented yet)
-            return -1;
+            // Split entry
+            vm_map_entry_t *new_entry = alloc_entry();
+            if (!new_entry) return -1;
+
+            // Initialize new entry (right part)
+            new_entry->start = end;
+            new_entry->end = cur->end;
+            new_entry->object = cur->object;
+            new_entry->offset = cur->offset + (end - cur->start);
+
+            // Reference object if present
+            if (new_entry->object) {
+                vm_object_reference(new_entry->object);
+            }
+
+            // Copy properties
+            new_entry->protection = cur->protection;
+            new_entry->max_protection = cur->max_protection;
+            new_entry->inheritance = cur->inheritance;
+            new_entry->flags = cur->flags;
+            new_entry->wire_count = cur->wire_count;
+
+            // Insert into list
+            new_entry->prev = cur;
+            new_entry->next = cur->next;
+            cur->next->prev = new_entry;
+            cur->next = new_entry;
+
+            // Adjust original entry (left part)
+            cur->end = start;
+
+            // Adjust map stats
+            map->nentries++;
+            map->size -= (end - start);
+
+            // Continue loop (next iteration will see new_entry, but its start (end) >= end,
+            // so it won't be processed again for this range)
+
         } else if (cur->start < end && cur->end > start) {
             // Partial overlap (trimming)
             if (cur->start < start) {
@@ -146,6 +182,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
                 cur->end = start;
             } else {
                 map->size -= (end - cur->start);
+                cur->offset += (end - cur->start);
                 cur->start = end;
             }
         }
