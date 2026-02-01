@@ -33,6 +33,11 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     // Find virtual address space
     if (v_addr == 0 || !(flags & MAP_FIXED)) {
         if (vm_map_find_space(map, &v_addr, length) != 0) return (void *)-1;
+    } else {
+        // MAP_FIXED: Unmap existing mappings in the range
+        if (vm_map_remove(map, v_addr, v_addr + length) != 0) {
+            return (void *)-1;
+        }
     }
 
     // Translate prot to VM_PROT_* flags
@@ -108,8 +113,18 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
 }
 
 int sys_munmap(void *addr, size_t length) {
-    // vm_map_remove(current_process->vm_map, (uintptr_t)addr, (uintptr_t)addr + length);
-    (void)addr; (void)length;
+    if (!current_process || !current_process->vm_map) return -1;
+    if (length == 0) return -1;
+
+    uintptr_t start = (uintptr_t)addr;
+    // Align length to page size
+    size_t aligned_len = (length + 0xFFF) & ~0xFFF;
+
+    if (start + aligned_len < start) return -1;
+
+    if (vm_map_remove(current_process->vm_map, start, start + aligned_len) != 0) {
+        return -1;
+    }
     return 0;
 }
 
