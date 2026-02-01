@@ -564,15 +564,17 @@ int vfs_unmount(const char *path) {
     
     // Check if busy? (Refcounts) - TODO
     
+    // Capture root of mounted fs
+    fs_node_t *root = mountpoint->ptr;
+
     // Detach
     mountpoint->ptr = NULL;
     mountpoint->flags &= ~FS_MOUNTPOINT;
     
-    // We should allow the filesystem to unmount (flush caches etc)
-    // But we don't have the fs handle easily here unless we store it in mountpoint->ptr->fs?
-    // mountpoint->ptr IS the root of the fs.
-    
-    // TODO: cleanup fs instance
+    // Cleanup fs instance
+    if (root && root->unmount) {
+        root->unmount(root);
+    }
     
     return 0;
 }
