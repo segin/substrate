@@ -362,8 +362,6 @@ void kmain(unsigned long magic, unsigned long addr) {
         fb_init(mboot_info);
     }
     
-    // Display kernel ident banner (first thing user sees)
-    kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
 
     // Diagnostic: Print command line
     char full_cmd[512] = {0};
