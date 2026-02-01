@@ -150,9 +150,9 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     return proc->pid;
 }
 
-int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg) {
+thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg) {
     thread_t *t = sched_alloc_thread(proc);
-    if (!t) return -1;
+    if (!t) return NULL;
     
     // Simulate stack frame for "entry_point(arg)"
     uint32_t *stk = (uint32_t*)stack;
@@ -176,7 +176,7 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     t->kstack_ptr = (uintptr_t)stk; 
     t->instr_ptr = (uintptr_t)entry_point;
 
-    return t->tid;
+    return t;
 }
 
 

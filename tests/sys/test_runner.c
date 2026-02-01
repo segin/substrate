@@ -142,6 +142,10 @@ void run_kernel_tests(void) {
         run_udf_write_tests();
     }
 
+    if (all || strcmp(test_arg, "kthread") == 0) {
+        run_kthread_create_tests();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested
