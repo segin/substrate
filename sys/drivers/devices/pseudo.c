@@ -203,7 +203,7 @@ void pseudo_init(void) {
     null_node.read = &null_read;
 
     null_node.write = &null_write;
-
+    null_node.rdev = (1 << 8) | 3;
     devfs_register_device(&null_node);
 
 
@@ -215,9 +215,8 @@ void pseudo_init(void) {
     zero_node.flags = FS_CHARDEVICE;
 
     zero_node.read = &zero_read;
-
     zero_node.write = &null_write; 
-
+    zero_node.rdev = (1 << 8) | 5;
     devfs_register_device(&zero_node);
 
 
@@ -229,9 +228,8 @@ void pseudo_init(void) {
     full_node.flags = FS_CHARDEVICE;
 
     full_node.read = &zero_read; // Always returns zeros
-
     full_node.write = &full_write; // Always returns error
-
+    full_node.rdev = (1 << 8) | 7;
     devfs_register_device(&full_node);
 
     /* Note: /dev/random and /dev/urandom now registered by random_init() */
@@ -241,6 +239,7 @@ void pseudo_init(void) {
     tty_node.flags = FS_CHARDEVICE;
     tty_node.read = &dev_tty_read;
     tty_node.write = &dev_tty_write;
+    tty_node.rdev = (5 << 8) | 0;
     devfs_register_device(&tty_node);
 
     // /dev/mem
@@ -250,6 +249,7 @@ void pseudo_init(void) {
     mem_node.flags = FS_CHARDEVICE;
     mem_node.read = &mem_read;
     mem_node.write = &mem_write;
+    mem_node.rdev = (1 << 8) | 1;
     devfs_register_device(&mem_node);
 
     // /dev/kmem
@@ -259,6 +259,7 @@ void pseudo_init(void) {
     kmem_node.flags = FS_CHARDEVICE;
     kmem_node.read = &kmem_read;
     kmem_node.write = &kmem_write;
+    kmem_node.rdev = (1 << 8) | 2;
     devfs_register_device(&kmem_node);
 
     // /dev/port
@@ -268,6 +269,7 @@ void pseudo_init(void) {
     port_node.flags = FS_CHARDEVICE;
     port_node.read = &port_read;
     port_node.write = &port_write;
+    port_node.rdev = (1 << 8) | 4;
     devfs_register_device(&port_node);
 
     // /dev/stdin

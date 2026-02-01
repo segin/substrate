@@ -208,6 +208,11 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
 void psignal(process_t *p, int sig) {
     /* Validate process pointer and signal number */
     if (!p || sig <= 0 || sig > NSIG) return;
+
+    /* Ignore signals if process is already exiting or a zombie */
+    if (p->state == SDYING || p->state == SZOMB) {
+        return;
+    }
     
     /* Init Protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1 */
     if (p->pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {

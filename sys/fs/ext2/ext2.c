@@ -330,8 +330,10 @@ static fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_
         node->readlink = ext2_readlink_fn;
     } else if (type == EXT2_S_IFCHR) {
         node->flags = FS_CHARDEVICE;
+        node->rdev = inode->i_block[0];
     } else if (type == EXT2_S_IFBLK) {
         node->flags = FS_BLOCKDEVICE;
+        node->rdev = inode->i_block[0];
     }
     
     return node;

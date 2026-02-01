@@ -204,9 +204,15 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
     if ((mode & 0xF000) == 0x4000) node->flags = FS_DIRECTORY;
     else if ((mode & 0xF000) == 0x8000) node->flags = FS_FILE;
     else if ((mode & 0xF000) == 0xA000) node->flags = FS_SYMLINK;
-    else if ((mode & 0xF000) == 0x2000) node->flags = FS_CHARDEVICE;
-    else if ((mode & 0xF000) == 0x6000) node->flags = FS_BLOCKDEVICE;
-    else node->flags = 0;
+    else if ((mode & 0xF000) == 0x2000) {
+        node->flags = FS_CHARDEVICE;
+        if (v2) node->rdev = ((struct minix_inode_v2*)cache)->i_zone[0];
+        else node->rdev = ((struct minix_inode_v1*)cache)->i_zone[0];
+    } else if ((mode & 0xF000) == 0x6000) {
+        node->flags = FS_BLOCKDEVICE;
+        if (v2) node->rdev = ((struct minix_inode_v2*)cache)->i_zone[0];
+        else node->rdev = ((struct minix_inode_v1*)cache)->i_zone[0];
+    } else node->flags = 0;
 
     node->mask = mode & 0xFFF;
 

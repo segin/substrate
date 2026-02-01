@@ -362,6 +362,7 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
     buf->st_uid = node->uid;
     buf->st_gid = node->gid;
     buf->st_mode = node->mask;
+    buf->st_rdev = node->rdev;
     
     // Set file type bits
     if ((node->flags & 0x7) == FS_DIRECTORY)

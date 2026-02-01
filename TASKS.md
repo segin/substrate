@@ -683,26 +683,26 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Set `p_state` to `SDYING`. <!-- process.c:237 -->
             - [x] Record exit status in `p_xstat`. <!-- process.c:238 -->
             - [x] Prevent further scheduling of process threads.
-        - [ ] **Phase 2: Resource Release (Critical Section):**
-            - [ ] **File Descriptors:**
-                - [ ] `fd_close_all(p)`: Close all open file descriptors. <!-- process.c:163-180, 243 -->
-                - [ ] For each fd: decrement refcount, call `close_fs()` if last ref.
-                - [ ] Clear `fds[]` array.
-            - [ ] **Virtual Memory:**
-                - [ ] Detach from current pmap: `pmap_release(p->pmap)`. <!-- process.c:249-256 -->
-                - [ ] Free all user page tables (pmap garbage collection).
-                - [ ] Switch to kernel pmap before freeing.
-                - [ ] Release `vm_map` and all `vm_map_entry` structures.
-            - [ ] **Current Working Directory:**
-                - [ ] `vnode_rele(p->cwd_node)`: Decrement cwd vnode refcount.
-            - [ ] **Root Directory (chroot):**
-                - [ ] `vnode_rele(p->root_node)`: Decrement root vnode refcount.
-            - [ ] **Controlling Terminal:**
-                - [ ] If session leader: send SIGHUP to foreground group.
-                - [ ] Clear `tty->session` and `tty->pgrp` pointers.
-                - [ ] Revoke TTY access for entire session.
-            - [ ] **Pending Signals:**
-                - [ ] Clear all pending signals (no longer deliverable).
+        - [x] **Phase 2: Resource Release (Critical Section):**
+            - [x] **File Descriptors:**
+                - [x] `fd_close_all(p)`: Close all open file descriptors. <!-- process.c:163-180, 243 -->
+                - [x] For each fd: decrement refcount, call `close_fs()` if last ref.
+                - [x] Clear `fds[]` array.
+            - [x] **Virtual Memory:**
+                - [x] Detach from current pmap: `pmap_release(p->pmap)`. <!-- process.c:249-256 -->
+                - [x] Free all user page tables (pmap garbage collection).
+                - [x] Switch to kernel pmap before freeing.
+                - [x] Release `vm_map` and all `vm_map_entry` structures.
+            - [x] **Current Working Directory:**
+                - [x] `close_fs(p->cwd_node)`: Decrement cwd vnode refcount.
+            - [x] **Root Directory (chroot):**
+                - [x] `close_fs(p->root_node)`: Decrement root vnode refcount.
+            - [x] **Controlling Terminal:**
+                - [x] If session leader: send SIGHUP to foreground group.
+                - [x] Clear `tty->session` and `tty->pgrp` pointers.
+                - [x] Revoke TTY access for entire session.
+            - [x] **Pending Signals:**
+                - [x] Clear all pending signals (no longer deliverable).
             - [ ] **Timers:**
                 - [ ] Cancel `ITIMER_REAL`, `ITIMER_VIRTUAL`, `ITIMER_PROF`.
                 - [ ] Cancel any pending `alarm()`.
@@ -712,10 +712,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Remove owned message queues if IPC_RMID pending.
             - [ ] **POSIX IPC:**
                 - [ ] Unlink any POSIX semaphores/shared memory owned.
-            - [ ] **Futex Cleanup:**
-                - [ ] Process robust mutex list.
-                - [ ] Mark owned futexes as FUTEX_OWNER_DIED.
-                - [ ] Wake waiters on robust list entries.
+            - [x] **Futex Cleanup:**
+                - [x] Process robust mutex list.
+                - [x] Mark owned futexes as FUTEX_OWNER_DIED.
+                - [x] Wake waiters on robust list entries.
             - [ ] **Locks Held:**
                 - [ ] Release any kernel mutexes held by threads.
                 - [ ] Cancel pending lock requests.
@@ -768,12 +768,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Record: command name, user time, system time, elapsed time, exit status.
             - [ ] Write to accounting file if enabled.
     - [ ] **Edge Cases and Error Handling:**
-        - [ ] **Init (PID 1) Exit:**
-            - [ ] If init exits normally, kernel halts/panics. <!-- process.c:231-234 -->
-            - [ ] Log warning and enter idle loop.
-        - [ ] **Killed by Signal During Exit:**
-            - [ ] Ignore all signals once in SDYING state.
-            - [ ] Cannot be interrupted during exit cleanup.
+        - [x] **Init (PID 1) Exit:**
+            - [x] If init exits normally, kernel halts/panics. <!-- process.c:231-234 -->
+            - [x] Log warning and enter idle loop.
+        - [x] **Killed by Signal During Exit:**
+            - [x] Ignore all signals once in SDYING state.
+            - [x] Cannot be interrupted during exit cleanup.
         - [ ] **Exit While Holding Locks:**
             - [ ] Kernel must handle lock abandonment.
             - [ ] Log warning if locks still held.
@@ -783,10 +783,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Vfork Exit:**
             - [ ] Special handling: wake parent immediately.
             - [ ] Parent was blocked waiting for child exec/exit.
-        - [ ] **Thread Group Exit:**
-            - [ ] If any thread calls `exit()`, entire process exits.
-            - [ ] All threads receive internal termination signal.
-            - [ ] Process-wide exit semantics (BSD `exit()` behavior).
+        - [x] **Thread Group Exit:**
+            - [x] If any thread calls `exit()`, entire process exits.
+            - [x] All threads receive internal termination signal.
+            - [x] Process-wide exit semantics (BSD `exit()` behavior).
 
     - [x] **Wait Subsystem (`wait4`, `waitpid`):**
         - [x] **Search Logic (`find_zombie`):** <!-- Now find_waitable_child -->

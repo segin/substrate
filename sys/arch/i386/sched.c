@@ -146,6 +146,7 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     
     t->kstack_ptr = (uintptr_t)kstack;
     t->instr_ptr = regs->eip;
+    t->state = THREAD_READY; // Ready to be scheduled
     
     return proc->pid;
 }
@@ -175,6 +176,7 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     
     t->kstack_ptr = (uintptr_t)stk; 
     t->instr_ptr = (uintptr_t)entry_point;
+    t->state = THREAD_READY; // Ready to be scheduled
 
     return t->tid;
 }
