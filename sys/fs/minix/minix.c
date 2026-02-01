@@ -87,45 +87,6 @@ static uint32_t minix_get_zone(minix_fs_t *fs, fs_node_t *node, uint32_t zone_in
     return 0;
 }
 
-static int minix_write_inode(minix_fs_t *fs, fs_node_t *node) {
-    if (!fs || !node) return -1;
-    uint32_t inode_num = (uint32_t)node->inode;
-    if (inode_num == 0 || inode_num > fs->sb.s_ninodes) return -1;
-
-    uint32_t inode_start_block = 2 + fs->sb.s_imap_blocks + fs->sb.s_zmap_blocks;
-    uint32_t inodes_per_block = MINIX_BLOCK_SIZE / sizeof(struct minix_inode_v1);
-    uint32_t block = inode_start_block + (inode_num - 1) / inodes_per_block;
-    uint32_t offset = ((inode_num - 1) % inodes_per_block) * sizeof(struct minix_inode_v1);
-
-    uint8_t buf[MINIX_BLOCK_SIZE];
-    if (read_fs(fs->block_device, block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) {
-        return -1;
-    }
-
-    struct minix_inode_v1 *raw = (struct minix_inode_v1 *)(buf + offset);
-
-    // Update fields
-    // Note: minix_read_inode populates these fields in the fs_node_t.
-    // If they were not populated, we would be writing back zeros/defaults, corrupting the inode.
-    raw->i_size = (uint32_t)node->length;
-    raw->i_mode = (raw->i_mode & 0xF000) | (node->mask & 0xFFF);
-    raw->i_uid = (uint16_t)node->uid;
-    raw->i_gid = (uint8_t)node->gid;
-    raw->i_time = (uint32_t)node->mtime;
-
-    // Sync zones from cache if available
-    // minix_read_inode allocates node->ptr to cache the raw inode (including zones).
-    if (node->ptr) {
-        struct minix_inode_v1 *cache = (struct minix_inode_v1 *)node->ptr;
-        memcpy(raw->i_zone, cache->i_zone, sizeof(raw->i_zone));
-    }
-
-    if (write_fs(fs->block_device, block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) {
-        return -1;
-    }
-    return 0;
-}
-
 static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node) {
     if (inode_num == 0 || inode_num > fs->sb.s_ninodes) return -1;
 
