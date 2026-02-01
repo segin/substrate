@@ -675,14 +675,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Respect `RLIMIT_CORE` resource limit.
 - [ ] **Process Lifecycle & Job Control:**
     - [ ] **Process Termination (`exit`, `_exit`):**
-        - [ ] **Entry Points:**
-            - [ ] `sys_exit(status)`: Libc-callable exit with cleanup.
-            - [ ] `sys__exit(status)`: Immediate exit, no libc cleanup.
-            - [ ] Both call internal `proc_exit(code)`. <!-- pm/process.c:230-291 -->
-        - [ ] **Phase 1: State Transition (RUNNING → DYING):**
-            - [ ] Set `p_state` to `SDYING`. <!-- process.c:237 -->
-            - [ ] Record exit status in `p_xstat`. <!-- process.c:238 -->
-            - [ ] Prevent further scheduling of process threads.
+        - [x] **Entry Points:**
+            - [x] `sys_exit(status)`: Libc-callable exit with cleanup.
+            - [x] `sys__exit(status)`: Immediate exit, no libc cleanup.
+            - [x] Both call internal `proc_exit(code)`. <!-- pm/process.c:230-291 -->
+        - [x] **Phase 1: State Transition (RUNNING → DYING):**
+            - [x] Set `p_state` to `SDYING`. <!-- process.c:237 -->
+            - [x] Record exit status in `p_xstat`. <!-- process.c:238 -->
+            - [x] Prevent further scheduling of process threads.
         - [ ] **Phase 2: Resource Release (Critical Section):**
             - [ ] **File Descriptors:**
                 - [ ] `fd_close_all(p)`: Close all open file descriptors. <!-- process.c:163-180, 243 -->

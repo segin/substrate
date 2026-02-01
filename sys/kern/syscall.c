@@ -331,6 +331,11 @@ int sys_exit(int code) {
     return 0;
 }
 
+int sys__exit(int code) {
+    proc_exit(code);
+    return 0;
+}
+
 int sys_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
