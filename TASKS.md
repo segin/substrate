@@ -3250,9 +3250,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
         - [x] `lib/sys/sysinfo.c`: Wrapper function.
         - [x] Man page: `sysinfo(2)`.
-    - [ ] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
-        - [ ] `lib/sys/getpagesize.c`: Wrapper function.
-        - [ ] Man page: `getpagesize(2)`.
+    - [x] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
+        - [x] `lib/sys/getpagesize.c`: Wrapper function.
+        - [x] Man page: `getpagesize(2)`.
     - [ ] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
         - [ ] `lib/sys/mlock.c`: Wrapper functions.
         - [ ] Man pages: `mlock(2)`, `munlock(2)`.
