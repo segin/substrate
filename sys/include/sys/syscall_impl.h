@@ -111,6 +111,7 @@ extern int sys_acct(const char*);
 extern int sys_poll(void*, unsigned int, int);
 extern int sys_futex(int*, int, int, void*, int*, int);
 extern int sys_set_thread_area(void*);
+extern int sys_modify_ldt(int, void*, unsigned long);
 extern int sys_fsync(int);
 extern int sys_umask(int);
 

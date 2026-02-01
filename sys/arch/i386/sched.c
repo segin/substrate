@@ -18,11 +18,18 @@ extern uint32_t get_time(void);
 extern thread_t *sched_alloc_thread(process_t *proc);
 extern void sched_init_generic(void);
 
+#include <sys/ldt.h>
+
 // Exposed to Generic Scheduler
 void arch_switch_to(thread_t *prev, thread_t *next) {
     // Switch Address Space if needed
     if (next->proc && next->proc->pmap) {
         pmap_activate(next->proc->pmap);
+    }
+    
+    // Switch LDT if needed
+    if (next->proc != prev->proc) {
+        ldt_activate(next->proc);
     }
     
     switch_to(prev, next);
