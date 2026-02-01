@@ -28,7 +28,7 @@ int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *
 
     // 5. Success
     if (tdp) {
-        // TODO: Find the thread_t by tid and return it
+        *tdp = sched_get_thread(tid);
     }
 
     return 0;
