@@ -27,7 +27,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
-		tests/tests.o
+	../tests/sys/tests.o
 	@echo "Linked kernel.bin"
 
 kernel.multiboot: kernel.bin
@@ -58,7 +58,7 @@ kernel.efi: arch_kernel klib kern drivers fs exec vfs exec_perso vm tests
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
-		tests/tests.o \
+	../tests/sys/tests.o \
 		$(LIBGCC)
 	objcopy -O pe-i386 kernel_efi.elf kernel.efi
 	@echo "Linked kernel.efi"
@@ -135,8 +135,7 @@ clean:
 	rm -f kernel.bin
 
 tests:
-	@echo "Building Kernel Tests..."
-	$(MAKE) -C tests
+	$(MAKE) -C ../tests/sys
 
 install: kernel.bin
 	@echo "Installing Kernel to $(DESTDIR)/vmunix..."

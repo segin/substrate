@@ -8,12 +8,14 @@ struct fs_node;
 typedef struct fs_node fs_node_t;
 
 // Console Backend Interface
+struct termios;
 typedef struct console_backend {
     const char *name;
     void (*write)(const char *data, size_t len);
     void (*putchar)(char c);
     void (*clear)(void);
     struct console_backend *next;
+    void (*set_termios)(struct termios *t);
 } console_backend_t;
 
 // API

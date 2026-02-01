@@ -13,6 +13,7 @@ process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
 process_t *kernel_process = NULL;
 static int next_pid = 1;
+static spinlock_t pid_lock;
 extern thread_t threads[MAX_THREADS];
 
 /*
@@ -42,6 +43,7 @@ void pm_init(void) {
     
     /* Initialize the process tree lock */
     mutex_init(&proctree_lock, "proctree");
+    spinlock_init(&pid_lock, "pid");
     
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
@@ -72,13 +74,18 @@ process_t *proc_find(int pid) {
 }
 
 process_t *proc_create(struct personality *pers) {
+    spinlock_acquire(&pid_lock);
     int i;
     for (i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid == -1) break;
     }
-    if (i == MAX_PROCS) return NULL;
+    if (i == MAX_PROCS) {
+        spinlock_release(&pid_lock);
+        return NULL;
+    }
     
     processes[i].pid = next_pid++;
+    spinlock_release(&pid_lock);
     processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].pers = pers;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
@@ -118,6 +125,9 @@ int proc_fork(process_t *parent, void *stack) {
     child_proc->cwd_node = parent->cwd_node;
     
     // Copy parent resources (FDs)
+    child_proc->tty = parent->tty;
+    child_proc->bitness = parent->bitness;
+
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];

@@ -5,7 +5,7 @@
 #include <kern/console.h>
 #include <kern/cmdline.h>
 #include <string.h>
-#include <tests/tests.h>
+#include "tests.h"
 
 // Forward declarations of test suites
 void run_pmap_tests(void);

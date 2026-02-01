@@ -280,6 +280,33 @@ void fb_init(multiboot_info_t *mbi) {
             fb_active = 0;
             return;
         }
+        if (strcmp(vid_arg, "ask") == 0) {
+            if (video_ask_mode(&fb) == 1) {
+                fb_active = 1; /* VESA Mode Set successfully via BIOS */
+                /* fb struct populated by video_ask_mode */
+                
+                /* Register console */
+                fb_console_init();
+                
+                /* Register FB device */
+                memset(&fb_node, 0, sizeof(fs_node_t));
+                strcpy(fb_node.name, "fb0");
+                fb_node.flags = FS_CHARDEVICE;
+                fb_node.ioctl = fb_fs_ioctl;
+                fb_node.mmap = fb_fs_mmap;
+                devfs_register_device(&fb_node);
+                
+                kprint("Video: VESA BIOS Mode Active.\n");
+                return;
+            } else {
+                /* Text mode selected */
+                fb_active = 0;
+                /* hw_text is likely active from kmain init, ensure it knows we want it. */
+                kprint("Video: Text mode selected.\n");
+                return; /* Logic below will try mb_driver etc, which might fail or override. */
+                /* If text mode selected, we just return. hw_text_init was called in kmain before fb_init. */
+            }
+        }
     }
 
     saved_mbi = mbi;
@@ -322,7 +349,7 @@ void fb_init(multiboot_info_t *mbi) {
     }
     
     /* Pass 2: Pick highest priority available if not selected yet */
-    if (!selected_drv) {
+    if (!selected_drv && (use_cmdline || !hw_text_active)) {
         video_driver_t *curr = video_drivers;
         int max_prio = -1;
         

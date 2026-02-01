@@ -40,5 +40,6 @@ typedef struct video_driver {
 } video_driver_t;
 
 void video_register_driver(video_driver_t *drv);
+int video_ask_mode(fb_info_t *fb);
 
 #endif /* _FB_H */

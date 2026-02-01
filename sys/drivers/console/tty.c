@@ -388,6 +388,7 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         case TCSETSW:
         case TCSETSF:
             if (arg) memcpy(&tty->termios, (void*)arg, sizeof(struct termios));
+            if (tty->driver->set_termios) tty->driver->set_termios(tty);
             return 0;
         case TIOCGWINSZ:
             if (arg) memcpy((void*)arg, &tty->winsize, sizeof(struct winsize));

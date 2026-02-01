@@ -368,7 +368,8 @@ void pmap_destroy(pmap_t pmap) {
                     if (page_phys != 0 && !(page_phys & 0xFFF)) {
                         // Don't free kernel pages (>= 0xC0000000 virtual)
                         if (page_phys < 0x40000000) {  // Reasonable upper bound for user pages
-                            // Convert physical to virtual for pmm_free_block
+                            // Use vm_phys_free_page via pmm_free_block
+                            // Our updated vm_phys_free_page handles refcounts
                             pmm_free_block((void *)(uintptr_t)(page_phys + 0xC0000000));
                         }
                     }
@@ -475,8 +476,12 @@ pmap_t pmap_fork(pmap_t src_pmap) {
             // Clear write bit in parent too (both now COW) (checkbox 142)
             src_pt[pti] = src_pte & ~PTE_W;
             
-            // Note: Page refcount increment would go here (checkbox 143)
-            // but PMM doesn't support refcounting yet
+            // Note: Page refcount increment for COW (checkbox 143)
+            uint32_t pa = src_pte & PTE_FRAME;
+            vm_page_t *page = pmm_get_page(pa);
+            if (page) {
+                __sync_fetch_and_add(&page->ref_count, 1);
+            }
             
             dst_pmap->resident_count++;
             
