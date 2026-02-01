@@ -832,3 +832,26 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
 
     return -1;
 }
+
+static int minix_write_inode(minix_fs_t *fs, fs_node_t *node) {
+    if (!fs || !node || !node->ptr) return -1;
+
+    if (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14) {
+        // V2
+        uint32_t inode_start = 2 + fs->sb.s_imap_blocks + fs->sb.s_zmap_blocks;
+        uint32_t inodes_per_block = MINIX_BLOCK_SIZE / sizeof(struct minix_inode_v2);
+        uint32_t block = inode_start + (node->inode - 1) / inodes_per_block;
+        uint32_t offset = ((node->inode - 1) % inodes_per_block) * sizeof(struct minix_inode_v2);
+        
+        uint8_t buf[MINIX_BLOCK_SIZE];
+        if (read_fs(fs->block_device, block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) return -1;
+        
+        memcpy(buf + offset, node->ptr, sizeof(struct minix_inode_v2));
+        
+        if (write_fs(fs->block_device, block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) return -1;
+        return 0;
+    } else {
+        // V1
+        return minix_write_inode_raw(fs, node->inode, (struct minix_inode_v1 *)node->ptr);
+    }
+}
