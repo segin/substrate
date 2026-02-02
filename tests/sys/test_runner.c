@@ -138,6 +138,10 @@ void run_kernel_tests(void) {
          test_printf_new();
     }
 
+    if (strcmp(test_arg, "benchmark") == 0) {
+         run_vm_map_benchmark();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested

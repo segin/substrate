@@ -44,6 +44,7 @@ typedef struct vm_map_entry {
 typedef struct vm_map {
     pmap_t pmap;            // Machine-dependent part
     vm_map_entry_t *header; // Sentinel node for the entry list
+    vm_map_entry_t *hint;   // Hint for finding free space (optimization)
     uint32_t nentries;      // Number of entries
     size_t size;            // Total virtual size
     uintptr_t min_offset;   // Lower bound of map

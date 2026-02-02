@@ -98,9 +98,8 @@ int sys_set_thread_area(struct user_desc *u_info) {
     // causing the CPU to reload the cached descriptor base.
     // Otherwise, it restores the old selector (0x33) with old base (0),
     // and TLS accesses (GS:offset) will fault.
-    extern registers_t *syscall_regs;
-    if (syscall_regs) {
-        syscall_regs->gs = selector;
+    if (current_thread && current_thread->syscall_regs) {
+        ((registers_t *)current_thread->syscall_regs)->gs = selector;
     }
     
     return 0;
