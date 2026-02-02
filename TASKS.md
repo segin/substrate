@@ -3300,33 +3300,34 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Handle quoting (`'` single, `"` double) and escaping (`\`).
         - [x] Handle operators (`&&`, `||`, `>>`, `<<`).
         - [x] Variable recognition (`$PROMPT`, `${VAR}`).
-    - [ ] **Parser (AST Generation):**
+    - [x] **Parser (AST Generation):**
         - [x] **Simple Commands:** List of arguments + redirections.
         - [x] **Pipelines:** Chain of simple commands connected by pipes.
         - [x] **Lists:** Sequences (`cmd1 ; cmd2`) and Logic (`cmd1 && cmd2`).
-        - [ ] **Compound Commands:**
-            - [ ] `IfClause`: `if` list `then` list `else` list `fi`.
-            - [ ] `WhileClause`: `while` list `do` list `done`.
-            - [ ] `ForClause`: `for` name `in` words `do` list `done`.
-            - [ ] `FunctionDef`: `name() { list; }`.
-    - [ ] **Expansion (WordExp):**
-        - [ ] Tilde Expansion (`~` -> `$HOME`).
-        - [ ] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
+        - [x] **Compound Commands:**
+            - [x] `IfClause`: `if` list `then` list `else` list `fi` (including `elif`).
+            - [x] `WhileClause`: `while` list `do` list `done`.
+            - [x] `ForClause`: `for` name `in` words `do` list `done`.
+            - [x] `FunctionDef`: `name() { list; }`.
+            - [x] `Subshells/Groups`: `( list )` and `{ list; }`.
+    - [/] **Expansion (WordExp):**
+        - [x] Tilde Expansion (`~` -> `$HOME`).
+        - [x] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
         - [ ] Command Substitution (`$(cmd)`).
         - [ ] Arithmetic Expansion (`$(( 1 + 2 ))`).
-        - [ ] Globbing (`*`, `?`, `[...]` file matching).
-    - [ ] **Execution Engine:**
-        - [ ] **Builtins:**
-            - [ ] `cd`: Change directory ($HOME default).
-            - [ ] `exit`: Terminate shell.
-            - [ ] `export`: precise environment variable support.
-            - [ ] `unset`: Remove variables.
+        - [x] Globbing (`*`, `?`, `[...]` file matching).
+    - [/] **Execution Engine:**
+        - [/] **Builtins:**
+            - [x] `cd`: Change directory ($HOME default).
+            - [x] `exit`: Terminate shell.
+            - [x] `export`: precise environment variable support.
+            - [x] `unset`: Remove variables.
             - [ ] `exec`: Replace shell process.
             - [ ] `eval`: Parse and execute arguments.
             - [ ] `shift`: Shift positional parameters.
-        - [ ] **External Commands:**
-            - [ ] `fork()` / `execve()` search path (`$PATH`).
-            - [ ] `waitpid()` for synchronous execution.
+        - [x] **External Commands:**
+            - [x] `fork()` / `execve()` search path (`$PATH`).
+            - [x] `waitpid()` for synchronous execution.
     - [ ] **Job Control:**
         - [ ] **Process Groups:** Set pgid for pipelines.
         - [ ] **Foreground/Background:** `tcsetpgrp` management.
@@ -3336,19 +3337,21 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] `dup2` management for `<`, `>`, `>>`, `2>`, `2>&1`.
         - [ ] Here-Documents (`<< EOF`).
 - [ ] **Core Utilities:**
-    - [ ] **`ls` - List directory contents:**
-        - [ ] **Purpose:** List information about the FILEs (the current directory by default).
-        - [ ] **Standards:** POSIX.1-2017, BSD Extensions (color).
-        - [ ] **Operands:**
-            - [ ] `-a`, `--all`: List all files including hidden ones.
-            - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
-            - [ ] `-l`: Long listing format (permissions, ownership, size, time).
-            - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
-            - [ ] `-R`, `--recursive`: List subdirectories recursively.
-            - [ ] `-r`, `--reverse`: Reverse order while sorting.
-            - [ ] `-S`: Sort by file size.
-            - [ ] `-t`: Sort by modification time.
-            - [ ] `--color`: Colorize output (auto/always/never).
+    - [x] **`ls` - List directory contents:**
+        - [x] **Purpose:** List information about the FILEs (the current directory by default).
+        - [x] **Standards:** POSIX.1-2017, BSD Extensions (color).
+        - [x] **Operands:**
+            - [x] `-a`, `--all`: List all files including hidden ones.
+            - [x] `-A`, `--almost-all`: List all except `.` and `..`.
+            - [x] `-l`: Long listing format (permissions, ownership, size, time).
+            - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+            - [x] `-R`, `--recursive`: List subdirectories recursively.
+            - [x] `-r`, `--reverse`: Reverse order while sorting.
+            - [x] `-S`: Sort by file size.
+            - [x] `-t`: Sort by modification time.
+            - [x] `--color`: Colorize output (auto/always/never).
+        - [ ] **Runtime:**
+            - [ ] Column width calculation for multi-column output.
         - [ ] **Runtime:**
             - [ ] Column width calculation for multi-column output.
             - [ ] Date formatting (recent vs old files).

@@ -36,6 +36,7 @@
 #define SYS_ACCESS  33
 #define SYS_SYNC    36
 #define SYS_KILL    37
+#define SYS_RENAME  38
 #define SYS_MKDIR   39
 #define SYS_RMDIR   40
 #define SYS_DUP     41
