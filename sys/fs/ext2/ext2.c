@@ -522,6 +522,10 @@ static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
     
+    // Initialize optimization hints
+    ext2_fs.last_alloc_group = 0;
+    ext2_fs.last_alloc_bit = 0;
+
     // Setup root node
     ext2_root_ctx.fs = &ext2_fs;
     ext2_root_ctx.inode_num = EXT2_ROOT_INO;
@@ -556,8 +560,13 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     
     static uint8_t bitmap_buf[4096] __attribute__((aligned(4)));
     
-    // Search each block group for a free block
-    for (uint32_t group = 0; group < fs->group_count; group++) {
+    uint32_t start_group = fs->last_alloc_group;
+    uint32_t group = start_group;
+
+    // Search each block group for a free block, starting from hint
+    for (uint32_t k = 0; k < fs->group_count; k++) {
+        group = (start_group + k) % fs->group_count;
+
         if (fs->bgd[group].bg_free_blocks_count == 0) continue;
         
         // Read the block bitmap
@@ -565,26 +574,60 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             continue;
         }
         
-        // Find the first free bit
         uint32_t bits_in_group = fs->blocks_per_group;
         uint32_t i = 0;
-        uint32_t *bitmap32 = (uint32_t *)bitmap_buf;
 
-        // Fast path: skip full words
-        // We can safely skip only if the word is all ones (0xFFFFFFFF).
-        // This is endian-safe because 0xFFFFFFFF is all ones regardless of endianness.
-        for (; i + 32 <= bits_in_group; i += 32) {
-            if (bitmap32[i / 32] != 0xFFFFFFFF) {
-                break; // Found a word with free bits, fall through to slow path
-            }
+        // Use hint if we are in the hinted group
+        if (group == fs->last_alloc_group) {
+            i = fs->last_alloc_bit;
+            if (i >= bits_in_group) i = 0;
         }
 
-        // Slow path: check remaining bits (and the word we broke on)
-        for (; i < bits_in_group; i++) {
-            uint32_t byte_idx = i / 8;
-            uint32_t bit_idx = i % 8;
+        uint32_t *bitmap32 = (uint32_t *)bitmap_buf;
+
+        // Search loop with wrapping support within the group
+        for (int pass = 0; pass < 2; pass++) {
+            // If pass 0: scan i..limit
+            // If pass 1: scan 0..i
+
+            uint32_t limit = (pass == 0) ? bits_in_group : i;
+            uint32_t current_i = (pass == 0) ? i : 0;
+
+            if (pass == 1 && i == 0) break; // No need to scan 0..0
+
+            uint32_t j = current_i;
+
+            // Align to 32 bits if possible
+            while (j < limit && (j % 32) != 0) {
+                 uint32_t byte_idx = j / 8;
+                 uint32_t bit_idx = j % 8;
+                 if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) goto found;
+                 j++;
+            }
+
+            // Skip full words
+            for (; j + 32 <= limit; j += 32) {
+                if (bitmap32[j / 32] != 0xFFFFFFFF) {
+                    break;
+                }
+            }
             
-            if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) {
+            // Check remaining bits
+            for (; j < limit; j++) {
+                uint32_t byte_idx = j / 8;
+                uint32_t bit_idx = j % 8;
+
+                if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) {
+                    goto found;
+                }
+            }
+
+            continue;
+
+            found: {
+                 uint32_t byte_idx = j / 8;
+                 uint32_t bit_idx = j % 8;
+
                 // Found free block - allocate it
                 bitmap_buf[byte_idx] |= (1 << bit_idx);
                 
@@ -595,11 +638,15 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
                 fs->bgd[group].bg_free_blocks_count--;
                 
                 // Calculate absolute block number
-                uint32_t block_num = group * fs->blocks_per_group + i + fs->sb.s_first_data_block;
+                uint32_t block_num = group * fs->blocks_per_group + j + fs->sb.s_first_data_block;
                 
                 // Update superblock free blocks count
                 fs->sb.s_free_blocks_count--;
                 
+                // Update hints
+                fs->last_alloc_group = group;
+                fs->last_alloc_bit = (j + 1) % bits_in_group;
+
                 return block_num;
             }
         }

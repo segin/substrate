@@ -124,6 +124,9 @@ typedef struct {
     uint32_t blocks_per_group;
     uint32_t group_count;
     uint32_t inode_size;
+    // Optimization hints
+    uint32_t last_alloc_group;
+    uint32_t last_alloc_bit;
 } ext2_fs_t;
 
 // EXT2 file/directory node context
@@ -140,5 +143,6 @@ void ext2_init(void);
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer);
 uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, void *buffer);
+uint32_t ext2_alloc_block(ext2_fs_t *fs);
 
 #endif
