@@ -3299,10 +3299,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Audit `lexer.c`, `parser.c`, `expand.c`, `exec.c`, `sh.c` for naive implementations or TODOs.
         - [ ] Setup coverage-guided fuzzing for the parser and expansion engine.
     - [ ] **Invocation & Startup:**
-        - [ ] Handle `sh -c` correctly.
-        - [ ] Handle `sh -s` correctly.
-        - [ ] Detect and handle login shell behavior.
-        - [ ] Argument parsing and POSIX option processing.
+        - [x] Handle `sh -c` correctly.
+        - [x] Handle `sh -s` correctly.
+        - [x] Detect and handle login shell behavior.
+        - [x] Argument parsing and POSIX option processing.
         - [ ] Interactive vs non-interactive mode detection.
         - [ ] Startup files: `ENV` and profile handling.
         - [ ] Locale and environment initialization.
