@@ -51,4 +51,10 @@ process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 
+/* Load Average */
+void sched_update_loadavg(void);
+void sched_get_loadavg(unsigned long *loads);
+uint32_t sched_count_runnable(void);
+uint32_t sched_count_threads(void);
+
 #endif
