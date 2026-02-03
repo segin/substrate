@@ -17,11 +17,11 @@
 .Sh DESCRIPTION
 The
 .Fn device_get
-function increments the reference count of a device structure.
+function atomically increments the reference count of a device structure.
 .Pp
 The
 .Fn device_put
-function decrements the reference count. If the reference count reaches zero, the device structure is freed.
+function atomically decrements the reference count. If the reference count reaches zero, the device structure is freed.
 .Pp
 If
 .Fa dev

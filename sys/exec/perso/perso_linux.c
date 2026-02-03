@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include "../../arch/i386/syscall.h"
 #include "../../include/sys/syscall_impl.h"
-#include <sys/ioctl.h>
-#include <sys/termios.h>
+#include "../../include/sys/ioctl.h"
+#include "../../include/sys/termios.h"
 #include "compat.h"
 #include "linux/linux_syscalls.h"
 #include "linux_user.h"
