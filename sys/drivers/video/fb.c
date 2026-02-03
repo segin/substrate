@@ -48,7 +48,9 @@ static uint8_t rgb_to_index(uint32_t color) {
 }
 
 static void linear_fb_putpixel(int x, int y, uint32_t color) {
-    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
+    /* Use virt_height if set, otherwise height */
+    int max_y = fb.virt_height ? (int)fb.virt_height : (int)fb.height;
+    if (x < 0 || x >= (int)fb.width || y < 0 || y >= max_y) return;
 
     if (fb.bpp >= 15) {
         uint8_t *pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x * (fb.bpp / 8));
@@ -261,7 +263,9 @@ static int mb_init(fb_info_t *info) {
     info->height = saved_mbi->framebuffer_height;
     info->pitch = saved_mbi->framebuffer_pitch;
     info->bpp = saved_mbi->framebuffer_bpp;
+    info->virt_height = saved_mbi->framebuffer_height;
     info->putpixel = linear_fb_putpixel;
+    info->scroll = NULL;
     return 0;
 }
 static video_driver_t mb_driver = {
@@ -377,6 +381,7 @@ void fb_init(multiboot_info_t *mbi) {
         fb_active = 1;
         current_driver = selected_drv;
         fb.putpixel = fb.putpixel ? fb.putpixel : linear_fb_putpixel; // Ensure fallback
+        if (fb.virt_height == 0) fb.virt_height = fb.height; // Fallback
         kprint("Video: Initialization success.\n");
     } else {
         kprint("Video: Initialization failed.\n");

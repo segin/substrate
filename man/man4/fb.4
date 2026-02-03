@@ -1,0 +1,46 @@
+.Dd October 26, 2023
+.Dt FB 4
+.Os
+.Sh NAME
+.Nm fb
+.Nd framebuffer device driver
+.Sh SYNOPSIS
+.In sys/fb.h
+.Sh DESCRIPTION
+The
+.Nm
+driver provides a linear framebuffer interface for graphics devices.
+It supports high-resolution graphics modes and hardware scrolling acceleration
+when available (e.g., via the Bochs Graphics Adapter).
+.Pp
+The driver creates the
+.Pa /dev/fb0
+device node, which can be accessed via
+.Xr mmap 2
+to map the framebuffer memory into user space.
+.Sh IOCTLS
+The following
+.Xr ioctl 2
+calls are supported:
+.Bl -tag -width FBIOGET_VSCREENINFO
+.It Dv FBIOGET_VSCREENINFO
+Get variable screen information, including resolution and color depth.
+Returns a
+.Vt struct fb_var_screeninfo .
+.It Dv FBIOPUT_VIDEO_MODE
+Set the video mode.
+.El
+.Sh HARDWARE SCROLLING
+On supported hardware (like BGA), the driver allocates a virtual buffer
+larger than the visible screen (typically 2x height). This allows for
+accelerated console scrolling by adjusting the display start offset
+rather than performing expensive memory copies.
+.Sh FILES
+.Pa /dev/fb0
+.Sh SEE ALSO
+.Xr mmap 2 ,
+.Xr vga 4
+.Sh HISTORY
+The
+.Nm
+driver first appeared in the kernel. Hardware scrolling support was added later.
