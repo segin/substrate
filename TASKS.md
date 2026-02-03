@@ -3325,12 +3325,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Robust error recovery and diagnostics.
     - [ ] **Expansions (Exact Order):**
         - [x] **1. Tilde Expansion**
-        - [ ] **2. Parameter Expansion:**
+        - [x] **2. Parameter Expansion:**
             - [x] Basic `$VAR`, `${VAR}`.
             - [x] `${VAR:-def}`, `${VAR:=def}`, `${VAR:?err}`, `${VAR:+alt}`.
-            - [ ] `${#VAR}` (Length).
-            - [ ] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
-            - [ ] `${VAR#pat}`, `${VAR##pat}` (Prefix).
+            - [x] `${#VAR}` (Length).
+            - [x] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
+            - [x] `${VAR#pat}`, `${VAR##pat}` (Prefix).
             - [ ] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
             - [ ] Nested parameter expansions.
         - [x] **3. Command Substitution** (`$(cmd)`).
@@ -3342,7 +3342,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Input/Output (`<`, `>`, `>>`).
         - [x] FD duplication (`<&`, `>&`).
         - [x] Here-documents (`<<`).
-        - [ ] Proper ordering and evaluation timing.
+        - [x] Proper ordering and evaluation timing.
         - [x] Error handling and rollback (save/restore).
     - [ ] **Execution Engine:**
         - [x] Builtin vs external command resolution.
