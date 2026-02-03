@@ -3314,7 +3314,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Tilde Expansion (`~` -> `$HOME`).
         - [x] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
         - [ ] Command Substitution (`$(cmd)`).
-        - [ ] Arithmetic Expansion (`$(( 1 + 2 ))`).
+        - [x] Arithmetic Expansion (`$(( 1 + 2 ))`).
         - [x] Globbing (`*`, `?`, `[...]` file matching).
     - [/] **Execution Engine:**
         - [/] **Builtins:**
