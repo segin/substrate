@@ -112,6 +112,9 @@ Running `make host_dist` builds and installs the core utilities into a local `ho
 
 These tools are compiled using the host's compiler (`cc`) and C library, but strictly adhering to the project's own Makefiles and source code, allowing verification of logic and behavior on a stable host.
 
+> [!CAUTION]
+> **Host Builds NEVER use Substrate's libc.** When `NATIVE_BUILD=1` is set, programs link against the host OS's standard C library (glibc, musl, etc.), not `lib/c/`. The Substrate libc (`lib/c/`, `lib/sys/`) is exclusively for the Substrate kernel and target binaries. Never modify these libraries to support Linux or other host operating systems.
+
 ## Recent Progress (as of Jan 2026)
 - Implemented `sys_brk` for dynamic heap allocation.
 - Stabilized BusyBox TLS (GS segment and Variant II offsets).
