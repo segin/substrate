@@ -178,6 +178,38 @@ uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint3
         uint32_t block_offset = (uint32_t)(offset % fs->block_size);
         uint32_t block_num = ext2_get_block_num(fs, inode, block_idx);
         
+        // Optimization: Read multiple contiguous blocks directly into buffer
+        // Condition: Start of block, full block needed, and not sparse
+        if (block_offset == 0 && size >= fs->block_size && block_num != 0) {
+            uint32_t count = 1;
+            uint32_t max_blocks = size / fs->block_size;
+            // Limit lookahead to reasonable chunk (e.g., 256 blocks / 1MB)
+            if (max_blocks > 256) max_blocks = 256;
+
+            while (count < max_blocks) {
+                uint32_t next_block = ext2_get_block_num(fs, inode, block_idx + count);
+                if (next_block == 0 || next_block != block_num + count) break;
+                count++;
+            }
+
+            // Perform single large read directly to user buffer
+            if (count > 0) {
+                off_t dev_offset = (off_t)block_num * fs->block_size;
+                uint32_t bytes_to_read = count * fs->block_size;
+
+                if (fs->device->read &&
+                    fs->device->read(fs->device, dev_offset, bytes_to_read, buf) == bytes_to_read) {
+
+                    buf += bytes_to_read;
+                    total_read += bytes_to_read;
+                    offset += bytes_to_read;
+                    size -= bytes_to_read;
+                    continue;
+                }
+                // Fallback to single block read if large read fails
+            }
+        }
+
         if (block_num == 0) {
             // Sparse file - return zeros
             uint32_t to_copy = fs->block_size - block_offset;
