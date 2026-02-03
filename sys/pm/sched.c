@@ -1,4 +1,6 @@
 #include <kern/sched.h>
+#include <kern/time.h>
+#include <sys/errno.h>
 #include <pm/pm.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -149,6 +151,35 @@ void sched_sleep(void *chan) {
     current_thread->wait_chan = chan;
     current_thread->state = THREAD_BLOCKED;
     sched_yield();
+}
+
+int sched_sleep_until(void *chan, uint64_t deadline_tick) {
+    if (!current_thread) return 0;
+
+    current_thread->sleep_expiry = deadline_tick;
+    current_thread->sleep_status = 0;
+
+    sched_sleep(chan);
+
+    current_thread->sleep_expiry = 0;
+    return current_thread->sleep_status;
+}
+
+void sched_tick(void) {
+    uint64_t now = get_ticks();
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 &&
+            threads[i].state == THREAD_BLOCKED &&
+            threads[i].sleep_expiry > 0 &&
+            now >= threads[i].sleep_expiry) {
+
+            threads[i].state = THREAD_READY;
+            threads[i].wait_chan = NULL;
+            threads[i].sleep_status = -ETIMEDOUT;
+            threads[i].sleep_expiry = 0;
+        }
+    }
 }
 
 void sched_wakeup(void *chan) {

@@ -5,6 +5,9 @@
 #include <sys/types.h>
 #include <sys/times.h>
 
+// Get current ticks
+uint64_t get_ticks(void);
+
 // Get current Unix timestamp (wall-clock time)
 time_t get_time(void);
 

@@ -156,6 +156,10 @@ typedef struct thread {
     void         *wait_chan; // Channel thread is sleeping on
     const char   *wait_reason; // Description of wait event
     
+    // Sleep Timeout
+    uint64_t      sleep_expiry; // Absolute tick count when sleep expires
+    int           sleep_status; // Return status of sleep (e.g., -ETIMEDOUT)
+
     // Signals
     uint32_t      sig_pending;
     uint32_t      sig_mask;
