@@ -632,13 +632,13 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
 
     // 3. Write Inode
     if (minix_write_inode_raw(fs, inode_num, &inode) != 0) {
-        // TODO: Free inode (clear bit)
+        minix_free_inode(fs, inode_num);
         return -1;
     }
 
     // 4. Add to Directory
     if (minix_dir_add(dir, name, inode_num) != 0) {
-        // TODO: Free inode
+        minix_free_inode(fs, inode_num);
         return -1;
     }
 
