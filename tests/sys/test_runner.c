@@ -186,6 +186,10 @@ void run_kernel_tests(void) {
     }
     */
 
+    if (all || strcmp(test_arg, "string") == 0) {
+        run_string_tests();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested
