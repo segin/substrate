@@ -152,6 +152,10 @@ void run_kernel_tests(void) {
          test_printf_new();
     }
 
+    if (all || strcmp(test_arg, "uma") == 0) {
+        run_uma_tests();
+    }
+
     if (all || strcmp(test_arg, "udf") == 0) {
         run_udf_write_tests();
     }
