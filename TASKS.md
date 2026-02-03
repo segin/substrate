@@ -3295,62 +3295,106 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
-    - [x] **Lexer (Tokenizer):**
-        - [x] Handle delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
-        - [x] Handle quoting (`'` single, `"` double) and escaping (`\`).
-        - [x] Handle operators (`&&`, `||`, `>>`, `<<`).
-        - [x] Variable recognition (`$PROMPT`, `${VAR}`).
-    - [/] **Parser (AST Generation):**
-        - [x] **Simple Commands:** List of arguments + redirections.
-        - [x] **Pipelines:** Chain of simple commands connected by pipes.
-        - [x] **Lists:** Sequences (`cmd1 ; cmd2`) and Logic (`cmd1 && cmd2`).
-        - [x] **Compound Commands:**
-            - [x] `IfClause`: `if` list `then` list `else` list `fi` (including `elif`).
-            - [x] `WhileClause`: `while` list `do` list `done`.
-            - [x] `ForClause`: `for` name `in` words `do` list `done`.
-            - [x] `FunctionDef`: `name() { list; }`.
-            - [x] `Subshells/Groups`: `( list )` and `{ list; }`.
-        - [ ] **Missing Parsing Features:**
-            - [ ] `CaseClause`: `case word in pattern) list ;; esac`.
-            - [ ] **Redirections on Compound Commands:** `while ... done > file`.
-            - [ ] **Assignment Words:** `VAR=val cmd` parsing.
-    - [/] **Expansion (WordExp):**
-        - [x] Tilde Expansion (`~` -> `$HOME`).
-        - [x] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
-            - [x] Missing: `${#VAR}` (Length), `${VAR%pat}` (Suffix), `${VAR?err}`.
-        - [x] Command Substitution (`$(cmd)`).
-        - [x] Arithmetic Expansion (`$(( 1 + 2 ))`).
-        - [x] Globbing (`*`, `?`, `[...]` file matching).
-        - [ ] **Field Splitting:** Split unquoted expansions by `$IFS`.
-        - [ ] **Quote Removal:** Separate pass after expansion.
-    - [/] **Execution Engine:**
-        - [ ] **State Management:**
-            - [ ] `$?`: Exit status tracking.
-            - [ ] `$$`, `$!`: PID tracking.
-        - [ ] **Builtin Redirection:** Support `cd / > /dev/null` (FD save/restore).
-        - [/] **Builtins:**
-            - [x] `cd`: Change directory ($HOME default).
-            - [x] `exit`: Terminate shell.
-            - [x] `export`: precise environment variable support.
-            - [x] `unset`: Remove variables.
-            - [x] `exec`: Replace shell process.
-            - [x] `eval`: Parse and execute arguments.
-            - [x] `shift`: Shift positional parameters.
-            - [ ] `read`: Read input.
-            - [ ] `set`: Set positional parameters / flags.
-            - [ ] `trap`: Signal handling.
-            - [ ] `return`: Function return.
-        - [x] **External Commands:**
-            - [x] `fork()` / `execve()` search path (`$PATH`).
-            - [x] `waitpid()` for synchronous execution.
+    - [ ] **Code Audit & Infrastructure:**
+        - [ ] Audit `lexer.c`, `parser.c`, `expand.c`, `exec.c`, `sh.c` for naive implementations or TODOs.
+        - [ ] Setup coverage-guided fuzzing for the parser and expansion engine.
+    - [ ] **Invocation & Startup:**
+        - [ ] Handle `sh -c` correctly.
+        - [ ] Handle `sh -s` correctly.
+        - [ ] Detect and handle login shell behavior.
+        - [ ] Argument parsing and POSIX option processing.
+        - [ ] Interactive vs non-interactive mode detection.
+        - [ ] Startup files: `ENV` and profile handling.
+        - [ ] Locale and environment initialization.
+        - [ ] Signal disposition at startup.
+    - [x] **Lexical Analysis:**
+        - [x] Delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
+        - [x] Quoting (`'` single, `"` double) and escaping (`\`).
+        - [x] Operators (`&&`, `||`, `>>`, `<<`, `<&`, `>&`).
+        - [x] Comment handling (`#`).
+        - [ ] Line continuation rules (backslash-newline).
+        - [ ] Here-document lexing (quoted vs unquoted delimiters).
+    - [x] **Shell Grammar & Parsing:**
+        - [x] Simple commands.
+        - [x] Pipelines.
+        - [x] Lists (`;`, `&`, `&&`, `||`).
+        - [x] Compound commands (`if`, `while`, `for`, `case`).
+        - [x] Grouping `{}` and subshells `()`.
+        - [x] Function definitions.
+        - [ ] Precedence and associativity verification.
+        - [ ] Robust error recovery and diagnostics.
+    - [ ] **Expansions (Exact Order):**
+        - [x] **1. Tilde Expansion**
+        - [ ] **2. Parameter Expansion:**
+            - [x] Basic `$VAR`, `${VAR}`.
+            - [x] `${VAR:-def}`, `${VAR:=def}`, `${VAR:?err}`, `${VAR:+alt}`.
+            - [ ] `${#VAR}` (Length).
+            - [ ] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
+            - [ ] `${VAR#pat}`, `${VAR##pat}` (Prefix).
+            - [ ] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
+            - [ ] Nested parameter expansions.
+        - [x] **3. Command Substitution** (`$(cmd)`).
+        - [x] **4. Arithmetic Expansion** (`$(( ... ))`).
+        - [ ] **5. Field Splitting:** Use `$IFS` for unquoted expansions.
+        - [ ] **6. Pathname Expansion:** Globbing (`*`, `?`, `[...]`).
+        - [ ] **7. Quote Removal:** Final pass.
+    - [ ] **Redirections:**
+        - [x] Input/Output (`<`, `>`, `>>`).
+        - [x] FD duplication (`<&`, `>&`).
+        - [x] Here-documents (`<<`).
+        - [ ] Proper ordering and evaluation timing.
+        - [x] Error handling and rollback (save/restore).
+    - [ ] **Execution Engine:**
+        - [x] Builtin vs external command resolution.
+        - [x] PATH search rules.
+        - [ ] `exec` behavior (shell replacement).
+        - [x] Process forking model.
+        - [ ] Job control hooks integration.
+        - [x] Exit status propagation.
+        - [ ] `set -e` semantics.
+    - [ ] **Builtin Commands:**
+        - [ ] `:` (Null command).
+        - [ ] `.` (Dot/Source).
+        - [ ] `break`.
+        - [ ] `continue`.
+        - [x] `cd` (including `CDPATH`).
+        - [ ] `command`.
+        - [x] `eval`.
+        - [x] `exec`.
+        - [x] `exit`.
+        - [x] `export`.
+        - [ ] `getopts`.
+        - [ ] `read`.
+        - [ ] `readonly`.
+        - [ ] `return`.
+        - [ ] `set`.
+        - [x] `unset`.
+        - [x] `shift`.
+        - [ ] `times`.
+        - [ ] `trap`.
+        - [ ] `umask`.
+        - [ ] `wait`.
+    - [ ] **Variables & Environment:**
+        - [ ] Shell vs Environment variable distinction.
+        - [ ] Scope rules (Global, Local, Function).
+        - [ ] Export semantics.
+        - [ ] Read-only enforcement.
+    - [x] **Functions:**
+        - [x] Definition and Invocation.
+        - [x] Local variables scoping.
+        - [x] Return behavior.
     - [x] **Job Control:**
-        - [x] **Process Groups:** Set pgid for pipelines.
-        - [x] **Foreground/Background:** `tcsetpgrp` management.
-        - [x] **Job Table:** Track status (Running, Stopped, Done).
-        - [x] **Signals:** `SIGINT`, `SIGTSTP`, `SIGCHLD` handler.
-    - [ ] **Redirection:**
-        - [x] `dup2` management for `<`, `>`, `>>`, `2>`, `2>&1`.
-        - [x] Here-Documents (`<< EOF`).
+        - [x] Foreground/Background.
+        - [x] Process groups.
+        - [x] Signal forwarding.
+    - [ ] **Signals & Traps:**
+        - [ ] Default signal handling.
+        - [ ] `trap` builtin integration.
+    - [ ] **Testing & Compliance:**
+        - [ ] Unit tests for all modules.
+        - [ ] Script-based conformance tests.
+        - [ ] Coverage-guided fuzzing.
+        - [ ] Man page (`sh(1)`).
 - [ ] **Core Utilities:**
     - [x] **`ls` - List directory contents:**
         - [x] **Purpose:** List information about the FILEs (the current directory by default).
