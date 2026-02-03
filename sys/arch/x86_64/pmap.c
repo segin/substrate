@@ -6,7 +6,9 @@
 extern uint64_t boot_pml4[]; // From boot.S
 
 // KERNEL_BASE for x86_64 is typically -2GB
+#ifndef KERNEL_BASE
 #define KERNEL_BASE     0xFFFFFFFF80000000UL
+#endif
 #define RECURSIVE_SLOT  510UL
 
 // Helper to convert kernel virtual to physical
@@ -25,10 +27,18 @@ static inline void *pmap_ptokv(uint64_t pa) {
 static struct pmap kernel_pmap_store;
 static pmap_t kernel_pmap_ptr = &kernel_pmap_store;
 
+// Global pmap list and lock
+struct pmap_list global_pmap_list;
+spinlock_t pmap_list_lock;
+
 // Current pmap (per-cpu var?)
 static pmap_t curpmap = &kernel_pmap_store;
 
 void pmap_init(void) {
+    // 0. Initialize global list and lock
+    spinlock_init(&pmap_list_lock, "pmap_list");
+    TAILQ_INIT(&global_pmap_list);
+
     // 1. Setup Recursive Mapping at Slot 510
     // boot_pml4 is physical or virtual?
     // In early boot, usually identity mapped or 
@@ -44,6 +54,9 @@ void pmap_init(void) {
     kernel_pmap_store.pml4 = (pml4e_t *)boot_pml4;
     kernel_pmap_store.pml4_phys = phys_pml4;
 
+    // Add kernel pmap to global list
+    TAILQ_INSERT_TAIL(&global_pmap_list, &kernel_pmap_store, list_entry);
+
     // 3. Enable NX (EFER.NXE) - MSR 0xC0000080 bit 11
     // uint64_t efer = rdmsr(0xC0000080);
     // wrmsr(0xC0000080, efer | (1<<11));
@@ -56,17 +69,21 @@ void pmap_init(void) {
 pmap_t pmap_kernel(void) { return kernel_pmap_ptr; }
 
 void pmap_activate(pmap_t pmap) {
+#ifndef HOST_TEST
     uint64_t current_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
 
     if (current_cr3 != pmap->pml4_phys) {
         __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pml4_phys) : "memory");
     }
+#endif
     curpmap = pmap;
 }
 
 void pmap_invalidate_page(uint64_t va) {
+#ifndef HOST_TEST
     __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
+#endif
 }
 
 /*
@@ -213,10 +230,9 @@ pmap_t pmap_create(void) {
     
     memset(&pmap->stats, 0, sizeof(struct pmap_stats));
     
-    pmap->list_entry.next = NULL;
-    pmap->list_entry.prev = NULL;
-    
-    // TODO: Add to global pmap list
+    spinlock_acquire(&pmap_list_lock);
+    TAILQ_INSERT_TAIL(&global_pmap_list, pmap, list_entry);
+    spinlock_release(&pmap_list_lock);
     
     return pmap;
 }
@@ -234,6 +250,10 @@ void pmap_destroy(pmap_t pmap) {
     // TODO: Atomic decrement
     pmap->ref_count--;
     if (pmap->ref_count > 0) return;
+
+    spinlock_acquire(&pmap_list_lock);
+    TAILQ_REMOVE(&global_pmap_list, pmap, list_entry);
+    spinlock_release(&pmap_list_lock);
     
     // 2. Free user pages (PML4 entries 0-255)
     // pmap->pml4 is accessible (virtual)
@@ -779,9 +799,11 @@ static volatile int shootdown_pending;
  * pmap_invalidate_all - Flush entire TLB by reloading CR3
  */
 void pmap_invalidate_all(void) {
+#ifndef HOST_TEST
     uint64_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+#endif
 }
 
 /*
@@ -895,7 +917,9 @@ void pmap_shootdown_wait(int expected_cpus) {
     
     int timeout = 1000000;
     while (shootdown_ack_count < expected_cpus && timeout > 0) {
+#ifndef HOST_TEST
         __asm__ volatile("pause");
+#endif
         timeout--;
     }
 }
@@ -908,6 +932,7 @@ void pmap_shootdown_wait(int expected_cpus) {
  * Returns: 1 if supported (CPUID.80000001H:EDX[26]), 0 otherwise.
  */
 int cpuid_check_1gb_pages(void) {
+#ifndef HOST_TEST
     uint32_t eax, ebx, ecx, edx;
     
     // Check extended CPUID support
@@ -917,6 +942,9 @@ int cpuid_check_1gb_pages(void) {
     // Check 1GB page support bit
     __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000001));
     return (edx >> 26) & 1;
+#else
+    return 0;
+#endif
 }
 
 /*
@@ -1082,9 +1110,13 @@ void pmap_remove_1gb(pmap_t pmap, uint64_t va) {
  * Returns: 1 if supported (CPUID.01H:EDX[13]), 0 otherwise.
  */
 int cpuid_check_pge(void) {
+#ifndef HOST_TEST
     uint32_t eax, ebx, ecx, edx;
     __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
     return (edx >> 13) & 1;
+#else
+    return 0;
+#endif
 }
 
 /*
@@ -1097,10 +1129,12 @@ int cpuid_check_pge(void) {
 void pmap_pge_enable(void) {
     if (!cpuid_check_pge()) return;
     
+#ifndef HOST_TEST
     uint64_t cr4;
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     cr4 |= (1UL << 7); // CR4.PGE
     __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+#endif
 }
 
 /*
@@ -1110,10 +1144,12 @@ void pmap_pge_enable(void) {
  * (toggle CR4.PGE off then on, or use INVPCID).
  */
 void pmap_pge_disable(void) {
+#ifndef HOST_TEST
     uint64_t cr4;
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     cr4 &= ~(1UL << 7);
     __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+#endif
 }
 
 /*
@@ -1209,6 +1245,7 @@ int pmap_clear_global(pmap_t pmap, uint64_t va) {
  * This uses the CR4 toggle method for compatibility.
  */
 void pmap_invalidate_global(void) {
+#ifndef HOST_TEST
     uint64_t cr4;
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     
@@ -1217,6 +1254,7 @@ void pmap_invalidate_global(void) {
     
     // Toggle PGE back on
     __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+#endif
 }
 
 /*
@@ -1245,9 +1283,13 @@ static int pcid_pool_count = 0;
  * Returns: 1 if supported (CPUID.01H:ECX[17]), 0 otherwise.
  */
 int cpuid_check_pcid(void) {
+#ifndef HOST_TEST
     uint32_t eax, ebx, ecx, edx;
     __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
     return (ecx >> 17) & 1;
+#else
+    return 0;
+#endif
 }
 
 /*
@@ -1256,9 +1298,13 @@ int cpuid_check_pcid(void) {
  * Returns: 1 if supported (CPUID.07H:EBX[10]), 0 otherwise.
  */
 int cpuid_check_invpcid(void) {
+#ifndef HOST_TEST
     uint32_t eax, ebx, ecx, edx;
     __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
     return (ebx >> 10) & 1;
+#else
+    return 0;
+#endif
 }
 
 /*
@@ -1271,10 +1317,12 @@ int cpuid_check_invpcid(void) {
 void pmap_pcid_enable(void) {
     if (!cpuid_check_pcid()) return;
     
+#ifndef HOST_TEST
     uint64_t cr4;
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     cr4 |= (1UL << 17); // CR4.PCIDE
     __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+#endif
 }
 
 /*
@@ -1339,7 +1387,9 @@ void pmap_activate_pcid(pmap_t pmap, int noflush) {
         new_cr3 |= (1ULL << 63); // NOFLUSH bit
     }
     
+#ifndef HOST_TEST
     __asm__ volatile("mov %0, %%cr3" :: "r"(new_cr3) : "memory");
+#endif
     curpmap = pmap;
 }
 
@@ -1363,12 +1413,14 @@ void pmap_invpcid(int type, int pcid, uint64_t va) {
         return;
     }
     
+#ifndef HOST_TEST
     struct {
         uint64_t pcid;
         uint64_t addr;
     } __attribute__((packed)) descriptor = { (uint64_t)pcid, va };
     
     __asm__ volatile("invpcid %0, %1" :: "m"(descriptor), "r"((uint64_t)type) : "memory");
+#endif
 }
 
 /*
