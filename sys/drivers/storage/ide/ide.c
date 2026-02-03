@@ -510,9 +510,8 @@ int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
     for (int i = 0; i < count; i++) {
         ide_wait_bsy(channel);
         ide_wait_drq(channel);
-        for (int j = 0; j < 256; j++) {
-            *buf++ = inw(bus + ATA_REG_DATA);
-        }
+        insw(bus + ATA_REG_DATA, buf, 256);
+        buf += 256;
     }
     return 0;
 }
@@ -536,9 +535,8 @@ int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
     for (int i = 0; i < count; i++) {
         ide_wait_bsy(channel);
         ide_wait_drq(channel);
-        for (int j = 0; j < 256; j++) {
-            *buf++ = inw(bus + ATA_REG_DATA);
-        }
+        insw(bus + ATA_REG_DATA, buf, 256);
+        buf += 256;
     }
     return 0;
 }
@@ -559,9 +557,8 @@ int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
     for (int i = 0; i < count; i++) {
         ide_wait_bsy(channel);
         ide_wait_drq(channel);
-        for (int j = 0; j < 256; j++) {
-            outw(bus + ATA_REG_DATA, *buf++);
-        }
+        outsw(bus + ATA_REG_DATA, buf, 256);
+        buf += 256;
     }
     return 0;
 }
@@ -585,9 +582,8 @@ int ide_write_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
     for (int i = 0; i < count; i++) {
         ide_wait_bsy(channel);
         ide_wait_drq(channel);
-        for (int j = 0; j < 256; j++) {
-            outw(bus + ATA_REG_DATA, *buf++);
-        }
+        outsw(bus + ATA_REG_DATA, buf, 256);
+        buf += 256;
     }
     return 0;
 }
@@ -621,10 +617,7 @@ int ide_identify(uint16_t bus, uint8_t drive, void *buffer) {
 
     ide_wait_drq(channel);
 
-    uint16_t *buf = (uint16_t *)buffer;
-    for (int i = 0; i < 256; i++) {
-        buf[i] = inw(bus + ATA_REG_DATA);
-    }
+    insw(bus + ATA_REG_DATA, buffer, 256);
     return 0;
 }
 
@@ -644,10 +637,7 @@ int ide_identify_atapi(uint16_t bus, uint8_t drive, void *buffer) {
     ide_wait_bsy(channel);
     ide_wait_drq(channel);
 
-    uint16_t *buf = (uint16_t *)buffer;
-    for (int i = 0; i < 256; i++) {
-        buf[i] = inw(bus + ATA_REG_DATA);
-    }
+    insw(bus + ATA_REG_DATA, buffer, 256);
     return 0;
 }
 
@@ -752,15 +742,23 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
         uint16_t words = byte_count / 2;
         
         if (write) {
-            for (uint16_t i = 0; i < words && transferred < buffer_len; i++) {
-                outw(bus + ATA_REG_DATA, *buf++);
-                transferred += 2;
+            uint32_t chunk = words;
+            uint32_t remaining_words = (buffer_len - transferred) / 2;
+            if (chunk > remaining_words) {
+                chunk = remaining_words;
             }
+            outsw(bus + ATA_REG_DATA, buf, chunk);
+            buf += chunk;
+            transferred += chunk * 2;
         } else {
-            for (uint16_t i = 0; i < words && transferred < buffer_len; i++) {
-                *buf++ = inw(bus + ATA_REG_DATA);
-                transferred += 2;
+            uint32_t chunk = words;
+            uint32_t remaining_words = (buffer_len - transferred) / 2;
+            if (chunk > remaining_words) {
+                chunk = remaining_words;
             }
+            insw(bus + ATA_REG_DATA, buf, chunk);
+            buf += chunk;
+            transferred += chunk * 2;
         }
     }
     
