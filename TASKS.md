@@ -3323,8 +3323,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `export`: precise environment variable support.
             - [x] `unset`: Remove variables.
             - [ ] `exec`: Replace shell process.
-            - [ ] `eval`: Parse and execute arguments.
-            - [ ] `shift`: Shift positional parameters.
+            - [x] `eval`: Parse and execute arguments.
+            - [x] `shift`: Shift positional parameters.
         - [x] **External Commands:**
             - [x] `fork()` / `execve()` search path (`$PATH`).
             - [x] `waitpid()` for synchronous execution.
