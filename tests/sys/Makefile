@@ -8,6 +8,8 @@ SRCS = test_runner.c test_pmap.c property_pmap_protect.c test_vm_expanded.c test
 # Add more tests here: test_mmap.c test_gdt.c etc.
 # property_pmap.c needs fixing (missing headers) maybe? Excluding for now to ensure build.
 
+SRCS += bench_sched.c
+
 OBJS = $(SRCS:.c=.o)
 
 all: tests.o
