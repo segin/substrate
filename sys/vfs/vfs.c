@@ -118,7 +118,9 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
             kprint("VFS: Mount point not found: ");
             kprint(path);
             kprint("\n");
-            // TODO: Free root? Unmount?
+            if (root->unmount) {
+                root->unmount(root);
+            }
             return -1; 
         }
 
@@ -126,6 +128,9 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
              kprint("VFS: Mount point is not a directory: ");
              kprint(path);
              kprint("\n");
+             if (root->unmount) {
+                 root->unmount(root);
+             }
              return -1;
         }
         
