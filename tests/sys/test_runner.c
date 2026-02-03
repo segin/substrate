@@ -186,6 +186,11 @@ void run_kernel_tests(void) {
     }
     */
 
+    if (all || strcmp(test_arg, "sysctl") == 0) {
+        extern void test_sysctl(void);
+        test_sysctl();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested
