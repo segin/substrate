@@ -32,6 +32,14 @@ uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
     return fs->device->read(fs->device, offset, fs->block_size, buffer);
 }
 
+// Read multiple blocks from the device
+static uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t start_block, uint32_t count, void *buffer) {
+    if (!fs || !fs->device || !fs->device->read) return 0;
+    off_t offset = (off_t)start_block * fs->block_size;
+    size_t size = count * fs->block_size;
+    return fs->device->read(fs->device, offset, size, buffer);
+}
+
 // Read an inode
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     if (!fs || inode_num == 0) return -1;
@@ -176,30 +184,70 @@ uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint3
         // Use 64-bit division/modulo
         uint32_t block_idx = (uint32_t)(offset / fs->block_size);
         uint32_t block_offset = (uint32_t)(offset % fs->block_size);
-        uint32_t block_num = ext2_get_block_num(fs, inode, block_idx);
         
-        if (block_num == 0) {
-            // Sparse file - return zeros
+        // Single block path for unaligned start or small tail
+        if (block_offset != 0 || size < fs->block_size) {
+            uint32_t block_num = ext2_get_block_num(fs, inode, block_idx);
+
+            if (block_num == 0) {
+                // Sparse file - return zeros
+                uint32_t to_copy = fs->block_size - block_offset;
+                if (to_copy > size) to_copy = size;
+                memset(buf, 0, to_copy);
+                buf += to_copy;
+                total_read += to_copy;
+                offset += to_copy;
+                size -= to_copy;
+                continue;
+            }
+
+            ext2_read_block(fs, block_num, block_buf);
+
             uint32_t to_copy = fs->block_size - block_offset;
             if (to_copy > size) to_copy = size;
-            memset(buf, 0, to_copy);
+
+            memcpy(buf, block_buf + block_offset, to_copy);
             buf += to_copy;
             total_read += to_copy;
             offset += to_copy;
             size -= to_copy;
             continue;
         }
+
+        // Aligned start, at least one full block to read.
+        // Try to read multiple contiguous blocks.
+        uint32_t start_block_num = ext2_get_block_num(fs, inode, block_idx);
+        uint32_t blocks_to_read = size / fs->block_size;
+        uint32_t run_len = 1;
         
-        ext2_read_block(fs, block_num, block_buf);
+        if (start_block_num != 0) {
+            // Find length of contiguous run of allocated blocks
+            for (uint32_t i = 1; i < blocks_to_read; i++) {
+                uint32_t next = ext2_get_block_num(fs, inode, block_idx + i);
+                if (next == start_block_num + i) {
+                    run_len++;
+                } else {
+                    break;
+                }
+            }
+            ext2_read_blocks(fs, start_block_num, run_len, buf);
+        } else {
+            // Find length of contiguous run of holes
+            for (uint32_t i = 1; i < blocks_to_read; i++) {
+                if (ext2_get_block_num(fs, inode, block_idx + i) == 0) {
+                    run_len++;
+                } else {
+                    break;
+                }
+            }
+            memset(buf, 0, run_len * fs->block_size);
+        }
         
-        uint32_t to_copy = fs->block_size - block_offset;
-        if (to_copy > size) to_copy = size;
-        
-        memcpy(buf, block_buf + block_offset, to_copy);
-        buf += to_copy;
-        total_read += to_copy;
-        offset += to_copy;
-        size -= to_copy;
+        uint32_t bytes_processed = run_len * fs->block_size;
+        buf += bytes_processed;
+        total_read += bytes_processed;
+        offset += bytes_processed;
+        size -= bytes_processed;
     }
     
     return total_read;
