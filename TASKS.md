@@ -3312,8 +3312,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Quoting (`'` single, `"` double) and escaping (`\`).
         - [x] Operators (`&&`, `||`, `>>`, `<<`, `<&`, `>&`).
         - [x] Comment handling (`#`).
-        - [ ] Line continuation rules (backslash-newline).
-        - [ ] Here-document lexing (quoted vs unquoted delimiters).
+        - [x] Line continuation rules (backslash-newline).
+        - [x] Here-document lexing (quoted vs unquoted delimiters).
     - [x] **Shell Grammar & Parsing:**
         - [x] Simple commands.
         - [x] Pipelines.
@@ -3321,8 +3321,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Compound commands (`if`, `while`, `for`, `case`).
         - [x] Grouping `{}` and subshells `()`.
         - [x] Function definitions.
-        - [ ] Precedence and associativity verification.
-        - [ ] Robust error recovery and diagnostics.
+        - [x] Precedence and associativity verification.
+        - [x] Robust error recovery and diagnostics.
     - [ ] **Expansions (Exact Order):**
         - [x] **1. Tilde Expansion**
         - [x] **2. Parameter Expansion:**
