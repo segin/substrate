@@ -3300,7 +3300,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Handle quoting (`'` single, `"` double) and escaping (`\`).
         - [x] Handle operators (`&&`, `||`, `>>`, `<<`).
         - [x] Variable recognition (`$PROMPT`, `${VAR}`).
-    - [x] **Parser (AST Generation):**
+    - [/] **Parser (AST Generation):**
         - [x] **Simple Commands:** List of arguments + redirections.
         - [x] **Pipelines:** Chain of simple commands connected by pipes.
         - [x] **Lists:** Sequences (`cmd1 ; cmd2`) and Logic (`cmd1 && cmd2`).
@@ -3310,13 +3310,24 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `ForClause`: `for` name `in` words `do` list `done`.
             - [x] `FunctionDef`: `name() { list; }`.
             - [x] `Subshells/Groups`: `( list )` and `{ list; }`.
+        - [ ] **Missing Parsing Features:**
+            - [ ] `CaseClause`: `case word in pattern) list ;; esac`.
+            - [ ] **Redirections on Compound Commands:** `while ... done > file`.
+            - [ ] **Assignment Words:** `VAR=val cmd` parsing.
     - [/] **Expansion (WordExp):**
         - [x] Tilde Expansion (`~` -> `$HOME`).
         - [x] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
+            - [x] Missing: `${#VAR}` (Length), `${VAR%pat}` (Suffix), `${VAR?err}`.
         - [x] Command Substitution (`$(cmd)`).
         - [x] Arithmetic Expansion (`$(( 1 + 2 ))`).
         - [x] Globbing (`*`, `?`, `[...]` file matching).
+        - [ ] **Field Splitting:** Split unquoted expansions by `$IFS`.
+        - [ ] **Quote Removal:** Separate pass after expansion.
     - [/] **Execution Engine:**
+        - [ ] **State Management:**
+            - [ ] `$?`: Exit status tracking.
+            - [ ] `$$`, `$!`: PID tracking.
+        - [ ] **Builtin Redirection:** Support `cd / > /dev/null` (FD save/restore).
         - [/] **Builtins:**
             - [x] `cd`: Change directory ($HOME default).
             - [x] `exit`: Terminate shell.
@@ -3325,6 +3336,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `exec`: Replace shell process.
             - [x] `eval`: Parse and execute arguments.
             - [x] `shift`: Shift positional parameters.
+            - [ ] `read`: Read input.
+            - [ ] `set`: Set positional parameters / flags.
+            - [ ] `trap`: Signal handling.
+            - [ ] `return`: Function return.
         - [x] **External Commands:**
             - [x] `fork()` / `execve()` search path (`$PATH`).
             - [x] `waitpid()` for synchronous execution.
