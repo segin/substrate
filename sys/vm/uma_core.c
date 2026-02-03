@@ -5,6 +5,7 @@
  */
 
 #include <vm/uma.h>
+#include <vm/vm_kmem.h>
 #include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <stddef.h>
@@ -21,6 +22,7 @@ static uma_zone_t *uma_zones = NULL;
 static uint8_t uma_bootstrap_mem[UMA_BOOTSTRAP_ZONES * sizeof(uma_zone_t)];
 static int uma_bootstrap_idx = 0;
 static bool uma_booted = false;
+static bool uma_dynamic_alloc_enabled = false;
 
 /* Bucket pool */
 #define UMA_BUCKET_POOL_SIZE 64
@@ -78,6 +80,14 @@ void uma_startup(void) {
 }
 
 /*
+ * Enable dynamic allocation (called after kmem_init)
+ */
+void uma_enable_dynamic_alloc(void) {
+    uma_dynamic_alloc_enabled = true;
+    kprint("UMA: dynamic zone allocation enabled\n");
+}
+
+/*
  * Allocate a bucket from the pool
  */
 static struct uma_bucket *uma_bucket_alloc(void) {
@@ -105,16 +115,18 @@ uma_zone_t *uma_zcreate(
     uma_zone_t *zone;
     
     /* Allocate zone structure */
-    if (uma_bootstrap_idx < UMA_BOOTSTRAP_ZONES) {
+    if (uma_dynamic_alloc_enabled) {
+        zone = (uma_zone_t *)kzalloc(sizeof(uma_zone_t));
+        if (!zone) return NULL;
+    } else if (uma_bootstrap_idx < UMA_BOOTSTRAP_ZONES) {
         zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * sizeof(uma_zone_t)];
         uma_bootstrap_idx++;
+        /* Initialize zone (kzalloc already zeros) */
+        memset(zone, 0, sizeof(uma_zone_t));
     } else {
-        /* TODO: Allocate from kmalloc after bootstrap */
+        kprint("UMA: panic - out of bootstrap zones and dynamic alloc not enabled!\n");
         return NULL;
     }
-    
-    /* Initialize zone */
-    memset(zone, 0, sizeof(uma_zone_t));
     zone->uz_name = name;
     zone->uz_size = size;
     zone->uz_flags = flags;
@@ -216,6 +228,12 @@ void uma_zdestroy(uma_zone_t *zone) {
                 break;
             }
         }
+    }
+
+    /* Free zone structure if it was dynamically allocated */
+    if ((uintptr_t)zone < (uintptr_t)uma_bootstrap_mem ||
+        (uintptr_t)zone >= (uintptr_t)uma_bootstrap_mem + sizeof(uma_bootstrap_mem)) {
+        kfree(zone, sizeof(uma_zone_t));
     }
 }
 

@@ -55,6 +55,9 @@ void kmem_init(void) {
             UMA_ZONE_MALLOC /* Mark as malloc zone */
         );
     }
+
+    /* Enable dynamic allocation of UMA zones now that kmalloc is ready */
+    uma_enable_dynamic_alloc();
 }
 
 /*
