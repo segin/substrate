@@ -12,6 +12,10 @@ typedef struct {
     uint32_t pitch;
     uint8_t  bpp;
     void (*putpixel)(int x, int y, uint32_t color);
+    /* Extended fields for hardware scrolling */
+    uint32_t virt_width;
+    uint32_t virt_height;
+    void (*set_viewport)(int x, int y);
 } fb_info_t;
 
 /* Core framebuffer operations */

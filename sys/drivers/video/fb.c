@@ -48,7 +48,11 @@ static uint8_t rgb_to_index(uint32_t color) {
 }
 
 static void linear_fb_putpixel(int x, int y, uint32_t color) {
-    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
+    /* Use virtual dimensions if set, otherwise physical */
+    int max_x = fb.virt_width ? (int)fb.virt_width : (int)fb.width;
+    int max_y = fb.virt_height ? (int)fb.virt_height : (int)fb.height;
+
+    if (x < 0 || x >= max_x || y < 0 || y >= max_y) return;
 
     if (fb.bpp >= 15) {
         uint8_t *pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x * (fb.bpp / 8));
@@ -161,8 +165,8 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         memset(vi, 0, sizeof(struct fb_var_screeninfo));
         vi->xres = fb.width;
         vi->yres = fb.height;
-        vi->xres_virtual = fb.width;
-        vi->yres_virtual = fb.height;
+        vi->xres_virtual = fb.virt_width ? fb.virt_width : fb.width;
+        vi->yres_virtual = fb.virt_height ? fb.virt_height : fb.height;
         vi->bits_per_pixel = fb.bpp;
 
         if (fb.bpp == 32 || fb.bpp == 24) {
@@ -261,6 +265,9 @@ static int mb_init(fb_info_t *info) {
     info->height = saved_mbi->framebuffer_height;
     info->pitch = saved_mbi->framebuffer_pitch;
     info->bpp = saved_mbi->framebuffer_bpp;
+    info->virt_width = info->width;
+    info->virt_height = info->height;
+    info->set_viewport = NULL;
     info->putpixel = linear_fb_putpixel;
     return 0;
 }
@@ -284,6 +291,10 @@ void fb_init(multiboot_info_t *mbi) {
             if (video_ask_mode(&fb) == 1) {
                 fb_active = 1; /* VESA Mode Set successfully via BIOS */
                 /* fb struct populated by video_ask_mode */
+
+                /* Ensure virtual dimensions are set if missing */
+                if (!fb.virt_width) fb.virt_width = fb.width;
+                if (!fb.virt_height) fb.virt_height = fb.height;
                 
                 /* Register console */
                 fb_console_init();
