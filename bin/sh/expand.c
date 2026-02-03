@@ -523,9 +523,9 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                     expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                     free(name);
                 }
-            } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#') {
+            } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
                 const char *start = p;
-                if (isdigit(*p) || *p == '?' || *p == '$' || *p == '#') p++;
+                if (isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') p++;
                 else while (*p && (isalnum(*p) || *p == '_')) p++;
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);
@@ -647,9 +647,9 @@ char *expand_heredoc(const char *content, int quoted) {
                     if (val) buffer_append_str_internal(&buf, &cap, &len, val);
                     free(name);
                 }
-            } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#') {
+            } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
                 const char *start = p;
-                if (isdigit(*p) || *p == '?' || *p == '$' || *p == '#') p++;
+                if (isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') p++;
                 else while (*p && (isalnum(*p) || *p == '_')) p++;
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);

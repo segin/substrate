@@ -732,6 +732,12 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
 
 static int execute_binary_op(ast_binary_op_t *bin) {
     int left_status = execute_ast(bin->left);
+    
+    // Update $? after each command so subsequent commands can see it
+    char status_buf[16];
+    snprintf(status_buf, sizeof(status_buf), "%d", left_status);
+    shell_var_set("?", status_buf);
+    
     if (func_return_signaled || loop_break_count > 0 || loop_continue_count > 0) return left_status;
     
     switch (bin->op) {

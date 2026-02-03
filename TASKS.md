@@ -3303,10 +3303,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Handle `sh -s` correctly.
         - [x] Detect and handle login shell behavior.
         - [x] Argument parsing and POSIX option processing.
-        - [ ] Interactive vs non-interactive mode detection.
+        - [x] Interactive vs non-interactive mode detection.
         - [ ] Startup files: `ENV` and profile handling.
         - [ ] Locale and environment initialization.
-        - [ ] Signal disposition at startup.
+        - [x] Signal disposition at startup.
     - [x] **Lexical Analysis:**
         - [x] Delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
         - [x] Quoting (`'` single, `"` double) and escaping (`\`).
@@ -3331,7 +3331,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `${#VAR}` (Length).
             - [x] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
             - [x] `${VAR#pat}`, `${VAR##pat}` (Prefix).
-            - [ ] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
+            - [x] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
             - [ ] Nested parameter expansions.
         - [x] **3. Command Substitution** (`$(cmd)`).
         - [x] **4. Arithmetic Expansion** (`$(( ... ))`).
