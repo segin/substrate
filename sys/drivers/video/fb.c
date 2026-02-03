@@ -48,7 +48,9 @@ static uint8_t rgb_to_index(uint32_t color) {
 }
 
 static void linear_fb_putpixel(int x, int y, uint32_t color) {
-    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
+    /* Use virt_height if set, otherwise height */
+    int max_y = fb.virt_height ? (int)fb.virt_height : (int)fb.height;
+    if (x < 0 || x >= (int)fb.width || y < 0 || y >= max_y) return;
 
     if (fb.bpp >= 15) {
         uint8_t *pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x * (fb.bpp / 8));
@@ -151,6 +153,13 @@ void fb_clear(uint32_t color) {
 
 /* Track the currently active driver */
 static video_driver_t *current_driver = NULL;
+
+int video_set_viewport(int x, int y) {
+    if (current_driver && current_driver->set_viewport) {
+        return current_driver->set_viewport(x, y);
+    }
+    return -1;
+}
 
 static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;

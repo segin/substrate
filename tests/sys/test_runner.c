@@ -186,6 +186,11 @@ void run_kernel_tests(void) {
     }
     */
 
+    if (all || strcmp(test_arg, "console_perf") == 0) {
+        extern void test_console_perf(void);
+        test_console_perf();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested

@@ -4,6 +4,9 @@
 #include "../../arch/i386/syscall.h"
 #include "../../include/sys/syscall_impl.h"
 #include <sys/ioctl.h>
+/* Prevent redefinition of struct termios and winsize by masking include/termios.h if sys/termios.h is used */
+#define _STRUCT_TERMIOS
+#define _STRUCT_WINSIZE_DEFINED
 #include <sys/termios.h>
 #include "compat.h"
 #include "linux/linux_syscalls.h"
