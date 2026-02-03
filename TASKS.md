@@ -3245,7 +3245,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Implement `syscall.S`: Raw i386 `int $0x80` entry (6 args via ebx-ebp).
     - [x] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype.
     - [x] Add to `lib/Makefile` SUBDIRS.
-- [ ] **VM Information Syscalls:**
+- [x] **VM Information Syscalls:**
     - [x] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
         - [x] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
         - [x] `lib/sys/sysinfo.c`: Wrapper function.
@@ -3277,7 +3277,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Kernel: Hooked up `sys_times()`.
         - [x] `lib/sys/times.c`: Wrapper function.
         - [x] Man page: `times(2)`.
-- [ ] **Special-Purpose Syscalls:**
+- [x] **Special-Purpose Syscalls:**
     - [x] `vm86()` wrapper (SYS_vm86): Enter VM86 mode.
         - [x] `lib/sys/vm86.c`: Typed wrapper.
         - [x] Man page: `vm86(2)`.
@@ -3352,17 +3352,15 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `--color`: Colorize output (auto/always/never).
         - [ ] **Runtime:**
             - [ ] Column width calculation for multi-column output.
-        - [ ] **Runtime:**
-            - [ ] Column width calculation for multi-column output.
             - [ ] Date formatting (recent vs old files).
             - [ ] User/Group name caching.
         - [ ] **Library dependencies:**
             - [ ] `xopendir`, `xreaddir`, `xstat`, `xclosedir`, `humanize_number`, `pwcache`, `groupcache` or `getpwuid`/`getgrgid`
-        - [ ] **Acceptance tests:**
-            - [ ] `ls` empty directory -> empty output
-            - [ ] `ls -a` -> shows `.` and `..`
-            - [ ] `ls -l` -> correct permissions and ownership columns
-            - [ ] `ls -R` -> descends into subdirectories
+        - [x] **Acceptance tests:**
+            - [x] `ls` empty directory -> empty output
+            - [x] `ls -a` -> shows `.` and `..`
+            - [x] `ls -l` -> correct permissions and ownership columns
+            - [x] `ls -R` -> descends into subdirectories
     - [ ] **`cp` - Copy files and directories:**
         - [ ] **Purpose:** Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.
         - [ ] **Standards:** POSIX.1-2017.
