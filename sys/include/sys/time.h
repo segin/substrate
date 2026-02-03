@@ -39,4 +39,7 @@ int utimes(const char *path, const struct timeval times[2]);
 #define ITIMER_VIRTUAL 1
 #define ITIMER_PROF    2
 
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
+
 #endif
