@@ -62,6 +62,10 @@ static function_entry_t *functions = NULL;
 static int func_return_signaled = 0;
 static int func_return_status = 0;
 
+// Loop control
+static int loop_break_count = 0;
+static int loop_continue_count = 0;
+
 // Forward declarations of handlers
 static int execute_simple_command(ast_simple_command_t *cmd);
 static int execute_function(function_entry_t *func, int argc, char **argv);
@@ -316,6 +320,58 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
             if (strcmp(op, "-ne") == 0) return (atoi(left) != atoi(right)) ? 0 : 1;
         }
         return 1;
+    }
+    
+    // : (null command) - always succeeds
+    if (strcmp(argv[0], ":") == 0) {
+        return 0;
+    }
+    
+    // . (dot/source) - execute commands from file
+    if (strcmp(argv[0], ".") == 0 || strcmp(argv[0], "source") == 0) {
+        if (argc < 2) {
+            fprintf(stderr, "sh: %s: filename argument required\n", argv[0]);
+            return 2;
+        }
+        FILE *f = fopen(argv[1], "r");
+        if (!f) {
+            fprintf(stderr, "sh: %s: %s: No such file or directory\n", argv[0], argv[1]);
+            return 1;
+        }
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (fsize > 0) {
+            char *content = malloc(fsize + 1);
+            if (content) {
+                size_t n = fread(content, 1, fsize, f);
+                content[n] = 0;
+                execute_line(content);
+                free(content);
+            }
+        }
+        fclose(f);
+        return 0;
+    }
+    
+    // break [n]
+    if (strcmp(argv[0], "break") == 0) {
+        loop_break_count = 1;
+        if (argc > 1) {
+            int n = atoi(argv[1]);
+            if (n > 0) loop_break_count = n;
+        }
+        return 0;
+    }
+    
+    // continue [n]
+    if (strcmp(argv[0], "continue") == 0) {
+        loop_continue_count = 1;
+        if (argc > 1) {
+            int n = atoi(argv[1]);
+            if (n > 0) loop_continue_count = n;
+        }
+        return 0;
     }
     
     return -1; 
@@ -676,7 +732,7 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
 
 static int execute_binary_op(ast_binary_op_t *bin) {
     int left_status = execute_ast(bin->left);
-    if (func_return_signaled) return left_status;
+    if (func_return_signaled || loop_break_count > 0 || loop_continue_count > 0) return left_status;
     
     switch (bin->op) {
         case OP_SEQ:
@@ -693,7 +749,7 @@ static int execute_binary_op(ast_binary_op_t *bin) {
 
 static int execute_if(ast_if_t *if_node) {
     int cond_status = execute_ast(if_node->condition);
-    if (func_return_signaled) return cond_status;
+    if (func_return_signaled || loop_break_count > 0 || loop_continue_count > 0) return cond_status;
     
     if (cond_status == 0) {
         return execute_ast(if_node->then_body);
@@ -710,6 +766,15 @@ static int execute_while(ast_while_t *w) {
         if (func_return_signaled) return status;
         status = execute_ast(w->body);
         if (func_return_signaled) return status;
+        if (loop_break_count > 0) {
+            loop_break_count--;
+            break;
+        }
+        if (loop_continue_count > 0) {
+            loop_continue_count--;
+            if (loop_continue_count > 0) break; // continue to outer loop
+            continue;
+        }
     }
     return status;
 }
@@ -726,6 +791,15 @@ static int execute_for(ast_for_t *f) {
             for (int k = 0; expanded[k]; k++) free(expanded[k]);
             free(expanded);
             return status;
+        }
+        if (loop_break_count > 0) {
+            loop_break_count--;
+            break;
+        }
+        if (loop_continue_count > 0) {
+            loop_continue_count--;
+            if (loop_continue_count > 0) break; // continue to outer loop
+            continue;
         }
     }
     

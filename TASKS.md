@@ -3353,10 +3353,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Exit status propagation.
         - [ ] `set -e` semantics.
     - [ ] **Builtin Commands:**
-        - [ ] `:` (Null command).
-        - [ ] `.` (Dot/Source).
-        - [ ] `break`.
-        - [ ] `continue`.
+        - [x] `:` (Null command).
+        - [x] `.` (Dot/Source).
+        - [x] `break`.
+        - [x] `continue`.
         - [x] `cd` (including `CDPATH`).
         - [ ] `command`.
         - [x] `eval`.
