@@ -157,6 +157,9 @@ void run_kernel_tests(void) {
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {
+        extern int test_device_refcounting(void);
+        if (test_device_refcounting() == 0) kprint("device_refcount: PASS\n"); else kprint("device_refcount: FAIL\n");
+
         extern int test_driver_registration_logic(void);
         if (test_driver_registration_logic() == 0) kprint("driver_register: PASS\n"); else kprint("driver_register: FAIL\n");
         
