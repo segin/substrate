@@ -3328,11 +3328,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **External Commands:**
             - [x] `fork()` / `execve()` search path (`$PATH`).
             - [x] `waitpid()` for synchronous execution.
-    - [ ] **Job Control:**
-        - [ ] **Process Groups:** Set pgid for pipelines.
-        - [ ] **Foreground/Background:** `tcsetpgrp` management.
-        - [ ] **Job Table:** Track status (Running, Stopped, Done).
-        - [ ] **Signals:** `SIGINT`, `SIGTSTP`, `SIGCHLD` handler.
+    - [x] **Job Control:**
+        - [x] **Process Groups:** Set pgid for pipelines.
+        - [x] **Foreground/Background:** `tcsetpgrp` management.
+        - [x] **Job Table:** Track status (Running, Stopped, Done).
+        - [x] **Signals:** `SIGINT`, `SIGTSTP`, `SIGCHLD` handler.
     - [ ] **Redirection:**
         - [x] `dup2` management for `<`, `>`, `>>`, `2>`, `2>&1`.
         - [x] Here-Documents (`<< EOF`).
