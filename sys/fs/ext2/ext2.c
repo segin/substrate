@@ -2,6 +2,7 @@
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <string.h>
+#include <vm/vm_kmem.h>
 
 // Static filesystem context (single mount for now)
 static ext2_fs_t ext2_fs;
@@ -30,6 +31,13 @@ uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
     if (!fs || !fs->device || !fs->device->read) return 0;
     off_t offset = (off_t)block_num * fs->block_size;
     return fs->device->read(fs->device, offset, fs->block_size, buffer);
+}
+
+// Read multiple blocks from the device
+static uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, void *buffer) {
+    if (!fs || !fs->device || !fs->device->read) return 0;
+    off_t offset = (off_t)block_num * fs->block_size;
+    return fs->device->read(fs->device, offset, fs->block_size * count, buffer);
 }
 
 // Read an inode
@@ -105,62 +113,142 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
 // Get block number for a given file block index (handles indirect blocks)
 static uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx) {
     uint32_t ptrs_per_block = fs->block_size / 4;
-    static uint32_t indirect_buf[1024];
-    static uint32_t dindirect_buf[1024];
     
     // Direct blocks (0-11)
     if (block_idx < 12) {
         return inode->i_block[block_idx];
     }
     block_idx -= 12;
+
+    uint32_t *indirect_buf = (uint32_t *)kmalloc(fs->block_size);
+    if (!indirect_buf) return 0;
+
+    uint32_t result = 0;
     
     // Indirect block (12)
     if (block_idx < ptrs_per_block) {
-        if (inode->i_block[12] == 0) return 0;
-        ext2_read_block(fs, inode->i_block[12], indirect_buf);
-        return indirect_buf[block_idx];
+        if (inode->i_block[12] != 0) {
+            ext2_read_block(fs, inode->i_block[12], indirect_buf);
+            result = indirect_buf[block_idx];
+        }
+        kfree(indirect_buf, fs->block_size);
+        return result;
     }
     block_idx -= ptrs_per_block;
     
     // Double indirect block (13)
     if (block_idx < ptrs_per_block * ptrs_per_block) {
-        if (inode->i_block[13] == 0) return 0;
-        ext2_read_block(fs, inode->i_block[13], dindirect_buf);
-        uint32_t indirect_idx = block_idx / ptrs_per_block;
-        uint32_t direct_idx = block_idx % ptrs_per_block;
-        if (dindirect_buf[indirect_idx] == 0) return 0;
-        ext2_read_block(fs, dindirect_buf[indirect_idx], indirect_buf);
-        return indirect_buf[direct_idx];
+        if (inode->i_block[13] != 0) {
+            ext2_read_block(fs, inode->i_block[13], indirect_buf);
+            uint32_t indirect_idx = block_idx / ptrs_per_block;
+            uint32_t direct_idx = block_idx % ptrs_per_block;
+
+            uint32_t next_block = indirect_buf[indirect_idx];
+            if (next_block != 0) {
+                // Reuse buffer
+                ext2_read_block(fs, next_block, indirect_buf);
+                result = indirect_buf[direct_idx];
+            }
+        }
+        kfree(indirect_buf, fs->block_size);
+        return result;
     }
     block_idx -= ptrs_per_block * ptrs_per_block;
     
     // Triple indirect block (14)
     if (block_idx < ptrs_per_block * ptrs_per_block * ptrs_per_block) {
-        if (inode->i_block[14] == 0) return 0;
+        if (inode->i_block[14] != 0) {
+            ext2_read_block(fs, inode->i_block[14], indirect_buf);
+
+            uint32_t tindirect_idx = block_idx / (ptrs_per_block * ptrs_per_block);
+            uint32_t remaining = block_idx % (ptrs_per_block * ptrs_per_block);
+            uint32_t dindirect_idx = remaining / ptrs_per_block;
+            uint32_t indirect_idx = remaining % ptrs_per_block;
+
+            uint32_t next_block = indirect_buf[tindirect_idx];
+            if (next_block != 0) {
+                ext2_read_block(fs, next_block, indirect_buf);
+                next_block = indirect_buf[dindirect_idx];
+                if (next_block != 0) {
+                    ext2_read_block(fs, next_block, indirect_buf);
+                    result = indirect_buf[indirect_idx];
+                }
+            }
+        }
+        kfree(indirect_buf, fs->block_size);
+        return result;
+    }
+
+    kfree(indirect_buf, fs->block_size);
+    return 0;
+}
+
+// Get contiguous extent of blocks
+static void ext2_get_blocks_extent(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx, uint32_t max_count, uint32_t *phys_block, uint32_t *count) {
+    *count = 0;
+    *phys_block = 0;
+    if (max_count == 0) return;
+
+    uint32_t ptrs_per_block = fs->block_size / 4;
+
+    // Direct Blocks
+    if (block_idx < 12) {
+        *phys_block = inode->i_block[block_idx];
+        *count = 1;
+        if (*phys_block == 0) return;
         
-        // Read triple indirect block
-        static uint32_t tindirect_buf[1024];
-        ext2_read_block(fs, inode->i_block[14], tindirect_buf);
+        for (uint32_t i = 1; i < max_count; i++) {
+            if (block_idx + i >= 12) break;
+            uint32_t next = inode->i_block[block_idx + i];
+            if (next == *phys_block + i) {
+                (*count)++;
+            } else {
+                break;
+            }
+        }
+        return;
+    }
+
+    // Single Indirect
+    uint32_t rel_idx = block_idx - 12;
+    if (rel_idx < ptrs_per_block) {
+        if (inode->i_block[12] == 0) {
+            *phys_block = 0; *count = 1; return;
+        }
         
-        // Calculate indices for triple indirection
-        uint32_t tindirect_idx = block_idx / (ptrs_per_block * ptrs_per_block);
-        uint32_t remaining = block_idx % (ptrs_per_block * ptrs_per_block);
-        uint32_t dindirect_idx = remaining / ptrs_per_block;
-        uint32_t indirect_idx = remaining % ptrs_per_block;
+        uint32_t *buf = (uint32_t *)kmalloc(fs->block_size);
+        if (!buf) {
+             *phys_block = ext2_get_block_num(fs, inode, block_idx);
+             *count = 1;
+             return;
+        }
+
+        if (ext2_read_block(fs, inode->i_block[12], buf) != fs->block_size) {
+            kfree(buf, fs->block_size);
+            *phys_block = 0; *count = 0; return;
+        }
         
-        // Read double indirect block
-        if (tindirect_buf[tindirect_idx] == 0) return 0;
-        ext2_read_block(fs, tindirect_buf[tindirect_idx], dindirect_buf);
+        *phys_block = buf[rel_idx];
+        *count = 1;
         
-        // Read indirect block
-        if (dindirect_buf[dindirect_idx] == 0) return 0;
-        ext2_read_block(fs, dindirect_buf[dindirect_idx], indirect_buf);
+        if (*phys_block != 0) {
+             for (uint32_t i = 1; i < max_count; i++) {
+                if (rel_idx + i >= ptrs_per_block) break;
+                if (buf[rel_idx + i] == *phys_block + i) {
+                    (*count)++;
+                } else {
+                    break;
+                }
+            }
+        }
         
-        return indirect_buf[indirect_idx];
+        kfree(buf, fs->block_size);
+        return;
     }
     
-    // Beyond triple indirect
-    return 0;
+    // Fallback for others
+    *phys_block = ext2_get_block_num(fs, inode, block_idx);
+    *count = 1;
 }
 
 // Read data from an inode at a given offset
@@ -168,47 +256,80 @@ uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint3
     if (offset >= inode->i_size) return 0;
     if (offset + size > inode->i_size) size = inode->i_size - offset;
     
-    static uint8_t block_buf[4096];
+    uint8_t *block_buf = kmalloc(fs->block_size);
+    if (!block_buf) return 0;
+
     uint8_t *buf = (uint8_t *)buffer;
     uint32_t total_read = 0;
     
     while (size > 0) {
-        // Use 64-bit division/modulo
         uint32_t block_idx = (uint32_t)(offset / fs->block_size);
         uint32_t block_offset = (uint32_t)(offset % fs->block_size);
-        uint32_t block_num = ext2_get_block_num(fs, inode, block_idx);
         
-        if (block_num == 0) {
-            // Sparse file - return zeros
-            uint32_t to_copy = fs->block_size - block_offset;
-            if (to_copy > size) to_copy = size;
-            memset(buf, 0, to_copy);
-            buf += to_copy;
-            total_read += to_copy;
-            offset += to_copy;
-            size -= to_copy;
-            continue;
+        uint32_t phys_block;
+        uint32_t contiguous_blocks;
+        uint32_t needed_blocks = (size + block_offset + fs->block_size - 1) / fs->block_size;
+        if (needed_blocks > 1024) needed_blocks = 1024;
+        
+        ext2_get_blocks_extent(fs, inode, block_idx, needed_blocks, &phys_block, &contiguous_blocks);
+        
+        if (contiguous_blocks == 0) break; // Should not happen
+
+        // 1. Handle Unaligned Head
+        if (block_offset > 0) {
+            if (phys_block == 0) memset(block_buf, 0, fs->block_size);
+            else ext2_read_block(fs, phys_block, block_buf);
+
+            uint32_t copy = fs->block_size - block_offset;
+            if (copy > size) copy = size;
+            memcpy(buf, block_buf + block_offset, copy);
+
+            buf += copy; offset += copy; size -= copy;
+            total_read += copy;
+
+            phys_block++;
+            contiguous_blocks--;
+            block_offset = 0;
+            if (size == 0) continue;
         }
         
-        ext2_read_block(fs, block_num, block_buf);
-        
-        uint32_t to_copy = fs->block_size - block_offset;
-        if (to_copy > size) to_copy = size;
-        
-        memcpy(buf, block_buf + block_offset, to_copy);
-        buf += to_copy;
-        total_read += to_copy;
-        offset += to_copy;
-        size -= to_copy;
+        // 2. Handle Aligned Body
+        if (contiguous_blocks > 0 && size >= fs->block_size) {
+            uint32_t full_blocks = size / fs->block_size;
+            if (full_blocks > contiguous_blocks) full_blocks = contiguous_blocks;
+
+            if (phys_block == 0) {
+                memset(buf, 0, full_blocks * fs->block_size);
+            } else {
+                ext2_read_blocks(fs, phys_block, full_blocks, buf);
+            }
+
+            uint32_t bytes = full_blocks * fs->block_size;
+            buf += bytes; offset += bytes; size -= bytes;
+            total_read += bytes;
+
+            phys_block += full_blocks;
+            contiguous_blocks -= full_blocks;
+        }
+
+        // 3. Handle Tail
+        if (contiguous_blocks > 0 && size > 0) {
+            if (phys_block == 0) memset(block_buf, 0, fs->block_size);
+            else ext2_read_block(fs, phys_block, block_buf);
+
+            memcpy(buf, block_buf, size);
+            buf += size; offset += size; size -= size;
+            total_read += size;
+        }
     }
     
+    kfree(block_buf, fs->block_size);
     return total_read;
 }
 
 // Allocate and add a block to an inode
 static int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx) {
     uint32_t ptrs_per_block = fs->block_size / 4;
-    static uint32_t indirect_buf[1024];
     
     // Direct blocks (0-11)
     if (block_idx < 12) {
@@ -221,10 +342,16 @@ static int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t b
     
     // Indirect block (12)
     if (block_idx < ptrs_per_block) {
+        uint32_t *indirect_buf = (uint32_t *)kmalloc(fs->block_size);
+        if (!indirect_buf) return -1;
+
         // Allocate indirect block if not present
         if (inode->i_block[12] == 0) {
             uint32_t new_indirect = ext2_alloc_block(fs);
-            if (new_indirect == 0) return -1;
+            if (new_indirect == 0) {
+                kfree(indirect_buf, fs->block_size);
+                return -1;
+            }
             inode->i_block[12] = new_indirect;
             memset(indirect_buf, 0, fs->block_size);
             ext2_write_block(fs, new_indirect, indirect_buf);
@@ -233,9 +360,14 @@ static int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t b
         // Allocate data block
         ext2_read_block(fs, inode->i_block[12], indirect_buf);
         uint32_t new_block = ext2_alloc_block(fs);
-        if (new_block == 0) return -1;
+        if (new_block == 0) {
+            kfree(indirect_buf, fs->block_size);
+            return -1;
+        }
         indirect_buf[block_idx] = new_block;
         ext2_write_block(fs, inode->i_block[12], indirect_buf);
+
+        kfree(indirect_buf, fs->block_size);
         return 0;
     }
     
