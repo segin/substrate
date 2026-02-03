@@ -3313,7 +3313,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [/] **Expansion (WordExp):**
         - [x] Tilde Expansion (`~` -> `$HOME`).
         - [x] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
-        - [ ] Command Substitution (`$(cmd)`).
+        - [x] Command Substitution (`$(cmd)`).
         - [x] Arithmetic Expansion (`$(( 1 + 2 ))`).
         - [x] Globbing (`*`, `?`, `[...]` file matching).
     - [/] **Execution Engine:**
@@ -3334,8 +3334,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Job Table:** Track status (Running, Stopped, Done).
         - [ ] **Signals:** `SIGINT`, `SIGTSTP`, `SIGCHLD` handler.
     - [ ] **Redirection:**
-        - [ ] `dup2` management for `<`, `>`, `>>`, `2>`, `2>&1`.
-        - [ ] Here-Documents (`<< EOF`).
+        - [x] `dup2` management for `<`, `>`, `>>`, `2>`, `2>&1`.
+        - [x] Here-Documents (`<< EOF`).
 - [ ] **Core Utilities:**
     - [x] **`ls` - List directory contents:**
         - [x] **Purpose:** List information about the FILEs (the current directory by default).
