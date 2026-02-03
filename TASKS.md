@@ -3322,7 +3322,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `exit`: Terminate shell.
             - [x] `export`: precise environment variable support.
             - [x] `unset`: Remove variables.
-            - [ ] `exec`: Replace shell process.
+            - [x] `exec`: Replace shell process.
             - [x] `eval`: Parse and execute arguments.
             - [x] `shift`: Shift positional parameters.
         - [x] **External Commands:**
