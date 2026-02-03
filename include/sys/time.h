@@ -18,6 +18,11 @@ struct itimerval {
     struct timeval it_value;    /* current value */
 };
 
+struct timespec {
+    time_t tv_sec;     /* seconds */
+    long   tv_nsec;    /* nanoseconds */
+};
+
 int gettimeofday(struct timeval *restrict tp, void *restrict tzp);
 int settimeofday(const struct timeval *tp, const void *tzp);
 

@@ -2,7 +2,9 @@
 #include <sys/types.h>
 #include <sys/math.h>
 #include <sys/times.h>
+#include <sys/time.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 
 time_t boot_time = 0;
 
@@ -21,6 +23,14 @@ int64_t get_uptime_ms(void) {
     return ticks * (1000 / HZ);
 }
 
+uint64_t get_ticks(void) {
+    return ticks;
+}
+
+uint32_t get_hz(void) {
+    return HZ;
+}
+
 void set_boot_time(time_t time) {
     boot_time = time;
 }
@@ -30,16 +40,6 @@ time_t sys_time(time_t *tloc) {
     if (tloc) *tloc = t;
     return t;
 }
-
-struct timeval {
-    time_t tv_sec;
-    suseconds_t tv_usec;
-};
-
-struct timezone {
-    int32_t tz_minuteswest;
-    int32_t tz_dsttime;
-};
 
 int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (!tv) return -1;
@@ -56,11 +56,6 @@ int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
     
     return 0;
 }
-
-struct timespec {
-    time_t tv_sec;
-    long tv_nsec;
-};
 
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
@@ -94,4 +89,5 @@ clock_t sys_times(struct tms *buf) {
 
 void timer_tick(void) {
     ticks++;
+    sched_check_timeouts();
 }
