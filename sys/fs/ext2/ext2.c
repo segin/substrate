@@ -503,6 +503,8 @@ static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_fs.group_count = (ext2_fs.sb.s_blocks_count + ext2_fs.blocks_per_group - 1) / ext2_fs.blocks_per_group;
     ext2_fs.inode_size = (ext2_fs.sb.s_rev_level >= 1) ? ext2_fs.sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
     ext2_fs.bgd = ext2_bgd_table;
+    ext2_fs.last_alloc_group = 0;
+    ext2_fs.last_alloc_bit = 0;
     
     // Read block group descriptor table (starts at block 2 for 1K blocks, block 1 for larger)
     uint32_t bgd_block = (ext2_fs.block_size == 1024) ? 2 : 1;
@@ -556,8 +558,13 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     
     static uint8_t bitmap_buf[4096] __attribute__((aligned(4)));
     
+    uint32_t start_group = fs->last_alloc_group;
+    uint32_t group = start_group;
+
     // Search each block group for a free block
-    for (uint32_t group = 0; group < fs->group_count; group++) {
+    for (uint32_t k = 0; k < fs->group_count; k++) {
+        group = (start_group + k) % fs->group_count;
+
         if (fs->bgd[group].bg_free_blocks_count == 0) continue;
         
         // Read the block bitmap
@@ -567,40 +574,62 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
         
         // Find the first free bit
         uint32_t bits_in_group = fs->blocks_per_group;
-        uint32_t i = 0;
+        uint32_t start_bit = (group == start_group) ? fs->last_alloc_bit : 0;
+        uint32_t i = start_bit;
         uint32_t *bitmap32 = (uint32_t *)bitmap_buf;
 
-        // Fast path: skip full words
-        // We can safely skip only if the word is all ones (0xFFFFFFFF).
-        // This is endian-safe because 0xFFFFFFFF is all ones regardless of endianness.
-        for (; i + 32 <= bits_in_group; i += 32) {
-            if (bitmap32[i / 32] != 0xFFFFFFFF) {
-                break; // Found a word with free bits, fall through to slow path
-            }
-        }
+        // Two passes for start_group to handle wrap-around
+        int passes = (group == start_group && start_bit > 0) ? 2 : 1;
 
-        // Slow path: check remaining bits (and the word we broke on)
-        for (; i < bits_in_group; i++) {
-            uint32_t byte_idx = i / 8;
-            uint32_t bit_idx = i % 8;
-            
-            if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) {
-                // Found free block - allocate it
-                bitmap_buf[byte_idx] |= (1 << bit_idx);
+        for (int p = 0; p < passes; p++) {
+            uint32_t limit = (p == 0) ? bits_in_group : start_bit;
+            if (p == 1) i = 0;
+
+            // 1. Unaligned bits at start
+            while (i < limit && (i % 32) != 0) {
+                uint32_t byte_idx = i / 8;
+                uint32_t bit_idx = i % 8;
+                if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) goto found;
+                i++;
+            }
+
+            // 2. Fast path: skip full words
+            // We can safely skip only if the word is all ones (0xFFFFFFFF).
+            // This is endian-safe because 0xFFFFFFFF is all ones regardless of endianness.
+            for (; i + 32 <= limit; i += 32) {
+                if (bitmap32[i / 32] != 0xFFFFFFFF) {
+                    break; // Found a word with free bits, fall through to slow path
+                }
+            }
+
+            // 3. Slow path: check remaining bits (and the word we broke on)
+            for (; i < limit; i++) {
+                uint32_t byte_idx = i / 8;
+                uint32_t bit_idx = i % 8;
                 
-                // Write bitmap back
-                ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
-                
-                // Update block group descriptor
-                fs->bgd[group].bg_free_blocks_count--;
-                
-                // Calculate absolute block number
-                uint32_t block_num = group * fs->blocks_per_group + i + fs->sb.s_first_data_block;
-                
-                // Update superblock free blocks count
-                fs->sb.s_free_blocks_count--;
-                
-                return block_num;
+                if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) {
+found:
+                    // Found free block - allocate it
+                    bitmap_buf[byte_idx] |= (1 << bit_idx);
+
+                    // Write bitmap back
+                    ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
+
+                    // Update block group descriptor
+                    fs->bgd[group].bg_free_blocks_count--;
+
+                    // Calculate absolute block number
+                    uint32_t block_num = group * fs->blocks_per_group + i + fs->sb.s_first_data_block;
+
+                    // Update superblock free blocks count
+                    fs->sb.s_free_blocks_count--;
+
+                    // Update hints for Next Fit
+                    fs->last_alloc_group = group;
+                    fs->last_alloc_bit = (i + 1) % bits_in_group;
+
+                    return block_num;
+                }
             }
         }
     }
