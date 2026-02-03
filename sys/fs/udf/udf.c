@@ -116,7 +116,27 @@ int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp) {
         }
     }
     
-    /* TODO: Try last sector and last-256 for completeness */
+    uint32_t total_sectors = (uint32_t)(dev->length / UDF_SECTOR_SIZE);
+
+    /* Try last sector */
+    if (total_sectors > 0) {
+        if (udf_read_tag(dev, total_sectors - 1, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
+            if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
+                memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+                return 0;
+            }
+        }
+    }
+
+    /* Try last sector - 256 */
+    if (total_sectors > 256) {
+        if (udf_read_tag(dev, total_sectors - 257, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
+            if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
+                memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+                return 0;
+            }
+        }
+    }
     
     kprint("UDF: AVDP not found\n");
     return -1;
