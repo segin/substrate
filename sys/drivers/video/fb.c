@@ -140,6 +140,110 @@ void fb_putpixel(int x, int y, uint32_t color) {
 }
 
 void fb_clear(uint32_t color) {
+    /* Optimization: Direct memory access for linear framebuffer */
+    if (fb.putpixel == linear_fb_putpixel && fb.addr) {
+        uint32_t total_bytes = fb.height * fb.pitch;
+
+        /* Case 1: Memset possible */
+        int use_memset = 0;
+        uint8_t fill_byte = 0;
+
+        if (color == 0) {
+            use_memset = 1;
+            fill_byte = 0;
+        } else if (fb.bpp == 8) {
+             /* For 8bpp, color must be converted to index */
+             fill_byte = rgb_to_index(color);
+             use_memset = 1;
+        } else if (fb.bpp == 32) {
+            uint8_t b = color & 0xFF;
+            if (((color >> 8) & 0xFF) == b &&
+                ((color >> 16) & 0xFF) == b &&
+                ((color >> 24) & 0xFF) == b) {
+                use_memset = 1;
+                fill_byte = b;
+            }
+        }
+
+        if (use_memset) {
+            uint32_t bytes_per_pixel = (fb.bpp + 7) / 8;
+            uint32_t line_bytes = fb.width * bytes_per_pixel;
+
+            if (fb.pitch == line_bytes) {
+                memset((void *)fb.addr, fill_byte, total_bytes);
+            } else {
+                for (uint32_t y = 0; y < fb.height; y++) {
+                    memset((void *)((uintptr_t)fb.addr + y * fb.pitch), fill_byte, line_bytes);
+                }
+            }
+            return;
+        }
+
+        /* Case 2: 32 bpp optimized loop */
+        if (fb.bpp == 32) {
+             if (fb.pitch == fb.width * 4) {
+                 uint32_t *d = fb.addr;
+                 size_t count = fb.width * fb.height;
+                 while (count--) {
+                     *d++ = color;
+                 }
+             } else {
+                 for (uint32_t y = 0; y < fb.height; y++) {
+                     uint32_t *d = (uint32_t *)((uintptr_t)fb.addr + y * fb.pitch);
+                     for (uint32_t x = 0; x < fb.width; x++) {
+                         *d++ = color;
+                     }
+                 }
+             }
+             return;
+        }
+
+        /* Case 3: 24 bpp optimized loop */
+        if (fb.bpp == 24) {
+             uint8_t r = (color >> 16) & 0xFF;
+             uint8_t g = (color >> 8) & 0xFF;
+             uint8_t b = color & 0xFF;
+
+             for (uint32_t y = 0; y < fb.height; y++) {
+                 uint8_t *d = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch);
+                 for (uint32_t x = 0; x < fb.width; x++) {
+                     *d++ = b;
+                     *d++ = g;
+                     *d++ = r;
+                 }
+             }
+             return;
+        }
+
+        /* Case 4: 16 bpp optimized loop */
+        if (fb.bpp == 16) {
+             uint16_t c = ((color >> 8) & 0xF800) |
+                          ((color >> 5) & 0x07E0) |
+                          ((color >> 3) & 0x001F);
+             for (uint32_t y = 0; y < fb.height; y++) {
+                 uint16_t *d = (uint16_t *)((uintptr_t)fb.addr + y * fb.pitch);
+                 for (uint32_t x = 0; x < fb.width; x++) {
+                     *d++ = c;
+                 }
+             }
+             return;
+        }
+
+        /* Case 5: 15 bpp optimized loop */
+        if (fb.bpp == 15) {
+             uint16_t c = ((color >> 9) & 0x7C00) |
+                          ((color >> 6) & 0x03E0) |
+                          ((color >> 3) & 0x001F);
+             for (uint32_t y = 0; y < fb.height; y++) {
+                 uint16_t *d = (uint16_t *)((uintptr_t)fb.addr + y * fb.pitch);
+                 for (uint32_t x = 0; x < fb.width; x++) {
+                     *d++ = c;
+                 }
+             }
+             return;
+        }
+    }
+
     for (uint32_t y = 0; y < fb.height; y++) {
         for (uint32_t x = 0; x < fb.width; x++) {
             fb_putpixel(x, y, color);

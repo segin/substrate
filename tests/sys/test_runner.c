@@ -179,6 +179,11 @@ void run_kernel_tests(void) {
         if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
     }
 
+    if (all || strcmp(test_arg, "fb_perf") == 0) {
+        extern void test_fb_perf(void);
+        test_fb_perf();
+    }
+
     /*
     if (all || strcmp(test_arg, "sysinfo") == 0) {
         extern int test_sysinfo(void);
