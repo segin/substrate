@@ -135,6 +135,8 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "minix") == 0) {
          run_minix_mount_tests();
          run_minix_write_tests();
+         extern void run_minix_inode_tests(void);
+         run_minix_inode_tests();
     }
 
     // Wait logic tests are run on host via verify_wait_host.sh
