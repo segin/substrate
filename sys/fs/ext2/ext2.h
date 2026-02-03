@@ -124,6 +124,9 @@ typedef struct {
     uint32_t blocks_per_group;
     uint32_t group_count;
     uint32_t inode_size;
+    // Hints for Next Fit allocation
+    uint32_t last_alloc_group;
+    uint32_t last_alloc_bit;
 } ext2_fs_t;
 
 // EXT2 file/directory node context
