@@ -8,6 +8,7 @@
 #include <vfs/vfs.h>
 #include <include/sys/proc.h>
 #include <pm/pm.h>
+#include <kern/sched.h>
 #include <exec/perso/personality.h>
 #include <arch/i386/pmap.h>
 #include <string.h>
@@ -89,9 +90,30 @@ static uint32_t gen_version(char *buf, size_t size __attribute__((unused))) {
         __DATE__);
 }
 
+static void count_threads_cb(thread_t *t, void *arg) {
+    int *counts = (int *)arg;
+    if (t->tid != -1) {
+        counts[1]++; // Total
+        if (t->state == THREAD_RUNNING || t->state == THREAD_READY) {
+            counts[0]++; // Active
+        }
+    }
+}
+
 static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
-    /* TODO: Calculate real load average */
-    return sprintf(buf, "0.00 0.00 0.00 1/10 1\n");
+    unsigned long avg[3];
+    sched_get_loadavg(avg, 3);
+
+    int counts[2] = {0, 0};
+    sched_iterate_threads(count_threads_cb, counts);
+
+    int last_pid = proc_get_last_pid();
+
+    return sprintf(buf, "%lu.%02lu %lu.%02lu %lu.%02lu %d/%d %d\n",
+        LOAD_INT(avg[0]), LOAD_FRAC(avg[0]),
+        LOAD_INT(avg[1]), LOAD_FRAC(avg[1]),
+        LOAD_INT(avg[2]), LOAD_FRAC(avg[2]),
+        counts[0], counts[1], last_pid);
 }
 
 static uint32_t proc_pmap_stats_read(char *buf, size_t size) {

@@ -3,6 +3,7 @@
 #include <sys/math.h>
 #include <sys/times.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 
 time_t boot_time = 0;
 
@@ -94,4 +95,7 @@ clock_t sys_times(struct tms *buf) {
 
 void timer_tick(void) {
     ticks++;
+    if (ticks % 500 == 0) {
+        sched_loadavg_update();
+    }
 }

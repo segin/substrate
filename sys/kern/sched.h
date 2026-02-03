@@ -51,4 +51,13 @@ process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 
+/* Load Average API */
+void sched_loadavg_update(void);
+void sched_get_loadavg(unsigned long averages[], int n);
+
+#define FSHIFT  11
+#define FSCALE  (1<<FSHIFT)
+#define LOAD_INT(x) ((x) >> FSHIFT)
+#define LOAD_FRAC(x) LOAD_INT(((x) & (FSCALE-1)) * 100)
+
 #endif
