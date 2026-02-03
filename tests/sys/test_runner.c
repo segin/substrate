@@ -44,6 +44,11 @@ void run_kernel_tests(void) {
     
     int all = (strcmp(test_arg, "all") == 0) || (strcmp(test_arg, "1") == 0);
     
+    if (all || strcmp(test_arg, "cow_perf") == 0) {
+        extern void test_cow_perf(void);
+        test_cow_perf();
+    }
+
     if (all || strcmp(test_arg, "pmap") == 0) {
         run_pmap_tests();
         run_pmap_protect_property_tests();

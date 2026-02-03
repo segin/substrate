@@ -1420,21 +1420,13 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         }
         
         // 2. Map new page temporarily to copy
-        // Use a fixed kernel virtual address scratch space (assuming single core for now)
-        // 0xFFBFF000 is used as scratch (Safe zone below recursive map 0xFFC00000)
-        // WARNING: Do NOT use 0xFFEFF000 (Conflicts with V_PT(767) -> Stack PT)
-        
-        #define COW_SCRATCH_ADDR 0xFFBFF000
+        // OPTIMIZED: virt_new is already a virtual address (Kernel Direct Map)
+        // so we can copy directly without mapping to scratch.
         
         uint32_t phys_new = (uint32_t)virt_new - 0xC0000000;
-        pmap_kenter(COW_SCRATCH_ADDR, phys_new); // Access is RW in kernel by default
-        __asm__ volatile("invlpg %0" :: "m" (*(char *)COW_SCRATCH_ADDR));
         
         // Copy from faulting address (readable) to new page (writable)
-        memcpy((void*)COW_SCRATCH_ADDR, (void*)(cr2 & 0xFFFFF000), 0x1000);
-        
-        pmap_kremove(COW_SCRATCH_ADDR);
-        __asm__ volatile("invlpg %0" :: "m" (*(char *)COW_SCRATCH_ADDR));
+        memcpy(virt_new, (void*)(cr2 & 0xFFFFF000), 0x1000);
 
         // 3. Update mappings
         // Decrement ref count of old page
