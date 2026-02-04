@@ -3347,7 +3347,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Execution Engine:**
         - [x] Builtin vs external command resolution.
         - [x] PATH search rules.
-        - [ ] `exec` behavior (shell replacement).
+        - [x] `exec` behavior (shell replacement).
         - [x] Process forking model.
         - [ ] Job control hooks integration.
         - [x] Exit status propagation.

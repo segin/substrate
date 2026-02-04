@@ -240,14 +240,14 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
             char *full_path = find_in_path(argv[1]);
             if (!full_path) {
                 fprintf(stderr, "sh: %s: command not found\n", argv[1]);
-                return 127;
+                exit(127);  // POSIX: exec failure exits the shell
             }
             char **envp = shell_var_get_envp();
             execve(full_path, argv + 1, envp);
             perror(argv[1]);
             exit(126);
         }
-        return 0;
+        return 0;  // No command - just apply redirections
     }
     if (strcmp(argv[0], "eval") == 0) {
         if (argc > 1) {
