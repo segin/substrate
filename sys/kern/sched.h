@@ -35,7 +35,7 @@
 void sched_init(void);
 
 /* Thread Creation */
-int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
+thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
 
 /* Fork (Clone Process) */
 int sched_fork_process(process_t *parent, void *stack);
@@ -52,5 +52,18 @@ thread_t *sched_get_thread(int tid);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 
 void sched_check_timeouts(void);
+
+/* Load Average */
+#define SI_LOAD_SCALE 2048
+
+/* Load average constants (1, 5, 15 min with 5 sec interval) */
+#define EXP_1  1884  /* 2048 * exp(-5/60) */
+#define EXP_5  2014  /* 2048 * exp(-5/300) */
+#define EXP_15 2037  /* 2048 * exp(-5/900) */
+
+void sched_update_loadavg(void);
+void sched_get_loadavg(unsigned long *loads);
+uint32_t sched_get_active_tasks(void);
+uint32_t sched_get_total_tasks(void);
 
 #endif

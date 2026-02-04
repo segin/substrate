@@ -41,6 +41,11 @@ time_t sys_time(time_t *tloc) {
     return t;
 }
 
+int sys_stime(time_t *t) {
+    if (!t) return -1;
+    boot_time = *t - div64_32(ticks, HZ);
+    return 0;
+}
 int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (!tv) return -1;
     
@@ -90,4 +95,7 @@ clock_t sys_times(struct tms *buf) {
 void timer_tick(void) {
     ticks++;
     sched_check_timeouts();
+    if (mod64_32(ticks, 5 * HZ) == 0) {
+        sched_update_loadavg();
+    }
 }
