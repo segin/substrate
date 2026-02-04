@@ -20,7 +20,7 @@ test: $(PROG) test_yacc.sh
 clean:
 	rm -f $(PROG) $(OBJS) $(TEST_OBJS) y.tab.c y.tab.h y.output *.o
 
-install:
+install: $(PROG)
 	mkdir -p $(DESTDIR)$(BINDIR)
 	cp $(PROG) $(DESTDIR)$(BINDIR)/$(PROG)
 

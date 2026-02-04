@@ -1,0 +1,81 @@
+.TH GETRUSAGE 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+getrusage \- get resource usage
+.SH SYNOPSIS
+.B #include <sys/time.h>
+.br
+.B #include <sys/resource.h>
+.PP
+.BI "int getrusage(int " who ", struct rusage *" usage ");"
+.SH DESCRIPTION
+.BR getrusage ()
+returns resource usage measures for
+.IR who ,
+which can be one of the following:
+.TP
+.B RUSAGE_SELF
+Return resource usage statistics for the calling process, which is the
+sum of resources used by all threads in the process.
+.TP
+.B RUSAGE_CHILDREN
+Return resource usage statistics for all children of the calling process
+that have terminated and been waited for.  These statistics will include
+the resources used by grandchildren, and further removed descendants, if
+all of the intervening descendants waited on their terminated children.
+.TP
+.B RUSAGE_THREAD
+Return resource usage statistics for the calling thread.
+.PP
+The resource usage information is returned in the structure pointed to by
+.IR usage ,
+which has the following form:
+.PP
+.RS
+.nf
+struct rusage {
+    struct timeval ru_utime; /* user CPU time used */
+    struct timeval ru_stime; /* system CPU time used */
+    long   ru_maxrss;        /* maximum resident set size */
+    long   ru_ixrss;         /* integral shared memory size */
+    long   ru_idrss;         /* integral unshared data size */
+    long   ru_isrss;         /* integral unshared stack size */
+    long   ru_minflt;        /* page reclaims (soft page faults) */
+    long   ru_majflt;        /* page faults (hard page faults) */
+    long   ru_nswap;         /* swaps */
+    long   ru_inblock;       /* block input operations */
+    long   ru_oublock;       /* block output operations */
+    long   ru_msgsnd;        /* IPC messages sent */
+    long   ru_msgrcv;        /* IPC messages received */
+    long   ru_nsignals;      /* signals received */
+    long   ru_nvcsw;         /* voluntary context switches */
+    long   ru_nivcsw;        /* involuntary context switches */
+};
+.fi
+.RE
+.SH RETURN VALUE
+On success, zero is returned.  On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EFAULT
+.I usage
+points outside the accessible address space.
+.TP
+.B EINVAL
+.I who
+is invalid.
+.SH CONFORMING TO
+POSIX.1-2001, POSIX.1-2008, SVr4, 4.3BSD.  POSIX.1-2001 specifies
+.BR getrusage (),
+but specifies only the fields
+.I ru_utime
+and
+.IR ru_stime .
+.SH SEE ALSO
+.BR times (2),
+.BR wait (2),
+.BR wait4 (2),
+.BR clock (3)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
