@@ -1,5 +1,5 @@
-#ifndef _STDIO_H
-#define _STDIO_H
+#ifndef _MOCK_STDIO_H
+#define _MOCK_STDIO_H
 
 #include <stddef.h>
 

@@ -438,8 +438,6 @@ int vfs_mkdir(const char *path, uint16_t permission) {
         if (path_buf[0] == '\0') {
             // Path was "/foo", parent became "" (meaning root)
             parent_node = fs_root;
-        } else {
-            // Find parent
             parent_node = vfs_lookup(start_node, path_buf);
         }
     } else {
