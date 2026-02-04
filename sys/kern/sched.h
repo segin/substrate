@@ -55,6 +55,11 @@ void sched_check_timeouts(void);
 
 /* Load Average */
 #define SI_LOAD_SCALE 2048
+#define FSHIFT  11
+#define FSCALE  SI_LOAD_SCALE
+#define FIXED_1 FSCALE
+#define LOAD_INT(x) ((x) >> FSHIFT)
+#define LOAD_FRAC(x) ((((x) & (FSCALE-1)) * 100) >> FSHIFT)
 
 /* Load average constants (1, 5, 15 min with 5 sec interval) */
 #define EXP_1  1884  /* 2048 * exp(-5/60) */

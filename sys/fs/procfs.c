@@ -90,6 +90,7 @@ static uint32_t gen_version(char *buf, size_t size __attribute__((unused))) {
         __DATE__);
 }
 
+
 static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
     unsigned long loads[3];
     sched_get_loadavg(loads);
@@ -97,10 +98,6 @@ static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
     uint32_t runnable = sched_count_runnable();
     uint32_t total = sched_count_threads();
     int last_pid = proc_get_last_pid();
-
-    /* Format fixed point load averages */
-    #define LOAD_INT(x) ((x) >> 11)
-    #define LOAD_FRAC(x) ((((x) & 2047) * 100) >> 11)
 
     return sprintf(buf,
         "%lu.%02lu %lu.%02lu %lu.%02lu %u/%u %d\n",

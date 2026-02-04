@@ -73,6 +73,10 @@ process_t *proc_find(int pid) {
     return NULL;
 }
 
+int proc_get_last_pid(void) {
+    return next_pid - 1;
+}
+
 process_t *proc_create(struct personality *pers) {
     spinlock_acquire(&pid_lock);
     int i;
@@ -458,8 +462,4 @@ void proc_set_bitness(process_t *p, uint8_t bitness) {
 
 uint8_t proc_get_bitness(process_t *p) {
     return p ? p->bitness : 0;
-}
-
-int proc_get_last_pid(void) {
-    return next_pid - 1;
 }

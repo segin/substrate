@@ -1,18 +1,27 @@
 /*
  * loadavg.c - System Load Average Calculation
  *
+<<<<<<< HEAD
+ * Implements exponential moving average for 1, 5, and 15 minute intervals.
+ * Sampled every 5 seconds (500 ticks).
+=======
  * Implements the standard UNIX load average calculation (1, 5, 15 minutes).
  * Updates are performed every 5 seconds.
+>>>>>>> main
  */
 
 #include <kern/sched.h>
 #include <sys/proc.h>
 #include <stdint.h>
 
-/* Fixed-point arithmetic constants (11-bit shift, scale 2048) */
-#define FSHIFT      11
-#define FSCALE      SI_LOAD_SCALE
-#define FIXED_1     FSCALE
+/*
+ * Constants for averages over 1, 5, and 15 minutes
+ * when sampling every 5 seconds.
+ * 2048 * exp(-5/60), etc.
+ */
+#define EXP_1       1884
+#define EXP_5       2014
+#define EXP_15      2037
 
 #define CALC_LOAD(load, exp, active) \
     (((unsigned long)(load) * (exp) + \
@@ -30,12 +39,6 @@ extern thread_t threads[MAX_THREADS];
  */
 uint32_t sched_count_runnable(void) {
     uint32_t count = 0;
-
-    /*
-     * Note: In a more advanced scheduler with per-cpu runqueues,
-     * we would sum the lengths of those queues.
-     * Here we scan the global thread table.
-     */
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1) {
             if (threads[i].state == THREAD_RUNNING ||
@@ -44,7 +47,6 @@ uint32_t sched_count_runnable(void) {
             }
         }
     }
-
     return count;
 }
 
