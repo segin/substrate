@@ -1,8 +1,10 @@
 #include <drivers/video/fb.h>
 #include <kern/console.h>
 #include <kern/cmdline.h>
+#include <kern/time.h>
 #include <sys/types.h>
 #include <string.h>
+#include <stdint.h>
 
 extern void linear_fb_putpixel(int x, int y, uint32_t color);
 extern fb_info_t fb;
@@ -12,15 +14,18 @@ extern fb_info_t fb;
 #define MOCK_HEIGHT 100
 static uint8_t mock_fb_mem[MOCK_WIDTH * MOCK_HEIGHT * 4] __attribute__((aligned(4096)));
 
+/* Read Time-Stamp Counter */
 static inline uint64_t rdtsc(void) {
     uint32_t lo, hi;
-    __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
+    __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
     return ((uint64_t)hi << 32) | lo;
 }
 
 void test_fb_perf(void) {
-    kprint("\n=== FB Clear Performance Benchmark ===\n");
+    kprint("\n=== Framebuffer Performance Tests ===\n");
 
+    /* Part 1: FB Clear Performance Benchmark */
+    kprint("\n--- FB Clear Performance Benchmark ---\n");
     // Backup existing fb state
     fb_info_t backup = fb;
 
@@ -50,7 +55,8 @@ void test_fb_perf(void) {
     uint64_t avg_cycles = total_cycles / iterations;
 
     kprint("Resolution: 100x100 (Mock), 32bpp\n");
-    kprintf("Iterations: %d\n", iterations);
+    extern int kprintf(const char *fmt, ...);
+    kprintf("Clear iterations: %d\n", iterations);
 
     uint32_t avg_k = (uint32_t)(avg_cycles / 1000);
     kprintf("Average cycles per clear: %u Kcycles\n", avg_k);
@@ -69,4 +75,26 @@ void test_fb_perf(void) {
 
     // Restore fb
     fb = backup;
+
+    /* Part 2: Framebuffer Scroll Performance Test */
+    kprint("\n--- Framebuffer Scroll Performance Test ---\n");
+
+    /* Warm up */
+    for (int i = 0; i < 50; i++) {
+        kprint("\n");
+    }
+
+    start = rdtsc();
+    iterations = 1000;
+
+    for (int i = 0; i < iterations; i++) {
+        kprint("\n");
+    }
+
+    end = rdtsc();
+    total_cycles = end - start;
+    avg_cycles = total_cycles / iterations;
+
+    kprintf("Scrolled %d lines in %llu cycles (Avg: %llu cycles/line)\n", iterations, total_cycles, avg_cycles);
+    kprint("=== End Tests ===\n");
 }
