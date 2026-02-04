@@ -214,7 +214,7 @@ uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint3
             if (max_blocks > 256) max_blocks = 256;
 
             while (count < max_blocks) {
-                uint32_t next_block = ext2_get_block_num(fs, inode, block_idx + count);
+                uint32_t next_block = ext2_get_block_num(fs, inode, block_idx + count, indirect, dindirect, tindirect);
                 if (next_block == 0 || next_block != block_num + count) break;
                 count++;
             }
