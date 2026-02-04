@@ -177,6 +177,9 @@ void run_kernel_tests(void) {
 
         extern int test_driver_override_logic(void);
         if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
+
+        extern int test_device_refcounting(void);
+        if (test_device_refcounting() == 0) kprint("device_refcounting: PASS\n"); else kprint("device_refcounting: FAIL\n");
     }
 
     if (all || strcmp(test_arg, "sysinfo") == 0) {
