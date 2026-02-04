@@ -17,16 +17,16 @@ static fs_node_t ext2_fs_node_cache[EXT2_NODE_CACHE_SIZE];
 static int ext2_node_cache_idx = 0;
 
 // Forward declarations
-static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
-static size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
-static size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
-static struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
-static fs_node_t *ext2_finddir(fs_node_t *node, char *name);
-static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size);
+fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
+size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
+struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
+fs_node_t *ext2_finddir(fs_node_t *node, char *name);
+int ext2_readlink(fs_node_t *node, char *buf, size_t size);
 uint32_t ext2_alloc_block(ext2_fs_t *fs);
 
 // Helper to find a zero bit in a bitmap range
-static int find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx) {
+int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx) {
     uint32_t *bitmap32 = (uint32_t *)bitmap;
     uint32_t i = start;
 
@@ -137,7 +137,7 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         kfree(block_buf, 4096);
         return -1;
     }
-    
+        return -1;
     // Update the inode data
     memcpy(block_buf + inode_offset, inode, sizeof(ext2_inode_t));
     
@@ -166,9 +166,8 @@ static uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t 
     // Indirect block (12)
     if (block_idx < ptrs_per_block) {
         if (inode->i_block[12] == 0) return 0;
-        // Need indirect buffer
         if (!indirect_buf) return 0;
-        ext2_read_block(fs, inode->i_block[12], indirect_buf);
+        ext2_read_block(fs, inode->i_block[12], (uint8_t *)indirect_buf);
         return indirect_buf[block_idx];
     }
     block_idx -= ptrs_per_block;
@@ -178,11 +177,14 @@ static uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t 
         if (inode->i_block[13] == 0) return 0;
         if (!dindirect_buf || !indirect_buf) return 0;
 
-        ext2_read_block(fs, inode->i_block[13], dindirect_buf);
+        ext2_read_block(fs, inode->i_block[13], (uint8_t *)dindirect_buf);
         uint32_t indirect_idx = block_idx / ptrs_per_block;
         uint32_t direct_idx = block_idx % ptrs_per_block;
-        if (dindirect_buf[indirect_idx] == 0) return 0;
-        ext2_read_block(fs, dindirect_buf[indirect_idx], indirect_buf);
+        uint32_t indirect_block = dindirect_buf[indirect_idx];
+
+        if (indirect_block == 0) return 0;
+
+        ext2_read_block(fs, indirect_block, (uint8_t *)indirect_buf);
         return indirect_buf[direct_idx];
     }
     block_idx -= ptrs_per_block * ptrs_per_block;
@@ -193,7 +195,7 @@ static uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t 
         if (!tindirect_buf || !dindirect_buf || !indirect_buf) return 0;
         
         // Read triple indirect block
-        ext2_read_block(fs, inode->i_block[14], tindirect_buf);
+        ext2_read_block(fs, inode->i_block[14], (uint8_t *)tindirect_buf);
         
         // Calculate indices for triple indirection
         uint32_t tindirect_idx = block_idx / (ptrs_per_block * ptrs_per_block);
@@ -201,14 +203,18 @@ static uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t 
         uint32_t dindirect_idx = remaining / ptrs_per_block;
         uint32_t indirect_idx = remaining % ptrs_per_block;
         
+        uint32_t dindirect_block = tindirect_buf[tindirect_idx];
+
+        if (dindirect_block == 0) return 0;
+
         // Read double indirect block
-        if (tindirect_buf[tindirect_idx] == 0) return 0;
-        ext2_read_block(fs, tindirect_buf[tindirect_idx], dindirect_buf);
-        
+        ext2_read_block(fs, dindirect_block, (uint8_t *)dindirect_buf);
+        uint32_t indirect_block = dindirect_buf[dindirect_idx];
+
+        if (indirect_block == 0) return 0;
+
         // Read indirect block
-        if (dindirect_buf[dindirect_idx] == 0) return 0;
-        ext2_read_block(fs, dindirect_buf[dindirect_idx], indirect_buf);
-        
+        ext2_read_block(fs, indirect_block, (uint8_t *)indirect_buf);
         return indirect_buf[indirect_idx];
     }
     
@@ -329,14 +335,20 @@ static int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t b
             uint32_t new_indirect = ext2_alloc_block(fs);
             if (new_indirect == 0) return -1;
             inode->i_block[12] = new_indirect;
-            memset(indirect_buf, 0, fs->block_size);
-            ext2_write_block(fs, new_indirect, indirect_buf);
+
+            uint32_t *temp_indirect_buf = kmalloc(fs->block_size);
+            if (!temp_indirect_buf) return -1;
+            memset(temp_indirect_buf, 0, fs->block_size);
+            ext2_write_block(fs, new_indirect, temp_indirect_buf);
+            kfree(temp_indirect_buf, fs->block_size);
         }
         
         // Allocate data block
         ext2_read_block(fs, inode->i_block[12], indirect_buf);
         uint32_t new_block = ext2_alloc_block(fs);
-        if (new_block == 0) return -1;
+        if (new_block == 0) {
+            return -1;
+        }
         indirect_buf[block_idx] = new_block;
         ext2_write_block(fs, inode->i_block[12], indirect_buf);
         return 0;
@@ -400,12 +412,6 @@ uint32_t ext2_inode_write(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint
         offset += to_copy;
         size -= to_copy;
     }
-    
-    // Update file size if we extended it
-    if ((uint32_t)offset > inode->i_size) {
-        inode->i_size = (uint32_t)offset;
-    }
-    
     // Update modification time
     extern int64_t get_time(void);
     inode->i_mtime = (uint32_t)get_time();
@@ -419,7 +425,7 @@ uint32_t ext2_inode_write(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint
 }
 
 // Allocate a node from the cache
-static fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
+fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     int idx = ext2_node_cache_idx++ % EXT2_NODE_CACHE_SIZE;
     
     ext2_node_t *ctx = &ext2_node_cache[idx];
@@ -449,7 +455,7 @@ static fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_
         node->write = ext2_file_write;
     } else if (type == EXT2_S_IFLNK) {
         node->flags = FS_SYMLINK;
-        node->readlink = ext2_readlink_fn;
+        node->readlink = ext2_readlink;
     } else if (type == EXT2_S_IFCHR) {
         node->flags = FS_CHARDEVICE;
         node->rdev = inode->i_block[0];
@@ -457,12 +463,11 @@ static fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_
         node->flags = FS_BLOCKDEVICE;
         node->rdev = inode->i_block[0];
     }
-    
     return node;
 }
 
 // Read symlink target
-static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size) {
+int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_inode_t *inode = &ctx->inode;
     
@@ -481,13 +486,13 @@ static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size) {
 }
 
 // File read operation
-static size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     return ext2_inode_read(ctx->fs, &ctx->inode, offset, size, buffer);
 }
 
 // File write operation
-static size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
@@ -503,7 +508,7 @@ static size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const 
 }
 
 // Read directory entry at index
-static struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
+struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
@@ -544,10 +549,10 @@ static struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
             if (de->inode != 0 && de->name_len > 0) {
                 if (cur_idx == index) {
                     // Found it - store in context specific dirent
-                    ctx->dirent.ino = de->inode;
-                    memcpy(ctx->dirent.name, de->name, de->name_len);
-                    ctx->dirent.name[de->name_len] = '\0';
-                    result = &ctx->dirent;
+                    ctx->current_dirent.ino = de->inode;
+                    memcpy(ctx->current_dirent.name, de->name, de->name_len);
+                    ctx->current_dirent.name[de->name_len] = '\0';
+                    result = &ctx->current_dirent;
                     goto cleanup;
                 }
                 cur_idx++;
@@ -568,7 +573,7 @@ cleanup:
 }
 
 // Find entry by name in directory
-static fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
+fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
@@ -633,7 +638,7 @@ cleanup:
 }
 
 // Mount ext2 filesystem
-static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
+fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     (void)device; (void)flags;
     
     fs_node_t *dev = (fs_node_t *)data;
@@ -746,11 +751,11 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
         int found = 0;
 
         // Pass 1: Search from start_bit to end
-        if (find_next_zero_bit(bitmap_buf, bits_in_group, start_bit, bits_in_group, &found_idx)) {
+        if (ext2_find_next_zero_bit(bitmap_buf, bits_in_group, start_bit, bits_in_group, &found_idx)) {
             found = 1;
         }
         // Pass 2: Search from 0 to start_bit (wrap around within group)
-        else if (start_bit > 0 && find_next_zero_bit(bitmap_buf, bits_in_group, 0, start_bit, &found_idx)) {
+        else if (start_bit > 0 && ext2_find_next_zero_bit(bitmap_buf, bits_in_group, 0, start_bit, &found_idx)) {
             found = 1;
         }
 
