@@ -4,7 +4,7 @@ include Makefile.inc
 # Order matters: lib is usually a dependency for bin/usr.bin
 SUBDIRS = lib sbin sys bin usr.lib usr.bin man
 
-.PHONY: all clean install efi multiboot freebsd zimage debug $(SUBDIRS)
+.PHONY: all clean install efi multiboot freebsd zimage debug host_dist $(SUBDIRS)
 
 all: $(SUBDIRS)
 
@@ -25,7 +25,7 @@ HOSTCC ?= cc
 HOSTCFLAGS ?= -O2 -Wall
 export HOSTCC HOSTCFLAGS
 
-native_dist:
+host_dist:
 	@mkdir -p host_dist/bin
 	@mkdir -p host_dist/sbin
 	@mkdir -p host_dist/usr/bin

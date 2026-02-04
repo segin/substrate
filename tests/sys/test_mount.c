@@ -9,6 +9,85 @@ extern int sys_umount(const char *target);
 extern int sys_mkdir(const char *p, int m);
 extern int sys_rmdir(const char *p);
 
+extern int sys_setuid(int u);
+extern int sched_spawn_kernel_process(void (*entry)(void*), void *arg);
+extern int sys_exit(int code);
+extern void sched_yield(void);
+
+// Synchronization for test
+static volatile int test_worker_status = 0; // 0=running, 1=success (mount failed as expected), 2=failed (mount succeeded or other error)
+static volatile int test_worker_done = 0;
+
+static void mount_permission_worker(void *arg) {
+    const char *mnt = (const char*)arg;
+
+    // 1. Drop privileges (1000)
+    // sys_setuid returns 0 on success
+    if (sys_setuid(1000) != 0) {
+        kprint("TEST WORKER: sys_setuid failed\n");
+        test_worker_status = 2;
+        test_worker_done = 1;
+        sys_exit(1);
+        return;
+    }
+
+    // 2. Try mount (should fail with -EPERM)
+    int ret = sys_mount(NULL, mnt, "devfs", 0, NULL);
+
+    if (ret == 0) {
+        kprint("TEST WORKER: sys_mount SUCCEEDED (unexpected for non-root)\n");
+        // Try to unmount to cleanup?
+        sys_umount(mnt);
+        test_worker_status = 2;
+    } else {
+        // Expected failure
+        // We assume failure is good enough for now, specifically -EPERM (-1)
+        test_worker_status = 1;
+    }
+
+    test_worker_done = 1;
+    sys_exit(0);
+}
+
+void test_mount_permissions(void) {
+    kprint("TEST: mount_permissions starting...\n");
+
+    const char *mnt_point = "/mnt_perm_test";
+
+    // Create mountpoint (as root)
+    sys_mkdir(mnt_point, 0755);
+
+    test_worker_status = 0;
+    test_worker_done = 0;
+
+    // Spawn worker
+    int tid = sched_spawn_kernel_process(mount_permission_worker, (void*)mnt_point);
+    if (tid < 0) {
+        kprint("TEST: Failed to spawn worker\n");
+        return;
+    }
+
+    // Wait for worker
+    int timeout = 10000000;
+    while (!test_worker_done && timeout > 0) {
+        timeout--;
+        sched_yield();
+    }
+
+    if (!test_worker_done) {
+        kprint("TEST: Worker timed out\n");
+    } else {
+        if (test_worker_status == 1) {
+             kprint("TEST: Permission check PASSED (non-root mount failed)\n");
+        } else {
+             kprint("TEST: Permission check FAILED\n");
+        }
+    }
+
+    // Cleanup
+    sys_rmdir(mnt_point);
+}
+
 void run_mount_tests(void) {
     kprint("TEST: mount_tests starting...\n");
     
@@ -88,5 +167,7 @@ void run_mount_tests(void) {
     // Cleanup
     sys_rmdir(mnt_point);
     
+    test_mount_permissions();
+
     kprint("TEST: mount_tests finished.\n");
 }
