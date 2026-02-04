@@ -64,8 +64,67 @@ void execute_line(const char *buffer) {
     }
 }
 
+// Source a file if it exists
+static void source_file(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    if (fsize > 0) {
+        char *content = malloc(fsize + 1);
+        if (content) {
+            size_t n = fread(content, 1, fsize, f);
+            content[n] = '\0';
+            execute_line(content);
+            free(content);
+        }
+    }
+    fclose(f);
+}
+
+// Process startup files per POSIX
+static void process_startup_files(int is_login_shell, int is_interactive) {
+    // POSIX: Login shells read /etc/profile then ~/.profile
+    if (is_login_shell) {
+        source_file("/etc/profile");
+        
+        char *home = getenv("HOME");
+        if (home) {
+            char profile_path[1024];
+            snprintf(profile_path, sizeof(profile_path), "%s/.profile", home);
+            source_file(profile_path);
+        }
+    }
+    
+    // POSIX: Interactive shells read file specified by $ENV (after expansion)
+    if (is_interactive) {
+        char *env_file = getenv("ENV");
+        if (env_file && env_file[0]) {
+            // TODO: Expand $ENV value (for now, use as-is)
+            source_file(env_file);
+        }
+    }
+}
+
+// Initialize default environment values
+static void init_environment(void) {
+    // POSIX: IFS default is space, tab, newline
+    if (!shell_var_get("IFS")) {
+        shell_var_set("IFS", " \t\n");
+    }
+    
+    // Set PATH if not already set
+    if (!getenv("PATH")) {
+        shell_var_export("PATH", "/usr/bin:/bin");
+    }
+}
+
 int main(int argc, char **argv, char **envp) {
     shell_var_init(envp);
+    init_environment();
     
     // Shell flags
     int opt_c = 0;           // -c: Execute string
@@ -78,7 +137,6 @@ int main(int argc, char **argv, char **envp) {
     if (argv[0] && argv[0][0] == '-') {
         is_login_shell = 1;
     }
-    (void)is_login_shell; // TODO: Use for profile loading
     
     // POSIX option parsing
     int optind = 1;
@@ -190,6 +248,9 @@ int main(int argc, char **argv, char **envp) {
         tcsetpgrp(STDIN_FILENO, shell_pgid);
         tcgetattr(STDIN_FILENO, &shell_tmodes);
     }
+    
+    // Process startup files (profile for login, ENV for interactive)
+    process_startup_files(is_login_shell, is_interactive && !reading_script);
     
     if (reading_script || opt_s) {
         // Read entire input for non-interactive/script mode

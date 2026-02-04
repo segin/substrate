@@ -3304,8 +3304,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Detect and handle login shell behavior.
         - [x] Argument parsing and POSIX option processing.
         - [x] Interactive vs non-interactive mode detection.
-        - [ ] Startup files: `ENV` and profile handling.
-        - [ ] Locale and environment initialization.
+        - [x] Startup files: `ENV` and profile handling.
+        - [x] Locale and environment initialization.
         - [x] Signal disposition at startup.
     - [x] **Lexical Analysis:**
         - [x] Delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
