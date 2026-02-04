@@ -1,0 +1,36 @@
+.TH STIME 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+stime \- set time
+.SH SYNOPSIS
+.B #include <time.h>
+.PP
+.BI "int stime(const time_t *" t ");"
+.SH DESCRIPTION
+.BR stime ()
+sets the system's idea of the time and date.  The time, pointed to by
+.IR t ,
+is measured in seconds since the Epoch, 1970-01-01 00:00:00 +0000 (UTC).
+.BR stime ()
+may be executed only by the superuser.
+.SH RETURN VALUE
+On success, zero is returned.  On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EFAULT
+Error in getting information from user space.
+.TP
+.B EPERM
+The calling process has insufficient privilege.  Under Linux the
+.B CAP_SYS_TIME
+privilege is required.
+.SH CONFORMING TO
+SVr4, 4.3BSD.  This function is not specified in POSIX.1-2001 or
+POSIX.1-2008.
+.SH SEE ALSO
+.BR date (1),
+.BR settimeofday (2),
+.BR time (2)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

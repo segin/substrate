@@ -1,14 +1,12 @@
 #ifndef _MOCK_STDIO_H
 #define _MOCK_STDIO_H
 
-// Minimal mock for stdio.h to satisfy vfs.c requirements
-// without pulling in conflicting host types.
+#include <stddef.h>
 
+// Basic stdio definitions for mocks
+// If compiling for host, these will link against libc
 int sprintf(char *str, const char *format, ...);
-
-// If vfs.c uses NULL, we need it.
-#ifndef NULL
-#define NULL ((void*)0)
-#endif
+int printf(const char *format, ...);
+int snprintf(char *str, size_t size, const char *format, ...);
 
 #endif
