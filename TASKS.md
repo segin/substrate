@@ -3349,7 +3349,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] PATH search rules.
         - [x] `exec` behavior (shell replacement).
         - [x] Process forking model.
-        - [ ] Job control hooks integration.
+        - [x] Job control hooks integration.
         - [x] Exit status propagation.
         - [ ] `set -e` semantics.
     - [ ] **Builtin Commands:**

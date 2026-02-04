@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include "job.h"
 #include "util.h"
+#include "parser.h"
 
 int shell_is_interactive = 0;
 pid_t shell_pgid;
@@ -264,6 +265,29 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
                 free(line);
             }
         }
+        return 0;
+    }
+    if (strcmp(argv[0], "wait") == 0) {
+        if (argc > 1) {
+            pid_t pid = atoi(argv[1]);
+            waitpid(pid, NULL, 0);
+        } else {
+            while (first_job) {
+                job_wait(first_job);
+                // job_wait doesn't free, we need to free it
+                job_free(first_job);
+            }
+            while (waitpid(-1, NULL, WNOHANG) > 0);
+        }
+        return 0;
+    }
+    if (strcmp(argv[0], "kill") == 0) {
+        if (argc < 2) { fprintf(stderr, "kill: usage: kill [-sig] pid\n"); return 1; }
+        int sig = SIGTERM;
+        int idx = 1;
+        if (argv[1][0] == '-') { sig = atoi(argv[1]+1); idx = 2; }
+        if (idx >= argc) return 1;
+        if (kill(atoi(argv[idx]), sig) < 0) { perror("kill"); return 1; }
         return 0;
     }
     if (strcmp(argv[0], "jobs") == 0) return builtin_jobs(argc, argv);
@@ -636,6 +660,7 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
     job_t *job = NULL;
     if (shell_is_interactive) {
         job = job_new();
+        job->command = ast_to_string((ast_node_t *)pipe_node);
     }
 
     for (int i = 0; i < n - 1; i++) {
@@ -731,6 +756,49 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
 }
 
 static int execute_binary_op(ast_binary_op_t *bin) {
+    // Handle background execution specially
+    if (bin->op == OP_BACKGROUND) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            // Child: run the command
+            if (shell_is_interactive) {
+                // Create new process group
+                setpgid(0, 0);
+                // Reset signal handlers
+                signal(SIGINT, SIG_DFL);
+                signal(SIGQUIT, SIG_DFL);
+                signal(SIGTSTP, SIG_DFL);
+                signal(SIGTTIN, SIG_DFL);
+                signal(SIGTTOU, SIG_DFL);
+                signal(SIGCHLD, SIG_DFL);
+            }
+            exit(execute_ast(bin->left));
+        } else if (pid > 0) {
+            // Parent: add to job list
+            if (shell_is_interactive) {
+                setpgid(pid, pid);
+                job_t *job = job_new();
+                job->pgid = pid;
+                job->command = ast_to_string(bin->left);
+                job_add_process(job, pid, NULL);
+                printf("[%d] %d\n", job->id, (int)pid);
+            }
+            // Set $! to PID of background process
+            char pid_buf[16];
+            snprintf(pid_buf, sizeof(pid_buf), "%d", (int)pid);
+            shell_var_set("!", pid_buf);
+            
+            // Continue with right side if present (OP_BACKGROUND is unary, but just in case)
+            if (bin->right) {
+                return execute_ast(bin->right);
+            }
+            return 0;  // Background commands return 0 immediately
+        } else {
+            perror("fork");
+            return 1;
+        }
+    }
+    
     int left_status = execute_ast(bin->left);
     
     // Update $? after each command so subsequent commands can see it
@@ -749,6 +817,9 @@ static int execute_binary_op(ast_binary_op_t *bin) {
         case OP_OR:
             if (left_status != 0) return execute_ast(bin->right);
             return left_status;
+        case OP_BACKGROUND:
+            // Already handled above
+            break;
     }
     return 1;
 }

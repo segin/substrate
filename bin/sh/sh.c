@@ -122,6 +122,11 @@ static void init_environment(void) {
     }
 }
 
+static void sigchld_handler(int sig) {
+    (void)sig;
+    // job_update_status will be called by the main loop.
+}
+
 int main(int argc, char **argv, char **envp) {
     shell_var_init(envp);
     init_environment();
@@ -184,20 +189,6 @@ int main(int argc, char **argv, char **envp) {
         }
     }
     
-    // Handle -c: Execute command string
-    if (opt_c) {
-        // POSIX: Next arg after command_string is $0, rest are positional params
-        // shell_var_set_args expects argv[0] = $0, argv[1+] = positional params
-        if (optind < argc) {
-            shell_var_set_args(argc - optind, argv + optind);
-        } else {
-            // No $0 provided, use "sh"
-            char *default_argv[] = {"sh", NULL};
-            shell_var_set_args(1, default_argv);
-        }
-        execute_line(command_string);
-        return 0;
-    }
     
     // Determine input source
     FILE *input = stdin;
@@ -237,7 +228,7 @@ int main(int argc, char **argv, char **envp) {
         signal(SIGTSTP, SIG_IGN);
         signal(SIGTTIN, SIG_IGN);
         signal(SIGTTOU, SIG_IGN);
-        signal(SIGCHLD, SIG_IGN);
+        signal(SIGCHLD, sigchld_handler);
         
         shell_pgid = getpid();
         if (setpgid(shell_pgid, shell_pgid) < 0) {
@@ -252,12 +243,18 @@ int main(int argc, char **argv, char **envp) {
     // Process startup files (profile for login, ENV for interactive)
     process_startup_files(is_login_shell, is_interactive && !reading_script);
     
+    // Handle -c: Execute command string
+    if (opt_c) {
+        execute_line(command_string);
+        return 0;
+    }
+    
     if (reading_script || opt_s) {
         // Read entire input for non-interactive/script mode
         fseek(input, 0, SEEK_END);
         off_t fsize = ftell(input);
         fseek(input, 0, SEEK_SET);
-
+ 
         if (fsize < 0) {
             // stdin or pipe - read incrementally
             size_t cap = 4096, len = 0;
@@ -295,7 +292,7 @@ int main(int argc, char **argv, char **envp) {
             }
             size_t nread = fread(buffer, 1, (size_t)fsize, input);
             buffer[nread] = 0;
-
+ 
             if (nread > 0) {
                 execute_line(buffer);
             } else if (fsize > 0) {
@@ -310,6 +307,7 @@ int main(int argc, char **argv, char **envp) {
         char buf[1024];
         while (1) {
             if (shell_is_interactive) {
+                job_update_status();
                 char *p = shell_var_get("PS1");
                 if (!p) p = "$ ";
                 printf("%s", p);
