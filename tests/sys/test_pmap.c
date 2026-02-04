@@ -234,6 +234,8 @@ static void itoa(int val, char *buf) {
 }
 
 void run_pmap_tests(void) {
+    char buf[32];
+
     kprint("\n=== PMAP Unit Tests ===\n");
     
     test_pmap_lifecycle();
@@ -249,14 +251,10 @@ void run_pmap_tests(void) {
     
     kprint("\nResults: ");
     kprint("Passed: ");
-
-    char buf[32];
     itoa(tests_passed, buf);
     kprint(buf);
-
     kprint(" Failed: ");
     itoa(tests_failed, buf);
     kprint(buf);
-
     kprint("\n");
 }
