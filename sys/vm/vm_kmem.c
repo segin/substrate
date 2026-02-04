@@ -56,7 +56,7 @@ void kmem_init(void) {
         );
     }
 
-    /* Enable dynamic allocation of UMA zones now that kmalloc is ready */
+    /* KMEM is now ready, allow UMA to use kmalloc for zone structures */
     uma_enable_dynamic_alloc();
 }
 

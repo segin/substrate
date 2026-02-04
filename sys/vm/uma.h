@@ -147,7 +147,7 @@ struct uma_zone {
 /* Initialize UMA subsystem */
 void uma_startup(void);
 
-/* Enable dynamic allocation of zone structures (call after kmem_init) */
+/* Enable dynamic allocation of zone structures (called by kmem_init) */
 void uma_enable_dynamic_alloc(void);
 
 /* Create a zone */
