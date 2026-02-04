@@ -31,6 +31,7 @@ typedef struct file file_t;
 struct pmap;
 struct pgrp;
 struct session;
+struct registers;
 
 #define MAX_FD 32
 
@@ -99,6 +100,10 @@ typedef struct process {
     struct vm_area *vm_areas;  // Linked list of mapped regions
     struct vm_map *vm_map;    // Substrate VM Map
     struct pmap *pmap;         // Pmap (Page Table) handle
+    
+    // LDT support
+    void        *ldt;             // Pointer to LDT entries (gdt_entry_t*)
+    int          ldt_entry_count; // Number of entries in LDT
     
     // Resource limits, FDs, etc. would go here
 } process_t;
@@ -179,7 +184,7 @@ typedef struct thread {
     uintptr_t                on_fault;
     
     // Syscall registers (for fork/vfork)
-    void *syscall_regs;
+    struct registers *syscall_regs;
 
     thread_state_t state;
     struct thread *next;

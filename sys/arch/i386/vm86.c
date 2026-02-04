@@ -409,7 +409,7 @@ int vm86_bios_call(int int_no, struct vm86_regs *regs) {
     /* Let's assume we can temporarirly map it. */
     /* Map 0->0, 4K->4K ... up to 1MB. */
     for (uint32_t i = 0; i < 0x100000; i += 0x1000) {
-        pmap_kenter(i, i); // User accessible for VM86
+        pmap_enter(pmap_kernel(), i, i, VM_PROT_ALL, 0); // User accessible for VM86
     }
     
     /* 2. Setup Monitor State */

@@ -1,0 +1,43 @@
+.Dd February 1, 2026
+.Dt PMM_FREE 9
+.Os Substrate
+.Sh NAME
+.Nm pmm_free_block ,
+.Nm pmm_free_contiguous
+.Nd free physical memory
+.Sh SYNOPSIS
+.In sys/pmm.h
+.Ft void
+.Fn pmm_free_block "void *p"
+.Ft void
+.Fn pmm_free_contiguous "void *p" "size_t count"
+.Sh DESCRIPTION
+The
+.Fn pmm_free_block
+function frees a single page of physical memory previously allocated block.
+.Pp
+The
+.Fn pmm_free_contiguous
+function frees
+.Fa count
+contiguous pages of physical memory.
+.Pp
+The pointer
+.Fa p
+must be a
+.emph virtual address
+in the kernel direct map region (0xC0000000+), matching the return value of
+.Fn pmm_alloc_block
+or
+.Fn pmm_alloc_contiguous .
+.Sh RETURN VALUES
+The
+.Fn pmm_free_block
+and
+.Fn pmm_free_contiguous
+functions return no value.
+.Sh SEE ALSO
+.Xr pmm_alloc_block 9 ,
+.Xr pmm_alloc_contiguous 9
+.Sh HISTORY
+The PMM allocator first appeared in Substrate.

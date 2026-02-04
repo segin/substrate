@@ -99,7 +99,7 @@ int sys_set_thread_area(struct user_desc *u_info) {
     // Otherwise, it restores the old selector (0x33) with old base (0),
     // and TLS accesses (GS:offset) will fault.
     if (current_thread && current_thread->syscall_regs) {
-        ((registers_t*)current_thread->syscall_regs)->gs = selector;
+        current_thread->syscall_regs->gs = selector;
     }
     
     return 0;

@@ -1,0 +1,54 @@
+.Dd February 1, 2026
+.Dt MUTEX 9
+.Os Substrate
+.Sh NAME
+.Nm mutex_init ,
+.Nm mutex_lock ,
+.Nm mutex_unlock ,
+.Nm mutex_trylock ,
+.Nm mutex_destroy
+.Nd kernel mutual exclusion synchronization primitive
+.Sh SYNOPSIS
+.In sys/lock.h
+.Ft void
+.Fn mutex_init "mutex_t *mtx" "const char *name"
+.Ft void
+.Fn mutex_lock "mutex_t *mtx"
+.Ft void
+.Fn mutex_unlock "mutex_t *mtx"
+.Ft int
+.Fn mutex_trylock "mutex_t *mtx"
+.Ft void
+.Fn mutex_destroy "mutex_t *mtx"
+.Sh DESCRIPTION
+Mutexes provide mutual exclusion for kernel threads.
+Only one thread may hold a mutex at any given time.
+If a thread attempts to lock a mutex held by another thread, it will sleep until the mutex is released.
+.Pp
+.Fn mutex_init
+initializes the mutex
+.Fa mtx
+with the given debugging
+.Fa name .
+.Pp
+.Fn mutex_lock
+acquires the mutex, sleeping if necessary.
+.Pp
+.Fn mutex_unlock
+releases the mutex and wakes up any waiters.
+.Pp
+.Fn mutex_trylock
+attempts to acquire the mutex without sleeping.
+Returns 1 on success, 0 if widely held.
+.Pp
+.Fn mutex_destroy
+destroys the mutex, asserting it is not held.
+.Sh RETURN VALUES
+.Fn mutex_trylock
+returns 1 if the lock was acquired, 0 otherwise.
+.Sh SEE ALSO
+.Xr spinlock 9
+.Sh HISTORY
+The
+.Fn mutex
+primitive first appeared in Substrate.

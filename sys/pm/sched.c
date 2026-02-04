@@ -40,7 +40,9 @@ thread_t *sched_alloc_thread(process_t *proc) {
 
     threads[i].tid = next_tid++;
     threads[i].proc = proc;
-    threads[i].state = THREAD_READY;
+    threads[i].state = THREAD_BLOCKED; // Set to BLOCKED until stack is ready
+    threads[i].wait_chan = NULL;
+    threads[i].wait_reason = NULL;
     threads[i].priority = current_thread ? current_thread->priority : 20;
     threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
     threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;

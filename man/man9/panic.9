@@ -1,0 +1,29 @@
+.Dd February 1, 2026
+.Dt PANIC 9
+.Os Substrate
+.Sh NAME
+.Nm panic
+.Nd bring down the system
+.Sh SYNOPSIS
+.In kern/panic.h
+.Ft void
+.Fn panic "const char *fmt, ..."
+.Sh DESCRIPTION
+The
+.Fn panic
+function terminates the running system.
+The message
+.Fa fmt
+is a
+.Xr printf 9
+style format string.
+The message is printed to the console and the system halts or reboots, depending on configuration and context.
+.Pp
+This function never returns.
+.Sh SEE ALSO
+.Xr kprint 9 ,
+.Xr printf 9
+.Sh HISTORY
+The
+.Fn panic
+function first appeared in Substrate.

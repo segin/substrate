@@ -150,10 +150,10 @@ static void futex_handle_dead_owner(int *uaddr) {
  * 1. Check if current thread owns it (TID matches)
  * 2. If so, mark with FUTEX_OWNER_DIED and wake waiters
  */
-void futex_exit_cleanup(void) {
-    if (!current_thread || !current_thread->robust_list) return;
+void futex_thread_exit(thread_t *t) {
+    if (!t || !t->robust_list) return;
     
-    struct robust_list_head *head = current_thread->robust_list;
+    struct robust_list_head *head = t->robust_list;
     struct robust_list *entry;
     int count = 0;
     const int MAX_ROBUST_WALK = 4096;  /* Prevent infinite loops */
@@ -164,7 +164,7 @@ void futex_exit_cleanup(void) {
         int val;
         
         if (futex_read_user(futex_addr, &val) == 0) {
-            if ((val & FUTEX_TID_MASK) == (uint32_t)current_thread->tid) {
+            if ((val & FUTEX_TID_MASK) == (uint32_t)t->tid) {
                 futex_handle_dead_owner(futex_addr);
             }
         }
@@ -184,7 +184,7 @@ void futex_exit_cleanup(void) {
         
         if (futex_read_user(futex_addr, &val) == 0) {
             /* Check if we own this lock */
-            if ((val & FUTEX_TID_MASK) == (uint32_t)current_thread->tid) {
+            if ((val & FUTEX_TID_MASK) == (uint32_t)t->tid) {
                 futex_handle_dead_owner(futex_addr);
             }
         }
@@ -194,8 +194,12 @@ void futex_exit_cleanup(void) {
     }
     
     /* Clear the robust list */
-    current_thread->robust_list = NULL;
-    current_thread->robust_list_len = 0;
+    t->robust_list = NULL;
+    t->robust_list_len = 0;
+}
+
+void futex_exit_cleanup(void) {
+    futex_thread_exit(current_thread);
 }
 
 /*
