@@ -3,8 +3,8 @@
 
 #include <sys/types.h>
 
-#ifndef _STRUCT_WINSIZE_DEFINED
-#define _STRUCT_WINSIZE_DEFINED
+#ifndef _STRUCT_WINSIZE
+#define _STRUCT_WINSIZE
 struct winsize {
     unsigned short ws_row;
     unsigned short ws_col;
