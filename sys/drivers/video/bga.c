@@ -29,6 +29,8 @@
 #define VBE_DISPI_ENABLED           0x01
 #define VBE_DISPI_LFB_ENABLED       0x40
 
+void bga_scroll(int y_offset);
+
 static void bga_write(uint16_t index, uint16_t value) {
     outw(VBE_DISPI_IOPORT_INDEX, index);
     outw(VBE_DISPI_IOPORT_DATA, value);
@@ -100,6 +102,14 @@ int bga_init(fb_info_t *fb_out) {
     bga_write(VBE_DISPI_INDEX_XRES, width);
     bga_write(VBE_DISPI_INDEX_YRES, height);
     bga_write(VBE_DISPI_INDEX_BPP, bpp);
+
+    /* Enable Virtual Height (Double Buffering / Scrolling) */
+    uint16_t virt_height = height * 2;
+    bga_write(VBE_DISPI_INDEX_VIRT_WIDTH, width);
+    bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, virt_height);
+    bga_write(VBE_DISPI_INDEX_X_OFFSET, 0);
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, 0);
+
     bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
 
     // Update fb info
@@ -108,9 +118,17 @@ int bga_init(fb_info_t *fb_out) {
     fb_out->height = height;
     fb_out->bpp = bpp;
     fb_out->pitch = (width * bpp) / 8;
+    fb_out->virt_height = virt_height;
 
-    kprint("BGA: Mode set to 1024x768x32.\n");
+    /* Implement Hardware Scroll */
+    fb_out->scroll = bga_scroll;
+
+    kprint("BGA: Mode set to 1024x768x32 (HW Scroll Enabled).\n");
     return 0;
+}
+
+void bga_scroll(int y_offset) {
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, (uint16_t)y_offset);
 }
 
 static video_driver_t bga_driver = {

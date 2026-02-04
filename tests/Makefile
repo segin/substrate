@@ -20,9 +20,13 @@ UNIT_TESTS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
 
 MOCKS = mocks.c
 
-all: test_runner test_minix
+all: test_runner test_minix test_ext2_perf
 	./test_runner
 	./test_minix
+	./test_ext2_perf
+
+test_ext2_perf: unit/fs/test_ext2_perf_host.c
+	$(CC) $(CFLAGS) $< -o $@
 
 test_minix: unit/fs/test_minix_standalone.c
 	$(CC) $(CFLAGS) $< -o $@
@@ -31,4 +35,4 @@ test_runner: $(CORE_SRCS) $(UNIT_TESTS) $(MOCKS) test_runner.c
 	$(CC) $(CFLAGS) $^ -o $@
 
 clean:
-	rm -f test_runner
+	rm -f test_runner test_minix test_ext2_perf
