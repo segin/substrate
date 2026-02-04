@@ -180,7 +180,7 @@ typedef struct thread {
     uintptr_t                on_fault;
     
     // Syscall registers (for fork/vfork)
-    void *syscall_regs;
+    struct registers *syscall_regs;
 
     thread_state_t state;
     struct thread *next;
