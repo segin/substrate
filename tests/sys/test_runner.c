@@ -200,6 +200,11 @@ void run_kernel_tests(void) {
 
     }
 
+    if (all || strcmp(test_arg, "fb_perf") == 0) {
+        extern void test_fb_perf(void);
+        test_fb_perf();
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested
