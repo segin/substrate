@@ -1,0 +1,4 @@
+#ifndef _KERN_CONSOLE_MOCK_H
+#define _KERN_CONSOLE_MOCK_H
+void kprint(const char *str);
+#endif

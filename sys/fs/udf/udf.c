@@ -116,7 +116,30 @@ int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp) {
         }
     }
     
-    /* TODO: Try last sector and last-256 for completeness */
+    /* Try last sector and last-256 for completeness */
+    if (dev->length >= UDF_SECTOR_SIZE) {
+        uint32_t last_sector = (uint32_t)((uint64_t)dev->length / UDF_SECTOR_SIZE) - 1;
+
+        /* Try last sector */
+        if (last_sector > UDF_AVDP_SECTOR) {
+            if (udf_read_tag(dev, last_sector, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
+                if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
+                    memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+                    return 0;
+                }
+            }
+        }
+
+        /* Try last-256 sector */
+        if (last_sector > UDF_AVDP_SECTOR + 256) {
+            if (udf_read_tag(dev, last_sector - 256, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
+                if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
+                    memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+                    return 0;
+                }
+            }
+        }
+    }
     
     kprint("UDF: AVDP not found\n");
     return -1;
@@ -309,6 +332,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
 /* External functions from udf_write.c */
 extern int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
 extern uint32_t udf_alloc_block(void);
+extern void udf_free_block(uint32_t block);
 extern int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type, uint32_t uid, uint32_t gid, uint32_t permissions);
 extern int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics);
 
@@ -461,7 +485,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     
     /* Create new directory FE */
     if (udf_create_fe(fs->device, block, UDF_FILETYPE_DIR, uid, gid, permission) != 0) {
-        // TODO: Free block
+        udf_free_block(block);
         return -1;
     }
     
@@ -474,6 +498,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     
     /* Add entry to parent directory */
     if (udf_add_fid(fs->device, &pctx->fe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
+        udf_free_block(block);
         return -1;
     }
     
