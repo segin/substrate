@@ -11,8 +11,11 @@
 #include "job.h"
 #include "util.h"
 #include "parser.h"
+#include <signal.h>
 
 int shell_is_interactive = 0;
+int shell_errexit = 0;
+int errexit_disabled = 0;
 pid_t shell_pgid;
 struct termios shell_tmodes;
 #include <termios.h>
@@ -179,6 +182,10 @@ int execute_ast(ast_node_t *node) {
             status = 1;
     }
 
+    if (status != 0 && shell_errexit && errexit_disabled == 0) {
+        exit(status);
+    }
+
     if (saved_fds) {
         restore_redirections(saved_fds);
     }
@@ -228,10 +235,21 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         return 0;
     }
     if (strcmp(argv[0], "set") == 0) {
-        if (argc > 1 && strcmp(argv[1], "--") == 0) {
-             shell_var_set_args(argc - 1, argv + 1);
-        } else {
-             shell_var_set_args(argc, argv);
+        if (argc > 1) {
+            for (int i = 1; i < argc; i++) {
+                if (argv[i][0] == '-') {
+                    for (char *p = argv[i] + 1; *p; p++) {
+                        if (*p == 'e') shell_errexit = 1;
+                    }
+                } else if (argv[i][0] == '+') {
+                    for (char *p = argv[i] + 1; *p; p++) {
+                        if (*p == 'e') shell_errexit = 0;
+                    }
+                } else if (strcmp(argv[i], "--") == 0) {
+                    shell_var_set_args(argc - i - 1, argv + i + 1);
+                    break;
+                }
+            }
         }
         return 0;
     }
@@ -799,7 +817,14 @@ static int execute_binary_op(ast_binary_op_t *bin) {
         }
     }
     
-    int left_status = execute_ast(bin->left);
+    int left_status;
+    if (bin->op == OP_AND || bin->op == OP_OR) {
+        errexit_disabled++;
+        left_status = execute_ast(bin->left);
+        errexit_disabled--;
+    } else {
+        left_status = execute_ast(bin->left);
+    }
     
     // Update $? after each command so subsequent commands can see it
     char status_buf[16];
@@ -818,14 +843,16 @@ static int execute_binary_op(ast_binary_op_t *bin) {
             if (left_status != 0) return execute_ast(bin->right);
             return left_status;
         case OP_BACKGROUND:
-            // Already handled above
             break;
     }
     return 1;
 }
 
 static int execute_if(ast_if_t *if_node) {
+    errexit_disabled++;
     int cond_status = execute_ast(if_node->condition);
+    errexit_disabled--;
+    
     if (func_return_signaled || loop_break_count > 0 || loop_continue_count > 0) return cond_status;
     
     if (cond_status == 0) {
@@ -839,7 +866,13 @@ static int execute_if(ast_if_t *if_node) {
 
 static int execute_while(ast_while_t *w) {
     int status = 0;
-    while (execute_ast(w->condition) == 0) {
+    while (1) {
+        errexit_disabled++;
+        int cond_status = execute_ast(w->condition);
+        errexit_disabled--;
+        
+        if (cond_status != 0) break;
+        
         if (func_return_signaled) return status;
         status = execute_ast(w->body);
         if (func_return_signaled) return status;

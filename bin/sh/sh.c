@@ -171,6 +171,9 @@ int main(int argc, char **argv, char **envp) {
                 case 'i':
                     opt_i = 1;
                     break;
+                case 'e':
+                    shell_errexit = 1;
+                    break;
                 default:
                     fprintf(stderr, "sh: illegal option -%c\n", *p);
                     return 2;
@@ -216,7 +219,8 @@ int main(int argc, char **argv, char **envp) {
     shell_var_set_args(argc - optind, argv + optind);
     
     // Initialize Job Control for interactive shells
-    int is_interactive = (input == stdin && isatty(STDIN_FILENO)) || opt_i;
+    int is_interactive = ((input == stdin && isatty(STDIN_FILENO)) || opt_i) && !opt_c;
+    if (opt_i) is_interactive = 1;
     
     if (is_interactive && !reading_script) {
         shell_is_interactive = 1;
