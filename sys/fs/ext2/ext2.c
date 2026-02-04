@@ -98,8 +98,6 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         kfree(block_buf, 4096);
         return -1;
     }
-        return -1;
-    }
     
     memcpy(inode, block_buf + inode_offset, sizeof(ext2_inode_t));
     kfree(block_buf, 4096);
@@ -140,8 +138,6 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         return -1;
     }
         return -1;
-    }
-    
     // Update the inode data
     memcpy(block_buf + inode_offset, inode, sizeof(ext2_inode_t));
     
@@ -315,6 +311,7 @@ uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint3
     kfree(indirect, block_size);
     kfree(dindirect, block_size);
     kfree(tindirect, block_size);
+
     return total_read;
 }
 
@@ -1050,6 +1047,7 @@ int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) {
         result = -1;
         goto cleanup;
     }
+
     // Zero the new block
     memset(block_buf, 0, fs->block_size);
     
