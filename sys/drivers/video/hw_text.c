@@ -57,13 +57,25 @@ static void hw_text_putentryat(char c, uint8_t color, size_t x, size_t y) {
 }
 
 static void hw_text_scroll(void) {
-    for (size_t y = 0; y < drv.height - 1; y++) {
-        for (size_t x = 0; x < drv.width; x++) {
-            drv.buffer[y * drv.width + x] = drv.buffer[(y + 1) * drv.width + x];
-        }
-    }
+    size_t line_size = drv.width * sizeof(uint16_t);
+    size_t scroll_size = (drv.height - 1) * line_size;
+
+    /* Move lines up */
+    memcpy(drv.buffer, (void*)((uintptr_t)drv.buffer + line_size), scroll_size);
+
+    /* Clear bottom line */
+    uint16_t empty = hw_text_entry(' ', drv.color);
+    uint16_t *last_line = drv.buffer + (drv.height - 1) * drv.width;
+
+    /* Optimize clearing if we have wmemset-like capability or just loop */
+    /* Since we have optimized word-aligned memset, we can use it?
+       No, memset sets bytes. We need to set uint16_t pattern.
+       But 'empty' is 2 bytes. If empty has same bytes (e.g. 0x0720), bytes are 0x20 and 0x07. Not memset-able.
+       We'll stick to a loop for the last line clearing, or use a wmemset helper if we had one.
+       The scroll move is the expensive part (24 lines vs 1 line). */
+
     for (size_t x = 0; x < drv.width; x++) {
-        drv.buffer[(drv.height - 1) * drv.width + x] = hw_text_entry(' ', drv.color);
+        last_line[x] = empty;
     }
 }
 

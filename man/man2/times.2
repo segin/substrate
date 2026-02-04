@@ -1,4 +1,4 @@
-.TH TIMES 2 "July 2023" "Kernel" "System Calls Manual"
+.TH TIMES 2 "February 2026" "Substrate" "System Calls Manual"
 .SH NAME
 times \- get process times
 .SH SYNOPSIS
@@ -6,17 +6,16 @@ times \- get process times
 .PP
 .BI "clock_t times(struct tms *" buf ");"
 .SH DESCRIPTION
-.B times()
+.BR times ()
 stores the current process times in the
-.B struct tms
-that
-.I buf
-points to.
-.PP
-The
 .I struct tms
-is as defined in
-.BR <sys/times.h> :
+pointed to by
+.IR buf .
+.PP
+.I struct tms
+is defined in
+.I <sys/times.h>
+as follows:
 .PP
 .RS
 .nf
@@ -32,19 +31,16 @@ struct tms {
 The
 .I tms_utime
 field contains the CPU time spent executing instructions of the calling
-process.
-The
+process.  The
 .I tms_stime
-field contains the CPU time spent in the system while executing tasks on
-behalf of the calling process.
-The
+field contains the CPU time spent in the system while executing on behalf
+of the calling process.  The
 .I tms_cutime
 field contains the sum of the
 .I tms_utime
 and
 .I tms_cutime
-values for all waited-for terminated children.
-The
+values for all waited-for terminated children.  The
 .I tms_cstime
 field contains the sum of the
 .I tms_stime
@@ -57,34 +53,28 @@ moment
 .BR wait (2)
 or
 .BR waitpid (2)
-returns their process ID.
-In particular, times of grandchildren that the children did not wait for are
-never seen.
+returns their process ID.  In particular, times of grandchildren that the
+children did not wait for are never seen.
 .PP
-All times reported are in clock ticks.
+All times returned are in clock ticks.
 .SH RETURN VALUE
-.B times()
+.BR times ()
 returns the number of clock ticks that have elapsed since an arbitrary
-point in the past.
-The return value may overflow the possible range of type
-.BR clock_t .
-On error,
-.B (clock_t) \-1
-is returned, and
-.I errno
-is set appropriately.
+point in the past.  The return value may overflow the possible range of
+type
+.IR clock_t .
 .SH ERRORS
 .TP
 .B EFAULT
-.I tms
-points outside the process's address space.
-.SH NOTES
-The number of clock ticks per second can be obtained using
-.BR sysconf(_SC_CLK_TCK) .
+.I buf
+points outside the process's accessible address space.
+.SH CONFORMING TO
+POSIX.1-2001, POSIX.1-2008, SVr4, 4.3BSD.
 .SH SEE ALSO
 .BR time (1),
 .BR getrusage (2),
 .BR wait (2),
-.BR time (2),
 .BR clock (3),
 .BR sysconf (3)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

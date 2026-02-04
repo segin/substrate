@@ -115,7 +115,7 @@ pid_t getpid(void) {
 }
 
 pid_t getppid(void) {
-    return (pid_t)_syscall0(SYS_getppid);
+    return (pid_t)_syscall0(SYS_GETPPID);
 }
 
 uid_t getuid(void) { return (uid_t)_syscall0(SYS_GETUID); }
@@ -146,19 +146,19 @@ sighandler_t signal(int signum, sighandler_t handler) {
 }
 
 int sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
-    return (int)_syscall3(SYS_sigaction, sig, (int)act, (int)oact);
+    return (int)_syscall3(SYS_SIGACTION, sig, (int)act, (int)oact);
 }
 
 int sigprocmask(int how, const sigset_t *set, sigset_t *oset) {
-    return (int)_syscall3(SYS_sigprocmask, how, (int)set, (int)oset);
+    return (int)_syscall3(SYS_SIGPROCMASK, how, (int)set, (int)oset);
 }
 
 int sigpending(sigset_t *set) {
-    return (int)_syscall1(SYS_sigpending, (int)set);
+    return (int)_syscall1(SYS_SIGPENDING, (int)set);
 }
 
 int sigsuspend(const sigset_t *mask) {
-    return (int)_syscall1(SYS_sigsuspend, (int)mask);
+    return (int)_syscall1(SYS_SIGSUSPEND, (int)mask);
 }
 
 int sigemptyset(sigset_t *set) {
@@ -281,13 +281,13 @@ int rename(const char *oldpath, const char *newpath) {
 int ftruncate(int fd, off_t length) {
     uint32_t len_lo = (uint32_t)(length & 0xFFFFFFFF);
     uint32_t len_hi = (uint32_t)((length >> 32) & 0xFFFFFFFF);
-    return (int)_syscall4(SYS_ftruncate, fd, len_lo, len_hi, 0);
+    return (int)_syscall4(SYS_FTRUNCATE, fd, len_lo, len_hi, 0);
 }
 
 int truncate(const char *path, off_t length) {
     uint32_t len_lo = (uint32_t)(length & 0xFFFFFFFF);
     uint32_t len_hi = (uint32_t)((length >> 32) & 0xFFFFFFFF);
-    return (int)_syscall5(SYS_truncate, (int)path, len_lo, len_hi, 0, 0);
+    return (int)_syscall5(SYS_TRUNCATE, (int)path, len_lo, len_hi, 0, 0);
 }
 
 int uname(struct utsname *buf) {
