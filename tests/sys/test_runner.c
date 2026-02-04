@@ -197,6 +197,13 @@ void run_kernel_tests(void) {
         if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
     }
 
+    if (all || strcmp(test_arg, "device") == 0) {
+        extern int test_device_refcounting(void);
+        if (test_device_refcounting() == 0) kprint("device_refcount: PASS\n"); else kprint("device_refcount: FAIL\n");
+
+        extern int test_device_allocation(void);
+        if (test_device_allocation() == 0) kprint("device_allocation: PASS\n"); else kprint("device_allocation: FAIL\n");
+    }
     if (all || strcmp(test_arg, "sysinfo") == 0) {
         extern int test_sysinfo(void);
         if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
