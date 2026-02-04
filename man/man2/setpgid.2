@@ -1,0 +1,67 @@
+.TH SETPGID 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+setpgid, getpgid, getpgrp \- set/get process group
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int setpgid(pid_t " pid ", pid_t " pgid ");"
+.br
+.BI "pid_t getpgid(pid_t " pid ");"
+.br
+.B pid_t getpgrp(void);
+.SH DESCRIPTION
+.BR setpgid ()
+sets the PGID of the process specified by
+.I pid
+to
+.IR pgid .
+If
+.I pid
+is zero, then the process ID of the calling process is used.
+If
+.I pgid
+is zero, then the PGID of the process specified by
+.I pid
+is made the same as its process ID.
+.PP
+.BR getpgid ()
+returns the PGID of the process specified by
+.IR pid .
+If
+.I pid
+is zero, then the process ID of the calling process is used.
+.PP
+.BR getpgrp ()
+is equivalent to
+.BR getpgid (0).
+.SH RETURN VALUE
+On success,
+.BR setpgid ()
+returns zero.  On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.PP
+On success,
+.BR getpgid ()
+returns a process group ID.  On error, (pid_t) \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B ESRCH
+No such process.
+.TP
+.B EINVAL
+The value of
+.I pgid
+is less than 0.
+.TP
+.B EPERM
+The process is not allowed to change its PGID in the requested manner.
+.SH CONFORMING TO
+POSIX.1-2001, POSIX.1-2008.
+.SH SEE ALSO
+.BR getsid (2),
+.BR setsid (2)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

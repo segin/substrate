@@ -1,0 +1,45 @@
+.Dd February 1, 2026
+.Dt DRIVER_ATTACH 9
+.Os
+.Sh NAME
+.Nm driver_attach
+.Nd bind a driver to a device
+.Sh SYNOPSIS
+.In kern/driver.h
+.Ft int
+.Fn driver_attach "struct driver *drv" "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn driver_attach
+function binds a device driver
+.Fa drv
+to a device
+.Fa dev .
+.Pp
+The function performs the following steps:
+.Bl -enum
+.It
+Verifies that the device is not already bound to a driver.
+.It
+Calls the
+.Va attach
+callback of the driver (if provided).
+.It
+Sets the
+.Va dev->driver
+pointer to
+.Fa drv .
+.El
+.Pp
+If the device is attached to a bus, the bus lock is held during the binding process to ensure atomicity.
+.Sh RETURN VALUES
+The
+.Fn driver_attach
+function returns 0 on success.
+Otherwise, it returns -1 to indicate failure (e.g., invalid arguments, device already bound, or attach callback returned failure).
+.Sh SEE ALSO
+.Xr driver_detach 9 ,
+.Xr driver_register 9 ,
+.Xr device_register 9
+.Sh AUTHORS
+.An The Substrate Project

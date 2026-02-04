@@ -1,0 +1,41 @@
+.Dd February 1, 2026
+.Dt DRIVER_OVERRIDE 9
+.Os Substrate
+.Sh NAME
+.Nm driver_override ,
+.Nm driver_blacklist_add
+.Nd control driver binding policy
+.Sh SYNOPSIS
+.In sys/kern/driver.h
+.Ft void
+.Fn driver_override "struct device *dev" "const char *name"
+.Ft void
+.Fn driver_blacklist_add "const char *name"
+.Sh DESCRIPTION
+The
+.Fn driver_override
+function forces a device to bind only to a driver with the specified
+.Fa name .
+If
+.Fa name
+is
+.Dv NULL ,
+the override is cleared and normal matching rules apply.
+.Pp
+The
+.Fn driver_blacklist_add
+function adds a driver name to the global blacklist. Blacklisted drivers
+are ignored during device matching, preventing them from automatically
+probing devices.
+.Sh EXAMPLES
+.Bd -literal
+/* Force binding to "virtio-blk" */
+driver_override(dev, "virtio-blk");
+
+/* Prevent "legacy-ide" from loading */
+driver_blacklist_add("legacy-ide");
+.Ed
+.Sh SEE ALSO
+.Xr bus_match_device 9 ,
+.Xr driver 9 ,
+.Xr device 9

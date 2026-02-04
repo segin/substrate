@@ -1,0 +1,44 @@
+.TH SETSID 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+setsid, getsid \- creates a session and sets the process group ID
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.B pid_t setsid(void);
+.br
+.BI "pid_t getsid(pid_t " pid ");"
+.SH DESCRIPTION
+.BR setsid ()
+creates a new session if the calling process is not a process group
+leader.  The calling process is the leader of the new session, is the
+process group leader of a new process group, and has no controlling
+terminal.
+.PP
+.BR getsid ()
+returns the session ID of the process with process ID
+.IR pid .
+If
+.I pid
+is 0,
+.BR getsid ()
+returns the session ID of the calling process.
+.SH RETURN VALUE
+On success, the (new) session ID of the calling process is returned.
+On error, (pid_t) \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EPERM
+The process group ID of any process equals the PID of the calling
+process.
+.TP
+.B ESRCH
+No such process.
+.SH CONFORMING TO
+POSIX.1-2001, POSIX.1-2008.
+.SH SEE ALSO
+.BR setpgid (2),
+.BR getpgid (2)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

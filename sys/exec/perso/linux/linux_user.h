@@ -212,9 +212,42 @@ struct linux_rt_sigframe {
     char     retcode[8];
 };
 
+/* Linux Socket Definitions */
+#define LINUX_AF_UNSPEC     0
+#define LINUX_AF_UNIX       1
+#define LINUX_AF_INET       2
+#define LINUX_AF_AX25       3
+#define LINUX_AF_IPX        4
+#define LINUX_AF_APPLETALK  5
+#define LINUX_AF_NETROM     6
+#define LINUX_AF_BRIDGE     7
+#define LINUX_AF_ATMPVC     8
+#define LINUX_AF_X25        9
+#define LINUX_AF_INET6      10
+#define LINUX_AF_ROSE       11
+#define LINUX_AF_DECnet     12
+#define LINUX_AF_NETBEUI    13
+#define LINUX_AF_SECURITY   14
+#define LINUX_AF_KEY        15
+#define LINUX_AF_NETLINK    16
+#define LINUX_AF_PACKET     17
+
+struct linux_sockaddr {
+    uint16_t sa_family;
+    char     sa_data[14];
+};
+
+/* Socket Translation Functions */
+int linux_to_native_sockaddr(const struct linux_sockaddr *lsa, void **native_sa, int *len);
+int native_to_linux_sockaddr(const void *native_sa, struct linux_sockaddr *lsa);
+
 /* Linux signal translation functions */
 void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 int  linux_sys_sigreturn(void *regs);
 int  linux_sys_rt_sigreturn(void *regs);
+int  linux_domain_to_native(int domain);
+int  native_domain_to_linux(int domain);
+int  native_to_linux_signal(int sig);
+int  linux_to_native_signal(int sig);
 
 #endif /* _LINUX_USER_H */

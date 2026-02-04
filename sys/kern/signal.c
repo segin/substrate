@@ -208,10 +208,20 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
 void psignal(process_t *p, int sig) {
     /* Validate process pointer and signal number */
     if (!p || sig <= 0 || sig > NSIG) return;
+
+    /* Ignore signals if process is already exiting or a zombie */
+    if (p->state == SDYING || p->state == SZOMB) {
+        return;
+    }
     
     /* Init Protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1 */
     if (p->pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
-        return;
+        // Allow delivery if explicit handler is installed (not SIG_DFL)
+        // Note: SIGKILL/SIGSTOP cannot usually be caught, so they remain blocked here
+        // unless sys_sigaction laws change. SIGTERM can be caught.
+        if (p->sig_actions[sig - 1].sa_handler == SIG_DFL) {
+            return;
+        }
     }
 
     /* Handle SIGCONT: Resume stopped process and clear pending stop signals */
@@ -503,6 +513,12 @@ void signal_handle_pending(registers_t *regs) {
         
         // Job Control Stops
         if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
+             // Orphaned process groups ignore these signals
+             extern int pgrp_is_orphaned(struct pgrp *pgrp);
+             if (current_process->p_pgrp && pgrp_is_orphaned(current_process->p_pgrp)) {
+                 return;
+             }
+
              // Stop the thread and process
              // kprint("Process stopped by signal\n");
              current_thread->state = THREAD_STOPPED;
