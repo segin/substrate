@@ -10,6 +10,7 @@
 #include <pm/pm.h>
 #include <exec/perso/personality.h>
 #include <arch/i386/pmap.h>
+#include <kern/sched.h>
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -90,8 +91,25 @@ static uint32_t gen_version(char *buf, size_t size __attribute__((unused))) {
 }
 
 static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
-    /* TODO: Calculate real load average */
-    return sprintf(buf, "0.00 0.00 0.00 1/10 1\n");
+    unsigned long loads[3];
+    sched_get_loadavg(loads);
+
+    uint32_t active = sched_get_active_tasks();
+    uint32_t total = sched_get_total_tasks();
+
+    /* Find last PID (max PID currently active) */
+    int last_pid = 0;
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (processes[i].pid > last_pid) {
+            last_pid = processes[i].pid;
+        }
+    }
+
+    return sprintf(buf, "%lu.%02lu %lu.%02lu %lu.%02lu %u/%u %d\n",
+        loads[0] / SI_LOAD_SCALE, ((loads[0] % SI_LOAD_SCALE) * 100) / SI_LOAD_SCALE,
+        loads[1] / SI_LOAD_SCALE, ((loads[1] % SI_LOAD_SCALE) * 100) / SI_LOAD_SCALE,
+        loads[2] / SI_LOAD_SCALE, ((loads[2] % SI_LOAD_SCALE) * 100) / SI_LOAD_SCALE,
+        active, total, last_pid);
 }
 
 static uint32_t proc_pmap_stats_read(char *buf, size_t size) {
