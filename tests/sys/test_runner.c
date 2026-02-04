@@ -31,6 +31,7 @@ extern void test_vm_page_queue(void);
 extern void run_minix_mount_tests(void);
 extern void run_minix_write_tests(void);
 extern void test_bitness(void);
+extern void run_sched_perf_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -185,6 +186,10 @@ void run_kernel_tests(void) {
         if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
     }
     */
+
+    if (all || strcmp(test_arg, "perf") == 0) {
+        run_sched_perf_tests();
+    }
 
     kprint("=== TESTS COMPLETE ===\n\n");
     

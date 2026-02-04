@@ -8,7 +8,8 @@
 
 thread_t threads[MAX_THREADS];
 thread_t *current_thread = NULL;
-static int next_tid = 1;
+// Use generation counts for O(1) TID lookup
+static uint32_t slot_generations[MAX_THREADS];
 
 extern void arch_switch_to(thread_t *prev, thread_t *next);
 extern void arch_set_kernel_stack(uintptr_t stack);
@@ -16,9 +17,9 @@ extern void arch_set_kernel_stack(uintptr_t stack);
 
 
 void sched_init_generic(void) {
-    next_tid = 0;
     extern void *memset(void *s, int c, size_t n);
     memset(threads, 0, sizeof(threads));
+    memset(slot_generations, 0, sizeof(slot_generations));
     
     // Initialize PM
     pm_init();
@@ -38,7 +39,10 @@ thread_t *sched_alloc_thread(process_t *proc) {
     }
     if (i == MAX_THREADS) return NULL;
 
-    threads[i].tid = next_tid++;
+    // Allocate TID using generation index for O(1) lookup
+    // TID = (generation << 6) | index
+    // MAX_THREADS is 64, so 6 bits for index.
+    threads[i].tid = (slot_generations[i]++ << 6) | i;
     threads[i].proc = proc;
     threads[i].state = THREAD_BLOCKED; // Set to BLOCKED until stack is ready
     threads[i].wait_chan = NULL;
@@ -123,9 +127,17 @@ int sched_get_current_tid(void) {
 }
 
 thread_t *sched_get_thread(int tid) {
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == tid) return &threads[i];
+    if (tid < 0) return NULL;
+
+    // O(1) lookup
+    // Index is encoded in lower bits (MAX_THREADS must be power of 2, 64 is 2^6)
+    int index = tid & (MAX_THREADS - 1);
+
+    // Verify TID matches (checks generation)
+    if (threads[index].tid == tid) {
+        return &threads[index];
     }
+
     return NULL;
 }
 

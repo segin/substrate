@@ -16,16 +16,7 @@ extern int num_cpus;
 // mask: bitmask of allowed CPUs (bit N = CPU N allowed)
 // Returns: 0 on success, -1 on error
 int sched_set_affinity(int tid, uint32_t mask) {
-    extern thread_t threads[];
-    thread_t *t = NULL;
-    
-    // Find thread
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == tid) {
-            t = &threads[i];
-            break;
-        }
-    }
+    thread_t *t = sched_get_thread(tid);
     
     if (!t) return -1;
     
@@ -45,15 +36,7 @@ int sched_set_affinity(int tid, uint32_t mask) {
 // Get CPU affinity mask for a thread
 // Returns: bitmask, or 0 on error
 uint32_t sched_get_affinity(int tid) {
-    extern thread_t threads[];
-    thread_t *t = NULL;
-    
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == tid) {
-            t = &threads[i];
-            break;
-        }
-    }
+    thread_t *t = sched_get_thread(tid);
     
     if (!t) return 0;
     
