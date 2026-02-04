@@ -341,9 +341,9 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
     void *stack_top = (char*)p.stack_base + p.stack_size;
-    int tid = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
-    if (tid > 0) {
-        if (p.child_tid) *p.child_tid = tid;
+    thread_t *t = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
+    if (t) {
+        if (p.child_tid) *p.child_tid = t->tid;
         return 0;
     }
     return -1;
