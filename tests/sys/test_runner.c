@@ -239,15 +239,16 @@ void run_kernel_tests(void) {
         if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
     }
 
-    if (all || strcmp(test_arg, "fb_perf") == 0) {
-        extern void test_fb_perf(void);
-        test_fb_perf();
+    if (all || strcmp(test_arg, "ext2") == 0) {
+        extern void run_ext2_perf_test(void);
+        run_ext2_perf_test();
     }
 
     if (all || strcmp(test_arg, "ide") == 0) {
         extern void test_ide_perf(void);
         test_ide_perf();
     }
+
     if (all || strcmp(test_arg, "sysinfo") == 0) {
         extern int test_sysinfo(void);
         if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
