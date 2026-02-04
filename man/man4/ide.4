@@ -1,0 +1,46 @@
+.TH IDE 4 "February 2026" "Substrate Kernel" "Kernel Interfaces"
+.SH NAME
+ide \- ATA/ATAPI IDE device driver
+.SH SYNOPSIS
+.B #include <drivers/storage/ide/ide.h>
+.SH DESCRIPTION
+The
+.B ide
+driver provides access to ATA (Parallel ATA) and ATAPI (CD-ROM/DVD) devices attached to standard IDE controllers. It supports both legacy PIO (Programmed I/O) and Bus Master DMA transfer modes.
+
+.SS Device Nodes
+IDE devices are typically accessed via the block device interface under
+.BR /dev/storage/ :
+.TP
+.B /dev/storage/ideN
+The block device node for the \fIN\fP-th detected IDE drive. The driver scans the Primary and Secondary channels for Master and Slave drives.
+
+.SS Features
+.TP
+.B PIO Transfers
+The driver supports LBA28 and LBA48 addressing for PIO transfers.
+.B Optimization:
+Data transfers in PIO mode are optimized using the
+.B rep insw
+and
+.B rep outsw
+instructions (see
+.BR io (9)
+) to transfer data in 256-word (512-byte) chunks. This reduces CPU overhead compared to byte-by-byte or word-by-word loops, particularly in virtualized environments where instruction emulation is costly.
+.TP
+.B DMA Support
+Bus Master DMA is supported on compatible controllers (e.g., Intel PIIX4) for high-performance, low-CPU-usage transfers.
+.TP
+.B ATAPI
+Packet commands (ATAPI) are supported for CD-ROM and DVD drives, allowing SCSI-like command execution over the IDE interface.
+
+.SH KERNEL CONFIGURATION
+The driver automatically probes for devices on the standard legacy I/O ports:
+.IP \(bu 4
+Primary: 0x1F0 (Control 0x3F6), IRQ 14
+.IP \(bu 4
+Secondary: 0x170 (Control 0x376), IRQ 15
+
+.SH SEE ALSO
+.BR scsi (4),
+.BR io (9)

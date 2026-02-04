@@ -75,6 +75,7 @@ sys/symbols_start.txt
 
 # Distribution root filesystem
 dist/
+host_dist/
 klog
 klog.notrace
 qemu.out
@@ -88,3 +89,7 @@ y.tab.c
 y.tab.h
 y.output
 test_output.txt
+
+# Tests
+test_minix
+*.img

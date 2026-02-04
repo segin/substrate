@@ -5,7 +5,46 @@
 void *memcpy(void *dest, const void *src, size_t n) {
     unsigned char *d = dest;
     const unsigned char *s = src;
+
+    // Small copy optimization / setup for alignment
+    if (n < sizeof(unsigned long)) {
+        while (n--) *d++ = *s++;
+        return dest;
+    }
+
+    // Check alignment compatibility
+    if ((uintptr_t)d % sizeof(unsigned long) == (uintptr_t)s % sizeof(unsigned long)) {
+        // Align dest to word boundary
+        while ((uintptr_t)d % sizeof(unsigned long)) {
+            *d++ = *s++;
+            n--;
+        }
+
+        // Copy words
+        unsigned long *ld = (unsigned long *)d;
+        const unsigned long *ls = (const unsigned long *)s;
+
+        while (n >= sizeof(unsigned long) * 4) {
+             ld[0] = ls[0];
+             ld[1] = ls[1];
+             ld[2] = ls[2];
+             ld[3] = ls[3];
+             ld += 4;
+             ls += 4;
+             n -= sizeof(unsigned long) * 4;
+        }
+
+        while (n >= sizeof(unsigned long)) {
+            *ld++ = *ls++;
+            n -= sizeof(unsigned long);
+        }
+
+        d = (unsigned char *)ld;
+        s = (const unsigned char *)ls;
+    }
+    // Copy remaining bytes
     while (n--) *d++ = *s++;
+
     return dest;
 }
 
@@ -31,6 +70,17 @@ void *memset(void *s, int c, size_t n) {
 #endif
 
         unsigned long *lp = (unsigned long *)p;
+
+        // Unroll loop 4x
+        while (n >= sizeof(unsigned long) * 4) {
+            lp[0] = word_val;
+            lp[1] = word_val;
+            lp[2] = word_val;
+            lp[3] = word_val;
+            lp += 4;
+            n -= sizeof(unsigned long) * 4;
+        }
+
         while (n >= sizeof(unsigned long)) {
             *lp++ = word_val;
             n -= sizeof(unsigned long);

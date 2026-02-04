@@ -1,6 +1,7 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/time.h> // for gettimeofday
+#include <sys/times.h>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
@@ -193,8 +194,16 @@ size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict forma
 }
 
 clock_t clock(void) {
-    // TODO: Wrap times() syscall
-    return (clock_t)-1;
+    struct tms buf;
+    if (times(&buf) == (clock_t)-1) {
+        return (clock_t)-1;
+    }
+
+    const unsigned long tickrate = 100;
+
+    unsigned long long total_ticks = (unsigned long long)buf.tms_utime + buf.tms_stime;
+
+    return (clock_t)((total_ticks * CLOCKS_PER_SEC) / tickrate);
 }
 
 double difftime(time_t time1, time_t time0) {
