@@ -14,8 +14,14 @@ static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         memcpy(buffer, mock_sb_buf, size);
         return size;
     }
-    // Block 0 or other blocks - return zeros
+    // IMAP/ZMAP/Inode blocks - return zeros
     memset(buffer, 0, size);
+    return size;
+}
+
+static size_t mock_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    (void)node; (void)offset; (void)buffer;
+    // Just pretend write succeeded
     return size;
 }
 
@@ -39,6 +45,7 @@ void run_minix_mount_tests(void) {
     memset(&device_node, 0, sizeof(fs_node_t));
     strcpy(device_node.name, "ram0");
     device_node.read = mock_read;
+    device_node.write = mock_write;
     device_node.flags = FS_BLOCKDEVICE;
 
     // Test 1: Invalid Magic (Zeroed buffer)
@@ -62,6 +69,20 @@ void run_minix_mount_tests(void) {
              kprint("PASS: Minix root inode correct\n");
         } else {
              kprint("FAIL: Minix root inode incorrect\n");
+        }
+
+        // Test Mknod
+        if (mount_node->mknod) {
+            // IMAP is all zeros, so alloc should find inode 1 (or 0)
+            // But root is 1. If we pretend 0 is free...
+            // minix_alloc_inode should return valid number.
+            if (mount_node->mknod(mount_node, "testdev", 0x21B6, 0x0301) == 0) {
+                 kprint("PASS: Minix mknod executed\n");
+            } else {
+                 kprint("FAIL: Minix mknod failed\n");
+            }
+        } else {
+             kprint("FAIL: Minix mknod callback not set\n");
         }
 
         // Test Unmount

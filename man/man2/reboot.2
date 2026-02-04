@@ -1,0 +1,50 @@
+.TH REBOOT 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+reboot \- reboot or enable/disable Ctrl-Alt-Del
+.SH SYNOPSIS
+.B #include <unistd.h>
+.br
+.B #include <sys/reboot.h>
+.PP
+.BI "int reboot(int " cmd ");"
+.SH DESCRIPTION
+The
+.BR reboot ()
+call reboots the system, or enables/disables the reboot keystroke
+(abbreviated CAD, since the default is Ctrl-Alt-Delete).
+.PP
+The
+.I cmd
+argument can be one of the following:
+.TP
+.B RB_AUTOBOOT
+The system is immediately rebooted.
+.TP
+.B RB_HALT_SYSTEM
+The system is halted.
+.TP
+.B RB_POWER_OFF
+The system is powered off.
+.SH RETURN VALUE
+For
+.B RB_AUTOBOOT
+and similar commands,
+.BR reboot ()
+does not return on success. On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EPERM
+The calling process has insufficient privilege to call
+.BR reboot ();
+the superuser privilege is required.
+.SH CONFORMING TO
+The
+.BR reboot ()
+call is Substrate-specific.
+.SH SEE ALSO
+.BR halt (8),
+.BR reboot (8)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

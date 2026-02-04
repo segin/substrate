@@ -33,6 +33,11 @@ time_t sys_time(time_t *tloc) {
     return t;
 }
 
+int sys_stime(time_t *t) {
+    if (!t) return -1;
+    boot_time = *t - div64_32(ticks, HZ);
+    return 0;
+}
 int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (!tv) return -1;
     

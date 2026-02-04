@@ -35,7 +35,7 @@
 void sched_init(void);
 
 /* Thread Creation */
-int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
+thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
 
 /* Fork (Clone Process) */
 int sched_fork_process(process_t *parent, void *stack);
