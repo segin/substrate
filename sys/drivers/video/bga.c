@@ -30,6 +30,7 @@
 #define VBE_DISPI_LFB_ENABLED       0x40
 
 void bga_scroll(int y_offset);
+static int bga_set_viewport(int x, int y);
 
 static void bga_write(uint16_t index, uint16_t value) {
     outw(VBE_DISPI_IOPORT_INDEX, index);
@@ -59,6 +60,7 @@ int bga_is_available(void) {
 extern uint32_t pci_read_config(uint32_t device, int offset);
 
 static uint32_t bga_lfb_addr = 0;
+
 
 /*
 static void find_bga_pci(uint32_t device, uint16_t vendor_id, uint16_t device_id, void *extra) {
@@ -107,7 +109,6 @@ int bga_init(fb_info_t *fb_out) {
     bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, virt_height);
     bga_write(VBE_DISPI_INDEX_X_OFFSET, 0);
     bga_write(VBE_DISPI_INDEX_Y_OFFSET, 0);
-
     bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
 
     // Update fb info
@@ -117,11 +118,14 @@ int bga_init(fb_info_t *fb_out) {
     fb_out->virt_height = virt_height;
     fb_out->bpp = bpp;
     fb_out->pitch = (width * bpp) / 8;
+    fb_out->virt_width = width;
+    fb_out->virt_height = virt_height;
+    fb_out->set_viewport = bga_set_viewport;
 
     /* Implement Hardware Scroll */
     fb_out->scroll = bga_scroll;
 
-    kprint("BGA: Mode set to 1024x768x32 (HW Scroll Enabled).\n");
+    kprint("BGA: Mode set to 1024x768x32 with Hardware Scrolling.\n");
     return 0;
 }
 
