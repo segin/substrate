@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-CFLAGS := $(KERNEL_CFLAGS) -I.
+CFLAGS := $(KERNEL_CFLAGS) -I. -I../../tests
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = acct.c time.c main.c panic.c stacktrace.c ksyms.c spinlock.c mutex.c semaphore.c kthread.c turnstile.c \

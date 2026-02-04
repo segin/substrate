@@ -779,47 +779,6 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
 
             kfree(bitmap_buf, 4096);
             return block_num;
->>>>>>> main
-        }
-
-        // Pass 2: 0 -> start_bit (wrap around within group)
-        if (found_bit == -1 && start_bit > 0) {
-             for (i = 0; i < start_bit; i++) {
-                 // Optimization: skip full words
-                 if ((i % 32) == 0 && (i + 32) <= start_bit) {
-                     if (bitmap32[i/32] == 0xFFFFFFFF) {
-                         i += 31;
-                         continue;
-                     }
-                 }
-
-                 if (!(bitmap_buf[i / 8] & (1 << (i % 8)))) {
-                     found_bit = i;
-                     break;
-                 }
-             }
-        }
-
-        if (found_bit != -1) {
-            // Found free block
-            uint32_t byte_idx = found_bit / 8;
-            uint32_t bit_idx = found_bit % 8;
-            
-            bitmap_buf[byte_idx] |= (1 << bit_idx);
-
-            ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
-
-            fs->bgd[group].bg_free_blocks_count--;
-
-            uint32_t block_num = group * fs->blocks_per_group + found_bit + fs->sb.s_first_data_block;
-
-            fs->sb.s_free_blocks_count--;
-
-            // Update hints
-            fs->last_alloc_group = group;
-            fs->last_alloc_bit = (found_bit + 1) % bits_in_group;
-
-            return block_num;
         }
 
         group = (group + 1) % fs->group_count;
