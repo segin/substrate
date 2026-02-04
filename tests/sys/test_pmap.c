@@ -197,7 +197,33 @@ void test_pge_global_flush(void) {
     kprint("  PASS\n");
 }
 
+/* Helper to convert integer to string */
+static void itoa(int n, char s[]) {
+    int i, sign;
+    int j, k;
+    char c;
+
+    if ((sign = n) < 0)  /* record sign */
+        n = -n;          /* make n positive */
+    i = 0;
+    do {       /* generate digits in reverse order */
+        s[i++] = n % 10 + '0';   /* get next digit */
+    } while ((n /= 10) > 0);     /* delete it */
+    if (sign < 0)
+        s[i++] = '-';
+    s[i] = '\0';
+
+    /* reverse the string */
+    for (j = 0, k = i - 1; j < k; j++, k--) {
+        c = s[j];
+        s[j] = s[k];
+        s[k] = c;
+    }
+}
+
 void run_pmap_tests(void) {
+    char buf[32];
+
     kprint("\n=== PMAP Unit Tests ===\n");
     
     test_pmap_lifecycle();
@@ -213,7 +239,10 @@ void run_pmap_tests(void) {
     
     kprint("\nResults: ");
     kprint("Passed: ");
-    // TODO: Add itoa to print numbers
+    itoa(tests_passed, buf);
+    kprint(buf);
     kprint(" Failed: ");
+    itoa(tests_failed, buf);
+    kprint(buf);
     kprint("\n");
 }
