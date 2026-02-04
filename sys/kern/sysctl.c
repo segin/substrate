@@ -65,10 +65,8 @@ SYSCTL_INT(hw, HW_PAGESIZE, pagesize, CTLFLAG_RD, &hw_pagesize, 0, "System page 
 extern void early_uart_print(const char *s);
 
 void sysctl_init(void) {
-    early_uart_print("sysctl_init: start\n");
     if (sysctl_initialized) return;
     sysctl_initialized = 1;
-    early_uart_print("sysctl_init: mutex_init\n");
     mutex_init(&sysctl_mutex, "sysctl");
     // Initialize root list
     sysctl__children.slh_first = NULL;
@@ -205,7 +203,6 @@ void sysctl_register_oid(struct sysctl_oid *oidp) {
 
     if (!sysctl_initialized) sysctl_init();
 
-    early_uart_print("sysctl_register_oid: lock\n");
     mutex_lock(&sysctl_mutex);
 
     // Insert into list (simple prepend or sort? BSD sorts)

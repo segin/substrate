@@ -1,0 +1,30 @@
+.Dd February 1, 2026
+.Dt BUS_COMPATIBLE_MATCH 9
+.Os Substrate
+.Sh NAME
+.Nm bus_compatible_match
+.Nd match driver compatible string against device
+.Sh SYNOPSIS
+.In sys/kern/bus.h
+.Ft int
+.Fn bus_compatible_match "const char *compat" "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn bus_compatible_match
+function checks if the
+.Fa compat
+string provided by a driver matches any of the compatible strings listed in the
+.Fa dev
+structure.
+.Pp
+The
+.Va dev->compatible
+field is expected to be a NUL-separated list of strings, terminated by an
+empty string (double NUL).
+.Sh RETURN VALUES
+Returns 1 if the
+.Fa compat
+string is found in the device's compatible list, 0 otherwise.
+.Sh SEE ALSO
+.Xr bus 9 ,
+.Xr device 9

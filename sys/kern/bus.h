@@ -13,6 +13,7 @@
 /* Forward declarations */
 struct device;
 struct driver;
+struct device_id;
 
 /*
  * struct bus_type
@@ -38,5 +39,9 @@ struct bus_type {
 
     spinlock_t lock;
 };
+
+struct driver *bus_match_device(struct bus_type *bus, struct device *dev);
+int bus_id_match(const struct device_id *id, struct device *dev);
+int bus_compatible_match(const char *compat, struct device *dev);
 
 #endif /* _KERN_BUS_H */

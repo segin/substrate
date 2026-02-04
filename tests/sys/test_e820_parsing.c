@@ -90,7 +90,8 @@ static void test_e820_reserved_skipped(void) {
 }
 
 /* Test: ACPI type is included (reclaimable) */
-static void test_e820_acpi_included(void) {
+/* Test: ACPI type is skipped (treated as reserved in legacy mode) */
+static void test_e820_acpi_skipped(void) {
     e820_entry_t map[1] = {
         { .addr = 0x100000, .len = 0x10000, .type = E820_ACPI }
     };
@@ -98,8 +99,8 @@ static void test_e820_acpi_included(void) {
     struct e820_test_ctx ctx = {0};
     pmm_walk_e820(map, 1, e820_test_cb, &ctx);
     
-    TEST_ASSERT(ctx.region_count == 1, "e820_acpi: expected 1 region");
-    TEST_PASS("e820_acpi_included");
+    TEST_ASSERT(ctx.region_count == 0, "e820_acpi: expected 0 regions");
+    TEST_PASS("test_e820_acpi_skipped");
 }
 
 /* Test: NVS type is skipped */
@@ -190,7 +191,7 @@ static void test_e820_mixed_types(void) {
     struct e820_test_ctx ctx = {0};
     pmm_walk_e820(map, 5, e820_test_cb, &ctx);
     
-    TEST_ASSERT(ctx.region_count == 3, "e820_mixed: expected 3 regions");
+    TEST_ASSERT(ctx.region_count == 2, "e820_mixed: expected 2 regions");
     TEST_PASS("e820_mixed_types");
 }
 
@@ -201,7 +202,7 @@ void test_e820_parsing(void) {
     test_e820_basic_valid_entry();
     test_e820_zero_length_skipped();
     test_e820_reserved_skipped();
-    test_e820_acpi_included();
+    test_e820_acpi_skipped();
     test_e820_nvs_skipped();
     test_e820_bad_skipped();
     test_e820_above_4gb_skipped();

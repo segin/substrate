@@ -18,11 +18,18 @@ extern uint32_t get_time(void);
 extern thread_t *sched_alloc_thread(process_t *proc);
 extern void sched_init_generic(void);
 
+#include <sys/ldt.h>
+
 // Exposed to Generic Scheduler
 void arch_switch_to(thread_t *prev, thread_t *next) {
     // Switch Address Space if needed
     if (next->proc && next->proc->pmap) {
         pmap_activate(next->proc->pmap);
+    }
+    
+    // Switch LDT if needed
+    if (next->proc != prev->proc) {
+        ldt_activate(next->proc);
     }
     
     switch_to(prev, next);
@@ -146,6 +153,7 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     
     t->kstack_ptr = (uintptr_t)kstack;
     t->instr_ptr = regs->eip;
+    t->state = THREAD_READY; // Ready to be scheduled
     
     return proc->pid;
 }
@@ -175,6 +183,7 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     
     t->kstack_ptr = (uintptr_t)stk; 
     t->instr_ptr = (uintptr_t)entry_point;
+    t->state = THREAD_READY; // Ready to be scheduled
 
     return t->tid;
 }

@@ -1,24 +1,20 @@
 #include <sys/signal.h>
-#include <sys/proc.h>
-#include <exec/perso/linux/linux_user.h>
-#include <arch/i386/idt.h>
+#include "../../../include/sys/proc.h"
+#include "linux_user.h"
+#include "../../../arch/i386/idt.h"
 #include <string.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /* These should be exported from sys/arch/i386/signal.c or shared in a header */
 extern int copyout(const void *src, void *dst, size_t size);
 extern int copyin(const void *src, void *dst, size_t size);
 extern int validate_user_addr(const void *addr, size_t size);
 
-/* Linux signal numbers (i386) - mostly same as Substrate for low signals */
-static int native_to_linux_sig(int sig) {
-    if (sig >= 1 && sig <= 31) return sig;
-    return sig; // TODO: Handle RT signals if Substrate supports them
-}
-
 void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
     uint32_t esp = regs->useresp;
-    int lsig = native_to_linux_sig(sig);
+    int lsig = native_to_linux_signal(sig);
 
     if (flags & SA_SIGINFO) {
         /* rt_sigframe */
