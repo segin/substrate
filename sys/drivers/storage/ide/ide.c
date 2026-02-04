@@ -740,19 +740,24 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
         
         /* Transfer data */
         uint16_t words = byte_count / 2;
-        uint16_t count_words = words;
-
-        if (transferred + count_words * 2 > buffer_len) {
-             count_words = (buffer_len - transferred) / 2;
-        }
         
-        if (write) {
-            outsw(bus + ATA_REG_DATA, buf, count_words);
-        } else {
-            insw(bus + ATA_REG_DATA, buf, count_words);
+        /* Ensure we don't overflow the buffer */
+        if (transferred + words * 2 > buffer_len) {
+             words = (buffer_len - transferred) / 2;
         }
-        buf += count_words;
-        transferred += count_words * 2;
+
+        if (words > 0) {
+            if (write) {
+                outsw(bus + ATA_REG_DATA, buf, words);
+            } else {
+                insw(bus + ATA_REG_DATA, buf, words);
+            }
+            buf += words;
+            transferred += words * 2;
+        } else {
+            /* No words to transfer in this chunk? (odd length/zero) */
+            break; 
+        }
     }
     
     /* Wait for completion */

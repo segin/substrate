@@ -57,6 +57,8 @@ test=all test_halt=1
     -   `property_pmap_protect.c`: Property tests for Copy-on-Write and permission logic.
 -   **MMAP (`test=mmap`):**
     -   Basic mmap/munmap functionality (WIP).
+-   **IDE (`test=ide`):**
+    -   `test_ide_perf.c`: Benchmarks IDE PIO data transfer performance (`inw` loop vs `rep insw`).
 
 ## Build System Integration
 

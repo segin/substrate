@@ -6,6 +6,7 @@
 #include <kern/panic.h>
 #include <string.h>
 #include <vm/vm_map.h>
+#include <vm/vm_kmem.h>
 #include <exec/perso/personality.h>
 
 
@@ -328,10 +329,16 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, -1 on failure
 int elf_execve(const char *path, char *const argv[], char *const envp[]) {
-    (void)argv; (void)envp; // TODO: Setup argc/argv/envp on stack
-    
     if (!fs_root) return -1;
-    
+
+    // Variables for argument capturing
+    int argc = 0;
+    int envc = 0;
+    size_t strings_size = 0;
+    char **k_argv = NULL;
+    char **k_envp = NULL;
+    char *arg_buffer = NULL;
+
     // Lookup the file
     fs_node_t *file = vfs_lookup(fs_root, path);
     if (!file) {
@@ -345,13 +352,77 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         kprint("execve: Not a regular file\n");
         return -1;
     }
+
+    // Capture arguments and environment
+    // Count argc and size
+    if (argv) {
+        while (argv[argc]) {
+            size_t len = strlen(argv[argc]);
+            strings_size += len + 1;
+            argc++;
+        }
+    }
+
+    // Count envc and size
+    if (envp) {
+        while (envp[envc]) {
+            size_t len = strlen(envp[envc]);
+            strings_size += len + 1;
+            envc++;
+        }
+    }
+
+    // Limit check (e.g. 32KB)
+    if (strings_size > 32 * 1024) {
+        kprint("execve: Argument list too long\n");
+        return -1; // E2BIG
+    }
+
+    // Allocate buffers
+    if (argc > 0) {
+        k_argv = kmalloc((argc + 1) * sizeof(char*));
+        if (!k_argv) return -1; // ENOMEM
+        k_argv[argc] = NULL;
+    }
+
+    if (envc > 0) {
+        k_envp = kmalloc((envc + 1) * sizeof(char*));
+        if (!k_envp) {
+            if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
+            return -1;
+        }
+        k_envp[envc] = NULL;
+    }
+
+    if (strings_size > 0) {
+        arg_buffer = kmalloc(strings_size);
+        if (!arg_buffer) {
+             if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
+             if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+             return -1;
+        }
+    }
+
+    // Copy strings
+    char *p = arg_buffer;
+    for (int i = 0; i < argc; i++) {
+        k_argv[i] = p;
+        strcpy(p, argv[i]);
+        p += strlen(argv[i]) + 1;
+    }
+
+    for (int i = 0; i < envc; i++) {
+        k_envp[i] = p;
+        strcpy(p, envp[i]);
+        p += strlen(envp[i]) + 1;
+    }
     
     // Create new address space for this process
     extern pmap_t pmap_create(void);
     pmap_t new_pmap = pmap_create();
     if (!new_pmap) {
         kprint("execve: Failed to create pmap\n");
-        return -1;
+        goto cleanup;
     }
 
     // Assign to process immediately so elf_load uses it
@@ -373,7 +444,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     uint32_t entry = elf_load(file, 0, interp_path, &interp_len);
     if (entry == 0) {
         kprint("execve: Failed to load ELF\n");
-        return -1;
+        goto cleanup;
     }
 
     if (interp_len > 0) {
@@ -384,14 +455,14 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         fs_node_t *interp_file = vfs_lookup(fs_root, interp_path);
         if (!interp_file) {
             kprint("execve: Interpreter not found\n");
-            return -1;
+            goto cleanup;
         }
         
         uint32_t interp_base = 0x40000000;
         uint32_t interp_entry = elf_load(interp_file, interp_base, NULL, NULL);
         if (interp_entry == 0) {
             kprint("execve: Failed to load interpreter\n");
-            return -1;
+            goto cleanup;
         }
         
         at_base = interp_base;
@@ -439,14 +510,14 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         void *pa = pmm_alloc_block();
         if (!pa) {
             kprint("execve: Out of memory for user stack\n");
-            return -1;
+            goto cleanup;
         }
         // Map with user access and WRITE permission for stack operations
         // pmap_enter expects physical address, convert virtual to physical
         uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
         if (pmap_enter(pmap, va, pa_phys, VM_PROT_WRITE, 0) < 0) {
             kprint("execve: Failed to map user stack\n");
-            return -1;
+            goto cleanup;
         }
         stack_pages[i].va = va;
         stack_pages[i].pa = pa;
@@ -472,12 +543,6 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         } \
     } while(0)
     
-    // Define environment strings
-    const char *env_term = "TERM=ansi";
-    const char *env_path = "PATH=/bin";
-    
-    uint32_t ptr_term = 0, ptr_path = 0, argv0_ptr = 0;
-
     // Helper macro to copy string to user stack (simulating multiple pushes)
     // We do this inline to avoid function call overhead/complexity with local vars
     #define PUSH_STRING(str, ptr_out) do { \
@@ -499,15 +564,26 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     } while(0)
 
     // Push strings to stack (High -> Low address)
+    // Order: envp[last]...envp[0], argv[last]...argv[0]
     
-    // 1. Push TERM=ansi
-    PUSH_STRING(env_term, ptr_term);
+    // Push environment strings
+    if (k_envp) {
+        for (int i = envc - 1; i >= 0; i--) {
+            uint32_t user_ptr;
+            PUSH_STRING(k_envp[i], user_ptr);
+            // Store user pointer back into k_envp array (reusing storage)
+            k_envp[i] = (char*)user_ptr;
+        }
+    }
     
-    // 2. Push PATH=/bin
-    PUSH_STRING(env_path, ptr_path);
-    
-    // 3. Push argv[0] (path)
-    PUSH_STRING(path, argv0_ptr);
+    // Push argument strings
+    if (k_argv) {
+        for (int i = argc - 1; i >= 0; i--) {
+            uint32_t user_ptr;
+            PUSH_STRING(k_argv[i], user_ptr);
+            k_argv[i] = (char*)user_ptr;
+        }
+    }
     
     #undef PUSH_STRING
     
@@ -519,7 +595,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     Elf32_Ehdr ehdr;
     if (file->read(file, 0, sizeof(Elf32_Ehdr), (uint8_t *)&ehdr) != sizeof(Elf32_Ehdr)) {
         kprint("execve: Failed to re-read header for AUXV\n");
-        return -1;
+        goto cleanup;
     }
     
     // Calculate AT_PHDR
@@ -633,9 +709,9 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     sp -= 4; STACK_WRITE32(sp, AT_UID);
     sp -= 4; STACK_WRITE32(sp, current_process->gid);
     sp -= 4; STACK_WRITE32(sp, AT_GID);
-    sp -= 4; STACK_WRITE32(sp, current_process->uid);
+    sp -= 4; STACK_WRITE32(sp, current_process->euid);
     sp -= 4; STACK_WRITE32(sp, AT_EUID);
-    sp -= 4; STACK_WRITE32(sp, current_process->gid);
+    sp -= 4; STACK_WRITE32(sp, current_process->egid);
     sp -= 4; STACK_WRITE32(sp, AT_EGID);
 
     // Push platform string "i686" for AT_PLATFORM
@@ -659,35 +735,43 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     sp -= 4; STACK_WRITE32(sp, platform_ptr);
     sp -= 4; STACK_WRITE32(sp, AT_PLATFORM);
     
-    // AT_EXECFN - points to the executable path (already on stack as argv[0])
-    // We'll use argv0_ptr which already points to the path string
-    sp -= 4; STACK_WRITE32(sp, argv0_ptr);
+    // AT_EXECFN - points to the executable path (argv[0])
+    // If argc > 0, argv[0] is at k_argv[0] (user address)
+    uint32_t execfn_ptr = 0;
+    if (k_argv && argc > 0) execfn_ptr = (uint32_t)(uintptr_t)k_argv[0];
+
+    sp -= 4; STACK_WRITE32(sp, execfn_ptr);
     sp -= 4; STACK_WRITE32(sp, AT_EXECFN);
     
     // ------------------
     
-    // Build envp array: [PATH, TERM, NULL]
-    // Stack grows down, so push NULL (last), then TERM, then PATH (first)
+    // Build envp array: [envp[0], envp[1], ..., NULL]
+    // Stack grows down, so push NULL first (highest address), then pointers in reverse order
     
-    // envp[2] = NULL
+    // envp[envc] = NULL
     sp -= 4; STACK_WRITE32(sp, 0);
     
-    // envp[1] = ptr_term
-    sp -= 4; STACK_WRITE32(sp, ptr_term);
+    if (k_envp) {
+        for (int i = envc - 1; i >= 0; i--) {
+            sp -= 4;
+            STACK_WRITE32(sp, (uint32_t)(uintptr_t)k_envp[i]);
+        }
+    }
     
-    // envp[0] = ptr_path
-    sp -= 4; STACK_WRITE32(sp, ptr_path);
+    // Build argv array: [argv[0], ..., NULL]
     
-    // Build argv array: [argv0, NULL]
-    
-    // argv[1] = NULL
+    // argv[argc] = NULL
     sp -= 4; STACK_WRITE32(sp, 0);
 
-    // argv[0] = ptr
-    sp -= 4; STACK_WRITE32(sp, argv0_ptr);
+    if (k_argv) {
+        for (int i = argc - 1; i >= 0; i--) {
+            sp -= 4;
+            STACK_WRITE32(sp, (uint32_t)(uintptr_t)k_argv[i]);
+        }
+    }
     
     // Push argc
-    sp -= 4; STACK_WRITE32(sp, 1);           // argc = 1
+    sp -= 4; STACK_WRITE32(sp, argc);
     
     kprint("execve: Jumping to userspace, entry=0x");
     char hexbuf[16];
@@ -726,6 +810,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     kprint(hexbuf);
     kprint("\n");
     
+    // Cleanup kernel arguments
+    if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
+    if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+    if (arg_buffer) kfree(arg_buffer, strings_size);
+
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
     jump_to_userspace(entry, sp);
@@ -733,6 +822,12 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Should never reach here
     panic("jump_to_userspace returned!");
     return 0;
+
+cleanup:
+    if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
+    if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+    if (arg_buffer) kfree(arg_buffer, strings_size);
+    return -1;
 }
 
 // Legacy function for compatibility
