@@ -745,6 +745,7 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
     kfree(raw_inode, inode_size);
 
     // 5. Add to Directory
+    // 5. Add to Directory
     if (minix_dir_add(dir, name, inode_num) != 0) {
         minix_free_inode(fs, (uint32_t)inode_num);
         return -1;
@@ -785,6 +786,7 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
     uint32_t zone = minix_alloc_zone(fs);
     if (zone == 0) {
         kfree(new_node.ptr, inode_size);
+        minix_free_inode(fs, inode_num);
         return -1;
     }
 
@@ -797,11 +799,15 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
 
     if (minix_write(&new_node, 0, target_len, (uint8_t *)target) != target_len) {
         kfree(new_node.ptr, inode_size);
+        minix_free_block(fs, zone);
+        minix_free_inode(fs, inode_num);
         return -1;
     }
 
     if (minix_write_inode(fs, &new_node) != 0) {
         kfree(new_node.ptr, inode_size);
+        minix_free_block(fs, zone);
+        minix_free_inode(fs, inode_num);
         return -1;
     }
 
@@ -809,6 +815,8 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
 
     // 4. Add to directory
     if (minix_dir_add(dir, name, (uint16_t)inode_num) != 0) {
+        minix_free_block(fs, zone);
+        minix_free_inode(fs, inode_num);
         return -1;
     }
 
