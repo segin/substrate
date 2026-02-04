@@ -1,0 +1,50 @@
+.Dd March 8, 2025
+.Dt SCHED 9
+.Os Substrate
+.Sh NAME
+.Nm sched_get_thread ,
+.Nm sched_yield ,
+.Nm sched_set_affinity
+.Nd kernel scheduler and thread management
+.Sh SYNOPSIS
+.In kern/sched.h
+.Ft thread_t *
+.Fn sched_get_thread "int tid"
+.Ft void
+.Fn sched_yield "void"
+.Ft int
+.Fn sched_set_affinity "int tid" "uint32_t mask"
+.Sh DESCRIPTION
+The
+.Nm sched
+subsystem manages process threads and CPU scheduling in the Substrate kernel.
+.Pp
+.Fn sched_get_thread
+retrieves the thread structure associated with the given
+.Fa tid .
+This operation is performed in O(1) time using an index-encoded TID scheme,
+where the TID contains both the slot index and a generation counter.
+.Pp
+.Fn sched_yield
+voluntarily relinquishes the CPU, allowing the scheduler to select the next
+best thread to run based on priority and scheduling class.
+.Pp
+.Fn sched_set_affinity
+sets the CPU affinity mask for the specified thread.
+The
+.Fa mask
+is a bitmask where each bit represents a valid CPU ID.
+Attempts to set an affinity mask with no valid CPUs will fail.
+.Sh RETURN VALUES
+.Fn sched_get_thread
+returns a pointer to the
+.Vt thread_t
+structure if found, or
+.Dv NULL
+if the TID is invalid or the thread does not exist.
+.Pp
+.Fn sched_set_affinity
+returns 0 on success, or -1 on failure (e.g., invalid TID or mask).
+.Sh SEE ALSO
+.Xr kthread 9 ,
+.Xr proc_find 9
