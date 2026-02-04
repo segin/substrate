@@ -1,0 +1,50 @@
+.TH MLOCK 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+mlock, munlock \- lock and unlock memory
+.SH SYNOPSIS
+.B #include <sys/mman.h>
+.PP
+.BI "int mlock(const void *" addr ", size_t " len ");"
+.br
+.BI "int munlock(const void *" addr ", size_t " len ");"
+.SH DESCRIPTION
+.BR mlock ()
+locks pages in the address range starting at
+.I addr
+and continuing for
+.I len
+bytes. All pages that contain a part of the specified address range are
+guaranteed to be resident in RAM when the call returns successfully;
+the pages are guaranteed to stay in RAM until later unlocked.
+.PP
+.BR munlock ()
+unlocks pages in the address range starting at
+.I addr
+and continuing for
+.I len
+bytes. After this call, all pages that contain a part of the specified
+memory range can be moved to external swap space again by the kernel.
+.PP
+On Substrate, these calls are currently implemented as stubs and always return
+success (0).
+.SH RETURN VALUE
+On success, these system calls return 0.
+On error, \-1 is returned,
+.I errno
+is set appropriately, and no changes are made to any locks in the address
+space of the process.
+.SH ERRORS
+.TP
+.B ENOMEM
+Some of the specified address range does not correspond to mapped pages
+in the address space of the process.
+.TP
+.B EAGAIN
+Some or all of the memory could not be locked.
+.SH CONFORMING TO
+POSIX.1-2001, POSIX.1-2008, SVr4.
+.SH SEE ALSO
+.BR mmap (2),
+.BR munmap (2)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

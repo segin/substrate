@@ -225,9 +225,7 @@ void pmap_destroy(pmap_t pmap) {
     if (!pmap) return;
     
     // 1. Decrement ref count
-    // TODO: Atomic decrement
-    pmap->ref_count--;
-    if (pmap->ref_count > 0) return;
+    if (__sync_sub_and_fetch(&pmap->ref_count, 1) > 0) return;
     
     // 2. Free user pages (PML4 entries 0-255)
     // pmap->pml4 is accessible (virtual)
