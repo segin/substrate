@@ -68,14 +68,6 @@ void sched_init(void) {
     extern char *strcpy(char *, const char *);
     strcpy(processes[0].comm, "swapper");
     
-    // Copy permissions/acct
-    // ... (simplified)
-    
-    // Alloc Kernel Thread
-    // We can't use alloc because it might pick index 0 which is fine, 
-    // but 'current_thread' is NULL so alloc might crash on priority inheritance?
-    // Modified alloc to handle NULL current_thread.
-    
     thread_t *t = sched_alloc_thread(&processes[0]);
     t->state = THREAD_RUNNING;
     t->priority = 20;
@@ -158,9 +150,9 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     return proc->pid;
 }
 
-int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg) {
+thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg) {
     thread_t *t = sched_alloc_thread(proc);
-    if (!t) return -1;
+    if (!t) return NULL;
     
     // Simulate stack frame for "entry_point(arg)"
     uint32_t *stk = (uint32_t*)stack;
@@ -185,7 +177,7 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     t->instr_ptr = (uintptr_t)entry_point;
     t->state = THREAD_READY; // Ready to be scheduled
 
-    return t->tid;
+    return t;
 }
 
 

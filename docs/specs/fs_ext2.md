@@ -24,6 +24,11 @@ Adds a directory entry to the specified directory.
 ### `int ext2_remove_entry(fs_node_t *dir, const char *name)`
 Removes an entry from the directory.
 
+## Concurrency
+The driver is designed to be thread-safe for concurrent access to different files/inodes.
+- **I/O Buffers:** Uses dynamic memory allocation (`kmalloc`) for block I/O buffers to prevent race conditions.
+- **Directory Iteration:** `readdir` maintains state within the file node context (`ext2_node_t`), ensuring safe iteration across multiple open handles.
+
 ## Constraints
 - Directory entry logic is currently stubbed.
 - Support for linked-list directory structure.

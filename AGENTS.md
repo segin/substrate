@@ -112,6 +112,12 @@ pmm_free_block(virt);  // CORRECT - convert first
     - **SEE ALSO:** Required section.
     - **ERRORS:** Required for APIs returning error codes via `errno`. Document separately from RETURN VALUE.
     - **EXAMPLE/EXAMPLES:** Use "EXAMPLE" for single, "EXAMPLES" for multiple.
+10. **Host Builds vs Target Builds (CRITICAL):**
+    - **Target Build:** Compiles code for the Substrate kernel and userland. Uses `-nostdlib` and the project's own `lib/c/`, `lib/sys/`, etc.
+    - **Host Build (`NATIVE_BUILD=1`):** Compiles code to run on the host OS (Linux, BSD, etc.) for testing purposes. Uses the **HOST OS's libc and system libraries**, NOT Substrate's.
+    - **NEVER** modify `lib/c/`, `lib/sys/`, `crt0.S`, `syscall.S`, or other core libraries to support Linux or any host OS. These are for Substrate only.
+    - Host builds link against the host's standard C library (e.g., glibc on Linux) via normal `cc` invocation without `-nostdlib`.
+    - The `bin/sh/Makefile` and similar use `NATIVE_BUILD=1` to toggle between target and host compilation modes.
 
 ## Directory Structure Overview
 - `sys/`: Kernel source.
@@ -128,8 +134,8 @@ pmm_free_block(virt);  // CORRECT - convert first
 - `bin/`: User-space utilities (`ls`, `sh`, `vi`, etc.).
 - `include/`: Userspace C library headers (shared by all libraries).
 - `lib/`:
-    - `c/`: LibC implementation.
-    - `sys/`: System call wrapper library (libsys). Raw `syscall()` and typed wrappers.
+    - `c/`: LibC implementation **(Substrate target ONLY, never for Linux/host)**.
+    - `sys/`: System call wrapper library (libsys). Raw `syscall()` and typed wrappers **(Substrate target ONLY)**.
     - `pthreads/`: Threading support.
     - `dbm/`: Database library.
 - `sbin/`: System binaries.

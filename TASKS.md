@@ -3121,7 +3121,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `NETLINK_ROUTE`: Interface/Address/Route management (`RTM_*`).
                 - [ ] `NETLINK_KOBJECT_UEVENT`: Hotplug/Device events.
             - [ ] **Direct Standard Syscalls:**
-                - [ ] `sysinfo()`: System uptime, total RAM, free RAM.
+                - [x] `sysinfo()`: System uptime, total RAM, free RAM.
                 - [ ] `uname()`: System identification.
                 - [ ] `getrlimit()`: Process resource limits.
                 - [ ] `clock_gettime()`: High-resolution system clocks.
@@ -3158,7 +3158,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
             - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
             - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
-        - [/] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
+        - [x] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
             - [x] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
             - [ ] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
             - [ ] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
@@ -3245,121 +3245,181 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Implement `syscall.S`: Raw i386 `int $0x80` entry (6 args via ebx-ebp).
     - [x] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype.
     - [x] Add to `lib/Makefile` SUBDIRS.
-- [ ] **VM Information Syscalls:**
-    - [ ] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
-        - [ ] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
-        - [ ] `lib/sys/sysinfo.c`: Wrapper function.
-        - [ ] Man page: `sysinfo(2)`.
-    - [ ] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
-        - [ ] `lib/sys/getpagesize.c`: Wrapper function.
-        - [ ] Man page: `getpagesize(2)`.
-    - [ ] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
-        - [ ] `lib/sys/mlock.c`: Wrapper functions.
-        - [ ] Man pages: `mlock(2)`, `munlock(2)`.
+- [x] **VM Information Syscalls:**
+    - [x] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
+        - [x] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
+        - [x] `lib/sys/sysinfo.c`: Wrapper function.
+        - [x] Man page: `sysinfo(2)`.
+    - [x] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
+        - [x] `lib/sys/getpagesize.c`: Wrapper function.
+        - [x] Man page: `getpagesize(2)`.
+    - [x] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
+        - [x] `lib/sys/mlock.c`: Wrapper functions.
+        - [x] Man pages: `mlock(2)`, `munlock(2)`.
 - [ ] **Process Information Syscalls:**
-    - [ ] `getpid()`/`getppid()` wrappers.
-        - [ ] `lib/sys/getpid.c`: Wrapper functions.
-        - [ ] Man pages: `getpid(2)`, `getppid(2)`.
-    - [ ] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers.
-        - [ ] `lib/sys/getuid.c`: Wrapper functions.
-        - [ ] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`.
-    - [ ] `getpgid()`/`setpgid()`/`getpgrp()` wrappers.
-        - [ ] `lib/sys/pgrp.c`: Wrapper functions.
-        - [ ] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`.
-    - [ ] `getsid()`/`setsid()` wrappers.
-        - [ ] `lib/sys/sid.c`: Wrapper functions.
-        - [ ] Man pages: `getsid(2)`, `setsid(2)`.
-    - [ ] `getrusage()` wrapper: Resource usage (user/sys time, memory).
-        - [ ] Kernel: Implement `sys_getrusage()` returning `struct rusage`.
-        - [ ] `lib/sys/getrusage.c`: Wrapper function.
-        - [ ] Man page: `getrusage(2)`.
-    - [ ] `times()` wrapper: Process times (user, sys, children).
-        - [ ] Kernel: Implement `sys_times()`.
-        - [ ] `lib/sys/times.c`: Wrapper function.
-        - [ ] Man page: `times(2)`.
-- [ ] **Special-Purpose Syscalls:**
+    - [x] `getpid()`/`getppid()` wrappers.
+        - [x] `lib/sys/getpid.c`: Wrapper functions.
+        - [x] Man pages: `getpid(2)`, `getppid(2)`.
+    - [x] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers.
+        - [x] `lib/sys/getuid.c`: Wrapper functions.
+        - [x] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`.
+    - [x] `getpgid()`/`setpgid()`/`getpgrp()` wrappers.
+        - [x] `lib/sys/pgrp.c`: Wrapper functions.
+        - [x] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`.
+    - [x] `getsid()`/`setsid()` wrappers.
+        - [x] `lib/sys/pgrp.c`: Wrapper functions.
+        - [x] Man pages: `getsid(2)`, `setsid(2)`.
+    - [x] `getrusage()` wrapper: Resource usage (user/sys time, memory).
+        - [x] Kernel: Hooked up `sys_getrusage()`.
+        - [x] `lib/sys/getrusage.c`: Wrapper function.
+        - [x] Man page: `getrusage(2)`.
+    - [x] `times()` wrapper: Process times (user, sys, children).
+        - [x] Kernel: Hooked up `sys_times()`.
+        - [x] `lib/sys/times.c`: Wrapper function.
+        - [x] Man page: `times(2)`.
+- [x] **Special-Purpose Syscalls:**
     - [x] `vm86()` wrapper (SYS_vm86): Enter VM86 mode.
         - [x] `lib/sys/vm86.c`: Typed wrapper.
-        - [ ] Man page: `vm86(2)`.
-    - [ ] `ptrace()` wrapper: Process tracing.
-        - [ ] `lib/sys/ptrace.c`: Wrapper function.
-        - [ ] Man page: `ptrace(2)`.
-    - [ ] `reboot()` wrapper: System reboot/power off.
-        - [ ] `lib/sys/reboot.c`: Wrapper function.
-        - [ ] Man page: `reboot(2)`.
-- [ ] **Sysctl Interface:**
-    - [ ] `sysctl()` wrapper: Kernel tunable access.
-        - [ ] Kernel: Implement `sys_sysctl()` MIB tree.
-        - [ ] `lib/sys/sysctl.c`: Wrapper function.
-        - [ ] Man page: `sysctl(2)`.
+        - [x] Man page: `vm86(2)`.
+    - [x] `ptrace()` wrapper: Process tracing.
+        - [x] `lib/sys/ptrace.c`: Wrapper function.
+        - [x] Man page: `ptrace(2)`.
+    - [x] `reboot()` wrapper: System reboot/power off.
+        - [x] `lib/sys/reboot.c`: Wrapper function.
+        - [x] Man page: `reboot(2)`.
+- [x] **Sysctl Interface:**
+    - [x] `sysctl()` wrapper: Kernel tunable access.
+        - [x] Kernel: Hooked up `sys_sysctl()` MIB tree.
+        - [x] `lib/sys/sysctl.c`: Wrapper function.
+        - [x] Man page: `sysctl(2)`.
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
-    - [x] **Lexer (Tokenizer):**
-        - [x] Handle delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
-        - [x] Handle quoting (`'` single, `"` double) and escaping (`\`).
-        - [x] Handle operators (`&&`, `||`, `>>`, `<<`).
-        - [x] Variable recognition (`$PROMPT`, `${VAR}`).
-    - [ ] **Parser (AST Generation):**
-        - [x] **Simple Commands:** List of arguments + redirections.
-        - [x] **Pipelines:** Chain of simple commands connected by pipes.
-        - [x] **Lists:** Sequences (`cmd1 ; cmd2`) and Logic (`cmd1 && cmd2`).
-        - [ ] **Compound Commands:**
-            - [ ] `IfClause`: `if` list `then` list `else` list `fi`.
-            - [ ] `WhileClause`: `while` list `do` list `done`.
-            - [ ] `ForClause`: `for` name `in` words `do` list `done`.
-            - [ ] `FunctionDef`: `name() { list; }`.
-    - [ ] **Expansion (WordExp):**
-        - [ ] Tilde Expansion (`~` -> `$HOME`).
-        - [ ] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
-        - [ ] Command Substitution (`$(cmd)`).
-        - [ ] Arithmetic Expansion (`$(( 1 + 2 ))`).
-        - [ ] Globbing (`*`, `?`, `[...]` file matching).
+    - [ ] **Code Audit & Infrastructure:**
+        - [ ] Audit `lexer.c`, `parser.c`, `expand.c`, `exec.c`, `sh.c` for naive implementations or TODOs.
+        - [ ] Setup coverage-guided fuzzing for the parser and expansion engine.
+    - [ ] **Invocation & Startup:**
+        - [x] Handle `sh -c` correctly.
+        - [x] Handle `sh -s` correctly.
+        - [x] Detect and handle login shell behavior.
+        - [x] Argument parsing and POSIX option processing.
+        - [x] Interactive vs non-interactive mode detection.
+        - [x] Startup files: `ENV` and profile handling.
+        - [x] Locale and environment initialization.
+        - [x] Signal disposition at startup.
+    - [x] **Lexical Analysis:**
+        - [x] Delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
+        - [x] Quoting (`'` single, `"` double) and escaping (`\`).
+        - [x] Operators (`&&`, `||`, `>>`, `<<`, `<&`, `>&`).
+        - [x] Comment handling (`#`).
+        - [x] Line continuation rules (backslash-newline).
+        - [x] Here-document lexing (quoted vs unquoted delimiters).
+    - [x] **Shell Grammar & Parsing:**
+        - [x] Simple commands.
+        - [x] Pipelines.
+        - [x] Lists (`;`, `&`, `&&`, `||`).
+        - [x] Compound commands (`if`, `while`, `for`, `case`).
+        - [x] Grouping `{}` and subshells `()`.
+        - [x] Function definitions.
+        - [x] Precedence and associativity verification.
+        - [x] Robust error recovery and diagnostics.
+    - [x] **Expansions (Exact Order):**
+        - [x] **1. Tilde Expansion**
+        - [x] **2. Parameter Expansion:**
+            - [x] Basic `$VAR`, `${VAR}`.
+            - [x] `${VAR:-def}`, `${VAR:=def}`, `${VAR:?err}`, `${VAR:+alt}`.
+            - [x] `${#VAR}` (Length).
+            - [x] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
+            - [x] `${VAR#pat}`, `${VAR##pat}` (Prefix).
+            - [x] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
+            - [x] Nested parameter expansions.
+        - [x] **3. Command Substitution** (`$(cmd)`).
+        - [x] **4. Arithmetic Expansion** (`$(( ... ))`).
+        - [x] **5. Field Splitting:** Use `$IFS` for unquoted expansions.
+        - [x] **6. Pathname Expansion:** Globbing (`*`, `?`, `[...]`).
+        - [x] **7. Quote Removal:** Final pass.
+    - [x] **Redirections:**
+        - [x] Input/Output (`<`, `>`, `>>`).
+        - [x] FD duplication (`<&`, `>&`).
+        - [x] Here-documents (`<<`).
+        - [x] Proper ordering and evaluation timing.
+        - [x] Error handling and rollback (save/restore).
     - [ ] **Execution Engine:**
-        - [ ] **Builtins:**
-            - [ ] `cd`: Change directory ($HOME default).
-            - [ ] `exit`: Terminate shell.
-            - [ ] `export`: precise environment variable support.
-            - [ ] `unset`: Remove variables.
-            - [ ] `exec`: Replace shell process.
-            - [ ] `eval`: Parse and execute arguments.
-            - [ ] `shift`: Shift positional parameters.
-        - [ ] **External Commands:**
-            - [ ] `fork()` / `execve()` search path (`$PATH`).
-            - [ ] `waitpid()` for synchronous execution.
-    - [ ] **Job Control:**
-        - [ ] **Process Groups:** Set pgid for pipelines.
-        - [ ] **Foreground/Background:** `tcsetpgrp` management.
-        - [ ] **Job Table:** Track status (Running, Stopped, Done).
-        - [ ] **Signals:** `SIGINT`, `SIGTSTP`, `SIGCHLD` handler.
-    - [ ] **Redirection:**
-        - [ ] `dup2` management for `<`, `>`, `>>`, `2>`, `2>&1`.
-        - [ ] Here-Documents (`<< EOF`).
+        - [x] Builtin vs external command resolution.
+        - [x] PATH search rules.
+        - [x] `exec` behavior (shell replacement).
+        - [x] Process forking model.
+        - [x] Job control hooks integration.
+        - [x] Exit status propagation.
+        - [ ] `set -e` semantics.
+    - [ ] **Builtin Commands:**
+        - [x] `:` (Null command).
+        - [x] `.` (Dot/Source).
+        - [x] `break`.
+        - [x] `continue`.
+        - [x] `cd` (including `CDPATH`).
+        - [ ] `command`.
+        - [x] `eval`.
+        - [x] `exec`.
+        - [x] `exit`.
+        - [x] `export`.
+        - [ ] `getopts`.
+        - [ ] `read`.
+        - [ ] `readonly`.
+        - [ ] `return`.
+        - [ ] `set`.
+        - [x] `unset`.
+        - [x] `shift`.
+        - [ ] `times`.
+        - [ ] `trap`.
+        - [ ] `umask`.
+        - [ ] `wait`.
+    - [ ] **Variables & Environment:**
+        - [ ] Shell vs Environment variable distinction.
+        - [ ] Scope rules (Global, Local, Function).
+        - [ ] Export semantics.
+        - [ ] Read-only enforcement.
+    - [x] **Functions:**
+        - [x] Definition and Invocation.
+        - [x] Local variables scoping.
+        - [x] Return behavior.
+    - [x] **Job Control:**
+        - [x] Foreground/Background.
+        - [x] Process groups.
+        - [x] Signal forwarding.
+    - [ ] **Signals & Traps:**
+        - [ ] Default signal handling.
+        - [ ] `trap` builtin integration.
+    - [ ] **Testing & Compliance:**
+        - [ ] Unit tests for all modules.
+        - [ ] Script-based conformance tests.
+        - [ ] Coverage-guided fuzzing.
+        - [ ] Man page (`sh(1)`).
 - [ ] **Core Utilities:**
-    - [ ] **`ls` - List directory contents:**
-        - [ ] **Purpose:** List information about the FILEs (the current directory by default).
-        - [ ] **Standards:** POSIX.1-2017, BSD Extensions (color).
-        - [ ] **Operands:**
-            - [ ] `-a`, `--all`: List all files including hidden ones.
-            - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
-            - [ ] `-l`: Long listing format (permissions, ownership, size, time).
-            - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
-            - [ ] `-R`, `--recursive`: List subdirectories recursively.
-            - [ ] `-r`, `--reverse`: Reverse order while sorting.
-            - [ ] `-S`: Sort by file size.
-            - [ ] `-t`: Sort by modification time.
-            - [ ] `--color`: Colorize output (auto/always/never).
+    - [x] **`ls` - List directory contents:**
+        - [x] **Purpose:** List information about the FILEs (the current directory by default).
+        - [x] **Standards:** POSIX.1-2017, BSD Extensions (color).
+        - [x] **Operands:**
+            - [x] `-a`, `--all`: List all files including hidden ones.
+            - [x] `-A`, `--almost-all`: List all except `.` and `..`.
+            - [x] `-l`: Long listing format (permissions, ownership, size, time).
+            - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+            - [x] `-R`, `--recursive`: List subdirectories recursively.
+            - [x] `-r`, `--reverse`: Reverse order while sorting.
+            - [x] `-S`: Sort by file size.
+            - [x] `-t`: Sort by modification time.
+            - [x] `--color`: Colorize output (auto/always/never).
         - [ ] **Runtime:**
             - [ ] Column width calculation for multi-column output.
             - [ ] Date formatting (recent vs old files).
             - [ ] User/Group name caching.
         - [ ] **Library dependencies:**
             - [ ] `xopendir`, `xreaddir`, `xstat`, `xclosedir`, `humanize_number`, `pwcache`, `groupcache` or `getpwuid`/`getgrgid`
-        - [ ] **Acceptance tests:**
-            - [ ] `ls` empty directory -> empty output
-            - [ ] `ls -a` -> shows `.` and `..`
-            - [ ] `ls -l` -> correct permissions and ownership columns
-            - [ ] `ls -R` -> descends into subdirectories
+        - [x] **Acceptance tests:**
+            - [x] `ls` empty directory -> empty output
+            - [x] `ls -a` -> shows `.` and `..`
+            - [x] `ls -l` -> correct permissions and ownership columns
+            - [x] `ls -R` -> descends into subdirectories
     - [ ] **`cp` - Copy files and directories:**
         - [ ] **Purpose:** Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.
         - [ ] **Standards:** POSIX.1-2017.

@@ -79,97 +79,44 @@ fs_node_t ramdisk_node = {
     .flags = FS_BLOCKDEVICE
 };
 
-// Helper to inspect ramdisk
-void hexdump_block(uint32_t block) {
-    printf("Block %d:\n", block);
-    for (int i = 0; i < 32; i++) {
-        printf("%02X ", ramdisk[block * 1024 + i]);
-    }
-    printf("\n");
-}
-
-struct minix_dirent_v1 { uint16_t inode; char name[30]; } __attribute__((packed));
-
 void init_minix_v1(void) {
     memset(ramdisk, 0, RAMDISK_SIZE);
-
-    // Boot block (0)
-
-    // Superblock (1)
     struct minix_superblock *sb = (struct minix_superblock *)(ramdisk + 1024);
     sb->s_ninodes = 100;
     sb->s_nzones = 100;
     sb->s_imap_blocks = 1;
     sb->s_zmap_blocks = 1;
-    sb->s_firstdatazone = 4; // boot(1)+sb(1)+imap(1)+zmap(1) = 4 blocks used. Data starts at 4?
-                             // wait, blocks are 0-indexed.
-                             // 0: boot
-                             // 1: sb
-                             // 2: imap
-                             // 3: zmap
-                             // 4: inodes?
-                             // minix.c: inode_start_block = 2 + s_imap_blocks + s_zmap_blocks = 2+1+1=4.
-                             // So Inodes at 4.
-                             // How many inode blocks? 100 inodes / (1024/32) = 100/32 = 3.125 -> 4 blocks.
-                             // So inodes at 4, 5, 6, 7.
-                             // Data starts at 8.
     sb->s_firstdatazone = 8;
     sb->s_log_zone_size = 0;
     sb->s_max_size = 0xFFFFFFFF;
     sb->s_magic = MINIX_V1_Magic;
-
-    // Set Inode Bitmap (Block 2)
-    // Bit 0 is unused (inode 0 is null). Bit 1 is Root.
-    // 0000 0011 -> 0x03 (Inode 0 and 1 used).
-    // Wait, is inode 0 used? Usually Minix inodes are 1-based. Inode 0 is not used.
-    // Bitmap bit 0 corresponds to inode 1? Or inode 0?
-    // Minix usually: bit 0 -> inode 1? No, usually bit 0 -> inode 0 (reserved).
-    // Let's assume bit 0 -> inode 0, bit 1 -> inode 1.
     ramdisk[2 * 1024] = 0x03;
-
-    // Set Zone Bitmap (Block 3)
-    // Bit 0->zone 0. Zone 0 usually reserved.
-    // s_firstdatazone is 8.
-    // So zones 0..7 are metadata?
-    // Minix zones refer to absolute blocks usually (in V1).
-    // So bits 0..7 should be marked used.
-    ramdisk[3 * 1024] = 0xFF; // Zones 0-7 used.
-
-    // Root Inode (Inode 1) at Block 4
-    // Inode 1 is at index (1-1) = 0.
+    ramdisk[3 * 1024] = 0xFF;
     struct minix_inode_v1 *root_inode = (struct minix_inode_v1 *)(ramdisk + 4 * 1024);
-    root_inode->i_mode = 0x41FF; // Directory + rwx
+    root_inode->i_mode = 0x41FF;
     root_inode->i_uid = 0;
-    root_inode->i_size = 32 * 2; // 2 entries
+    root_inode->i_size = 32 * 2;
     root_inode->i_time = 0;
     root_inode->i_nlinks = 2;
-    root_inode->i_zone[0] = 8; // Data at zone 8
-
-    // Root Directory Entries at Zone 8 (Block 8)
+    root_inode->i_zone[0] = 8;
     struct minix_dirent_v1 *dirs = (struct minix_dirent_v1 *)(ramdisk + 8 * 1024);
-
     dirs[0].inode = 1; strcpy(dirs[0].name, ".");
     dirs[1].inode = 1; strcpy(dirs[1].name, "..");
 }
 
 void init_minix_v2(void) {
     memset(ramdisk, 0, RAMDISK_SIZE);
-
     struct minix_superblock *sb = (struct minix_superblock *)(ramdisk + 1024);
     sb->s_ninodes = 100;
-    sb->s_zones = 100; // V2 uses s_zones
+    sb->s_zones = 100;
     sb->s_imap_blocks = 1;
     sb->s_zmap_blocks = 1;
     sb->s_firstdatazone = 8;
     sb->s_log_zone_size = 0;
     sb->s_max_size = 0xFFFFFFFF;
     sb->s_magic = MINIX_V2_Magic;
-
     ramdisk[2 * 1024] = 0x03;
     ramdisk[3 * 1024] = 0xFF;
-
-    // Root Inode (Inode 1) at Block 4
-    // V2 Inode size = 64 bytes
     struct minix_inode_v2 *root_inode = (struct minix_inode_v2 *)(ramdisk + 4 * 1024);
     root_inode->i_mode = 0x41FF;
     root_inode->i_uid = 0;
@@ -179,91 +126,139 @@ void init_minix_v2(void) {
     root_inode->i_ctime = 0;
     root_inode->i_nlinks = 2;
     root_inode->i_zone[0] = 8;
-
     struct minix_dirent_v1 *dirs = (struct minix_dirent_v1 *)(ramdisk + 8 * 1024);
     dirs[0].inode = 1; strcpy(dirs[0].name, ".");
     dirs[1].inode = 1; strcpy(dirs[1].name, "..");
+}
+
+bool test_minix_link_v1(void) {
+    printf("Test: Minix V1 Hard Link\n");
+    init_minix_v1();
+    fs_node_t *root = minix_mount("ramdisk", 0, &ramdisk_node);
+    if (!root) return false;
+
+    if (minix_mknod(root, "file1", 0x81FF, 0) != 0) {
+        printf("FAIL: mknod failed\n"); return false;
+    }
+    fs_node_t *file1 = minix_finddir(root, "file1");
+    if (!file1) { printf("FAIL: file1 not found\n"); return false; }
+
+    if (minix_link(root, file1, "link1") != 0) {
+        printf("FAIL: minix_link failed\n"); return false;
+    }
+
+    struct minix_inode_v1 *cached = (struct minix_inode_v1 *)file1->ptr;
+    if (cached->i_nlinks != 2) {
+        printf("FAIL: Cached link count is %d, expected 2\n", cached->i_nlinks);
+        return false;
+    }
+
+    fs_node_t file1_fresh;
+    memset(&file1_fresh, 0, sizeof(file1_fresh));
+    if (minix_read_inode((minix_fs_t*)root->impl, file1->inode, &file1_fresh) != 0) {
+        printf("FAIL: re-read inode failed\n"); return false;
+    }
+    struct minix_inode_v1 *fresh = (struct minix_inode_v1 *)file1_fresh.ptr;
+    if (fresh->i_nlinks != 2) {
+        printf("FAIL: On-disk link count is %d, expected 2\n", fresh->i_nlinks);
+        return false;
+    }
+    kfree(file1_fresh.ptr, sizeof(struct minix_inode_v1));
+    kfree(file1->ptr, sizeof(struct minix_inode_v1));
+    kfree(file1, sizeof(fs_node_t));
+    minix_unmount(root);
+    return true;
+}
+
+bool test_minix_link_v2(void) {
+    printf("Test: Minix V2 Hard Link\n");
+    init_minix_v2();
+    fs_node_t *root = minix_mount("ramdisk", 0, &ramdisk_node);
+    if (!root) return false;
+
+    if (minix_mknod(root, "file2", 0x81FF, 0) != 0) {
+        printf("FAIL: mknod failed\n"); return false;
+    }
+    fs_node_t *file2 = minix_finddir(root, "file2");
+    if (!file2) return false;
+
+    if (minix_link(root, file2, "link2") != 0) {
+        printf("FAIL: minix_link failed\n"); return false;
+    }
+
+    struct minix_inode_v2 *cached = (struct minix_inode_v2 *)file2->ptr;
+    if (cached->i_nlinks != 2) {
+        printf("FAIL: Cached link count is %d, expected 2\n", cached->i_nlinks);
+        return false;
+    }
+
+    fs_node_t file2_fresh;
+    memset(&file2_fresh, 0, sizeof(file2_fresh));
+    if (minix_read_inode((minix_fs_t*)root->impl, file2->inode, &file2_fresh) != 0) return false;
+    struct minix_inode_v2 *fresh = (struct minix_inode_v2 *)file2_fresh.ptr;
+    if (fresh->i_nlinks != 2) {
+        printf("FAIL: On-disk link count is %d, expected 2\n", fresh->i_nlinks);
+        return false;
+    }
+    kfree(file2_fresh.ptr, sizeof(struct minix_inode_v2));
+    kfree(file2->ptr, sizeof(struct minix_inode_v2));
+    kfree(file2, sizeof(fs_node_t));
+    minix_unmount(root);
+    return true;
 }
 
 bool test_minix_symlink_v1(void) {
     printf("Test: Minix V1 Symlink\n");
     init_minix_v1();
 
-    printf("Mounting...\n");
     fs_node_t *root = minix_mount("ramdisk", 0, &ramdisk_node);
-    if (!root) { printf("FAIL: Failed to mount Minix\n"); return false; }
+    if (!root) return false;
 
-    printf("Mount successful. Root inode: %ld\n", root->inode);
-
-    // Create symlink
-    // root is the directory
-    // "mylink" is the name
-    // "/target/path" is the target
     int ret = minix_symlink(root, "mylink", "/target/path");
     if (ret != 0) {
         printf("FAIL: minix_symlink returned %d\n", ret);
-        kfree(root, sizeof(fs_node_t));
         return false;
-    } else {
-        printf("minix_symlink returned success\n");
     }
 
-    // Verify directory entry exists
-    // We can use minix_finddir
     fs_node_t *link_node = minix_finddir(root, "mylink");
     if (!link_node) {
         printf("FAIL: Created symlink not found in dir\n");
-        kfree(root, sizeof(fs_node_t));
         return false;
     }
 
-    // Verify node properties
     if ((link_node->flags & FS_SYMLINK) == 0) {
         printf("FAIL: Node is not marked as symlink (flags=%x)\n", link_node->flags);
-        // continue
     }
 
-    // Verify target content
     char buf[64] = {0};
     ssize_t len = minix_readlink(link_node, buf, sizeof(buf));
-    if (len < 0) {
-        printf("FAIL: readlink failed\n");
-    } else {
-        if (strcmp(buf, "/target/path") != 0) {
-            printf("FAIL: Link target mismatch: '%s', expected '/target/path'\n", buf);
-        } else {
-            printf("PASS: Link target verified\n");
-        }
+    if (len < 0 || strcmp(buf, "/target/path") != 0) {
+        printf("FAIL: Link target mismatch\n");
+        return false;
     }
 
+    kfree(link_node->ptr, sizeof(struct minix_inode_v1));
     kfree(link_node, sizeof(fs_node_t));
-    kfree(root, sizeof(fs_node_t));
-    return (ret == 0);
+    minix_unmount(root);
+    return true;
 }
 
 bool test_minix_symlink_v2(void) {
     printf("Test: Minix V2 Symlink\n");
     init_minix_v2();
 
-    printf("Mounting...\n");
     fs_node_t *root = minix_mount("ramdisk", 0, &ramdisk_node);
-    if (!root) { printf("FAIL: Failed to mount Minix\n"); return false; }
-
-    printf("Mount successful. Root inode: %ld\n", root->inode);
+    if (!root) return false;
 
     int ret = minix_symlink(root, "mylink_v2", "/target/path/v2");
     if (ret != 0) {
         printf("FAIL: minix_symlink returned %d\n", ret);
-        kfree(root, sizeof(fs_node_t));
         return false;
-    } else {
-        printf("minix_symlink returned success\n");
     }
 
     fs_node_t *link_node = minix_finddir(root, "mylink_v2");
     if (!link_node) {
         printf("FAIL: Created symlink not found in dir\n");
-        kfree(root, sizeof(fs_node_t));
         return false;
     }
 
@@ -273,25 +268,23 @@ bool test_minix_symlink_v2(void) {
 
     char buf[64] = {0};
     ssize_t len = minix_readlink(link_node, buf, sizeof(buf));
-    if (len < 0) {
-        printf("FAIL: readlink failed\n");
-    } else {
-        if (strcmp(buf, "/target/path/v2") != 0) {
-            printf("FAIL: Link target mismatch: '%s', expected '/target/path/v2'\n", buf);
-        } else {
-            printf("PASS: Link target verified\n");
-        }
+    if (len < 0 || strcmp(buf, "/target/path/v2") != 0) {
+        printf("FAIL: Link target mismatch\n");
+        return false;
     }
 
+    kfree(link_node->ptr, sizeof(struct minix_inode_v2));
     kfree(link_node, sizeof(fs_node_t));
-    kfree(root, sizeof(fs_node_t));
-    return (ret == 0);
+    minix_unmount(root);
+    return true;
 }
 
 int main() {
-    setvbuf(stdout, NULL, _IONBF, 0); // Disable buffering
+    setvbuf(stdout, NULL, _IONBF, 0);
     printf("Starting test_minix...\n");
     bool pass = true;
+    pass &= test_minix_link_v1();
+    pass &= test_minix_link_v2();
     pass &= test_minix_symlink_v1();
     pass &= test_minix_symlink_v2();
 
