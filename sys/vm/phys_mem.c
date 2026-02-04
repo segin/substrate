@@ -68,6 +68,7 @@ static vm_page_t* vm_phys_alloc_locked(int order) {
             }
             
             vm_phys_free_count -= (1 << order);
+            page->ref_count = 1; // Default for new allocation
             return page;
         }
     }
@@ -169,7 +170,17 @@ void vm_phys_free_page(vm_page_t *page) {
     spinlock_acquire(&vm_phys_lock);
     
     // Check if double free
-    if (!(page->flags & PG_FREE)) {
+    if (page->flags & PG_FREE) {
+        spinlock_release(&vm_phys_lock);
+        intr_restore(flags);
+        return;
+    }
+
+    // Reference count: only free if reaches 0
+    if (page->ref_count > 1) {
+        page->ref_count--;
+    } else {
+        page->ref_count = 0;
         vm_phys_free_locked(page, 0);
     }
     
@@ -187,6 +198,13 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
     spinlock_acquire(&vm_phys_lock);
     
     vm_page_t *page = vm_phys_alloc_locked(order);
+    if (page) {
+        // All pages in the contiguous block get ref_count 1
+        for (size_t i = 0; i < (1UL << order); i++) {
+            vm_page_t *p = &page[i];
+            p->ref_count = 1;
+        }
+    }
     
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);

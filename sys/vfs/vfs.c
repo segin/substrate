@@ -1,10 +1,13 @@
 #include <vfs/vfs.h>
 #include <sys/mount.h>
+#include <sys/proc.h>
 
 #include <string.h>
 #include <kern/console.h>
 #include <stdio.h>
 #include <sys/poll.h>
+#include <sys/proc.h>
+
 fs_node_t *fs_root = 0; 
 
 static filesystem_t *filesystems = NULL;
@@ -14,6 +17,7 @@ extern void ext2_init(void);
 extern void fat_init(void);
 extern void exfat_init(void);
 extern void minix_init(void);
+extern void udf_init(void);
 extern void devfs_init(void);
 extern void procfs_init(void);
 extern void sysfs_init(void);
@@ -21,7 +25,6 @@ extern void fuse_init(void);
 extern void fuse_fs_init(void);
 extern void p9_init(void);
 extern void pseudo_init(void);
-extern void ntsync_init(void);
 
 void vfs_init(void) {
     kprint("VFS: Initializing...\n");
@@ -31,23 +34,18 @@ void vfs_init(void) {
     fat_init();
     exfat_init();
     minix_init();
+    udf_init();
     
     // Register pseudo-filesystems
     devfs_init();
     procfs_init();
     sysfs_init();
     pseudo_init();
-    ntsync_init();
     
     // Register network/special filesystems
     fuse_init();
     fuse_fs_init();
     p9_init();
-    
-    // Mount pseudo-filesystems
-    vfs_mount(NULL, "/dev", "devfs", 0, NULL);
-    vfs_mount(NULL, "/proc", "procfs", 0, NULL);
-    vfs_mount(NULL, "/sys", "sysfs", 0, NULL);
     
     kprint("VFS: Ready.\n");
 }
@@ -123,7 +121,9 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
             kprint("VFS: Mount point not found: ");
             kprint(path);
             kprint("\n");
-            // TODO: Free root? Unmount?
+            if (root && root->unmount) {
+                root->unmount(root);
+            }
             return -1; 
         }
 
@@ -421,6 +421,12 @@ int vfs_mkdir(const char *path, uint16_t permission) {
     char *last_slash = vfs_strrchr(path_buf, '/');
     char *name = NULL;
     fs_node_t *parent_node = NULL;
+
+    // Determine start node for relative lookups
+    fs_node_t *start_node = fs_root;
+    if (path[0] != '/' && current_process && current_process->cwd_node) {
+        start_node = current_process->cwd_node;
+    }
     
     if (last_slash) {
         *last_slash = '\0';
@@ -434,13 +440,11 @@ int vfs_mkdir(const char *path, uint16_t permission) {
             parent_node = fs_root;
         } else {
             // Find parent
-            // TODO: Use current_process->cwd if relative? 
-            // For now assuming full path or we rely on caller to resolve.
-            parent_node = vfs_lookup(fs_root, path_buf);
+            parent_node = vfs_lookup(start_node, path_buf);
         }
     } else {
-        // No slash: "foo" -> imply root if no CWD support yet
-        parent_node = fs_root;
+        // No slash: "foo"
+        parent_node = start_node;
         name = path_buf;
     }
     
@@ -564,15 +568,17 @@ int vfs_unmount(const char *path) {
     
     // Check if busy? (Refcounts) - TODO
     
+    // Capture root of mounted fs
+    fs_node_t *root = mountpoint->ptr;
+
     // Detach
     mountpoint->ptr = NULL;
     mountpoint->flags &= ~FS_MOUNTPOINT;
     
-    // We should allow the filesystem to unmount (flush caches etc)
-    // But we don't have the fs handle easily here unless we store it in mountpoint->ptr->fs?
-    // mountpoint->ptr IS the root of the fs.
-    
-    // TODO: cleanup fs instance
+    // Cleanup fs instance
+    if (root && root->unmount) {
+        root->unmount(root);
+    }
     
     return 0;
 }

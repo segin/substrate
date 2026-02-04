@@ -56,4 +56,6 @@ struct vm86_struct {
 // This might need to align with your kernel's trapframe definition in sys/arch/i386/process.h or similar
 // For now, vm86_regs covers the userspace view.
 
+int vm86_bios_call(int int_no, struct vm86_regs *regs);
+
 #endif

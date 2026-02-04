@@ -1,0 +1,51 @@
+.Dd January 31, 2026
+.Dt CMDLINE 9
+.Os Substrate
+.Sh NAME
+.Nm cmdline
+.Nd kernel command line parameters
+.Sh DESCRIPTION
+The Substrate kernel accepts various command line parameters at boot time to configure system behavior, hardware drivers, and debugging options.
+.Sh PARAMETERS
+.Bl -tag -width "syscall_trace"
+.It Sy root=device
+Specifies the device to mount as the root filesystem.
+Example:
+.Li root=/dev/hda1
+.It Sy rootfstype=type
+Specifies the filesystem type of the root device. Default is
+.Li ext2 .
+.It Sy init=path
+Specifies the path to the init process binary.
+Default search order:
+.Li /sbin/init ,
+.Li /etc/init ,
+.Li /bin/init ,
+.Li /bin/sh .
+.It Sy video=mode
+Configures the video driver or mode.
+Supported values:
+.Bl -tag -width "hercules" -compact
+.It Li off , none
+Disable framebuffer/video driver.
+.It Li ask
+Determine video mode via interactive menu (planned).
+.It Li cfa , cga
+Force CGA text mode (0xB8000).
+.It Li ega
+Force EGA text mode (0xB8000).
+.It Li hercules , mono
+Force MDA/Hercules monochrome text mode (0xB0000).
+.El
+.It Sy serial_debug
+Enables kernel logging output to the serial port (COM1).
+.It Sy syscall_trace , syscall_log
+Enables logging of all system calls to the console/serial port.
+.It Sy procmem
+If the init process (PID 1) crashes, dump its memory mappings to the debug output.
+.El
+.Sh SEE ALSO
+.Xr boot 8 ,
+.Xr init 8
+.Sh AUTHORS
+.An The Substrate Project

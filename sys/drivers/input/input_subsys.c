@@ -5,6 +5,8 @@
 #include <string.h>
 #include <kern/console.h>
 #include <vfs/vfs.h>
+#include <sys/time.h>
+#include <kern/time.h>
 
 #define INPUT_QUEUE_SIZE 64
 
@@ -77,9 +79,12 @@ void input_notify_readers(void) {
 void input_report_event(input_dev_t *dev, uint16_t type, uint16_t code, int32_t value) {
     (void)dev; // In future, use this to filter
     
+    struct timeval tv;
+    sys_gettimeofday(&tv, NULL);
+
     uint64_t idx = global_seq % INPUT_QUEUE_SIZE;
-    global_event_log[idx].time_sec = 0; // TODO: Get real time
-    global_event_log[idx].time_usec = 0;
+    global_event_log[idx].time_sec = tv.tv_sec;
+    global_event_log[idx].time_usec = tv.tv_usec;
     global_event_log[idx].type = type;
     global_event_log[idx].code = code;
     global_event_log[idx].value = value;

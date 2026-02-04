@@ -1,0 +1,47 @@
+.Dd February 1, 2026
+.Dt BUS_MATCH_DEVICE 9
+.Os Substrate
+.Sh NAME
+.Nm bus_match_device
+.Nd find the best matched driver for a device
+.Sh SYNOPSIS
+.In sys/kern/bus.h
+.Ft struct driver *
+.Fn bus_match_device "struct bus_type *bus" "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn bus_match_device
+function iterates over all drivers registered on the specified
+.Fa bus
+to find a driver that supports the device
+.Fa dev .
+.Pp
+For each driver, the function determines a match using the following precedence:
+.Bl -enum
+.It
+If the driver provides a
+.Va match_func
+callback, it is invoked.
+.It
+Otherwise, the bus's
+.Va match
+callback is invoked.
+.El
+.Pp
+If multiple drivers match the device, the one with the highest
+.Va priority
+is returned. Ties are broken by selecting the first driver encountered (registration order).
+.Sh RETURN VALUES
+The
+.Fn bus_match_device
+function returns a pointer to the best matching
+.Ft struct driver
+if one is found, or
+.Dv NULL
+if no driver matches.
+.Sh LOCKING
+The function acquires and releases the bus's spinlock to safely traverse the driver list.
+.Sh SEE ALSO
+.Xr bus 9 ,
+.Xr driver 9 ,
+.Xr device 9

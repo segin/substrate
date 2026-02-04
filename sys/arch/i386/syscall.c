@@ -98,9 +98,8 @@ int sys_set_thread_area(struct user_desc *u_info) {
     // causing the CPU to reload the cached descriptor base.
     // Otherwise, it restores the old selector (0x33) with old base (0),
     // and TLS accesses (GS:offset) will fault.
-    extern registers_t *syscall_regs;
-    if (syscall_regs) {
-        syscall_regs->gs = selector;
+    if (current_thread && current_thread->syscall_regs) {
+        current_thread->syscall_regs->gs = selector;
     }
     
     return 0;
@@ -109,8 +108,8 @@ int sys_set_thread_area(struct user_desc *u_info) {
 // Global flag from main.c
 extern int syscall_trace_enabled;
 
-// Global pointer to current syscall's register frame (for fork)
-registers_t *syscall_regs = NULL;
+// Global flag from main.c
+extern int syscall_trace_enabled;
 
 void syscall_handler(registers_t *regs) {
     if (!current_process || !current_process->pers) {
@@ -119,7 +118,9 @@ void syscall_handler(registers_t *regs) {
     }
 
     // Save regs pointer for special syscalls like fork
-    syscall_regs = regs;
+    if (current_thread) {
+        current_thread->syscall_regs = regs;
+    }
     
     struct personality *p = current_process->pers;
     uint32_t syscall_num = regs->eax;
@@ -258,14 +259,14 @@ void syscall_handler(registers_t *regs) {
 /* Arch-specific syscalls that require registers_t */
 int sys_fork(void) {
     // Fork needs access to the current syscall's register frame
-    // In a real OS, fork() returns 0 in the child and the child's PID in the parent.
-    return sched_fork_process(current_process, syscall_regs);
+    if (!current_thread || !current_thread->syscall_regs) return -1;
+    return sched_fork_process(current_process, current_thread->syscall_regs);
 }
 
 int sys_vfork(void) {
     // vfork: child shares parent's address space, parent blocks until child exec/exit
-    // For now, implement as regular fork (simpler, same behavior but less efficient)
-    return sched_fork_process(current_process, syscall_regs);
+    if (!current_thread || !current_thread->syscall_regs) return -1;
+    return sched_fork_process(current_process, current_thread->syscall_regs);
 }
 
 extern void isr128(void); 

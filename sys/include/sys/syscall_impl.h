@@ -10,6 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 /* Process management */
 extern int sys_exit(int);
@@ -100,8 +101,8 @@ extern int sys_nice(int);
 
 /* Time */
 extern int64_t sys_time(int64_t*);
-extern int sys_stime(uint32_t*);
-extern int sys_times(void*);
+extern int sys_stime(time_t*);
+extern clock_t sys_times(void*);
 extern int sys_nanosleep(void*, void*);
 extern int sys_gettimeofday(void*, void*);
 
@@ -111,8 +112,11 @@ extern int sys_acct(const char*);
 extern int sys_poll(void*, unsigned int, int);
 extern int sys_futex(int*, int, int, void*, int*, int);
 extern int sys_set_thread_area(void*);
+extern int sys_modify_ldt(int, void*, unsigned long);
 extern int sys_fsync(int);
 extern int sys_umask(int);
+extern int sys_reboot(int);
+extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
 /* Native specific */
 struct thr_param;
@@ -126,5 +130,7 @@ extern int sys_cpu_count(void);
 extern int sys_hostname(char*, size_t);
 extern int sys_rt_sigreturn(void*);
 extern int sys_sigreturn(void*);
+struct sysinfo;
+extern int sys_sysinfo(struct sysinfo*);
 
 #endif /* _SYS_SYSCALL_IMPL_H */

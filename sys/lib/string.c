@@ -5,13 +5,73 @@
 void *memcpy(void *dest, const void *src, size_t n) {
     unsigned char *d = dest;
     const unsigned char *s = src;
+
+    // For small sizes, simple byte copy is faster than overhead setup
+    if (n < 2 * sizeof(unsigned long)) {
+        while (n--) *d++ = *s++;
+        return dest;
+    }
+
+    // Align destination to word boundary
+    while ((uintptr_t)d & (sizeof(unsigned long) - 1)) {
+        *d++ = *s++;
+        n--;
+    }
+
+    // Copy words
+    unsigned long *wd = (unsigned long *)d;
+    const unsigned long *ws = (const unsigned long *)s;
+    size_t words = n / sizeof(unsigned long);
+
+    while (words--) {
+        *wd++ = *ws++;
+    }
+
+    // Restore pointers for remainder
+    d = (unsigned char *)wd;
+    s = (const unsigned char *)ws;
+    n %= sizeof(unsigned long);
+
+    // Copy remaining bytes
     while (n--) *d++ = *s++;
+
     return dest;
 }
 
 void *memset(void *s, int c, size_t n) {
     unsigned char *p = s;
-    while (n--) *p++ = (unsigned char)c;
+    unsigned char val = (unsigned char)c;
+
+    // Align to word boundary
+    while (n > 0 && ((uintptr_t)p & (sizeof(unsigned long) - 1))) {
+        *p++ = val;
+        n--;
+    }
+
+    // Fill words
+    if (n >= sizeof(unsigned long)) {
+        unsigned long word_val = val;
+        word_val |= (word_val << 8);
+        word_val |= (word_val << 16);
+#if UINTPTR_MAX > 0xFFFFFFFF
+        if (sizeof(unsigned long) > 4) {
+             word_val |= (word_val << 32);
+        }
+#endif
+
+        unsigned long *lp = (unsigned long *)p;
+        while (n >= sizeof(unsigned long)) {
+            *lp++ = word_val;
+            n -= sizeof(unsigned long);
+        }
+        p = (unsigned char *)lp;
+    }
+
+    // Fill remaining bytes
+    while (n > 0) {
+        *p++ = val;
+        n--;
+    }
     return s;
 }
 

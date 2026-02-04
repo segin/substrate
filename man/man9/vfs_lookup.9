@@ -1,0 +1,43 @@
+.Dd February 1, 2026
+.Dt VFS_LOOKUP 9
+.Os Substrate
+.Sh NAME
+.Nm vfs_lookup
+.Nd lookup a pathname in the virtual file system
+.Sh SYNOPSIS
+.In vfs/vfs.h
+.Ft fs_node_t *
+.Fn vfs_lookup "fs_node_t *root" "const char *path"
+.Sh DESCRIPTION
+The
+.Fn vfs_lookup
+function resolves a pathname to a VFS node
+.Pq Vt fs_node_t ,
+starting the search from the given
+.Fa root
+node.
+.Pp
+It transparently handles directory traversal, including crossing mount points and following symlinks (depending on internal implementation details).
+.Pp
+If
+.Fa path
+begins with '/', the leading slash is skipped, effectively treating it as relative to the provided
+.Fa root .
+Callers typically pass
+.Va fs_root
+as
+.Fa root
+for absolute paths.
+.Sh RETURN VALUES
+The
+.Fn vfs_lookup
+function returns a pointer to the found
+.Vt fs_node_t
+structure, or NULL if the path could not be resolved.
+.Sh SEE ALSO
+.Xr vfs 9 ,
+.Xr vfs_mkdir 9
+.Sh HISTORY
+The
+.Fn vfs_lookup
+function appeared in Substrate.

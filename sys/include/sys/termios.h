@@ -7,10 +7,34 @@ typedef uint32_t tcflag_t;
 typedef uint8_t  cc_t;
 typedef uint32_t speed_t;
 
+#define B0 0
+#define B50 50
+#define B75 75
+#define B110 110
+#define B134 134
+#define B150 150
+#define B200 200
+#define B300 300
+#define B600 600
+#define B1200 1200
+#define B1800 1800
+#define B2400 2400
+#define B4800 4800
+#define B9600 9600
+#define B19200 19200
+#define B38400 38400
+#define B57600 57600
+#define B115200 115200
+#define B230400 230400
+#define B460800 460800
+#define B921600 921600
+
 /* Native Substrate termios uses NCCS=32. Foreign personalities (Linux, FreeBSD)
  * translate to their own termios format in their personality ioctl handlers. */
 #define NCCS 32
 
+#ifndef _STRUCT_TERMIOS
+#define _STRUCT_TERMIOS
 struct termios {
     tcflag_t c_iflag; // Input flags
     tcflag_t c_oflag; // Output flags
@@ -21,6 +45,7 @@ struct termios {
     speed_t  c_ispeed; // Input speed
     speed_t  c_ospeed; // Output speed
 };
+#endif
 
 // c_cc indices
 #define VINTR    0
@@ -129,11 +154,14 @@ struct termios {
 #define TIOCINQ     FIONREAD
 #define TIOCNOTTY   0x5422
 
+#ifndef _STRUCT_WINSIZE_DEFINED
+#define _STRUCT_WINSIZE_DEFINED
 struct winsize {
     unsigned short ws_row;
     unsigned short ws_col;
     unsigned short ws_xpixel;
     unsigned short ws_ypixel;
 };
+#endif
 
 #endif

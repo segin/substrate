@@ -53,11 +53,19 @@ struct minix_inode_v2 {
     uint32_t i_zone[10];
 } __attribute__((packed));
 
+/* Directory Entry (V1) */
+struct minix_dirent_v1 {
+    uint16_t inode;
+    char name[30];
+} __attribute__((packed));
+
 /* Internal Minix FS node */
 typedef struct {  
     struct minix_superblock sb;
     fs_node_t *block_device;
     // Add other internal state if needed
+    uint32_t last_inode_alloc;
+    uint32_t last_zone_alloc;
 } minix_fs_t;
 
 void minix_init(void);

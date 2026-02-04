@@ -9,7 +9,7 @@
 static uint32_t crc32_table[256];
 static int crc32_initialized = 0;
 
-static void crc32_init_table(void) {
+void crc32_init(void) {
     if (crc32_initialized) return;
     
     for (uint32_t i = 0; i < 256; i++) {
@@ -27,8 +27,6 @@ static void crc32_init_table(void) {
 }
 
 uint32_t crc32(const void *data, size_t len) {
-    crc32_init_table();
-    
     const uint8_t *buf = data;
     uint32_t crc = 0xFFFFFFFF;
     

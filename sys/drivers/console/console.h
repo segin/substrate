@@ -8,12 +8,14 @@ struct fs_node;
 typedef struct fs_node fs_node_t;
 
 // Console Backend Interface
+struct termios;
 typedef struct console_backend {
     const char *name;
     void (*write)(const char *data, size_t len);
     void (*putchar)(char c);
     void (*clear)(void);
     struct console_backend *next;
+    void (*set_termios)(struct termios *t);
 } console_backend_t;
 
 // API
@@ -34,8 +36,13 @@ void console_clear(void);
 // For /dev/tty proxy
 fs_node_t *console_get_node(void);
 
-// Helper for formatted printing (replaces kprintf later)
+// Helper for formatted printing
 void kprint(const char *str);
+int kprintf(const char *fmt, ...);
+char *kasprintf(const char *fmt, ...);
+#ifndef HOST_TEST
+char *vasprintf(const char *fmt, __builtin_va_list ap);
+#endif
 
 struct process;
 // Attach console to a process's FDs 0, 1, 2

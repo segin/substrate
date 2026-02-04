@@ -32,6 +32,7 @@ struct tty_driver {
     int (*write_room)(struct tty *tty);
     int (*chars_in_buffer)(struct tty *tty);
     int (*ioctl)(struct tty *tty, uint32_t cmd, unsigned long arg);
+    void (*set_termios)(struct tty *tty);
 };
 
 struct tty {

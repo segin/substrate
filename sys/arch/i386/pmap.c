@@ -21,7 +21,7 @@ static uint32_t kernel_page_tables[33][1024];
 #define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
 #define PTE_FRAME       0xFFFFF000 // Frame address mask
 
-#include <include/sys/proc.h> // For current_process
+#include <sys/proc.h> // For current_process
 
 
 static struct pmap kernel_pmap_store;
@@ -293,13 +293,9 @@ pmap_t pmap_create(void) {
         }
     }
 
-    // Copy Lower Half Identity Map (0-128MB) if present
-    // Required because kernel allocator currently relies on it
-    for (int i = 0; i < 32; i++) {
-        if (kernel_pd[i] & PTE_P) {
-             pd[i] = kernel_pd[i];
-        }
-    }
+    // Lower Half Identity Map (0-128MB) is NOT copied to user pmaps.
+    // This prevents user processes from accessing physical memory 1:1,
+    // and avoids potential double-free issues in pmap_destroy for shared static tables.
     
     // 5. Set up recursive mapping at entry 1023
     pd[1023] = pd_phys | PTE_P | PTE_W;
@@ -368,7 +364,8 @@ void pmap_destroy(pmap_t pmap) {
                     if (page_phys != 0 && !(page_phys & 0xFFF)) {
                         // Don't free kernel pages (>= 0xC0000000 virtual)
                         if (page_phys < 0x40000000) {  // Reasonable upper bound for user pages
-                            // Convert physical to virtual for pmm_free_block
+                            // Use vm_phys_free_page via pmm_free_block
+                            // Our updated vm_phys_free_page handles refcounts
                             pmm_free_block((void *)(uintptr_t)(page_phys + 0xC0000000));
                         }
                     }
@@ -475,8 +472,12 @@ pmap_t pmap_fork(pmap_t src_pmap) {
             // Clear write bit in parent too (both now COW) (checkbox 142)
             src_pt[pti] = src_pte & ~PTE_W;
             
-            // Note: Page refcount increment would go here (checkbox 143)
-            // but PMM doesn't support refcounting yet
+            // Note: Page refcount increment for COW (checkbox 143)
+            uint32_t pa = src_pte & PTE_FRAME;
+            vm_page_t *page = pmm_get_page(pa);
+            if (page) {
+                __sync_fetch_and_add(&page->ref_count, 1);
+            }
             
             dst_pmap->resident_count++;
             
@@ -1402,8 +1403,6 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         
         if (!page_old) return 0; 
         
-        if (!page_old) return 0; 
-        
         // Use current process's pmap
         pmap_t pmap = NULL;
         if (current_process) {
@@ -1412,29 +1411,22 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         if (!pmap) return 0;
 
         // Perform COW copy
-        // 1. Allocate new page
-        void *phys_new = pmm_alloc_block();
-        if (!phys_new) {
+        // 1. Allocate new page (returns virtual address)
+        void *virt_new = pmm_alloc_block();
+        if (!virt_new) {
             extern void kprint(const char *);
             kprint("pmap_fault: OOM during COW\n");
             return 0;
         }
         
         // 2. Map new page temporarily to copy
-        // Use a fixed kernel virtual address scratch space (assuming single core for now)
-        // 0xFFBFF000 is used as scratch (Safe zone below recursive map 0xFFC00000)
-        // WARNING: Do NOT use 0xFFEFF000 (Conflicts with V_PT(767) -> Stack PT)
+        // OPTIMIZED: virt_new is already a virtual address (Kernel Direct Map)
+        // so we can copy directly without mapping to scratch.
         
-        #define COW_SCRATCH_ADDR 0xFFBFF000
-        
-        pmap_kenter(COW_SCRATCH_ADDR, (uint32_t)phys_new); // Access is RW in kernel by default
-        __asm__ volatile("invlpg %0" :: "m" (*(char *)COW_SCRATCH_ADDR));
+        uint32_t phys_new = (uint32_t)virt_new - 0xC0000000;
         
         // Copy from faulting address (readable) to new page (writable)
-        memcpy((void*)COW_SCRATCH_ADDR, (void*)(cr2 & 0xFFFFF000), 0x1000);
-        
-        pmap_kremove(COW_SCRATCH_ADDR);
-        __asm__ volatile("invlpg %0" :: "m" (*(char *)COW_SCRATCH_ADDR));
+        memcpy(virt_new, (void*)(cr2 & 0xFFFFF000), 0x1000);
 
         // 3. Update mappings
         // Decrement ref count of old page

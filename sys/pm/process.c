@@ -13,6 +13,7 @@ process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
 process_t *kernel_process = NULL;
 static int next_pid = 1;
+static spinlock_t pid_lock;
 extern thread_t threads[MAX_THREADS];
 
 /*
@@ -42,6 +43,7 @@ void pm_init(void) {
     
     /* Initialize the process tree lock */
     mutex_init(&proctree_lock, "proctree");
+    spinlock_init(&pid_lock, "pid");
     
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
@@ -72,13 +74,18 @@ process_t *proc_find(int pid) {
 }
 
 process_t *proc_create(struct personality *pers) {
+    spinlock_acquire(&pid_lock);
     int i;
     for (i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid == -1) break;
     }
-    if (i == MAX_PROCS) return NULL;
+    if (i == MAX_PROCS) {
+        spinlock_release(&pid_lock);
+        return NULL;
+    }
     
     processes[i].pid = next_pid++;
+    spinlock_release(&pid_lock);
     processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].pers = pers;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
@@ -90,6 +97,10 @@ process_t *proc_create(struct personality *pers) {
     processes[i].start_time = get_time();
     processes[i].uid = current_process ? current_process->uid : 0;
     processes[i].gid = current_process ? current_process->gid : 0;
+    processes[i].euid = current_process ? current_process->euid : 0;
+    processes[i].egid = current_process ? current_process->egid : 0;
+    processes[i].suid = current_process ? current_process->suid : 0;
+    processes[i].sgid = current_process ? current_process->sgid : 0;
     
     // Initialize rusage structures
     extern void rusage_init(process_t *p);
@@ -101,6 +112,10 @@ process_t *proc_create(struct personality *pers) {
 int proc_fork(process_t *parent, void *stack) {
     process_t *child_proc = proc_create(parent->pers);
     if (!child_proc) return -1;
+    
+    // Inherit process name
+    extern char *strcpy(char *, const char *);
+    strcpy(child_proc->comm, parent->comm);
     
     // Clone parent's address space with COW
     if (parent->pmap) {
@@ -118,6 +133,9 @@ int proc_fork(process_t *parent, void *stack) {
     child_proc->cwd_node = parent->cwd_node;
     
     // Copy parent resources (FDs)
+    child_proc->tty = parent->tty;
+    child_proc->bitness = parent->bitness;
+
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];
@@ -207,7 +225,7 @@ int sched_fork_process(process_t *parent, void *stack) {
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     extern void *pmm_alloc_block(void);
     extern struct personality personality_native;
-    extern int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
+    extern thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
 
     // 1. Create Process
     process_t *child = proc_create(&personality_native);
@@ -224,9 +242,9 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     void *stack_top = (uint8_t*)stack + 4096;
     
     // 4. Create Thread
-    int tid = sched_create_thread(child, entry, stack_top, arg);
+    thread_t *t = sched_create_thread(child, entry, stack_top, arg);
     
-    return tid;
+    return t ? t->tid : -1;
 }
 
 // Close all FDs for a process
@@ -305,14 +323,47 @@ void proc_exit(int code) {
     // 1. Set State
     current_process->state = SDYING;
     current_process->exit_code = code;
+    
+    // 1b. Thread Cleanup (Robust Futexes & Pending Signals)
+    extern void futex_thread_exit(thread_t *t);
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 && threads[i].proc == current_process) {
+            /* Cleanup robust futexes for this thread */
+            futex_thread_exit(&threads[i]);
+            
+            /* Clear pending signals - process is dying */
+            threads[i].sig_pending = 0;
+            
+            /* Mark as zombie to stop execution (if not current thread) */
+            if (&threads[i] != current_thread) {
+                threads[i].state = THREAD_ZOMBIE;
+            }
+        }
+    }
+
     extern void acct_process(int code);
     acct_process(code);
     
     // 2. Resource Release
     fd_close_all(current_process);
     
+    extern void close_fs(fs_node_t *node);
+    extern fs_node_t *fs_root;
+
+    if (current_process->cwd_node) {
+        close_fs(current_process->cwd_node);
+        current_process->cwd_node = NULL;
+    }
+
+    if (current_process->root_node && current_process->root_node != fs_root) {
+        close_fs(current_process->root_node);
+        current_process->root_node = NULL;
+    }
+
     if (current_process->vm_map) {
-        // VM Map release
+        extern void vm_map_destroy(struct vm_map *map);
+        // vm_map_destroy(current_process->vm_map);
+        current_process->vm_map = NULL;
     }
     
     if (current_process->pmap && current_process->pmap != pmap_kernel()) {
@@ -326,8 +377,27 @@ void proc_exit(int code) {
     
     // 3. Reparent Children
     proc_reparent_children(current_process);
+
+    // 4. Controlling Terminal Cleanup
+    if (current_process->tty) {
+        extern void tty_hangup(struct tty *tty);
+        
+        // Check if session leader
+        int is_session_leader = 0;
+        if (current_process->p_pgrp && 
+            current_process->p_pgrp->pg_session &&
+            current_process->p_pgrp->pg_session->s_leader == current_process) {
+            is_session_leader = 1;
+        }
+        
+        if (is_session_leader) {
+            tty_hangup(current_process->tty);
+        }
+        
+        current_process->tty = NULL;
+    }
     
-    // 4. Notify Parent
+    // 5. Notify Parent
     if (current_process->p_parent) {
         // Check SA_NOCLDWAIT
         int nocldwait = 0;
@@ -388,4 +458,8 @@ void proc_set_bitness(process_t *p, uint8_t bitness) {
 
 uint8_t proc_get_bitness(process_t *p) {
     return p ? p->bitness : 0;
+}
+
+int proc_get_last_pid(void) {
+    return next_pid - 1;
 }

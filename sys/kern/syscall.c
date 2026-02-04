@@ -22,8 +22,11 @@
 #include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
 
+#include <sys/smp.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/errno.h>
+#include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -35,7 +38,7 @@ extern thread_t threads[256];
 
 extern int sys_acct(const char *path);
 extern int64_t sys_time(int64_t *tloc);
-extern int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
+extern int sys_sigaction(int sig, const void *act, void *oact);
 
 // Simple file structure allocator
 #define MAX_SYSTEM_FILES 128
@@ -329,13 +332,18 @@ int sys_exit(int code) {
     return 0;
 }
 
+int sys__exit(int code) {
+    proc_exit(code);
+    return 0;
+}
+
 int sys_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
     void *stack_top = (char*)p.stack_base + p.stack_size;
-    int tid = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
-    if (tid > 0) {
-        if (p.child_tid) *p.child_tid = tid;
+    thread_t *t = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
+    if (t) {
+        if (p.child_tid) *p.child_tid = t->tid;
         return 0;
     }
     return -1;
@@ -355,6 +363,7 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
     buf->st_uid = node->uid;
     buf->st_gid = node->gid;
     buf->st_mode = node->mask;
+    buf->st_rdev = node->rdev;
     
     // Set file type bits
     if ((node->flags & 0x7) == FS_DIRECTORY)
@@ -409,21 +418,33 @@ int sys_rmdir(const char *p) { (void)p; return 0; }
 int sys_getuid(void) { return current_process->uid; }
 int sys_getgid(void) { return current_process->gid; }
 int sys_getppid(void) { return current_process->ppid; }
-int sys_geteuid(void) { return current_process->uid; } // No EUID yet
-int sys_getegid(void) { return current_process->gid; } // No EGID yet
+int sys_geteuid(void) { return current_process->euid; }
+int sys_getegid(void) { return current_process->egid; }
 int sys_setuid(int u) {
-    if (current_process->uid == 0) {
+    if (current_process->euid == 0) {
         current_process->uid = u;
+        current_process->euid = u;
+        current_process->suid = u;
         return 0;
     }
-    return -1;
+    if ((uint32_t)u == current_process->uid || (uint32_t)u == current_process->suid) {
+        current_process->euid = u;
+        return 0;
+    }
+    return -EPERM;
 }
 int sys_setgid(int g) {
-    if (current_process->uid == 0) {
+    if (current_process->euid == 0) {
         current_process->gid = g;
+        current_process->egid = g;
+        current_process->sgid = g;
         return 0;
     }
-    return -1;
+    if ((uint32_t)g == current_process->gid || (uint32_t)g == current_process->sgid) {
+        current_process->egid = g;
+        return 0;
+    }
+    return -EPERM;
 }
 int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
 
@@ -585,17 +606,21 @@ int sys_unlink(const char *path) {
     if (!last_slash) {
         // No slash - parent is CWD
         parent = current_process->cwd_node ? current_process->cwd_node : root;
+        if (strlen(path) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, path);
     } else if (last_slash == path) {
         // Only one slash at the beginning - parent is root
         parent = root;
+        if (strlen(path + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, path + 1);
     } else {
         // Split into dir and file
         size_t dirlen = last_slash - path;
-        if (dirlen >= sizeof(dir)) return -1;
+        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
         memcpy(dir, path, dirlen);
         dir[dirlen] = '\0';
+        
+        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, last_slash + 1);
         
         parent = vfs_lookup(root, dir);
@@ -627,15 +652,19 @@ int sys_link(const char *oldpath, const char *newpath) {
     fs_node_t *parent = NULL;
     if (!last_slash) {
         parent = cwd;
+        if (strlen(newpath) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, newpath);
     } else if (last_slash == newpath) {
         parent = root;
+        if (strlen(newpath + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, newpath + 1);
     } else {
         size_t dirlen = last_slash - newpath;
-        if (dirlen >= sizeof(dir)) return -1;
+        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
         memcpy(dir, newpath, dirlen);
         dir[dirlen] = '\0';
+        
+        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, last_slash + 1);
         parent = vfs_lookup(root, dir);
     }
@@ -682,6 +711,21 @@ int sys_access(const char *path, int mode) {
     if (mode == F_OK) return 0;
 
     return vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
+}
+
+int sys_mlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    // In the future, this should wire pages in the PMAP to prevent swapping.
+    (void)addr;
+    (void)len;
+    return 0;
+}
+
+int sys_munlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    (void)addr;
+    (void)len;
+    return 0;
 }
 
 int sys_sync(void) {
@@ -854,9 +898,10 @@ int sys_waitpid(int pid, int *status, int options) {
 
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
 
+#include <sys/exec.h>
+
 int sys_execve(const char *f, char *const a[], char *const e[]) {
-    extern int elf_execve(const char *path, char *const argv[], char *const envp[]);
-    return elf_execve(f, a, e);
+    return exec_dispatch(f, a, e);
 }
 
 /* sys_fork and sys_vfork are arch-specific (need registers_t) - in arch/i386/syscall.c */
@@ -867,7 +912,9 @@ int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0
 
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
     if (!target || !fstype) return -1;
-    // TODO: Check permissions (superuser)
+
+    if (current_process->euid != 0) return -EPERM;
+
     return vfs_mount(source, target, fstype, (uint32_t)flags, data);
 }
 
@@ -875,7 +922,7 @@ extern int vfs_unmount(const char *path);
 
 int sys_umount(const char *target) { 
     if (!target) return -1;
-    // TODO: Check permissions
+    if (current_process->euid != 0) return -EPERM;
     return vfs_unmount(target); 
 }
 
@@ -1014,11 +1061,9 @@ int sys_proc_count(void) {
 }
 
 // sys_cpu_count - Get number of CPUs
-// Returns: online CPU count (currently 1 for uniprocessor kernel)
+// Returns: online CPU count
 int sys_cpu_count(void) {
-    // TODO: When SMP is implemented, return actual online CPU count
-    // For now, we're a uniprocessor system
-    return 1;
+    return smp_get_cpu_count();
 }
 
 // sys_hostname - Get system hostname
@@ -1038,6 +1083,21 @@ int sys_hostname(char *buf, size_t len) {
     } else {
         memcpy(buf, kernel_hostname, hlen + 1);
     }
+    
+    return 0;
+}
+
+int sys_reboot(int cmd) {
+    (void)cmd;
+    // For now, always reboot. 
+    // In a real system we'd check cmd for RB_HALT, RB_POWEROFF etc.
+    // Keyboard controller reset
+    while (inb(0x64) & 0x02);
+    outb(0x64, 0xFE);
+    
+    // Fallback if that fails: Triple fault
+    // (by loading 0-length IDT and causing exception)
+    __asm__ volatile("lidt %0; int3"::"m"((uint16_t[3]){0,0,0}));
     
     return 0;
 }

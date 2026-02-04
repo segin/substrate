@@ -35,6 +35,7 @@ typedef int (*link_type_t)(struct fs_node*, struct fs_node*, const char*);
 typedef int (*unlink_type_t)(struct fs_node*, const char *name);
 typedef int (*mkdir_type_t)(struct fs_node*, const char *name, uint16_t permission);
 typedef int (*mknod_type_t)(struct fs_node*, const char *name, uint16_t mode, uint32_t dev);
+typedef int (*unmount_type_t)(struct fs_node*);
 
 typedef struct fs_node {
     char name[128];
@@ -44,7 +45,8 @@ typedef struct fs_node {
     uint32_t flags;       // Includes the node type.
     uint64_t inode;       // This is device-specific - provides a way for a filesystem to identify files.
     off_t    length;      // Size of the file, in bytes (64-bit).
-    uint32_t impl;        // An implementation-defined number.
+    uint32_t rdev;        // Device ID (if character or block device).
+    uintptr_t impl;       // An implementation-defined number.
     
     // Timestamps (64-bit for Year 2038 compliance)
     int64_t atime;        // Last access time
@@ -66,6 +68,7 @@ typedef struct fs_node {
     unlink_type_t unlink;
     mkdir_type_t mkdir;
     mknod_type_t mknod;
+    unmount_type_t unmount;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
 } fs_node_t;
 

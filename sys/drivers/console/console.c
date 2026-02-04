@@ -5,6 +5,8 @@
 #include <vfs/vfs.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 // Globals
 static console_backend_t *backends = NULL;
@@ -13,6 +15,7 @@ static struct tty *console_tty = NULL;
 // TTY Driver Methods Forward Declarations
 static int console_tty_write(struct tty *tty, const unsigned char *buf, int count);
 static int console_tty_put_char(struct tty *tty, unsigned char c);
+static void console_tty_set_termios(struct tty *tty);
 
 // Driver Structure
 static struct tty_driver console_driver = {
@@ -21,7 +24,8 @@ static struct tty_driver console_driver = {
     .major = 5,
     .minor_start = 1,
     .write = console_tty_write,
-    .put_char = console_tty_put_char
+    .put_char = console_tty_put_char,
+    .set_termios = console_tty_set_termios
 };
 
 void console_init(void) {
@@ -72,6 +76,17 @@ static int console_tty_put_char(struct tty *tty, unsigned char c) {
     (void)tty;
     backend_write((const char*)&c, 1);
     return 1;
+}
+
+static void console_tty_set_termios(struct tty *tty) {
+    if (!tty) return;
+    console_backend_t *b = backends;
+    while (b) {
+        if (b->set_termios) {
+            b->set_termios(&tty->termios);
+        }
+        b = b->next;
+    }
 }
 
 // Public wrapper for kernel printing
@@ -147,6 +162,17 @@ void kprint(const char *str) {
     const char *s = str;
     while (*s++) len++;
     backend_write(str, len);
+}
+
+int kprintf(const char *fmt, ...) {
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    int ret = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    kprint(buf);
+    return ret;
 }
 
 void console_attach_std_fds(struct process *proc) {

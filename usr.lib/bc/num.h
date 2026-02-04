@@ -34,7 +34,6 @@ bc_num *bc_from_string(const char *s);
 void bc_print(bc_num *n); // Prints to stdout
 
 // Utils
-int bc_is_zero(bc_num *n);
 void bc_canonicalize(bc_num *n); 
 void bc_expsize(bc_num *n, int needed);
 
@@ -47,8 +46,17 @@ bc_num *bc_mod(bc_num *a, bc_num *b);
 bc_num *bc_pow(bc_num *a, bc_num *b);
 
 // Comparison
+// Comparison
 // Returns -1 (a<b), 0 (a=b), 1 (a>b)
 int bc_compare(bc_num *a, bc_num *b);
-int bc_is_neg(bc_num *n);
+int bc_abs_cmp(bc_num *a, bc_num *b);
+
+static inline int bc_is_neg(bc_num *n) {
+    return n->sign < 0;
+}
+
+static inline int bc_is_zero(bc_num *n) {
+    return n->len == 0 || n->sign == 0;
+}
 
 #endif

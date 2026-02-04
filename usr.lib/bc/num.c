@@ -61,6 +61,10 @@ bc_num *bc_from_long(long long v) {
 }
 
 void bc_print(bc_num *n) {
+    if (!n) {
+        printf("(null)");
+        return;
+    }
     if (n->sign == 0 || n->len == 0) {
         printf("0");
         return;
@@ -93,18 +97,16 @@ bc_num *bc_dup(bc_num *src) {
     return n;
 }
 
-int bc_is_neg(bc_num *n) {
-    return n->sign < 0;
-}
-
-int bc_is_zero(bc_num *n) {
-    // Canonical zero has len=0 or sign=0
-    return n->len == 0 || n->sign == 0;
-}
-
-void bc_canonicalize(bc_num *n) {
-    while (n->len > 0 && n->digits[n->len-1] == 0) n->len--;
-    if (n->len == 0) n->sign = 0;
+// Helper: compare absolute values
+// Returns 1 if |a| > |b|, -1 if |a| < |b|, 0 if equal
+int bc_abs_cmp(bc_num *a, bc_num *b) {
+    if (a->len > b->len) return 1;
+    if (a->len < b->len) return -1;
+    for (int i = a->len - 1; i >= 0; i--) {
+        if (a->digits[i] > b->digits[i]) return 1;
+        if (a->digits[i] < b->digits[i]) return -1;
+    }
+    return 0;
 }
 
 

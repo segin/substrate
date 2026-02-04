@@ -1,0 +1,68 @@
+.Dd February 1, 2026
+.Dt VFS 9
+.Os Substrate
+.Sh NAME
+.Nm vfs_mount ,
+.Nm vfs_lookup ,
+.Nm vfs_open ,
+.Nm vfs_register_filesystem
+.Nd virtual file system interface
+.Sh SYNOPSIS
+.In vfs/vfs.h
+.Ft int
+.Fn vfs_mount "const char *device" "const char *path" "const char *type" "uint32_t flags" "void *data"
+.Ft "fs_node_t *"
+.Fn vfs_lookup "fs_node_t *root" "const char *path"
+.Ft "void"
+.Fn vfs_register_filesystem "filesystem_t *fs"
+.Ft "size_t"
+.Fn read_fs "fs_node_t *node" "off_t offset" "size_t size" "uint8_t *buffer"
+.Ft "size_t"
+.Fn write_fs "fs_node_t *node" "off_t offset" "size_t size" "const uint8_t *buffer"
+.Sh DESCRIPTION
+The Substrate Virtual File System (VFS) provides a unified interface for accessing different filesystems.
+.SS Mounting
+.Fn vfs_mount
+mounts a filesystem of
+.Fa type
+on the directory specified by
+.Fa path .
+The
+.Fa device
+argument specifies the source device (e.g. "/dev/hda"), and
+.Fa flags
+and
+.Fa data
+provide filesystem-specific options.
+.SS Lookup
+.Fn vfs_lookup
+resolves a pathname to a
+.Vt fs_node_t
+structure, starting from the given
+.Fa root .
+This handles directory traversal and mount points transparently.
+.SS Registration
+.Fn vfs_register_filesystem
+registers a new filesystem driver with the kernel. The
+.Vt filesystem_t
+structure must provide a
+.Fn mount
+callback.
+.SS I/O Operations
+.Fn read_fs
+and
+.Fn write_fs
+are wrappers around the node-specific read/write method pointers. They perform validity checks and invoke the underlying driver.
+.Sh RETURN VALUES
+.Fn vfs_mount
+returns 0 on success, or -1 on error.
+.Fn vfs_lookup
+returns a pointer to the found node, or NULL if not found.
+.Sh SEE ALSO
+.Xr pmap 9 ,
+.Xr vfs_lookup 9 ,
+.Xr vfs_mkdir 9 ,
+.Xr vfs_mount 9 ,
+.Xr vfs_register_filesystem 9
+.Sh HISTORY
+The VFS subsystem first appeared in Substrate.
