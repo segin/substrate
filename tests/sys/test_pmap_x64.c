@@ -30,6 +30,26 @@ void test_pmap_x64_lifecycle(void) {
     kprint("  PASS\n");
 }
 
+void test_pmap_x64_refcount(void) {
+    kprint("Test: x64 pmap refcount\n");
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != NULL, "pmap_create");
+    TEST_ASSERT(pmap->ref_count == 1, "ref_count init 1");
+
+    // Manually increment
+    __sync_fetch_and_add(&pmap->ref_count, 1);
+    TEST_ASSERT(pmap->ref_count == 2, "ref_count 2");
+
+    // Destroy should decrement but not destroy
+    pmap_destroy(pmap);
+    TEST_ASSERT(pmap->ref_count == 1, "ref_count back to 1");
+
+    // Destroy should destroy
+    pmap_destroy(pmap);
+
+    kprint("  PASS\n");
+}
+
 void test_pmap_x64_enter_extract(void) {
     kprint("Test: x64 pmap_enter/extract\n");
     pmap_t pmap = pmap_kernel(); // Use kernel pmap as it is active
@@ -58,5 +78,6 @@ void run_pmap_x64_tests(void) {
     kprint("\n=== PMAP x86_64 Unit Tests ===\n");
     test_pmap_x64_lifecycle();
     test_pmap_x64_enter_extract();
+    test_pmap_x64_refcount();
     kprint("\nDone.\n");
 }
