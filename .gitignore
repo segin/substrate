@@ -75,6 +75,7 @@ sys/symbols_start.txt
 
 # Distribution root filesystem
 dist/
+host_dist/
 klog
 klog.notrace
 qemu.out

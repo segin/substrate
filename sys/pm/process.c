@@ -109,6 +109,10 @@ int proc_fork(process_t *parent, void *stack) {
     process_t *child_proc = proc_create(parent->pers);
     if (!child_proc) return -1;
     
+    // Inherit process name
+    extern char *strcpy(char *, const char *);
+    strcpy(child_proc->comm, parent->comm);
+    
     // Clone parent's address space with COW
     if (parent->pmap) {
         child_proc->pmap = pmap_fork(parent->pmap);
@@ -315,14 +319,47 @@ void proc_exit(int code) {
     // 1. Set State
     current_process->state = SDYING;
     current_process->exit_code = code;
+    
+    // 1b. Thread Cleanup (Robust Futexes & Pending Signals)
+    extern void futex_thread_exit(thread_t *t);
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 && threads[i].proc == current_process) {
+            /* Cleanup robust futexes for this thread */
+            futex_thread_exit(&threads[i]);
+            
+            /* Clear pending signals - process is dying */
+            threads[i].sig_pending = 0;
+            
+            /* Mark as zombie to stop execution (if not current thread) */
+            if (&threads[i] != current_thread) {
+                threads[i].state = THREAD_ZOMBIE;
+            }
+        }
+    }
+
     extern void acct_process(int code);
     acct_process(code);
     
     // 2. Resource Release
     fd_close_all(current_process);
     
+    extern void close_fs(fs_node_t *node);
+    extern fs_node_t *fs_root;
+
+    if (current_process->cwd_node) {
+        close_fs(current_process->cwd_node);
+        current_process->cwd_node = NULL;
+    }
+
+    if (current_process->root_node && current_process->root_node != fs_root) {
+        close_fs(current_process->root_node);
+        current_process->root_node = NULL;
+    }
+
     if (current_process->vm_map) {
-        // VM Map release
+        extern void vm_map_destroy(struct vm_map *map);
+        // vm_map_destroy(current_process->vm_map);
+        current_process->vm_map = NULL;
     }
     
     if (current_process->pmap && current_process->pmap != pmap_kernel()) {
@@ -336,8 +373,27 @@ void proc_exit(int code) {
     
     // 3. Reparent Children
     proc_reparent_children(current_process);
+
+    // 4. Controlling Terminal Cleanup
+    if (current_process->tty) {
+        extern void tty_hangup(struct tty *tty);
+        
+        // Check if session leader
+        int is_session_leader = 0;
+        if (current_process->p_pgrp && 
+            current_process->p_pgrp->pg_session &&
+            current_process->p_pgrp->pg_session->s_leader == current_process) {
+            is_session_leader = 1;
+        }
+        
+        if (is_session_leader) {
+            tty_hangup(current_process->tty);
+        }
+        
+        current_process->tty = NULL;
+    }
     
-    // 4. Notify Parent
+    // 5. Notify Parent
     if (current_process->p_parent) {
         // Check SA_NOCLDWAIT
         int nocldwait = 0;

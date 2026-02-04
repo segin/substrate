@@ -1,0 +1,46 @@
+.Dd February 1, 2026
+.Dt KFREE 9
+.Os Substrate
+.Sh NAME
+.Nm kfree
+.Nd free kernel memory allocated with kmalloc
+.Sh SYNOPSIS
+.In vm/vm_kmem.h
+.Ft void
+.Fn kfree "void *ptr" "size_t size"
+.Sh DESCRIPTION
+The
+.Fn kfree
+function frees a block of memory previously allocated by
+.Fn kmalloc
+or
+.Fn kzalloc .
+.Pp
+The arguments are:
+.Bl -tag -width size
+.It Fa ptr
+The pointer to the memory block to be freed.
+If
+.Fa ptr
+is
+.Dv NULL ,
+no action is performed.
+.It Fa size
+The size of the memory block being freed, in bytes.
+This must match the size passed to the original allocation call.
+.El
+.Sh RETURN VALUES
+The
+.Fn kfree
+function returns no value.
+.Sh SEE ALSO
+.Xr kmalloc 9 ,
+.Xr kzalloc 9 ,
+.Xr kmem_init 9
+.Sh HISTORY
+The
+.Fn kfree
+function first appeared in Substrate.
+.Sh AUTHORS
+.An -nosplit
+The Substrate Project

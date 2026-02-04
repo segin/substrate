@@ -293,13 +293,9 @@ pmap_t pmap_create(void) {
         }
     }
 
-    // Copy Lower Half Identity Map (0-128MB) if present
-    // Required because kernel allocator currently relies on it
-    for (int i = 0; i < 32; i++) {
-        if (kernel_pd[i] & PTE_P) {
-             pd[i] = kernel_pd[i];
-        }
-    }
+    // Lower Half Identity Map (0-128MB) is NOT copied to user pmaps.
+    // This prevents user processes from accessing physical memory 1:1,
+    // and avoids potential double-free issues in pmap_destroy for shared static tables.
     
     // 5. Set up recursive mapping at entry 1023
     pd[1023] = pd_phys | PTE_P | PTE_W;
@@ -1407,8 +1403,6 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         
         if (!page_old) return 0; 
         
-        if (!page_old) return 0; 
-        
         // Use current process's pmap
         pmap_t pmap = NULL;
         if (current_process) {
@@ -1417,9 +1411,9 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         if (!pmap) return 0;
 
         // Perform COW copy
-        // 1. Allocate new page
-        void *phys_new = pmm_alloc_block();
-        if (!phys_new) {
+        // 1. Allocate new page (returns virtual address)
+        void *virt_new = pmm_alloc_block();
+        if (!virt_new) {
             extern void kprint(const char *);
             kprint("pmap_fault: OOM during COW\n");
             return 0;
@@ -1432,7 +1426,8 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         
         #define COW_SCRATCH_ADDR 0xFFBFF000
         
-        pmap_kenter(COW_SCRATCH_ADDR, (uint32_t)phys_new); // Access is RW in kernel by default
+        uint32_t phys_new = (uint32_t)virt_new - 0xC0000000;
+        pmap_kenter(COW_SCRATCH_ADDR, phys_new); // Access is RW in kernel by default
         __asm__ volatile("invlpg %0" :: "m" (*(char *)COW_SCRATCH_ADDR));
         
         // Copy from faulting address (readable) to new page (writable)

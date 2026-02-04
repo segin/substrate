@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
+#include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -331,6 +332,11 @@ int sys_exit(int code) {
     return 0;
 }
 
+int sys__exit(int code) {
+    proc_exit(code);
+    return 0;
+}
+
 int sys_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
@@ -357,6 +363,7 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
     buf->st_uid = node->uid;
     buf->st_gid = node->gid;
     buf->st_mode = node->mask;
+    buf->st_rdev = node->rdev;
     
     // Set file type bits
     if ((node->flags & 0x7) == FS_DIRECTORY)
@@ -587,17 +594,21 @@ int sys_unlink(const char *path) {
     if (!last_slash) {
         // No slash - parent is CWD
         parent = current_process->cwd_node ? current_process->cwd_node : root;
+        if (strlen(path) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, path);
     } else if (last_slash == path) {
         // Only one slash at the beginning - parent is root
         parent = root;
+        if (strlen(path + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, path + 1);
     } else {
         // Split into dir and file
         size_t dirlen = last_slash - path;
-        if (dirlen >= sizeof(dir)) return -1;
+        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
         memcpy(dir, path, dirlen);
         dir[dirlen] = '\0';
+        
+        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, last_slash + 1);
         
         parent = vfs_lookup(root, dir);
@@ -629,15 +640,19 @@ int sys_link(const char *oldpath, const char *newpath) {
     fs_node_t *parent = NULL;
     if (!last_slash) {
         parent = cwd;
+        if (strlen(newpath) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, newpath);
     } else if (last_slash == newpath) {
         parent = root;
+        if (strlen(newpath + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, newpath + 1);
     } else {
         size_t dirlen = last_slash - newpath;
-        if (dirlen >= sizeof(dir)) return -1;
+        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
         memcpy(dir, newpath, dirlen);
         dir[dirlen] = '\0';
+        
+        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
         strcpy(file, last_slash + 1);
         parent = vfs_lookup(root, dir);
     }
@@ -684,6 +699,21 @@ int sys_access(const char *path, int mode) {
     if (mode == F_OK) return 0;
 
     return vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
+}
+
+int sys_mlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    // In the future, this should wire pages in the PMAP to prevent swapping.
+    (void)addr;
+    (void)len;
+    return 0;
+}
+
+int sys_munlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    (void)addr;
+    (void)len;
+    return 0;
 }
 
 int sys_sync(void) {
@@ -856,9 +886,10 @@ int sys_waitpid(int pid, int *status, int options) {
 
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
 
+#include <sys/exec.h>
+
 int sys_execve(const char *f, char *const a[], char *const e[]) {
-    extern int elf_execve(const char *path, char *const argv[], char *const envp[]);
-    return elf_execve(f, a, e);
+    return exec_dispatch(f, a, e);
 }
 
 /* sys_fork and sys_vfork are arch-specific (need registers_t) - in arch/i386/syscall.c */
@@ -1040,6 +1071,21 @@ int sys_hostname(char *buf, size_t len) {
     } else {
         memcpy(buf, kernel_hostname, hlen + 1);
     }
+    
+    return 0;
+}
+
+int sys_reboot(int cmd) {
+    (void)cmd;
+    // For now, always reboot. 
+    // In a real system we'd check cmd for RB_HALT, RB_POWEROFF etc.
+    // Keyboard controller reset
+    while (inb(0x64) & 0x02);
+    outb(0x64, 0xFE);
+    
+    // Fallback if that fails: Triple fault
+    // (by loading 0-length IDT and causing exception)
+    __asm__ volatile("lidt %0; int3"::"m"((uint16_t[3]){0,0,0}));
     
     return 0;
 }

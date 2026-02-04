@@ -29,6 +29,10 @@ pmap \- machine-dependent virtual memory interface
 .br
 .BI "int pmap_copy(pmap_t " dst ", pmap_t " src ", uint32_t " sva ", uint32_t " eva ", int " cow ");"
 .br
+.BI "void pmap_kenter(uint32_t " va ", uint32_t " pa ");"
+.br
+.BI "void pmap_kremove(uint32_t " va ");"
+.br
 .BI "void pmap_dump(pmap_t " pmap ");"
 .br
 .BI "int pmap_check(pmap_t " pmap ");"
@@ -69,6 +73,20 @@ unmaps the virtual address
 .PP
 .B pmap_protect
 changes the protection bits for a range of virtual addresses.
+.PP
+.B pmap_protect
+changes the protection bits for a range of virtual addresses.
+.PP
+.B pmap_kenter
+enters a mapping into the kernel address space. This creates a direct mapping from virtual address
+.I va
+to physical address
+.IR pa .
+It is intended for mapping kernel data structures and devices.
+.PP
+.B pmap_kremove
+removes a mapping from the kernel address space at
+.IR va .
 .PP
 .B pmap_copy
 copies mappings from source to destination pmap. If

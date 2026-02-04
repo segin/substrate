@@ -1,0 +1,39 @@
+.Dd February 1, 2026
+.Dt SPINLOCK 9
+.Os Substrate
+.Sh NAME
+.Nm spinlock_init ,
+.Nm spinlock_acquire ,
+.Nm spinlock_release ,
+.Nm spinlock_try_acquire
+.Nd busy-wait synchronization primitive
+.Sh SYNOPSIS
+.In sys/lock.h
+.Ft void
+.Fn spinlock_init "spinlock_t *sl" "const char *name"
+.Ft void
+.Fn spinlock_acquire "spinlock_t *sl"
+.Ft void
+.Fn spinlock_release "spinlock_t *sl"
+.Ft int
+.Fn spinlock_try_acquire "spinlock_t *sl"
+.Sh DESCRIPTION
+Spinlocks provide mutual exclusion for short critical sections, typically in interrupt handlers or scheduler code where sleeping is not permitted.
+.Pp
+.Fn spinlock_acquire
+busy-waits until the lock is available. It disables local interrupts while holding the lock to prevent deadlocks with interrupt handlers on the same CPU.
+.Pp
+.Fn spinlock_release
+releases the lock and restores the previous interrupt state.
+.Pp
+.Fn spinlock_try_acquire
+attempts to acquire the lock without spinning.
+.Sh RETURN VALUES
+.Fn spinlock_try_acquire
+returns 1 if the lock was acquired, 0 otherwise.
+.Sh SEE ALSO
+.Xr mutex 9
+.Sh HISTORY
+The
+.Fn spinlock
+primitive first appeared in Substrate.

@@ -1,0 +1,45 @@
+.Dd February 1, 2026
+.Dt KMALLOC 9
+.Os Substrate
+.Sh NAME
+.Nm kmalloc ,
+.Nm kzalloc
+.Nd allocate kernel memory
+.Sh SYNOPSIS
+.In vm/vm_kmem.h
+.Ft void *
+.Fn kmalloc "size_t size"
+.Ft void *
+.Fn kzalloc "size_t size"
+.Sh DESCRIPTION
+The
+.Fn kmalloc
+function allocates
+.Fa size
+bytes of kernel memory.
+The allocated memory is uninitialized.
+.Pp
+The
+.Fn kzalloc
+function allocates
+.Fa size
+bytes of kernel memory and initializes it to zero.
+.Pp
+The allocated memory must be freed with
+.Fn kfree 9
+when it is no longer needed.
+.Sh RETURN VALUES
+The
+.Fn kmalloc
+and
+.Fn kzalloc
+functions return a pointer to the allocated memory, or
+.Dv NULL
+if the allocation failed.
+.Sh SEE ALSO
+.Xr kfree 9 ,
+.Xr kmem_init 9
+.Sh HISTORY
+The
+.Fn kmalloc
+function first appeared in Substrate.
