@@ -21,11 +21,9 @@
  * We iterate processes directly from pm.h
  */
 
-int sys_sysinfo(struct sysinfo *info) {
+// Internal implementation (no pointer validation)
+int do_sysinfo(struct sysinfo *info) {
     if (!info) return -14; // EFAULT
-
-    // Check user pointer validity (basic)
-    if ((uintptr_t)info >= 0xC0000000) return -14;
 
     struct sysinfo kinfo;
     memset(&kinfo, 0, sizeof(kinfo));
@@ -51,10 +49,13 @@ int sys_sysinfo(struct sysinfo *info) {
     }
     kinfo.procs = procs;
 
-    // Loads (placeholder)
-    kinfo.loads[0] = 0;
-    kinfo.loads[1] = 0;
-    kinfo.loads[2] = 0;
+    // Loads (scaled by 65536, SI_LOAD_SCALE)
+    // Currently using instantaneous load as proxy
+    extern uint32_t sched_get_system_load(void);
+    unsigned long load = sched_get_system_load() * 65536;
+    kinfo.loads[0] = load;
+    kinfo.loads[1] = load;
+    kinfo.loads[2] = load;
 
     // Copyout
     // Using memcpy as placeholder for copyout/copy_to_user
@@ -62,4 +63,11 @@ int sys_sysinfo(struct sysinfo *info) {
     memcpy(info, &kinfo, sizeof(kinfo));
 
     return 0;
+}
+
+int sys_sysinfo(struct sysinfo *info) {
+    // Check user pointer validity (basic)
+    if ((uintptr_t)info >= 0xC0000000) return -14;
+
+    return do_sysinfo(info);
 }

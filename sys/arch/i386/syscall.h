@@ -31,13 +31,17 @@
 #define SYS_UMOUNT  22
 #define SYS_SETUID  23
 #define SYS_GETUID  24
+#define SYS_STIME   25
+#define SYS_PTRACE  26
 #define SYS_ACCESS  33
 #define SYS_SYNC    36
 #define SYS_KILL    37
+#define SYS_RENAME  38
 #define SYS_MKDIR   39
 #define SYS_RMDIR   40
 #define SYS_DUP     41
 #define SYS_PIPE    42
+#define SYS_TIMES   43
 #define SYS_BRK     45
 #define SYS_SETGID  46
 #define SYS_GETGID  47
@@ -49,6 +53,7 @@
 #define SYS_CHROOT  61
 #define SYS_DUP2    63
 #define SYS_READLINK 85
+#define SYS_REBOOT   88
 #define SYS_MMAP    90
 #define SYS_MUNMAP  91
 #define SYS_TRUNCATE 92
@@ -82,6 +87,14 @@
 #define SYS_CPU_COUNT 245
 #define SYS_HOSTNAME 246
 #define SYS_RT_SIGRETURN 247
+#define SYS_CLOCK_GETTIME 265
+#define SYS_mlock       150
+#define SYS_munlock     151
+#define SYS_SETSID      147
+#define SYS_GETSID      310
+#define SYS_SETPGID     181
+#define SYS_GETPGID     182
+#define SYS_GETRUSAGE   117
 
 void syscall_init(void);
 

@@ -1,0 +1,61 @@
+.TH SYSCTL 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sysctl \- read or write system information
+.SH SYNOPSIS
+.B #include <sys/sysctl.h>
+.PP
+.BI "int sysctl(int *" name ", unsigned int " namelen ", void *" oldp ,
+.BI "           size_t *" oldlenp ", void *" newp ", size_t " newlen ");"
+.SH DESCRIPTION
+The
+.BR sysctl ()
+call is used to examine and modify kernel parameters.  The
+parameters are organized as a tree of objects, and are designated by
+Management Information Base (MIB) style names.
+.PP
+The
+.I name
+is an array of integers of length
+.I namelen
+which specifies the object.
+.PP
+The
+.BR sysctl ()
+function copies information from the object to the buffer specified by
+.I oldp
+if it is not NULL.  The amount of data copied is stored in the
+integer pointed to by
+.IR oldlenp .
+.PP
+If
+.I newp
+is not NULL, it should point to a buffer containing new information
+to be written into the object.  The
+.I newlen
+is the size of the new data.
+.SH RETURN VALUE
+On success, 0 is returned.  On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EFAULT
+An address specified in the call was invalid.
+.TP
+.B EINVAL
+The
+.I namelen
+was invalid.
+.TP
+.B ENOENT
+The specified name was not found.
+.TP
+.B EPERM
+An attempt was made to write into a read-only object.
+.SH CONFORMING TO
+This call appeared in 4.4BSD. It is specific to BSD-like systems
+and Substrate.
+.SH SEE ALSO
+.BR sysctl (8)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

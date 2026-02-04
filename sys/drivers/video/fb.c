@@ -47,36 +47,41 @@ static uint8_t rgb_to_index(uint32_t color) {
     return i;
 }
 
-static void linear_fb_putpixel(int x, int y, uint32_t color) {
+static uint32_t fb_get_raw_pixel(uint32_t color, uint8_t bpp) {
+    if (bpp >= 15) {
+        switch (bpp) {
+            case 32: return color;
+            case 24: return color & 0xFFFFFF;
+            case 16: return ((color >> 8) & 0xF800) | ((color >> 5) & 0x07E0) | ((color >> 3) & 0x001F);
+            case 15: return ((color >> 9) & 0x7C00) | ((color >> 6) & 0x03E0) | ((color >> 3) & 0x001F);
+        }
+    } else if (bpp == 8) {
+        return rgb_to_index(color);
+    }
+    return 0;
+}
+
+void linear_fb_putpixel(int x, int y, uint32_t color) {
     /* Use virt_height if set, otherwise height */
     int max_y = fb.virt_height ? (int)fb.virt_height : (int)fb.height;
     if (x < 0 || x >= (int)fb.width || y < 0 || y >= max_y) return;
 
     if (fb.bpp >= 15) {
         uint8_t *pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x * (fb.bpp / 8));
+        uint32_t val = fb_get_raw_pixel(color, fb.bpp);
         switch (fb.bpp) {
             case 32:
-                *(uint32_t *)pixel = color;
+                *(uint32_t *)pixel = val;
                 break;
             case 24:
-                pixel[0] = color & 0xFF;
-                pixel[1] = (color >> 8) & 0xFF;
-                pixel[2] = (color >> 16) & 0xFF;
+                pixel[0] = val & 0xFF;
+                pixel[1] = (val >> 8) & 0xFF;
+                pixel[2] = (val >> 16) & 0xFF;
                 break;
-            case 16: {
-                uint16_t c = ((color >> 8) & 0xF800) |
-                             ((color >> 5) & 0x07E0) |
-                             ((color >> 3) & 0x001F);
-                *(uint16_t *)pixel = c;
+            case 16:
+            case 15:
+                *(uint16_t *)pixel = (uint16_t)val;
                 break;
-            }
-            case 15: {
-                uint16_t c = ((color >> 9) & 0x7C00) |
-                             ((color >> 6) & 0x03E0) |
-                             ((color >> 3) & 0x001F);
-                *(uint16_t *)pixel = c;
-                break;
-            }
         }
     } else {
         /* Packed pixel formats (1, 2, 4, 8 bpp) with Palette Adaptation */
@@ -84,7 +89,7 @@ static void linear_fb_putpixel(int x, int y, uint32_t color) {
         
         if (fb.bpp == 8) {
              uint8_t *pixel = (uint8_t *)((uintptr_t)fb.addr + y * fb.pitch + x);
-             *pixel = index;
+             *pixel = (uint8_t)fb_get_raw_pixel(color, 8);
              return;
         }
         
@@ -142,9 +147,113 @@ void fb_putpixel(int x, int y, uint32_t color) {
 }
 
 void fb_clear(uint32_t color) {
-    for (uint32_t y = 0; y < fb.height; y++) {
-        for (uint32_t x = 0; x < fb.width; x++) {
-            fb_putpixel(x, y, color);
+    /* If the driver is not using the standard linear layout, use the slow path */
+    if (fb.putpixel != linear_fb_putpixel) {
+        for (uint32_t y = 0; y < fb.height; y++) {
+            for (uint32_t x = 0; x < fb.width; x++) {
+                fb_putpixel(x, y, color);
+            }
+        }
+        return;
+    }
+
+    uintptr_t addr = (uintptr_t)fb.addr;
+    uint32_t pitch = fb.pitch;
+    uint32_t height = fb.height;
+    uint32_t width = fb.width;
+    uint8_t bpp = fb.bpp;
+
+    /* Pre-calculate pixel value */
+    uint32_t pixel_val = 0;
+
+    if (bpp >= 8) {
+        pixel_val = fb_get_raw_pixel(color, bpp);
+    } else {
+        /* Packed pixel formats */
+        uint8_t index = rgb_to_index(color);
+
+        if (bpp == 4) {
+            pixel_val = (index & 0xF) | ((index & 0xF) << 4);
+        } else if (bpp == 2) {
+             /* Luma mapping for 2bpp logic from putpixel is:
+                luma = (r*77 + g*150 + b*29) >> 8; val = luma >> 6;
+             */
+             uint8_t r = (color >> 16) & 0xFF;
+             uint8_t g = (color >> 8) & 0xFF;
+             uint8_t b = color & 0xFF;
+             uint8_t luma = (r * 77 + g * 150 + b * 29) >> 8;
+             uint8_t val = (luma >> 6) & 0x3;
+             pixel_val = val | (val << 2) | (val << 4) | (val << 6);
+        } else if (bpp == 1) {
+             uint8_t r = (color >> 16) & 0xFF;
+             uint8_t g = (color >> 8) & 0xFF;
+             uint8_t b = color & 0xFF;
+             uint8_t luma = (r * 77 + g * 150 + b * 29) >> 8;
+             uint8_t val = (luma > 127) ? 1 : 0;
+             pixel_val = val ? 0xFF : 0x00;
+        }
+    }
+
+    /* Optimization: If bytes are identical, use memset */
+    int use_memset = 0;
+    if (bpp == 32) {
+        uint8_t b0 = pixel_val & 0xFF;
+        uint8_t b1 = (pixel_val >> 8) & 0xFF;
+        uint8_t b2 = (pixel_val >> 16) & 0xFF;
+        uint8_t b3 = (pixel_val >> 24) & 0xFF;
+        if (b0 == b1 && b1 == b2 && b2 == b3) {
+            use_memset = 1;
+            pixel_val = b0; // For memset argument
+        }
+    } else if (bpp == 16 || bpp == 15) {
+        uint8_t b0 = pixel_val & 0xFF;
+        uint8_t b1 = (pixel_val >> 8) & 0xFF;
+        if (b0 == b1) {
+            use_memset = 1;
+            pixel_val = b0;
+        }
+    } else if (bpp <= 8) {
+        use_memset = 1;
+    }
+
+    if (use_memset) {
+        /* Calculate bytes per line */
+        /* For <8bpp, rounding up to byte */
+        uint32_t line_bytes = (width * bpp + 7) / 8;
+
+        /* If pitch == line_bytes, we can memset the whole block */
+        if (pitch == line_bytes) {
+            memset((void*)addr, (uint8_t)pixel_val, pitch * height);
+        } else {
+            for (uint32_t y = 0; y < height; y++) {
+                memset((void*)(addr + y * pitch), (uint8_t)pixel_val, line_bytes);
+            }
+        }
+    } else {
+        /* Multi-byte fill loop */
+        for (uint32_t y = 0; y < height; y++) {
+            uint8_t *row = (uint8_t *)(addr + y * pitch);
+            if (bpp == 32) {
+                uint32_t *p = (uint32_t *)row;
+                for (uint32_t x = 0; x < width; x++) {
+                    p[x] = pixel_val;
+                }
+            } else if (bpp == 24) {
+                 uint8_t r = pixel_val & 0xFF;
+                 uint8_t g = (pixel_val >> 8) & 0xFF;
+                 uint8_t b = (pixel_val >> 16) & 0xFF;
+                 for (uint32_t x = 0; x < width; x++) {
+                     row[x*3] = r;
+                     row[x*3+1] = g;
+                     row[x*3+2] = b;
+                 }
+            } else if (bpp == 16 || bpp == 15) {
+                uint16_t *p = (uint16_t *)row;
+                uint16_t val16 = (uint16_t)pixel_val;
+                for (uint32_t x = 0; x < width; x++) {
+                    p[x] = val16;
+                }
+            }
         }
     }
 }
