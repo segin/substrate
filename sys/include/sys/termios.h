@@ -33,8 +33,8 @@ typedef uint32_t speed_t;
  * translate to their own termios format in their personality ioctl handlers. */
 #define NCCS 32
 
-#ifndef _STRUCT_TERMIOS_DEFINED
-#define _STRUCT_TERMIOS_DEFINED
+#ifndef _STRUCT_TERMIOS
+#define _STRUCT_TERMIOS
 struct termios {
     tcflag_t c_iflag; // Input flags
     tcflag_t c_oflag; // Output flags
