@@ -21,7 +21,7 @@ static uint32_t kernel_page_tables[33][1024];
 #define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
 #define PTE_FRAME       0xFFFFF000 // Frame address mask
 
-#include <include/sys/proc.h> // For current_process
+#include <sys/proc.h> // For current_process
 
 
 static struct pmap kernel_pmap_store;
