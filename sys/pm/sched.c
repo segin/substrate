@@ -1,14 +1,14 @@
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <pm/pm.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include <stddef.h>
-#include <stdint.h>
-
 thread_t threads[MAX_THREADS];
+// Generation counters for each thread slot to enable O(1) TID lookup.
+// TID = index + (generation * MAX_THREADS)
+static uint32_t slot_generations[MAX_THREADS];
 thread_t *current_thread = NULL;
-static int next_tid = 1;
 
 extern void arch_switch_to(thread_t *prev, thread_t *next);
 extern void arch_set_kernel_stack(uintptr_t stack);
@@ -16,9 +16,9 @@ extern void arch_set_kernel_stack(uintptr_t stack);
 
 
 void sched_init_generic(void) {
-    next_tid = 0;
     extern void *memset(void *s, int c, size_t n);
     memset(threads, 0, sizeof(threads));
+    memset(slot_generations, 0, sizeof(slot_generations));
     
     // Initialize PM
     pm_init();
@@ -38,11 +38,15 @@ thread_t *sched_alloc_thread(process_t *proc) {
     }
     if (i == MAX_THREADS) return NULL;
 
-    threads[i].tid = next_tid++;
+    // Generate O(1) compatible TID
+    threads[i].tid = i + (slot_generations[i] * MAX_THREADS);
+    slot_generations[i]++;
+
     threads[i].proc = proc;
     threads[i].state = THREAD_BLOCKED; // Set to BLOCKED until stack is ready
     threads[i].wait_chan = NULL;
     threads[i].wait_reason = NULL;
+    threads[i].sleep_expiry = 0;
     threads[i].priority = current_thread ? current_thread->priority : 20;
     threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
     threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
@@ -123,9 +127,9 @@ int sched_get_current_tid(void) {
 }
 
 thread_t *sched_get_thread(int tid) {
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == tid) return &threads[i];
-    }
+    if (tid < 0) return NULL;
+    int idx = tid % MAX_THREADS;
+    if (threads[idx].tid == tid) return &threads[idx];
     return NULL;
 }
 
@@ -167,10 +171,68 @@ void sched_wakeup_n(void *chan, int n) {
     }
 }
 
+void sched_check_timeouts(void) {
+    uint64_t current_ticks = get_ticks();
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        thread_t *t = &threads[i];
+        if (t->tid != -1 && t->state == THREAD_BLOCKED && t->sleep_expiry > 0) {
+            if (current_ticks >= t->sleep_expiry) {
+                // Timeout expired
+                t->state = THREAD_READY;
+                t->wait_chan = NULL;
+                t->sleep_expiry = 0;
+            }
+        }
+    }
+}
+
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) {
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1) {
             callback(&threads[i], arg);
         }
     }
+}
+
+/* Load Average Calculation */
+
+static unsigned long avenrun[3] = { 0, 0, 0 };
+
+uint32_t sched_get_active_tasks(void) {
+    uint32_t count = 0;
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 &&
+           (threads[i].state == THREAD_RUNNING || threads[i].state == THREAD_READY)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+uint32_t sched_get_total_tasks(void) {
+    uint32_t count = 0;
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1) {
+            count++;
+        }
+    }
+    return count;
+}
+
+void sched_update_loadavg(void) {
+    /* Get active tasks scaled to fixed point */
+    unsigned long active = sched_get_active_tasks() * SI_LOAD_SCALE;
+
+    /* Calculate new load averages */
+    avenrun[0] = (avenrun[0] * EXP_1 + active * (SI_LOAD_SCALE - EXP_1)) >> 11;
+    avenrun[1] = (avenrun[1] * EXP_5 + active * (SI_LOAD_SCALE - EXP_5)) >> 11;
+    avenrun[2] = (avenrun[2] * EXP_15 + active * (SI_LOAD_SCALE - EXP_15)) >> 11;
+}
+
+void sched_get_loadavg(unsigned long *loads) {
+    if (!loads) return;
+    loads[0] = avenrun[0];
+    loads[1] = avenrun[1];
+    loads[2] = avenrun[2];
 }
