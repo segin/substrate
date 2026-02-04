@@ -124,8 +124,7 @@ typedef struct {
     uint32_t blocks_per_group;
     uint32_t group_count;
     uint32_t inode_size;
-
-    // Optimization: Next Fit allocator state
+    // Hints for Next Fit allocation
     uint32_t last_alloc_group;
     uint32_t last_alloc_bit;
 } ext2_fs_t;
@@ -135,14 +134,40 @@ typedef struct {
     ext2_fs_t *fs;
     uint32_t inode_num;
     ext2_inode_t inode;
+    struct dirent current_dirent; // For readdir
 } ext2_node_t;
 
 // Public functions
 void ext2_init(void);
+fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
 
-// Internal helpers (exposed for testing)
+// Driver operations (non-static for extensibility/testing)
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
+int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer);
+uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer);
 uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, void *buffer);
+uint32_t ext2_inode_write(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, const void *buffer);
+uint32_t ext2_alloc_block(ext2_fs_t *fs);
+void ext2_free_block(ext2_fs_t *fs, uint32_t block_num);
+uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir);
+void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir);
+uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, void *buffer);
+void ext2_get_blocks_extent(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx, uint32_t max_count, 
+                                   uint32_t *phys_block, uint32_t *count,
+                                   uint32_t *indirect_buf, uint32_t *dindirect_buf, uint32_t *tindirect_buf);
+uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx,
+                                   uint32_t *indirect_buf, uint32_t *dindirect_buf, uint32_t *tindirect_buf);
+
+// VFS callbacks (non-static as requested)
+size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
+struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
+fs_node_t *ext2_finddir(fs_node_t *node, char *name);
+int ext2_readlink(fs_node_t *node, char *buf, size_t size);
+
+// Helpers
+int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx);
+fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
 
 #endif
