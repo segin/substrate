@@ -3323,7 +3323,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Function definitions.
         - [x] Precedence and associativity verification.
         - [x] Robust error recovery and diagnostics.
-    - [ ] **Expansions (Exact Order):**
+    - [x] **Expansions (Exact Order):**
         - [x] **1. Tilde Expansion**
         - [x] **2. Parameter Expansion:**
             - [x] Basic `$VAR`, `${VAR}`.
@@ -3335,10 +3335,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Nested parameter expansions.
         - [x] **3. Command Substitution** (`$(cmd)`).
         - [x] **4. Arithmetic Expansion** (`$(( ... ))`).
-        - [ ] **5. Field Splitting:** Use `$IFS` for unquoted expansions.
-        - [ ] **6. Pathname Expansion:** Globbing (`*`, `?`, `[...]`).
-        - [ ] **7. Quote Removal:** Final pass.
-    - [ ] **Redirections:**
+        - [x] **5. Field Splitting:** Use `$IFS` for unquoted expansions.
+        - [x] **6. Pathname Expansion:** Globbing (`*`, `?`, `[...]`).
+        - [x] **7. Quote Removal:** Final pass.
+    - [x] **Redirections:**
         - [x] Input/Output (`<`, `>`, `>>`).
         - [x] FD duplication (`<&`, `>&`).
         - [x] Here-documents (`<<`).
