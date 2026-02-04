@@ -11,6 +11,31 @@
 #include <sys/syscall_impl.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
+#include "../../include/sys/resource.h"
+#include "../../include/sys/times.h"
+
+int netbsd_sys_getrusage(int who, struct rusage *rusage) {
+    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -1;
+
+    struct tms t;
+    if ((clock_t)sys_times(&t) == (clock_t)-1) return -1;
+
+    extern void *memset(void *, int, size_t);
+    memset(rusage, 0, sizeof(struct rusage));
+
+    // Ticks to timeval. HZ=100.
+    // user time
+    clock_t ut = (who == RUSAGE_SELF) ? t.tms_utime : t.tms_cutime;
+    rusage->ru_utime.tv_sec = ut / 100;
+    rusage->ru_utime.tv_usec = (ut % 100) * 10000;
+
+    // system time
+    clock_t st = (who == RUSAGE_SELF) ? t.tms_stime : t.tms_cstime;
+    rusage->ru_stime.tv_sec = st / 100;
+    rusage->ru_stime.tv_usec = (st % 100) * 10000;
+
+    return 0;
+}
 
 /* NetBSD syscall table - based on i386 column */
 static void *netbsd_syscalls[MAX_SYSCALLS] = {
@@ -130,8 +155,8 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_compat_recvmsg] = NULL,            /* compat_recvmsg */
     [NETBSD_SYS_compat_sendmsg] = NULL,            /* compat_sendmsg */
     [NETBSD_SYS_obs_vtrace]     = NULL,            /* obs_vtrace */
-    [NETBSD_SYS_gettimeofday]   = NULL,            /* gettimeofday */
-    [NETBSD_SYS_getrusage]      = NULL,            /* getrusage */
+    [NETBSD_SYS_gettimeofday]   = &sys_gettimeofday,
+    [NETBSD_SYS_getrusage]      = &netbsd_sys_getrusage,
     [NETBSD_SYS_getsockopt]     = NULL,            /* getsockopt */
     [NETBSD_SYS_resuba]         = NULL,            /* resuba */
     /* Higher syscalls */

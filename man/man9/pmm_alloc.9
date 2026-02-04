@@ -1,0 +1,43 @@
+.Dd February 1, 2026
+.Dt PMM_ALLOC 9
+.Os Substrate
+.Sh NAME
+.Nm pmm_alloc_block ,
+.Nm pmm_alloc_contiguous
+.Nd allocate physical memory
+.Sh SYNOPSIS
+.In sys/pmm.h
+.Ft "void *"
+.Fn pmm_alloc_block "void"
+.Ft "void *"
+.Fn pmm_alloc_contiguous "size_t count"
+.Sh DESCRIPTION
+The
+.Fn pmm_alloc_block
+function allocates a single page of physical memory.
+.Pp
+The
+.Fn pmm_alloc_contiguous
+function allocates
+.Fa count
+contiguous pages of physical memory.
+.Pp
+Note that these functions return
+.emph virtual addresses
+in the kernel direct map region (0xC0000000+), not raw physical addresses.
+To use these addresses with hardware that requires physical addresses (e.g. paging structures, DMA), you must subtract 0xC0000000 or use
+.Fn pmap_extract .
+.Sh RETURN VALUES
+The
+.Fn pmm_alloc_block
+and
+.Fn pmm_alloc_contiguous
+functions return a kernel virtual address pointing to the allocated memory, or
+.Dv NULL
+if the allocation failed (Out of Memory).
+.Sh SEE ALSO
+.Xr pmm_free_block 9 ,
+.Xr pmm_free_contiguous 9 ,
+.Xr pmap 9
+.Sh HISTORY
+The PMM allocator first appeared in Substrate.

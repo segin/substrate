@@ -18,11 +18,18 @@ extern uint32_t get_time(void);
 extern thread_t *sched_alloc_thread(process_t *proc);
 extern void sched_init_generic(void);
 
+#include <sys/ldt.h>
+
 // Exposed to Generic Scheduler
 void arch_switch_to(thread_t *prev, thread_t *next) {
     // Switch Address Space if needed
     if (next->proc && next->proc->pmap) {
         pmap_activate(next->proc->pmap);
+    }
+    
+    // Switch LDT if needed
+    if (next->proc != prev->proc) {
+        ldt_activate(next->proc);
     }
     
     switch_to(prev, next);
@@ -60,14 +67,6 @@ void sched_init(void) {
     
     extern char *strcpy(char *, const char *);
     strcpy(processes[0].comm, "swapper");
-    
-    // Copy permissions/acct
-    // ... (simplified)
-    
-    // Alloc Kernel Thread
-    // We can't use alloc because it might pick index 0 which is fine, 
-    // but 'current_thread' is NULL so alloc might crash on priority inheritance?
-    // Modified alloc to handle NULL current_thread.
     
     thread_t *t = sched_alloc_thread(&processes[0]);
     t->state = THREAD_RUNNING;
@@ -146,13 +145,14 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     
     t->kstack_ptr = (uintptr_t)kstack;
     t->instr_ptr = regs->eip;
+    t->state = THREAD_READY; // Ready to be scheduled
     
     return proc->pid;
 }
 
-int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg) {
+thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg) {
     thread_t *t = sched_alloc_thread(proc);
-    if (!t) return -1;
+    if (!t) return NULL;
     
     // Simulate stack frame for "entry_point(arg)"
     uint32_t *stk = (uint32_t*)stack;
@@ -175,8 +175,9 @@ int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack
     
     t->kstack_ptr = (uintptr_t)stk; 
     t->instr_ptr = (uintptr_t)entry_point;
+    t->state = THREAD_READY; // Ready to be scheduled
 
-    return t->tid;
+    return t;
 }
 
 

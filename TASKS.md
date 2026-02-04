@@ -647,27 +647,27 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Cannot be caught, blocked, or ignored.
             - [x] Always terminates the process immediately.
             - [x] Wake all stopped threads before terminating.
-        - [ ] **SIGSTOP:**
-            - [ ] Cannot be caught, blocked, or ignored.
-            - [ ] Stops all threads in the process.
-            - [ ] Process transitions to SSTOP state.
-        - [ ] **SIGCONT:**
-            - [ ] Resume stopped process.
-            - [ ] Clear pending SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU.
-            - [ ] If handler installed, also deliver to handler.
-            - [ ] Set P_CONTINUED flag for `waitpid(WCONTINUED)`.
-        - [ ] **SIGCHLD:**
-            - [ ] Sent when child exits, stops, or continues.
-            - [ ] If SA_NOCLDSTOP, don't send for stop/continue.
-            - [ ] If SA_NOCLDWAIT, auto-reap children (no zombies).
-        - [ ] **Job Control Stops (SIGTSTP/SIGTTIN/SIGTTOU):**
-            - [ ] Can be caught or ignored.
-            - [ ] Default action: Stop the process.
-            - [ ] Orphaned process groups ignore these signals.
-    - [ ] **PID 1 (Init) Protection:**
-        - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler installed.
-        - [ ] If init exits, system halts or panics.
-        - [ ] Init adopts all orphaned processes.
+        - [x] **SIGSTOP:**
+            - [x] Cannot be caught, blocked, or ignored.
+            - [x] Stops all threads in the process.
+            - [x] Process transitions to SSTOP state.
+        - [x] **SIGCONT:**
+            - [x] Resume stopped process.
+            - [x] Clear pending SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU.
+            - [x] If handler installed, also deliver to handler.
+            - [x] Set P_CONTINUED flag for `waitpid(WCONTINUED)`.
+        - [x] **SIGCHLD:**
+            - [x] Sent when child exits, stops, or continues.
+            - [x] If SA_NOCLDSTOP, don't send for stop/continue.
+            - [x] If SA_NOCLDWAIT, auto-reap children (no zombies).
+        - [x] **Job Control Stops (SIGTSTP/SIGTTIN/SIGTTOU):**
+            - [x] Can be caught or ignored.
+            - [x] Default action: Stop the process.
+            - [x] Orphaned process groups ignore these signals.
+    - [x] **PID 1 (Init) Protection:**
+        - [x] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler installed.
+        - [x] If init exits, system halts or panics.
+        - [x] Init adopts all orphaned processes.
     - [ ] **Core Dump (Future):**
         - [ ] Signals with SA_CORE action: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
         - [ ] `coredump()`: Write process memory and registers to file.
@@ -675,34 +675,34 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Respect `RLIMIT_CORE` resource limit.
 - [ ] **Process Lifecycle & Job Control:**
     - [ ] **Process Termination (`exit`, `_exit`):**
-        - [ ] **Entry Points:**
-            - [ ] `sys_exit(status)`: Libc-callable exit with cleanup.
-            - [ ] `sys__exit(status)`: Immediate exit, no libc cleanup.
-            - [ ] Both call internal `proc_exit(code)`. <!-- pm/process.c:230-291 -->
-        - [ ] **Phase 1: State Transition (RUNNING → DYING):**
-            - [ ] Set `p_state` to `SDYING`. <!-- process.c:237 -->
-            - [ ] Record exit status in `p_xstat`. <!-- process.c:238 -->
-            - [ ] Prevent further scheduling of process threads.
-        - [ ] **Phase 2: Resource Release (Critical Section):**
-            - [ ] **File Descriptors:**
-                - [ ] `fd_close_all(p)`: Close all open file descriptors. <!-- process.c:163-180, 243 -->
-                - [ ] For each fd: decrement refcount, call `close_fs()` if last ref.
-                - [ ] Clear `fds[]` array.
-            - [ ] **Virtual Memory:**
-                - [ ] Detach from current pmap: `pmap_release(p->pmap)`. <!-- process.c:249-256 -->
-                - [ ] Free all user page tables (pmap garbage collection).
-                - [ ] Switch to kernel pmap before freeing.
-                - [ ] Release `vm_map` and all `vm_map_entry` structures.
-            - [ ] **Current Working Directory:**
-                - [ ] `vnode_rele(p->cwd_node)`: Decrement cwd vnode refcount.
-            - [ ] **Root Directory (chroot):**
-                - [ ] `vnode_rele(p->root_node)`: Decrement root vnode refcount.
-            - [ ] **Controlling Terminal:**
-                - [ ] If session leader: send SIGHUP to foreground group.
-                - [ ] Clear `tty->session` and `tty->pgrp` pointers.
-                - [ ] Revoke TTY access for entire session.
-            - [ ] **Pending Signals:**
-                - [ ] Clear all pending signals (no longer deliverable).
+        - [x] **Entry Points:**
+            - [x] `sys_exit(status)`: Libc-callable exit with cleanup.
+            - [x] `sys__exit(status)`: Immediate exit, no libc cleanup.
+            - [x] Both call internal `proc_exit(code)`. <!-- pm/process.c:230-291 -->
+        - [x] **Phase 1: State Transition (RUNNING → DYING):**
+            - [x] Set `p_state` to `SDYING`. <!-- process.c:237 -->
+            - [x] Record exit status in `p_xstat`. <!-- process.c:238 -->
+            - [x] Prevent further scheduling of process threads.
+        - [x] **Phase 2: Resource Release (Critical Section):**
+            - [x] **File Descriptors:**
+                - [x] `fd_close_all(p)`: Close all open file descriptors. <!-- process.c:163-180, 243 -->
+                - [x] For each fd: decrement refcount, call `close_fs()` if last ref.
+                - [x] Clear `fds[]` array.
+            - [x] **Virtual Memory:**
+                - [x] Detach from current pmap: `pmap_release(p->pmap)`. <!-- process.c:249-256 -->
+                - [x] Free all user page tables (pmap garbage collection).
+                - [x] Switch to kernel pmap before freeing.
+                - [x] Release `vm_map` and all `vm_map_entry` structures.
+            - [x] **Current Working Directory:**
+                - [x] `close_fs(p->cwd_node)`: Decrement cwd vnode refcount.
+            - [x] **Root Directory (chroot):**
+                - [x] `close_fs(p->root_node)`: Decrement root vnode refcount.
+            - [x] **Controlling Terminal:**
+                - [x] If session leader: send SIGHUP to foreground group.
+                - [x] Clear `tty->session` and `tty->pgrp` pointers.
+                - [x] Revoke TTY access for entire session.
+            - [x] **Pending Signals:**
+                - [x] Clear all pending signals (no longer deliverable).
             - [ ] **Timers:**
                 - [ ] Cancel `ITIMER_REAL`, `ITIMER_VIRTUAL`, `ITIMER_PROF`.
                 - [ ] Cancel any pending `alarm()`.
@@ -712,10 +712,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Remove owned message queues if IPC_RMID pending.
             - [ ] **POSIX IPC:**
                 - [ ] Unlink any POSIX semaphores/shared memory owned.
-            - [ ] **Futex Cleanup:**
-                - [ ] Process robust mutex list.
-                - [ ] Mark owned futexes as FUTEX_OWNER_DIED.
-                - [ ] Wake waiters on robust list entries.
+            - [x] **Futex Cleanup:**
+                - [x] Process robust mutex list.
+                - [x] Mark owned futexes as FUTEX_OWNER_DIED.
+                - [x] Wake waiters on robust list entries.
             - [ ] **Locks Held:**
                 - [ ] Release any kernel mutexes held by threads.
                 - [ ] Cancel pending lock requests.
@@ -768,12 +768,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Record: command name, user time, system time, elapsed time, exit status.
             - [ ] Write to accounting file if enabled.
     - [ ] **Edge Cases and Error Handling:**
-        - [ ] **Init (PID 1) Exit:**
-            - [ ] If init exits normally, kernel halts/panics. <!-- process.c:231-234 -->
-            - [ ] Log warning and enter idle loop.
-        - [ ] **Killed by Signal During Exit:**
-            - [ ] Ignore all signals once in SDYING state.
-            - [ ] Cannot be interrupted during exit cleanup.
+        - [x] **Init (PID 1) Exit:**
+            - [x] If init exits normally, kernel halts/panics. <!-- process.c:231-234 -->
+            - [x] Log warning and enter idle loop.
+        - [x] **Killed by Signal During Exit:**
+            - [x] Ignore all signals once in SDYING state.
+            - [x] Cannot be interrupted during exit cleanup.
         - [ ] **Exit While Holding Locks:**
             - [ ] Kernel must handle lock abandonment.
             - [ ] Log warning if locks still held.
@@ -783,10 +783,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **Vfork Exit:**
             - [ ] Special handling: wake parent immediately.
             - [ ] Parent was blocked waiting for child exec/exit.
-        - [ ] **Thread Group Exit:**
-            - [ ] If any thread calls `exit()`, entire process exits.
-            - [ ] All threads receive internal termination signal.
-            - [ ] Process-wide exit semantics (BSD `exit()` behavior).
+        - [x] **Thread Group Exit:**
+            - [x] If any thread calls `exit()`, entire process exits.
+            - [x] All threads receive internal termination signal.
+            - [x] Process-wide exit semantics (BSD `exit()` behavior).
 
     - [x] **Wait Subsystem (`wait4`, `waitpid`):**
         - [x] **Search Logic (`find_zombie`):** <!-- Now find_waitable_child -->
@@ -3121,7 +3121,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `NETLINK_ROUTE`: Interface/Address/Route management (`RTM_*`).
                 - [ ] `NETLINK_KOBJECT_UEVENT`: Hotplug/Device events.
             - [ ] **Direct Standard Syscalls:**
-                - [ ] `sysinfo()`: System uptime, total RAM, free RAM.
+                - [x] `sysinfo()`: System uptime, total RAM, free RAM.
                 - [ ] `uname()`: System identification.
                 - [ ] `getrlimit()`: Process resource limits.
                 - [ ] `clock_gettime()`: High-resolution system clocks.
@@ -3158,7 +3158,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
             - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
             - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
-        - [/] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
+        - [x] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
             - [x] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
             - [ ] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
             - [ ] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
@@ -3245,121 +3245,181 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Implement `syscall.S`: Raw i386 `int $0x80` entry (6 args via ebx-ebp).
     - [x] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype.
     - [x] Add to `lib/Makefile` SUBDIRS.
-- [ ] **VM Information Syscalls:**
-    - [ ] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
-        - [ ] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
-        - [ ] `lib/sys/sysinfo.c`: Wrapper function.
-        - [ ] Man page: `sysinfo(2)`.
-    - [ ] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
-        - [ ] `lib/sys/getpagesize.c`: Wrapper function.
-        - [ ] Man page: `getpagesize(2)`.
-    - [ ] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
-        - [ ] `lib/sys/mlock.c`: Wrapper functions.
-        - [ ] Man pages: `mlock(2)`, `munlock(2)`.
+- [x] **VM Information Syscalls:**
+    - [x] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
+        - [x] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
+        - [x] `lib/sys/sysinfo.c`: Wrapper function.
+        - [x] Man page: `sysinfo(2)`.
+    - [x] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
+        - [x] `lib/sys/getpagesize.c`: Wrapper function.
+        - [x] Man page: `getpagesize(2)`.
+    - [x] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
+        - [x] `lib/sys/mlock.c`: Wrapper functions.
+        - [x] Man pages: `mlock(2)`, `munlock(2)`.
 - [ ] **Process Information Syscalls:**
-    - [ ] `getpid()`/`getppid()` wrappers.
-        - [ ] `lib/sys/getpid.c`: Wrapper functions.
-        - [ ] Man pages: `getpid(2)`, `getppid(2)`.
-    - [ ] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers.
-        - [ ] `lib/sys/getuid.c`: Wrapper functions.
-        - [ ] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`.
-    - [ ] `getpgid()`/`setpgid()`/`getpgrp()` wrappers.
-        - [ ] `lib/sys/pgrp.c`: Wrapper functions.
-        - [ ] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`.
-    - [ ] `getsid()`/`setsid()` wrappers.
-        - [ ] `lib/sys/sid.c`: Wrapper functions.
-        - [ ] Man pages: `getsid(2)`, `setsid(2)`.
-    - [ ] `getrusage()` wrapper: Resource usage (user/sys time, memory).
-        - [ ] Kernel: Implement `sys_getrusage()` returning `struct rusage`.
-        - [ ] `lib/sys/getrusage.c`: Wrapper function.
-        - [ ] Man page: `getrusage(2)`.
-    - [ ] `times()` wrapper: Process times (user, sys, children).
-        - [ ] Kernel: Implement `sys_times()`.
-        - [ ] `lib/sys/times.c`: Wrapper function.
-        - [ ] Man page: `times(2)`.
-- [ ] **Special-Purpose Syscalls:**
+    - [x] `getpid()`/`getppid()` wrappers.
+        - [x] `lib/sys/getpid.c`: Wrapper functions.
+        - [x] Man pages: `getpid(2)`, `getppid(2)`.
+    - [x] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers.
+        - [x] `lib/sys/getuid.c`: Wrapper functions.
+        - [x] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`.
+    - [x] `getpgid()`/`setpgid()`/`getpgrp()` wrappers.
+        - [x] `lib/sys/pgrp.c`: Wrapper functions.
+        - [x] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`.
+    - [x] `getsid()`/`setsid()` wrappers.
+        - [x] `lib/sys/pgrp.c`: Wrapper functions.
+        - [x] Man pages: `getsid(2)`, `setsid(2)`.
+    - [x] `getrusage()` wrapper: Resource usage (user/sys time, memory).
+        - [x] Kernel: Hooked up `sys_getrusage()`.
+        - [x] `lib/sys/getrusage.c`: Wrapper function.
+        - [x] Man page: `getrusage(2)`.
+    - [x] `times()` wrapper: Process times (user, sys, children).
+        - [x] Kernel: Hooked up `sys_times()`.
+        - [x] `lib/sys/times.c`: Wrapper function.
+        - [x] Man page: `times(2)`.
+- [x] **Special-Purpose Syscalls:**
     - [x] `vm86()` wrapper (SYS_vm86): Enter VM86 mode.
         - [x] `lib/sys/vm86.c`: Typed wrapper.
-        - [ ] Man page: `vm86(2)`.
-    - [ ] `ptrace()` wrapper: Process tracing.
-        - [ ] `lib/sys/ptrace.c`: Wrapper function.
-        - [ ] Man page: `ptrace(2)`.
-    - [ ] `reboot()` wrapper: System reboot/power off.
-        - [ ] `lib/sys/reboot.c`: Wrapper function.
-        - [ ] Man page: `reboot(2)`.
-- [ ] **Sysctl Interface:**
-    - [ ] `sysctl()` wrapper: Kernel tunable access.
-        - [ ] Kernel: Implement `sys_sysctl()` MIB tree.
-        - [ ] `lib/sys/sysctl.c`: Wrapper function.
-        - [ ] Man page: `sysctl(2)`.
+        - [x] Man page: `vm86(2)`.
+    - [x] `ptrace()` wrapper: Process tracing.
+        - [x] `lib/sys/ptrace.c`: Wrapper function.
+        - [x] Man page: `ptrace(2)`.
+    - [x] `reboot()` wrapper: System reboot/power off.
+        - [x] `lib/sys/reboot.c`: Wrapper function.
+        - [x] Man page: `reboot(2)`.
+- [x] **Sysctl Interface:**
+    - [x] `sysctl()` wrapper: Kernel tunable access.
+        - [x] Kernel: Hooked up `sys_sysctl()` MIB tree.
+        - [x] `lib/sys/sysctl.c`: Wrapper function.
+        - [x] Man page: `sysctl(2)`.
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
-    - [x] **Lexer (Tokenizer):**
-        - [x] Handle delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
-        - [x] Handle quoting (`'` single, `"` double) and escaping (`\`).
-        - [x] Handle operators (`&&`, `||`, `>>`, `<<`).
-        - [x] Variable recognition (`$PROMPT`, `${VAR}`).
-    - [ ] **Parser (AST Generation):**
-        - [x] **Simple Commands:** List of arguments + redirections.
-        - [x] **Pipelines:** Chain of simple commands connected by pipes.
-        - [x] **Lists:** Sequences (`cmd1 ; cmd2`) and Logic (`cmd1 && cmd2`).
-        - [ ] **Compound Commands:**
-            - [ ] `IfClause`: `if` list `then` list `else` list `fi`.
-            - [ ] `WhileClause`: `while` list `do` list `done`.
-            - [ ] `ForClause`: `for` name `in` words `do` list `done`.
-            - [ ] `FunctionDef`: `name() { list; }`.
-    - [ ] **Expansion (WordExp):**
-        - [ ] Tilde Expansion (`~` -> `$HOME`).
-        - [ ] Parameter Expansion (`$VAR`, `${VAR:-def}`, `${VAR#strip}`).
-        - [ ] Command Substitution (`$(cmd)`).
-        - [ ] Arithmetic Expansion (`$(( 1 + 2 ))`).
-        - [ ] Globbing (`*`, `?`, `[...]` file matching).
+    - [ ] **Code Audit & Infrastructure:**
+        - [ ] Audit `lexer.c`, `parser.c`, `expand.c`, `exec.c`, `sh.c` for naive implementations or TODOs.
+        - [ ] Setup coverage-guided fuzzing for the parser and expansion engine.
+    - [ ] **Invocation & Startup:**
+        - [x] Handle `sh -c` correctly.
+        - [x] Handle `sh -s` correctly.
+        - [x] Detect and handle login shell behavior.
+        - [x] Argument parsing and POSIX option processing.
+        - [x] Interactive vs non-interactive mode detection.
+        - [x] Startup files: `ENV` and profile handling.
+        - [x] Locale and environment initialization.
+        - [x] Signal disposition at startup.
+    - [x] **Lexical Analysis:**
+        - [x] Delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
+        - [x] Quoting (`'` single, `"` double) and escaping (`\`).
+        - [x] Operators (`&&`, `||`, `>>`, `<<`, `<&`, `>&`).
+        - [x] Comment handling (`#`).
+        - [x] Line continuation rules (backslash-newline).
+        - [x] Here-document lexing (quoted vs unquoted delimiters).
+    - [x] **Shell Grammar & Parsing:**
+        - [x] Simple commands.
+        - [x] Pipelines.
+        - [x] Lists (`;`, `&`, `&&`, `||`).
+        - [x] Compound commands (`if`, `while`, `for`, `case`).
+        - [x] Grouping `{}` and subshells `()`.
+        - [x] Function definitions.
+        - [x] Precedence and associativity verification.
+        - [x] Robust error recovery and diagnostics.
+    - [x] **Expansions (Exact Order):**
+        - [x] **1. Tilde Expansion**
+        - [x] **2. Parameter Expansion:**
+            - [x] Basic `$VAR`, `${VAR}`.
+            - [x] `${VAR:-def}`, `${VAR:=def}`, `${VAR:?err}`, `${VAR:+alt}`.
+            - [x] `${#VAR}` (Length).
+            - [x] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
+            - [x] `${VAR#pat}`, `${VAR##pat}` (Prefix).
+            - [x] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
+            - [x] Nested parameter expansions.
+        - [x] **3. Command Substitution** (`$(cmd)`).
+        - [x] **4. Arithmetic Expansion** (`$(( ... ))`).
+        - [x] **5. Field Splitting:** Use `$IFS` for unquoted expansions.
+        - [x] **6. Pathname Expansion:** Globbing (`*`, `?`, `[...]`).
+        - [x] **7. Quote Removal:** Final pass.
+    - [x] **Redirections:**
+        - [x] Input/Output (`<`, `>`, `>>`).
+        - [x] FD duplication (`<&`, `>&`).
+        - [x] Here-documents (`<<`).
+        - [x] Proper ordering and evaluation timing.
+        - [x] Error handling and rollback (save/restore).
     - [ ] **Execution Engine:**
-        - [ ] **Builtins:**
-            - [ ] `cd`: Change directory ($HOME default).
-            - [ ] `exit`: Terminate shell.
-            - [ ] `export`: precise environment variable support.
-            - [ ] `unset`: Remove variables.
-            - [ ] `exec`: Replace shell process.
-            - [ ] `eval`: Parse and execute arguments.
-            - [ ] `shift`: Shift positional parameters.
-        - [ ] **External Commands:**
-            - [ ] `fork()` / `execve()` search path (`$PATH`).
-            - [ ] `waitpid()` for synchronous execution.
-    - [ ] **Job Control:**
-        - [ ] **Process Groups:** Set pgid for pipelines.
-        - [ ] **Foreground/Background:** `tcsetpgrp` management.
-        - [ ] **Job Table:** Track status (Running, Stopped, Done).
-        - [ ] **Signals:** `SIGINT`, `SIGTSTP`, `SIGCHLD` handler.
-    - [ ] **Redirection:**
-        - [ ] `dup2` management for `<`, `>`, `>>`, `2>`, `2>&1`.
-        - [ ] Here-Documents (`<< EOF`).
+        - [x] Builtin vs external command resolution.
+        - [x] PATH search rules.
+        - [x] `exec` behavior (shell replacement).
+        - [x] Process forking model.
+        - [x] Job control hooks integration.
+        - [x] Exit status propagation.
+        - [ ] `set -e` semantics.
+    - [ ] **Builtin Commands:**
+        - [x] `:` (Null command).
+        - [x] `.` (Dot/Source).
+        - [x] `break`.
+        - [x] `continue`.
+        - [x] `cd` (including `CDPATH`).
+        - [ ] `command`.
+        - [x] `eval`.
+        - [x] `exec`.
+        - [x] `exit`.
+        - [x] `export`.
+        - [ ] `getopts`.
+        - [ ] `read`.
+        - [ ] `readonly`.
+        - [ ] `return`.
+        - [ ] `set`.
+        - [x] `unset`.
+        - [x] `shift`.
+        - [ ] `times`.
+        - [ ] `trap`.
+        - [ ] `umask`.
+        - [ ] `wait`.
+    - [ ] **Variables & Environment:**
+        - [ ] Shell vs Environment variable distinction.
+        - [ ] Scope rules (Global, Local, Function).
+        - [ ] Export semantics.
+        - [ ] Read-only enforcement.
+    - [x] **Functions:**
+        - [x] Definition and Invocation.
+        - [x] Local variables scoping.
+        - [x] Return behavior.
+    - [x] **Job Control:**
+        - [x] Foreground/Background.
+        - [x] Process groups.
+        - [x] Signal forwarding.
+    - [ ] **Signals & Traps:**
+        - [ ] Default signal handling.
+        - [ ] `trap` builtin integration.
+    - [ ] **Testing & Compliance:**
+        - [ ] Unit tests for all modules.
+        - [ ] Script-based conformance tests.
+        - [ ] Coverage-guided fuzzing.
+        - [ ] Man page (`sh(1)`).
 - [ ] **Core Utilities:**
-    - [ ] **`ls` - List directory contents:**
-        - [ ] **Purpose:** List information about the FILEs (the current directory by default).
-        - [ ] **Standards:** POSIX.1-2017, BSD Extensions (color).
-        - [ ] **Operands:**
-            - [ ] `-a`, `--all`: List all files including hidden ones.
-            - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
-            - [ ] `-l`: Long listing format (permissions, ownership, size, time).
-            - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
-            - [ ] `-R`, `--recursive`: List subdirectories recursively.
-            - [ ] `-r`, `--reverse`: Reverse order while sorting.
-            - [ ] `-S`: Sort by file size.
-            - [ ] `-t`: Sort by modification time.
-            - [ ] `--color`: Colorize output (auto/always/never).
+    - [x] **`ls` - List directory contents:**
+        - [x] **Purpose:** List information about the FILEs (the current directory by default).
+        - [x] **Standards:** POSIX.1-2017, BSD Extensions (color).
+        - [x] **Operands:**
+            - [x] `-a`, `--all`: List all files including hidden ones.
+            - [x] `-A`, `--almost-all`: List all except `.` and `..`.
+            - [x] `-l`: Long listing format (permissions, ownership, size, time).
+            - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+            - [x] `-R`, `--recursive`: List subdirectories recursively.
+            - [x] `-r`, `--reverse`: Reverse order while sorting.
+            - [x] `-S`: Sort by file size.
+            - [x] `-t`: Sort by modification time.
+            - [x] `--color`: Colorize output (auto/always/never).
         - [ ] **Runtime:**
             - [ ] Column width calculation for multi-column output.
             - [ ] Date formatting (recent vs old files).
             - [ ] User/Group name caching.
         - [ ] **Library dependencies:**
             - [ ] `xopendir`, `xreaddir`, `xstat`, `xclosedir`, `humanize_number`, `pwcache`, `groupcache` or `getpwuid`/`getgrgid`
-        - [ ] **Acceptance tests:**
-            - [ ] `ls` empty directory -> empty output
-            - [ ] `ls -a` -> shows `.` and `..`
-            - [ ] `ls -l` -> correct permissions and ownership columns
-            - [ ] `ls -R` -> descends into subdirectories
+        - [x] **Acceptance tests:**
+            - [x] `ls` empty directory -> empty output
+            - [x] `ls -a` -> shows `.` and `..`
+            - [x] `ls -l` -> correct permissions and ownership columns
+            - [x] `ls -R` -> descends into subdirectories
     - [ ] **`cp` - Copy files and directories:**
         - [ ] **Purpose:** Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.
         - [ ] **Standards:** POSIX.1-2017.
@@ -5483,13 +5543,13 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Tests: unit (detach all bound devices, list removal)
         - Docs: `driver_unregister.9`
         - Acceptance: All devices detached, driver removed
-    - [ ] Implement `driver_attach()` binding.
+    - [x] Implement `driver_attach()` binding.
         - Files: `sys/kern/driver.c`
         - API: `int driver_attach(driver_t *drv, device_t *dev)`
         - Tests: unit (successful attach, already-bound rejection)
         - Docs: `driver_attach.9`
         - Acceptance: dev->driver set, attach() callback invoked
-    - [ ] Implement `driver_detach()` unbinding.
+    - [x] Implement `driver_detach()` unbinding.
         - Files: `sys/kern/driver.c`
         - API: `int driver_detach(device_t *dev)`
         - Tests: unit (detach callback, driver pointer cleared)
@@ -5497,21 +5557,21 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - Acceptance: detach() called, dev->driver = NULL
 
 - [ ] **Matching and Binding Logic:**
-    - [ ] Implement `bus_match_device()` generic matcher.
+    - [x] Implement `bus_match_device()` generic matcher.
         - Files: `sys/kern/bus.c` (new)
         - API: `driver_t *bus_match_device(bus_type_t *bus, device_t *dev)`
         - Logic: Iterate drivers, call match() or compare id_table, return highest priority match
         - Tests: unit (exact match, class match, priority ordering)
         - Docs: `bus_match.9`
         - Acceptance: Correct driver selected by priority
-    - [ ] Implement ID table matching for vendor/device/class.
+    - [x] Implement ID table matching for vendor/device/class.
         - Files: `sys/kern/bus.c`
         - API: `int bus_id_match(const device_id_t *id, device_t *dev)`
         - Wildcards: 0xFFFF for any vendor/device, class mask support
         - Tests: unit (wildcard match, specific match, no match)
         - Docs: `bus_id_match.9`
         - Acceptance: Wildcard and specific IDs match correctly
-    - [ ] Implement `compatible` string matching (DT/ACPI style).
+    - [x] Implement `compatible` string matching (DT/ACPI style).
         - Files: `sys/kern/bus.c`
         - API: `int bus_compatible_match(const char *compat, device_t *dev)`
         - Tests: unit (exact string, multi-value compat)
@@ -6153,7 +6213,7 @@ Reference: User Request (Step 30668)
     - [ ] Standardize `truncate` / `ftruncate` to 64-bit ABI.
         - Files: `sys/kern/vfs_syscalls.c`
         - Tests: property (truncate large file)
-        - Acceptance: No `truncate64` syscall needed.
+        - Acceptance: `truncate` / `ftruncate` are natively 64-bit; no `truncate64` syscall needed.
     - [ ] Standardize `mmap` to handle 64-bit offsets (pgoff).
         - Files: `sys/arch/i386/syscall.c`
         - Tests: integration (map large offset)
@@ -6161,7 +6221,7 @@ Reference: User Request (Step 30668)
     - [ ] Review `getdents` / `getdents64` dirent structures.
         - Files: `sys/fs/fs.c`
         - Tests: integration (read directory with many/large inodes)
-        - Acceptance: Single 64-bit friendly dirent format.
+        - Acceptance: Single 64-bit friendly dirent format (`getdents` implies 64-bit inodes/offsets).
     - [ ] Standardize `statfs` / `statvfs` to 64-bit block counts.
         - Files: `sys/vfs/vfs.c`
         - Tests: integration (df on large volume)

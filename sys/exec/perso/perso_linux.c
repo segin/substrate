@@ -1,13 +1,132 @@
-#include <exec/perso/personality.h>
+#include "personality.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 #include <sys/ioctl.h>
-//#include <sys/termios.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/linux/linux_syscalls.h>
-#include <exec/perso/linux/linux_user.h>
+#include <sys/termios.h>
+#include "compat.h"
+#include "linux/linux_syscalls.h"
+#include "linux_user.h"
+#include <sys/signal.h>
+
+/* Signal Translation Tables */
+#define LINUX_SIGHUP        1
+#define LINUX_SIGINT        2
+#define LINUX_SIGQUIT       3
+#define LINUX_SIGILL        4
+#define LINUX_SIGTRAP       5
+#define LINUX_SIGABRT       6
+#define LINUX_SIGBUS        7
+#define LINUX_SIGFPE        8
+#define LINUX_SIGKILL       9
+#define LINUX_SIGUSR1       10
+#define LINUX_SIGSEGV       11
+#define LINUX_SIGUSR2       12
+#define LINUX_SIGPIPE       13
+#define LINUX_SIGALRM       14
+#define LINUX_SIGTERM       15
+#define LINUX_SIGSTKFLT     16
+#define LINUX_SIGCHLD       17
+#define LINUX_SIGCONT       18
+#define LINUX_SIGSTOP       19
+#define LINUX_SIGTSTP       20
+#define LINUX_SIGTTIN       21
+#define LINUX_SIGTTOU       22
+#define LINUX_SIGURG        23
+#define LINUX_SIGXCPU       24
+#define LINUX_SIGXFSZ       25
+#define LINUX_SIGVTALRM     26
+#define LINUX_SIGPROF       27
+#define LINUX_SIGWINCH      28
+#define LINUX_SIGIO         29
+#define LINUX_SIGPWR        30
+#define LINUX_SIGSYS        31
+#define LINUX_SIGTBLSZ      31
+#define LINUX_SIGRTMIN      32
+#define LINUX_SIGRTMAX      64
+
+static int native_to_linux_sigtbl[LINUX_SIGTBLSZ + 1] = {
+    0,
+    LINUX_SIGHUP,    /* SIGHUP */
+    LINUX_SIGINT,    /* SIGINT */
+    LINUX_SIGQUIT,   /* SIGQUIT */
+    LINUX_SIGILL,    /* SIGILL */
+    LINUX_SIGTRAP,   /* SIGTRAP */
+    LINUX_SIGABRT,   /* SIGABRT */
+    0,               /* SIGEMT */
+    LINUX_SIGFPE,    /* SIGFPE */
+    LINUX_SIGKILL,   /* SIGKILL */
+    LINUX_SIGBUS,    /* SIGBUS */
+    LINUX_SIGSEGV,   /* SIGSEGV */
+    LINUX_SIGSYS,    /* SIGSYS */
+    LINUX_SIGPIPE,   /* SIGPIPE */
+    LINUX_SIGALRM,   /* SIGALRM */
+    LINUX_SIGTERM,   /* SIGTERM */
+    LINUX_SIGURG,    /* SIGURG */
+    LINUX_SIGSTOP,   /* SIGSTOP */
+    LINUX_SIGTSTP,   /* SIGTSTP */
+    LINUX_SIGCONT,   /* SIGCONT */
+    LINUX_SIGCHLD,   /* SIGCHLD */
+    LINUX_SIGTTIN,   /* SIGTTIN */
+    LINUX_SIGTTOU,   /* SIGTTOU */
+    LINUX_SIGIO,     /* SIGIO */
+    LINUX_SIGXCPU,   /* SIGXCPU */
+    LINUX_SIGXFSZ,   /* SIGXFSZ */
+    LINUX_SIGVTALRM, /* SIGVTALRM */
+    LINUX_SIGPROF,   /* SIGPROF */
+    LINUX_SIGWINCH,  /* SIGWINCH */
+    0,               /* SIGINFO */
+    LINUX_SIGUSR1,   /* SIGUSR1 */
+    LINUX_SIGUSR2    /* SIGUSR2 */
+};
+
+static int linux_to_native_sigtbl[LINUX_SIGTBLSZ + 1] = {
+    0,
+    SIGHUP,    /* LINUX_SIGHUP */
+    SIGINT,    /* LINUX_SIGINT */
+    SIGQUIT,   /* LINUX_SIGQUIT */
+    SIGILL,    /* LINUX_SIGILL */
+    SIGTRAP,   /* LINUX_SIGTRAP */
+    SIGABRT,   /* LINUX_SIGABRT */
+    SIGBUS,    /* LINUX_SIGBUS */
+    SIGFPE,    /* LINUX_SIGFPE */
+    SIGKILL,   /* LINUX_SIGKILL */
+    SIGUSR1,   /* LINUX_SIGUSR1 */
+    SIGSEGV,   /* LINUX_SIGSEGV */
+    SIGUSR2,   /* LINUX_SIGUSR2 */
+    SIGPIPE,   /* LINUX_SIGPIPE */
+    SIGALRM,   /* LINUX_SIGALRM */
+    SIGTERM,   /* LINUX_SIGTERM */
+    SIGBUS,    /* LINUX_SIGSTKFLT */
+    SIGCHLD,   /* LINUX_SIGCHLD */
+    SIGCONT,   /* LINUX_SIGCONT */
+    SIGSTOP,   /* LINUX_SIGSTOP */
+    SIGTSTP,   /* LINUX_SIGTSTP */
+    SIGTTIN,   /* LINUX_SIGTTIN */
+    SIGTTOU,   /* LINUX_SIGTTOU */
+    0,         /* LINUX_SIGURG */
+    0,         /* LINUX_SIGXCPU */
+    0,         /* LINUX_SIGXFSZ */
+    0,         /* LINUX_SIGVTALARM */
+    0,         /* LINUX_SIGPROF */
+    SIGWINCH,  /* LINUX_SIGWINCH */
+    0,         /* LINUX_SIGIO */
+    0,         /* LINUX_SIGPWR */
+    0          /* LINUX_SIGSYS */
+};
+
+int linux_to_native_signal(int sig) {
+    if (sig > 0 && sig <= LINUX_SIGTBLSZ)
+        return linux_to_native_sigtbl[sig];
+    return 0; // Invalid or RT signal (TODO: RT)
+}
+
+int native_to_linux_signal(int sig) {
+    if (sig > 0 && sig <= LINUX_SIGTBLSZ)
+        return native_to_linux_sigtbl[sig];
+    return 0; // Invalid or RT signal
+}
 
 /* Linux TTY ioctl handler - 0x5400-0x54FF range */
 static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
@@ -140,6 +259,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_mkdir]          = &sys_mkdir,
     [LINUX_SYS_rmdir]          = &sys_rmdir,
     [LINUX_SYS_pipe]           = &sys_pipe,
+    [LINUX_SYS_times]          = &sys_times,
     [LINUX_SYS_brk]            = &sys_brk,
     [LINUX_SYS_setgid]         = &sys_setgid,
     [LINUX_SYS_getgid]         = &sys_getgid,
@@ -215,6 +335,7 @@ static const char *linux_names[MAX_SYSCALLS] = {
     [LINUX_SYS_rmdir]          = "rmdir",
     [LINUX_SYS_dup]            = "dup",
     [LINUX_SYS_pipe]           = "pipe",
+    [LINUX_SYS_times]          = "times",
     [LINUX_SYS_brk]            = "brk",
     [LINUX_SYS_setgid]         = "setgid",
     [LINUX_SYS_getgid]         = "getgid",
@@ -290,6 +411,7 @@ static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {
     [LINUX_SYS_rmdir]          = { 1, { ARG_STR } }, // rmdir
     [LINUX_SYS_dup]            = { 1, { ARG_INT } }, // dup
     [LINUX_SYS_pipe]           = { 1, { ARG_PTR } }, // pipe
+    [LINUX_SYS_times]          = { 1, { ARG_PTR } }, // times
     [LINUX_SYS_brk]            = { 1, { ARG_HEX } }, // brk
     [LINUX_SYS_setgid]         = { 1, { ARG_INT } }, // setgid
     [LINUX_SYS_getgid]         = { 0, { 0 } }, // getgid

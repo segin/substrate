@@ -8,6 +8,8 @@
 
 extern process_t *current_process;
 
+int sys_munmap(void *addr, size_t length);
+
 // Find a free virtual address range
 static uint32_t vm_find_free_range(process_t *proc, uint32_t length, uint32_t hint) {
     uint32_t start = hint ? hint : 0x40000000;  // mmap region starts at 1GB
@@ -53,7 +55,9 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t 
     uint32_t start_addr;
     if (flags & MAP_FIXED) {
         start_addr = (uint32_t)addr;
-        // TODO: Unmap any existing mappings in this range
+        if (sys_munmap(addr, length) < 0) {
+            return MAP_FAILED;
+        }
     } else {
         start_addr = vm_find_free_range(current_process, length, (uint32_t)addr);
         if (!start_addr) return MAP_FAILED;
@@ -73,6 +77,11 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t 
     vm_area_t *area = vm_area_create(start_addr, start_addr + length, vm_prot, vm_flags);
     if (!area) return MAP_FAILED;
     
+    if (vm_area_insert(&current_process->vm_areas, area) < 0) {
+        vm_area_destroy(area);
+        return MAP_FAILED;
+    }
+
     // Handle file-backed mapping
     if (!(flags & MAP_ANONYMOUS)) {
         if (fd < 0 || fd >= MAX_FD)  {
@@ -135,29 +144,60 @@ int sys_munmap(void *addr, size_t length) {
     uint32_t start = (uint32_t)addr;
     uint32_t end = start + ((length + 0xFFF) & ~0xFFF);
     
-    // Find and remove overlapping areas
+    // Iterate over VMAs
     vm_area_t *curr = current_process->vm_areas;
     while (curr) {
         vm_area_t *next = curr->next;
         
-        // Check if this area overlaps with unmap range
-        if (!(curr->vm_end <= start || curr->vm_start >= end)) {
-            // Unmap pages
-            for (uint32_t virt = curr->vm_start; virt < curr->vm_end; virt += 0x1000) {
-                if (virt >= start && virt < end) {
-                    uint32_t phys = pmap_extract(current_process->pmap, virt);
-                    if (phys) {
-                        // Convert physical to virtual for pmm_free_block
-                        void *page_virt = (void *)(phys + 0xC0000000);
-                        pmm_free_block(page_virt);
-                        pmap_remove(current_process->pmap, virt);
-                    }
-                }
+        // Check for overlap
+        if (start < curr->vm_end && end > curr->vm_start) {
+
+            // Unmap pages in intersection
+            uint32_t unmap_start = (start > curr->vm_start) ? start : curr->vm_start;
+            uint32_t unmap_end = (end < curr->vm_end) ? end : curr->vm_end;
+
+            for (uint32_t virt = unmap_start; virt < unmap_end; virt += 0x1000) {
+                 uint32_t phys = pmap_extract(current_process->pmap, virt);
+                 if (phys) {
+                     void *page_virt = (void *)(phys + 0xC0000000);
+                     pmm_free_block(page_virt);
+                     pmap_remove(current_process->pmap, virt);
+                 }
             }
             
-            // Remove area
-            vm_area_remove(&current_process->vm_areas, curr);
-            vm_area_destroy(curr);
+            // Case 1: Total removal
+            if (start <= curr->vm_start && end >= curr->vm_end) {
+                vm_area_remove(&current_process->vm_areas, curr);
+                vm_area_destroy(curr);
+            }
+            // Case 2: Cut from beginning (VMA start moves up)
+            else if (start <= curr->vm_start && end < curr->vm_end) {
+                 if (curr->vm_file) {
+                     curr->vm_offset += (end - curr->vm_start);
+                 }
+                 curr->vm_start = end;
+            }
+            // Case 3: Cut from end (VMA end moves down)
+            else if (start > curr->vm_start && end >= curr->vm_end) {
+                curr->vm_end = start;
+            }
+            // Case 4: Split in middle
+            else if (start > curr->vm_start && end < curr->vm_end) {
+                // Create new VMA for the right part
+                vm_area_t *new_area = vm_area_create(end, curr->vm_end, curr->vm_prot, curr->vm_flags);
+                if (!new_area) return -1;
+
+                if (curr->vm_file) {
+                    new_area->vm_file = curr->vm_file;
+                    new_area->vm_offset = curr->vm_offset + (end - curr->vm_start);
+                }
+
+                // Adjust current VMA (left part)
+                curr->vm_end = start;
+
+                // Insert new area
+                vm_area_insert(&current_process->vm_areas, new_area);
+            }
         }
         
         curr = next;

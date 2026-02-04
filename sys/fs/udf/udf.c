@@ -11,15 +11,7 @@
 #include <sys/proc.h>
 
 /* UDF filesystem context (single mount for now) */
-/* UDF filesystem context (single mount for now) */
-struct udf_fs {
-    fs_node_t *device;              /* Block device */
-    uint32_t sector_size;           /* Usually 2048 */
-    uint32_t partition_start;       /* First sector of partition */
-    uint32_t partition_length;      /* Partition length in sectors */
-    uint32_t logical_block_size;    /* From LVD */
-    struct udf_long_ad root_icb;    /* Root directory location */
-} udf_ctx;
+struct udf_fs udf_ctx;
 
 /* Forward declarations */
 static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data);
@@ -27,7 +19,7 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data);
 /*
  * Calculate tag checksum (sum of bytes 0-3 and 5-15)
  */
-static uint8_t udf_tag_checksum(struct udf_tag *tag) {
+uint8_t udf_tag_checksum(struct udf_tag *tag) {
     uint8_t sum = 0;
     uint8_t *p = (uint8_t *)tag;
     for (int i = 0; i < 4; i++) sum += p[i];
@@ -58,7 +50,8 @@ static void udf_crc_init(void) {
     udf_crc_initialized = 1;
 }
 
-static uint16_t udf_crc(const uint8_t *data, uint32_t len) {
+uint16_t udf_crc(const uint8_t *data, uint32_t len) {
+    udf_crc_init();
     uint16_t crc = 0;
     for (uint32_t i = 0; i < len; i++) {
         crc = udf_crc_table[((crc >> 8) ^ data[i]) & 0xFF] ^ (crc << 8);
@@ -123,7 +116,30 @@ int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp) {
         }
     }
     
-    /* TODO: Try last sector and last-256 for completeness */
+    /* Try last sector and last-256 for completeness */
+    if (dev->length >= UDF_SECTOR_SIZE) {
+        uint32_t last_sector = (uint32_t)((uint64_t)dev->length / UDF_SECTOR_SIZE) - 1;
+
+        /* Try last sector */
+        if (last_sector > UDF_AVDP_SECTOR) {
+            if (udf_read_tag(dev, last_sector, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
+                if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
+                    memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+                    return 0;
+                }
+            }
+        }
+
+        /* Try last-256 sector */
+        if (last_sector > UDF_AVDP_SECTOR + 256) {
+            if (udf_read_tag(dev, last_sector - 256, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
+                if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
+                    memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+                    return 0;
+                }
+            }
+        }
+    }
     
     kprint("UDF: AVDP not found\n");
     return -1;
@@ -316,6 +332,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
 /* External functions from udf_write.c */
 extern int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
 extern uint32_t udf_alloc_block(void);
+extern void udf_free_block(uint32_t block);
 extern int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type, uint32_t uid, uint32_t gid, uint32_t permissions);
 extern int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics);
 
@@ -468,7 +485,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     
     /* Create new directory FE */
     if (udf_create_fe(fs->device, block, UDF_FILETYPE_DIR, uid, gid, permission) != 0) {
-        // TODO: Free block
+        udf_free_block(block);
         return -1;
     }
     
@@ -481,6 +498,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     
     /* Add entry to parent directory */
     if (udf_add_fid(fs->device, &pctx->fe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
+        udf_free_block(block);
         return -1;
     }
     

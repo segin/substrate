@@ -449,10 +449,10 @@ int sys_sigreturn(void *scp_ptr) {
         return -1;  /* EINVAL */
     }
     
-    registers_t *syscall_regs = (registers_t *)current_thread->syscall_regs;
-    if (!syscall_regs) {
+    if (!current_thread || !current_thread->syscall_regs) {
         return -1;  /* Internal error */
     }
+    registers_t *syscall_regs = (registers_t *)current_thread->syscall_regs;
     
     /*
      * Copy sigcontext from user space to kernel buffer
@@ -568,10 +568,10 @@ int sys_rt_sigreturn(void *ucp_ptr) {
         return -1;  /* EINVAL */
     }
     
-    registers_t *syscall_regs = (registers_t *)current_thread->syscall_regs;
-    if (!syscall_regs) {
+    if (!current_thread || !current_thread->syscall_regs) {
         return -1;  /* Internal error */
     }
+    registers_t *syscall_regs = (registers_t *)current_thread->syscall_regs;
     
     /*
      * Copy ucontext from user space to kernel buffer

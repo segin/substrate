@@ -331,4 +331,28 @@ struct udf_fid {
 #define UDF_FID_DELETED     (1 << 2)
 #define UDF_FID_PARENT      (1 << 3)
 
+/* Space Bitmap Descriptor (for unallocated space tracking) */
+struct udf_space_bitmap {
+    struct udf_tag tag;
+    uint32_t num_bits;       /* Number of bits in bitmap */
+    uint32_t num_bytes;      /* Number of bytes in bitmap */
+    /* Followed by bitmap data */
+} __attribute__((packed));
+
+struct fs_node;
+
+/* UDF filesystem context */
+struct udf_fs {
+    struct fs_node *device;         /* Block device */
+    uint32_t sector_size;           /* Usually 2048 */
+    uint32_t partition_start;       /* First sector of partition */
+    uint32_t partition_length;      /* Partition length in sectors */
+    uint32_t logical_block_size;    /* From LVD */
+    struct udf_long_ad root_icb;    /* Root directory location */
+};
+
+/* Helper functions exposed for write support */
+uint8_t udf_tag_checksum(struct udf_tag *tag);
+uint16_t udf_crc(const uint8_t *data, uint32_t len);
+
 #endif /* _FS_UDF_UDF_H */

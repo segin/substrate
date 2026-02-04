@@ -19,7 +19,7 @@
 #define SEEK_CUR 1
 #define SEEK_END 2
 
-typedef struct {
+typedef struct FILE {
     int fd;
     int flags;     // RW, APPEND, etc.
     int mode;      // Buffering mode
@@ -35,6 +35,9 @@ typedef struct {
     
     int unget_char; // Single char pushback (simplified)
     int has_unget;
+
+    struct FILE *next;
+    struct FILE *prev;
 } FILE;
 
 extern FILE *stdin;

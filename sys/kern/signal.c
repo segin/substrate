@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <pm/pm.h>
 #include <exec/perso/personality.h>
+#include <sys/time.h>
+#include <kern/time.h>
 
 extern thread_t threads[MAX_THREADS];
 
@@ -141,22 +143,47 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
     
     if (wait_mask == 0) return -22; // EINVAL
     
-    // TODO: Implement proper timeout handling using kernel tick counter
-    // For now, if timeout is NULL, wait indefinitely
-    // If timeout is specified but we can't implement it, treat as no-wait
-    (void)timeout; // Placeholder
+    uint64_t deadline = 0;
+    int use_timeout = 0;
+
+    if (timeout) {
+        const struct timespec *ts = (const struct timespec *)timeout;
+        if (ts->tv_nsec < 0 || ts->tv_nsec >= 1000000000) return -22; // EINVAL
+
+        uint32_t hz = get_hz();
+        uint64_t ticks = ts->tv_sec * hz;
+        ticks += ((uint64_t)ts->tv_nsec * hz) / 1000000000;
+
+        deadline = get_ticks() + ticks;
+        use_timeout = 1;
+    }
     
     // Check for immediately available signal
     uint32_t deliverable = current_thread->sig_pending & wait_mask;
     
-    if (!deliverable && timeout != NULL) {
-        // Non-blocking check failed
-        return -11; // EAGAIN
+    if (!deliverable && use_timeout) {
+        uint64_t now = get_ticks();
+        if (now >= deadline) {
+             return -11; // EAGAIN
+        }
     }
     
     // Block until signal available (if no timeout)
     while (!deliverable) {
+        if (use_timeout) {
+            uint64_t now = get_ticks();
+            if (now >= deadline) {
+                 return -11; // EAGAIN
+            }
+            current_thread->sleep_expiry = deadline;
+        }
+
         sched_sleep(&current_thread->sig_pending);
+
+        if (use_timeout) {
+            current_thread->sleep_expiry = 0;
+        }
+
         deliverable = current_thread->sig_pending & wait_mask;
         
         // Check for interruption by other signals
@@ -208,10 +235,20 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
 void psignal(process_t *p, int sig) {
     /* Validate process pointer and signal number */
     if (!p || sig <= 0 || sig > NSIG) return;
+
+    /* Ignore signals if process is already exiting or a zombie */
+    if (p->state == SDYING || p->state == SZOMB) {
+        return;
+    }
     
     /* Init Protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1 */
     if (p->pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
-        return;
+        // Allow delivery if explicit handler is installed (not SIG_DFL)
+        // Note: SIGKILL/SIGSTOP cannot usually be caught, so they remain blocked here
+        // unless sys_sigaction laws change. SIGTERM can be caught.
+        if (p->sig_actions[sig - 1].sa_handler == SIG_DFL) {
+            return;
+        }
     }
 
     /* Handle SIGCONT: Resume stopped process and clear pending stop signals */
@@ -503,6 +540,12 @@ void signal_handle_pending(registers_t *regs) {
         
         // Job Control Stops
         if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
+             // Orphaned process groups ignore these signals
+             extern int pgrp_is_orphaned(struct pgrp *pgrp);
+             if (current_process->p_pgrp && pgrp_is_orphaned(current_process->p_pgrp)) {
+                 return;
+             }
+
              // Stop the thread and process
              // kprint("Process stopped by signal\n");
              current_thread->state = THREAD_STOPPED;

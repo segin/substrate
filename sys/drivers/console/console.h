@@ -40,7 +40,9 @@ fs_node_t *console_get_node(void);
 void kprint(const char *str);
 int kprintf(const char *fmt, ...);
 char *kasprintf(const char *fmt, ...);
+#ifndef HOST_TEST
 char *vasprintf(const char *fmt, __builtin_va_list ap);
+#endif
 
 struct process;
 // Attach console to a process's FDs 0, 1, 2

@@ -1,0 +1,208 @@
+make: Entering directory '/home/segin/test/sys'
+Building Kernel Libraries...
+Building Kernel Subsystems...
+Building Process Manager...
+Building Kernel for i386...
+Building FS...
+make -C arch/i386
+make -C lib
+make -C kern
+Building Exec Loaders...
+make -C pm
+make -C fs
+make -C exec/formats
+make[1]: Entering directory '/home/segin/test/sys/arch/i386'
+make[1]: Entering directory '/home/segin/test/sys/fs'
+make[1]: Entering directory '/home/segin/test/sys/pm'
+make[1]: Entering directory '/home/segin/test/sys/kern'
+Building VFS...
+make[1]: Entering directory '/home/segin/test/sys/lib'
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I/home/segin/test/sys/include -I/home/segin/test/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I/home/segin/test/sys -I. -I../x86-common/include -Ifpu   -c -o syscall.o syscall.c
+Building Personalities...
+make -C vfs
+make -C exec/perso
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/kern'
+make[1]: Entering directory '/home/segin/test/sys/exec/formats'
+make[1]: Entering directory '/home/segin/test/sys/vfs'
+make[1]: Entering directory '/home/segin/test/sys/exec/perso'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/exec/formats'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/pm'
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I/home/segin/test/sys/include -I/home/segin/test/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I/home/segin/test/sys -I. -I../x86-common/include -Ifpu   -c -o pmap.o pmap.c
+make[1]: Nothing to be done for 'all'.
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/fs'
+make[1]: Leaving directory '/home/segin/test/sys/lib'
+make -C ../tests/sys
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I/home/segin/test/sys/include -I/home/segin/test/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I/home/segin/test/sys -I. -I../x86-common/include -Ifpu   -c -o vm86.o vm86.c
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/vfs'
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I/home/segin/test/sys/include -I/home/segin/test/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I/home/segin/test/sys -I. -I../x86-common/include -Ifpu   -c -o signal.o signal.c
+Building Drivers...
+Building VM Subsystem...
+make -C drivers/video
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/exec/perso'
+make -C vm
+make[1]: Entering directory '/home/segin/test/sys/drivers/video'
+make[1]: Entering directory '/home/segin/test/tests/sys'
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_runner.o test_runner.c
+make[1]: Entering directory '/home/segin/test/sys/vm'
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I/home/segin/test/sys/include -I/home/segin/test/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I/home/segin/test/sys -I. -I../x86-common/include -Ifpu   -c -o early_boot.o early_boot.c
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/drivers/video'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/vm'
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_pmap.o test_pmap.c
+syscall.c: In function ‘sys_set_thread_area’:
+syscall.c:102:37: error: dereferencing ‘void *’ pointer [-Werror]
+  102 |         current_thread->syscall_regs->gs = selector;
+      |                                     ^~
+syscall.c:102:37: error: request for member ‘gs’ in something not a structure or union
+make -C drivers/input
+cc1: all warnings being treated as errors
+make[1]: Entering directory '/home/segin/test/sys/drivers/input'
+make[1]: *** [<builtin>: syscall.o] Error 1
+make[1]: *** Waiting for unfinished jobs....
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_vm_expanded.o test_vm_expanded.c
+vm86.c: In function ‘vm86_bios_call’:
+vm86.c:410:20: error: ‘kpmap’ undeclared (first use in this function); did you mean ‘pmap’?
+  410 |         pmap_enter(kpmap, i, i, VM_PROT_ALL, 0); // User accessible for VM86
+      |                    ^~~~~
+      |                    pmap
+vm86.c:410:20: note: each undeclared identifier is reported only once for each function it appears in
+vm86.c:410:27: error: ‘i’ undeclared (first use in this function)
+  410 |         pmap_enter(kpmap, i, i, VM_PROT_ALL, 0); // User accessible for VM86
+      |                           ^
+vm86.c:405:24: error: unused parameter ‘int_no’ [-Werror=unused-parameter]
+  405 | int vm86_bios_call(int int_no, struct vm86_regs *regs) {
+      |                    ~~~~^~~~~~
+vm86.c:405:50: error: unused parameter ‘regs’ [-Werror=unused-parameter]
+  405 | int vm86_bios_call(int int_no, struct vm86_regs *regs) {
+      |                                ~~~~~~~~~~~~~~~~~~^~~~
+vm86.c: At top level:
+vm86.c:415:23: error: expected declaration specifiers or ‘...’ before ‘&’ token
+  415 |     vm86_monitor_init(&mon);
+      |                       ^
+vm86.c:416:8: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘.’ token
+  416 |     mon.in_kernel_bios = 1;
+      |        ^
+vm86.c:420:12: error: expected declaration specifiers or ‘...’ before ‘&’ token
+  420 |     memset(&info, 0, sizeof(info));
+      |            ^
+vm86.c:420:19: error: expected declaration specifiers or ‘...’ before numeric constant
+  420 |     memset(&info, 0, sizeof(info));
+      |                   ^
+vm86.c:420:22: error: expected declaration specifiers or ‘...’ before ‘sizeof’
+  420 |     memset(&info, 0, sizeof(info));
+      |                      ^~~~~~
+vm86.c:421:5: error: expected identifier or ‘(’ before ‘if’
+  421 |     if (regs) info.regs = *regs;
+      |     ^~
+vm86.c:428:9: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘.’ token
+  428 |     info.regs.esp = stack_base;
+      |         ^
+vm86.c:429:9: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘.’ token
+  429 |     info.regs.ss  = 0x0000;
+      |         ^
+vm86.c:430:9: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘.’ token
+  430 |     info.regs.cs  = 0x0000;
+      |         ^
+vm86.c:431:9: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘.’ token
+  431 |     info.regs.eip = code_base;
+      |         ^
+vm86.c:434:21: error: initializer element is not constant
+  434 |     uint8_t *stub = (uint8_t*)code_base; // Identity mapped
+      |                     ^
+vm86.c:435:5: error: data definition has no type or storage class [-Werror]
+  435 |     stub[0] = 0xCD;       // INT
+      |     ^~~~
+vm86.c:435:5: error: type defaults to ‘int’ in declaration of ‘stub’ [-Wimplicit-int]
+vm86.c:435:5: error: conflicting types for ‘stub’; have ‘int[0]’
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/drivers/input'
+make -C drivers/storage
+vm86.c:434:14: note: previous definition of ‘stub’ with type ‘uint8_t *’ {aka ‘unsigned char *’}
+  434 |     uint8_t *stub = (uint8_t*)code_base; // Identity mapped
+      |              ^~~~
+vm86.c:436:5: error: data definition has no type or storage class [-Werror]
+  436 |     stub[1] = int_no;     // imm8
+      |     ^~~~
+vm86.c:436:5: error: type defaults to ‘int’ in declaration of ‘stub’ [-Wimplicit-int]
+vm86.c:436:15: error: ‘int_no’ undeclared here (not in a function)
+  436 |     stub[1] = int_no;     // imm8
+      |               ^~~~~~
+vm86.c:437:5: error: data definition has no type or storage class [-Werror]
+  437 |     stub[2] = 0xF4;       // HLT
+      |     ^~~~
+vm86.c:437:5: error: type defaults to ‘int’ in declaration of ‘stub’ [-Wimplicit-int]
+vm86.c:441:14: error: expected declaration specifiers or ‘...’ before ‘&’ token
+  441 |     sys_vm86(&info);
+      |              ^
+vm86.c:452:5: error: expected identifier or ‘(’ before ‘return’
+  452 |     return 0;
+      |     ^~~~~~
+vm86.c:453:1: error: expected identifier or ‘(’ before ‘}’ token
+  453 | }
+      | ^
+vm86.c: In function ‘vm86_bios_call’:
+vm86.c:411:5: error: control reaches end of non-void function [-Werror=return-type]
+  411 |     }
+      |     ^
+cc1: all warnings being treated as errors
+make[1]: *** [<builtin>: vm86.o] Error 1
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_unlink.o test_unlink.c
+make[1]: Entering directory '/home/segin/test/sys/drivers/storage'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/drivers/storage'
+make -C drivers/devices
+make[1]: Entering directory '/home/segin/test/sys/drivers/devices'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/drivers/devices'
+make -C drivers/virtio
+make[1]: Entering directory '/home/segin/test/sys/drivers/virtio'
+make[1]: 'virtio_drv.o' is up to date.
+make[1]: Leaving directory '/home/segin/test/sys/drivers/virtio'
+make -C drivers/console
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o property_unlink.o property_unlink.c
+make[1]: Entering directory '/home/segin/test/sys/drivers/console'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/drivers/console'
+make -C drivers/console/uart
+make[1]: Entering directory '/home/segin/test/sys/drivers/console/uart'
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_vm_map.o test_vm_map.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_vm_map_benchmark.o test_vm_map_benchmark.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_uma.o test_uma.c
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/home/segin/test/sys/drivers/console/uart'
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_e820_parsing.o test_e820_parsing.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_vfs_mkdir.o test_vfs_mkdir.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_minix_mount.o test_minix_mount.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_minix_write.o test_minix_write.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_minix_inode.o test_minix_inode.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_mount.o test_mount.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_driver_attach.o test_driver_attach.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_driver_detach.o test_driver_detach.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_udf_write.o test_udf_write.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_sigstop.o test_sigstop.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_bus_match.o test_bus_match.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_driver_override.o test_driver_override.c
+make[1]: Leaving directory '/home/segin/test/sys/arch/i386'
+make: *** [Makefile:68: arch_kernel] Error 2
+make: *** Waiting for unfinished jobs....
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_vfs_error.o test_vfs_error.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_console_perf.o test_console_perf.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_sysinfo.o test_sysinfo.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_kthread_create.o test_kthread_create.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_fb_perf.o test_fb_perf.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_string.o test_string.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_sysctl.o test_sysctl.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_pmap_cow_perf.o test_pmap_cow_perf.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_ide_perf.o test_ide_perf.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o test_ext2_perf.o test_ext2_perf.c
+cc -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../include -I../../sys/include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../.. -I../../include   -c -o bench_sched.o bench_sched.c
+ld -m elf_i386 -nostdlib -r -o tests.o test_runner.o test_pmap.o property_pmap_protect.o test_vm_expanded.o test_pid.o test_unlink.o property_unlink.o test_link.o property_link.o test_cow_stats.o test_vm_map.o test_vm_map_benchmark.o test_vm_object.o test_vm_fault.o test_vm_cow.o test_vm_pager.o test_vm_policy.o test_uma.o test_futex.o test_ntsync.o test_geom.o test_pte_user.o test_stacktrace.o test_ksyms.o test_mmap_parsing.o test_e820_parsing.o test_vm_phys.o test_vm_page_queue.o test_vfs_mkdir.o test_scsi.o test_signal.o test_bitness.o test_rng.o test_ps2.o test_minix_mount.o test_minix_write.o test_minix_inode.o test_mount.o test_device_struct.o test_driver_struct.o test_bus_struct.o test_resource_struct.o test_device_create.o test_device_register.o test_device_unregister.o test_device_refcount.o test_device_find_child.o test_driver_register.o test_driver_unregister.o test_driver_attach.o test_driver_detach.o test_printf_new.o test_udf_write.o test_sigstop.o test_bus_match.o test_driver_override.o test_vfs_error.o test_console_perf.o test_sysinfo.o test_kthread_create.o test_fb_perf.o test_string.o test_sysctl.o test_pmap_cow_perf.o test_ide_perf.o test_ext2_perf.o bench_sched.o
+make[1]: Leaving directory '/home/segin/test/tests/sys'
+make: Leaving directory '/home/segin/test/sys'
