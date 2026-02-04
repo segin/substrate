@@ -1,0 +1,5 @@
+echo "Before exec"
+sh -c "exec echo Executed"
+echo "After exec subshell"
+exec echo "Final exec"
+echo "Should not print"

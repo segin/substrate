@@ -34,6 +34,11 @@ void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t
     outl(PCI_CONFIG_DATA, val);
 }
 
+static pci_device_t *pci_devices_head = NULL;
+static pci_device_t *pci_devices_tail = NULL;
+
+extern void *kmalloc(size_t size);
+
 void pci_check_device(uint8_t bus, uint8_t device) {
     uint8_t function = 0;
  
@@ -48,6 +53,24 @@ void pci_check_device(uint8_t bus, uint8_t device) {
     sprintf(buf, "PCI %02x:%02x.0 %04x:%04x [%04x]\n", 
             bus, device, vendorID, deviceID, classCode);
     kprint(buf);
+
+    pci_device_t *dev = (pci_device_t *)kmalloc(sizeof(pci_device_t));
+    if (dev) {
+        dev->bus = bus;
+        dev->slot = device;
+        dev->func = function;
+        dev->vendor_id = (uint16_t)vendorID;
+        dev->device_id = (uint16_t)deviceID;
+        dev->class_code = classCode;
+        dev->next = NULL;
+
+        if (pci_devices_tail) {
+            pci_devices_tail->next = dev;
+        } else {
+            pci_devices_head = dev;
+        }
+        pci_devices_tail = dev;
+    }
 }
 
 void pci_scan(void) {
@@ -56,6 +79,17 @@ void pci_scan(void) {
             pci_check_device(bus, device);
         }
     }
+}
+
+pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id, pci_device_t *from) {
+    pci_device_t *curr = from ? from->next : pci_devices_head;
+    while (curr) {
+        if (curr->vendor_id == vendor_id && (device_id == 0xFFFF || curr->device_id == device_id)) {
+            return curr;
+        }
+        curr = curr->next;
+    }
+    return NULL;
 }
 
 void pci_init(void) {

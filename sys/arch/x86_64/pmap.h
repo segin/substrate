@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/queue.h>
+#include <sys/lock.h>
 
 // x86_64 Page Table Flags
 #define PTE_P           0x001UL    // Present
@@ -32,20 +34,6 @@ typedef uint64_t pte_t;
 #define RECURSIVE_SLOT  510UL
 
 // Sign-extended base for slot 510: 0xFFFFFF0000000000
-// V_PT:   510 -> i -> j -> k  (0xFFFFFF0000000000 + offset)
-// V_PD:   510 -> 510 -> i -> j (0xFFFFFF7F80000000)
-// V_PDPT: 510 -> 510 -> 510 -> i (0xFFFFFF7FBFC00000)
-// V_PML4: 510 -> 510 -> 510 -> 510 (0xFFFFFF7FBFDFE000) -> Wait, let me accept the user's logic or recalc.
-
-// Recalculating for 510:
-// PML4 Self-Map (V_PML4): Indices 510, 510, 510, 510
-// 0xFFFF_FFFF_FFFF_F000 ?? No.
-// Let's rely on standard logic:
-// V_PT   Base: 0xFFFF_FF00_0000_0000 (PML4=510)
-// V_PD   Base: 0xFFFF_FF80_0000_0000 (PML4=510, PDPT=510) --> 0x1FE<<30 + sign ext.
-// V_PDPT Base: 0xFFFF_FFC0_0000_0000 (PML4=510, PDPT=510, PD=510) --> 0x1FE<<21
-// V_PML4 Base: 0xFFFF_FFE0_0000_0000 (PML4=510, PDPT=510, PD=510, PT=510) --> 0x1FE<<12
-
 #define PG_V_PT     0xFFFFFF0000000000UL
 #define PG_V_PD     0xFFFFFF8000000000UL
 #define PG_V_PDPT   0xFFFFFFC000000000UL
@@ -66,13 +54,9 @@ typedef uint64_t pte_t;
 #define V_PT_INDEX(i,j,k,l)    ((pte_t *)(PG_V_PT + ((uint64_t)(i) << 30) + ((uint64_t)(j) << 21) + ((uint64_t)(k) << 12) + ((uint64_t)(l) * 8)))
 
 // Simplified access assuming we know the VA parts
-// But simpler to use standard addresses + va offsets?
-// For logic reuse:
 #define V_PML4       ((pml4e_t *)PG_V_PML4)
 // These take indices into PML4/PDPT/PD
 #define V_PDPT(pml4i)       V_PDPT_INDEX(pml4i, 0) // Points to base of PDPT page for pml4i? Warning: This must return a page-aligned pointer to the table? 
-// No. V_PDPT(pml4i) should return the PDPT page array.
-// V_PDPT_INDEX(pml4i, j) returns pointer to entry j.
 
 #define PML4_INDEX(va)  (((va) >> 39) & 0x1FF)
 #define PDPT_INDEX(va)  (((va) >> 30) & 0x1FF)
@@ -104,12 +88,14 @@ struct pmap {
     int lock;              // SMP lock
     int asid;              // Address Space ID
     
-    struct {
-        struct pmap *next;
-        struct pmap *prev;
-    } list_entry;          // Global pmap list
+    TAILQ_ENTRY(pmap) list_entry; // Global pmap list
 };
 typedef struct pmap *pmap_t;
+
+// Global pmap list
+TAILQ_HEAD(pmap_list, pmap);
+extern struct pmap_list global_pmap_list;
+extern spinlock_t pmap_list_lock;
 
 // Initialization
 void pmap_init(void);
