@@ -25,6 +25,46 @@ static fs_node_t *ext2_finddir(fs_node_t *node, char *name);
 static int ext2_readlink_fn(fs_node_t *node, char *buf, size_t size);
 uint32_t ext2_alloc_block(ext2_fs_t *fs);
 
+// Helper to find a zero bit in a bitmap range
+static int find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx) {
+    uint32_t *bitmap32 = (uint32_t *)bitmap;
+    uint32_t i = start;
+
+    if (end > total_bits) end = total_bits;
+
+    // Align to 32 bits
+    while (i < end && (i & 31)) {
+        uint32_t byte_idx = i / 8;
+        uint32_t bit_idx = i % 8;
+
+        if (!(((uint8_t*)bitmap)[byte_idx] & (1 << bit_idx))) {
+            *found_idx = i;
+            return 1;
+        }
+        i++;
+    }
+
+    // Fast path: skip full words
+    for (; i + 32 <= end; i += 32) {
+        if (bitmap32[i / 32] != 0xFFFFFFFF) {
+            break;
+        }
+    }
+
+    // Slow path for remaining bits
+    for (; i < end; i++) {
+        uint32_t byte_idx = i / 8;
+        uint32_t bit_idx = i % 8;
+
+        if (!(((uint8_t*)bitmap)[byte_idx] & (1 << bit_idx))) {
+            *found_idx = i;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 // Read a block from the device
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
     if (!fs || !fs->device || !fs->device->read) return 0;
@@ -682,12 +722,9 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     uint8_t *bitmap_buf = kmalloc(4096);
     if (!bitmap_buf) return 0;
     
-    uint32_t start_group = fs->last_alloc_group;
-    uint32_t group = start_group;
-
-    // Search each block group for a free block, starting from hint
+    // Search each block group for a free block, starting from last allocation
     for (uint32_t k = 0; k < fs->group_count; k++) {
-        group = (start_group + k) % fs->group_count;
+        uint32_t group = (fs->last_alloc_group + k) % fs->group_count;
 
         if (fs->bgd[group].bg_free_blocks_count == 0) continue;
         
@@ -697,81 +734,44 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
         }
         
         uint32_t bits_in_group = fs->blocks_per_group;
-        uint32_t i = 0;
+        uint32_t start_bit = (group == fs->last_alloc_group) ? fs->last_alloc_bit : 0;
+        uint32_t found_idx = 0;
+        int found = 0;
 
-        // Use hint if we are in the hinted group
-        if (group == fs->last_alloc_group) {
-            i = fs->last_alloc_bit;
-            if (i >= bits_in_group) i = 0;
+        // Pass 1: Search from start_bit to end
+        if (find_next_zero_bit(bitmap_buf, bits_in_group, start_bit, bits_in_group, &found_idx)) {
+            found = 1;
+        }
+        // Pass 2: Search from 0 to start_bit (wrap around within group)
+        else if (start_bit > 0 && find_next_zero_bit(bitmap_buf, bits_in_group, 0, start_bit, &found_idx)) {
+            found = 1;
         }
 
-        uint32_t *bitmap32 = (uint32_t *)bitmap_buf;
-
-        // Search loop with wrapping support within the group
-        for (int pass = 0; pass < 2; pass++) {
-            // If pass 0: scan i..limit
-            // If pass 1: scan 0..i
-
-            uint32_t limit = (pass == 0) ? bits_in_group : i;
-            uint32_t current_i = (pass == 0) ? i : 0;
-
-            if (pass == 1 && i == 0) break; // No need to scan 0..0
-
-            uint32_t j = current_i;
-
-            // Align to 32 bits if possible
-            while (j < limit && (j % 32) != 0) {
-                 uint32_t byte_idx = j / 8;
-                 uint32_t bit_idx = j % 8;
-                 if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) goto found;
-                 j++;
-            }
-
-            // Skip full words
-            for (; j + 32 <= limit; j += 32) {
-                if (bitmap32[j / 32] != 0xFFFFFFFF) {
-                    break;
-                }
-            }
+        if (found) {
+            uint32_t byte_idx = found_idx / 8;
+            uint32_t bit_idx = found_idx % 8;
             
-            // Check remaining bits
-            for (; j < limit; j++) {
-                uint32_t byte_idx = j / 8;
-                uint32_t bit_idx = j % 8;
+            // Mark as used
+            bitmap_buf[byte_idx] |= (1 << bit_idx);
 
-                if (!(bitmap_buf[byte_idx] & (1 << bit_idx))) {
-                    goto found;
-                }
-            }
+            // Write bitmap back
+            ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
 
-            continue;
+            // Update block group descriptor
+            fs->bgd[group].bg_free_blocks_count--;
 
-            found: {
-                 uint32_t byte_idx = j / 8;
-                 uint32_t bit_idx = j % 8;
+            // Calculate absolute block number
+            uint32_t block_num = group * fs->blocks_per_group + found_idx + fs->sb.s_first_data_block;
 
-                // Found free block - allocate it
-                bitmap_buf[byte_idx] |= (1 << bit_idx);
-                
-                // Write bitmap back
-                ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
-                
-                // Update block group descriptor
-                fs->bgd[group].bg_free_blocks_count--;
-                
-                // Calculate absolute block number
-                uint32_t block_num = group * fs->blocks_per_group + j + fs->sb.s_first_data_block;
-                
-                // Update superblock free blocks count
-                fs->sb.s_free_blocks_count--;
-                
-                // Update hints
-                fs->last_alloc_group = group;
-                fs->last_alloc_bit = (j + 1) % bits_in_group;
+            // Update superblock free blocks count
+            fs->sb.s_free_blocks_count--;
 
-                kfree(bitmap_buf, 4096);
-                return block_num;
-            }
+            // Update hints
+            fs->last_alloc_group = group;
+            fs->last_alloc_bit = (found_idx + 1) % bits_in_group;
+
+            kfree(bitmap_buf, 4096);
+            return block_num;
         }
     }
     
