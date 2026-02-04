@@ -5,6 +5,7 @@
  */
 
 #include <vm/uma.h>
+#include <vm/vm_kmem.h>
 #include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <stddef.h>
@@ -74,12 +75,11 @@ void uma_startup(void) {
     uma_bucket_idx = 0;
     uma_zones = NULL;
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
-    uma_dynamic_alloc = false;
     kprint("UMA: subsystem initialized\n");
 }
 
 /*
- * Enable dynamic allocation (called by kmem after initialization)
+ * Enable dynamic allocation of zone structures (called by kmem_init)
  */
 void uma_enable_dynamic_alloc(void) {
     uma_dynamic_alloc = true;
@@ -118,17 +118,12 @@ uma_zone_t *uma_zcreate(
         if (uma_bootstrap_idx < UMA_BOOTSTRAP_ZONES) {
             zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * sizeof(uma_zone_t)];
             uma_bootstrap_idx++;
+            memset(zone, 0, sizeof(uma_zone_t));
         } else {
             kprint("UMA: Bootstrap zones exhausted!\n");
             return NULL;
         }
-    } else {
-        zone = kmalloc(sizeof(uma_zone_t));
-        if (!zone) return NULL;
     }
-    
-    /* Initialize zone */
-    memset(zone, 0, sizeof(uma_zone_t));
     zone->uz_name = name;
     zone->uz_size = size;
     zone->uz_flags = flags;
