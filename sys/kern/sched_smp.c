@@ -13,7 +13,7 @@
 
 // Per-CPU runqueues
 static runqueue_t cpu_runqueues[MAX_CPUS];
-static int num_cpus = 1;
+int num_cpus = 1;
 
 // Initialize per-CPU runqueues
 void sched_smp_init(int cpu_count) {
