@@ -263,6 +263,13 @@ void fb_clear(uint32_t color) {
 /* Track the currently active driver */
 static video_driver_t *current_driver = NULL;
 
+int video_set_viewport(int x, int y) {
+    if (current_driver && current_driver->set_viewport) {
+        return current_driver->set_viewport(x, y);
+    }
+    return -1;
+}
+
 static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
     if (request == FBIOGET_VSCREENINFO) {

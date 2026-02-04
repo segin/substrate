@@ -31,10 +31,18 @@ static int view_y_offset = 0; /* Current hardware scroll offset */
 extern fb_info_t fb;
 extern int fb_active;
 
+/* Access to current driver for set_viewport via video_set_viewport() in fb.c */
+
 /* ==================== Console Backend ==================== */
 
 static void fb_console_clear(void) {
     fb_clear(FB_COLOR_BLACK);
+    cursor_x = 0;
+    cursor_y = 0;
+    view_y_offset = 0;
+    if (video_set_viewport(0, 0) != 0) {
+        // failed or not supported
+    }
 }
 
 static console_backend_t fb_console_backend = {
@@ -61,6 +69,11 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
         cursor_x = 0;
     } else {
         /* Draw Character */
+        /* Adjusted for view_y_offset?
+           No, putpixel coords are absolute in FB memory.
+           cursor_y tracks absolute Y in FB memory.
+           view_y_offset tracks where the screen starts displaying.
+        */
         const uint8_t *glyph = &font_8x16[(unsigned char)c * 16];
         int draw_y = cursor_y + view_y_offset;
 
@@ -140,6 +153,7 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
             /* Clear bottom line */
             uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
             for (uint32_t y = fb.height - FB_FONT_HEIGHT; y < fb.height; y++) {
+                // Optimized fill could go here, but per-pixel is safe
                 for (uint32_t x = 0; x < fb.width; x++) {
                     fb_putpixel(x, y, clear_color);
                 }

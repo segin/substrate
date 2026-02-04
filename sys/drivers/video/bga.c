@@ -96,15 +96,13 @@ int bga_init(fb_info_t *fb_out) {
     // Set resolution: 1024x768x32
     uint16_t width = 1024;
     uint16_t height = 768;
+    uint16_t virt_height = height * 2; // Double buffering for scrolling
     uint16_t bpp = 32;
 
     bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
     bga_write(VBE_DISPI_INDEX_XRES, width);
     bga_write(VBE_DISPI_INDEX_YRES, height);
     bga_write(VBE_DISPI_INDEX_BPP, bpp);
-
-    /* Enable Virtual Height (Double Buffering / Scrolling) */
-    uint16_t virt_height = height * 2;
     bga_write(VBE_DISPI_INDEX_VIRT_WIDTH, width);
     bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, virt_height);
     bga_write(VBE_DISPI_INDEX_X_OFFSET, 0);
@@ -116,14 +114,20 @@ int bga_init(fb_info_t *fb_out) {
     fb_out->addr = (uint32_t*)bga_lfb_addr;
     fb_out->width = width;
     fb_out->height = height;
+    fb_out->virt_height = virt_height;
     fb_out->bpp = bpp;
     fb_out->pitch = (width * bpp) / 8;
-    fb_out->virt_height = virt_height;
 
     /* Implement Hardware Scroll */
     fb_out->scroll = bga_scroll;
 
     kprint("BGA: Mode set to 1024x768x32 (HW Scroll Enabled).\n");
+    return 0;
+}
+
+static int bga_set_viewport(int x, int y) {
+    bga_write(VBE_DISPI_INDEX_X_OFFSET, (uint16_t)x);
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, (uint16_t)y);
     return 0;
 }
 
@@ -135,7 +139,8 @@ static video_driver_t bga_driver = {
     .name = "bga",
     .priority = 50,
     .probe = bga_is_available,
-    .init = bga_init
+    .init = bga_init,
+    .set_viewport = bga_set_viewport
 };
 
 void bga_install(void) {
