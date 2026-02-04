@@ -2,6 +2,8 @@
 #include <kern/console.h>
 #include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
+#include <sys/stat.h>
+#include <kern/time.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -24,7 +26,6 @@ static int minix_unmount(fs_node_t *root);
 /* Inode reading helper */
 static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node);
 static int minix_write_inode(minix_fs_t *fs, fs_node_t *node);
-static int minix_write_inode_raw(minix_fs_t *fs, uint32_t inode_num, struct minix_inode_v1 *inode);
 
 /* Filesystem definition */
 static filesystem_t minix_fs = {
@@ -559,24 +560,6 @@ static int minix_alloc_inode(minix_fs_t *fs) {
     return -1;
 }
 
-static int minix_write_inode_raw(minix_fs_t *fs, uint32_t inode_num, struct minix_inode_v1 *inode) {
-    uint32_t inode_start_block = 2 + fs->sb.s_imap_blocks + fs->sb.s_zmap_blocks;
-    uint32_t inodes_per_block = MINIX_BLOCK_SIZE / sizeof(struct minix_inode_v1);
-    uint32_t block = inode_start_block + (inode_num - 1) / inodes_per_block;
-    uint32_t offset = ((inode_num - 1) % inodes_per_block) * sizeof(struct minix_inode_v1);
-
-    uint8_t buf[MINIX_BLOCK_SIZE];
-    if (read_fs(fs->block_device, block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) {
-        return -1;
-    }
-
-    memcpy(buf + offset, inode, sizeof(struct minix_inode_v1));
-
-    if (write_fs(fs->block_device, block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) {
-        return -1;
-    }
-    return 0;
-}
 
 static int minix_dir_add(fs_node_t *dir, const char *name, uint32_t inode_num) {
     struct minix_dirent_v1 entry;
@@ -620,25 +603,60 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
     int inode_num = minix_alloc_inode(fs);
     if (inode_num < 0) return -1;
 
-    // 2. Create Inode Structure
-    struct minix_inode_v1 inode;
-    memset(&inode, 0, sizeof(inode));
-    inode.i_mode = mode;
-    inode.i_uid = 0; // Default root? or copy from dir?
-    inode.i_gid = 0;
-    inode.i_nlinks = 1; // Link count 1 (from directory)
-    inode.i_time = 0; // TODO: Get current time
-    inode.i_zone[0] = (uint16_t)dev;
+    // 2. Prepare FS Node wrapper
+    fs_node_t new_node;
+    memset(&new_node, 0, sizeof(fs_node_t));
+    new_node.inode = (uint64_t)inode_num;
+    new_node.impl = (uintptr_t)fs;
 
-    // 3. Write Inode
-    if (minix_write_inode_raw(fs, inode_num, &inode) != 0) {
-        // TODO: Free inode (clear bit)
+    // Set type flags
+    if (S_ISDIR(mode)) new_node.flags = FS_DIRECTORY;
+    else if (S_ISCHR(mode)) new_node.flags = FS_CHARDEVICE;
+    else if (S_ISBLK(mode)) new_node.flags = FS_BLOCKDEVICE;
+    else if (S_ISREG(mode)) new_node.flags = FS_FILE;
+    else if (S_ISFIFO(mode)) new_node.flags = FS_PIPE;
+    else if (S_ISLNK(mode)) new_node.flags = FS_SYMLINK;
+    else new_node.flags = 0;
+
+    new_node.mask = mode & 0xFFF;
+    new_node.uid = dir->uid;
+    new_node.gid = dir->gid;
+    new_node.length = 0;
+
+    // 3. Allocate and Initialize Cached Raw Inode
+    bool v2 = (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14);
+    size_t inode_size = v2 ? sizeof(struct minix_inode_v2) : sizeof(struct minix_inode_v1);
+
+    void *raw_inode = kmalloc(inode_size);
+    if (!raw_inode) {
+        // TODO: Free allocated inode number
+        return -1;
+    }
+    memset(raw_inode, 0, inode_size);
+
+    // Initialize specific fields in raw inode that minix_write_inode preserves
+    if (v2) {
+        struct minix_inode_v2 *v2_inode = (struct minix_inode_v2 *)raw_inode;
+        v2_inode->i_nlinks = 1;
+        v2_inode->i_zone[0] = dev;
+    } else {
+        struct minix_inode_v1 *v1_inode = (struct minix_inode_v1 *)raw_inode;
+        v1_inode->i_nlinks = 1;
+        v1_inode->i_zone[0] = (uint16_t)dev;
+    }
+
+    new_node.ptr = (struct fs_node *)raw_inode;
+
+    // 4. Write Inode to Disk (using V1/V2 aware helper)
+    if (minix_write_inode(fs, &new_node) != 0) {
+        kfree(raw_inode, inode_size);
         return -1;
     }
 
-    // 4. Add to Directory
+    kfree(raw_inode, inode_size);
+
+    // 5. Add to Directory
     if (minix_dir_add(dir, name, inode_num) != 0) {
-        // TODO: Free inode
         return -1;
     }
 
@@ -839,6 +857,8 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
     return -1;
 }
 
+<<<<<<< HEAD
+=======
 static int minix_write_inode(minix_fs_t *fs, fs_node_t *node) {
     if (!fs || !node || !node->ptr) return -1;
 
@@ -861,3 +881,4 @@ static int minix_write_inode(minix_fs_t *fs, fs_node_t *node) {
         return minix_write_inode_raw(fs, node->inode, (struct minix_inode_v1 *)node->ptr);
     }
 }
+>>>>>>> main
