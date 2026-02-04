@@ -418,21 +418,33 @@ int sys_rmdir(const char *p) { (void)p; return 0; }
 int sys_getuid(void) { return current_process->uid; }
 int sys_getgid(void) { return current_process->gid; }
 int sys_getppid(void) { return current_process->ppid; }
-int sys_geteuid(void) { return current_process->uid; } // No EUID yet
-int sys_getegid(void) { return current_process->gid; } // No EGID yet
+int sys_geteuid(void) { return current_process->euid; }
+int sys_getegid(void) { return current_process->egid; }
 int sys_setuid(int u) {
-    if (current_process->uid == 0) {
+    if (current_process->euid == 0) {
         current_process->uid = u;
+        current_process->euid = u;
+        current_process->suid = u;
         return 0;
     }
-    return -1;
+    if ((uint32_t)u == current_process->uid || (uint32_t)u == current_process->suid) {
+        current_process->euid = u;
+        return 0;
+    }
+    return -EPERM;
 }
 int sys_setgid(int g) {
-    if (current_process->uid == 0) {
+    if (current_process->euid == 0) {
         current_process->gid = g;
+        current_process->egid = g;
+        current_process->sgid = g;
         return 0;
     }
-    return -1;
+    if ((uint32_t)g == current_process->gid || (uint32_t)g == current_process->sgid) {
+        current_process->egid = g;
+        return 0;
+    }
+    return -EPERM;
 }
 int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
 
@@ -901,7 +913,7 @@ int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
     if (!target || !fstype) return -1;
 
-    if (current_process->uid != 0) return -EPERM;
+    if (current_process->euid != 0) return -EPERM;
 
     return vfs_mount(source, target, fstype, (uint32_t)flags, data);
 }
@@ -910,7 +922,7 @@ extern int vfs_unmount(const char *path);
 
 int sys_umount(const char *target) { 
     if (!target) return -1;
-    if (current_process->uid != 0) return -EPERM;
+    if (current_process->euid != 0) return -EPERM;
     return vfs_unmount(target); 
 }
 
