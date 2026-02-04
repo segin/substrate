@@ -13,7 +13,7 @@ void run_unlink_property_tests(void) {
     memset(long_path, 'a', 511);
     long_path[511] = '\0';
     
-    if (sys_unlink(long_path) == -1) {
+    if (sys_unlink(long_path) < 0) {
         kprint("PASS: sys_unlink handles path overflow gracefully\n");
     } else {
         kprint("FAIL: sys_unlink allowed extremely long path\n");

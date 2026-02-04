@@ -538,6 +538,7 @@ void random_init(void) {
     random_node.flags = FS_CHARDEVICE;
     random_node.read = random_dev_read;
     random_node.write = random_dev_write;
+    random_node.rdev = (1 << 8) | 8;
     devfs_register_device(&random_node);
     
     /* Register /dev/urandom */
@@ -546,6 +547,7 @@ void random_init(void) {
     urandom_node.flags = FS_CHARDEVICE;
     urandom_node.read = urandom_dev_read;
     urandom_node.write = random_dev_write;
+    urandom_node.rdev = (1 << 8) | 9;
     devfs_register_device(&urandom_node);
     
     kprint("RNG: Registered /dev/random and /dev/urandom\n");

@@ -4,12 +4,46 @@
  * Core Driver Management Implementation
  */
 
-#include <kern/driver.h>
-#include <kern/bus.h>
-#include <kern/device.h>
+#include <sys/types.h>
+#include <sys/errno.h>
 #include <sys/lock.h>
 #include <string.h>
 #include <stddef.h>
+
+#include "driver.h"
+#include "bus.h"
+#include "device.h"
+
+#define MAX_BLACKLIST 32
+static const char *driver_blacklist[MAX_BLACKLIST];
+static int blacklist_count = 0;
+static spinlock_t blacklist_lock;
+
+void driver_blacklist_add(const char *name) {
+    spinlock_acquire(&blacklist_lock);
+    if (blacklist_count < MAX_BLACKLIST) {
+        driver_blacklist[blacklist_count++] = name;
+    }
+    spinlock_release(&blacklist_lock);
+}
+
+int driver_is_blacklisted(const char *name) {
+    int i;
+    /* Lockless read safeish for basic check, or add lock */
+    /* Assuming static strings or consistent memory */
+    for (i = 0; i < MAX_BLACKLIST; i++) {
+        if (driver_blacklist[i] && strcmp(driver_blacklist[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void driver_override(struct device *dev, const char *name) {
+    if (dev) {
+        dev->driver_override = name;
+    }
+}
 
 /*
  * probe_device
@@ -131,6 +165,106 @@ int driver_register(struct driver *drv, struct bus_type *bus) {
         curr_dev = next;
     }
     
+    return 0;
+}
+
+/*
+ * driver_attach
+ *
+ * Binds a driver to a device.
+ * Calls the driver's attach callback and sets the binding if successful.
+ */
+int driver_attach(struct driver *drv, struct device *dev) {
+    int ret;
+
+    if (!drv || !dev) return -1;
+
+    /* Lock the bus to ensure exclusive access to the device state */
+    if (dev->bus) {
+        spinlock_acquire(&dev->bus->lock);
+    }
+
+    if (dev->driver) {
+        /* Already bound */
+        if (dev->bus) spinlock_release(&dev->bus->lock);
+        return -1;
+    }
+
+    /* Verify bus compatibility if implied */
+    if (dev->bus && drv->bus_type && dev->bus != drv->bus_type) {
+        spinlock_release(&dev->bus->lock);
+        return -1;
+    }
+
+    /* Call driver attach */
+    if (drv->attach) {
+        /* Drop lock during callback? 
+           Usually attach might sleep or need other locks. 
+           But we need to prevent other binders. 
+           For now, holding lock prevents race on dev->driver. 
+           CAUTION: attach must be atomic/fast or we need fine-grained locking.
+           Given Substrate design so far, holding bus lock might be strict.
+           Let's hold it to protect dev->driver. 
+        */
+        ret = drv->attach(dev);
+        if (ret != 0) {
+            if (dev->bus) spinlock_release(&dev->bus->lock);
+            return ret;
+        }
+    }
+
+    dev->driver = drv;
+
+    if (dev->bus) {
+        spinlock_release(&dev->bus->lock);
+    }
+    
+    return 0;
+}
+
+/*
+ * driver_detach
+ *
+ * Detaches a driver from a device.
+ * Calls the driver's detach callback and clears the binding.
+ */
+int driver_detach(struct device *dev) {
+    struct driver *drv;
+    int ret;
+
+    if (!dev) return -1;
+
+    /* Lock the bus */
+    if (dev->bus) {
+        spinlock_acquire(&dev->bus->lock);
+    }
+    
+    drv = dev->driver;
+    if (!drv) {
+        /* Not bound */
+        if (dev->bus) spinlock_release(&dev->bus->lock);
+        return -1;
+    }
+
+    /* Call driver detach */
+    if (drv->detach) {
+        /* See driver_attach regarding locking.
+           We hold lock to prevent re-attach during detach.
+        */
+        ret = drv->detach(dev);
+        if (ret != 0) {
+            /* Detach failed/refused */
+            if (dev->bus) spinlock_release(&dev->bus->lock);
+            return ret;
+        }
+    }
+
+    dev->driver = NULL;
+
+    if (dev->bus) {
+        spinlock_release(&dev->bus->lock);
+    }
+
     return 0;
 }
 

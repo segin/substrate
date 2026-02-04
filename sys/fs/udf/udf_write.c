@@ -10,26 +10,39 @@
 #include <string.h>
 
 /* External context from udf.c */
-extern struct udf_fs {
-    fs_node_t *device;
-    uint32_t sector_size;
-    uint32_t partition_start;
-    uint32_t partition_length;
-    uint32_t logical_block_size;
-    struct udf_long_ad root_icb;
-} udf_ctx;
-
-/* Space Bitmap Descriptor (for unallocated space tracking) */
-struct udf_space_bitmap {
-    struct udf_tag tag;
-    uint32_t num_bits;       /* Number of bits in bitmap */
-    uint32_t num_bytes;      /* Number of bytes in bitmap */
-    /* Followed by bitmap data */
-} __attribute__((packed));
+extern struct udf_fs udf_ctx;
 
 static uint8_t *space_bitmap = NULL;
 static uint32_t space_bitmap_size = 0;
 static uint32_t space_bitmap_sector = 0;
+
+/*
+ * Write space bitmap back to disk
+ */
+static void udf_write_space_bitmap(void) {
+    if (!space_bitmap || !udf_ctx.device) return;
+
+    struct udf_space_bitmap *sbm = (struct udf_space_bitmap *)(space_bitmap - sizeof(struct udf_space_bitmap));
+
+    /* Recalculate CRC of the bitmap data */
+    if (sbm->tag.desc_crc_len > 0) {
+        sbm->tag.desc_crc = udf_crc(space_bitmap, sbm->tag.desc_crc_len);
+    }
+
+    /* Recalculate tag checksum */
+    sbm->tag.tag_checksum = udf_tag_checksum(&sbm->tag);
+
+    /* Calculate number of sectors */
+    uint32_t total_size = sizeof(struct udf_space_bitmap) + sbm->num_bytes;
+    uint32_t sectors = (total_size + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+
+    /* Write to disk */
+    for (uint32_t i = 0; i < sectors; i++) {
+        off_t offset = (off_t)(space_bitmap_sector + i) * UDF_SECTOR_SIZE;
+        uint8_t *buf = (uint8_t *)sbm + (i * UDF_SECTOR_SIZE);
+        udf_ctx.device->write(udf_ctx.device, offset, UDF_SECTOR_SIZE, buf);
+    }
+}
 
 /*
  * Read and parse space bitmap from partition header
@@ -80,7 +93,7 @@ uint32_t udf_alloc_block(void) {
                 if (!(space_bitmap[byte] & (1 << bit))) {
                     /* Mark as allocated */
                     space_bitmap[byte] |= (1 << bit);
-                    /* TODO: Write back to disk */
+                    udf_write_space_bitmap();
                     return byte * 8 + bit;
                 }
             }
@@ -101,7 +114,7 @@ void udf_free_block(uint32_t block) {
     uint8_t bit = block % 8;
     
     space_bitmap[byte] &= ~(1 << bit);
-    /* TODO: Write back to disk */
+    udf_write_space_bitmap();
 }
 
 /*

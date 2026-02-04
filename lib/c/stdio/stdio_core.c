@@ -11,6 +11,8 @@
 
 #define BUFSIZ 1024
 
+static FILE *g_file_list_head = NULL;
+
 // Helper to flush buffer
 static int __fflush_write(FILE *f) {
     if (f->pos > f->buffer) {
@@ -54,6 +56,14 @@ FILE *fdopen(int fd, const char *mode) {
     // if (isatty(fd)) f->mode = _IOLBF; else f->mode = _IOFBF;
     f->mode = _IOFBF; 
     
+    // Add to global list
+    f->next = g_file_list_head;
+    f->prev = NULL;
+    if (g_file_list_head) {
+        g_file_list_head->prev = f;
+    }
+    g_file_list_head = f;
+
     return f;
 }
 
@@ -85,6 +95,17 @@ FILE *fopen(const char *path, const char *mode) {
 int fclose(FILE *stream) {
     if (!stream) return EOF;
     fflush(stream);
+
+    // Remove from global list
+    if (stream->prev) {
+        stream->prev->next = stream->next;
+    } else {
+        g_file_list_head = stream->next;
+    }
+    if (stream->next) {
+        stream->next->prev = stream->prev;
+    }
+
     close(stream->fd);
     if (stream->own_buffer) free(stream->buffer);
     free(stream);
@@ -92,7 +113,18 @@ int fclose(FILE *stream) {
 }
 
 int fflush(FILE *stream) {
-    if (!stream) return 0; // TODO: fflush(NULL) should flush all
+    if (!stream) {
+        int ret = 0;
+        FILE *current = g_file_list_head;
+        while (current) {
+            if (fflush(current) == EOF) {
+                ret = EOF;
+            }
+            current = current->next;
+        }
+        return ret;
+    }
+
     if (stream->flags == O_RDONLY) {
         // Purge read buffer
         stream->pos = stream->buffer;
