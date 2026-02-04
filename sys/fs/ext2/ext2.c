@@ -664,6 +664,8 @@ static fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_fs.group_count = (ext2_fs.sb.s_blocks_count + ext2_fs.blocks_per_group - 1) / ext2_fs.blocks_per_group;
     ext2_fs.inode_size = (ext2_fs.sb.s_rev_level >= 1) ? ext2_fs.sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
     ext2_fs.bgd = ext2_bgd_table;
+    ext2_fs.last_alloc_group = 0;
+    ext2_fs.last_alloc_bit = 0;
     
     // Read block group descriptor table (starts at block 2 for 1K blocks, block 1 for larger)
     uint32_t bgd_block = (ext2_fs.block_size == 1024) ? 2 : 1;
@@ -723,13 +725,18 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     if (!bitmap_buf) return 0;
     
     // Search each block group for a free block, starting from last allocation
-    for (uint32_t k = 0; k < fs->group_count; k++) {
-        uint32_t group = (fs->last_alloc_group + k) % fs->group_count;
+    uint32_t start_group = fs->last_alloc_group;
+    uint32_t group = start_group;
 
-        if (fs->bgd[group].bg_free_blocks_count == 0) continue;
+    do {
+        if (fs->bgd[group].bg_free_blocks_count == 0) {
+            group = (group + 1) % fs->group_count;
+            continue;
+        }
         
         // Read the block bitmap
         if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf) != fs->block_size) {
+            group = (group + 1) % fs->group_count;
             continue;
         }
         
@@ -773,7 +780,9 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             kfree(bitmap_buf, 4096);
             return block_num;
         }
-    }
+
+        group = (group + 1) % fs->group_count;
+    } while (group != start_group);
     
     kfree(bitmap_buf, 4096);
     return 0; // No free blocks

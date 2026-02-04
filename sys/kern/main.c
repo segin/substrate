@@ -39,7 +39,7 @@
 #include <fs/fuse.h>
 #include <fs/9p.h>
 
-#include <tests/tests.h>
+#include <sys/tests.h>
 
 extern void ntsync_init(void);
 
