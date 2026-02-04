@@ -16,6 +16,7 @@
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <sys/ntsync.h>
 #include <sys/proc.h>
 #include <sys/time.h>
@@ -706,17 +707,35 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
     
     /* Sleep until signaled or timeout */
+    uint64_t deadline = 0;
+    int has_deadline = (args->timeout != UINT64_MAX);
+
+    if (has_deadline) {
+        if (args->flags & NTSYNC_WAIT_REALTIME) {
+            time_t boot_sec = get_time() - get_uptime();
+            uint64_t boot_ns = (uint64_t)boot_sec * 1000000000ULL;
+            if (args->timeout > boot_ns) {
+                deadline = (args->timeout - boot_ns) / 10000000ULL;
+            } else {
+                deadline = get_ticks(); /* Already passed */
+            }
+        } else {
+            deadline = args->timeout / 10000000ULL;
+        }
+    }
+
     int timed_out = 0;
     while (!waiter.signaled) {
-        if (args->timeout != UINT64_MAX) {
-            clockid_t clk = (args->flags & NTSYNC_WAIT_REALTIME) ? CLOCK_REALTIME : CLOCK_MONOTONIC;
-            uint64_t now = get_current_time_ns(clk);
-            if (now >= args->timeout) {
+        if (has_deadline) {
+            int ret = sched_sleep_until(current_thread, deadline);
+            if (waiter.signaled) break;
+            if (ret == -ETIMEDOUT) {
                 timed_out = 1;
                 break;
             }
+        } else {
+            sched_sleep(current_thread);
         }
-        sched_yield();  /* Basic sleep - could be improved with sleep queues */
     }
     
     /* Remove waiter from all objects */
@@ -754,7 +773,7 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         args->index = args->count;
         return 0;
     }
-    
+
     if (timed_out) return -ETIMEDOUT;
 
     return -EINTR;  /* Interrupted */
