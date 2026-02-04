@@ -152,6 +152,12 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs);
 void ext2_free_block(ext2_fs_t *fs, uint32_t block_num);
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir);
 void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir);
+uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, void *buffer);
+void ext2_get_blocks_extent(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx, uint32_t max_count, 
+                                   uint32_t *phys_block, uint32_t *count,
+                                   uint32_t *indirect_buf, uint32_t *dindirect_buf, uint32_t *tindirect_buf);
+uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx,
+                                   uint32_t *indirect_buf, uint32_t *dindirect_buf, uint32_t *tindirect_buf);
 
 // VFS callbacks (non-static as requested)
 size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
