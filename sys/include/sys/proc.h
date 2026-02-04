@@ -96,6 +96,10 @@ typedef struct process {
     struct vm_map *vm_map;    // Substrate VM Map
     struct pmap *pmap;         // Pmap (Page Table) handle
     
+    // LDT support
+    void        *ldt;             // Pointer to LDT entries (gdt_entry_t*)
+    int          ldt_entry_count; // Number of entries in LDT
+    
     // Resource limits, FDs, etc. would go here
 } process_t;
 
@@ -175,7 +179,7 @@ typedef struct thread {
     uintptr_t                on_fault;
     
     // Syscall registers (for fork/vfork)
-    struct registers *syscall_regs;
+    void *syscall_regs;
 
     thread_state_t state;
     struct thread *next;

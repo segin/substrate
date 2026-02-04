@@ -920,6 +920,5 @@ void ntsync_init(void) {
     ntsync_device.ioctl = ntsync_ioctl;
     
     devfs_register_device(&ntsync_device);
-    
-    kprint("  ntsync: Windows NT sync primitive driver initialized\n");
+    kprint("NTSYNC: NT-style synchronization driver initialized\n");
 }

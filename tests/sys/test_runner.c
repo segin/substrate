@@ -29,6 +29,7 @@ extern void test_vm_phys(void);
 extern void test_vm_page_queue(void);
 extern void test_vm_page_queue(void);
 extern void run_minix_mount_tests(void);
+extern void run_minix_write_tests(void);
 extern void test_bitness(void);
 
 void run_kernel_tests(void) {
@@ -48,6 +49,7 @@ void run_kernel_tests(void) {
         run_pmap_protect_property_tests();
         run_vm_expanded_tests();
         run_pid_tests();
+        run_pid_tests();
         run_unlink_tests();
         run_unlink_property_tests();
         run_link_property_tests();
@@ -60,6 +62,15 @@ void run_kernel_tests(void) {
         test_e820_parsing();
         test_vm_phys();
         test_vm_page_queue();
+    }
+
+    if (all || strcmp(test_arg, "unlink") == 0) {
+        run_unlink_tests();
+        run_unlink_property_tests();
+    }
+
+    if (all || strcmp(test_arg, "e820") == 0) {
+        test_e820_parsing();
     }
 
     if (all || strcmp(test_arg, "vm") == 0) {
@@ -103,6 +114,8 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "signal") == 0) {
          extern void run_signal_tests(void);
          run_signal_tests();
+         extern void run_sigstop_tests(void);
+         run_sigstop_tests();
     }
 
     if (all || strcmp(test_arg, "bitness") == 0) {
@@ -121,6 +134,7 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "minix") == 0) {
          run_minix_mount_tests();
+         run_minix_write_tests();
     }
 
     // Wait logic tests are run on host via verify_wait_host.sh
@@ -140,6 +154,50 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "udf") == 0) {
         run_udf_write_tests();
+    }
+
+    if (all || strcmp(test_arg, "kthread") == 0) {
+        if (cmdline_has("test_kthread_create")) { // Safeguard if needed, or just function check
+             // Wait, run_kthread_create_tests needs declaration? It's not in forward decls?
+             // HEAD had it. I should make sure forward decls are there or just use extern inside block.
+             extern void run_kthread_create_tests(void);
+             run_kthread_create_tests();
+        } else {
+             extern void run_kthread_create_tests(void);
+             run_kthread_create_tests();
+        }
+    }
+
+    if (all || strcmp(test_arg, "driver") == 0) {
+        extern int test_driver_registration_logic(void);
+        if (test_driver_registration_logic() == 0) kprint("driver_register: PASS\n"); else kprint("driver_register: FAIL\n");
+        
+        extern int test_driver_attach_logic(void);
+        if (test_driver_attach_logic() == 0) kprint("driver_attach: PASS\n"); else kprint("driver_attach: FAIL\n");
+
+        extern int test_driver_detach_logic(void);
+        if (test_driver_detach_logic() == 0) kprint("driver_detach: PASS\n"); else kprint("driver_detach: FAIL\n");
+
+        extern int test_bus_match_logic(void);
+        if (test_bus_match_logic() == 0) kprint("bus_match: PASS\n"); else kprint("bus_match: FAIL\n");
+
+        extern int test_bus_id_match_logic(void);
+        if (test_bus_id_match_logic() == 0) kprint("bus_id_match: PASS\n"); else kprint("bus_id_match: FAIL\n");
+
+        extern int test_bus_compatible_match_logic(void);
+        if (test_bus_compatible_match_logic() == 0) kprint("bus_compatible_match: PASS\n"); else kprint("bus_compatible_match: FAIL\n");
+
+        extern int test_driver_override_logic(void);
+        if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
+
+        extern int test_device_refcounting(void);
+        if (test_device_refcounting() == 0) kprint("device_refcounting: PASS\n"); else kprint("device_refcounting: FAIL\n");
+    }
+
+    if (all || strcmp(test_arg, "sysinfo") == 0) {
+        extern int test_sysinfo(void);
+        if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
+>>>>>>> main
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");
