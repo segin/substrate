@@ -134,6 +134,7 @@ typedef struct {
     ext2_fs_t *fs;
     uint32_t inode_num;
     ext2_inode_t inode;
+    struct dirent dirent;
 } ext2_node_t;
 
 // Public functions

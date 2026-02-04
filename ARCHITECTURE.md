@@ -101,6 +101,20 @@ These components are essential for booting and basic system operation.
 - **Linux:** Emulates Linux 2.6.x i386 syscalls. Handles `rt_sigaction` (174) and `rt_sigprocmask` (175) by mapping to internal signal infrastructure.
 - **FreeBSD:** Planned support for FreeBSD 8/10+ i386 binaries.
 
+## Build System & Host Tools
+The project supports generating a complete set of native tools for the host operating system (Linux/BSD) to facilitate testing and cross-compilation independent of the target environment.
+
+### Host Distribution (`host_dist`)
+Running `make host_dist` builds and installs the core utilities into a local `host_dist/` directory. This includes:
+- **`bin/`**: `sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, etc.
+- **`usr/bin/`**: `yacc`, `brandelf`.
+- **`sbin/`**: `mkfs`, `fsck`.
+
+These tools are compiled using the host's compiler (`cc`) and C library, but strictly adhering to the project's own Makefiles and source code, allowing verification of logic and behavior on a stable host.
+
+> [!CAUTION]
+> **Host Builds NEVER use Substrate's libc.** When `NATIVE_BUILD=1` is set, programs link against the host OS's standard C library (glibc, musl, etc.), not `lib/c/`. The Substrate libc (`lib/c/`, `lib/sys/`) is exclusively for the Substrate kernel and target binaries. Never modify these libraries to support Linux or other host operating systems.
+
 ## Recent Progress (as of Jan 2026)
 - Implemented `sys_brk` for dynamic heap allocation.
 - Stabilized BusyBox TLS (GS segment and Variant II offsets).

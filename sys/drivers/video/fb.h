@@ -11,7 +11,9 @@ typedef struct {
     uint32_t height;
     uint32_t pitch;
     uint8_t  bpp;
+    uint32_t virt_height; /* For hardware scrolling */
     void (*putpixel)(int x, int y, uint32_t color);
+    void (*scroll)(int y_offset);
 } fb_info_t;
 
 /* Core framebuffer operations */

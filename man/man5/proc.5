@@ -32,7 +32,7 @@ Kernel boot command line as passed by the bootloader.
 Kernel version string including build date.
 .TP
 .B /proc/loadavg
-System load averages for the last 1, 5, and 15 minutes.
+System load averages for the last 1, 5, and 15 minutes, followed by the number of currently executing kernel scheduling entities over the total number of scheduling entities, and finally the PID of the most recently created process.
 .TP
 .B /proc/cow_stats
 Copy-on-Write memory statistics: page faults, COW duplications, TLB flushes.
