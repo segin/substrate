@@ -5,7 +5,31 @@
 void *memcpy(void *dest, const void *src, size_t n) {
     unsigned char *d = dest;
     const unsigned char *s = src;
-    while (n--) *d++ = *s++;
+
+    // Align destination to word boundary
+    while (n > 0 && ((uintptr_t)d & (sizeof(unsigned long) - 1))) {
+        *d++ = *s++;
+        n--;
+    }
+
+    // Copy words
+    if (n >= sizeof(unsigned long)) {
+        unsigned long *wd = (unsigned long *)d;
+        const unsigned long *ws = (const unsigned long *)s;
+
+        while (n >= sizeof(unsigned long)) {
+            *wd++ = *ws++;
+            n -= sizeof(unsigned long);
+        }
+        d = (unsigned char *)wd;
+        s = (const unsigned char *)ws;
+    }
+
+    // Copy remaining bytes
+    while (n > 0) {
+        *d++ = *s++;
+        n--;
+    }
     return dest;
 }
 
