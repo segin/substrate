@@ -156,6 +156,18 @@ void run_kernel_tests(void) {
         run_udf_write_tests();
     }
 
+    if (all || strcmp(test_arg, "kthread") == 0) {
+        if (cmdline_has("test_kthread_create")) { // Safeguard if needed, or just function check
+             // Wait, run_kthread_create_tests needs declaration? It's not in forward decls?
+             // HEAD had it. I should make sure forward decls are there or just use extern inside block.
+             extern void run_kthread_create_tests(void);
+             run_kthread_create_tests();
+        } else {
+             extern void run_kthread_create_tests(void);
+             run_kthread_create_tests();
+        }
+    }
+
     if (all || strcmp(test_arg, "driver") == 0) {
         extern int test_driver_registration_logic(void);
         if (test_driver_registration_logic() == 0) kprint("driver_register: PASS\n"); else kprint("driver_register: FAIL\n");
@@ -177,14 +189,16 @@ void run_kernel_tests(void) {
 
         extern int test_driver_override_logic(void);
         if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
+
+        extern int test_device_refcounting(void);
+        if (test_device_refcounting() == 0) kprint("device_refcounting: PASS\n"); else kprint("device_refcounting: FAIL\n");
     }
 
-    /*
     if (all || strcmp(test_arg, "sysinfo") == 0) {
         extern int test_sysinfo(void);
         if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
+
     }
-    */
 
     if (all || strcmp(test_arg, "fb_perf") == 0) {
         extern void test_fb_perf(void);

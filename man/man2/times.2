@@ -1,0 +1,83 @@
+.TH TIMES 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+times \- get process times
+.SH SYNOPSIS
+.B #include <sys/times.h>
+.PP
+.BI "clock_t times(struct tms *" buf ");"
+.SH DESCRIPTION
+.BR times ()
+stores the current process times in the
+.I struct tms
+pointed to by
+.IR buf .
+.PP
+.I struct tms
+is defined in
+.I <sys/times.h>
+as follows:
+.PP
+.RS
+.nf
+struct tms {
+    clock_t tms_utime;  /* user time */
+    clock_t tms_stime;  /* system time */
+    clock_t tms_cutime; /* user time of children */
+    clock_t tms_cstime; /* system time of children */
+};
+.fi
+.RE
+.PP
+The
+.I tms_utime
+field contains the CPU time spent executing instructions of the calling
+process.  The
+.I tms_stime
+field contains the CPU time spent in the system while executing on behalf
+of the calling process.  The
+.I tms_cutime
+field contains the sum of the
+.I tms_utime
+and
+.I tms_cutime
+values for all waited-for terminated children.  The
+.I tms_cstime
+field contains the sum of the
+.I tms_stime
+and
+.I tms_cstime
+values for all waited-for terminated children.
+.PP
+Times for terminated children (and their descendants) are added in at the
+moment
+.BR wait (2)
+or
+.BR waitpid (2)
+returns their process ID.  In particular, times of grandchildren that the
+children did not wait for are never seen.
+.PP
+All times returned are in clock ticks.
+.SH RETURN VALUE
+.BR times ()
+returns the number of clock ticks that have elapsed since an arbitrary
+point in the past.  The return value may overflow the possible range of
+type
+.IR clock_t .
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EFAULT
+.I buf
+points outside the process's accessible address space.
+.SH CONFORMING TO
+POSIX.1-2001, POSIX.1-2008, SVr4, 4.3BSD.
+.SH SEE ALSO
+.BR time (1),
+.BR getrusage (2),
+.BR wait (2),
+.BR clock (3),
+.BR sysconf (3)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

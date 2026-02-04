@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
+#include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -340,9 +341,9 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
     void *stack_top = (char*)p.stack_base + p.stack_size;
-    int tid = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
-    if (tid > 0) {
-        if (p.child_tid) *p.child_tid = tid;
+    thread_t *t = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
+    if (t) {
+        if (p.child_tid) *p.child_tid = t->tid;
         return 0;
     }
     return -1;
@@ -700,6 +701,21 @@ int sys_access(const char *path, int mode) {
     return vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
 }
 
+int sys_mlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    // In the future, this should wire pages in the PMAP to prevent swapping.
+    (void)addr;
+    (void)len;
+    return 0;
+}
+
+int sys_munlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    (void)addr;
+    (void)len;
+    return 0;
+}
+
 int sys_sync(void) {
     // In a real system, we'd iterate over all mounted filesystems
     // and call their sync methods.
@@ -1055,6 +1071,21 @@ int sys_hostname(char *buf, size_t len) {
     } else {
         memcpy(buf, kernel_hostname, hlen + 1);
     }
+    
+    return 0;
+}
+
+int sys_reboot(int cmd) {
+    (void)cmd;
+    // For now, always reboot. 
+    // In a real system we'd check cmd for RB_HALT, RB_POWEROFF etc.
+    // Keyboard controller reset
+    while (inb(0x64) & 0x02);
+    outb(0x64, 0xFE);
+    
+    // Fallback if that fails: Triple fault
+    // (by loading 0-length IDT and causing exception)
+    __asm__ volatile("lidt %0; int3"::"m"((uint16_t[3]){0,0,0}));
     
     return 0;
 }

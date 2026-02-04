@@ -31,6 +31,7 @@ typedef struct file file_t;
 struct pmap;
 struct pgrp;
 struct session;
+struct registers;
 
 #define MAX_FD 32
 
