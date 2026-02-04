@@ -77,6 +77,11 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t 
     vm_area_t *area = vm_area_create(start_addr, start_addr + length, vm_prot, vm_flags);
     if (!area) return MAP_FAILED;
     
+    if (vm_area_insert(&current_process->vm_areas, area) < 0) {
+        vm_area_destroy(area);
+        return MAP_FAILED;
+    }
+
     // Handle file-backed mapping
     if (!(flags & MAP_ANONYMOUS)) {
         if (fd < 0 || fd >= MAX_FD)  {

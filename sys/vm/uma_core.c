@@ -5,10 +5,12 @@
  */
 
 #include <vm/uma.h>
+#include <vm/vm_kmem.h>
 #include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <stddef.h>
 #include <string.h>
+#include <vm/vm_kmem.h>
 
 /* Global list of all zones */
 static uma_zone_t *uma_zones = NULL;
@@ -20,7 +22,7 @@ static uma_zone_t *uma_zones = NULL;
 #define UMA_BOOTSTRAP_ZONES 32
 static uint8_t uma_bootstrap_mem[UMA_BOOTSTRAP_ZONES * sizeof(uma_zone_t)];
 static int uma_bootstrap_idx = 0;
-static bool uma_booted = false;
+static bool uma_dynamic_alloc = false;
 
 /* Bucket pool */
 #define UMA_BUCKET_POOL_SIZE 64
@@ -73,8 +75,15 @@ void uma_startup(void) {
     uma_bucket_idx = 0;
     uma_zones = NULL;
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
-    uma_booted = true;
     kprint("UMA: subsystem initialized\n");
+}
+
+/*
+ * Enable dynamic allocation of zone structures (called by kmem_init)
+ */
+void uma_enable_dynamic_alloc(void) {
+    uma_dynamic_alloc = true;
+    kprint("UMA: Dynamic zone allocation enabled\n");
 }
 
 /*
@@ -105,16 +114,16 @@ uma_zone_t *uma_zcreate(
     uma_zone_t *zone;
     
     /* Allocate zone structure */
-    if (uma_bootstrap_idx < UMA_BOOTSTRAP_ZONES) {
-        zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * sizeof(uma_zone_t)];
-        uma_bootstrap_idx++;
-    } else {
-        /* TODO: Allocate from kmalloc after bootstrap */
-        return NULL;
+    if (!uma_dynamic_alloc) {
+        if (uma_bootstrap_idx < UMA_BOOTSTRAP_ZONES) {
+            zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * sizeof(uma_zone_t)];
+            uma_bootstrap_idx++;
+            memset(zone, 0, sizeof(uma_zone_t));
+        } else {
+            kprint("UMA: Bootstrap zones exhausted!\n");
+            return NULL;
+        }
     }
-    
-    /* Initialize zone */
-    memset(zone, 0, sizeof(uma_zone_t));
     zone->uz_name = name;
     zone->uz_size = size;
     zone->uz_flags = flags;
@@ -216,6 +225,15 @@ void uma_zdestroy(uma_zone_t *zone) {
                 break;
             }
         }
+    }
+
+    /* Free zone structure if it was dynamically allocated */
+    uintptr_t zaddr = (uintptr_t)zone;
+    uintptr_t bstart = (uintptr_t)uma_bootstrap_mem;
+    uintptr_t bend = bstart + sizeof(uma_bootstrap_mem);
+
+    if (zaddr < bstart || zaddr >= bend) {
+        kfree(zone, sizeof(uma_zone_t));
     }
 }
 

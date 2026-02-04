@@ -37,7 +37,7 @@ void panic(const char *msg) {
 }
 
 // Globals Mocks
-#include "../sys/sys/proc.h"
+#include <sys/proc.h>
 #include "../sys/exec/perso/personality.h"
 struct personality personality_native = { "Native", NULL, 0 };
 struct personality personality_freebsd = { "FreeBSD", NULL, 0 };

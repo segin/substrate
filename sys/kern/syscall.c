@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
+#include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -340,9 +341,9 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
     void *stack_top = (char*)p.stack_base + p.stack_size;
-    int tid = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
-    if (tid > 0) {
-        if (p.child_tid) *p.child_tid = tid;
+    thread_t *t = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
+    if (t) {
+        if (p.child_tid) *p.child_tid = t->tid;
         return 0;
     }
     return -1;
@@ -417,21 +418,33 @@ int sys_rmdir(const char *p) { (void)p; return 0; }
 int sys_getuid(void) { return current_process->uid; }
 int sys_getgid(void) { return current_process->gid; }
 int sys_getppid(void) { return current_process->ppid; }
-int sys_geteuid(void) { return current_process->uid; } // No EUID yet
-int sys_getegid(void) { return current_process->gid; } // No EGID yet
+int sys_geteuid(void) { return current_process->euid; }
+int sys_getegid(void) { return current_process->egid; }
 int sys_setuid(int u) {
-    if (current_process->uid == 0) {
+    if (current_process->euid == 0) {
         current_process->uid = u;
+        current_process->euid = u;
+        current_process->suid = u;
         return 0;
     }
-    return -1;
+    if ((uint32_t)u == current_process->uid || (uint32_t)u == current_process->suid) {
+        current_process->euid = u;
+        return 0;
+    }
+    return -EPERM;
 }
 int sys_setgid(int g) {
-    if (current_process->uid == 0) {
+    if (current_process->euid == 0) {
         current_process->gid = g;
+        current_process->egid = g;
+        current_process->sgid = g;
         return 0;
     }
-    return -1;
+    if ((uint32_t)g == current_process->gid || (uint32_t)g == current_process->sgid) {
+        current_process->egid = g;
+        return 0;
+    }
+    return -EPERM;
 }
 int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
 
@@ -700,6 +713,21 @@ int sys_access(const char *path, int mode) {
     return vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
 }
 
+int sys_mlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    // In the future, this should wire pages in the PMAP to prevent swapping.
+    (void)addr;
+    (void)len;
+    return 0;
+}
+
+int sys_munlock(const void *addr, size_t len) {
+    // Stub implementation: always succeed
+    (void)addr;
+    (void)len;
+    return 0;
+}
+
 int sys_sync(void) {
     // In a real system, we'd iterate over all mounted filesystems
     // and call their sync methods.
@@ -885,7 +913,7 @@ int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
     if (!target || !fstype) return -1;
 
-    if (current_process->uid != 0) return -EPERM;
+    if (current_process->euid != 0) return -EPERM;
 
     return vfs_mount(source, target, fstype, (uint32_t)flags, data);
 }
@@ -894,7 +922,7 @@ extern int vfs_unmount(const char *path);
 
 int sys_umount(const char *target) { 
     if (!target) return -1;
-    if (current_process->uid != 0) return -EPERM;
+    if (current_process->euid != 0) return -EPERM;
     return vfs_unmount(target); 
 }
 
@@ -1055,6 +1083,21 @@ int sys_hostname(char *buf, size_t len) {
     } else {
         memcpy(buf, kernel_hostname, hlen + 1);
     }
+    
+    return 0;
+}
+
+int sys_reboot(int cmd) {
+    (void)cmd;
+    // For now, always reboot. 
+    // In a real system we'd check cmd for RB_HALT, RB_POWEROFF etc.
+    // Keyboard controller reset
+    while (inb(0x64) & 0x02);
+    outb(0x64, 0xFE);
+    
+    // Fallback if that fails: Triple fault
+    // (by loading 0-length IDT and causing exception)
+    __asm__ volatile("lidt %0; int3"::"m"((uint16_t[3]){0,0,0}));
     
     return 0;
 }
