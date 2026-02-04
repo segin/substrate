@@ -25,7 +25,25 @@
 
 static int cursor_x = 0;
 static int cursor_y = 0;
-static int view_y_offset = 0; /* Current hardware scroll offset */
+static int view_y_offset = 0; /* Viewport Y offset for hardware scrolling */
+
+/* Helper for faster framebuffer copies */
+static void optimized_memcpy(void *dst, const void *src, size_t n) {
+    uint32_t *d = (uint32_t *)dst;
+    const uint32_t *s = (const uint32_t *)src;
+    size_t n_dwords = n / 4;
+
+    /* 8-way unroll */
+    while (n_dwords >= 8) {
+        d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+        d[4] = s[4]; d[5] = s[5]; d[6] = s[6]; d[7] = s[7];
+        d += 8; s += 8;
+        n_dwords -= 8;
+    }
+    while (n_dwords--) {
+        *d++ = *s++;
+    }
+}
 
 /* External framebuffer info (from fb.c) */
 extern fb_info_t fb;
@@ -36,6 +54,12 @@ extern int fb_active;
 /* ==================== Console Backend ==================== */
 
 static void fb_console_clear(void) {
+    if (fb.set_viewport) {
+        view_y_offset = 0;
+        fb.set_viewport(0, 0);
+    }
+    cursor_x = 0;
+    cursor_y = 0;
     fb_clear(FB_COLOR_BLACK);
     cursor_x = 0;
     cursor_y = 0;
@@ -110,9 +134,6 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
                   * When the view offset reaches the end of the virtual buffer, we must
                   * copy the currently visible content (shifted up by one line) back to
                   * the top of the buffer (offset 0) to continue scrolling.
-                  *
-                  * We preserve the visible screen content starting from the second line
-                  * of the previous view, effectively discarding the top line.
                   */
 
                  void *dst = fb.addr;
@@ -122,7 +143,7 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
                  void *src = (void *)((uintptr_t)fb.addr + (previous_offset + FB_FONT_HEIGHT) * fb.pitch);
                  size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
 
-                 memcpy(dst, src, size);
+                 optimized_memcpy(dst, src, size);
                  view_y_offset = 0;
             }
 
@@ -132,7 +153,6 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
 
             /* Fill the new line with background */
             for (uint32_t y = 0; y < FB_FONT_HEIGHT; y++) {
-                // Optimized fill could go here, but per-pixel is safe
                 for (uint32_t x = 0; x < fb.width; x++) {
                     fb_putpixel(x, clear_y + y, clear_color);
                 }
@@ -144,16 +164,15 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
             cursor_y -= FB_FONT_HEIGHT;
 
         } else {
-            /* Fallback: Software Scroll (memcpy) */
+            /* Fallback: Software Scroll (optimized memcpy) */
             void *dst = fb.addr;
             void *src = (void *)((uintptr_t)fb.addr + FB_FONT_HEIGHT * fb.pitch);
             size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
-            memcpy(dst, src, size);
+            optimized_memcpy(dst, src, size);
 
             /* Clear bottom line */
             uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
             for (uint32_t y = fb.height - FB_FONT_HEIGHT; y < fb.height; y++) {
-                // Optimized fill could go here, but per-pixel is safe
                 for (uint32_t x = 0; x < fb.width; x++) {
                     fb_putpixel(x, y, clear_color);
                 }

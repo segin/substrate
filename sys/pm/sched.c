@@ -1,5 +1,6 @@
 #include <kern/sched.h>
 #include <kern/time.h>
+#include <sys/errno.h>
 #include <pm/pm.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -155,6 +156,35 @@ void sched_sleep(void *chan) {
     sched_yield();
 }
 
+int sched_sleep_until(void *chan, uint64_t deadline_tick) {
+    if (!current_thread) return 0;
+
+    current_thread->sleep_expiry = deadline_tick;
+    current_thread->sleep_status = 0;
+
+    sched_sleep(chan);
+
+    current_thread->sleep_expiry = 0;
+    return current_thread->sleep_status;
+}
+
+void sched_tick(void) {
+    uint64_t now = get_ticks();
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 &&
+            threads[i].state == THREAD_BLOCKED &&
+            threads[i].sleep_expiry > 0 &&
+            now >= threads[i].sleep_expiry) {
+
+            threads[i].state = THREAD_READY;
+            threads[i].wait_chan = NULL;
+            threads[i].sleep_status = -ETIMEDOUT;
+            threads[i].sleep_expiry = 0;
+        }
+    }
+}
+
 void sched_wakeup(void *chan) {
     sched_wakeup_n(chan, -1);
 }
@@ -167,22 +197,6 @@ void sched_wakeup_n(void *chan, int n) {
             threads[i].wait_chan = NULL;
             woken++;
             if (n > 0 && woken >= n) break;
-        }
-    }
-}
-
-void sched_check_timeouts(void) {
-    uint64_t current_ticks = get_ticks();
-
-    for (int i = 0; i < MAX_THREADS; i++) {
-        thread_t *t = &threads[i];
-        if (t->tid != -1 && t->state == THREAD_BLOCKED && t->sleep_expiry > 0) {
-            if (current_ticks >= t->sleep_expiry) {
-                // Timeout expired
-                t->state = THREAD_READY;
-                t->wait_chan = NULL;
-                t->sleep_expiry = 0;
-            }
         }
     }
 }

@@ -13,6 +13,8 @@ typedef struct {
     uint32_t pitch;
     uint8_t  bpp;
     void (*putpixel)(int x, int y, uint32_t color);
+    uint32_t virt_width;
+    int (*set_viewport)(int x, int y);
     void (*scroll)(int y_offset);
 } fb_info_t;
 
