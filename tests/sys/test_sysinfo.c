@@ -18,7 +18,9 @@ int test_sysinfo(void) {
 
     /* 1. Basic Call */
     memset(&info, 0, sizeof(info));
-    ret = sysinfo(&info);
+    // Call kernel implementation directly
+    extern int do_sysinfo(struct sysinfo *info);
+    ret = do_sysinfo(&info);
     if (ret != 0) {
         kprint("FAIL: sysinfo returned error (1)\n");
         return -1;

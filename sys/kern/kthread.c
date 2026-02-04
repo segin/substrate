@@ -16,9 +16,9 @@ int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *
     if (!stack) return -1;
 
     // 3. Use scheduler to create the thread
-    int tid = sched_create_thread(proc, (void (*)(void*))func, (char*)stack + 4096, arg);
+    thread_t *t = sched_create_thread(proc, (void (*)(void*))func, (char*)stack + 4096, arg);
     
-    if (tid < 0) {
+    if (!t) {
         kfree(stack, 4096);
         return -1;
     }
@@ -28,7 +28,7 @@ int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *
 
     // 5. Success
     if (tdp) {
-        *tdp = sched_get_thread(tid);
+        *tdp = t;
     }
 
     return 0;
