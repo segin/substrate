@@ -11,16 +11,8 @@
 
 /* Fixed-point arithmetic constants (11-bit shift, scale 2048) */
 #define FSHIFT      11
-#define FSCALE      (1 << FSHIFT)
+#define FSCALE      SI_LOAD_SCALE
 #define FIXED_1     FSCALE
-
-/*
- * Exponential decay constants for 5 second update interval:
- * exp_n = e^(-5/n) * FSCALE
- */
-#define EXP_1       1884    /* 1 minute: e^(-5/60) */
-#define EXP_5       2014    /* 5 minutes: e^(-5/300) */
-#define EXP_15      2037    /* 15 minutes: e^(-5/900) */
 
 #define CALC_LOAD(load, exp, active) \
     (((unsigned long)(load) * (exp) + \
