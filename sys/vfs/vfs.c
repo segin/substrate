@@ -6,6 +6,8 @@
 #include <kern/console.h>
 #include <stdio.h>
 #include <sys/poll.h>
+#include <sys/proc.h>
+
 fs_node_t *fs_root = 0; 
 
 static filesystem_t *filesystems = NULL;
