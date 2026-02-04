@@ -1,4 +1,5 @@
 #include <arch/x86_64/pmap.h>
+#include <arch/x86-common/include/msr.h>
 #include <arch/i386/pmm.h>
 #include <vm/vm_kmem.h> // For kmalloc/kfree
 #include <string.h> // for memset
@@ -58,9 +59,8 @@ void pmap_init(void) {
     TAILQ_INSERT_TAIL(&global_pmap_list, &kernel_pmap_store, list_entry);
 
     // 3. Enable NX (EFER.NXE) - MSR 0xC0000080 bit 11
-    // uint64_t efer = rdmsr(0xC0000080);
-    // wrmsr(0xC0000080, efer | (1<<11));
-    // TODO: Need asm/msr helpers.
+    uint64_t efer = rdmsr(MSR_EFER);
+    wrmsr(MSR_EFER, efer | EFER_NXE);
 
     // 4. Load CR3 to refresh
     pmap_activate(kernel_pmap_ptr);
@@ -122,13 +122,7 @@ int pmap_enter(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t fl
     }
 
     // 3. Check PDE
-    pde_t *pd = V_PD_INDEX(pml4i, pdpti, 0); // V_PD_INDEX returns pointer to entry? No, Wait.
-    // Macros used: V_PD_INDEX(i,j,k) -> pointer to entry.
-    // We want the array (table).
     // V_PD_INDEX(pml4i, pdpti, 0) points to entry 0 of the PD.
-    // Use pointer arithmetic or macros carefully.
-    
-    // My previous macro: V_PD_INDEX(i,j,k). k=0 is start of PD.
     pde_t *pd_table = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0); 
     
     if (!(pd_table[pdi] & PTE_P)) {
@@ -245,12 +239,12 @@ static void free_table_phys(uint64_t pa) {
 
 void pmap_destroy(pmap_t pmap) {
     if (!pmap) return;
+    if (pmap == kernel_pmap_ptr) return;
     
-    // 1. Decrement ref count
-    // TODO: Atomic decrement
-    pmap->ref_count--;
-    if (pmap->ref_count > 0) return;
+    // 1. Atomic decrement ref count
+    if (__sync_sub_and_fetch(&pmap->ref_count, 1) > 0) return;
 
+    // Remove from global list
     spinlock_acquire(&pmap_list_lock);
     TAILQ_REMOVE(&global_pmap_list, pmap, list_entry);
     spinlock_release(&pmap_list_lock);
@@ -285,8 +279,6 @@ void pmap_destroy(pmap_t pmap) {
                                 // Large page, no PT underneath
                                 continue;
                             }
-                            
-                            pte_t *pt = (pte_t *)pmap_ptokv(pt_phys);
                             
                             // Decrement refcounts for pages? 
                             // For now just free the PT itself
@@ -770,13 +762,7 @@ int pmap_page_is_cow(pmap_t pmap, uint64_t va) {
  * pmap_release - Decrement pmap reference count
  */
 void pmap_release(pmap_t pmap) {
-    if (!pmap) return;
-    if (pmap == kernel_pmap_ptr) return;
-    
-    int old = __sync_fetch_and_sub(&pmap->ref_count, 1);
-    if (old <= 1) {
-        pmap_destroy(pmap);
-    }
+    pmap_destroy(pmap);
 }
 
 // ========== TLB Shootdown for SMP ==========

@@ -1,0 +1,48 @@
+.TH IO 9 "February 2026" "Substrate Kernel" "Kernel Developer Manual"
+.SH NAME
+inb, inw, inl, outb, outw, outl, insw, outsw \- port-mapped I/O operations
+.SH SYNOPSIS
+.B #include <arch/x86-common/include/io.h>
+.PP
+.BI "uint8_t inb(uint16_t " port );
+.br
+.BI "uint16_t inw(uint16_t " port );
+.br
+.BI "uint32_t inl(uint16_t " port );
+.PP
+.BI "void outb(uint16_t " port ", uint8_t " data );
+.br
+.BI "void outw(uint16_t " port ", uint16_t " data );
+.br
+.BI "void outl(uint16_t " port ", uint32_t " data );
+.PP
+.BI "void insw(uint16_t " port ", void *" addr ", uint32_t " count );
+.br
+.BI "void outsw(uint16_t " port ", const void *" addr ", uint32_t " count );
+.SH DESCRIPTION
+These functions provide low-level access to the x86 architecture's I/O port address space.
+
+.SS Single Value Operations
+.TP
+.B inb(), inw(), inl()
+Read a single byte (8-bit), word (16-bit), or double-word (32-bit) from the specified I/O \fIport\fP.
+.TP
+.B outb(), outw(), outl()
+Write a single byte, word, or double-word \fIdata\fP to the specified I/O \fIport\fP.
+
+.SS String Operations
+These functions perform efficient block transfers using x86 string instructions (\fBrep ins/outs\fP).
+.TP
+.B insw()
+Read \fIcount\fP 16-bit words from \fIport\fP into the memory buffer at \fIaddr\fP.
+This is implemented using the \fBrep insw\fP instruction, which is significantly faster than a loop of \fBinw()\fP calls, especially on virtualized hardware.
+.TP
+.B outsw()
+Write \fIcount\fP 16-bit words from the memory buffer at \fIaddr\fP to \fIport\fP.
+This is implemented using the \fBrep outsw\fP instruction.
+
+.SH RETURN VALUE
+The \fBin*\fP functions return the value read from the port. The \fBout*\fP and \fB*sw\fP functions return no value.
+
+.SH SEE ALSO
+.BR ide (4)

@@ -1,0 +1,42 @@
+.Dd February 1, 2026
+.Dt VFS_MKDIR 9
+.Os Substrate
+.Sh NAME
+.Nm vfs_mkdir
+.Nd create a directory in the virtual file system
+.Sh SYNOPSIS
+.In vfs/vfs.h
+.Ft int
+.Fn vfs_mkdir "const char *path" "uint16_t permission"
+.Sh DESCRIPTION
+The
+.Fn vfs_mkdir
+function attempts to create a new directory at the location specified by
+.Fa path .
+.Pp
+If
+.Fa path
+is an absolute path (starts with '/'), the lookup and creation occur relative to the filesystem root node
+.Pq Va fs_root .
+.Pp
+If
+.Fa path
+is a relative path, the lookup and creation occur relative to the current process's working directory
+.Pq Va current_process->cwd_node .
+If the current process or its CWD is not set (e.g., during early boot), it falls back to the filesystem root.
+.Pp
+The
+.Fa permission
+argument specifies the permission bits (mode) for the new directory.
+.Sh RETURN VALUES
+The
+.Fn vfs_mkdir
+function returns 0 on success, or -1 on failure (e.g., if the parent directory is not found, or the underlying filesystem does not support directory creation).
+.Sh SEE ALSO
+.Xr vfs 9 ,
+.Xr vfs_lookup 9 ,
+.Xr vfs_mount 9
+.Sh HISTORY
+The
+.Fn vfs_mkdir
+function appeared in Substrate.

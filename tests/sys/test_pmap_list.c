@@ -11,6 +11,14 @@
 // Mock headers guards to skip them
 #define _PMM_H
 #define _VM_KMEM_H
+#define _ARCH_X86_COMMON_MSR_H 
+
+// Mock MSR definitions
+#define MSR_EFER    0xC0000080
+#define EFER_NXE    (1 << 11)
+
+static inline uint64_t rdmsr(uint32_t msr) { (void)msr; return 0; }
+static inline void wrmsr(uint32_t msr, uint64_t val) { (void)msr; (void)val; }
 
 // Mock types/funcs from pmm.h
 void* pmm_alloc_block(void);
