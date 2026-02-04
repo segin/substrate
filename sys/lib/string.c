@@ -6,34 +6,45 @@ void *memcpy(void *dest, const void *src, size_t n) {
     unsigned char *d = dest;
     const unsigned char *s = src;
 
-    // For very small sizes, the overhead of alignment logic outweighs the benefit
-    if (n < 2 * sizeof(unsigned long)) {
+    // Small copy optimization / setup for alignment
+    if (n < sizeof(unsigned long)) {
         while (n--) *d++ = *s++;
         return dest;
     }
 
-    // Align destination to word boundary
-    while ((uintptr_t)d & (sizeof(unsigned long) - 1)) {
-        if (n == 0) return dest;
-        *d++ = *s++;
-        n--;
+    // Check alignment compatibility
+    if ((uintptr_t)d % sizeof(unsigned long) == (uintptr_t)s % sizeof(unsigned long)) {
+        // Align dest to word boundary
+        while ((uintptr_t)d % sizeof(unsigned long)) {
+            *d++ = *s++;
+            n--;
+        }
+
+        // Copy words
+        unsigned long *ld = (unsigned long *)d;
+        const unsigned long *ls = (const unsigned long *)s;
+
+        while (n >= sizeof(unsigned long) * 4) {
+             ld[0] = ls[0];
+             ld[1] = ls[1];
+             ld[2] = ls[2];
+             ld[3] = ls[3];
+             ld += 4;
+             ls += 4;
+             n -= sizeof(unsigned long) * 4;
+        }
+
+        while (n >= sizeof(unsigned long)) {
+            *ld++ = *ls++;
+            n -= sizeof(unsigned long);
+        }
+
+        d = (unsigned char *)ld;
+        s = (const unsigned char *)ls;
     }
-
-    // Copy words
-    unsigned long *wd = (unsigned long *)d;
-    const unsigned long *ws = (const unsigned long *)s;
-
-    while (n >= sizeof(unsigned long)) {
-        *wd++ = *ws++;
-        n -= sizeof(unsigned long);
-    }
-
     // Copy remaining bytes
-    d = (unsigned char *)wd;
-    s = (const unsigned char *)ws;
-    while (n--) {
-        *d++ = *s++;
-    }
+    while (n--) *d++ = *s++;
+
     return dest;
 }
 
@@ -59,6 +70,17 @@ void *memset(void *s, int c, size_t n) {
 #endif
 
         unsigned long *lp = (unsigned long *)p;
+
+        // Unroll loop 4x
+        while (n >= sizeof(unsigned long) * 4) {
+            lp[0] = word_val;
+            lp[1] = word_val;
+            lp[2] = word_val;
+            lp[3] = word_val;
+            lp += 4;
+            n -= sizeof(unsigned long) * 4;
+        }
+
         while (n >= sizeof(unsigned long)) {
             *lp++ = word_val;
             n -= sizeof(unsigned long);

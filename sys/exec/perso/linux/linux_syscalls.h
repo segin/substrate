@@ -29,6 +29,7 @@
 #define LINUX_SYS_rmdir          40
 #define LINUX_SYS_dup            41
 #define LINUX_SYS_pipe           42
+#define LINUX_SYS_times          43
 #define LINUX_SYS_brk            45
 #define LINUX_SYS_setgid         46
 #define LINUX_SYS_getgid         47

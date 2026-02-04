@@ -5,6 +5,9 @@
 #include <sys/types.h>
 #include <sys/times.h>
 
+// Get current ticks
+uint64_t get_ticks(void);
+
 // Get current Unix timestamp (wall-clock time)
 time_t get_time(void);
 
@@ -13,6 +16,12 @@ time_t get_uptime(void);
 
 // Get uptime in milliseconds since boot (monotonic)
 int64_t get_uptime_ms(void);
+
+// Get current system ticks
+uint64_t get_ticks(void);
+
+// Get system HZ
+uint32_t get_hz(void);
 
 // Timer tick handler (called from PIT/APIC interrupt)
 void timer_tick(void);

@@ -29,6 +29,9 @@
 #define VBE_DISPI_ENABLED           0x01
 #define VBE_DISPI_LFB_ENABLED       0x40
 
+void bga_scroll(int y_offset);
+static int bga_set_viewport(int x, int y);
+
 static void bga_write(uint16_t index, uint16_t value) {
     outw(VBE_DISPI_IOPORT_INDEX, index);
     outw(VBE_DISPI_IOPORT_DATA, value);
@@ -57,6 +60,7 @@ int bga_is_available(void) {
 extern uint32_t pci_read_config(uint32_t device, int offset);
 
 static uint32_t bga_lfb_addr = 0;
+
 
 /*
 static void find_bga_pci(uint32_t device, uint16_t vendor_id, uint16_t device_id, void *extra) {
@@ -94,30 +98,53 @@ int bga_init(fb_info_t *fb_out) {
     // Set resolution: 1024x768x32
     uint16_t width = 1024;
     uint16_t height = 768;
+    uint16_t virt_height = height * 2; // Double buffering for scrolling
     uint16_t bpp = 32;
 
     bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
     bga_write(VBE_DISPI_INDEX_XRES, width);
     bga_write(VBE_DISPI_INDEX_YRES, height);
     bga_write(VBE_DISPI_INDEX_BPP, bpp);
+    bga_write(VBE_DISPI_INDEX_VIRT_WIDTH, width);
+    bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, virt_height);
+    bga_write(VBE_DISPI_INDEX_X_OFFSET, 0);
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, 0);
     bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
 
     // Update fb info
     fb_out->addr = (uint32_t*)bga_lfb_addr;
     fb_out->width = width;
     fb_out->height = height;
+    fb_out->virt_height = virt_height;
     fb_out->bpp = bpp;
     fb_out->pitch = (width * bpp) / 8;
+    fb_out->virt_width = width;
+    fb_out->virt_height = virt_height;
+    fb_out->set_viewport = bga_set_viewport;
 
-    kprint("BGA: Mode set to 1024x768x32.\n");
+    /* Implement Hardware Scroll */
+    fb_out->scroll = bga_scroll;
+
+    kprint("BGA: Mode set to 1024x768x32 with Hardware Scrolling.\n");
     return 0;
+}
+
+static int bga_set_viewport(int x, int y) {
+    bga_write(VBE_DISPI_INDEX_X_OFFSET, (uint16_t)x);
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, (uint16_t)y);
+    return 0;
+}
+
+void bga_scroll(int y_offset) {
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, (uint16_t)y_offset);
 }
 
 static video_driver_t bga_driver = {
     .name = "bga",
     .priority = 50,
     .probe = bga_is_available,
-    .init = bga_init
+    .init = bga_init,
+    .set_viewport = bga_set_viewport
 };
 
 void bga_install(void) {

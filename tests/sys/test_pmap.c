@@ -197,7 +197,45 @@ void test_pge_global_flush(void) {
     kprint("  PASS\n");
 }
 
+static void itoa(int val, char *buf) {
+    if (val == 0) {
+        buf[0] = '0';
+        buf[1] = '\0';
+        return;
+    }
+
+    int is_neg = 0;
+    unsigned int uval;
+
+    if (val < 0) {
+        is_neg = 1;
+        uval = (unsigned int)(-(val + 1)) + 1; // Handle INT_MIN
+    } else {
+        uval = val;
+    }
+
+    char tmp[32];
+    int k = 0;
+    while (uval > 0) {
+        tmp[k++] = (uval % 10) + '0';
+        uval /= 10;
+    }
+
+    if (is_neg) {
+        tmp[k++] = '-';
+    }
+
+    // Reverse into buf
+    int i = 0;
+    while (k > 0) {
+        buf[i++] = tmp[--k];
+    }
+    buf[i] = '\0';
+}
+
 void run_pmap_tests(void) {
+    char buf[32];
+
     kprint("\n=== PMAP Unit Tests ===\n");
     
     test_pmap_lifecycle();
@@ -213,7 +251,10 @@ void run_pmap_tests(void) {
     
     kprint("\nResults: ");
     kprint("Passed: ");
-    // TODO: Add itoa to print numbers
+    itoa(tests_passed, buf);
+    kprint(buf);
     kprint(" Failed: ");
+    itoa(tests_failed, buf);
+    kprint(buf);
     kprint("\n");
 }
