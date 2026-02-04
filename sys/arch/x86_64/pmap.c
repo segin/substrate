@@ -223,6 +223,7 @@ static void free_table_phys(uint64_t pa) {
 
 void pmap_destroy(pmap_t pmap) {
     if (!pmap) return;
+    if (pmap == kernel_pmap_ptr) return;
     
     // 1. Decrement ref count
     if (__sync_sub_and_fetch(&pmap->ref_count, 1) > 0) return;
@@ -740,13 +741,7 @@ int pmap_page_is_cow(pmap_t pmap, uint64_t va) {
  * pmap_release - Decrement pmap reference count
  */
 void pmap_release(pmap_t pmap) {
-    if (!pmap) return;
-    if (pmap == kernel_pmap_ptr) return;
-    
-    int old = __sync_fetch_and_sub(&pmap->ref_count, 1);
-    if (old <= 1) {
-        pmap_destroy(pmap);
-    }
+    pmap_destroy(pmap);
 }
 
 // ========== TLB Shootdown for SMP ==========
