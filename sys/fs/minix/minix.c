@@ -717,7 +717,7 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
 
     void *raw_inode = kmalloc(inode_size);
     if (!raw_inode) {
-        // TODO: Free allocated inode number
+        minix_free_inode(fs, (uint32_t)inode_num);
         return -1;
     }
     memset(raw_inode, 0, inode_size);
@@ -738,6 +738,7 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
     // 4. Write Inode to Disk (using V1/V2 aware helper)
     if (minix_write_inode(fs, &new_node) != 0) {
         kfree(raw_inode, inode_size);
+        minix_free_inode(fs, (uint32_t)inode_num);
         return -1;
     }
 
@@ -745,6 +746,7 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
 
     // 5. Add to Directory
     if (minix_dir_add(dir, name, inode_num) != 0) {
+        minix_free_inode(fs, (uint32_t)inode_num);
         return -1;
     }
 

@@ -129,8 +129,8 @@ struct termios {
 #define FIONREAD    0x541B
 #define TIOCINQ     FIONREAD
 
-#ifndef _STRUCT_WINSIZE
-#define _STRUCT_WINSIZE
+#ifndef _STRUCT_WINSIZE_DEFINED
+#define _STRUCT_WINSIZE_DEFINED
 struct winsize {
     unsigned short ws_row;
     unsigned short ws_col;
