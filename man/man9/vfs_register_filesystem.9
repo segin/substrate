@@ -1,0 +1,29 @@
+.Dd February 1, 2026
+.Dt VFS_REGISTER_FILESYSTEM 9
+.Os Substrate
+.Sh NAME
+.Nm vfs_register_filesystem
+.Nd register a filesystem driver
+.Sh SYNOPSIS
+.In vfs/vfs.h
+.Ft void
+.Fn vfs_register_filesystem "filesystem_t *fs"
+.Sh DESCRIPTION
+The
+.Fn vfs_register_filesystem
+function registers a new filesystem driver with the VFS kernel subsystem.
+The
+.Fa fs
+argument must point to a populated
+.Vt filesystem_t
+structure, which includes the filesystem name and a mount callback function.
+.Pp
+Registered filesystems are available for use by
+.Fn vfs_mount .
+.Sh SEE ALSO
+.Xr vfs 9 ,
+.Xr vfs_mount 9
+.Sh HISTORY
+The
+.Fn vfs_register_filesystem
+function appeared in Substrate.
