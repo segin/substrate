@@ -1,0 +1,39 @@
+.TH VM86 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+vm86 \- enter virtual 8086 mode
+.SH SYNOPSIS
+.B #include <sys/vm86.h>
+.PP
+.BI "int vm86(struct vm86_struct *" info ");"
+.SH DESCRIPTION
+The system call
+.BR vm86 ()
+is used to enter virtual 8086 mode (VM86). This mode allows the execution of 16-bit
+real-mode code in a protected environment.
+.PP
+The
+.I info
+structure contains the CPU state (registers) to be loaded when entering VM86 mode.
+.SH RETURN VALUE
+On success,
+.BR vm86 ()
+does not return in the usual sense; instead, it enters VM86 mode. If it returns
+due to an exception or interrupt that needs to be handled by the caller, it returns 0.
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EFAULT
+The pointer
+.I info
+is invalid.
+.TP
+.B ENOSYS
+The system does not support VM86 mode (e.g., non-x86 architectures).
+.SH CONFORMING TO
+This call is specific to x86-based Linux and Substrate systems.
+.SH SEE ALSO
+.BR vmm (4)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
