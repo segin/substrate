@@ -758,6 +758,21 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
         uint32_t bits_in_group = fs->inodes_per_group;
         
         for (uint32_t i = start; i < bits_in_group; i++) {
+            // Optimization: Skip full 32-bit words
+            if ((i % 32 == 0) && (i + 32 <= bits_in_group)) {
+                if (*(uint32_t *)&bitmap_buf[i / 8] == 0xFFFFFFFF) {
+                    i += 31;
+                    continue;
+                }
+            }
+            // Optimization: Skip full bytes
+            else if ((i % 8 == 0) && (i + 8 <= bits_in_group)) {
+                if (bitmap_buf[i / 8] == 0xFF) {
+                    i += 7;
+                    continue;
+                }
+            }
+
             uint32_t byte_idx = i / 8;
             uint32_t bit_idx = i % 8;
             
