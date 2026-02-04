@@ -1,0 +1,62 @@
+.\" EXT2 driver man page
+.TH EXT2 4 "January 2026" "Substrate Kernel" "Special Files"
+.SH NAME
+ext2 \- Second Extended Filesystem driver
+.SH SYNOPSIS
+.B mount -t ext2
+.I device mountpoint
+.SH DESCRIPTION
+The
+.B ext2
+driver provides read-write support for the Second Extended Filesystem (ext2).
+It supports standard Unix file operations including file creation, deletion, reading, writing, and directory management.
+.SS Features
+.IP \[bu] 2
+Support for both Rev 0 (old) and Rev 1 (dynamic) inode sizes.
+.IP \[bu]
+Block groups and block group descriptors.
+.IP \[bu]
+Indirect, double indirect, and triple indirect block addressing.
+.IP \[bu]
+Directory iteration (readdir).
+.IP \[bu]
+Symbolic links (fast and slow).
+.SS Concurrency
+The driver is designed to be thread-safe for concurrent access:
+.TP
+.B I/O Buffers
+All block I/O operations use dynamically allocated buffers (via
+.BR kmalloc (9))
+to prevent race conditions when multiple threads access the filesystem simultaneously.
+.TP
+.B Directory Iteration
+Directory iteration state (current position, directory entry buffer) is maintained within the node context
+.RB ( struct ext2_node_t ),
+ensuring that concurrent
+.BR readdir (3)
+calls on different file descriptors do not interfere with each other.
+.SS Structures
+The driver defines the following on-disk structures in
+.IR ext2.h :
+.TP
+.B ext2_superblock_t
+Filesystem global metadata (magic number, block count, inode count).
+.TP
+.B ext2_group_desc_t
+Block group descriptor pointing to bitmaps and tables.
+.TP
+.B ext2_inode_t
+Inode structure containing file metadata and block pointers.
+.TP
+.B ext2_dirent_t
+Directory entry structure.
+.SH FILES
+.TP
+.I sys/fs/ext2/ext2.h
+Structure definitions.
+.TP
+.I sys/fs/ext2/ext2.c
+Implementation of the filesystem driver.
+.SH SEE ALSO
+.BR vfs (9),
+.BR mount (2)

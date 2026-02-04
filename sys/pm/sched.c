@@ -5,12 +5,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <stddef.h>
-#include <stdint.h>
-
 thread_t threads[MAX_THREADS];
+// Generation counters for each thread slot to enable O(1) TID lookup.
+// TID = index + (generation * MAX_THREADS)
+static uint32_t slot_generations[MAX_THREADS];
 thread_t *current_thread = NULL;
-static int next_tid = 1;
 
 extern void arch_switch_to(thread_t *prev, thread_t *next);
 extern void arch_set_kernel_stack(uintptr_t stack);
@@ -18,9 +17,9 @@ extern void arch_set_kernel_stack(uintptr_t stack);
 
 
 void sched_init_generic(void) {
-    next_tid = 0;
     extern void *memset(void *s, int c, size_t n);
     memset(threads, 0, sizeof(threads));
+    memset(slot_generations, 0, sizeof(slot_generations));
     
     // Initialize PM
     pm_init();
@@ -40,11 +39,15 @@ thread_t *sched_alloc_thread(process_t *proc) {
     }
     if (i == MAX_THREADS) return NULL;
 
-    threads[i].tid = next_tid++;
+    // Generate O(1) compatible TID
+    threads[i].tid = i + (slot_generations[i] * MAX_THREADS);
+    slot_generations[i]++;
+
     threads[i].proc = proc;
     threads[i].state = THREAD_BLOCKED; // Set to BLOCKED until stack is ready
     threads[i].wait_chan = NULL;
     threads[i].wait_reason = NULL;
+    threads[i].sleep_expiry = 0;
     threads[i].priority = current_thread ? current_thread->priority : 20;
     threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
     threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
@@ -125,9 +128,9 @@ int sched_get_current_tid(void) {
 }
 
 thread_t *sched_get_thread(int tid) {
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == tid) return &threads[i];
-    }
+    if (tid < 0) return NULL;
+    int idx = tid % MAX_THREADS;
+    if (threads[idx].tid == tid) return &threads[idx];
     return NULL;
 }
 
@@ -205,3 +208,4 @@ void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) 
         }
     }
 }
+

@@ -19,6 +19,8 @@
 #include <kern/time.h>
 #include <sys/ntsync.h>
 #include <sys/proc.h>
+#include <sys/time.h>
+#include <kern/time.h>
 #include <string.h>
 #include <errno.h>
 
@@ -118,6 +120,14 @@ typedef struct ntsync_instance {
  * Spinlock Helpers
  * ============================================================
  */
+
+static uint64_t get_current_time_ns(clockid_t clk_id) {
+    struct timespec ts;
+    if (sys_clock_gettime(clk_id, &ts) != 0) {
+        return 0;
+    }
+    return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
 
 static inline void spinlock_acquire(volatile int *lock) {
     while (__sync_lock_test_and_set(lock, 1)) {
@@ -765,7 +775,7 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
 
     if (timed_out) return -ETIMEDOUT;
-    
+
     return -EINTR;  /* Interrupted */
 }
 
@@ -849,6 +859,13 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         
         /* Sleep briefly and retry */
         /* TODO: Proper wait queue implementation */
+        if (args->timeout != UINT64_MAX) {
+            clockid_t clk = (args->flags & NTSYNC_WAIT_REALTIME) ? CLOCK_REALTIME : CLOCK_MONOTONIC;
+            uint64_t now = get_current_time_ns(clk);
+            if (now >= args->timeout) {
+                return -ETIMEDOUT;
+            }
+        }
         sched_yield();
     }
     

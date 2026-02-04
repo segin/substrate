@@ -10,7 +10,32 @@
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 #include <exec/perso/openbsd/openbsd_syscalls.h>
+#include "../../include/sys/resource.h"
+#include "../../include/sys/times.h"
 
+// OpenBSD uses same logic as NetBSD for getrusage via times() wrapper if times syscall is missing
+int openbsd_sys_getrusage(int who, struct rusage *rusage) {
+    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -1;
+
+    struct tms t;
+    if ((clock_t)sys_times(&t) == (clock_t)-1) return -1;
+
+    extern void *memset(void *, int, size_t);
+    memset(rusage, 0, sizeof(struct rusage));
+
+    // Ticks to timeval. HZ=100.
+    // user time
+    clock_t ut = (who == RUSAGE_SELF) ? t.tms_utime : t.tms_cutime;
+    rusage->ru_utime.tv_sec = ut / 100;
+    rusage->ru_utime.tv_usec = (ut % 100) * 10000;
+
+    // system time
+    clock_t st = (who == RUSAGE_SELF) ? t.tms_stime : t.tms_cstime;
+    rusage->ru_stime.tv_sec = st / 100;
+    rusage->ru_stime.tv_usec = (st % 100) * 10000;
+
+    return 0;
+}
 
 /* OpenBSD syscall table - based on i386 column */
 static void *openbsd_syscalls[MAX_SYSCALLS] = {
@@ -128,10 +153,14 @@ static void *openbsd_syscalls[MAX_SYSCALLS] = {
     [OPENBSD_SYS_compat_recvmsg] = NULL,            /* compat_recvmsg */
     [OPENBSD_SYS_compat_sendmsg] = NULL,            /* compat_sendmsg */
     [OPENBSD_SYS_obs_vtrace]     = NULL,            /* obs_vtrace */
-    [OPENBSD_SYS_gettimeofday]   = NULL,            /* gettimeofday */
-    [OPENBSD_SYS_getrusage]      = NULL,            /* getrusage */
+    [OPENBSD_SYS_gettimeofday]   = &sys_gettimeofday,
+    [OPENBSD_SYS_getrusage]      = &openbsd_sys_getrusage,
     [OPENBSD_SYS_getsockopt]     = NULL,            /* getsockopt */
-    /* Higher syscalls - mapped separately per OpenBSD version */
+    [OPENBSD_SYS_kill_modern]    = &sys_kill,
+    [OPENBSD_SYS_lseek_modern]   = &sys_lseek,
+    [OPENBSD_SYS_msync_modern]   = &sys_msync,
+    [OPENBSD_SYS_pipe_modern]    = &sys_pipe,
+    [OPENBSD_SYS_sigaltstack_modern] = &sys_sigaltstack,
 };
 
 static const char *openbsd_names[MAX_SYSCALLS] = {
@@ -202,6 +231,11 @@ static const char *openbsd_names[MAX_SYSCALLS] = {
     [OPENBSD_SYS_getpgrp]        = "getpgrp",
     [OPENBSD_SYS_setpgid]        = "setpgid",
     [OPENBSD_SYS_dup2]           = "dup2",
+    [OPENBSD_SYS_kill_modern]    = "kill",
+    [OPENBSD_SYS_lseek_modern]   = "lseek",
+    [OPENBSD_SYS_msync_modern]   = "msync",
+    [OPENBSD_SYS_pipe_modern]    = "pipe",
+    [OPENBSD_SYS_sigaltstack_modern] = "sigaltstack",
 };
 
 static struct syscall_fmt openbsd_fmts[MAX_SYSCALLS] = {

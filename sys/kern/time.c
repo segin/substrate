@@ -28,6 +28,10 @@ int64_t get_uptime_ms(void) {
     return ticks * (1000 / HZ);
 }
 
+uint32_t get_hz(void) {
+    return HZ;
+}
+
 void set_boot_time(time_t time) {
     boot_time = time;
 }
@@ -38,6 +42,11 @@ time_t sys_time(time_t *tloc) {
     return t;
 }
 
+int sys_stime(time_t *t) {
+    if (!t) return -1;
+    boot_time = *t - div64_32(ticks, HZ);
+    return 0;
+}
 int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (!tv) return -1;
     
@@ -89,4 +98,7 @@ clock_t sys_times(struct tms *buf) {
 void timer_tick(void) {
     ticks++;
     sched_tick();
+    if (mod64_32(ticks, 5 * HZ) == 0) {
+        sched_update_loadavg();
+    }
 }
