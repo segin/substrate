@@ -39,7 +39,7 @@
 #include <fs/fuse.h>
 #include <fs/9p.h>
 
-#include <tests/tests.h>
+#include <sys/tests.h>
 
 extern void ntsync_init(void);
 
@@ -263,11 +263,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     current_process->pid = 0;
     strcpy(current_process->comm, "(swapper)");
 
-    early_uart_print("KMAIN: console_init\n");
-    console_init();
-    hw_text_init(); // Registers VGA text console
-    uart_init(); // Initializes UART hardare
-
     // 2. Process Multiboot Info EARLY to get cmdline
     // Note: boot.S already converted 'addr' (mboot_info) to Higher Half Virtual Address.
     // However, pointers *inside* the struct (like cmdline, mmap_addr) are still PHYSICAL.
@@ -298,7 +293,14 @@ void kmain(unsigned long magic, unsigned long addr) {
     kprint("\n");
 
 
-    // Check for serial debug
+    // Memory Subsystem Init (PMM, VM, UMA)
+    init_memory(mboot_info);
+
+    console_init();
+    hw_text_init(); // Registers VGA text console
+    uart_init(); // Initializes UART hardare
+
+    // Check for serial debug (MUST be after console_init which clears backends)
     if (cmdline_has("serial_debug")) {
         serial_debug_enabled = 1;
         console_register(uart_get_console());
@@ -313,11 +315,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Display kernel ident banner (mirrored if serial_debug_enabled)
     kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
 
-    early_uart_print("KMAIN: init_memory\n");
-    // Memory Subsystem Init (PMM, VM, UMA)
-    init_memory(mboot_info);
-
-    early_uart_print("KMAIN: gdt_init\n");
     // Initialize GDT
     gdt_init();
     kprint("GDT Initialized.\n");
@@ -339,7 +336,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     extern void pmap_map_trampoline(void);
     pmap_map_trampoline();
     
-    early_uart_print("KMAIN: random_init\n");
     // Initialize Random Number Generator
     extern void random_init(void);
     random_init();
@@ -352,6 +348,8 @@ void kmain(unsigned long magic, unsigned long addr) {
     kprint("Scheduler Initialized.\n");
 
     // Initialize Sysctl Subsystem
+    extern void sysctl_init(void);
+    sysctl_init();
     extern void sysctl_init(void);
     sysctl_init();
     

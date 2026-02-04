@@ -1,57 +1,47 @@
-.\"
-.\" IOCTL(2) - Substrate Native Personality
-.\"
-.TH IOCTL 2 "January 2026" "Substrate OS" "System Calls"
+.TH IOCTL 2 "February 2026" "Substrate" "System Calls Manual"
 .SH NAME
 ioctl \- control device
 .SH SYNOPSIS
-.nf
 .B #include <sys/ioctl.h>
 .PP
-.BI "int ioctl(int " fd ", unsigned long " request ", ...);
-.fi
+.BI "int ioctl(int " fd ", unsigned long " request ", ...);"
 .SH DESCRIPTION
 The
 .BR ioctl ()
 system call manipulates the underlying device parameters of special files.
-.PP
-The
-.I request
-argument is a device-dependent request code. The third argument is an
-untyped pointer to memory, traditionally
-.BR "char *argp" .
-.SS Terminal ioctls
-For terminal devices,
+In particular, many operating characteristics of character special files
+(e.g., terminals) may be controlled with
 .BR ioctl ()
-supports the following requests:
-.TP
-.B TCGETS (0x5401)
-Get terminal attributes into
-.BR "struct termios" .
-.TP
-.B TCSETS (0x5402)
-Set terminal attributes from
-.BR "struct termios" .
-.TP
-.B TCSETSW (0x5403)
-Set terminal attributes after output drains.
-.TP
-.B TCSETSF (0x5404)
-Set terminal attributes after output drains and flush input.
-.TP
-.B TIOCGWINSZ (0x5413)
-Get window size into
-.BR "struct winsize" .
-.TP
-.B TIOCSPGRP (0x5410)
-Set the foreground process group ID.
-.TP
-.B TIOCGPGRP (0x540F)
-Get the foreground process group ID.
-.SH RETURN VALUE
-On success, zero is returned.
+requests.  The argument
+.I fd
+must be an open file descriptor.
 .PP
-On error, \-1 is returned, and
+The second argument is a device-dependent request code.  The third
+argument is an untyped pointer to memory.  It's traditionally
+.I "char *argp"
+(from the days before
+.I void *
+was valid C), and will be so named for this discussion.
+.PP
+An
+.BR ioctl ()
+.I request
+has encoded in it whether the argument is an
+.I in
+parameter or
+.I out
+parameter, and the size of the argument
+.I argp
+in bytes.  Macros and defines used in specifying an
+.BR ioctl ()
+.I request
+are located in the file
+.IR <sys/ioctl.h> .
+.SH RETURN VALUE
+Usually, on success zero is returned.  A few
+.BR ioctl ()
+requests use the return value as an output parameter and return a
+nonnegative value on success.  On error, \-1 is returned, and
 .I errno
 is set appropriately.
 .SH ERRORS
@@ -60,27 +50,36 @@ is set appropriately.
 .I fd
 is not a valid file descriptor.
 .TP
+.B EFAULT
+.I argp
+references an inaccessible memory area.
+.TP
+.B EINVAL
+.I request
+or
+.I argp
+is not valid.
+.TP
 .B ENOTTY
 .I fd
 is not associated with a character special device.
 .TP
-.B EINVAL
-.I request
-is not valid.
-.SH NOTES
-.SS Substrate Native ABI
-.nf
-Syscall Number: 54 (SYS_IOCTL)
-Arguments:      fd, request, arg (on stack)
-.fi
-.SS Native termios
-Substrate's native
-.B struct termios
-uses NCCS=32 control characters. The Linux personality translates
-between this and Linux's NCCS=19 format.
+.B ENOTTY
+The specified request does not apply to the kind of object that the file
+descriptor
+.I fd
+references.
+.SH CONFORMING TO
+No single standard.  Arguments, returns, and semantics of
+.BR ioctl ()
+vary according to the device driver in question (the call is used as a
+catch-all for operations that don't cleanly fit the Unix stream I/O
+model).
 .SH SEE ALSO
-.BR termios (4),
-.BR tty (4),
-.BR substrate (7)
-.SH STANDARDS
-POSIX.1-2001, POSIX.1-2008 (partially).
+.BR execve (2),
+.BR fcntl (2),
+.BR open (2),
+.BR sd (4),
+.BR tty (4)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
