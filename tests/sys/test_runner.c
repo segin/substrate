@@ -31,6 +31,7 @@ extern void test_vm_page_queue(void);
 extern void run_minix_mount_tests(void);
 extern void run_minix_write_tests(void);
 extern void test_bitness(void);
+extern void run_sched_bench(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -256,6 +257,15 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "sysctl") == 0) {
         extern void test_sysctl(void);
         test_sysctl();
+    }
+
+    if (all || strcmp(test_arg, "bench_sched") == 0) {
+        extern void bench_sched(void);
+        bench_sched();
+    }
+
+    if (strcmp(test_arg, "sched_bench") == 0) {
+        run_sched_bench();
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");
