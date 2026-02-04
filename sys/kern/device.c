@@ -177,6 +177,7 @@ int device_unregister(struct device *dev) {
  */
 void device_get(struct device *dev) {
     if (dev) {
+
         __sync_fetch_and_add(&dev->ref_count, 1);
     }
 }
@@ -189,7 +190,8 @@ void device_get(struct device *dev) {
  */
 void device_put(struct device *dev) {
     if (dev) {
-        if (__sync_sub_and_fetch(&dev->ref_count, 1) == 0) {
+
+        if (__sync_sub_and_fetch(&dev->ref_count, 1) <= 0) {
             /* Ensure it's unregistered? 
                Usually safe to assume calling put on a registered device is bad if it hits zero,
                but we just free memory here. */

@@ -18,10 +18,12 @@
 The
 .Fn device_get
 function atomically increments the reference count of a device structure.
+It is safe to call from multiple threads.
 .Pp
 The
 .Fn device_put
 function atomically decrements the reference count. If the reference count reaches zero, the device structure is freed.
+This operation is also thread-safe.
 .Pp
 If
 .Fa dev
