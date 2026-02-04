@@ -250,6 +250,10 @@ time_t time(time_t *tloc) {
     return (time_t)_syscall1(SYS_TIME, (int)tloc);
 }
 
+clock_t times(struct tms *buf) {
+    return (clock_t)_syscall1(SYS_TIMES, (int)buf);
+}
+
 int mkdir(const char *pathname, mode_t mode) {
     return (int)_syscall2(SYS_MKDIR, (int)pathname, mode);
 }
