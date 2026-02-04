@@ -1,0 +1,38 @@
+.TH PTRACE 2 "February 2026" "Substrate" "System Calls Manual"
+.SH NAME
+ptrace \- process trace
+.SH SYNOPSIS
+.B #include <sys/ptrace.h>
+.PP
+.BI "long ptrace(int " request ", pid_t " pid ", void *" addr ", int " data ");"
+.SH DESCRIPTION
+The
+.BR ptrace ()
+system call provides a means by which one process (the "tracer") may
+observe and control the execution of another process (the "tracee"),
+and examine and change the tracee's memory and registers.  It is
+primarily used to implement breakpoint debugging and system call
+tracing.
+.SH RETURN VALUE
+On success,
+.BR ptrace ()
+returns a value that depends on the request. On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EPERM
+The specified process cannot be traced.
+.TP
+.B ESRCH
+The specified process does not exist.
+.TP
+.B ENOSYS
+The system does not currently implement this request.
+.SH CONFORMING TO
+SVr4, 4.3BSD.
+.SH SEE ALSO
+.BR gdb (1),
+.BR strace (1)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

@@ -42,9 +42,9 @@ void *memcpy(void *dest, const void *src, size_t n) {
         d = (unsigned char *)ld;
         s = (const unsigned char *)ls;
     }
-
     // Copy remaining bytes
     while (n--) *d++ = *s++;
+
     return dest;
 }
 

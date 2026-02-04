@@ -51,24 +51,62 @@ _start:
 	inc %esi
 	loop 2b
 
+	# Table 3: 8..12MB
+	mov $(boot_page_table3 - 0xC0000000), %edi
+	mov $2048, %esi # Start at page 2048 (8MB)
+	mov $1024, %ecx
+3:
+	mov %esi, %edx
+	shl $12, %edx
+	or $3, %edx  # Present + RW
+	mov %edx, (%edi)
+	add $4, %edi
+	inc %esi
+	loop 3b
+
+	# Table 4: 12..16MB
+	mov $(boot_page_table4 - 0xC0000000), %edi
+	mov $3072, %esi # Start at page 3072 (12MB)
+	mov $1024, %ecx
+4:
+	mov %esi, %edx
+	shl $12, %edx
+	or $3, %edx  # Present + RW
+	mov %edx, (%edi)
+	add $4, %edi
+	inc %esi
+	loop 4b
+
 	# 2. Setup Page Directory
 	mov $(boot_page_directory - 0xC0000000), %edx
 	
-	# Entry 0, 1: PT1, PT2 (Identity 0..8MB)
+	# Entry 0, 1, 2, 3: PT1, PT2, PT3, PT4 (Identity 0..16MB)
 	mov $(boot_page_table1 - 0xC0000000), %eax
 	or $3, %eax
 	mov %eax, (%edx)
 	mov $(boot_page_table2 - 0xC0000000), %eax
 	or $3, %eax
 	mov %eax, 4(%edx)
+	mov $(boot_page_table3 - 0xC0000000), %eax
+	or $3, %eax
+	mov %eax, 8(%edx)
+	mov $(boot_page_table4 - 0xC0000000), %eax
+	or $3, %eax
+	mov %eax, 12(%edx)
 
-	# Entry 768, 769: PT1, PT2 (Higher Half 3GB..3GB+8MB)
+	# Entry 768, 769, 770, 771: PT1..PT4 (Higher Half 3GB..3GB+16MB)
 	mov $(boot_page_table1 - 0xC0000000), %eax
 	or $3, %eax
 	mov %eax, 3072(%edx)
 	mov $(boot_page_table2 - 0xC0000000), %eax
 	or $3, %eax
 	mov %eax, 3076(%edx)
+	mov $(boot_page_table3 - 0xC0000000), %eax
+	or $3, %eax
+	mov %eax, 3080(%edx)
+	mov $(boot_page_table4 - 0xC0000000), %eax
+	or $3, %eax
+	mov %eax, 3084(%edx)
 
 	# Entry 1019 (0x3FB*4=4076): LAPIC page table (0xFEC00000-0xFFFFF000)
 	# This maps the Local APIC at 0xFEE00000
@@ -142,6 +180,10 @@ boot_page_directory:
 boot_page_table1:
 	.skip 4096
 boot_page_table2:
+	.skip 4096
+boot_page_table3:
+	.skip 4096
+boot_page_table4:
 	.skip 4096
 boot_page_table_lapic:
 	.skip 4096

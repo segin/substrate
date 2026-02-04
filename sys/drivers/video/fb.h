@@ -13,6 +13,7 @@ typedef struct {
     uint32_t pitch;
     uint8_t  bpp;
     void (*putpixel)(int x, int y, uint32_t color);
+    void (*scroll)(int y_offset);
 } fb_info_t;
 
 /* Core framebuffer operations */

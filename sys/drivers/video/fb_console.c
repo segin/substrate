@@ -25,7 +25,7 @@
 
 static int cursor_x = 0;
 static int cursor_y = 0;
-static int view_y_offset = 0; /* HW Scrolling Offset */
+static int view_y_offset = 0; /* Current hardware scroll offset */
 
 /* External framebuffer info (from fb.c) */
 extern fb_info_t fb;
@@ -75,12 +75,14 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
            view_y_offset tracks where the screen starts displaying.
         */
         const uint8_t *glyph = &font_8x16[(unsigned char)c * 16];
+        int draw_y = cursor_y + view_y_offset;
+
         for (int y = 0; y < FB_FONT_HEIGHT; y++) {
             for (int x = 0; x < FB_FONT_WIDTH; x++) {
                 if (glyph[y] & (0x80 >> x)) {
-                    fb_putpixel(cursor_x + x, cursor_y + y, fg);
+                    fb_putpixel(cursor_x + x, draw_y + y, fg);
                 } else if (bg != FB_COLOR_TRANSPARENT) {
-                    fb_putpixel(cursor_x + x, cursor_y + y, bg);
+                    fb_putpixel(cursor_x + x, draw_y + y, bg);
                 }
             }
         }
@@ -94,86 +96,55 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
     }
 
     /* Handle scroll */
-    /* Visible area: [view_y_offset, view_y_offset + fb.height) */
-    /* Cursor Y is the TOP of the current line being written. */
-    /* If cursor_y + FB_FONT_HEIGHT > view_y_offset + fb.height */
+    if (cursor_y + FB_FONT_HEIGHT > (int)fb.height) {
+        if (fb.scroll && fb.virt_height >= fb.height * 2) {
+            /* Hardware Scrolling Strategy */
 
-    int visible_bottom = view_y_offset + (int)fb.height;
-
-    if (cursor_y + FB_FONT_HEIGHT > visible_bottom) {
-        /* Need to scroll */
-
-        /* Can we hardware scroll? */
-        int can_hw_scroll = (fb.virt_height > fb.height);
-
-        if (can_hw_scroll) {
-            /* Increment viewport */
+            /* Advance view offset */
             view_y_offset += FB_FONT_HEIGHT;
 
-            /* Check if we hit the limit of virtual height */
+            /* Check if we need to wrap around the circular buffer */
             if (view_y_offset + (int)fb.height > (int)fb.virt_height) {
-                /* Wrap around / Reset */
-                /* Copy the LAST screen (fb.height) of content to the TOP of the buffer (0) */
-                /* Src: fb.addr + (view_y_offset * pitch) ??
-                   Actually, we want to copy the currently visible content (minus the new line we just added? No, we haven't added it yet effectively or we are about to)
+                 /*
+                  * Buffer wrap-around strategy:
+                  * When the view offset reaches the end of the virtual buffer, we must
+                  * copy the currently visible content (shifted up by one line) back to
+                  * the top of the buffer (offset 0) to continue scrolling.
+                  *
+                  * We preserve the visible screen content starting from the second line
+                  * of the previous view, effectively discarding the top line.
+                  */
 
-                   Wait, we are here because cursor_y just advanced past the bottom.
-                   So the previous lines [cursor_y - height + font_height ... cursor_y] are what we want to keep.
+                 void *dst = fb.addr;
+                 int previous_offset = view_y_offset - FB_FONT_HEIGHT;
 
-                   Simpler strategy:
-                   Copy the current screen worth of data from (old_view_y + font_height) to 0.
-                   Reset view_y_offset to 0.
-                   Reset cursor_y to (fb.height - font_height).
-                */
+                 /* Source is the second line of the previous view */
+                 void *src = (void *)((uintptr_t)fb.addr + (previous_offset + FB_FONT_HEIGHT) * fb.pitch);
+                 size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
 
-                /* Calculate source: The area that WAS visible is [view_y_offset - font_height, ...].
-                   We want to preserve the screen content.
-                   The content we want to keep is the last (H - font_h) pixels.
-                   Src = fb.addr + (view_y_offset * pitch)
-                   Dst = fb.addr
-                   Size = (fb.height - font_height) * pitch
-
-                   Wait, if we scroll down, the new line is at the bottom.
-                   The new viewport will be view_y_offset.
-                   But if view_y_offset + height > virt_height, we can't set it.
-
-                   So we must wrap.
-                   Copy visible window (old view_y) to 0?
-                   We are adding a NEW line at the bottom.
-                   So we copy the *previous* (height - font_height) lines to 0.
-                   Then we set cursor_y to (height - font_height).
-                   Then we clear the new line at cursor_y.
-                   Then we set viewport to 0.
-                */
-
-                int old_view_y = view_y_offset - FB_FONT_HEIGHT; // The viewport BEFORE we tried to scroll
-
-                void *dst = fb.addr;
-                void *src = (void *)((uintptr_t)fb.addr + (old_view_y + FB_FONT_HEIGHT) * fb.pitch);
-                size_t copy_size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
-
-                memcpy(dst, src, copy_size);
-
-                view_y_offset = 0;
-                cursor_y = fb.height - FB_FONT_HEIGHT;
-
-                video_set_viewport(0, 0);
-            } else {
-                /* Just update viewport */
-                video_set_viewport(0, view_y_offset);
+                 memcpy(dst, src, size);
+                 view_y_offset = 0;
             }
 
-            /* Clear the new line at cursor_y */
-            /* Note: cursor_y is absolute. If we didn't wrap, cursor_y is growing. */
+            /* Clear the new bottom line */
             uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
-            for (int y = cursor_y; y < cursor_y + FB_FONT_HEIGHT; y++) {
+            int clear_y = view_y_offset + (fb.height - FB_FONT_HEIGHT);
+
+            /* Fill the new line with background */
+            for (uint32_t y = 0; y < FB_FONT_HEIGHT; y++) {
+                // Optimized fill could go here, but per-pixel is safe
                 for (uint32_t x = 0; x < fb.width; x++) {
-                    fb_putpixel(x, y, clear_color);
+                    fb_putpixel(x, clear_y + y, clear_color);
                 }
             }
 
+            /* Commit Scroll */
+            fb.scroll(view_y_offset);
+
+            cursor_y -= FB_FONT_HEIGHT;
+
         } else {
-            /* Software Fallback (original logic) */
+            /* Fallback: Software Scroll (memcpy) */
             void *dst = fb.addr;
             void *src = (void *)((uintptr_t)fb.addr + FB_FONT_HEIGHT * fb.pitch);
             size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
@@ -182,12 +153,12 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
             /* Clear bottom line */
             uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
             for (uint32_t y = fb.height - FB_FONT_HEIGHT; y < fb.height; y++) {
+                // Optimized fill could go here, but per-pixel is safe
                 for (uint32_t x = 0; x < fb.width; x++) {
                     fb_putpixel(x, y, clear_color);
                 }
             }
             cursor_y -= FB_FONT_HEIGHT;
-            view_y_offset = 0; // Ensure 0
         }
     }
 }
