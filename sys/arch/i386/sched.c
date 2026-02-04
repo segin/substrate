@@ -68,14 +68,6 @@ void sched_init(void) {
     extern char *strcpy(char *, const char *);
     strcpy(processes[0].comm, "swapper");
     
-    // Copy permissions/acct
-    // ... (simplified)
-    
-    // Alloc Kernel Thread
-    // We can't use alloc because it might pick index 0 which is fine, 
-    // but 'current_thread' is NULL so alloc might crash on priority inheritance?
-    // Modified alloc to handle NULL current_thread.
-    
     thread_t *t = sched_alloc_thread(&processes[0]);
     t->state = THREAD_RUNNING;
     t->priority = 20;
