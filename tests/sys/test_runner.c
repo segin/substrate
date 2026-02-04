@@ -31,6 +31,7 @@ extern void test_vm_page_queue(void);
 extern void run_minix_mount_tests(void);
 extern void run_minix_write_tests(void);
 extern void test_bitness(void);
+extern void run_string_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -44,6 +45,10 @@ void run_kernel_tests(void) {
     
     int all = (strcmp(test_arg, "all") == 0) || (strcmp(test_arg, "1") == 0);
     
+    if (all || strcmp(test_arg, "string") == 0) {
+        run_string_tests();
+    }
+
     if (all || strcmp(test_arg, "pmap") == 0) {
         run_pmap_tests();
         run_pmap_protect_property_tests();
