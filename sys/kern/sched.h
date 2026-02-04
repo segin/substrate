@@ -35,7 +35,7 @@
 void sched_init(void);
 
 /* Thread Creation */
-int sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
+thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
 
 /* Fork (Clone Process) */
 int sched_fork_process(process_t *parent, void *stack);
@@ -51,13 +51,24 @@ process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 
-/* Load Average API */
-void sched_loadavg_update(void);
-void sched_get_loadavg(unsigned long averages[], int n);
+void sched_check_timeouts(void);
 
+/* Load Average */
+#define SI_LOAD_SCALE 2048
 #define FSHIFT  11
-#define FSCALE  (1<<FSHIFT)
+#define FSCALE  SI_LOAD_SCALE
+#define FIXED_1 FSCALE
 #define LOAD_INT(x) ((x) >> FSHIFT)
-#define LOAD_FRAC(x) LOAD_INT(((x) & (FSCALE-1)) * 100)
+#define LOAD_FRAC(x) ((((x) & (FSCALE-1)) * 100) >> FSHIFT)
+
+/* Load average constants (1, 5, 15 min with 5 sec interval) */
+#define EXP_1  1884  /* 2048 * exp(-5/60) */
+#define EXP_5  2014  /* 2048 * exp(-5/300) */
+#define EXP_15 2037  /* 2048 * exp(-5/900) */
+
+void sched_update_loadavg(void);
+void sched_get_loadavg(unsigned long *loads);
+uint32_t sched_count_runnable(void);
+uint32_t sched_count_threads(void);
 
 #endif

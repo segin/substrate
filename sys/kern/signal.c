@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <pm/pm.h>
 #include <exec/perso/personality.h>
+#include <sys/time.h>
+#include <kern/time.h>
 
 extern thread_t threads[MAX_THREADS];
 
@@ -141,22 +143,47 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
     
     if (wait_mask == 0) return -22; // EINVAL
     
-    // TODO: Implement proper timeout handling using kernel tick counter
-    // For now, if timeout is NULL, wait indefinitely
-    // If timeout is specified but we can't implement it, treat as no-wait
-    (void)timeout; // Placeholder
+    uint64_t deadline = 0;
+    int use_timeout = 0;
+
+    if (timeout) {
+        const struct timespec *ts = (const struct timespec *)timeout;
+        if (ts->tv_nsec < 0 || ts->tv_nsec >= 1000000000) return -22; // EINVAL
+
+        uint32_t hz = get_hz();
+        uint64_t ticks = ts->tv_sec * hz;
+        ticks += ((uint64_t)ts->tv_nsec * hz) / 1000000000;
+
+        deadline = get_ticks() + ticks;
+        use_timeout = 1;
+    }
     
     // Check for immediately available signal
     uint32_t deliverable = current_thread->sig_pending & wait_mask;
     
-    if (!deliverable && timeout != NULL) {
-        // Non-blocking check failed
-        return -11; // EAGAIN
+    if (!deliverable && use_timeout) {
+        uint64_t now = get_ticks();
+        if (now >= deadline) {
+             return -11; // EAGAIN
+        }
     }
     
     // Block until signal available (if no timeout)
     while (!deliverable) {
+        if (use_timeout) {
+            uint64_t now = get_ticks();
+            if (now >= deadline) {
+                 return -11; // EAGAIN
+            }
+            current_thread->sleep_expiry = deadline;
+        }
+
         sched_sleep(&current_thread->sig_pending);
+
+        if (use_timeout) {
+            current_thread->sleep_expiry = 0;
+        }
+
         deliverable = current_thread->sig_pending & wait_mask;
         
         // Check for interruption by other signals

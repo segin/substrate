@@ -90,30 +90,21 @@ static uint32_t gen_version(char *buf, size_t size __attribute__((unused))) {
         __DATE__);
 }
 
-static void count_threads_cb(thread_t *t, void *arg) {
-    int *counts = (int *)arg;
-    if (t->tid != -1) {
-        counts[1]++; // Total
-        if (t->state == THREAD_RUNNING || t->state == THREAD_READY) {
-            counts[0]++; // Active
-        }
-    }
-}
 
 static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
-    unsigned long avg[3];
-    sched_get_loadavg(avg, 3);
+    unsigned long loads[3];
+    sched_get_loadavg(loads);
 
-    int counts[2] = {0, 0};
-    sched_iterate_threads(count_threads_cb, counts);
-
+    uint32_t runnable = sched_count_runnable();
+    uint32_t total = sched_count_threads();
     int last_pid = proc_get_last_pid();
 
-    return sprintf(buf, "%lu.%02lu %lu.%02lu %lu.%02lu %d/%d %d\n",
-        LOAD_INT(avg[0]), LOAD_FRAC(avg[0]),
-        LOAD_INT(avg[1]), LOAD_FRAC(avg[1]),
-        LOAD_INT(avg[2]), LOAD_FRAC(avg[2]),
-        counts[0], counts[1], last_pid);
+    return sprintf(buf,
+        "%lu.%02lu %lu.%02lu %lu.%02lu %u/%u %d\n",
+        LOAD_INT(loads[0]), LOAD_FRAC(loads[0]),
+        LOAD_INT(loads[1]), LOAD_FRAC(loads[1]),
+        LOAD_INT(loads[2]), LOAD_FRAC(loads[2]),
+        runnable, total, last_pid);
 }
 
 static uint32_t proc_pmap_stats_read(char *buf, size_t size) {

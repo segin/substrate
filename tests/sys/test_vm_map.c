@@ -7,9 +7,16 @@
 #include <vm/vm_object.h>
 #include <arch/i386/pmap.h>
 #include <kern/console.h>
+#include <stdio.h>
 
 static int tests_passed = 0;
 static int tests_failed = 0;
+
+static inline uint64_t rdtsc(void) {
+    uint32_t lo, hi;
+    __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
 
 #define TEST_ASSERT(cond, msg) do { \
     if (!(cond)) { \
@@ -152,6 +159,50 @@ void test_vm_map_wire(void) {
     kprint("  PASS\n");
 }
 
+void test_vm_map_benchmark(void) {
+    kprint("Test: vm_map benchmark (Linear Lookup)\n");
+
+    pmap_t pmap = pmap_create();
+    vm_map_t *map = vm_map_create(pmap, 0x1000, 0xFFFFFFFF);
+
+    // 1. Populate Map with 2000 entries
+    int entries = 2000;
+    uintptr_t start = 0x10000;
+    uintptr_t size = 0x1000; // 4KB
+
+    for (int i = 0; i < entries; i++) {
+        vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, size);
+        vm_map_insert(map, obj, 0, start, start + size, 7, 7, 1);
+        start += size + 0x1000; // Leave gap to prevent merging if any
+    }
+
+    // 2. Perform Lookups
+    int iterations = 100; // 100 iterations (reduced from 10k for speed in QEMU)
+
+    // We simulate sequential access pattern which is common
+    uint64_t start_cycles = rdtsc();
+
+    for (int j = 0; j < iterations; j++) {
+        // Lookup every entry sequentially
+        uintptr_t addr = 0x10000;
+        for (int i = 0; i < entries; i++) {
+            volatile vm_map_entry_t *e = vm_map_lookup(map, addr);
+            (void)e;
+            addr += size + 0x1000;
+        }
+    }
+
+    uint64_t end_cycles = rdtsc();
+    uint64_t total_cycles = end_cycles - start_cycles;
+
+    char buf[128];
+    sprintf(buf, "  Benchmark: %d lookups took %u cycles (avg %u)\n",
+            iterations * entries, (uint32_t)total_cycles, (uint32_t)(total_cycles / (iterations * entries)));
+    kprint(buf);
+
+    vm_map_destroy(map);
+}
+
 void run_vm_map_tests(void) {
     kprint("\n=== VM Map Unit Tests ===\n");
     
@@ -161,6 +212,7 @@ void run_vm_map_tests(void) {
     test_vm_map_remove();
     test_vm_map_entry_flags();
     test_vm_map_wire();
+    test_vm_map_benchmark();
     
     kprint("\nVM Map Tests Complete\n");
 }
