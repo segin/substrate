@@ -709,9 +709,9 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     sp -= 4; STACK_WRITE32(sp, AT_UID);
     sp -= 4; STACK_WRITE32(sp, current_process->gid);
     sp -= 4; STACK_WRITE32(sp, AT_GID);
-    sp -= 4; STACK_WRITE32(sp, current_process->uid);
+    sp -= 4; STACK_WRITE32(sp, current_process->euid);
     sp -= 4; STACK_WRITE32(sp, AT_EUID);
-    sp -= 4; STACK_WRITE32(sp, current_process->gid);
+    sp -= 4; STACK_WRITE32(sp, current_process->egid);
     sp -= 4; STACK_WRITE32(sp, AT_EGID);
 
     // Push platform string "i686" for AT_PLATFORM
