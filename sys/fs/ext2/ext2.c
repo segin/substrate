@@ -78,6 +78,7 @@ uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, voi
     off_t offset = (off_t)block_num * fs->block_size;
     return fs->device->read(fs->device, offset, fs->block_size * count, buffer);
 }
+}
 
 // Read an inode
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
