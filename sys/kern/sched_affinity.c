@@ -40,10 +40,7 @@ int sched_set_affinity(int tid, uint32_t mask) {
 // Returns: bitmask, or 0 on error
 uint32_t sched_get_affinity(int tid) {
     thread_t *t = sched_get_thread(tid);
-<<<<<<< HEAD
-    
-=======
->>>>>>> main
+
     if (!t) return 0;
     
     // Return mask, or all CPUs if unset
