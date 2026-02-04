@@ -1,11 +1,13 @@
 #include <vfs/vfs.h>
 #include <sys/mount.h>
+#include <sys/proc.h>
 
 #include <string.h>
 #include <kern/console.h>
 #include <stdio.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+
 fs_node_t *fs_root = 0; 
 
 static filesystem_t *filesystems = NULL;
@@ -119,7 +121,9 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
             kprint("VFS: Mount point not found: ");
             kprint(path);
             kprint("\n");
-            // TODO: Free root? Unmount?
+            if (root && root->unmount) {
+                root->unmount(root);
+            }
             return -1; 
         }
 
@@ -127,6 +131,9 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
              kprint("VFS: Mount point is not a directory: ");
              kprint(path);
              kprint("\n");
+             if (root->unmount) {
+                 root->unmount(root);
+             }
              return -1;
         }
         
@@ -418,7 +425,7 @@ int vfs_mkdir(const char *path, uint16_t permission) {
     char *name = NULL;
     fs_node_t *parent_node = NULL;
 
-    // Determine start node (CWD or Root)
+    // Determine start node for relative lookups
     fs_node_t *start_node = fs_root;
     if (path[0] != '/' && current_process && current_process->cwd_node) {
         start_node = current_process->cwd_node;
@@ -439,7 +446,7 @@ int vfs_mkdir(const char *path, uint16_t permission) {
             parent_node = vfs_lookup(start_node, path_buf);
         }
     } else {
-        // No slash: "foo" -> parent is start_node
+        // No slash: "foo"
         parent_node = start_node;
         name = path_buf;
     }

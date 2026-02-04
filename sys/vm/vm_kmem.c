@@ -55,6 +55,9 @@ void kmem_init(void) {
             UMA_ZONE_MALLOC /* Mark as malloc zone */
         );
     }
+
+    /* KMEM is now ready, allow UMA to use kmalloc for zone structures */
+    uma_enable_dynamic_alloc();
 }
 
 /*
