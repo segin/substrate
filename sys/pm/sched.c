@@ -1,8 +1,6 @@
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <pm/pm.h>
-#include <stddef.h>
-#include <stdint.h>
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -48,6 +46,7 @@ thread_t *sched_alloc_thread(process_t *proc) {
     threads[i].state = THREAD_BLOCKED; // Set to BLOCKED until stack is ready
     threads[i].wait_chan = NULL;
     threads[i].wait_reason = NULL;
+    threads[i].sleep_expiry = 0;
     threads[i].priority = current_thread ? current_thread->priority : 20;
     threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
     threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
@@ -168,6 +167,22 @@ void sched_wakeup_n(void *chan, int n) {
             threads[i].wait_chan = NULL;
             woken++;
             if (n > 0 && woken >= n) break;
+        }
+    }
+}
+
+void sched_check_timeouts(void) {
+    uint64_t current_ticks = get_ticks();
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        thread_t *t = &threads[i];
+        if (t->tid != -1 && t->state == THREAD_BLOCKED && t->sleep_expiry > 0) {
+            if (current_ticks >= t->sleep_expiry) {
+                // Timeout expired
+                t->state = THREAD_READY;
+                t->wait_chan = NULL;
+                t->sleep_expiry = 0;
+            }
         }
     }
 }

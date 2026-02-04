@@ -23,6 +23,14 @@ int64_t get_uptime_ms(void) {
     return ticks * (1000 / HZ);
 }
 
+uint64_t get_ticks(void) {
+    return ticks;
+}
+
+uint32_t get_hz(void) {
+    return HZ;
+}
+
 void set_boot_time(time_t time) {
     boot_time = time;
 }
@@ -86,6 +94,7 @@ clock_t sys_times(struct tms *buf) {
 
 void timer_tick(void) {
     ticks++;
+    sched_check_timeouts();
     if (mod64_32(ticks, 5 * HZ) == 0) {
         sched_update_loadavg();
     }
