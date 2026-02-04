@@ -515,13 +515,190 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                     // expand_str_split("[cmd]", !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                 }
             } else if (*p == '{') {
-                p++; const char *start = p;
-                while (*p && *p != '}') p++;
-                if (*p == '}') {
-                    char *name = sh_strndup(start, p - start);
-                    char *val = lookup_variable(name);
-                    expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
-                    free(name);
+                p++;
+                const char *start = p;
+                // Find matching closing brace, accounting for nested ${...}
+                int brace_depth = 1;
+                while (*p && brace_depth > 0) {
+                    if (*p == '$' && *(p+1) == '{') {
+                        brace_depth++;
+                        p += 2;
+                    } else if (*p == '}') {
+                        brace_depth--;
+                        if (brace_depth > 0) p++;
+                    } else {
+                        p++;
+                    }
+                }
+                if (brace_depth == 0) {
+                    // Extract content between ${...}
+                    char *content = sh_strndup(start, p - start);
+                    
+                    // Parse: varname possibly followed by operator and word
+                    // POSIX operators: :-, :=, :?, :+, -, =, ?, +, #, ##, %, %%
+                    const char *c = content;
+                    char *varname = NULL;
+                    
+                    // Special parameters can be single chars: #, !, ?, $, *, @, 0-9, -
+                    if (*c == '#' && (c[1] == '\0' || c[1] == ':' || c[1] == '-' || c[1] == '=' || c[1] == '?' || c[1] == '+' || c[1] == '%' || c[1] == '#')) {
+                        varname = strdup("#");
+                        c++;
+                    } else if (*c == '!' || *c == '?' || *c == '$' || *c == '-' || *c == '@' || *c == '*') {
+                        varname = sh_strndup(c, 1);
+                        c++;
+                    } else if (isdigit(*c)) {
+                        varname = sh_strndup(c, 1);
+                        c++;
+                    } else {
+                        // Regular varname
+                        const char *name_start = c;
+                        while (*c && (isalnum(*c) || *c == '_')) c++;
+                        if (c > name_start) {
+                            varname = sh_strndup(name_start, c - name_start);
+                        }
+                    }
+                    
+                    char *val = varname ? lookup_variable(varname) : NULL;
+                    int is_set = (val != NULL);
+                    int is_nonnull = (val && val[0]);
+                    
+                    // Check for operators
+                    if (*c == ':' && (c[1] == '-' || c[1] == '=' || c[1] == '?' || c[1] == '+')) {
+                        // :- :+ := :? operators (check null flag)
+                        char op = c[1];
+                        const char *word = c + 2;
+                        
+                        if (op == '-') {
+                            // ${var:-word}: use word if unset or null
+                            if (!is_nonnull) {
+                                // Recursively expand the word
+                                char *expanded = expand_word(word);
+                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                free(expanded);
+                            } else {
+                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            }
+                        } else if (op == '+') {
+                            // ${var:+word}: use word if set and non-null
+                            if (is_nonnull) {
+                                char *expanded = expand_word(word);
+                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                free(expanded);
+                            }
+                        } else if (op == '=') {
+                            // ${var:=word}: assign and use word if unset or null
+                            if (!is_nonnull && varname) {
+                                char *expanded = expand_word(word);
+                                shell_var_set(varname, expanded);
+                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                free(expanded);
+                            } else {
+                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            }
+                        } else if (op == '?') {
+                            // ${var:?word}: error if unset or null
+                            if (!is_nonnull) {
+                                char *expanded = expand_word(word);
+                                fprintf(stderr, "sh: %s: %s\n", varname ? varname : "", expanded);
+                                free(expanded);
+                                // Could exit here for non-interactive
+                            } else {
+                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            }
+                        }
+                    } else if (*c == '-' || *c == '=' || *c == '?' || *c == '+') {
+                        // - + = ? operators (only check unset)
+                        char op = *c;
+                        const char *word = c + 1;
+                        
+                        if (op == '-') {
+                            if (!is_set) {
+                                char *expanded = expand_word(word);
+                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                free(expanded);
+                            } else {
+                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            }
+                        } else if (op == '+') {
+                            if (is_set) {
+                                char *expanded = expand_word(word);
+                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                free(expanded);
+                            }
+                        } else if (op == '=') {
+                            if (!is_set && varname) {
+                                char *expanded = expand_word(word);
+                                shell_var_set(varname, expanded);
+                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                free(expanded);
+                            } else {
+                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            }
+                        } else if (op == '?') {
+                            if (!is_set) {
+                                char *expanded = expand_word(word);
+                                fprintf(stderr, "sh: %s: %s\n", varname ? varname : "", expanded);
+                                free(expanded);
+                            } else {
+                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            }
+                        }
+                    } else if (*c == '#') {
+                        // ${#var} or ${var#pattern} / ${var##pattern}
+                        if (c == content && c[1] && (isalpha(c[1]) || c[1] == '_')) {
+                            // ${#var} - length
+                            c++;
+                            char *length_var = strdup(c);
+                            char *length_val = lookup_variable(length_var);
+                            char buf[32];
+                            snprintf(buf, sizeof(buf), "%zu", length_val ? strlen(length_val) : 0);
+                            expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            free(length_var);
+                        } else {
+                            // ${var#pattern} or ${var##pattern}
+                            int greedy = (c[1] == '#');
+                            const char *pattern = greedy ? c + 2 : c + 1;
+                            if (val) {
+                                // Remove shortest/longest prefix matching pattern
+                                size_t vlen = strlen(val);
+                                size_t match_len = 0;
+                                for (size_t i = 0; i <= vlen; i++) {
+                                    char tmp = val[i];
+                                    val[i] = '\0';
+                                    if (match_pattern(pattern, val)) {
+                                        match_len = i;
+                                        if (!greedy) { val[i] = tmp; break; }
+                                    }
+                                    val[i] = tmp;
+                                }
+                                expand_str_split(val + match_len, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            }
+                        }
+                    } else if (*c == '%') {
+                        // ${var%pattern} or ${var%%pattern}
+                        int greedy = (c[1] == '%');
+                        const char *pattern = greedy ? c + 2 : c + 1;
+                        if (val) {
+                            // Remove shortest/longest suffix matching pattern
+                            size_t vlen = strlen(val);
+                            size_t best = vlen;
+                            for (size_t i = 0; i <= vlen; i++) {
+                                if (match_pattern(pattern, val + vlen - i)) {
+                                    best = vlen - i;
+                                    if (!greedy) break;
+                                }
+                            }
+                            char *trimmed = sh_strndup(val, best);
+                            expand_str_split(trimmed, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            free(trimmed);
+                        }
+                    } else {
+                        // No operator, just expand the variable
+                        expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                    }
+                    
+                    free(varname);
+                    free(content);
                 }
             } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
                 const char *start = p;

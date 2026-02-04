@@ -3332,7 +3332,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
             - [x] `${VAR#pat}`, `${VAR##pat}` (Prefix).
             - [x] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
-            - [ ] Nested parameter expansions.
+            - [x] Nested parameter expansions.
         - [x] **3. Command Substitution** (`$(cmd)`).
         - [x] **4. Arithmetic Expansion** (`$(( ... ))`).
         - [ ] **5. Field Splitting:** Use `$IFS` for unquoted expansions.
