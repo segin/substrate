@@ -63,7 +63,7 @@ void sched_check_timeouts(void);
 
 void sched_update_loadavg(void);
 void sched_get_loadavg(unsigned long *loads);
-uint32_t sched_get_active_tasks(void);
-uint32_t sched_get_total_tasks(void);
+uint32_t sched_count_runnable(void);
+uint32_t sched_count_threads(void);
 
 #endif
