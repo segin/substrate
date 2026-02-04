@@ -3121,7 +3121,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `NETLINK_ROUTE`: Interface/Address/Route management (`RTM_*`).
                 - [ ] `NETLINK_KOBJECT_UEVENT`: Hotplug/Device events.
             - [ ] **Direct Standard Syscalls:**
-                - [ ] `sysinfo()`: System uptime, total RAM, free RAM.
+                - [x] `sysinfo()`: System uptime, total RAM, free RAM.
                 - [ ] `uname()`: System identification.
                 - [ ] `getrlimit()`: Process resource limits.
                 - [ ] `clock_gettime()`: High-resolution system clocks.
@@ -3158,7 +3158,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
             - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
             - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
-        - [/] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
+        - [x] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
             - [x] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
             - [ ] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
             - [ ] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
