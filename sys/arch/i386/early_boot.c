@@ -42,7 +42,7 @@ void early_exception_handler(void) {
     early_uart_print("EIP: ");
     early_print_hex(eip);
     early_uart_print("\n");
-    
+
     /* Halt forever */
     for (;;) __asm__ volatile("hlt");
 }

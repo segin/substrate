@@ -1,0 +1,75 @@
+." Copyright (c) 2026 Substrate Project
+." All rights reserved.
+."
+.Dd February 04, 2026
+.Dt FB 4
+.Os Substrate
+.Sh NAME
+.Nm fb
+.Nd generic linear framebuffer driver
+.Sh SYNOPSIS
+.Cd "video=ask"
+.Cd "video=none"
+.Cd "video=[driver]"
+.Sh DESCRIPTION
+The
+.Nm
+driver provides a generic interface for linear framebuffers, exposing a device node
+.Pa /dev/fb0
+that supports memory mapping and IOCTL operations. It serves as the foundation for the kernel's graphical console and user-space graphics.
+.Pp
+The driver automatically detects and registers video hardware drivers (like
+.Xr vga 4
+or the Multiboot-provided framebuffer). If a linear framebuffer is available,
+.Nm
+exposes it to the system.
+.Pp
+The driver implements optimized drawing primitives, including accelerated clearing and scrolling, taking advantage of direct memory access and aligned writes for supported color depths (32, 24, 16, 15, and 8 bpp).
+.Sh KERNEL COMMAND LINE
+The
+.Nm
+behavior can be controlled via the
+.Cd video
+kernel argument:
+.Bl -tag -width "video=none"
+.It Cd video=ask
+Prompt the user (via BIOS VESA extensions) to select a video mode during boot.
+.It Cd video=none
+Disable the video subsystem.
+.It Cd video=off
+Alias for
+.Cd video=none .
+.It Cd video=[driver]
+Force the use of a specific video driver (e.g.,
+.Cd video=bga
+,
+.Cd video=vga
+).
+.El
+.Sh FILES
+.Bl -tag -width "/dev/fb0" -compact
+.It Pa /dev/fb0
+Character device providing access to the framebuffer. Supports
+.Fn mmap
+for direct pixel access and
+.Fn ioctl
+for querying screen info.
+.El
+.Sh IOCTLS
+The following ioctls are supported on
+.Pa /dev/fb0 :
+.Bl -tag -width "FBIOGET_VSCREENINFO"
+.It Dv FBIOGET_VSCREENINFO
+Returns a
+.Vt struct fb_var_screeninfo
+describing the resolution, bit depth, and color offsets.
+.El
+.Sh SEE ALSO
+.Xr vga 4 ,
+.Xr tty 4
+.Sh HISTORY
+The
+.Nm
+driver first appeared in Substrate.
+.Sh AUTHORS
+.An Substrate Project Developers
