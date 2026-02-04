@@ -10,6 +10,8 @@ typedef uint32_t speed_t;
 
 #define NCCS 32
 
+#ifndef _STRUCT_TERMIOS
+#define _STRUCT_TERMIOS
 struct termios {
     tcflag_t c_iflag; // Input flags
     tcflag_t c_oflag; // Output flags
@@ -20,6 +22,7 @@ struct termios {
     speed_t  c_ispeed; // Input speed
     speed_t  c_ospeed; // Output speed
 };
+#endif
 
 // c_cc indices
 #define VINTR    0
@@ -126,11 +129,14 @@ struct termios {
 #define FIONREAD    0x541B
 #define TIOCINQ     FIONREAD
 
+#ifndef _STRUCT_WINSIZE
+#define _STRUCT_WINSIZE
 struct winsize {
     unsigned short ws_row;
     unsigned short ws_col;
     unsigned short ws_xpixel;
     unsigned short ws_ypixel;
 };
+#endif
 
 #endif
