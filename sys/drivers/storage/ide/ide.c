@@ -746,14 +746,18 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
              words = (buffer_len - transferred) / 2;
         }
 
-        if (write) {
-            outsw(bus + ATA_REG_DATA, buf, words);
+        if (words > 0) {
+            if (write) {
+                outsw(bus + ATA_REG_DATA, buf, words);
+            } else {
+                insw(bus + ATA_REG_DATA, buf, words);
+            }
             buf += words;
+            transferred += words * 2;
         } else {
-            insw(bus + ATA_REG_DATA, buf, words);
-            buf += words;
+            /* No words to transfer in this chunk? (odd length/zero) */
+            break; 
         }
-        transferred += words * 2;
     }
     
     /* Wait for completion */
