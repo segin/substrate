@@ -11,13 +11,16 @@
 /* MAX_CPUS defined in sched.h */
 
 extern int num_cpus;
+extern int percpu_get_cpu_id(void);
+extern void sched_dequeue(thread_t *t);
+extern void sched_enqueue(thread_t *t);
 
 // Set CPU affinity mask for a thread
 // mask: bitmask of allowed CPUs (bit N = CPU N allowed)
 // Returns: 0 on success, -1 on error
 int sched_set_affinity(int tid, uint32_t mask) {
     thread_t *t = sched_get_thread(tid);
-    
+
     if (!t) return -1;
     
     // Validate mask - at least one valid CPU must be set
@@ -37,7 +40,10 @@ int sched_set_affinity(int tid, uint32_t mask) {
 // Returns: bitmask, or 0 on error
 uint32_t sched_get_affinity(int tid) {
     thread_t *t = sched_get_thread(tid);
+<<<<<<< HEAD
     
+=======
+>>>>>>> main
     if (!t) return 0;
     
     // Return mask, or all CPUs if unset
@@ -85,7 +91,6 @@ void sched_migrate_if_needed(thread_t *t) {
     if (t->cpu_affinity == 0) return;  // No restriction
     
     // Get current CPU
-    extern int percpu_get_cpu_id(void);
     int cpu = percpu_get_cpu_id();
     
     // Check if current CPU is allowed
@@ -99,8 +104,6 @@ void sched_migrate_if_needed(thread_t *t) {
     
     // For ready thread, dequeue and re-enqueue (will pick valid CPU)
     if (t->state == THREAD_READY && t->on_runqueue) {
-        extern void sched_dequeue(thread_t *t);
-        extern void sched_enqueue(thread_t *t);
         sched_dequeue(t);
         sched_enqueue(t);
     }

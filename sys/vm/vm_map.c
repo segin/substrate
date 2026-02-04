@@ -24,11 +24,12 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     if (sentinel) {
         sentinel->next = sentinel;
         sentinel->prev = sentinel;
-        sentinel->start = sentinel->end = 0;
+        sentinel->start = sentinel->end = min;
         sentinel->object = NULL;
     }
     
     map->header = sentinel;
+    map->hint = sentinel;
 }
 
 vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
@@ -39,6 +40,8 @@ vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
         kfree(map, sizeof(vm_map_t));
         return NULL;
     }
+    // Initialize hint to header to match vm_map_init logic
+    map->hint = map->header;
     return map;
 }
 
@@ -47,9 +50,29 @@ static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **en
     vm_map_entry_t *cur;
     vm_map_entry_t *header = map->header;
 
-    for (cur = header->next; cur != header; cur = cur->next) {
+    // Check hint first
+    if (map->hint && map->hint != header) {
+        cur = map->hint;
         if (va >= cur->start && va < cur->end) {
             *entry = cur;
+            return true;
+        }
+        // Use hint as start point if possible
+        if (va > cur->start) {
+             // Continue from hint
+             cur = cur->next;
+        } else {
+             // Restart from beginning
+             cur = header->next;
+        }
+    } else {
+        cur = header->next;
+    }
+
+    for (; cur != header; cur = cur->next) {
+        if (va >= cur->start && va < cur->end) {
+            *entry = cur;
+            map->hint = cur; // Update hint
             return true;
         }
         if (va < cur->start) {
@@ -96,27 +119,62 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     prev_entry->next->prev = new_entry;
     prev_entry->next = new_entry;
     
+    map->hint = new_entry;
+
     map->nentries++;
     map->size += (end - start);
     return 0;
 }
 
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length) {
-    vm_map_entry_t *cur;
     vm_map_entry_t *header = map->header;
+    vm_map_entry_t *hint = map->hint;
+    vm_map_entry_t *cur;
     
-    uintptr_t start = map->min_offset;
-    
-    for (cur = header->next; ; cur = cur->next) {
-        if (cur == header || cur->start > start) {
-            uintptr_t next_start = (cur == header) ? map->max_offset : cur->start;
-            if (next_start - start >= length) {
+    // Default to header if hint is invalid/null
+    if (!hint) hint = header;
+
+    uintptr_t start;
+
+    // First pass: From hint to end of list
+    if (hint == header) {
+        cur = header->next;
+        start = map->min_offset;
+    } else {
+        cur = hint->next;
+        start = hint->end;
+    }
+
+    // Optimization: Unroll common sequential scan
+    // We scan from cur to header
+    while (cur != header) {
+        if (cur->start >= start && cur->start - start >= length) {
+            *addr = start;
+            return 0;
+        }
+        start = cur->end;
+        cur = cur->next;
+    }
+
+    // Check tail gap (gap between last entry and max_offset)
+    if (map->max_offset >= start && map->max_offset - start >= length) {
+        *addr = start;
+        return 0;
+    }
+
+    // Second pass: From start of list to hint (if we started mid-list)
+    if (hint != header) {
+        cur = header->next;
+        start = map->min_offset;
+
+        while (cur != hint->next) {
+            if (cur->start >= start && cur->start - start >= length) {
                 *addr = start;
                 return 0;
             }
+            start = cur->end;
+            cur = cur->next;
         }
-        if (cur == header) break;
-        start = cur->end;
     }
     
     return -1; // No space found
@@ -131,6 +189,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
         
         if (cur->start >= start && cur->end <= end) {
             // Entirely within range, remove it
+            if (map->hint == cur) map->hint = cur->prev;
             cur->prev->next = cur->next;
             cur->next->prev = cur->prev;
             map->nentries--;
@@ -194,13 +253,9 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
 
 // Lookup entry containing the given virtual address
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
-    vm_map_entry_t *header = map->header;
-    vm_map_entry_t *cur;
-    
-    for (cur = header->next; cur != header; cur = cur->next) {
-        if (va >= cur->start && va < cur->end) {
-            return cur;
-        }
+    vm_map_entry_t *entry;
+    if (vm_map_lookup_entry(map, va, &entry)) {
+        return entry;
     }
     return NULL;
 }

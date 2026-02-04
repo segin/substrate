@@ -1,15 +1,16 @@
 #include <kern/sched.h>
+#include <kern/time.h>
+#include <sys/errno.h>
 #include <pm/pm.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include <stddef.h>
-#include <stdint.h>
-
 thread_t threads[MAX_THREADS];
-thread_t *current_thread = NULL;
-// Use generation counts for O(1) TID lookup
+// Generation counters for each thread slot to enable O(1) TID lookup.
+// TID = index + (generation * MAX_THREADS)
 static uint32_t slot_generations[MAX_THREADS];
+thread_t *current_thread = NULL;
+
 
 extern void arch_switch_to(thread_t *prev, thread_t *next);
 extern void arch_set_kernel_stack(uintptr_t stack);
@@ -47,6 +48,7 @@ thread_t *sched_alloc_thread(process_t *proc) {
     threads[i].state = THREAD_BLOCKED; // Set to BLOCKED until stack is ready
     threads[i].wait_chan = NULL;
     threads[i].wait_reason = NULL;
+    threads[i].sleep_expiry = 0;
     threads[i].priority = current_thread ? current_thread->priority : 20;
     threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
     threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
@@ -137,7 +139,6 @@ thread_t *sched_get_thread(int tid) {
     if (threads[index].tid == tid) {
         return &threads[index];
     }
-
     return NULL;
 }
 
@@ -163,6 +164,35 @@ void sched_sleep(void *chan) {
     sched_yield();
 }
 
+int sched_sleep_until(void *chan, uint64_t deadline_tick) {
+    if (!current_thread) return 0;
+
+    current_thread->sleep_expiry = deadline_tick;
+    current_thread->sleep_status = 0;
+
+    sched_sleep(chan);
+
+    current_thread->sleep_expiry = 0;
+    return current_thread->sleep_status;
+}
+
+void sched_tick(void) {
+    uint64_t now = get_ticks();
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 &&
+            threads[i].state == THREAD_BLOCKED &&
+            threads[i].sleep_expiry > 0 &&
+            now >= threads[i].sleep_expiry) {
+
+            threads[i].state = THREAD_READY;
+            threads[i].wait_chan = NULL;
+            threads[i].sleep_status = -ETIMEDOUT;
+            threads[i].sleep_expiry = 0;
+        }
+    }
+}
+
 void sched_wakeup(void *chan) {
     sched_wakeup_n(chan, -1);
 }
@@ -186,3 +216,4 @@ void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) 
         }
     }
 }
+

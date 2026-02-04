@@ -8,6 +8,7 @@
 #include <vfs/vfs.h>
 #include <include/sys/proc.h>
 #include <pm/pm.h>
+#include <kern/sched.h>
 #include <exec/perso/personality.h>
 #include <arch/i386/pmap.h>
 #include <string.h>
@@ -89,9 +90,21 @@ static uint32_t gen_version(char *buf, size_t size __attribute__((unused))) {
         __DATE__);
 }
 
+
 static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
-    /* TODO: Calculate real load average */
-    return sprintf(buf, "0.00 0.00 0.00 1/10 1\n");
+    unsigned long loads[3];
+    sched_get_loadavg(loads);
+
+    uint32_t runnable = sched_count_runnable();
+    uint32_t total = sched_count_threads();
+    int last_pid = proc_get_last_pid();
+
+    return sprintf(buf,
+        "%lu.%02lu %lu.%02lu %lu.%02lu %u/%u %d\n",
+        LOAD_INT(loads[0]), LOAD_FRAC(loads[0]),
+        LOAD_INT(loads[1]), LOAD_FRAC(loads[1]),
+        LOAD_INT(loads[2]), LOAD_FRAC(loads[2]),
+        runnable, total, last_pid);
 }
 
 static uint32_t proc_pmap_stats_read(char *buf, size_t size) {

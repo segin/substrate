@@ -31,6 +31,7 @@ typedef struct file file_t;
 struct pmap;
 struct pgrp;
 struct session;
+struct registers;
 
 #define MAX_FD 32
 
@@ -77,6 +78,10 @@ typedef struct process {
     uint32_t stime;
     uint32_t uid;
     uint32_t gid;
+    uint32_t euid;
+    uint32_t egid;
+    uint32_t suid;
+    uint32_t sgid;
     uint8_t  ac_flag;
     uint8_t  is_kernel_task; // 1 if kernel thread, 0 if user process
     uint8_t  bitness;        // Process execution mode (16/32/64)
@@ -156,6 +161,10 @@ typedef struct thread {
     void         *wait_chan; // Channel thread is sleeping on
     const char   *wait_reason; // Description of wait event
     
+    // Sleep Timeout
+    uint64_t      sleep_expiry; // Absolute tick count when sleep expires (0 = none)
+    int           sleep_status; // Return status of sleep (e.g., -ETIMEDOUT)
+
     // Signals
     uint32_t      sig_pending;
     uint32_t      sig_mask;
@@ -179,7 +188,7 @@ typedef struct thread {
     uintptr_t                on_fault;
     
     // Syscall registers (for fork/vfork)
-    struct registers *syscall_regs;
+    void *syscall_regs;
 
     thread_state_t state;
     struct thread *next;

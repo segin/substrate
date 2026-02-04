@@ -10,8 +10,7 @@
 #define STDERR_FILENO 2
 
 typedef int pid_t;
-typedef int ssize_t;
-// off_t defined in sys/types.h
+// off_t and ssize_t defined in sys/types.h
 
 [[noreturn]] void _exit(int status);
 int fork(void);
@@ -63,5 +62,6 @@ int usleep(useconds_t usec);
 int gethostname(char *name, size_t len);
 int sethostname(const char *name, size_t len);
 
+long syscall(long number, ...);
 
 #endif
