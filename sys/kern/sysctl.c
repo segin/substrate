@@ -138,8 +138,10 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
 
     /* 2. Setup request */
     memset(&req, 0, sizeof(req));
-    req.p_pid = (current_process) ? current_process->pid : 0;
-    req.p_uid = (current_process) ? current_process->uid : 0; // TODO: UID support
+    if (current_process) {
+        req.p_pid = current_process->pid;
+        req.p_uid = current_process->uid;
+    }
     req.oldptr = oldp;
     req.newptr = newp;
     req.newlen = newlen;
