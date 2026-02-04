@@ -1,0 +1,28 @@
+.Dd February 1, 2026
+.Dt KPRINT 9
+.Os Substrate
+.Sh NAME
+.Nm kprint
+.Nd print string to kernel console
+.Sh SYNOPSIS
+.In kern/console.h
+.Ft void
+.Fn kprint "const char *str"
+.Sh DESCRIPTION
+The
+.Fn kprint
+function writes the null-terminated string
+.Fa str
+to the kernel console/log.
+It is a low-level printing routine, often used by
+.Xr printf 9
+and for early boot debugging.
+.Pp
+It is safe to call from most contexts, including interrupt handlers (depending on the console driver implementation).
+.Sh SEE ALSO
+.Xr printf 9 ,
+.Xr panic 9
+.Sh HISTORY
+The
+.Fn kprint
+function first appeared in Substrate.

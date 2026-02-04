@@ -2,8 +2,20 @@
  * linux_user.c - Linux personality ABI translation layer
  */
 
-#include <exec/perso/linux/linux_user.h>
-#include <sys/syscall_impl.h>
+#include "linux_user.h"
+#include "../../../include/sys/syscall_impl.h"
+#include <stddef.h>
+#include <sys/socket.h>
+#include <sys/errno.h>
+#include <sys/file.h>
+/* Undefine stat macros if they exist to prevent conflict with our structs */
+#undef st_atime
+#undef st_mtime
+#undef st_ctime
+#include <stddef.h>
+#include <sys/socket.h>
+#include <sys/errno.h>
+#include <sys/file.h> 
 
 /* Linux stat translation: native -> linux_stat */
 int linux_sys_stat(const char *path, struct linux_stat *buf) {

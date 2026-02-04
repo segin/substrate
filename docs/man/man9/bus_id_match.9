@@ -1,0 +1,49 @@
+.Dd February 1, 2026
+.Dt BUS_ID_MATCH 9
+.Os Substrate
+.Sh NAME
+.Nm bus_id_match
+.Nd match device against a generic ID entry
+.Sh SYNOPSIS
+.In sys/kern/bus.h
+.In sys/kern/driver.h
+.Ft int
+.Fn bus_id_match "const struct device_id *id" "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn bus_id_match
+function determines if a device matches a specific ID criteria. It checks the
+device's vendor ID, device ID, and class code against the provided
+.Fa id
+structure.
+.Pp
+The matching rules are:
+.Bl -bullet
+.It
+.Va vendor_id :
+Must match
+.Va dev->vendor_id
+unless set to
+.Dv DEVICE_ID_ANY .
+.It
+.Va device_id :
+Must match
+.Va dev->device_id
+unless set to
+.Dv DEVICE_ID_ANY .
+.It
+.Va class_id / class_mask :
+The device's class is constructed as
+.Pq "class << 16 | subclass << 8 | progif" .
+The masked value must match
+.Va id->class_id .
+If
+.Va class_mask
+is 0, the class check is skipped.
+.El
+.Sh RETURN VALUES
+Returns 1 if the device matches the ID entry, 0 otherwise.
+.Sh SEE ALSO
+.Xr bus 9 ,
+.Xr driver 9 ,
+.Xr device 9

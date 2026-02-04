@@ -41,6 +41,9 @@
 
 #include <tests/tests.h>
 
+extern void ntsync_init(void);
+
+
 #include <kern/console.h>
 #include <kern/cmdline.h>
 #include <kern/sched.h>
@@ -184,6 +187,11 @@ static void init_root_fs(void) {
     if (!fs_root) {
         panic("not syncing - cannot mount root!");
     }
+
+    // Mount pseudo-filesystems AFTER root is established
+    vfs_mount(NULL, "/dev", "devfs", 0, NULL);
+    vfs_mount(NULL, "/proc", "procfs", 0, NULL);
+    vfs_mount(NULL, "/sys", "sysfs", 0, NULL);
 }
 
 // kinit - kernel init task (becomes PID 1 after exec)
@@ -354,8 +362,6 @@ void kmain(unsigned long magic, unsigned long addr) {
         fb_init(mboot_info);
     }
     
-    // Display kernel ident banner (first thing user sees)
-    kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
 
     // Diagnostic: Print command line
     char full_cmd[512] = {0};
@@ -375,6 +381,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     pci_init();
     ide_init();
     virtio_init();
+    ntsync_init();
     
     // Run Kernel Tests (if requested via cmdline 'test=...')
     run_kernel_tests();

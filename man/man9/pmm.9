@@ -48,7 +48,7 @@ must be called during kernel bootstrap to populate the free lists from the memor
 .B pmm_alloc_block
 and
 .B pmm_alloc_contiguous
-return the physical address of the allocated memory, or NULL on failure.
+return the \fBvirtual address\fP (kernel direct map, 0xC0000000+) of the allocated memory, or NULL on failure.
 .B pmm_watermark_alloc
 returns a kernel virtual address.
 .SH SEE ALSO
