@@ -269,8 +269,35 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         char *path = argv[1];
         if (!path) path = shell_var_get("HOME");
         if (!path) path = "/";
+
+        /* POSIX: CDPATH handling - only for relative paths not starting with . or .. */
+        int is_dot_ref = (path[0] == '.' && (path[1] == '\0' || path[1] == '/' || 
+                         (path[1] == '.' && (path[2] == '\0' || path[2] == '/'))));
+        
+        if (path[0] != '/' && !is_dot_ref) {
+            char *cdpath = shell_var_get("CDPATH");
+            if (cdpath && *cdpath) {
+                char *cp = strdup(cdpath);
+                char *saveptr;
+                char *dir = strtok_r(cp, ":", &saveptr);
+                while (dir) {
+                    char full[1024];
+                    snprintf(full, sizeof(full), "%s/%s", dir, path);
+                    if (chdir(full) == 0) {
+                        /* POSIX: If found via CDPATH, print the destination */
+                        char cwd[1024];
+                        if (getcwd(cwd, sizeof(cwd))) printf("%s\n", cwd);
+                        free(cp);
+                        return 0;
+                    }
+                    dir = strtok_r(NULL, ":", &saveptr);
+                }
+                free(cp);
+            }
+        }
+
         if (chdir(path) < 0) {
-            perror("cd");
+            perror(path);
             return 1;
         }
         return 0;
@@ -364,6 +391,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         exit(126);
     }
     if (strcmp(argv[0], "eval") == 0) {
+        int status = 0;
         if (argc > 1) {
             int total_len = 0;
             for (int i = 1; i < argc; i++) total_len += strlen(argv[i]) + 1;
@@ -374,11 +402,11 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
                     strcat(line, argv[i]);
                     if (i < argc - 1) strcat(line, " ");
                 }
-                execute_line(line);
+                status = execute_line(line);
                 free(line);
             }
         }
-        return 0;
+        return status;
     }
     if (strcmp(argv[0], "wait") == 0) {
         int last_status = 0;

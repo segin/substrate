@@ -10,6 +10,46 @@
 #include <sys/wait.h>
 
 extern long strtol(const char *nptr, char **endptr, int base);
+extern int execute_line(char *line);
+
+static char *capture_command_output(const char *cmd_str) {
+    int pfd[2];
+    if (pipe(pfd) < 0) return strdup("");
+    
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(pfd[0]);
+        dup2(pfd[1], STDOUT_FILENO);
+        close(pfd[1]);
+        execute_line((char *)cmd_str);
+        _exit(0);
+    } else if (pid > 0) {
+        close(pfd[1]);
+        size_t cap = 1024, len = 0;
+        char *buf = malloc(cap);
+        char read_buf[256];
+        ssize_t n;
+        while ((n = read(pfd[0], read_buf, sizeof(read_buf))) > 0) {
+            if (len + n >= cap) {
+                cap *= 2;
+                buf = realloc(buf, cap);
+            }
+            memcpy(buf + len, read_buf, n);
+            len += n;
+        }
+        buf[len] = '\0';
+        close(pfd[0]);
+        waitpid(pid, NULL, 0);
+        /* POSIX: strip trailing newlines */
+        while (len > 0 && buf[len - 1] == '\n') {
+            buf[--len] = '\0';
+        }
+        return buf;
+    } else {
+        close(pfd[0]); close(pfd[1]);
+        return strdup("");
+    }
+}
 
 static void buffer_append_internal(char **buf, size_t *cap, size_t *len, char c) {
     if (*len + 1 >= *cap) {
@@ -506,6 +546,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                 }
             } else if (*p == '(') {
                 p++;
+                const char *start = p;
                 int depth = 1;
                 while (*p && depth > 0) {
                     if (*p == '(') depth++;
@@ -513,8 +554,11 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                     if (depth > 0) p++;
                 }
                 if (depth == 0) {
-                    // TODO: Command substitution. For now just placeholder.
-                    // expand_str_split("[cmd]", !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                    char *cmd = sh_strndup(start, p - start);
+                    char *output = capture_command_output(cmd);
+                    expand_str_split(output, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                    free(output);
+                    free(cmd);
                 }
             } else if (*p == '{') {
                 p++;
@@ -809,13 +853,21 @@ char *expand_heredoc(const char *content, int quoted) {
                      free(expr);
                  }
             } else if (*p == '(') {
-                 // Command sub - TODO
+                 // Command sub
                  p++;
+                 const char *start = p;
                  int depth = 1;
                  while (*p && depth > 0) {
                      if (*p == '(') depth++;
                      else if (*p == ')') depth--;
                      if (depth > 0) p++;
+                 }
+                 if (depth == 0) {
+                     char *cmd = sh_strndup(start, p - start);
+                     char *output = capture_command_output(cmd);
+                     buffer_append_str_internal(&buf, &cap, &len, output);
+                     free(output);
+                     free(cmd);
                  }
             } else if (*p == '{') {
                 p++; const char *start = p;

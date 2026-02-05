@@ -3352,7 +3352,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Job control hooks integration.
         - [x] Exit status propagation.
         - [x] `set -e` semantics.
-    - [ ] **Builtin Commands:**
+    - [x] **Builtin Commands:**
         - [x] `:` (Null command).
         - [x] `.` (Dot/Source).
         - [x] `break`.
