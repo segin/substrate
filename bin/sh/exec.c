@@ -248,7 +248,8 @@ int execute_ast(ast_node_t *node) {
             status = 1;
     }
 
-    if (status != 0 && shell_errexit && errexit_disabled == 0) {
+    if (status != 0 && shell_errexit && errexit_disabled == 0 &&
+        (node->type == NODE_SIMPLE_COMMAND || node->type == NODE_PIPELINE || node->type == NODE_SUBSHELL)) {
         exit(status);
     }
 
@@ -1103,9 +1104,51 @@ static char *find_in_path(const char *cmd) {
     return NULL;
 }
 
+static char **merge_env(char **base_env, int assign_count, char **assignments) {
+    int env_count = 0;
+    while (base_env && base_env[env_count]) env_count++;
+
+    /* Allocate new env array (base + assignments + 1) */
+    char **new_env = malloc((env_count + assign_count + 1) * sizeof(char *));
+    for (int i = 0; i < env_count; i++) new_env[i] = base_env[i];
+
+    int current_count = env_count;
+    for (int i = 0; i < assign_count; i++) {
+        char *eq = strchr(assignments[i], '=');
+        if (!eq) continue;
+
+        *eq = '\0';
+        char *val = expand_word(eq + 1);
+        *eq = '=';
+
+        char buf[2048];
+        snprintf(buf, sizeof(buf), "%s=%s", assignments[i], val ? val : "");
+        if (val) free(val);
+
+        /* Duplication handling: replace if exists, else append */
+        size_t key_len = eq - assignments[i];
+        int found = -1;
+        for (int k = 0; k < current_count; k++) {
+            if (strncmp(new_env[k], assignments[i], key_len) == 0 && new_env[k][key_len] == '=') {
+                found = k;
+                break;
+            }
+        }
+
+        char *entry = strdup(buf);
+        if (found != -1) {
+            new_env[found] = entry;
+        } else {
+            new_env[current_count++] = entry;
+        }
+    }
+    new_env[current_count] = NULL;
+    return new_env;
+}
+
 static int execute_simple_command(ast_simple_command_t *cmd) {
     if (cmd->arg_count == 0) {
-        // Assignments only: e.g. "VAR=val"
+        /* Assignments only: VAR=val */
         fd_save_t *saved_fds = NULL;
         if (cmd->base.redirections) {
             saved_fds = save_redirections(cmd->base.redirections);
@@ -1116,16 +1159,15 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
         }
 
         for (int i = 0; i < cmd->assign_count; i++) {
-             char *eq = strchr(cmd->assignments[i], '=');
-             if (eq) {
-                 *eq = 0;
-                 char *val_expanded = expand_word(eq + 1); // Expand RHS
-                 shell_var_export(cmd->assignments[i], val_expanded ? val_expanded : "");
-                 if (val_expanded) free(val_expanded);
-                 *eq = '=';
-             }
+            char *eq = strchr(cmd->assignments[i], '=');
+            if (eq) {
+                *eq = '\0';
+                char *val = expand_word(eq + 1);
+                shell_var_export(cmd->assignments[i], val ? val : "");
+                if (val) free(val);
+                *eq = '=';
+            }
         }
-        
         if (saved_fds) restore_redirections(saved_fds);
         return 0;
     }
@@ -1134,128 +1176,75 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
     int argc = 0;
     while (argv[argc]) argc++;
 
+    /* Builtins */
+    int is_exec = (strcmp(argv[0], "exec") == 0);
+    int status = -1;
+
     fd_save_t *saved_fds = NULL;
     if (cmd->base.redirections) {
-        saved_fds = save_redirections(cmd->base.redirections);
+        if (!is_exec) saved_fds = save_redirections(cmd->base.redirections);
         if (apply_redirections(cmd->base.redirections) != 0) {
-            restore_redirections(saved_fds);
-            for (int i=0; argv[i]; i++) free(argv[i]);
+            if (saved_fds) restore_redirections(saved_fds);
+            for (int i = 0; argv[i]; i++) free(argv[i]);
             free(argv);
             return 1;
         }
     }
 
-    int status = handle_builtin(argc, argv, cmd);
-    
-    if (saved_fds) restore_redirections(saved_fds);
-    
+    status = handle_builtin(argc, argv, cmd);
     if (status != -1) {
-        for (int i=0; argv[i]; i++) free(argv[i]);
+        if (saved_fds) restore_redirections(saved_fds);
+        for (int i = 0; argv[i]; i++) free(argv[i]);
         free(argv);
         return status;
     }
 
-    // Check functions (before PATH search)
+    /* Functions */
     function_entry_t *func = functions;
     while (func) {
         if (strcmp(func->name, argv[0]) == 0) {
-             int ret = execute_function(func, argc, argv);
-             for (int i=0; argv[i]; i++) free(argv[i]);
-             free(argv);
-             return ret;
+            int ret = execute_function(func, argc, argv);
+            if (saved_fds) restore_redirections(saved_fds);
+            for (int i = 0; argv[i]; i++) free(argv[i]);
+            free(argv);
+            return ret;
         }
         func = func->next;
     }
 
+    /* External Commands */
     char *full_path = find_in_path(argv[0]);
     if (!full_path) {
         fprintf(stderr, "%s: %s: command not found\n", shell_var_get_name(), argv[0]);
-        for (int i=0; argv[i]; i++) free(argv[i]);
+        if (saved_fds) restore_redirections(saved_fds);
+        for (int i = 0; argv[i]; i++) free(argv[i]);
         free(argv);
         return 127;
     }
 
-    int pid = fork();
+    pid_t pid = fork();
     if (pid == 0) {
-        if (apply_redirections(cmd->base.redirections) != 0) exit(1);
-        
-        // Construct expanded assignments properly
-        // Ideally we should merge with shell_var_get_envp()
-        // But since we are in child, we can just setenv/putenv?
-        // But we are using custom shell_var.
-        // Let's create a temporary env array merge.
-        
-        char **base_env = shell_var_get_envp();
-        int env_count = 0;
-        while(base_env[env_count]) env_count++;
-        
-        // New array size: base + assign_count + 1
-        char **new_env = malloc((env_count + cmd->assign_count + 1) * sizeof(char*));
-        for (int i=0; i<env_count; i++) new_env[i] = base_env[i];
-        
-        int current_count = env_count;
-        for (int i=0; i<cmd->assign_count; i++) {
-             char *eq = strchr(cmd->assignments[i], '=');
-             if (eq) {
-                 *eq = 0;
-                 char *val = expand_word(eq + 1);
-                 *eq = '=';
-                 
-                 // Create "KEY=VAL" string
-                 // Note: duplication handling is tricky (should overwrite existing key).
-                 // For now, simple append (most execve implementations use first occurrence, or last? POSIX undefined?)
-                 // Linux execve: uses all, but getenv uses first.
-                 // Correct logic: we should override.
-                 
-                 // Simpler: use putenv/setenv in child if libc supports it, then use extern char **environ?
-                 // But we are passing new_env to execve.
-                 
-                 // Let's just construct strings.
-                 // To do it right, we should scan base_env for Key and replace.
-                 
-                 char buf[1024]; // Careful with size
-                 snprintf(buf, sizeof(buf), "%s=%s", cmd->assignments[i], val ? val : "");
-                 if (val) free(val);
-                 
-                 // Remove existing key from new_env if present
-                 size_t key_len = eq - cmd->assignments[i];
-                 int found = -1;
-                 for (int k=0; k<current_count; k++) {
-                     if (strncmp(new_env[k], cmd->assignments[i], key_len) == 0 && new_env[k][key_len] == '=') {
-                         found = k;
-                         break;
-                     }
-                 }
-                 
-                 char *entry = strdup(buf);
-                 if (found != -1) {
-                     new_env[found] = entry; // Override
-                 } else {
-                     new_env[current_count++] = entry;
-                 }
-                 *eq = '='; // Restore just in case
-             }
-        }
-        new_env[current_count] = NULL;
-        
-        execve(full_path, argv, new_env);
+        char **env = merge_env(shell_var_get_envp(), cmd->assign_count, cmd->assignments);
+        execve(full_path, argv, env);
         perror(argv[0]);
-        exit(1);
-    } else if (pid < 0) {
-        perror("fork");
+        _exit(1);
+    } else if (pid > 0) {
+        int wait_status;
+        waitpid(pid, &wait_status, 0);
+        if (saved_fds) restore_redirections(saved_fds);
         free(full_path);
+        for (int i = 0; argv[i]; i++) free(argv[i]);
+        free(argv);
+        if (WIFEXITED(wait_status)) return WEXITSTATUS(wait_status);
+        return 1;
+    } else {
+        perror("fork");
+        if (saved_fds) restore_redirections(saved_fds);
+        free(full_path);
+        for (int i = 0; argv[i]; i++) free(argv[i]);
+        free(argv);
         return 1;
     }
-
-    int wait_status;
-    waitpid(pid, &wait_status, 0);
-
-    free(full_path);
-    for (int i=0; argv[i]; i++) free(argv[i]);
-    free(argv);
-
-    if (WIFEXITED(wait_status)) return WEXITSTATUS(wait_status);
-    return 1;
 }
 
 static int execute_pipeline(ast_pipeline_t *pipe_node) {
