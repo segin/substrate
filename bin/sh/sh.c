@@ -10,7 +10,10 @@
 #include "expand.h"
 #include "job.h"
 #include "shell_var.h"
+#include "util.h"
 #include <termios.h>
+
+static int command_count = 1;
 
 extern int tcsetpgrp(int fd, pid_t pgrp);
 extern pid_t tcgetpgrp(int fd);
@@ -138,25 +141,97 @@ static int get_last_status(void) {
     return s ? atoi(s) : 0;
 }
 
+static char *expand_prompt_escapes(const char *ps1) {
+    if (!ps1) return NULL;
+    size_t cap = strlen(ps1) * 2 + 16;
+    size_t len = 0;
+    char *buf = malloc(cap);
+    if (!buf) return NULL;
+    
+    const char *p = ps1;
+    while (*p) {
+        if (*p == '\\') {
+            p++;
+            if (!*p) {
+                // Trailing backslash - append as is
+                buffer_append(&buf, &cap, &len, '\\');
+                break;
+            }
+            switch (*p) {
+                case '!': {
+                    char num[32];
+                    snprintf(num, sizeof(num), "%d", command_count);
+                    buffer_append_str(&buf, &cap, &len, num);
+                    break;
+                }
+                case '$': {
+                    char c = (geteuid() == 0) ? '#' : '$';
+                    buffer_append(&buf, &cap, &len, c);
+                    break;
+                }
+                case '\\':
+                    // Literal backslash.
+                    // IMPORTANT: To survive expand_word which removes quotes,
+                    // we might need to output \\ if we want a single backslash?
+                    // But expand_word treats \ as quote.
+                    // If we output \, expand_word sees \ and escapes next char.
+                    // If we want literal \, we should output \\.
+                    buffer_append_str(&buf, &cap, &len, "\\\\");
+                    break;
+                default:
+                    // Undefined escape: print literal char (e.g. \a -> a)
+                    // But wait, user might expect \n to be newline?
+                    // TASKS.md said "Handle undefined escapes deterministically (e.g., print literal char)".
+                    // It didn't strictly require \n, \r etc.
+                    // But standard prompt usually supports them.
+                    // For now, I'll stick to printing the char literal.
+                    buffer_append(&buf, &cap, &len, *p);
+                    break;
+            }
+        } else {
+            buffer_append(&buf, &cap, &len, *p);
+        }
+        p++;
+    }
+    buf[len] = 0;
+    return buf;
+}
+
 static char *evaluate_prompt(const char *ps1) {
     if (!ps1) return NULL;
     
     // Save state
     int saved_xtrace = shell_xtrace;
     int saved_errexit = shell_errexit;
+    char *saved_status_str = shell_var_get("?");
+    char *saved_status = saved_status_str ? strdup(saved_status_str) : NULL;
     
     // Disable tracing and error exit for prompt evaluation
     shell_xtrace = 0;
     shell_errexit = 0;
     
-    char *expanded = expand_word(ps1);
+    char *escaped = expand_prompt_escapes(ps1);
+    char *expanded = expand_word(escaped ? escaped : ps1);
+    if (escaped) free(escaped);
     
     // Restore state
     shell_xtrace = saved_xtrace;
     shell_errexit = saved_errexit;
+    if (saved_status) {
+        shell_var_set("?", saved_status);
+        free(saved_status);
+    } else {
+        // If ? wasn't set (e.g. at start), it remains unset or we could unset it?
+        // Usually ? is always set to 0 initially.
+        // shell_var_get might return NULL?
+        // If it was NULL, let's leave it as is or set to 0?
+        // shell_var_set("?", "0") might be safer if it somehow got unset.
+        // But for minimal intrusion, if it was NULL, we do nothing.
+    }
     
     return expanded;
 }
+
 
 int main(int argc, char **argv, char **envp) {
     shell_var_init(envp);
@@ -256,7 +331,7 @@ int main(int argc, char **argv, char **envp) {
     int is_interactive = ((input == stdin && isatty(STDIN_FILENO)) || opt_i) && !opt_c;
     if (opt_i) is_interactive = 1;
     
-    if (is_interactive && !reading_script) {
+    if (is_interactive && !reading_script && isatty(STDIN_FILENO)) {
         shell_is_interactive = 1;
         while (tcgetpgrp(STDIN_FILENO) != (shell_pgid = getpgrp()))
             kill(-shell_pgid, SIGTTIN);
@@ -361,6 +436,7 @@ int main(int argc, char **argv, char **envp) {
             
             if (!fgets(buf, sizeof(buf), input)) break;
             execute_line(buf);
+            if (shell_is_interactive) command_count++;
             check_traps();
         }
     }

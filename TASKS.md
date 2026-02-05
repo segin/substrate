@@ -3409,14 +3409,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Enable **Command Substitution** for PS1.
                 - [x] Enable **Arithmetic Expansion** for PS1.
                 - [x] Disable **Quote Removal** (PS1 retains quotes, or strictly follows POSIX requirements).
-            - [ ] **Escape Sequence Parsing:**
-                - [ ] Implement parser for backslash escapes in PS1.
-                - [ ] Support `\!` (history number) escape.
-                - [ ] Support `\$` (uid-based suffix `#`/`$`) escape.
-                - [ ] Support `\\` (literal backslash) escape.
-                - [ ] Handle undefined escapes deterministically (e.g., print literal char).
+            - [x] **Escape Sequence Parsing:**
+                - [x] Implement parser for backslash escapes in PS1.
+                - [x] Support `\!` (history number) escape.
+                - [x] Support `\$` (uid-based suffix `#`/`$`) escape.
+                - [x] Support `\\` (literal backslash) escape.
+                - [x] Handle undefined escapes deterministically (e.g., print literal char).
             - [ ] **State-Dependent Elements:**
-                - [ ] Implement effective UID check for `\$`.
+                - [x] Implement effective UID check for `\$`.
                 - [ ] Expose exit status `?` to prompt expansion without resetting it.
             - [ ] **Error Handling:**
                 - [ ] Graceful failure on expansion error (fallback to default string).
