@@ -37,8 +37,11 @@ kernel.freebsd: kernel.bin
 	cp kernel.bin kernel.freebsd
 
 kernel.zimage: kernel.bin
-	# For zImage, we often want a flat binary if using it with legacy loaders
-	objcopy -O binary kernel.bin kernel.zimage
+	@echo "Building zImage..."
+	$(MAKE) -C arch/$(ARCH) zimage_header.bin
+	objcopy -O binary kernel.bin kernel.raw
+	arch/$(ARCH)/mkzimage.py arch/$(ARCH)/zimage_header.bin kernel.raw kernel.zimage
+	rm -f kernel.raw
 
 kernel.efi: arch_kernel klib kern drivers fs exec vfs exec_perso vm tests
 	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.elf \
@@ -132,7 +135,7 @@ clean:
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean
 	$(MAKE) -C lib clean
-	rm -f kernel.bin
+	rm -f kernel.bin kernel.zimage
 
 tests:
 	$(MAKE) -C ../tests/sys
