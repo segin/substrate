@@ -320,19 +320,47 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         return 0;
     }
     if (strcmp(argv[0], "exec") == 0) {
+        /* exec [-a name] [command [args...]]
+         * Replace shell with command. If no command, just apply redirections. */
         if (apply_redirections(cmd_node->base.redirections) != 0) return 1;
-        if (argc > 1) {
-            char *full_path = find_in_path(argv[1]);
-            if (!full_path) {
-                fprintf(stderr, "sh: %s: command not found\n", argv[1]);
-                exit(127);  // POSIX: exec failure exits the shell
+
+        if (argc == 1) return 0;  /* No command - redirections applied */
+
+        int arg_idx = 1;
+        char *argv0_override = NULL;
+
+        /* Handle -a option for argv[0] override */
+        if (argc > 2 && strcmp(argv[1], "-a") == 0) {
+            argv0_override = argv[2];
+            arg_idx = 3;
+            if (arg_idx >= argc) {
+                fprintf(stderr, "sh: exec: -a requires command\n");
+                return 1;
             }
-            char **envp = shell_var_get_envp();
-            execve(full_path, argv + 1, envp);
-            perror(argv[1]);
-            exit(126);
         }
-        return 0;  // No command - just apply redirections
+
+        char *full_path = find_in_path(argv[arg_idx]);
+        if (!full_path) {
+            fprintf(stderr, "sh: exec: %s: command not found\n", argv[arg_idx]);
+            exit(127);  /* POSIX: exec failure exits the shell */
+        }
+
+        /* Build argv for execve */
+        char **exec_argv = argv + arg_idx;
+        char *saved_argv0 = NULL;
+        if (argv0_override) {
+            saved_argv0 = exec_argv[0];
+            exec_argv[0] = argv0_override;
+        }
+
+        char **envp = shell_var_get_envp();
+        execve(full_path, exec_argv, envp);
+
+        /* execve failed - restore argv[0] for error message */
+        if (saved_argv0) exec_argv[0] = saved_argv0;
+        perror(argv[arg_idx]);
+        free(full_path);
+        exit(126);
     }
     if (strcmp(argv[0], "eval") == 0) {
         if (argc > 1) {
