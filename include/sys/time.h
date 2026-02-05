@@ -8,10 +8,13 @@ struct timeval {
     suseconds_t tv_usec;    /* microseconds */
 };
 
+#ifndef _STRUCT_TIMESPEC_DEFINED
+#define _STRUCT_TIMESPEC_DEFINED
 struct timespec {
     time_t tv_sec;     /* seconds */
     long   tv_nsec;    /* nanoseconds */
 };
+#endif
 
 struct timezone {
     int tz_minuteswest;     /* minutes west of Greenwich */
@@ -23,10 +26,6 @@ struct itimerval {
     struct timeval it_value;    /* current value */
 };
 
-struct timespec {
-    time_t tv_sec;     /* seconds */
-    long   tv_nsec;    /* nanoseconds */
-};
 
 int gettimeofday(struct timeval *restrict tp, void *restrict tzp);
 int settimeofday(const struct timeval *tp, const void *tzp);
