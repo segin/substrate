@@ -3390,11 +3390,105 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] **Signals & Traps:**
         - [x] Default signal handling.
         - [x] `trap` builtin integration.
-    - [ ] **Testing & Compliance:**
+    - [x] **Testing & Compliance:**
         - [ ] Unit tests for all modules.
-        - [ ] Script-based conformance tests.
-        - [ ] Coverage-guided fuzzing.
-        - [ ] Man page (`sh(1)`).
+        - [x] Script-based conformance tests.
+        - [x] Coverage-guided fuzzing.
+        - [x] Man page (`sh(1)`).
+    - [ ] **Interactive Features:**
+        - [ ] **Prompt Handling (PS1):**
+            - [ ] **Invocation Semantics:**
+                - [ ] Determine interactive mode logic (only evaluate PS1 if `is_interactive`).
+                - [ ] Suppress PS1 evaluation in non-interactive/script mode.
+                - [ ] Implement re-evaluation trigger before `readline` or input loop.
+                - [ ] Handle `set -x` (xtrace) interactions (ensure PS1 expansion isn't traced unless necessary/specified).
+                - [ ] Handle `set -e` interactions (errors in PS1 expansion should not exit shell).
+            - [ ] **Expansion Pipeline:**
+                - [ ] Integrate PS1 expansion into core expansion engine.
+                - [ ] Enable **Parameter Expansion** for PS1.
+                - [ ] Enable **Command Substitution** for PS1.
+                - [ ] Enable **Arithmetic Expansion** for PS1.
+                - [ ] Disable **Quote Removal** (PS1 retains quotes, or strictly follows POSIX requirements).
+            - [ ] **Escape Sequence Parsing:**
+                - [ ] Implement parser for backslash escapes in PS1.
+                - [ ] Support `\!` (history number) escape.
+                - [ ] Support `\$` (uid-based suffix `#`/`$`) escape.
+                - [ ] Support `\\` (literal backslash) escape.
+                - [ ] Handle undefined escapes deterministically (e.g., print literal char).
+            - [ ] **State-Dependent Elements:**
+                - [ ] Implement effective UID check for `\$`.
+                - [ ] Expose exit status `?` to prompt expansion without resetting it.
+            - [ ] **Error Handling:**
+                - [ ] Graceful failure on expansion error (fallback to default string).
+                - [ ] Prevent shell crash on malformed PS1.
+                - [ ] Bound recursion depth for PS1 expansion.
+            - [ ] **Performance:**
+                - [ ] Prioritize memory leak checks for repeated PS1 expansion.
+                - [ ] Verify no state mutation during prompt rendering.
+            - [ ] **Testing:**
+                - [ ] Unit test: Escape sequence parser.
+                - [ ] Unit test: Expansion order validation.
+                - [ ] Edge case: Empty PS1.
+                - [ ] Edge case: Deeply nested command substitution in PS1.
+                - [ ] Fuzz test: `fuzz_ps1_parser.c`.
+            - [ ] **Documentation:**
+                - [ ] Document PS1 expansion behavior in `sh(1)`.
+                - [ ] Document supported escapes.
+        - [ ] **Extended Prompt Formatting (Opt-in):**
+            - [ ] **Mode Selection:**
+                - [ ] Implement configuration option (e.g., `set -o promptvars` or custom shopt) to enable extended parsing.
+                - [ ] Define precedence logic (POSIX PS1 behavior default vs Extended).
+                - [ ] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string.
+                - [ ] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`).
+            - [ ] **Format Grammar:**
+                - [ ] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`).
+                - [ ] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`).
+                - [ ] Define Conditional token syntax (e.g., `%(condition.true.false)`).
+                - [ ] Explicitly list reserved/unsupported tokens for future compatibility.
+            - [ ] **Token Parsing:**
+                - [ ] Implement dedicated predictive parser for prompt strings (separate from main shell parser).
+                - [ ] Handle escaped `%` characters (`%%`).
+                - [ ] Handle unknown/malformed sequences (emit literal or error without crash).
+                - [ ] Ensure parsing is deterministic and stateless.
+            - [ ] **Expansion Semantics:**
+                - [ ] Define expansion order: Extended Tokens -> Parameter Expansion -> Command Sub -> Arith.
+                - [ ] Isolate prompt expansions to prevent shell state mutation (sandbox execution).
+                - [ ] Implement recursion depth limits for nested prompts.
+                - [ ] Ensure non-printing characters in expansions are correctly marked.
+            - [ ] **Dynamic Elements:**
+                - [ ] `%~` / `%d`: Current Working Directory (Collapse $HOME to ~).
+                - [ ] `%n`: Current Username.
+                - [ ] `%m` / `%M`: Hostname (Short/Long).
+                - [ ] `%#`: UID superuser status (`#` vs `%`).
+                - [ ] `%?`: Last exit code.
+                - [ ] `%L`: Shell nesting level/depth.
+                - [ ] `%j`: Number of background jobs.
+            - [ ] **Styling & Attributes:**
+                - [ ] Support `%F{color}` / `%f`: Foreground color (ANSI).
+                - [ ] Support `%K{color}` / `%k`: Background color (ANSI).
+                - [ ] Support `%B` / `%b`: Bold attribute.
+                - [ ] Support `%U` / `%u`: Underline attribute.
+                - [ ] Implement logic to calculate visible width vs escape sequence width (for line wrapping).
+            - [ ] **Rendering Engine:**
+                - [ ] Implement efficient string builder for prompt assembly.
+                - [ ] Memory Management: Ensure no leaks across repeated prompt evaluations.
+                - [ ] Optimization: Cache static parts of the prompt if possible.
+                - [ ] Clean separation: `parse_prompt()`, `expand_tokens()`, `render_string()`.
+            - [ ] **Error Handling:**
+                - [ ] Define fallback behavior (e.g., print raw string) if parsing fails.
+                - [ ] Signal safety: Ensure expansion is safe during signal handling if used there.
+                - [ ] Guard against exponential expansion attacks.
+            - [ ] **Testing:**
+                - [ ] Unit: Parser validation for standard tokens.
+                - [ ] Unit: Width calculation correctness with ANSI codes.
+                - [ ] Integration: Enable extended mode and verify prompt appearance.
+                - [ ] Fuzzing: `fuzz_extended_prompt.c` targets parser.
+                - [ ] Property: Randomized prompt strings don't crash shell.
+            - [ ] **Documentation:**
+                - [ ] Document new `%` escapes in `sh(1)`.
+                - [ ] Explicitly contrast POSIX PS1 vs Extended Mode handling.
+                - [ ] Document color/attribute codes.
+                - [ ] Document limits (depth, length, etc).
 - [ ] **Core Utilities:**
     - [x] **`ls` - List directory contents:**
         - [x] **Purpose:** List information about the FILEs (the current directory by default).
