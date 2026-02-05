@@ -29,6 +29,9 @@ test_util: util.c tests/test_util.c
 fuzzer: lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
 	clang -g -fsanitize=fuzzer,address -I. -o $@ lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
 
+fuzz_ps1: prompt.c util.c shell_var.c tests/fuzz_ps1_parser.c
+	clang -g -fsanitize=fuzzer,address -I. -o $@ prompt.c util.c shell_var.c tests/fuzz_ps1_parser.c
+
 fuzz_parser: lexer.c parser.c shell_var.c util.c tests/fuzz_parser.c
 	$(CC) -g -I. -o $@ $^
 

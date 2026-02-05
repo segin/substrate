@@ -3416,7 +3416,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Support `\\` (literal backslash) escape.
                 - [x] Handle undefined escapes deterministically (e.g., print literal char).
                 - [x] Support **Common Escapes** (`\u`, `\h`, `\w`) using standard libc functions.
-            - [ ] **State-Dependent Elements:**
+            - [x] **State-Dependent Elements:**
                 - [x] Implement effective UID check for `\$`.
                 - [x] Expose exit status `?` to prompt expansion without resetting it.
             - [x] **Error Handling:**
@@ -3431,7 +3431,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Unit test: Expansion order validation.
                 - [x] Edge case: Empty PS1.
                 - [x] Edge case: Deeply nested command substitution in PS1.
-                - [ ] Fuzz test: `fuzz_ps1_parser.c`.
+                - [x] Fuzz test: `fuzz_ps1_parser.c`.
             - [ ] **Documentation:**
                 - [ ] Document PS1 expansion behavior in `sh(1)`.
                 - [ ] Document supported escapes.
