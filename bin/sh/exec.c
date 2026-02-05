@@ -244,7 +244,7 @@ int execute_ast(ast_node_t *node) {
             status = execute_subshell((ast_subshell_t *)node);
             break;
         default:
-            fprintf(stderr, "sh: Unknown node type %d\n", node->type);
+            fprintf(stderr, "%s: Unknown node type %d\n", shell_var_get_name(), node->type);
             status = 1;
     }
 
@@ -334,14 +334,14 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
             argv0_override = argv[2];
             arg_idx = 3;
             if (arg_idx >= argc) {
-                fprintf(stderr, "sh: exec: -a requires command\n");
+                fprintf(stderr, "%s: exec: -a requires command\n", shell_var_get_name());
                 return 1;
             }
         }
 
         char *full_path = find_in_path(argv[arg_idx]);
         if (!full_path) {
-            fprintf(stderr, "sh: exec: %s: command not found\n", argv[arg_idx]);
+            fprintf(stderr, "%s: exec: %s: command not found\n", shell_var_get_name(), argv[arg_idx]);
             exit(127);  /* POSIX: exec failure exits the shell */
         }
 
@@ -393,7 +393,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
                     j = first_job;
                     while (j && j->id != jid) j = j->next;
                     if (!j) {
-                        fprintf(stderr, "sh: wait: %s: no such job\n", argv[i]);
+                        fprintf(stderr, "%s: wait: %s: no such job\n", shell_var_get_name(), argv[i]);
                         last_status = 127;
                         continue;
                     }
@@ -487,7 +487,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         int real_argc = argc;
         if (is_bracket) {
             if (strcmp(argv[argc-1], "]") != 0) {
-                fprintf(stderr, "sh: [: missing `]'\n");
+                fprintf(stderr, "%s: [: missing `]'\n", shell_var_get_name());
                 return 2;
             }
             real_argc--;
@@ -518,12 +518,12 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
     // . (dot/source) - execute commands from file
     if (strcmp(argv[0], ".") == 0 || strcmp(argv[0], "source") == 0) {
         if (argc < 2) {
-            fprintf(stderr, "sh: %s: filename argument required\n", argv[0]);
+            fprintf(stderr, "%s: %s: filename argument required\n", shell_var_get_name(), argv[0]);
             return 2;
         }
         FILE *f = fopen(argv[1], "r");
         if (!f) {
-            fprintf(stderr, "sh: %s: %s: No such file or directory\n", argv[0], argv[1]);
+            fprintf(stderr, "%s: %s: %s: No such file or directory\n", shell_var_get_name(), argv[0], argv[1]);
             return 1;
         }
         fseek(f, 0, SEEK_END);
@@ -608,7 +608,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
             char *end;
             long mask = strtol(argv[1], &end, 8);
             if (*end) {
-                fprintf(stderr, "sh: umask: %s: invalid octal number\n", argv[1]);
+                fprintf(stderr, "%s: umask: %s: invalid octal number\n", shell_var_get_name(), argv[1]);
                 return 1;
             }
             umask((mode_t)mask);
@@ -649,7 +649,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         for (int i = start_idx; i < argc; i++) {
             int sig = parse_signal(argv[i]);
             if (sig < 0 || sig >= EXEC_SIG_MAX) {
-                fprintf(stderr, "sh: trap: %s: invalid signal specification\n", argv[i]);
+                fprintf(stderr, "%s: trap: %s: invalid signal specification\n", shell_var_get_name(), argv[i]);
                 continue;
             }
             if (trap_commands[sig]) { free(trap_commands[sig]); trap_commands[sig] = NULL; }
@@ -675,7 +675,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
                     case 'v': opt_v = 1; break;
                     case 'V': opt_V = 1; break;
                     default:
-                        fprintf(stderr, "sh: command: -%c: invalid option\n", *p);
+                        fprintf(stderr, "%s: command: -%c: invalid option\n", shell_var_get_name(), *p);
                         return 2;
                 }
             }
@@ -721,7 +721,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
                 free(full);
                 return 0;
             }
-            if (opt_V) fprintf(stderr, "sh: %s: not found\n", cmd_name);
+            if (opt_V) fprintf(stderr, "%s: %s: not found\n", shell_var_get_name(), cmd_name);
             return 127;
         }
 
@@ -745,7 +745,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
             /* External command */
             char *full = find_in_path(new_argv[0]);
             if (!full) {
-                fprintf(stderr, "sh: %s: command not found\n", new_argv[0]);
+                fprintf(stderr, "%s: %s: command not found\n", shell_var_get_name(), new_argv[0]);
                 status = 127;
             } else {
                 pid_t pid = fork();
@@ -783,7 +783,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         int opt_r = 0, start = 1;
         if (argc > 1 && strcmp(argv[1], "-r") == 0) { opt_r = 1; start = 2; }
         if (start >= argc) {
-            fprintf(stderr, "sh: read: missing variable name\n");
+            fprintf(stderr, "%s: read: missing variable name\n", shell_var_get_name());
             return 1;
         }
 
@@ -857,7 +857,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
     /* getopts optstring name [args...] - POSIX option parsing */
     if (strcmp(argv[0], "getopts") == 0) {
         if (argc < 3) {
-            fprintf(stderr, "sh: getopts: usage: getopts optstring name [args]\n");
+            fprintf(stderr, "%s: getopts: usage: getopts optstring name [args]\n", shell_var_get_name());
             return 2;
         }
 
@@ -930,7 +930,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         if (!found || opt == ':') {
             /* Invalid option */
             if (optstring[0] != ':') {
-                fprintf(stderr, "sh: illegal option -- %c\n", opt);
+                fprintf(stderr, "%s: illegal option -- %c\n", shell_var_get_name(), opt);
             }
             shell_var_set(varname, "?");
             shell_var_set("OPTARG", optchar);
@@ -975,7 +975,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
                     shell_var_set(varname, ":");
                     shell_var_set("OPTARG", optchar);
                 } else {
-                    fprintf(stderr, "sh: option requires an argument -- %c\n", opt);
+                    fprintf(stderr, "%s: option requires an argument -- %c\n", shell_var_get_name(), opt);
                     shell_var_set(varname, "?");
                 }
                 char buf[16];
@@ -1016,7 +1016,7 @@ static int apply_redirections(ast_redirection_t *redir) {
         if (redir->type != REDIR_HERE_DOC && redir->filename) {
             expanded = expand_word(redir->filename);
             if (!expanded) {
-                fprintf(stderr, "sh: expansion failed for redirection\n");
+                fprintf(stderr, "%s: expansion failed for redirection\n", shell_var_get_name());
                 return 1;
             }
         }
@@ -1169,7 +1169,7 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
 
     char *full_path = find_in_path(argv[0]);
     if (!full_path) {
-        fprintf(stderr, "sh: %s: command not found\n", argv[0]);
+        fprintf(stderr, "%s: %s: command not found\n", shell_var_get_name(), argv[0]);
         for (int i=0; argv[i]; i++) free(argv[i]);
         free(argv);
         return 127;

@@ -30,11 +30,12 @@ extern int tcgetattr(int fd, struct termios *termios_p);
 #define SIGTSTP 18
 #endif
 
-void execute_line(const char *buffer) {
-    if (!buffer || !*buffer) return;
+int execute_line(char *buffer) {
+    if (!buffer || !*buffer) return 0;
     
     lexer_t l;
     lexer_init(&l, buffer);
+    int last_status = 0;
     
     while (1) {
         token_t *t = lexer_peek(&l);
@@ -43,6 +44,7 @@ void execute_line(const char *buffer) {
         ast_node_t *node = parser_parse(&l);
         if (node) {
             int status = execute_ast(node);
+            last_status = status;
             char res_buf[16];
             snprintf(res_buf, sizeof(res_buf), "%d", status);
             shell_var_set("?", res_buf);
@@ -62,6 +64,7 @@ void execute_line(const char *buffer) {
             }
         }
     }
+    return last_status;
 }
 
 // Source a file if it exists
@@ -127,6 +130,12 @@ static void sigchld_handler(int sig) {
     // job_update_status will be called by the main loop.
 }
 
+// Helper to get last exit status
+static int get_last_status(void) {
+    char *s = shell_var_get("?");
+    return s ? atoi(s) : 0;
+}
+
 int main(int argc, char **argv, char **envp) {
     shell_var_init(envp);
     init_environment();
@@ -175,7 +184,7 @@ int main(int argc, char **argv, char **envp) {
                     shell_errexit = 1;
                     break;
                 default:
-                    fprintf(stderr, "sh: illegal option -%c\n", *p);
+                    fprintf(stderr, "%s: illegal option -%c\n", shell_var_get_name(), *p);
                     return 2;
             }
         }
@@ -184,7 +193,7 @@ int main(int argc, char **argv, char **envp) {
         // -c requires the next argument as the command string
         if (opt_c) {
             if (optind >= argc) {
-                fprintf(stderr, "sh: -c: option requires an argument\n");
+                fprintf(stderr, "%s: -c: option requires an argument\n", shell_var_get_name());
                 return 2;
             }
             command_string = argv[optind++];
@@ -250,7 +259,7 @@ int main(int argc, char **argv, char **envp) {
     // Handle -c: Execute command string
     if (opt_c) {
         execute_line(command_string);
-        return 0;
+        return get_last_status();
     }
     
     if (reading_script || opt_s) {
@@ -264,7 +273,7 @@ int main(int argc, char **argv, char **envp) {
             size_t cap = 4096, len = 0;
             char *buffer = malloc(cap);
             if (!buffer) {
-                fprintf(stderr, "sh: Out of memory\n");
+                fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
                 if (input != stdin) fclose(input);
                 return 1;
             }
@@ -275,7 +284,7 @@ int main(int argc, char **argv, char **envp) {
                     cap *= 2;
                     buffer = realloc(buffer, cap);
                     if (!buffer) {
-                        fprintf(stderr, "sh: Out of memory\n");
+                        fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
                         return 1;
                     }
                 }
@@ -290,7 +299,7 @@ int main(int argc, char **argv, char **envp) {
         } else {
             char *buffer = malloc(fsize + 1);
             if (!buffer) {
-                fprintf(stderr, "sh: Out of memory\n");
+                fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
                 if (input != stdin) fclose(input);
                 return 1;
             }
@@ -300,7 +309,7 @@ int main(int argc, char **argv, char **envp) {
             if (nread > 0) {
                 execute_line(buffer);
             } else if (fsize > 0) {
-                fprintf(stderr, "sh: Failed to read script\n");
+                fprintf(stderr, "%s: Failed to read script\n", shell_var_get_name());
             }
             free(buffer);
         }
@@ -322,5 +331,5 @@ int main(int argc, char **argv, char **envp) {
             execute_line(buf);
         }
     }
-    return 0;
+    return get_last_status();
 }

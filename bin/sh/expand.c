@@ -32,6 +32,7 @@ static void buffer_append_str_internal(char **buf, size_t *cap, size_t *len, con
 #define QUOTED_BIT 0x80
 
 static void finalize_word(char **cw, size_t *cw_cap, size_t *cw_len, char ***list, size_t *cap, size_t *len, int quoted_any) {
+    (void)cw_cap;
     if (*cw_len > 0 || quoted_any) {
         if (*len + 1 >= *cap) {
             *cap *= 2;
@@ -446,6 +447,7 @@ static void glob_word(const char *pattern, char ***list, size_t *cap, size_t *le
 }
 
 static void expand_word_internal(const char *word, char ***list, size_t *cap, size_t *len, int split) {
+    (void)split;
     if (!word) return;
     size_t cw_cap = 32, cw_len = 0;
     char *cw = malloc(cw_cap); cw[0] = 0;
@@ -599,7 +601,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                             // ${var:?word}: error if unset or null
                             if (!is_nonnull) {
                                 char *expanded = expand_word(word);
-                                fprintf(stderr, "sh: %s: %s\n", varname ? varname : "", expanded);
+                                fprintf(stderr, "%s: %s: %s\n", shell_var_get_name(), varname ? varname : "", expanded);
                                 free(expanded);
                                 // Could exit here for non-interactive
                             } else {
@@ -637,7 +639,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                         } else if (op == '?') {
                             if (!is_set) {
                                 char *expanded = expand_word(word);
-                                fprintf(stderr, "sh: %s: %s\n", varname ? varname : "", expanded);
+                                fprintf(stderr, "%s: %s: %s\n", shell_var_get_name(), varname ? varname : "", expanded);
                                 free(expanded);
                             } else {
                                 expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
