@@ -129,8 +129,46 @@ int pipe(int pipefd[2]) {
     return (int)_syscall1(SYS_PIPE, (int)pipefd);
 }
 
+// Forward declaration
+int ioctl(int fd, unsigned long request, ...);
+
 int dup2(int oldfd, int newfd) {
     return (int)_syscall2(SYS_DUP2, oldfd, newfd);
+}
+
+int dup(int oldfd) {
+    return (int)_syscall1(SYS_DUP, oldfd);
+}
+
+int tcsetpgrp(int fd, pid_t pgrp) {
+    return ioctl(fd, TIOCSPGRP, &pgrp);
+}
+
+pid_t tcgetpgrp(int fd) {
+    pid_t pgrp;
+    if (ioctl(fd, TIOCGPGRP, &pgrp) < 0) return -1;
+    return pgrp;
+}
+
+int tcgetattr(int fd, struct termios *termios_p) {
+    return ioctl(fd, TCGETS, termios_p);
+}
+
+int tcsetattr(int fd, int optional_actions, const struct termios *termios_p) {
+    (void)optional_actions;
+    return ioctl(fd, 0x5402, termios_p); 
+}
+
+int setpgid(pid_t pid, pid_t pgid) {
+    return (int)_syscall2(SYS_SETPGID, (int)pid, (int)pgid);
+}
+
+pid_t getpgid(pid_t pid) {
+    return (pid_t)_syscall1(SYS_GETPGID, (int)pid);
+}
+
+pid_t getpgrp(void) {
+    return getpgid(0);
 }
 
 void sync(void) {

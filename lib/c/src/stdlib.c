@@ -60,6 +60,56 @@ int at_quick_exit(void (*func)(void)) {
     return 0;
 }
 
+long strtol(const char *nptr, char **endptr, int base) {
+    const char *s = nptr;
+    unsigned long acc;
+    int c;
+    unsigned long cutoff;
+    int neg = 0, any, cutlim;
+
+    if (base < 0 || base == 1 || base > 36) {
+        if (endptr) *endptr = (char *)nptr;
+        return 0;
+    }
+
+    while (isspace(*s)) s++;
+    if (*s == '-') {
+        neg = 1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+    if ((base == 0 || base == 16) && *s == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+        base = 16;
+    }
+    if (base == 0) base = *s == '0' ? 8 : 10;
+
+    cutoff = neg ? -(unsigned long)-2147483648L : 2147483647L; // Simplified LONG_MAX/MIN for 32-bit
+    cutlim = cutoff % (unsigned long)base;
+    cutoff /= (unsigned long)base;
+    for (acc = 0, any = 0;; c = *s++) {
+        if (isdigit(c)) c -= '0';
+        else if (isalpha(c)) c -= isupper(c) ? 'A' - 10 : 'a' - 10;
+        else break;
+        if (c >= base) break;
+        if (any < 0 || acc > cutoff || (acc == cutoff && c > cutlim))
+            any = -1;
+        else {
+            any = 1;
+            acc *= base;
+            acc += c;
+        }
+    }
+    if (any < 0) {
+        acc = neg ? -2147483648L : 2147483647L;
+    } else if (neg) {
+        acc = -acc;
+    }
+    if (endptr != 0) *endptr = (char *)(any ? s - 1 : nptr);
+    return acc;
+}
+
 int atoi(const char *nptr) {
     return (int)atol(nptr);
 }
