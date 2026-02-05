@@ -3403,12 +3403,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Implement re-evaluation trigger before `readline` or input loop.
                 - [x] Handle `set -x` (xtrace) interactions (ensure PS1 expansion isn't traced unless necessary/specified).
                 - [x] Handle `set -e` interactions (errors in PS1 expansion should not exit shell).
-            - [ ] **Expansion Pipeline:**
-                - [ ] Integrate PS1 expansion into core expansion engine.
-                - [ ] Enable **Parameter Expansion** for PS1.
-                - [ ] Enable **Command Substitution** for PS1.
-                - [ ] Enable **Arithmetic Expansion** for PS1.
-                - [ ] Disable **Quote Removal** (PS1 retains quotes, or strictly follows POSIX requirements).
+            - [x] **Expansion Pipeline:**
+                - [x] Integrate PS1 expansion into core expansion engine.
+                - [x] Enable **Parameter Expansion** for PS1.
+                - [x] Enable **Command Substitution** for PS1.
+                - [x] Enable **Arithmetic Expansion** for PS1.
+                - [x] Disable **Quote Removal** (PS1 retains quotes, or strictly follows POSIX requirements).
             - [ ] **Escape Sequence Parsing:**
                 - [ ] Implement parser for backslash escapes in PS1.
                 - [ ] Support `\!` (history number) escape.
