@@ -199,6 +199,28 @@ char *strtok(char *str, const char *delim) {
     return str;
 }
 
+char *strtok_r(char *str, const char *delim, char **saveptr) {
+    char *s = str;
+    if (!s) s = *saveptr;
+    if (!s) return NULL;
+
+    s += strspn(s, delim);
+    if (*s == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+
+    char *token = s;
+    s += strcspn(s, delim);
+    if (*s == '\0') {
+        *saveptr = NULL;
+    } else {
+        *s = '\0';
+        *saveptr = s + 1;
+    }
+    return token;
+}
+
 char *strerror(int errnum) {
     (void)errnum;
     return "Error";

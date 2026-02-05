@@ -59,4 +59,13 @@ struct stat {
 #define S_IWOTH 00002
 #define S_IXOTH 00001
 
+#define S_IXOTH 00001
+
+int stat(const char *path, struct stat *buf);
+int fstat(int fd, struct stat *buf);
+int lstat(const char *path, struct stat *buf);
+int mkdir(const char *path, mode_t mode);
+int chmod(const char *path, mode_t mode);
+mode_t umask(mode_t mask);
+
 #endif

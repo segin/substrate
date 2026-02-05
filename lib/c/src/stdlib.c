@@ -10,6 +10,10 @@ void abort(void) {
     _exit(134);
 }
 
+void __stack_chk_fail(void) {
+    _exit(127);
+}
+
 // Simple bump allocator for now, 1MB heap
 static char heap[1024 * 1024];
 static size_t heap_ptr = 0;

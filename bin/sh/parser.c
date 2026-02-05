@@ -40,6 +40,7 @@ static void free_redirections(ast_redirection_t *r) {
     while (r) {
         ast_redirection_t *next = r->next;
         if (r->filename) free(r->filename);
+        if (r->heredoc_content) free(r->heredoc_content);
         free(r);
         r = next;
     }
@@ -229,12 +230,12 @@ static ast_redirection_t *parse_redirections(lexer_t *l) {
         if (!t || t->type != TOKEN_OPERATOR) break;
         
         redir_type_t type;
-        if (strcmp(t->value, "<") == 0) type = REDIR_IN;
-        else if (strcmp(t->value, ">") == 0) type = REDIR_OUT;
-        else if (strcmp(t->value, ">>") == 0) type = REDIR_APPEND;
-        else if (strcmp(t->value, "<<") == 0) type = REDIR_HERE_DOC;
-        else if (strcmp(t->value, "<&") == 0) type = REDIR_DUP_IN;
-        else if (strcmp(t->value, ">&") == 0) type = REDIR_DUP_OUT;
+        if (t->value && strcmp(t->value, "<") == 0) type = REDIR_IN;
+        else if (t->value && strcmp(t->value, ">") == 0) type = REDIR_OUT;
+        else if (t->value && strcmp(t->value, ">>") == 0) type = REDIR_APPEND;
+        else if (t->value && strcmp(t->value, "<<") == 0) type = REDIR_HERE_DOC;
+        else if (t->value && strcmp(t->value, "<&") == 0) type = REDIR_DUP_IN;
+        else if (t->value && strcmp(t->value, ">&") == 0) type = REDIR_DUP_OUT;
         else break;
         
         if (fd == -1) {
@@ -389,9 +390,9 @@ static ast_node_t *parse_simple_command(lexer_t *l) {
         }
         else if (t->type == TOKEN_OPERATOR) {
             // Check if it's a redirection operator vs control operator
-            if (strcmp(t->value, ";") == 0 || strcmp(t->value, "&") == 0 || strcmp(t->value, "|") == 0 ||
+            if (t->value && (strcmp(t->value, ";") == 0 || strcmp(t->value, "&") == 0 || strcmp(t->value, "|") == 0 ||
                 strcmp(t->value, "&&") == 0 || strcmp(t->value, "||") == 0 || strcmp(t->value, "(") == 0 || strcmp(t->value, ")") == 0 ||
-                strcmp(t->value, ";;") == 0) {
+                strcmp(t->value, ";;") == 0)) {
                 // Control operator - End of Simple Command
                 break;
             }
@@ -596,7 +597,7 @@ static ast_node_t *parse_subshell(lexer_t *l) {
     node->list = parse_list(l);
     
     token_t *t = lexer_next(l);
-    if (!t || strcmp(t->value, ")") != 0) {
+    if (!t || !t->value || strcmp(t->value, ")") != 0) {
         if (t) token_free(t);
         ast_free((ast_node_t*)node);
         return NULL;
@@ -610,7 +611,7 @@ static ast_node_t *parse_group(lexer_t *l) {
     ast_node_t *node = parse_list(l);
     
     token_t *t = lexer_next(l);
-    if (!t || strcmp(t->value, "}") != 0) {
+    if (!t || !t->value || strcmp(t->value, "}") != 0) {
         if (t) token_free(t);
         ast_free(node);
         return NULL;
@@ -799,7 +800,7 @@ static ast_node_t *parse_case(lexer_t *l) {
         token_free(lexer_next(l));
         
         t = lexer_next(l);
-        if (!t || strcmp(t->value, ")") != 0) {
+        if (!t || !t->value || strcmp(t->value, ")") != 0) {
             // Error
             free(pattern);
             ast_free((ast_node_t*)node);

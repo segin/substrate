@@ -2,6 +2,7 @@
 #define SHELL_VAR_H
 
 void shell_var_init(char **envp);
+void shell_var_destroy(void);
 char *shell_var_get(const char *name);
 void shell_var_set(const char *name, const char *value);
 void shell_var_export(const char *name, const char *value);

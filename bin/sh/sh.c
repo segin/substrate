@@ -138,6 +138,26 @@ static int get_last_status(void) {
     return s ? atoi(s) : 0;
 }
 
+static char *evaluate_prompt(const char *ps1) {
+    if (!ps1) return NULL;
+    
+    // Save state
+    int saved_xtrace = shell_xtrace;
+    int saved_errexit = shell_errexit;
+    
+    // Disable tracing and error exit for prompt evaluation
+    shell_xtrace = 0;
+    shell_errexit = 0;
+    
+    char *expanded = expand_word(ps1);
+    
+    // Restore state
+    shell_xtrace = saved_xtrace;
+    shell_errexit = saved_errexit;
+    
+    return expanded;
+}
+
 int main(int argc, char **argv, char **envp) {
     shell_var_init(envp);
     init_environment();
@@ -184,6 +204,9 @@ int main(int argc, char **argv, char **envp) {
                     break;
                 case 'e':
                     shell_errexit = 1;
+                    break;
+                case 'x':
+                    shell_xtrace = 1;
                     break;
                 default:
                     fprintf(stderr, "%s: illegal option -%c\n", shell_var_get_name(), *p);
@@ -330,7 +353,9 @@ int main(int argc, char **argv, char **envp) {
                 check_traps();
                 char *p = shell_var_get("PS1");
                 if (!p) p = "$ ";
-                printf("%s", p);
+                char *expanded = evaluate_prompt(p);
+                printf("%s", expanded ? expanded : p);
+                if (expanded) free(expanded);
                 fflush(stdout);
             }
             

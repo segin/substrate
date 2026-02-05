@@ -3397,12 +3397,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Man page (`sh(1)`).
     - [ ] **Interactive Features:**
         - [ ] **Prompt Handling (PS1):**
-            - [ ] **Invocation Semantics:**
-                - [ ] Determine interactive mode logic (only evaluate PS1 if `is_interactive`).
-                - [ ] Suppress PS1 evaluation in non-interactive/script mode.
-                - [ ] Implement re-evaluation trigger before `readline` or input loop.
-                - [ ] Handle `set -x` (xtrace) interactions (ensure PS1 expansion isn't traced unless necessary/specified).
-                - [ ] Handle `set -e` interactions (errors in PS1 expansion should not exit shell).
+            - [x] **Invocation Semantics:**
+                - [x] Determine interactive mode logic (only evaluate PS1 if `is_interactive`).
+                - [x] Suppress PS1 evaluation in non-interactive/script mode.
+                - [x] Implement re-evaluation trigger before `readline` or input loop.
+                - [x] Handle `set -x` (xtrace) interactions (ensure PS1 expansion isn't traced unless necessary/specified).
+                - [x] Handle `set -e` interactions (errors in PS1 expansion should not exit shell).
             - [ ] **Expansion Pipeline:**
                 - [ ] Integrate PS1 expansion into core expansion engine.
                 - [ ] Enable **Parameter Expansion** for PS1.

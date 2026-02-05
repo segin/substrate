@@ -98,3 +98,21 @@ void unquote_word(char *word) {
     }
     *dest = 0;
 }
+
+void buffer_append(char **buf, size_t *cap, size_t *len, char c) {
+    if (*len + 1 >= *cap) {
+        *cap *= 2;
+        if (*cap == 0) *cap = 16;
+        *buf = realloc(*buf, *cap);
+    }
+    (*buf)[*len] = c;
+    (*len)++;
+    (*buf)[*len] = 0;
+}
+
+void buffer_append_str(char **buf, size_t *cap, size_t *len, const char *str) {
+    if (!str) return;
+    while (*str) {
+        buffer_append(buf, cap, len, *str++);
+    }
+}

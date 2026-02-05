@@ -1,0 +1,56 @@
+.Dd February 5, 2026
+.Dt SH 1
+.Os Substrate
+.Sh NAME
+.Nm sh
+.Nd command interpreter (shell)
+.Sh SYNOPSIS
+.Nm
+.Op Fl c Ar string
+.Op Ar file
+.Op Ar args ...
+.Sh DESCRIPTION
+The
+.Nm
+utility is a command interpreter that executes commands read from standard input or from a file.
+.Pp
+The shell implements a subset of the POSIX shell standard, including control structures, variable expansion, and input/output redirection.
+.Sh OPTIONS
+.Bl -tag -width indent
+.It Fl c Ar string
+Read commands from the
+.Ar string
+operand instead of from the standard input.
+.El
+.Sh BUILTINS
+The following built-in commands are supported:
+.Bl -tag -width indent
+.It Ic cd Op Ar directory
+Change the working directory.
+.It Ic exit Op Ar status
+Exit the shell with the specified status.
+.It Ic export Ar name Ns = Ns Ar value
+Set an environment variable.
+.It Ic read Op Fl r Ar var ...
+Read a line from standard input.
+.It Ic unset Ar name
+Unset a variable/function.
+.It Ic shift Op Ar n
+Shift positional parameters.
+.It Ic exec Op Ar command ...
+Replace the shell with the specified command.
+.It Ic . Ar file
+Execute commands from a file in the current shell environment.
+.El
+.Sh EXIT STATUS
+The
+.Nm
+utility exits 0 on success, and >0 if an error occurs.
+.Sh SEE ALSO
+.Xr udf 4
+.Sh STANDARDS
+The
+.Nm
+utility is designed to be compliant with the IEEE Std 1003.1-2008 ("POSIX.1") specification.
+.Sh AUTHORS
+The Substrate Project Developers.

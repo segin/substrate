@@ -52,23 +52,7 @@ static char *capture_command_output(const char *cmd_str) {
     }
 }
 
-static void buffer_append_internal(char **buf, size_t *cap, size_t *len, char c) {
-    if (*len + 1 >= *cap) {
-        *cap *= 2;
-        if (*cap == 0) *cap = 16;
-        *buf = realloc(*buf, *cap);
-    }
-    (*buf)[*len] = c;
-    (*len)++;
-    (*buf)[*len] = 0;
-}
 
-static void buffer_append_str_internal(char **buf, size_t *cap, size_t *len, const char *str) {
-    if (!str) return;
-    while (*str) {
-        buffer_append_internal(buf, cap, len, *str++);
-    }
-}
 
 #define QUOTED_BIT 0x80
 
@@ -97,7 +81,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
     if (!split) {
         // Within double quotes: mask everything to prevent field splitting and globbing
         while (*val) {
-            buffer_append_internal(cw, cw_cap, cw_len, (*val++) | QUOTED_BIT);
+            buffer_append(cw, cw_cap, cw_len, (*val++) | QUOTED_BIT);
         }
         return;
     }
@@ -115,7 +99,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
                 continue;
             }
         } else {
-            buffer_append_internal(cw, cw_cap, cw_len, *p);
+            buffer_append(cw, cw_cap, cw_len, *p);
         }
         if (*p) p++;
     }
@@ -350,7 +334,34 @@ static int glob_match(const char *pattern, const char *name) {
             if (!*name) return 0;
             return glob_match(pattern + 1, name + 1);
         }
-        // [ matching could be added here
+        if (p == '[') {
+            if (!*name) return 0;
+            pattern++;
+            int invert = 0;
+            if ((*pattern & ~QUOTED_BIT) == '!') {
+                invert = 1;
+                pattern++;
+            }
+            int match = 0;
+            int first = 1;
+            while (*pattern && ((*pattern & ~QUOTED_BIT) != ']' || first)) {
+                if (((unsigned char)pattern[1] & ~QUOTED_BIT) == '-' && (unsigned char)pattern[2] && ((unsigned char)pattern[2] & ~QUOTED_BIT) != ']') {
+                    unsigned char start = (unsigned char)*pattern & ~QUOTED_BIT;
+                    unsigned char end = (unsigned char)pattern[2] & ~QUOTED_BIT;
+                    if ((unsigned char)*name >= start && (unsigned char)*name <= end) match = 1;
+                    pattern += 3;
+                } else {
+                    if ((unsigned char)*name == (unsigned char)(*pattern & ~QUOTED_BIT)) match = 1;
+                    pattern++;
+                }
+                first = 0;
+            }
+            if ((*pattern & ~QUOTED_BIT) != ']') return 0;
+            pattern++;
+            if (invert) match = !match;
+            if (!match) return 0;
+            return glob_match(pattern, name + 1);
+        }
     }
     if (*name && (*name == (char)(p & ~QUOTED_BIT))) {
         return glob_match(pattern + 1, name + 1);
@@ -503,24 +514,24 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
     }
     while (*p) {
         char c = *p;
-        if (escape) { buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); escape = 0; }
+        if (escape) { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); escape = 0; }
         else if (in_sq) {
             if (c == '\'') { in_sq = 0; quoted_any = 1; }
-            else { buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); quoted_any = 1; }
+            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); quoted_any = 1; }
         }
         else if (c == '\\') {
             if (in_dq) {
                 char next = *(p + 1);
                 if (next == '$' || next == '`' || next == '"' || next == '\\' || next == '\n') { escape = 1; p++; continue; }
-                buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT);
+                buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT);
             } else { escape = 1; p++; continue; }
         } else if (c == '\'') {
             if (!in_dq) { in_sq = 1; quoted_any = 1; }
-            else { buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
+            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
         }
         else if (c == '"') {
             if (!in_sq) { in_dq = !in_dq; quoted_any = 1; }
-            else { buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
+            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
         }
         else if (c == '$' && !in_sq) {
             p++;
@@ -756,7 +767,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                 expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                 free(name); p--;
             } else {
-                buffer_append_internal(&cw, &cw_cap, &cw_len, '$');
+                buffer_append(&cw, &cw_cap, &cw_len, '$');
                 p--;
             }
         }
@@ -786,12 +797,12 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                 free(output);
                 free(cmd);
             } else {
-                buffer_append_internal(&cw, &cw_cap, &cw_len, '`');
+                buffer_append(&cw, &cw_cap, &cw_len, '`');
                 p = start - 1;
             }
         }
         else {
-            buffer_append_internal(&cw, &cw_cap, &cw_len, in_dq ? (c | QUOTED_BIT) : c);
+            buffer_append(&cw, &cw_cap, &cw_len, in_dq ? (c | QUOTED_BIT) : c);
         }
         p++;
     }
@@ -855,11 +866,11 @@ char *expand_heredoc(const char *content, int quoted) {
         if (*p == '\\') {
             char next = *(p + 1);
             if (next == '$' || next == '`' || next == '"' || next == '\\' || next == '\n') {
-                if (next != '\n') buffer_append_internal(&buf, &cap, &len, next);
+                if (next != '\n') buffer_append(&buf, &cap, &len, next);
                 p += 2;
                 continue;
             }
-            buffer_append_internal(&buf, &cap, &len, '\\');
+            buffer_append(&buf, &cap, &len, '\\');
         } else if (*p == '$') {
             p++;
             if (*p == '(' && *(p+1) == '(') {
@@ -881,7 +892,7 @@ char *expand_heredoc(const char *content, int quoted) {
                      long val = parse_assign();
                      char val_buf[32];
                      snprintf(val_buf, sizeof(val_buf), "%ld", val);
-                     buffer_append_str_internal(&buf, &cap, &len, val_buf);
+                     buffer_append_str(&buf, &cap, &len, val_buf);
                      free(expr);
                  }
             } else if (*p == '(') {
@@ -897,7 +908,7 @@ char *expand_heredoc(const char *content, int quoted) {
                  if (depth == 0) {
                      char *cmd = sh_strndup(start, p - start);
                      char *output = capture_command_output(cmd);
-                     buffer_append_str_internal(&buf, &cap, &len, output);
+                     buffer_append_str(&buf, &cap, &len, output);
                      free(output);
                      free(cmd);
                  }
@@ -907,7 +918,7 @@ char *expand_heredoc(const char *content, int quoted) {
                 if (*p == '}') {
                     char *name = sh_strndup(start, p - start);
                     char *val = lookup_variable(name);
-                    if (val) buffer_append_str_internal(&buf, &cap, &len, val);
+                    if (val) buffer_append_str(&buf, &cap, &len, val);
                     free(name);
                 }
             } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
@@ -916,10 +927,10 @@ char *expand_heredoc(const char *content, int quoted) {
                 else while (*p && (isalnum(*p) || *p == '_')) p++;
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);
-                if (val) buffer_append_str_internal(&buf, &cap, &len, val);
+                if (val) buffer_append_str(&buf, &cap, &len, val);
                 free(name); p--;
             } else {
-                buffer_append_internal(&buf, &cap, &len, '$');
+                buffer_append(&buf, &cap, &len, '$');
                 p--;
             }
         } else if (*p == '`') {
@@ -944,15 +955,15 @@ char *expand_heredoc(const char *content, int quoted) {
                 }
                 *dst = '\0';
                 char *output = capture_command_output(cmd);
-                buffer_append_str_internal(&buf, &cap, &len, output);
+                buffer_append_str(&buf, &cap, &len, output);
                 free(output);
                 free(cmd);
             } else {
-                buffer_append_internal(&buf, &cap, &len, '`');
+                buffer_append(&buf, &cap, &len, '`');
                 p = start - 1;
             }
         } else {
-            buffer_append_internal(&buf, &cap, &len, *p);
+            buffer_append(&buf, &cap, &len, *p);
         }
         p++;
     }

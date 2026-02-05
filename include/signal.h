@@ -19,6 +19,20 @@
 #define SIGPIPE 13
 #define SIGALRM 14
 #define SIGTERM 15
+#define SIGURG  16
+#define SIGSTOP 17
+#define SIGTSTP 18
+#define SIGCONT 19
+#define SIGCHLD 20
+#define SIGTTIN 21
+#define SIGTTOU 22
+#define SIGPOLL 23
+#define SIGXCPU 24
+#define SIGXFSZ 25
+#define SIGVTALRM 26
+#define SIGPROF 27
+#define SIGWINCH 28
+#define SIGSYS  31
 
 typedef void (*sighandler_t)(int);
 

@@ -17,6 +17,7 @@
 
 int shell_is_interactive = 0;
 int shell_errexit = 0;
+int shell_xtrace = 0;
 int errexit_disabled = 0;
 pid_t shell_pgid;
 struct termios shell_tmodes;
@@ -305,6 +306,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
     if (strcmp(argv[0], "exit") == 0) {
         int status = 0;
         if (argc > 1) status = atoi(argv[1]);
+        run_exit_trap();
         exit(status);
     }
     if (strcmp(argv[0], "cd") == 0) {
@@ -376,10 +378,12 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
                 if (argv[i][0] == '-') {
                     for (char *p = argv[i] + 1; *p; p++) {
                         if (*p == 'e') shell_errexit = 1;
+                        if (*p == 'x') shell_xtrace = 1;
                     }
                 } else if (argv[i][0] == '+') {
                     for (char *p = argv[i] + 1; *p; p++) {
                         if (*p == 'e') shell_errexit = 0;
+                        if (*p == 'x') shell_xtrace = 0;
                     }
                 } else if (strcmp(argv[i], "--") == 0) {
                     shell_var_set_args(argc - i - 1, argv + i + 1);

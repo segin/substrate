@@ -16,6 +16,7 @@ int atoi(const char *nptr);
 long atol(const char *nptr);
 long long atoll(const char *nptr);
 double atof(const char *nptr);
+long strtol(const char *nptr, char **endptr, int base);
 
 char *getenv(const char *name);
 int system(const char *command);
