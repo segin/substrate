@@ -3436,11 +3436,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Document PS1 expansion behavior in `sh(1)`.
                 - [x] Document supported escapes.
         - [ ] **Extended Prompt Formatting (Opt-in):**
-            - [ ] **Mode Selection:**
-                - [ ] Implement configuration option (e.g., `set -o promptvars` or custom shopt) to enable extended parsing.
-                - [ ] Define precedence logic (POSIX PS1 behavior default vs Extended).
-                - [ ] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string.
-                - [ ] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`).
+            - [x] **Mode Selection:**
+                - [x] Implement configuration option (e.g., `set -o promptvars` or custom shopt) to enable extended parsing.
+                - [x] Define precedence logic (POSIX PS1 behavior default vs Extended).
+                - [x] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string.
+                - [x] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`).
             - [ ] **Format Grammar:**
                 - [ ] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`).
                 - [ ] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`).

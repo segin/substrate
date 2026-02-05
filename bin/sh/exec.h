@@ -23,5 +23,6 @@ extern int errexit_disabled;
 extern pid_t shell_pgid;
 extern struct termios shell_tmodes;
 extern int shell_xtrace;
+extern int shell_promptvars;
 
 #endif

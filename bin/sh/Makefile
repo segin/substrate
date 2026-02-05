@@ -43,6 +43,7 @@ test: all test_lexer test_parser test_expand test_shell_var test_job test_util
 	./test_job
 	./test_util
 	./test_prompt
+	sh tests/test_prompt_mode.sh
 
 test_prompt: prompt.c util.c shell_var.c tests/test_prompt.c
 	gcc -g -I. -o $@ prompt.c util.c shell_var.c tests/test_prompt.c

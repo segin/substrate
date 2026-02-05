@@ -16,6 +16,7 @@
 #include "prompt.h"
 
 static int command_count = 1;
+int shell_promptvars = 0;
 
 extern int tcsetpgrp(int fd, pid_t pgrp);
 extern pid_t tcgetpgrp(int fd);
@@ -130,6 +131,10 @@ static void init_environment(void) {
     if (!getenv("PATH")) {
         shell_var_export("PATH", "/usr/bin:/bin");
     }
+    
+    // Initialize Prompt Mode
+    shell_var_set("SHELL_PROMPT_MODE", "POSIX");
+    shell_var_set_readonly("SHELL_PROMPT_MODE");
 }
 
 static void sigchld_handler(int sig) {

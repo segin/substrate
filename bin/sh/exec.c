@@ -376,14 +376,46 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         if (argc > 1) {
             for (int i = 1; i < argc; i++) {
                 if (argv[i][0] == '-') {
-                    for (char *p = argv[i] + 1; *p; p++) {
-                        if (*p == 'e') shell_errexit = 1;
-                        if (*p == 'x') shell_xtrace = 1;
+                    if (argv[i][1] == 'o') {
+                        // set -o option
+                        const char *opt = (argv[i][2] != '\0') ? argv[i] + 2 : ((i + 1 < argc) ? argv[++i] : NULL);
+                        if (!opt) {
+                             fprintf(stderr, "%s: set: -o requires argument\n", shell_var_get_name());
+                             return 1;
+                        }
+                        if (strcmp(opt, "promptvars") == 0) {
+                            shell_promptvars = 1;
+                            shell_var_force_set("SHELL_PROMPT_MODE", "EXTENDED");
+                        } else {
+                            fprintf(stderr, "%s: set: unknown option %s\n", shell_var_get_name(), opt);
+                            return 1;
+                        }
+                    } else {
+                        for (char *p = argv[i] + 1; *p; p++) {
+                            if (*p == 'e') shell_errexit = 1;
+                            if (*p == 'x') shell_xtrace = 1;
+                        }
                     }
                 } else if (argv[i][0] == '+') {
-                    for (char *p = argv[i] + 1; *p; p++) {
-                        if (*p == 'e') shell_errexit = 0;
-                        if (*p == 'x') shell_xtrace = 0;
+                    if (argv[i][1] == 'o') {
+                        // set +o option
+                        const char *opt = (argv[i][2] != '\0') ? argv[i] + 2 : ((i + 1 < argc) ? argv[++i] : NULL);
+                        if (!opt) {
+                             fprintf(stderr, "%s: set: +o requires argument\n", shell_var_get_name());
+                             return 1;
+                        }
+                        if (strcmp(opt, "promptvars") == 0) {
+                            shell_promptvars = 0;
+                            shell_var_force_set("SHELL_PROMPT_MODE", "POSIX");
+                        } else {
+                            fprintf(stderr, "%s: set: unknown option %s\n", shell_var_get_name(), opt);
+                            return 1;
+                        }
+                    } else {
+                        for (char *p = argv[i] + 1; *p; p++) {
+                            if (*p == 'e') shell_errexit = 0;
+                            if (*p == 'x') shell_xtrace = 0;
+                        }
                     }
                 } else if (strcmp(argv[i], "--") == 0) {
                     shell_var_set_args(argc - i - 1, argv + i + 1);

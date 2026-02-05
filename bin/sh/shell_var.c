@@ -294,6 +294,29 @@ void shell_var_set(const char *name, const char *value) {
     }
 }
 
+void shell_var_force_set(const char *name, const char *value) {
+    ensure_global_scope();
+    shell_scope_t *s;
+    shell_var_t *v = find_var_recursive(name, &s);
+    if (v) {
+        // Bypass readonly check
+        free(v->value);
+        v->value = strdup(value);
+    } else {
+        // If not found, set in global scope
+        s = scope_stack;
+        while (s->next) s = s->next;
+        
+        v = malloc(sizeof(shell_var_t));
+        v->name = strdup(name);
+        v->value = strdup(value);
+        v->exported = 0;
+        v->readonly = 0;
+        v->next = s->vars;
+        s->vars = v;
+    }
+}
+
 void shell_var_set_local(const char *name, const char *value) {
     ensure_global_scope();
     shell_scope_t *s = scope_stack; // top scope
