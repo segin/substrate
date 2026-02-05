@@ -3428,9 +3428,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Verify no state mutation during prompt rendering.
             - [x] **Testing:**
                 - [x] Unit test: Escape sequence parser (implemented in `tests/test_prompt.c`).
-                - [ ] Unit test: Expansion order validation.
-                - [ ] Edge case: Empty PS1.
-                - [ ] Edge case: Deeply nested command substitution in PS1.
+                - [x] Unit test: Expansion order validation.
+                - [x] Edge case: Empty PS1.
+                - [x] Edge case: Deeply nested command substitution in PS1.
                 - [ ] Fuzz test: `fuzz_ps1_parser.c`.
             - [ ] **Documentation:**
                 - [ ] Document PS1 expansion behavior in `sh(1)`.
