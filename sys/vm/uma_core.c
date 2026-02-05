@@ -123,6 +123,9 @@ uma_zone_t *uma_zcreate(
             kprint("UMA: Bootstrap zones exhausted!\n");
             return NULL;
         }
+    } else {
+        zone = kzalloc(sizeof(uma_zone_t));
+        if (!zone) return NULL;
     }
     zone->uz_name = name;
     zone->uz_size = size;
