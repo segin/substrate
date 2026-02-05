@@ -3415,16 +3415,17 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Support `\$` (uid-based suffix `#`/`$`) escape.
                 - [x] Support `\\` (literal backslash) escape.
                 - [x] Handle undefined escapes deterministically (e.g., print literal char).
+                - [x] Support **Common Escapes** (`\u`, `\h`, `\w`) using standard libc functions.
             - [ ] **State-Dependent Elements:**
                 - [x] Implement effective UID check for `\$`.
-                - [ ] Expose exit status `?` to prompt expansion without resetting it.
-            - [ ] **Error Handling:**
-                - [ ] Graceful failure on expansion error (fallback to default string).
-                - [ ] Prevent shell crash on malformed PS1.
-                - [ ] Bound recursion depth for PS1 expansion.
-            - [ ] **Performance:**
-                - [ ] Prioritize memory leak checks for repeated PS1 expansion.
-                - [ ] Verify no state mutation during prompt rendering.
+                - [x] Expose exit status `?` to prompt expansion without resetting it.
+            - [x] **Error Handling:**
+                - [x] Graceful failure on expansion error (fallback to default string).
+                - [x] Prevent shell crash on malformed PS1 (OOM safety).
+                - [x] Bound recursion depth for PS1 expansion (verified single-pass).
+            - [x] **Performance:**
+                - [x] Prioritize memory leak checks for repeated PS1 expansion.
+                - [x] Verify no state mutation during prompt rendering.
             - [ ] **Testing:**
                 - [ ] Unit test: Escape sequence parser.
                 - [ ] Unit test: Expansion order validation.

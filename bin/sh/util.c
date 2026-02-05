@@ -1,6 +1,7 @@
 #include "util.h"
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 char *sh_strndup(const char *s, size_t n) {
     size_t len = 0;
@@ -103,7 +104,16 @@ void buffer_append(char **buf, size_t *cap, size_t *len, char c) {
     if (*len + 1 >= *cap) {
         *cap *= 2;
         if (*cap == 0) *cap = 16;
-        *buf = realloc(*buf, *cap);
+        char *new_buf = realloc(*buf, *cap);
+        if (!new_buf) {
+            // Simplified OOM handling: exit safety
+            // In a more complex shell we might return error, but for now prevent segfault.
+            // Using write/exit to avoid malloc in error handler.
+            const char *msg = "sh: Out of memory\n";
+            write(2, msg, strlen(msg));
+            exit(1);
+        }
+        *buf = new_buf;
     }
     (*buf)[*len] = c;
     (*len)++;

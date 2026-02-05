@@ -12,6 +12,7 @@
 #include "shell_var.h"
 #include "util.h"
 #include <termios.h>
+#include <pwd.h>
 
 static int command_count = 1;
 
@@ -171,13 +172,43 @@ static char *expand_prompt_escapes(const char *ps1) {
                 }
                 case '\\':
                     // Literal backslash.
-                    // IMPORTANT: To survive expand_word which removes quotes,
-                    // we might need to output \\ if we want a single backslash?
-                    // But expand_word treats \ as quote.
-                    // If we output \, expand_word sees \ and escapes next char.
-                    // If we want literal \, we should output \\.
                     buffer_append_str(&buf, &cap, &len, "\\\\");
                     break;
+                case 'u': {
+                    struct passwd *pw = getpwuid(getuid());
+                    if (pw && pw->pw_name) {
+                        buffer_append_str(&buf, &cap, &len, pw->pw_name);
+                    } else {
+                        char num[32];
+                        snprintf(num, sizeof(num), "%d", getuid());
+                        buffer_append_str(&buf, &cap, &len, num);
+                    }
+                    break;
+                }
+                case 'h': {
+                    char hostname[256];
+                    if (gethostname(hostname, sizeof(hostname)) == 0) {
+                        buffer_append_str(&buf, &cap, &len, hostname);
+                    } else {
+                        buffer_append_str(&buf, &cap, &len, "unknown");
+                    }
+                    break;
+                }
+                case 'w': {
+                    char cwd[1024];
+                    if (getcwd(cwd, sizeof(cwd))) {
+                        char *home = getenv("HOME");
+                        if (home && strncmp(cwd, home, strlen(home)) == 0) {
+                            buffer_append(&buf, &cap, &len, '~');
+                            buffer_append_str(&buf, &cap, &len, cwd + strlen(home));
+                        } else {
+                            buffer_append_str(&buf, &cap, &len, cwd);
+                        }
+                    } else {
+                        buffer_append_str(&buf, &cap, &len, "?");
+                    }
+                    break;
+                }
                 default:
                     // Undefined escape: print literal char (e.g. \a -> a)
                     // But wait, user might expect \n to be newline?
@@ -213,6 +244,11 @@ static char *evaluate_prompt(const char *ps1) {
     char *escaped = expand_prompt_escapes(ps1);
     char *expanded = expand_word(escaped ? escaped : ps1);
     if (escaped) free(escaped);
+    
+    // Fallback if expansion failed
+    if (!expanded) {
+        expanded = strdup("$ "); 
+    }
     
     // Restore state
     shell_xtrace = saved_xtrace;
@@ -331,26 +367,29 @@ int main(int argc, char **argv, char **envp) {
     int is_interactive = ((input == stdin && isatty(STDIN_FILENO)) || opt_i) && !opt_c;
     if (opt_i) is_interactive = 1;
     
-    if (is_interactive && !reading_script && isatty(STDIN_FILENO)) {
+    if (is_interactive && !reading_script) {
         shell_is_interactive = 1;
-        while (tcgetpgrp(STDIN_FILENO) != (shell_pgid = getpgrp()))
-            kill(-shell_pgid, SIGTTIN);
         
-        signal(SIGINT, SIG_IGN);
-        signal(SIGQUIT, SIG_IGN);
-        signal(SIGTSTP, SIG_IGN);
-        signal(SIGTTIN, SIG_IGN);
-        signal(SIGTTOU, SIG_IGN);
-        signal(SIGCHLD, sigchld_handler);
-        
-        shell_pgid = getpid();
-        if (setpgid(shell_pgid, shell_pgid) < 0) {
-            perror("Couldn't put the shell in its own process group");
-            exit(1);
+        if (isatty(STDIN_FILENO)) {
+            while (tcgetpgrp(STDIN_FILENO) != (shell_pgid = getpgrp()))
+                kill(-shell_pgid, SIGTTIN);
+            
+            signal(SIGINT, SIG_IGN);
+            signal(SIGQUIT, SIG_IGN);
+            signal(SIGTSTP, SIG_IGN);
+            signal(SIGTTIN, SIG_IGN);
+            signal(SIGTTOU, SIG_IGN);
+            signal(SIGCHLD, sigchld_handler);
+            
+            shell_pgid = getpid();
+            if (setpgid(shell_pgid, shell_pgid) < 0) {
+                perror("Couldn't put the shell in its own process group");
+                exit(1);
+            }
+            
+            tcsetpgrp(STDIN_FILENO, shell_pgid);
+            tcgetattr(STDIN_FILENO, &shell_tmodes);
         }
-        
-        tcsetpgrp(STDIN_FILENO, shell_pgid);
-        tcgetattr(STDIN_FILENO, &shell_tmodes);
     }
     
     // Process startup files (profile for login, ENV for interactive)
