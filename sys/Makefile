@@ -4,6 +4,14 @@ include ../Makefile.inc
 ARCH ?= i386
 # Note: No libgcc needed - we implement our own 64-bit helpers in kern/lib.c
 
+EFI_OBJCOPY_FLAGS =
+ifeq ($(ARCH),i386)
+	EFI_OBJCOPY_FLAGS := --change-section-vma .text-0xBFC00000 \
+		--change-section-vma .rodata-0xBFC00000 \
+		--change-section-vma .data-0xBFC00000 \
+		--change-section-vma .bss-0xBFC00000
+endif
+
 .PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi tests klib
 
 all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
@@ -40,7 +48,7 @@ kernel.zimage: kernel.bin
 	# For zImage, we often want a flat binary if using it with legacy loaders
 	objcopy -O binary kernel.bin kernel.zimage
 
-kernel.efi: arch_kernel klib kern drivers fs exec vfs exec_perso vm tests
+kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.elf \
 		arch/$(ARCH)/kernel.o \
 		lib/lib.o \
@@ -60,7 +68,7 @@ kernel.efi: arch_kernel klib kern drivers fs exec vfs exec_perso vm tests
 		vm/vm.o \
 	../tests/sys/tests.o \
 		$(LIBGCC)
-	objcopy -O pe-i386 kernel_efi.elf kernel.efi
+	objcopy -O pe-i386 $(EFI_OBJCOPY_FLAGS) kernel_efi.elf kernel.efi
 	@echo "Linked kernel.efi"
 
 arch_kernel:
