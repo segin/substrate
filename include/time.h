@@ -26,10 +26,13 @@ struct tm {
     const char *tm_zone;
 };
 
+#ifndef _STRUCT_TIMESPEC_DEFINED
+#define _STRUCT_TIMESPEC_DEFINED
 struct timespec {
     time_t tv_sec;   // seconds
     long   tv_nsec;  // nanoseconds
 };
+#endif
 
 time_t time(time_t *tloc);
 double difftime(time_t time1, time_t time0);

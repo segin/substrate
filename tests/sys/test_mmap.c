@@ -3,9 +3,17 @@
  */
 
 #include <vm/vm_area.h>
-#include <vm/vm_mmap.c>
 #include <kern/console.h>
 #include <sys/mman.h>
+
+// Rename symbols to avoid conflict with kernel proper
+#define sys_mmap test_sys_mmap
+#define sys_munmap test_sys_munmap
+#define sys_mprotect test_sys_mprotect
+
+// Include implementation files directly
+#include <vm/vm_area.c>
+#include <vm/vm_mmap.c>
 
 static int tests_passed = 0;
 static int tests_failed = 0;
@@ -121,6 +129,58 @@ void test_large_mapping(void) {
     kprint("  PASS\n");
 }
 
+// Test 6: MAP_FIXED unaligned
+void test_mmap_fixed_unaligned(void) {
+    kprint("Test: MAP_FIXED unaligned\n");
+
+    void *target = (void *)0x50000123; // Unaligned
+    void *addr = sys_mmap(target, 4096, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+
+    TEST_ASSERT(addr == MAP_FAILED, "MAP_FIXED with unaligned address failed");
+
+    kprint("  PASS\n");
+}
+
+// Test 7: MAP_FIXED overlap
+void test_mmap_fixed_overlap(void) {
+    kprint("Test: MAP_FIXED overlap\n");
+
+    // 1. Create a base mapping
+    void *addr1 = (void *)0x60000000;
+    void *res1 = sys_mmap(addr1, 8192, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    TEST_ASSERT(res1 == addr1, "initial mapping at 0x60000000");
+
+    // Write something
+    ((char *)addr1)[0] = 'X';
+    ((char *)addr1)[4096] = 'Y';
+
+    // 2. Create an overlapping mapping (second page of addr1)
+    void *addr2 = (void *)0x60001000;
+    void *res2 = sys_mmap(addr2, 4096, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    TEST_ASSERT(res2 == addr2, "overlapping mapping at 0x60001000");
+
+    // 3. Verify content
+    // Old mapping first page should still be 'X'
+    TEST_ASSERT(((char *)addr1)[0] == 'X', "first page preserved");
+
+    // New mapping should be zeroed (anonymous)
+    TEST_ASSERT(((char *)addr2)[0] == 0, "overlapping page zeroed");
+
+    // 4. Verify VMAs
+    // We expect:
+    // VMA 1: 0x60000000 - 0x60001000
+    // VMA 2: 0x60001000 - 0x60002000 (new)
+
+    // Unmap everything
+    sys_munmap(addr1, 4096);
+    sys_munmap(addr2, 4096);
+
+    kprint("  PASS\n");
+}
+
 void run_mmap_tests(void) {
     kprint("\n=== MMAP Unit Tests ===\n");
     
@@ -129,6 +189,8 @@ void run_mmap_tests(void) {
     test_mmap_fixed();
     test_mprotect();
     test_large_mapping();
+    test_mmap_fixed_unaligned();
+    test_mmap_fixed_overlap();
     
     kprint("\nResults: ");
     kprint("Passed: ");

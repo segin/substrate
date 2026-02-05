@@ -55,6 +55,7 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t 
     uint32_t start_addr;
     if (flags & MAP_FIXED) {
         start_addr = (uint32_t)addr;
+        if (start_addr & 0xFFF) return MAP_FAILED;
         if (sys_munmap(addr, length) < 0) {
             return MAP_FAILED;
         }
@@ -142,6 +143,7 @@ int sys_munmap(void *addr, size_t length) {
     if (length == 0) return -1;
     
     uint32_t start = (uint32_t)addr;
+    if (start & 0xFFF) return -1;
     uint32_t end = start + ((length + 0xFFF) & ~0xFFF);
     
     // Iterate over VMAs
