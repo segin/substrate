@@ -1,5 +1,5 @@
 PROG=sh
-SRCS=sh.c lexer.c parser.c expand.c exec.c shell_var.c util.c job.c
+SRCS=sh.c lexer.c parser.c expand.c exec.c shell_var.c util.c job.c prompt.c
 OBJS=$(SRCS:.c=.o)
 
 include ../../Makefile.bin.inc
@@ -39,3 +39,7 @@ test: all test_lexer test_parser test_expand test_shell_var test_job test_util
 	./test_shell_var
 	./test_job
 	./test_util
+	./test_prompt
+
+test_prompt: prompt.c util.c shell_var.c tests/test_prompt.c
+	gcc -g -I. -o $@ prompt.c util.c shell_var.c tests/test_prompt.c

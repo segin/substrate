@@ -3426,8 +3426,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Performance:**
                 - [x] Prioritize memory leak checks for repeated PS1 expansion.
                 - [x] Verify no state mutation during prompt rendering.
-            - [ ] **Testing:**
-                - [ ] Unit test: Escape sequence parser.
+            - [x] **Testing:**
+                - [x] Unit test: Escape sequence parser (implemented in `tests/test_prompt.c`).
                 - [ ] Unit test: Expansion order validation.
                 - [ ] Edge case: Empty PS1.
                 - [ ] Edge case: Deeply nested command substitution in PS1.

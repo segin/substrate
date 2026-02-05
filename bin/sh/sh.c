@@ -13,6 +13,7 @@
 #include "util.h"
 #include <termios.h>
 #include <pwd.h>
+#include "prompt.h"
 
 static int command_count = 1;
 
@@ -142,131 +143,7 @@ static int get_last_status(void) {
     return s ? atoi(s) : 0;
 }
 
-static char *expand_prompt_escapes(const char *ps1) {
-    if (!ps1) return NULL;
-    size_t cap = strlen(ps1) * 2 + 16;
-    size_t len = 0;
-    char *buf = malloc(cap);
-    if (!buf) return NULL;
-    
-    const char *p = ps1;
-    while (*p) {
-        if (*p == '\\') {
-            p++;
-            if (!*p) {
-                // Trailing backslash - append as is
-                buffer_append(&buf, &cap, &len, '\\');
-                break;
-            }
-            switch (*p) {
-                case '!': {
-                    char num[32];
-                    snprintf(num, sizeof(num), "%d", command_count);
-                    buffer_append_str(&buf, &cap, &len, num);
-                    break;
-                }
-                case '$': {
-                    char c = (geteuid() == 0) ? '#' : '$';
-                    buffer_append(&buf, &cap, &len, c);
-                    break;
-                }
-                case '\\':
-                    // Literal backslash.
-                    buffer_append_str(&buf, &cap, &len, "\\\\");
-                    break;
-                case 'u': {
-                    struct passwd *pw = getpwuid(getuid());
-                    if (pw && pw->pw_name) {
-                        buffer_append_str(&buf, &cap, &len, pw->pw_name);
-                    } else {
-                        char num[32];
-                        snprintf(num, sizeof(num), "%d", getuid());
-                        buffer_append_str(&buf, &cap, &len, num);
-                    }
-                    break;
-                }
-                case 'h': {
-                    char hostname[256];
-                    if (gethostname(hostname, sizeof(hostname)) == 0) {
-                        buffer_append_str(&buf, &cap, &len, hostname);
-                    } else {
-                        buffer_append_str(&buf, &cap, &len, "unknown");
-                    }
-                    break;
-                }
-                case 'w': {
-                    char cwd[1024];
-                    if (getcwd(cwd, sizeof(cwd))) {
-                        char *home = getenv("HOME");
-                        if (home && strncmp(cwd, home, strlen(home)) == 0) {
-                            buffer_append(&buf, &cap, &len, '~');
-                            buffer_append_str(&buf, &cap, &len, cwd + strlen(home));
-                        } else {
-                            buffer_append_str(&buf, &cap, &len, cwd);
-                        }
-                    } else {
-                        buffer_append_str(&buf, &cap, &len, "?");
-                    }
-                    break;
-                }
-                default:
-                    // Undefined escape: print literal char (e.g. \a -> a)
-                    // But wait, user might expect \n to be newline?
-                    // TASKS.md said "Handle undefined escapes deterministically (e.g., print literal char)".
-                    // It didn't strictly require \n, \r etc.
-                    // But standard prompt usually supports them.
-                    // For now, I'll stick to printing the char literal.
-                    buffer_append(&buf, &cap, &len, *p);
-                    break;
-            }
-        } else {
-            buffer_append(&buf, &cap, &len, *p);
-        }
-        p++;
-    }
-    buf[len] = 0;
-    return buf;
-}
 
-static char *evaluate_prompt(const char *ps1) {
-    if (!ps1) return NULL;
-    
-    // Save state
-    int saved_xtrace = shell_xtrace;
-    int saved_errexit = shell_errexit;
-    char *saved_status_str = shell_var_get("?");
-    char *saved_status = saved_status_str ? strdup(saved_status_str) : NULL;
-    
-    // Disable tracing and error exit for prompt evaluation
-    shell_xtrace = 0;
-    shell_errexit = 0;
-    
-    char *escaped = expand_prompt_escapes(ps1);
-    char *expanded = expand_word(escaped ? escaped : ps1);
-    if (escaped) free(escaped);
-    
-    // Fallback if expansion failed
-    if (!expanded) {
-        expanded = strdup("$ "); 
-    }
-    
-    // Restore state
-    shell_xtrace = saved_xtrace;
-    shell_errexit = saved_errexit;
-    if (saved_status) {
-        shell_var_set("?", saved_status);
-        free(saved_status);
-    } else {
-        // If ? wasn't set (e.g. at start), it remains unset or we could unset it?
-        // Usually ? is always set to 0 initially.
-        // shell_var_get might return NULL?
-        // If it was NULL, let's leave it as is or set to 0?
-        // shell_var_set("?", "0") might be safer if it somehow got unset.
-        // But for minimal intrusion, if it was NULL, we do nothing.
-    }
-    
-    return expanded;
-}
 
 
 int main(int argc, char **argv, char **envp) {
@@ -467,7 +344,7 @@ int main(int argc, char **argv, char **envp) {
                 check_traps();
                 char *p = shell_var_get("PS1");
                 if (!p) p = "$ ";
-                char *expanded = evaluate_prompt(p);
+                char *expanded = evaluate_prompt(p, command_count);
                 printf("%s", expanded ? expanded : p);
                 if (expanded) free(expanded);
                 fflush(stdout);
