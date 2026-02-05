@@ -459,19 +459,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
     if (strcmp(argv[0], "fg") == 0) return builtin_fg(argc, argv);
     if (strcmp(argv[0], "bg") == 0) return builtin_bg(argc, argv);
     if (strcmp(argv[0], "return") == 0) return handle_return(argc, argv);
-    if (strcmp(argv[0], "local") == 0) {
-        if (argc > 1) {
-            char *eq = strchr(argv[1], '=');
-            if (eq) {
-                *eq = 0;
-                shell_var_set_local(argv[1], eq + 1);
-                *eq = '=';
-            } else {
-                shell_var_set_local(argv[1], "");
-            }
-        }
-        return 0;
-    }
+    
     if (strcmp(argv[0], "echo") == 0) {
         for (int i = 1; i < argc; i++) {
             printf("%s%s", argv[i], (i == argc - 1) ? "" : " ");
@@ -482,8 +470,6 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
     }
     
     if (strcmp(argv[0], "[") == 0 || strcmp(argv[0], "test") == 0) {
-        if (argc < 2) return 1; 
-        
         int is_bracket = (argv[0][0] == '[');
         int real_argc = argc;
         if (is_bracket) {
@@ -494,7 +480,18 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
             real_argc--;
         }
         
-        if (real_argc == 2) return (argv[1][0] == '\0');
+        /* [ ] or test with no args is false */
+        if (real_argc == 1) return 1;
+
+        if (real_argc == 2) {
+            /* [ string ] or test string -> true if string not empty */
+            return (argv[1][0] == '\0');
+        }
+
+        if (real_argc == 3) {
+            if (strcmp(argv[1], "-z") == 0) return (argv[2][0] == '\0') ? 0 : 1;
+            if (strcmp(argv[1], "-n") == 0) return (argv[2][0] != '\0') ? 0 : 1;
+        }
         
         if (real_argc == 4) {
             char *left = argv[1];
@@ -848,9 +845,26 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
             if (eq) {
                 *eq = '\0';
                 shell_var_set(argv[i], eq + 1);
+                shell_var_set_readonly(argv[i]);
                 *eq = '=';
+            } else {
+                shell_var_set_readonly(argv[i]);
             }
-            /* Mark as readonly - would need shell_var API extension */
+        }
+        return 0;
+    }
+
+    /* local [name[=value]...] - declare local variable */
+    if (strcmp(argv[0], "local") == 0) {
+        for (int i = 1; i < argc; i++) {
+            char *eq = strchr(argv[i], '=');
+            if (eq) {
+                *eq = '\0';
+                shell_var_set_local(argv[i], eq + 1);
+                *eq = '=';
+            } else {
+                shell_var_set_local(argv[i], "");
+            }
         }
         return 0;
     }
@@ -1163,7 +1177,7 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
             if (eq) {
                 *eq = '\0';
                 char *val = expand_word(eq + 1);
-                shell_var_export(cmd->assignments[i], val ? val : "");
+                shell_var_set(cmd->assignments[i], val ? val : "");
                 if (val) free(val);
                 *eq = '=';
             }

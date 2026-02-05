@@ -11,6 +11,7 @@ typedef struct shell_var {
     char *name;
     char *value;
     int exported;
+    int readonly;
     struct shell_var *next;
 } shell_var_t;
 
@@ -218,6 +219,10 @@ void shell_var_set(const char *name, const char *value) {
     shell_scope_t *s;
     shell_var_t *v = find_var_recursive(name, &s);
     if (v) {
+        if (v->readonly) {
+            fprintf(stderr, "%s: %s: readonly variable\n", shell_var_get_name(), name);
+            return;
+        }
         free(v->value);
         v->value = strdup(value);
     } else {
@@ -229,6 +234,7 @@ void shell_var_set(const char *name, const char *value) {
         v->name = strdup(name);
         v->value = strdup(value);
         v->exported = 0;
+        v->readonly = 0;
         v->next = s->vars;
         s->vars = v;
     }
@@ -240,6 +246,10 @@ void shell_var_set_local(const char *name, const char *value) {
     shell_var_t *v = s->vars;
     while (v) {
         if (strcmp(v->name, name) == 0) {
+            if (v->readonly) {
+                fprintf(stderr, "%s: %s: readonly variable\n", shell_var_get_name(), name);
+                return;
+            }
             free(v->value);
             v->value = strdup(value);
             return;
@@ -250,6 +260,7 @@ void shell_var_set_local(const char *name, const char *value) {
     v->name = strdup(name);
     v->value = strdup(value);
     v->exported = 0;
+    v->readonly = 0;
     v->next = s->vars;
     s->vars = v;
 }
@@ -257,7 +268,31 @@ void shell_var_set_local(const char *name, const char *value) {
 void shell_var_export(const char *name, const char *value) {
     shell_var_set(name, value);
     shell_var_t *v = find_var_recursive(name, NULL);
-    if (v) v->exported = 1;
+    if (v) {
+        /* If it was already readonly, shell_var_set printed an error and return.
+         * But we should still mark it exported if it exists. */
+        v->exported = 1;
+    }
+}
+
+void shell_var_set_readonly(const char *name) {
+    shell_var_t *v = find_var_recursive(name, NULL);
+    if (v) {
+        v->readonly = 1;
+    } else {
+        /* Optional: POSIX says readonly can define a variable with no value if it doesn't exist?
+         * "If a name is specified without a value, and the name is not already set, 
+         *  it shall be created with an empty value and the read-only attribute shall be set." 
+         * Let's follow this. */
+        shell_var_set(name, "");
+        v = find_var_recursive(name, NULL);
+        if (v) v->readonly = 1;
+    }
+}
+
+int shell_var_is_readonly(const char *name) {
+    shell_var_t *v = find_var_recursive(name, NULL);
+    return v ? v->readonly : 0;
 }
 
 char **shell_var_get_envp(void) {
@@ -318,14 +353,16 @@ void shell_var_unset(const char *name) {
         shell_var_t *prev = NULL;
         while (v) {
             if (strcmp(v->name, name) == 0) {
+                if (v->readonly) {
+                    fprintf(stderr, "%s: %s: cannot unset: readonly variable\n", shell_var_get_name(), name);
+                    return;
+                }
                 if (prev) prev->next = v->next;
                 else s->vars = v->next;
                 free(v->name);
                 free(v->value);
                 free(v);
-                return; // Unset only the first one found? Usually unset unsets *all*?
-                // bash: unset unsets the variable at the current scope? No, it unsets globally?
-                // POSIX: "unset name" removes the variable from the execution environment.
+                return;
             }
             prev = v;
             v = v->next;

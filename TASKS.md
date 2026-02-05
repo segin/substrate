@@ -3374,11 +3374,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `trap`.
         - [x] `umask`.
         - [x] `wait`.
-    - [ ] **Variables & Environment:**
-        - [ ] Shell vs Environment variable distinction.
-        - [ ] Scope rules (Global, Local, Function).
-        - [ ] Export semantics.
-        - [ ] Read-only enforcement.
+    - [x] **Variables & Environment:**
+        - [x] Shell vs Environment variable distinction.
+        - [x] Scope rules (Global, Local, Function).
+        - [x] Export semantics.
+        - [x] Read-only enforcement.
     - [x] **Functions:**
         - [x] Definition and Invocation.
         - [x] Local variables scoping.
