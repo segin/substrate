@@ -85,16 +85,43 @@ static void trap_handler(int sig) {
 
 static int parse_signal(const char *str) {
     if (isdigit((unsigned char)str[0])) return atoi(str);
-    if (strcmp(str, "EXIT") == 0) return 0;
-    if (strcmp(str, "HUP") == 0) return SIGHUP;
-    if (strcmp(str, "INT") == 0) return SIGINT;
-    if (strcmp(str, "QUIT") == 0) return SIGQUIT;
-    if (strcmp(str, "KILL") == 0) return SIGKILL;
-    if (strcmp(str, "TERM") == 0) return SIGTERM;
-    if (strcmp(str, "CHLD") == 0) return SIGCHLD;
-    if (strcmp(str, "STOP") == 0) return SIGSTOP;
-    if (strcmp(str, "TSTP") == 0) return SIGTSTP;
+    const char *s = str;
+    if (strncmp(s, "SIG", 3) == 0) s += 3;
+
+    if (strcmp(s, "EXIT") == 0) return 0;
+    if (strcmp(s, "HUP") == 0) return SIGHUP;
+    if (strcmp(s, "INT") == 0) return SIGINT;
+    if (strcmp(s, "QUIT") == 0) return SIGQUIT;
+    if (strcmp(s, "ILL") == 0) return SIGILL;
+    if (strcmp(s, "TRAP") == 0) return SIGTRAP;
+    if (strcmp(s, "ABRT") == 0) return SIGABRT;
+    if (strcmp(s, "FPE") == 0) return SIGFPE;
+    if (strcmp(s, "KILL") == 0) return SIGKILL;
+    if (strcmp(s, "BUS") == 0) return SIGBUS;
+    if (strcmp(s, "SEGV") == 0) return SIGSEGV;
+    if (strcmp(s, "SYS") == 0) return SIGSYS;
+    if (strcmp(s, "PIPE") == 0) return SIGPIPE;
+    if (strcmp(s, "ALRM") == 0) return SIGALRM;
+    if (strcmp(s, "TERM") == 0) return SIGTERM;
+    if (strcmp(s, "URG") == 0) return SIGURG;
+    if (strcmp(s, "STOP") == 0) return SIGSTOP;
+    if (strcmp(s, "TSTP") == 0) return SIGTSTP;
+    if (strcmp(s, "CONT") == 0) return SIGCONT;
+    if (strcmp(s, "CHLD") == 0) return SIGCHLD;
+    if (strcmp(s, "TTIN") == 0) return SIGTTIN;
+    if (strcmp(s, "TTOU") == 0) return SIGTTOU;
+    if (strcmp(s, "WINCH") == 0) return SIGWINCH;
+    if (strcmp(s, "USR1") == 0) return SIGUSR1;
+    if (strcmp(s, "USR2") == 0) return SIGUSR2;
     return -1;
+}
+
+void run_exit_trap(void) {
+    if (trap_commands[0]) {
+        execute_line(trap_commands[0]);
+        free(trap_commands[0]);
+        trap_commands[0] = NULL;
+    }
 }
 
 void check_traps(void) {
@@ -108,6 +135,19 @@ void check_traps(void) {
             }
         }
     }
+}
+
+void reset_traps(void) {
+    for (int i = 0; i < EXEC_SIG_MAX; i++) {
+        if (trap_commands[i]) {
+            free(trap_commands[i]);
+            trap_commands[i] = NULL;
+            /* If it was a trap (not an ignore), reset to default */
+            if (i > 0) signal(i, SIG_DFL);
+        }
+    }
+    trap_pending_any = 0;
+    for (int i = 0; i < EXEC_SIG_MAX; i++) pending_traps[i] = 0;
 }
 
 // Function entry
@@ -256,6 +296,8 @@ int execute_ast(ast_node_t *node) {
     if (saved_fds) {
         restore_redirections(saved_fds);
     }
+    
+    check_traps();
     return status;
 }
 
@@ -478,7 +520,14 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         if (argc < 2) { fprintf(stderr, "kill: usage: kill [-sig] pid\n"); return 1; }
         int sig = SIGTERM;
         int idx = 1;
-        if (argv[1][0] == '-') { sig = atoi(argv[1]+1); idx = 2; }
+        if (argv[1][0] == '-') { 
+            sig = parse_signal(argv[1]+1);
+            if (sig < 0) {
+                fprintf(stderr, "kill: %s: invalid signal specification\n", argv[1]+1);
+                return 1;
+            }
+            idx = 2;
+        }
         if (idx >= argc) return 1;
         if (kill(atoi(argv[idx]), sig) < 0) { perror("kill"); return 1; }
         return 0;
@@ -663,7 +712,8 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         int reset = (strcmp(action, "-") == 0);
 
         if (argc == 2 && !reset) {
-            /* Single arg: might be signal to reset */
+            /* POSIX: If the first operand is an unsigned decimal integer, 
+               reset each specified signal to its default value. */
             int sig = parse_signal(action);
             if (sig >= 0 && sig < EXEC_SIG_MAX) {
                 if (trap_commands[sig]) { free(trap_commands[sig]); trap_commands[sig] = NULL; }
@@ -678,12 +728,21 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
                 fprintf(stderr, "%s: trap: %s: invalid signal specification\n", shell_var_get_name(), argv[i]);
                 continue;
             }
+            
             if (trap_commands[sig]) { free(trap_commands[sig]); trap_commands[sig] = NULL; }
+            
             if (reset) {
                 if (sig > 0) signal(sig, SIG_DFL);
+            } else if (action[0] == '\0') {
+                /* trap "" sig: ignore the signal */
+                if (sig > 0) {
+                    signal(sig, SIG_IGN);
+                }
             } else {
                 trap_commands[sig] = strdup(action);
-                if (sig > 0) signal(sig, trap_handler);
+                if (sig > 0) {
+                    signal(sig, trap_handler);
+                }
             }
         }
         return 0;
@@ -1266,6 +1325,7 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
 
     pid_t pid = fork();
     if (pid == 0) {
+        reset_traps();
         char **env = merge_env(shell_var_get_envp(), cmd->assign_count, cmd->assignments);
         execve(full_path, argv, env);
         perror(argv[0]);
@@ -1312,6 +1372,7 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
         pids[i] = fork();
         if (pids[i] == 0) {
             // Child process
+            reset_traps();
             if (shell_is_interactive) {
                pid_t pid = getpid();
                if (i == 0) {
@@ -1397,6 +1458,7 @@ static int execute_binary_op(ast_binary_op_t *bin) {
     if (bin->op == OP_BACKGROUND) {
         pid_t pid = fork();
         if (pid == 0) {
+            reset_traps();
             // Child: run the command
             if (shell_is_interactive) {
                 // Create new process group
@@ -1455,9 +1517,11 @@ static int execute_binary_op(ast_binary_op_t *bin) {
     
     switch (bin->op) {
         case OP_SEQ:
+            check_traps();
             return execute_ast(bin->right);
         case OP_AND:
             if (left_status == 0) {
+                check_traps();
                 return execute_ast(bin->right);  /* Right is "last" - errexit applies */
             }
             /* Short-circuit: left failed, don't execute right.
@@ -1465,6 +1529,7 @@ static int execute_binary_op(ast_binary_op_t *bin) {
             return left_status;
         case OP_OR:
             if (left_status != 0) {
+                check_traps();
                 return execute_ast(bin->right);  /* Right is "last" - errexit applies */
             }
             /* Short-circuit: left succeeded, return it */
@@ -1497,11 +1562,13 @@ static int execute_while(ast_while_t *w) {
         errexit_disabled++;
         int cond_status = execute_ast(w->condition);
         errexit_disabled--;
+        check_traps();
         
         if (cond_status != 0) break;
         
         if (func_return_signaled) return status;
         status = execute_ast(w->body);
+        check_traps();
         if (func_return_signaled) return status;
         if (loop_break_count > 0) {
             loop_break_count--;
@@ -1524,6 +1591,7 @@ static int execute_for(ast_for_t *f) {
     for (int i = 0; expanded[i] != NULL; i++) {
         shell_var_set(f->var_name, expanded[i]);
         status = execute_ast(f->body);
+        check_traps();
         if (func_return_signaled) {
             for (int k = 0; expanded[k]; k++) free(expanded[k]);
             free(expanded);
@@ -1575,6 +1643,7 @@ static int execute_case(ast_case_t *c) {
 static int execute_subshell(ast_subshell_t *sub) {
     pid_t pid = fork();
     if (pid == 0) {
+        reset_traps();
         exit(execute_ast(sub->list));
     }
     int status;

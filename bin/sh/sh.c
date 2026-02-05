@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include "exec.h"
+#include "expand.h"
 #include "job.h"
 #include "shell_var.h"
 #include <termios.h>
@@ -106,8 +107,9 @@ static void process_startup_files(int is_login_shell, int is_interactive) {
     if (is_interactive) {
         char *env_file = getenv("ENV");
         if (env_file && env_file[0]) {
-            // TODO: Expand $ENV value (for now, use as-is)
-            source_file(env_file);
+            char *expanded = expand_word(env_file);
+            source_file(expanded ? expanded : env_file);
+            if (expanded) free(expanded);
         }
     }
 }
@@ -259,6 +261,7 @@ int main(int argc, char **argv, char **envp) {
     // Handle -c: Execute command string
     if (opt_c) {
         execute_line(command_string);
+        run_exit_trap();
         return get_last_status();
     }
     
@@ -267,7 +270,7 @@ int main(int argc, char **argv, char **envp) {
         fseek(input, 0, SEEK_END);
         off_t fsize = ftell(input);
         fseek(input, 0, SEEK_SET);
- 
+
         if (fsize < 0) {
             // stdin or pipe - read incrementally
             size_t cap = 4096, len = 0;
@@ -275,6 +278,7 @@ int main(int argc, char **argv, char **envp) {
             if (!buffer) {
                 fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
                 if (input != stdin) fclose(input);
+                run_exit_trap();
                 return 1;
             }
             
@@ -285,6 +289,7 @@ int main(int argc, char **argv, char **envp) {
                     buffer = realloc(buffer, cap);
                     if (!buffer) {
                         fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
+                        run_exit_trap();
                         return 1;
                     }
                 }
@@ -301,6 +306,7 @@ int main(int argc, char **argv, char **envp) {
             if (!buffer) {
                 fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
                 if (input != stdin) fclose(input);
+                run_exit_trap();
                 return 1;
             }
             size_t nread = fread(buffer, 1, (size_t)fsize, input);
@@ -321,6 +327,7 @@ int main(int argc, char **argv, char **envp) {
         while (1) {
             if (shell_is_interactive) {
                 job_update_status();
+                check_traps();
                 char *p = shell_var_get("PS1");
                 if (!p) p = "$ ";
                 printf("%s", p);
@@ -329,7 +336,9 @@ int main(int argc, char **argv, char **envp) {
             
             if (!fgets(buf, sizeof(buf), input)) break;
             execute_line(buf);
+            check_traps();
         }
     }
+    run_exit_trap();
     return get_last_status();
 }

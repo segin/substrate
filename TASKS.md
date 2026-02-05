@@ -3387,9 +3387,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Foreground/Background.
         - [x] Process groups.
         - [x] Signal forwarding.
-    - [ ] **Signals & Traps:**
-        - [ ] Default signal handling.
-        - [ ] `trap` builtin integration.
+    - [x] **Signals & Traps:**
+        - [x] Default signal handling.
+        - [x] `trap` builtin integration.
     - [ ] **Testing & Compliance:**
         - [ ] Unit tests for all modules.
         - [ ] Script-based conformance tests.

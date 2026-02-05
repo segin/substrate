@@ -22,6 +22,7 @@ static char *capture_command_output(const char *cmd_str) {
         dup2(pfd[1], STDOUT_FILENO);
         close(pfd[1]);
         execute_line((char *)cmd_str);
+        fflush(stdout);
         _exit(0);
     } else if (pid > 0) {
         close(pfd[1]);
@@ -758,7 +759,38 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                 buffer_append_internal(&cw, &cw_cap, &cw_len, '$');
                 p--;
             }
-        } else {
+        }
+        else if (c == '`' && !in_sq) {
+            p++;
+            const char *start = p;
+            while (*p && *p != '`') {
+                if (*p == '\\' && (*(p+1) == '$' || *(p+1) == '`' || *(p+1) == '\\' || *(p+1) == '\n')) p++;
+                p++;
+            }
+            if (*p == '`') {
+                char *cmd = sh_strndup(start, p - start);
+                /* Handle backslash escapes inside backticks */
+                char *src = cmd, *dst = cmd;
+                while (*src) {
+                    if (*src == '\\' && (src[1] == '$' || src[1] == '`' || src[1] == '\\' || src[1] == '\n')) {
+                        src++;
+                        if (*src != '\n') *dst++ = *src;
+                    } else {
+                        *dst++ = *src;
+                    }
+                    src++;
+                }
+                *dst = '\0';
+                char *output = capture_command_output(cmd);
+                expand_str_split(output, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                free(output);
+                free(cmd);
+            } else {
+                buffer_append_internal(&cw, &cw_cap, &cw_len, '`');
+                p = start - 1;
+            }
+        }
+        else {
             buffer_append_internal(&cw, &cw_cap, &cw_len, in_dq ? (c | QUOTED_BIT) : c);
         }
         p++;
@@ -889,6 +921,35 @@ char *expand_heredoc(const char *content, int quoted) {
             } else {
                 buffer_append_internal(&buf, &cap, &len, '$');
                 p--;
+            }
+        } else if (*p == '`') {
+            p++;
+            const char *start = p;
+            while (*p && *p != '`') {
+                if (*p == '\\' && (*(p+1) == '$' || *(p+1) == '`' || *(p+1) == '\\' || *(p+1) == '\n')) p++;
+                p++;
+            }
+            if (*p == '`') {
+                char *cmd = sh_strndup(start, p - start);
+                /* Handle backslash escapes inside backticks */
+                char *src = cmd, *dst = cmd;
+                while (*src) {
+                    if (*src == '\\' && (src[1] == '$' || src[1] == '`' || src[1] == '\\' || src[1] == '\n')) {
+                        src++;
+                        if (*src != '\n') *dst++ = *src;
+                    } else {
+                        *dst++ = *src;
+                    }
+                    src++;
+                }
+                *dst = '\0';
+                char *output = capture_command_output(cmd);
+                buffer_append_str_internal(&buf, &cap, &len, output);
+                free(output);
+                free(cmd);
+            } else {
+                buffer_append_internal(&buf, &cap, &len, '`');
+                p = start - 1;
             }
         } else {
             buffer_append_internal(&buf, &cap, &len, *p);
