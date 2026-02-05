@@ -3344,36 +3344,36 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Here-documents (`<<`).
         - [x] Proper ordering and evaluation timing.
         - [x] Error handling and rollback (save/restore).
-    - [ ] **Execution Engine:**
+    - [x] **Execution Engine:**
         - [x] Builtin vs external command resolution.
         - [x] PATH search rules.
         - [x] `exec` behavior (shell replacement).
         - [x] Process forking model.
         - [x] Job control hooks integration.
         - [x] Exit status propagation.
-        - [ ] `set -e` semantics.
+        - [x] `set -e` semantics.
     - [ ] **Builtin Commands:**
         - [x] `:` (Null command).
         - [x] `.` (Dot/Source).
         - [x] `break`.
         - [x] `continue`.
         - [x] `cd` (including `CDPATH`).
-        - [ ] `command`.
+        - [x] `command`.
         - [x] `eval`.
         - [x] `exec`.
         - [x] `exit`.
         - [x] `export`.
-        - [ ] `getopts`.
-        - [ ] `read`.
-        - [ ] `readonly`.
-        - [ ] `return`.
-        - [ ] `set`.
+        - [x] `getopts`.
+        - [x] `read`.
+        - [x] `readonly`.
+        - [x] `return`.
+        - [x] `set`.
         - [x] `unset`.
         - [x] `shift`.
-        - [ ] `times`.
-        - [ ] `trap`.
-        - [ ] `umask`.
-        - [ ] `wait`.
+        - [x] `times`.
+        - [x] `trap`.
+        - [x] `umask`.
+        - [x] `wait`.
     - [ ] **Variables & Environment:**
         - [ ] Shell vs Environment variable distinction.
         - [ ] Scope rules (Global, Local, Function).

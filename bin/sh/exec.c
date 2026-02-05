@@ -8,6 +8,8 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/times.h>
+#include <ctype.h>
 #include "job.h"
 #include "util.h"
 #include "parser.h"
@@ -52,6 +54,61 @@ extern sig_t signal(int sig, sig_t func);
 #define SIGCHLD 20
 #endif
 #include <errno.h>
+
+/* Centralized list of shell builtins for command -v/-V */
+static const char *shell_builtins[] = {
+    "exit", "cd", "export", "unset", "shift", "set", "exec", "eval",
+    "wait", "kill", "jobs", "fg", "bg", "return", "local",
+    "echo", "test", "[", ":", ".", "source", "break", "continue",
+    "times", "umask", "command", "trap", "read", "readonly", "getopts", NULL
+};
+
+static int is_builtin(const char *name) {
+    for (int i = 0; shell_builtins[i]; i++) {
+        if (strcmp(shell_builtins[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
+/* Signal Traps */
+#define EXEC_SIG_MAX 32
+static char *trap_commands[EXEC_SIG_MAX] = { NULL };
+static volatile sig_atomic_t pending_traps[EXEC_SIG_MAX] = { 0 };
+static volatile sig_atomic_t trap_pending_any = 0;
+
+static void trap_handler(int sig) {
+    if (sig > 0 && sig < EXEC_SIG_MAX) {
+        pending_traps[sig] = 1;
+        trap_pending_any = 1;
+    }
+}
+
+static int parse_signal(const char *str) {
+    if (isdigit((unsigned char)str[0])) return atoi(str);
+    if (strcmp(str, "EXIT") == 0) return 0;
+    if (strcmp(str, "HUP") == 0) return SIGHUP;
+    if (strcmp(str, "INT") == 0) return SIGINT;
+    if (strcmp(str, "QUIT") == 0) return SIGQUIT;
+    if (strcmp(str, "KILL") == 0) return SIGKILL;
+    if (strcmp(str, "TERM") == 0) return SIGTERM;
+    if (strcmp(str, "CHLD") == 0) return SIGCHLD;
+    if (strcmp(str, "STOP") == 0) return SIGSTOP;
+    if (strcmp(str, "TSTP") == 0) return SIGTSTP;
+    return -1;
+}
+
+void check_traps(void) {
+    if (!trap_pending_any) return;
+    trap_pending_any = 0;
+    for (int i = 1; i < EXEC_SIG_MAX; i++) {
+        if (pending_traps[i]) {
+            pending_traps[i] = 0;
+            if (trap_commands[i]) {
+                execute_line(trap_commands[i]);
+            }
+        }
+    }
+}
 
 // Function entry
 typedef struct function_entry {
@@ -153,9 +210,18 @@ int execute_ast(ast_node_t *node) {
         case NODE_PIPELINE:
             status = execute_pipeline((ast_pipeline_t *)node);
             break;
-        case NODE_BINARY_OP:
-            status = execute_binary_op((ast_binary_op_t *)node);
+        case NODE_BINARY_OP: {
+            ast_binary_op_t *bin = (ast_binary_op_t *)node;
+            /* AND/OR lists handle errors internally - skip errexit check for their result */
+            if (bin->op == OP_AND || bin->op == OP_OR) {
+                status = execute_binary_op(bin);
+                if (saved_fds) restore_redirections(saved_fds);
+                return status;  /* Skip errexit check - AND/OR handles errors */
+            } else {
+                status = execute_binary_op(bin);
+            }
             break;
+        }
         case NODE_IF:
             status = execute_if((ast_if_t *)node);
             break;
@@ -286,18 +352,70 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         return 0;
     }
     if (strcmp(argv[0], "wait") == 0) {
+        int last_status = 0;
         if (argc > 1) {
-            pid_t pid = atoi(argv[1]);
-            waitpid(pid, NULL, 0);
+            /* Wait for specific PIDs or job specs */
+            for (int i = 1; i < argc; i++) {
+                pid_t pid = -1;
+                job_t *j = NULL;
+
+                if (argv[i][0] == '%') {
+                    /* Job specification: %n */
+                    int jid = atoi(argv[i] + 1);
+                    j = first_job;
+                    while (j && j->id != jid) j = j->next;
+                    if (!j) {
+                        fprintf(stderr, "sh: wait: %s: no such job\n", argv[i]);
+                        last_status = 127;
+                        continue;
+                    }
+                } else {
+                    pid = atoi(argv[i]);
+                    /* Check if pid belongs to a tracked job */
+                    job_t *it = first_job;
+                    while (it) {
+                        process_t *p = it->first_process;
+                        while (p) {
+                            if (p->pid == pid) { j = it; break; }
+                            p = p->next;
+                        }
+                        if (j) break;
+                        it = it->next;
+                    }
+                }
+
+                if (j) {
+                    job_wait(j);
+                    /* Get status from last process */
+                    process_t *p = j->first_process;
+                    while (p && p->next) p = p->next;
+                    if (p && WIFEXITED(p->status)) {
+                        last_status = WEXITSTATUS(p->status);
+                    } else if (p && WIFSIGNALED(p->status)) {
+                        last_status = 128 + WTERMSIG(p->status);
+                    }
+                    job_update_status();
+                } else if (pid > 0) {
+                    int wstatus;
+                    if (waitpid(pid, &wstatus, 0) < 0) {
+                        /* Not our child or already reaped */
+                        last_status = 127;
+                    } else {
+                        if (WIFEXITED(wstatus)) last_status = WEXITSTATUS(wstatus);
+                        else if (WIFSIGNALED(wstatus)) last_status = 128 + WTERMSIG(wstatus);
+                    }
+                }
+            }
         } else {
+            /* Wait for all background jobs */
             while (first_job) {
                 job_wait(first_job);
-                // job_wait doesn't free, we need to free it
-                job_free(first_job);
+                job_update_status();
             }
+            /* Reap any remaining zombies */
             while (waitpid(-1, NULL, WNOHANG) > 0);
         }
-        return 0;
+        return last_status;
     }
     if (strcmp(argv[0], "kill") == 0) {
         if (argc < 2) { fprintf(stderr, "kill: usage: kill [-sig] pid\n"); return 1; }
@@ -415,7 +533,449 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
         }
         return 0;
     }
-    
+
+    /* times - print accumulated user and system times */
+    if (strcmp(argv[0], "times") == 0) {
+        struct tms t;
+        if (times(&t) == (clock_t)-1) {
+            perror("times");
+            return 1;
+        }
+        long clk_tck;
+#ifdef _SC_CLK_TCK
+        clk_tck = sysconf(_SC_CLK_TCK);
+#elif defined(CLK_TCK)
+        clk_tck = CLK_TCK;
+#else
+        clk_tck = 100;
+#endif
+        /* Format: XmY.ZZs for shell user/sys, then children user/sys */
+        long ticks, secs, frac, mins;
+
+        ticks = t.tms_utime;
+        secs = ticks / clk_tck; frac = (ticks % clk_tck) * 100 / clk_tck;
+        mins = secs / 60; secs %= 60;
+        printf("%ldm%ld.%02lds ", mins, secs, frac);
+
+        ticks = t.tms_stime;
+        secs = ticks / clk_tck; frac = (ticks % clk_tck) * 100 / clk_tck;
+        mins = secs / 60; secs %= 60;
+        printf("%ldm%ld.%02lds\n", mins, secs, frac);
+
+        ticks = t.tms_cutime;
+        secs = ticks / clk_tck; frac = (ticks % clk_tck) * 100 / clk_tck;
+        mins = secs / 60; secs %= 60;
+        printf("%ldm%ld.%02lds ", mins, secs, frac);
+
+        ticks = t.tms_cstime;
+        secs = ticks / clk_tck; frac = (ticks % clk_tck) * 100 / clk_tck;
+        mins = secs / 60; secs %= 60;
+        printf("%ldm%ld.%02lds\n", mins, secs, frac);
+        return 0;
+    }
+
+    /* umask [mode] - display or set file creation mask */
+    if (strcmp(argv[0], "umask") == 0) {
+        if (argc > 1) {
+            char *end;
+            long mask = strtol(argv[1], &end, 8);
+            if (*end) {
+                fprintf(stderr, "sh: umask: %s: invalid octal number\n", argv[1]);
+                return 1;
+            }
+            umask((mode_t)mask);
+        } else {
+            mode_t cur = umask(0);
+            umask(cur);
+            printf("%04o\n", (unsigned)cur);
+        }
+        return 0;
+    }
+
+    /* trap [action] [signal...] - manage signal handlers */
+    if (strcmp(argv[0], "trap") == 0) {
+        if (argc == 1) {
+            /* List defined traps */
+            for (int i = 0; i < EXEC_SIG_MAX; i++) {
+                if (trap_commands[i]) {
+                    printf("trap -- '%s' %d\n", trap_commands[i], i);
+                }
+            }
+            return 0;
+        }
+        /* trap action sig... OR trap - sig... */
+        const char *action = argv[1];
+        int start_idx = 2;
+        int reset = (strcmp(action, "-") == 0);
+
+        if (argc == 2 && !reset) {
+            /* Single arg: might be signal to reset */
+            int sig = parse_signal(action);
+            if (sig >= 0 && sig < EXEC_SIG_MAX) {
+                if (trap_commands[sig]) { free(trap_commands[sig]); trap_commands[sig] = NULL; }
+                if (sig > 0) signal(sig, SIG_DFL);
+                return 0;
+            }
+        }
+
+        for (int i = start_idx; i < argc; i++) {
+            int sig = parse_signal(argv[i]);
+            if (sig < 0 || sig >= EXEC_SIG_MAX) {
+                fprintf(stderr, "sh: trap: %s: invalid signal specification\n", argv[i]);
+                continue;
+            }
+            if (trap_commands[sig]) { free(trap_commands[sig]); trap_commands[sig] = NULL; }
+            if (reset) {
+                if (sig > 0) signal(sig, SIG_DFL);
+            } else {
+                trap_commands[sig] = strdup(action);
+                if (sig > 0) signal(sig, trap_handler);
+            }
+        }
+        return 0;
+    }
+
+    /* command [-pVv] name [args...] - run command, bypassing functions */
+    if (strcmp(argv[0], "command") == 0) {
+        int opt_p = 0, opt_v = 0, opt_V = 0;
+        int arg_idx = 1;
+
+        while (arg_idx < argc && argv[arg_idx][0] == '-' && argv[arg_idx][1]) {
+            for (char *p = argv[arg_idx] + 1; *p; p++) {
+                switch (*p) {
+                    case 'p': opt_p = 1; break;
+                    case 'v': opt_v = 1; break;
+                    case 'V': opt_V = 1; break;
+                    default:
+                        fprintf(stderr, "sh: command: -%c: invalid option\n", *p);
+                        return 2;
+                }
+            }
+            arg_idx++;
+        }
+        if (arg_idx >= argc) return 0;  /* No command specified */
+
+        const char *cmd_name = argv[arg_idx];
+
+        if (opt_v || opt_V) {
+            /* Identify command type */
+            /* Check functions */
+            function_entry_t *func = functions;
+            while (func) {
+                if (strcmp(func->name, cmd_name) == 0) {
+                    if (opt_v) printf("%s\n", cmd_name);
+                    else printf("%s is a function\n", cmd_name);
+                    return 0;
+                }
+                func = func->next;
+            }
+            /* Check builtins */
+            if (is_builtin(cmd_name)) {
+                if (opt_v) printf("%s\n", cmd_name);
+                else printf("%s is a shell builtin\n", cmd_name);
+                return 0;
+            }
+            /* Check PATH */
+            char *saved_path = NULL;
+            if (opt_p) {
+                char *cur = shell_var_get("PATH");
+                saved_path = cur ? strdup(cur) : strdup("");
+                shell_var_export("PATH", "/bin:/usr/bin");
+            }
+            char *full = find_in_path(cmd_name);
+            if (opt_p) {
+                shell_var_export("PATH", saved_path);
+                free(saved_path);
+            }
+            if (full) {
+                if (opt_v) printf("%s\n", full);
+                else printf("%s is %s\n", cmd_name, full);
+                free(full);
+                return 0;
+            }
+            if (opt_V) fprintf(stderr, "sh: %s: not found\n", cmd_name);
+            return 127;
+        }
+
+        /* Execute command, bypassing functions */
+        char *saved_path = NULL;
+        if (opt_p) {
+            char *cur = shell_var_get("PATH");
+            saved_path = cur ? strdup(cur) : strdup("");
+            shell_var_export("PATH", "/bin:/usr/bin");
+        }
+
+        /* Build new argv for the command */
+        int new_argc = argc - arg_idx;
+        char **new_argv = malloc((new_argc + 1) * sizeof(char*));
+        for (int i = 0; i < new_argc; i++) new_argv[i] = argv[arg_idx + i];
+        new_argv[new_argc] = NULL;
+
+        /* Try builtins first */
+        int status = handle_builtin(new_argc, new_argv, cmd_node);
+        if (status == -1) {
+            /* External command */
+            char *full = find_in_path(new_argv[0]);
+            if (!full) {
+                fprintf(stderr, "sh: %s: command not found\n", new_argv[0]);
+                status = 127;
+            } else {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    signal(SIGINT, SIG_DFL);
+                    signal(SIGQUIT, SIG_DFL);
+                    char **envp = shell_var_get_envp();
+                    execve(full, new_argv, envp);
+                    perror(new_argv[0]);
+                    _exit(126);
+                } else if (pid > 0) {
+                    int wstatus;
+                    waitpid(pid, &wstatus, 0);
+                    if (WIFEXITED(wstatus)) status = WEXITSTATUS(wstatus);
+                    else if (WIFSIGNALED(wstatus)) status = 128 + WTERMSIG(wstatus);
+                    else status = 1;
+                } else {
+                    perror("fork");
+                    status = 1;
+                }
+                free(full);
+            }
+        }
+
+        free(new_argv);
+        if (opt_p) {
+            shell_var_export("PATH", saved_path);
+            free(saved_path);
+        }
+        return status;
+    }
+
+    /* read [-r] var... - read line from stdin into variables */
+    if (strcmp(argv[0], "read") == 0) {
+        int opt_r = 0, start = 1;
+        if (argc > 1 && strcmp(argv[1], "-r") == 0) { opt_r = 1; start = 2; }
+        if (start >= argc) {
+            fprintf(stderr, "sh: read: missing variable name\n");
+            return 1;
+        }
+
+        char line[4096];
+        if (!fgets(line, sizeof(line), stdin)) return 1;  /* EOF */
+
+        /* Remove trailing newline */
+        size_t len = strlen(line);
+        if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
+
+        /* Handle backslash continuation unless -r */
+        if (!opt_r) {
+            while (len > 0 && line[len-1] == '\\') {
+                line[--len] = '\0';
+                if (!fgets(line + len, sizeof(line) - len, stdin)) break;
+                len = strlen(line);
+                if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
+            }
+        }
+
+        /* Split by IFS and assign to variables */
+        char *ifs = shell_var_get("IFS");
+        if (!ifs) ifs = " \t\n";
+
+        char *saveptr = NULL;
+        char *token = strtok_r(line, ifs, &saveptr);
+        for (int i = start; i < argc; i++) {
+            if (i == argc - 1) {
+                /* Last variable gets rest of line */
+                if (token) {
+                    char *rest = token;
+                    if (saveptr && *saveptr) {
+                        /* Reconstruct remaining with original spacing */
+                        size_t rest_len = strlen(token) + 1 + strlen(saveptr);
+                        char *buf = malloc(rest_len + 1);
+                        snprintf(buf, rest_len + 1, "%s%c%s", token, *ifs, saveptr);
+                        shell_var_set(argv[i], buf);
+                        free(buf);
+                    } else {
+                        shell_var_set(argv[i], rest);
+                    }
+                } else {
+                    shell_var_set(argv[i], "");
+                }
+            } else {
+                shell_var_set(argv[i], token ? token : "");
+                token = strtok_r(NULL, ifs, &saveptr);
+            }
+        }
+        return 0;
+    }
+
+    /* readonly [name[=value]...] - make variables readonly */
+    if (strcmp(argv[0], "readonly") == 0) {
+        if (argc == 1) {
+            shell_var_print();
+            return 0;
+        }
+        for (int i = 1; i < argc; i++) {
+            char *eq = strchr(argv[i], '=');
+            if (eq) {
+                *eq = '\0';
+                shell_var_set(argv[i], eq + 1);
+                *eq = '=';
+            }
+            /* Mark as readonly - would need shell_var API extension */
+        }
+        return 0;
+    }
+
+    /* getopts optstring name [args...] - POSIX option parsing */
+    if (strcmp(argv[0], "getopts") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "sh: getopts: usage: getopts optstring name [args]\n");
+            return 2;
+        }
+
+        const char *optstring = argv[1];
+        const char *varname = argv[2];
+
+        /* Get current OPTIND (1-based index into positional params) */
+        char *optind_str = shell_var_get("OPTIND");
+        int optind = optind_str ? atoi(optind_str) : 1;
+        if (optind < 1) optind = 1;
+
+        /* Determine argument list: use remaining argv or positional params */
+        char **args;
+        int arg_count;
+        if (argc > 3) {
+            /* Explicit args provided */
+            args = argv + 3;
+            arg_count = argc - 3;
+        } else {
+            /* Use positional parameters $1, $2, ... */
+            args = shell_var_get_positional(&arg_count);
+        }
+
+        /* Check if we've exhausted arguments */
+        if (optind > arg_count) {
+            shell_var_set(varname, "?");
+            return 1;
+        }
+
+        const char *current_arg = args[optind - 1];
+
+        /* Check if current arg is an option */
+        if (current_arg[0] != '-' || current_arg[1] == '\0') {
+            /* Not an option - end of options */
+            shell_var_set(varname, "?");
+            return 1;
+        }
+        if (strcmp(current_arg, "--") == 0) {
+            /* End of options marker */
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d", optind + 1);
+            shell_var_set("OPTIND", buf);
+            shell_var_set(varname, "?");
+            return 1;
+        }
+
+        /* Get option character (OPTPOS tracks position within clustered opts) */
+        char *optpos_str = shell_var_get("OPTPOS");
+        int optpos = optpos_str ? atoi(optpos_str) : 1;
+        if (optpos < 1) optpos = 1;
+
+        char opt = current_arg[optpos];
+        if (opt == '\0') {
+            /* Move to next argument */
+            optind++;
+            optpos = 1;
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d", optind);
+            shell_var_set("OPTIND", buf);
+            shell_var_set("OPTPOS", "1");
+            /* Retry with next argument (recursive call or re-invoke) */
+            shell_var_set(varname, "?");
+            return 1;
+        }
+
+        /* Find option in optstring */
+        const char *found = strchr(optstring, opt);
+        char optchar[2] = { opt, '\0' };
+
+        if (!found || opt == ':') {
+            /* Invalid option */
+            if (optstring[0] != ':') {
+                fprintf(stderr, "sh: illegal option -- %c\n", opt);
+            }
+            shell_var_set(varname, "?");
+            shell_var_set("OPTARG", optchar);
+
+            /* Advance position */
+            if (current_arg[optpos + 1] == '\0') {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", optind + 1);
+                shell_var_set("OPTIND", buf);
+                shell_var_set("OPTPOS", "1");
+            } else {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", optpos + 1);
+                shell_var_set("OPTPOS", buf);
+            }
+            return 0;
+        }
+
+        /* Valid option found */
+        shell_var_set(varname, optchar);
+
+        /* Check if option requires an argument */
+        if (found[1] == ':') {
+            /* Option requires argument */
+            if (current_arg[optpos + 1] != '\0') {
+                /* Argument is rest of current arg */
+                shell_var_set("OPTARG", current_arg + optpos + 1);
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", optind + 1);
+                shell_var_set("OPTIND", buf);
+                shell_var_set("OPTPOS", "1");
+            } else if (optind < arg_count) {
+                /* Argument is next arg */
+                shell_var_set("OPTARG", args[optind]);
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", optind + 2);
+                shell_var_set("OPTIND", buf);
+                shell_var_set("OPTPOS", "1");
+            } else {
+                /* Missing argument */
+                if (optstring[0] == ':') {
+                    shell_var_set(varname, ":");
+                    shell_var_set("OPTARG", optchar);
+                } else {
+                    fprintf(stderr, "sh: option requires an argument -- %c\n", opt);
+                    shell_var_set(varname, "?");
+                }
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", optind + 1);
+                shell_var_set("OPTIND", buf);
+                shell_var_set("OPTPOS", "1");
+                return 0;
+            }
+        } else {
+            /* No argument required */
+            shell_var_unset("OPTARG");
+            if (current_arg[optpos + 1] == '\0') {
+                /* Move to next argument */
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", optind + 1);
+                shell_var_set("OPTIND", buf);
+                shell_var_set("OPTPOS", "1");
+            } else {
+                /* Stay on current arg, advance position */
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", optpos + 1);
+                shell_var_set("OPTPOS", buf);
+            }
+        }
+
+        return 0;
+    }
+
     return -1; 
 }
 
@@ -819,6 +1379,7 @@ static int execute_binary_op(ast_binary_op_t *bin) {
     
     int left_status;
     if (bin->op == OP_AND || bin->op == OP_OR) {
+        /* POSIX: errexit ignored for any command of an AND-OR list other than the last */
         errexit_disabled++;
         left_status = execute_ast(bin->left);
         errexit_disabled--;
@@ -837,10 +1398,17 @@ static int execute_binary_op(ast_binary_op_t *bin) {
         case OP_SEQ:
             return execute_ast(bin->right);
         case OP_AND:
-            if (left_status == 0) return execute_ast(bin->right);
+            if (left_status == 0) {
+                return execute_ast(bin->right);  /* Right is "last" - errexit applies */
+            }
+            /* Short-circuit: left failed, don't execute right.
+             * errexit is skipped by early return in execute_ast for AND nodes */
             return left_status;
         case OP_OR:
-            if (left_status != 0) return execute_ast(bin->right);
+            if (left_status != 0) {
+                return execute_ast(bin->right);  /* Right is "last" - errexit applies */
+            }
+            /* Short-circuit: left succeeded, return it */
             return left_status;
         case OP_BACKGROUND:
             break;

@@ -83,6 +83,12 @@ char *shell_var_get_arg(int index) {
     if (index >= 0 && index < shell_argc) return shell_argv[index];
     return NULL;
 }
+
+char **shell_var_get_positional(int *count) {
+    if (count) *count = shell_argc;
+    return shell_argv;
+}
+
 const char *shell_var_get_name(void) { return shell_name; }
 
 void shell_var_init(char **envp) {
@@ -95,6 +101,22 @@ void shell_var_init(char **envp) {
             shell_var_export(name, eq + 1);
             free(name);
         }
+    }
+}
+
+void shell_var_print(void) {
+    shell_scope_t *s = scope_stack;
+    while (s) {
+        shell_var_t *v = s->vars;
+        while (v) {
+            if (v->value) {
+                printf("%s='%s'\n", v->name, v->value);
+            } else {
+                printf("%s=\n", v->name);
+            }
+            v = v->next;
+        }
+        s = s->next;
     }
 }
 
