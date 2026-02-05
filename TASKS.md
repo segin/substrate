@@ -3432,9 +3432,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Edge case: Empty PS1.
                 - [x] Edge case: Deeply nested command substitution in PS1.
                 - [x] Fuzz test: `fuzz_ps1_parser.c`.
-            - [ ] **Documentation:**
-                - [ ] Document PS1 expansion behavior in `sh(1)`.
-                - [ ] Document supported escapes.
+            - [x] **Documentation:**
+                - [x] Document PS1 expansion behavior in `sh(1)`.
+                - [x] Document supported escapes.
         - [ ] **Extended Prompt Formatting (Opt-in):**
             - [ ] **Mode Selection:**
                 - [ ] Implement configuration option (e.g., `set -o promptvars` or custom shopt) to enable extended parsing.

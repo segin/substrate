@@ -42,6 +42,39 @@ Replace the shell with the specified command.
 .It Ic . Ar file
 Execute commands from a file in the current shell environment.
 .El
+.Sh PROMPT EXPANSION
+If the
+.Ev PS1
+environment variable is set, it is expanded for the primary prompt.
+Expansion occurs in the following order:
+.Bl -enum
+.It
+Backslash escape sequences are replaced.
+.It
+Parameter expansion, command substitution, and arithmetic expansion are performed.
+.El
+.Pp
+The following escape sequences are supported:
+.Bl -tag -width indent
+.It Ic \!
+The current history command number.
+.It Ic \$
+The character
+.Ql #
+if the effective UID is 0 (root), otherwise
+.Ql $ .
+.It Ic \\
+A literal backslash functions as a quote.
+.It Ic \h
+The hostname of the system.
+.It Ic \u
+The username of the current user.
+.It Ic \w
+The current working directory, with
+.Ev HOME
+replaced by
+.Ql ~ .
+.El
 .Sh EXIT STATUS
 The
 .Nm
