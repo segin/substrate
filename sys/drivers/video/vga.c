@@ -340,6 +340,8 @@ static void cga_putpixel(int x, int y, uint32_t color) {
 /* ================== Driver Interface ================== */
 
 static int vga_list_modes(struct video_mode_info *modes, int max_count) {
+    if (!modes) return VGA_MODE_COUNT;
+
     int count = 0;
     for (unsigned int i = 0; i < VGA_MODE_COUNT && count < max_count; i++) {
         modes[count].width = vga_modes[i].width;
