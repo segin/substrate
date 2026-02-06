@@ -2,6 +2,9 @@
 #define _STDLIB_H
 
 #include <stddef.h>
+#include <stdint.h>
+
+#define RAND_MAX 2147483647
 
 [[noreturn]] void exit(int status);
 [[noreturn]] void abort(void);
@@ -33,5 +36,9 @@ long long llabs(long long j);
 
 int rand(void);
 void srand(unsigned int seed);
+
+uint32_t arc4random(void);
+void arc4random_buf(void *buf, size_t n);
+uint32_t arc4random_uniform(uint32_t upper_bound);
 
 #endif
