@@ -21,18 +21,23 @@ typedef struct sys_procinfo {
     pid_t sid;
     uid_t uid;
     gid_t gid;
-    uint8_t state;
-    uint8_t bitness; // proc_bitness_t
-    char name[32];   // Process name (comm)
+    uid_t euid;          // Effective user ID
+    gid_t egid;          // Effective group ID
+    uint8_t state;       // R=Running, S=Sleeping, Z=Zombie, T=Stopped
+    uint8_t bitness;     // proc_bitness_t
+    int16_t perso_id;    // Personality ID (PERS_NATIVE, PERS_LINUX, etc.)
+    int16_t tty;         // Controlling terminal device (-1 if none)
+    uint16_t nice;       // Nice value
+    char name[32];       // Process name (comm)
     
     // Time accounting
-    uint32_t start_time;
-    uint32_t user_time;
-    uint32_t sys_time;
+    uint32_t start_time; // Process start time (seconds since boot)
+    uint32_t user_time;  // User mode CPU time (jiffies)
+    uint32_t sys_time;   // System mode CPU time (jiffies)
     
     // Memory usage
-    uint32_t vsize;  // Virtual memory size
-    uint32_t rss;    // Resident Set Size (pages)
+    uint32_t vsize;      // Virtual memory size (bytes)
+    uint32_t rss;        // Resident Set Size (pages)
     
 } sys_procinfo_t;
 
@@ -204,6 +209,7 @@ int sys_proc_cwd(pid_t pid, char *buf, size_t len);
 int sys_proc_exe(pid_t pid, char *buf, size_t len);
 int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc);
 int sys_proc_environ(pid_t pid, char **envp, size_t *envc);
+int sys_proc_pers_name(int perso_id, char *buf, size_t len);
 
 /* Memory Statistics API */
 int sys_vm_stats(sys_vmstat_t *stats);

@@ -37,3 +37,11 @@ int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
 int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
     return (int)syscall(SYS_PROC_ENVIRON, pid, (uintptr_t)envp, (uintptr_t)envc, 0, 0, 0);
 }
+
+#ifndef SYS_PROC_PERS_NAME
+#define SYS_PROC_PERS_NAME 360
+#endif
+
+int sys_proc_pers_name(int perso_id, char *buf, size_t len) {
+    return (int)syscall(SYS_PROC_PERS_NAME, perso_id, (uintptr_t)buf, len, 0, 0, 0);
+}

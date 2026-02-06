@@ -5839,27 +5839,28 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Record login in `/var/run/utmp` and `/var/log/wtmp`.
             - [ ] Handle login failures (syslog LOG_AUTH).
     - [ ] **`ps` (Process Status):**
-        - [ ] **Data Gathering:**
-            - [ ] Iterate over `/proc/[pid]` directories.
-            - [ ] Parse `/proc/[pid]/stat` for state (`R`, `S`, `Z`), ppid, pgrp, session, tty.
-            - [ ] Parse `/proc/[pid]/cmdline` for full arguments.
-            - [ ] Parse `/proc/[pid]/status` for real/effective UID/GID.
+        - [ ] **Data Gathering (via `libsys`):**
+            - [ ] Call `sys_proc_count()` to get process count.
+            - [ ] Call `sys_proc_list()` to enumerate all PIDs.
+            - [ ] Call `sys_proc_info()` for each PID to get state, ppid, pgid, sid, tty, perso_id.
+            - [ ] Call `sys_proc_cmdline()` for full command line arguments.
+            - [ ] Call `sys_proc_pers_name()` to resolve personality ID to display string.
         - [ ] **Formatting & Output:**
-            - [ ] Resolve TTY major/minor to device names (`/dev/tty1`, `?`).
-            - [ ] Calculate %CPU (utime+stime / uptime delta).
-            - [ ] Calculate %MEM (rss * pagesize / total_ram).
-            - [ ] Format columns (PID, TTY, STAT, TIME, COMMAND).
+            - [ ] Resolve TTY device number to name (from `sys_procinfo_t.tty`).
+            - [ ] Calculate %CPU (user_time+sys_time / uptime delta).
+            - [ ] Calculate %MEM (rss * pagesize / total_ram from `sys_vm_stats()`).
+            - [ ] Format columns: PID, TTY, STAT, TIME, COMMAND, PERS (personality).
             - [ ] Support BSD syntax (`aux`) vs SysV syntax (`-ef`).
     - [ ] **`top` (Real-time Monitor):**
-        - [ ] **Backend:**
-            - [ ] Efficiently scan `/proc` (snapshotting).
-            - [ ] Calculate CPU delta usage between samples (Prev/Curr ticks).
-            - [ ] Read global stats (`/proc/stat`, `/proc/meminfo`).
+        - [ ] **Backend (via `libsys`):**
+            - [ ] Efficiently call `sys_proc_list()` and `sys_proc_info()` (snapshotting).
+            - [ ] Calculate CPU delta usage via `sys_cpu_times()` between samples.
+            - [ ] Read global stats via `sys_vm_stats()` and `sys_cpu_loadavg()`.
         - [ ] **UI / Display:**
             - [ ] Initialize terminal (raw mode, no echo).
             - [ ] Handle VT100 control sequences (clear screen, cursor positioning).
-            - [ ] Display Header (Uptime, Load Avg, CPU states, Mem/Swap).
-            - [ ] Display Process List (Sortable by CPU/Mem, clamped to screen height).
+            - [ ] Display Header: Uptime (`sys_uptime()`), Load (`sys_cpu_loadavg()`), Mem/Swap.
+            - [ ] Display Process List (sortable by CPU/Mem, show personality, clamp to screen).
             - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
     - [ ] **Documentation Utils:**
         - [ ] **`roff` / `nroff` (Typesetting Engine):**
