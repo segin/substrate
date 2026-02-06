@@ -915,15 +915,15 @@ int sys_mount(const char *source, const char *target, const char *fstype, unsign
 
     if (current_process->euid != 0) return -EPERM;
 
-    return vfs_mount(source, target, fstype, (uint32_t)flags, data);
+    return vfs_mount_legacy(source, target, fstype, (uint32_t)flags, data);
 }
 
-extern int vfs_unmount(const char *path);
+extern int vfs_unmount_legacy(const char *path);
 
 int sys_umount(const char *target) { 
     if (!target) return -1;
     if (current_process->euid != 0) return -EPERM;
-    return vfs_unmount(target); 
+    return vfs_unmount_legacy(target); 
 }
 
 

@@ -136,3 +136,75 @@ vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
 
     return 0;
 }
+
+/*
+ * vfs_start:
+ * Make filesystem operational.
+ */
+int
+vfs_start(struct mount *mp, int flags, struct thread *td)
+{
+    if (mp->mnt_op && mp->mnt_op->vfs_start)
+        return mp->mnt_op->vfs_start(mp, flags, td);
+    return 0;
+}
+
+/*
+ * vfs_root:
+ * Return the root vnode of the mounted filesystem.
+ */
+int
+vfs_root(struct mount *mp, struct vnode **vpp)
+{
+    struct vnode *vp;
+    int error;
+
+    if (mp->mnt_op && mp->mnt_op->vfs_root) {
+        error = mp->mnt_op->vfs_root(mp, &vp);
+        if (error)
+            return error;
+        
+        *vpp = vp;
+        return 0;
+    }
+    
+    return EOPNOTSUPP;
+}
+
+/*
+ * vfs_statfs:
+ * Get filesystem statistics.
+ */
+int
+vfs_statfs(struct mount *mp, struct statfs *sbp, struct thread *td)
+{
+    if (mp->mnt_op && mp->mnt_op->vfs_statfs)
+        return mp->mnt_op->vfs_statfs(mp, sbp, td);
+    return EOPNOTSUPP;
+}
+
+/*
+ * vfs_sync:
+ * Flush dirty buffers to disk.
+ */
+int
+vfs_sync(struct mount *mp, int waitfor, struct ucred *cred, struct thread *td)
+{
+    if (mp == NULL) {
+        /* Sync all filesystems */
+        struct mount *mnt;
+        int error, final_error = 0;
+        
+        TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
+            error = vfs_sync(mnt, waitfor, cred, td);
+            if (error)
+                final_error = error;
+        }
+        return final_error;
+    }
+
+    if (mp->mnt_op && mp->mnt_op->vfs_sync)
+        return mp->mnt_op->vfs_sync(mp, waitfor, cred, td);
+        
+    return 0;
+}

@@ -1,0 +1,51 @@
+.Dd February 6, 2026
+.Dt VFS_UNMOUNT 9
+.Os
+.Sh NAME
+.Nm vfs_unmount
+.Nd unmount a filesystem
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/mount.h
+.In sys/vnode.h
+.Ft int
+.Fn vfs_unmount "struct mount *mp" "int mntflags" "struct thread *td"
+.Sh DESCRIPTION
+The
+.Fn vfs_unmount
+function unmounts a filesystem from the system's namespace.
+It performs the following operations:
+.Bl -enum
+.It
+Check if the filesystem is busy (unless MNT_FORCE is specified).
+.It
+Call the filesystem-specific VFS_UNMOUNT operation.
+.It
+Unlink the filesystem from the mount point vnode.
+.It
+Remove
+.Fa mp
+from the global mount list and free it.
+.El
+.Pp
+Arguments:
+.Bl -tag -width ".Fa mntflags"
+.It Fa mp
+The filesystem to unmount.
+.It Fa mntflags
+Flags controlling the unmount operation (e.g., MNT_FORCE).
+.It Fa td
+The thread performing the unmount.
+.El
+.Sh RETURN VALUES
+The
+.Fn vfs_unmount
+function returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er EBUSY"
+.It Bq Er EBUSY
+The filesystem is busy (has active vnodes) and MNT_FORCE was not specified.
+.El
+.Sh SEE ALSO
+.Xr vfs_mount 9 ,
+.Xr vfs_sync 9

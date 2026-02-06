@@ -1587,7 +1587,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - Tests: unit (mount success/failure), integration (mount ext2/fat)
                 - Docs: `vfs_mount.9`
                 - Acceptance: Filesystem mounted, accessible via path
-            - [ ] Implement `vfs_start(mp, flags, p)`.
+            - [x] Implement `vfs_start(mp, flags, p)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Post-mount initialization callback
                 - Tests: unit (callback invoked after mount)
@@ -1600,20 +1600,20 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - Tests: unit (clean unmount, busy unmount rejection, force unmount)
                 - Docs: `vfs_unmount.9`
                 - Acceptance: Filesystem detached, resources freed
-            - [ ] Implement `vfs_root(mp, vpp)`.
+            - [x] Implement `vfs_root(mp, vpp)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Return root vnode for mounted filesystem
                 - Tests: unit (root vnode returned with correct type)
                 - Docs: `vfs_root.9`
                 - Acceptance: Root vnode valid, ref count incremented
-            - [ ] Implement `vfs_statfs(mp, sbp, p)`.
+            - [x] Implement `vfs_statfs(mp, sbp, p)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Fill statfs structure with filesystem stats
                 - Fields: `f_blocks`, `f_bfree`, `f_bavail`, `f_files`, `f_ffree`
                 - Tests: unit (stats match filesystem state)
                 - Docs: `vfs_statfs.9`
                 - Acceptance: Correct free space/inode counts
-            - [ ] Implement `vfs_sync(mp, waitfor, cred, p)`.
+            - [x] Implement `vfs_sync(mp, waitfor, cred, p)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Sync dirty buffers to disk
                 - Flags: `MNT_WAIT` (sync), `MNT_NOWAIT` (async)

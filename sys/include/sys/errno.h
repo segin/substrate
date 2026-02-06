@@ -43,5 +43,7 @@
 #define ETIMEDOUT   110 /* Connection timed out */
 #define ENAMETOOLONG 63 /* File name too long */
 #define ELOOP        62 /* Too many symbolic links encountered */
+#define EOPNOTSUPP   95 /* Operation not supported on transport endpoint */
+#define ENOTSUP      EOPNOTSUPP
 
 #endif
