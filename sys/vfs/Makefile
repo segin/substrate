@@ -3,7 +3,7 @@ include ../../Makefile.inc
 CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = vfs.c
+SRCS = vfs.c vnode.c
 OBJS = $(SRCS:.c=.o)
 
 all: vfs_subsys.o
