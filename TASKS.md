@@ -3442,8 +3442,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string.
                 - [x] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`).
             - [ ] **Format Grammar:**
-                - [ ] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`).
-                - [ ] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`).
+                - [x] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`).
+                - [x] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`).
                 - [ ] Define Conditional token syntax (e.g., `%(condition.true.false)`).
                 - [ ] Explicitly list reserved/unsupported tokens for future compatibility.
             - [ ] **Token Parsing:**
