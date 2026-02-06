@@ -3,6 +3,7 @@
 
 #include <sys/termios.h>
 #include <sys/proc.h> 
+#include <sys/lock.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -58,8 +59,7 @@ struct tty {
     tty_buffer_t write_buf;
     
     // Synchronization
-    // TODO: Add mutex/spinlock
-    int buf_lock;
+    spinlock_t lock;
     int delct; // Delimiter count in raw_buf
     
     // Wait queues

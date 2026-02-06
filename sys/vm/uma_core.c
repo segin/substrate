@@ -506,6 +506,11 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
             goto out;
         }
     }
+
+    /* Check zone limits before allocating new memory */
+    if (zone->uz_limit > 0 && zone->uz_count >= zone->uz_limit) {
+        return NULL;
+    }
     
     /* Slow path: allocate from slab */
     item = uma_zalloc_slab(zone, flags);
@@ -636,9 +641,9 @@ int uma_zone_get_cur(uma_zone_t *zone) {
 }
 
 void uma_zone_set_max(uma_zone_t *zone, int max) {
-    (void)zone;
-    (void)max;
-    /* TODO: Implement zone limits */
+    if (zone) {
+        zone->uz_limit = (max < 0) ? 0 : (uint32_t)max;
+    }
 }
 
 int uma_zone_reserve(uma_zone_t *zone, int count) {
