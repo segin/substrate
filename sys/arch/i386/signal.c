@@ -131,12 +131,51 @@ int copyin(const void *src, void *dst, size_t size) {
         : "memory"
     );
     
-    /* Success */
     current_thread->on_fault = 0;
     return 0;
 
 fault:
-    /* Fault occurred */
+    current_thread->on_fault = 0;
+    return -1;
+}
+
+/*
+ * copyinstr - Copy string from user space to kernel space
+ *
+ * Safely copies a null-terminated string from 'src' in user space
+ * to kernel buffer 'dst'. Uses on_fault handler to catch page faults.
+ *
+ * Returns:
+ *    0 on success
+ *   -1 on invalid address (EFAULT)
+ *   -2 on buffer too small (ENAMETOOLONG)
+ */
+int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
+    const char *s = (const char *)src;
+    char *d = (char *)dst;
+    size_t i;
+
+    /* Set up fault handler */
+    current_thread->on_fault = (uintptr_t)&&fault;
+
+    for (i = 0; i < maxlen; i++) {
+        /* This access may trigger a page fault */
+        *d = *s;
+        if (*d == '\0') {
+            if (len) *len = i + 1;
+            current_thread->on_fault = 0;
+            return 0;
+        }
+        s++;
+        d++;
+    }
+
+    /* Buffer full but no null terminator found */
+    current_thread->on_fault = 0;
+    if (len) *len = maxlen;
+    return -2;
+
+fault:
     current_thread->on_fault = 0;
     return -1;
 }

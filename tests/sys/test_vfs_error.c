@@ -40,10 +40,10 @@ void run_vfs_error_tests(void) {
     mock_unmount_called = 0;
 
     // Attempt to mount to a non-existent path
-    int ret = vfs_mount(NULL, "/nonexistent/path", "mock_fail", 0, NULL);
+    int ret = vfs_mount_legacy(NULL, "/nonexistent/path", "mock_fail", 0, NULL);
 
     if (ret != -1) {
-        kprint("FAILED (vfs_mount succeeded unexpectedly)\n");
+        kprint("FAILED (vfs_mount_legacy succeeded unexpectedly)\n");
     } else {
         if (mock_unmount_called) {
             kprint("PASS (unmount called)\n");
@@ -65,9 +65,9 @@ void run_vfs_error_tests(void) {
     // Find a non-directory node. /dev/null is usually present after devfs init.
     fs_node_t *node = vfs_lookup(fs_root, "/dev/null");
     if (node && (node->flags & 0x7) != FS_DIRECTORY) {
-        ret = vfs_mount(NULL, "/dev/null", "mock_fail", 0, NULL);
+        ret = vfs_mount_legacy(NULL, "/dev/null", "mock_fail", 0, NULL);
          if (ret != -1) {
-            kprint("FAILED (vfs_mount succeeded on non-dir)\n");
+            kprint("FAILED (vfs_mount_legacy succeeded on non-dir)\n");
         } else {
             if (mock_unmount_called) {
                 kprint("PASS (unmount called)\n");

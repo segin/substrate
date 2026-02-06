@@ -1,0 +1,34 @@
+.TH MEMSET 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+memset \- fill memory with a constant byte
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "void *memset(void *" s ", int " c ", size_t " n ");"
+.SH DESCRIPTION
+The
+.BR memset ()
+function fills the first
+.I n
+bytes of the memory area pointed to by
+.I s
+with the constant byte
+.IR c .
+.SH RETURN VALUE
+The
+.BR memset ()
+function returns a pointer to the memory area
+.IR s .
+.SH EXAMPLES
+.EX
+#include <string.h>
+
+int main() {
+    char buf[10];
+    memset(buf, 0, 10);
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR memcpy (3),
+.BR memmove (3)

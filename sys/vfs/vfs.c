@@ -1,5 +1,7 @@
 #include <vfs/vfs.h>
+#include <vfs/vnode.h>
 #include <sys/mount.h>
+#include <sys/namei.h>
 #include <sys/proc.h>
 
 #include <string.h>
@@ -7,8 +9,11 @@
 #include <stdio.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+#include <vm/vm_kmem.h>
 
+struct mountlist mountlist;
 fs_node_t *fs_root = 0; 
+struct vnode *rootvnode = NULL;
 
 static filesystem_t *filesystems = NULL;
 
@@ -48,6 +53,8 @@ void vfs_init(void) {
     p9_init();
     
     kprint("VFS: Ready.\n");
+    nchinit();
+    TAILQ_INIT(&mountlist);
 }
 
 void vfs_register_filesystem(filesystem_t *fs) {
@@ -59,7 +66,7 @@ filesystem_t *vfs_get_filesystems(void) {
     return filesystems;
 }
 
-int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
+int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
     // Find filesystem type
     filesystem_t *fs = filesystems;
     while (fs) {
@@ -110,12 +117,13 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
     if (!root) return -1;
 
     // Handle Root Mount
+    fs_node_t *mountpoint = NULL;
     if (strcmp(path, "/") == 0) {
         fs_root = root;
     } else {
         // Handle mount on existing directory
         // We must lookup the mount point
-        fs_node_t *mountpoint = vfs_lookup(fs_root, path);
+        mountpoint = vfs_lookup(fs_root, path);
         
         if (!mountpoint) {
             kprint("VFS: Mount point not found: ");
@@ -142,9 +150,33 @@ int vfs_mount(const char *device, const char *path, const char *type, uint32_t f
         mountpoint->ptr = root;
     }
     
-    // Register in generic mount list (for sys_sync, unmount, etc.)
-    // TODO: Allocate proper struct mount. For now we rely on the implicit tree structure
-    // or we should add it to a list if we want to support unmount by path easily.
+    // Register in generic mount list
+    struct mount *mp = kmalloc(sizeof(struct mount));
+    if (mp) {
+        memset(mp, 0, sizeof(struct mount));
+
+        // Populate mount structure
+        strncpy(mp->mnt_stat_path, path, sizeof(mp->mnt_stat_path));
+        mp->mnt_stat_path[sizeof(mp->mnt_stat_path)-1] = '\0';
+
+        strncpy(mp->mnt_stat.f_mntonname, path, sizeof(mp->mnt_stat.f_mntonname));
+        mp->mnt_stat.f_mntonname[sizeof(mp->mnt_stat.f_mntonname)-1] = '\0';
+
+        if (device) {
+            strncpy(mp->mnt_stat.f_mntfromname, device, sizeof(mp->mnt_stat.f_mntfromname));
+            mp->mnt_stat.f_mntfromname[sizeof(mp->mnt_stat.f_mntfromname)-1] = '\0';
+        }
+
+        if (type) {
+            strncpy(mp->mnt_stat.f_fstypename, type, sizeof(mp->mnt_stat.f_fstypename));
+            mp->mnt_stat.f_fstypename[sizeof(mp->mnt_stat.f_fstypename)-1] = '\0';
+        }
+
+        mp->mnt_node_root = root;
+        mp->mnt_node_covered = mountpoint;
+
+        TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+    }
 
     return 0;
 }
@@ -414,50 +446,49 @@ static char *vfs_strrchr(const char *s, int c) {
 }
 
 int vfs_mkdir(const char *path, uint16_t permission) {
-    if (!path) return -1;
-    
-    char path_buf[256];
-    strncpy(path_buf, path, sizeof(path_buf));
-    path_buf[255] = '\0';
-    
-    // Split path into parent and name
-    char *last_slash = vfs_strrchr(path_buf, '/');
-    char *name = NULL;
-    fs_node_t *parent_node = NULL;
+    struct nameidata nd;
+    struct vattr va;
+    struct vnode *vp;
+    int error;
 
-    // Determine start node for relative lookups
-    fs_node_t *start_node = fs_root;
-    if (path[0] != '/' && current_process && current_process->cwd_node) {
-        start_node = current_process->cwd_node;
+    if (!path) return -1;
+
+    /* Initialize attributes for the new directory */
+    VATTR_NULL(&va);
+    va.va_type = VDIR;
+    va.va_mode = permission & 0777;
+
+    /* 
+     * Lookup for creation.
+     * We need the parent directory (nd.ni_dvp) and information about the 
+     * component to be created (nd.ni_cnd).
+     */
+    NDINIT(&nd, CREATE, LOCKPARENT, UIO_SYSSPACE, path);
+    error = namei(&nd);
+    if (error)
+        return error;
+
+    /* Check if the entry already exists */
+    if (nd.ni_vp != NULL) {
+        vput(nd.ni_dvp);
+        vrele(nd.ni_vp);
+        return -17; /* EEXIST */
     }
+
+    /* Perform the directory creation */
+    error = VOP_MKDIR(nd.ni_dvp, &vp, &nd.ni_cnd, &va);
     
-    if (last_slash) {
-        *last_slash = '\0';
-        name = last_slash + 1;
-        
-        // Check for trailing slash case: /foo/bar/ -> name=""
-        if (*name == '\0') return -1; // Trailing slash not supported yet
-        
-        if (path_buf[0] == '\0') {
-            // Path was "/foo", parent became "" (meaning root)
-            parent_node = fs_root;
-        } else {
-            // Find parent
-            parent_node = vfs_lookup(start_node, path_buf);
-        }
-    } else {
-        // No slash: "foo"
-        parent_node = start_node;
-        name = path_buf;
+    /* VOP_MKDIR is expected to release the lock on parent if needed, 
+     * but following BSD pattern, we usually vput the parent.
+     */
+    vput(nd.ni_dvp);
+    
+    if (error == 0) {
+        /* Successfully created, we can release the new vnode */
+        vput(vp);
     }
-    
-    if (!parent_node) return -1; // Parent not found
-    
-    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -1; // Not a directory
-    
-    if (!parent_node->mkdir) return -1; // FS doesn't support mkdir
-    
-    return parent_node->mkdir(parent_node, name, permission);
+
+    return error;
 }
 
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
@@ -495,7 +526,7 @@ int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
     return parent_node->mknod(parent_node, name, mode, dev);
 }
 
-int vfs_unmount(const char *path) {
+int vfs_unmount_legacy(const char *path) {
     if (!path) return -1;
     
     // Lookup mount point (directory that was mounted ON)
@@ -583,6 +614,18 @@ int vfs_unmount(const char *path) {
         root->unmount(root);
     }
     
+    // Remove from mount list
+    struct mount *mp;
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        if (mp->mnt_node_covered == mountpoint && mp->mnt_node_root == root) {
+            TAILQ_REMOVE(&mountlist, mp, mnt_list);
+            kfree(mp, sizeof(struct mount));
+            break;
+        }
+        // Fallback check by path if nodes match fails or are reused improperly (less safe but covers legacy)
+        // Ideally node check is sufficient.
+    }
+
     return 0;
 }
 

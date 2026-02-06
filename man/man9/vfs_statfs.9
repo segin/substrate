@@ -1,0 +1,39 @@
+.Dd February 6, 2026
+.Dt VFS_STATFS 9
+.Os
+.Sh NAME
+.Nm vfs_statfs
+.Nd get filesystem statistics
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/mount.h
+.In sys/vnode.h
+.Ft int
+.Fn vfs_statfs "struct mount *mp" "struct statfs *sbp" "struct thread *td"
+.Sh DESCRIPTION
+The
+.Fn vfs_statfs
+function retrieves statistics for the filesystem specified by
+.Fa mp .
+The results are stored in the structure pointed to by
+.Fa sbp .
+.Pp
+Arguments:
+.Bl -tag -width ".Fa sbp"
+.It Fa mp
+The filesystem to query.
+.It Fa sbp
+Pointer to a statfs structure to receive the statistics.
+.It Fa td
+The thread performing the query.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er EOPNOTSUPP"
+.It Bq Er EOPNOTSUPP
+The filesystem does not support this operation.
+.El
+.Sh SEE ALSO
+.Xr vfs_mount 9 ,
+.Xr statfs 2

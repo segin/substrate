@@ -1,0 +1,37 @@
+.TH STRPBRK 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strpbrk \- search a string for any of a set of bytes
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *strpbrk(const char *" s ", const char *" accept ");"
+.SH DESCRIPTION
+The
+.BR strpbrk ()
+function locates the first occurrence in the string
+.I s
+of any of the bytes in the string
+.IR accept .
+.SH RETURN VALUE
+The
+.BR strpbrk ()
+function returns a pointer to the byte in
+.I s
+that matches one of the bytes in
+.IR accept ,
+or NULL if no such byte is found.
+.SH EXAMPLES
+.EX
+#include <string.h>
+#include <stdio.h>
+
+int main() {
+    char *p = strpbrk("hello world", "aeiou");
+    if (p) printf("First vowel: %c\\n", *p);
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR strchr (3),
+.BR strspn (3),
+.BR strstr (3)

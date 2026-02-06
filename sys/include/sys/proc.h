@@ -26,6 +26,7 @@ typedef uint8_t process_state_t;
 struct personality;
 struct fs_node;
 typedef struct fs_node fs_node_t;
+struct runqueue;
 struct file;
 typedef struct file file_t;
 struct pmap;
@@ -48,8 +49,7 @@ typedef struct process {
     int exit_code;
     struct pgrp *p_pgrp;       // Process group (NULL = none)
     struct process *p_pgrp_link; // Next process in same pgrp (linked list)
-    struct personality *pers; // Pointer to personality definition (internal use)
-    int perso_id; // Stable personality ID (user visible)
+    int perso_id; // Personality ID (PERS_NATIVE, PERS_LINUX, etc.)
     file_t *fds[MAX_FD]; // File Descriptor Table
     int next_fd;         // Hint for next free FD
     fs_node_t *root_node; // Per-process root (for chroot)
@@ -154,6 +154,7 @@ typedef struct thread {
     // Scheduling - Runqueue linkage
     struct thread *rq_next;       // Next in runqueue level
     struct thread *rq_prev;       // Prev in runqueue level
+    struct runqueue *current_queue; // The runqueue this thread is currently on
     uint32_t       cpu_affinity;  // CPU affinity mask (bitmask)
     uint8_t        on_runqueue;   // Is thread currently on a runqueue?
     uint8_t        needs_resched; // Set by IPI to trigger reschedule

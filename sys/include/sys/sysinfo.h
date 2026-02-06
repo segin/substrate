@@ -35,6 +35,19 @@ typedef struct sys_procinfo {
     
 } sys_procinfo_t;
 
+typedef struct sys_fd {
+    int fd;
+    char path[256];
+    uint32_t flags;
+} sys_fd_t;
+
+typedef struct sys_map {
+    uint32_t start;
+    uint32_t end;
+    uint32_t flags;
+    char name[256];
+} sys_map_t;
+
 #endif
 
 struct sysinfo {

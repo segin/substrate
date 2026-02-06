@@ -1,0 +1,56 @@
+.TH STRCPY 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strcpy, strncpy \- copy a string
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *strcpy(char *" dest ", const char *" src ");"
+.sp
+.BI "char *strncpy(char *" dest ", const char *" src ", size_t " n ");"
+.SH DESCRIPTION
+The
+.BR strcpy ()
+function copies the string pointed to by
+.I src
+(including the terminating null byte ('\\0')) to the buffer pointed to by
+.IR dest .
+The strings may not overlap, and the destination string
+.I dest
+must be large enough to receive the copy.
+.sp
+The
+.BR strncpy ()
+function is similar, except that at most
+.I n
+bytes of
+.I src
+are copied.
+.B Warning:
+If there is no null byte among the first
+.I n
+bytes of
+.IR src ,
+the string placed in
+.I dest
+will not be null-terminated.
+.SH RETURN VALUE
+The
+.BR strcpy ()
+and
+.BR strncpy ()
+functions return a pointer to the destination string
+.IR dest .
+.SH EXAMPLES
+.EX
+#include <string.h>
+
+int main() {
+    char dest[20];
+    strcpy(dest, "Hello");
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR memcpy (3),
+.BR strdup (3),
+.BR strlen (3)

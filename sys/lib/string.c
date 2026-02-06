@@ -48,6 +48,20 @@ void *memcpy(void *dest, const void *src, size_t n) {
     return dest;
 }
 
+void *memmove(void *dest, const void *src, size_t n) {
+    unsigned char *d = dest;
+    const unsigned char *s = src;
+
+    if (d < s) {
+        while (n--) *d++ = *s++;
+    } else if (d > s) {
+        d += n;
+        s += n;
+        while (n--) *--d = *--s;
+    }
+    return dest;
+}
+
 void *memset(void *s, int c, size_t n) {
     unsigned char *p = s;
     unsigned char val = (unsigned char)c;
@@ -143,4 +157,21 @@ char *strchr(const char *s, int c) {
         if (!*s++) return NULL;
     }
     return (char *)s;
+}
+
+size_t strspn(const char *s1, const char *s2) {
+    size_t n;
+    for (n = 0; *s1; s1++, n++) {
+        const char *p;
+        for (p = s2; *p && *p != *s1; p++);
+        if (!*p) break;
+    }
+    return n;
+}
+
+char *strpbrk(const char *s1, const char *s2) {
+    while (*s1) {
+        if (strchr(s2, *s1++)) return (char *)s1 - 1;
+    }
+    return NULL;
 }

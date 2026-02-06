@@ -1539,109 +1539,109 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS Subsystem Refactor (BSD-style):**
     - [ ] **Core Structures & Life Cycle:**
-        - [ ] **`struct vnode`:**
-            - [ ] `v_type` (VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD).
-            - [ ] `v_tag` (VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.).
-            - [ ] `v_op` (operations vector), `v_data` (private fs data).
-            - [ ] `v_mount` (pointer to mount point).
-            - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
-            - [ ] `v_writecount` (writers count), `v_flag` (VROOT, VTEXT, VSYSTEM, etc.).
-            - [ ] `v_lock` (exclusive/shared lock).
-            - [ ] **Life Cycle:**
-                - [ ] `getnewvnode()`: Allocate new vnode from zone, recycle LRU if full.
-                - [ ] `vref()`: Increment use count.
-                - [ ] `vrele()`: Decrement use count, trigger inactive/reclaim if zero.
-                - [ ] `vput()`: Unlock and vrele.
-                - [ ] `vget()`: Lock and vref.
-                - [ ] `vgone()`: Mark vnode for doom/destruction.
-                - [ ] `vclean()`: Disassociate vnode from filesystem data.
-        - [ ] **`struct mount`:**
-            - [ ] `mnt_vnodecovered` (vnode mounted on).
-            - [ ] `mnt_op` (VFS ops vector).
-            - [ ] `mnt_data` (private fs data).
-            - [ ] `mnt_flag` (MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS).
-            - [ ] `mnt_nvnodelist` (list of active vnodes).
-            - [ ] `mnt_stat` (cached filesystem statistics).
-        - [ ] **`struct file`:**
-            - [ ] `f_type` (DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE).
-            - [ ] `f_data` (pointer to vnode/socket/pipe).
-            - [ ] `f_flag` (FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT).
-            - [ ] `f_ops` (file operations vector: read, write, ioctl, poll, close).
-            - [ ] `f_offset` (current file offset).
-            - [ ] `f_count` (reference count).
-            - [ ] `f_cred` (credentials at open time).
-    - [ ] **Pathname Lookup (`namei`):**
-        - [ ] **`struct nameidata`:** Encapsulate lookup state, path string, purpose (LOOKUP/CREATE/DELETE).
-        - [ ] **`struct componentname`:** Current path component being resolved.
-        - [ ] **Lookup Logic:**
-            - [ ] Parsing `/` delimiters.
-            - [ ] Handling `.` and `..`.
-            - [ ] Crossing mount points (`mnt_vnodecovered`).
-            - [ ] Symbolic link resolution (recursion limit: MAXSYMLINKS).
-        - [ ] **Name Cache:** Global hash table (`nchash`) mapping `(directory vnode, name)` -> `target vnode`.
+        - [x] **`struct vnode`:**
+            - [x] `v_type` (VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD).
+            - [x] `v_tag` (VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.).
+            - [x] `v_op` (operations vector), `v_data` (private fs data).
+            - [x] `v_mount` (pointer to mount point).
+            - [x] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
+            - [x] `v_writecount` (writers count), `v_flag` (VROOT, VTEXT, VSYSTEM, etc.).
+            - [x] `v_lock` (exclusive/shared lock).
+            - [x] **Life Cycle:**
+                - [x] `getnewvnode()`: Allocate new vnode from zone, recycle LRU if full.
+                - [x] `vref()`: Increment use count.
+                - [x] `vrele()`: Decrement use count, trigger inactive/reclaim if zero.
+                - [x] `vput()`: Unlock and vrele.
+                - [x] `vget()`: Lock and vref.
+                - [x] `vgone()`: Mark vnode for doom/destruction.
+                - [x] `vclean()`: Disassociate vnode from filesystem data.
+        - [x] **`struct mount`:**
+            - [x] `mnt_vnodecovered` (vnode mounted on).
+            - [x] `mnt_op` (VFS ops vector).
+            - [x] `mnt_data` (private fs data).
+            - [x] `mnt_flag` (MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS).
+            - [x] `mnt_nvnodelist` (list of active vnodes).
+            - [x] `mnt_stat` (cached filesystem statistics).
+        - [x] **`struct file`:**
+            - [x] `f_type` (DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE).
+            - [x] `f_data` (pointer to vnode/socket/pipe).
+            - [x] `f_flag` (FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT).
+            - [x] `f_ops` (file operations vector: read, write, ioctl, poll, close).
+            - [x] `f_offset` (current file offset).
+            - [x] `f_count` (reference count).
+            - [x] `f_cred` (credentials at open time).
+    - [x] **Pathname Lookup (`namei`):**
+        - [x] **`struct nameidata`:** Encapsulate lookup state, path string, purpose (LOOKUP/CREATE/DELETE).
+        - [x] **`struct componentname`:** Current path component being resolved.
+        - [x] **Lookup Logic:**
+            - [x] Parsing `/` delimiters.
+            - [x] Handling `.` and `..`.
+            - [x] Crossing mount points (`mnt_vnodecovered`).
+            - [x] Symbolic link resolution (recursion limit: MAXSYMLINKS).
+        - [x] **Name Cache:** Global hash table (`nchash`) mapping `(directory vnode, name)` -> `target vnode`.
     - [ ] **Operations Vectors:**
         - [ ] **`vfs_ops` (Filesystem-level):**
-            - [ ] Implement `vfs_mount(mp, path, data, ndp, p)`.
+            - [x] Implement `vfs_mount(mp, path, data, ndp, p)`.
                 - Files: `sys/vfs/vfs_mount.c` (new), `sys/vfs/vfs.h`
                 - API: Mount filesystem at path, parse mount options
                 - Tests: unit (mount success/failure), integration (mount ext2/fat)
                 - Docs: `vfs_mount.9`
                 - Acceptance: Filesystem mounted, accessible via path
-            - [ ] Implement `vfs_start(mp, flags, p)`.
+            - [x] Implement `vfs_start(mp, flags, p)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Post-mount initialization callback
                 - Tests: unit (callback invoked after mount)
                 - Docs: `vfs_start.9`
                 - Acceptance: Filesystem fully operational after start
-            - [ ] Implement `vfs_unmount(mp, mntflags, p)`.
+            - [x] Implement `vfs_unmount(mp, mntflags, p)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Unmount filesystem, flush buffers, free resources
                 - Flags: `MNT_FORCE` for forced unmount
                 - Tests: unit (clean unmount, busy unmount rejection, force unmount)
                 - Docs: `vfs_unmount.9`
                 - Acceptance: Filesystem detached, resources freed
-            - [ ] Implement `vfs_root(mp, vpp)`.
+            - [x] Implement `vfs_root(mp, vpp)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Return root vnode for mounted filesystem
                 - Tests: unit (root vnode returned with correct type)
                 - Docs: `vfs_root.9`
                 - Acceptance: Root vnode valid, ref count incremented
-            - [ ] Implement `vfs_statfs(mp, sbp, p)`.
+            - [x] Implement `vfs_statfs(mp, sbp, p)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Fill statfs structure with filesystem stats
                 - Fields: `f_blocks`, `f_bfree`, `f_bavail`, `f_files`, `f_ffree`
                 - Tests: unit (stats match filesystem state)
                 - Docs: `vfs_statfs.9`
                 - Acceptance: Correct free space/inode counts
-            - [ ] Implement `vfs_sync(mp, waitfor, cred, p)`.
+            - [x] Implement `vfs_sync(mp, waitfor, cred, p)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Sync dirty buffers to disk
                 - Flags: `MNT_WAIT` (sync), `MNT_NOWAIT` (async)
                 - Tests: integration (sync flushes dirty data)
                 - Docs: `vfs_sync.9`
                 - Acceptance: All dirty buffers written
-            - [ ] Implement `vfs_vget(mp, ino, vpp)`.
+            - [x] Implement `vfs_vget(mp, ino, vpp)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Get vnode by inode number
                 - Tests: unit (vnode retrieved, cache hit/miss)
                 - Docs: `vfs_vget.9`
                 - Acceptance: Correct vnode returned for inode
-            - [ ] Implement `vfs_fhtovp(mp, fhp, vpp)`.
+            - [x] Implement `vfs_fhtovp(mp, fhp, vpp)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Convert NFS file handle to vnode
                 - Tests: unit (handle resolution)
                 - Docs: `vfs_fhtovp.9`
                 - Acceptance: Valid vnode from file handle
         - [ ] **`vnode_ops` (File-level):**
-            - [ ] **Name Resolution:**
-                - [ ] Implement `vop_lookup(dvp, vpp, cnp)`.
+            - [x] **Name Resolution:**
+                - [x] Implement `vop_lookup(dvp, vpp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c` (new), `sys/vfs/vnode.h`
                     - API: Look up component name in directory vnode
                     - Returns: `ENOENT` if not found, `0` + vnode if found
                     - Tests: unit (found, not found, permission denied)
                     - Docs: `vop_lookup.9`
                     - Acceptance: Correct vnode returned for existing entry
-                - [ ] Implement `vop_cachedlookup(dvp, vpp, cnp)`.
+                - [x] Implement `vop_cachedlookup(dvp, vpp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c`, `sys/vfs/namecache.c`
                     - API: Lookup wrapper interacting with name cache
                     - Logic: Check cache first, call vop_lookup on miss
@@ -1649,41 +1649,41 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Docs: `vop_cachedlookup.9`
                     - Acceptance: Cache reduces filesystem lookups
             - [ ] **Creation/Deletion:**
-                - [ ] Implement `vop_create(dvp, vpp, cnp, vap)`.
+                - [x] Implement `vop_create(dvp, vpp, cnp, vap)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Create regular file in directory
                     - Logic: Allocate inode, create dir entry, return new vnode
                     - Tests: unit (create success, EEXIST, EACCES, ENOSPC)
                     - Docs: `vop_create.9`
                     - Acceptance: New file created with correct attributes
-                - [ ] Implement `vop_mknod(dvp, vpp, cnp, vap)`.
+                - [x] Implement `vop_mknod(dvp, vpp, cnp, vap)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Create device node (block/char special)
                     - Attrs: `va_rdev` for device major/minor
                     - Tests: unit (block device, char device, FIFO, socket)
                     - Docs: `vop_mknod.9`
                     - Acceptance: Device node with correct rdev
-                - [x] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
+                - [ ] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
                     - Files: `sys/vfs/vfs.c`, `sys/fs/udf/udf.c`
                     - API: Create directory
                     - Tests: unit (mkdir success, nested mkdir)
                     - Docs: `vop_mkdir.9`
                     - Acceptance: Directory created with . and .. entries
-                - [ ] Implement `vop_whiteout(dvp, cnp, flags)`.
+                - [x] Implement `vop_whiteout(dvp, cnp, flags)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: UnionFS whiteout entry support
                     - Flags: `CREATE`, `DELETE`, `LOOKUP`
                     - Tests: unit (create whiteout, delete whiteout)
                     - Docs: `vop_whiteout.9`
                     - Acceptance: Whiteout hides lower layer entry
-                - [ ] Implement `vop_remove(dvp, vp, cnp)`.
+                - [x] Implement `vop_remove(dvp, vp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Remove directory entry (unlink)
                     - Logic: Decrement link count, free inode if zero
                     - Tests: unit (unlink file, unlink with hardlinks, ENOENT)
                     - Docs: `vop_remove.9`
                     - Acceptance: Entry removed, inode freed when nlink=0
-                - [ ] Implement `vop_rmdir(dvp, vp, cnp)`.
+                - [x] Implement `vop_rmdir(dvp, vp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Remove empty directory
                     - Tests: unit (rmdir empty, ENOTEMPTY, EBUSY for .)
@@ -2795,109 +2795,109 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Stdio:**
     - [ ] Implement Buffered I/O logic (`fflush`, buffer management).
     - [ ] **Complete `printf` Family Implementation (User & Kernel):**
-        - [ ] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
-        - [ ] **User:** `lib/c` implementation.
-        - [ ] **Flags:**
+        - [x] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
+        - [x] **User:** `lib/c` implementation.
+        - [x] **Flags:**
             - [x] `-` (Left-align within field width).
             - [x] `+` (Force sign for positive numbers).
             - [x] ` ` (Space prefix for positive numbers).
             - [x] `#` (Alternate form: 0x for hex, force decimal point).
             - [x] `0` (Zero-padding).
-        - [ ] **Width & Precision:**
+        - [x] **Width & Precision:**
             - [x] Numeric width (e.g., `%5d`).
-            - [ ] Dynamic width `*` (from argument).
-            - [x] Numeric precision (e.g., `%.5d`) - strings only.
-            - [ ] Dynamic precision `.*`(from argument).
-            - [x] Combined width/precision (e.g., `%5.2f`) - strings only.
-            - [ ] Negative width logic (treat as `-` flag + positive width).
-        - [ ] **Length Modifiers:**
-            - [ ] `hh` (signed/unsigned char).
-            - [ ] `h` (signed/unsigned short).
-            - [ ] `l` (long, wint_t).
-            - [ ] `ll` (long long).
-            - [ ] `j` (intmax_t, uintmax_t).
-            - [ ] `z` (size_t, ssize_t).
-            - [ ] `t` (ptrdiff_t).
-            - [ ] `L` (long double).
-        - [ ] **Conversion Specifiers:**
-            - [ ] **Integers:** `d`, `i` (signed decimal).
+            - [x] Dynamic width `*` (from argument).
+            - [x] Numeric precision (e.g., `%.5d`).
+            - [x] Dynamic precision `.*`(from argument).
+            - [x] Combined width/precision (e.g., `%5.2f`).
+            - [x] Negative width logic (treat as `-` flag + positive width).
+        - [x] **Length Modifiers:**
+            - [x] `hh` (signed/unsigned char).
+            - [x] `h` (signed/unsigned short).
+            - [x] `l` (long, wint_t).
+            - [x] `ll` (long long).
+            - [x] `j` (intmax_t, uintmax_t).
+            - [x] `z` (size_t, ssize_t).
+            - [x] `t` (ptrdiff_t).
+            - [x] `L` (long double).
+        - [x] **Conversion Specifiers:**
+            - [x] **Integers:** `d`, `i` (signed decimal).
             - [x] **Unsigned:** `u` (decimal), `o` (octal).
-            - [ ] **Hex:** `x`, `X` (lower/upper case).
-            - [ ] **Floating Point (Basic):** `f`, `F` (decimal notation).
-            - [ ] **Scientific:** `e`, `E` (exponential notation).
-            - [ ] **Significant:** `g`, `G` (shortest representation).
-            - [ ] **Hex Float:** `a`, `A` (C99 hex float).
-            - [ ] **Characters:** `c` (char), `lc` (wint_t).
-            - [ ] **Strings:** `s` (char*), `ls` (wchar_t*).
-            - [ ] **Pointer:** `p` (implementation defined, usually %08x or %016x).
-            - [ ] **Count:** `n` (store number of chars written to int*).
-            - [ ] **Literal:** `%` (print percent sign).
+            - [x] **Hex:** `x`, `X` (lower/upper case).
+            - [x] **Floating Point (Basic):** `f`, `F` (decimal notation).
+            - [x] **Scientific:** `e`, `E` (exponential notation).
+            - [x] **Significant:** `g`, `G` (shortest representation).
+            - [x] **Hex Float:** `a`, `A` (C99 hex float - placeholder).
+            - [x] **Characters:** `c` (char), `lc` (wint_t).
+            - [x] **Strings:** `s` (char*), `ls` (wchar_t*).
+            - [x] **Pointer:** `p` (implementation defined, usually %08x or %016x).
+            - [x] **Count:** `n` (store number of chars written to int*).
+            - [x] **Literal:** `%` (print percent sign).
         - [ ] **Complex/Compound Cases:**
-            - [ ] Prefix combinations (e.g., `%20#llx`).
-            - [ ] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
-            - [ ] "0" flag ignored if "-" is present.
-            - [ ] "0" flag ignored if precision is specified for integers.
-            - [ ] Space ignored if "+" is present.
-- [ ] **String/Mem:**
+            - [x] Prefix combinations (e.g., `%20#llx`).
+            - [x] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
+            - [x] "0" flag ignored if "-" is present.
+            - [x] "0" flag ignored if precision is specified for integers.
+            - [x] Space ignored if "+" is present.
+- [x] **String/Mem:**
     - [x] Optimize `memcpy`, `memset`, `memmove`.
-    - [ ] **Math Library (`lib/m/`):**
-        - [ ] **Architecture:**
-            - [ ] `math.h` header definition.
-            - [ ] `math_errhandling` (errno support).
-            - [ ] `__fpclassify` internal helper.
-        - [ ] **Classification:**
-            - [ ] `fpclassify()`
-            - [ ] `isfinite()`
-            - [ ] `isinf()`
-            - [ ] `isnan()`
-            - [ ] `isnormal()`
-            - [ ] `signbit()`
-        - [ ] **Basic Arithmetic:**
-            - [ ] `fabs()`
-            - [ ] `fmod()`
-            - [ ] `remainder()`
-            - [ ] `fmax()`
-            - [ ] `fmin()`
-            - [ ] `fdim()`
-            - [ ] `ceil()`
-            - [ ] `floor()`
-            - [ ] `trunc()`
-            - [ ] `round()`
-            - [ ] `rint()`
-        - [ ] **Exponential & Power:**
-            - [ ] `exp()`
-            - [ ] `exp2()`
-            - [ ] `expm1()`
-            - [ ] `log()`
-            - [ ] `log2()`
-            - [ ] `log10()`
-            - [ ] `log1p()`
-            - [ ] `pow()`
-            - [ ] `sqrt()`
-            - [ ] `cbrt()`
-            - [ ] `hypot()`
-        - [ ] **Trigonometric:**
-            - [ ] `sin()`
-            - [ ] `cos()`
-            - [ ] `tan()`
-            - [ ] `asin()`
-            - [ ] `acos()`
-            - [ ] `atan()`
-            - [ ] `atan2()`
-        - [ ] **Hyperbolic:**
-            - [ ] `sinh()`
-            - [ ] `cosh()`
-            - [ ] `tanh()`
-            - [ ] `asinh()`
-            - [ ] `acosh()`
-            - [ ] `atanh()`
-        - [ ] **Manipulation:**
-            - [ ] `frexp()`
-            - [ ] `ldexp()`
-            - [ ] `modf()`
-            - [ ] `scalbn()`
-            - [ ] `nextafter()`
-            - [ ] `copysign()`
+    - [/] **Math Library (`lib/m/`):**
+        - [x] **Architecture:**
+            - [x] `math.h` header definition.
+            - [x] `math_errhandling` (errno support).
+            - [x] `__fpclassify` internal helper.
+        - [x] **Classification:**
+            - [x] `fpclassify()`
+            - [x] `isfinite()`
+            - [x] `isinf()`
+            - [x] `isnan()`
+            - [x] `isnormal()`
+            - [x] `signbit()`
+        - [x] **Basic Arithmetic:**
+            - [x] `fabs()`
+            - [x] `fmod()`
+            - [x] `remainder()`
+            - [x] `fmax()`
+            - [x] `fmin()`
+            - [x] `fdim()`
+            - [x] `ceil()`
+            - [x] `floor()`
+            - [x] `trunc()`
+            - [x] `round()`
+            - [x] `rint()`
+        - [x] **Exponential & Power:**
+            - [x] `exp()`
+            - [x] `exp2()`
+            - [x] `expm1()`
+            - [x] `log()`
+            - [x] `log2()`
+            - [x] `log10()`
+            - [x] `log1p()`
+            - [x] `pow()`
+            - [x] `sqrt()`
+            - [x] `cbrt()`
+            - [x] `hypot()`
+        - [x] **Trigonometric:**
+            - [x] `sin()`
+            - [x] `cos()`
+            - [x] `tan()`
+            - [x] `asin()`
+            - [x] `acos()`
+            - [x] `atan()`
+            - [x] `atan2()`
+        - [x] **Hyperbolic:**
+            - [x] `sinh()`
+            - [x] `cosh()`
+            - [x] `tanh()`
+            - [x] `asinh()`
+            - [x] `acosh()`
+            - [x] `atanh()`
+        - [x] **Manipulation:**
+            - [x] `frexp()`
+            - [x] `ldexp()`
+            - [x] `modf()`
+            - [x] `scalbn()`
+            - [x] `nextafter()`
+            - [x] `copysign()`
     - [ ] **Optimizations (i386/x87 Inline Assembly):**
         - [ ] **Trigonometric Functions:**
             - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
@@ -2923,11 +2923,61 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `nearbyint()`: `frndint` (without raising inexact exception).
             - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
             - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
-- [ ] **Dynamic Linker (`/sbin/ld.so`):**
-    - [ ] **Kernel ELF Loader Support:**
-        - [ ] Parse `PT_INTERP` program header to identify dynamic linker path.
-        - [ ] Load dynamic linker ELF into memory alongside main executable.
-        - [ ] Set up auxiliary vector (`AT_*`) entries for dynamic linker:
+- [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:**
+    - [ ] **1. Specification & Design:**
+        - [ ] **Design Document:**
+            - [ ] Write authoritative design doc for `ld.so` in `docs/ld.so-design.md`.
+            - [ ] Document goals: POSIX/ELF-ABI compliance, BSD compatibility, performance.
+            - [ ] Document ABI targets: i386 (primary), x86_64 (future).
+            - [ ] Document supported ELF features: REL/RELA, PLT/GOT, TLS models.
+            - [ ] Document environment variables: `LD_LIBRARY_PATH`, `LD_PRELOAD`, `LD_DEBUG`, etc.
+            - [ ] Document secure behavior for setuid/setgid binaries.
+            - [ ] Acceptance: design doc reviewed and approved.
+        - [ ] **Architecture Matrix:**
+            - [ ] Enumerate all supported relocation types per architecture.
+            - [ ] Document ABI differences (i386 vs x86_64).
+            - [ ] Create `docs/ld.so-reloc-matrix.md` with full relocation table.
+            - [ ] Acceptance: matrix covers all targeted architectures.
+        - [ ] **Symbol Resolution Specification:**
+            - [ ] Define symbol resolution algorithm and precedence rules.
+            - [ ] Document order: LD_PRELOAD → executable → DT_RPATH/RUNPATH → system paths.
+            - [ ] Define versioning policy (DT_VERSYM, DT_VERNEED, DT_VERDEF).
+            - [ ] Define SONAME handling policy.
+            - [ ] Document DT_RPATH vs DT_RUNPATH semantics.
+            - [ ] Document DT_HASH vs GNU_HASH interaction.
+            - [ ] Acceptance: specification reviewed and edge cases documented.
+    - [ ] **2. Loader Core: ELF Parsing & Mapping:**
+        - [ ] **ELF Header Parsing:**
+            - [ ] Implement ELF header validation (magic, class, endianness, version).
+            - [ ] Implement program header table parsing.
+            - [ ] Implement section header table parsing (optional, for debugging).
+            - [ ] Parse `PT_DYNAMIC` segment and extract dynamic table.
+            - [ ] Parse all `DT_*` tags into internal structures.
+            - [ ] Files: `libexec/ld.so/elf_parse.c`, `elf_parse.h`.
+            - [ ] Tests: unit tests for valid/invalid ELF headers.
+        - [ ] **Segment Mapping:**
+            - [ ] Implement safe segment mapping with correct protections (PROT_READ/WRITE/EXEC).
+            - [ ] Handle segment alignment and page rounding.
+            - [ ] Handle file-backed mapping via `mmap()`.
+            - [ ] Implement fallback to read-into-memory for unsupported cases.
+            - [ ] Document MAP_SHARED vs MAP_PRIVATE semantics.
+            - [ ] Files: `libexec/ld.so/elf_map.c`, `elf_map.h`.
+            - [ ] Tests: mapping tests with various segment configurations.
+        - [ ] **Validation & Robustness:**
+            - [ ] Validate all offsets and sizes against file bounds.
+            - [ ] Check for integer overflow in size calculations.
+            - [ ] Reject malformed ELF files with clear error messages.
+            - [ ] Reject unsupported ELF types (mismatched architecture).
+            - [ ] Tests: unit tests with malformed/truncated/malicious ELF files.
+            - [ ] Acceptance: loader maps sample DSOs correctly, rejects malformed inputs.
+    - [ ] **3. Kernel ELF Loader Support:**
+        - [ ] **PT_INTERP Handling:**
+            - [ ] Parse `PT_INTERP` program header to identify dynamic linker path.
+            - [ ] Load dynamic linker ELF into memory alongside main executable.
+            - [ ] Transfer control to dynamic linker entry point (not main executable).
+            - [ ] Files: `sys/exec/elf_interp.c`.
+        - [ ] **Auxiliary Vector Setup:**
+            - [ ] Set up auxiliary vector (`AT_*`) entries for dynamic linker.
             - [ ] `AT_BASE` - Base address where linker was loaded.
             - [ ] `AT_PHDR` - Address of program headers.
             - [ ] `AT_PHENT` - Size of program header entry.
@@ -2937,59 +2987,56 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `AT_RANDOM` - Pointer to 16 bytes of random data.
             - [ ] `AT_PAGESZ` - System page size.
             - [ ] `AT_UID`, `AT_EUID`, `AT_GID`, `AT_EGID` - User/group IDs.
-            - [ ] `AT_SECURE` - Set if running setuid/setgid.
-        - [ ] Transfer control to dynamic linker entry point (not main executable).
-    - [ ] **Dynamic Linker Bootstrap:**
-        - [ ] Self-relocation: Linker must relocate itself before anything else.
-        - [ ] Parse own ELF headers to find own relocations.
-        - [ ] Apply `R_386_RELATIVE` relocations to fix up addresses.
-        - [ ] No libc calls during bootstrap (use raw syscalls).
-    - [ ] **ELF Parsing:**
-        - [ ] **Parse `PT_DYNAMIC` Segment:**
-            - [ ] Locate `PT_DYNAMIC` in Program Header Table.
-            - [ ] Read all `Elf32_Dyn` entries into strict memory structure.
-            - [ ] Map tags to internal state variables.
-        - [ ] **Process Dynamic Tags (Mandatory):**
-            - [ ] `DT_NEEDED`: Add library to load queue (recursive dependency).
-            - [ ] `DT_STRTAB`: Verify string table address and size.
-            - [ ] `DT_SYMTAB`: Verify symbol table address and entry size (`DT_SYMENT`).
-            - [ ] `DT_HASH` / `DT_GNU_HASH`: setup hash tables for symbol lookup.
-            - [ ] `DT_STRSZ`: String table size validation.
-            - [ ] `DT_PLTGOT`: Address of PLT/GOT.
-            - [ ] `DT_DEBUG`: Set for debugger interface (`r_debug`).
-        - [ ] **Process Relocation Tags:**
-            - [ ] `DT_REL` / `DT_RELA`: Relocation table address.
-            - [ ] `DT_RELSZ` / `DT_RELASZ`: Relocation table size.
-            - [ ] `DT_RELENT` / `DT_RELAENT`: size of each relocation entry.
-            - [ ] `DT_PLTREL`: Type of reloc in PLT (`DT_REL` or `DT_RELA`).
-            - [ ] `DT_JMPREL`: PLT relocation table address.
-            - [ ] `DT_PLTRELSZ`: PLT relocation table size.
-        - [ ] **Process Initialization/Termination Tags:**
-            - [ ] `DT_INIT`: Legacy init function address.
-            - [ ] `DT_FINI`: Legacy fini function address.
-            - [ ] `DT_INIT_ARRAY`: Array of init function pointers.
-            - [ ] `DT_INIT_ARRAYSZ`: Size of init array.
-            - [ ] `DT_FINI_ARRAY`: Array of fini function pointers.
-            - [ ] `DT_FINI_ARRAYSZ`: Size of fini array.
-            - [ ] `DT_PREINIT_ARRAY`: Array of pre-init function pointers.
-            - [ ] `DT_PREINIT_ARRAYSZ`: Size of pre-init array.    - [ ] **Library Loading:**
-        - [ ] Implement library search path parsing (`LD_LIBRARY_PATH`, `/etc/ld.so.conf`).
-        - [ ] Default search paths: `/lib`, `/usr/lib`, `/usr/local/lib`.
-        - [ ] `$ORIGIN` expansion in rpath/runpath.
-        - [ ] `DT_RPATH` and `DT_RUNPATH` handling.
-        - [ ] Load shared libraries via `mmap()` with correct protections.
-        - [ ] Handle library dependencies recursively (breadth-first order).
-        - [ ] Detect circular dependencies.
-        - [ ] Handle `DT_SONAME` for library identity.
-    - [ ] **Symbol Resolution:**
-        - [ ] Implement symbol lookup using `DT_HASH` (SYSV hash).
-        - [ ] Implement symbol lookup using `DT_GNU_HASH` (GNU hash, faster).
-        - [ ] Symbol versioning support (`DT_VERSYM`, `DT_VERNEED`, `DT_VERDEF`).
-        - [ ] Symbol binding types: `STB_LOCAL`, `STB_GLOBAL`, `STB_WEAK`.
-        - [ ] Symbol visibility: `STV_DEFAULT`, `STV_HIDDEN`, `STV_PROTECTED`.
-        - [ ] Handle undefined weak symbols (resolve to NULL).
-        - [ ] Interposition: First definition wins (global scope).
-    - [ ] **Relocation Processing:**
+            - [ ] `AT_SECURE` - Set if running setuid/setgid (secureexec).
+            - [ ] Tests: verify auxv entries correct for various binaries.
+    - [ ] **4. Dynamic Linker Bootstrap:**
+        - [ ] **Self-Relocation:**
+            - [ ] Linker must relocate itself before any other operations.
+            - [ ] Parse own ELF headers to find own relocations.
+            - [ ] Apply `R_386_RELATIVE` relocations to fix up addresses.
+            - [ ] No libc calls during bootstrap (use raw syscalls only).
+            - [ ] Files: `libexec/ld.so/rtld_start.S`, `rtld_bootstrap.c`.
+            - [ ] Tests: verify linker starts correctly with various load addresses.
+        - [ ] **Early Initialization:**
+            - [ ] Parse auxiliary vector from stack.
+            - [ ] Initialize minimal internal state.
+            - [ ] Set up error output (write to stderr via raw syscall).
+            - [ ] Acceptance: bootstrap completes without libc dependencies.
+    - [ ] **5. Dependency Resolution & Loading Order:**
+        - [ ] **Dependency Graph Builder:**
+            - [ ] Discover `DT_NEEDED` entries recursively.
+            - [ ] Build directed acyclic graph of dependencies.
+            - [ ] Detect and handle circular dependencies.
+            - [ ] Compute correct load order (topological sort).
+            - [ ] Files: `libexec/ld.so/rtld_dep.c`, `rtld_dep.h`.
+            - [ ] Tests: tests for diamond dependencies, cycles, deep trees.
+        - [ ] **DSO Caching & Reference Counting:**
+            - [ ] Cache loaded DSOs per process (avoid duplicate loads).
+            - [ ] Implement reference counting for each loaded object.
+            - [ ] Handle `DT_SONAME` for library identity matching.
+            - [ ] Files: `libexec/ld.so/rtld_obj.c`, `rtld_obj.h`.
+        - [ ] **Search Path Policy:**
+            - [ ] Implement `LD_PRELOAD` handling.
+            - [ ] Implement `LD_LIBRARY_PATH` parsing.
+            - [ ] Implement `DT_RPATH` handling (deprecated but supported).
+            - [ ] Implement `DT_RUNPATH` handling (preferred).
+            - [ ] Implement `$ORIGIN` expansion in rpath/runpath.
+            - [ ] Implement `$LIB`, `$PLATFORM` expansion if needed.
+            - [ ] Implement system cache (`/etc/ld.so.cache`) lookup.
+            - [ ] Implement default search paths: `/lib`, `/usr/lib`, `/usr/local/lib`.
+            - [ ] Files: `libexec/ld.so/rtld_search.c`, `rtld_search.h`.
+            - [ ] Tests: tests for each search path component.
+        - [ ] **Library Loading:**
+            - [ ] Load shared libraries via `mmap()` with correct protections.
+            - [ ] Handle dependencies recursively (breadth-first order).
+            - [ ] Handle `DT_SONAME` for library identity.
+            - [ ] Tests: load order tests, constructor order tests.
+            - [ ] Acceptance: dependencies loaded in correct order.
+    - [ ] **6. Relocations & Binding:**
+        - [ ] **Relocation Processing Engine:**
+            - [ ] Implement generic relocation dispatch by type.
+            - [ ] Process non-PLT relocations before PLT relocations.
+            - [ ] Files: `libexec/ld.so/rtld_reloc.c`, `rtld_reloc.h`.
         - [ ] **i386 Relocation Types:**
             - [ ] `R_386_NONE` - No relocation.
             - [ ] `R_386_32` - Absolute 32-bit relocation.
@@ -3000,73 +3047,387 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `R_386_GLOB_DAT` - Set GOT entry to symbol address.
             - [ ] `R_386_JMP_SLOT` - PLT lazy binding slot.
             - [ ] `R_386_RELATIVE` - Base address + addend.
-            - [ ] `R_386_TLS_TPOFF` - Thread-local storage offset.
-            - [ ] `R_386_TLS_DTPMOD32`, `R_386_TLS_DTPOFF32` - TLS dynamic relocations.
-        - [ ] Apply relocations in correct order (non-PLT before PLT).
-        - [ ] Handle `BIND_NOW` / `LD_BIND_NOW` for eager binding.
-    - [ ] **Procedure Linkage Table (PLT):**
-        - [ ] Implement lazy binding via PLT stubs.
-        - [ ] PLT0: Call into resolver with library and relocation index.
-        - [ ] `_dl_runtime_resolve()`: Resolve symbol and patch GOT.
-        - [ ] Support `LD_BIND_NOT` for debugging (don't update GOT).
-    - [ ] **Global Offset Table (GOT):**
-        - [ ] GOT[0]: Points to `_DYNAMIC` section.
-        - [ ] GOT[1]: Link map pointer for this object.
-        - [ ] GOT[2]: Resolver entry point.
-        - [ ] GOT[3+]: Function/data addresses.
-    - [ ] **Thread-Local Storage (TLS):**
-        - [ ] Implement TLS allocation for each loaded library.
-        - [ ] Static TLS model (known at link time).
-        - [ ] Dynamic TLS model (allocated at runtime).
-        - [ ] `__tls_get_addr()` implementation.
-        - [ ] TLS initialization (`PT_TLS` segment copying).
-    - [ ] **Initialization and Finalization:**
-        - [ ] Call `DT_INIT` functions for each library.
-        - [ ] Call `DT_INIT_ARRAY` constructors.
-        - [ ] Call in dependency order (dependencies before dependents).
-        - [ ] Call `DT_FINI_ARRAY` destructors on exit.
-        - [ ] Call `DT_FINI` functions on exit.
-        - [ ] `atexit()` integration.
-    - [ ] **Runtime Loading (`libdl`):**
-        - [ ] `dlopen(filename, flags)` - Load shared library at runtime.
-            - [ ] `RTLD_LAZY` - Lazy binding.
-            - [ ] `RTLD_NOW` - Immediate binding.
-            - [ ] `RTLD_GLOBAL` - Symbols available globally.
-            - [ ] `RTLD_LOCAL` - Symbols private to this object.
-            - [ ] `RTLD_NODELETE` - Don't unload on dlclose.
-            - [ ] `RTLD_NOLOAD` - Don't load, just return handle if loaded.
-            - [ ] `RTLD_DEEPBIND` - Put this library before global scope.
-        - [ ] `dlsym(handle, symbol)` - Look up symbol in library.
-            - [ ] `RTLD_DEFAULT` - Search default library order.
-            - [ ] `RTLD_NEXT` - Search libraries after caller.
-        - [ ] `dlclose(handle)` - Unload library (decrement refcount).
-        - [ ] `dlerror()` - Get last error message.
-        - [ ] `dladdr(addr, info)` - Get info about address (library, symbol).
-        - [ ] `dlinfo(handle, request, info)` - Get linker info.
-    - [ ] **Debugging Support:**
-        - [ ] `r_debug` structure for debugger integration.
-        - [ ] `_r_debug` symbol export.
-        - [ ] `RT_ADD`, `RT_DELETE`, `RT_CONSISTENT` state notifications.
-        - [ ] `LD_DEBUG` environment variable support.
-        - [ ] Debug output: bindings, libs, symbols, reloc, files, statistics.
-    - [ ] **Security Features:**
-        - [ ] Ignore `LD_LIBRARY_PATH` for setuid/setgid binaries.
-        - [ ] Ignore `LD_PRELOAD` for setuid/setgid binaries.
-        - [ ] Implement `PT_GNU_RELRO` (read-only relocations).
-        - [ ] Implement BIND_NOW for full RELRO.
-        - [ ] Validate ELF headers and segments.
-    - [ ] **Configuration:**
-        - [ ] `/etc/ld.so.conf` - Library path configuration.
-        - [ ] `/etc/ld.so.cache` - Precomputed library cache.
-        - [ ] `ldconfig` tool to rebuild cache.
-    - [ ] **Testing:**
-        - [ ] Unit tests for relocation types.
-        - [ ] Integration tests with simple shared libraries.
-        - [ ] Test lazy vs eager binding.
-        - [ ] Test `dlopen`/`dlsym`/`dlclose` lifecycle.
-        - [ ] Test circular dependency detection.
-        - [ ] Test symbol versioning.
-        - [ ] Test TLS in shared libraries.
+            - [ ] `R_386_TLS_TPOFF` - Thread-local storage offset (static TLS).
+            - [ ] `R_386_TLS_DTPMOD32` - TLS module ID.
+            - [ ] `R_386_TLS_DTPOFF32` - TLS offset within module.
+            - [ ] Tests: unit tests for each relocation type.
+        - [ ] **Lazy PLT Binding:**
+            - [ ] Implement lazy binding via PLT stubs.
+            - [ ] PLT0: Call into resolver with library and relocation index.
+            - [ ] Implement `_dl_runtime_resolve()`: resolve symbol and patch GOT.
+            - [ ] Support `LD_BIND_NOT` for debugging (don't update GOT).
+            - [ ] Files: `libexec/ld.so/rtld_plt.S`, `rtld_plt.c`.
+            - [ ] Tests: lazy binding tests with multiple calls.
+        - [ ] **Immediate Binding:**
+            - [ ] Implement `RTLD_NOW` / `LD_BIND_NOW` for eager binding.
+            - [ ] Bind all PLT slots at load time when requested.
+            - [ ] Tests: immediate binding tests.
+        - [ ] **Copy Relocations:**
+            - [ ] Implement `R_386_COPY` for data symbols.
+            - [ ] Allocate space in executable BSS for copied symbols.
+            - [ ] Copy initial data from shared library.
+            - [ ] Tests: copy relocation tests.
+        - [ ] **Thread Safety:**
+            - [ ] Implement atomic updates to GOT/PLT during lazy binding.
+            - [ ] Document and implement locking policy for concurrent bindings.
+            - [ ] Tests: concurrency tests for lazy binding under threads.
+            - [ ] Acceptance: relocations applied correctly, no races.
+    - [ ] **7. Procedure Linkage Table (PLT) & Global Offset Table (GOT):**
+        - [ ] **GOT Structure:**
+            - [ ] GOT[0]: Points to `_DYNAMIC` section.
+            - [ ] GOT[1]: Link map pointer for this object.
+            - [ ] GOT[2]: Resolver entry point (`_dl_runtime_resolve`).
+            - [ ] GOT[3+]: Function/data addresses.
+            - [ ] Document GOT layout in design doc.
+        - [ ] **PLT Structure:**
+            - [ ] PLT[0]: Common resolver stub.
+            - [ ] PLT[n]: Per-function stubs that call PLT[0].
+            - [ ] Document PLT layout and calling convention.
+            - [ ] Tests: verify PLT/GOT structure for sample DSOs.
+    - [ ] **8. Symbol Resolution & Interposition:**
+        - [ ] **Symbol Table Access:**
+            - [ ] Implement `DT_HASH` (SYSV hash) lookup.
+            - [ ] Implement `DT_GNU_HASH` (GNU hash, faster) lookup.
+            - [ ] Benchmark and prefer GNU_HASH when available.
+            - [ ] Files: `libexec/ld.so/rtld_sym.c`, `rtld_sym.h`.
+        - [ ] **Global Symbol Table:**
+            - [ ] Build global symbol table for resolution.
+            - [ ] Handle symbol preemption (LD_PRELOAD first).
+            - [ ] Handle weak vs strong symbol rules.
+            - [ ] Handle symbol visibility (DEFAULT, HIDDEN, PROTECTED).
+            - [ ] Handle undefined weak symbols (resolve to NULL).
+        - [ ] **Symbol Versioning:**
+            - [ ] Implement `DT_VERSYM` support (version symbol table).
+            - [ ] Implement `DT_VERNEED` support (version needed).
+            - [ ] Implement `DT_VERDEF` support (version definition).
+            - [ ] Match versioned symbols correctly.
+            - [ ] Tests: versioned symbol tests.
+        - [ ] **Interposition & DT_SYMBOLIC:**
+            - [ ] Implement interposition rules (first definition wins).
+            - [ ] Implement `DT_SYMBOLIC` semantics (search own symbols first).
+            - [ ] Tests: interposition tests with LD_PRELOAD and overrides.
+            - [ ] Acceptance: symbol resolution matches specification.
+    - [ ] **9. Thread-Local Storage (TLS):**
+        - [ ] **TLS Models:**
+            - [ ] Implement static TLS model (Initial Exec, Local Exec).
+            - [ ] Implement dynamic TLS model (General Dynamic, Local Dynamic).
+            - [ ] Document TLS model selection in design doc.
+            - [ ] Files: `libexec/ld.so/rtld_tls.c`, `rtld_tls.h`.
+        - [ ] **TLS Initialization:**
+            - [ ] Parse `PT_TLS` segment from each DSO.
+            - [ ] Calculate total static TLS size and offsets.
+            - [ ] Initialize TLS for main program.
+            - [ ] Initialize TLS for dlopen-ed modules.
+            - [ ] Handle TLS alignment requirements.
+        - [ ] **TLS Runtime Support:**
+            - [ ] Implement `__tls_get_addr()` for dynamic TLS access.
+            - [ ] Implement per-thread TLS allocation.
+            - [ ] Integrate with pthread runtime (thread creation).
+            - [ ] Files: `libexec/ld.so/rtld_tls_get_addr.S`.
+            - [ ] Tests: TLS correctness tests across threads.
+            - [ ] Tests: dlopen/dlclose with TLS usage.
+            - [ ] Acceptance: TLS variables isolated per thread.
+    - [ ] **10. Constructors / Destructors / Initialization Order:**
+        - [ ] **Constructor Scanning:**
+            - [ ] Scan for `.init` section (legacy).
+            - [ ] Scan for `DT_INIT` function address.
+            - [ ] Scan for `DT_PREINIT_ARRAY` (executable only).
+            - [ ] Scan for `DT_INIT_ARRAY` function pointer array.
+            - [ ] Scan for `.ctors` section (legacy GCC).
+            - [ ] Files: `libexec/ld.so/rtld_init.c`, `rtld_init.h`.
+        - [ ] **Constructor Invocation:**
+            - [ ] Call `DT_PREINIT_ARRAY` functions (executable only, before deps).
+            - [ ] Call constructors in dependency order (deps before dependents).
+            - [ ] Call `DT_INIT` before `DT_INIT_ARRAY`.
+            - [ ] Handle constructor failures (continue or abort per policy).
+            - [ ] Tests: constructor order tests with complex dependency graphs.
+        - [ ] **Destructor Invocation:**
+            - [ ] Call `DT_FINI_ARRAY` destructors on exit.
+            - [ ] Call `DT_FINI` after `DT_FINI_ARRAY`.
+            - [ ] Call `atexit()` handlers (integrate with libc).
+            - [ ] Call destructors in reverse dependency order.
+            - [ ] Call destructors on `dlclose()` when refcount reaches zero.
+            - [ ] Tests: destructor order tests, dlclose destructor tests.
+            - [ ] Acceptance: constructors/destructors run in correct order.
+    - [ ] **11. dlopen / dlsym / dlclose Runtime API (libdl):**
+        - [ ] **dlopen():**
+            - [ ] Implement `dlopen(filename, flags)` - Load shared library at runtime.
+            - [ ] Flag: `RTLD_LAZY` - Lazy binding.
+            - [ ] Flag: `RTLD_NOW` - Immediate binding (resolve all symbols).
+            - [ ] Flag: `RTLD_GLOBAL` - Symbols available for subsequent loads.
+            - [ ] Flag: `RTLD_LOCAL` - Symbols private to this object (default).
+            - [ ] Flag: `RTLD_NODELETE` - Don't unload on dlclose.
+            - [ ] Flag: `RTLD_NOLOAD` - Don't load, just return handle if loaded.
+            - [ ] Flag: `RTLD_DEEPBIND` - Put this library before global scope.
+            - [ ] Return opaque handle on success, NULL on failure.
+            - [ ] Files: `lib/dl/dlopen.c`.
+            - [ ] Tests: dlopen tests for each flag combination.
+        - [ ] **dlsym():**
+            - [ ] Implement `dlsym(handle, symbol)` - Look up symbol.
+            - [ ] Handle `RTLD_DEFAULT` - Search default library order.
+            - [ ] Handle `RTLD_NEXT` - Search libraries after caller.
+            - [ ] Handle `RTLD_SELF` - Search caller's scope.
+            - [ ] Return symbol address or NULL if not found.
+            - [ ] Files: `lib/dl/dlsym.c`.
+            - [ ] Tests: dlsym tests for each pseudo-handle.
+        - [ ] **dlclose():**
+            - [ ] Implement `dlclose(handle)` - Decrement refcount.
+            - [ ] Unload library when refcount reaches zero.
+            - [ ] Call destructors before unload.
+            - [ ] Handle `RTLD_NODELETE` (never actually unload).
+            - [ ] Handle dependencies (don't unload if still referenced).
+            - [ ] Files: `lib/dl/dlclose.c`.
+            - [ ] Tests: refcounting tests, destructor tests.
+        - [ ] **dlerror():**
+            - [ ] Implement `dlerror()` - Get last error message.
+            - [ ] Thread-safe error storage.
+            - [ ] Clear error after retrieval.
+            - [ ] Files: `lib/dl/dlerror.c`.
+        - [ ] **dladdr():**
+            - [ ] Implement `dladdr(addr, info)` - Get info about address.
+            - [ ] Populate `Dl_info` structure with filename, base, symbol name, symbol address.
+            - [ ] Files: `lib/dl/dladdr.c`.
+        - [ ] **dlinfo():**
+            - [ ] Implement `dlinfo(handle, request, info)` - Get linker info.
+            - [ ] Support `RTLD_DI_LINKMAP`, `RTLD_DI_LMID`, etc.
+            - [ ] Files: `lib/dl/dlinfo.c`.
+        - [ ] **libdl Header & Build:**
+            - [ ] Create `include/dlfcn.h` with all declarations.
+            - [ ] Build `libdl.so` shared library.
+            - [ ] Tests: integration tests for full dlopen/dlsym/dlclose lifecycle.
+            - [ ] Acceptance: runtime API matches POSIX and documented behavior.
+    - [ ] **12. Environment, Configuration & Security:**
+        - [ ] **Environment Variables:**
+            - [ ] `LD_LIBRARY_PATH` - Additional library search paths.
+            - [ ] `LD_PRELOAD` - Libraries to preload before others.
+            - [ ] `LD_BIND_NOW` - Force immediate binding.
+            - [ ] `LD_BIND_NOT` - Don't update GOT (debug).
+            - [ ] `LD_DEBUG` - Enable debug output.
+            - [ ] `LD_DEBUG_OUTPUT` - Debug output file.
+            - [ ] `LD_TRACE_LOADED_OBJECTS` - Print library list and exit (ldd mode).
+            - [ ] Document all environment variables in man page.
+        - [ ] **Secureexec Mode:**
+            - [ ] Detect setuid/setgid via `AT_SECURE` auxv entry.
+            - [ ] Ignore `LD_LIBRARY_PATH` for setuid/setgid binaries.
+            - [ ] Ignore `LD_PRELOAD` for setuid/setgid binaries.
+            - [ ] Ignore `LD_DEBUG` for setuid/setgid binaries.
+            - [ ] Ignore all `LD_*` variables in secure mode.
+            - [ ] Refuse to load libraries from user-writable directories.
+            - [ ] Verify library ownership/permissions in secure mode.
+            - [ ] Document secure behavior in design doc and man page.
+            - [ ] Tests: secureexec tests with mock setuid scenario.
+        - [ ] **RELRO (Read-Only Relocations):**
+            - [ ] Implement `PT_GNU_RELRO` segment handling.
+            - [ ] Mark relocation areas read-only after processing.
+            - [ ] Implement full RELRO with `BIND_NOW`.
+            - [ ] Tests: RELRO protection tests.
+        - [ ] **Chroot/Sysroot Handling:**
+            - [ ] Support alternate sysroot for containers/chroots.
+            - [ ] Respect `LD_SYSROOT` or similar if defined.
+            - [ ] Tests: sysroot tests.
+            - [ ] Acceptance: secure modes enforce all restrictions.
+    - [ ] **13. Configuration & Caching:**
+        - [ ] **ld.so.conf:**
+            - [ ] Implement `/etc/ld.so.conf` parsing.
+            - [ ] Support include directives for `/etc/ld.so.conf.d/*.conf`.
+            - [ ] Files: `libexec/ld.so/rtld_conf.c`.
+        - [ ] **ld.so.cache:**
+            - [ ] Define cache file format.
+            - [ ] Implement cache reader in loader.
+            - [ ] Handle cache miss gracefully (fall back to search).
+            - [ ] Handle stale/corrupt cache gracefully.
+            - [ ] Files: `libexec/ld.so/rtld_cache.c`.
+        - [ ] **ldconfig Tool:**
+            - [ ] Implement `sbin/ldconfig` to rebuild cache.
+            - [ ] Scan configured directories for shared libraries.
+            - [ ] Create symlinks for SONAME → real file.
+            - [ ] Write `/etc/ld.so.cache`.
+            - [ ] Files: `sbin/ldconfig/ldconfig.c`.
+            - [ ] Man page: `ldconfig(8)`.
+            - [ ] Tests: cache read/write tests.
+            - [ ] Acceptance: cache improves lookup performance.
+    - [ ] **14. Performance & Optimizations:**
+        - [ ] **Hash Lookup Optimization:**
+            - [ ] Prefer GNU_HASH over SYSV hash when available.
+            - [ ] Benchmark both hash algorithms.
+            - [ ] Document performance characteristics.
+        - [ ] **Lazy Binding Optimization:**
+            - [ ] Minimize overhead in PLT resolver.
+            - [ ] Cache resolved symbols efficiently.
+        - [ ] **Relocation Batching:**
+            - [ ] Process relocations in batches where possible.
+            - [ ] Minimize page faults during relocation.
+        - [ ] **Prelinking (Optional):**
+            - [ ] Document prelinking concept as optional future enhancement.
+            - [ ] Add placeholder task for `prelink` tool.
+        - [ ] **Performance Testing:**
+            - [ ] Add microbenchmarks for symbol lookup.
+            - [ ] Add benchmarks for library load time.
+            - [ ] Integrate performance tests into CI.
+            - [ ] Acceptance: measurable improvements documented.
+    - [ ] **15. Diagnostics, Auditing & Tracing:**
+        - [ ] **Debug Output:**
+            - [ ] Implement `LD_DEBUG` support with categories:
+                - [ ] `LD_DEBUG=libs` - Library search/load.
+                - [ ] `LD_DEBUG=reloc` - Relocation processing.
+                - [ ] `LD_DEBUG=symbols` - Symbol lookups.
+                - [ ] `LD_DEBUG=bindings` - Symbol bindings.
+                - [ ] `LD_DEBUG=files` - File operations.
+                - [ ] `LD_DEBUG=versions` - Version processing.
+                - [ ] `LD_DEBUG=statistics` - Runtime statistics.
+                - [ ] `LD_DEBUG=all` - All categories.
+            - [ ] Files: `libexec/ld.so/rtld_debug.c`.
+        - [ ] **Debugger Support:**
+            - [ ] Implement `r_debug` structure for GDB integration.
+            - [ ] Export `_r_debug` symbol.
+            - [ ] Implement `_dl_debug_state()` breakpoint hook.
+            - [ ] State notifications: `RT_ADD`, `RT_DELETE`, `RT_CONSISTENT`.
+            - [ ] Files: `libexec/ld.so/rtld_gdb.c`, `include/link.h`.
+            - [ ] Tests: GDB integration tests.
+        - [ ] **Audit Interface (Optional):**
+            - [ ] Implement `rtld-audit` interface for load/unload hooks.
+            - [ ] Support `LD_AUDIT` environment variable.
+            - [ ] Document audit API.
+        - [ ] **System Tracing:**
+            - [ ] Ensure loader is ktrace/strace-friendly.
+            - [ ] Document tracing techniques.
+            - [ ] Tests: trace output tests.
+            - [ ] Acceptance: diagnostics useful and documented.
+    - [ ] **16. Error Handling & Robustness:**
+        - [ ] **Failure Modes:**
+            - [ ] Define and document failure modes for each operation.
+            - [ ] Relocation failure: report symbol name and DSO.
+            - [ ] Unresolved symbol: report symbol name and search path.
+            - [ ] Constructor failure: report function address and DSO.
+            - [ ] Malformed DSO: report specific validation failure.
+        - [ ] **Error Messages:**
+            - [ ] Provide helpful diagnostics with SONAME/path information.
+            - [ ] Include failing relocation type and offset.
+            - [ ] Format: `ld.so: <DSO>: <error>: <details>`.
+        - [ ] **Graceful Degradation:**
+            - [ ] Continue loading other DSOs after non-fatal errors where possible.
+            - [ ] Document fatal vs non-fatal error policy.
+        - [ ] **Fuzzing & Sanitizers:**
+            - [ ] Fuzz test with malformed ELF files.
+            - [ ] Fuzz test with malicious relocation data.
+            - [ ] Run all tests under AddressSanitizer.
+            - [ ] Run all tests under UndefinedBehaviorSanitizer.
+            - [ ] Tests: determinism tests (same input → same output).
+            - [ ] Acceptance: loader never crashes on malformed input.
+    - [ ] **17. Thread Safety & Concurrency:**
+        - [ ] **Locking Strategy:**
+            - [ ] Define global loader lock vs per-object locks.
+            - [ ] Document locking invariants.
+            - [ ] Implement recursive-safe locking for nested dlopen.
+            - [ ] Files: `libexec/ld.so/rtld_lock.c`, `rtld_lock.h`.
+        - [ ] **Thread-Safe Operations:**
+            - [ ] Thread-safe `dlopen()`.
+            - [ ] Thread-safe `dlclose()`.
+            - [ ] Thread-safe lazy binding resolution.
+            - [ ] Thread-safe TLS allocation.
+        - [ ] **Concurrency Testing:**
+            - [ ] Stress tests with many threads calling dlopen/dlsym.
+            - [ ] Stress tests with concurrent lazy binding.
+            - [ ] Tests: deadlock detection tests.
+            - [ ] Tests: race condition tests.
+            - [ ] Acceptance: no deadlocks or races in tests.
+    - [ ] **18. Unloading & Resource Cleanup:**
+        - [ ] **dlclose Behavior:**
+            - [ ] Decrement reference count on dlclose.
+            - [ ] Unload when refcount reaches zero (unless RTLD_NODELETE).
+            - [ ] Call destructors before unload.
+            - [ ] Free TLS data for unloaded module.
+            - [ ] Unmap segments.
+        - [ ] **Unloadable Modules:**
+            - [ ] Handle case where symbols are still referenced.
+            - [ ] Document behavior (refuse unload or warn).
+            - [ ] Handle static TLS modules (cannot unload).
+        - [ ] **Leak Detection:**
+            - [ ] Run tests under sanitizers to detect leaks.
+            - [ ] Verify all allocations freed on process exit.
+            - [ ] Verify TLS and static data cleaned up.
+            - [ ] Acceptance: no leaks in tests.
+    - [ ] **19. ABI & Tooling Compatibility:**
+        - [ ] **dl_iterate_phdr:**
+            - [ ] Implement `dl_iterate_phdr()` for iterating loaded objects.
+            - [ ] Required for exception handling (libunwind, C++ EH).
+            - [ ] Files: `lib/dl/dl_iterate_phdr.c`.
+            - [ ] Header: `include/link.h`.
+        - [ ] **libdl Interface:**
+            - [ ] Provide complete `dlfcn.h` header.
+            - [ ] Provide `link.h` header (link_map, r_debug).
+            - [ ] Build `libdl.so` and `libdl.a`.
+        - [ ] **Compatibility Shims:**
+            - [ ] Document any GNU/Linux compatibility shims needed.
+            - [ ] Implement common expectations of third-party software.
+            - [ ] Tests: third-party compatibility tests.
+    - [ ] **20. Installer & Packaging:**
+        - [ ] **Install Layout:**
+            - [ ] Define interpreter path: `/libexec/ld.so` (BSD style).
+            - [ ] Alternative: `/libexec/ld-elf.so.1` for compatibility.
+            - [ ] Install `libdl.so` to `/lib`.
+            - [ ] Install headers to `/usr/include`.
+        - [ ] **Packaging:**
+            - [ ] Provide packaging scripts.
+            - [ ] Define versioning policy.
+            - [ ] Define symlink policy for upgrades.
+            - [ ] Acceptance: installer places interpreter correctly.
+    - [ ] **21. Tests & CI:**
+        - [ ] **Unit Tests:**
+            - [ ] ELF parsing tests (valid/invalid headers).
+            - [ ] Segment mapping tests.
+            - [ ] Relocation tests (each type).
+            - [ ] Symbol lookup tests (hash, versioning).
+            - [ ] TLS tests.
+        - [ ] **Integration Tests:**
+            - [ ] Build small test executables and shared libraries.
+            - [ ] Test preload functionality.
+            - [ ] Test dlopen/dlsym/dlclose lifecycle.
+            - [ ] Test constructor/destructor order.
+            - [ ] Test TLS across threads and dlopen.
+            - [ ] Test circular dependencies.
+            - [ ] Test deep dependency trees.
+        - [ ] **Property Tests:**
+            - [ ] Symbol resolution order properties.
+            - [ ] Relocation correctness properties.
+        - [ ] **Fuzz Tests:**
+            - [ ] Fuzz ELF parser with malformed files.
+            - [ ] Fuzz relocation processor.
+            - [ ] Fuzz symbol resolver.
+        - [ ] **CI Matrix:**
+            - [ ] Sanitizer builds (ASAN, UBSAN, MSAN).
+            - [ ] Multi-arch builds (i386, x86_64 when ready).
+            - [ ] Regression test suite.
+            - [ ] Performance benchmarks.
+            - [ ] Acceptance: CI green, sanitizers clean.
+    - [ ] **22. Documentation & Man Pages:**
+        - [ ] **Man Pages:**
+            - [ ] Write `ld.so(8)` man page covering:
+                - [ ] Description of dynamic linker.
+                - [ ] Environment variables.
+                - [ ] Secureexec rules.
+                - [ ] Debugging techniques.
+                - [ ] Files and paths.
+            - [ ] Write `dlopen(3)` man page with usage examples.
+            - [ ] Write `dlsym(3)` man page.
+            - [ ] Write `dlclose(3)` man page.
+            - [ ] Write `dlerror(3)` man page.
+            - [ ] Write `dladdr(3)` man page.
+            - [ ] Write `dlinfo(3)` man page.
+            - [ ] Write `dl_iterate_phdr(3)` man page.
+            - [ ] Write `ldconfig(8)` man page.
+        - [ ] **Developer Documentation:**
+            - [ ] Design document (covered in Specification).
+            - [ ] Decision log for major choices.
+            - [ ] Security notes and threat model.
+            - [ ] Migration notes for systems upgrading.
+            - [ ] Acceptance: docs reviewed and in repository.
+    - [ ] **23. Audit & Refactor Existing Code:**
+        - [ ] Audit any existing loader/runtime code in repository.
+        - [ ] Document fragile or incomplete code paths.
+        - [ ] Schedule refactor tasks before reuse.
+        - [ ] Replace all TODOs/FIXMEs with individual checklist items.
+        - [ ] Acceptance: no fragile stubs remain when core implemented.
 - [ ] **System Interface Libraries:**
     - [ ] **Native Kernel Introspection (`libsys` / `libkernel`):**
         - [ ] **Core Architecture:**
@@ -3125,44 +3486,44 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `uname()`: System identification.
                 - [ ] `getrlimit()`: Process resource limits.
                 - [ ] `clock_gettime()`: High-resolution system clocks.
-        - [/] **Process Information API (`lib/sys`):**
+        - [x] **Process Information API (`lib/sys`):**
             - [x] `sys_proc_count()` - Get total number of processes.
             - [x] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
             - [x] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info (including `bitness`).
-            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
-            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
-            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
-            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)` - Get current working directory.
-            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
-            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
-            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
-        - [ ] **Memory Statistics API (`lib/sys`):**
-            - [ ] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
-            - [ ] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).
-            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
-            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
-            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
-        - [/] **CPU Information API (`lib/sys`):**
+            - [x] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
+            - [x] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
+            - [x] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
+            - [x] `sys_proc_cwd(pid_t pid, char *buf, size_t len)` - Get current working directory.
+            - [x] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
+            - [x] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
+            - [x] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
+        - [x] **Memory Statistics API (`lib/sys`):** (stubs)
+            - [x] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
+            - [x] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).
+            - [x] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
+            - [x] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
+            - [x] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
+        - [x] **CPU Information API (`lib/sys`):** (stubs)
             - [x] `sys_cpu_count()` - Number of CPUs (online/possible/present).
-            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
-            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
-            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
-        - [/] **System Information API (`lib/sys`):**
-            - [ ] `sys_uptime(struct timespec *ts)` - System uptime.
-            - [ ] `sys_boottime(struct timespec *ts)` - Boot timestamp.
+            - [x] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
+            - [x] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
+            - [x] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
+        - [x] **System Information API (`lib/sys`):** (stubs)
+            - [x] `sys_uptime(struct timespec *ts)` - System uptime.
+            - [x] `sys_boottime(struct timespec *ts)` - Boot timestamp.
             - [x] `sys_hostname(char *buf, size_t len)` - System hostname.
-            - [ ] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
-            - [ ] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
-        - [ ] **Network Information API (`lib/sys`):**
-            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)` - List network interfaces.
-            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
-            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
-            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
+            - [x] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
+            - [x] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
+        - [x] **Network Information API (`lib/sys`):** (stubs)
+            - [x] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)` - List network interfaces.
+            - [x] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
+            - [x] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
+            - [x] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
         - [x] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
             - [x] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
-            - [ ] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
-            - [ ] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
-            - [ ] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.
+            - [x] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
+            - [x] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
+            - [x] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.
     - [ ] **BSD Compatibility Shim (`libkvm`):**
         - [ ] **Design Goals:**
             - [ ] Provide FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
@@ -3344,41 +3705,41 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Here-documents (`<<`).
         - [x] Proper ordering and evaluation timing.
         - [x] Error handling and rollback (save/restore).
-    - [ ] **Execution Engine:**
+    - [x] **Execution Engine:**
         - [x] Builtin vs external command resolution.
         - [x] PATH search rules.
         - [x] `exec` behavior (shell replacement).
         - [x] Process forking model.
         - [x] Job control hooks integration.
         - [x] Exit status propagation.
-        - [ ] `set -e` semantics.
-    - [ ] **Builtin Commands:**
+        - [x] `set -e` semantics.
+    - [x] **Builtin Commands:**
         - [x] `:` (Null command).
         - [x] `.` (Dot/Source).
         - [x] `break`.
         - [x] `continue`.
         - [x] `cd` (including `CDPATH`).
-        - [ ] `command`.
+        - [x] `command`.
         - [x] `eval`.
         - [x] `exec`.
         - [x] `exit`.
         - [x] `export`.
-        - [ ] `getopts`.
-        - [ ] `read`.
-        - [ ] `readonly`.
-        - [ ] `return`.
-        - [ ] `set`.
+        - [x] `getopts`.
+        - [x] `read`.
+        - [x] `readonly`.
+        - [x] `return`.
+        - [x] `set`.
         - [x] `unset`.
         - [x] `shift`.
-        - [ ] `times`.
-        - [ ] `trap`.
-        - [ ] `umask`.
-        - [ ] `wait`.
-    - [ ] **Variables & Environment:**
-        - [ ] Shell vs Environment variable distinction.
-        - [ ] Scope rules (Global, Local, Function).
-        - [ ] Export semantics.
-        - [ ] Read-only enforcement.
+        - [x] `times`.
+        - [x] `trap`.
+        - [x] `umask`.
+        - [x] `wait`.
+    - [x] **Variables & Environment:**
+        - [x] Shell vs Environment variable distinction.
+        - [x] Scope rules (Global, Local, Function).
+        - [x] Export semantics.
+        - [x] Read-only enforcement.
     - [x] **Functions:**
         - [x] Definition and Invocation.
         - [x] Local variables scoping.
@@ -3387,151 +3748,1465 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Foreground/Background.
         - [x] Process groups.
         - [x] Signal forwarding.
-    - [ ] **Signals & Traps:**
-        - [ ] Default signal handling.
-        - [ ] `trap` builtin integration.
-    - [ ] **Testing & Compliance:**
+    - [x] **Signals & Traps:**
+        - [x] Default signal handling.
+        - [x] `trap` builtin integration.
+    - [x] **Testing & Compliance:**
         - [ ] Unit tests for all modules.
-        - [ ] Script-based conformance tests.
-        - [ ] Coverage-guided fuzzing.
-        - [ ] Man page (`sh(1)`).
+        - [x] Script-based conformance tests.
+        - [x] Coverage-guided fuzzing.
+        - [x] Man page (`sh(1)`).
+    - [ ] **Interactive Features:**
+        - [ ] **Prompt Handling (PS1):**
+            - [x] **Invocation Semantics:**
+                - [x] Determine interactive mode logic (only evaluate PS1 if `is_interactive`).
+                - [x] Suppress PS1 evaluation in non-interactive/script mode.
+                - [x] Implement re-evaluation trigger before `readline` or input loop.
+                - [x] Handle `set -x` (xtrace) interactions (ensure PS1 expansion isn't traced unless necessary/specified).
+                - [x] Handle `set -e` interactions (errors in PS1 expansion should not exit shell).
+            - [x] **Expansion Pipeline:**
+                - [x] Integrate PS1 expansion into core expansion engine.
+                - [x] Enable **Parameter Expansion** for PS1.
+                - [x] Enable **Command Substitution** for PS1.
+                - [x] Enable **Arithmetic Expansion** for PS1.
+                - [x] Disable **Quote Removal** (PS1 retains quotes, or strictly follows POSIX requirements).
+            - [x] **Escape Sequence Parsing:**
+                - [x] Implement parser for backslash escapes in PS1.
+                - [x] Support `\!` (history number) escape.
+                - [x] Support `\$` (uid-based suffix `#`/`$`) escape.
+                - [x] Support `\\` (literal backslash) escape.
+                - [x] Handle undefined escapes deterministically (e.g., print literal char).
+                - [x] Support **Common Escapes** (`\u`, `\h`, `\w`) using standard libc functions.
+            - [x] **State-Dependent Elements:**
+                - [x] Implement effective UID check for `\$`.
+                - [x] Expose exit status `?` to prompt expansion without resetting it.
+            - [x] **Error Handling:**
+                - [x] Graceful failure on expansion error (fallback to default string).
+                - [x] Prevent shell crash on malformed PS1 (OOM safety).
+                - [x] Bound recursion depth for PS1 expansion (verified single-pass).
+            - [x] **Performance:**
+                - [x] Prioritize memory leak checks for repeated PS1 expansion.
+                - [x] Verify no state mutation during prompt rendering.
+            - [x] **Testing:**
+                - [x] Unit test: Escape sequence parser (implemented in `tests/test_prompt.c`).
+                - [x] Unit test: Expansion order validation.
+                - [x] Edge case: Empty PS1.
+                - [x] Edge case: Deeply nested command substitution in PS1.
+                - [x] Fuzz test: `fuzz_ps1_parser.c`.
+            - [x] **Documentation:**
+                - [x] Document PS1 expansion behavior in `sh(1)`.
+                - [x] Document supported escapes.
+        - [ ] **Extended Prompt Formatting (Opt-in):**
+            - [x] **Mode Selection:**
+                - [x] Implement configuration option (e.g., `set -o promptvars` or custom shopt) to enable extended parsing.
+                - [x] Define precedence logic (POSIX PS1 behavior default vs Extended).
+                - [x] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string.
+                - [x] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`).
+            - [x] **Format Grammar:**
+                - [x] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`).
+                - [x] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`).
+                - [x] Define Conditional token syntax (e.g., `%(condition.true.false)`).
+                - [x] Explicitly list reserved/unsupported tokens for future compatibility.
+            - [x] **Token Parsing:**
+                - [x] Implement dedicated predictive parser for prompt strings (separate from main shell parser).
+                - [x] Handle escaped `%` characters (`%%`).
+                - [x] Handle unknown/malformed sequences (emit literal or error without crash).
+                - [x] Ensure parsing is deterministic and stateless.
+            - [x] **Expansion Semantics:**
+                - [x] Define expansion order: Extended Tokens -> Parameter Expansion -> Command Sub -> Arith.
+                - [x] Isolate prompt expansions to prevent shell state mutation (sandbox execution).
+                - [x] Implement recursion depth limits for nested prompts.
+                - [x] Ensure non-printing characters in expansions are correctly marked.
+            - [x] **Dynamic Elements:**
+                - [x] `%~` / `%d`: Current Working Directory (Collapse $HOME to ~).
+                - [x] `%n`: Current Username.
+                - [x] `%m` / `%M`: Hostname (Short/Long).
+                - [x] `%#`: UID superuser status (`#` vs `%`).
+                - [x] `%?`: Last exit code.
+                - [x] `%L`: Shell nesting level/depth.
+                - [x] `%j`: Number of background jobs.
+            - [x] **Styling & Attributes:**
+                - [x] Support `%F{color}` / `%f`: Foreground color (ANSI).
+                - [x] Support `%K{color}` / `%k`: Background color (ANSI).
+                - [x] Support `%B` / `%b`: Bold attribute.
+                - [x] Support `%U` / `%u`: Underline attribute.
+                - [x] Implement logic to calculate visible width vs escape sequence width (for line wrapping).
+            - [x] **Rendering Engine:**
+                - [x] Implement efficient string builder for prompt assembly.
+                - [x] Memory Management: Ensure no leaks across repeated prompt evaluations.
+                - [x] Optimization: Cache static parts of the prompt if possible.
+                - [x] Clean separation: `parse_prompt()`, `expand_tokens()`, `render_string()`.
+            - [x] **Error Handling:**
+                - [x] Define fallback behavior (e.g., print raw string) if parsing fails.
+                - [x] Signal safety: Ensure expansion is safe during signal handling if used there.
+                - [x] Guard against exponential expansion attacks.
+            - [x] **Testing:**
+                - [x] Unit: Parser validation for standard tokens.
+                - [x] Unit: Width calculation correctness with ANSI codes.
+                - [x] Integration: Enable extended mode and verify prompt appearance.
+                - [x] Fuzzing: `fuzz_extended_prompt.c` targets parser.
+                - [x] Property: Randomized prompt strings don't crash shell.
+            - [x] **Documentation:**
+                - [x] Document new `%` escapes in `sh(1)`.
+                - [x] Explicitly contrast POSIX PS1 vs Extended Mode handling.
+                - [x] Document color/attribute codes.
+                - [x] Document limits (depth, length, etc).
 - [ ] **Core Utilities:**
-    - [x] **`ls` - List directory contents:**
-        - [x] **Purpose:** List information about the FILEs (the current directory by default).
-        - [x] **Standards:** POSIX.1-2017, BSD Extensions (color).
-        - [x] **Operands:**
-            - [x] `-a`, `--all`: List all files including hidden ones.
-            - [x] `-A`, `--almost-all`: List all except `.` and `..`.
-            - [x] `-l`: Long listing format (permissions, ownership, size, time).
-            - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
-            - [x] `-R`, `--recursive`: List subdirectories recursively.
-            - [x] `-r`, `--reverse`: Reverse order while sorting.
-            - [x] `-S`: Sort by file size.
-            - [x] `-t`: Sort by modification time.
-            - [x] `--color`: Colorize output (auto/always/never).
-        - [ ] **Runtime:**
-            - [ ] Column width calculation for multi-column output.
-            - [ ] Date formatting (recent vs old files).
-            - [ ] User/Group name caching.
-        - [ ] **Library dependencies:**
-            - [ ] `xopendir`, `xreaddir`, `xstat`, `xclosedir`, `humanize_number`, `pwcache`, `groupcache` or `getpwuid`/`getgrgid`
-        - [x] **Acceptance tests:**
-            - [x] `ls` empty directory -> empty output
-            - [x] `ls -a` -> shows `.` and `..`
-            - [x] `ls -l` -> correct permissions and ownership columns
-            - [x] `ls -R` -> descends into subdirectories
-    - [ ] **`cp` - Copy files and directories:**
-        - [ ] **Purpose:** Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
+    - [ ] **`ls` - List directory contents (Production Quality Rewrite):**
+        - [x] **Audit & Refactor Existing Code:**
+            - [x] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
+            - [x] Document all functionality gaps and bugs.
+            - [x] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal.
+            - [x] Extract option parsing into `ls_opts.c` and `ls_opts.h`.
+            - [x] Extract output formatting into `ls_print.c` and `ls_print.h`.
+            - [x] Extract sorting logic into `ls_sort.c` and `ls_sort.h`.
+            - [x] Extract directory traversal into `ls_traverse.c` and `ls_traverse.h`.
+            - [x] Write unit tests for each extracted module before proceeding.
+        - [x] **CLI Options:**
+            - [x] **Filtering:**
+                - [x] `-a`, `--all`: List all files including hidden ones.
+                - [x] `-A`, `--almost-all`: List all except `.` and `..`.
+                - [x] `-d`, `--directory`: List directories themselves, not their contents.
+                - [x] `-I PATTERN`, `--ignore=PATTERN`: Do not list implied entries matching PATTERN.
+            - [x] **Output Format:**
+                - [x] `-l`: Long listing format (permissions, ownership, size, time).
+                - [x] `-1`: Force single-column output.
+                - [x] `-C`: Force multi-column output (default for terminal).
+                - [x] `-m`: Comma-separated output.
+                - [x] `-x`: List entries by lines instead of columns.
+                - [x] `-g`: Like `-l` but omit owner.
+                - [x] `-o`: Like `-l` but omit group.
+                - [x] `-n`, `--numeric-uid-gid`: Like `-l` but show numeric UID/GID.
+            - [x] **Sorting:**
+                - [x] `-r`, `--reverse`: Reverse order while sorting.
+                - [x] `-S`: Sort by file size (largest first).
+                - [x] `-t`: Sort by modification time (newest first).
+                - [x] `-u`: Sort by access time (with `-lt`), show atime (with `-l`).
+                - [x] `-c`: Sort by ctime (with `-lt`), show ctime (with `-l`).
+                - [x] `-U`: Do not sort; list in directory order.
+                - [x] `-f`: Do not sort, enable `-aU`, disable `-ls --color`.
+                - [x] `-v`: Natural sort of version numbers within text.
+            - [x] **Symlink Handling:**
+                - [x] `-L`, `--dereference`: Follow symlinks and show target's info.
+                - [x] `-H`: Follow symlinks only on command line arguments.
+            - [x] **Size & Units:**
+                - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+                - [x] `-k`, `--kibibytes`: Use 1024-byte blocks.
+                - [x] `-s`, `--size`: Print allocated size of each file, in blocks.
+                - [ ] `--block-size=SIZE`: Scale sizes by SIZE before printing.
+                - [x] `--si`: Use powers of 1000 not 1024.
+            - [x] **File Type Indicators:**
+                - [x] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
+                - [x] `-p`: Append `/` indicator to directories.
+                - [ ] `--file-type`: Likewise, except do not append `*`.
+            - [x] **Inode & Block:**
+                - [x] `-i`, `--inode`: Print inode number of each file.
+            - [x] **Recursion:**
+                - [x] `-R`, `--recursive`: List subdirectories recursively.
+                - [ ] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
+            - [x] **Color:**
+                - [x] `--color=auto`: Colorize when stdout is a terminal.
+                - [x] `--color=always`: Always colorize output.
+                - [x] `--color=never`: Never colorize output.
+                - [ ] Parse `LS_COLORS` environment variable.
+                - [x] Default color scheme for file types (dir, link, exec, etc.).
+            - [x] **Width Control:**
+                - [ ] `--width=N`: Set output width to N columns.
+                - [ ] `-w N`: Same as `--width=N`.
+                - [x] Read `COLUMNS` environment variable.
+                - [x] Query terminal width via `ioctl(TIOCGWINSZ)`.
+                - [x] Fallback to 80 columns for pipes/non-terminals.
+            - [ ] **Timestamps:**
+                - [ ] `--time=WORD`: Show time as WORD (atime/access/use, ctime/status, mtime/modification).
+                - [ ] `--time-style=STYLE`: Time style (full-iso, long-iso, iso, locale, +FORMAT).
+            - [ ] **Miscellaneous:**
+                - [ ] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters.
+                - [ ] `--show-control-chars`: Show non-graphic characters as-is (default).
+                - [ ] `-N`, `--literal`: Print raw entry names (don't quote).
+                - [ ] `-Q`, `--quote-name`: Enclose entry names in double quotes.
+                - [ ] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape).
+                - [ ] `--help`: Display help.
+                - [ ] `--version`: Display version.
+        - [ ] **Output Modes:**
+            - [ ] Implement long format (`-l`) with all columns.
+            - [ ] Implement multi-column format (default for terminal).
+            - [ ] Implement single-column format (`-1`).
+            - [ ] Implement comma-separated format (`-m`).
+            - [ ] Implement by-lines format (`-x`).
+            - [ ] Auto-detect terminal vs pipe; select output mode accordingly.
+            - [ ] Handle very narrow terminals (< 20 columns) gracefully.
+        - [ ] **Long Format Details:**
+            - [ ] **File Mode String:**
+                - [ ] File type indicator (d, l, c, b, p, s, -).
+                - [ ] Owner rwx permissions.
+                - [ ] Group rwx permissions.
+                - [ ] Other rwx permissions.
+                - [ ] Setuid bit (`s`/`S` in owner execute).
+                - [ ] Setgid bit (`s`/`S` in group execute).
+                - [ ] Sticky bit (`t`/`T` in other execute).
+                - [ ] ACL indicator (`+`) when extended attributes present.
+                - [ ] Extended attribute indicator (`@`) for xattrs.
+            - [ ] **Link Count:** Print hard link count.
+            - [ ] **Owner:** Print username (or UID if `-n`).
+            - [ ] **Group:** Print group name (or GID if `-n`).
+            - [ ] **Size:** Print file size in bytes (or human-readable if `-h`).
+            - [ ] **Device Major/Minor:** Print major,minor for block/char devices.
+            - [ ] **Timestamps:**
+                - [ ] Default to mtime.
+                - [ ] Support atime with `-u`.
+                - [ ] Support ctime with `-c`.
+                - [ ] Recent files (< 6 months): show month, day, time.
+                - [ ] Old files (>= 6 months): show month, day, year.
+                - [ ] Custom time formats via `--time-style`.
+            - [ ] **Filename:** Print file name.
+            - [ ] **Symlink Target:** Print ` -> target` for symlinks.
+            - [ ] **Total Block Count:** Print `total N` line for each directory.
+        - [ ] **Symlink Behavior:**
+            - [ ] Default: `lstat()` for symlinks, show link info.
+            - [ ] `-L`: `stat()` for symlinks, show target info.
+            - [ ] Show `-> target` in long listing.
+            - [ ] Handle broken symlinks gracefully (show with error indicator).
+            - [ ] Detect symlink loops and report error.
+        - [ ] **Recursive Traversal (`-R`):**
+            - [ ] Implement depth-first traversal.
+            - [ ] Print directory header for each subdirectory.
+            - [ ] Handle permission denied on subdirs (warn and continue).
+            - [ ] Implement cycle detection (detect hardlink loops and symlink loops).
+            - [ ] Option to not cross filesystem boundaries (`--one-file-system`/`-x` GNU ext).
+            - [ ] Respect `-d` to not recurse even with `-R`.
+        - [ ] **Sorting & Collation:**
+            - [ ] Implement name sort (default, case-sensitive).
+            - [ ] Implement case-insensitive name sort (locale-aware).
+            - [ ] Implement size sort (`-S`).
+            - [ ] Implement time sort (`-t`, `-u`, `-c`).
+            - [ ] Implement extension sort (`-X` GNU ext).
+            - [ ] Implement version sort (`-v`).
+            - [ ] Implement reverse sort (`-r`).
+            - [ ] Implement no-sort (`-U`, `-f`).
+            - [ ] Use stable sort with tie-breakers (name as secondary).
+            - [ ] Locale-aware collation via `strcoll()`.
+            - [ ] Directories first option (GNU ext).
+        - [ ] **Column/Width Layout:**
+            - [ ] Calculate printable width of each filename.
+            - [ ] Account for ANSI color escape sequences (non-printing).
+            - [ ] Account for combining characters (zero-width).
+            - [ ] Account for wide characters (CJK, double-width).
+            - [ ] Use `wcwidth()` / `wcswidth()` for Unicode handling.
+            - [ ] Pack columns to fit terminal width.
+            - [ ] Handle filenames wider than terminal width.
+            - [ ] Align columns consistently.
+        - [ ] **Permissions/ACLs/Extended Attributes:**
+            - [ ] Detect ACLs via `acl_get_file()` or `getxattr("system.posix_acl_access")`.
+            - [ ] Show `+` suffix on mode string when ACLs present.
+            - [ ] Detect extended attributes via `listxattr()`.
+            - [ ] Show `@` suffix when xattrs present (macOS style).
+            - [ ] Fallback gracefully when ACL/xattr APIs unavailable.
+            - [ ] Option to list xattr names (`-@` BSD ext).
+        - [ ] **User/Group Name Caching:**
+            - [ ] Implement UID->username cache.
+            - [ ] Implement GID->groupname cache.
+            - [ ] Handle missing users/groups (print numeric ID).
+            - [ ] Limit cache size to prevent memory bloat.
+        - [ ] **Error Handling:**
+            - [ ] Per-file errors: warn and continue.
+            - [ ] Directory open errors: warn and continue to next arg.
+            - [ ] Memory allocation failures: exit with proper code.
+            - [ ] Exit code 0: success.
+            - [ ] Exit code 1: minor problems (cannot access file).
+            - [ ] Exit code 2: serious trouble (cannot access command-line arg).
+            - [ ] Never crash on any input.
+        - [ ] **Performance:**
+            - [ ] Minimize syscalls: batch `stat()` calls where possible.
+            - [ ] Use `lstat()` by default; only `stat()` when `-L`.
+            - [ ] Consider `fts(3)` or custom traversal for `-R`.
+            - [ ] Buffer output for efficiency.
+            - [ ] Avoid repeated `getpwuid()`/`getgrgid()` via caching.
+            - [ ] Profile with large directories (10K+ entries).
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test mode string formatting for all file types.
+                - [ ] Test mode string with setuid/setgid/sticky.
+                - [ ] Test size formatting (bytes, KB, MB, GB, TB).
+                - [ ] Test human-readable size formatting.
+                - [ ] Test timestamp formatting (recent vs old).
+                - [ ] Test column width calculation.
+                - [ ] Test sorting algorithms (all modes).
+                - [ ] Test collation with locale.
+            - [ ] **Integration Tests:**
+                - [ ] Empty directory.
+                - [ ] Directory with hidden files.
+                - [ ] Directory with symlinks (valid and broken).
+                - [ ] Directory with special files (devices, sockets, FIFOs).
+                - [ ] Deep directory tree (`-R`).
+                - [ ] Large directory (1000+ files).
+                - [ ] Permission denied scenarios.
+                - [ ] Symlink loops.
+                - [ ] Files with spaces, quotes, newlines in names.
+                - [ ] Mixed sorting criteria.
+            - [ ] **Property Tests:**
+                - [ ] Random filenames don't crash (fuzzing).
+                - [ ] Binary characters in filenames handled.
+                - [ ] Control characters handled.
+                - [ ] Unicode filenames (combining chars, CJK).
+                - [ ] Very long filenames (PATH_MAX-1).
+            - [ ] **Acceptance Tests:**
+                - [ ] `ls` empty directory -> empty output.
+                - [ ] `ls -a` -> shows `.` and `..`.
+                - [ ] `ls -l` -> correct 9-column output.
+                - [ ] `ls -lh` -> human sizes (K, M, G).
+                - [ ] `ls -R` -> descends into subdirectories.
+                - [ ] `ls -lS` -> sorted by size descending.
+                - [ ] `ls -lt` -> sorted by mtime descending.
+                - [ ] `ls -F` -> indicators appended.
+                - [ ] `ls --color=always | cat` -> contains ANSI codes.
+                - [ ] `ls -i` -> inode numbers shown.
+        - [ ] **Documentation:**
+            - [ ] Write `ls(1)` man page covering all options.
+            - [ ] Document output formats with examples.
+            - [ ] Document sorting behavior.
+            - [ ] Document color configuration (`LS_COLORS`).
+            - [ ] Document width calculation algorithm (developer notes).
+            - [ ] Document locale/Unicode handling (developer notes).
+            - [ ] Document ACL/xattr detection (developer notes).
+        - [ ] **Accessibility & Machine Parsing:**
+            - [ ] Document `-1` for machine-parseable output.
+            - [ ] Document `--quoting-style` for safe parsing.
+            - [ ] Ensure no extra whitespace or formatting breaks parsing.
+            - [ ] Test with common UNIX text processing tools (`awk`, `cut`).
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] Long format matches expected field layout.
+            - [ ] Sorting produces correct order for all modes.
+            - [ ] No crashes on any valid or malformed filenames.
+            - [ ] Handles directories with 100K+ entries without OOM.
+            - [ ] Color output respects terminal capabilities.
+            - [ ] Exit codes match documented behavior.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`cp` - Copy files and directories (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/cp/cp.c` for TODO comments, fragile code, and incomplete features.
+            - [ ] Document all functionality gaps and bugs.
+            - [ ] Create refactoring plan: modular architecture with separate files.
+            - [ ] Extract option parsing into `cp_opts.c` and `cp_opts.h`.
+            - [ ] Extract copy engine into `cp_copy.c` and `cp_copy.h`.
+            - [ ] Extract metadata preservation into `cp_preserve.c` and `cp_preserve.h`.
+            - [ ] Extract atomic replace logic into `cp_atomic.c` and `cp_atomic.h`.
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **Basic CLI Options:**
             - [ ] `-r`, `-R`, `--recursive`: Copy directories recursively.
-            - [ ] `-f`, `--force`: Force overwrite.
+            - [ ] `-f`, `--force`: Force overwrite, remove destination if needed.
             - [ ] `-i`, `--interactive`: Prompt before overwrite.
-            - [ ] `-p`: Preserve file attributes (mode, ownership, timestamps).
+            - [ ] `-n`, `--no-clobber`: Do not overwrite existing files.
             - [ ] `-v`, `--verbose`: Explain what is being done.
-        - [ ] **Runtime:**
-            - [ ] Handle `EISDIR` (source is dir, target is not).
-            - [ ] Handle self-copy attempts.
-        - [ ] **Library dependencies:**
-            - [ ] `xopen`, `safe_read`, `safe_write`, `xclose`, `utimensat`, `chown`
-        - [ ] **Acceptance tests:**
-            - [ ] `cp file1 file2` -> file2 identical to file1
-            - [ ] `cp -r dir1 dir2` -> dir2 contains copy of dir1 structure
-            - [ ] `cp -i existing` -> prompts user (mock input)
-    - [ ] **`mv` - Move (rename) files:**
-        - [ ] **Purpose:** Rename SOURCE to DEST, or move SOURCE(s) to DIRECTORY.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
+            - [ ] `-d`: Same as `--no-dereference --preserve=links`.
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Preservation Options:**
+            - [ ] `-p`: Preserve mode, ownership, timestamps.
+            - [ ] `-a`, `--archive`: Same as `-dR --preserve=all`.
+            - [ ] `--preserve=LIST`: Preserve specified attributes.
+                - [ ] `--preserve=mode`: Preserve file mode bits.
+                - [ ] `--preserve=ownership`: Preserve owner and group.
+                - [ ] `--preserve=timestamps`: Preserve atime and mtime.
+                - [ ] `--preserve=links`: Preserve hard links in source tree.
+                - [ ] `--preserve=xattr`: Preserve extended attributes.
+                - [ ] `--preserve=all`: All of the above.
+            - [ ] `--no-preserve=LIST`: Do not preserve specified attributes.
+        - [ ] **Link Options:**
+            - [ ] `-l`, `--link`: Create hard links instead of copying.
+            - [ ] `-s`, `--symbolic-link`: Create symbolic links instead of copying.
+            - [ ] `-L`, `--dereference`: Always follow symlinks in source.
+            - [ ] `-P`, `--no-dereference`: Never follow symlinks (default).
+            - [ ] `-H`: Follow symlinks on command line only.
+        - [ ] **Sparse File Options:**
+            - [ ] `--sparse=auto`: Detect and create sparse files automatically (default).
+            - [ ] `--sparse=always`: Always create sparse files (even for regular data).
+            - [ ] `--sparse=never`: Never create sparse files.
+            - [ ] Implement `SEEK_DATA`/`SEEK_HOLE` for hole detection.
+            - [ ] Fallback to zero-block detection when `SEEK_HOLE` unavailable.
+        - [ ] **Buffer & Performance Options:**
+            - [ ] `-b SIZE`, `--buffer-size=SIZE`: Set IO buffer size.
+            - [ ] Default buffer size (64KB or configurable).
+            - [ ] Use `copy_file_range()` when available and beneficial.
+            - [ ] Use `sendfile()` as optimization on Linux.
+            - [ ] Fallback to portable `read()`/`write()` loop.
+            - [ ] Profile and tune buffer sizes for various file sizes.
+        - [ ] **Backup Options:**
+            - [ ] `-b`, `--backup`: Make backup of each existing destination file.
+            - [ ] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never).
+            - [ ] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`).
+        - [ ] **Target Directory Options:**
+            - [ ] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Copy all sources into target dir.
+            - [ ] `-T`, `--no-target-directory`: Treat destination as normal file.
+        - [ ] **Miscellaneous Options:**
+            - [ ] `--reflink=WHEN`: Control clone/CoW (auto, always, never).
+            - [ ] `--remove-destination`: Remove existing dest files before copy.
+            - [ ] `-u`, `--update`: Copy only when source is newer or dest missing.
+        - [ ] **Basic Copy Operations:**
+            - [ ] **Single File to File:**
+                - [ ] Create destination file with correct mode.
+                - [ ] Copy data from source to destination.
+                - [ ] Preserve metadata as requested.
+                - [ ] Handle existing destination per flags.
+            - [ ] **Multiple Files to Directory:**
+                - [ ] Verify destination is a directory.
+                - [ ] Construct destination paths correctly.
+                - [ ] Process each source file.
+                - [ ] Handle errors per-file (warn and continue).
+            - [ ] **Directory Recursion (`-R`/`-a`):**
+                - [ ] Create destination directory structure.
+                - [ ] Traverse source directory depth-first.
+                - [ ] Copy regular files, symlinks, devices, FIFOs.
+                - [ ] Preserve directory permissions after contents copied.
+                - [ ] Handle permission denied (warn and continue).
+        - [ ] **Atomic Replace:**
+            - [ ] Create temporary file in destination directory.
+            - [ ] Use unique naming (`.cp.XXXXXX` pattern).
+            - [ ] Copy all data to temporary file.
+            - [ ] Set correct permissions on temporary file.
+            - [ ] Call `fsync()` on file descriptor.
+            - [ ] `rename()` temporary file to destination.
+            - [ ] Handle rename failure (cross-device, permissions).
+            - [ ] Clean up temporary file on any failure.
+            - [ ] Atomic replace for regular files only.
+        - [ ] **Hardlink Graph Preservation:**
+            - [ ] Detect when multiple source files are hard links to same inode.
+            - [ ] Maintain map of (source_dev, source_ino) -> destination_path.
+            - [ ] On second encounter, create hard link to first copy.
+            - [ ] Efficient hash map implementation for large trees.
+            - [ ] Handle cross-device scenarios (cannot preserve links).
+        - [ ] **Extended Attributes & ACLs:**
+            - [ ] Detect platform support for xattrs (`getxattr()`, `setxattr()`).
+            - [ ] List source file xattrs with `listxattr()`.
+            - [ ] Copy each xattr to destination.
+            - [ ] Handle xattr size limits.
+            - [ ] Detect platform support for ACLs.
+            - [ ] Copy ACLs when `--preserve=all` or `--preserve=xattr`.
+            - [ ] Graceful degradation when APIs unavailable.
+            - [ ] Warn when preservation fails (non-fatal).
+        - [ ] **Special Files:**
+            - [ ] **Symlinks:** Copy link target or create symlink based on flags.
+            - [ ] **Block Devices:** Use `mknod()` with `-R`.
+            - [ ] **Character Devices:** Use `mknod()` with `-R`.
+            - [ ] **FIFOs:** Use `mkfifo()` with `-R`.
+            - [ ] **Sockets:** Skip or warn (cannot copy).
+        - [ ] **Cross-Device Handling:**
+            - [ ] Detect cross-device copy (stat source and dest dirs).
+            - [ ] `-l` (hardlink) fails across devices with clear error.
+            - [ ] `-s` (symlink) works across devices.
+            - [ ] Regular copy works across devices.
+            - [ ] Hardlink preservation fails across devices (warn).
+        - [ ] **Error Handling & Robustness:**
+            - [ ] Handle `EINTR` during read/write (retry).
+            - [ ] Handle partial writes (continue from where left off).
+            - [ ] Handle `ENOSPC` (disk full) gracefully.
+            - [ ] Handle `EDQUOT` (quota exceeded) gracefully.
+            - [ ] Clean up partial destination on failure.
+            - [ ] Signal handling: catch SIGINT/SIGTERM, cleanup, exit.
+            - [ ] Write robust signal-safe cleanup routines.
+            - [ ] Exit code 0: success.
+            - [ ] Exit code 1: some files could not be copied.
+            - [ ] Never crash on any input.
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (use dynamic allocation).
+            - [ ] Hygienic path joining (handle trailing slashes).
+            - [ ] Detect and reject self-copy attempts.
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+        - [ ] **Permission & Ownership Handling:**
+            - [ ] Create destination with source mode (masked by umask initially).
+            - [ ] After copy complete, chmod to exact source mode.
+            - [ ] If root, chown to source owner:group.
+            - [ ] If not root, preserve group if possible.
+            - [ ] Warn if ownership cannot be preserved.
+            - [ ] Handle setuid/setgid bits correctly.
+        - [ ] **Timestamp Preservation:**
+            - [ ] Read source atime and mtime.
+            - [ ] Use `utimensat()` for nanosecond precision.
+            - [ ] Fallback to `utimes()` if needed.
+            - [ ] Preserve timestamps after all data written.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test atomic replace helper.
+                - [ ] Test sparse file detection.
+                - [ ] Test hardlink map operations.
+                - [ ] Test path joining logic.
+                - [ ] Test metadata preservation helpers.
+                - [ ] Test buffer allocation.
+            - [ ] **Integration Tests:**
+                - [ ] Copy single file to new file.
+                - [ ] Copy single file to existing file.
+                - [ ] Copy multiple files to directory.
+                - [ ] Copy directory recursively.
+                - [ ] Copy with `-p` (permissions preserved).
+                - [ ] Copy with `-a` (archive mode).
+                - [ ] Copy hardlinked files (links preserved).
+                - [ ] Copy sparse files (holes preserved).
+                - [ ] Copy symlinks with `-d` and `-L`.
+                - [ ] Copy special files (devices, FIFOs).
+                - [ ] Copy files with xattrs.
+                - [ ] Copy across filesystems.
+                - [ ] Handle permission denied.
+                - [ ] Handle disk full.
+                - [ ] Handle self-copy attempt.
+            - [ ] **Property Tests:**
+                - [ ] Random file content survives copy.
+                - [ ] Random metadata preserved correctly.
+                - [ ] Random directory structures copy correctly.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary filenames.
+                - [ ] Fuzz metadata parsing.
+                - [ ] Fuzz option parsing.
+            - [ ] **Acceptance Tests:**
+                - [ ] `cp file1 file2` -> file2 identical to file1.
+                - [ ] `cp -r dir1 dir2` -> dir2 contains copy of dir1.
+                - [ ] `cp -a` -> timestamps, permissions, links preserved.
+                - [ ] `cp -i existing` -> prompts user.
+                - [ ] `cp -n existing` -> skips overwrite.
+                - [ ] `cp -l` -> creates hard links.
+                - [ ] `cp -s` -> creates symlinks.
+                - [ ] Atomic replace verified (no partial files on interrupt).
+        - [ ] **Documentation:**
+            - [ ] Write `cp(1)` man page covering all options.
+            - [ ] Document preservation behavior in detail.
+            - [ ] Document sparse file handling.
+            - [ ] Document atomic replace mechanism.
+            - [ ] Write developer design doc for data flow.
+            - [ ] Document hardlink preservation algorithm.
+            - [ ] Document cross-device handling.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] Atomic replace demonstrated (no partial files).
+            - [ ] Hardlink preservation works for multi-file inputs.
+            - [ ] Sparse files copied efficiently.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Correct behavior across all flag combinations.
+            - [ ] Exit codes match documented behavior.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`mv` - Move (rename) files (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/mv/mv.c` for TODO comments, fragile code, incomplete features.
+            - [ ] Document all functionality gaps and bugs.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into `mv_opts.c` and `mv_opts.h`.
+            - [ ] Extract rename/copy logic into `mv_core.c` and `mv_core.h`.
+            - [ ] Integrate with `cp` atomic replace logic (shared library or code reuse).
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **CLI Options:**
             - [ ] `-f`, `--force`: Do not prompt before overwriting.
             - [ ] `-i`, `--interactive`: Prompt before overwrite.
-            - [ ] `-v`, `--verbose`: Verbose output.
-        - [ ] **Runtime:**
-            - [ ] Try `rename()` syscall first.
-            - [ ] Fallback to `cp` + `rm` if cross-device link (`EXDEV`).
-        - [ ] **Library dependencies:**
-            - [ ] `rename`, `xread`, `xwrite`, `unlink`
-        - [ ] **Acceptance tests:**
-            - [ ] `mv file1 file2` -> file1 gone, file2 exists
-            - [ ] `mv file dir/` -> dir/file exists
-            - [ ] `mv` across filesystems -> invokes copy mechanism
-    - [ ] **`rm` - Remove files or directories:**
-        - [ ] **Purpose:** Remove (unlink) the FILE(s).
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-r`, `-R`, `--recursive`: Remove directories and their contents recursively.
-            - [ ] `-f`, `--force`: Ignore nonexistent files and arguments, never prompt.
+            - [ ] `-n`, `--no-clobber`: Do not overwrite existing file.
+            - [ ] `-v`, `--verbose`: Explain what is being done.
+            - [ ] `-u`, `--update`: Move only when source is newer or dest missing.
+            - [ ] `--strip-trailing-slashes`: Remove trailing slashes from source args.
+            - [ ] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Move all sources into target dir.
+            - [ ] `-T`, `--no-target-directory`: Treat destination as normal file.
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Backup Options:**
+            - [ ] `-b`, `--backup`: Make backup of each existing destination file.
+            - [ ] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never).
+            - [ ] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`).
+        - [ ] **Rename Semantics (Same Filesystem):**
+            - [ ] Use `rename(2)` syscall for atomic move.
+            - [ ] Handle `rename()` success: done, no further action.
+            - [ ] Handle `rename()` failure with `EXDEV`: trigger copy+unlink fallback.
+            - [ ] Handle `rename()` failure with `ENOENT`: source doesn't exist, error.
+            - [ ] Handle `rename()` failure with `EACCES`/`EPERM`: permission error.
+            - [ ] Handle `rename()` failure with `ENOTDIR`: path component not directory.
+            - [ ] Handle `rename()` failure with `EISDIR`: dest is dir, source is not.
+            - [ ] Handle `rename()` failure with `ENOTEMPTY`: dest dir not empty (dir move).
+        - [ ] **Cross-Filesystem Fallback:**
+            - [ ] Detect `EXDEV` from `rename()`.
+            - [ ] Invoke copy operation (reuse `cp` logic).
+            - [ ] Preserve all metadata during copy (timestamps, ownership, mode).
+            - [ ] Preserve extended attributes during copy.
+            - [ ] Preserve ACLs during copy if supported.
+            - [ ] Preserve hardlink graph during recursive move.
+            - [ ] After successful copy, unlink source.
+            - [ ] For directories: recursively copy, then recursively remove source.
+            - [ ] Handle partial failure: source partially moved.
+            - [ ] Clean up destination on copy failure before unlinking source.
+        - [ ] **Overwrite Policies:**
+            - [ ] Default: prompt if destination exists and stdout is TTY.
+            - [ ] `-f`: Never prompt, silently overwrite.
+            - [ ] `-i`: Always prompt before overwrite.
+            - [ ] `-n`: Never overwrite, silently skip.
+            - [ ] Precedence: last option wins among `-f`, `-i`, `-n`.
+            - [ ] Non-TTY behavior: `-i` still prompts (use /dev/tty or skip).
+            - [ ] Prompt format: "overwrite 'file'? " with y/n response.
+        - [ ] **Directory Moves:**
+            - [ ] Move directory to new name (rename within fs).
+            - [ ] Move directory into existing directory.
+            - [ ] Detect move-into-self error (moving dir into its own subtree).
+            - [ ] Error message for move-into-self: clear explanation.
+            - [ ] Handle non-empty destination directory (error).
+            - [ ] Recursive directory move for cross-fs.
+        - [ ] **Special File Handling:**
+            - [ ] **Symlinks:** Move symlink itself (not target) by default.
+            - [ ] `-L`: Follow symlinks (move target, not link).
+            - [ ] `-P`: Never follow symlinks (default).
+            - [ ] **Block/Character Devices:** Rename or recreate on cross-fs.
+            - [ ] **FIFOs:** Rename or recreate on cross-fs.
+            - [ ] **Sockets:** Rename only (cannot copy).
+        - [ ] **Hardlinks & Metadata:**
+            - [ ] Preserve hardlink relationships during cross-fs copy.
+            - [ ] Reuse hardlink map from `cp` implementation.
+            - [ ] Preserve file mode (chmod after copy).
+            - [ ] Preserve owner/group (chown after copy, if root).
+            - [ ] Preserve timestamps (utimensat after copy).
+        - [ ] **Race Condition Avoidance:**
+            - [ ] Minimize TOCTOU window between check and operation.
+            - [ ] Use `renameat2()` with `RENAME_NOREPLACE` where available.
+            - [ ] Fallback to traditional rename with accept-the-race semantics.
+            - [ ] For `-n`: open with O_EXCL to avoid overwrite races.
+            - [ ] Document known race conditions that cannot be avoided.
+        - [ ] **Error Handling:**
+            - [ ] Per-file errors: warn and continue with next source.
+            - [ ] Exit code 0: all moves successful.
+            - [ ] Exit code 1: at least one move failed.
+            - [ ] Never crash on any input.
+            - [ ] Handle EINTR during operations.
+            - [ ] Signal handling: catch SIGINT, cleanup partial operations.
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (use dynamic allocation).
+            - [ ] `--strip-trailing-slashes` implementation.
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+            - [ ] Detect and reject source == destination.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test rename semantics helper.
+                - [ ] Test cross-fs detection.
+                - [ ] Test overwrite policy logic.
+                - [ ] Test path manipulation (strip slashes).
+                - [ ] Test move-into-self detection.
+            - [ ] **Integration Tests:**
+                - [ ] Move single file to new name.
+                - [ ] Move single file to existing file (overwrite).
+                - [ ] Move file to directory.
+                - [ ] Move multiple files to directory.
+                - [ ] Move directory to new name.
+                - [ ] Move directory into existing directory.
+                - [ ] Move across filesystems.
+                - [ ] Move with `-i` (interactive prompt).
+                - [ ] Move with `-n` (no clobber).
+                - [ ] Move with `-u` (update).
+                - [ ] Move special files (symlinks, devices).
+                - [ ] Move-into-self detection.
+                - [ ] Hardlink preservation on cross-fs.
+            - [ ] **Property Tests:**
+                - [ ] File content preserved after move.
+                - [ ] Metadata preserved after cross-fs move.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary/special characters.
+                - [ ] Fuzz option parsing.
+            - [ ] **Non-TTY Interactive Tests:**
+                - [ ] `-i` behavior when stdin is not TTY.
+                - [ ] Input redirection for prompts.
+            - [ ] **Acceptance Tests:**
+                - [ ] `mv file1 file2` -> file1 gone, file2 exists.
+                - [ ] `mv file dir/` -> dir/file exists.
+                - [ ] `mv` across filesystems -> content identical.
+                - [ ] `mv -i existing` -> prompts user.
+                - [ ] `mv -n existing` -> skips, source untouched.
+                - [ ] `mv dir1 dir2` -> dir1 renamed if same fs.
+        - [ ] **Documentation:**
+            - [ ] Write `mv(1)` man page covering all options.
+            - [ ] Document rename(2) atomicity guarantees.
+            - [ ] Document cross-filesystem behavior.
+            - [ ] Document backup options.
+            - [ ] Write developer notes on atomicity.
+            - [ ] Document race condition considerations.
+        - [ ] **Acceptance Criteria:**
+            - [ ] `rename(2)` used when possible.
+            - [ ] Correct fallback to copy+unlink for cross-fs.
+            - [ ] Hardlink preservation on fallback.
+            - [ ] Metadata preservation on fallback.
+            - [ ] Robust error handling.
+            - [ ] No memory leaks.
+            - [ ] Exit codes match documented behavior.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`rm` - Remove files or directories (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/rm/rm.c` for TODO comments, fragile code, incomplete features.
+            - [ ] Document all functionality gaps and security concerns.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into `rm_opts.c` and `rm_opts.h`.
+            - [ ] Extract recursive walker into `rm_walk.c` and `rm_walk.h`.
+            - [ ] Extract safety checks into `rm_safety.c` and `rm_safety.h`.
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **CLI Options:**
+            - [ ] `-f`, `--force`: Ignore nonexistent files, never prompt.
             - [ ] `-i`: Prompt before every removal.
-            - [ ] `-v`, `--verbose`: Verbose output.
-        - [ ] **Runtime:**
-            - [ ] Depth-first traversal for `-r`.
-            - [ ] Handling of `.` and `..` (skip).
-        - [ ] **Library dependencies:**
-            - [ ] `unlink`, `rmdir`, `fstatat`, `openat`
-        - [ ] **Acceptance tests:**
-            - [ ] `rm file` -> file removed
-            - [ ] `rm -r dir` -> dir and contents removed
-            - [ ] `rm -f nonexist` -> no error
-    - [ ] **`mkdir` - Make directories:**
-        - [ ] **Purpose:** Create the DIRECTORY(ies), if they do not already exist.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
+            - [ ] `-I`: Prompt once before removing more than 3 files or recursing.
+            - [ ] `-r`, `-R`, `--recursive`: Remove directories and their contents recursively.
+            - [ ] `-d`, `--dir`: Remove empty directories.
+            - [ ] `-v`, `--verbose`: Explain what is being done.
+            - [ ] `--one-file-system`: Do not cross filesystem boundaries.
+            - [ ] `--preserve-root`: Do not remove `/` (default).
+            - [ ] `--no-preserve-root`: Allow removing `/` (dangerous).
+            - [ ] `--interactive=WHEN`: Prompt according to WHEN (never, once, always).
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Root Protection (`--preserve-root`):**
+            - [ ] Default: refuse to remove `/` with `-r`.
+            - [ ] Detect `/` as argument (canonicalize paths first).
+            - [ ] Detect attempts to remove filesystem root.
+            - [ ] Error message: "it is dangerous to operate recursively on '/'".
+            - [ ] `--no-preserve-root`: explicit opt-in to dangerous behavior.
+            - [ ] Acceptance: never accidentally remove `/` in any test.
+        - [ ] **Dangerous Pattern Detection:**
+            - [ ] Refuse `rm -rf /` unless `--no-preserve-root`.
+            - [ ] Warn on `rm -rf /*` (but allow if forced).
+            - [ ] Warn on `rm -rf ~` or `rm -rf $HOME`.
+            - [ ] Document dangerous patterns in man page.
+        - [ ] **Symlink Handling (Recursive Mode):**
+            - [ ] Do NOT follow symlinks during directory traversal.
+            - [ ] Remove the symlink itself, not the target.
+            - [ ] Never descend into symlinked directories.
+            - [ ] Handle broken symlinks (remove them).
+            - [ ] Tests: symlink removal tests, symlink-to-directory tests.
+        - [ ] **TOCTOU Hardening (FD-Based Traversal):**
+            - [ ] Use `openat()` to open directories relative to parent fd.
+            - [ ] Use `unlinkat()` to remove files relative to directory fd.
+            - [ ] Use `fstatat()` to stat files relative to directory fd.
+            - [ ] Never use path-based operations during traversal.
+            - [ ] Keep directory fd open during traversal of its contents.
+            - [ ] Handle directory fd invalidation gracefully.
+            - [ ] Files: `rm_walk.c` uses fd-based traversal throughout.
+            - [ ] Tests: TOCTOU tests with mock concurrent modifications.
+        - [ ] **Recursive Removal Algorithm:**
+            - [ ] Depth-first traversal: remove contents before directory.
+            - [ ] Open directory via `openat(parent_fd, name, O_DIRECTORY)`.
+            - [ ] Iterate directory with `getdents()` or `fdopendir()`.
+            - [ ] Skip `.` and `..` entries.
+            - [ ] Recursively remove subdirectories.
+            - [ ] Use `unlinkat(dir_fd, name, 0)` for files.
+            - [ ] Use `unlinkat(dir_fd, name, AT_REMOVEDIR)` for directories.
+            - [ ] Close directory fd after contents removed.
+        - [ ] **One-File-System Option:**
+            - [ ] Detect filesystem boundary during traversal.
+            - [ ] Compare `st_dev` of child to parent.
+            - [ ] Skip (do not descend) if `st_dev` differs.
+            - [ ] Warn when skipping due to filesystem boundary.
+            - [ ] Tests: cross-filesystem skip tests (with mock or loopback).
+        - [ ] **Interactive Prompting:**
+            - [ ] `-i`: Prompt before every removal.
+            - [ ] `-I`: Prompt once if more than 3 files or if `-r`.
+            - [ ] Prompt format: "rm: remove <type> '<path>'?".
+            - [ ] Accept y/Y for yes, n/N or other for no.
+            - [ ] Non-TTY behavior: `-i` reads from /dev/tty or skips.
+            - [ ] `-f` overrides `-i` (last option wins).
+        - [ ] **Permission & Ownership Handling:**
+            - [ ] Check write permission on parent directory (for unlink).
+            - [ ] Handle unwritable files with prompt (unless `-f`).
+            - [ ] Prompt: "rm: remove write-protected <type> '<path>'?".
+            - [ ] Sticky bit handling: only owner can delete in sticky dir.
+            - [ ] POSIX semantics: check effective UID vs file owner.
+        - [ ] **Special File Handling:**
+            - [ ] Regular files: `unlinkat(dir_fd, name, 0)`.
+            - [ ] Directories: `unlinkat(dir_fd, name, AT_REMOVEDIR)`.
+            - [ ] Symlinks: unlink the link, not target.
+            - [ ] Devices/FIFOs: unlink normally.
+            - [ ] Sockets: unlink normally.
+        - [ ] **Immutable Files & Extended Attributes:**
+            - [ ] Handle `EPERM` from unlink on immutable files.
+            - [ ] Document immutable flag behavior in man page.
+            - [ ] Privileged mode: can remove if root and chattr -i first (not auto).
+            - [ ] Report clear error for immutable files.
+        - [ ] **Error Handling:**
+            - [ ] Continue on per-file errors (unless fatal).
+            - [ ] Accumulate errors and return nonzero on any failure.
+            - [ ] `-f` suppresses error messages but still sets exit code.
+            - [ ] Exit code 0: all files removed successfully.
+            - [ ] Exit code 1: at least one file could not be removed.
+            - [ ] Handle `ENOENT` gracefully with `-f`.
+            - [ ] Handle `EACCES`, `EPERM`, `EBUSY`, `EROFS` appropriately.
+            - [ ] Handle `ENOTEMPTY` (race: dir filled during removal).
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (dynamic allocation).
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+            - [ ] Canonicalize paths for root protection check.
+            - [ ] Reject paths ending in `/` for non-directories.
+        - [ ] **Signal Handling:**
+            - [ ] Catch SIGINT/SIGTERM for cleanup.
+            - [ ] Exit cleanly on signal (don't leave partial state).
+            - [ ] Document interruptibility in man page.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test recursive walker with mock filesystem.
+                - [ ] Test symlink detection logic.
+                - [ ] Test preserve-root detection.
+                - [ ] Test option parsing.
+                - [ ] Test fd-based traversal helpers.
+            - [ ] **Integration Tests:**
+                - [ ] Remove single file.
+                - [ ] Remove multiple files.
+                - [ ] Remove empty directory with `-d`.
+                - [ ] Remove non-empty directory with `-r`.
+                - [ ] Remove deep directory tree.
+                - [ ] Remove with `-f` (nonexistent file).
+                - [ ] Remove with `-i` (interactive prompt).
+                - [ ] Remove with `-I` (prompt once).
+                - [ ] Remove with `-v` (verbose output).
+                - [ ] Preserve-root protection test.
+                - [ ] Symlink removal (file and directory links).
+                - [ ] One-file-system boundary test.
+                - [ ] Write-protected file prompt test.
+                - [ ] Sticky bit handling test.
+            - [ ] **TOCTOU Tests:**
+                - [ ] Concurrent file creation during removal.
+                - [ ] Concurrent symlink replacement during removal.
+                - [ ] Concurrent directory creation during removal.
+                - [ ] Mock harness for race condition injection.
+            - [ ] **Property Tests:**
+                - [ ] Random directory trees removed completely.
+                - [ ] Symlinks never followed during recursion.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary filenames.
+                - [ ] Fuzz option parsing.
+                - [ ] Fuzz directory tree structures.
+            - [ ] **Acceptance Tests:**
+                - [ ] `rm file` -> file removed.
+                - [ ] `rm -r dir` -> dir and contents removed.
+                - [ ] `rm -f nonexist` -> no error.
+                - [ ] `rm -rf /` -> refused (preserve-root).
+                - [ ] `rm -rf --no-preserve-root /tmp/test` -> allowed.
+                - [ ] No accidental deletion in any test.
+        - [ ] **Documentation:**
+            - [ ] Write `rm(1)` man page covering all options.
+            - [ ] Document `--preserve-root` behavior prominently.
+            - [ ] Document risks of `rm -rf`.
+            - [ ] Document symlink behavior during recursion.
+            - [ ] Document sticky bit and permission handling.
+            - [ ] Write developer notes on fd-based traversal.
+            - [ ] Document TOCTOU mitigations.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] `--preserve-root` default prevents accidental root removal.
+            - [ ] FD-based traversal prevents TOCTOU races.
+            - [ ] Symlinks never followed during recursive removal.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Correct exit codes for all scenarios.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`mkdir` - Make directories (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/mkdir/mkdir.c` for TODO comments, fragile code.
+            - [ ] Document all functionality gaps and bugs.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into `mkdir_opts.c` and `mkdir_opts.h`.
+            - [ ] Extract mode parsing into shared `lib/modeparse.c` (reusable by chmod).
+            - [ ] Extract parent creation logic into `mkdir_parents.c`.
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **CLI Options:**
             - [ ] `-p`, `--parents`: No error if existing, make parent directories as needed.
-            - [ ] `-m`, `--mode=MODE`: Set file mode (as in chmod).
+            - [ ] `-m MODE`, `--mode=MODE`: Set file mode (as in chmod).
             - [ ] `-v`, `--verbose`: Print a message for each created directory.
-        - [ ] **Runtime:**
-            - [ ] set umask before creation if `-m` not specified (default behavior).
-            - [ ] parsing mode strings (e.g., `a+rwx`).
-        - [ ] **Library dependencies:**
-            - [ ] `mkdir`, `mkdirat`, `chmod`, `parse_mode`
-        - [ ] **Acceptance tests:**
-            - [ ] `mkdir dir` -> dir exists
-            - [ ] `mkdir -p a/b/c` -> creates deep path
-            - [ ] `mkdir exists` -> fails (unless -p)
-    - [ ] **`rmdir` - Remove empty directories:**
-        - [ ] **Purpose:** Remove the DIRECTORY(ies), if they are empty.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-p`, `--parents`: Remove explicit parent directories if being emptied.
-            - [ ] `-v`, `--verbose`: Verbose output.
-        - [ ] **Runtime:**
-            - [ ] Fail if not empty (`ENOTEMPTY`).
-        - [ ] **Library dependencies:**
-            - [ ] `rmdir`
-        - [ ] **Acceptance tests:**
-            - [ ] `rmdir empty_dir` -> succeeds
-            - [ ] `rmdir non_empty_dir` -> fails
-            - [ ] `rmdir -p a/b/c` -> removes c, then b, then a
-    - [ ] **`cat` - Concatenate files and print on standard output:**
-        - [ ] **Purpose:** Concatenate FILE(s) to standard output.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
+            - [ ] `-Z`, `--context=CTX`: Set SELinux context (stub or implement if needed).
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Mode Parsing:**
+            - [ ] **Octal Modes:**
+                - [ ] Parse octal strings (e.g., `0755`, `755`).
+                - [ ] Validate octal range (0-7 per digit).
+                - [ ] Support leading zero or no leading zero.
+            - [ ] **Symbolic Modes:**
+                - [ ] Parse symbolic modes (e.g., `u+rwx`, `a+rx`, `go-w`).
+                - [ ] Support WHO: `u` (user), `g` (group), `o` (other), `a` (all).
+                - [ ] Support PERM: `r` (read), `w` (write), `x` (execute).
+                - [ ] Support OP: `+` (add), `-` (remove), `=` (set exactly).
+                - [ ] Support multiple clauses (e.g., `u+rw,go+r`).
+                - [ ] Apply symbolic mode relative to initial mode (0777 for dirs).
+            - [ ] **Umask Interaction:**
+                - [ ] Without `-m`: apply umask to default mode (0777).
+                - [ ] With `-m`: use specified mode exactly (ignore umask for final).
+                - [ ] For `-p` intermediate dirs: use default mode with umask.
+                - [ ] Document umask interaction in man page.
+            - [ ] **Mode Library:**
+                - [ ] Create reusable `parse_mode()` function.
+                - [ ] Return parsed mode or error indicator.
+                - [ ] Unit tests for all mode formats.
+        - [ ] **Basic Directory Creation:**
+            - [ ] Create single directory with `mkdir()` syscall.
+            - [ ] Apply specified mode with `chmod()` after creation.
+            - [ ] Handle `EEXIST` error (fail unless `-p`).
+            - [ ] Report error on `EACCES`, `ENOENT`, `ENOTDIR`.
+            - [ ] Verbose output: "mkdir: created directory '<path>'".
+        - [ ] **Parent Directory Creation (`-p`):**
+            - [ ] Parse path into components.
+            - [ ] Create each missing intermediate directory.
+            - [ ] Intermediate directories get default mode (0777 & ~umask).
+            - [ ] Final directory gets specified mode (or default).
+            - [ ] Do not error if directory already exists.
+            - [ ] Error if path component exists but is not a directory.
+            - [ ] Handle paths starting with `/` (absolute).
+            - [ ] Handle paths starting with `./` or `../` (relative).
+            - [ ] Handle trailing slashes correctly.
+        - [ ] **Race-Safe Creation:**
+            - [ ] Use `mkdirat()` for relative creation within parent fd.
+            - [ ] Handle `EEXIST` gracefully during `-p` (concurrent mkdir).
+            - [ ] After `EEXIST`, verify it's a directory (not a file).
+            - [ ] Use `fstatat()` to check type after race.
+            - [ ] Idempotent behavior: concurrent `mkdir -p` on same path succeeds.
+            - [ ] Files: use fd-based operations where possible.
+        - [ ] **Permissions & Ownership:**
+            - [ ] Created directories owned by effective UID/GID.
+            - [ ] When running as root: document that ownership is root.
+            - [ ] Setgid inheritance: if parent has setgid, child inherits.
+            - [ ] Document ownership behavior in man page.
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (dynamic allocation).
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+            - [ ] Handle empty path component (double slash).
+            - [ ] Handle `.` and `..` components correctly.
+        - [ ] **Error Handling:**
+            - [ ] Continue to next operand on per-directory error.
+            - [ ] Accumulate errors and return nonzero on any failure.
+            - [ ] Exit code 0: all directories created successfully.
+            - [ ] Exit code 1: at least one directory could not be created.
+            - [ ] Clear error messages with path and errno description.
+            - [ ] Handle `ENOSPC`, `EDQUOT`, `EROFS`.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test octal mode parsing.
+                - [ ] Test symbolic mode parsing.
+                - [ ] Test mode with umask application.
+                - [ ] Test path component splitting.
+                - [ ] Test option parsing.
+            - [ ] **Integration Tests:**
+                - [ ] Create single directory.
+                - [ ] Create directory with `-m` octal mode.
+                - [ ] Create directory with `-m` symbolic mode.
+                - [ ] Create directory with `-v` verbose.
+                - [ ] Create parent directories with `-p`.
+                - [ ] Create already existing directory (error without `-p`).
+                - [ ] Create already existing directory (success with `-p`).
+                - [ ] Path component is file (error).
+                - [ ] Deep path creation.
+                - [ ] Trailing slash handling.
+            - [ ] **Race/Concurrency Tests:**
+                - [ ] Concurrent `mkdir -p` on same path.
+                - [ ] Verify idempotent behavior.
+                - [ ] Concurrent mkdir where one creates file (error case).
+            - [ ] **Property Tests:**
+                - [ ] Random paths created correctly with `-p`.
+                - [ ] Mode applied correctly after creation.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary filenames.
+                - [ ] Fuzz mode parsing with random strings.
+                - [ ] Fuzz option parsing.
+            - [ ] **Acceptance Tests:**
+                - [ ] `mkdir dir` -> dir exists.
+                - [ ] `mkdir -p a/b/c` -> creates deep path.
+                - [ ] `mkdir exists` -> fails (unless -p).
+                - [ ] `mkdir -m 700 dir` -> dir has mode 700.
+                - [ ] `mkdir -pv a/b` -> prints created directories.
+        - [ ] **Documentation:**
+            - [ ] Write `mkdir(1)` man page covering all options.
+            - [ ] Document `-m` mode format (octal and symbolic).
+            - [ ] Document umask interaction.
+            - [ ] Document `-p` idempotent behavior.
+            - [ ] Document race conditions and safety.
+            - [ ] Write developer notes on atomic creation.
+            - [ ] Document ownership and setgid behavior.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] `-p` is idempotent (concurrent safe).
+            - [ ] Mode parsing supports octal and symbolic.
+            - [ ] Umask correctly applied.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Correct exit codes for all scenarios.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`rmdir` - Remove empty directories (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/rmdir/rmdir.c` for TODO comments, fragile code.
+            - [ ] Document all functionality gaps and bugs.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into `rmdir_opts.c` and `rmdir_opts.h`.
+            - [ ] Extract ancestor removal logic into `rmdir_parents.c`.
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **CLI Options:**
+            - [ ] `-p`, `--parents`: Remove ancestors if they become empty after removal.
+            - [ ] `-v`, `--verbose`: Output a diagnostic for every directory processed.
+            - [ ] `--ignore-fail-on-non-empty`: Ignore failures due to non-empty.
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Basic Directory Removal:**
+            - [ ] Remove single directory with `rmdir()` syscall.
+            - [ ] Fail if directory is not empty (`ENOTEMPTY`).
+            - [ ] Fail if path is not a directory (`ENOTDIR`).
+            - [ ] Fail if path does not exist (`ENOENT`).
+            - [ ] Verbose output: "rmdir: removing directory, '<path>'".
+        - [ ] **Ancestor Removal (`-p`):**
+            - [ ] Parse path into ancestor components.
+            - [ ] After removing target, attempt to remove parent.
+            - [ ] Continue up the tree while directories are empty.
+            - [ ] Stop at first failure (non-empty, permission, etc.).
+            - [ ] Handle relative paths (./a/b/c).
+            - [ ] Handle absolute paths (/a/b/c).
+            - [ ] Do not attempt to remove root `/` or `.`.
+            - [ ] Verbose output for each ancestor removed.
+        - [ ] **Safety & Validation:**
+            - [ ] Do NOT follow symlinks.
+            - [ ] Refuse removal if path is a symlink to a directory.
+            - [ ] Verify path is a directory before removal.
+            - [ ] Refuse removal of `.` and `..`.
+            - [ ] Refuse removal of `/` (always).
+        - [ ] **Race-Safe Removal:**
+            - [ ] Use `openat()` to open parent directory.
+            - [ ] Use `fstatat()` to verify target is empty directory.
+            - [ ] Use `unlinkat(parent_fd, name, AT_REMOVEDIR)` for removal.
+            - [ ] Handle race where directory becomes non-empty.
+            - [ ] Handle race where directory is removed by another process.
+            - [ ] Files: fd-based validation before removal.
+        - [ ] **Error Handling:**
+            - [ ] Continue to next operand on per-directory error.
+            - [ ] Accumulate errors and return nonzero on any failure.
+            - [ ] Exit code 0: all directories removed successfully.
+            - [ ] Exit code 1: at least one directory could not be removed.
+            - [ ] Clear error messages with path and errno description.
+            - [ ] `--ignore-fail-on-non-empty`: suppress `ENOTEMPTY` errors.
+            - [ ] Handle `EACCES`, `EPERM`, `EBUSY`, `EROFS`.
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (dynamic allocation).
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+            - [ ] Handle trailing slashes correctly.
+            - [ ] Handle empty path component (error).
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test ancestor path parsing.
+                - [ ] Test option parsing.
+                - [ ] Test symlink detection.
+                - [ ] Test empty directory detection.
+            - [ ] **Integration Tests:**
+                - [ ] Remove single empty directory.
+                - [ ] Remove single non-empty directory (error).
+                - [ ] Remove with `-v` (verbose output).
+                - [ ] Remove with `-p` (ancestors).
+                - [ ] Ancestor stops at non-empty.
+                - [ ] Symlink to directory (error).
+                - [ ] Path is file not directory (error).
+                - [ ] Deep ancestor chain removal.
+                - [ ] `--ignore-fail-on-non-empty` behavior.
+            - [ ] **Race/Concurrency Tests:**
+                - [ ] Concurrent file creation during removal.
+                - [ ] Concurrent directory creation in target.
+                - [ ] Concurrent removal by another process.
+            - [ ] **Property Tests:**
+                - [ ] Random empty directory trees removed correctly.
+                - [ ] `-p` removes as many ancestors as possible.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary filenames.
+                - [ ] Fuzz option parsing.
+            - [ ] **Acceptance Tests:**
+                - [ ] `rmdir empty_dir` -> succeeds.
+                - [ ] `rmdir non_empty_dir` -> fails.
+                - [ ] `rmdir -p a/b/c` -> removes c, then b, then a.
+                - [ ] `rmdir -pv a/b` -> verbose output for each.
+                - [ ] Symlink to dir -> error, not followed.
+        - [ ] **Documentation:**
+            - [ ] Write `rmdir(1)` man page covering all options.
+            - [ ] Document `-p` ancestor removal behavior.
+            - [ ] Document symlink handling (not followed).
+            - [ ] Document race condition handling.
+            - [ ] Write developer notes on fd-based validation.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] `-p` removes ancestors correctly.
+            - [ ] Symlinks never followed.
+            - [ ] Race-safe with fd-based operations.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Correct exit codes for all scenarios.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`cal` - Display a calendar (Production Quality Implementation):**
+        - [ ] **Audit & Design:**
+            - [ ] Review BSD and GNU cal implementations for feature parity.
+            - [ ] Document supported year range (e.g., 1-9999 or wider).
+            - [ ] Document Gregorian/Julian transition handling strategy.
+            - [ ] Create design doc: `docs/cal-design.md`.
+        - [ ] **CLI Options:**
+            - [ ] `[month] [year]`: Display specific month/year.
+            - [ ] `[year]`: Display entire year calendar.
+            - [ ] `-1`: Display single month (default).
+            - [ ] `-3`: Display previous, current, and next month.
+            - [ ] `-y`: Display entire year calendar.
+            - [ ] `-m`: Start week on Monday (ISO 8601).
+            - [ ] `-s`: Start week on Sunday (default, traditional).
+            - [ ] `-j`, `--julian`: Display Julian day-of-year (1-366).
+            - [ ] `-w`: Display week numbers.
+            - [ ] `-n NUM`: Display NUM months starting from current.
+            - [ ] `-A NUM`: Display NUM months after current.
+            - [ ] `-B NUM`: Display NUM months before current.
+            - [ ] `-h`, `--no-highlight`: Do not highlight today.
+            - [ ] `--color=WHEN`: Colorize output (always, auto, never).
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Calendar System Options:**
+            - [ ] `--gregorian`: Use Gregorian calendar exclusively.
+            - [ ] `--julian`: Use Julian calendar exclusively.
+            - [ ] `-p`, `--reform=DATE`: Set Gregorian reform date (default: 1752-09-14).
+            - [ ] Support common reform dates (1582, 1752, etc.).
+            - [ ] Document historical transitions in man page.
+        - [ ] **Date Calculations:**
+            - [ ] **Leap Year Rules:**
+                - [ ] Gregorian: divisible by 4, except centuries unless by 400.
+                - [ ] Julian: divisible by 4.
+                - [ ] Implement `is_leap_year(year, calendar_type)`.
+                - [ ] Unit tests for leap year edge cases.
+            - [ ] **Day of Week Calculation:**
+                - [ ] Implement Zeller's congruence or similar algorithm.
+                - [ ] Handle Gregorian/Julian calendar differences.
+                - [ ] Calculate first day of any month in range.
+                - [ ] Unit tests against known reference dates.
+            - [ ] **Days in Month:**
+                - [ ] Standard days per month.
+                - [ ] February adjustment for leap years.
+                - [ ] Handle Gregorian transition gaps.
+            - [ ] **Julian Day Number:**
+                - [ ] Calculate day-of-year (1-365/366).
+                - [ ] Display with `-j` flag.
+        - [ ] **Gregorian/Julian Transition:**
+            - [ ] Default transition: September 1752 (British/US).
+            - [ ] September 1752: skip Sep 3-13 (11 days).
+            - [ ] Configurable transition date with `--reform`.
+            - [ ] Correctly display months that span transition.
+            - [ ] Handle years before transition with Julian calendar.
+            - [ ] Handle years after transition with Gregorian calendar.
+            - [ ] Document behavior in man page.
+        - [ ] **Output Formatting:**
+            - [ ] **Single Month:**
+                - [ ] Header: month name and year, centered.
+                - [ ] Day names row (Su Mo Tu We Th Fr Sa or Mo Tu...).
+                - [ ] Weeks in rows, right-aligned day numbers.
+                - [ ] Spaces for days before/after month.
+                - [ ] 20 or 21 character width per month.
+            - [ ] **Year Calendar:**
+                - [ ] 3 months per row (or configurable).
+                - [ ] Centered year header.
+                - [ ] Proper spacing between month columns.
+            - [ ] **Three-Month Display (`-3`):**
+                - [ ] Previous, current, next month side by side.
+            - [ ] **Today Highlighting:**
+                - [ ] Default: highlight today with reverse video.
+                - [ ] `-h` to disable.
+                - [ ] ANSI escape codes for terminal.
+                - [ ] Detect if output is TTY.
+            - [ ] **Julian Day Format (`-j`):**
+                - [ ] 3-digit day-of-year instead of 2-digit date.
+                - [ ] Wider column layout (27 chars per month).
+            - [ ] **Week Numbers (`-w`):**
+                - [ ] ISO week numbers in left column.
+        - [ ] **Locale Support:**
+            - [ ] **Month Names:**
+                - [ ] Use locale-specific month names.
+                - [ ] Fallback to English if locale unavailable.
+            - [ ] **Day Names:**
+                - [ ] Use locale-specific abbreviated day names.
+                - [ ] Handle wide characters in names.
+            - [ ] **First Day of Week:**
+                - [ ] Respect LC_TIME first_weekday if available.
+                - [ ] Override with `-m` or `-s`.
+            - [ ] **Character Width:**
+                - [ ] Handle wide characters (CJK) in names.
+                - [ ] Calculate display width correctly.
+        - [ ] **Error Handling:**
+            - [ ] Invalid month (< 1 or > 12): error.
+            - [ ] Invalid year (out of range): error.
+            - [ ] Invalid option combinations: error.
+            - [ ] Exit code 0: success.
+            - [ ] Exit code 1: error.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Leap year calculation (multiple edge cases).
+                - [ ] Day of week calculation (known dates).
+                - [ ] Days in month (all months, leap/non-leap).
+                - [ ] Julian day-of-year calculation.
+                - [ ] Option parsing.
+            - [ ] **Reference Data Tests:**
+                - [ ] Compare output against ncal/cal reference.
+                - [ ] Test years: 1, 100, 1582, 1752, 2000, 2024, 9999.
+                - [ ] Test leap years: 1600, 1700, 1800, 1900, 2000, 2100.
+                - [ ] Test February in leap/non-leap years.
+            - [ ] **Gregorian/Julian Transition Tests:**
+                - [ ] September 1752 calendar (11-day gap).
+                - [ ] October 1582 calendar (10-day gap).
+                - [ ] Custom reform dates.
+            - [ ] **Locale Tests:**
+                - [ ] Different LC_TIME settings.
+                - [ ] First day of week variations.
+                - [ ] Non-ASCII month/day names.
+            - [ ] **Property Tests:**
+                - [ ] Any valid month/year produces valid output.
+                - [ ] February days correct for any year.
+                - [ ] Day count per month always correct.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz year values (extreme ranges).
+                - [ ] Fuzz option combinations.
+            - [ ] **Acceptance Tests:**
+                - [ ] `cal` -> displays current month.
+                - [ ] `cal 2024` -> displays 2024 year calendar.
+                - [ ] `cal 9 1752` -> shows September 1752 with gap.
+                - [ ] `cal -j` -> Julian day-of-year format.
+                - [ ] `cal -m` -> weeks start Monday.
+                - [ ] `cal -3` -> three months displayed.
+        - [ ] **Documentation:**
+            - [ ] Write `cal(1)` man page covering all options.
+            - [ ] Document supported year range.
+            - [ ] Document Gregorian/Julian transition behavior.
+            - [ ] Document `-j` Julian day format.
+            - [ ] Document locale support.
+            - [ ] Historical notes on calendar reforms.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] Output matches authoritative references.
+            - [ ] Leap years calculated correctly.
+            - [ ] Gregorian/Julian transition handled.
+            - [ ] Locale-aware formatting works.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`cat` - Concatenate files and print on standard output (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/cat/cat.c` for TODO comments, fragile code.
+            - [ ] Document all functionality gaps and bugs.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into separate function.
+            - [ ] Extract I/O loop into reusable function.
+            - [ ] Write unit tests for each module.
+        - [ ] **CLI Options (POSIX + Extensions):**
+            - [ ] `-u`: Write bytes unbuffered (POSIX).
+            - [ ] `-` (dash): Read from stdin (POSIX).
             - [ ] `-n`, `--number`: Number all output lines.
+            - [ ] `-b`, `--number-nonblank`: Number non-blank lines only.
+            - [ ] `-s`, `--squeeze-blank`: Suppress repeated empty lines.
             - [ ] `-E`, `--show-ends`: Display `$` at end of each line.
-            - [ ] `-` (dash): Read from stdin.
-        - [ ] **Runtime:**
-            - [ ] Unbuffered vs Buffered I/O considerations.
-            - [ ] Error handling (continue to next file on error).
-        - [ ] **Library dependencies:**
-            - [ ] `xopen`, `safe_read`, `safe_write`
-        - [ ] **Acceptance tests:**
-            - [ ] `cat file` -> prints contents
-            - [ ] `cat file1 file2` -> prints concatenated
-            - [ ] `cat -n file` -> lines numbered
-    - [ ] **`echo` - Display a line of text:**
-        - [ ] **Purpose:** Display a line of text.
-        - [ ] **Standards:** POSIX.1-2017 / XSI.
-        - [ ] **Operands:**
+            - [ ] `-T`, `--show-tabs`: Display TAB as `^I`.
+            - [ ] `-v`, `--show-nonprinting`: Display control chars as `^X`, M-X.
+            - [ ] `-A`, `--show-all`: Equivalent to `-vET`.
+            - [ ] `-e`: Equivalent to `-vE`.
+            - [ ] `-t`: Equivalent to `-vT`.
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Input Handling:**
+            - [ ] Read from files specified as arguments.
+            - [ ] Read from stdin if no files or `-` argument.
+            - [ ] Handle multiple `-` arguments (read stdin multiple times).
+            - [ ] Handle binary files (pass through unchanged).
+            - [ ] Handle empty files (output nothing).
+            - [ ] Handle very large files (streaming, no full buffering).
+            - [ ] Handle files with no trailing newline.
+        - [ ] **Output Handling:**
+            - [ ] Write to stdout.
+            - [ ] `-u` flag: unbuffered writes (one syscall per read).
+            - [ ] Default: buffered I/O for performance.
+            - [ ] Handle `EINTR` on write (retry).
+            - [ ] Handle `EPIPE` gracefully (broken pipe).
+            - [ ] Handle partial writes.
+        - [ ] **Line Numbering (`-n`, `-b`):**
+            - [ ] Right-justify line numbers in 6-character field.
+            - [ ] Follow number with TAB separator.
+            - [ ] `-n`: Number all lines including blank.
+            - [ ] `-b`: Number only non-blank lines.
+            - [ ] Line counter persists across files.
+            - [ ] Handle lines without trailing newline.
+        - [ ] **Blank Line Squeezing (`-s`):**
+            - [ ] Replace multiple consecutive blank lines with one.
+            - [ ] Track state across read boundaries.
+            - [ ] Works correctly with `-n` (numbers squeezed output).
+        - [ ] **End-of-Line Marker (`-E`):**
+            - [ ] Display `$` before each newline.
+            - [ ] Handle lines without trailing newline.
+        - [ ] **Tab Display (`-T`):**
+            - [ ] Display TAB characters as `^I`.
+        - [ ] **Non-Printing Characters (`-v`):**
+            - [ ] Display control chars (0x00-0x1F) as `^@` through `^_`.
+            - [ ] Display DEL (0x7F) as `^?`.
+            - [ ] Display high-bit chars (0x80-0x9F) as `M-^@` through `M-^_`.
+            - [ ] Display high-bit chars (0xA0-0xFE) as `M- ` through `M-~`.
+            - [ ] Display 0xFF as `M-^?`.
+            - [ ] Exception: TAB, NL, FF handled separately.
+        - [ ] **Error Handling:**
+            - [ ] Continue to next file on per-file error.
+            - [ ] Print error message to stderr for each failure.
+            - [ ] Return nonzero exit code if any file failed.
+            - [ ] Exit code 0: all files processed successfully.
+            - [ ] Exit code 1: at least one file could not be read.
+            - [ ] Handle `ENOENT`, `EACCES`, `EISDIR`.
+        - [ ] **Special Cases:**
+            - [ ] Handle directories (error: is a directory).
+            - [ ] Handle device files (read normally).
+            - [ ] Handle FIFOs/pipes.
+            - [ ] Handle socket files (error or read).
+            - [ ] Symlinks: follow to target.
+        - [ ] **Performance:**
+            - [ ] Use efficient buffer size (e.g., 64KB).
+            - [ ] Minimize syscalls in default mode.
+            - [ ] Streaming: never buffer entire file.
+            - [ ] Consider `sendfile()` for file-to-stdout (optional).
+        - [ ] **Build & Installation:**
+            - [ ] Update `bin/cat/Makefile`.
+            - [ ] Install to `/bin/cat`.
+            - [ ] Add to root filesystem `dist/`.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Option parsing.
+                - [ ] Line numbering logic.
+                - [ ] Blank squeezing state machine.
+                - [ ] Non-printing character encoding.
+            - [ ] **Integration Tests:**
+                - [ ] Basic: `cat file` -> prints contents.
+                - [ ] Multiple files: `cat file1 file2` -> concatenated.
+                - [ ] Stdin: `echo test | cat` -> "test".
+                - [ ] Dash: `cat - file` -> stdin then file.
+                - [ ] Line numbers: `cat -n file` -> numbered lines.
+                - [ ] Non-blank numbers: `cat -b file`.
+                - [ ] Squeeze blank: `cat -s file`.
+                - [ ] Show ends: `cat -E file` -> `$` at EOL.
+                - [ ] Show tabs: `cat -T file` -> `^I`.
+                - [ ] Show non-printing: `cat -v file`.
+                - [ ] Show all: `cat -A file`.
+                - [ ] Unbuffered: `cat -u file`.
+                - [ ] Binary file passthrough.
+                - [ ] Empty file.
+                - [ ] Very large file.
+                - [ ] File without trailing newline.
+                - [ ] Directory argument (error).
+            - [ ] **Error Handling Tests:**
+                - [ ] Nonexistent file.
+                - [ ] Permission denied.
+                - [ ] Continue after error.
+            - [ ] **Property Tests:**
+                - [ ] Output byte count equals input byte count (without options).
+                - [ ] Line count matches with `-n`.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz binary files.
+                - [ ] Fuzz option combinations.
+            - [ ] **Acceptance Tests:**
+                - [ ] `cat file` -> prints contents.
+                - [ ] `cat file1 file2` -> prints concatenated.
+                - [ ] `cat -n file` -> lines numbered.
+                - [ ] `cat -` -> reads stdin.
+        - [ ] **Documentation:**
+            - [ ] Write `cat(1)` man page covering all options.
+            - [ ] Document POSIX `-u` behavior.
+            - [ ] Document `-v` encoding scheme.
+            - [ ] Document error continuation behavior.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All POSIX options implemented (`-u`).
+            - [ ] All common extensions implemented (`-n`, `-b`, `-s`, `-E`, `-T`, `-v`).
+            - [ ] Binary files handled correctly.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Correct exit codes.
+            - [ ] Man page complete.
+            - [ ] All tests pass in CI.
+    - [ ] **`echo` - Display a line of text (Standalone `/bin/echo`):**
+        - [ ] **Design & Rationale:**
+            - [ ] Create standalone `/bin/echo` executable separate from shell builtin.
+            - [ ] Document differences from shell builtin echo.
+            - [ ] Shell builtin takes precedence; `/bin/echo` invoked via explicit path.
+            - [ ] Design doc: behavior parity with BSD/GNU echo.
+        - [ ] **CLI Options:**
             - [ ] `-n`: Do not output the trailing newline.
-            - [ ] `-e`: Enable interpretation of backslash escapes (`\n`, `\t`, `\\`, `\0NNN`).
+            - [ ] `-e`: Enable interpretation of backslash escapes.
             - [ ] `-E`: Disable interpretation of backslash escapes (default).
-        - [ ] **Runtime:**
-            - [ ] Print all arguments separated by space.
-        - [ ] **Library dependencies:**
-            - [ ] `printf` or `write`
-        - [ ] **Acceptance tests:**
-            - [ ] `echo hello` -> prints "hello\n"
-            - [ ] `echo -n hello` -> prints "hello" (no newline)
-            - [ ] `echo -e "a\tb"` -> prints "a    b"
+            - [ ] `--help`: Display help and exit (GNU extension).
+            - [ ] `--version`: Display version and exit (GNU extension).
+            - [ ] POSIX mode: only `-n` supported when POSIXLY_CORRECT set.
+        - [ ] **Backslash Escape Sequences (`-e`):**
+            - [ ] `\\`: Backslash.
+            - [ ] `\a`: Alert (bell).
+            - [ ] `\b`: Backspace.
+            - [ ] `\c`: Suppress further output (stop processing).
+            - [ ] `\e`, `\E`: Escape character (0x1B).
+            - [ ] `\f`: Form feed.
+            - [ ] `\n`: Newline.
+            - [ ] `\r`: Carriage return.
+            - [ ] `\t`: Horizontal tab.
+            - [ ] `\v`: Vertical tab.
+            - [ ] `\0nnn`: Octal byte value (0-3 digits).
+            - [ ] `\xHH`: Hexadecimal byte value (1-2 digits).
+            - [ ] `\uHHHH`: Unicode code point (4 hex digits).
+            - [ ] `\UHHHHHHHH`: Unicode code point (8 hex digits).
+        - [ ] **Argument Handling:**
+            - [ ] Print all arguments separated by single space.
+            - [ ] Handle empty arguments correctly.
+            - [ ] Handle arguments with embedded whitespace.
+            - [ ] Handle arguments with special characters.
+            - [ ] Append newline unless `-n` specified.
+        - [ ] **Option Parsing:**
+            - [ ] Stop option parsing at first non-option argument.
+            - [ ] Treat `-` as literal argument.
+            - [ ] Treat `--` as end of options.
+            - [ ] Handle combined options (e.g., `-ne`).
+            - [ ] Invalid options treated as arguments (POSIX behavior).
+        - [ ] **Output:**
+            - [ ] Write to stdout using `write()` syscall.
+            - [ ] Handle `EINTR` (retry on interrupt).
+            - [ ] Handle partial writes.
+            - [ ] Exit code 0 on success.
+            - [ ] Exit code 1 on write error.
+        - [ ] **Build & Installation:**
+            - [ ] Create `bin/echo/` directory structure.
+            - [ ] Create `bin/echo/Makefile`.
+            - [ ] Install to `/bin/echo`.
+            - [ ] Add to root filesystem `dist/`.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Escape sequence parsing.
+                - [ ] Option parsing.
+                - [ ] Octal/hex/unicode parsing.
+            - [ ] **Integration Tests:**
+                - [ ] Basic: `echo hello` -> "hello\n".
+                - [ ] No newline: `echo -n hello` -> "hello".
+                - [ ] Tab: `echo -e 'a\tb'` -> "a\tb".
+                - [ ] Newline: `echo -e 'a\nb'` -> "a\nb".
+                - [ ] Backslash: `echo -e '\\'` -> "\\".
+                - [ ] Octal: `echo -e '\101'` -> "A".
+                - [ ] Hex: `echo -e '\x41'` -> "A".
+                - [ ] Stop output: `echo -e 'a\cb'` -> "a".
+                - [ ] Multiple args: `echo a b c` -> "a b c\n".
+                - [ ] Empty args: `echo "" x` -> " x\n".
+                - [ ] Dash literal: `echo -` -> "-\n".
+                - [ ] Combined options: `echo -ne 'a\n'` -> "a\n".
+                - [ ] No escape: `echo -E 'a\tb'` -> "a\\tb\n".
+            - [ ] **Edge Case Tests:**
+                - [ ] Very long arguments.
+                - [ ] Binary data in arguments.
+                - [ ] Unicode characters.
+                - [ ] Null bytes in escape sequences.
+            - [ ] **Property Tests:**
+                - [ ] Output length matches expected.
+                - [ ] Escape sequences produce valid output.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz argument parsing.
+                - [ ] Fuzz escape sequence parsing.
+            - [ ] **Acceptance Tests:**
+                - [ ] Explicit `/bin/echo` works.
+                - [ ] Compatible with common scripts.
+        - [ ] **Documentation:**
+            - [ ] Write `echo(1)` man page.
+            - [ ] Document all escape sequences.
+            - [ ] Document `-e`/`-E` behavior.
+            - [ ] Document differences from shell builtin.
+            - [ ] Document POSIX vs GNU extensions.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented.
+            - [ ] All escape sequences work correctly.
+            - [ ] Standalone binary at `/bin/echo`.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Exit codes correct.
+            - [ ] Man page complete.
+            - [ ] All tests pass in CI.
     - [ ] **`touch` - Change file timestamps:**
         - [ ] **Purpose:** Update the access and modification times of each FILE to the current time.
         - [ ] **Standards:** POSIX.1-2017.
@@ -4164,27 +5839,28 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Record login in `/var/run/utmp` and `/var/log/wtmp`.
             - [ ] Handle login failures (syslog LOG_AUTH).
     - [ ] **`ps` (Process Status):**
-        - [ ] **Data Gathering:**
-            - [ ] Iterate over `/proc/[pid]` directories.
-            - [ ] Parse `/proc/[pid]/stat` for state (`R`, `S`, `Z`), ppid, pgrp, session, tty.
-            - [ ] Parse `/proc/[pid]/cmdline` for full arguments.
-            - [ ] Parse `/proc/[pid]/status` for real/effective UID/GID.
+        - [ ] **Data Gathering (via `libsys`):**
+            - [ ] Call `sys_proc_count()` to get process count.
+            - [ ] Call `sys_proc_list()` to enumerate all PIDs.
+            - [ ] Call `sys_proc_info()` for each PID to get state, ppid, pgid, sid, tty, perso_id.
+            - [ ] Call `sys_proc_cmdline()` for full command line arguments.
+            - [ ] Call `sys_proc_pers_name()` to resolve personality ID to display string.
         - [ ] **Formatting & Output:**
-            - [ ] Resolve TTY major/minor to device names (`/dev/tty1`, `?`).
-            - [ ] Calculate %CPU (utime+stime / uptime delta).
-            - [ ] Calculate %MEM (rss * pagesize / total_ram).
-            - [ ] Format columns (PID, TTY, STAT, TIME, COMMAND).
+            - [ ] Resolve TTY device number to name (from `sys_procinfo_t.tty`).
+            - [ ] Calculate %CPU (user_time+sys_time / uptime delta).
+            - [ ] Calculate %MEM (rss * pagesize / total_ram from `sys_vm_stats()`).
+            - [ ] Format columns: PID, TTY, STAT, TIME, COMMAND, PERS (personality).
             - [ ] Support BSD syntax (`aux`) vs SysV syntax (`-ef`).
     - [ ] **`top` (Real-time Monitor):**
-        - [ ] **Backend:**
-            - [ ] Efficiently scan `/proc` (snapshotting).
-            - [ ] Calculate CPU delta usage between samples (Prev/Curr ticks).
-            - [ ] Read global stats (`/proc/stat`, `/proc/meminfo`).
+        - [ ] **Backend (via `libsys`):**
+            - [ ] Efficiently call `sys_proc_list()` and `sys_proc_info()` (snapshotting).
+            - [ ] Calculate CPU delta usage via `sys_cpu_times()` between samples.
+            - [ ] Read global stats via `sys_vm_stats()` and `sys_cpu_loadavg()`.
         - [ ] **UI / Display:**
             - [ ] Initialize terminal (raw mode, no echo).
             - [ ] Handle VT100 control sequences (clear screen, cursor positioning).
-            - [ ] Display Header (Uptime, Load Avg, CPU states, Mem/Swap).
-            - [ ] Display Process List (Sortable by CPU/Mem, clamped to screen height).
+            - [ ] Display Header: Uptime (`sys_uptime()`), Load (`sys_cpu_loadavg()`), Mem/Swap.
+            - [ ] Display Process List (sortable by CPU/Mem, show personality, clamp to screen).
             - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
     - [ ] **Documentation Utils:**
         - [ ] **`roff` / `nroff` (Typesetting Engine):**

@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <stdint.h>
 
 void exit(int status) {
     _exit(status);
@@ -8,6 +11,10 @@ void exit(int status) {
 
 void abort(void) {
     _exit(134);
+}
+
+void __stack_chk_fail(void) {
+    _exit(127);
 }
 
 // Simple bump allocator for now, 1MB heap
@@ -60,6 +67,56 @@ int at_quick_exit(void (*func)(void)) {
     return 0;
 }
 
+long strtol(const char *nptr, char **endptr, int base) {
+    const char *s = nptr;
+    unsigned long acc;
+    int c;
+    unsigned long cutoff;
+    int neg = 0, any, cutlim;
+
+    if (base < 0 || base == 1 || base > 36) {
+        if (endptr) *endptr = (char *)nptr;
+        return 0;
+    }
+
+    while (isspace(*s)) s++;
+    if (*s == '-') {
+        neg = 1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+    if ((base == 0 || base == 16) && *s == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+        base = 16;
+    }
+    if (base == 0) base = *s == '0' ? 8 : 10;
+
+    cutoff = neg ? -(unsigned long)-2147483648L : 2147483647L; // Simplified LONG_MAX/MIN for 32-bit
+    cutlim = cutoff % (unsigned long)base;
+    cutoff /= (unsigned long)base;
+    for (acc = 0, any = 0;; c = *s++) {
+        if (isdigit(c)) c -= '0';
+        else if (isalpha(c)) c -= isupper(c) ? 'A' - 10 : 'a' - 10;
+        else break;
+        if (c >= base) break;
+        if (any < 0 || acc > cutoff || (acc == cutoff && c > cutlim))
+            any = -1;
+        else {
+            any = 1;
+            acc *= base;
+            acc += c;
+        }
+    }
+    if (any < 0) {
+        acc = neg ? -2147483648L : 2147483647L;
+    } else if (neg) {
+        acc = -acc;
+    }
+    if (endptr != 0) *endptr = (char *)(any ? s - 1 : nptr);
+    return acc;
+}
+
 int atoi(const char *nptr) {
     return (int)atol(nptr);
 }
@@ -110,11 +167,86 @@ void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int 
     return NULL;
 }
 
-static unsigned int next = 1;
-int rand(void) {
-    next = next * 1103515245 + 12345;
-    return (unsigned int)(next/65536) % 32768;
+/* xoroshiro128++ implementation */
+static uint64_t s[2] = { 0x1234567890ABCDEF, 0xFEDCBA0987654321 };
+
+static inline uint64_t rotl(const uint64_t x, int k) {
+	return (x << k) | (x >> (64 - k));
 }
+
+static uint64_t next_rand(void) {
+	const uint64_t s0 = s[0];
+	uint64_t s1 = s[1];
+	const uint64_t result = rotl(s0 + s1, 17) + s0;
+
+	s1 ^= s0;
+	s[0] = rotl(s0, 49) ^ s1 ^ (s1 << 21); // a, b
+	s[1] = rotl(s1, 28);
+
+	return result;
+}
+
+int rand(void) {
+    return (int)(next_rand() & 0x7FFFFFFF);
+}
+
 void srand(unsigned int seed) {
-    next = seed;
+    // SplitMix64 based seeding
+    uint64_t z = (uint64_t)seed;
+
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    s[0] = z ^ (z >> 31);
+
+    // Changing seed for second part
+    z = (uint64_t)seed + 0x9e3779b97f4a7c15ULL;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    s[1] = z ^ (z >> 31);
+
+    // Ensure non-zero state
+    if (s[0] == 0 && s[1] == 0) s[0] = 1;
+}
+
+void arc4random_buf(void *buf, size_t n) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0) {
+        abort();
+    }
+    char *p = (char *)buf;
+    size_t left = n;
+    while (left > 0) {
+        ssize_t r = read(fd, p, left);
+        if (r <= 0) {
+             close(fd);
+             abort();
+        }
+        p += r;
+        left -= r;
+    }
+    close(fd);
+}
+
+uint32_t arc4random(void) {
+    uint32_t v;
+    arc4random_buf(&v, sizeof(v));
+    return v;
+}
+
+uint32_t arc4random_uniform(uint32_t upper_bound) {
+    uint32_t r, min;
+
+    if (upper_bound < 2)
+        return 0;
+
+    /* 2**32 % x == (2**32 - x) % x */
+    min = -upper_bound % upper_bound;
+
+    for (;;) {
+        r = arc4random();
+        if (r >= min)
+            break;
+    }
+
+    return r % upper_bound;
 }

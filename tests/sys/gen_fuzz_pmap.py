@@ -8,6 +8,7 @@ and checks for crashes or memory corruption
 import random
 import struct
 import sys
+import os
 
 def generate_fuzz_sequence(n_ops=1000):
     """Generate random sequence of pmap operations"""
@@ -56,7 +57,7 @@ void run_pmap_fuzz_test(void) {
     
 """
     
-    for op, pmap_id in ops:
+    for i, (op, pmap_id) in enumerate(ops):
         if op == 'create':
             code += f"    // Create pmap {pmap_id}\n"
             code += f"    pmaps[{pmap_id}] = pmap_create();\n"
@@ -70,7 +71,7 @@ void run_pmap_fuzz_test(void) {
             code += f"    ops++;\n"
         
         # Add progress marker every 100 ops
-        if len([o for o in ops[:ops.index((op, pmap_id))+1]]) % 100 == 0:
+        if (i + 1) % 100 == 0:
             code += '    kprint(".");\n'
     
     code += """
@@ -88,11 +89,14 @@ def main():
     ops = generate_fuzz_sequence(1000)
     code = generate_fuzz_c_code(ops)
     
-    with open('/home/segin/test/sys/tests/fuzz_pmap.c', 'w') as f:
+    # Use current directory for output
+    output_path = os.path.join(os.path.dirname(__file__) if '__file__' in globals() else '.', 'fuzz_pmap.c')
+
+    with open(output_path, 'w') as f:
         f.write(code)
     
     print(f"Generated {len(ops)} operations")
-    print("Created: fuzz_pmap.c")
+    print(f"Created: {output_path}")
 
 if __name__ == '__main__':
     main()

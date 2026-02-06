@@ -16,29 +16,121 @@ char *strfry(char *string) {
     return string;
 }
 
+/*
+ * Optimized memcpy - uses word-aligned transfers for speed.
+ * Handles unaligned head/tail bytes separately.
+ */
 void *memcpy(void *dest, const void *src, size_t n) {
-    char *d = dest;
-    const char *s = src;
-    while (n--) *d++ = *s++;
+    unsigned char *d = dest;
+    const unsigned char *s = src;
+    
+    /* Copy byte-by-byte until destination is word-aligned */
+    while (n && ((uintptr_t)d & 3)) {
+        *d++ = *s++;
+        n--;
+    }
+    
+    /* Copy words (4 bytes at a time) */
+    uint32_t *dw = (uint32_t *)d;
+    const uint32_t *sw = (const uint32_t *)s;
+    while (n >= 4) {
+        *dw++ = *sw++;
+        n -= 4;
+    }
+    
+    /* Copy remaining bytes */
+    d = (unsigned char *)dw;
+    s = (const unsigned char *)sw;
+    while (n--) {
+        *d++ = *s++;
+    }
+    
     return dest;
 }
 
+/*
+ * Optimized memmove - handles overlapping regions safely.
+ * Uses word-aligned transfers when possible.
+ */
 void *memmove(void *dest, const void *src, size_t n) {
-    char *d = dest;
-    const char *s = src;
+    unsigned char *d = dest;
+    const unsigned char *s = src;
+    
     if (d < s) {
-        while (n--) *d++ = *s++;
-    } else {
+        /* Forward copy - same as memcpy optimization */
+        while (n && ((uintptr_t)d & 3)) {
+            *d++ = *s++;
+            n--;
+        }
+        uint32_t *dw = (uint32_t *)d;
+        const uint32_t *sw = (const uint32_t *)s;
+        while (n >= 4) {
+            *dw++ = *sw++;
+            n -= 4;
+        }
+        d = (unsigned char *)dw;
+        s = (const unsigned char *)sw;
+        while (n--) {
+            *d++ = *s++;
+        }
+    } else if (d > s) {
+        /* Backward copy to handle overlap */
         d += n;
         s += n;
-        while (n--) *--d = *--s;
+        
+        /* Copy tail bytes until destination is word-aligned */
+        while (n && ((uintptr_t)d & 3)) {
+            *--d = *--s;
+            n--;
+        }
+        
+        /* Copy words backward */
+        uint32_t *dw = (uint32_t *)d;
+        const uint32_t *sw = (const uint32_t *)s;
+        while (n >= 4) {
+            *--dw = *--sw;
+            n -= 4;
+        }
+        
+        /* Copy remaining bytes */
+        d = (unsigned char *)dw;
+        s = (const unsigned char *)sw;
+        while (n--) {
+            *--d = *--s;
+        }
     }
     return dest;
 }
 
+/*
+ * Optimized memset - uses word-aligned fills for speed.
+ */
 void *memset(void *s, int c, size_t n) {
     unsigned char *p = s;
-    while(n--) *p++ = (unsigned char)c;
+    unsigned char byte = (unsigned char)c;
+    
+    /* Fill byte-by-byte until word-aligned */
+    while (n && ((uintptr_t)p & 3)) {
+        *p++ = byte;
+        n--;
+    }
+    
+    /* Create a word with the byte replicated 4 times */
+    uint32_t word = byte | (byte << 8) | (byte << 16) | (byte << 24);
+    
+    /* Fill words */
+    uint32_t *pw = (uint32_t *)p;
+    while (n >= 4) {
+        *pw++ = word;
+        n -= 4;
+    }
+    
+    /* Fill remaining bytes */
+    p = (unsigned char *)pw;
+    while (n--) {
+        *p++ = byte;
+    }
+    
     return s;
 }
 
@@ -197,6 +289,35 @@ char *strtok(char *str, const char *delim) {
         saveptr = NULL;
     }
     return str;
+}
+
+char *strpbrk(const char *s1, const char *s2) {
+    while (*s1) {
+        if (strchr(s2, *s1++)) return (char *)s1 - 1;
+    }
+    return NULL;
+}
+
+char *strtok_r(char *str, const char *delim, char **saveptr) {
+    char *s = str;
+    if (!s) s = *saveptr;
+    if (!s) return NULL;
+
+    s += strspn(s, delim);
+    if (*s == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+
+    char *token = s;
+    s += strcspn(s, delim);
+    if (*s == '\0') {
+        *saveptr = NULL;
+    } else {
+        *s = '\0';
+        *saveptr = s + 1;
+    }
+    return token;
 }
 
 char *strerror(int errnum) {

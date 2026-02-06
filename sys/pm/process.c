@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmap.h>
+#include <exec/perso/personality.h>
 
 process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
@@ -77,7 +78,7 @@ int proc_get_last_pid(void) {
     return next_pid - 1;
 }
 
-process_t *proc_create(struct personality *pers) {
+process_t *proc_create(int perso_id) {
     spinlock_acquire(&pid_lock);
     int i;
     for (i = 0; i < MAX_PROCS; i++) {
@@ -91,7 +92,7 @@ process_t *proc_create(struct personality *pers) {
     processes[i].pid = next_pid++;
     spinlock_release(&pid_lock);
     processes[i].ppid = current_process ? current_process->pid : 0;
-    processes[i].pers = pers;
+    processes[i].perso_id = perso_id;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
     processes[i].next_fd = 0; // Reset FD hint
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;
@@ -114,7 +115,7 @@ process_t *proc_create(struct personality *pers) {
 }
 
 int proc_fork(process_t *parent, void *stack) {
-    process_t *child_proc = proc_create(parent->pers);
+    process_t *child_proc = proc_create(parent->perso_id);
     if (!child_proc) return -1;
     
     // Inherit process name
@@ -143,7 +144,7 @@ int proc_fork(process_t *parent, void *stack) {
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];
-            child_proc->fds[j]->ref_count++;
+            child_proc->fds[j]->f_count++;
         }
     }
     
@@ -228,11 +229,10 @@ int sched_fork_process(process_t *parent, void *stack) {
 
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     extern void *pmm_alloc_block(void);
-    extern struct personality personality_native;
     extern thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
 
     // 1. Create Process
-    process_t *child = proc_create(&personality_native);
+    process_t *child = proc_create(PERS_NATIVE);
     if (!child) return -1;
     
     // 2. Set Name

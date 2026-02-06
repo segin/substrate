@@ -1,0 +1,48 @@
+.TH VOP_WHITEOUT 9 "February 6, 2026" "Substrate" "Kernel Developer's Manual"
+.SH NAME
+VOP_WHITEOUT \- create, delete, or lookup a whiteout entry
+.SH SYNOPSIS
+.B #include <vfs/vnode.h>
+.B #include <sys/namei.h>
+.PP
+.BI "int VOP_WHITEOUT(struct vnode *dvp, struct componentname *cnp, int flags);"
+.SH DESCRIPTION
+The
+.B VOP_WHITEOUT()
+function manipulates whiteout entries in a directory. Whiteouts are used by union filesystems to hide entries in lower layers.
+.PP
+The arguments are:
+.TP
+.I dvp
+The vnode of the directory.
+.TP
+.I cnp
+The component name information.
+.TP
+.I flags
+One of
+.B CREATE\fR,
+.B DELETE\fR,
+or
+.B LOOKUP\fR.
+.SH LOCKS
+The directory
+.I dvp
+should be locked on entry and will remain locked on return.
+.SH RETURN VALUES
+Zero is returned on success, otherwise an error code is returned.
+.SH ERRORS
+.TP
+[EOPNOTSUPP]
+The filesystem does not support whiteouts.
+.TP
+[ENOTDIR]
+The
+.I dvp
+argument is not a directory.
+.TP
+[EROFS]
+The filesystem is read-only.
+.SH SEE ALSO
+.BR vnode (9),
+.BR namei (9)

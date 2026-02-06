@@ -1,6 +1,13 @@
 #include <arch/x86_64/pmap.h>
-#include <arch/x86-common/include/msr.h>
 #include <arch/i386/pmm.h>
+
+// MSR definitions for NX bit
+#define MSR_EFER    0xC0000080
+#define EFER_NXE    (1UL << 11)
+
+// MSR helpers from pmap_asm.S
+extern uint64_t pmap_rdmsr(uint32_t msr);
+extern void pmap_wrmsr(uint32_t msr, uint64_t val);
 #include <vm/vm_kmem.h> // For kmalloc/kfree
 #include <string.h> // for memset
 
@@ -35,6 +42,22 @@ spinlock_t pmap_list_lock;
 // Current pmap (per-cpu var?)
 static pmap_t curpmap = &kernel_pmap_store;
 
+static int cpuid_check_nx(void) {
+#ifndef HOST_TEST
+    uint32_t eax, ebx, ecx, edx;
+
+    // Check extended CPUID support
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000000));
+    if (eax < 0x80000001UL) return 0;
+
+    // Check NX bit (Bit 20 of EDX)
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000001));
+    return (edx >> 20) & 1;
+#else
+    return 0;
+#endif
+}
+
 void pmap_init(void) {
     // 0. Initialize global list and lock
     spinlock_init(&pmap_list_lock, "pmap_list");
@@ -59,8 +82,10 @@ void pmap_init(void) {
     TAILQ_INSERT_TAIL(&global_pmap_list, &kernel_pmap_store, list_entry);
 
     // 3. Enable NX (EFER.NXE) - MSR 0xC0000080 bit 11
-    uint64_t efer = rdmsr(MSR_EFER);
-    wrmsr(MSR_EFER, efer | EFER_NXE);
+    if (cpuid_check_nx()) {
+        uint64_t efer = pmap_rdmsr(MSR_EFER);
+        pmap_wrmsr(MSR_EFER, efer | EFER_NXE);
+    }
 
     // 4. Load CR3 to refresh
     pmap_activate(kernel_pmap_ptr);

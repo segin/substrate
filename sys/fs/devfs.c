@@ -73,7 +73,8 @@ static struct dirent dev_dirent;
 static struct dirent *storage_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     if (index < (uint64_t)storage_device_count) {
-        strcpy(dev_dirent.name, storage_devices[index]->name);
+        strncpy(dev_dirent.name, storage_devices[index]->name, sizeof(dev_dirent.name) - 1);
+        dev_dirent.name[sizeof(dev_dirent.name) - 1] = '\0';
         dev_dirent.ino = index + 1;
         return &dev_dirent;
     }
@@ -115,7 +116,8 @@ static struct dirent *devfs_readdir(fs_node_t *node, uint64_t index) {
     // Then char devices
     uint64_t char_idx = index - 2;
     if (char_idx < (uint64_t)char_device_count) {
-        strcpy(dev_dirent.name, char_devices[char_idx]->name);
+        strncpy(dev_dirent.name, char_devices[char_idx]->name, sizeof(dev_dirent.name) - 1);
+        dev_dirent.name[sizeof(dev_dirent.name) - 1] = '\0';
         dev_dirent.ino = char_idx + 3;
         return &dev_dirent;
     }

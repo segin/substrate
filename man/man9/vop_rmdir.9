@@ -1,0 +1,58 @@
+.TH VOP_RMDIR 9 "February 6, 2026" "Substrate" "Kernel Developer's Manual"
+.SH NAME
+VOP_RMDIR \- remove a directory
+.SH SYNOPSIS
+.B #include <vfs/vnode.h>
+.B #include <sys/namei.h>
+.PP
+.BI "int VOP_RMDIR(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);"
+.SH DESCRIPTION
+The
+.B VOP_RMDIR()
+function removes an empty directory.
+.PP
+The arguments are:
+.TP
+.I dvp
+The vnode of the parent directory.
+.TP
+.I vp
+The vnode of the directory to be removed.
+.TP
+.I cnp
+The component name information for the directory to be removed.
+.SH LOCKS
+The parent directory
+.I dvp
+and the directory
+.I vp
+should be locked on entry and will remain locked on return.
+.SH RETURN VALUES
+Zero is returned on success, otherwise an error code is returned.
+.SH ERRORS
+.TP
+[ENOTDIR]
+The
+.I dvp
+argument is not a directory, or
+.I vp
+is not a directory.
+.TP
+[ENOTEMPTY]
+The directory
+.I vp
+is not empty.
+.TP
+[EBUSY]
+The directory
+.I vp
+is in use (e.g., a mount point).
+.TP
+[EACCES]
+Permission denied.
+.TP
+[EROFS]
+The filesystem is read-only.
+.SH SEE ALSO
+.BR vnode (9),
+.BR VOP_REMOVE (9)

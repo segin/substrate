@@ -1,0 +1,55 @@
+.TH VOP_REMOVE 9 "February 6, 2026" "Substrate" "Kernel Developer's Manual"
+.SH NAME
+VOP_REMOVE \- remove a file
+.SH SYNOPSIS
+.B #include <vfs/vnode.h>
+.B #include <sys/namei.h>
+.PP
+.BI "int VOP_REMOVE(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);"
+.SH DESCRIPTION
+The
+.B VOP_REMOVE()
+function removes a directory entry for a file.
+.PP
+The arguments are:
+.TP
+.I dvp
+The vnode of the directory from which the file is to be removed.
+.TP
+.I vp
+The vnode of the file to be removed.
+.TP
+.I cnp
+The component name information for the file to be removed.
+.SH LOCKS
+The directory
+.I dvp
+and the file
+.I vp
+should be locked on entry and will remain locked on return.
+.SH RETURN VALUES
+Zero is returned on success, otherwise an error code is returned.
+.SH ERRORS
+.TP
+[ENOTDIR]
+The
+.I dvp
+argument is not a directory.
+.TP
+[ENOENT]
+The file specified by
+.I cnp
+does not exist.
+.TP
+[EACCES]
+Permission denied.
+.TP
+[EPERM]
+The file is immutable or the directory is append-only.
+.TP
+[EROFS]
+The filesystem is read-only.
+.SH SEE ALSO
+.BR vnode (9),
+.BR VOP_LOOKUP (9),
+.BR VOP_RMDIR (9)

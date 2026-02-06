@@ -12,4 +12,8 @@ struct tms {
 
 clock_t times(struct tms *buf);
 
+#ifndef CLK_TCK
+#define CLK_TCK 100
+#endif
+
 #endif

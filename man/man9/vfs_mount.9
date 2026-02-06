@@ -1,45 +1,66 @@
-.Dd February 1, 2026
+.Dd February 6, 2026
 .Dt VFS_MOUNT 9
-.Os Substrate
+.Os
 .Sh NAME
 .Nm vfs_mount
 .Nd mount a filesystem
 .Sh SYNOPSIS
-.In vfs/vfs.h
+.In sys/param.h
+.In sys/mount.h
+.In sys/vnode.h
 .Ft int
-.Fn vfs_mount "const char *device" "const char *path" "const char *type" "uint32_t flags" "void *data"
+.Fn vfs_mount "struct mount *mp" "const char *path" "void *data" "struct nameidata *ndp" "struct thread *td"
 .Sh DESCRIPTION
 The
 .Fn vfs_mount
-function mounts a filesystem of the specified
-.Fa type
-onto the directory specified by
-.Fa path .
+function mounts a filesystem into the system's namespace.
+It performs the following operations:
+.Bl -enum
+.It
+Look up the mount point vnode using
+.Fa ndp .
+.It
+Verify that the mount point is a directory and is not already a mount point.
+.It
+Initialize the
+.Fa mp
+structure.
+.It
+Call the filesystem-specific VFS_MOUNT operation.
+.It
+On success, insert
+.Fa mp
+into the global mount list and link it to the mount point vnode.
+.El
 .Pp
-The
-.Fa device
-argument specifies the source device (e.g., "/dev/hda") or a special identifier depending on the filesystem type.
-.Pp
-The
-.Fa flags
-and
-.Fa data
-arguments provide generic and filesystem-specific mount options, respectively.
-.Pp
-If
-.Fa path
-is "/", the filesystem is mounted as the root filesystem
-.Pq Va fs_root .
-Otherwise, the function looks up the mount point node and attaches the new filesystem root to it.
+table arguments:
+.Bl -tag -width ".Fa mntflags"
+.It Fa mp
+Structure representing the filesystem to be mounted.
+If NULL, a new structure is allocated.
+.It Fa path
+Path to the directory where the filesystem will be mounted.
+.It Fa data
+Filesystem-specific data (arguments).
+.It Fa ndp
+Nameidata structure used for path lookup.
+.It Fa td
+The thread performing the mount.
+.El
 .Sh RETURN VALUES
 The
 .Fn vfs_mount
-function returns 0 on success, or -1 on failure.
+function returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er ENOTDIR"
+.It Bq Er ENOTDIR
+The path is not a directory.
+.It Bq Er EBUSY
+The path is already a mount point.
+.It Bq Er ENOMEM
+Insufficient memory to allocate internal structures.
+.El
 .Sh SEE ALSO
-.Xr vfs 9 ,
-.Xr vfs_lookup 9 ,
-.Xr vfs_register_filesystem 9
-.Sh HISTORY
-The
-.Fn vfs_mount
-function appeared in Substrate.
+.Xr vfs_unmount 9 ,
+.Xr vfs_start 9 ,
+.Xr vfs_root 9

@@ -1,6 +1,7 @@
 #include <kern/sched.h>
 #include <pm/pm.h>
 #include <sys/acct.h>
+#include <exec/perso/personality.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "pmap.h"
@@ -11,7 +12,6 @@ extern void set_kernel_stack(uint32_t stack);
 extern thread_t *current_thread; // Now defined in generic sched.c
 extern process_t processes[]; // from pm
 extern fs_node_t *fs_root;
-extern struct personality personality_native;
 extern uint32_t get_time(void);
 
 // Generic Allocation Helper
@@ -60,7 +60,7 @@ void sched_init(void) {
     // Setup Kernel Process (PID 0 - Swapper)
     processes[0].pid = 0;
     processes[0].ppid = 0;
-    processes[0].pers = &personality_native;
+    processes[0].perso_id = PERS_NATIVE;
     processes[0].root_node = fs_root;
     processes[0].is_kernel_task = 1;
     processes[0].pmap = pmap_kernel(); // Use Kernel PMAP

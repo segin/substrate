@@ -1,0 +1,39 @@
+.Dd February 6, 2026
+.Dt VFS_SYNC 9
+.Os
+.Sh NAME
+.Nm vfs_sync
+.Nd flush dirty buffers to disk
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/mount.h
+.In sys/vnode.h
+.Ft int
+.Fn vfs_sync "struct mount *mp" "int waitfor" "struct ucred *cred" "struct thread *td"
+.Sh DESCRIPTION
+The
+.Fn vfs_sync
+function flushes dirty buffers associated with the filesystem
+.Fa mp
+to disk.
+If
+.Fa mp
+is NULL, all mounted filesystems are synced.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa waitfor"
+.It Fa mp
+The filesystem to sync, or NULL for all.
+.It Fa waitfor
+If MNT_WAIT, the function waits for I/O completion.
+If MNT_NOWAIT, it initiates I/O but does not wait.
+.It Fa cred
+Credentials to use for the operation.
+.It Fa td
+The thread performing the operation.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh SEE ALSO
+.Xr vfs_mount 9 ,
+.Xr sync 2

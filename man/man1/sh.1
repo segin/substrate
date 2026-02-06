@@ -1,0 +1,177 @@
+.Dd February 5, 2026
+.Dt SH 1
+.Os Substrate
+.Sh NAME
+.Nm sh
+.Nd command interpreter (shell)
+.Sh SYNOPSIS
+.Nm
+.Op Fl c Ar string
+.Op Ar file
+.Op Ar args ...
+.Sh DESCRIPTION
+The
+.Nm
+utility is a command interpreter that executes commands read from standard input or from a file.
+.Pp
+The shell implements a subset of the POSIX shell standard, including control structures, variable expansion, and input/output redirection.
+.Sh OPTIONS
+.Bl -tag -width indent
+.It Fl c Ar string
+Read commands from the
+.Ar string
+operand instead of from the standard input.
+.El
+.Sh BUILTINS
+The following built-in commands are supported:
+.Bl -tag -width indent
+.It Ic cd Op Ar directory
+Change the working directory.
+.It Ic exit Op Ar status
+Exit the shell with the specified status.
+.It Ic export Ar name Ns = Ns Ar value
+Set an environment variable.
+.It Ic read Op Fl r Ar var ...
+Read a line from standard input.
+.It Ic unset Ar name
+Unset a variable/function.
+.It Ic shift Op Ar n
+Shift positional parameters.
+.It Ic exec Op Ar command ...
+Replace the shell with the specified command.
+.It Ic . Ar file
+Execute commands from a file in the current shell environment.
+.El
+.Sh PROMPT EXPANSION
+If the
+.Ev PS1
+environment variable is set, it is expanded for the primary prompt.
+Expansion occurs in the following order:
+.Bl -enum
+.It
+Backslash escape sequences are replaced (POSIX mode).
+.It
+If Extended Mode is enabled, percent escape sequences are replaced.
+.It
+Parameter expansion, command substitution, and arithmetic expansion are performed.
+.El
+.Ss POSIX Mode (Default)
+The following backslash escape sequences are supported:
+.Bl -tag -width indent
+.It Ic \e!
+The current history command number.
+.It Ic \e$
+The character
+.Ql #
+if the effective UID is 0 (root), otherwise
+.Ql $ .
+.It Ic \e\e
+A literal backslash.
+.It Ic \eh
+The hostname of the system (short form).
+.It Ic \eu
+The username of the current user.
+.It Ic \ew
+The current working directory, with
+.Ev HOME
+replaced by
+.Ql ~ .
+.El
+.Ss Extended Mode
+Extended Mode is enabled by setting:
+.Dl set -o promptvars
+.Pp
+In Extended Mode, additional percent escape sequences are available.
+.Pp
+.Em Dynamic Elements:
+.Bl -tag -width indent
+.It Ic %n
+The username of the current user.
+.It Ic %m
+The hostname (short form, up to first dot).
+.It Ic %M
+The full hostname.
+.It Ic %~
+The current working directory, with
+.Ev HOME
+replaced by
+.Ql ~ .
+.It Ic %#
+The character
+.Ql #
+if the effective UID is 0 (root), otherwise
+.Ql % .
+.It Ic %?
+The exit status of the last command.
+.It Ic %L
+The shell nesting level (from
+.Ev SHLVL ) .
+.It Ic %j
+The number of background jobs.
+.El
+.Pp
+.Em Styling & Attributes:
+.Bl -tag -width indent
+.It Ic %F{color}
+Set foreground color. Supported colors: black, red, green, yellow, blue, magenta, cyan, white, default.
+.It Ic %f
+Reset foreground color to default.
+.It Ic %K{color}
+Set background color. Same colors as foreground.
+.It Ic %k
+Reset background color to default.
+.It Ic %B
+Enable bold text.
+.It Ic %b
+Disable bold text.
+.It Ic %U
+Enable underline.
+.It Ic %u
+Disable underline.
+.El
+.Pp
+.Em Conditional Tokens:
+.Bl -tag -width indent
+.It Ic %(?<sep>true<sep>false)
+Conditional based on exit status. If last command succeeded, expand to
+.Ar true ,
+otherwise
+.Ar false .
+The separator
+.Ar <sep>
+is any single character.
+.It Ic %(#<sep>root<sep>user)
+Conditional based on UID. If UID is 0, expand to
+.Ar root ,
+otherwise
+.Ar user .
+.El
+.Pp
+.Em Literal Percent:
+.Bl -tag -width indent
+.It Ic %%
+A literal percent sign.
+.El
+.Ss SAFETY LIMITS
+To prevent denial of service attacks and runaway expansion:
+.Bl -bullet
+.It
+Maximum recursion depth: 10 levels.
+.It
+Maximum output size: 64KB.
+.It
+Signals (SIGINT, SIGTERM, SIGCHLD) are blocked during prompt expansion.
+.El
+Unknown escape sequences are printed literally.
+.Sh EXIT STATUS
+The
+.Nm
+utility exits 0 on success, and >0 if an error occurs.
+.Sh SEE ALSO
+.Xr udf 4
+.Sh STANDARDS
+The
+.Nm
+utility is designed to be compliant with the IEEE Std 1003.1-2008 ("POSIX.1") specification.
+.Sh AUTHORS
+The Substrate Project Developers.

@@ -1,0 +1,52 @@
+.TH STRSPN 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strspn, strcspn \- get length of a prefix substring
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "size_t strspn(const char *" s ", const char *" accept ");"
+.sp
+.BI "size_t strcspn(const char *" s ", const char *" reject ");"
+.SH DESCRIPTION
+The
+.BR strspn ()
+function calculates the length (in bytes) of the initial segment of
+.I s
+which consists entirely of bytes in
+.IR accept .
+.sp
+The
+.BR strcspn ()
+function calculates the length (in bytes) of the initial segment of
+.I s
+which consists entirely of bytes not in
+.IR reject .
+.SH RETURN VALUE
+The
+.BR strspn ()
+function returns the number of bytes in the initial segment of
+.I s
+which consist entirely of bytes from
+.IR accept .
+.sp
+The
+.BR strcspn ()
+function returns the number of bytes in the initial segment of
+.I s
+which consist entirely of bytes not from
+.IR reject .
+.SH EXAMPLES
+.EX
+#include <string.h>
+#include <stdio.h>
+
+int main() {
+    printf("%zu\\n", strspn("123abc", "1234567890")); // Prints 3
+    printf("%zu\\n", strcspn("abc123", "1234567890")); // Prints 3
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR strpbrk (3),
+.BR strchr (3),
+.BR strstr (3)

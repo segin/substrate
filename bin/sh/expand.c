@@ -10,28 +10,54 @@
 #include <sys/wait.h>
 
 extern long strtol(const char *nptr, char **endptr, int base);
+extern int execute_line(char *line);
 
-static void buffer_append_internal(char **buf, size_t *cap, size_t *len, char c) {
-    if (*len + 1 >= *cap) {
-        *cap *= 2;
-        if (*cap == 0) *cap = 16;
-        *buf = realloc(*buf, *cap);
+static char *capture_command_output(const char *cmd_str) {
+    int pfd[2];
+    if (pipe(pfd) < 0) return strdup("");
+    
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(pfd[0]);
+        dup2(pfd[1], STDOUT_FILENO);
+        close(pfd[1]);
+        execute_line((char *)cmd_str);
+        fflush(stdout);
+        _exit(0);
+    } else if (pid > 0) {
+        close(pfd[1]);
+        size_t cap = 1024, len = 0;
+        char *buf = malloc(cap);
+        char read_buf[256];
+        ssize_t n;
+        while ((n = read(pfd[0], read_buf, sizeof(read_buf))) > 0) {
+            if (len + n >= cap) {
+                cap *= 2;
+                buf = realloc(buf, cap);
+            }
+            memcpy(buf + len, read_buf, n);
+            len += n;
+        }
+        buf[len] = '\0';
+        close(pfd[0]);
+        waitpid(pid, NULL, 0);
+        /* POSIX: strip trailing newlines */
+        while (len > 0 && buf[len - 1] == '\n') {
+            buf[--len] = '\0';
+        }
+        return buf;
+    } else {
+        close(pfd[0]); close(pfd[1]);
+        return strdup("");
     }
-    (*buf)[*len] = c;
-    (*len)++;
-    (*buf)[*len] = 0;
 }
 
-static void buffer_append_str_internal(char **buf, size_t *cap, size_t *len, const char *str) {
-    if (!str) return;
-    while (*str) {
-        buffer_append_internal(buf, cap, len, *str++);
-    }
-}
+
 
 #define QUOTED_BIT 0x80
 
 static void finalize_word(char **cw, size_t *cw_cap, size_t *cw_len, char ***list, size_t *cap, size_t *len, int quoted_any) {
+    (void)cw_cap;
     if (*cw_len > 0 || quoted_any) {
         if (*len + 1 >= *cap) {
             *cap *= 2;
@@ -55,7 +81,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
     if (!split) {
         // Within double quotes: mask everything to prevent field splitting and globbing
         while (*val) {
-            buffer_append_internal(cw, cw_cap, cw_len, (*val++) | QUOTED_BIT);
+            buffer_append(cw, cw_cap, cw_len, (*val++) | QUOTED_BIT);
         }
         return;
     }
@@ -73,7 +99,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
                 continue;
             }
         } else {
-            buffer_append_internal(cw, cw_cap, cw_len, *p);
+            buffer_append(cw, cw_cap, cw_len, *p);
         }
         if (*p) p++;
     }
@@ -308,7 +334,34 @@ static int glob_match(const char *pattern, const char *name) {
             if (!*name) return 0;
             return glob_match(pattern + 1, name + 1);
         }
-        // [ matching could be added here
+        if (p == '[') {
+            if (!*name) return 0;
+            pattern++;
+            int invert = 0;
+            if ((*pattern & ~QUOTED_BIT) == '!') {
+                invert = 1;
+                pattern++;
+            }
+            int match = 0;
+            int first = 1;
+            while (*pattern && ((*pattern & ~QUOTED_BIT) != ']' || first)) {
+                if (((unsigned char)pattern[1] & ~QUOTED_BIT) == '-' && (unsigned char)pattern[2] && ((unsigned char)pattern[2] & ~QUOTED_BIT) != ']') {
+                    unsigned char start = (unsigned char)*pattern & ~QUOTED_BIT;
+                    unsigned char end = (unsigned char)pattern[2] & ~QUOTED_BIT;
+                    if ((unsigned char)*name >= start && (unsigned char)*name <= end) match = 1;
+                    pattern += 3;
+                } else {
+                    if ((unsigned char)*name == (unsigned char)(*pattern & ~QUOTED_BIT)) match = 1;
+                    pattern++;
+                }
+                first = 0;
+            }
+            if ((*pattern & ~QUOTED_BIT) != ']') return 0;
+            pattern++;
+            if (invert) match = !match;
+            if (!match) return 0;
+            return glob_match(pattern, name + 1);
+        }
     }
     if (*name && (*name == (char)(p & ~QUOTED_BIT))) {
         return glob_match(pattern + 1, name + 1);
@@ -460,24 +513,24 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
     }
     while (*p) {
         char c = *p;
-        if (escape) { buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); escape = 0; }
+        if (escape) { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); escape = 0; }
         else if (in_sq) {
             if (c == '\'') { in_sq = 0; quoted_any = 1; }
-            else { buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); quoted_any = 1; }
+            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); quoted_any = 1; }
         }
         else if (c == '\\') {
             if (in_dq) {
                 char next = *(p + 1);
                 if (next == '$' || next == '`' || next == '"' || next == '\\' || next == '\n') { escape = 1; p++; continue; }
-                buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT);
+                buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT);
             } else { escape = 1; p++; continue; }
         } else if (c == '\'') {
             if (!in_dq) { in_sq = 1; quoted_any = 1; }
-            else { buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
+            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
         }
         else if (c == '"') {
             if (!in_sq) { in_dq = !in_dq; quoted_any = 1; }
-            else { buffer_append_internal(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
+            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
         }
         else if (c == '$' && !in_sq) {
             p++;
@@ -504,6 +557,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                 }
             } else if (*p == '(') {
                 p++;
+                const char *start = p;
                 int depth = 1;
                 while (*p && depth > 0) {
                     if (*p == '(') depth++;
@@ -511,8 +565,11 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                     if (depth > 0) p++;
                 }
                 if (depth == 0) {
-                    // TODO: Command substitution. For now just placeholder.
-                    // expand_str_split("[cmd]", !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                    char *cmd = sh_strndup(start, p - start);
+                    char *output = capture_command_output(cmd);
+                    expand_str_split(output, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                    free(output);
+                    free(cmd);
                 }
             } else if (*p == '{') {
                 p++;
@@ -582,7 +639,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                             // ${var:+word}: use word if set and non-null
                             if (is_nonnull) {
                                 char *expanded = expand_word(word);
-                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             }
                         } else if (op == '=') {
@@ -590,20 +647,20 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                             if (!is_nonnull && varname) {
                                 char *expanded = expand_word(word);
                                 shell_var_set(varname, expanded);
-                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             } else {
-                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             }
                         } else if (op == '?') {
                             // ${var:?word}: error if unset or null
                             if (!is_nonnull) {
                                 char *expanded = expand_word(word);
-                                fprintf(stderr, "sh: %s: %s\n", varname ? varname : "", expanded);
+                                fprintf(stderr, "%s: %s: %s\n", shell_var_get_name(), varname ? varname : "", expanded);
                                 free(expanded);
                                 // Could exit here for non-interactive
                             } else {
-                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             }
                         }
                     } else if (*c == '-' || *c == '=' || *c == '?' || *c == '+') {
@@ -614,33 +671,33 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                         if (op == '-') {
                             if (!is_set) {
                                 char *expanded = expand_word(word);
-                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             } else {
-                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             }
                         } else if (op == '+') {
                             if (is_set) {
                                 char *expanded = expand_word(word);
-                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             }
                         } else if (op == '=') {
                             if (!is_set && varname) {
                                 char *expanded = expand_word(word);
                                 shell_var_set(varname, expanded);
-                                expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             } else {
-                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             }
                         } else if (op == '?') {
                             if (!is_set) {
                                 char *expanded = expand_word(word);
-                                fprintf(stderr, "sh: %s: %s\n", varname ? varname : "", expanded);
+                                fprintf(stderr, "%s: %s: %s\n", shell_var_get_name(), varname ? varname : "", expanded);
                                 free(expanded);
                             } else {
-                                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                                expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             }
                         }
                     } else if (*c == '#') {
@@ -652,7 +709,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                             char *length_val = lookup_variable(length_var);
                             char buf[32];
                             snprintf(buf, sizeof(buf), "%zu", length_val ? strlen(length_val) : 0);
-                            expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            expand_str_split(buf, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             free(length_var);
                         } else {
                             // ${var#pattern} or ${var##pattern}
@@ -689,12 +746,12 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                                 }
                             }
                             char *trimmed = sh_strndup(val, best);
-                            expand_str_split(trimmed, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            expand_str_split(trimmed, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             free(trimmed);
                         }
                     } else {
                         // No operator, just expand the variable
-                        expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                        expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                     }
                     
                     free(varname);
@@ -706,14 +763,45 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                 else while (*p && (isalnum(*p) || *p == '_')) p++;
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);
-                expand_str_split(val, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                 free(name); p--;
             } else {
-                buffer_append_internal(&cw, &cw_cap, &cw_len, '$');
+                buffer_append(&cw, &cw_cap, &cw_len, '$');
                 p--;
             }
-        } else {
-            buffer_append_internal(&cw, &cw_cap, &cw_len, in_dq ? (c | QUOTED_BIT) : c);
+        }
+        else if (c == '`' && !in_sq) {
+            p++;
+            const char *start = p;
+            while (*p && *p != '`') {
+                if (*p == '\\' && (*(p+1) == '$' || *(p+1) == '`' || *(p+1) == '\\' || *(p+1) == '\n')) p++;
+                p++;
+            }
+            if (*p == '`') {
+                char *cmd = sh_strndup(start, p - start);
+                /* Handle backslash escapes inside backticks */
+                char *src = cmd, *dst = cmd;
+                while (*src) {
+                    if (*src == '\\' && (src[1] == '$' || src[1] == '`' || src[1] == '\\' || src[1] == '\n')) {
+                        src++;
+                        if (*src != '\n') *dst++ = *src;
+                    } else {
+                        *dst++ = *src;
+                    }
+                    src++;
+                }
+                *dst = '\0';
+                char *output = capture_command_output(cmd);
+                expand_str_split(output, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                free(output);
+                free(cmd);
+            } else {
+                buffer_append(&cw, &cw_cap, &cw_len, '`');
+                p = start - 1;
+            }
+        }
+        else {
+            buffer_append(&cw, &cw_cap, &cw_len, in_dq ? (c | QUOTED_BIT) : c);
         }
         p++;
     }
@@ -777,11 +865,11 @@ char *expand_heredoc(const char *content, int quoted) {
         if (*p == '\\') {
             char next = *(p + 1);
             if (next == '$' || next == '`' || next == '"' || next == '\\' || next == '\n') {
-                if (next != '\n') buffer_append_internal(&buf, &cap, &len, next);
+                if (next != '\n') buffer_append(&buf, &cap, &len, next);
                 p += 2;
                 continue;
             }
-            buffer_append_internal(&buf, &cap, &len, '\\');
+            buffer_append(&buf, &cap, &len, '\\');
         } else if (*p == '$') {
             p++;
             if (*p == '(' && *(p+1) == '(') {
@@ -803,17 +891,25 @@ char *expand_heredoc(const char *content, int quoted) {
                      long val = parse_assign();
                      char val_buf[32];
                      snprintf(val_buf, sizeof(val_buf), "%ld", val);
-                     buffer_append_str_internal(&buf, &cap, &len, val_buf);
+                     buffer_append_str(&buf, &cap, &len, val_buf);
                      free(expr);
                  }
             } else if (*p == '(') {
-                 // Command sub - TODO
+                 // Command sub
                  p++;
+                 const char *start = p;
                  int depth = 1;
                  while (*p && depth > 0) {
                      if (*p == '(') depth++;
                      else if (*p == ')') depth--;
                      if (depth > 0) p++;
+                 }
+                 if (depth == 0) {
+                     char *cmd = sh_strndup(start, p - start);
+                     char *output = capture_command_output(cmd);
+                     buffer_append_str(&buf, &cap, &len, output);
+                     free(output);
+                     free(cmd);
                  }
             } else if (*p == '{') {
                 p++; const char *start = p;
@@ -821,7 +917,7 @@ char *expand_heredoc(const char *content, int quoted) {
                 if (*p == '}') {
                     char *name = sh_strndup(start, p - start);
                     char *val = lookup_variable(name);
-                    if (val) buffer_append_str_internal(&buf, &cap, &len, val);
+                    if (val) buffer_append_str(&buf, &cap, &len, val);
                     free(name);
                 }
             } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
@@ -830,14 +926,43 @@ char *expand_heredoc(const char *content, int quoted) {
                 else while (*p && (isalnum(*p) || *p == '_')) p++;
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);
-                if (val) buffer_append_str_internal(&buf, &cap, &len, val);
+                if (val) buffer_append_str(&buf, &cap, &len, val);
                 free(name); p--;
             } else {
-                buffer_append_internal(&buf, &cap, &len, '$');
+                buffer_append(&buf, &cap, &len, '$');
                 p--;
             }
+        } else if (*p == '`') {
+            p++;
+            const char *start = p;
+            while (*p && *p != '`') {
+                if (*p == '\\' && (*(p+1) == '$' || *(p+1) == '`' || *(p+1) == '\\' || *(p+1) == '\n')) p++;
+                p++;
+            }
+            if (*p == '`') {
+                char *cmd = sh_strndup(start, p - start);
+                /* Handle backslash escapes inside backticks */
+                char *src = cmd, *dst = cmd;
+                while (*src) {
+                    if (*src == '\\' && (src[1] == '$' || src[1] == '`' || src[1] == '\\' || src[1] == '\n')) {
+                        src++;
+                        if (*src != '\n') *dst++ = *src;
+                    } else {
+                        *dst++ = *src;
+                    }
+                    src++;
+                }
+                *dst = '\0';
+                char *output = capture_command_output(cmd);
+                buffer_append_str(&buf, &cap, &len, output);
+                free(output);
+                free(cmd);
+            } else {
+                buffer_append(&buf, &cap, &len, '`');
+                p = start - 1;
+            }
         } else {
-            buffer_append_internal(&buf, &cap, &len, *p);
+            buffer_append(&buf, &cap, &len, *p);
         }
         p++;
     }

@@ -1,0 +1,31 @@
+.Dd February 6, 2026
+.Dt VFS_START 9
+.Os
+.Sh NAME
+.Nm vfs_start
+.Nd make a filesystem operational
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/mount.h
+.In sys/vnode.h
+.Ft int
+.Fn vfs_start "struct mount *mp" "int flags" "struct thread *td"
+.Sh DESCRIPTION
+The
+.Fn vfs_start
+function is called after a mount is successfully completed to make the filesystem operational.
+It calls the filesystem-specific VFS_START operation.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa flags"
+.It Fa mp
+The filesystem to start.
+.It Fa flags
+Mount flags.
+.It Fa td
+The thread performing the operation.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh SEE ALSO
+.Xr vfs_mount 9

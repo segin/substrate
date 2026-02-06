@@ -1,0 +1,37 @@
+.Dd February 6, 2026
+.Dt VOP_CACHEDLOOKUP 9
+.Os
+.Sh NAME
+.Nm vop_cachedlookup
+.Nd lookup a name in a directory with cache support
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/vnode.h
+.Ft int
+.Fn vop_cachedlookup "struct vnode *dvp" "struct vnode **vpp" "struct componentname *cnp"
+.Sh DESCRIPTION
+The
+.Fn vop_cachedlookup
+function searches for a directory entry, first checking the name cache.
+If the entry is found in the cache, the associated vnode is returned in
+.Fa *vpp .
+If not found, it calls
+.Xr vop_lookup 9
+to perform the lookup on the filesystem.
+If the filesystem lookup is successful, the result is added to the name cache.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa cred"
+.It Fa dvp
+The directory vnode to search.
+.It Fa vpp
+Pointer to a vnode pointer where the result will be stored.
+.It Fa cnp
+The component name information for the lookup.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_lookup 9 ,
+.Xr cache_lookup 9

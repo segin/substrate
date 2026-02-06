@@ -1,0 +1,44 @@
+.Dd February 6, 2026
+.Dt VFS_FHTOVP 9
+.Os
+.Sh NAME
+.Nm vfs_fhtovp
+.Nd turn an NFS file handle into a vnode
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/mount.h
+.In sys/vnode.h
+.Ft int
+.Fn vfs_fhtovp "struct mount *mp" "struct fid *fhp" "struct vnode **vpp"
+.Sh DESCRIPTION
+The
+.Fn vfs_fhtovp
+function converts a file handle
+.Fa fhp
+into a vnode for the filesystem
+.Fa mp .
+The vnode is returned in
+.Fa *vpp
+with a reference count incremented.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa vpp"
+.It Fa mp
+The mounted filesystem.
+.It Fa fhp
+Pointer to the file handle.
+.It Fa vpp
+Pointer to a vnode pointer where the result will be stored.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er EOPNOTSUPP"
+.It Bq Er EOPNOTSUPP
+The filesystem does not support this operation.
+.It Bq Er ESTALE
+The file handle is stale (file deleted or filesystem changed).
+.El
+.Sh SEE ALSO
+.Xr vfs_mount 9 ,
+.Xr vfs_vget 9

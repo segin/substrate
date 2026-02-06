@@ -11,16 +11,19 @@ OBJS = $(SRCS:.c=.o)
 OBJS := $(OBJS:.S=.o)
 
 # Helper to build the kernel object (not fully linked kernel yet)
-all: kernel.o
+all: kernel.o zimage_header.bin
 
 kernel.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
+
+zimage_header.bin: zimage_header.o
+	objcopy -O binary -j .zimage_header $< $@
 
 %.o: %.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o
+	rm -f *.o zimage_header.bin
 
 install:
 	# Nothing to install yet

@@ -11,6 +11,7 @@ typedef struct shell_var {
     char *name;
     char *value;
     int exported;
+    int readonly;
     struct shell_var *next;
 } shell_var_t;
 
@@ -21,16 +22,41 @@ typedef struct shell_scope {
 
 static shell_scope_t *scope_stack = NULL;
 
+// Positional parameters
+static int shell_argc = 0;
+static char **shell_argv = NULL;
+static char *shell_name = NULL;
+
+typedef struct arg_stack_frame {
+    int argc;
+    char **argv;
+    char *name;
+    struct arg_stack_frame *next;
+} arg_stack_frame_t;
+
+static arg_stack_frame_t *arg_stack = NULL;
+
+void shell_var_pop_args(void) {
+    if (!arg_stack) return;
+    if (shell_name) free(shell_name);
+    if (shell_argv) {
+        for (int i=0; i<shell_argc; i++) free(shell_argv[i]);
+        free(shell_argv);
+    }
+    arg_stack_frame_t *frame = arg_stack;
+    shell_argc = frame->argc;
+    shell_argv = frame->argv;
+    shell_name = frame->name;
+    arg_stack = frame->next;
+    free(frame);
+}
+
 static void ensure_global_scope(void) {
     if (!scope_stack) {
         scope_stack = calloc(1, sizeof(shell_scope_t));
     }
 }
 
-// Positional parameters
-static int shell_argc = 0;
-static char **shell_argv = NULL;
-static char *shell_name = NULL;
 
 void shell_var_set_args(int argc, char **argv) {
     if (shell_name) free(shell_name);
@@ -80,14 +106,49 @@ void shell_var_shift(int n) {
 
 int shell_var_get_argc(void) { return shell_argc; }
 char *shell_var_get_arg(int index) {
-    if (index >= 0 && index < shell_argc) return shell_argv[index];
+    if (index > 0 && index <= shell_argc) return shell_argv[index - 1];
     return NULL;
 }
+
+char **shell_var_get_positional(int *count) {
+    if (count) *count = shell_argc;
+    return shell_argv;
+}
+
 const char *shell_var_get_name(void) { return shell_name; }
 
+void shell_var_destroy(void) {
+    while (scope_stack) {
+        shell_scope_t *scope = scope_stack;
+        shell_var_t *v = scope->vars;
+        while (v) {
+            shell_var_t *next = v->next;
+            if (v->name) free(v->name);
+            if (v->value) free(v->value);
+            free(v);
+            v = next;
+        }
+        scope_stack = scope->next;
+        free(scope);
+    }
+    if (shell_name) free(shell_name);
+    shell_name = NULL;
+    if (shell_argv) {
+        for (int i = 0; i < shell_argc; i++) free(shell_argv[i]);
+        free(shell_argv);
+        shell_argv = NULL;
+    }
+    shell_argc = 0;
+    // The following line assumes 'arg_stack' and 'shell_var_pop_args' exist.
+    // If they are not defined elsewhere, this will cause a compilation error.
+    // For this change, we are inserting the provided code faithfully.
+    while (arg_stack) shell_var_pop_args();
+}
+
 void shell_var_init(char **envp) {
+    shell_var_destroy(); // Clear any existing state
     ensure_global_scope();
-    if (!envp) return;
+    if (!envp) return; // Corrected from 'if (envp) { return;'
     for (int i = 0; envp[i]; i++) {
         char *eq = strchr(envp[i], '=');
         if (eq) {
@@ -95,6 +156,22 @@ void shell_var_init(char **envp) {
             shell_var_export(name, eq + 1);
             free(name);
         }
+    }
+}
+
+void shell_var_print(void) {
+    shell_scope_t *s = scope_stack;
+    while (s) {
+        shell_var_t *v = s->vars;
+        while (v) {
+            if (v->value) {
+                printf("%s='%s'\n", v->name, v->value);
+            } else {
+                printf("%s=\n", v->name);
+            }
+            v = v->next;
+        }
+        s = s->next;
     }
 }
 
@@ -196,6 +273,10 @@ void shell_var_set(const char *name, const char *value) {
     shell_scope_t *s;
     shell_var_t *v = find_var_recursive(name, &s);
     if (v) {
+        if (v->readonly) {
+            fprintf(stderr, "%s: %s: readonly variable\n", shell_var_get_name(), name);
+            return;
+        }
         free(v->value);
         v->value = strdup(value);
     } else {
@@ -207,6 +288,30 @@ void shell_var_set(const char *name, const char *value) {
         v->name = strdup(name);
         v->value = strdup(value);
         v->exported = 0;
+        v->readonly = 0;
+        v->next = s->vars;
+        s->vars = v;
+    }
+}
+
+void shell_var_force_set(const char *name, const char *value) {
+    ensure_global_scope();
+    shell_scope_t *s;
+    shell_var_t *v = find_var_recursive(name, &s);
+    if (v) {
+        // Bypass readonly check
+        free(v->value);
+        v->value = strdup(value);
+    } else {
+        // If not found, set in global scope
+        s = scope_stack;
+        while (s->next) s = s->next;
+        
+        v = malloc(sizeof(shell_var_t));
+        v->name = strdup(name);
+        v->value = strdup(value);
+        v->exported = 0;
+        v->readonly = 0;
         v->next = s->vars;
         s->vars = v;
     }
@@ -218,6 +323,10 @@ void shell_var_set_local(const char *name, const char *value) {
     shell_var_t *v = s->vars;
     while (v) {
         if (strcmp(v->name, name) == 0) {
+            if (v->readonly) {
+                fprintf(stderr, "%s: %s: readonly variable\n", shell_var_get_name(), name);
+                return;
+            }
             free(v->value);
             v->value = strdup(value);
             return;
@@ -228,6 +337,7 @@ void shell_var_set_local(const char *name, const char *value) {
     v->name = strdup(name);
     v->value = strdup(value);
     v->exported = 0;
+    v->readonly = 0;
     v->next = s->vars;
     s->vars = v;
 }
@@ -235,7 +345,31 @@ void shell_var_set_local(const char *name, const char *value) {
 void shell_var_export(const char *name, const char *value) {
     shell_var_set(name, value);
     shell_var_t *v = find_var_recursive(name, NULL);
-    if (v) v->exported = 1;
+    if (v) {
+        /* If it was already readonly, shell_var_set printed an error and return.
+         * But we should still mark it exported if it exists. */
+        v->exported = 1;
+    }
+}
+
+void shell_var_set_readonly(const char *name) {
+    shell_var_t *v = find_var_recursive(name, NULL);
+    if (v) {
+        v->readonly = 1;
+    } else {
+        /* Optional: POSIX says readonly can define a variable with no value if it doesn't exist?
+         * "If a name is specified without a value, and the name is not already set, 
+         *  it shall be created with an empty value and the read-only attribute shall be set." 
+         * Let's follow this. */
+        shell_var_set(name, "");
+        v = find_var_recursive(name, NULL);
+        if (v) v->readonly = 1;
+    }
+}
+
+int shell_var_is_readonly(const char *name) {
+    shell_var_t *v = find_var_recursive(name, NULL);
+    return v ? v->readonly : 0;
 }
 
 char **shell_var_get_envp(void) {
@@ -296,14 +430,16 @@ void shell_var_unset(const char *name) {
         shell_var_t *prev = NULL;
         while (v) {
             if (strcmp(v->name, name) == 0) {
+                if (v->readonly) {
+                    fprintf(stderr, "%s: %s: cannot unset: readonly variable\n", shell_var_get_name(), name);
+                    return;
+                }
                 if (prev) prev->next = v->next;
                 else s->vars = v->next;
                 free(v->name);
                 free(v->value);
                 free(v);
-                return; // Unset only the first one found? Usually unset unsets *all*?
-                // bash: unset unsets the variable at the current scope? No, it unsets globally?
-                // POSIX: "unset name" removes the variable from the execution environment.
+                return;
             }
             prev = v;
             v = v->next;
@@ -333,14 +469,6 @@ void shell_var_pop_scope(void) {
     free(s);
 }
 
-typedef struct arg_stack_frame {
-    int argc;
-    char **argv;
-    char *name;
-    struct arg_stack_frame *next;
-} arg_stack_frame_t;
-
-static arg_stack_frame_t *arg_stack = NULL;
 
 void shell_var_push_args(void) {
     arg_stack_frame_t *frame = malloc(sizeof(arg_stack_frame_t));
@@ -354,17 +482,4 @@ void shell_var_push_args(void) {
     shell_name = NULL;
 }
 
-void shell_var_pop_args(void) {
-    if (!arg_stack) return;
-    if (shell_name) free(shell_name);
-    if (shell_argv) {
-        for (int i=0; i<shell_argc; i++) free(shell_argv[i]);
-        free(shell_argv);
-    }
-    arg_stack_frame_t *frame = arg_stack;
-    shell_argc = frame->argc;
-    shell_argv = frame->argv;
-    shell_name = frame->name;
-    arg_stack = frame->next;
-    free(frame);
-}
+

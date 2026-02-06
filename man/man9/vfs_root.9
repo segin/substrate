@@ -1,0 +1,37 @@
+.Dd February 6, 2026
+.Dt VFS_ROOT 9
+.Os
+.Sh NAME
+.Nm vfs_root
+.Nd return the root vnode of a filesystem
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/mount.h
+.In sys/vnode.h
+.Ft int
+.Fn vfs_root "struct mount *mp" "struct vnode **vpp"
+.Sh DESCRIPTION
+The
+.Fn vfs_root
+function returns the root vnode of the mounted filesystem specified by
+.Fa mp .
+The vnode is returned in
+.Fa *vpp
+with a reference count incremented.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa vpp"
+.It Fa mp
+The mounted filesystem to query.
+.It Fa vpp
+Pointer to a vnode pointer where the root vnode will be stored.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er EOPNOTSUPP"
+.It Bq Er EOPNOTSUPP
+The filesystem does not support this operation.
+.El
+.Sh SEE ALSO
+.Xr vfs_mount 9

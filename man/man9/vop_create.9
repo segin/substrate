@@ -1,0 +1,52 @@
+.Dd February 6, 2026
+.Dt VOP_CREATE 9
+.Os
+.Sh NAME
+.Nm vop_create
+.Nd create a new file
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/vnode.h
+.Ft int
+.Fn vop_create "struct vnode *dvp" "struct vnode **vpp" "struct componentname *cnp" "struct vattr *vap"
+.Sh DESCRIPTION
+The
+.Fn vop_create
+function creates a new regular file named
+.Fa name
+in the directory
+.Fa dvp .
+If successful, the new vnode is returned in
+.Fa *vpp
+with a reference count incremented.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa cred"
+.It Fa dvp
+The directory vnode where the file will be created.
+.It Fa vpp
+Pointer to a vnode pointer where the new vnode will be stored.
+.It Fa cnp
+The component name information for the new file.
+.It Fa vap
+The attributes (including mode) for the new file.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er ENOTDIR"
+.It Bq Er ENOTDIR
+The vnode
+.Fa dvp
+is not a directory.
+.It Bq Er EEXIST
+The file already exists.
+.It Bq Er EACCES
+Permission denied.
+.It Bq Er EOPNOTSUPP
+The filesystem does not support this operation.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_mkdir 9 ,
+.Xr vop_mknod 9

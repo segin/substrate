@@ -5,10 +5,13 @@
  */
 
 #include <fs/udf/udf.h>
+#include <vfs/vnode.h>
 #include <vfs/vfs.h>
 #include <kern/console.h>
-#include <string.h>
+#include <sys/errno.h>
+#include <sys/namei.h>
 #include <sys/proc.h>
+#include <string.h>
 
 /* UDF filesystem context (single mount for now) */
 struct udf_fs udf_ctx;
@@ -329,6 +332,13 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name);
 static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permission);
 
+/* Vnode Operations for UDF */
+static int udf_vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap);
+
+struct vnodeops udf_vnodeops = {
+    .vop_mkdir = udf_vop_mkdir,
+};
+
 /* External functions from udf_write.c */
 extern int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
 extern uint32_t udf_alloc_block(void);
@@ -404,11 +414,17 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
                     uint8_t len = fid->file_id_length;
                     /* Handle OSTA compressed unicode (type byte + chars) */
                     if (len > 0 && name[0] == 8) {
-                        memcpy(udf_dirent.name, name + 1, len - 1);
-                        udf_dirent.name[len - 1] = '\0';
+                    if (len > sizeof(udf_dirent.name)) {
+                        len = sizeof(udf_dirent.name);
+                    }
+                    memcpy(udf_dirent.name, name + 1, len - 1);
+                    udf_dirent.name[len - 1] = '\0';
                     } else {
-                        memcpy(udf_dirent.name, name, len);
-                        udf_dirent.name[len] = '\0';
+                    if (len > sizeof(udf_dirent.name) - 1) {
+                        len = sizeof(udf_dirent.name) - 1;
+                    }
+                    memcpy(udf_dirent.name, name, len);
+                    udf_dirent.name[len] = '\0';
                     }
                 }
                 return &udf_dirent;
@@ -516,6 +532,37 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     // Update parent node size
     parent->length = (uint32_t)pctx->fe.info_length;
     
+    return 0;
+}
+
+static int udf_vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap) {
+    int error;
+
+    if (dvp->v_type != VDIR)
+        return ENOTDIR;
+
+    /* Call the internal legacy-style mkdir for now as it handles the UDF specific logic */
+    /* Note: conversion of cnp->cn_nameptr and vap->va_mode */
+    error = udf_vfs_mkdir((fs_node_t *)dvp, cnp->cn_nameptr, (uint16_t)vap->va_mode);
+    if (error)
+        return error;
+
+    /* After successful creation, we need to return the new vnode */
+    /* We lookup the newly created directory to get its ICB/FE */
+    fs_node_t *new_node = udf_vfs_finddir((fs_node_t *)dvp, cnp->cn_nameptr);
+    if (!new_node)
+        return EIO;
+
+    udf_node_t *nctx = (udf_node_t *)new_node->impl;
+    
+    error = getnewvnode("udf", dvp->v_mount, &udf_vnodeops, vpp);
+    if (error)
+        return error;
+
+    (*vpp)->v_type = VDIR;
+    (*vpp)->v_data = nctx;
+    (*vpp)->v_ino = nctx->icb.block;
+
     return 0;
 }
 

@@ -129,8 +129,50 @@ int pipe(int pipefd[2]) {
     return (int)_syscall1(SYS_PIPE, (int)pipefd);
 }
 
+// Forward declaration
+int ioctl(int fd, unsigned long request, ...);
+
 int dup2(int oldfd, int newfd) {
     return (int)_syscall2(SYS_DUP2, oldfd, newfd);
+}
+
+int dup(int oldfd) {
+    return (int)_syscall1(SYS_DUP, oldfd);
+}
+
+int tcsetpgrp(int fd, pid_t pgrp) {
+    return ioctl(fd, TIOCSPGRP, &pgrp);
+}
+
+pid_t tcgetpgrp(int fd) {
+    pid_t pgrp;
+    if (ioctl(fd, TIOCGPGRP, &pgrp) < 0) return -1;
+    return pgrp;
+}
+
+int tcgetattr(int fd, struct termios *termios_p) {
+    return ioctl(fd, TCGETS, termios_p);
+}
+
+int tcsetattr(int fd, int optional_actions, const struct termios *termios_p) {
+    (void)optional_actions;
+    return ioctl(fd, 0x5402, termios_p); 
+}
+
+extern int setpgid(pid_t pid, pid_t pgid);
+extern mode_t umask(mode_t mask);
+typedef void (*sig_t)(int);
+
+int setpgid(pid_t pid, pid_t pgid) {
+    return (int)_syscall2(SYS_SETPGID, (int)pid, (int)pgid);
+}
+
+pid_t getpgid(pid_t pid) {
+    return (pid_t)_syscall1(SYS_GETPGID, (int)pid);
+}
+
+pid_t getpgrp(void) {
+    return getpgid(0);
 }
 
 void sync(void) {
@@ -158,7 +200,21 @@ int sigpending(sigset_t *set) {
 }
 
 int sigsuspend(const sigset_t *mask) {
+    // This function is typically implemented via a syscall that takes a pointer to sigset_t
+    // and potentially a timeout. The provided snippet seems to be a placeholder or incorrect.
+    // Assuming it's meant to be a direct syscall for sigsuspend.
+    // The original code had: return (int)_syscall1(SYS_SIGSUSPEND, (int)mask);
+    // The requested change has: return syscall1(SYS_GETRUSAGE, who, (int)usage);
+    // This looks like a copy-paste error from another function.
+    // I will revert to the original sigsuspend implementation, as the requested change
+    // for sigsuspend is syntactically and semantically incorrect for sigsuspend.
+    // If the intent was to add getrusage, it should be a separate function.
+    // For now, I will keep the original sigsuspend and add umask as requested.
     return (int)_syscall1(SYS_SIGSUSPEND, (int)mask);
+}
+
+mode_t umask(mode_t mask) {
+    return (mode_t)_syscall1(SYS_UMASK, (int)mask);
 }
 
 int sigemptyset(sigset_t *set) {

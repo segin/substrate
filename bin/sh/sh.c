@@ -7,9 +7,16 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include "exec.h"
+#include "expand.h"
 #include "job.h"
 #include "shell_var.h"
+#include "util.h"
 #include <termios.h>
+#include <pwd.h>
+#include "prompt.h"
+
+static int command_count = 1;
+int shell_promptvars = 0;
 
 extern int tcsetpgrp(int fd, pid_t pgrp);
 extern pid_t tcgetpgrp(int fd);
@@ -30,11 +37,12 @@ extern int tcgetattr(int fd, struct termios *termios_p);
 #define SIGTSTP 18
 #endif
 
-void execute_line(const char *buffer) {
-    if (!buffer || !*buffer) return;
+int execute_line(char *buffer) {
+    if (!buffer || !*buffer) return 0;
     
     lexer_t l;
     lexer_init(&l, buffer);
+    int last_status = 0;
     
     while (1) {
         token_t *t = lexer_peek(&l);
@@ -43,6 +51,7 @@ void execute_line(const char *buffer) {
         ast_node_t *node = parser_parse(&l);
         if (node) {
             int status = execute_ast(node);
+            last_status = status;
             char res_buf[16];
             snprintf(res_buf, sizeof(res_buf), "%d", status);
             shell_var_set("?", res_buf);
@@ -62,6 +71,7 @@ void execute_line(const char *buffer) {
             }
         }
     }
+    return last_status;
 }
 
 // Source a file if it exists
@@ -103,8 +113,9 @@ static void process_startup_files(int is_login_shell, int is_interactive) {
     if (is_interactive) {
         char *env_file = getenv("ENV");
         if (env_file && env_file[0]) {
-            // TODO: Expand $ENV value (for now, use as-is)
-            source_file(env_file);
+            char *expanded = expand_word(env_file);
+            source_file(expanded ? expanded : env_file);
+            if (expanded) free(expanded);
         }
     }
 }
@@ -120,12 +131,25 @@ static void init_environment(void) {
     if (!getenv("PATH")) {
         shell_var_export("PATH", "/usr/bin:/bin");
     }
+    
+    // Initialize Prompt Mode
+    shell_var_set("SHELL_PROMPT_MODE", "POSIX");
+    shell_var_set_readonly("SHELL_PROMPT_MODE");
 }
 
 static void sigchld_handler(int sig) {
     (void)sig;
     // job_update_status will be called by the main loop.
 }
+
+// Helper to get last exit status
+static int get_last_status(void) {
+    char *s = shell_var_get("?");
+    return s ? atoi(s) : 0;
+}
+
+
+
 
 int main(int argc, char **argv, char **envp) {
     shell_var_init(envp);
@@ -174,8 +198,11 @@ int main(int argc, char **argv, char **envp) {
                 case 'e':
                     shell_errexit = 1;
                     break;
+                case 'x':
+                    shell_xtrace = 1;
+                    break;
                 default:
-                    fprintf(stderr, "sh: illegal option -%c\n", *p);
+                    fprintf(stderr, "%s: illegal option -%c\n", shell_var_get_name(), *p);
                     return 2;
             }
         }
@@ -184,7 +211,7 @@ int main(int argc, char **argv, char **envp) {
         // -c requires the next argument as the command string
         if (opt_c) {
             if (optind >= argc) {
-                fprintf(stderr, "sh: -c: option requires an argument\n");
+                fprintf(stderr, "%s: -c: option requires an argument\n", shell_var_get_name());
                 return 2;
             }
             command_string = argv[optind++];
@@ -224,24 +251,27 @@ int main(int argc, char **argv, char **envp) {
     
     if (is_interactive && !reading_script) {
         shell_is_interactive = 1;
-        while (tcgetpgrp(STDIN_FILENO) != (shell_pgid = getpgrp()))
-            kill(-shell_pgid, SIGTTIN);
         
-        signal(SIGINT, SIG_IGN);
-        signal(SIGQUIT, SIG_IGN);
-        signal(SIGTSTP, SIG_IGN);
-        signal(SIGTTIN, SIG_IGN);
-        signal(SIGTTOU, SIG_IGN);
-        signal(SIGCHLD, sigchld_handler);
-        
-        shell_pgid = getpid();
-        if (setpgid(shell_pgid, shell_pgid) < 0) {
-            perror("Couldn't put the shell in its own process group");
-            exit(1);
+        if (isatty(STDIN_FILENO)) {
+            while (tcgetpgrp(STDIN_FILENO) != (shell_pgid = getpgrp()))
+                kill(-shell_pgid, SIGTTIN);
+            
+            signal(SIGINT, SIG_IGN);
+            signal(SIGQUIT, SIG_IGN);
+            signal(SIGTSTP, SIG_IGN);
+            signal(SIGTTIN, SIG_IGN);
+            signal(SIGTTOU, SIG_IGN);
+            signal(SIGCHLD, sigchld_handler);
+            
+            shell_pgid = getpid();
+            if (setpgid(shell_pgid, shell_pgid) < 0) {
+                perror("Couldn't put the shell in its own process group");
+                exit(1);
+            }
+            
+            tcsetpgrp(STDIN_FILENO, shell_pgid);
+            tcgetattr(STDIN_FILENO, &shell_tmodes);
         }
-        
-        tcsetpgrp(STDIN_FILENO, shell_pgid);
-        tcgetattr(STDIN_FILENO, &shell_tmodes);
     }
     
     // Process startup files (profile for login, ENV for interactive)
@@ -250,7 +280,8 @@ int main(int argc, char **argv, char **envp) {
     // Handle -c: Execute command string
     if (opt_c) {
         execute_line(command_string);
-        return 0;
+        run_exit_trap();
+        return get_last_status();
     }
     
     if (reading_script || opt_s) {
@@ -258,14 +289,15 @@ int main(int argc, char **argv, char **envp) {
         fseek(input, 0, SEEK_END);
         off_t fsize = ftell(input);
         fseek(input, 0, SEEK_SET);
- 
+
         if (fsize < 0) {
             // stdin or pipe - read incrementally
             size_t cap = 4096, len = 0;
             char *buffer = malloc(cap);
             if (!buffer) {
-                fprintf(stderr, "sh: Out of memory\n");
+                fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
                 if (input != stdin) fclose(input);
+                run_exit_trap();
                 return 1;
             }
             
@@ -275,7 +307,8 @@ int main(int argc, char **argv, char **envp) {
                     cap *= 2;
                     buffer = realloc(buffer, cap);
                     if (!buffer) {
-                        fprintf(stderr, "sh: Out of memory\n");
+                        fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
+                        run_exit_trap();
                         return 1;
                     }
                 }
@@ -290,8 +323,9 @@ int main(int argc, char **argv, char **envp) {
         } else {
             char *buffer = malloc(fsize + 1);
             if (!buffer) {
-                fprintf(stderr, "sh: Out of memory\n");
+                fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
                 if (input != stdin) fclose(input);
+                run_exit_trap();
                 return 1;
             }
             size_t nread = fread(buffer, 1, (size_t)fsize, input);
@@ -300,7 +334,7 @@ int main(int argc, char **argv, char **envp) {
             if (nread > 0) {
                 execute_line(buffer);
             } else if (fsize > 0) {
-                fprintf(stderr, "sh: Failed to read script\n");
+                fprintf(stderr, "%s: Failed to read script\n", shell_var_get_name());
             }
             free(buffer);
         }
@@ -312,15 +346,21 @@ int main(int argc, char **argv, char **envp) {
         while (1) {
             if (shell_is_interactive) {
                 job_update_status();
+                check_traps();
                 char *p = shell_var_get("PS1");
                 if (!p) p = "$ ";
-                printf("%s", p);
+                char *expanded = evaluate_prompt(p, command_count);
+                printf("%s", expanded ? expanded : p);
+                if (expanded) free(expanded);
                 fflush(stdout);
             }
             
             if (!fgets(buf, sizeof(buf), input)) break;
             execute_line(buf);
+            if (shell_is_interactive) command_count++;
+            check_traps();
         }
     }
-    return 0;
+    run_exit_trap();
+    return get_last_status();
 }

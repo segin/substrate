@@ -1,0 +1,42 @@
+.Dd February 6, 2026
+.Dt VFS_VGET 9
+.Os
+.Sh NAME
+.Nm vfs_vget
+.Nd get a vnode from an inode number
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/mount.h
+.In sys/vnode.h
+.Ft int
+.Fn vfs_vget "struct mount *mp" "void *ino" "struct vnode **vpp"
+.Sh DESCRIPTION
+The
+.Fn vfs_vget
+function retrieves a vnode representing the file with the specified inode number (or filesystem-specific identifier) from the filesystem
+.Fa mp .
+The vnode is returned in
+.Fa *vpp
+with a reference count incremented.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa vpp"
+.It Fa mp
+The mounted filesystem to query.
+.It Fa ino
+Pointer to the inode identifier (filesystem specific).
+.It Fa vpp
+Pointer to a vnode pointer where the result will be stored.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er EOPNOTSUPP"
+.It Bq Er EOPNOTSUPP
+The filesystem does not support this operation.
+.It Bq Er ENOENT
+The file specified by the identifier does not exist.
+.El
+.Sh SEE ALSO
+.Xr vfs_mount 9 ,
+.Xr vfs_lookup 9
