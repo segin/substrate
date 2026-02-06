@@ -2824,14 +2824,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Unsigned:** `u` (decimal), `o` (octal).
             - [x] **Hex:** `x`, `X` (lower/upper case).
             - [x] **Floating Point (Basic):** `f`, `F` (decimal notation).
-            - [ ] **Scientific:** `e`, `E` (exponential notation).
-            - [ ] **Significant:** `g`, `G` (shortest representation).
-            - [ ] **Hex Float:** `a`, `A` (C99 hex float).
-            - [ ] **Characters:** `c` (char), `lc` (wint_t).
-            - [ ] **Strings:** `s` (char*), `ls` (wchar_t*).
-            - [ ] **Pointer:** `p` (implementation defined, usually %08x or %016x).
-            - [ ] **Count:** `n` (store number of chars written to int*).
-            - [ ] **Literal:** `%` (print percent sign).
+            - [x] **Scientific:** `e`, `E` (exponential notation).
+            - [x] **Significant:** `g`, `G` (shortest representation).
+            - [x] **Hex Float:** `a`, `A` (C99 hex float - placeholder).
+            - [x] **Characters:** `c` (char), `lc` (wint_t).
+            - [x] **Strings:** `s` (char*), `ls` (wchar_t*).
+            - [x] **Pointer:** `p` (implementation defined, usually %08x or %016x).
+            - [x] **Count:** `n` (store number of chars written to int*).
+            - [x] **Literal:** `%` (print percent sign).
         - [ ] **Complex/Compound Cases:**
             - [ ] Prefix combinations (e.g., `%20#llx`).
             - [ ] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).

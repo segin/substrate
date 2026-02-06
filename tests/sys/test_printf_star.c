@@ -54,5 +54,24 @@ void test_printf_star(void) {
     // Our ftoa rounds, so let's see. 3.141590
     if (strncmp(buf, "3.14159", 7) != 0) panic("test_printf_star: f basic");
 
-    kprint("PASS: printf dynamic width/precision (*), modifiers, and float\\n");
+    // Scientific notation
+    sprintf(buf, "%e", 1234.5); // 1.234500e+03
+    if (strncmp(buf, "1.234500e+03", 12) != 0) panic("test_printf_star: e notation");
+
+    // Significant digits
+    sprintf(buf, "%g", 0.00001); // 1e-05
+    if (strcmp(buf, "1e-05") != 0) panic("test_printf_star: g notation small");
+    sprintf(buf, "%g", 123.456); // 123.456
+    if (strncmp(buf, "123.456", 7) != 0) panic("test_printf_star: g notation normal");
+
+    // Wide characters and strings
+    sprintf(buf, "%lc %ls", (int)'A', "Wide"); 
+    if (strcmp(buf, "A Wide") != 0) panic("test_printf_star: wide chars");
+
+    // %n count
+    int count = 0;
+    sprintf(buf, "Hello%nWorld", &count);
+    if (count != 5) panic("test_printf_star: n count");
+
+    kprint("PASS: printf all remaining features (e, g, wide, n)\\n");
 }

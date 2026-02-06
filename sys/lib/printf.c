@@ -145,6 +145,108 @@ static void ftoa(char *buf, double val, int precision, int uppercase) {
     *buf = '\0';
 }
 
+// Scientific notation to ASCII
+static void etoa(char *buf, double val, int precision, int uppercase) {
+    if (precision < 0) precision = 6;
+    
+    // Handle NaN and Inf
+    if (val != val) {
+        strcpy(buf, uppercase ? "NAN" : "nan");
+        return;
+    }
+    if (val > 1e308 || val < -1e308) {
+        strcpy(buf, uppercase ? "INF" : "inf");
+        return;
+    }
+
+    if (val < 0) {
+        *buf++ = '-';
+        val = -val;
+    }
+
+    int exponent = 0;
+    if (val > 0) {
+        if (val >= 10.0) {
+            while (val >= 10.0) {
+                val /= 10.0;
+                exponent++;
+            }
+        } else if (val < 1.0) {
+            while (val < 1.0) {
+                val *= 10.0;
+                exponent--;
+            }
+        }
+    }
+
+    // Reuse ftoa logic for the mantissa (which is now in [1, 10))
+    ftoa(buf, val, precision, uppercase);
+    buf += strlen(buf);
+    
+    *buf++ = uppercase ? 'E' : 'e';
+    *buf++ = (exponent >= 0) ? '+' : '-';
+    if (exponent < 0) exponent = -exponent;
+    
+    // Exponent is usually at least 2 digits
+    if (exponent < 10) *buf++ = '0';
+    char exp_buf[16];
+    itoa(exp_buf, exponent, 0, 0);
+    strcpy(buf, exp_buf);
+}
+
+// Significant digits to ASCII
+static void gtoa(char *buf, double val, int precision, int uppercase, int alternate_form) {
+    if (precision < 0) precision = 6;
+    if (precision == 0) precision = 1;
+
+    // Handle NaN and Inf
+    if (val != val || val > 1e308 || val < -1e308) {
+        ftoa(buf, val, precision, uppercase);
+        return;
+    }
+
+    double abs_val = (val < 0) ? -val : val;
+    int exponent = 0;
+    if (abs_val > 0) {
+        double t = abs_val;
+        if (t >= 10.0) {
+            while (t >= 10.0) { t /= 10.0; exponent++; }
+        } else if (t < 1.0) {
+            while (t < 1.0) { t *= 10.0; exponent--; }
+        }
+    }
+
+    if (exponent < -4 || exponent >= precision) {
+        // Use scientific notation
+        etoa(buf, val, precision - 1, uppercase);
+    } else {
+        // Use decimal notation
+        ftoa(buf, val, precision - 1 - exponent, uppercase);
+    }
+
+    // Trim trailing zeros unless alternate form (#) is set
+    if (!alternate_form) {
+        char *dot = strchr(buf, '.');
+        if (dot) {
+            // Find if there's an exponent part (e/E)
+            char *e = strchr(dot, 'e');
+            if (!e) e = strchr(dot, 'E');
+            char *end = e ? e : dot + strlen(dot);
+            char *p = end - 1;
+            while (p > dot && *p == '0') {
+                *p-- = '\0';
+            }
+            if (*p == '.') {
+                *p = '\0';
+            }
+            // If we had an exponent, shift it back
+            if (e) {
+                memmove(p + (*p == '\0' ? 0 : 1), e, strlen(e) + 1);
+            }
+        }
+    }
+}
+
 int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     char *s = str;
     const char *f = format;
@@ -460,6 +562,65 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                     }
                     break;
                 }
+                case 'e':
+                case 'E': {
+                    double val;
+                    if (length == LEN_LONG_DOUBLE) {
+                        val = (double)va_arg(ap, long double);
+                    } else {
+                        val = va_arg(ap, double);
+                    }
+                    char tmp[128];
+                    etoa(tmp, val, precision, (*f == 'E'));
+                    int tmp_len = strlen(tmp);
+
+                    if (width > tmp_len && !left_align) {
+                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                    }
+                    for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                    if (width > tmp_len && left_align) {
+                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                    }
+                    break;
+                }
+                case 'g':
+                case 'G': {
+                    double val;
+                    if (length == LEN_LONG_DOUBLE) {
+                        val = (double)va_arg(ap, long double);
+                    } else {
+                        val = va_arg(ap, double);
+                    }
+                    char tmp[128];
+                    gtoa(tmp, val, precision, (*f == 'G'), alternate_form);
+                    int tmp_len = strlen(tmp);
+
+                    if (width > tmp_len && !left_align) {
+                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                    }
+                    for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                    if (width > tmp_len && left_align) {
+                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                    }
+                    break;
+                }
+                case 'a':
+                case 'A': {
+                    // Simplistic hex float placeholder
+                    double val = va_arg(ap, double);
+                    (void)val;
+                    char tmp[128];
+                    strcpy(tmp, (*f == 'A') ? "0X1.0P+0" : "0x1.0p+0");
+                    int tmp_len = strlen(tmp);
+                    if (width > tmp_len && !left_align) {
+                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                    }
+                    for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                    if (width > tmp_len && left_align) {
+                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
+                    }
+                    break;
+                }
                 case 'p': {
                     unsigned int val = (unsigned int)(uintptr_t)va_arg(ap, void*);
                     char tmp[32];
@@ -484,7 +645,13 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                     break;
                 }
                 case 's': {
-                    const char *val = va_arg(ap, const char *);
+                    const char *val;
+                    if (length == LEN_L) {
+                        // Wide string (wchar_t*) - simplistic ASCII cast
+                        val = (const char *)va_arg(ap, void *);
+                    } else {
+                        val = va_arg(ap, const char *);
+                    }
                     if (!val) val = "(null)";
                     
                     int s_len = 0;
@@ -506,8 +673,29 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                     break;
                 }
                 case 'c': {
-                    char c = (char)va_arg(ap, int);
-                    EMIT(c);
+                    if (length == LEN_L) {
+                        // Wide character (wint_t) - simplistic ASCII cast
+                        char c = (char)va_arg(ap, int);
+                        EMIT(c);
+                    } else {
+                        char c = (char)va_arg(ap, int);
+                        EMIT(c);
+                    }
+                    break;
+                }
+                case 'n': {
+                    // Store written characters count
+                    void *ptr = va_arg(ap, void*);
+                    if (ptr) {
+                        if (length == LEN_LL) *(long long *)ptr = (long long)len;
+                        else if (length == LEN_L) *(long *)ptr = (long)len;
+                        else if (length == LEN_HH) *(signed char *)ptr = (signed char)len;
+                        else if (length == LEN_H) *(short *)ptr = (short)len;
+                        else if (length == LEN_J) *(intmax_t *)ptr = (intmax_t)len;
+                        else if (length == LEN_Z) *(ssize_t *)ptr = (ssize_t)len;
+                        else if (length == LEN_T) *(ptrdiff_t *)ptr = (ptrdiff_t)len;
+                        else *(int *)ptr = (int)len;
+                    }
                     break;
                 }
                 case '%':
