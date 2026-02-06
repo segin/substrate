@@ -2864,26 +2864,26 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `trunc()`
             - [x] `round()`
             - [x] `rint()`
-        - [ ] **Exponential & Power:**
-            - [ ] `exp()`
-            - [ ] `exp2()`
-            - [ ] `expm1()`
-            - [ ] `log()`
-            - [ ] `log2()`
-            - [ ] `log10()`
-            - [ ] `log1p()`
-            - [ ] `pow()`
-            - [ ] `sqrt()`
-            - [ ] `cbrt()`
-            - [ ] `hypot()`
-        - [ ] **Trigonometric:**
-            - [ ] `sin()`
-            - [ ] `cos()`
-            - [ ] `tan()`
-            - [ ] `asin()`
-            - [ ] `acos()`
-            - [ ] `atan()`
-            - [ ] `atan2()`
+        - [x] **Exponential & Power:**
+            - [x] `exp()`
+            - [x] `exp2()`
+            - [x] `expm1()`
+            - [x] `log()`
+            - [x] `log2()`
+            - [x] `log10()`
+            - [x] `log1p()`
+            - [x] `pow()`
+            - [x] `sqrt()`
+            - [x] `cbrt()`
+            - [x] `hypot()`
+        - [x] **Trigonometric:**
+            - [x] `sin()`
+            - [x] `cos()`
+            - [x] `tan()`
+            - [x] `asin()`
+            - [x] `acos()`
+            - [x] `atan()`
+            - [x] `atan2()`
         - [ ] **Hyperbolic:**
             - [ ] `sinh()`
             - [ ] `cosh()`

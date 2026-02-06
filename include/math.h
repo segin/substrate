@@ -82,11 +82,16 @@ double tanh(double x);
 
 /* Exponential and logarithmic functions */
 double exp(double x);
+double exp2(double x);
+double expm1(double x);
 double log(double x);
 double log10(double x);
 double log2(double x);
+double log1p(double x);
 double pow(double x, double y);
 double sqrt(double x);
+double cbrt(double x);
+double hypot(double x, double y);
 
 /* Absolute value and remainder */
 double fabs(double x);
