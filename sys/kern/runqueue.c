@@ -84,6 +84,7 @@ void runqueue_add(runqueue_t *rq, thread_t *t) {
     // Add to tail of queue (FIFO within priority)
     t->rq_next = NULL;
     t->rq_prev = q->tail;
+    t->current_queue = rq;
     
     if (q->tail) {
         q->tail->rq_next = t;
@@ -122,6 +123,7 @@ void runqueue_remove(runqueue_t *rq, thread_t *t) {
     
     t->rq_next = NULL;
     t->rq_prev = NULL;
+    t->current_queue = NULL;
     q->count--;
     
     // Clear bitmap if queue empty
