@@ -30,6 +30,7 @@ typedef struct {
     bool inode;          // -i
     bool classify;       // -F
     bool slash_dirs;     // -p
+    bool file_type;      // --file-type (like -F but no * for exec)
     bool quote_names;    // -Q
 
     // Sorting

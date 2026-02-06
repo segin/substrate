@@ -77,6 +77,7 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                 else if (strcmp(argv[i], "--recursive") == 0) config->recursive = true;
                 else if (strcmp(argv[i], "--size") == 0) config->show_blocks = true;
                 else if (strcmp(argv[i], "--si") == 0) config->si_units = true;
+                else if (strcmp(argv[i], "--file-type") == 0) config->file_type = true;
                 else if (strncmp(argv[i], "--block-size=", 13) == 0) {
                     char *val = argv[i] + 13;
                     long size = 1;

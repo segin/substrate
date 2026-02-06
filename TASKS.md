@@ -3898,7 +3898,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **File Type Indicators:**
                 - [x] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
                 - [x] `-p`: Append `/` indicator to directories.
-                - [ ] `--file-type`: Likewise, except do not append `*`.
+                - [x] `--file-type`: Likewise, except do not append `*`.
             - [x] **Inode & Block:**
                 - [x] `-i`, `--inode`: Print inode number of each file.
             - [x] **Recursion:**

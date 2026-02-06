@@ -53,6 +53,12 @@ static void print_name(file_info_t *f, const ls_config_t *config) {
         else if (f->st.st_mode & S_IXUSR) printf("*");
         else if (S_ISFIFO(f->st.st_mode)) printf("|");
         else if (S_ISSOCK(f->st.st_mode)) printf("=");
+    } else if (config->file_type) {
+        // Like -F but do not append * for executables
+        if (S_ISDIR(f->st.st_mode)) printf("/");
+        else if (S_ISLNK(f->st.st_mode)) printf("@");
+        else if (S_ISFIFO(f->st.st_mode)) printf("|");
+        else if (S_ISSOCK(f->st.st_mode)) printf("=");
     } else if (config->slash_dirs && S_ISDIR(f->st.st_mode)) {
         printf("/");
     }
