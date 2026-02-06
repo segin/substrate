@@ -3485,11 +3485,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Integration: Enable extended mode and verify prompt appearance.
                 - [x] Fuzzing: `fuzz_extended_prompt.c` targets parser.
                 - [x] Property: Randomized prompt strings don't crash shell.
-            - [ ] **Documentation:**
-                - [ ] Document new `%` escapes in `sh(1)`.
-                - [ ] Explicitly contrast POSIX PS1 vs Extended Mode handling.
-                - [ ] Document color/attribute codes.
-                - [ ] Document limits (depth, length, etc).
+            - [x] **Documentation:**
+                - [x] Document new `%` escapes in `sh(1)`.
+                - [x] Explicitly contrast POSIX PS1 vs Extended Mode handling.
+                - [x] Document color/attribute codes.
+                - [x] Document limits (depth, length, etc).
 - [ ] **Core Utilities:**
     - [x] **`ls` - List directory contents:**
         - [x] **Purpose:** List information about the FILEs (the current directory by default).
