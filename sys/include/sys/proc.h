@@ -26,6 +26,7 @@ typedef uint8_t process_state_t;
 struct personality;
 struct fs_node;
 typedef struct fs_node fs_node_t;
+struct runqueue;
 struct file;
 typedef struct file file_t;
 struct pmap;
@@ -154,6 +155,7 @@ typedef struct thread {
     // Scheduling - Runqueue linkage
     struct thread *rq_next;       // Next in runqueue level
     struct thread *rq_prev;       // Prev in runqueue level
+    struct runqueue *current_queue; // The runqueue this thread is currently on
     uint32_t       cpu_affinity;  // CPU affinity mask (bitmask)
     uint8_t        on_runqueue;   // Is thread currently on a runqueue?
     uint8_t        needs_resched; // Set by IPI to trigger reschedule
