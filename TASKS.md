@@ -3893,7 +3893,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
                 - [x] `-k`, `--kibibytes`: Use 1024-byte blocks.
                 - [x] `-s`, `--size`: Print allocated size of each file, in blocks.
-                - [ ] `--block-size=SIZE`: Scale sizes by SIZE before printing.
+                - [x] `--block-size=SIZE`: Scale sizes by SIZE before printing.
                 - [x] `--si`: Use powers of 1000 not 1024.
             - [x] **File Type Indicators:**
                 - [x] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.

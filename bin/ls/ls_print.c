@@ -10,6 +10,12 @@
 #include "ls_print.h"
 
 static void print_formatted_size(off_t size, const ls_config_t *config) {
+    // Apply block-size scaling if specified
+    if (config->block_size > 0) {
+        printf("%8ld ", (long)((size + config->block_size - 1) / config->block_size));
+        return;
+    }
+    
     if (!config->human_readable) {
         printf("%8ld ", (long)size);
         return;

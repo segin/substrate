@@ -49,6 +49,7 @@ typedef struct {
     bool kibibytes;      // -k
     bool show_blocks;    // -s
     bool si_units;       // --si
+    long block_size;     // --block-size=SIZE (0 = default)
 
     // Recursion & Color
     bool recursive;      // -R
