@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+#include <vm/vm_kmem.h>
 
 struct mountlist mountlist;
 fs_node_t *fs_root = 0; 
@@ -116,12 +117,13 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
     if (!root) return -1;
 
     // Handle Root Mount
+    fs_node_t *mountpoint = NULL;
     if (strcmp(path, "/") == 0) {
         fs_root = root;
     } else {
         // Handle mount on existing directory
         // We must lookup the mount point
-        fs_node_t *mountpoint = vfs_lookup(fs_root, path);
+        mountpoint = vfs_lookup(fs_root, path);
         
         if (!mountpoint) {
             kprint("VFS: Mount point not found: ");
@@ -148,9 +150,33 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         mountpoint->ptr = root;
     }
     
-    // Register in generic mount list (for sys_sync, unmount, etc.)
-    // TODO: Allocate proper struct mount. For now we rely on the implicit tree structure
-    // or we should add it to a list if we want to support unmount by path easily.
+    // Register in generic mount list
+    struct mount *mp = kmalloc(sizeof(struct mount));
+    if (mp) {
+        memset(mp, 0, sizeof(struct mount));
+
+        // Populate mount structure
+        strncpy(mp->mnt_stat_path, path, sizeof(mp->mnt_stat_path));
+        mp->mnt_stat_path[sizeof(mp->mnt_stat_path)-1] = '\0';
+
+        strncpy(mp->mnt_stat.f_mntonname, path, sizeof(mp->mnt_stat.f_mntonname));
+        mp->mnt_stat.f_mntonname[sizeof(mp->mnt_stat.f_mntonname)-1] = '\0';
+
+        if (device) {
+            strncpy(mp->mnt_stat.f_mntfromname, device, sizeof(mp->mnt_stat.f_mntfromname));
+            mp->mnt_stat.f_mntfromname[sizeof(mp->mnt_stat.f_mntfromname)-1] = '\0';
+        }
+
+        if (type) {
+            strncpy(mp->mnt_stat.f_fstypename, type, sizeof(mp->mnt_stat.f_fstypename));
+            mp->mnt_stat.f_fstypename[sizeof(mp->mnt_stat.f_fstypename)-1] = '\0';
+        }
+
+        mp->mnt_node_root = root;
+        mp->mnt_node_covered = mountpoint;
+
+        TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+    }
 
     return 0;
 }
@@ -588,6 +614,18 @@ int vfs_unmount_legacy(const char *path) {
         root->unmount(root);
     }
     
+    // Remove from mount list
+    struct mount *mp;
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        if (mp->mnt_node_covered == mountpoint && mp->mnt_node_root == root) {
+            TAILQ_REMOVE(&mountlist, mp, mnt_list);
+            kfree(mp, sizeof(struct mount));
+            break;
+        }
+        // Fallback check by path if nodes match fails or are reused improperly (less safe but covers legacy)
+        // Ideally node check is sufficient.
+    }
+
     return 0;
 }
 

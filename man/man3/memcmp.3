@@ -1,0 +1,43 @@
+.TH MEMCMP 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+memcmp \- compare memory areas
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "int memcmp(const void *" s1 ", const void *" s2 ", size_t " n ");"
+.SH DESCRIPTION
+The
+.BR memcmp ()
+function compares the first
+.I n
+bytes (each interpreted as
+.IR "unsigned char" )
+of the memory areas
+.I s1
+and
+.IR s2 .
+.SH RETURN VALUE
+The
+.BR memcmp ()
+function returns an integer less than, equal to, or greater than zero if the
+first
+.I n
+bytes of
+.I s1
+is found, respectively, to be less than, to match, or be greater than the
+first
+.I n
+bytes of
+.IR s2 .
+.SH EXAMPLES
+.EX
+#include <string.h>
+
+int main() {
+    if (memcmp("abc", "abd", 3) < 0) { /* ... */ }
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR strcmp (3),
+.BR memchr (3)

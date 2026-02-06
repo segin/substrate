@@ -88,6 +88,13 @@
 #define SYS_CPU_COUNT 245
 #define SYS_HOSTNAME 246
 #define SYS_RT_SIGRETURN 247
+#define SYS_PROC_THREADS 248
+#define SYS_PROC_FDS     249
+#define SYS_PROC_MAPS    250
+#define SYS_PROC_CWD     251
+#define SYS_PROC_EXE     252
+#define SYS_PROC_CMDLINE 253
+#define SYS_PROC_ENVIRON 254
 #define SYS_CLOCK_GETTIME 265
 #define SYS_mlock       150
 #define SYS_munlock     151

@@ -1,0 +1,46 @@
+.TH MEMCPY 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+memcpy \- copy memory area
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "void *memcpy(void *" dest ", const void *" src ", size_t " n ");"
+.SH DESCRIPTION
+The
+.BR memcpy ()
+function copies
+.I n
+bytes from memory area
+.I src
+to memory area
+.IR dest .
+The memory areas must not overlap. Use
+.BR memmove (3)
+if the memory areas do overlap.
+.SS Implementation Notes
+This implementation is optimized using word-aligned transfers on 32-bit boundaries.
+Small copies (< 4 bytes) use byte-by-byte copying.
+Larger transfers align to 4-byte boundaries and copy 32-bit words for approximately
+3-4x speedup compared to naive byte-by-byte implementations.
+.SH RETURN VALUE
+The
+.BR memcpy ()
+function returns a pointer to
+.IR dest .
+.SH EXAMPLES
+.EX
+#include <string.h>
+#include <stdio.h>
+
+int main() {
+    char src[] = "Hello";
+    char dest[6];
+    memcpy(dest, src, 6);
+    printf("%s\\n", dest);
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR memmove (3),
+.BR memset (3),
+.BR strcpy (3)

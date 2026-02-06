@@ -18,6 +18,7 @@
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
+typedef long fpos_t;
 
 typedef struct FILE {
     int fd;
@@ -52,6 +53,8 @@ int vprintf(const char *format, va_list ap);
 int vfprintf(FILE *stream, const char *format, va_list ap);
 int vsprintf(char *str, const char *format, va_list ap);
 int vsnprintf(char *str, size_t size, const char *format, va_list ap);
+int vasprintf(char **strp, const char *format, va_list ap);
+int asprintf(char **strp, const char *format, ...);
 
 int scanf(const char *format, ...);
 int fscanf(FILE *stream, const char *format, ...);

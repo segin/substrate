@@ -1,0 +1,43 @@
+.TH MEMMOVE 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+memmove \- copy memory area
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "void *memmove(void *" dest ", const void *" src ", size_t " n ");"
+.SH DESCRIPTION
+The
+.BR memmove ()
+function copies
+.I n
+bytes from memory area
+.I src
+to memory area
+.IR dest .
+The memory areas may overlap: copying takes place as though the
+bytes in
+.I src
+are first copied into a temporary array that does not overlap
+.I src
+or
+.IR dest ,
+and the bytes are then copied from the temporary array to
+.IR dest .
+.SH RETURN VALUE
+The
+.BR memmove ()
+function returns a pointer to
+.IR dest .
+.SH EXAMPLES
+.EX
+#include <string.h>
+
+int main() {
+    char str[] = "abcdef";
+    memmove(str + 1, str, 3); // "aabcde"
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR memcpy (3),
+.BR memset (3)

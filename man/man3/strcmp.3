@@ -1,0 +1,53 @@
+.TH STRCMP 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strcmp, strncmp \- compare two strings
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "int strcmp(const char *" s1 ", const char *" s2 ");"
+.sp
+.BI "int strncmp(const char *" s1 ", const char *" s2 ", size_t " n ");"
+.SH DESCRIPTION
+The
+.BR strcmp ()
+function compares the two strings
+.I s1
+and
+.IR s2 .
+It returns an integer less than, equal to, or greater than zero if
+.I s1
+is found, respectively, to be less than, to match, or be greater than
+.IR s2 .
+.sp
+The
+.BR strncmp ()
+function is similar, except it compares only the first (at most)
+.I n
+bytes of
+.I s1
+and
+.IR s2 .
+.SH RETURN VALUE
+The
+.BR strcmp ()
+and
+.BR strncmp ()
+functions return an integer less than, equal to, or greater than zero if
+.IR s1
+(or the first
+.I n
+bytes thereof) is found, respectively, to be less than, to match, or be
+greater than
+.IR s2 .
+.SH EXAMPLES
+.EX
+#include <string.h>
+
+int main() {
+    if (strcmp("a", "b") < 0) { /* ... */ }
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR memcmp (3),
+.BR strchr (3)

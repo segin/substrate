@@ -576,8 +576,12 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
                 if (cur_idx == index) {
                     // Found it - store in context specific dirent
                     ctx->current_dirent.ino = de->inode;
-                    memcpy(ctx->current_dirent.name, de->name, de->name_len);
-                    ctx->current_dirent.name[de->name_len] = '\0';
+                    uint32_t len = de->name_len;
+                    if (len >= sizeof(ctx->current_dirent.name)) {
+                        len = sizeof(ctx->current_dirent.name) - 1;
+                    }
+                    memcpy(ctx->current_dirent.name, de->name, len);
+                    ctx->current_dirent.name[len] = '\0';
                     result = &ctx->current_dirent;
                     goto cleanup;
                 }
@@ -642,8 +646,12 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                     if (ext2_read_inode(fs, de->inode, &inode) == 0) {
                         result_node = ext2_alloc_node(fs, de->inode, &inode);
                         // Copy name
-                        memcpy(result_node->name, de->name, de->name_len);
-                        result_node->name[de->name_len] = '\0';
+                        uint32_t len = de->name_len;
+                        if (len >= sizeof(result_node->name)) {
+                            len = sizeof(result_node->name) - 1;
+                        }
+                        memcpy(result_node->name, de->name, len);
+                        result_node->name[len] = '\0';
                         goto cleanup;
                     }
                 }

@@ -2795,8 +2795,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Stdio:**
     - [ ] Implement Buffered I/O logic (`fflush`, buffer management).
     - [ ] **Complete `printf` Family Implementation (User & Kernel):**
-        - [ ] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
-        - [ ] **User:** `lib/c` implementation.
+        - [x] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
+        - [x] **User:** `lib/c` implementation.
         - [x] **Flags:**
             - [x] `-` (Left-align within field width).
             - [x] `+` (Force sign for positive numbers).
@@ -2806,9 +2806,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Width & Precision:**
             - [x] Numeric width (e.g., `%5d`).
             - [x] Dynamic width `*` (from argument).
-            - [x] Numeric precision (e.g., `%.5d`) - strings only.
+            - [x] Numeric precision (e.g., `%.5d`).
             - [x] Dynamic precision `.*`(from argument).
-            - [x] Combined width/precision (e.g., `%5.2f`) - strings only.
+            - [x] Combined width/precision (e.g., `%5.2f`).
             - [x] Negative width logic (treat as `-` flag + positive width).
         - [x] **Length Modifiers:**
             - [x] `hh` (signed/unsigned char).
@@ -2833,71 +2833,71 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Count:** `n` (store number of chars written to int*).
             - [x] **Literal:** `%` (print percent sign).
         - [ ] **Complex/Compound Cases:**
-            - [ ] Prefix combinations (e.g., `%20#llx`).
-            - [ ] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
-            - [ ] "0" flag ignored if "-" is present.
-            - [ ] "0" flag ignored if precision is specified for integers.
-            - [ ] Space ignored if "+" is present.
-- [ ] **String/Mem:**
-    - [ ] Optimize `memcpy`, `memset`, `memmove`.
-    - [ ] **Math Library (`lib/m/`):**
-        - [ ] **Architecture:**
-            - [ ] `math.h` header definition.
-            - [ ] `math_errhandling` (errno support).
-            - [ ] `__fpclassify` internal helper.
-        - [ ] **Classification:**
-            - [ ] `fpclassify()`
-            - [ ] `isfinite()`
-            - [ ] `isinf()`
-            - [ ] `isnan()`
-            - [ ] `isnormal()`
-            - [ ] `signbit()`
-        - [ ] **Basic Arithmetic:**
-            - [ ] `fabs()`
-            - [ ] `fmod()`
-            - [ ] `remainder()`
-            - [ ] `fmax()`
-            - [ ] `fmin()`
-            - [ ] `fdim()`
-            - [ ] `ceil()`
-            - [ ] `floor()`
-            - [ ] `trunc()`
-            - [ ] `round()`
-            - [ ] `rint()`
-        - [ ] **Exponential & Power:**
-            - [ ] `exp()`
-            - [ ] `exp2()`
-            - [ ] `expm1()`
-            - [ ] `log()`
-            - [ ] `log2()`
-            - [ ] `log10()`
-            - [ ] `log1p()`
-            - [ ] `pow()`
-            - [ ] `sqrt()`
-            - [ ] `cbrt()`
-            - [ ] `hypot()`
-        - [ ] **Trigonometric:**
-            - [ ] `sin()`
-            - [ ] `cos()`
-            - [ ] `tan()`
-            - [ ] `asin()`
-            - [ ] `acos()`
-            - [ ] `atan()`
-            - [ ] `atan2()`
-        - [ ] **Hyperbolic:**
-            - [ ] `sinh()`
-            - [ ] `cosh()`
-            - [ ] `tanh()`
-            - [ ] `asinh()`
-            - [ ] `acosh()`
-            - [ ] `atanh()`
-        - [ ] **Manipulation:**
-            - [ ] `frexp()`
-            - [ ] `ldexp()`
-            - [ ] `modf()`
-            - [ ] `scalbn()`
-            - [ ] `nextafter()`
-            - [ ] `copysign()`
+            - [x] Prefix combinations (e.g., `%20#llx`).
+            - [x] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
+            - [x] "0" flag ignored if "-" is present.
+            - [x] "0" flag ignored if precision is specified for integers.
+            - [x] Space ignored if "+" is present.
+- [x] **String/Mem:**
+    - [x] Optimize `memcpy`, `memset`, `memmove`.
+    - [/] **Math Library (`lib/m/`):**
+        - [x] **Architecture:**
+            - [x] `math.h` header definition.
+            - [x] `math_errhandling` (errno support).
+            - [x] `__fpclassify` internal helper.
+        - [x] **Classification:**
+            - [x] `fpclassify()`
+            - [x] `isfinite()`
+            - [x] `isinf()`
+            - [x] `isnan()`
+            - [x] `isnormal()`
+            - [x] `signbit()`
+        - [x] **Basic Arithmetic:**
+            - [x] `fabs()`
+            - [x] `fmod()`
+            - [x] `remainder()`
+            - [x] `fmax()`
+            - [x] `fmin()`
+            - [x] `fdim()`
+            - [x] `ceil()`
+            - [x] `floor()`
+            - [x] `trunc()`
+            - [x] `round()`
+            - [x] `rint()`
+        - [x] **Exponential & Power:**
+            - [x] `exp()`
+            - [x] `exp2()`
+            - [x] `expm1()`
+            - [x] `log()`
+            - [x] `log2()`
+            - [x] `log10()`
+            - [x] `log1p()`
+            - [x] `pow()`
+            - [x] `sqrt()`
+            - [x] `cbrt()`
+            - [x] `hypot()`
+        - [x] **Trigonometric:**
+            - [x] `sin()`
+            - [x] `cos()`
+            - [x] `tan()`
+            - [x] `asin()`
+            - [x] `acos()`
+            - [x] `atan()`
+            - [x] `atan2()`
+        - [x] **Hyperbolic:**
+            - [x] `sinh()`
+            - [x] `cosh()`
+            - [x] `tanh()`
+            - [x] `asinh()`
+            - [x] `acosh()`
+            - [x] `atanh()`
+        - [x] **Manipulation:**
+            - [x] `frexp()`
+            - [x] `ldexp()`
+            - [x] `modf()`
+            - [x] `scalbn()`
+            - [x] `nextafter()`
+            - [x] `copysign()`
     - [ ] **Optimizations (i386/x87 Inline Assembly):**
         - [ ] **Trigonometric Functions:**
             - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
@@ -3486,44 +3486,44 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `uname()`: System identification.
                 - [ ] `getrlimit()`: Process resource limits.
                 - [ ] `clock_gettime()`: High-resolution system clocks.
-        - [/] **Process Information API (`lib/sys`):**
+        - [x] **Process Information API (`lib/sys`):**
             - [x] `sys_proc_count()` - Get total number of processes.
             - [x] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
             - [x] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info (including `bitness`).
-            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
-            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
-            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
-            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)` - Get current working directory.
-            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
-            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
-            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
-        - [ ] **Memory Statistics API (`lib/sys`):**
-            - [ ] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
-            - [ ] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).
-            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
-            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
-            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
-        - [/] **CPU Information API (`lib/sys`):**
+            - [x] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
+            - [x] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
+            - [x] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
+            - [x] `sys_proc_cwd(pid_t pid, char *buf, size_t len)` - Get current working directory.
+            - [x] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
+            - [x] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
+            - [x] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
+        - [x] **Memory Statistics API (`lib/sys`):** (stubs)
+            - [x] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
+            - [x] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).
+            - [x] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
+            - [x] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
+            - [x] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
+        - [x] **CPU Information API (`lib/sys`):** (stubs)
             - [x] `sys_cpu_count()` - Number of CPUs (online/possible/present).
-            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
-            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
-            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
-        - [/] **System Information API (`lib/sys`):**
-            - [ ] `sys_uptime(struct timespec *ts)` - System uptime.
-            - [ ] `sys_boottime(struct timespec *ts)` - Boot timestamp.
+            - [x] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
+            - [x] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
+            - [x] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
+        - [x] **System Information API (`lib/sys`):** (stubs)
+            - [x] `sys_uptime(struct timespec *ts)` - System uptime.
+            - [x] `sys_boottime(struct timespec *ts)` - Boot timestamp.
             - [x] `sys_hostname(char *buf, size_t len)` - System hostname.
-            - [ ] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
-            - [ ] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
-        - [ ] **Network Information API (`lib/sys`):**
-            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)` - List network interfaces.
-            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
-            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
-            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
+            - [x] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
+            - [x] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
+        - [x] **Network Information API (`lib/sys`):** (stubs)
+            - [x] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)` - List network interfaces.
+            - [x] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
+            - [x] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
+            - [x] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
         - [x] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
             - [x] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
-            - [ ] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
-            - [ ] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
-            - [ ] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.
+            - [x] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
+            - [x] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
+            - [x] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.
     - [ ] **BSD Compatibility Shim (`libkvm`):**
         - [ ] **Design Goals:**
             - [ ] Provide FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
@@ -3853,69 +3853,69 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Document limits (depth, length, etc).
 - [ ] **Core Utilities:**
     - [ ] **`ls` - List directory contents (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal.
-            - [ ] Extract option parsing into `ls_opts.c` and `ls_opts.h`.
-            - [ ] Extract output formatting into `ls_print.c` and `ls_print.h`.
-            - [ ] Extract sorting logic into `ls_sort.c` and `ls_sort.h`.
-            - [ ] Extract directory traversal into `ls_traverse.c` and `ls_traverse.h`.
-            - [ ] Write unit tests for each extracted module before proceeding.
-        - [ ] **CLI Options:**
-            - [ ] **Filtering:**
-                - [ ] `-a`, `--all`: List all files including hidden ones.
-                - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
-                - [ ] `-d`, `--directory`: List directories themselves, not their contents.
-                - [ ] `-I PATTERN`, `--ignore=PATTERN`: Do not list implied entries matching PATTERN.
-            - [ ] **Output Format:**
-                - [ ] `-l`: Long listing format (permissions, ownership, size, time).
-                - [ ] `-1`: Force single-column output.
-                - [ ] `-C`: Force multi-column output (default for terminal).
-                - [ ] `-m`: Comma-separated output.
-                - [ ] `-x`: List entries by lines instead of columns.
-                - [ ] `-g`: Like `-l` but omit owner.
-                - [ ] `-o`: Like `-l` but omit group.
-                - [ ] `-n`, `--numeric-uid-gid`: Like `-l` but show numeric UID/GID.
-            - [ ] **Sorting:**
-                - [ ] `-r`, `--reverse`: Reverse order while sorting.
-                - [ ] `-S`: Sort by file size (largest first).
-                - [ ] `-t`: Sort by modification time (newest first).
-                - [ ] `-u`: Sort by access time (with `-lt`), show atime (with `-l`).
-                - [ ] `-c`: Sort by ctime (with `-lt`), show ctime (with `-l`).
-                - [ ] `-U`: Do not sort; list in directory order.
-                - [ ] `-f`: Do not sort, enable `-aU`, disable `-ls --color`.
-                - [ ] `-v`: Natural sort of version numbers within text.
-            - [ ] **Symlink Handling:**
-                - [ ] `-L`, `--dereference`: Follow symlinks and show target's info.
-                - [ ] `-H`: Follow symlinks only on command line arguments.
-            - [ ] **Size & Units:**
-                - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
-                - [ ] `-k`, `--kibibytes`: Use 1024-byte blocks.
-                - [ ] `-s`, `--size`: Print allocated size of each file, in blocks.
+        - [x] **Audit & Refactor Existing Code:**
+            - [x] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
+            - [x] Document all functionality gaps and bugs.
+            - [x] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal.
+            - [x] Extract option parsing into `ls_opts.c` and `ls_opts.h`.
+            - [x] Extract output formatting into `ls_print.c` and `ls_print.h`.
+            - [x] Extract sorting logic into `ls_sort.c` and `ls_sort.h`.
+            - [x] Extract directory traversal into `ls_traverse.c` and `ls_traverse.h`.
+            - [x] Write unit tests for each extracted module before proceeding.
+        - [x] **CLI Options:**
+            - [x] **Filtering:**
+                - [x] `-a`, `--all`: List all files including hidden ones.
+                - [x] `-A`, `--almost-all`: List all except `.` and `..`.
+                - [x] `-d`, `--directory`: List directories themselves, not their contents.
+                - [x] `-I PATTERN`, `--ignore=PATTERN`: Do not list implied entries matching PATTERN.
+            - [x] **Output Format:**
+                - [x] `-l`: Long listing format (permissions, ownership, size, time).
+                - [x] `-1`: Force single-column output.
+                - [x] `-C`: Force multi-column output (default for terminal).
+                - [x] `-m`: Comma-separated output.
+                - [x] `-x`: List entries by lines instead of columns.
+                - [x] `-g`: Like `-l` but omit owner.
+                - [x] `-o`: Like `-l` but omit group.
+                - [x] `-n`, `--numeric-uid-gid`: Like `-l` but show numeric UID/GID.
+            - [x] **Sorting:**
+                - [x] `-r`, `--reverse`: Reverse order while sorting.
+                - [x] `-S`: Sort by file size (largest first).
+                - [x] `-t`: Sort by modification time (newest first).
+                - [x] `-u`: Sort by access time (with `-lt`), show atime (with `-l`).
+                - [x] `-c`: Sort by ctime (with `-lt`), show ctime (with `-l`).
+                - [x] `-U`: Do not sort; list in directory order.
+                - [x] `-f`: Do not sort, enable `-aU`, disable `-ls --color`.
+                - [x] `-v`: Natural sort of version numbers within text.
+            - [x] **Symlink Handling:**
+                - [x] `-L`, `--dereference`: Follow symlinks and show target's info.
+                - [x] `-H`: Follow symlinks only on command line arguments.
+            - [x] **Size & Units:**
+                - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+                - [x] `-k`, `--kibibytes`: Use 1024-byte blocks.
+                - [x] `-s`, `--size`: Print allocated size of each file, in blocks.
                 - [ ] `--block-size=SIZE`: Scale sizes by SIZE before printing.
-                - [ ] `--si`: Use powers of 1000 not 1024.
-            - [ ] **File Type Indicators:**
-                - [ ] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
-                - [ ] `-p`: Append `/` indicator to directories.
+                - [x] `--si`: Use powers of 1000 not 1024.
+            - [x] **File Type Indicators:**
+                - [x] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
+                - [x] `-p`: Append `/` indicator to directories.
                 - [ ] `--file-type`: Likewise, except do not append `*`.
-            - [ ] **Inode & Block:**
-                - [ ] `-i`, `--inode`: Print inode number of each file.
-            - [ ] **Recursion:**
-                - [ ] `-R`, `--recursive`: List subdirectories recursively.
+            - [x] **Inode & Block:**
+                - [x] `-i`, `--inode`: Print inode number of each file.
+            - [x] **Recursion:**
+                - [x] `-R`, `--recursive`: List subdirectories recursively.
                 - [ ] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
-            - [ ] **Color:**
-                - [ ] `--color=auto`: Colorize when stdout is a terminal.
-                - [ ] `--color=always`: Always colorize output.
-                - [ ] `--color=never`: Never colorize output.
+            - [x] **Color:**
+                - [x] `--color=auto`: Colorize when stdout is a terminal.
+                - [x] `--color=always`: Always colorize output.
+                - [x] `--color=never`: Never colorize output.
                 - [ ] Parse `LS_COLORS` environment variable.
-                - [ ] Default color scheme for file types (dir, link, exec, etc.).
-            - [ ] **Width Control:**
+                - [x] Default color scheme for file types (dir, link, exec, etc.).
+            - [x] **Width Control:**
                 - [ ] `--width=N`: Set output width to N columns.
                 - [ ] `-w N`: Same as `--width=N`.
-                - [ ] Read `COLUMNS` environment variable.
-                - [ ] Query terminal width via `ioctl(TIOCGWINSZ)`.
-                - [ ] Fallback to 80 columns for pipes/non-terminals.
+                - [x] Read `COLUMNS` environment variable.
+                - [x] Query terminal width via `ioctl(TIOCGWINSZ)`.
+                - [x] Fallback to 80 columns for pipes/non-terminals.
             - [ ] **Timestamps:**
                 - [ ] `--time=WORD`: Show time as WORD (atime/access/use, ctime/status, mtime/modification).
                 - [ ] `--time-style=STYLE`: Time style (full-iso, long-iso, iso, locale, +FORMAT).
@@ -5839,27 +5839,28 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Record login in `/var/run/utmp` and `/var/log/wtmp`.
             - [ ] Handle login failures (syslog LOG_AUTH).
     - [ ] **`ps` (Process Status):**
-        - [ ] **Data Gathering:**
-            - [ ] Iterate over `/proc/[pid]` directories.
-            - [ ] Parse `/proc/[pid]/stat` for state (`R`, `S`, `Z`), ppid, pgrp, session, tty.
-            - [ ] Parse `/proc/[pid]/cmdline` for full arguments.
-            - [ ] Parse `/proc/[pid]/status` for real/effective UID/GID.
+        - [ ] **Data Gathering (via `libsys`):**
+            - [ ] Call `sys_proc_count()` to get process count.
+            - [ ] Call `sys_proc_list()` to enumerate all PIDs.
+            - [ ] Call `sys_proc_info()` for each PID to get state, ppid, pgid, sid, tty, perso_id.
+            - [ ] Call `sys_proc_cmdline()` for full command line arguments.
+            - [ ] Call `sys_proc_pers_name()` to resolve personality ID to display string.
         - [ ] **Formatting & Output:**
-            - [ ] Resolve TTY major/minor to device names (`/dev/tty1`, `?`).
-            - [ ] Calculate %CPU (utime+stime / uptime delta).
-            - [ ] Calculate %MEM (rss * pagesize / total_ram).
-            - [ ] Format columns (PID, TTY, STAT, TIME, COMMAND).
+            - [ ] Resolve TTY device number to name (from `sys_procinfo_t.tty`).
+            - [ ] Calculate %CPU (user_time+sys_time / uptime delta).
+            - [ ] Calculate %MEM (rss * pagesize / total_ram from `sys_vm_stats()`).
+            - [ ] Format columns: PID, TTY, STAT, TIME, COMMAND, PERS (personality).
             - [ ] Support BSD syntax (`aux`) vs SysV syntax (`-ef`).
     - [ ] **`top` (Real-time Monitor):**
-        - [ ] **Backend:**
-            - [ ] Efficiently scan `/proc` (snapshotting).
-            - [ ] Calculate CPU delta usage between samples (Prev/Curr ticks).
-            - [ ] Read global stats (`/proc/stat`, `/proc/meminfo`).
+        - [ ] **Backend (via `libsys`):**
+            - [ ] Efficiently call `sys_proc_list()` and `sys_proc_info()` (snapshotting).
+            - [ ] Calculate CPU delta usage via `sys_cpu_times()` between samples.
+            - [ ] Read global stats via `sys_vm_stats()` and `sys_cpu_loadavg()`.
         - [ ] **UI / Display:**
             - [ ] Initialize terminal (raw mode, no echo).
             - [ ] Handle VT100 control sequences (clear screen, cursor positioning).
-            - [ ] Display Header (Uptime, Load Avg, CPU states, Mem/Swap).
-            - [ ] Display Process List (Sortable by CPU/Mem, clamped to screen height).
+            - [ ] Display Header: Uptime (`sys_uptime()`), Load (`sys_cpu_loadavg()`), Mem/Swap.
+            - [ ] Display Process List (sortable by CPU/Mem, show personality, clamp to screen).
             - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
     - [ ] **Documentation Utils:**
         - [ ] **`roff` / `nroff` (Typesetting Engine):**

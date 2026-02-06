@@ -8,6 +8,7 @@
 #include <vm/vm_map.h>
 #include <vm/vm_kmem.h>
 #include <exec/perso/personality.h>
+#include <sys/random.h>
 
 
 
@@ -298,16 +299,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     if (current_process) {
         switch (detected_os) {
             case ELFOSABI_FREEBSD:
-                current_process->pers = &personality_freebsd;
+                current_process->perso_id = PERS_FREEBSD;
                 break;
             case ELFOSABI_LINUX:
-                current_process->pers = &personality_linux;
+                current_process->perso_id = PERS_LINUX;
                 break;
             default:
-                current_process->pers = &personality_native;
+                current_process->perso_id = PERS_NATIVE;
                 break;
         }
-        current_process->perso_id = current_process->pers->id;
         
         // Set Bitness
         if (ehdr.e_ident[EI_CLASS] == ELFCLASS64) {
@@ -686,14 +686,17 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     sp -= 4; STACK_WRITE32(sp, AT_BASE);
 
     // Push 16 bytes of random data for AT_RANDOM
-    // TODO: Use true RNG. For now, pseudo-random or fixed.
-    static uint32_t rand_seed = 0xAA55AA55;
     uint32_t rand_ptr;
     sp -= 16;
     rand_ptr = sp;
+
+    uint8_t rand_buf[16];
+    random_get_bytes(rand_buf, sizeof(rand_buf));
+
     for (int i = 0; i < 4; i++) {
-        rand_seed = rand_seed * 1103515245 + 12345;
-        STACK_WRITE32(sp + i * 4, rand_seed);
+        uint32_t val;
+        memcpy(&val, &rand_buf[i * 4], 4);
+        STACK_WRITE32(sp + i * 4, val);
     }
     
     // AT_RANDOM
