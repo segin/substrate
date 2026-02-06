@@ -220,6 +220,43 @@ void test_uma_dynamic_stress(void) {
     kprint("  PASS\n");
 }
 
+/* Test zone limits */
+void test_uma_limits(void) {
+    kprint("Test: zone limits\n");
+
+    uma_zone_t *zone = uma_zcreate("test-limits", 32, NULL, NULL, NULL, NULL, 0, 0);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    uma_zone_set_max(zone, 5);
+
+    void *objs[10];
+    int i;
+
+    /* Allocate up to limit */
+    for (i = 0; i < 5; i++) {
+        objs[i] = uma_zalloc(zone, M_NOWAIT);
+        TEST_ASSERT(objs[i] != NULL, "alloc under limit");
+    }
+
+    /* Try to exceed limit */
+    void *extra = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(extra == NULL, "alloc over limit fails");
+
+    /* Free one and try again */
+    uma_zfree(zone, objs[0]);
+    extra = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(extra != NULL, "alloc after free succeeds");
+
+    /* Cleanup */
+    uma_zfree(zone, extra);
+    for (i = 1; i < 5; i++) {
+        uma_zfree(zone, objs[i]);
+    }
+
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
 void run_uma_tests(void) {
     kprint("\n=== UMA Tests ===\n");
     test_uma_dynamic_stress(); // Run this first to ensure it runs before any panic
@@ -228,6 +265,7 @@ void run_uma_tests(void) {
     test_uma_zero_fill();
     test_uma_ctor_dtor();
     test_uma_many_allocs();
+    test_uma_limits();
     // test_uma_redzone(); // Causes panic, disabled for now
     kprint("\nUMA Tests Complete\n");
 }
