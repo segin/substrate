@@ -2838,31 +2838,31 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] "0" flag ignored if "-" is present.
             - [x] "0" flag ignored if precision is specified for integers.
             - [x] Space ignored if "+" is present.
-- [ ] **String/Mem:**
-    - [ ] Optimize `memcpy`, `memset`, `memmove`.
-    - [ ] **Math Library (`lib/m/`):**
-        - [ ] **Architecture:**
-            - [ ] `math.h` header definition.
-            - [ ] `math_errhandling` (errno support).
-            - [ ] `__fpclassify` internal helper.
-        - [ ] **Classification:**
-            - [ ] `fpclassify()`
-            - [ ] `isfinite()`
-            - [ ] `isinf()`
-            - [ ] `isnan()`
-            - [ ] `isnormal()`
-            - [ ] `signbit()`
-        - [ ] **Basic Arithmetic:**
-            - [ ] `fabs()`
-            - [ ] `fmod()`
-            - [ ] `remainder()`
-            - [ ] `fmax()`
-            - [ ] `fmin()`
+- [x] **String/Mem:**
+    - [x] Optimize `memcpy`, `memset`, `memmove`.
+    - [/] **Math Library (`lib/m/`):**
+        - [x] **Architecture:**
+            - [x] `math.h` header definition.
+            - [x] `math_errhandling` (errno support).
+            - [x] `__fpclassify` internal helper.
+        - [x] **Classification:**
+            - [x] `fpclassify()`
+            - [x] `isfinite()`
+            - [x] `isinf()`
+            - [x] `isnan()`
+            - [x] `isnormal()`
+            - [x] `signbit()`
+        - [x] **Basic Arithmetic:**
+            - [x] `fabs()`
+            - [x] `fmod()`
+            - [x] `remainder()`
+            - [x] `fmax()`
+            - [x] `fmin()`
             - [ ] `fdim()`
-            - [ ] `ceil()`
-            - [ ] `floor()`
-            - [ ] `trunc()`
-            - [ ] `round()`
+            - [x] `ceil()`
+            - [x] `floor()`
+            - [x] `trunc()`
+            - [x] `round()`
             - [ ] `rint()`
         - [ ] **Exponential & Power:**
             - [ ] `exp()`
