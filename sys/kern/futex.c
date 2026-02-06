@@ -236,9 +236,21 @@ int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len
     if (pid == 0) {
         target = current_thread;
     } else {
-        /* TODO: Lookup thread by TID and verify permissions */
-        /* For now, only allow current thread */
-        return -ESRCH;
+        target = sched_get_thread(pid);
+        if (!target) return -ESRCH;
+
+        /* Verify permissions:
+         * 1. Target is current thread (handled implicitly by same process check usually, but good for clarity)
+         * 2. Target is in same process
+         * 3. Target process has same UID as current process EUID
+         * 4. Current process is root (euid == 0)
+         */
+        if (target != current_thread &&
+            target->proc != current_process &&
+            target->proc->uid != current_process->euid &&
+            current_process->euid != 0) {
+            return -EPERM;
+        }
     }
     
     if (!target) return -ESRCH;

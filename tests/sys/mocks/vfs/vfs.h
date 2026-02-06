@@ -1,5 +1,5 @@
-#ifndef _VFS_MOCK_H
-#define _VFS_MOCK_H
+#ifndef _VFS_H
+#define _VFS_H
 
 #include <stdint.h>
 #include <sys/types.h>
