@@ -298,16 +298,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     if (current_process) {
         switch (detected_os) {
             case ELFOSABI_FREEBSD:
-                current_process->pers = &personality_freebsd;
+                current_process->perso_id = PERS_FREEBSD;
                 break;
             case ELFOSABI_LINUX:
-                current_process->pers = &personality_linux;
+                current_process->perso_id = PERS_LINUX;
                 break;
             default:
-                current_process->pers = &personality_native;
+                current_process->perso_id = PERS_NATIVE;
                 break;
         }
-        current_process->perso_id = current_process->pers->id;
         
         // Set Bitness
         if (ehdr.e_ident[EI_CLASS] == ELFCLASS64) {

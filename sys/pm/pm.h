@@ -12,7 +12,7 @@ extern process_t *current_process;
 extern mutex_t proctree_lock;
 
 void pm_init(void);
-process_t *proc_create(struct personality *pers);
+process_t *proc_create(int perso_id);
 int proc_fork(process_t *parent, void *stack);
 void proc_remove_child(process_t *parent, process_t *child);
 
