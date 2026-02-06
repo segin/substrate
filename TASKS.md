@@ -1634,14 +1634,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - Acceptance: Valid vnode from file handle
         - [ ] **`vnode_ops` (File-level):**
             - [ ] **Name Resolution:**
-                - [ ] Implement `vop_lookup(dvp, vpp, cnp)`.
+                - [x] Implement `vop_lookup(dvp, vpp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c` (new), `sys/vfs/vnode.h`
                     - API: Look up component name in directory vnode
                     - Returns: `ENOENT` if not found, `0` + vnode if found
                     - Tests: unit (found, not found, permission denied)
                     - Docs: `vop_lookup.9`
                     - Acceptance: Correct vnode returned for existing entry
-                - [ ] Implement `vop_cachedlookup(dvp, vpp, cnp)`.
+                - [x] Implement `vop_cachedlookup(dvp, vpp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c`, `sys/vfs/namecache.c`
                     - API: Lookup wrapper interacting with name cache
                     - Logic: Check cache first, call vop_lookup on miss
