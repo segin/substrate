@@ -11,6 +11,13 @@ typedef enum {
     TIME_CTIME = 2
 } ls_time_type_t;
 
+typedef enum {
+    TIME_STYLE_LOCALE = 0,
+    TIME_STYLE_ISO,
+    TIME_STYLE_LONG_ISO,
+    TIME_STYLE_FULL_ISO
+} ls_time_style_t;
+
 typedef struct {
     // Filtering
     bool all;            // -a
@@ -39,7 +46,8 @@ typedef struct {
     bool sort_time;      // -t
     bool no_sort;        // -U
     bool version_sort;   // -v
-    ls_time_type_t time_type; // -u (atime), -c (ctime)
+    ls_time_type_t time_type; // -u (atime), -c (ctime), --time=WORD
+    ls_time_style_t time_style; // --time-style=STYLE
 
     // Symlink Handling
     bool dereference;    // -L

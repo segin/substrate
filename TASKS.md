@@ -3916,9 +3916,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Read `COLUMNS` environment variable.
                 - [x] Query terminal width via `ioctl(TIOCGWINSZ)`.
                 - [x] Fallback to 80 columns for pipes/non-terminals.
-            - [ ] **Timestamps:**
-                - [ ] `--time=WORD`: Show time as WORD (atime/access/use, ctime/status, mtime/modification).
-                - [ ] `--time-style=STYLE`: Time style (full-iso, long-iso, iso, locale, +FORMAT).
+            - [x] **Timestamps:**
+                - [x] `--time=WORD`: Use time WORD (atime, access, use, ctime, status, mtime, modification).
+                - [x] `--time-style=STYLE`: Use STYLE (full-iso, long-iso, iso, locale)., +FORMAT).
             - [ ] **Miscellaneous:**
                 - [ ] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters.
                 - [ ] `--show-control-chars`: Show non-graphic characters as-is (default).

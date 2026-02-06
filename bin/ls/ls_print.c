@@ -134,7 +134,22 @@ void ls_print_entry(file_info_t *f, const ls_config_t *config) {
         char timebuf[64];
         struct tm *tm = localtime(&t);
         if (tm) {
-            strftime(timebuf, sizeof(timebuf), "%b %d %H:%M", tm);
+            const char *fmt;
+            switch (config->time_style) {
+                case TIME_STYLE_FULL_ISO:
+                    fmt = "%Y-%m-%d %H:%M:%S.000000000 %z";
+                    break;
+                case TIME_STYLE_LONG_ISO:
+                    fmt = "%Y-%m-%d %H:%M";
+                    break;
+                case TIME_STYLE_ISO:
+                    fmt = "%m-%d %H:%M";
+                    break;
+                default: // TIME_STYLE_LOCALE
+                    fmt = "%b %d %H:%M";
+                    break;
+            }
+            strftime(timebuf, sizeof(timebuf), fmt, tm);
             printf("%s ", timebuf);
         } else {
             printf("??? ?? ??:?? ");

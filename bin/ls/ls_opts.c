@@ -98,6 +98,22 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                 else if (strncmp(argv[i], "--width=", 8) == 0) {
                     config->term_width = atoi(argv[i] + 8);
                 }
+                else if (strncmp(argv[i], "--time=", 7) == 0) {
+                    char *val = argv[i] + 7;
+                    if (strcmp(val, "atime") == 0 || strcmp(val, "access") == 0 || strcmp(val, "use") == 0)
+                        config->time_type = TIME_ATIME;
+                    else if (strcmp(val, "ctime") == 0 || strcmp(val, "status") == 0)
+                        config->time_type = TIME_CTIME;
+                    else if (strcmp(val, "mtime") == 0 || strcmp(val, "modification") == 0)
+                        config->time_type = TIME_MTIME;
+                }
+                else if (strncmp(argv[i], "--time-style=", 13) == 0) {
+                    char *val = argv[i] + 13;
+                    if (strcmp(val, "full-iso") == 0) config->time_style = TIME_STYLE_FULL_ISO;
+                    else if (strcmp(val, "long-iso") == 0) config->time_style = TIME_STYLE_LONG_ISO;
+                    else if (strcmp(val, "iso") == 0) config->time_style = TIME_STYLE_ISO;
+                    else if (strcmp(val, "locale") == 0) config->time_style = TIME_STYLE_LOCALE;
+                }
                 else {
                     fprintf(stderr, "ls: unrecognized option '%s'\n", argv[i]);
                     return -1;
