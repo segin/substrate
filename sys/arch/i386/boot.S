@@ -4,6 +4,10 @@
 # Multiboot Header
 .section .multiboot
 .align 4
+    # Entry point for Linux zImage loader (jumps to _start)
+    # This allows the kernel to be loaded at 0x100000 and executed from offset 0
+    jmp _start
+    .align 4
 .long MULTIBOOT_HEADER_MAGIC
 .long MULTIBOOT_HEADER_FLAGS
 .long -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
