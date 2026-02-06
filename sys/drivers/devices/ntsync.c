@@ -121,14 +121,6 @@ typedef struct ntsync_instance {
  * ============================================================
  */
 
-static uint64_t get_current_time_ns(clockid_t clk_id) {
-    struct timespec ts;
-    if (sys_clock_gettime(clk_id, &ts) != 0) {
-        return 0;
-    }
-    return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
-}
-
 static inline void spinlock_acquire(volatile int *lock) {
     while (__sync_lock_test_and_set(lock, 1)) {
         while (*lock) {
@@ -271,10 +263,8 @@ static void ntsync_wake_one(ntsync_object_t *obj) {
  */
 static void ntsync_wake_all(ntsync_object_t *obj) {
     for (ntsync_waiter_t *w = obj->waiters; w; w = w->next) {
-        if (!w->all_wait) {
-            w->signaled = 1;
-            sched_wakeup(w->thread);
-        }
+        w->signaled = 1;
+        sched_wakeup(w->thread);
     }
 }
 
@@ -306,15 +296,25 @@ static int ntsync_sem_post(ntsync_object_t *obj, uint32_t *arg) {
     obj->sem.count += add_count;
     
     /* Wake waiters */
-    while (obj->sem.count > 0 && obj->waiters) {
-        ntsync_waiter_t *w = obj->waiters;
+    ntsync_waiter_t **pp = &obj->waiters;
+    uint32_t wake_limit = obj->sem.count;
+
+    while (wake_limit > 0 && *pp) {
+        ntsync_waiter_t *w = *pp;
         if (!w->all_wait) {
             w->signaled = 1;
-            obj->sem.count--;
+            wake_limit--;
             sched_wakeup(w->thread);
+            /* Remove from queue */
+            *pp = w->next;
+            obj->waiter_count--;
+        } else {
+            /* For wait-all, we wake them to check, but don't consume/remove */
+            w->signaled = 1;
+            sched_wakeup(w->thread);
+            /* Check next waiter */
+            pp = &w->next;
         }
-        obj->waiters = w->next;
-        obj->waiter_count--;
     }
     
     spinlock_release(&obj->lock);
@@ -683,26 +683,36 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
     
     /* None signaled - need to sleep */
-    ntsync_waiter_t waiter;
-    waiter.thread = current_thread;
-    waiter.signaled = 0;
-    waiter.all_wait = 0;
-    waiter.priority = current_thread ? current_thread->priority : 0;
-    waiter.next = NULL;
-    
-    /* Add waiter to all objects */
+    int has_alert = (args->alert != 0 && args->alert < (uint32_t)inst->object_count);
+    uint32_t total_waiters = args->count + (has_alert ? 1 : 0);
+    ntsync_waiter_t *waiters = kmalloc(total_waiters * sizeof(ntsync_waiter_t));
+    if (!waiters) return -ENOMEM;
+
+    /* Initialize and enqueue waiters */
     for (uint32_t i = 0; i < args->count; i++) {
+        waiters[i].thread = current_thread;
+        waiters[i].signaled = 0;
+        waiters[i].all_wait = 0;
+        waiters[i].priority = current_thread ? current_thread->priority : 0;
+        waiters[i].next = NULL;
+
         ntsync_object_t *obj = inst->objects[obj_fds[i]];
         spinlock_acquire(&obj->lock);
-        waiter_enqueue(obj, &waiter);
+        waiter_enqueue(obj, &waiters[i]);
         spinlock_release(&obj->lock);
     }
-    
-    /* Also add to alert if specified */
-    if (args->alert != 0 && args->alert < (uint32_t)inst->object_count) {
+
+    if (has_alert) {
+        ntsync_waiter_t *w = &waiters[args->count];
+        w->thread = current_thread;
+        w->signaled = 0;
+        w->all_wait = 0;
+        w->priority = current_thread ? current_thread->priority : 0;
+        w->next = NULL;
+
         ntsync_object_t *alert_obj = inst->objects[args->alert];
         spinlock_acquire(&alert_obj->lock);
-        waiter_enqueue(alert_obj, &waiter);
+        waiter_enqueue(alert_obj, w);
         spinlock_release(&alert_obj->lock);
     }
     
@@ -725,10 +735,30 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
 
     int timed_out = 0;
-    while (!waiter.signaled) {
+
+    while (1) {
+        int any_woken = 0;
+        for (uint32_t i = 0; i < total_waiters; i++) {
+            if (waiters[i].signaled) {
+                any_woken = 1;
+                break;
+            }
+        }
+
+        if (any_woken) break;
+
         if (has_deadline) {
             int ret = sched_sleep_until(current_thread, deadline);
-            if (waiter.signaled) break;
+
+            /* Check signals again after wake */
+            for (uint32_t i = 0; i < total_waiters; i++) {
+                if (waiters[i].signaled) {
+                    any_woken = 1;
+                    break;
+                }
+            }
+            if (any_woken) break;
+
             if (ret == -ETIMEDOUT) {
                 timed_out = 1;
                 break;
@@ -738,21 +768,25 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         }
     }
     
-    /* Remove waiter from all objects */
+    /* Remove waiters */
     for (uint32_t i = 0; i < args->count; i++) {
         ntsync_object_t *obj = inst->objects[obj_fds[i]];
         spinlock_acquire(&obj->lock);
-        waiter_dequeue(obj, &waiter);
+        waiter_dequeue(obj, &waiters[i]);
         spinlock_release(&obj->lock);
     }
     
-    if (args->alert != 0 && args->alert < (uint32_t)inst->object_count) {
+    if (has_alert) {
         ntsync_object_t *alert_obj = inst->objects[args->alert];
         spinlock_acquire(&alert_obj->lock);
-        waiter_dequeue(alert_obj, &waiter);
+        waiter_dequeue(alert_obj, &waiters[args->count]);
         spinlock_release(&alert_obj->lock);
     }
     
+    kfree(waiters);
+
+    if (timed_out) return -ETIMEDOUT;
+
     /* Find which object signaled us */
     for (uint32_t i = 0; i < args->count; i++) {
         ntsync_object_t *obj = inst->objects[obj_fds[i]];
@@ -769,7 +803,7 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
     
     /* Check if alert triggered */
-    if (args->alert != 0 && args->alert < (uint32_t)inst->object_count) {
+    if (has_alert) {
         args->index = args->count;
         return 0;
     }
@@ -789,24 +823,86 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     
     int *obj_fds = (int *)(uintptr_t)args->objs;
     
-    /* Check for duplicates (not allowed in wait_all) */
+    /* Check for duplicates (not allowed in wait_all) and validity */
     for (uint32_t i = 0; i < args->count; i++) {
+        int fd = obj_fds[i];
+        if (fd < 0 || fd >= inst->object_count) return -EINVAL;
+
         for (uint32_t j = i + 1; j < args->count; j++) {
-            if (obj_fds[i] == obj_fds[j]) return -EINVAL;
+            if (fd == obj_fds[j]) return -EINVAL;
         }
-        if (args->alert != 0 && obj_fds[i] == (int)args->alert) {
+        if (args->alert != 0 && fd == (int)args->alert) {
             return -EINVAL;
         }
     }
     
+    int has_alert = (args->alert != 0 && args->alert < (uint32_t)inst->object_count);
+    uint32_t total_waiters = args->count + (has_alert ? 1 : 0);
+    ntsync_waiter_t *waiters = kmalloc(total_waiters * sizeof(ntsync_waiter_t));
+    if (!waiters) return -ENOMEM;
+
+    /* Initialize and enqueue waiters */
+    for (uint32_t i = 0; i < args->count; i++) {
+        waiters[i].thread = current_thread;
+        waiters[i].signaled = 0;
+        waiters[i].all_wait = 1;
+        waiters[i].priority = current_thread ? current_thread->priority : 0;
+        waiters[i].next = NULL;
+
+        int fd = obj_fds[i];
+        ntsync_object_t *obj = inst->objects[fd];
+        spinlock_acquire(&obj->lock);
+        waiter_enqueue(obj, &waiters[i]);
+        spinlock_release(&obj->lock);
+    }
+
+    if (has_alert) {
+        ntsync_waiter_t *w = &waiters[args->count];
+        w->thread = current_thread;
+        w->signaled = 0;
+        w->all_wait = 1; /* Treat alert as part of wait-all logic for wakeups */
+        w->priority = current_thread ? current_thread->priority : 0;
+        w->next = NULL;
+
+        ntsync_object_t *alert_obj = inst->objects[args->alert];
+        spinlock_acquire(&alert_obj->lock);
+        waiter_enqueue(alert_obj, w);
+        spinlock_release(&alert_obj->lock);
+    }
+
+    uint64_t deadline = 0;
+    int has_deadline = (args->timeout != UINT64_MAX);
+
+    if (has_deadline) {
+        if (args->flags & NTSYNC_WAIT_REALTIME) {
+            time_t boot_sec = get_time() - get_uptime();
+            uint64_t boot_ns = (uint64_t)boot_sec * 1000000000ULL;
+            if (args->timeout > boot_ns) {
+                deadline = (args->timeout - boot_ns) / 10000000ULL;
+            } else {
+                deadline = get_ticks(); /* Already passed */
+            }
+        } else {
+            deadline = args->timeout / 10000000ULL;
+        }
+    }
+
+    int ret_code = 0;
+
     /* Try to acquire all objects atomically */
     while (1) {
+        /* Clear signaled flags */
+        for (uint32_t i = 0; i < total_waiters; i++) {
+            waiters[i].signaled = 0;
+        }
+        __sync_synchronize();
+
         int all_signaled = 1;
         
         /* Lock all objects */
         for (uint32_t i = 0; i < args->count; i++) {
             int fd = obj_fds[i];
-            if (fd < 0 || fd >= inst->object_count) return -EINVAL;
+            /* Already checked validity above */
             spinlock_acquire(&inst->objects[fd]->lock);
         }
         
@@ -834,7 +930,8 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
             }
             
             args->index = 0;
-            return ret;
+            ret_code = ret;
+            goto cleanup;
         }
         
         /* Unlock all */
@@ -843,7 +940,7 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         }
         
         /* Check alert */
-        if (args->alert != 0 && args->alert < (uint32_t)inst->object_count) {
+        if (has_alert) {
             ntsync_object_t *alert_obj = inst->objects[args->alert];
             spinlock_acquire(&alert_obj->lock);
             if (alert_obj->type == NTSYNC_OBJ_EVENT && alert_obj->event.signaled) {
@@ -852,24 +949,54 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
                 }
                 spinlock_release(&alert_obj->lock);
                 args->index = args->count;
-                return 0;
+                ret_code = 0;
+                goto cleanup;
             }
             spinlock_release(&alert_obj->lock);
         }
         
-        /* Sleep briefly and retry */
-        /* TODO: Proper wait queue implementation */
-        if (args->timeout != UINT64_MAX) {
-            clockid_t clk = (args->flags & NTSYNC_WAIT_REALTIME) ? CLOCK_REALTIME : CLOCK_MONOTONIC;
-            uint64_t now = get_current_time_ns(clk);
-            if (now >= args->timeout) {
-                return -ETIMEDOUT;
+        /* Check if any waiter was signaled */
+        int any_woken = 0;
+        for (uint32_t i = 0; i < total_waiters; i++) {
+            if (waiters[i].signaled) {
+                any_woken = 1;
+                break;
             }
         }
-        sched_yield();
+
+        if (any_woken) {
+            continue;
+        }
+
+        if (has_deadline) {
+            int r = sched_sleep_until(current_thread, deadline);
+            if (r == -ETIMEDOUT) {
+                ret_code = -ETIMEDOUT;
+                goto cleanup;
+            }
+        } else {
+            sched_sleep(current_thread);
+        }
+    }
+
+cleanup:
+    /* Remove waiters */
+    for (uint32_t i = 0; i < args->count; i++) {
+        ntsync_object_t *obj = inst->objects[obj_fds[i]];
+        spinlock_acquire(&obj->lock);
+        waiter_dequeue(obj, &waiters[i]);
+        spinlock_release(&obj->lock);
+    }
+
+    if (has_alert) {
+        ntsync_object_t *alert_obj = inst->objects[args->alert];
+        spinlock_acquire(&alert_obj->lock);
+        waiter_dequeue(alert_obj, &waiters[args->count]);
+        spinlock_release(&alert_obj->lock);
     }
     
-    return -ETIMEDOUT;
+    kfree(waiters);
+    return ret_code;
 }
 
 /*
