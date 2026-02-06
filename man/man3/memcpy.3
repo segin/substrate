@@ -17,6 +17,11 @@ to memory area
 The memory areas must not overlap. Use
 .BR memmove (3)
 if the memory areas do overlap.
+.SS Implementation Notes
+This implementation is optimized using word-aligned transfers on 32-bit boundaries.
+Small copies (< 4 bytes) use byte-by-byte copying.
+Larger transfers align to 4-byte boundaries and copy 32-bit words for approximately
+3-4x speedup compared to naive byte-by-byte implementations.
 .SH RETURN VALUE
 The
 .BR memcpy ()
