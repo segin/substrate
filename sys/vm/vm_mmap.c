@@ -5,6 +5,7 @@
 #include <sys/mman.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <vfs/vfs.h>
 
 extern process_t *current_process;
 
@@ -90,18 +91,18 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t 
             return MAP_FAILED;
         }
         file_t *f = current_process->fds[fd];
-        if (!f || !f->node) {
+        if (!f || !f->f_data) {
             vm_area_destroy(area);
             return MAP_FAILED;
         }
         
-        area->vm_file = f->node; // Ideally incref
+        area->vm_file = (fs_node_t*)f->f_data; // Ideally incref
         // offset argument is page offset (4096 byte units) to support >4GB files
         area->vm_offset = (off_t)offset << 12;
         
         // Try VFS mmap (device mapping)
         extern void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
-        if (mmap_fs(f->node, (void*)start_addr, length, prot, flags, area->vm_offset) == (void*)-1) {
+        if (mmap_fs((fs_node_t*)f->f_data, (void*)start_addr, length, prot, flags, area->vm_offset) == (void*)-1) {
              // Fallback or error? For now, if driver doesn't support it, fail.
              // (Unless we implement generic read() -> page cache later)
              vm_area_destroy(area);

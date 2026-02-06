@@ -3,6 +3,7 @@
 #include <vm/vm_fault.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <vfs/vfs.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -94,13 +95,13 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         memset(pa_virt, 0, 0x1000);
 
         // If file-backed, read data into page
-        if (file && file->node && file->node->read) {
+        if (file && file->f_data && ((fs_node_t*)file->f_data)->read) {
             uint32_t bytes_to_read = 0x1000;
             // Clamp to remaining length
             if (va + 0x1000 > v_addr + length) {
                 bytes_to_read = (v_addr + length) - va;
             }
-            file->node->read(file->node, file_offset, bytes_to_read, (uint8_t *)pa_virt);
+            ((fs_node_t*)file->f_data)->read((fs_node_t*)file->f_data, file_offset, bytes_to_read, (uint8_t *)pa_virt);
             file_offset += bytes_to_read;
         }
 

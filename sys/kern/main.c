@@ -166,20 +166,20 @@ static void init_root_fs(void) {
              strcpy(root_type, "ext2");
         }
         
-        if (vfs_mount(root_dev, "/", root_type, 0, NULL) != 0) {
+        if (vfs_mount_legacy(root_dev, "/", root_type, 0, NULL) != 0) {
             kprint("VFS: Cannot mount root ");
             kprint(root_dev);
             kprint("\n");
             
             kprint("VFS: Trying /dev/storage/ram0\n");
-            if (vfs_mount("/dev/storage/ram0", "/", "ext2", 0, NULL) != 0) {
+            if (vfs_mount_legacy("/dev/storage/ram0", "/", "ext2", 0, NULL) != 0) {
                  panic("not syncing - cannot mount root!");
             }
         }
     } else {
         kprint("VFS: No root= argument specified.\n");
         kprint("VFS: Trying /dev/storage/ram0\n");
-        if (vfs_mount("/dev/storage/ram0", "/", "ext2", 0, NULL) != 0) {
+        if (vfs_mount_legacy("/dev/storage/ram0", "/", "ext2", 0, NULL) != 0) {
             panic("not syncing - cannot mount root!");
         }
     }
@@ -189,9 +189,9 @@ static void init_root_fs(void) {
     }
 
     // Mount pseudo-filesystems AFTER root is established
-    vfs_mount(NULL, "/dev", "devfs", 0, NULL);
-    vfs_mount(NULL, "/proc", "procfs", 0, NULL);
-    vfs_mount(NULL, "/sys", "sysfs", 0, NULL);
+    vfs_mount_legacy(NULL, "/dev", "devfs", 0, NULL);
+    vfs_mount_legacy(NULL, "/proc", "procfs", 0, NULL);
+    vfs_mount_legacy(NULL, "/sys", "sysfs", 0, NULL);
 }
 
 // kinit - kernel init task (becomes PID 1 after exec)

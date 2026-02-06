@@ -1539,49 +1539,49 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS Subsystem Refactor (BSD-style):**
     - [ ] **Core Structures & Life Cycle:**
-        - [ ] **`struct vnode`:**
-            - [ ] `v_type` (VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD).
-            - [ ] `v_tag` (VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.).
-            - [ ] `v_op` (operations vector), `v_data` (private fs data).
-            - [ ] `v_mount` (pointer to mount point).
-            - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
-            - [ ] `v_writecount` (writers count), `v_flag` (VROOT, VTEXT, VSYSTEM, etc.).
-            - [ ] `v_lock` (exclusive/shared lock).
-            - [ ] **Life Cycle:**
-                - [ ] `getnewvnode()`: Allocate new vnode from zone, recycle LRU if full.
-                - [ ] `vref()`: Increment use count.
-                - [ ] `vrele()`: Decrement use count, trigger inactive/reclaim if zero.
-                - [ ] `vput()`: Unlock and vrele.
-                - [ ] `vget()`: Lock and vref.
-                - [ ] `vgone()`: Mark vnode for doom/destruction.
-                - [ ] `vclean()`: Disassociate vnode from filesystem data.
-        - [ ] **`struct mount`:**
-            - [ ] `mnt_vnodecovered` (vnode mounted on).
-            - [ ] `mnt_op` (VFS ops vector).
-            - [ ] `mnt_data` (private fs data).
-            - [ ] `mnt_flag` (MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS).
-            - [ ] `mnt_nvnodelist` (list of active vnodes).
-            - [ ] `mnt_stat` (cached filesystem statistics).
-        - [ ] **`struct file`:**
-            - [ ] `f_type` (DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE).
-            - [ ] `f_data` (pointer to vnode/socket/pipe).
-            - [ ] `f_flag` (FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT).
-            - [ ] `f_ops` (file operations vector: read, write, ioctl, poll, close).
-            - [ ] `f_offset` (current file offset).
-            - [ ] `f_count` (reference count).
-            - [ ] `f_cred` (credentials at open time).
-    - [ ] **Pathname Lookup (`namei`):**
-        - [ ] **`struct nameidata`:** Encapsulate lookup state, path string, purpose (LOOKUP/CREATE/DELETE).
-        - [ ] **`struct componentname`:** Current path component being resolved.
-        - [ ] **Lookup Logic:**
-            - [ ] Parsing `/` delimiters.
-            - [ ] Handling `.` and `..`.
-            - [ ] Crossing mount points (`mnt_vnodecovered`).
-            - [ ] Symbolic link resolution (recursion limit: MAXSYMLINKS).
-        - [ ] **Name Cache:** Global hash table (`nchash`) mapping `(directory vnode, name)` -> `target vnode`.
+        - [x] **`struct vnode`:**
+            - [x] `v_type` (VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD).
+            - [x] `v_tag` (VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.).
+            - [x] `v_op` (operations vector), `v_data` (private fs data).
+            - [x] `v_mount` (pointer to mount point).
+            - [x] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
+            - [x] `v_writecount` (writers count), `v_flag` (VROOT, VTEXT, VSYSTEM, etc.).
+            - [x] `v_lock` (exclusive/shared lock).
+            - [x] **Life Cycle:**
+                - [x] `getnewvnode()`: Allocate new vnode from zone, recycle LRU if full.
+                - [x] `vref()`: Increment use count.
+                - [x] `vrele()`: Decrement use count, trigger inactive/reclaim if zero.
+                - [x] `vput()`: Unlock and vrele.
+                - [x] `vget()`: Lock and vref.
+                - [x] `vgone()`: Mark vnode for doom/destruction.
+                - [x] `vclean()`: Disassociate vnode from filesystem data.
+        - [x] **`struct mount`:**
+            - [x] `mnt_vnodecovered` (vnode mounted on).
+            - [x] `mnt_op` (VFS ops vector).
+            - [x] `mnt_data` (private fs data).
+            - [x] `mnt_flag` (MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS).
+            - [x] `mnt_nvnodelist` (list of active vnodes).
+            - [x] `mnt_stat` (cached filesystem statistics).
+        - [x] **`struct file`:**
+            - [x] `f_type` (DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE).
+            - [x] `f_data` (pointer to vnode/socket/pipe).
+            - [x] `f_flag` (FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT).
+            - [x] `f_ops` (file operations vector: read, write, ioctl, poll, close).
+            - [x] `f_offset` (current file offset).
+            - [x] `f_count` (reference count).
+            - [x] `f_cred` (credentials at open time).
+    - [x] **Pathname Lookup (`namei`):**
+        - [x] **`struct nameidata`:** Encapsulate lookup state, path string, purpose (LOOKUP/CREATE/DELETE).
+        - [x] **`struct componentname`:** Current path component being resolved.
+        - [x] **Lookup Logic:**
+            - [x] Parsing `/` delimiters.
+            - [x] Handling `.` and `..`.
+            - [x] Crossing mount points (`mnt_vnodecovered`).
+            - [x] Symbolic link resolution (recursion limit: MAXSYMLINKS).
+        - [x] **Name Cache:** Global hash table (`nchash`) mapping `(directory vnode, name)` -> `target vnode`.
     - [ ] **Operations Vectors:**
         - [ ] **`vfs_ops` (Filesystem-level):**
-            - [ ] Implement `vfs_mount(mp, path, data, ndp, p)`.
+            - [x] Implement `vfs_mount(mp, path, data, ndp, p)`.
                 - Files: `sys/vfs/vfs_mount.c` (new), `sys/vfs/vfs.h`
                 - API: Mount filesystem at path, parse mount options
                 - Tests: unit (mount success/failure), integration (mount ext2/fat)
@@ -1593,7 +1593,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - Tests: unit (callback invoked after mount)
                 - Docs: `vfs_start.9`
                 - Acceptance: Filesystem fully operational after start
-            - [ ] Implement `vfs_unmount(mp, mntflags, p)`.
+            - [x] Implement `vfs_unmount(mp, mntflags, p)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Unmount filesystem, flush buffers, free resources
                 - Flags: `MNT_FORCE` for forced unmount

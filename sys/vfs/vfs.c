@@ -1,5 +1,7 @@
 #include <vfs/vfs.h>
+#include <vfs/vnode.h>
 #include <sys/mount.h>
+#include <sys/namei.h>
 #include <sys/proc.h>
 
 #include <string.h>
@@ -8,7 +10,9 @@
 #include <sys/poll.h>
 #include <sys/proc.h>
 
+struct mountlist mountlist;
 fs_node_t *fs_root = 0; 
+struct vnode *rootvnode = NULL;
 
 static filesystem_t *filesystems = NULL;
 
@@ -48,6 +52,8 @@ void vfs_init(void) {
     p9_init();
     
     kprint("VFS: Ready.\n");
+    nchinit();
+    TAILQ_INIT(&mountlist);
 }
 
 void vfs_register_filesystem(filesystem_t *fs) {
@@ -59,7 +65,7 @@ filesystem_t *vfs_get_filesystems(void) {
     return filesystems;
 }
 
-int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
+int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
     // Find filesystem type
     filesystem_t *fs = filesystems;
     while (fs) {
@@ -495,7 +501,7 @@ int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
     return parent_node->mknod(parent_node, name, mode, dev);
 }
 
-int vfs_unmount(const char *path) {
+int vfs_unmount_legacy(const char *path) {
     if (!path) return -1;
     
     // Lookup mount point (directory that was mounted ON)

@@ -143,7 +143,7 @@ int proc_fork(process_t *parent, void *stack) {
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];
-            child_proc->fds[j]->ref_count++;
+            child_proc->fds[j]->f_count++;
         }
     }
     

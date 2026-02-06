@@ -196,10 +196,10 @@ void console_attach_std_fds(struct process *proc) {
             return;
         }
         memset(f, 0, sizeof(file_t));
-        f->node = node;
-        f->offset = 0;
-        f->flags = 2; // R/W
-        f->ref_count = 1;
+        f->f_data = node;
+        f->f_offset = 0;
+        f->f_flag = 2; // R/W
+        f->f_count = 1;
         
         proc->fds[i] = f;
     }

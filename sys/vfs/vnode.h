@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <sys/types.h>
 #include <sys/lock.h>
+#include <sys/queue.h>
 
 /* Forward declarations */
 struct vnode;
@@ -99,7 +100,7 @@ struct vnode {
     
     /* Mount relationship */
     struct mount    *v_mount;       /* Pointer to mount point */
-    struct vnode    *v_mountedhere; /* Mounted filesystem's root (if mount point) */
+    struct mount    *v_mountedhere; /* Pointer to mounted filesystem */
     
     /* Reference counting */
     uint32_t        v_usecount;     /* Active references (holds vnode in use) */
@@ -121,6 +122,9 @@ struct vnode {
     /* Hash chain for vnode lookup */
     struct vnode    *v_hash_next;
     
+    /* Vnode list entry for mount point */
+    TAILQ_ENTRY(vnode) v_mntlist;
+    
     /* Filesystem-specific cached info */
     uint64_t        v_id;           /* Capability identifier (generation) */
     uint64_t        v_ino;          /* Inode number (if applicable) */
@@ -136,47 +140,116 @@ struct vnodeops {
     int (*vop_lookup)(struct vnode *dvp, struct vnode **vpp, 
                       const char *name, struct ucred *cred);
     int (*vop_create)(struct vnode *dvp, struct vnode **vpp,
-                      const char *name, int mode, struct ucred *cred);
+                      const char *name, mode_t mode, struct ucred *cred);
+    int (*vop_mknod)(struct vnode *dvp, struct vnode **vpp,
+                     const char *name, mode_t mode, dev_t dev, struct ucred *cred);
     int (*vop_open)(struct vnode *vp, int mode, struct ucred *cred);
     int (*vop_close)(struct vnode *vp, int fflag, struct ucred *cred);
-    int (*vop_read)(struct vnode *vp, struct uio *uio, int ioflag,
-                    struct ucred *cred);
-    int (*vop_write)(struct vnode *vp, struct uio *uio, int ioflag,
-                     struct ucred *cred);
-    int (*vop_ioctl)(struct vnode *vp, unsigned long command, void *data,
-                     int fflag, struct ucred *cred);
-    int (*vop_getattr)(struct vnode *vp, struct vattr *vap,
-                       struct ucred *cred);
-    int (*vop_setattr)(struct vnode *vp, struct vattr *vap,
-                       struct ucred *cred);
     int (*vop_access)(struct vnode *vp, int mode, struct ucred *cred);
-    int (*vop_readlink)(struct vnode *vp, struct uio *uio,
-                        struct ucred *cred);
-    int (*vop_symlink)(struct vnode *dvp, struct vnode **vpp,
-                       const char *name, const char *target,
-                       struct ucred *cred);
-    int (*vop_link)(struct vnode *tdvp, struct vnode *vp,
-                    const char *name, struct ucred *cred);
-    int (*vop_remove)(struct vnode *dvp, struct vnode *vp,
-                      const char *name, struct ucred *cred);
-    int (*vop_rename)(struct vnode *fdvp, struct vnode *fvp,
-                      const char *fname, struct vnode *tdvp,
-                      struct vnode *tvp, const char *tname,
-                      struct ucred *cred);
-    int (*vop_mkdir)(struct vnode *dvp, struct vnode **vpp,
-                     const char *name, int mode, struct ucred *cred);
-    int (*vop_rmdir)(struct vnode *dvp, struct vnode *vp,
-                     const char *name, struct ucred *cred);
-    int (*vop_readdir)(struct vnode *vp, struct uio *uio,
-                       struct ucred *cred, int *eofflag);
+    int (*vop_getattr)(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+    int (*vop_setattr)(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+    int (*vop_read)(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred);
+    int (*vop_write)(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred);
+    int (*vop_ioctl)(struct vnode *vp, uint32_t command, void *data, int fflag, struct ucred *cred);
+    int (*vop_poll)(struct vnode *vp, int events, struct ucred *cred);
     int (*vop_fsync)(struct vnode *vp, int waitfor, struct ucred *cred);
+    int (*vop_remove)(struct vnode *dvp, struct vnode *vp, const char *name, struct ucred *cred);
+    int (*vop_link)(struct vnode *tdvp, struct vnode *vp, const char *name, struct ucred *cred);
+    int (*vop_rename)(struct vnode *fdvp, struct vnode *fvp, const char *fname,
+                      struct vnode *tdvp, struct vnode *tvp, const char *tname,
+                      struct ucred *cred);
+    int (*vop_mkdir)(struct vnode *dvp, struct vnode **vpp, const char *name,
+                     mode_t mode, struct ucred *cred);
+    int (*vop_rmdir)(struct vnode *dvp, struct vnode *vp, const char *name, struct ucred *cred);
+    int (*vop_readdir)(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag);
+    int (*vop_readlink)(struct vnode *vp, struct uio *uio, struct ucred *cred);
+    int (*vop_symlink)(struct vnode *dvp, struct vnode **vpp, const char *linkname,
+                       const char *target, struct ucred *cred);
     int (*vop_inactive)(struct vnode *vp, struct ucred *cred);
     int (*vop_reclaim)(struct vnode *vp, struct ucred *cred);
-    int (*vop_strategy)(struct vnode *vp, void *bp);
-    int (*vop_bmap)(struct vnode *vp, off_t offset, struct vnode **vpp,
-                    off_t *bnp, int *runp, int *runb);
+    int (*vop_strategy)(struct vnode *vp, void *bp); /* Using void* for buf for now */
+    int (*vop_bmap)(struct vnode *vp, off_t offset, struct vnode **vpp, uint64_t *bnp,
+                    int *runp, int *runb);
     int (*vop_print)(struct vnode *vp);
 };
+
+/*
+ * VOP macros for calling vnode operations
+ */
+#define VOP_LOOKUP(dvp, vpp, cnp) \
+    ((dvp)->v_op->vop_lookup(dvp, vpp, (cnp)->cn_nameptr, (cnp)->cn_cred))
+#define VOP_CREATE(dvp, vpp, cnp, vap) \
+    ((dvp)->v_op->vop_create(dvp, vpp, (cnp)->cn_nameptr, (vap)->va_mode, (cnp)->cn_cred))
+#define VOP_OPEN(vp, mode, cred) \
+    ((vp)->v_op->vop_open(vp, mode, cred))
+#define VOP_CLOSE(vp, fflag, cred) \
+    ((vp)->v_op->vop_close(vp, fflag, cred))
+#define VOP_READ(vp, uio, ioflag, cred) \
+    ((vp)->v_op->vop_read(vp, uio, ioflag, cred))
+#define VOP_WRITE(vp, uio, ioflag, cred) \
+    ((vp)->v_op->vop_write(vp, uio, ioflag, cred))
+#define VOP_IOCTL(vp, command, data, fflag, cred) \
+    ((vp)->v_op->vop_ioctl(vp, command, data, fflag, cred))
+#define VOP_GETATTR(vp, vap, cred) \
+    ((vp)->v_op->vop_getattr(vp, vap, cred))
+#define VOP_SETATTR(vp, vap, cred) \
+    ((vp)->v_op->vop_setattr(vp, vap, cred))
+#define VOP_ACCESS(vp, mode, cred) \
+    ((vp)->v_op->vop_access(vp, mode, cred))
+#define VOP_READLINK(vp, uio, cred) \
+    ((vp)->v_op->vop_readlink(vp, uio, cred))
+#define VOP_SYMLINK(dvp, vpp, cnp, vap, target) \
+    ((dvp)->v_op->vop_symlink(dvp, vpp, (cnp)->cn_nameptr, target, (cnp)->cn_cred))
+#define VOP_LINK(tdvp, vp, cnp) \
+    ((tdvp)->v_op->vop_link(tdvp, vp, (cnp)->cn_nameptr, (cnp)->cn_cred))
+#define VOP_REMOVE(dvp, vp, cnp) \
+    ((dvp)->v_op->vop_remove(dvp, vp, (cnp)->cn_nameptr, (cnp)->cn_cred))
+#define VOP_RENAME(fdvp, fvp, fcnp, tdvp, tvp, tcnp) \
+    ((fdvp)->v_op->vop_rename(fdvp, fvp, (fcnp)->cn_nameptr, tdvp, tvp, (tcnp)->cn_nameptr, (fcnp)->cn_cred))
+#define VOP_MKDIR(dvp, vpp, cnp, vap) \
+    ((dvp)->v_op->vop_mkdir(dvp, vpp, (cnp)->cn_nameptr, (vap)->va_mode, (cnp)->cn_cred))
+#define VOP_RMDIR(dvp, vp, cnp) \
+    ((dvp)->v_op->vop_rmdir(dvp, vp, (cnp)->cn_nameptr, (cnp)->cn_cred))
+#define VOP_READDIR(vp, uio, cred, eofflag) \
+    ((vp)->v_op->vop_readdir(vp, uio, cred, eofflag))
+#define VOP_FSYNC(vp, waitfor, cred) \
+    ((vp)->v_op->vop_fsync(vp, waitfor, cred))
+#define VOP_INACTIVE(vp, cred) \
+    ((vp)->v_op->vop_inactive(vp, cred))
+#define VOP_RECLAIM(vp, cred) \
+    ((vp)->v_op->vop_reclaim(vp, cred))
+#define VOP_STRATEGY(vp, bp) \
+    ((vp)->v_op->vop_strategy(vp, bp))
+#define VOP_BMAP(vp, offset, vpp, bnp, runp, runb) \
+    ((vp)->v_op->vop_bmap(vp, offset, vpp, bnp, runp, runb))
+#define VOP_PRINT(vp) \
+    ((vp)->v_op->vop_print(vp))
+
+/*
+ * VFS macros for calling filesystem operations
+ */
+#define VFS_MOUNT(mp, path, data, cred) \
+    ((mp)->mnt_op->vfs_mount(mp, path, data, cred))
+#define VFS_START(mp, flags) \
+    ((mp)->mnt_op->vfs_start(mp, flags))
+#define VFS_UNMOUNT(mp, mntflags) \
+    ((mp)->mnt_op->vfs_unmount(mp, mntflags))
+#define VFS_ROOT(mp, vpp) \
+    ((mp)->mnt_op->vfs_root(mp, vpp))
+#define VFS_QUOTACTL(mp, cmds, uid, arg) \
+    ((mp)->mnt_op->vfs_quotactl(mp, cmds, uid, arg))
+#define VFS_STATFS(mp, sbp) \
+    ((mp)->mnt_op->vfs_statfs(mp, sbp))
+#define VFS_SYNC(mp, waitfor, cred) \
+    ((mp)->mnt_op->vfs_sync(mp, waitfor, cred))
+#define VFS_VGET(mp, ino, flags, vpp) \
+    ((mp)->mnt_op->vfs_vget(mp, ino, flags, vpp))
+#define VFS_FHTOVP(mp, fhp, vpp) \
+    ((mp)->mnt_op->vfs_fhtovp(mp, fhp, vpp))
+#define VFS_VPTOFH(vp, fhp) \
+    ((mp)->mnt_op->vfs_vptofh(vp, fhp))
+#define VFS_INIT(vfsconf) \
+    ((vfsconf)->vfc_vfsops->vfs_init(vfsconf))
 
 /*
  * Vnode attributes (for getattr/setattr)
@@ -208,26 +281,10 @@ struct vattr {
 #define VA_EXCLUSIVE    0x02    /* O_EXCL create */
 
 /*
- * Mount structure (partial, for reference)
+ * Mount related definitions
  */
-struct mount {
-    struct vnode        *mnt_vnodecovered;  /* Vnode we mounted on */
-    struct vnode        *mnt_root;          /* Root vnode of this fs */
-    uint32_t            mnt_flag;           /* Mount flags */
-    const char          *mnt_type;          /* Filesystem type name */
-    void                *mnt_data;          /* Private filesystem data */
-    struct mount        *mnt_next;          /* Next in global mount list */
-};
-
-/* Mount flags */
-#define MNT_RDONLY      0x0001  /* Read only filesystem */
-#define MNT_NOSUID      0x0002  /* Setuid/setgid forbidden */
-#define MNT_NODEV       0x0004  /* Device nodes forbidden */
-#define MNT_NOEXEC      0x0008  /* Execution forbidden */
-#define MNT_SYNCHRONOUS 0x0010  /* Synchronous writes */
-#define MNT_ASYNC       0x0020  /* Asynchronous writes */
-#define MNT_LOCAL       0x1000  /* Local filesystem */
-#define MNT_QUOTA       0x2000  /* Quotas enabled */
+/* Forward declarations */
+struct mount;
 
 /*
  * Vnode lifecycle functions

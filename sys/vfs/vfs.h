@@ -115,7 +115,7 @@ int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode)
 
 void vfs_register_filesystem(filesystem_t *fs);
 filesystem_t *vfs_get_filesystems(void);
-int vfs_mount(const char *device, const char *path, const char *type, uint32_t flags, void *data);
+int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
 void vfs_init(void);

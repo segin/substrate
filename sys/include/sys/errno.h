@@ -42,5 +42,6 @@
 #define ENOTRECOVERABLE 131 /* State not recoverable */
 #define ETIMEDOUT   110 /* Connection timed out */
 #define ENAMETOOLONG 63 /* File name too long */
+#define ELOOP        62 /* Too many symbolic links encountered */
 
 #endif

@@ -48,9 +48,9 @@ static bool file_system_initialized = false;
 
 static void file_init_list(void) {
     for (int i = 0; i < MAX_SYSTEM_FILES - 1; i++) {
-        system_files[i].next_free = &system_files[i + 1];
+        system_files[i].f_next = &system_files[i + 1];
     }
-    system_files[MAX_SYSTEM_FILES - 1].next_free = NULL;
+    system_files[MAX_SYSTEM_FILES - 1].f_next = NULL;
     file_free_list = &system_files[0];
     file_system_initialized = true;
 }
@@ -66,9 +66,9 @@ file_t *file_alloc(void) {
 
     if (file_free_list) {
         file_t *f = file_free_list;
-        file_free_list = f->next_free;
-        f->next_free = NULL;
-        f->ref_count = 1;
+        file_free_list = f->f_next;
+        f->f_next = NULL;
+        f->f_count = 1;
         return f;
     }
     return NULL;
@@ -83,11 +83,11 @@ void file_free(file_t *f) {
     }
 
     // Prevent double-free
-    if (f->ref_count == 0) return;
-
-    f->ref_count = 0;
-    f->node = NULL;
-    f->next_free = file_free_list;
+    if (f->f_count == 0) return;
+    
+    f->f_count = 0;
+    f->f_data = NULL;
+    f->f_next = file_free_list;
     file_free_list = f;
 }
 
@@ -97,8 +97,8 @@ int sys_write(int fd, const char *buf, int len) {
     if (!f) return -1;
     
     // Check for console node if write_fs isn't fully generic yet
-    if (f->node && f->node->write) {
-        return write_fs(f->node, f->offset, len, (uint8_t*)buf);
+    if (f->f_data && ((fs_node_t*)f->f_data)->write) {
+        return write_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
     }
     
     return 0;
@@ -109,8 +109,8 @@ int sys_read(int fd, char *buf, int len) {
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
     
-    uint32_t bytes = read_fs(f->node, f->offset, len, (uint8_t*)buf);
-    f->offset += bytes;
+    uint32_t bytes = read_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
+    f->f_offset += bytes;
     return bytes;
 }
 
@@ -161,10 +161,10 @@ int sys_open(const char *path, int flags, int mode) {
     file_t *f = file_alloc();
     if (!f) return -1;
 
-    f->node = node;
-    f->offset = 0;
-    f->flags = flags;
-    f->ref_count = 1;
+    f->f_data = node;
+    f->f_offset = 0;
+    f->f_flag = (short)flags;
+    f->f_count = 1;
 
     current_process->fds[fd] = f;
     open_fs(node, 1, 0); // Open read/write?
@@ -175,9 +175,9 @@ int sys_open(const char *path, int flags, int mode) {
 // Helper for internal use (and userspace via sys_close)
 void file_close_ptr(file_t *f) {
     if (!f) return;
-    f->ref_count--;
-    if (f->ref_count <= 0) {
-        close_fs(f->node);
+    f->f_count--;
+    if (f->f_count <= 0) {
+        close_fs((fs_node_t*)f->f_data);
         file_free(f);
     }
 }
@@ -204,11 +204,11 @@ int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int w) {
     
     off_t off = ((off_t)off_hi << 32) | off_lo;
     
-    if (w == 0) f->offset = off; // SEEK_SET
-    else if (w == 1) f->offset += off; // SEEK_CUR
-    else if (w == 2) f->offset = f->node->length + off; // SEEK_END
+    if (w == 0) f->f_offset = off; // SEEK_SET
+    else if (w == 1) f->f_offset += off; // SEEK_CUR
+    else if (w == 2) f->f_offset = ((fs_node_t*)f->f_data)->length + off; // SEEK_END
     
-    return f->offset;
+    return f->f_offset;
 }
 
 
@@ -231,7 +231,7 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
     
     while (bpos < count) {
         // Read one entry
-        struct dirent *d = readdir_fs(f->node, f->offset);
+        struct dirent *d = readdir_fs((fs_node_t*)f->f_data, f->f_offset);
         if (!d) {
             // EOF
             if (bpos == 0) return 0; // EOF on first try
@@ -253,7 +253,7 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
         
         struct linux_dirent *ld = (struct linux_dirent*)(buf + bpos);
         ld->d_ino = d->ino;
-        ld->d_off = f->offset + 1; // Offset of NEXT entry
+        ld->d_off = f->f_offset + 1; // Offset of NEXT entry
         ld->d_reclen = reclen;
         for(int i=0; i<name_len; i++) ld->d_name[i] = d->name[i];
         ld->d_name[name_len] = 0;
@@ -261,7 +261,7 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
         // (already done by simple pointer math for next entry, but maybe nice to clear garbage)
         
         bpos += reclen;
-        f->offset++;
+        f->f_offset++;
     }
     
     return bpos;
@@ -519,8 +519,8 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
             file_t *f = (fds[i].fd < MAX_FD) ? current_process->fds[fds[i].fd] : NULL;
             short mask = 0;
             
-            if (f && f->node) {
-                mask = poll_fs(f->node, waiter);
+            if (f && f->f_data) {
+                mask = poll_fs((fs_node_t*)f->f_data, waiter);
                 
                 // Mask against requested events
                 // Always return ERR/HUP/NVAL
@@ -565,8 +565,8 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
 int sys_fstat(int fd, struct stat *buf) {
     if (fd < 0 || fd >= MAX_FD || !buf) return -1;
     file_t *f = current_process->fds[fd];
-    if (!f || !f->node) return -1;
-    fill_stat(buf, f->node);
+    if (!f || !f->f_data) return -1;
+    fill_stat(buf, (fs_node_t*)f->f_data);
     return 0;
 }
 
@@ -574,10 +574,10 @@ int sys_fstat(int fd, struct stat *buf) {
 int sys_ioctl(int fd, uint32_t request, void *arg) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
-    if (!f || !f->node) return -1;
+    if (!f || !f->f_data) return -1;
     
-    if (f->node->ioctl) {
-        return f->node->ioctl(f->node, request, arg);
+    if (((fs_node_t*)f->f_data)->ioctl) {
+        return ((fs_node_t*)f->f_data)->ioctl((fs_node_t*)f->f_data, request, arg);
     }
     
     // Default: not supported
@@ -769,13 +769,13 @@ int sys_pipe(int *fds) {
     current_process->next_fd = f2 + 1;
 
     file_t *rf = file_alloc();
-    rf->node = read_node;
-    rf->flags = 0; // O_RDONLY
+    rf->f_data = read_node;
+    rf->f_flag = 0; // O_RDONLY
     current_process->fds[f1] = rf;
 
     file_t *wf = file_alloc();
-    wf->node = write_node;
-    wf->flags = 0; // O_WRONLY
+    wf->f_data = write_node;
+    wf->f_flag = 0; // O_WRONLY
     current_process->fds[f2] = wf;
 
     fds[0] = f1;
@@ -814,7 +814,7 @@ int sys_dup(int oldfd) {
     current_process->next_fd = newfd + 1;
 
     current_process->fds[newfd] = f;
-    f->ref_count++;
+    f->f_count++;
     return newfd;
 }
 
@@ -827,11 +827,11 @@ int sys_dup2(int oldfd, int newfd) {
     if (!f) return -1;
 
     if (current_process->fds[newfd]) {
-        sys_close(newfd);
+        file_close_ptr(current_process->fds[newfd]);
     }
 
     current_process->fds[newfd] = f;
-    f->ref_count++;
+    f->f_count++;
     return newfd;
 }
 
@@ -954,10 +954,10 @@ int sys_chdir(const char *path) {
 int sys_fchdir(int fd) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
-    if (!f || !f->node) return -1;
-    if ((f->node->flags & 0x7) != FS_DIRECTORY) return -1;
+    if (!f || !f->f_data) return -1;
+    if ((((fs_node_t*)f->f_data)->flags & 0x7) != FS_DIRECTORY) return -1;
     
-    current_process->cwd_node = f->node;
+    current_process->cwd_node = (fs_node_t*)f->f_data;
     return 0;
 }
 
