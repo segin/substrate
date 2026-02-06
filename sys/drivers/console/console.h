@@ -41,7 +41,7 @@ void kprint(const char *str);
 int kprintf(const char *fmt, ...);
 char *kasprintf(const char *fmt, ...);
 #ifndef HOST_TEST
-char *vasprintf(const char *fmt, __builtin_va_list ap);
+char *kvasprintf(const char *fmt, __builtin_va_list ap);
 #endif
 
 struct process;

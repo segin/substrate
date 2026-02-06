@@ -1,0 +1,31 @@
+.TH STRLEN 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strlen \- calculate the length of a string
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "size_t strlen(const char *" s ");"
+.SH DESCRIPTION
+The
+.BR strlen ()
+function calculates the length of the string pointed to by
+.IR s ,
+excluding the terminating null byte ('\\0').
+.SH RETURN VALUE
+The
+.BR strlen ()
+function returns the number of characters in the string pointed to by
+.IR s .
+.SH EXAMPLES
+.EX
+#include <string.h>
+#include <stdio.h>
+
+int main() {
+    printf("%zu\\n", strlen("Hello")); // Prints 5
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR strcmp (3),
+.BR strchr (3)

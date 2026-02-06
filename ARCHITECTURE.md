@@ -91,7 +91,14 @@ These components are essential for booting and basic system operation.
 - **`lib/`**:
     - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.
     - **`sys/`**: System call wrapper library (libsys). Provides raw `syscall()` function and typed wrappers for kernel syscalls. See `libsys(7)`.
-    - **`m/`**: Math library.
+    - **`m/`**: Math library (libm). C99 compliant IEEE 754 floating-point support:
+        - **Classification:** `fpclassify()`, `isfinite()`, `isinf()`, `isnan()`, `isnormal()`, `signbit()`.
+        - **Basic Arithmetic:** `fabs()`, `fmod()`, `remainder()`, `fmax()`, `fmin()`.
+        - **Rounding:** `ceil()`, `floor()`, `trunc()`, `round()`.
+        - **Trigonometric:** `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2()` (stubs).
+        - **Exponential:** `exp()`, `log()`, `log10()`, `pow()`, `sqrt()` (stubs).
+        - **Type Variants:** Float (`f` suffix) and long double (`l` suffix) versions.
+        - **Error Handling:** `math_errhandling` set to `MATH_ERRNO`.
     - **`dl/`**: Dynamic linker.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
     - **`dbm/`**: Database Manager library.

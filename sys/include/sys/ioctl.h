@@ -21,4 +21,6 @@ struct winsize {
 #define TIOCSPGRP 0x5410
 #define TCGETS    0x5401
 
+int ioctl(int fd, unsigned long request, ...);
+
 #endif

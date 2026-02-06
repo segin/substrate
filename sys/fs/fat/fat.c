@@ -77,13 +77,16 @@ static void fat_parse_short_name(const char *fat_name, char *output) {
 }
 
 // Parse long filename entry
-int fat_parse_lfn(fat_lfn_t *lfn, char *buffer) {
+int fat_parse_lfn(fat_lfn_t *lfn, char *buffer, int max_len) {
     int idx = ((lfn->order & 0x3F) - 1) * 13;  // Each LFN holds 13 chars
+
+    if (idx < 0 || idx >= max_len) return -1;
     
     // Extract name1 (5 chars)
     for (int i = 0; i < 5; i++) {
         uint16_t c = lfn->name1[i];
         if (c == 0 || c == 0xFFFF) return idx;
+        if (idx >= max_len) return -1;
         buffer[idx++] = (c < 256) ? (char)c : '?';  // Simple UTF-16 to ASCII
     }
     
@@ -91,6 +94,7 @@ int fat_parse_lfn(fat_lfn_t *lfn, char *buffer) {
     for (int i = 0; i < 6; i++) {
         uint16_t c = lfn->name2[i];
         if (c == 0 || c == 0xFFFF) return idx;
+        if (idx >= max_len) return -1;
         buffer[idx++] = (c < 256) ? (char)c : '?';
     }
     
@@ -98,6 +102,7 @@ int fat_parse_lfn(fat_lfn_t *lfn, char *buffer) {
     for (int i = 0; i < 2; i++) {
         uint16_t c = lfn->name3[i];
         if (c == 0 || c == 0xFFFF) return idx;
+        if (idx >= max_len) return -1;
         buffer[idx++] = (c < 256) ? (char)c : '?';
     }
     
@@ -177,7 +182,7 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
             // Check for LFN entry
             if (entry->attr == FAT_ATTR_LFN) {
                 fat_lfn_t *lfn = (fat_lfn_t *)entry;
-                lfn_len = fat_parse_lfn(lfn, lfn_buffer);
+                lfn_len = fat_parse_lfn(lfn, lfn_buffer, sizeof(lfn_buffer) - 1);
                 continue;
             }
             
@@ -267,7 +272,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
             // Check for LFN entry
             if (entry->attr == FAT_ATTR_LFN) {
                 fat_lfn_t *lfn = (fat_lfn_t *)entry;
-                lfn_len = fat_parse_lfn(lfn, lfn_buffer);
+                lfn_len = fat_parse_lfn(lfn, lfn_buffer, sizeof(lfn_buffer) - 1);
                 continue;
             }
             

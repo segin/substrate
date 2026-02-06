@@ -1,0 +1,25 @@
+.TH STRDUP 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strdup \- duplicate a string
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *strdup(const char *" s ");"
+.SH DESCRIPTION
+The
+.BR strdup ()
+function returns a pointer to a new string which is a duplicate of the string
+.IR s .
+Memory for the new string is obtained with
+.BR malloc (3),
+and can be freed with
+.BR free (3).
+.SH RETURN VALUE
+On success, the
+.BR strdup ()
+function returns a pointer to the duplicated string. It returns NULL if
+insufficient memory was available.
+.SH SEE ALSO
+.BR malloc (3),
+.BR free (3),
+.BR strcpy (3)

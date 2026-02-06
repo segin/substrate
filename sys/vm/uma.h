@@ -133,6 +133,7 @@ struct uma_zone {
     uint64_t            uz_allocs;      /* Total allocations */
     uint64_t            uz_frees;       /* Total frees */
     uint32_t            uz_count;       /* Current allocated count */
+    uint32_t            uz_limit;       /* Maximum allowed allocations (0=unlimited) */
     uint32_t            uz_max;         /* Maximum ever allocated */
     uint32_t            uz_sleeps;      /* Times slept on alloc */
     

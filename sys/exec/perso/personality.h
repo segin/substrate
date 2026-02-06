@@ -17,14 +17,16 @@ struct syscall_fmt {
 
 enum personality_type {
     PERS_NATIVE  = 0,
-    PERS_LINUX   = 1,
-    PERS_FREEBSD = 2,
-    PERS_NETBSD  = 3,
-    PERS_OPENBSD = 4,
+    PERS_LINUX   = 3,
+    PERS_SVR4    = 4,
     PERS_SVR3    = 5,
-    PERS_SVR4    = 6,
-    PERS_SUNOS   = 7,
-    PERS_MAX
+    PERS_SOLARIS = 6,
+    PERS_FREEBSD = 9,
+    PERS_NETBSD  = 2,
+    PERS_OPENBSD = 12,
+    /* Values >= 128 reserved for non-ELF personalities */
+    PERS_SUNOS   = 129,
+    PERS_MAX     = 256
 };
 
 struct personality {
@@ -48,7 +50,7 @@ extern struct personality personality_svr3;
 extern struct personality personality_svr4;
 extern struct personality personality_netbsd;
 extern struct personality personality_openbsd;
-extern struct personality personality_sunos;
+extern struct personality personality_solaris;
 
 struct personality *perso_lookup(int id);
 const char *perso_name(int id);

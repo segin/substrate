@@ -295,10 +295,10 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 }
             }
 
-            // If left_align is set (either by '-' or negative width), pad_zero must be disabled
+            // Standard: the '0' flag is ignored if the '-' flag is present.
             if (left_align) pad_zero = 0;
-            
-            // Parse precision
+
+            // Parse length modifier
             int precision = -1;
             if (*f == '.') {
                 f++;
@@ -378,30 +378,54 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                     } else {
                         val = va_arg(ap, int);
                     }
-                    char tmp[64];
-                    itoa(tmp, val, force_sign, space_prefix);
-                    int tmp_len = strlen(tmp);
+
+                    // Standard: for integer conversions, '0' flag is ignored if precision is specified.
+                    if (precision != -1) pad_zero = 0;
+
+                    char digits[64];
+                    int is_negative = (val < 0);
+                    uint64_t uval = (is_negative) ? (uint64_t)-val : (uint64_t)val;
                     
-                    if (width > tmp_len) {
-                        if (pad_zero) {
-                            int has_sign = (tmp[0] == '+' || tmp[0] == '-' || tmp[0] == ' ');
-                            if (has_sign) {
-                                EMIT(tmp[0]);
-                                for (int i = 0; i < width - tmp_len; i++) EMIT('0');
-                                for (int i = 1; i < tmp_len; i++) EMIT(tmp[i]);
-                            } else {
-                                for (int i = 0; i < width - tmp_len; i++) EMIT('0');
-                                for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                            }
-                        } else if (left_align) {
-                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                        } else {
-                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                        }
+                    if (uval == 0 && precision == 0) {
+                        digits[0] = '\0';
                     } else {
-                        for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                        // Minimal itoa-like for digits only
+                        char b[64];
+                        int i = 0;
+                        if (uval == 0) b[i++] = '0';
+                        else {
+                            while (uval > 0) { b[i++] = (uval % 10) + '0'; uval /= 10; }
+                        }
+                        for (int j = 0; j < i; j++) digits[j] = b[i - j - 1];
+                        digits[i] = '\0';
+                    }
+
+                    int digits_len = strlen(digits);
+                    int precision_fill = (precision > digits_len) ? (precision - digits_len) : 0;
+                    
+                    const char *prefix = "";
+                    if (is_negative) prefix = "-";
+                    else if (force_sign) prefix = "+";
+                    else if (space_prefix) prefix = " ";
+                    int prefix_len = strlen(prefix);
+
+                    int total_len = prefix_len + precision_fill + digits_len;
+                    
+                    if (!left_align && pad_zero) {
+                        for (int i = 0; prefix[i]; i++) EMIT(prefix[i]);
+                        for (int i = 0; i < width - total_len; i++) EMIT('0');
+                        for (int i = 0; i < precision_fill; i++) EMIT('0');
+                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
+                    } else if (!left_align) {
+                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
+                        for (int i = 0; prefix[i]; i++) EMIT(prefix[i]);
+                        for (int i = 0; i < precision_fill; i++) EMIT('0');
+                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
+                    } else {
+                        for (int i = 0; prefix[i]; i++) EMIT(prefix[i]);
+                        for (int i = 0; i < precision_fill; i++) EMIT('0');
+                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
+                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
                     }
                     break;
                 }
@@ -422,23 +446,41 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                     } else {
                         val = va_arg(ap, unsigned int);
                     }
-                    char tmp[64];
-                    itoa(tmp, (int64_t)val, 0, 0); // itoa with 0 force_sign works for unsigned
-                    int tmp_len = strlen(tmp);
 
-                    if (width > tmp_len) {
-                        if (pad_zero) {
-                             for (int i = 0; i < width - tmp_len; i++) EMIT('0');
-                             for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                        } else if (left_align) {
-                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                        } else {
-                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                        }
+                    // Standard: for integer conversions, '0' flag is ignored if precision is specified.
+                    if (precision != -1) pad_zero = 0;
+
+                    char digits[64];
+                    if (val == 0 && precision == 0) {
+                        digits[0] = '\0';
                     } else {
-                        for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
+                        char b[64];
+                        int i = 0;
+                        uint64_t uval = val;
+                        if (uval == 0) b[i++] = '0';
+                        else {
+                            while (uval > 0) { b[i++] = (uval % 10) + '0'; uval /= 10; }
+                        }
+                        for (int j = 0; j < i; j++) digits[j] = b[i - j - 1];
+                        digits[i] = '\0';
+                    }
+
+                    int digits_len = strlen(digits);
+                    int precision_fill = (precision > digits_len) ? (precision - digits_len) : 0;
+                    int total_len = precision_fill + digits_len;
+
+                    if (!left_align && pad_zero) {
+                         for (int i = 0; i < width - total_len; i++) EMIT('0');
+                         for (int i = 0; i < precision_fill; i++) EMIT('0');
+                         for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
+                    } else if (left_align) {
+                        for (int i = 0; i < precision_fill; i++) EMIT('0');
+                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
+                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
+                    } else {
+                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
+                        for (int i = 0; i < precision_fill; i++) EMIT('0');
+                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
                     }
                     break;
                 }
@@ -746,7 +788,7 @@ int vsprintf(char *str, const char *format, va_list ap) {
     return vsnprintf(str, SIZE_MAX, format, ap);
 }
 
-char *vasprintf(const char *fmt, va_list ap) {
+char *kvasprintf(const char *fmt, va_list ap) {
     va_list ap2;
     va_copy(ap2, ap);
 
@@ -766,7 +808,7 @@ char *vasprintf(const char *fmt, va_list ap) {
 char *kasprintf(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    char *str = vasprintf(fmt, ap);
+    char *str = kvasprintf(fmt, ap);
     va_end(ap);
     return str;
 }

@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <stdint.h>
 
 void exit(int status) {
     _exit(status);
@@ -164,11 +167,86 @@ void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int 
     return NULL;
 }
 
-static unsigned int next = 1;
-int rand(void) {
-    next = next * 1103515245 + 12345;
-    return (unsigned int)(next/65536) % 32768;
+/* xoroshiro128++ implementation */
+static uint64_t s[2] = { 0x1234567890ABCDEF, 0xFEDCBA0987654321 };
+
+static inline uint64_t rotl(const uint64_t x, int k) {
+	return (x << k) | (x >> (64 - k));
 }
+
+static uint64_t next_rand(void) {
+	const uint64_t s0 = s[0];
+	uint64_t s1 = s[1];
+	const uint64_t result = rotl(s0 + s1, 17) + s0;
+
+	s1 ^= s0;
+	s[0] = rotl(s0, 49) ^ s1 ^ (s1 << 21); // a, b
+	s[1] = rotl(s1, 28);
+
+	return result;
+}
+
+int rand(void) {
+    return (int)(next_rand() & 0x7FFFFFFF);
+}
+
 void srand(unsigned int seed) {
-    next = seed;
+    // SplitMix64 based seeding
+    uint64_t z = (uint64_t)seed;
+
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    s[0] = z ^ (z >> 31);
+
+    // Changing seed for second part
+    z = (uint64_t)seed + 0x9e3779b97f4a7c15ULL;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    s[1] = z ^ (z >> 31);
+
+    // Ensure non-zero state
+    if (s[0] == 0 && s[1] == 0) s[0] = 1;
+}
+
+void arc4random_buf(void *buf, size_t n) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0) {
+        abort();
+    }
+    char *p = (char *)buf;
+    size_t left = n;
+    while (left > 0) {
+        ssize_t r = read(fd, p, left);
+        if (r <= 0) {
+             close(fd);
+             abort();
+        }
+        p += r;
+        left -= r;
+    }
+    close(fd);
+}
+
+uint32_t arc4random(void) {
+    uint32_t v;
+    arc4random_buf(&v, sizeof(v));
+    return v;
+}
+
+uint32_t arc4random_uniform(uint32_t upper_bound) {
+    uint32_t r, min;
+
+    if (upper_bound < 2)
+        return 0;
+
+    /* 2**32 % x == (2**32 - x) % x */
+    min = -upper_bound % upper_bound;
+
+    for (;;) {
+        r = arc4random();
+        if (r >= min)
+            break;
+    }
+
+    return r % upper_bound;
 }

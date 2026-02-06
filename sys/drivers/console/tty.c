@@ -7,8 +7,14 @@
 #include <vm/vm_kmem.h>
 #include <kern/sched.h>
 #include <sys/poll.h>
+#include <intr.h>
 
 #define TTY_MAGIC 0x5401
+
+// Locking helper macros
+// Note: We use local variable _flags to save interrupt state.
+#define TTY_LOCK(tty)   uint32_t _flags = intr_disable(); spinlock_acquire(&(tty)->lock)
+#define TTY_UNLOCK(tty) spinlock_release(&(tty)->lock); intr_restore(_flags)
 
 static struct tty *ttys[64]; // Simple array for now
 
@@ -50,6 +56,8 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
     tty->driver = driver;
     tty->index = idx;
     
+    spinlock_init(&tty->lock, "tty_lock");
+
     tty_default_termios(&tty->termios);
     
     tty->winsize.ws_row = 25;
@@ -87,8 +95,8 @@ static int tty_buf_get(tty_buffer_t *tb, char *c) {
 }
 
 // Forward declarations
-void ttyoutput(char c, struct tty *tp);
-void ttstart(struct tty *tp);
+static void tty_output_locked(char c, struct tty *tp);
+static void tty_start_locked(struct tty *tp);
 
 static void tty_send_xchar(struct tty *tp, char c) {
     if (tp->driver->put_char) {
@@ -99,24 +107,20 @@ static void tty_send_xchar(struct tty *tp, char c) {
 }
 
 // Unix v6-style output processing
-void ttyoutput(char c, struct tty *tp) {
+static void tty_output_locked(char c, struct tty *tp) {
     // Ignore EOT in normal mode
     if (c == 004 && (tp->termios.c_lflag & ICANON)) return;
     
     // Turn tabs to spaces
     if (c == '\t' && (tp->termios.c_oflag & OXTABS)) { // using OXTABS instead of XTABS
         do {
-            ttyoutput(' ', tp);
-        } while (tp->winsize.ws_col && (tp->winsize.ws_col % 8)); // Very approx column tracking needed?
-        // Note: keeping state of col requires explicit col tracking in struct tty.
-        // For now, simpler implementation or assume hardware handles it if we don't.
-        // But requested to match v6. v6 tracks t_col.
-        // We lack t_col in struct tty (winsize is for size, not cursor).
+            tty_output_locked(' ', tp);
+        } while (tp->winsize.ws_col && (tp->winsize.ws_col % 8));
         return;
     }
     
     if (c == '\n' && (tp->termios.c_oflag & ONLCR)) {
-        ttyoutput('\r', tp);
+        tty_output_locked('\r', tp);
     }
     
     // Put to write buffer
@@ -128,7 +132,7 @@ void ttyoutput(char c, struct tty *tp) {
     }
 }
 
-void ttstart(struct tty *tp) {
+static void tty_start_locked(struct tty *tp) {
     if (tp->stopped) return;
     char c;
     while (tty_buf_get(&tp->write_buf, &c)) {
@@ -141,7 +145,7 @@ void ttstart(struct tty *tp) {
 }
 
 // Unix v6-style canonical processing
-static void canon(struct tty *tp) {
+static void canon(struct tty *tp, uint32_t *flags_ptr) {
     char buf[256]; // Line buffer
     char *bp = buf;
     char c;
@@ -151,7 +155,16 @@ static void canon(struct tty *tp) {
         // sleep
         current_thread->wait_chan = &tp->read_wait;
         current_thread->state = THREAD_BLOCKED;
+
+        // Unlock and restore interrupts to sleep
+        spinlock_release(&tp->lock);
+        intr_restore(*flags_ptr);
+
         sched_yield();
+
+        // Re-lock and disable interrupts
+        *flags_ptr = intr_disable();
+        spinlock_acquire(&tp->lock);
     }
     
     while (tty_buf_get(&tp->raw_buf, &c)) {
@@ -214,13 +227,17 @@ static void canon(struct tty *tp) {
 void tty_flip_buffer_push(struct tty *tty, char c) {
     if (!tty) return;
     
+    TTY_LOCK(tty);
+
     /* Input Processing */
     if (tty->termios.c_iflag & ISTRIP)
         c &= 0x7F;
         
     if (c == '\r') {
-        if (tty->termios.c_iflag & IGNCR)
+        if (tty->termios.c_iflag & IGNCR) {
+            TTY_UNLOCK(tty);
             return;
+        }
         if (tty->termios.c_iflag & ICRNL)
             c = '\n';
     } else if (c == '\n') {
@@ -237,11 +254,13 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     if (tty->termios.c_iflag & IXON) {
         if (c == tty->termios.c_cc[VSTOP]) {
             tty->stopped = 1;
+            TTY_UNLOCK(tty);
             return; /* Do not pass VSTOP to application */
         }
         if (c == tty->termios.c_cc[VSTART]) {
             tty->stopped = 0;
-            ttstart(tty); /* Kick output */
+            tty_start_locked(tty); /* Kick output */
+            TTY_UNLOCK(tty);
             return; /* Do not pass VSTART to application */
         }
     }
@@ -256,6 +275,7 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         if (sig) {
             if (tty->pgrp > 0) signal_send_group(tty->pgrp, sig);
             // v6: flushtty(tp)
+            TTY_UNLOCK(tty);
             return;
         }
     }
@@ -280,9 +300,11 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     
     // Echo
     if (tty->termios.c_lflag & ECHO) {
-    ttyoutput(c, tty); // Echoes through canonical output processing!
-        ttstart(tty);
+        tty_output_locked(c, tty); // Echoes through canonical output processing!
+        tty_start_locked(tty);
     }
+
+    TTY_UNLOCK(tty);
 }
 
 // Job Control Checks
@@ -323,6 +345,8 @@ static int tty_check_write(struct tty *tty) {
 int tty_read(struct tty *tty, char *buf, int len) {
     if (!tty || len <= 0) return 0;
     
+    TTY_LOCK(tty);
+
     if (tty_check_read(tty)) {
         // Should restart syscall or return EINTR
         // For now return 0 or -1?
@@ -330,6 +354,7 @@ int tty_read(struct tty *tty, char *buf, int len) {
         // Returning -1 and setting errno = EINTR is correct.
         // But we don't have errno access here easily.
         // Assume syscall wrapper handles signal interruption.
+        TTY_UNLOCK(tty);
         return -4; // EINTR 
     }
     
@@ -339,7 +364,7 @@ int tty_read(struct tty *tty, char *buf, int len) {
     
     while (count < len) {
         if (tty->read_buf.head == tty->read_buf.tail) {
-            canon(tty); // Blocks until line available
+            canon(tty, &_flags); // Blocks until line available. Releases/reacquires lock.
         }
         
         while (count < len) {
@@ -347,57 +372,78 @@ int tty_read(struct tty *tty, char *buf, int len) {
             if (tty_buf_get(&tty->read_buf, &c)) {
                 buf[count++] = c;
                 // In canonical mode, return on newline
-                if ((tty->termios.c_lflag & ICANON) && c == '\n') return count;
+                if ((tty->termios.c_lflag & ICANON) && c == '\n') {
+                    TTY_UNLOCK(tty);
+                    return count;
+                }
             } else {
                 break; // read_buf empty, need more canon
             }
         }
         
         if (tty->termios.c_lflag & ICANON) {
-             if (count > 0) return count; // Return processed line
+             if (count > 0) {
+                 TTY_UNLOCK(tty);
+                 return count; // Return processed line
+             }
         } else {
              // Raw mode: return whatever we got
-             if (count > 0) return count;
+             if (count > 0) {
+                 TTY_UNLOCK(tty);
+                 return count;
+             }
         }
     }
+    TTY_UNLOCK(tty);
     return count;
 }
 
 int tty_write(struct tty *tty, const char *buf, int len) {
     if (!tty) return 0;
     
+    TTY_LOCK(tty);
+
     if (tty_check_write(tty)) {
+        TTY_UNLOCK(tty);
         return -4; // EINTR
     }
     
     for (int i = 0; i < len; i++) {
-        ttyoutput(buf[i], tty);
+        tty_output_locked(buf[i], tty);
     }
-    ttstart(tty);
+    tty_start_locked(tty);
+    TTY_UNLOCK(tty);
     return len;
 }
 
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     if (!tty) return -1;
     
+    TTY_LOCK(tty);
+
     switch (cmd) {
         case TCGETS:
             if (arg) memcpy((void*)arg, &tty->termios, sizeof(struct termios));
+            TTY_UNLOCK(tty);
             return 0;
         case TCSETS:
         case TCSETSW:
         case TCSETSF:
             if (arg) memcpy(&tty->termios, (void*)arg, sizeof(struct termios));
             if (tty->driver->set_termios) tty->driver->set_termios(tty);
+            TTY_UNLOCK(tty);
             return 0;
         case TIOCGWINSZ:
             if (arg) memcpy((void*)arg, &tty->winsize, sizeof(struct winsize));
+            TTY_UNLOCK(tty);
             return 0;
         case TIOCSPGRP:
             if (arg) tty->pgrp = *(int*)arg;
+            TTY_UNLOCK(tty);
             return 0;
         case TIOCGPGRP:
             if (arg) *(int*)arg = tty->pgrp;
+            TTY_UNLOCK(tty);
             return 0;
         case TIOCSCTTY: {
             // Set controlling TTY
@@ -412,6 +458,7 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             if (!is_session_leader) {
                 // Must be session leader
                 // return EPERM;
+                TTY_UNLOCK(tty);
                 return -1;
             }
             // If already has ctty and arg!=1, fail?
@@ -423,8 +470,10 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
                 tty->pgrp = cur_pgrp;
                 // current_process->tty = fs_node... (Cannot set fs_node here directly without context)
                 // Assuming VFS layer calls this and updates process->tty if success.
+                TTY_UNLOCK(tty);
                 return 0;
             }
+            TTY_UNLOCK(tty);
             return -1;
         }
         
@@ -438,27 +487,41 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
                 tty->session = 0;
                 tty->pgrp = 0;
                 // current_process->tty = NULL;
+                TTY_UNLOCK(tty);
                 return 0;
             }
+            TTY_UNLOCK(tty);
             return -1;
         }
     }
+    TTY_UNLOCK(tty);
     return -1;
 }
 
 int tty_open(struct tty *tty) {
     if (!tty) return -1;
+    TTY_LOCK(tty);
     tty->count++;
-    if (tty->driver->open) return tty->driver->open(tty);
+    if (tty->driver->open) {
+        int ret = tty->driver->open(tty);
+        if (ret != 0) {
+            tty->count--;
+        }
+        TTY_UNLOCK(tty);
+        return ret;
+    }
+    TTY_UNLOCK(tty);
     return 0;
 }
 
 void tty_close(struct tty *tty) {
     if (!tty) return;
+    TTY_LOCK(tty);
     tty->count--;
     if (tty->count <= 0) {
         if (tty->driver->close) tty->driver->close(tty);
     }
+    TTY_UNLOCK(tty);
 }
 
 /*
@@ -475,6 +538,8 @@ void tty_close(struct tty *tty) {
 void tty_hangup(struct tty *tty) {
     if (!tty) return;
     
+    TTY_LOCK(tty);
+
     /* Send SIGHUP to foreground process group */
     if (tty->pgrp > 0) {
         signal_send_group(tty->pgrp, SIGHUP);
@@ -486,6 +551,8 @@ void tty_hangup(struct tty *tty) {
     /* Disassociate terminal from session */
     tty->session = 0;
     tty->pgrp = 0;
+
+    TTY_UNLOCK(tty);
 }
 
 int tty_poll(struct tty *tty, void *waiter) {
@@ -494,39 +561,19 @@ int tty_poll(struct tty *tty, void *waiter) {
     
     int events = 0;
     
+    TTY_LOCK(tty);
+
     // Check for input
-    // If ICANON, check read_buf (canonical lines).
-    // If !ICANON, check raw_buf (or whatever logic tty_read uses).
-    // Logic in tty_read:
-    // If read_buf.head != read_buf.tail, we have data.
-    // If !ICANON, scanning raw_buf might be needed? 
-    // Wait, canon() moves raw -> read.
-    // Actually, tty_read checks read_buf. If empty, calls canon().
-    // canon() waits for delimiter.
-    
-    // So POLLIN is true if:
-    // 1. read_buf is not empty.
-    // 2. OR (if !ICANON) raw_buf is not empty? 
-    //    tty_flip_buffer_push puts to raw_buf.
-    //    If !ICANON, canon() passes through immediately logic?
-    //    Let's check tty_read again. 
-    //    tty_read calls canon() if read_buf empty.
-    //    canon() waits for delimiter.
-    //    Use tty->delct? tty->delct > 0 means we have a line/delimiter.
-    
     if (tty->read_buf.head != tty->read_buf.tail) {
         events |= POLLIN | POLLRDNORM;
     } else if (tty->delct > 0) {
         // We have a delimiter in raw buf, so read will succeed (after canon runs).
-        // Since we can't run canon here (it might block?), we assume readable.
-        // Actually, if we are here, we should trigger canon? 
-        // No, poll shouldn't change state.
-        // But if delct > 0, it means we HAVE a line ready to be processed.
         events |= POLLIN | POLLRDNORM;
     }
     
     // Always writable for now
     events |= POLLOUT | POLLWRNORM;
     
+    TTY_UNLOCK(tty);
     return events;
 }

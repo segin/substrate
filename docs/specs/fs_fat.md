@@ -14,8 +14,8 @@ The FAT driver provides compatibility with standard MS-DOS and Windows formatted
 ### `uint32_t fat_get_next_cluster(uint32_t cluster)`
 Retrieves the next cluster index in a chain.
 
-### `int fat_parse_lfn(fat_lfn_t *lfn, char *buffer)`
-Decodes a Long File Name entry into the provided buffer.
+### `int fat_parse_lfn(fat_lfn_t *lfn, char *buffer, int max_len)`
+Decodes a Long File Name entry into the provided buffer, respecting the maximum length.
 
 ## Constraints
 - LFN support is currently stubbed.

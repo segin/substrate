@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 struct vnode;
+struct fs_node;
 struct nameidata;
 struct thread;
 struct ucred;
@@ -82,6 +83,8 @@ struct mount {
     uint32_t            mnt_flag;           /* flags */
     struct vnode_list   mnt_vnodelist;      /* list of active vnodes */
     struct statfs       mnt_stat;           /* cached filesystem statistics */
+    struct fs_node      *mnt_node_covered;  /* Legacy: Node we mounted on */
+    struct fs_node      *mnt_node_root;     /* Legacy: root node of this fs */
 };
 
 /*

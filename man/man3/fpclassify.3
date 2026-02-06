@@ -1,0 +1,78 @@
+.TH FPCLASSIFY 3 "2026-02-06" "Substrate" "Library Functions Manual"
+.SH NAME
+fpclassify, isfinite, isinf, isnan, isnormal, signbit \- floating-point classification macros
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <math.h>
+.PP
+.BI "int fpclassify(" x );
+.BI "int isfinite(" x );
+.BI "int isinf(" x );
+.BI "int isnan(" x );
+.BI "int isnormal(" x );
+.BI "int signbit(" x );
+.fi
+.SH DESCRIPTION
+These macros classify IEEE 754 floating-point numbers. They work with 
+.BR float ,
+.BR double ,
+and
+.B long double
+arguments.
+.PP
+.BR fpclassify ()
+returns one of the following constants:
+.RS
+.TP
+.B FP_NAN
+The argument is Not-a-Number.
+.TP
+.B FP_INFINITE
+The argument is positive or negative infinity.
+.TP
+.B FP_ZERO
+The argument is positive or negative zero.
+.TP
+.B FP_SUBNORMAL
+The argument is a subnormal (denormalized) number.
+.TP
+.B FP_NORMAL
+The argument is a normal floating-point number.
+.RE
+.PP
+.BR isfinite ()
+returns nonzero if
+.I x
+is finite (not infinity or NaN).
+.PP
+.BR isinf ()
+returns nonzero if
+.I x
+is positive or negative infinity.
+.PP
+.BR isnan ()
+returns nonzero if
+.I x
+is a NaN.
+.PP
+.BR isnormal ()
+returns nonzero if
+.I x
+is a normal number (not zero, subnormal, infinity, or NaN).
+.PP
+.BR signbit ()
+returns nonzero if the sign bit of
+.I x
+is set (negative).
+.SH RETURN VALUE
+.BR fpclassify ()
+returns one of the FP_* constants.
+All other macros return nonzero for true, zero for false.
+.SH STANDARDS
+C99, POSIX.1-2001.
+.SH SEE ALSO
+.BR fabs (3),
+.BR isnan (3),
+.BR math (7)

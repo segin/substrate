@@ -1,0 +1,21 @@
+.TH STRERROR 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strerror \- return string describing error number
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *strerror(int " errnum ");"
+.SH DESCRIPTION
+The
+.BR strerror ()
+function returns a pointer to a string that describes the error code passed in
+the argument
+.IR errnum .
+.SH RETURN VALUE
+The
+.BR strerror ()
+function returns the appropriate error description string, or a generic
+"Unknown error" message if the error number is unknown.
+.SH SEE ALSO
+.BR perror (3),
+.BR errno (3)

@@ -8,17 +8,19 @@ extern struct personality personality_netbsd;
 extern struct personality personality_openbsd;
 extern struct personality personality_svr3;
 extern struct personality personality_svr4;
+extern struct personality personality_solaris;
 extern struct personality personality_sunos;
 
 static struct personality *personalities[PERS_MAX] = {
-    [PERS_NATIVE] = &personality_native,
-    [PERS_LINUX] = &personality_linux,
+    [PERS_NATIVE]  = &personality_native,
+    [PERS_LINUX]   = &personality_linux,
+    [PERS_SVR4]    = &personality_svr4,
+    [PERS_SVR3]    = &personality_svr3,
+    [PERS_SOLARIS] = &personality_solaris,
     [PERS_FREEBSD] = &personality_freebsd,
-    [PERS_NETBSD] = &personality_netbsd,
+    [PERS_NETBSD]  = &personality_netbsd,
     [PERS_OPENBSD] = &personality_openbsd,
-    [PERS_SVR3] = &personality_svr3,
-    [PERS_SVR4] = &personality_svr4,
-    [PERS_SUNOS] = &personality_sunos,
+    [PERS_SUNOS]   = &personality_sunos,
 };
 
 struct personality *perso_lookup(int id) {
