@@ -191,15 +191,39 @@ typedef struct fd_save {
     struct fd_save *next;
 } fd_save_t;
 
-static fd_save_t *save_redirections(ast_redirection_t *redir) {
+static int save_redirections(ast_redirection_t *redir, fd_save_t **out_list) {
     fd_save_t *head = NULL;
     ast_redirection_t *r = redir;
     while (r) {
         fd_save_t *save = malloc(sizeof(fd_save_t));
+        if (!save) {
+            /* Allocation failed - clean up and return error */
+            while (head) {
+                if (head->saved_fd != -1) close(head->saved_fd);
+                fd_save_t *next = head->next;
+                free(head);
+                head = next;
+            }
+            *out_list = NULL;
+            return -1;
+        }
         save->orig_fd = r->fd;
         save->saved_fd = dup(r->fd);
-        if (save->saved_fd < 0 && errno == EBADF) {
-            save->saved_fd = -1; // Was closed
+        if (save->saved_fd < 0) {
+            if (errno == EBADF) {
+                save->saved_fd = -1; // Was closed
+            } else {
+                /* Error saving FD (e.g. EMFILE) */
+                free(save);
+                while (head) {
+                    if (head->saved_fd != -1) close(head->saved_fd);
+                    fd_save_t *next = head->next;
+                    free(head);
+                    head = next;
+                }
+                *out_list = NULL;
+                return -1;
+            }
         }
         
         save->next = head;
@@ -207,7 +231,8 @@ static fd_save_t *save_redirections(ast_redirection_t *redir) {
         
         r = r->next;
     }
-    return head;
+    *out_list = head;
+    return 0;
 }
 
 static void restore_redirections(fd_save_t *save) {
@@ -232,7 +257,10 @@ int execute_ast(ast_node_t *node) {
 
     if (node->type != NODE_SIMPLE_COMMAND && node->type != NODE_SUBSHELL) {
         if (node->redirections) {
-            saved_fds = save_redirections(node->redirections);
+            if (save_redirections(node->redirections, &saved_fds) != 0) {
+                fprintf(stderr, "%s: redirection error\n", shell_var_get_name());
+                return 1;
+            }
             if (apply_redirections(node->redirections) != 0) {
                  restore_redirections(saved_fds);
                  return 1;
@@ -244,8 +272,6 @@ int execute_ast(ast_node_t *node) {
         case NODE_SIMPLE_COMMAND:
             // Simple command handles its own redirections (builtins vs external)
             // For now, external commands fork so we don't save.
-            // Builtins currently might not redirect correctly without saving?
-            // TODO: Fix builtin redirections in execute_simple_command
             status = execute_simple_command((ast_simple_command_t *)node);
             break;
         case NODE_PIPELINE:
@@ -428,7 +454,7 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
     if (strcmp(argv[0], "exec") == 0) {
         /* exec [-a name] [command [args...]]
          * Replace shell with command. If no command, just apply redirections. */
-        if (apply_redirections(cmd_node->base.redirections) != 0) return 1;
+        /* Redirections applied by caller (execute_simple_command) */
 
         if (argc == 1) return 0;  /* No command - redirections applied */
 
@@ -1288,7 +1314,10 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
         /* Assignments only: VAR=val */
         fd_save_t *saved_fds = NULL;
         if (cmd->base.redirections) {
-            saved_fds = save_redirections(cmd->base.redirections);
+            if (save_redirections(cmd->base.redirections, &saved_fds) != 0) {
+                fprintf(stderr, "%s: redirection error\n", shell_var_get_name());
+                return 1;
+            }
             if (apply_redirections(cmd->base.redirections) != 0) {
                 restore_redirections(saved_fds);
                 return 1;
@@ -1319,7 +1348,14 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
 
     fd_save_t *saved_fds = NULL;
     if (cmd->base.redirections) {
-        if (!is_exec) saved_fds = save_redirections(cmd->base.redirections);
+        if (!is_exec) {
+            if (save_redirections(cmd->base.redirections, &saved_fds) != 0) {
+                fprintf(stderr, "%s: redirection error\n", shell_var_get_name());
+                for (int i = 0; argv[i]; i++) free(argv[i]);
+                free(argv);
+                return 1;
+            }
+        }
         if (apply_redirections(cmd->base.redirections) != 0) {
             if (saved_fds) restore_redirections(saved_fds);
             for (int i = 0; argv[i]; i++) free(argv[i]);
