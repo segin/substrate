@@ -1620,13 +1620,13 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - Tests: integration (sync flushes dirty data)
                 - Docs: `vfs_sync.9`
                 - Acceptance: All dirty buffers written
-            - [ ] Implement `vfs_vget(mp, ino, vpp)`.
+            - [x] Implement `vfs_vget(mp, ino, vpp)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Get vnode by inode number
                 - Tests: unit (vnode retrieved, cache hit/miss)
                 - Docs: `vfs_vget.9`
                 - Acceptance: Correct vnode returned for inode
-            - [ ] Implement `vfs_fhtovp(mp, fhp, vpp)`.
+            - [x] Implement `vfs_fhtovp(mp, fhp, vpp)`.
                 - Files: `sys/vfs/vfs_mount.c`
                 - API: Convert NFS file handle to vnode
                 - Tests: unit (handle resolution)
