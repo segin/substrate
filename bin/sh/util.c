@@ -101,10 +101,17 @@ void unquote_word(char *word) {
 }
 
 void buffer_append(char **buf, size_t *cap, size_t *len, char c) {
+    // Guard against exponential expansion - max 64KB
+    #define BUFFER_MAX_SIZE (64 * 1024)
+    if (*len >= BUFFER_MAX_SIZE) {
+        return; // Silently stop appending beyond limit
+    }
+    
     if (*len + 1 >= *cap) {
-        *cap *= 2;
-        if (*cap == 0) *cap = 16;
-        char *new_buf = realloc(*buf, *cap);
+        size_t new_cap = *cap * 2;
+        if (new_cap == 0) new_cap = 16;
+        if (new_cap > BUFFER_MAX_SIZE) new_cap = BUFFER_MAX_SIZE + 1;
+        char *new_buf = realloc(*buf, new_cap);
         if (!new_buf) {
             // Simplified OOM handling: exit safety
             // In a more complex shell we might return error, but for now prevent segfault.
@@ -114,6 +121,7 @@ void buffer_append(char **buf, size_t *cap, size_t *len, char c) {
             exit(1);
         }
         *buf = new_buf;
+        *cap = new_cap;
     }
     (*buf)[*len] = c;
     (*len)++;

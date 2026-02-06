@@ -3441,50 +3441,50 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Define precedence logic (POSIX PS1 behavior default vs Extended).
                 - [x] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string.
                 - [x] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`).
-            - [ ] **Format Grammar:**
+            - [x] **Format Grammar:**
                 - [x] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`).
                 - [x] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`).
-                - [ ] Define Conditional token syntax (e.g., `%(condition.true.false)`).
-                - [ ] Explicitly list reserved/unsupported tokens for future compatibility.
-            - [ ] **Token Parsing:**
-                - [ ] Implement dedicated predictive parser for prompt strings (separate from main shell parser).
-                - [ ] Handle escaped `%` characters (`%%`).
-                - [ ] Handle unknown/malformed sequences (emit literal or error without crash).
-                - [ ] Ensure parsing is deterministic and stateless.
-            - [ ] **Expansion Semantics:**
-                - [ ] Define expansion order: Extended Tokens -> Parameter Expansion -> Command Sub -> Arith.
-                - [ ] Isolate prompt expansions to prevent shell state mutation (sandbox execution).
-                - [ ] Implement recursion depth limits for nested prompts.
-                - [ ] Ensure non-printing characters in expansions are correctly marked.
-            - [ ] **Dynamic Elements:**
-                - [ ] `%~` / `%d`: Current Working Directory (Collapse $HOME to ~).
-                - [ ] `%n`: Current Username.
-                - [ ] `%m` / `%M`: Hostname (Short/Long).
-                - [ ] `%#`: UID superuser status (`#` vs `%`).
-                - [ ] `%?`: Last exit code.
-                - [ ] `%L`: Shell nesting level/depth.
-                - [ ] `%j`: Number of background jobs.
-            - [ ] **Styling & Attributes:**
-                - [ ] Support `%F{color}` / `%f`: Foreground color (ANSI).
-                - [ ] Support `%K{color}` / `%k`: Background color (ANSI).
-                - [ ] Support `%B` / `%b`: Bold attribute.
-                - [ ] Support `%U` / `%u`: Underline attribute.
-                - [ ] Implement logic to calculate visible width vs escape sequence width (for line wrapping).
-            - [ ] **Rendering Engine:**
-                - [ ] Implement efficient string builder for prompt assembly.
-                - [ ] Memory Management: Ensure no leaks across repeated prompt evaluations.
-                - [ ] Optimization: Cache static parts of the prompt if possible.
-                - [ ] Clean separation: `parse_prompt()`, `expand_tokens()`, `render_string()`.
-            - [ ] **Error Handling:**
-                - [ ] Define fallback behavior (e.g., print raw string) if parsing fails.
-                - [ ] Signal safety: Ensure expansion is safe during signal handling if used there.
-                - [ ] Guard against exponential expansion attacks.
-            - [ ] **Testing:**
-                - [ ] Unit: Parser validation for standard tokens.
-                - [ ] Unit: Width calculation correctness with ANSI codes.
-                - [ ] Integration: Enable extended mode and verify prompt appearance.
-                - [ ] Fuzzing: `fuzz_extended_prompt.c` targets parser.
-                - [ ] Property: Randomized prompt strings don't crash shell.
+                - [x] Define Conditional token syntax (e.g., `%(condition.true.false)`).
+                - [x] Explicitly list reserved/unsupported tokens for future compatibility.
+            - [x] **Token Parsing:**
+                - [x] Implement dedicated predictive parser for prompt strings (separate from main shell parser).
+                - [x] Handle escaped `%` characters (`%%`).
+                - [x] Handle unknown/malformed sequences (emit literal or error without crash).
+                - [x] Ensure parsing is deterministic and stateless.
+            - [x] **Expansion Semantics:**
+                - [x] Define expansion order: Extended Tokens -> Parameter Expansion -> Command Sub -> Arith.
+                - [x] Isolate prompt expansions to prevent shell state mutation (sandbox execution).
+                - [x] Implement recursion depth limits for nested prompts.
+                - [x] Ensure non-printing characters in expansions are correctly marked.
+            - [x] **Dynamic Elements:**
+                - [x] `%~` / `%d`: Current Working Directory (Collapse $HOME to ~).
+                - [x] `%n`: Current Username.
+                - [x] `%m` / `%M`: Hostname (Short/Long).
+                - [x] `%#`: UID superuser status (`#` vs `%`).
+                - [x] `%?`: Last exit code.
+                - [x] `%L`: Shell nesting level/depth.
+                - [x] `%j`: Number of background jobs.
+            - [x] **Styling & Attributes:**
+                - [x] Support `%F{color}` / `%f`: Foreground color (ANSI).
+                - [x] Support `%K{color}` / `%k`: Background color (ANSI).
+                - [x] Support `%B` / `%b`: Bold attribute.
+                - [x] Support `%U` / `%u`: Underline attribute.
+                - [x] Implement logic to calculate visible width vs escape sequence width (for line wrapping).
+            - [x] **Rendering Engine:**
+                - [x] Implement efficient string builder for prompt assembly.
+                - [x] Memory Management: Ensure no leaks across repeated prompt evaluations.
+                - [x] Optimization: Cache static parts of the prompt if possible.
+                - [x] Clean separation: `parse_prompt()`, `expand_tokens()`, `render_string()`.
+            - [x] **Error Handling:**
+                - [x] Define fallback behavior (e.g., print raw string) if parsing fails.
+                - [x] Signal safety: Ensure expansion is safe during signal handling if used there.
+                - [x] Guard against exponential expansion attacks.
+            - [x] **Testing:**
+                - [x] Unit: Parser validation for standard tokens.
+                - [x] Unit: Width calculation correctness with ANSI codes.
+                - [x] Integration: Enable extended mode and verify prompt appearance.
+                - [x] Fuzzing: `fuzz_extended_prompt.c` targets parser.
+                - [x] Property: Randomized prompt strings don't crash shell.
             - [ ] **Documentation:**
                 - [ ] Document new `%` escapes in `sh(1)`.
                 - [ ] Explicitly contrast POSIX PS1 vs Extended Mode handling.
