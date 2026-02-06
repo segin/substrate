@@ -1,0 +1,72 @@
+.Dd February 6, 2026
+.Dt VNODE 9
+.Os Substrate
+.Sh NAME
+.Nm vnode
+.Nd virtual file system node
+.Sh SYNOPSIS
+.In sys/vnode.h
+.Sh DESCRIPTION
+A
+.Vt vnode
+is an object inside the kernel that represents a file or directory in a file system.
+It provides a unified interface for all filesystem objects, reference counting for lifecycle management, and a locking mechanism for concurrent access.
+.Pp
+Each vnode has an associated type
+.Va v_type ,
+which can be
+.Dv VREG
+(regular file),
+.Dv VDIR
+(directory),
+.Dv VBLK
+(block device),
+.Dv VCHR
+(character device),
+.Dv VLNK
+(symbolic link),
+etc.
+.SS Vnode Attributes
+The
+.Vt vattr
+structure is used to pass file attributes between the VFS and the filesystem layers.
+It includes fields such as:
+.Bl -tag -width ".Va va_blocksize"
+.It Va va_type
+The type of the vnode.
+.It Va va_mode
+The file permissions and type bits.
+.It Va va_uid , Va va_gid
+The owner's user and group identifiers.
+.It Va va_size
+The size of the file in bytes.
+.It Va va_atime , Va va_mtime , Va va_ctime
+The access, modification, and change times.
+.It Va va_rdev
+The device identifier for device nodes.
+.El
+.SS Component Name
+The
+.Vt componentname
+structure contains information about a pathname component during lookup or creation operations.
+It includes:
+.Bl -tag -width ".Va cn_nameptr"
+.It Va cn_nameptr
+Pointer to the component name string.
+.It Va cn_namelen
+The length of the component name.
+.It Va cn_cred
+The credentials of the user performing the operation.
+.It Va cn_nameiop
+The operation being performed (e.g.,
+.Dv LOOKUP ,
+.Dv CREATE ,
+.Dv DELETE ,
+.Dv RENAME ).
+.El
+.Sh SEE ALSO
+.Xr vfs 9 ,
+.Xr vop_lookup 9 ,
+.Xr vop_create 9
+.Sh HISTORY
+The vnode interface appeared in Substrate.

@@ -1669,21 +1669,21 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (mkdir success, nested mkdir)
                     - Docs: `vop_mkdir.9`
                     - Acceptance: Directory created with . and .. entries
-                - [ ] Implement `vop_whiteout(dvp, cnp, flags)`.
+                - [x] Implement `vop_whiteout(dvp, cnp, flags)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: UnionFS whiteout entry support
                     - Flags: `CREATE`, `DELETE`, `LOOKUP`
                     - Tests: unit (create whiteout, delete whiteout)
                     - Docs: `vop_whiteout.9`
                     - Acceptance: Whiteout hides lower layer entry
-                - [ ] Implement `vop_remove(dvp, vp, cnp)`.
+                - [x] Implement `vop_remove(dvp, vp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Remove directory entry (unlink)
                     - Logic: Decrement link count, free inode if zero
                     - Tests: unit (unlink file, unlink with hardlinks, ENOENT)
                     - Docs: `vop_remove.9`
                     - Acceptance: Entry removed, inode freed when nlink=0
-                - [ ] Implement `vop_rmdir(dvp, vp, cnp)`.
+                - [x] Implement `vop_rmdir(dvp, vp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Remove empty directory
                     - Tests: unit (rmdir empty, ENOTEMPTY, EBUSY for .)

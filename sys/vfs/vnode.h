@@ -24,6 +24,7 @@ struct mount;
 struct uio;
 struct ucred;
 struct vattr;
+struct componentname;
 
 /*
  * Vnode types
@@ -138,11 +139,11 @@ struct vnode {
  */
 struct vnodeops {
     int (*vop_lookup)(struct vnode *dvp, struct vnode **vpp, 
-                      const char *name, struct ucred *cred);
+                      struct componentname *cnp);
     int (*vop_create)(struct vnode *dvp, struct vnode **vpp,
-                      const char *name, mode_t mode, struct ucred *cred);
+                      struct componentname *cnp, struct vattr *vap);
     int (*vop_mknod)(struct vnode *dvp, struct vnode **vpp,
-                     const char *name, mode_t mode, dev_t dev, struct ucred *cred);
+                     struct componentname *cnp, struct vattr *vap);
     int (*vop_open)(struct vnode *vp, int mode, struct ucred *cred);
     int (*vop_close)(struct vnode *vp, int fflag, struct ucred *cred);
     int (*vop_access)(struct vnode *vp, int mode, struct ucred *cred);
@@ -153,18 +154,21 @@ struct vnodeops {
     int (*vop_ioctl)(struct vnode *vp, uint32_t command, void *data, int fflag, struct ucred *cred);
     int (*vop_poll)(struct vnode *vp, int events, struct ucred *cred);
     int (*vop_fsync)(struct vnode *vp, int waitfor, struct ucred *cred);
-    int (*vop_remove)(struct vnode *dvp, struct vnode *vp, const char *name, struct ucred *cred);
-    int (*vop_link)(struct vnode *tdvp, struct vnode *vp, const char *name, struct ucred *cred);
-    int (*vop_rename)(struct vnode *fdvp, struct vnode *fvp, const char *fname,
-                      struct vnode *tdvp, struct vnode *tvp, const char *tname,
-                      struct ucred *cred);
-    int (*vop_mkdir)(struct vnode *dvp, struct vnode **vpp, const char *name,
-                     mode_t mode, struct ucred *cred);
-    int (*vop_rmdir)(struct vnode *dvp, struct vnode *vp, const char *name, struct ucred *cred);
+    int (*vop_remove)(struct vnode *dvp, struct vnode *vp,
+                      struct componentname *cnp);
+    int (*vop_link)(struct vnode *tdvp, struct vnode *vp,
+                    struct componentname *cnp);
+    int (*vop_rename)(struct vnode *fdvp, struct vnode *fvp, struct componentname *fcnp,
+                      struct vnode *tdvp, struct vnode *tvp, struct componentname *tcnp);
+    int (*vop_mkdir)(struct vnode *dvp, struct vnode **vpp,
+                     struct componentname *cnp, struct vattr *vap);
+    int (*vop_rmdir)(struct vnode *dvp, struct vnode *vp,
+                     struct componentname *cnp);
     int (*vop_readdir)(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag);
     int (*vop_readlink)(struct vnode *vp, struct uio *uio, struct ucred *cred);
-    int (*vop_symlink)(struct vnode *dvp, struct vnode **vpp, const char *linkname,
-                       const char *target, struct ucred *cred);
+    int (*vop_symlink)(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
+                       struct vattr *vap, const char *target);
+    int (*vop_whiteout)(struct vnode *dvp, struct componentname *cnp, int flags);
     int (*vop_inactive)(struct vnode *vp, struct ucred *cred);
     int (*vop_reclaim)(struct vnode *vp, struct ucred *cred);
     int (*vop_strategy)(struct vnode *vp, void *bp); /* Using void* for buf for now */
@@ -177,47 +181,49 @@ struct vnodeops {
  * VOP macros for calling vnode operations
  */
 #define VOP_LOOKUP(dvp, vpp, cnp) \
-    ((dvp)->v_op->vop_lookup(dvp, vpp, (cnp)->cn_nameptr, (cnp)->cn_cred))
+    ((dvp)->v_op->vop_lookup(dvp, vpp, cnp))
 #define VOP_CREATE(dvp, vpp, cnp, vap) \
-    ((dvp)->v_op->vop_create(dvp, vpp, (cnp)->cn_nameptr, (vap)->va_mode, (cnp)->cn_cred))
+    ((dvp)->v_op->vop_create(dvp, vpp, cnp, vap))
+#define VOP_MKNOD(dvp, vpp, cnp, vap) \
+    ((dvp)->v_op->vop_mknod(dvp, vpp, cnp, vap))
 #define VOP_OPEN(vp, mode, cred) \
     ((vp)->v_op->vop_open(vp, mode, cred))
 #define VOP_CLOSE(vp, fflag, cred) \
     ((vp)->v_op->vop_close(vp, fflag, cred))
+#define VOP_ACCESS(vp, mode, cred) \
+    ((vp)->v_op->vop_access(vp, mode, cred))
+#define VOP_GETATTR(vp, vap, cred) \
+    ((vp)->v_op->vop_getattr(vp, vap, cred))
+#define VOP_SETATTR(vp, vap, cred) \
+    ((vp)->v_op->vop_setattr(vp, vap, cred))
 #define VOP_READ(vp, uio, ioflag, cred) \
     ((vp)->v_op->vop_read(vp, uio, ioflag, cred))
 #define VOP_WRITE(vp, uio, ioflag, cred) \
     ((vp)->v_op->vop_write(vp, uio, ioflag, cred))
 #define VOP_IOCTL(vp, command, data, fflag, cred) \
     ((vp)->v_op->vop_ioctl(vp, command, data, fflag, cred))
-#define VOP_GETATTR(vp, vap, cred) \
-    ((vp)->v_op->vop_getattr(vp, vap, cred))
-#define VOP_SETATTR(vp, vap, cred) \
-    ((vp)->v_op->vop_setattr(vp, vap, cred))
-#define VOP_ACCESS(vp, mode, cred) \
-    ((vp)->v_op->vop_access(vp, mode, cred))
+#define VOP_POLL(vp, events, cred) \
+    ((vp)->v_op->vop_poll(vp, events, cred))
+#define VOP_FSYNC(vp, waitfor, cred) \
+    ((vp)->v_op->vop_fsync(vp, waitfor, cred))
+#define VOP_REMOVE(dvp, vp, cnp) \
+    ((dvp)->v_op->vop_remove(dvp, vp, cnp))
+#define VOP_LINK(tdvp, vp, cnp) \
+    ((tdvp)->v_op->vop_link(tdvp, vp, cnp))
+#define VOP_RENAME(fdvp, fvp, fcnp, tdvp, tvp, tcnp) \
+    ((fdvp)->v_op->vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp))
+#define VOP_MKDIR(dvp, vpp, cnp, vap) \
+    ((dvp)->v_op->vop_mkdir(dvp, vpp, cnp, vap))
+#define VOP_RMDIR(dvp, vp, cnp) \
+    ((dvp)->v_op->vop_rmdir(dvp, vp, cnp))
+#define VOP_READDIR(vp, uio, cred, eofflag) \
+    ((vp)->v_op->vop_readdir(vp, uio, cred, eofflag))
 #define VOP_READLINK(vp, uio, cred) \
     ((vp)->v_op->vop_readlink(vp, uio, cred))
 #define VOP_SYMLINK(dvp, vpp, cnp, vap, target) \
-    ((dvp)->v_op->vop_symlink(dvp, vpp, (cnp)->cn_nameptr, target, (cnp)->cn_cred))
-#define VOP_LINK(tdvp, vp, cnp) \
-    ((tdvp)->v_op->vop_link(tdvp, vp, (cnp)->cn_nameptr, (cnp)->cn_cred))
-#define VOP_REMOVE(dvp, vp, cnp) \
-    ((dvp)->v_op->vop_remove(dvp, vp, (cnp)->cn_nameptr, (cnp)->cn_cred))
-#define VOP_RENAME(fdvp, fvp, fcnp, tdvp, tvp, tcnp) \
-    ((fdvp)->v_op->vop_rename(fdvp, fvp, (fcnp)->cn_nameptr, tdvp, tvp, (tcnp)->cn_nameptr, (fcnp)->cn_cred))
-#define VOP_MKDIR(dvp, vpp, cnp, vap) \
-    ((dvp)->v_op->vop_mkdir(dvp, vpp, (cnp)->cn_nameptr, (vap)->va_mode, (cnp)->cn_cred))
-#define VOP_RMDIR(dvp, vp, cnp) \
-    ((dvp)->v_op->vop_rmdir(dvp, vp, (cnp)->cn_nameptr, (cnp)->cn_cred))
-#define VOP_READDIR(vp, uio, cred, eofflag) \
-    ((vp)->v_op->vop_readdir(vp, uio, cred, eofflag))
-#define VOP_FSYNC(vp, waitfor, cred) \
-    ((vp)->v_op->vop_fsync(vp, waitfor, cred))
-#define VOP_INACTIVE(vp, cred) \
-    ((vp)->v_op->vop_inactive(vp, cred))
-#define VOP_RECLAIM(vp, cred) \
-    ((vp)->v_op->vop_reclaim(vp, cred))
+    ((dvp)->v_op->vop_symlink(dvp, vpp, cnp, vap, target))
+#define VOP_WHITEOUT(dvp, cnp, flags) \
+    ((dvp)->v_op->vop_whiteout(dvp, cnp, flags))
 #define VOP_STRATEGY(vp, bp) \
     ((vp)->v_op->vop_strategy(vp, bp))
 #define VOP_BMAP(vp, offset, vpp, bnp, runp, runb) \
@@ -387,10 +393,13 @@ extern struct vnode_stats vnstats;
 } while (0)
 
 /* VOP wrappers */
-int vop_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, struct ucred *cred);
-int vop_cachedlookup(struct vnode *dvp, struct vnode **vpp, const char *name, struct ucred *cred);
-int vop_create(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, struct ucred *cred);
-int vop_mknod(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, dev_t dev, struct ucred *cred);
-int vop_mkdir(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, struct ucred *cred);
+int vop_lookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp);
+int vop_cachedlookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp);
+int vop_create(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap);
+int vop_mknod(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap);
+int vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap);
+int vop_remove(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);
+int vop_rmdir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);
+int vop_whiteout(struct vnode *dvp, struct componentname *cnp, int flags);
 
 #endif /* _SYS_VNODE_H */

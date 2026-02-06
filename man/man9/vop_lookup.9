@@ -8,7 +8,7 @@
 .In sys/param.h
 .In sys/vnode.h
 .Ft int
-.Fn vop_lookup "struct vnode *dvp" "struct vnode **vpp" "const char *name" "struct ucred *cred"
+.Fn vop_lookup "struct vnode *dvp" "struct vnode **vpp" "struct componentname *cnp"
 .Sh DESCRIPTION
 The
 .Fn vop_lookup
@@ -26,10 +26,8 @@ Arguments:
 The directory vnode to search.
 .It Fa vpp
 Pointer to a vnode pointer where the result will be stored.
-.It Fa name
-The component name to look up.
-.It Fa cred
-The user credentials for the operation.
+.It Fa cnp
+The component name information for the lookup.
 .El
 .Sh RETURN VALUES
 Returns 0 on success, or an error code on failure.

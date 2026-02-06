@@ -8,7 +8,7 @@
 .In sys/param.h
 .In sys/vnode.h
 .Ft int
-.Fn vop_mkdir "struct vnode *dvp" "struct vnode **vpp" "const char *name" "mode_t mode" "struct ucred *cred"
+.Fn vop_mkdir "struct vnode *dvp" "struct vnode **vpp" "struct componentname *cnp" "struct vattr *vap"
 .Sh DESCRIPTION
 The
 .Fn vop_mkdir
@@ -26,12 +26,10 @@ Arguments:
 The parent directory vnode.
 .It Fa vpp
 Pointer to a vnode pointer where the new directory vnode will be stored.
-.It Fa name
-The name of the new directory.
-.It Fa mode
-The mode (permissions) for the new directory.
-.It Fa cred
-The user credentials for the operation.
+.It Fa cnp
+The component name information for the new directory.
+.It Fa vap
+The attributes (including mode) for the new directory.
 .El
 .Sh RETURN VALUES
 Returns 0 on success, or an error code on failure.

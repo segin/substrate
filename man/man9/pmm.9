@@ -20,12 +20,12 @@ The Physical Memory Manager (PMM) manages the allocation and release of physical
 allocates memory from a reserved early-boot region ("watermark") before the main allocator is initialized. This memory cannot be freed. It returns a virtual address in the kernel higher-half (0xC0000000+).
 .SS Standard Allocation
 .B pmm_alloc_block
-allocates a single 4KB physical page. It returns the physical address of the page, or NULL if no memory is available.
+allocates a single 4KB physical page. It returns the \fBvirtual address\fP (kernel direct-mapped, 0xC0000000+) of the page, or NULL if no memory is available.
 .PP
 .B pmm_free_block
 releases a single 4KB physical page back to the pool.
 .I p
-must be a valid physical address previously allocated.
+must be a valid virtual address previously allocated.
 .PP
 .B pmm_alloc_contiguous
 allocates

@@ -135,6 +135,10 @@ Use
 to flush global pages (toggles CR4.PGE).
 .IP \[bu]
 Copy-on-Write (COW) faults use direct kernel mapping for efficient memory copying, avoiding temporary mappings.
+.IP \[bu]
+Identity mapping is provided for the Local APIC (0xFEE00000 \[en] 0xFFFFFFFF) during bootstrap to allow early interrupt controller access.
+.IP \[bu]
+Kernel PDEs 0-31 are identity-mapped in the user address space to facilitate early boot transitions, which incurs a 128KB memory overhead per address space.
 .SH SEE ALSO
 .BR pmm (9),
 .BR vm_page (9)

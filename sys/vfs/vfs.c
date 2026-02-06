@@ -420,50 +420,49 @@ static char *vfs_strrchr(const char *s, int c) {
 }
 
 int vfs_mkdir(const char *path, uint16_t permission) {
-    if (!path) return -1;
-    
-    char path_buf[256];
-    strncpy(path_buf, path, sizeof(path_buf));
-    path_buf[255] = '\0';
-    
-    // Split path into parent and name
-    char *last_slash = vfs_strrchr(path_buf, '/');
-    char *name = NULL;
-    fs_node_t *parent_node = NULL;
+    struct nameidata nd;
+    struct vattr va;
+    struct vnode *vp;
+    int error;
 
-    // Determine start node for relative lookups
-    fs_node_t *start_node = fs_root;
-    if (path[0] != '/' && current_process && current_process->cwd_node) {
-        start_node = current_process->cwd_node;
+    if (!path) return -1;
+
+    /* Initialize attributes for the new directory */
+    VATTR_NULL(&va);
+    va.va_type = VDIR;
+    va.va_mode = permission & 0777;
+
+    /* 
+     * Lookup for creation.
+     * We need the parent directory (nd.ni_dvp) and information about the 
+     * component to be created (nd.ni_cnd).
+     */
+    NDINIT(&nd, CREATE, LOCKPARENT, UIO_SYSSPACE, path);
+    error = namei(&nd);
+    if (error)
+        return error;
+
+    /* Check if the entry already exists */
+    if (nd.ni_vp != NULL) {
+        vput(nd.ni_dvp);
+        vrele(nd.ni_vp);
+        return -17; /* EEXIST */
     }
+
+    /* Perform the directory creation */
+    error = VOP_MKDIR(nd.ni_dvp, &vp, &nd.ni_cnd, &va);
     
-    if (last_slash) {
-        *last_slash = '\0';
-        name = last_slash + 1;
-        
-        // Check for trailing slash case: /foo/bar/ -> name=""
-        if (*name == '\0') return -1; // Trailing slash not supported yet
-        
-        if (path_buf[0] == '\0') {
-            // Path was "/foo", parent became "" (meaning root)
-            parent_node = fs_root;
-        } else {
-            // Find parent
-            parent_node = vfs_lookup(start_node, path_buf);
-        }
-    } else {
-        // No slash: "foo"
-        parent_node = start_node;
-        name = path_buf;
+    /* VOP_MKDIR is expected to release the lock on parent if needed, 
+     * but following BSD pattern, we usually vput the parent.
+     */
+    vput(nd.ni_dvp);
+    
+    if (error == 0) {
+        /* Successfully created, we can release the new vnode */
+        vput(vp);
     }
-    
-    if (!parent_node) return -1; // Parent not found
-    
-    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -1; // Not a directory
-    
-    if (!parent_node->mkdir) return -1; // FS doesn't support mkdir
-    
-    return parent_node->mkdir(parent_node, name, permission);
+
+    return error;
 }
 
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
