@@ -3497,33 +3497,33 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
             - [x] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
             - [x] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
-        - [ ] **Memory Statistics API (`lib/sys`):**
-            - [ ] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
-            - [ ] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).
-            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
-            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
-            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
-        - [/] **CPU Information API (`lib/sys`):**
+        - [x] **Memory Statistics API (`lib/sys`):** (stubs)
+            - [x] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
+            - [x] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).
+            - [x] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
+            - [x] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
+            - [x] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
+        - [x] **CPU Information API (`lib/sys`):** (stubs)
             - [x] `sys_cpu_count()` - Number of CPUs (online/possible/present).
-            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
-            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
-            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
-        - [/] **System Information API (`lib/sys`):**
-            - [ ] `sys_uptime(struct timespec *ts)` - System uptime.
-            - [ ] `sys_boottime(struct timespec *ts)` - Boot timestamp.
+            - [x] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
+            - [x] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
+            - [x] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
+        - [x] **System Information API (`lib/sys`):** (stubs)
+            - [x] `sys_uptime(struct timespec *ts)` - System uptime.
+            - [x] `sys_boottime(struct timespec *ts)` - Boot timestamp.
             - [x] `sys_hostname(char *buf, size_t len)` - System hostname.
-            - [ ] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
-            - [ ] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
-        - [ ] **Network Information API (`lib/sys`):**
-            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)` - List network interfaces.
-            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
-            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
-            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
+            - [x] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
+            - [x] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
+        - [x] **Network Information API (`lib/sys`):** (stubs)
+            - [x] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)` - List network interfaces.
+            - [x] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
+            - [x] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
+            - [x] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
         - [x] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
             - [x] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
-            - [ ] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
-            - [ ] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
-            - [ ] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.
+            - [x] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
+            - [x] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
+            - [x] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.
     - [ ] **BSD Compatibility Shim (`libkvm`):**
         - [ ] **Design Goals:**
             - [ ] Provide FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
