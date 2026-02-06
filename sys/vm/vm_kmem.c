@@ -108,21 +108,7 @@ void *kmalloc(size_t size) {
     size_t total = size + sizeof(kmem_large_header_t);
     size_t pages = (total + 4095) / 4096;
     
-    void *mem = NULL;
-    for (size_t i = 0; i < pages; i++) {
-        void *p = pmm_alloc_block();
-        if (!p) {
-            /* Free previously allocated pages on failure */
-            if (mem) {
-                for (size_t j = 0; j < i; j++) {
-                    pmm_free_block((void *)((uintptr_t)mem + j * 4096));
-                }
-            }
-            return NULL;
-        }
-        if (i == 0) mem = p;
-    }
-    
+    void *mem = pmm_alloc_contiguous(pages);
     if (!mem) return NULL;
     
     kmem_stats.large_allocs++;
@@ -162,9 +148,7 @@ void kfree(void *ptr, size_t size) {
     size_t pages = (total + 4095) / 4096;
     
     /* Free pages */
-    for (size_t i = 0; i < pages; i++) {
-        pmm_free_block((void *)((uintptr_t)hdr + i * 4096));
-    }
+    pmm_free_contiguous(hdr, pages);
     
     kmem_stats.large_frees++;
 }
