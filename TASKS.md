@@ -3911,8 +3911,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Parse `LS_COLORS` environment variable.
                 - [x] Default color scheme for file types (dir, link, exec, etc.).
             - [x] **Width Control:**
-                - [ ] `--width=N`: Set output width to N columns.
-                - [ ] `-w N`: Same as `--width=N`.
+                - [x] `--width=N`: Set output width to N columns.
+                - [x] `-w N`: Same as `--width=N`.
                 - [x] Read `COLUMNS` environment variable.
                 - [x] Query terminal width via `ioctl(TIOCGWINSZ)`.
                 - [x] Fallback to 80 columns for pipes/non-terminals.

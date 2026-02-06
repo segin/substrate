@@ -56,6 +56,7 @@ typedef struct {
     bool recursive;      // -R
     char *hide_pattern;  // --hide=PATTERN (for -R)
     int color;           // 0=never, 1=auto, 2=always
+    int term_width;      // --width=N, -w N (0 = auto-detect)
 } ls_config_t;
 
 typedef struct {

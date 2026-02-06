@@ -188,7 +188,7 @@ void ls_print_list(file_info_t *files, int count, const ls_config_t *config) {
     }
 
     // Multi-column output
-    int term_width = get_term_width();
+    int term_width = config->term_width > 0 ? config->term_width : get_term_width();
     int max_len = 0;
     for (int i = 0; i < count; i++) {
         int len = strlen(files[i].name);

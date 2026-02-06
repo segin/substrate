@@ -95,6 +95,9 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                     }
                     config->block_size = size > 0 ? size : 1;
                 }
+                else if (strncmp(argv[i], "--width=", 8) == 0) {
+                    config->term_width = atoi(argv[i] + 8);
+                }
                 else {
                     fprintf(stderr, "ls: unrecognized option '%s'\n", argv[i]);
                     return -1;
@@ -139,6 +142,14 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                         case 'u': config->time_type = TIME_ATIME; break;
                         case 'U': config->no_sort = true; break;
                         case 'v': config->version_sort = true; break;
+                        case 'w':
+                            if (argv[i][j+1]) {
+                                config->term_width = atoi(&argv[i][j+1]);
+                                j = strlen(argv[i]) - 1;
+                            } else if (i + 1 < argc) {
+                                config->term_width = atoi(argv[++i]);
+                            }
+                            break;
                         case 'x': config->by_lines = true; break;
                         case '1': config->one_per_line = true; config->multi_column = false; break;
                         default:
