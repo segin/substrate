@@ -2884,20 +2884,20 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `acos()`
             - [x] `atan()`
             - [x] `atan2()`
-        - [ ] **Hyperbolic:**
-            - [ ] `sinh()`
-            - [ ] `cosh()`
-            - [ ] `tanh()`
-            - [ ] `asinh()`
-            - [ ] `acosh()`
-            - [ ] `atanh()`
-        - [ ] **Manipulation:**
-            - [ ] `frexp()`
-            - [ ] `ldexp()`
-            - [ ] `modf()`
-            - [ ] `scalbn()`
-            - [ ] `nextafter()`
-            - [ ] `copysign()`
+        - [x] **Hyperbolic:**
+            - [x] `sinh()`
+            - [x] `cosh()`
+            - [x] `tanh()`
+            - [x] `asinh()`
+            - [x] `acosh()`
+            - [x] `atanh()`
+        - [x] **Manipulation:**
+            - [x] `frexp()`
+            - [x] `ldexp()`
+            - [x] `modf()`
+            - [x] `scalbn()`
+            - [x] `nextafter()`
+            - [x] `copysign()`
     - [ ] **Optimizations (i386/x87 Inline Assembly):**
         - [ ] **Trigonometric Functions:**
             - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.

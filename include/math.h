@@ -79,6 +79,17 @@ double atan2(double y, double x);
 double sinh(double x);
 double cosh(double x);
 double tanh(double x);
+double asinh(double x);
+double acosh(double x);
+double atanh(double x);
+
+/* Floating-point manipulation */
+double frexp(double x, int *exp);
+double ldexp(double x, int exp);
+double modf(double x, double *iptr);
+double scalbn(double x, int n);
+double nextafter(double x, double y);
+double copysign(double x, double y);
 
 /* Exponential and logarithmic functions */
 double exp(double x);

@@ -6,6 +6,7 @@
  */
 
 #include <math.h>
+#include <stdint.h>
 
 /* Constants (with guards to avoid redefinition) */
 #ifndef M_PI
@@ -277,6 +278,114 @@ double acos(double x) {
     return M_PI_2 - asin(x);
 }
 
+/*
+ * Hyperbolic functions
+ * sinh(x) = (e^x - e^-x) / 2
+ * cosh(x) = (e^x + e^-x) / 2
+ * tanh(x) = sinh(x) / cosh(x)
+ */
+double sinh(double x) {
+    if (fabs(x) < 1e-9) return x;  /* Taylor for small x */
+    double ex = exp(x);
+    return (ex - 1.0 / ex) * 0.5;
+}
+
+double cosh(double x) {
+    double ex = exp(x);
+    return (ex + 1.0 / ex) * 0.5;
+}
+
+double tanh(double x) {
+    if (x > 20.0) return 1.0;
+    if (x < -20.0) return -1.0;
+    double e2x = exp(2.0 * x);
+    return (e2x - 1.0) / (e2x + 1.0);
+}
+
+/* asinh(x) = log(x + sqrt(x^2 + 1)) */
+double asinh(double x) {
+    if (fabs(x) < 1e-9) return x;
+    return log(x + sqrt(x * x + 1.0));
+}
+
+/* acosh(x) = log(x + sqrt(x^2 - 1)), x >= 1 */
+double acosh(double x) {
+    if (x < 1.0) return NAN;
+    return log(x + sqrt(x * x - 1.0));
+}
+
+/* atanh(x) = 0.5 * log((1+x)/(1-x)), |x| < 1 */
+double atanh(double x) {
+    if (x <= -1.0 || x >= 1.0) return (x == 1.0) ? INFINITY : (x == -1.0) ? -INFINITY : NAN;
+    return 0.5 * log((1.0 + x) / (1.0 - x));
+}
+
+/*
+ * Floating-point manipulation functions
+ */
+
+/* frexp: x = mantissa * 2^exp, where 0.5 <= |mantissa| < 1 */
+double frexp(double x, int *exp) {
+    if (x == 0.0) { *exp = 0; return 0.0; }
+    if (isinf(x) || isnan(x)) { *exp = 0; return x; }
+    
+    int neg = (x < 0);
+    if (neg) x = -x;
+    
+    *exp = 0;
+    while (x >= 1.0) { x *= 0.5; (*exp)++; }
+    while (x < 0.5) { x *= 2.0; (*exp)--; }
+    
+    return neg ? -x : x;
+}
+
+/* ldexp: x * 2^exp */
+double ldexp(double x, int exp) {
+    if (x == 0.0 || isinf(x) || isnan(x)) return x;
+    while (exp > 0) { x *= 2.0; exp--; }
+    while (exp < 0) { x *= 0.5; exp++; }
+    return x;
+}
+
+/* modf: split into integer and fractional parts */
+double modf(double x, double *iptr) {
+    double i = trunc(x);
+    *iptr = i;
+    return x - i;
+}
+
+/* scalbn: x * 2^n (FLT_RADIX = 2) */
+double scalbn(double x, int n) {
+    return ldexp(x, n);
+}
+
+/* nextafter: next representable value after x towards y */
+double nextafter(double x, double y) {
+    if (isnan(x) || isnan(y)) return NAN;
+    if (x == y) return y;
+    
+    union { double d; uint64_t u; } u = { .d = x };
+    
+    if (x == 0.0) {
+        /* Smallest subnormal */
+        u.u = 1;
+        return (y > 0) ? u.d : -u.d;
+    }
+    
+    if ((x > 0) == (y > x)) {
+        u.u++;
+    } else {
+        u.u--;
+    }
+    return u.d;
+}
+
+/* copysign: magnitude of x with sign of y */
+double copysign(double x, double y) {
+    union { double d; uint64_t u; } ux = { .d = x }, uy = { .d = y };
+    ux.u = (ux.u & 0x7FFFFFFFFFFFFFFFULL) | (uy.u & 0x8000000000000000ULL);
+    return ux.d;
+}
 
 /* Absolute value - actual implementation */
 double fabs(double x) {
