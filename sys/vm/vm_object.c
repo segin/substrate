@@ -60,8 +60,13 @@ void vm_object_deallocate(vm_object_t *object) {
             vm_page_free(p);
             p = next;
         }
-        // TODO: kfree(object) if dynamic
-        object->type = VM_OBJ_TYPE_DEAD;
+        // Free object if dynamic, otherwise mark as dead
+        if (object >= bootstrap_objects &&
+            object < bootstrap_objects + MAX_BOOTSTRAP_OBJECTS) {
+            object->type = VM_OBJ_TYPE_DEAD;
+        } else {
+            kfree(object, sizeof(vm_object_t));
+        }
     }
 }
 

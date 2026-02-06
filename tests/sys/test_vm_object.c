@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <vm/vm_object.h>
+#include <vm/vm_kmem.h>
 #include <kern/console.h>
 
 static int tests_passed = 0;
@@ -86,10 +87,47 @@ void test_vm_object_pages(void) {
     kprint("  PASS\n");
 }
 
+// Test 4: Dynamic allocation and freeing
+void test_vm_object_dynamic_free(void) {
+    kprint("Test: vm_object dynamic free\n");
+
+    // Allocate many objects to ensure we exhaust bootstrap pool
+    // MAX_BOOTSTRAP_OBJECTS is 32 in vm_object.c
+    const int count = 50;
+    vm_object_t *objects[50];
+
+    for (int i = 0; i < count; i++) {
+        objects[i] = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x1000);
+        TEST_ASSERT(objects[i] != NULL, "allocation failed");
+    }
+
+    // Get current frees count
+    uint64_t frees_before = 0;
+    kmem_get_stats(NULL, &frees_before, NULL);
+
+    // Deallocate the last object (definitely dynamic)
+    vm_object_deallocate(objects[count - 1]);
+    objects[count - 1] = NULL;
+
+    // Get new frees count
+    uint64_t frees_after = 0;
+    kmem_get_stats(NULL, &frees_after, NULL);
+
+    TEST_ASSERT(frees_after > frees_before, "kfree called for dynamic object");
+
+    // Clean up remaining
+    for (int i = 0; i < count - 1; i++) {
+        vm_object_deallocate(objects[i]);
+    }
+
+    kprint("  PASS\n");
+}
+
 void run_vm_object_tests(void) {
     kprint("\n=== VM Object Unit Tests ===\n");
     test_vm_object_lifecycle();
     test_vm_object_shadow();
     test_vm_object_pages();
+    test_vm_object_dynamic_free();
     kprint("\nVM Object Tests Complete\n");
 }
