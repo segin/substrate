@@ -286,6 +286,11 @@ void run_kernel_tests(void) {
         test_sysctl();
     }
 
+    if (all || strcmp(test_arg, "getcwd") == 0) {
+        extern void run_getcwd_tests(void);
+        run_getcwd_tests();
+    }
+
     if (all || strcmp(test_arg, "bench_sched") == 0 || strcmp(test_arg, "sched_bench") == 0) {
         extern void run_sched_bench(void);
         run_sched_bench();
