@@ -3854,7 +3854,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Core Utilities:**
     - [ ] **`ls` - List directory contents (Production Quality Rewrite):**
         - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
+            - [x] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
             - [ ] Document all functionality gaps and bugs.
             - [ ] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal.
             - [ ] Extract option parsing into `ls_opts.c` and `ls_opts.h`.
