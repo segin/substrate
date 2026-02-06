@@ -3853,69 +3853,69 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Document limits (depth, length, etc).
 - [ ] **Core Utilities:**
     - [ ] **`ls` - List directory contents (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
+        - [x] **Audit & Refactor Existing Code:**
             - [x] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal.
-            - [ ] Extract option parsing into `ls_opts.c` and `ls_opts.h`.
-            - [ ] Extract output formatting into `ls_print.c` and `ls_print.h`.
-            - [ ] Extract sorting logic into `ls_sort.c` and `ls_sort.h`.
-            - [ ] Extract directory traversal into `ls_traverse.c` and `ls_traverse.h`.
-            - [ ] Write unit tests for each extracted module before proceeding.
-        - [ ] **CLI Options:**
-            - [ ] **Filtering:**
-                - [ ] `-a`, `--all`: List all files including hidden ones.
-                - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
-                - [ ] `-d`, `--directory`: List directories themselves, not their contents.
-                - [ ] `-I PATTERN`, `--ignore=PATTERN`: Do not list implied entries matching PATTERN.
-            - [ ] **Output Format:**
-                - [ ] `-l`: Long listing format (permissions, ownership, size, time).
-                - [ ] `-1`: Force single-column output.
-                - [ ] `-C`: Force multi-column output (default for terminal).
-                - [ ] `-m`: Comma-separated output.
-                - [ ] `-x`: List entries by lines instead of columns.
-                - [ ] `-g`: Like `-l` but omit owner.
-                - [ ] `-o`: Like `-l` but omit group.
-                - [ ] `-n`, `--numeric-uid-gid`: Like `-l` but show numeric UID/GID.
-            - [ ] **Sorting:**
-                - [ ] `-r`, `--reverse`: Reverse order while sorting.
-                - [ ] `-S`: Sort by file size (largest first).
-                - [ ] `-t`: Sort by modification time (newest first).
-                - [ ] `-u`: Sort by access time (with `-lt`), show atime (with `-l`).
-                - [ ] `-c`: Sort by ctime (with `-lt`), show ctime (with `-l`).
-                - [ ] `-U`: Do not sort; list in directory order.
-                - [ ] `-f`: Do not sort, enable `-aU`, disable `-ls --color`.
-                - [ ] `-v`: Natural sort of version numbers within text.
-            - [ ] **Symlink Handling:**
-                - [ ] `-L`, `--dereference`: Follow symlinks and show target's info.
-                - [ ] `-H`: Follow symlinks only on command line arguments.
-            - [ ] **Size & Units:**
-                - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
-                - [ ] `-k`, `--kibibytes`: Use 1024-byte blocks.
-                - [ ] `-s`, `--size`: Print allocated size of each file, in blocks.
+            - [x] Document all functionality gaps and bugs.
+            - [x] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal.
+            - [x] Extract option parsing into `ls_opts.c` and `ls_opts.h`.
+            - [x] Extract output formatting into `ls_print.c` and `ls_print.h`.
+            - [x] Extract sorting logic into `ls_sort.c` and `ls_sort.h`.
+            - [x] Extract directory traversal into `ls_traverse.c` and `ls_traverse.h`.
+            - [x] Write unit tests for each extracted module before proceeding.
+        - [x] **CLI Options:**
+            - [x] **Filtering:**
+                - [x] `-a`, `--all`: List all files including hidden ones.
+                - [x] `-A`, `--almost-all`: List all except `.` and `..`.
+                - [x] `-d`, `--directory`: List directories themselves, not their contents.
+                - [x] `-I PATTERN`, `--ignore=PATTERN`: Do not list implied entries matching PATTERN.
+            - [x] **Output Format:**
+                - [x] `-l`: Long listing format (permissions, ownership, size, time).
+                - [x] `-1`: Force single-column output.
+                - [x] `-C`: Force multi-column output (default for terminal).
+                - [x] `-m`: Comma-separated output.
+                - [x] `-x`: List entries by lines instead of columns.
+                - [x] `-g`: Like `-l` but omit owner.
+                - [x] `-o`: Like `-l` but omit group.
+                - [x] `-n`, `--numeric-uid-gid`: Like `-l` but show numeric UID/GID.
+            - [x] **Sorting:**
+                - [x] `-r`, `--reverse`: Reverse order while sorting.
+                - [x] `-S`: Sort by file size (largest first).
+                - [x] `-t`: Sort by modification time (newest first).
+                - [x] `-u`: Sort by access time (with `-lt`), show atime (with `-l`).
+                - [x] `-c`: Sort by ctime (with `-lt`), show ctime (with `-l`).
+                - [x] `-U`: Do not sort; list in directory order.
+                - [x] `-f`: Do not sort, enable `-aU`, disable `-ls --color`.
+                - [x] `-v`: Natural sort of version numbers within text.
+            - [x] **Symlink Handling:**
+                - [x] `-L`, `--dereference`: Follow symlinks and show target's info.
+                - [x] `-H`: Follow symlinks only on command line arguments.
+            - [x] **Size & Units:**
+                - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+                - [x] `-k`, `--kibibytes`: Use 1024-byte blocks.
+                - [x] `-s`, `--size`: Print allocated size of each file, in blocks.
                 - [ ] `--block-size=SIZE`: Scale sizes by SIZE before printing.
-                - [ ] `--si`: Use powers of 1000 not 1024.
-            - [ ] **File Type Indicators:**
-                - [ ] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
-                - [ ] `-p`: Append `/` indicator to directories.
+                - [x] `--si`: Use powers of 1000 not 1024.
+            - [x] **File Type Indicators:**
+                - [x] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
+                - [x] `-p`: Append `/` indicator to directories.
                 - [ ] `--file-type`: Likewise, except do not append `*`.
-            - [ ] **Inode & Block:**
-                - [ ] `-i`, `--inode`: Print inode number of each file.
-            - [ ] **Recursion:**
-                - [ ] `-R`, `--recursive`: List subdirectories recursively.
+            - [x] **Inode & Block:**
+                - [x] `-i`, `--inode`: Print inode number of each file.
+            - [x] **Recursion:**
+                - [x] `-R`, `--recursive`: List subdirectories recursively.
                 - [ ] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
-            - [ ] **Color:**
-                - [ ] `--color=auto`: Colorize when stdout is a terminal.
-                - [ ] `--color=always`: Always colorize output.
-                - [ ] `--color=never`: Never colorize output.
+            - [x] **Color:**
+                - [x] `--color=auto`: Colorize when stdout is a terminal.
+                - [x] `--color=always`: Always colorize output.
+                - [x] `--color=never`: Never colorize output.
                 - [ ] Parse `LS_COLORS` environment variable.
-                - [ ] Default color scheme for file types (dir, link, exec, etc.).
-            - [ ] **Width Control:**
+                - [x] Default color scheme for file types (dir, link, exec, etc.).
+            - [x] **Width Control:**
                 - [ ] `--width=N`: Set output width to N columns.
                 - [ ] `-w N`: Same as `--width=N`.
-                - [ ] Read `COLUMNS` environment variable.
-                - [ ] Query terminal width via `ioctl(TIOCGWINSZ)`.
-                - [ ] Fallback to 80 columns for pipes/non-terminals.
+                - [x] Read `COLUMNS` environment variable.
+                - [x] Query terminal width via `ioctl(TIOCGWINSZ)`.
+                - [x] Fallback to 80 columns for pipes/non-terminals.
             - [ ] **Timestamps:**
                 - [ ] `--time=WORD`: Show time as WORD (atime/access/use, ctime/status, mtime/modification).
                 - [ ] `--time-style=STYLE`: Time style (full-iso, long-iso, iso, locale, +FORMAT).

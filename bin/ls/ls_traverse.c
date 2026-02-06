@@ -2,18 +2,32 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
-#include <errno.h>
+#include <fnmatch.h>
 #include "ls_traverse.h"
 #include "ls_sort.h"
 #include "ls_print.h"
 
 static void list_single_dir(const char *path, const ls_config_t *config);
 
+// Simple glob pattern matching
+static int match_pattern(const char *pattern, const char *name) {
+    return fnmatch(pattern, name, 0) == 0;
+}
+
 void ls_list_dir(const char *path, const ls_config_t *config) {
     struct stat st;
-    if (lstat(path, &st) != 0) {
-        perror(path);
-        return;
+    
+    // -L or -H for command line args: follow symlinks
+    if (config->dereference || config->dereference_args) {
+        if (stat(path, &st) != 0) {
+            perror(path);
+            return;
+        }
+    } else {
+        if (lstat(path, &st) != 0) {
+            perror(path);
+            return;
+        }
     }
 
     if (!S_ISDIR(st.st_mode) || config->directory) {
@@ -55,13 +69,19 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
 
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
+        // Hidden file filtering
         if (!config->all) {
             if (ent->d_name[0] == '.') {
                 if (!config->almost_all) continue;
-                if (config->almost_all && (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)) continue;
+                if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
             }
         } else {
             if (config->almost_all && (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)) continue;
+        }
+
+        // -I PATTERN: ignore matching entries
+        if (config->ignore_pattern && match_pattern(config->ignore_pattern, ent->d_name)) {
+            continue;
         }
 
         if (count >= cap) {
@@ -69,7 +89,6 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
             file_info_t *new_files = realloc(files, cap * sizeof(file_info_t));
             if (!new_files) {
                 fprintf(stderr, "ls: out of memory\n");
-                // Cleanup what we have so far
                 for (int i = 0; i < count; i++) {
                     free(files[i].name);
                     free(files[i].full_path);
@@ -84,7 +103,6 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
         files[count].name = strdup(ent->d_name);
         if (!files[count].name) {
              fprintf(stderr, "ls: out of memory\n");
-             // Cleanup
              for (int i = 0; i < count; i++) {
                  free(files[i].name);
                  free(files[i].full_path);
@@ -114,8 +132,18 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
              sprintf(files[count].full_path, "%s/%s", path, ent->d_name);
         }
         
-        if (lstat(files[count].full_path, &files[count].st) != 0) {
-            memset(&files[count].st, 0, sizeof(struct stat));
+        // -L: follow symlinks when statting
+        if (config->dereference) {
+            if (stat(files[count].full_path, &files[count].st) != 0) {
+                // Fallback to lstat if stat fails (broken link)
+                if (lstat(files[count].full_path, &files[count].st) != 0) {
+                    memset(&files[count].st, 0, sizeof(struct stat));
+                }
+            }
+        } else {
+            if (lstat(files[count].full_path, &files[count].st) != 0) {
+                memset(&files[count].st, 0, sizeof(struct stat));
+            }
         }
         count++;
     }
@@ -136,7 +164,6 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
         }
     }
 
-    // Individual cleanup
     for (int i = 0; i < count; i++) {
         free(files[i].name);
         free(files[i].full_path);
