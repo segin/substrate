@@ -2,6 +2,7 @@
 #include <sys/9p.h>
 #include <string.h>
 #include <stddef.h>
+#include <vm/vm_kmem.h>
 
 static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     // 1. Create TREAD message
@@ -31,12 +32,23 @@ static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_
     // Response Buffer
     // RREAD: size[4] RREAD[1] tag[2] count[4] data[count]
     // We need enough space for header + data
-    uint32_t rsize_max = 4 + 1 + 2 + 4 + size;
-    uint8_t rmsg[rsize_max];
+    uint32_t header_size = 4 + 1 + 2 + 4;
+
+    if (size > UINT32_MAX - header_size) {
+        return 0;
+    }
+
+    uint32_t rsize_max = header_size + size;
+    uint8_t *rmsg = kmalloc(rsize_max);
+    if (!rmsg) {
+        return 0;
+    }
+
+    uint32_t ret_count = 0;
     
     extern int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_len);
     if (virtio_9p_send(msg, msize, rmsg, rsize_max) != 0) {
-        return 0; // Error
+        goto cleanup;
     }
     
     // Parse Response
@@ -46,10 +58,12 @@ static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_
     uint8_t r_type = *p; p += 1;
     
     if (r_type == P9_RERROR) {
-        return 0;
+        goto cleanup;
     }
     
-    if (r_type != P9_RREAD) return 0;
+    if (r_type != P9_RREAD) {
+        goto cleanup;
+    }
     
     p += 2; // Skip Tag
     uint32_t count = *(uint32_t*)p; p += 4;
@@ -57,8 +71,11 @@ static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_
     if (count > size) count = size; // Should not happen
     
     memcpy(buffer, p, count);
-    
-    return count;
+    ret_count = count;
+
+cleanup:
+    kfree(rmsg, rsize_max);
+    return ret_count;
 }
 
 static fs_node_t *p9_mount(const char *device, uint32_t flags, void *data) {

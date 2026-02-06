@@ -3,6 +3,8 @@
 #include <sys/mount.h>
 #include <string.h>
 
+extern struct mountlist mountlist;
+
 // Extern existing syscall wrappers within kernel (from syscall.c)
 extern int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data);
 extern int sys_umount(const char *target);
@@ -88,9 +90,24 @@ void test_mount_permissions(void) {
     sys_rmdir(mnt_point);
 }
 
+static int count_mounts(void) {
+    int count = 0;
+    struct mount *mp;
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        count++;
+    }
+    return count;
+}
+
 void run_mount_tests(void) {
     kprint("TEST: mount_tests starting...\n");
     
+    int initial_mounts = count_mounts();
+    kprint("Initial mounts: ");
+    // Manual integer print
+    if (initial_mounts == 0) kprint("0 (Suspicious)\n");
+    else kprint("Non-zero (OK)\n");
+
     const char *mnt_point = "/mnt_tmp_test";
     
     // 1. Create mount point
@@ -114,16 +131,18 @@ void run_mount_tests(void) {
     // devfs typically doesn't need a source, but we pass NULL or "none"
     int ret = sys_mount(NULL, mnt_point, "devfs", 0, NULL);
     if (ret != 0) {
-        kprint("FAILED (ret=");
-        // char buf[16];
-        // extern void itoa(int, char*); // simplistic or use sprintf
-        // sprintf(buf, "%d", ret); 
-        // kprint(buf);
-        kprint(")\n");
+        kprint("FAILED (ret!=0)\n");
         return;
     }
     kprint("OK\n");
     
+    int after_mount = count_mounts();
+    if (after_mount == initial_mounts + 1) {
+        kprint("TEST: Mount list count incremented (OK)\n");
+    } else {
+        kprint("TEST: Mount list count NOT incremented (FAILED)\n");
+    }
+
     // 3. Verify content
     kprint("TEST: Verifying content (lookup 'null')... ");
     // Lookup inside the NEW mount
@@ -153,6 +172,13 @@ void run_mount_tests(void) {
         kprint("FAILED (ret!=0)\n");
     } else {
         kprint("OK\n");
+    }
+
+    int after_unmount = count_mounts();
+    if (after_unmount == initial_mounts) {
+        kprint("TEST: Mount list count decremented (OK)\n");
+    } else {
+        kprint("TEST: Mount list count NOT decremented (FAILED)\n");
     }
     
     // 5. Verify unmount (content should be gone or revert to directory)

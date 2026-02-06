@@ -34,6 +34,7 @@ extern void test_bitness(void);
 extern void run_sched_perf_tests(void);
 extern void run_string_tests(void);
 extern void run_sched_bench(void);
+extern void run_sched_dequeue_bench(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -286,9 +287,18 @@ void run_kernel_tests(void) {
         test_sysctl();
     }
 
+    if (all || strcmp(test_arg, "getcwd") == 0) {
+        extern void run_getcwd_tests(void);
+        run_getcwd_tests();
+    }
+
     if (all || strcmp(test_arg, "bench_sched") == 0 || strcmp(test_arg, "sched_bench") == 0) {
         extern void run_sched_bench(void);
         run_sched_bench();
+    }
+
+    if (strcmp(test_arg, "sched_dequeue") == 0) {
+        run_sched_dequeue_bench();
     }
 
     if (all || strcmp(test_arg, "fb_perf") == 0) {
@@ -309,6 +319,7 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "perf") == 0) {
         run_sched_perf_tests();
+        run_sched_dequeue_bench();
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");

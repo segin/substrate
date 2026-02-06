@@ -111,7 +111,7 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data);
 size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 struct dirent *fat_readdir(fs_node_t *node, uint64_t index);
 fs_node_t *fat_finddir(fs_node_t *node, char *name);
-int fat_parse_lfn(fat_lfn_t *lfn, char *buffer);
+int fat_parse_lfn(fat_lfn_t *lfn, char *buffer, int max_len);
 uint32_t fat_get_next_cluster(fat_fs_t *fs, uint32_t cluster);
 
 #endif

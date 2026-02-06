@@ -84,41 +84,31 @@ void sched_enqueue(thread_t *t) {
 // Remove thread from its runqueue
 void sched_dequeue(thread_t *t) {
     if (!t) return;
-    if (!t->on_runqueue) return;  // Not on runqueue
     
-    // Find which runqueue has this thread
-    for (int i = 0; i < num_cpus; i++) {
-        runqueue_t *rq = &cpu_runqueues[i];
+    // Loop to handle race conditions
+    while (t->on_runqueue) {
+        runqueue_t *rq = t->current_queue;
+        if (!rq) {
+            // Should not happen if on_runqueue is set
+            return;
+        }
         
         // Lock
         while (__sync_lock_test_and_set(&rq->lock, 1)) {
             while (rq->lock) __asm__ volatile("pause");
         }
         
-        // Check if thread is in this runqueue
-        // (In production, thread would track its owning runqueue)
-        int found = 0;
-        for (int level = 0; level < RQ_TOTAL_LEVELS; level++) {
-            thread_t *curr = rq->queues[level].head;
-            while (curr) {
-                if (curr == t) {
-                    found = 1;
-                    break;
-                }
-                curr = curr->rq_next;
-            }
-            if (found) break;
-        }
-        
-        if (found) {
+        // Re-check ownership under lock
+        if (t->current_queue == rq && t->on_runqueue) {
             runqueue_remove(rq, t);
             t->on_runqueue = 0;
             __sync_lock_release(&rq->lock);
             return;
         }
         
-        // Unlock and try next CPU
+        // Thread moved or was removed while we were waiting for lock
         __sync_lock_release(&rq->lock);
+        __asm__ volatile("pause");
     }
 }
 
