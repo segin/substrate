@@ -3903,7 +3903,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `-i`, `--inode`: Print inode number of each file.
             - [x] **Recursion:**
                 - [x] `-R`, `--recursive`: List subdirectories recursively.
-                - [ ] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
+                - [x] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
             - [x] **Color:**
                 - [x] `--color=auto`: Colorize when stdout is a terminal.
                 - [x] `--color=always`: Always colorize output.

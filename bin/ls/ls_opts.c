@@ -75,6 +75,7 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                 else if (strcmp(argv[i], "--quote-name") == 0) config->quote_names = true;
                 else if (strcmp(argv[i], "--reverse") == 0) config->reverse = true;
                 else if (strcmp(argv[i], "--recursive") == 0) config->recursive = true;
+                else if (strncmp(argv[i], "--hide=", 7) == 0) config->hide_pattern = argv[i] + 7;
                 else if (strcmp(argv[i], "--size") == 0) config->show_blocks = true;
                 else if (strcmp(argv[i], "--si") == 0) config->si_units = true;
                 else if (strcmp(argv[i], "--file-type") == 0) config->file_type = true;
