@@ -306,6 +306,11 @@ void run_kernel_tests(void) {
         test_fb_perf();
     }
 
+    if (all || strcmp(test_arg, "fb_modes") == 0) {
+        extern void test_fb_modes(void);
+        test_fb_modes();
+    }
+
     if (all || strcmp(test_arg, "console_perf") == 0) {
         extern void test_console_perf(void);
         test_console_perf();
