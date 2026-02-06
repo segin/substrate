@@ -3919,14 +3919,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Timestamps:**
                 - [x] `--time=WORD`: Use time WORD (atime, access, use, ctime, status, mtime, modification).
                 - [x] `--time-style=STYLE`: Use STYLE (full-iso, long-iso, iso, locale)., +FORMAT).
-            - [ ] **Miscellaneous:**
-                - [ ] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters.
-                - [ ] `--show-control-chars`: Show non-graphic characters as-is (default).
-                - [ ] `-N`, `--literal`: Print raw entry names (don't quote).
-                - [ ] `-Q`, `--quote-name`: Enclose entry names in double quotes.
-                - [ ] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape).
-                - [ ] `--help`: Display help.
-                - [ ] `--version`: Display version.
+            - [x] **Miscellaneous:**
+                - [x] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters.
+                - [x] `--show-control-chars`: Show non-graphic characters as-is (default).
+                - [x] `-N`, `--literal`: Print raw entry names (don't quote).
+                - [x] `-Q`, `--quote-name`: Enclose entry names in double quotes.
+                - [x] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape).
+                - [x] `--help`: Display help.
+                - [x] `--version`: Display version.
         - [ ] **Output Modes:**
             - [ ] Implement long format (`-l`) with all columns.
             - [ ] Implement multi-column format (default for terminal).

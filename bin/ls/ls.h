@@ -65,6 +65,11 @@ typedef struct {
     char *hide_pattern;  // --hide=PATTERN (for -R)
     int color;           // 0=never, 1=auto, 2=always
     int term_width;      // --width=N, -w N (0 = auto-detect)
+
+    // Miscellaneous
+    bool hide_control_chars; // -q
+    bool literal;            // -N, --literal
+    int quoting_style;       // 0=literal, 1=shell, 2=shell-always, 3=c, 4=escape
 } ls_config_t;
 
 typedef struct {

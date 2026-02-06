@@ -114,6 +114,34 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                     else if (strcmp(val, "iso") == 0) config->time_style = TIME_STYLE_ISO;
                     else if (strcmp(val, "locale") == 0) config->time_style = TIME_STYLE_LOCALE;
                 }
+                else if (strcmp(argv[i], "--literal") == 0) config->literal = true;
+                else if (strcmp(argv[i], "--hide-control-chars") == 0) config->hide_control_chars = true;
+                else if (strcmp(argv[i], "--show-control-chars") == 0) config->hide_control_chars = false;
+                else if (strncmp(argv[i], "--quoting-style=", 16) == 0) {
+                    char *val = argv[i] + 16;
+                    if (strcmp(val, "literal") == 0) config->quoting_style = 0;
+                    else if (strcmp(val, "shell") == 0) config->quoting_style = 1;
+                    else if (strcmp(val, "shell-always") == 0) config->quoting_style = 2;
+                    else if (strcmp(val, "c") == 0) config->quoting_style = 3;
+                    else if (strcmp(val, "escape") == 0) config->quoting_style = 4;
+                }
+                else if (strcmp(argv[i], "--help") == 0) {
+                    printf("Usage: ls [OPTION]... [FILE]...\n");
+                    printf("List information about the FILEs (the current directory by default).\n\n");
+                    printf("  -a, --all              do not ignore entries starting with .\n");
+                    printf("  -A, --almost-all       do not list implied . and ..\n");
+                    printf("  -l                     use a long listing format\n");
+                    printf("  -h, --human-readable   print sizes in human readable format\n");
+                    printf("  -R, --recursive        list subdirectories recursively\n");
+                    printf("  --color=WHEN           colorize output (never, auto, always)\n");
+                    printf("  --help                 display this help and exit\n");
+                    printf("  --version              output version information and exit\n");
+                    return 1; // Signal to exit after help
+                }
+                else if (strcmp(argv[i], "--version") == 0) {
+                    printf("ls (Substrate coreutils) 1.0\n");
+                    return 1; // Signal to exit after version
+                }
                 else {
                     fprintf(stderr, "ls: unrecognized option '%s'\n", argv[i]);
                     return -1;
@@ -147,8 +175,10 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                         case 'L': config->dereference = true; break;
                         case 'm': config->comma_sep = true; break;
                         case 'n': config->numeric_ids = true; config->long_fmt = true; break;
+                        case 'N': config->literal = true; break;
                         case 'o': config->long_fmt = true; config->no_group = true; break;
                         case 'p': config->slash_dirs = true; break;
+                        case 'q': config->hide_control_chars = true; break;
                         case 'Q': config->quote_names = true; break;
                         case 'r': config->reverse = true; break;
                         case 'R': config->recursive = true; break;
