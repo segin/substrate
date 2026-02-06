@@ -2,6 +2,7 @@
 #include <drivers/input/keyboard.h>
 #include <kern/console.h>
 #include <string.h>
+#include <sys/errno.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
 #include <sys/tty.h>
@@ -30,7 +31,7 @@ static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
 static size_t full_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer; (void)size;
     // Always return error (ENOSPC is usually 28)
-    return size; // TODO: Should return error code logic if VFS supports it, or 0? VFS write usually returns bytes written.
+    return (size_t)-ENOSPC;
 }
 
 // /dev/port

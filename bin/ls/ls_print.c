@@ -8,8 +8,15 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include "ls_print.h"
+#include "ls_colors.h"
 
 static void print_formatted_size(off_t size, const ls_config_t *config) {
+    // Apply block-size scaling if specified
+    if (config->block_size > 0) {
+        printf("%8ld ", (long)((size + config->block_size - 1) / config->block_size));
+        return;
+    }
+    
     if (!config->human_readable) {
         printf("%8ld ", (long)size);
         return;
@@ -30,14 +37,16 @@ static void print_name(file_info_t *f, const ls_config_t *config) {
     if (config->quote_names) printf("\"");
     
     if (config->color) {
-        if (S_ISDIR(f->st.st_mode)) printf("%s%s%s", COLOR_DIR, f->name, COLOR_RESET);
-        else if (S_ISLNK(f->st.st_mode)) printf("%s%s%s", COLOR_LINK, f->name, COLOR_RESET);
-        else if (f->st.st_mode & S_IXUSR) printf("%s%s%s", COLOR_EXE, f->name, COLOR_RESET);
-        else if (S_ISCHR(f->st.st_mode) || S_ISBLK(f->st.st_mode)) printf("%s%s%s", COLOR_DEV, f->name, COLOR_RESET);
-        else printf("%s", f->name);
+        const char *color = ls_colors_get(f->name, f->st.st_mode);
+        if (color && *color) {
+            printf("%s%s%s", color, f->name, ls_colors_reset());
+        } else {
+            printf("%s", f->name);
+        }
     } else {
         printf("%s", f->name);
     }
+
     
     if (config->quote_names) printf("\"");
     
@@ -45,6 +54,12 @@ static void print_name(file_info_t *f, const ls_config_t *config) {
         if (S_ISDIR(f->st.st_mode)) printf("/");
         else if (S_ISLNK(f->st.st_mode)) printf("@");
         else if (f->st.st_mode & S_IXUSR) printf("*");
+        else if (S_ISFIFO(f->st.st_mode)) printf("|");
+        else if (S_ISSOCK(f->st.st_mode)) printf("=");
+    } else if (config->file_type) {
+        // Like -F but do not append * for executables
+        if (S_ISDIR(f->st.st_mode)) printf("/");
+        else if (S_ISLNK(f->st.st_mode)) printf("@");
         else if (S_ISFIFO(f->st.st_mode)) printf("|");
         else if (S_ISSOCK(f->st.st_mode)) printf("=");
     } else if (config->slash_dirs && S_ISDIR(f->st.st_mode)) {
@@ -119,7 +134,22 @@ void ls_print_entry(file_info_t *f, const ls_config_t *config) {
         char timebuf[64];
         struct tm *tm = localtime(&t);
         if (tm) {
-            strftime(timebuf, sizeof(timebuf), "%b %d %H:%M", tm);
+            const char *fmt;
+            switch (config->time_style) {
+                case TIME_STYLE_FULL_ISO:
+                    fmt = "%Y-%m-%d %H:%M:%S.000000000 %z";
+                    break;
+                case TIME_STYLE_LONG_ISO:
+                    fmt = "%Y-%m-%d %H:%M";
+                    break;
+                case TIME_STYLE_ISO:
+                    fmt = "%m-%d %H:%M";
+                    break;
+                default: // TIME_STYLE_LOCALE
+                    fmt = "%b %d %H:%M";
+                    break;
+            }
+            strftime(timebuf, sizeof(timebuf), fmt, tm);
             printf("%s ", timebuf);
         } else {
             printf("??? ?? ??:?? ");
@@ -173,7 +203,7 @@ void ls_print_list(file_info_t *files, int count, const ls_config_t *config) {
     }
 
     // Multi-column output
-    int term_width = get_term_width();
+    int term_width = config->term_width > 0 ? config->term_width : get_term_width();
     int max_len = 0;
     for (int i = 0; i < count; i++) {
         int len = strlen(files[i].name);

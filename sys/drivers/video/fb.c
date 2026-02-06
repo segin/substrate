@@ -298,23 +298,18 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         return 0;
     } else if (request == FBIOGET_VIDEO_MODES) {
         if (!current_driver || !current_driver->list_modes) return -1;
-        /* Arg is pointer to array of video_mode_info, preceded by count? */
-        /* Simplification: Arg is pointer to struct { int count; struct video_mode_info modes[]; } logic is complex for simple ioctl */
-        /* Standard Linux: Iterate modedb. Here we assume arg is `struct video_mode_info *` and we fill up to N? */
-        /* Let's assume the user passes a buffer and we return count? Protocol definition needed. */
-        /* Protocol: arg points to a struct containing max count and ptr? */
-        /* Let's do simple: Arg is ptr to `struct video_mode_info` array. But how to know length? */
-        /* Alternative: Arg is `struct video_mode_request { int max; int count; struct video_mode_info *modes; }` */
-        /* For now, let's assume arg is (struct video_mode_info *) and we accept max 16? Unsafe. */
-        /* Better: Just rely on driver to fill safely? No. */
-        /* Let's assume arg is `struct video_mode_info *` and first element `mode_id` is actually max_count passed in? Hacky. */
         
-        /* Let's check what I defined in sys/fb.h. Nothing specific about request format. */
-        /* I will implement it as: IOCTL passes `struct video_mode_info *buf`. But we need size. */
-        /* Let's change the IOCTL to be FBIOGET_VIDEO_MODES taking `struct video_mode_query*`? I can't change header easily now. */
-        /* Let's return -1 for now until protocol defined, OR assume arg is `struct { int count; struct video_mode_info modes[16]; } *` ? */
-        
-        return -1; // TODO: Define protocol
+        struct video_mode_query *query = (struct video_mode_query *)arg;
+        if (!query) return -1;
+
+        int total = current_driver->list_modes(NULL, 0);
+
+        if (query->modes) {
+            current_driver->list_modes(query->modes, query->count);
+        }
+
+        query->count = total;
+        return 0;
     } else if (request == FBIOPUT_VIDEO_MODE) {
         if (!current_driver || !current_driver->set_mode) return -1;
         uint32_t mode_id = (uint32_t)(uintptr_t)arg; /* Mode ID passed directly as arg or pointer? Usually pointer to int. */
@@ -385,11 +380,26 @@ static int mb_init(fb_info_t *info) {
     info->scroll = NULL;
     return 0;
 }
+
+static int mb_list_modes(struct video_mode_info *modes, int max_count) {
+    if (!modes) return 1;
+    if (max_count > 0) {
+        modes[0].width = fb.width;
+        modes[0].height = fb.height;
+        modes[0].bpp = fb.bpp;
+        modes[0].mode_id = 0;
+        modes[0].flags = 0;
+        return 1;
+    }
+    return 0;
+}
+
 static video_driver_t mb_driver = {
     .name = "multiboot",
     .priority = 10,
     .probe = mb_probe,
-    .init = mb_init
+    .init = mb_init,
+    .list_modes = mb_list_modes
 };
 
 /* ==================== Initialization ==================== */

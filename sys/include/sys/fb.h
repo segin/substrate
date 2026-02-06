@@ -20,6 +20,11 @@ struct video_mode_info {
     uint32_t reserved[3];
 };
 
+struct video_mode_query {
+    uint32_t count;      /* In: buffer size (elements). Out: total modes available. */
+    struct video_mode_info *modes; /* Pointer to array of video_mode_info */
+};
+
 struct fb_var_screeninfo {
     uint32_t xres;          /* visible resolution */
     uint32_t yres;

@@ -3,12 +3,15 @@
 #include "ls.h"
 #include "ls_opts.h"
 #include "ls_traverse.h"
+#include "ls_colors.h"
 
 #ifndef TEST
 int main(int argc, char **argv) {
     ls_config_t config;
     char **file_operands = NULL;
     int file_count = 0;
+
+    ls_colors_init();
 
     if (ls_parse_opts(argc, argv, &config, &file_operands, &file_count) != 0) {
         ls_print_usage(argv[0]);

@@ -75,8 +75,73 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                 else if (strcmp(argv[i], "--quote-name") == 0) config->quote_names = true;
                 else if (strcmp(argv[i], "--reverse") == 0) config->reverse = true;
                 else if (strcmp(argv[i], "--recursive") == 0) config->recursive = true;
+                else if (strncmp(argv[i], "--hide=", 7) == 0) config->hide_pattern = argv[i] + 7;
                 else if (strcmp(argv[i], "--size") == 0) config->show_blocks = true;
                 else if (strcmp(argv[i], "--si") == 0) config->si_units = true;
+                else if (strcmp(argv[i], "--file-type") == 0) config->file_type = true;
+                else if (strncmp(argv[i], "--block-size=", 13) == 0) {
+                    char *val = argv[i] + 13;
+                    long size = 1;
+                    if (*val >= '0' && *val <= '9') {
+                        size = atol(val);
+                    } else {
+                        // Parse suffix: K, M, G, T
+                        switch (*val) {
+                            case 'K': case 'k': size = 1024; break;
+                            case 'M': case 'm': size = 1024 * 1024; break;
+                            case 'G': case 'g': size = 1024L * 1024 * 1024; break;
+                            default: size = 1; break;
+                        }
+                    }
+                    config->block_size = size > 0 ? size : 1;
+                }
+                else if (strncmp(argv[i], "--width=", 8) == 0) {
+                    config->term_width = atoi(argv[i] + 8);
+                }
+                else if (strncmp(argv[i], "--time=", 7) == 0) {
+                    char *val = argv[i] + 7;
+                    if (strcmp(val, "atime") == 0 || strcmp(val, "access") == 0 || strcmp(val, "use") == 0)
+                        config->time_type = TIME_ATIME;
+                    else if (strcmp(val, "ctime") == 0 || strcmp(val, "status") == 0)
+                        config->time_type = TIME_CTIME;
+                    else if (strcmp(val, "mtime") == 0 || strcmp(val, "modification") == 0)
+                        config->time_type = TIME_MTIME;
+                }
+                else if (strncmp(argv[i], "--time-style=", 13) == 0) {
+                    char *val = argv[i] + 13;
+                    if (strcmp(val, "full-iso") == 0) config->time_style = TIME_STYLE_FULL_ISO;
+                    else if (strcmp(val, "long-iso") == 0) config->time_style = TIME_STYLE_LONG_ISO;
+                    else if (strcmp(val, "iso") == 0) config->time_style = TIME_STYLE_ISO;
+                    else if (strcmp(val, "locale") == 0) config->time_style = TIME_STYLE_LOCALE;
+                }
+                else if (strcmp(argv[i], "--literal") == 0) config->literal = true;
+                else if (strcmp(argv[i], "--hide-control-chars") == 0) config->hide_control_chars = true;
+                else if (strcmp(argv[i], "--show-control-chars") == 0) config->hide_control_chars = false;
+                else if (strncmp(argv[i], "--quoting-style=", 16) == 0) {
+                    char *val = argv[i] + 16;
+                    if (strcmp(val, "literal") == 0) config->quoting_style = 0;
+                    else if (strcmp(val, "shell") == 0) config->quoting_style = 1;
+                    else if (strcmp(val, "shell-always") == 0) config->quoting_style = 2;
+                    else if (strcmp(val, "c") == 0) config->quoting_style = 3;
+                    else if (strcmp(val, "escape") == 0) config->quoting_style = 4;
+                }
+                else if (strcmp(argv[i], "--help") == 0) {
+                    printf("Usage: ls [OPTION]... [FILE]...\n");
+                    printf("List information about the FILEs (the current directory by default).\n\n");
+                    printf("  -a, --all              do not ignore entries starting with .\n");
+                    printf("  -A, --almost-all       do not list implied . and ..\n");
+                    printf("  -l                     use a long listing format\n");
+                    printf("  -h, --human-readable   print sizes in human readable format\n");
+                    printf("  -R, --recursive        list subdirectories recursively\n");
+                    printf("  --color=WHEN           colorize output (never, auto, always)\n");
+                    printf("  --help                 display this help and exit\n");
+                    printf("  --version              output version information and exit\n");
+                    return 1; // Signal to exit after help
+                }
+                else if (strcmp(argv[i], "--version") == 0) {
+                    printf("ls (Substrate coreutils) 1.0\n");
+                    return 1; // Signal to exit after version
+                }
                 else {
                     fprintf(stderr, "ls: unrecognized option '%s'\n", argv[i]);
                     return -1;
@@ -110,8 +175,10 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                         case 'L': config->dereference = true; break;
                         case 'm': config->comma_sep = true; break;
                         case 'n': config->numeric_ids = true; config->long_fmt = true; break;
+                        case 'N': config->literal = true; break;
                         case 'o': config->long_fmt = true; config->no_group = true; break;
                         case 'p': config->slash_dirs = true; break;
+                        case 'q': config->hide_control_chars = true; break;
                         case 'Q': config->quote_names = true; break;
                         case 'r': config->reverse = true; break;
                         case 'R': config->recursive = true; break;
@@ -121,6 +188,14 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                         case 'u': config->time_type = TIME_ATIME; break;
                         case 'U': config->no_sort = true; break;
                         case 'v': config->version_sort = true; break;
+                        case 'w':
+                            if (argv[i][j+1]) {
+                                config->term_width = atoi(&argv[i][j+1]);
+                                j = strlen(argv[i]) - 1;
+                            } else if (i + 1 < argc) {
+                                config->term_width = atoi(argv[++i]);
+                            }
+                            break;
                         case 'x': config->by_lines = true; break;
                         case '1': config->one_per_line = true; config->multi_column = false; break;
                         default:

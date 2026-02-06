@@ -11,6 +11,13 @@ typedef enum {
     TIME_CTIME = 2
 } ls_time_type_t;
 
+typedef enum {
+    TIME_STYLE_LOCALE = 0,
+    TIME_STYLE_ISO,
+    TIME_STYLE_LONG_ISO,
+    TIME_STYLE_FULL_ISO
+} ls_time_style_t;
+
 typedef struct {
     // Filtering
     bool all;            // -a
@@ -30,6 +37,7 @@ typedef struct {
     bool inode;          // -i
     bool classify;       // -F
     bool slash_dirs;     // -p
+    bool file_type;      // --file-type (like -F but no * for exec)
     bool quote_names;    // -Q
 
     // Sorting
@@ -38,7 +46,8 @@ typedef struct {
     bool sort_time;      // -t
     bool no_sort;        // -U
     bool version_sort;   // -v
-    ls_time_type_t time_type; // -u (atime), -c (ctime)
+    ls_time_type_t time_type; // -u (atime), -c (ctime), --time=WORD
+    ls_time_style_t time_style; // --time-style=STYLE
 
     // Symlink Handling
     bool dereference;    // -L
@@ -49,10 +58,18 @@ typedef struct {
     bool kibibytes;      // -k
     bool show_blocks;    // -s
     bool si_units;       // --si
+    long block_size;     // --block-size=SIZE (0 = default)
 
     // Recursion & Color
     bool recursive;      // -R
+    char *hide_pattern;  // --hide=PATTERN (for -R)
     int color;           // 0=never, 1=auto, 2=always
+    int term_width;      // --width=N, -w N (0 = auto-detect)
+
+    // Miscellaneous
+    bool hide_control_chars; // -q
+    bool literal;            // -N, --literal
+    int quoting_style;       // 0=literal, 1=shell, 2=shell-always, 3=c, 4=escape
 } ls_config_t;
 
 typedef struct {

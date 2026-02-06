@@ -84,6 +84,11 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
             continue;
         }
 
+        // --hide=PATTERN: hide matching entries (for recursive mode)
+        if (config->hide_pattern && match_pattern(config->hide_pattern, ent->d_name)) {
+            continue;
+        }
+
         if (count >= cap) {
             cap *= 2;
             file_info_t *new_files = realloc(files, cap * sizeof(file_info_t));

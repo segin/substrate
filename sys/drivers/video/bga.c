@@ -139,12 +139,32 @@ void bga_scroll(int y_offset) {
     bga_write(VBE_DISPI_INDEX_Y_OFFSET, (uint16_t)y_offset);
 }
 
+static struct video_mode_info bga_modes[] = {
+    { 640, 480, 32, 1, 0, {0} },
+    { 800, 600, 32, 2, 0, {0} },
+    { 1024, 768, 32, 3, 0, {0} },
+    { 1280, 720, 32, 4, 0, {0} },
+    { 1280, 1024, 32, 5, 0, {0} }
+};
+#define BGA_MODE_COUNT (int)(sizeof(bga_modes) / sizeof(bga_modes[0]))
+
+static int bga_list_modes(struct video_mode_info *modes, int max_count) {
+    if (!modes) return BGA_MODE_COUNT;
+    int count = 0;
+    for (int i = 0; i < BGA_MODE_COUNT && count < max_count; i++) {
+        modes[count] = bga_modes[i];
+        count++;
+    }
+    return count;
+}
+
 static video_driver_t bga_driver = {
     .name = "bga",
     .priority = 50,
     .probe = bga_is_available,
     .init = bga_init,
-    .set_viewport = bga_set_viewport
+    .set_viewport = bga_set_viewport,
+    .list_modes = bga_list_modes
 };
 
 void bga_install(void) {

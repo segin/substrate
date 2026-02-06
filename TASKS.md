@@ -3893,40 +3893,40 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
                 - [x] `-k`, `--kibibytes`: Use 1024-byte blocks.
                 - [x] `-s`, `--size`: Print allocated size of each file, in blocks.
-                - [ ] `--block-size=SIZE`: Scale sizes by SIZE before printing.
+                - [x] `--block-size=SIZE`: Scale sizes by SIZE before printing.
                 - [x] `--si`: Use powers of 1000 not 1024.
             - [x] **File Type Indicators:**
                 - [x] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
                 - [x] `-p`: Append `/` indicator to directories.
-                - [ ] `--file-type`: Likewise, except do not append `*`.
+                - [x] `--file-type`: Likewise, except do not append `*`.
             - [x] **Inode & Block:**
                 - [x] `-i`, `--inode`: Print inode number of each file.
             - [x] **Recursion:**
                 - [x] `-R`, `--recursive`: List subdirectories recursively.
-                - [ ] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
+                - [x] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
             - [x] **Color:**
                 - [x] `--color=auto`: Colorize when stdout is a terminal.
                 - [x] `--color=always`: Always colorize output.
                 - [x] `--color=never`: Never colorize output.
-                - [ ] Parse `LS_COLORS` environment variable.
+                - [x] Parse `LS_COLORS` environment variable.
                 - [x] Default color scheme for file types (dir, link, exec, etc.).
             - [x] **Width Control:**
-                - [ ] `--width=N`: Set output width to N columns.
-                - [ ] `-w N`: Same as `--width=N`.
+                - [x] `--width=N`: Set output width to N columns.
+                - [x] `-w N`: Same as `--width=N`.
                 - [x] Read `COLUMNS` environment variable.
                 - [x] Query terminal width via `ioctl(TIOCGWINSZ)`.
                 - [x] Fallback to 80 columns for pipes/non-terminals.
-            - [ ] **Timestamps:**
-                - [ ] `--time=WORD`: Show time as WORD (atime/access/use, ctime/status, mtime/modification).
-                - [ ] `--time-style=STYLE`: Time style (full-iso, long-iso, iso, locale, +FORMAT).
-            - [ ] **Miscellaneous:**
-                - [ ] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters.
-                - [ ] `--show-control-chars`: Show non-graphic characters as-is (default).
-                - [ ] `-N`, `--literal`: Print raw entry names (don't quote).
-                - [ ] `-Q`, `--quote-name`: Enclose entry names in double quotes.
-                - [ ] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape).
-                - [ ] `--help`: Display help.
-                - [ ] `--version`: Display version.
+            - [x] **Timestamps:**
+                - [x] `--time=WORD`: Use time WORD (atime, access, use, ctime, status, mtime, modification).
+                - [x] `--time-style=STYLE`: Use STYLE (full-iso, long-iso, iso, locale)., +FORMAT).
+            - [x] **Miscellaneous:**
+                - [x] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters.
+                - [x] `--show-control-chars`: Show non-graphic characters as-is (default).
+                - [x] `-N`, `--literal`: Print raw entry names (don't quote).
+                - [x] `-Q`, `--quote-name`: Enclose entry names in double quotes.
+                - [x] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape).
+                - [x] `--help`: Display help.
+                - [x] `--version`: Display version.
         - [ ] **Output Modes:**
             - [ ] Implement long format (`-l`) with all columns.
             - [ ] Implement multi-column format (default for terminal).
