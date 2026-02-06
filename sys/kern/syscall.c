@@ -12,6 +12,7 @@
 #include <kern/panic.h>
 #include <kern/console.h>
 #include <exec/perso/personality.h>
+#include <vm/vm_kmem.h>
 #include <include/sys/thr.h>
 #include <include/sys/acct.h>
 #include <include/sys/file.h>
@@ -961,10 +962,123 @@ int sys_fchdir(int fd) {
     return 0;
 }
 
+// Forward declaration
+static int validate_user_buffer(const void *buf, size_t size);
+
+// Helper to find name of an inode in a directory
+// Returns allocated string (caller must free) or NULL
+static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
+    if (!dir || !dir->readdir) return NULL;
+
+    // We have to iterate linearly.
+    // Assuming standard "readdir" semantics: index 0, 1, 2...
+    // We check every entry.
+
+    // Safety limit to prevent infinite loops in broken FS
+    uint64_t index = 0;
+    while (index < 100000) {
+        struct dirent *d = readdir_fs(dir, index);
+        if (!d) break; // End of directory
+
+        if (d->ino == inode) {
+            // Match found
+            // Skip . and ..
+            if (strcmp(d->name, ".") == 0 || strcmp(d->name, "..") == 0) {
+                 index++;
+                 continue;
+            }
+
+            // Allocate and copy
+            int len = strlen(d->name);
+            char *name = kmalloc(len + 1);
+            if (!name) return NULL;
+            memcpy(name, d->name, len);
+            name[len] = '\0';
+            return name;
+        }
+        index++;
+    }
+    return NULL;
+}
+
 int sys_getcwd(char *buf, size_t size) {
     if (!buf || size < 2) return -1;
-    // TODO: Proper path tracking
-    buf[0] = '/'; buf[1] = 0;
+    if (validate_user_buffer(buf, size) != 0) return -14; // EFAULT
+
+    // Allocate temp kernel buffer
+    // Start filling from END
+    char *kbuf = kmalloc(4096);
+    if (!kbuf) return -12; // ENOMEM
+
+    char *ptr = kbuf + 4096 - 1;
+    *ptr = '\0';
+
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : fs_root;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+
+    fs_node_t *curr = cwd;
+
+    // If we are at root initially
+    if (curr == root || (curr->inode == root->inode)) { // Simple check
+        *(--ptr) = '/';
+    } else {
+        // Walk up
+        while (1) {
+            if (curr == root || (curr->inode == root->inode)) {
+                if (*ptr == '\0') *(--ptr) = '/';
+                break;
+            }
+
+            fs_node_t *parent = finddir_fs(curr, "..");
+            if (!parent) {
+                // Error looking up parent?
+                // Should not happen in valid FS
+                kfree(kbuf, 4096);
+                return -2; // ENOENT
+            }
+
+            if (parent->inode == curr->inode) {
+                // Hit filesystem root (mount point root or actual root)
+                if (*ptr == '\0') *(--ptr) = '/';
+                break;
+            }
+
+            // Find name of curr in parent
+            char *name = find_name_by_inode(parent, curr->inode);
+            if (!name) {
+                // Name not found
+                 kfree(kbuf, 4096);
+                 return -2; // ENOENT
+            }
+
+            int len = strlen(name);
+            if (ptr - kbuf < len + 1) {
+                // Path too long
+                kfree(name, len + 1);
+                kfree(kbuf, 4096);
+                return -36; // ENAMETOOLONG
+            }
+
+            ptr -= len;
+            memcpy(ptr, name, len);
+            *(--ptr) = '/';
+
+            kfree(name, len + 1);
+
+            // Move up
+            curr = parent;
+        }
+    }
+
+    // Calculate length
+    size_t len = (kbuf + 4096 - 1) - ptr;
+    if (len >= size) {
+        kfree(kbuf, 4096);
+        return -34; // ERANGE
+    }
+
+    memcpy(buf, ptr, len + 1); // Copy string + null
+    kfree(kbuf, 4096);
     return 0;
 }
 
