@@ -2797,33 +2797,33 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Complete `printf` Family Implementation (User & Kernel):**
         - [ ] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
         - [ ] **User:** `lib/c` implementation.
-        - [ ] **Flags:**
+        - [x] **Flags:**
             - [x] `-` (Left-align within field width).
             - [x] `+` (Force sign for positive numbers).
             - [x] ` ` (Space prefix for positive numbers).
             - [x] `#` (Alternate form: 0x for hex, force decimal point).
             - [x] `0` (Zero-padding).
-        - [ ] **Width & Precision:**
+        - [x] **Width & Precision:**
             - [x] Numeric width (e.g., `%5d`).
-            - [ ] Dynamic width `*` (from argument).
+            - [x] Dynamic width `*` (from argument).
             - [x] Numeric precision (e.g., `%.5d`) - strings only.
-            - [ ] Dynamic precision `.*`(from argument).
+            - [x] Dynamic precision `.*`(from argument).
             - [x] Combined width/precision (e.g., `%5.2f`) - strings only.
-            - [ ] Negative width logic (treat as `-` flag + positive width).
-        - [ ] **Length Modifiers:**
-            - [ ] `hh` (signed/unsigned char).
-            - [ ] `h` (signed/unsigned short).
-            - [ ] `l` (long, wint_t).
-            - [ ] `ll` (long long).
-            - [ ] `j` (intmax_t, uintmax_t).
-            - [ ] `z` (size_t, ssize_t).
-            - [ ] `t` (ptrdiff_t).
-            - [ ] `L` (long double).
-        - [ ] **Conversion Specifiers:**
-            - [ ] **Integers:** `d`, `i` (signed decimal).
+            - [x] Negative width logic (treat as `-` flag + positive width).
+        - [x] **Length Modifiers:**
+            - [x] `hh` (signed/unsigned char).
+            - [x] `h` (signed/unsigned short).
+            - [x] `l` (long, wint_t).
+            - [x] `ll` (long long).
+            - [x] `j` (intmax_t, uintmax_t).
+            - [x] `z` (size_t, ssize_t).
+            - [x] `t` (ptrdiff_t).
+            - [x] `L` (long double).
+        - [x] **Conversion Specifiers:**
+            - [x] **Integers:** `d`, `i` (signed decimal).
             - [x] **Unsigned:** `u` (decimal), `o` (octal).
-            - [ ] **Hex:** `x`, `X` (lower/upper case).
-            - [ ] **Floating Point (Basic):** `f`, `F` (decimal notation).
+            - [x] **Hex:** `x`, `X` (lower/upper case).
+            - [x] **Floating Point (Basic):** `f`, `F` (decimal notation).
             - [ ] **Scientific:** `e`, `E` (exponential notation).
             - [ ] **Significant:** `g`, `G` (shortest representation).
             - [ ] **Hex Float:** `a`, `A` (C99 hex float).
@@ -2839,7 +2839,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] "0" flag ignored if precision is specified for integers.
             - [ ] Space ignored if "+" is present.
 - [ ] **String/Mem:**
-    - [x] Optimize `memcpy`, `memset`, `memmove`.
+    - [ ] Optimize `memcpy`, `memset`, `memmove`.
     - [ ] **Math Library (`lib/m/`):**
         - [ ] **Architecture:**
             - [ ] `math.h` header definition.

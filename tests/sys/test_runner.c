@@ -200,6 +200,8 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "printf_new") == 0) {
          extern void test_printf_new(void);
          test_printf_new();
+         extern void test_printf_star(void);
+         test_printf_star();
     }
 
     if (strcmp(test_arg, "benchmark") == 0) {
