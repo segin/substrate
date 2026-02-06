@@ -22,7 +22,7 @@ enum personality_type {
     PERS_SVR3    = 5,
     PERS_SOLARIS = 6,
     PERS_FREEBSD = 9,
-    PERS_NETBSD  = 10,
+    PERS_NETBSD  = 2,
     PERS_OPENBSD = 12,
     /* Values >= 128 reserved for non-ELF personalities */
     PERS_SUNOS   = 129,
