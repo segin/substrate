@@ -3908,7 +3908,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `--color=auto`: Colorize when stdout is a terminal.
                 - [x] `--color=always`: Always colorize output.
                 - [x] `--color=never`: Never colorize output.
-                - [ ] Parse `LS_COLORS` environment variable.
+                - [x] Parse `LS_COLORS` environment variable.
                 - [x] Default color scheme for file types (dir, link, exec, etc.).
             - [x] **Width Control:**
                 - [ ] `--width=N`: Set output width to N columns.

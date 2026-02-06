@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include "ls_print.h"
+#include "ls_colors.h"
 
 static void print_formatted_size(off_t size, const ls_config_t *config) {
     // Apply block-size scaling if specified
@@ -36,14 +37,16 @@ static void print_name(file_info_t *f, const ls_config_t *config) {
     if (config->quote_names) printf("\"");
     
     if (config->color) {
-        if (S_ISDIR(f->st.st_mode)) printf("%s%s%s", COLOR_DIR, f->name, COLOR_RESET);
-        else if (S_ISLNK(f->st.st_mode)) printf("%s%s%s", COLOR_LINK, f->name, COLOR_RESET);
-        else if (f->st.st_mode & S_IXUSR) printf("%s%s%s", COLOR_EXE, f->name, COLOR_RESET);
-        else if (S_ISCHR(f->st.st_mode) || S_ISBLK(f->st.st_mode)) printf("%s%s%s", COLOR_DEV, f->name, COLOR_RESET);
-        else printf("%s", f->name);
+        const char *color = ls_colors_get(f->name, f->st.st_mode);
+        if (color && *color) {
+            printf("%s%s%s", color, f->name, ls_colors_reset());
+        } else {
+            printf("%s", f->name);
+        }
     } else {
         printf("%s", f->name);
     }
+
     
     if (config->quote_names) printf("\"");
     
