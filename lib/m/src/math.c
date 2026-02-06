@@ -60,6 +60,11 @@ double fmin(double x, double y) {
     return (x < y) ? x : y;
 }
 
+/* Positive difference */
+double fdim(double x, double y) {
+    return (x > y) ? (x - y) : 0.0;
+}
+
 /* Rounding functions */
 double ceil(double x) {
     int i = (int)x;
@@ -77,6 +82,16 @@ double trunc(double x) {
 
 double round(double x) {
     return (x >= 0) ? floor(x + 0.5) : ceil(x - 0.5);
+}
+
+double rint(double x) {
+    /* Round to nearest integer, ties to even (banker's rounding) */
+    double n = floor(x + 0.5);
+    /* If exactly halfway, round to even */
+    if (x + 0.5 == n && (int)n % 2 != 0) {
+        n -= 1.0;
+    }
+    return n;
 }
 
 /* Float versions */

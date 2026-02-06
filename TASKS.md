@@ -2858,12 +2858,12 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `remainder()`
             - [x] `fmax()`
             - [x] `fmin()`
-            - [ ] `fdim()`
+            - [x] `fdim()`
             - [x] `ceil()`
             - [x] `floor()`
             - [x] `trunc()`
             - [x] `round()`
-            - [ ] `rint()`
+            - [x] `rint()`
         - [ ] **Exponential & Power:**
             - [ ] `exp()`
             - [ ] `exp2()`

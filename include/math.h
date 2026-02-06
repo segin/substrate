@@ -96,12 +96,14 @@ double remainder(double x, double y);
 /* Min/Max */
 double fmax(double x, double y);
 double fmin(double x, double y);
+double fdim(double x, double y);
 
 /* Rounding */
 double ceil(double x);
 double floor(double x);
 double trunc(double x);
 double round(double x);
+double rint(double x);
 
 /* Float versions (f suffix) */
 float sinf(float x);
