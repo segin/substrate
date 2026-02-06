@@ -1,0 +1,39 @@
+.TH MEMCHR 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+memchr \- scan memory for a character
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "void *memchr(const void *" s ", int " c ", size_t " n ");"
+.SH DESCRIPTION
+The
+.BR memchr ()
+function scans the initial
+.I n
+bytes of the memory area pointed to by
+.I s
+for the first instance of
+.IR c .
+Both
+.I c
+and the bytes of the memory area pointed to by
+.I s
+are interpreted as
+.IR "unsigned char" .
+.SH RETURN VALUE
+The
+.BR memchr ()
+function returns a pointer to the matching byte or NULL if the character does
+not occur in the given memory area.
+.SH EXAMPLES
+.EX
+#include <string.h>
+
+int main() {
+    char *p = memchr("hello", 'e', 5);
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR strchr (3),
+.BR memcmp (3)

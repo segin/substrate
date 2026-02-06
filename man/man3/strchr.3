@@ -1,0 +1,49 @@
+.TH STRCHR 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strchr, strrchr \- locate character in string
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *strchr(const char *" s ", int " c ");"
+.sp
+.BI "char *strrchr(const char *" s ", int " c ");"
+.SH DESCRIPTION
+The
+.BR strchr ()
+function returns a pointer to the first occurrence of the character
+.I c
+in the string
+.IR s .
+.sp
+The
+.BR strrchr ()
+function returns a pointer to the last occurrence of the character
+.I c
+in the string
+.IR s .
+.sp
+Here "character" means "byte"; these functions do not work with wide or
+multibyte characters.
+.SH RETURN VALUE
+The
+.BR strchr ()
+and
+.BR strrchr ()
+functions return a pointer to the matched character or NULL if the character is
+not found. The terminating null byte is considered part of the string, so that
+if
+.I c
+is specified as '\\0', these functions return a pointer to the terminator.
+.SH EXAMPLES
+.EX
+#include <string.h>
+
+int main() {
+    char *p = strchr("hello", 'l');
+    char *q = strrchr("hello", 'l');
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR memchr (3),
+.BR strstr (3)

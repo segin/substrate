@@ -91,6 +91,13 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_GETPGID] = &sys_getpgid,
     [SYS_GETRUSAGE] = &sys_getrusage,
     [SYS_TIMES] = &sys_times,
+    [SYS_PROC_THREADS] = &sys_proc_threads,
+    [SYS_PROC_FDS] = &sys_proc_fds,
+    [SYS_PROC_MAPS] = &sys_proc_maps,
+    [SYS_PROC_CWD] = &sys_proc_cwd,
+    [SYS_PROC_EXE] = &sys_proc_exe,
+    [SYS_PROC_CMDLINE] = &sys_proc_cmdline,
+    [SYS_PROC_ENVIRON] = &sys_proc_environ,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -162,6 +169,13 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_GETPGID] = "getpgid",
     [SYS_GETRUSAGE] = "getrusage",
     [SYS_TIMES] = "times",
+    [SYS_PROC_THREADS] = "proc_threads",
+    [SYS_PROC_FDS] = "proc_fds",
+    [SYS_PROC_MAPS] = "proc_maps",
+    [SYS_PROC_CWD] = "proc_cwd",
+    [SYS_PROC_EXE] = "proc_exe",
+    [SYS_PROC_CMDLINE] = "proc_cmdline",
+    [SYS_PROC_ENVIRON] = "proc_environ",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -233,6 +247,13 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_GETPGID] = { 1, { ARG_INT } },
     [SYS_GETRUSAGE] = { 2, { ARG_INT, ARG_PTR } },
     [SYS_TIMES] = { 1, { ARG_PTR } },
+    [SYS_PROC_THREADS] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_PROC_FDS] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_PROC_MAPS] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_PROC_CWD] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [SYS_PROC_EXE] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [SYS_PROC_CMDLINE] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_PROC_ENVIRON] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
 };
 
 extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);

@@ -1087,6 +1087,41 @@ int sys_hostname(char *buf, size_t len) {
     return 0;
 }
 
+int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count) {
+    (void)pid; (void)tids; (void)count;
+    return -1; // ENOSYS stub
+}
+
+int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
+    (void)pid; (void)fds; (void)count;
+    return -1;
+}
+
+int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count) {
+    (void)pid; (void)maps; (void)count;
+    return -1;
+}
+
+int sys_proc_cwd(pid_t pid, char *buf, size_t len) {
+    (void)pid; (void)buf; (void)len;
+    return -1;
+}
+
+int sys_proc_exe(pid_t pid, char *buf, size_t len) {
+    (void)pid; (void)buf; (void)len;
+    return -1;
+}
+
+int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
+    (void)pid; (void)argv; (void)argc;
+    return -1;
+}
+
+int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
+    (void)pid; (void)envp; (void)envc;
+    return -1;
+}
+
 int sys_reboot(int cmd) {
     (void)cmd;
     // For now, always reboot. 

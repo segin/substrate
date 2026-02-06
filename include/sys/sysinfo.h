@@ -16,6 +16,8 @@ typedef enum {
 typedef struct sys_procinfo {
     pid_t pid;
     pid_t ppid;
+    pid_t pgid;
+    pid_t sid;
     uid_t uid;
     gid_t gid;
     uint8_t state;
@@ -32,6 +34,19 @@ typedef struct sys_procinfo {
     uint32_t rss;    // Resident Set Size (pages)
     
 } sys_procinfo_t;
+
+typedef struct sys_fd {
+    int fd;
+    char path[256];
+    uint32_t flags;
+} sys_fd_t;
+
+typedef struct sys_map {
+    uintptr_t start;
+    uintptr_t end;
+    uint32_t flags;
+    char name[256];
+} sys_map_t;
 
 struct sysinfo {
     long uptime;             /* Seconds since boot */
@@ -52,6 +67,16 @@ struct sysinfo {
 
 #ifndef _KERNEL
 int sysinfo(struct sysinfo *info);
+int sys_proc_count(void);
+int sys_proc_list(pid_t *pids, size_t count);
+int sys_proc_info(pid_t pid, sys_procinfo_t *info);
+int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count);
+int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count);
+int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count);
+int sys_proc_cwd(pid_t pid, char *buf, size_t len);
+int sys_proc_exe(pid_t pid, char *buf, size_t len);
+int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc);
+int sys_proc_environ(pid_t pid, char **envp, size_t *envc);
 #endif
 
 #endif

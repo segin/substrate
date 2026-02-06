@@ -1,0 +1,65 @@
+.TH STRTOK 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strtok, strtok_r \- extract tokens from strings
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *strtok(char *" str ", const char *" delim ");"
+.sp
+.BI "char *strtok_r(char *" str ", const char *" delim ", char **" saveptr ");"
+.SH DESCRIPTION
+The
+.BR strtok ()
+function parses a string into a sequence of tokens. On the first call to
+.BR strtok (),
+the string to be parsed should be specified in
+.IR str .
+In each subsequent call that should parse the same string,
+.I str
+must be NULL.
+.sp
+The
+.I delim
+argument specifies a set of bytes that delimit the tokens in the parsed string.
+The caller may specify different strings in
+.I delim
+in successive calls that parse the same string.
+.sp
+The
+.BR strtok_r ()
+function is a reentrant version of
+.BR strtok ().
+The
+.I saveptr
+argument is a pointer to a
+.I "char *"
+variable that is used internally by
+.BR strtok_r ()
+in order to maintain context between successive calls that parse the same
+string.
+.SH RETURN VALUE
+The
+.BR strtok ()
+and
+.BR strtok_r ()
+functions return a pointer to the next token, or NULL if there are no more
+tokens.
+.SH EXAMPLES
+.EX
+#include <string.h>
+#include <stdio.h>
+
+int main() {
+    char str[] = "apple,banana,cherry";
+    char *token = strtok(str, ",");
+    while (token) {
+        printf("%s\\n", token);
+        token = strtok(NULL, ",");
+    }
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR strpbrk (3),
+.BR strsep (3),
+.BR strspn (3)

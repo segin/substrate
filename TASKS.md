@@ -2795,8 +2795,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Stdio:**
     - [ ] Implement Buffered I/O logic (`fflush`, buffer management).
     - [ ] **Complete `printf` Family Implementation (User & Kernel):**
-        - [ ] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
-        - [ ] **User:** `lib/c` implementation.
+        - [x] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
+        - [x] **User:** `lib/c` implementation.
         - [x] **Flags:**
             - [x] `-` (Left-align within field width).
             - [x] `+` (Force sign for positive numbers).
@@ -2806,9 +2806,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Width & Precision:**
             - [x] Numeric width (e.g., `%5d`).
             - [x] Dynamic width `*` (from argument).
-            - [x] Numeric precision (e.g., `%.5d`) - strings only.
+            - [x] Numeric precision (e.g., `%.5d`).
             - [x] Dynamic precision `.*`(from argument).
-            - [x] Combined width/precision (e.g., `%5.2f`) - strings only.
+            - [x] Combined width/precision (e.g., `%5.2f`).
             - [x] Negative width logic (treat as `-` flag + positive width).
         - [x] **Length Modifiers:**
             - [x] `hh` (signed/unsigned char).
@@ -2833,11 +2833,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] **Count:** `n` (store number of chars written to int*).
             - [x] **Literal:** `%` (print percent sign).
         - [ ] **Complex/Compound Cases:**
-            - [ ] Prefix combinations (e.g., `%20#llx`).
-            - [ ] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
-            - [ ] "0" flag ignored if "-" is present.
-            - [ ] "0" flag ignored if precision is specified for integers.
-            - [ ] Space ignored if "+" is present.
+            - [x] Prefix combinations (e.g., `%20#llx`).
+            - [x] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
+            - [x] "0" flag ignored if "-" is present.
+            - [x] "0" flag ignored if precision is specified for integers.
+            - [x] Space ignored if "+" is present.
 - [ ] **String/Mem:**
     - [ ] Optimize `memcpy`, `memset`, `memmove`.
     - [ ] **Math Library (`lib/m/`):**
@@ -3486,17 +3486,17 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `uname()`: System identification.
                 - [ ] `getrlimit()`: Process resource limits.
                 - [ ] `clock_gettime()`: High-resolution system clocks.
-        - [/] **Process Information API (`lib/sys`):**
+        - [x] **Process Information API (`lib/sys`):**
             - [x] `sys_proc_count()` - Get total number of processes.
             - [x] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
             - [x] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info (including `bitness`).
-            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
-            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
-            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
-            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)` - Get current working directory.
-            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
-            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
-            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
+            - [x] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
+            - [x] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
+            - [x] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
+            - [x] `sys_proc_cwd(pid_t pid, char *buf, size_t len)` - Get current working directory.
+            - [x] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
+            - [x] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
+            - [x] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
         - [ ] **Memory Statistics API (`lib/sys`):**
             - [ ] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
             - [ ] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).

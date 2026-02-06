@@ -1,0 +1,59 @@
+.TH STRCAT 3 2026-02-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+strcat, strncat \- concatenate substrings
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *strcat(char *" dest ", const char *" src ");"
+.sp
+.BI "char *strncat(char *" dest ", const char *" src ", size_t " n ");"
+.SH DESCRIPTION
+The
+.BR strcat ()
+function appends the
+.I src
+string to the
+.I dest
+string, overwriting the terminating null byte ('\\0') at the end of
+.IR dest ,
+and then adds a terminating null byte.
+The strings may not overlap, and the
+.I dest
+string must have enough space for the result.
+.sp
+The
+.BR strncat ()
+function is similar, except that it will use at most
+.I n
+bytes from
+.IR src ,
+and
+.I src
+does not need to be null-terminated if it contains
+.I n
+or more bytes.
+As with
+.BR strcat (),
+the resulting string in
+.I dest
+is always null-terminated.
+.SH RETURN VALUE
+The
+.BR strcat ()
+and
+.BR strncat ()
+functions return a pointer to the resulting string
+.IR dest .
+.SH EXAMPLES
+.EX
+#include <string.h>
+
+int main() {
+    char dest[20] = "Hello ";
+    strcat(dest, "World");
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR strcpy (3),
+.BR strlen (3)
