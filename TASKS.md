@@ -1633,7 +1633,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - Docs: `vfs_fhtovp.9`
                 - Acceptance: Valid vnode from file handle
         - [ ] **`vnode_ops` (File-level):**
-            - [ ] **Name Resolution:**
+            - [x] **Name Resolution:**
                 - [x] Implement `vop_lookup(dvp, vpp, cnp)`.
                     - Files: `sys/vfs/vnode_ops.c` (new), `sys/vfs/vnode.h`
                     - API: Look up component name in directory vnode
@@ -1649,21 +1649,21 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Docs: `vop_cachedlookup.9`
                     - Acceptance: Cache reduces filesystem lookups
             - [ ] **Creation/Deletion:**
-                - [ ] Implement `vop_create(dvp, vpp, cnp, vap)`.
+                - [x] Implement `vop_create(dvp, vpp, cnp, vap)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Create regular file in directory
                     - Logic: Allocate inode, create dir entry, return new vnode
                     - Tests: unit (create success, EEXIST, EACCES, ENOSPC)
                     - Docs: `vop_create.9`
                     - Acceptance: New file created with correct attributes
-                - [ ] Implement `vop_mknod(dvp, vpp, cnp, vap)`.
+                - [x] Implement `vop_mknod(dvp, vpp, cnp, vap)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Create device node (block/char special)
                     - Attrs: `va_rdev` for device major/minor
                     - Tests: unit (block device, char device, FIFO, socket)
                     - Docs: `vop_mknod.9`
                     - Acceptance: Device node with correct rdev
-                - [x] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
+                - [ ] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
                     - Files: `sys/vfs/vfs.c`, `sys/fs/udf/udf.c`
                     - API: Create directory
                     - Tests: unit (mkdir success, nested mkdir)

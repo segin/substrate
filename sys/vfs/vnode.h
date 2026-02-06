@@ -386,4 +386,11 @@ extern struct vnode_stats vnstats;
         panic("vnode has zero usecount"); \
 } while (0)
 
+/* VOP wrappers */
+int vop_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, struct ucred *cred);
+int vop_cachedlookup(struct vnode *dvp, struct vnode **vpp, const char *name, struct ucred *cred);
+int vop_create(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, struct ucred *cred);
+int vop_mknod(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, dev_t dev, struct ucred *cred);
+int vop_mkdir(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, struct ucred *cred);
+
 #endif /* _SYS_VNODE_H */

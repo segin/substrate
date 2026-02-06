@@ -1,0 +1,51 @@
+.Dd February 6, 2026
+.Dt VOP_MKDIR 9
+.Os
+.Sh NAME
+.Nm vop_mkdir
+.Nd create a directory
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/vnode.h
+.Ft int
+.Fn vop_mkdir "struct vnode *dvp" "struct vnode **vpp" "const char *name" "mode_t mode" "struct ucred *cred"
+.Sh DESCRIPTION
+The
+.Fn vop_mkdir
+function creates a new directory named
+.Fa name
+in the directory
+.Fa dvp .
+If successful, the new directory vnode is returned in
+.Fa *vpp
+with a reference count incremented.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa cred"
+.It Fa dvp
+The parent directory vnode.
+.It Fa vpp
+Pointer to a vnode pointer where the new directory vnode will be stored.
+.It Fa name
+The name of the new directory.
+.It Fa mode
+The mode (permissions) for the new directory.
+.It Fa cred
+The user credentials for the operation.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er EOPNOTSUPP"
+.It Bq Er EOPNOTSUPP
+The filesystem does not support this operation.
+.It Bq Er ENOTDIR
+The vnode
+.Fa dvp
+is not a directory.
+.It Bq Er EEXIST
+The directory already exists.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_create 9

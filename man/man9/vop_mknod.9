@@ -1,0 +1,53 @@
+.Dd February 6, 2026
+.Dt VOP_MKNOD 9
+.Os
+.Sh NAME
+.Nm vop_mknod
+.Nd create a device node
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/vnode.h
+.Ft int
+.Fn vop_mknod "struct vnode *dvp" "struct vnode **vpp" "const char *name" "mode_t mode" "dev_t dev" "struct ucred *cred"
+.Sh DESCRIPTION
+The
+.Fn vop_mknod
+function creates a new device node named
+.Fa name
+in the directory
+.Fa dvp .
+The device identifier is specified by
+.Fa dev .
+If successful, the new vnode is returned in
+.Fa *vpp
+with a reference count incremented.
+.Pp
+Arguments:
+.Bl -tag -width ".Fa cred"
+.It Fa dvp
+The directory vnode.
+.It Fa vpp
+Pointer to a vnode pointer where the new vnode will be stored.
+.It Fa name
+The name of the new node.
+.It Fa mode
+The mode and type of the new node.
+.It Fa dev
+The device identifier (major/minor numbers).
+.It Fa cred
+The user credentials for the operation.
+.El
+.Sh RETURN VALUES
+Returns 0 on success, or an error code on failure.
+.Sh ERRORS
+.Bl -tag -width ".Bq Er EOPNOTSUPP"
+.It Bq Er EOPNOTSUPP
+The filesystem does not support this operation.
+.It Bq Er ENOTDIR
+The vnode
+.Fa dvp
+is not a directory.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_create 9

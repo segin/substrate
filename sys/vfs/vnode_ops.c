@@ -54,3 +54,51 @@ vop_cachedlookup(struct vnode *dvp, struct vnode **vpp, const char *name, struct
 
     return error;
 }
+
+/*
+ * vop_create:
+ * Create a new regular file.
+ */
+int
+vop_create(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, struct ucred *cred)
+{
+    if (dvp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (dvp->v_op && dvp->v_op->vop_create)
+        return dvp->v_op->vop_create(dvp, vpp, name, mode, cred);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_mknod:
+ * Create a device node.
+ */
+int
+vop_mknod(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, dev_t dev, struct ucred *cred)
+{
+    if (dvp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (dvp->v_op && dvp->v_op->vop_mknod)
+        return dvp->v_op->vop_mknod(dvp, vpp, name, mode, dev, cred);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_mkdir:
+ * Create a new directory.
+ */
+int
+vop_mkdir(struct vnode *dvp, struct vnode **vpp, const char *name, mode_t mode, struct ucred *cred)
+{
+    if (dvp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (dvp->v_op && dvp->v_op->vop_mkdir)
+        return dvp->v_op->vop_mkdir(dvp, vpp, name, mode, cred);
+
+    return EOPNOTSUPP;
+}
