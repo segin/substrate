@@ -360,14 +360,14 @@ char *expand_prompt_escapes(const char *ps1, int command_count, int extended, in
                 case 'u': // %u = underline off
                     buffer_append_str(&buf, &cap, &len, "\001\033[24m\002");
                     break;
-                case 'T': { // %T = 24-hour time HH:MM:SS
+                case 'T': { // %T = 24-hour time HH:MM (no padding)
                     time_t now = time(NULL);
                     struct tm tm_buf;
                     struct tm *tm_info = localtime_r(&now, &tm_buf);
                     if (tm_info) {
                         char tstr[32];
-                        snprintf(tstr, sizeof(tstr), "%02d:%02d:%02d", 
-                                tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+                        snprintf(tstr, sizeof(tstr), "%d:%02d", 
+                                tm_info->tm_hour, tm_info->tm_min);
                         buffer_append_str(&buf, &cap, &len, tstr);
                     }
                     break;
