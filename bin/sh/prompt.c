@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <pwd.h>
+#include <time.h>
 #include "prompt.h"
 #include "util.h"
 #include "expand.h"
@@ -60,6 +61,13 @@ char *expand_prompt_escapes(const char *ps1, int command_count, int extended, in
                 case 'h': {
                     char hostname[256];
                     if (gethostname(hostname, sizeof(hostname)) == 0) {
+                        hostname[sizeof(hostname) - 1] = '\0';
+                        for (int i = 0; hostname[i]; i++) {
+                            if (hostname[i] == '.') {
+                                hostname[i] = '\0';
+                                break;
+                            }
+                        }
                         buffer_append_str(&buf, &cap, &len, hostname);
                     } else {
                         buffer_append_str(&buf, &cap, &len, "unknown");
@@ -106,9 +114,16 @@ char *expand_prompt_escapes(const char *ps1, int command_count, int extended, in
                     }
                     break;
                 }
-                case 'm': { // %m = \h
+                case 'm': { // %m = \h (short hostname)
                     char hostname[256];
                     if (gethostname(hostname, sizeof(hostname)) == 0) {
+                        hostname[sizeof(hostname) - 1] = '\0';
+                        for (int i = 0; hostname[i]; i++) {
+                            if (hostname[i] == '.') {
+                                hostname[i] = '\0';
+                                break;
+                            }
+                        }
                         buffer_append_str(&buf, &cap, &len, hostname);
                     } else {
                         buffer_append_str(&buf, &cap, &len, "unknown");
@@ -345,10 +360,30 @@ char *expand_prompt_escapes(const char *ps1, int command_count, int extended, in
                 case 'u': // %u = underline off
                     buffer_append_str(&buf, &cap, &len, "\001\033[24m\002");
                     break;
-                case 'T':
-                case 'D':
-                    // Reserved/Ignored
+                case 'T': { // %T = 24-hour time HH:MM:SS
+                    time_t now = time(NULL);
+                    struct tm tm_buf;
+                    struct tm *tm_info = localtime_r(&now, &tm_buf);
+                    if (tm_info) {
+                        char tstr[32];
+                        snprintf(tstr, sizeof(tstr), "%02d:%02d:%02d", 
+                                tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+                        buffer_append_str(&buf, &cap, &len, tstr);
+                    }
                     break;
+                }
+                case 'D': { // %D = YY-MM-DD
+                    time_t now = time(NULL);
+                    struct tm tm_buf;
+                    struct tm *tm_info = localtime_r(&now, &tm_buf);
+                    if (tm_info) {
+                        char dstr[32];
+                        snprintf(dstr, sizeof(dstr), "%02d-%02d-%02d", 
+                                tm_info->tm_year % 100, tm_info->tm_mon + 1, tm_info->tm_mday);
+                        buffer_append_str(&buf, &cap, &len, dstr);
+                    }
+                    break;
+                }
                 default:
                     // Treat unknown %x as literal %x
                     buffer_append(&buf, &cap, &len, '%');
@@ -386,10 +421,12 @@ char *evaluate_prompt(const char *ps1, int command_count, int extended) {
     shell_errexit = 0;
     
     char *escaped = expand_prompt_escapes(ps1, command_count, extended, 0);
+    // fprintf(stderr, "DEBUG: escaped=[%s]\n", escaped ? escaped : "NULL");
     char *expanded;
     
     // Always call expand_word
     expanded = expand_word(escaped ? escaped : ps1);
+    // fprintf(stderr, "DEBUG: expanded=[%s]\n", expanded ? expanded : "NULL");
     
     if (escaped) free(escaped);
     
