@@ -347,9 +347,14 @@ int main(int argc, char **argv, char **envp) {
             if (shell_is_interactive) {
                 job_update_status();
                 check_traps();
-                char *p = shell_var_get("PS1");
+                char *p = shell_var_get("prompt");
+                int extended = 1;  // prompt uses zsh-style %escapes
+                if (!p) {
+                    p = shell_var_get("PS1");
+                    extended = 0;  // PS1 uses bash-style \escapes
+                }
                 if (!p) p = "$ ";
-                char *expanded = evaluate_prompt(p, command_count);
+                char *expanded = evaluate_prompt(p, command_count, extended);
                 printf("%s", expanded ? expanded : p);
                 if (expanded) free(expanded);
                 fflush(stdout);
