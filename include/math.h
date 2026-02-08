@@ -74,6 +74,7 @@ double asin(double x);
 double acos(double x);
 double atan(double x);
 double atan2(double y, double x);
+void sincos(double x, double *s, double *c);
 
 /* Hyperbolic functions */
 double sinh(double x);
@@ -120,6 +121,9 @@ double floor(double x);
 double trunc(double x);
 double round(double x);
 double rint(double x);
+double nearbyint(double x);
+long lrint(double x);
+long long llrint(double x);
 
 /* Float versions (f suffix) */
 float sinf(float x);
@@ -135,6 +139,7 @@ float ceilf(float x);
 float floorf(float x);
 float truncf(float x);
 float roundf(float x);
+void sincosf(float x, float *s, float *c);
 
 /* Long double versions (l suffix) */
 long double sinl(long double x);
@@ -150,5 +155,6 @@ long double ceill(long double x);
 long double floorl(long double x);
 long double truncl(long double x);
 long double roundl(long double x);
+void sincosl(long double x, long double *s, long double *c);
 
 #endif /* _MATH_H */

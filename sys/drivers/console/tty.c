@@ -222,6 +222,47 @@ static void canon(struct tty *tp, uint32_t *flags_ptr) {
     }
 }
 
+static void tty_echo(struct tty *tp, unsigned char c) {
+    if (!(tp->termios.c_lflag & ECHO)) {
+        if (c == '\n' && (tp->termios.c_lflag & ECHONL)) {
+            tty_output_locked('\n', tp);
+        }
+        return;
+    }
+
+    if (tp->termios.c_lflag & ICANON) {
+        if (c == tp->termios.c_cc[VERASE]) {
+            if (tp->termios.c_lflag & ECHOE) {
+                tty_output_locked('\b', tp);
+                tty_output_locked(' ', tp);
+                tty_output_locked('\b', tp);
+            } else {
+                tty_output_locked(tp->termios.c_cc[VERASE], tp);
+            }
+            return;
+        }
+        if (c == tp->termios.c_cc[VKILL]) {
+            if (tp->termios.c_lflag & ECHOKE) {
+                // Erase line visual
+                tty_output_locked('^', tp);
+                tty_output_locked('U', tp);
+                tty_output_locked('\n', tp);
+            } else if (tp->termios.c_lflag & ECHOK) {
+                tty_output_locked('\n', tp);
+            }
+            return;
+        }
+    }
+
+    if ((tp->termios.c_lflag & ECHOCTL) && c < 32 && c != '\n' && c != '\t') {
+        tty_output_locked('^', tp);
+        tty_output_locked(c + 64, tp);
+        return;
+    }
+
+    tty_output_locked(c, tp);
+}
+
 // Input processing (ISR context usually)
 // Implements 'ttyinput'
 void tty_flip_buffer_push(struct tty *tty, char c) {
@@ -245,9 +286,6 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
             c = '\r';
     }
     
-    // cooked = !(RAW)
-    // In v6, flags&RAW checks.
-    
     int raw = !(tty->termios.c_lflag & ICANON);
     
     // Software flow control (IXON) - Output throttling
@@ -255,13 +293,13 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         if (c == tty->termios.c_cc[VSTOP]) {
             tty->stopped = 1;
             TTY_UNLOCK(tty);
-            return; /* Do not pass VSTOP to application */
+            return;
         }
         if (c == tty->termios.c_cc[VSTART]) {
             tty->stopped = 0;
-            tty_start_locked(tty); /* Kick output */
+            tty_start_locked(tty);
             TTY_UNLOCK(tty);
-            return; /* Do not pass VSTART to application */
+            return;
         }
     }
     
@@ -270,11 +308,10 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         int sig = 0;
         if (c == tty->termios.c_cc[VINTR]) sig = SIGINT;
         else if (c == tty->termios.c_cc[VQUIT]) sig = SIGQUIT;
-        else if (c == tty->termios.c_cc[VSUSP]) sig = SIGTSTP; /* Job control stop (Ctrl-Z) */
+        else if (c == tty->termios.c_cc[VSUSP]) sig = SIGTSTP;
         
         if (sig) {
             if (tty->pgrp > 0) signal_send_group(tty->pgrp, sig);
-            // v6: flushtty(tp)
             TTY_UNLOCK(tty);
             return;
         }
@@ -299,10 +336,8 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     }
     
     // Echo
-    if (tty->termios.c_lflag & ECHO) {
-        tty_output_locked(c, tty); // Echoes through canonical output processing!
-        tty_start_locked(tty);
-    }
+    tty_echo(tty, c);
+    tty_start_locked(tty);
 
     TTY_UNLOCK(tty);
 }

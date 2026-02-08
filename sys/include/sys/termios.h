@@ -106,7 +106,7 @@ struct termios {
 #define PARODD  0001000
 #define HUPCL   0002000
 #define CLOCAL  0004000
-
+#define CRTSCTS 020000000000		/* flow control */
 // c_lflag
 #define ISIG    0000001
 #define ICANON  0000002

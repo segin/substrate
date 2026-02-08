@@ -62,6 +62,15 @@ static void uart_set_termios(struct termios *t) {
     outb(UART_COM1 + 0, divisor & 0xFF);
     outb(UART_COM1 + 1, (divisor >> 8) & 0xFF);
     outb(UART_COM1 + 3, lcr); // Disable DLAB, set params
+
+    // Modem Control (AFE/Flow Control)
+    uint8_t mcr = inb(UART_COM1 + 4); 
+    if (t->c_cflag & CRTSCTS) {
+        mcr |= 0x20; // Auto Flow Control (AFE) on 16550A+
+    } else {
+        mcr &= ~0x20;
+    }
+    outb(UART_COM1 + 4, mcr);
 }
 
 static console_backend_t uart_console = {

@@ -33,32 +33,49 @@
  * e^x = 1 + x + x^2/2! + x^3/3! + ...
  */
 double exp(double x) {
-    /* Handle special cases */
-    if (x == 0) return 1.0;
-    if (x < -708) return 0.0;  /* Underflow */
-    if (x > 709) return INFINITY;  /* Overflow */
-    
-    /* Reduce range: e^x = 2^k * e^r where r = x - k*ln(2) */
-    int k = (int)(x * M_LOG2E);
-    double r = x - k * M_LN2;
-    
-    /* Taylor series for e^r (|r| < ln(2)) */
-    double term = 1.0, sum = 1.0;
-    for (int i = 1; i < 30 && fabs(term) > 1e-15; i++) {
-        term *= r / i;
-        sum += term;
-    }
-    
-    /* Multiply by 2^k */
-    while (k > 0) { sum *= 2.0; k--; }
-    while (k < 0) { sum *= 0.5; k++; }
-    
-    return sum;
+    if (isnan(x)) return x;
+    if (x == 0.0) return 1.0;
+    if (isinf(x)) return (x > 0) ? INFINITY : 0.0;
+
+    double res;
+    __asm__ __volatile__(
+        "fldl2e\n\t"        /* Load log2(e) */
+        "fmulp\n\t"         /* st(0) = x * log2(e) */
+        "fld %%st(0)\n\t"
+        "frndint\n\t"       /* st(0) = i = round(x * log2(e)) */
+        "fsub %%st(0), %%st(1)\n\t" /* st(1) = f = (x * log2(e)) - i */
+        "fxch\n\t"
+        "f2xm1\n\t"         /* st(0) = 2^f - 1 */
+        "fld1\n\t"
+        "faddp\n\t"         /* st(0) = 2^f */
+        "fscale\n\t"        /* st(0) = 2^f * 2^i = 2^(x * log2(e)) = e^x */
+        "fstp %%st(1)\n\t"
+        "fstpl %0"
+        : "=m"(res) : "m"(x) : "ax", "cc");
+    return res;
 }
 
 /* exp2(x) = 2^x = e^(x * ln(2)) */
 double exp2(double x) {
-    return exp(x * M_LN2);
+    if (isnan(x)) return x;
+    if (x == 0.0) return 1.0;
+    if (isinf(x)) return (x > 0) ? INFINITY : 0.0;
+
+    double res;
+    __asm__ __volatile__(
+        "fldl %1\n\t"
+        "fld %%st(0)\n\t"
+        "frndint\n\t"       /* i */
+        "fsub %%st(0), %%st(1)\n\t" /* f */
+        "fxch\n\t"
+        "f2xm1\n\t"
+        "fld1\n\t"
+        "faddp\n\t"
+        "fscale\n\t"
+        "fstp %%st(1)\n\t"
+        "fstpl %0"
+        : "=m"(res) : "m"(x) : "ax", "cc");
+    return res;
 }
 
 /* expm1(x) = e^x - 1, accurate for small x */
@@ -72,36 +89,23 @@ double expm1(double x) {
  * Uses identity: log(x) = 2 * atanh((x-1)/(x+1)) for x > 0
  */
 double log(double x) {
-    if (x <= 0) return (x == 0) ? -INFINITY : NAN;
-    if (x == 1) return 0.0;
-    if (isinf(x)) return INFINITY;
-    
-    /* Reduce to [1, 2): x = m * 2^e, log(x) = log(m) + e*ln(2) */
-    int e = 0;
-    while (x >= 2.0) { x *= 0.5; e++; }
-    while (x < 1.0) { x *= 2.0; e--; }
-    
-    /* Use series: log(x) = 2 * sum((t^(2k+1))/(2k+1)) where t = (x-1)/(x+1) */
-    double t = (x - 1.0) / (x + 1.0);
-    double t2 = t * t;
-    double sum = t;
-    double term = t;
-    for (int k = 1; k < 50; k++) {
-        term *= t2;
-        sum += term / (2 * k + 1);
-    }
-    
-    return 2.0 * sum + e * M_LN2;
+    double res;
+    __asm__ __volatile__("fldln2; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
+    return res;
 }
 
 /* log2(x) = log(x) / ln(2) */
 double log2(double x) {
-    return log(x) * M_LOG2E;
+    double res;
+    __asm__ __volatile__("fld1; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
+    return res;
 }
 
 /* log10(x) = log(x) / ln(10) */
 double log10(double x) {
-    return log(x) / M_LN10;
+    double res;
+    __asm__ __volatile__("fldlg2; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
+    return res;
 }
 
 /* log1p(x) = log(1+x), accurate for small x */
@@ -113,16 +117,36 @@ double log1p(double x) {
 /* pow(x, y) = x^y = e^(y * log(x)) */
 double pow(double x, double y) {
     if (y == 0.0) return 1.0;
-    if (x == 0.0) return (y > 0) ? 0.0 : INFINITY;
     if (x == 1.0) return 1.0;
+    if (x == 0.0) return (y > 0) ? 0.0 : INFINITY;
+    if (isnan(x) || isnan(y)) return NAN;
+
     if (x < 0.0) {
-        /* Handle negative base with integer exponent */
-        int yi = (int)y;
-        if (y != yi) return NAN;  /* Non-integer power of negative */
-        double result = exp(y * log(-x));
-        return (yi % 2) ? -result : result;
+        /* Negative base: only valid if y is an integer */
+        double yi;
+        if (modf(y, &yi) != 0.0) return NAN;
+        double res = pow(-x, y);
+        if (((long long)yi) % 2) return -res;
+        return res;
     }
-    return exp(y * log(x));
+
+    double res;
+    __asm__ __volatile__(
+        "fldl %2\n\t"       /* y */
+        "fldl %1\n\t"       /* x */
+        "fyl2x\n\t"         /* st(0) = y * log2(x) */
+        "fld %%st(0)\n\t"
+        "frndint\n\t"       /* i */
+        "fsub %%st(0), %%st(1)\n\t" /* f */
+        "fxch\n\t"
+        "f2xm1\n\t"
+        "fld1\n\t"
+        "faddp\n\t"
+        "fscale\n\t"
+        "fstp %%st(1)\n\t"
+        "fstpl %0"
+        : "=m"(res) : "m"(x), "m"(y) : "ax", "cc");
+    return res;
 }
 
 /*
@@ -131,20 +155,9 @@ double pow(double x, double y) {
  */
 double sqrt(double x) {
     if (x < 0) return NAN;
-    if (x == 0 || isinf(x)) return x;
-    
-    /* Initial guess */
-    double guess = x * 0.5;
-    if (guess == 0) guess = 1.0;
-    
-    /* Newton-Raphson iterations */
-    for (int i = 0; i < 20; i++) {
-        double next = 0.5 * (guess + x / guess);
-        if (fabs(next - guess) < 1e-15 * fabs(guess)) break;
-        guess = next;
-    }
-    
-    return guess;
+    double res;
+    __asm__ __volatile__("fldl %1; fsqrt; fstpl %0" : "=m"(res) : "m"(x));
+    return res;
 }
 
 /* cbrt(x) - Cube root using Newton-Raphson */
@@ -183,19 +196,24 @@ double hypot(double x, double y) {
  * sin(x) = x - x^3/3! + x^5/5! - ...
  */
 double sin(double x) {
-    /* Reduce to [-pi, pi] */
-    while (x > M_PI) x -= 2.0 * M_PI;
-    while (x < -M_PI) x += 2.0 * M_PI;
-    
-    /* Taylor series */
-    double x2 = x * x;
-    double term = x, sum = x;
-    for (int i = 1; i < 20; i++) {
-        term *= -x2 / ((2*i) * (2*i + 1));
-        if (fabs(term) < 1e-15) break;
-        sum += term;
-    }
-    return sum;
+    double res;
+    __asm__ __volatile__(
+        "fldl %1\n\t"
+        "1: fsin\n\t"
+        "fnstsw %%ax\n\t"
+        "sahf\n\t"
+        "jp 2f\n\t"
+        "fstpl %0\n\t"
+        "jmp 3f\n\t"
+        "2: fldpi\n\t"
+        "fadd %%st(0)\n\t"
+        "fxch %%st(1)\n\t"
+        "fprem1\n\t"
+        "fstp %%st(1)\n\t"
+        "jmp 1b\n\t"
+        "3:"
+        : "=m"(res) : "m"(x) : "ax", "cc");
+    return res;
 }
 
 /*
@@ -203,26 +221,67 @@ double sin(double x) {
  * cos(x) = 1 - x^2/2! + x^4/4! - ...
  */
 double cos(double x) {
-    /* Reduce to [-pi, pi] */
-    while (x > M_PI) x -= 2.0 * M_PI;
-    while (x < -M_PI) x += 2.0 * M_PI;
-    
-    /* Taylor series */
-    double x2 = x * x;
-    double term = 1.0, sum = 1.0;
-    for (int i = 1; i < 20; i++) {
-        term *= -x2 / ((2*i - 1) * (2*i));
-        if (fabs(term) < 1e-15) break;
-        sum += term;
-    }
-    return sum;
+    double res;
+    __asm__ __volatile__(
+        "fldl %1\n\t"
+        "1: fcos\n\t"
+        "fnstsw %%ax\n\t"
+        "sahf\n\t"
+        "jp 2f\n\t"
+        "fstpl %0\n\t"
+        "jmp 3f\n\t"
+        "2: fldpi\n\t"
+        "fadd %%st(0)\n\t"
+        "fxch %%st(1)\n\t"
+        "fprem1\n\t"
+        "fstp %%st(1)\n\t"
+        "jmp 1b\n\t"
+        "3:"
+        : "=m"(res) : "m"(x) : "ax", "cc");
+    return res;
+}
+
+void sincos(double x, double *s, double *c) {
+    __asm__ __volatile__(
+        "fldl %2\n\t"
+        "1: fsincos\n\t"
+        "fnstsw %%ax\n\t"
+        "sahf\n\t"
+        "jp 2f\n\t"
+        "fstpl %1\n\t"
+        "fstpl %0\n\t"
+        "jmp 3f\n\t"
+        "2: fldpi\n\t"
+        "fadd %%st(0)\n\t"
+        "fxch %%st(1)\n\t"
+        "fprem1\n\t"
+        "fstp %%st(1)\n\t"
+        "jmp 1b\n\t"
+        "3:"
+        : "=m"(*s), "=m"(*c) : "m"(x) : "ax", "cc");
 }
 
 /* tan(x) = sin(x) / cos(x) */
 double tan(double x) {
-    double c = cos(x);
-    if (fabs(c) < 1e-15) return (x > 0) ? INFINITY : -INFINITY;
-    return sin(x) / c;
+    double res;
+    __asm__ __volatile__(
+        "fldl %1\n\t"
+        "1: fptan\n\t"
+        "fnstsw %%ax\n\t"
+        "sahf\n\t"
+        "jp 2f\n\t"
+        "fstp %%st(0)\n\t" // Pop the 1.0 pushed by fptan
+        "fstpl %0\n\t"
+        "jmp 3f\n\t"
+        "2: fldpi\n\t"
+        "fadd %%st(0)\n\t"
+        "fxch %%st(1)\n\t"
+        "fprem1\n\t"
+        "fstp %%st(1)\n\t"
+        "jmp 1b\n\t"
+        "3:"
+        : "=m"(res) : "m"(x) : "ax", "cc");
+    return res;
 }
 
 /*
@@ -250,15 +309,9 @@ double atan(double x) {
 
 /* atan2(y, x) - Two-argument arctangent */
 double atan2(double y, double x) {
-    if (x > 0) return atan(y / x);
-    if (x < 0) {
-        if (y >= 0) return atan(y / x) + M_PI;
-        return atan(y / x) - M_PI;
-    }
-    /* x == 0 */
-    if (y > 0) return M_PI_2;
-    if (y < 0) return -M_PI_2;
-    return 0.0;  /* y == 0 too */
+    double res;
+    __asm__ __volatile__("fldl %1; fldl %2; fpatan; fstpl %0" : "=m"(res) : "m"(y), "m"(x));
+    return res;
 }
 
 /*
@@ -356,7 +409,10 @@ double modf(double x, double *iptr) {
 
 /* scalbn: x * 2^n (FLT_RADIX = 2) */
 double scalbn(double x, int n) {
-    return ldexp(x, n);
+    double res;
+    __asm__ __volatile__("fildl %2; fldl %1; fscale; fstp %%st(1); fstpl %0" 
+                         : "=m"(res) : "m"(x), "m"(n));
+    return res;
 }
 
 /* nextafter: next representable value after x towards y */
@@ -389,20 +445,42 @@ double copysign(double x, double y) {
 
 /* Absolute value - actual implementation */
 double fabs(double x) {
-    return (x < 0) ? -x : x;
+    double res;
+    __asm__ __volatile__("fldl %1; fabs; fstpl %0" : "=m"(res) : "m"(x));
+    return res;
 }
 
 /* Remainder functions */
 double fmod(double x, double y) {
     if (y == 0.0) return NAN;
-    return x - (int)(x / y) * y;
+    double res;
+    __asm__ __volatile__(
+        "fldl %2\n\t"
+        "fldl %1\n\t"
+        "1: fprem\n\t"
+        "fnstsw %%ax\n\t"
+        "sahf\n\t"
+        "jp 1b\n\t"
+        "fstpl %0\n\t"
+        "fstp %%st(0)"
+        : "=m"(res) : "m"(x), "m"(y) : "ax", "cc");
+    return res;
 }
 
 double remainder(double x, double y) {
     if (y == 0.0) return NAN;
-    double n = x / y;
-    double q = (n >= 0) ? (int)(n + 0.5) : (int)(n - 0.5);
-    return x - q * y;
+    double res;
+    __asm__ __volatile__(
+        "fldl %2\n\t"
+        "fldl %1\n\t"
+        "1: fprem1\n\t"
+        "fnstsw %%ax\n\t"
+        "sahf\n\t"
+        "jp 1b\n\t"
+        "fstpl %0\n\t"
+        "fstp %%st(0)"
+        : "=m"(res) : "m"(x), "m"(y) : "ax", "cc");
+    return res;
 }
 
 /* Min/Max - actual implementations */
@@ -443,13 +521,25 @@ double round(double x) {
 }
 
 double rint(double x) {
-    /* Round to nearest integer, ties to even (banker's rounding) */
-    double n = floor(x + 0.5);
-    /* If exactly halfway, round to even */
-    if (x + 0.5 == n && (int)n % 2 != 0) {
-        n -= 1.0;
-    }
-    return n;
+    double res;
+    __asm__ __volatile__("fldl %1; frndint; fstpl %0" : "=m"(res) : "m"(x));
+    return res;
+}
+
+double nearbyint(double x) {
+    return rint(x); // x87 frndint honors CW but doesn't necessarily raise inexact if masked
+}
+
+long lrint(double x) {
+    long res;
+    __asm__ __volatile__("fldl %1; fistpl %0" : "=m"(res) : "m"(x));
+    return res;
+}
+
+long long llrint(double x) {
+    long long res;
+    __asm__ __volatile__("fldl %1; fistpq %0" : "=m"(res) : "m"(x));
+    return res;
 }
 
 /* Float versions */
