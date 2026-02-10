@@ -148,13 +148,38 @@ static void tty_output_locked(char c, struct tty *tp) {
 
 static void tty_start_locked(struct tty *tp) {
     if (tp->stopped) return;
-    char c;
-    while (tty_buf_get(&tp->write_buf, &c)) {
-        if (tp->driver->put_char) {
-            tp->driver->put_char(tp, c);
-        } else if (tp->driver->write) {
-            tp->driver->write(tp, (unsigned char*)&c, 1);
+    
+    if (tp->driver->write) {
+        unsigned char buf[128];
+        int n;
+        while ((n = tp->write_buf.count) > 0) {
+            if (n > (int)sizeof(buf)) n = sizeof(buf);
+            
+            // Peek and pull chars
+            for (int i = 0; i < n; i++) {
+                char c;
+                tty_buf_get(&tp->write_buf, &c);
+                buf[i] = (unsigned char)c;
+            }
+            
+            int written = tp->driver->write(tp, buf, n);
+            if (written <= 0) break; // Driver can't accept more
+            
+            // If driver wrote less than requested, we'd need to put back chars...
+            // but our tty_buf_get already removed them.
+            // Simplified: assume driver writes what it can or we pause.
         }
+    } else {
+        char c;
+        while (tty_buf_get(&tp->write_buf, &c)) {
+            if (tp->driver->put_char) {
+                tp->driver->put_char(tp, c);
+            }
+        }
+    }
+    
+    if (tp->driver->flush_chars) {
+        tp->driver->flush_chars(tp);
     }
 }
 

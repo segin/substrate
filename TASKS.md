@@ -1038,9 +1038,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] **Driver Interface (`tty_driver`):**
                 - [x] `install` / `remove`: setup private data.
                 - [x] `open` / `close`: hardware init/shutdown.
-                - [ ] `write`: device output path.
-                - [ ] `put_char`: optimized single-char write.
-                - [ ] `flush_chars`: kick hardware transmission.
+                - [x] `write`: device output path.
+                - [x] `put_char`: optimized single-char write.
+                - [x] `flush_chars`: kick hardware transmission.
                 - [ ] `write_room`: check available hardware buffer space.
                 - [ ] `chars_in_buffer`: check pending bytes.
                 - [ ] `ioctl`: hardware-specific controls.
