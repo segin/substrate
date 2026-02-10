@@ -167,45 +167,68 @@ void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int 
     return NULL;
 }
 
-/* xoroshiro128++ implementation */
-static uint64_t s[2] = { 0x1234567890ABCDEF, 0xFEDCBA0987654321 };
+/* ChaCha20 implementation */
+static uint32_t chacha_state[16];
+static uint32_t chacha_block[16];
+static int chacha_idx = 16;
+static int seeded = 0;
 
-static inline uint64_t rotl(const uint64_t x, int k) {
-	return (x << k) | (x >> (64 - k));
-}
+static void chacha20_block(uint32_t out[16], const uint32_t in[16]) {
+    int i;
+    uint32_t x[16];
 
-static uint64_t next_rand(void) {
-	const uint64_t s0 = s[0];
-	uint64_t s1 = s[1];
-	const uint64_t result = rotl(s0 + s1, 17) + s0;
+    for (i = 0; i < 16; ++i) x[i] = in[i];
 
-	s1 ^= s0;
-	s[0] = rotl(s0, 49) ^ s1 ^ (s1 << 21); // a, b
-	s[1] = rotl(s1, 28);
+    for (i = 0; i < 20; i += 2) {
+        #define QR(a,b,c,d) \
+            x[a] += x[b]; x[d] ^= x[a]; x[d] = (x[d] << 16) | (x[d] >> 16); \
+            x[c] += x[d]; x[b] ^= x[c]; x[b] = (x[b] << 12) | (x[b] >> 20); \
+            x[a] += x[b]; x[d] ^= x[a]; x[d] = (x[d] << 8) | (x[d] >> 24); \
+            x[c] += x[d]; x[b] ^= x[c]; x[b] = (x[b] << 7) | (x[b] >> 25);
 
-	return result;
-}
+        QR(0, 4, 8, 12); QR(1, 5, 9, 13); QR(2, 6, 10, 14); QR(3, 7, 11, 15);
+        QR(0, 5, 10, 15); QR(1, 6, 11, 12); QR(2, 7, 8, 13); QR(3, 4, 9, 14);
+        #undef QR
+    }
 
-int rand(void) {
-    return (int)(next_rand() & 0x7FFFFFFF);
+    for (i = 0; i < 16; ++i) out[i] = x[i] + in[i];
 }
 
 void srand(unsigned int seed) {
-    // SplitMix64 based seeding
-    uint64_t z = (uint64_t)seed;
+    // "expand 32-byte k"
+    chacha_state[0] = 0x61707865;
+    chacha_state[1] = 0x3320646e;
+    chacha_state[2] = 0x79622d32;
+    chacha_state[3] = 0x6b206574;
+    // Key (use seed repeated/modified)
+    chacha_state[4] = seed;
+    chacha_state[5] = seed ^ 0xCAFEBABE;
+    chacha_state[6] = seed ^ 0xDEADBEEF;
+    chacha_state[7] = seed ^ 0xFEEDFACE;
+    chacha_state[8] = seed;
+    chacha_state[9] = seed;
+    chacha_state[10] = seed;
+    chacha_state[11] = seed;
+    // Counter
+    chacha_state[12] = 0;
+    // Nonce
+    chacha_state[13] = 0;
+    chacha_state[14] = 0;
+    chacha_state[15] = 0;
 
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    s[0] = z ^ (z >> 31);
+    chacha_idx = 16;
+    seeded = 1;
+}
 
-    // Changing seed for second part
-    z = (uint64_t)seed + 0x9e3779b97f4a7c15ULL;
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    s[1] = z ^ (z >> 31);
+int rand(void) {
+    if (!seeded) srand(1);
 
-    // Ensure non-zero state
-    if (s[0] == 0 && s[1] == 0) s[0] = 1;
+    if (chacha_idx >= 16) {
+        chacha20_block(chacha_block, chacha_state);
+        chacha_state[12]++; // Increment counter
+        chacha_idx = 0;
+    }
+    return (int)(chacha_block[chacha_idx++] & 0x7FFFFFFF);
 }
 
 void arc4random_buf(void *buf, size_t n) {
