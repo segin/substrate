@@ -30,6 +30,7 @@ extern void fuse_init(void);
 extern void fuse_fs_init(void);
 extern void p9_init(void);
 extern void pseudo_init(void);
+extern void full_init(void);
 
 void vfs_init(void) {
     kprint("VFS: Initializing...\n");
@@ -46,6 +47,7 @@ void vfs_init(void) {
     procfs_init();
     sysfs_init();
     pseudo_init();
+    full_init();
     
     // Register network/special filesystems
     fuse_init();
