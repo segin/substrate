@@ -36,6 +36,8 @@ struct tty_driver {
     int (*chars_in_buffer)(struct tty *tty);
     int (*ioctl)(struct tty *tty, uint32_t cmd, unsigned long arg);
     void (*set_termios)(struct tty *tty);
+    void (*throttle)(struct tty *tty);
+    void (*unthrottle)(struct tty *tty);
 };
 
 struct tty {

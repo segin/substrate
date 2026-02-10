@@ -1041,7 +1041,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `write`: device output path.
                 - [x] `put_char`: optimized single-char write.
                 - [x] `flush_chars`: kick hardware transmission.
-                - [ ] `write_room`: check available hardware buffer space.
+                - [x] `write_room`: check available hardware buffer space.
                 - [ ] `chars_in_buffer`: check pending bytes.
                 - [ ] `ioctl`: hardware-specific controls.
                 - [ ] `throttle` / `unthrottle`: hardware flow control hooks.

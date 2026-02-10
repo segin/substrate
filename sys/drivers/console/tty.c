@@ -155,6 +155,13 @@ static void tty_start_locked(struct tty *tp) {
         while ((n = tp->write_buf.count) > 0) {
             if (n > (int)sizeof(buf)) n = sizeof(buf);
             
+            // Check driver write room
+            if (tp->driver->write_room) {
+                int room = tp->driver->write_room(tp);
+                if (room <= 0) break;
+                if (n > room) n = room;
+            }
+            
             // Peek and pull chars
             for (int i = 0; i < n; i++) {
                 char c;
@@ -257,6 +264,9 @@ static void canon(struct tty *tp, uint32_t *flags_ptr) {
         if (tp->raw_buf.count <= (TTY_BUF_SIZE / 4)) {
             tp->input_stopped = 0;
             tty_send_xchar(tp, tp->termios.c_cc[VSTART]);
+            if (tp->driver->unthrottle) {
+                tp->driver->unthrottle(tp);
+            }
         }
     }
 }
@@ -364,6 +374,9 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         if (tty->raw_buf.count >= (TTY_BUF_SIZE * 3 / 4)) {
             tty->input_stopped = 1;
             tty_send_xchar(tty, tty->termios.c_cc[VSTOP]);
+            if (tty->driver->throttle) {
+                tty->driver->throttle(tty);
+            }
         }
     }
     
@@ -568,6 +581,14 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             return -1;
         }
     }
+    
+    // Call driver-specific ioctl
+    if (tty->driver->ioctl) {
+        int ret = tty->driver->ioctl(tty, cmd, arg);
+        TTY_UNLOCK(tty);
+        return ret;
+    }
+
     TTY_UNLOCK(tty);
     return -1;
 }
@@ -645,8 +666,12 @@ int tty_poll(struct tty *tty, void *waiter) {
         events |= POLLIN | POLLRDNORM;
     }
     
-    // Always writable for now
-    events |= POLLOUT | POLLWRNORM;
+    // Check for writability
+    if (tty->write_buf.count == 0) {
+        if (!tty->driver->chars_in_buffer || tty->driver->chars_in_buffer(tty) == 0) {
+            events |= POLLOUT | POLLWRNORM;
+        }
+    }
     
     TTY_UNLOCK(tty);
     return events;
