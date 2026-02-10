@@ -99,6 +99,21 @@ static void test_memcpy_large(void) {
     kfree(dest, size);
 }
 
+static void test_strlen(void) {
+    if (strlen("") != 0) {
+        kprint("FAIL: strlen(\"\") != 0\n");
+        failed_tests++;
+    }
+    if (strlen("a") != 1) {
+        kprint("FAIL: strlen(\"a\") != 1\n");
+        failed_tests++;
+    }
+    if (strlen("hello") != 5) {
+        kprint("FAIL: strlen(\"hello\") != 5\n");
+        failed_tests++;
+    }
+}
+
 // Performance Benchmarks
 
 static void benchmark_memcpy(const char *label, void *dst, const void *src, size_t n, int iterations) {
@@ -125,6 +140,9 @@ static void benchmark_memcpy(const char *label, void *dst, const void *src, size
 void run_string_tests(void) {
     kprint("\n=== STRING TESTS ===\n");
     failed_tests = 0;
+
+    kprint("Checking strlen correctness...\n");
+    test_strlen();
 
     kprint("Checking memcpy correctness...\n");
     test_memcpy_basic();

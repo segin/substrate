@@ -89,6 +89,9 @@ bool test_sched_fuzz(void) {
 extern bool test_svr3_personality_table(void);
 extern bool test_svr4_personality_table(void);
 
+// LibC Tests
+extern bool test_libc_strlen(void);
+
 typedef struct {
     const char *name;
     bool (*func)(void);
@@ -141,6 +144,7 @@ test_case_t tests[] = {
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
     {"svr4_perso", test_svr4_personality_table},
+    {"libc_strlen", test_libc_strlen},
     {NULL, NULL}
 };
 
