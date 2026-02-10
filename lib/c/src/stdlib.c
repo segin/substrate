@@ -167,14 +167,69 @@ void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int 
     return NULL;
 }
 
-uint32_t arc4random(void);
+/* ChaCha20 implementation */
+static uint32_t chacha_state[16];
+static uint32_t chacha_block[16];
+static int chacha_idx = 16;
+static int seeded = 0;
 
-int rand(void) {
-    return (int)(arc4random() & 0x7FFFFFFF);
+static void chacha20_block(uint32_t out[16], const uint32_t in[16]) {
+    int i;
+    uint32_t x[16];
+
+    for (i = 0; i < 16; ++i) x[i] = in[i];
+
+    for (i = 0; i < 20; i += 2) {
+        #define QR(a,b,c,d) \
+            x[a] += x[b]; x[d] ^= x[a]; x[d] = (x[d] << 16) | (x[d] >> 16); \
+            x[c] += x[d]; x[b] ^= x[c]; x[b] = (x[b] << 12) | (x[b] >> 20); \
+            x[a] += x[b]; x[d] ^= x[a]; x[d] = (x[d] << 8) | (x[d] >> 24); \
+            x[c] += x[d]; x[b] ^= x[c]; x[b] = (x[b] << 7) | (x[b] >> 25);
+
+        QR(0, 4, 8, 12); QR(1, 5, 9, 13); QR(2, 6, 10, 14); QR(3, 7, 11, 15);
+        QR(0, 5, 10, 15); QR(1, 6, 11, 12); QR(2, 7, 8, 13); QR(3, 4, 9, 14);
+        #undef QR
+    }
+
+    for (i = 0; i < 16; ++i) out[i] = x[i] + in[i];
 }
 
 void srand(unsigned int seed) {
-    (void)seed;
+    // "expand 32-byte k"
+    chacha_state[0] = 0x61707865;
+    chacha_state[1] = 0x3320646e;
+    chacha_state[2] = 0x79622d32;
+    chacha_state[3] = 0x6b206574;
+    // Key (use seed repeated/modified)
+    chacha_state[4] = seed;
+    chacha_state[5] = seed ^ 0xCAFEBABE;
+    chacha_state[6] = seed ^ 0xDEADBEEF;
+    chacha_state[7] = seed ^ 0xFEEDFACE;
+    chacha_state[8] = seed;
+    chacha_state[9] = seed;
+    chacha_state[10] = seed;
+    chacha_state[11] = seed;
+    // Counter
+    chacha_state[12] = 0;
+    // Nonce
+    chacha_state[13] = 0;
+    chacha_state[14] = 0;
+    chacha_state[15] = 0;
+
+    chacha_idx = 16;
+    seeded = 1;
+}
+
+int rand(void) {
+    if (!seeded) srand(1);
+
+    if (chacha_idx >= 16) {
+        chacha20_block(chacha_block, chacha_state);
+        chacha_state[12]++; // Increment counter
+        chacha_idx = 0;
+    }
+    return (int)(chacha_block[chacha_idx++] & 0x7FFFFFFF);
+}
 }
 
 void arc4random_buf(void *buf, size_t n) {
