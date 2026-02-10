@@ -6,6 +6,7 @@
 #include <pm/pm.h>
 #include <exec/perso/personality.h>
 #include <string.h>
+#include <exec/perso/personality.h>
 
 /*
  * Kernel-side signal property tests

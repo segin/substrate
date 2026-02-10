@@ -598,7 +598,6 @@ void signal_handle_pending(registers_t *regs) {
     }
 
     // Deliver signal via personality-specific sendsig
-    // Deliver signal via personality-specific sendsig
     struct personality *p = perso_lookup(current_process->perso_id);
     if (p && p->sendsig) {
         p->sendsig((void*)handler, sig, old_mask, flags, regs);

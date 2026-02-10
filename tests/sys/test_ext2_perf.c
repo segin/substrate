@@ -8,7 +8,7 @@ extern uint32_t ext2_alloc_block(ext2_fs_t *fs);
 
 // Mock disk parameters
 #define BLOCK_SIZE 1024
-#define BLOCKS_COUNT 8192
+#define BLOCKS_COUNT 256
 static uint8_t mock_disk[BLOCKS_COUNT * BLOCK_SIZE];
 
 static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {

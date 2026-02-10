@@ -127,6 +127,7 @@ void syscall_handler(registers_t *regs) {
     if (current_thread) {
         current_thread->syscall_regs = regs;
     }
+    
     uint32_t syscall_num = regs->eax;
 
     // Track syscall for SA_RESTART support
