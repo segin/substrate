@@ -9,6 +9,7 @@
 #include <sys/errno.h>
 #include <sys/proc.h>
 #include <sys/lock.h>
+#include <sys/smp.h>
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -67,6 +68,9 @@ extern void early_uart_print(const char *s);
 void sysctl_init(void) {
     if (sysctl_initialized) return;
     sysctl_initialized = 1;
+
+    hw_ncpu = smp_get_cpu_count();
+
     mutex_init(&sysctl_mutex, "sysctl");
     // Initialize root list
     sysctl__children.slh_first = NULL;

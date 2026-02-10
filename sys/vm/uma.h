@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <sys/smp.h>
 
 /* Forward declarations */
 typedef struct uma_zone uma_zone_t;
@@ -127,7 +128,7 @@ struct uma_zone {
     uma_slab_t          *uz_free_slabs;     /* All objects free */
     
     /* Per-CPU caches (array indexed by CPU ID) */
-    uma_cache_t         uz_cpu[1];      /* Extended at alloc time */
+    uma_cache_t         uz_cpu[MAX_CPUS];
     
     /* Statistics */
     uint64_t            uz_allocs;      /* Total allocations */

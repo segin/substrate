@@ -15,8 +15,8 @@
 /* Global list of all zones */
 static uma_zone_t *uma_zones = NULL;
 
-/* Number of CPUs (TODO: detect at runtime) */
-#define UMA_NCPU    1
+/* Number of CPUs (detected at runtime) */
+static int uma_ncpu = 1;
 
 /* Bootstrap zone pool */
 #define UMA_BOOTSTRAP_ZONES 32
@@ -71,6 +71,7 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item);
  * Initialize UMA subsystem
  */
 void uma_startup(void) {
+    uma_ncpu = smp_get_cpu_count();
     uma_bootstrap_idx = 0;
     uma_bucket_idx = 0;
     uma_zones = NULL;
@@ -177,7 +178,7 @@ uma_zone_t *uma_zcreate(
     zone->uz_arg = NULL;
     
     /* Initialize per-CPU cache */
-    for (int i = 0; i < UMA_NCPU; i++) {
+    for (int i = 0; i < uma_ncpu; i++) {
         zone->uz_cpu[i].uc_freebucket = NULL;
         zone->uz_cpu[i].uc_allocbucket = NULL;
         zone->uz_cpu[i].uc_allocs = 0;
@@ -599,7 +600,7 @@ void uma_reclaim(void) {
         if (zone->uz_flags & UMA_ZONE_NOFREE) continue;
         
         /* Drain per-CPU buckets */
-        for (int cpu = 0; cpu < UMA_NCPU; cpu++) {
+        for (int cpu = 0; cpu < uma_ncpu; cpu++) {
             uma_cache_t *cache = &zone->uz_cpu[cpu];
             
             if (cache->uc_allocbucket) {

@@ -2,10 +2,10 @@
 #define _KERN_SCHED_H
 
 #include <sys/proc.h>
+#include <sys/smp.h>
 
 /* Thread and CPU limits */
 #define MAX_THREADS 64
-#define MAX_CPUS 32
 
 /* IPI vector for scheduler preemption (must match IDT setup) */
 #define SCHED_IPI_VECTOR 0xFD
