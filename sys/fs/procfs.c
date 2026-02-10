@@ -41,23 +41,25 @@ struct procfs_entry {
 
 /* Generator functions for each /proc entry */
 
-static uint32_t gen_cpuinfo(char *buf, size_t size __attribute__((unused))) {
-    return sprintf(buf,
+static uint32_t gen_cpuinfo(char *buf, size_t size) {
+    int ret = snprintf(buf, size,
         "processor\t: 0\n"
         "vendor_id\t: GenuineIntel\n"
         "model name\t: Substrate Virtual CPU\n"
         "cpu MHz\t\t: 1000.000\n"
         "cache size\t: 256 KB\n"
         "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic\n");
+    if (ret < 0) return 0;
+    return (ret >= (int)size) ? (uint32_t)size - 1 : (uint32_t)ret;
 }
 
-static uint32_t gen_meminfo(char *buf, size_t size __attribute__((unused))) {
+static uint32_t gen_meminfo(char *buf, size_t size) {
     /* Get real values from PMM when available */
     uint32_t total_kb = pmm_get_total_memory() / 1024;
     uint32_t free_kb = pmm_get_free_memory() / 1024;
     uint32_t used_kb = total_kb - free_kb;
     
-    return sprintf(buf,
+    int ret = snprintf(buf, size,
         "MemTotal:    %8u kB\n"
         "MemFree:     %8u kB\n"
         "MemUsed:     %8u kB\n"
@@ -66,11 +68,15 @@ static uint32_t gen_meminfo(char *buf, size_t size __attribute__((unused))) {
         "SwapTotal:          0 kB\n"
         "SwapFree:           0 kB\n",
         total_kb, free_kb, used_kb);
+    if (ret < 0) return 0;
+    return (ret >= (int)size) ? (uint32_t)size - 1 : (uint32_t)ret;
 }
 
-static uint32_t gen_uptime(char *buf, size_t size __attribute__((unused))) {
+static uint32_t gen_uptime(char *buf, size_t size) {
     uint32_t t = get_time();
-    return sprintf(buf, "%u.00 0.00\n", t);
+    int ret = snprintf(buf, size, "%u.00 0.00\n", t);
+    if (ret < 0) return 0;
+    return (ret >= (int)size) ? (uint32_t)size - 1 : (uint32_t)ret;
 }
 
 static uint32_t gen_cmdline(char *buf, size_t size) {
@@ -84,14 +90,16 @@ static uint32_t gen_cmdline(char *buf, size_t size) {
     return len;
 }
 
-static uint32_t gen_version(char *buf, size_t size __attribute__((unused))) {
-    return sprintf(buf, 
+static uint32_t gen_version(char *buf, size_t size) {
+    int ret = snprintf(buf, size,
         "Substrate version 0.1.0 (gcc) #1 SMP PREEMPT %s\n",
         __DATE__);
+    if (ret < 0) return 0;
+    return (ret >= (int)size) ? (uint32_t)size - 1 : (uint32_t)ret;
 }
 
 
-static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
+static uint32_t gen_loadavg(char *buf, size_t size) {
     unsigned long loads[3];
     sched_get_loadavg(loads);
 
@@ -99,23 +107,26 @@ static uint32_t gen_loadavg(char *buf, size_t size __attribute__((unused))) {
     uint32_t total = sched_count_threads();
     int last_pid = proc_get_last_pid();
 
-    return sprintf(buf,
+    int ret = snprintf(buf, size,
         "%lu.%02lu %lu.%02lu %lu.%02lu %u/%u %d\n",
         LOAD_INT(loads[0]), LOAD_FRAC(loads[0]),
         LOAD_INT(loads[1]), LOAD_FRAC(loads[1]),
         LOAD_INT(loads[2]), LOAD_FRAC(loads[2]),
         runnable, total, last_pid);
+    if (ret < 0) return 0;
+    return (ret >= (int)size) ? (uint32_t)size - 1 : (uint32_t)ret;
 }
 
 static uint32_t proc_pmap_stats_read(char *buf, size_t size) {
-    (void)size;
     struct pmap_stats stats;
     // sys_pmap_stats is declared in pmap.h
     if (sys_pmap_stats(&stats) != 0) {
-        return sprintf(buf, "error: could not get stats\n"); 
+        int ret = snprintf(buf, size, "error: could not get stats\n");
+        if (ret < 0) return 0;
+        return (ret >= (int)size) ? (uint32_t)size - 1 : (uint32_t)ret;
     }
     
-    return sprintf(buf, 
+    int ret = snprintf(buf, size,
         "Faults: %u\n"
         "COW Faults: %u\n"
         "Zero Fills: %u\n"
@@ -139,25 +150,35 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size) {
         stats.tlb_full_flush_count,
         stats.total_pmaps
     );
+    if (ret < 0) return 0;
+    return (ret >= (int)size) ? (uint32_t)size - 1 : (uint32_t)ret;
 }
 
-static uint32_t gen_filesystems(char *buf, size_t size __attribute__((unused))) {
+static uint32_t gen_filesystems(char *buf, size_t size) {
     /* Dynamically generate from VFS registry */
     int off = 0;
     filesystem_t *fs = vfs_get_filesystems();
     
-    while (fs && off < (int)size - 32) {
+    while (fs && off < (int)size - 1) {
         /* Check if this is a pseudo-filesystem (no device required) */
         int nodev = (strcmp(fs->name, "procfs") == 0 ||
                     strcmp(fs->name, "devfs") == 0 ||
                     strcmp(fs->name, "sysfs") == 0 ||
                     strcmp(fs->name, "tmpfs") == 0);
         
+        int ret;
         if (nodev) {
-            off += sprintf(buf + off, "nodev\t%s\n", fs->name);
+            ret = snprintf(buf + off, size - off, "nodev\t%s\n", fs->name);
         } else {
-            off += sprintf(buf + off, "\t%s\n", fs->name);
+            ret = snprintf(buf + off, size - off, "\t%s\n", fs->name);
         }
+
+        if (ret < 0) break;
+        if (off + ret >= (int)size) {
+            off = size - 1;
+            break;
+        }
+        off += ret;
         fs = fs->next;
     }
     return off;
@@ -216,9 +237,10 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
 
     char buf[512];
     int len;
+    struct personality *pers = perso_lookup(current_process->perso_id);
     
-    if (current_process->pers && strcmp(current_process->pers->name, "Linux") == 0) {
-        len = sprintf(buf,
+    if (pers && strcmp(pers->name, "Linux") == 0) {
+        len = snprintf(buf, sizeof(buf),
             "Name:\t%s\n"
             "State:\tR (running)\n"
             "Tgid:\t%d\n"
@@ -229,7 +251,7 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
             p->uid, p->uid, p->uid, p->uid,
             p->gid, p->gid, p->gid, p->gid);
     } else {
-        len = sprintf(buf,
+        len = snprintf(buf, sizeof(buf),
             "Name:\t%s\n"
             "Pid:\t%d\n"
             "Uid:\t%d\n"
@@ -237,6 +259,9 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
             "State:\tRunning\n",
             p->comm, p->pid, p->uid, p->gid);
     }
+
+    if (len < 0) len = 0;
+    if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
     
     if (offset >= (uint32_t)len) return 0;
     if (offset + size > (uint32_t)len) size = len - offset;
@@ -307,7 +332,7 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
             if (count == proc_idx) {
-                sprintf(proc_dirent.name, "%d", processes[i].pid);
+                snprintf(proc_dirent.name, sizeof(proc_dirent.name), "%d", processes[i].pid);
                 return &proc_dirent;
             }
             count++;
@@ -345,7 +370,7 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
             if (processes[i].pid == pid) {
                 static fs_node_t pid_dir;
                 memset(&pid_dir, 0, sizeof(fs_node_t));
-                sprintf(pid_dir.name, "%d", pid);
+                snprintf(pid_dir.name, sizeof(pid_dir.name), "%d", pid);
                 pid_dir.flags = FS_DIRECTORY;
                 pid_dir.inode = pid;
                 pid_dir.readdir = &proc_pid_readdir;
