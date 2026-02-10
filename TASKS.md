@@ -1035,7 +1035,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Raw echo (input char -> output).
                     - [x] Control char echo (`^C`).
                     - [x] Erase echo (backspace-space-backspace sequence).
-            - [ ] **Driver Interface (`tty_driver`):**
+            - [x] **Driver Interface (`tty_driver`):**
                 - [x] `install` / `remove`: setup private data.
                 - [x] `open` / `close`: hardware init/shutdown.
                 - [x] `write`: device output path.

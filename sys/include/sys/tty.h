@@ -24,7 +24,6 @@ struct tty_driver {
     int major;
     int minor_start;
     int num;
-    
     int (*install)(struct tty_driver *driver, struct tty *tty);
     void (*remove)(struct tty_driver *driver, struct tty *tty);
     int (*open)(struct tty *tty);
@@ -65,6 +64,7 @@ struct tty {
     // Synchronization
     spinlock_t lock;
     int delct; // Delimiter count in raw_buf
+    int canon_len; // Current canonical line length for echo/editing
     
     // Wait queues
     void *read_wait;

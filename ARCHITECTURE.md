@@ -49,6 +49,7 @@ The kernel is the core of the operating system, structured as follows:
         - **Fonts:** Compiled-in CP437 fonts (`font_8x16.c`, `font_8x8.c`) covering full 256 charsets.
         - **Architecture:** Table-driven mode setting with specific CRTC register dumps (6845/VGA).
     - **`serial/`**: UART driver.
+    - **`console/`**: TTY core and console device driver stack, using a `tty_driver` callback interface (install/remove, open/close, write/put_char, buffer state queries, and flow-control hooks).
     - **`input/`**: PS/2 Keyboard and Mouse drivers.
     - **`storage/`**: Drivers for SCSI, IDE, AHCI, NVMe.
     - **`virtio/`**: Virtualized devices (Block, 9P, Net).

@@ -1,0 +1,65 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd February 8, 2026
+.Dt TTY_DRIVER 9
+.Os Substrate
+.Sh NAME
+.Nm struct tty_driver
+.Nd terminal driver interface
+.Sh SYNOPSIS
+.In sys/tty.h
+.Sh DESCRIPTION
+The
+.Vt struct tty_driver
+interface defines the kernel callbacks required to bind a hardware or virtual
+terminal device to the TTY core. It provides lifecycle hooks, output paths, and
+flow-control integration for canonical and raw line discipline handling.
+.Sh FIELDS
+.Bl -tag -width "chars_in_buffer"
+.It Vt const char *driver_name
+Human-readable driver identifier (e.g., "console").
+.It Vt const char *name
+Base device name (e.g., "tty").
+.It Vt int major
+Device major number for devfs registrations.
+.It Vt int minor_start
+Starting minor number for the driver instance range.
+.It Vt int num
+Total number of devices exported by the driver.
+.It Vt int (*install)(struct tty *tty)
+Allocate or initialize per-instance driver data. Returns 0 on success.
+.It Vt void (*remove)(struct tty *tty)
+Release per-instance driver data and resources.
+.It Vt int (*open)(struct tty *tty)
+Perform hardware initialization when the TTY is opened.
+.It Vt void (*close)(struct tty *tty)
+Shutdown hardware when the final reference closes.
+.It Vt int (*write)(struct tty *tty, const unsigned char *buf, int count)
+Write a buffer of output data to the device.
+.It Vt int (*put_char)(struct tty *tty, unsigned char c)
+Optimized single-character output path.
+.It Vt void (*flush_chars)(struct tty *tty)
+Kick hardware transmission or drain staged characters.
+.It Vt int (*write_room)(struct tty *tty)
+Report how many bytes can be accepted by the hardware output path.
+.It Vt int (*chars_in_buffer)(struct tty *tty)
+Report how many bytes remain pending in the hardware output buffer.
+.It Vt int (*ioctl)(struct tty *tty, uint32_t cmd, unsigned long arg)
+Driver-specific control operations not handled by the TTY core.
+.It Vt void (*set_termios)(struct tty *tty)
+Apply termios configuration changes to hardware.
+.It Vt void (*throttle)(struct tty *tty)
+Engage hardware flow control to pause input.
+.It Vt void (*unthrottle)(struct tty *tty)
+Release hardware flow control to resume input.
+.El
+.Sh SEE ALSO
+.Xr tty 4 ,
+.Xr termios 4
+.Sh HISTORY
+The
+.Vt struct tty_driver
+interface first appeared in Substrate.
+.Sh AUTHORS
+.An Kirn Gill II Aq Mt segin2005@gmail.com
