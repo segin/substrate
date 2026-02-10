@@ -155,24 +155,7 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
     return size;
 }
 
-// /dev/kmem
-static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node;
-    // Access arbitrary virtual address.
-    // DANGEROUS: If offset is unmapped, we panic.
-    // For now, naive implementation as is standard for kmem in simple kernels.
-    
-    void *src = (void*)(uintptr_t)offset;
-    memcpy(buffer, src, size);
-    return size;
-}
-
-static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    (void)node;
-    void *dst = (void*)(uintptr_t)offset;
-    memcpy(dst, buffer, size);
-    return size;
-}
+// /dev/kmem - Implemented in kmem.c
 
 static fs_node_t null_node;
 
@@ -231,14 +214,8 @@ void pseudo_init(void) {
     devfs_register_device(&mem_node);
 
     // /dev/kmem
-    static fs_node_t kmem_node;
-    memset(&kmem_node, 0, sizeof(fs_node_t));
-    strcpy(kmem_node.name, "kmem");
-    kmem_node.flags = FS_CHARDEVICE;
-    kmem_node.read = &kmem_read;
-    kmem_node.write = &kmem_write;
-    kmem_node.rdev = (1 << 8) | 2;
-    devfs_register_device(&kmem_node);
+    extern void kmem_dev_init(void);
+    kmem_dev_init();
 
     // /dev/port
     static fs_node_t port_node;
