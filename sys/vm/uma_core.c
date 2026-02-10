@@ -642,6 +642,7 @@ int uma_zone_get_cur(uma_zone_t *zone) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) {
     if (zone) {
+        /* Set the limit. 0 means unlimited. */
         zone->uz_limit = (max < 0) ? 0 : (uint32_t)max;
     }
 }

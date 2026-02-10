@@ -93,6 +93,7 @@ process_t *proc_create(int perso_id) {
     spinlock_release(&pid_lock);
     processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].perso_id = perso_id;
+    processes[i].pers = perso_lookup(perso_id);
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
     processes[i].next_fd = 0; // Reset FD hint
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;
