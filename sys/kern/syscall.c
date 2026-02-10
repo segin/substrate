@@ -19,6 +19,7 @@
 #include <include/sys/proc.h>
 #include <include/sys/signal.h>
 #include <include/sys/session.h>
+#include <kern/file.h>
 #include <vfs/vfs.h>
 #include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>

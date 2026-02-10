@@ -13,8 +13,8 @@ static console_backend_t *backends = NULL;
 static struct tty *console_tty = NULL;
 
 // TTY Driver Methods Forward Declarations
-static int console_tty_install(struct tty *tty);
-static void console_tty_remove(struct tty *tty);
+static int console_tty_install(struct tty_driver *driver, struct tty *tty);
+static void console_tty_remove(struct tty_driver *driver, struct tty *tty);
 static int console_tty_open(struct tty *tty);
 static void console_tty_close(struct tty *tty);
 static int console_tty_write(struct tty *tty, const unsigned char *buf, int count);
@@ -86,13 +86,17 @@ static void backend_write(const char *data, size_t len) {
 }
 
 // TTY Driver Implementation
-static int console_tty_install(struct tty *tty) {
-    (void)tty;
+static int console_tty_install(struct tty_driver *driver, struct tty *tty) {
+    (void)driver;
+    if (!tty) return -1;
     return 0;
 }
 
-static void console_tty_remove(struct tty *tty) {
-    (void)tty;
+static void console_tty_remove(struct tty_driver *driver, struct tty *tty) {
+    (void)driver;
+    if (tty == console_tty) {
+        console_tty = NULL;
+    }
 }
 
 static int console_tty_open(struct tty *tty) {
@@ -242,6 +246,11 @@ int kprintf(const char *fmt, ...) {
     return ret;
 }
 
+#include <kern/file.h>
+#include <sys/proc.h>
+#include <sys/tty.h>
+#include <string.h>
+
 void console_attach_std_fds(struct process *proc) {
     if (!proc) return;
     
@@ -255,19 +264,37 @@ void console_attach_std_fds(struct process *proc) {
         return;
     }
 
-    // Manually populate FDs 0, 1, 2
+    // Associate process with console TTY
+    if (console_tty) {
+        proc->tty = console_tty;
+    }
+
+    // Populate FDs 0, 1, 2 (stdin, stdout, stderr)
     for (int i = 0; i < 3; i++) {
-        file_t *f = (file_t*)kmalloc(sizeof(file_t));
+        // If FD is already occupied (unlikely for PID 1 at this stage), skip it.
+        if (proc->fds[i]) continue;
+
+        file_t *f = file_alloc();
         if (!f) {
-            kprint("console: OOM during std fd init\n");
+            kprint("console: system file table full during std fd init\n");
             return;
         }
+
         memset(f, 0, sizeof(file_t));
+        f->f_type = DTYPE_VNODE;
         f->f_data = node;
         f->f_offset = 0;
-        f->f_flag = 2; // R/W
+        f->f_flag = FREAD | FWRITE;
         f->f_count = 1;
         
+        // Notify VFS that we've opened the node
+        open_fs(node, 1, 1);
+        
         proc->fds[i] = f;
+    }
+
+    // Update next_fd hint if it was 0
+    if (proc->next_fd < 3) {
+        proc->next_fd = 3;
     }
 }
