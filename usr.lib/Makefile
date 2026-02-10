@@ -1,12 +1,20 @@
 include ../Makefile.inc
 
-.PHONY: all clean install
+SUBDIRS = bc libuu
 
-all:
-	@echo "Building User Libraries (usr.lib)..."
+.PHONY: all clean install $(SUBDIRS)
+
+all: $(SUBDIRS)
+
+$(SUBDIRS):
+	$(MAKE) -C $@
 
 clean:
-	@echo "Cleaning User Libraries..."
+	@for dir in $(SUBDIRS); do \
+		$(MAKE) -C $$dir clean; \
+	done
 
 install:
-	@echo "Installing User Libraries..."
+	@for dir in $(SUBDIRS); do \
+		$(MAKE) -C $$dir install; \
+	done
