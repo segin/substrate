@@ -1034,7 +1034,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **Echoing Logic:**
                     - [x] Raw echo (input char -> output).
                     - [x] Control char echo (`^C`).
-                    - [ ] Erase echo (backspace-space-backspace sequence).
+                    - [x] Erase echo (backspace-space-backspace sequence).
             - [ ] **Driver Interface (`tty_driver`):**
                 - [ ] `install` / `remove`: setup private data.
                 - [ ] `open` / `close`: hardware init/shutdown.
