@@ -6412,6 +6412,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Filesystem Tools (`sbin/`):**
     - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
     - [ ] **`fsck`:** Implement `ext2` consistency check.
+    - [ ] **`cpio`:** Implement POSIX-compatible archive utility (`usr.bin/cpio`).
 
 ### 8. Security and Identity
 - [ ] **User & Group Management:**

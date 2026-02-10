@@ -322,6 +322,10 @@ int mknod(const char *pathname, mode_t mode, dev_t dev) {
     return (int)_syscall3(SYS_MKNOD, (int)pathname, mode, dev);
 }
 
+int chmod(const char *pathname, mode_t mode) {
+    return (int)_syscall2(SYS_CHMOD, (int)pathname, mode);
+}
+
 int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
     return (int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)filesystemtype, (int)mountflags, (int)data);
 }
