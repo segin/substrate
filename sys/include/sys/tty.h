@@ -25,6 +25,8 @@ struct tty_driver {
     int minor_start;
     int num;
     
+    int (*install)(struct tty_driver *driver, struct tty *tty);
+    void (*remove)(struct tty_driver *driver, struct tty *tty);
     int (*open)(struct tty *tty);
     void (*close)(struct tty *tty);
     int (*write)(struct tty *tty, const unsigned char *buf, int count);

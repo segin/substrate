@@ -66,12 +66,26 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
     if (idx >= 0 && idx < 64) {
         ttys[idx] = tty;
     }
+
+    if (driver->install) {
+        int ret = driver->install(driver, tty);
+        if (ret != 0) {
+            if (idx >= 0 && idx < 64) ttys[idx] = NULL;
+            kfree(tty, sizeof(struct tty));
+            return NULL;
+        }
+    }
     
     return tty;
 }
 
 void tty_free(struct tty *tty) {
-    if (tty) kfree(tty, sizeof(struct tty));
+    if (tty) {
+        if (tty->driver && tty->driver->remove) {
+            tty->driver->remove(tty->driver, tty);
+        }
+        kfree(tty, sizeof(struct tty));
+    }
 }
 
 // Minimal ring buffer ops
