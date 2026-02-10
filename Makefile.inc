@@ -49,7 +49,7 @@ ifdef NATIVE_BUILD
     # Ensure no 32-bit override if host is 64-bit (unless HOSTCFLAGS specifies it)
 else
     # Target build configuration (Substrate i386)
-    USER_CFLAGS = $(CFLAGS)
+    USER_CFLAGS = $(CFLAGS) -I$(TOP)/sys
     USER_LDFLAGS = -m32 -nostdlib -fno-pie
 endif
 

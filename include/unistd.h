@@ -62,6 +62,10 @@ int usleep(useconds_t usec);
 int gethostname(char *name, size_t len);
 int sethostname(const char *name, size_t len);
 
+extern char *optarg;
+extern int optind, opterr, optopt;
+int getopt(int argc, char * const argv[], const char *optstring);
+
 long syscall(long number, ...);
 
 #endif
