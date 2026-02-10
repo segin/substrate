@@ -2924,28 +2924,28 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
             - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
 - [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:**
-    - [ ] **1. Specification & Design:**
-        - [ ] **Design Document:**
-            - [ ] Write authoritative design doc for `ld.so` in `docs/ld.so-design.md`.
-            - [ ] Document goals: POSIX/ELF-ABI compliance, BSD compatibility, performance.
-            - [ ] Document ABI targets: i386 (primary), x86_64 (future).
-            - [ ] Document supported ELF features: REL/RELA, PLT/GOT, TLS models.
-            - [ ] Document environment variables: `LD_LIBRARY_PATH`, `LD_PRELOAD`, `LD_DEBUG`, etc.
-            - [ ] Document secure behavior for setuid/setgid binaries.
-            - [ ] Acceptance: design doc reviewed and approved.
-        - [ ] **Architecture Matrix:**
-            - [ ] Enumerate all supported relocation types per architecture.
-            - [ ] Document ABI differences (i386 vs x86_64).
-            - [ ] Create `docs/ld.so-reloc-matrix.md` with full relocation table.
-            - [ ] Acceptance: matrix covers all targeted architectures.
-        - [ ] **Symbol Resolution Specification:**
-            - [ ] Define symbol resolution algorithm and precedence rules.
-            - [ ] Document order: LD_PRELOAD → executable → DT_RPATH/RUNPATH → system paths.
-            - [ ] Define versioning policy (DT_VERSYM, DT_VERNEED, DT_VERDEF).
-            - [ ] Define SONAME handling policy.
-            - [ ] Document DT_RPATH vs DT_RUNPATH semantics.
-            - [ ] Document DT_HASH vs GNU_HASH interaction.
-            - [ ] Acceptance: specification reviewed and edge cases documented.
+    - [x] **1. Specification & Design:**
+        - [x] **Design Document:**
+            - [x] Write authoritative design doc for `ld.so` in `docs/ld.so-design.md`.
+            - [x] Document goals: POSIX/ELF-ABI compliance, BSD compatibility, performance.
+            - [x] Document ABI targets: i386 (primary), x86_64 (future).
+            - [x] Document supported ELF features: REL/RELA, PLT/GOT, TLS models.
+            - [x] Document environment variables: `LD_LIBRARY_PATH`, `LD_PRELOAD`, `LD_DEBUG`, etc.
+            - [x] Document secure behavior for setuid/setgid binaries.
+            - [x] Acceptance: design doc reviewed and approved.
+        - [x] **Architecture Matrix:**
+            - [x] Enumerate all supported relocation types per architecture.
+            - [x] Document ABI differences (i386 vs x86_64).
+            - [x] Create `docs/ld.so-reloc-matrix.md` with full relocation table.
+            - [x] Acceptance: matrix covers all targeted architectures.
+        - [x] **Symbol Resolution Specification:**
+            - [x] Define symbol resolution algorithm and precedence rules.
+            - [x] Document order: LD_PRELOAD → executable → DT_RPATH/RUNPATH → system paths.
+            - [x] Define versioning policy (DT_VERSYM, DT_VERNEED, DT_VERDEF).
+            - [x] Define SONAME handling policy.
+            - [x] Document DT_RPATH vs DT_RUNPATH semantics.
+            - [x] Document DT_HASH vs GNU_HASH interaction.
+            - [x] Acceptance: specification reviewed and edge cases documented.
     - [ ] **2. Loader Core: ELF Parsing & Mapping:**
         - [ ] **ELF Header Parsing:**
             - [ ] Implement ELF header validation (magic, class, endianness, version).
