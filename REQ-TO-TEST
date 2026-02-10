@@ -1,0 +1,17 @@
+# Requirements to Tests Traceability Matrix (REQ-TO-TEST)
+
+| Req ID | Requirement | Test Case / Procedure | Expected Result |
+|---|---|---|---|
+| **U1** | **Privilege & lockdown enforcement** | `test_kmem.c`: `open("/dev/kmem", O_RDONLY)` as non-root | `EPERM` |
+| **U1** | **Securelevel check** | `test_kmem.c`: Set `securelevel > 0` via sysctl, then `open("/dev/kmem")` | `EPERM` (if strict) or restricted |
+| **U2** | **KVA semantics** | `test_kmem.c`: Use exported kernel test buffer address | Correct data read from buffer |
+| **U2** | **Seek support** | `test_kmem.c`: `lseek()` to test buffer address | Returns address, subsequent read succeeds |
+| **U3** | **Safe copy semantics** | `test_kmem.c`: `read()`/`write()` to valid address | Returns count, content matches |
+| **U3** | **Fault handling** | `test_kmem.c`: `read()`/`write()` to invalid address (e.g. 0xFFFFFFF0) | `EFAULT`, no panic |
+| **U4** | **Policy restrictions** | `test_kmem.c`: `write()` with `kern.kmem.allow_write=0` | `EPERM` |
+| **U4** | **Policy enabling** | `test_kmem.c`: Enable write policy, then `write()` | Success |
+| **U5** | **fstat/stat** | `fstat("/dev/kmem")` | `st_mode` & `S_IFCHR` |
+| **U6** | **IOCTL unsupported** | `ioctl(fd, ...)` | `ENOTTY` |
+| **O1** | **mmap disallowed** | `test_kmem.c`: `mmap(..., fd, ...)` | `EINVAL` or `EPERM` |
+| **C1** | **Safe copy implementation** | Code Inspection: `kmem.c` uses `copyin`/`copyout` | N/A |
+| **C2** | **Safe test harness** | `test_kmem.c` reads `debug.kmem_test_addr` sysctl | Valid address returned |

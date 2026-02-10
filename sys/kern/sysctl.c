@@ -33,6 +33,7 @@ struct sysctl_oid sysctl_vm   = { &sysctl__children, NULL, "vm",   CTL_VM,   CTL
 struct sysctl_oid sysctl_debug= { &sysctl__children, NULL, "debug",CTL_DEBUG,CTLTYPE_NODE|CTLFLAG_RD, (void*)&sysctl_debug_children,0, NULL, NULL, "Debugging", 0 };
 
 /* Basic Variables */
+int securelevel = 0;
 static char kernel_ostype[] = "Substrate";
 static char kernel_osrelease[] = "0.1-ALPHA";
 static char kernel_version[] = "Substrate 0.1-ALPHA (GENERIC) #0: Tue Jan 27 00:00:00 UTC 2026";
@@ -40,6 +41,7 @@ static int kernel_maxproc = 1000; // placeholder
 static char kernel_hostname[256] = "localhost";
 static char kernel_domainname[256] = "localdomain";
 
+SYSCTL_INT(kern, KERN_SECURELVL, securelevel, CTLFLAG_RW, &securelevel, 0, "System security level");
 SYSCTL_STRING(kern, KERN_OSTYPE, ostype, CTLFLAG_RD, kernel_ostype, 0, "Operating system type");
 SYSCTL_STRING(kern, KERN_OSRELEASE, osrelease, CTLFLAG_RD, kernel_osrelease, 0, "Operating system release");
 SYSCTL_INT(kern, KERN_OSREV, osrevision, CTLFLAG_RD, NULL, 202601, "Operating system revision");
@@ -78,6 +80,7 @@ void sysctl_init(void) {
     sysctl_register_oid(&sysctl_debug);
 
     // Register Kern variables
+    sysctl_register_oid(&sysctl_kern_securelevel);
     sysctl_register_oid(&sysctl_kern_ostype);
     sysctl_register_oid(&sysctl_kern_osrelease);
     sysctl_register_oid(&sysctl_kern_osrevision);
