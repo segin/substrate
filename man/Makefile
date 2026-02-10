@@ -1,6 +1,6 @@
 include ../Makefile.inc
 
-MAN_DIRS = man1 man2 man4 man9
+MAN_DIRS = man1 man2 man3 man4 man5 man7 man9
 DESTDIR ?= ../dist
 
 all:
