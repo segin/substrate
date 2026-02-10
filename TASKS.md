@@ -1037,7 +1037,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [x] Erase echo (backspace-space-backspace sequence).
             - [ ] **Driver Interface (`tty_driver`):**
                 - [x] `install` / `remove`: setup private data.
-                - [ ] `open` / `close`: hardware init/shutdown.
+                - [x] `open` / `close`: hardware init/shutdown.
                 - [ ] `write`: device output path.
                 - [ ] `put_char`: optimized single-char write.
                 - [ ] `flush_chars`: kick hardware transmission.
