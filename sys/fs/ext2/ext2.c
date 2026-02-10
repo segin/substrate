@@ -577,6 +577,7 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
                     // Found it - store in context specific dirent
                     ctx->current_dirent.ino = de->inode;
                     uint32_t len = de->name_len;
+                    // Fix: Ensure name fits in buffer to prevent overflow
                     if (len >= sizeof(ctx->current_dirent.name)) {
                         len = sizeof(ctx->current_dirent.name) - 1;
                     }
