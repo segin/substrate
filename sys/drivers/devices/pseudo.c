@@ -6,15 +6,13 @@
 #include <sys/proc.h>
 #include <vfs/vfs.h>
 #include <sys/tty.h>
+#include "null.h"
 
 // /dev/null
-// /dev/null
-static size_t null_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node; (void)offset; (void)size; (void)buffer;
-    return 0; // EOF
-}
+// Implemented in null.c
 
-static size_t null_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+// Shared discard write for /dev/zero and others
+static size_t discard_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer;
     return size; // Discarded
 }
@@ -182,8 +180,6 @@ static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8
     return size;
 }
 
-static fs_node_t null_node;
-
 static fs_node_t zero_node;
 
 static fs_node_t full_node;
@@ -194,20 +190,8 @@ static fs_node_t tty_node;
 
 
 void pseudo_init(void) {
-
-    memset(&null_node, 0, sizeof(fs_node_t));
-
-    strcpy(null_node.name, "null");
-
-    null_node.flags = FS_CHARDEVICE;
-
-    null_node.read = &null_read;
-
-    null_node.write = &null_write;
-    null_node.rdev = (1 << 8) | 3;
-    devfs_register_device(&null_node);
-
-
+    // Initialize /dev/null (from null.c)
+    null_init();
 
     memset(&zero_node, 0, sizeof(fs_node_t));
 
@@ -216,7 +200,7 @@ void pseudo_init(void) {
     zero_node.flags = FS_CHARDEVICE;
 
     zero_node.read = &zero_read;
-    zero_node.write = &null_write; 
+    zero_node.write = &discard_write;
     zero_node.rdev = (1 << 8) | 5;
     devfs_register_device(&zero_node);
 
