@@ -27,9 +27,8 @@ static int test_psignal_delivery(void) {
     kprint("Test: psignal delivery logic... ");
     
     // Create a dummy process and thread
-    extern process_t *proc_create(struct personality *pers);
-    extern struct personality personality_native;
-    process_t *p = proc_create(&personality_native);
+    extern process_t *proc_create(int perso_id);
+    process_t *p = proc_create(0); // PERS_NATIVE
     if (!p) return -1;
     
     extern thread_t *sched_alloc_thread(process_t *proc);

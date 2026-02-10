@@ -2,7 +2,6 @@
 #define _SYSCALL_H
 
 #include <stdint.h>
-#include "idt.h"
 
 // Define max syscalls
 #define MAX_SYSCALLS 600   /* FreeBSD has ~576 syscalls */
