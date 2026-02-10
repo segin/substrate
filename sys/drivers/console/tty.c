@@ -62,16 +62,31 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
     
     tty->winsize.ws_row = 25;
     tty->winsize.ws_col = 80;
-    
+
+    if (driver && driver->install) {
+        int ret = driver->install(tty);
+        if (ret != 0) {
+            kfree(tty, sizeof(struct tty));
+            return NULL;
+        }
+    }
+
     if (idx >= 0 && idx < 64) {
         ttys[idx] = tty;
     }
-    
+
     return tty;
 }
 
 void tty_free(struct tty *tty) {
-    if (tty) kfree(tty, sizeof(struct tty));
+    if (!tty) return;
+    if (tty->driver && tty->driver->remove) {
+        tty->driver->remove(tty);
+    }
+    if (tty->index >= 0 && tty->index < 64) {
+        ttys[tty->index] = NULL;
+    }
+    kfree(tty, sizeof(struct tty));
 }
 
 // Minimal ring buffer ops
@@ -92,6 +107,57 @@ static int tty_buf_get(tty_buffer_t *tb, char *c) {
     tb->tail = (tb->tail + 1) % TTY_BUF_SIZE;
     tb->count--;
     return 1;
+}
+
+static int tty_canon_len(struct tty *tty) {
+    if (!tty) return 0;
+
+    char line[TTY_BUF_SIZE];
+    int line_len = 0;
+    int idx = tty->raw_buf.tail;
+    int count = tty->raw_buf.count;
+
+    for (int i = 0; i < count; i++) {
+        char c = tty->raw_buf.data[idx];
+        idx = (idx + 1) % TTY_BUF_SIZE;
+
+        if (c == (char)0xFF) {
+            line_len = 0;
+            continue;
+        }
+
+        if (c == tty->termios.c_cc[VERASE]) {
+            if (line_len > 0) line_len--;
+            continue;
+        }
+
+        if (c == tty->termios.c_cc[VKILL]) {
+            line_len = 0;
+            continue;
+        }
+
+        if (c == tty->termios.c_cc[VWERASE]) {
+            while (line_len > 0 &&
+                (line[line_len - 1] == ' ' || line[line_len - 1] == '\t')) {
+                line_len--;
+            }
+            while (line_len > 0 &&
+                (line[line_len - 1] != ' ' && line[line_len - 1] != '\t')) {
+                line_len--;
+            }
+            continue;
+        }
+
+        if (c == tty->termios.c_cc[VEOF]) {
+            continue;
+        }
+
+        if (line_len < TTY_BUF_SIZE) {
+            line[line_len++] = c;
+        }
+    }
+
+    return line_len;
 }
 
 // Forward declarations
@@ -141,6 +207,9 @@ static void tty_start_locked(struct tty *tp) {
         } else if (tp->driver->write) {
             tp->driver->write(tp, (unsigned char*)&c, 1);
         }
+    }
+    if (tp->driver->flush_chars) {
+        tp->driver->flush_chars(tp);
     }
 }
 
@@ -218,6 +287,9 @@ static void canon(struct tty *tp, uint32_t *flags_ptr) {
         if (tp->raw_buf.count <= (TTY_BUF_SIZE / 4)) {
             tp->input_stopped = 0;
             tty_send_xchar(tp, tp->termios.c_cc[VSTART]);
+            if (tp->driver->unthrottle) {
+                tp->driver->unthrottle(tp);
+            }
         }
     }
 }
@@ -317,6 +389,8 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         }
     }
     
+    int old_canon_len = tty->canon_len;
+
     // Put char to raw buffer
     tty_buf_put(&tty->raw_buf, c);
     
@@ -325,6 +399,9 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         if (tty->raw_buf.count >= (TTY_BUF_SIZE * 3 / 4)) {
             tty->input_stopped = 1;
             tty_send_xchar(tty, tty->termios.c_cc[VSTOP]);
+            if (tty->driver->throttle) {
+                tty->driver->throttle(tty);
+            }
         }
     }
     
@@ -335,8 +412,23 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         sched_wakeup(&tty->read_wait);
     }
     
-    // Echo
-    tty_echo(tty, c);
+    // Echo and canonical line tracking
+    if (raw) {
+        tty_echo(tty, c);
+    } else {
+        tty->canon_len = tty_canon_len(tty);
+        if (c == tty->termios.c_cc[VERASE]) {
+            if (old_canon_len > 0) {
+                tty_echo(tty, c);
+            }
+        } else if (c == tty->termios.c_cc[VWERASE]) {
+            if (old_canon_len > 0) {
+                tty_echo(tty, c);
+            }
+        } else {
+            tty_echo(tty, c);
+        }
+    }
     tty_start_locked(tty);
 
     TTY_UNLOCK(tty);
@@ -453,33 +545,34 @@ int tty_write(struct tty *tty, const char *buf, int len) {
 
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     if (!tty) return -1;
-    
+    int ret = -1;
+
     TTY_LOCK(tty);
 
     switch (cmd) {
         case TCGETS:
             if (arg) memcpy((void*)arg, &tty->termios, sizeof(struct termios));
-            TTY_UNLOCK(tty);
-            return 0;
+            ret = 0;
+            break;
         case TCSETS:
         case TCSETSW:
         case TCSETSF:
             if (arg) memcpy(&tty->termios, (void*)arg, sizeof(struct termios));
             if (tty->driver->set_termios) tty->driver->set_termios(tty);
-            TTY_UNLOCK(tty);
-            return 0;
+            ret = 0;
+            break;
         case TIOCGWINSZ:
             if (arg) memcpy((void*)arg, &tty->winsize, sizeof(struct winsize));
-            TTY_UNLOCK(tty);
-            return 0;
+            ret = 0;
+            break;
         case TIOCSPGRP:
             if (arg) tty->pgrp = *(int*)arg;
-            TTY_UNLOCK(tty);
-            return 0;
+            ret = 0;
+            break;
         case TIOCGPGRP:
             if (arg) *(int*)arg = tty->pgrp;
-            TTY_UNLOCK(tty);
-            return 0;
+            ret = 0;
+            break;
         case TIOCSCTTY: {
             // Set controlling TTY
             // Arg: 0 or 1. If 1, steal from another session.
@@ -493,8 +586,8 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             if (!is_session_leader) {
                 // Must be session leader
                 // return EPERM;
-                TTY_UNLOCK(tty);
-                return -1;
+                ret = -1;
+                break;
             }
             // If already has ctty and arg!=1, fail?
             // Simplified: Just set it.
@@ -505,11 +598,11 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
                 tty->pgrp = cur_pgrp;
                 // current_process->tty = fs_node... (Cannot set fs_node here directly without context)
                 // Assuming VFS layer calls this and updates process->tty if success.
-                TTY_UNLOCK(tty);
-                return 0;
+                ret = 0;
+                break;
             }
-            TTY_UNLOCK(tty);
-            return -1;
+            ret = -1;
+            break;
         }
         
         case TIOCNOTTY: {
@@ -522,15 +615,18 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
                 tty->session = 0;
                 tty->pgrp = 0;
                 // current_process->tty = NULL;
-                TTY_UNLOCK(tty);
-                return 0;
+                ret = 0;
+                break;
             }
-            TTY_UNLOCK(tty);
-            return -1;
+            ret = -1;
+            break;
         }
     }
+    if (ret == -1 && tty->driver->ioctl) {
+        ret = tty->driver->ioctl(tty, cmd, arg);
+    }
     TTY_UNLOCK(tty);
-    return -1;
+    return ret;
 }
 
 int tty_open(struct tty *tty) {
@@ -606,9 +702,18 @@ int tty_poll(struct tty *tty, void *waiter) {
         events |= POLLIN | POLLRDNORM;
     }
     
-    // Always writable for now
-    events |= POLLOUT | POLLWRNORM;
-    
+    int write_room = TTY_BUF_SIZE - tty->write_buf.count;
+    int pending = tty->write_buf.count;
+    if (tty->driver->write_room) {
+        write_room = tty->driver->write_room(tty);
+    }
+    if (tty->driver->chars_in_buffer) {
+        pending += tty->driver->chars_in_buffer(tty);
+    }
+    if (write_room > 0 && pending < TTY_BUF_SIZE) {
+        events |= POLLOUT | POLLWRNORM;
+    }
+
     TTY_UNLOCK(tty);
     return events;
 }

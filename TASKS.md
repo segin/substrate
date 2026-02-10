@@ -1034,17 +1034,17 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **Echoing Logic:**
                     - [x] Raw echo (input char -> output).
                     - [x] Control char echo (`^C`).
-                    - [ ] Erase echo (backspace-space-backspace sequence).
-            - [ ] **Driver Interface (`tty_driver`):**
-                - [ ] `install` / `remove`: setup private data.
-                - [ ] `open` / `close`: hardware init/shutdown.
-                - [ ] `write`: device output path.
-                - [ ] `put_char`: optimized single-char write.
-                - [ ] `flush_chars`: kick hardware transmission.
-                - [ ] `write_room`: check available hardware buffer space.
-                - [ ] `chars_in_buffer`: check pending bytes.
-                - [ ] `ioctl`: hardware-specific controls.
-                - [ ] `throttle` / `unthrottle`: hardware flow control hooks.
+                    - [x] Erase echo (backspace-space-backspace sequence).
+            - [x] **Driver Interface (`tty_driver`):**
+                - [x] `install` / `remove`: setup private data.
+                - [x] `open` / `close`: hardware init/shutdown.
+                - [x] `write`: device output path.
+                - [x] `put_char`: optimized single-char write.
+                - [x] `flush_chars`: kick hardware transmission.
+                - [x] `write_room`: check available hardware buffer space.
+                - [x] `chars_in_buffer`: check pending bytes.
+                - [x] `ioctl`: hardware-specific controls.
+                - [x] `throttle` / `unthrottle`: hardware flow control hooks.
             - [x] **Session/Job Control:**
                 - [x] `tty_struct.session`: Pointer to current session.
                 - [x] `tty_struct.pgrp`: Pointer to foreground process group.
