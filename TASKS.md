@@ -1043,7 +1043,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `flush_chars`: kick hardware transmission.
                 - [x] `write_room`: check available hardware buffer space.
                 - [x] `chars_in_buffer`: check pending bytes.
-                - [ ] `ioctl`: hardware-specific controls.
+                - [x] `ioctl`: hardware-specific controls.
                 - [ ] `throttle` / `unthrottle`: hardware flow control hooks.
             - [x] **Session/Job Control:**
                 - [x] `tty_struct.session`: Pointer to current session.
