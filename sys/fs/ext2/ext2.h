@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <vfs/vfs.h>
+#include <sys/lock.h>
 
 // EXT2 Magic Number
 #define EXT2_SUPER_MAGIC 0xEF53
@@ -135,6 +136,13 @@ typedef struct {
     uint32_t inode_num;
     ext2_inode_t inode;
     struct dirent current_dirent; // For readdir
+
+    // Scratch buffers for I/O operations (protected by lock)
+    mutex_t lock;
+    uint8_t *block_buf;
+    uint32_t *indirect_buf;
+    uint32_t *dindirect_buf;
+    uint32_t *tindirect_buf;
 } ext2_node_t;
 
 // Public functions
@@ -146,8 +154,9 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
 int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer);
 uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer);
-uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, void *buffer);
-uint32_t ext2_inode_write(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, const void *buffer);
+// Optimized versions taking ext2_node_t for cached buffers
+uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *buffer);
+uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const void *buffer);
 uint32_t ext2_alloc_block(ext2_fs_t *fs);
 void ext2_free_block(ext2_fs_t *fs, uint32_t block_num);
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir);

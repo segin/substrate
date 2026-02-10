@@ -217,7 +217,8 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
     char buf[512];
     int len;
     
-    if (current_process->pers && strcmp(current_process->pers->name, "Linux") == 0) {
+    struct personality *pers = perso_lookup(current_process->perso_id);
+    if (pers && strcmp(pers->name, "Linux") == 0) {
         len = sprintf(buf,
             "Name:\t%s\n"
             "State:\tR (running)\n"

@@ -268,6 +268,11 @@ void run_kernel_tests(void) {
         run_ext2_perf_test();
     }
 
+    if (all || strcmp(test_arg, "ext2_read_perf") == 0) {
+        extern void run_ext2_read_perf_test(void);
+        run_ext2_read_perf_test();
+    }
+
     if (all || strcmp(test_arg, "ide") == 0) {
         extern void test_ide_perf(void);
         test_ide_perf();

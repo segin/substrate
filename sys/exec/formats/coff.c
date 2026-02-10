@@ -42,7 +42,7 @@ int coff_load_file(void *file, uint32_t size) {
 
     // Default to SVR3 for now if we detect a 386 COFF binary
     if (current_process) {
-        current_process->pers = &personality_svr3;
+        current_process->perso_id = personality_svr3.id;
         proc_set_bitness(current_process, BITNESS_32);
     }
 
