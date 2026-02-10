@@ -279,9 +279,15 @@ void sched_periodic_balance(void) {
     if (!sched_needs_load_balance()) return;
     
     // Only rebalance occasionally to avoid overhead
-    static uint32_t balance_counter = 0;
-    balance_counter++;
-    if (balance_counter % 100 != 0) return;
+    // Use per-CPU counters to avoid cache contention and race conditions
+    static uint32_t balance_counters[MAX_CPUS];
+    extern int percpu_get_cpu_id(void);
+    int cpu_id = percpu_get_cpu_id();
+
+    if (cpu_id < 0 || cpu_id >= MAX_CPUS) return;
+
+    balance_counters[cpu_id]++;
+    if (balance_counters[cpu_id] % 100 != 0) return;
     
     // Each CPU checks if it should steal
     thread_t *t = sched_load_balance();

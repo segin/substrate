@@ -179,6 +179,10 @@ int sched_sleep_until(void *chan, uint64_t deadline_tick) {
 void sched_tick(void) {
     uint64_t now = get_ticks();
 
+    // Perform periodic SMP load balancing
+    extern void sched_periodic_balance(void);
+    sched_periodic_balance();
+
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 &&
             threads[i].state == THREAD_BLOCKED &&
