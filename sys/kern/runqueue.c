@@ -5,6 +5,7 @@
  */
 
 #include <kern/runqueue.h>
+#include <sys/lock.h>
 #include <string.h>
 
 // Find first set bit (1-indexed, 0 if none)
@@ -31,6 +32,7 @@ static inline int ffs64(uint64_t x) {
 void runqueue_init(runqueue_t *rq, uint32_t cpu_id) {
     memset(rq, 0, sizeof(*rq));
     rq->cpu_id = cpu_id;
+    spinlock_init(&rq->lock, "runqueue");
     
     for (int i = 0; i < RQ_TOTAL_LEVELS; i++) {
         rq->queues[i].head = NULL;
