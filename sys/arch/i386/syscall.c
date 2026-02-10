@@ -112,7 +112,13 @@ extern int syscall_trace_enabled;
 extern int syscall_trace_enabled;
 
 void syscall_handler(registers_t *regs) {
-    if (!current_process || !current_process->pers) {
+    // Lookup personality pointer from ID
+    struct personality *p = NULL;
+    if (current_process) {
+        p = perso_lookup(current_process->perso_id);
+    }
+
+    if (!current_process || !p) {
         regs->eax = -38; // ENOSYS
         return;
     }
@@ -121,8 +127,6 @@ void syscall_handler(registers_t *regs) {
     if (current_thread) {
         current_thread->syscall_regs = regs;
     }
-    
-    struct personality *p = current_process->pers;
     uint32_t syscall_num = regs->eax;
 
     // Track syscall for SA_RESTART support
