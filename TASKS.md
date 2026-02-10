@@ -1044,7 +1044,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `write_room`: check available hardware buffer space.
                 - [x] `chars_in_buffer`: check pending bytes.
                 - [x] `ioctl`: hardware-specific controls.
-                - [ ] `throttle` / `unthrottle`: hardware flow control hooks.
+                - [x] `throttle` / `unthrottle`: hardware flow control hooks.
             - [x] **Session/Job Control:**
                 - [x] `tty_struct.session`: Pointer to current session.
                 - [x] `tty_struct.pgrp`: Pointer to foreground process group.
