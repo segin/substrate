@@ -19,8 +19,8 @@ static size_t null_write(fs_node_t *node, off_t offset, size_t size, const uint8
     return size; // Discarded
 }
 
-// /dev/zero
-static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+// /dev/zero - Replaced by zero.c
+static size_t full_read_zeros(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     memset(buffer, 0, size);
     return size;
@@ -184,14 +184,14 @@ static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8
 
 static fs_node_t null_node;
 
-static fs_node_t zero_node;
-
 static fs_node_t full_node;
 
 static fs_node_t tty_node;
 
 
 
+
+extern void zero_init(void);
 
 void pseudo_init(void) {
 
@@ -207,20 +207,8 @@ void pseudo_init(void) {
     null_node.rdev = (1 << 8) | 3;
     devfs_register_device(&null_node);
 
-
-
-    memset(&zero_node, 0, sizeof(fs_node_t));
-
-    strcpy(zero_node.name, "zero");
-
-    zero_node.flags = FS_CHARDEVICE;
-
-    zero_node.read = &zero_read;
-    zero_node.write = &null_write; 
-    zero_node.rdev = (1 << 8) | 5;
-    devfs_register_device(&zero_node);
-
-
+    // Initialize new zero driver
+    zero_init();
 
     memset(&full_node, 0, sizeof(fs_node_t));
 
@@ -228,7 +216,7 @@ void pseudo_init(void) {
 
     full_node.flags = FS_CHARDEVICE;
 
-    full_node.read = &zero_read; // Always returns zeros
+    full_node.read = &full_read_zeros; // Always returns zeros
     full_node.write = &full_write; // Always returns error
     full_node.rdev = (1 << 8) | 7;
     devfs_register_device(&full_node);
