@@ -78,6 +78,7 @@ static void fat_parse_short_name(const char *fat_name, char *output) {
 
 // Parse long filename entry
 int fat_parse_lfn(fat_lfn_t *lfn, char *buffer, int max_len) {
+    // Security: Validate index to prevent buffer overflow
     int idx = ((lfn->order & 0x3F) - 1) * 13;  // Each LFN holds 13 chars
 
     if (idx < 0 || idx >= max_len) return -1;
@@ -182,7 +183,17 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
             // Check for LFN entry
             if (entry->attr == FAT_ATTR_LFN) {
                 fat_lfn_t *lfn = (fat_lfn_t *)entry;
-                lfn_len = fat_parse_lfn(lfn, lfn_buffer, sizeof(lfn_buffer) - 1);
+
+                // If this is the last entry (masked with 0x40), it marks the start of a new LFN sequence
+                if (lfn->order & 0x40) {
+                    memset(lfn_buffer, 0, sizeof(lfn_buffer));
+                    lfn_len = 0;
+                }
+
+                int ret = fat_parse_lfn(lfn, lfn_buffer, sizeof(lfn_buffer) - 1);
+                if (ret > lfn_len) {
+                    lfn_len = ret;
+                }
                 continue;
             }
             
@@ -272,7 +283,17 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
             // Check for LFN entry
             if (entry->attr == FAT_ATTR_LFN) {
                 fat_lfn_t *lfn = (fat_lfn_t *)entry;
-                lfn_len = fat_parse_lfn(lfn, lfn_buffer, sizeof(lfn_buffer) - 1);
+
+                // If this is the last entry (masked with 0x40), it marks the start of a new LFN sequence
+                if (lfn->order & 0x40) {
+                    memset(lfn_buffer, 0, sizeof(lfn_buffer));
+                    lfn_len = 0;
+                }
+
+                int ret = fat_parse_lfn(lfn, lfn_buffer, sizeof(lfn_buffer) - 1);
+                if (ret > lfn_len) {
+                    lfn_len = ret;
+                }
                 continue;
             }
             
