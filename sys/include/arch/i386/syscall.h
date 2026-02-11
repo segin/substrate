@@ -1,6 +1,5 @@
 #ifndef _ARCH_SYSCALL_H
 #define _ARCH_SYSCALL_H
-
 #define SYS_EXIT    1
 #define SYS_FORK    2
 #define SYS_READ    3
@@ -50,6 +49,8 @@
 #define SYS_MUNMAP  91
 #define SYS_TRUNCATE 92
 #define SYS_FTRUNCATE 93
+#define SYS_SETPRIORITY 96
+#define SYS_GETPRIORITY 100
 #define SYS_UMASK   60
 #define SYS_STAT    106
 #define SYS_LSTAT   107
@@ -96,4 +97,5 @@
 #define SYS_GETPGID     182
 #define SYS_GETRUSAGE   117
 
+void syscall_init(void);
 #endif

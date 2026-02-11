@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <termios.h>
 
 extern int64_t _syscall0(int);
@@ -407,4 +408,17 @@ int sethostname(const char *name, size_t len) {
 
 int futex(int *uaddr, int op, int val, const struct timespec *timeout, int *uaddr2, int val3) {
     return _syscall6(240, (int)uaddr, op, val, (int)timeout, (int)uaddr2, val3);
+}
+
+int getpriority(int which, id_t who) {
+    int ret = (int)_syscall2(SYS_GETPRIORITY, which, who);
+    if (ret < 0) {
+        errno = -ret;
+        return -1;
+    }
+    return ret - 20;
+}
+
+int setpriority(int which, id_t who, int prio) {
+    return (int)_syscall3(SYS_SETPRIORITY, which, who, prio);
 }
