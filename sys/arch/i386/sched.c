@@ -60,7 +60,7 @@ void sched_init(void) {
     // Setup Kernel Process (PID 0 - Swapper)
     processes[0].pid = 0;
     processes[0].ppid = 0;
-    processes[0].perso_id = PERS_NATIVE;
+    proc_set_personality(&processes[0], PERS_NATIVE);
     processes[0].root_node = fs_root;
     processes[0].is_kernel_task = 1;
     processes[0].pmap = pmap_kernel(); // Use Kernel PMAP

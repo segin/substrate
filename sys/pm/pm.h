@@ -15,6 +15,7 @@ void pm_init(void);
 process_t *proc_create(int perso_id);
 int proc_fork(process_t *parent, void *stack);
 void proc_remove_child(process_t *parent, process_t *child);
+void proc_set_personality(process_t *p, int perso_id);
 
 void proc_set_bitness(process_t *p, uint8_t bitness);
 uint8_t proc_get_bitness(process_t *p);

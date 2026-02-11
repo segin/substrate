@@ -78,6 +78,13 @@ int proc_get_last_pid(void) {
     return next_pid - 1;
 }
 
+void proc_set_personality(process_t *p, int perso_id) {
+    if (!p) return;
+
+    p->perso_id = perso_id;
+    p->pers = perso_lookup(perso_id);
+}
+
 process_t *proc_create(int perso_id) {
     spinlock_acquire(&pid_lock);
     int i;
@@ -92,8 +99,7 @@ process_t *proc_create(int perso_id) {
     processes[i].pid = next_pid++;
     spinlock_release(&pid_lock);
     processes[i].ppid = current_process ? current_process->pid : 0;
-    processes[i].perso_id = perso_id;
-    processes[i].pers = perso_lookup(perso_id);
+    proc_set_personality(&processes[i], perso_id);
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
     processes[i].next_fd = 0; // Reset FD hint
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;

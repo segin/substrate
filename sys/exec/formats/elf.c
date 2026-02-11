@@ -3,6 +3,7 @@
 #include <kern/console.h>
 #include <sys/sysinfo.h> // For BITNESS_*
 #include <sys/proc.h>
+#include <pm/pm.h>
 #include <kern/panic.h>
 #include <string.h>
 #include <vm/vm_map.h>
@@ -299,13 +300,13 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     if (current_process) {
         switch (detected_os) {
             case ELFOSABI_FREEBSD:
-                current_process->perso_id = PERS_FREEBSD;
+                proc_set_personality(current_process, PERS_FREEBSD);
                 break;
             case ELFOSABI_LINUX:
-                current_process->perso_id = PERS_LINUX;
+                proc_set_personality(current_process, PERS_LINUX);
                 break;
             default:
-                current_process->perso_id = PERS_NATIVE;
+                proc_set_personality(current_process, PERS_NATIVE);
                 break;
         }
         
