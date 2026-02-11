@@ -29,8 +29,7 @@ void swapper_init(void) {
     memset(&swapper_proc, 0, sizeof(swapper_proc));
     swapper_proc.pid = 0;
     swapper_proc.ppid = 0;
-    swapper_proc.pgrp = 0;
-    swapper_proc.session = 0;
+    swapper_proc.p_pgrp = 0;
     swapper_proc.is_kernel_task = 1;
     
     // Set comm name
@@ -111,8 +110,7 @@ void swapper_idle_loop(void) {
             // Simplified: just enable and yield.
             __asm__ volatile("sti");
             
-            extern void sched_yield(void);
-            sched_yield();
+            sched_switch(next);
             continue;
         }
         

@@ -64,6 +64,29 @@ thread_t *sched_alloc_thread(process_t *proc) {
     return &threads[i];
 }
 
+static void sched_context_switch(thread_t *prev, thread_t *next) {
+    if (prev && prev->state == THREAD_RUNNING) prev->state = THREAD_READY;
+    next->state = THREAD_RUNNING;
+
+    current_thread = next;
+    current_process = current_thread->proc;
+
+    // Arch specific hooks
+    if (current_thread->kstack_top) {
+        arch_set_kernel_stack(current_thread->kstack_top);
+    }
+
+    // Activate new process's address space if switching processes
+    if (prev && prev->proc != next->proc && next->proc && next->proc->pmap) {
+        extern void pmap_activate(void *pmap);
+        pmap_activate(next->proc->pmap);
+    }
+
+    if (prev && prev != next) {
+        arch_switch_to(prev, next);
+    }
+}
+
 void sched_yield(void) {
     if (!current_thread) return;
 
@@ -96,31 +119,18 @@ void sched_yield(void) {
     }
 
     if (best_thread == current_thread && current_thread && current_thread->state == THREAD_RUNNING) return;
+    
+    if (best_thread) {
+        sched_context_switch(current_thread, best_thread);
+    }
+}
 
-    // Context Switch
-    thread_t *prev = current_thread;
-    thread_t *next = best_thread;
+void sched_switch(thread_t *next) {
+    if (!next) return;
+    if (!current_thread) return;
+    if (next == current_thread && current_thread->state == THREAD_RUNNING) return;
     
-    if (prev && prev->state == THREAD_RUNNING) prev->state = THREAD_READY;
-    next->state = THREAD_RUNNING;
-    
-    current_thread = next;
-    current_process = current_thread->proc;
-    
-    // Arch specific hooks
-    if (current_thread->kstack_top) {
-        arch_set_kernel_stack(current_thread->kstack_top);
-    }
-    
-    // Activate new process's address space if switching processes
-    if (prev && prev->proc != next->proc && next->proc && next->proc->pmap) {
-        extern void pmap_activate(void *pmap);
-        pmap_activate(next->proc->pmap);
-    }
-    
-    if (prev && prev != next) {
-        arch_switch_to(prev, next);
-    }
+    sched_context_switch(current_thread, next);
 }
 
 int sched_get_current_tid(void) {
