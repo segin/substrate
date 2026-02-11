@@ -211,14 +211,14 @@ int smp_boot_ap(uint8_t apic_id) {
     // 3. Send INIT IPI -> Wait 10ms -> SIPI -> Wait 200us -> SIPI
     lapic_send_init(apic_id);
     
-    // Delay ~10ms (simple busy wait - TODO: use proper timer)
-    for (volatile int i = 0; i < 1000000; i++) { }
+    // Delay 10ms
+    lapic_timer_delay_ms(10);
     
     // First SIPI
     lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
     
-    // Delay ~200us
-    for (volatile int i = 0; i < 20000; i++) { }
+    // Delay 200us
+    lapic_timer_delay_us(200);
     
     // Second SIPI (per Intel spec)
     lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
