@@ -24,6 +24,31 @@ bc_num *peek() {
     return bc_from_long(0);
 }
 
+char *buf = NULL;
+int buf_cap = 0;
+int buf_len = 0;
+
+void buf_add(int c) {
+    if (buf_len + 1 >= buf_cap) {
+        buf_cap = buf_cap < 8 ? 8 : buf_cap * 2;
+        buf = realloc(buf, buf_cap);
+    }
+    buf[buf_len++] = c;
+    buf[buf_len] = '\0';
+}
+
+void buf_reset() {
+    buf_len = 0;
+    if (buf) buf[0] = '\0';
+}
+
+void push_buf(int sign) {
+    bc_num *n = bc_from_string(buf);
+    if (n->sign != 0) n->sign *= sign;
+    push(n);
+    buf_reset();
+}
+
 int main(int argc, char *argv[]) {
     FILE *in = stdin;
     if (argc > 1) {
@@ -32,24 +57,21 @@ int main(int argc, char *argv[]) {
     }
 
     int c;
-    long long num = 0;
     int in_num = 0;
     int sign = 1;
 
     while ((c = fgetc(in)) != EOF) {
         if (isspace(c)) {
             if (in_num) { 
-                push(bc_from_long(num * sign)); 
-                num = 0; in_num = 0; sign = 1; 
+                push_buf(sign);
+                in_num = 0; sign = 1;
             }
             continue;
         }
         
         if (isdigit(c)) {
-            // Simple parsing for prototype (still long long limit on input parse)
-            // TODO: Proper bignum parsing
             in_num = 1;
-            num = num * 10 + (c - '0');
+            buf_add(c);
             continue;
         }
         
@@ -59,14 +81,19 @@ int main(int argc, char *argv[]) {
         }
 
         if (c == '_') {
+            if (in_num) {
+                push_buf(sign);
+                sign = 1;
+            }
             sign = -1;
             in_num = 1;
+            buf_reset();
             continue;
         }
 
         if (in_num) { 
-            push(bc_from_long(num * sign)); 
-            num = 0; in_num = 0; sign = 1; 
+            push_buf(sign);
+            in_num = 0; sign = 1;
         }
 
         bc_num *a, *b, *res;
@@ -135,10 +162,12 @@ int main(int argc, char *argv[]) {
                 bc_free(a); bc_free(b);
                 break;
             case 'q':
+                if (buf) free(buf);
                 return 0;
             default:
                 break;
         }
     }
+    if (buf) free(buf);
     return 0;
 }

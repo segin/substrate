@@ -60,6 +60,58 @@ bc_num *bc_from_long(long long v) {
     return n;
 }
 
+bc_num *bc_from_string(const char *s) {
+    bc_num *n = bc_new();
+    if (!s || *s == '\0') {
+        n->sign = 0;
+        return n;
+    }
+
+    // Handle optional sign
+    int sign = 1;
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+
+    // Skip leading zeros
+    while (*s == '0') s++;
+    if (*s == '\0') {
+        n->sign = 0;
+        return n;
+    }
+
+    n->sign = sign;
+    int len = strlen(s);
+    // Base 100: each digit stores 0-99 (2 decimal digits)
+    // Required capacity: (len + 1) / 2
+    int needed = (len + 1) / 2;
+    bc_expsize(n, needed);
+
+    int d = 0;
+    for (int i = 0; i < needed; i++) {
+        // Parse 2 chars from the end: s[len-1-2*i] and s[len-2-2*i]
+        int val = 0;
+        int idx1 = len - 1 - (2 * i);
+        int idx2 = len - 2 - (2 * i);
+
+        // LSD (idx1)
+        if (idx1 >= 0) {
+            val += (s[idx1] - '0');
+        }
+        // MSD (idx2) - contributes x10
+        if (idx2 >= 0) {
+            val += (s[idx2] - '0') * 10;
+        }
+        n->digits[d++] = val;
+    }
+    n->len = d;
+
+    return n;
+}
+
 void bc_print(bc_num *n) {
     if (!n) {
         printf("(null)");
