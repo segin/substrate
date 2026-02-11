@@ -14,8 +14,10 @@
 
 #include <sys/futex.h>
 #include <sys/proc.h>
-#include <errno.h>
+#include <sys/errno.h>
+#include <sys/time.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <arch/i386/pmap.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -39,6 +41,29 @@ extern int sleepq_requeue(void *src, void *dst, int wake_n, int requeue_n);
 
 static inline int validate_uaddr(uintptr_t addr) {
     return (addr <= USER_SPACE_MAX) && ((addr & 3) == 0);
+}
+
+/*
+ * Helper to safely read timespec from user space
+ */
+static int futex_read_timespec(void *uaddr, struct timespec *out) {
+    uintptr_t addr = (uintptr_t)uaddr;
+
+    /* Check basic user space bounds */
+    if (addr > USER_SPACE_MAX || (addr + sizeof(struct timespec)) > USER_SPACE_MAX) {
+        return -EFAULT;
+    }
+
+    /* Check alignment (4-byte aligned for 32-bit time_t/long) */
+    if (addr & 3) {
+        return -EFAULT;
+    }
+
+    /* Direct copy since we share address space and validated bounds */
+    /* In a full model we'd use copyin() to handle faults */
+    *out = *(struct timespec *)uaddr;
+
+    return 0;
 }
 
 /*
@@ -303,11 +328,41 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
             }
             
             /* Sleep on the physical address key */
-            /* TODO: Honor timeout parameter */
-            (void)timeout;
-            sched_sleep(key);
+            if (timeout) {
+                struct timespec ts;
+                if (futex_read_timespec(timeout, &ts) != 0) {
+                    return -EFAULT;
+                }
+
+                if (ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000) {
+                    return -EINVAL;
+                }
+
+                uint64_t hz = get_hz();
+                uint64_t ticks = (uint64_t)ts.tv_sec * hz;
+                ticks += ((uint64_t)ts.tv_nsec * hz) / 1000000000ULL;
+
+                uint64_t deadline = get_ticks() + ticks;
+                int ret = sched_sleep_until(key, deadline);
+
+                if (ret == -ETIMEDOUT) return -ETIMEDOUT;
+
+                /* Check for signal interruption */
+                if ((current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
+                    (current_thread->sig_pending & ~current_thread->sig_mask)) {
+                    return -EINTR;
+                }
+            } else {
+                sched_sleep(key);
+
+                /* Check for signal interruption */
+                if ((current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
+                    (current_thread->sig_pending & ~current_thread->sig_mask)) {
+                    return -EINTR;
+                }
+            }
             
-            /* Return 0 on wake (or -EINTR if interrupted by signal) */
+            /* Return 0 on wake */
             return 0;
         }
 
@@ -766,4 +821,3 @@ int futex_unlock_pi(int *uaddr) {
     
     return err ? err : -EAGAIN;
 }
-
