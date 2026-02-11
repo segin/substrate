@@ -123,6 +123,13 @@ These tools are compiled using the host's compiler (`cc`) and C library, but str
 > [!CAUTION]
 > **Host Builds NEVER use Substrate's libc.** When `NATIVE_BUILD=1` is set, programs link against the host OS's standard C library (glibc, musl, etc.), not `lib/c/`. The Substrate libc (`lib/c/`, `lib/sys/`) is exclusively for the Substrate kernel and target binaries. Never modify these libraries to support Linux or other host operating systems.
 
+### Testing
+- **Kernel Tests:** Located in `tests/unit/`, `tests/sys/`. Compiled via `tests/Makefile` and run on the host.
+- **Libc Tests:** Located in `tests/lib/c/`.
+    - **Strategy:** These tests verify the target libc implementation (`lib/c/src/`) by compiling it for the host environment.
+    - **Symbol Prefixing:** To avoid conflicts with the host's standard library (e.g., `memcpy` vs `libc_memcpy`), object files are processed with `objcopy --prefix-symbols=libc_` before linking.
+    - **Execution:** Run via `make test_libc_string` in `tests/`.
+
 ## Recent Progress (as of Jan 2026)
 - Implemented `sys_brk` for dynamic heap allocation.
 - Stabilized BusyBox TLS (GS segment and Variant II offsets).
