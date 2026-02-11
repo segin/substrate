@@ -174,6 +174,7 @@ struct vnodeops {
     int (*vop_strategy)(struct vnode *vp, void *bp); /* Using void* for buf for now */
     int (*vop_bmap)(struct vnode *vp, off_t offset, struct vnode **vpp, uint64_t *bnp,
                     int *runp, int *runb);
+    int (*vop_pathconf)(struct vnode *vp, int name, register_t *retval);
     int (*vop_print)(struct vnode *vp);
 };
 
@@ -228,6 +229,8 @@ struct vnodeops {
     ((vp)->v_op->vop_strategy(vp, bp))
 #define VOP_BMAP(vp, offset, vpp, bnp, runp, runb) \
     ((vp)->v_op->vop_bmap(vp, offset, vpp, bnp, runp, runb))
+#define VOP_PATHCONF(vp, name, retval) \
+    ((vp)->v_op->vop_pathconf(vp, name, retval))
 #define VOP_PRINT(vp) \
     ((vp)->v_op->vop_print(vp))
 
