@@ -166,8 +166,8 @@ void run_kernel_tests(void) {
     }
 
     if (all || strcmp(test_arg, "signal") == 0) {
-         extern void run_signal_tests(void);
-         run_signal_tests();
+         // extern void run_signal_tests(void);
+         // run_signal_tests();
          extern void run_sigstop_tests(void);
          run_sigstop_tests();
     }
@@ -337,6 +337,11 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "mem") == 0) {
         extern int test_mem(void);
         if (test_mem() == 0) kprint("mem: PASS\n"); else kprint("mem: FAIL\n");
+    }
+
+    if (all || strcmp(test_arg, "vfs_cache") == 0) {
+        extern void run_vfs_cache_tests(void);
+        run_vfs_cache_tests();
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");

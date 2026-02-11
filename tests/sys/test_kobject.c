@@ -19,7 +19,7 @@ void run_kobject_tests(void) {
 
     // Test initialization
     if (kobj.refcount != 1) {
-        kprint("FAIL: Initial refcount should be 1, got %u\n", kobj.refcount);
+        kprintf("FAIL: Initial refcount should be 1, got %u\n", kobj.refcount);
         return;
     }
     if (kobj.release != NULL) {
@@ -33,14 +33,14 @@ void run_kobject_tests(void) {
     // Test get
     kobject_get(&kobj);
     if (kobj.refcount != 2) {
-        kprint("FAIL: Refcount after get should be 2, got %u\n", kobj.refcount);
+        kprintf("FAIL: Refcount after get should be 2, got %u\n", kobj.refcount);
         return;
     }
 
     // Test put (refcount 2 -> 1, no release)
     kobject_put(&kobj);
     if (kobj.refcount != 1) {
-        kprint("FAIL: Refcount after first put should be 1, got %u\n", kobj.refcount);
+        kprintf("FAIL: Refcount after first put should be 1, got %u\n", kobj.refcount);
         return;
     }
     if (release_called != 0) {
@@ -51,7 +51,7 @@ void run_kobject_tests(void) {
     // Test put (refcount 1 -> 0, release called)
     kobject_put(&kobj);
     if (kobj.refcount != 0) {
-        kprint("FAIL: Refcount after final put should be 0, got %u\n", kobj.refcount);
+        kprintf("FAIL: Refcount after final put should be 0, got %u\n", kobj.refcount);
         return;
     }
     if (release_called != 1) {
@@ -72,7 +72,7 @@ void run_kobject_tests(void) {
     kobject_init(&kobj2, "test_obj2");
     kobject_put(&kobj2); // Should not crash
     if (kobj2.refcount != 0) {
-        kprint("FAIL: Refcount for kobj2 should be 0, got %u\n", kobj2.refcount);
+        kprintf("FAIL: Refcount for kobj2 should be 0, got %u\n", kobj2.refcount);
         return;
     }
 

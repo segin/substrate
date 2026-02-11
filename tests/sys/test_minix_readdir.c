@@ -141,19 +141,19 @@ void run_minix_readdir_tests(void) {
         kprint("FAIL: readdir(1) returned NULL\n");
     } else {
         // Verify name length and content
-        int len = strlen(dir_ent->name);
+        int len = strlen(dir_ent->d_name);
         if (len != 30) {
         kprintf("FAIL: Name length is %d, expected 30\n", len);
         } else {
             // Verify content is 30 'A's
             bool match = true;
             for (int i = 0; i < 30; i++) {
-                if (dir_ent->name[i] != 'A') {
+                if (dir_ent->d_name[i] != 'A') {
                     match = false;
                     break;
                 }
             }
-            if (match && dir_ent->name[30] == '\0') {
+            if (match && dir_ent->d_name[30] == '\0') {
                  kprint("PASS: Name is 30 chars 'A' and null-terminated\n");
             } else {
                  kprint("FAIL: Name content mismatch or not null terminated\n");
@@ -161,8 +161,8 @@ void run_minix_readdir_tests(void) {
         }
 
         // Also verify inode
-        if (dir_ent->ino != 2) {
-            kprintf("FAIL: Inode is %d, expected 2\n", (int)dir_ent->ino);
+        if (dir_ent->d_ino != 2) {
+            kprintf("FAIL: Inode is %d, expected 2\n", (int)dir_ent->d_ino);
         }
     }
 
