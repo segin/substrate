@@ -37,9 +37,12 @@ static void dump_thread_callback(thread_t *t, void *arg) {
         // Kernel tasks show "(kernel)" instead of personality
         if (t->proc->is_kernel_task) {
             pers = "(kernel)";
-        } else if (t->proc->pers && t->proc->pers->name) {
+        } else {
             // Inspecting kernel personality structure (read-only metadata)
-            pers = t->proc->pers->name;
+            struct personality *p = perso_lookup(t->proc->perso_id);
+            if (p && p->name) {
+                pers = p->name;
+            }
         }
     }
     

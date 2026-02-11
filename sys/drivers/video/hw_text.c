@@ -172,12 +172,16 @@ void hw_text_clear_screen(void) {
     cb_clear_screen();
 }
 
+static void hw_text_putc_nolock(char c) {
+    ansi_process(&drv.ansi, c, &ansi_cb);
+}
+
 void hw_text_putc(char c) {
     // Disable interrupts to prevent reentrancy during register access or state change
-    static uint32_t eflags;
+    uint32_t eflags;
     __asm__ volatile("pushfl; popl %0; cli" : "=r"(eflags));
 
-    ansi_process(&drv.ansi, c, &ansi_cb);
+    hw_text_putc_nolock(c);
     hw_text_update_cursor();
 
     // Restore interrupts
@@ -185,8 +189,17 @@ void hw_text_putc(char c) {
 }
 
 static void hw_text_console_write(const char *data, size_t len) {
+    // Disable interrupts to batch operations
+    uint32_t eflags;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(eflags));
+
     for (size_t i = 0; i < len; i++)
-        hw_text_putc(data[i]);
+        hw_text_putc_nolock(data[i]);
+
+    hw_text_update_cursor();
+
+    // Restore interrupts
+    __asm__ volatile("pushl %0; popfl" :: "r"(eflags));
 }
 
 static void hw_text_console_clear(void) {
