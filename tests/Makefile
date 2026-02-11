@@ -19,7 +19,7 @@ UNIT_TESTS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
-             sys/test_sysinfo.c
+             sys/test_sysinfo.c unit/lib/test_string.c
 
 MOCKS = mocks.c
 
