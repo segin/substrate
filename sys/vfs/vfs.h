@@ -15,6 +15,7 @@
 #define FS_MOUNTPOINT  0x08 
 
 struct fs_node;
+struct mount;
 
 typedef size_t (*read_type_t)(struct fs_node*, off_t, size_t, uint8_t*);
 typedef size_t (*write_type_t)(struct fs_node*, off_t, size_t, const uint8_t*);
@@ -68,6 +69,7 @@ typedef struct fs_node {
     mknod_type_t mknod;
     unmount_type_t unmount;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
+    struct mount *mp;    // Mount point this node belongs to.
 } fs_node_t;
 
 typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
