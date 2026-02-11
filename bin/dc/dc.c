@@ -92,10 +92,8 @@ int main(int argc, char *argv[]) {
                 while (sp > 0) bc_free(pop());
                 sp = 0;
                 break;
-            case 'd': // Duplicate (deep copy needed for safety?)
-                // For now, simple pointer copy is risky if popped and freed
-                // TODO: bc_dup
-                if (sp > 0) push(bc_from_long(0)); // Placeholder
+            case 'd':
+                if (sp > 0) push(bc_dup(peek()));
                 else printf("dc: stack empty\n");
                 break;
             case '+':
