@@ -50,6 +50,7 @@ static int ide_device_count = 0;
 typedef struct {
     uint8_t channel;
     uint8_t drive;
+    uint8_t type;  /* 0=ATA, 1=ATAPI */
 } ide_drive_ctx_t;
 
 static ide_drive_ctx_t ide_contexts[MAX_IDE_DEVICES];
@@ -864,6 +865,10 @@ static int ide_blkdev_read(blkdev_t *dev, uint64_t sector, uint32_t count,
     uint8_t channel = ctx->channel;
     uint8_t drive = ctx->drive;
     
+    if (ctx->type == 1) { /* ATAPI */
+        return ide_atapi_read_sectors(channel, drive, (uint32_t)sector, (uint16_t)count, buffer);
+    }
+
     /* Use DMA if available, otherwise PIO */
     if (ide_channels[channel].dma_capable && count <= 256) {
         return ide_dma_read(channel, drive, sector, (uint16_t)count, buffer);
@@ -884,6 +889,10 @@ static int ide_blkdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
     uint8_t channel = ctx->channel;
     uint8_t drive = ctx->drive;
     
+    if (ctx->type == 1) { /* ATAPI */
+        return -1; /* Write not supported yet */
+    }
+
     if (ide_channels[channel].dma_capable && count <= 256) {
         return ide_dma_write(channel, drive, sector, (uint16_t)count, buffer);
     }
@@ -968,9 +977,20 @@ void ide_init(void) {
             uint16_t buf[256];
             memset(buf, 0, 512);
             
+            int type = -1;
             int ret = ide_identify(buses[ch], d, buf);
-            if (ret == 0 && ide_device_count < MAX_IDE_DEVICES) {
-                /* Found an ATA drive */
+
+            if (ret == 0) {
+                type = 0; /* ATA */
+            } else if (ret == -2) {
+                /* ATAPI signature detected, try ATAPI command */
+                if (ide_identify_atapi(buses[ch], d, buf) == 0) {
+                    type = 1; /* ATAPI */
+                }
+            }
+
+            if (type != -1 && ide_device_count < MAX_IDE_DEVICES) {
+                /* Found a drive */
                 char model[41];
                 for (int i = 0; i < 20; i++) {
                     uint16_t w = buf[27 + i];
@@ -985,22 +1005,37 @@ void ide_init(void) {
                     else break;
                 }
                 
-                /* Get total sectors */
-                uint64_t total_sectors;
-                if (buf[83] & (1 << 10)) {
-                    /* LBA48 supported */
-                    total_sectors = (uint64_t)buf[100] |
-                                   ((uint64_t)buf[101] << 16) |
-                                   ((uint64_t)buf[102] << 32) |
-                                   ((uint64_t)buf[103] << 48);
+                uint64_t total_sectors = 0;
+                uint32_t sector_size = 512;
+
+                if (type == 0) {
+                    /* ATA size calculation */
+                    if (buf[83] & (1 << 10)) {
+                        /* LBA48 supported */
+                        total_sectors = (uint64_t)buf[100] |
+                                       ((uint64_t)buf[101] << 16) |
+                                       ((uint64_t)buf[102] << 32) |
+                                       ((uint64_t)buf[103] << 48);
+                    } else {
+                        /* LBA28 only */
+                        total_sectors = buf[60] | ((uint32_t)buf[61] << 16);
+                    }
                 } else {
-                    /* LBA28 only */
-                    total_sectors = buf[60] | ((uint32_t)buf[61] << 16);
+                    /* ATAPI size calculation */
+                    uint32_t lba, blk_size;
+                    /* Try to read capacity. If fails (no media), size=0 */
+                    if (ide_atapi_read_capacity(ch, d, &lba, &blk_size) == 0) {
+                        total_sectors = (uint64_t)lba + 1;
+                        sector_size = blk_size;
+                    } else {
+                        /* Default for CD-ROM if no media */
+                        sector_size = 2048;
+                    }
                 }
                 
                 /* Store device info */
                 ide_devices[ide_device_count].present = 1;
-                ide_devices[ide_device_count].type = 0;  /* ATA */
+                ide_devices[ide_device_count].type = type;
                 ide_devices[ide_device_count].channel = ch;
                 ide_devices[ide_device_count].drive = d;
                 ide_devices[ide_device_count].size = total_sectors;
@@ -1009,6 +1044,7 @@ void ide_init(void) {
                 /* Setup context */
                 ide_contexts[ide_device_count].channel = ch;
                 ide_contexts[ide_device_count].drive = d;
+                ide_contexts[ide_device_count].type = type;
                 
                 /* Setup blkdev */
                 blkdev_t *bdev = &ide_blkdevs[ide_device_count];
@@ -1020,7 +1056,7 @@ void ide_init(void) {
                 bdev->name[3] = '0' + ide_device_count;
                 bdev->name[4] = '\0';
                 
-                bdev->sector_size = 512;
+                bdev->sector_size = sector_size;
                 bdev->total_sectors = total_sectors;
                 bdev->priv = &ide_contexts[ide_device_count];
                 bdev->read = ide_blkdev_read;
@@ -1036,11 +1072,11 @@ void ide_init(void) {
                 kprint(bus_names[ch]);
                 kprint(" ");
                 kprint(drive_names[d]);
+                if (type == 1) kprint(", ATAPI");
                 kprint(")\n");
                 
                 ide_device_count++;
             }
-            /* TODO: Try IDENTIFY ATAPI for CDROM detection */
         }
     }
     
