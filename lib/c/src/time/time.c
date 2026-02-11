@@ -40,16 +40,18 @@ struct tm *gmtime_r(const time_t *__restrict timer, struct tm *__restrict result
     result->tm_wday = (days + 4) % 7; // 1/1/1970 was Thursday (4)
     if (result->tm_wday < 0) result->tm_wday += 7;
 
+    while (days < 0) {
+        year--;
+        int days_this_year = IS_LEAP(year) ? 366 : 365;
+        days += days_this_year;
+    }
+
     while (1) {
         int days_this_year = IS_LEAP(year) ? 366 : 365;
         if (days < days_this_year) break;
         days -= days_this_year;
         year++;
     }
-    
-    // Handle days negative? Not for typical positive time_t, but strictly yes.
-    // Simplifying assumption: t >= 0 for now for simplicity, strict logic requires negative year handling.
-    // TODO: Negative years
 
     result->tm_year = year - 1900;
     result->tm_yday = days;
