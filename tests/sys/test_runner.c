@@ -35,6 +35,7 @@ extern void run_sched_perf_tests(void);
 extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
+extern void run_kobject_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -50,6 +51,10 @@ void run_kernel_tests(void) {
     
     if (all || strcmp(test_arg, "string") == 0) {
         run_string_tests();
+    }
+
+    if (all || strcmp(test_arg, "kobject") == 0) {
+        run_kobject_tests();
     }
 
     if (all || strcmp(test_arg, "pmap") == 0) {
