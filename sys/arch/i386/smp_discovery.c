@@ -4,6 +4,7 @@
 #include <arch/i386/early_boot.h>
 #include <string.h>
 #include <stdint.h>
+#include <arch/i386/include/early_boot.h>
 
 #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
 
@@ -30,6 +31,8 @@ struct acpi_header {
     uint32_t creator_id;
     uint32_t creator_revision;
 } __attribute__((packed));
+
+#define P2V(x) ((void*)((uintptr_t)(x) + 0xC0000000))
 
 void smp_discover_cores(void) {
     early_uart_print("SMP: Discovering cores...\n");
@@ -81,7 +84,6 @@ void smp_discover_cores(void) {
         early_uart_print("SMP: RSDT Invalid signature!\n");
         return;
     }
-
     int entries = (rsdt->length - sizeof(struct acpi_header)) / 4;
     uint32_t *ptrs = (uint32_t*)((uintptr_t)rsdt + sizeof(struct acpi_header));
 

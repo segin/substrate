@@ -82,6 +82,7 @@ void uma_startup(void) {
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
 
     // Detect number of CPUs
+    // Detect number of CPUs
     int count = smp_get_cpu_count();
     if (count > 0) {
         if (count > UMA_MAX_CPUS) {
@@ -89,6 +90,8 @@ void uma_startup(void) {
             count = UMA_MAX_CPUS;
         }
         uma_ncpu = count;
+    } else {
+        uma_ncpu = 1;
     }
 
     kprint("UMA: subsystem initialized\n");
@@ -253,7 +256,7 @@ void uma_zdestroy(uma_zone_t *zone) {
     uintptr_t bend = bstart + sizeof(uma_bootstrap_mem);
 
     if (zaddr < bstart || zaddr >= bend) {
-        kfree(zone, sizeof(uma_zone_t));
+        kfree(zone, sizeof(uma_zone_t) + (uma_ncpu - 1) * sizeof(uma_cache_t));
     }
 }
 
