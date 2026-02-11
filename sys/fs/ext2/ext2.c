@@ -489,7 +489,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     node->mask = inode->i_mode & 0xFFF;
     node->uid = inode->i_uid;
     node->gid = inode->i_gid;
-    node->impl = (uint32_t)(uintptr_t)ctx;
+    node->impl = (uintptr_t)ctx;
     
     // Set type and callbacks based on inode mode
     uint16_t type = inode->i_mode & 0xF000;
@@ -632,6 +632,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
+    uint32_t name_len = strlen(name);
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
     
@@ -669,7 +670,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
             
             if (de->inode != 0 && de->name_len > 0) {
                 // Compare names
-                if (de->name_len == strlen(name) && 
+                if (de->name_len == name_len &&
                     strncmp(de->name, name, de->name_len) == 0) {
                     // Found it - read the inode and return a node
                     ext2_inode_t inode;
@@ -765,7 +766,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_root.flags = FS_DIRECTORY;
     ext2_root.inode = EXT2_ROOT_INO;
     ext2_root.length = root_inode.i_size;
-    ext2_root.impl = (uint32_t)(uintptr_t)&ext2_root_ctx;
+    ext2_root.impl = (uintptr_t)&ext2_root_ctx;
     ext2_root.readdir = ext2_readdir;
     ext2_root.finddir = ext2_finddir;
     
