@@ -16,13 +16,10 @@
 #include <sys/proc.h>
 #include <errno.h>
 #include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <arch/i386/pmap.h>
 #include <stddef.h>
 #include <stdint.h>
-
-/* Forward declarations for sleepq backend */
-extern int sleepq_wake_n(void *chan, int n);
-extern int sleepq_requeue(void *src, void *dst, int wake_n, int requeue_n);
 
 /*
  * User address validation
@@ -46,11 +43,11 @@ static inline int validate_uaddr(uintptr_t addr) {
  *
  * Futexes use physical addresses as keys so that shared memory
  * futexes work correctly across processes. Private futexes
- * could optimize by using (process_id, vaddr) tuple.
+ * can optimize by using (process_id, vaddr) tuple.
  *
  * Returns NULL if page is not mapped.
  */
-static void *futex_get_key(uintptr_t uaddr) {
+static void *futex_validate_and_get_phys_key(uintptr_t uaddr) {
     if (!current_process || !current_process->pmap) return NULL;
     
     /* Use pmap_extract to get physical address */
@@ -73,7 +70,7 @@ static int futex_read_user(int *uaddr, int *value) {
      * with validation that page is mapped. */
     if (!validate_uaddr((uintptr_t)uaddr)) return -EFAULT;
     
-    void *key = futex_get_key((uintptr_t)uaddr);
+    void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
     if (!key) return -EFAULT;
     
     *value = *uaddr;
@@ -90,7 +87,7 @@ static int futex_cmpxchg_user(int *uaddr, int oldval, int newval, int *err) {
         return 0;
     }
     
-    void *key = futex_get_key((uintptr_t)uaddr);
+    void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
     if (!key) {
         *err = -EFAULT;
         return 0;
@@ -136,7 +133,7 @@ static void futex_handle_dead_owner(int *uaddr) {
     
     if (err == 0) {
         /* Wake one waiter so they can acquire the lock */
-        void *key = futex_get_key((uintptr_t)uaddr);
+        void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
         if (key) {
             sleepq_wake_n(key, 1);
         }
@@ -268,6 +265,10 @@ int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len
     return 0;
 }
 
+/* Forward declarations */
+int futex_lock_pi(int *uaddr, int detect, int trylock);
+int futex_unlock_pi(int *uaddr);
+
 /*
  * Main futex syscall dispatcher
  */
@@ -278,11 +279,25 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
 
     /* Extract operation and flags */
     int cmd = op & FUTEX_CMD_MASK;
-    /* int private_flag = op & FUTEX_PRIVATE_FLAG; */ /* TODO: Optimize private futexes */
+    int is_private = (op & FUTEX_PRIVATE_FLAG) != 0;
 
-    void *key = futex_get_key((uintptr_t)uaddr);
-    if (!key) {
-        return -EFAULT;
+    void *key = NULL;
+
+    /* Determine key to use based on private flag */
+    if (is_private) {
+        /*
+         * For private futexes, use virtual address as key.
+         * We skip pmap_extract for performance, but still ensure
+         * basic address validity.
+         */
+        key = (void *)((uintptr_t)uaddr);
+    } else {
+        /*
+         * For shared futexes, use physical address as key.
+         * This requires pmap_extract.
+         */
+        key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
+        if (!key) return -EFAULT;
     }
 
     switch (cmd) {
@@ -294,6 +309,11 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
              * 3. Otherwise, sleep on the futex key
              */
             int current_val;
+
+            /*
+             * Note: futex_read_user validates mapping even for private keys,
+             * ensuring we don't sleep on unmapped memory that we need to read.
+             */
             if (futex_read_user(uaddr, &current_val) != 0) {
                 return -EFAULT;
             }
@@ -302,10 +322,22 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                 return -EAGAIN;
             }
             
-            /* Sleep on the physical address key */
+            /* Sleep on the key */
             /* TODO: Honor timeout parameter */
             (void)timeout;
-            sched_sleep(key);
+
+            /* Check signals before sleeping */
+            if (current_thread && (current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
+                (current_thread->sig_pending & ~current_thread->sig_mask)) {
+                return -EINTR;
+            }
+
+            if (is_private) {
+                sleepq_add_private(key, current_thread);
+            } else {
+                sleepq_add(key, current_thread);
+            }
+            sched_yield();
             
             /* Return 0 on wake (or -EINTR if interrupted by signal) */
             return 0;
@@ -315,8 +347,11 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
             /*
              * Wake up to 'val' threads waiting on this futex
              */
-            int ret = sleepq_wake_n(key, val);
-            return ret;
+            if (is_private) {
+                return sleepq_wake_n_private(key, val);
+            } else {
+                return sleepq_wake_n(key, val);
+            }
         }
 
         case FUTEX_REQUEUE:
@@ -342,13 +377,20 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                 return -EFAULT;
             }
             
-            void *key2 = futex_get_key((uintptr_t)uaddr2);
-            if (!key2) return -EFAULT;
+            /* Validate destination address */
+            void *key2;
+            if (is_private) {
+                key2 = (void *)((uintptr_t)uaddr2);
+            } else {
+                void *phys_key2 = futex_validate_and_get_phys_key((uintptr_t)uaddr2);
+                if (!phys_key2) return -EFAULT;
+                key2 = phys_key2;
+            }
             
             /* 'timeout' is repurposed as val2 (requeue limit) */
             int requeue_limit = (int)(uintptr_t)timeout;
             
-            int ret = sleepq_requeue(key, key2, val, requeue_limit);
+            int ret = sleepq_requeue(key, key2, val, requeue_limit, is_private);
             return ret;
         }
 
@@ -595,7 +637,7 @@ int futex_lock_pi(int *uaddr, int detect, int trylock) {
     }
     
     /* Slow path: contended - need PI handling */
-    void *key = futex_get_key((uintptr_t)uaddr);
+    void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
     if (!key) return -EFAULT;
     
     pi_spinlock();
@@ -658,7 +700,8 @@ int futex_lock_pi(int *uaddr, int detect, int trylock) {
         }
         
         /* Sleep */
-        sched_sleep(key);
+        sleepq_add(key, current_thread);
+        sched_yield();
         
         /* Woken: try to acquire */
         oldval = futex_cmpxchg_user(uaddr, 0, tid, &err);
@@ -730,7 +773,7 @@ int futex_unlock_pi(int *uaddr) {
         return -EPERM;
     }
     
-    void *key = futex_get_key((uintptr_t)uaddr);
+    void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
     if (!key) return -EFAULT;
     
     pi_spinlock();
