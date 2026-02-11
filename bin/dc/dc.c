@@ -24,6 +24,37 @@ bc_num *peek() {
     return bc_from_long(0);
 }
 
+// Input buffer
+char *in_buf = NULL;
+int in_cap = 0;
+int in_len = 0;
+
+void buf_add(int c) {
+    if (in_len + 1 >= in_cap) {
+        in_cap = in_cap ? in_cap * 2 : 64;
+        in_buf = realloc(in_buf, in_cap);
+        if (!in_buf) {
+             fprintf(stderr, "dc: memory exhausted\n");
+             exit(1);
+        }
+    }
+    in_buf[in_len++] = c;
+    in_buf[in_len] = '\0';
+}
+
+void buf_reset() {
+    in_len = 0;
+    if (in_buf) in_buf[0] = '\0';
+}
+
+void flush_num(int *sign) {
+    bc_num *n = bc_from_string(in_buf);
+    if (*sign < 0) n->sign *= -1;
+    push(n);
+    buf_reset();
+    *sign = 1;
+}
+
 int main(int argc, char *argv[]) {
     FILE *in = stdin;
     if (argc > 1) {
@@ -32,24 +63,21 @@ int main(int argc, char *argv[]) {
     }
 
     int c;
-    long long num = 0;
     int in_num = 0;
     int sign = 1;
 
     while ((c = fgetc(in)) != EOF) {
         if (isspace(c)) {
             if (in_num) { 
-                push(bc_from_long(num * sign)); 
-                num = 0; in_num = 0; sign = 1; 
+                flush_num(&sign);
+                in_num = 0;
             }
             continue;
         }
         
-        if (isdigit(c)) {
-            // Simple parsing for prototype (still long long limit on input parse)
-            // TODO: Proper bignum parsing
+        if (isdigit(c) || c == '.') {
             in_num = 1;
-            num = num * 10 + (c - '0');
+            buf_add(c);
             continue;
         }
         
@@ -59,14 +87,19 @@ int main(int argc, char *argv[]) {
         }
 
         if (c == '_') {
+            if (in_num) {
+                flush_num(&sign);
+                in_num = 0;
+            }
             sign = -1;
             in_num = 1;
             continue;
         }
 
+        // Any other command flushes number
         if (in_num) { 
-            push(bc_from_long(num * sign)); 
-            num = 0; in_num = 0; sign = 1; 
+            flush_num(&sign);
+            in_num = 0;
         }
 
         bc_num *a, *b, *res;
@@ -92,10 +125,8 @@ int main(int argc, char *argv[]) {
                 while (sp > 0) bc_free(pop());
                 sp = 0;
                 break;
-            case 'd': // Duplicate (deep copy needed for safety?)
-                // For now, simple pointer copy is risky if popped and freed
-                // TODO: bc_dup
-                if (sp > 0) push(bc_from_long(0)); // Placeholder
+            case 'd':
+                if (sp > 0) push(bc_dup(peek()));
                 else printf("dc: stack empty\n");
                 break;
             case '+':
