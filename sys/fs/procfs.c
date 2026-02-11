@@ -2,7 +2,7 @@
  * procfs.c - Process Filesystem Implementation
  *
  * Table-driven design for extensibility. Each static entry is defined
- * in procfs_entries[]. Per-process directories are handled separately.
+ * in procfs_entries[] . Per-process directories are handled separately.
  */
 
 #include <vfs/vfs.h>
@@ -286,7 +286,8 @@ static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     const char *entries[] = { ".", "..", "status", "cmdline", NULL };
     if (index >= 4) return NULL;
-    strcpy(proc_dirent.name, entries[index]);
+    strcpy(proc_dirent.d_name, entries[index]);
+    proc_dirent.d_ino = node->inode;
     return &proc_dirent;
 }
 
@@ -316,13 +317,14 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     
     /* . and .. */
-    if (index == 0) { strcpy(proc_dirent.name, "."); return &proc_dirent; }
-    if (index == 1) { strcpy(proc_dirent.name, ".."); return &proc_dirent; }
+    if (index == 0) { strcpy(proc_dirent.d_name, "."); proc_dirent.d_ino = node->inode; return &proc_dirent; }
+    if (index == 1) { strcpy(proc_dirent.d_name, ".."); proc_dirent.d_ino = node->inode; return &proc_dirent; }
     
     /* Static entries from table */
     uint64_t static_idx = index - 2;
     if (static_idx < PROCFS_STATIC_COUNT) {
-        strcpy(proc_dirent.name, procfs_entries[static_idx].name);
+        strcpy(proc_dirent.d_name, procfs_entries[static_idx].name);
+        proc_dirent.d_ino = static_idx + 1; // Assign a unique inode for static entries
         return &proc_dirent;
     }
     
@@ -332,7 +334,8 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
             if (count == proc_idx) {
-                snprintf(proc_dirent.name, sizeof(proc_dirent.name), "%d", processes[i].pid);
+                snprintf(proc_dirent.d_name, sizeof(proc_dirent.d_name), "%d", processes[i].pid);
+                proc_dirent.d_ino = processes[i].pid;
                 return &proc_dirent;
             }
             count++;

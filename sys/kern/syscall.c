@@ -242,7 +242,7 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
         
         // Calculate size
         int name_len = 0;
-        while(d->name[name_len]) name_len++;
+        while(d->d_name[name_len]) name_len++;
         
         int reclen = sizeof(unsigned long) * 2 + sizeof(unsigned short) + name_len + 1;
         reclen = (reclen + 3) & ~3; // Align to 4 bytes
@@ -254,10 +254,10 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
         }
         
         struct linux_dirent *ld = (struct linux_dirent*)(buf + bpos);
-        ld->d_ino = d->ino;
+        ld->d_ino = d->d_ino;
         ld->d_off = f->f_offset + 1; // Offset of NEXT entry
         ld->d_reclen = reclen;
-        for(int i=0; i<name_len; i++) ld->d_name[i] = d->name[i];
+        for(int i=0; i<name_len; i++) ld->d_name[i] = d->d_name[i];
         ld->d_name[name_len] = 0;
         // Zero pad if needed for alignment
         // (already done by simple pointer math for next entry, but maybe nice to clear garbage)
@@ -981,19 +981,19 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
         struct dirent *d = readdir_fs(dir, index);
         if (!d) break; // End of directory
 
-        if (d->ino == inode) {
+        if (d->d_ino == inode) {
             // Match found
             // Skip . and ..
-            if (strcmp(d->name, ".") == 0 || strcmp(d->name, "..") == 0) {
+            if (strcmp(d->d_name, ".") == 0 || strcmp(d->d_name, "..") == 0) {
                  index++;
                  continue;
             }
 
             // Allocate and copy
-            int len = strlen(d->name);
+            int len = strlen(d->d_name);
             char *name = kmalloc(len + 1);
             if (!name) return NULL;
-            memcpy(name, d->name, len);
+            memcpy(name, d->d_name, len);
             name[len] = '\0';
             return name;
         }

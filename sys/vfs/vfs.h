@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/types.h>
+#include <sys/dirent.h>
 
 #define FS_FILE        0x01
 #define FS_DIRECTORY   0x02
@@ -13,10 +15,6 @@
 #define FS_MOUNTPOINT  0x08 
 
 struct fs_node;
-
-#include <sys/types.h>
-
-/* ... */
 
 typedef size_t (*read_type_t)(struct fs_node*, off_t, size_t, uint8_t*);
 typedef size_t (*write_type_t)(struct fs_node*, off_t, size_t, const uint8_t*);
@@ -72,11 +70,6 @@ typedef struct fs_node {
     struct fs_node *ptr; // Used by mountpoints and symlinks.
 } fs_node_t;
 
-struct dirent {
-    char name[128];
-    uint64_t ino;
-};
-
 typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
 
 typedef struct filesystem {
@@ -91,8 +84,6 @@ typedef struct vfs_mount {
     struct vfs_mount *next;
 } vfs_mount_t;
 
-/* ... */
-
 // Standard VFS functions
 size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
@@ -106,7 +97,6 @@ int poll_fs(fs_node_t *node, void *waiter);
 int readlink_fs(fs_node_t *node, char *buf, size_t size);
 int symlink_fs(fs_node_t *parent, const char *target, const char *name);
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name);
-int unlink_fs(fs_node_t *node, const char *name);
 int unlink_fs(fs_node_t *node, const char *name);
 int vfs_mkdir(const char *path, uint16_t permission);
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev);
