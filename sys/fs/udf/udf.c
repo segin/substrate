@@ -414,12 +414,14 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
                     uint8_t len = fid->file_id_length;
                     /* Handle OSTA compressed unicode (type byte + chars) */
                     if (len > 0 && name[0] == 8) {
+                    /* Ensure len fits in udf_dirent.name to prevent buffer overflow */
                     if (len > sizeof(udf_dirent.name)) {
                         len = sizeof(udf_dirent.name);
                     }
                     memcpy(udf_dirent.name, name + 1, len - 1);
                     udf_dirent.name[len - 1] = '\0';
                     } else {
+                    /* Ensure len fits in udf_dirent.name to prevent buffer overflow */
                     if (len > sizeof(udf_dirent.name) - 1) {
                         len = sizeof(udf_dirent.name) - 1;
                     }
