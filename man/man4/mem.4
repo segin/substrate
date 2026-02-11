@@ -1,53 +1,68 @@
-.\" Process this file with
-.\" groff -man -Tascii mem.4
-.\"
-.TH MEM 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
-.SH NAME
-mem, kmem \- physical and kernel virtual memory
-.SH SYNOPSIS
-.B /dev/mem
-.br
-.B /dev/kmem
-.SH DESCRIPTION
-.SS /dev/mem
+.Dd October 26, 2023
+.Dt MEM 4
+.Os Substrate
+.Sh NAME
+.Nm mem ,
+.Nm kmem
+.Nd memory files
+.Sh SYNOPSIS
+.In fcntl.h
+.Ft int
+.Fn open "/dev/mem" "flags"
+.Sh DESCRIPTION
 The
-.B mem
-device provides access to the computer's physical memory.
-Byte addresses in
-.B /dev/mem
-are interpreted as physical memory addresses.
-.PP
-This device is typically used for:
-.IP \(bu 2
-Accessing memory-mapped I/O regions
-.IP \(bu 2
-Reading BIOS data areas
-.IP \(bu 2
-Hardware diagnostics
-.SS /dev/kmem
+.Nm mem
+file is a character device file that provides access to the physical memory of the computer.
+Byte offsets in this file are interpreted as physical memory addresses.
+Reading and writing to this file allows user-mode processes to access hardware devices mapped into physical memory (MMIO) or to inspect physical RAM.
+
 The
-.B kmem
-device provides access to the kernel's virtual address space.
-Byte addresses correspond to kernel virtual addresses.
-.PP
-This device allows inspection of kernel data structures and is primarily
-used by system utilities such as
-.BR ps (1)
-and
-.BR top (1)
-on traditional Unix systems.
-.SH SECURITY
-Access to these devices requires root privileges.
-Reading or writing arbitrary memory can crash the system or compromise security.
-.PP
-Modern security practices recommend disabling these devices or restricting
-access via mandatory access controls.
-.SH FILES
-.TP
-.B /dev/mem
-Physical memory (character device, major 1, minor 1).
-.TP
-.B /dev/kmem
-Kernel virtual memory (character device, major 1, minor 2).
-.SH SEE ALSO
-.BR intro (4)
+.Nm kmem
+file provides access to the virtual memory of the kernel.
+Byte offsets in this file are interpreted as kernel virtual addresses.
+
+.Sh SECURITY
+Access to
+.Nm mem
+is restricted to the superuser (UID 0) and/or processes with the
+.Dv CAP_SYS_RAWIO
+capability.
+In addition, the system
+.Va securelevel
+configuration may further restrict access:
+.Bl -tag -width indent
+.It Level 0
+Read and write access permitted.
+.It Level 1 or higher
+Write access is denied. Read access may be restricted to read-only ranges.
+.El
+
+.Sh IOCTLS
+The
+.Nm mem
+device supports standard character device ioctls.
+Management ioctls for configuring allowed ranges may be supported in the future.
+
+.Sh FILES
+.Bl -tag -width "/dev/kmem" -compact
+.It Pa /dev/mem
+Physical memory.
+.It Pa /dev/kmem
+Kernel virtual memory.
+.El
+
+.Sh ERRORS
+.Bl -tag -width Er
+.It Bq Er EPERM
+Permission denied (non-root user or securelevel restriction).
+.It Bq Er EFAULT
+Bad address (user buffer invalid) or physical address fault.
+.It Bq Er EIO
+Bus error or hardware error while accessing the physical address.
+.It Bq Er ENXIO
+Address out of valid physical range (e.g. beyond max RAM and not MMIO).
+.El
+
+.Sh SEE ALSO
+.Xr securelevel 7 ,
+.Xr mmap 2

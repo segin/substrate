@@ -327,6 +327,11 @@ void run_kernel_tests(void) {
         run_sched_dequeue_bench();
     }
 
+    if (all || strcmp(test_arg, "mem") == 0) {
+        extern int test_mem(void);
+        if (test_mem() == 0) kprint("mem: PASS\n"); else kprint("mem: FAIL\n");
+    }
+
     kprint("=== TESTS COMPLETE ===\n\n");
     
     // Optional: Halt after tests if requested

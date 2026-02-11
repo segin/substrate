@@ -29,6 +29,7 @@ static int test_psignal_delivery(void) {
     kprint("Test: psignal delivery logic... ");
     
     // Create a dummy process and thread
+
     process_t *p = proc_create(PERS_NATIVE);
     if (!p) return -1;
     
