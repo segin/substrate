@@ -24,29 +24,38 @@ bc_num *peek() {
     return bc_from_long(0);
 }
 
-char *buf = NULL;
-int buf_cap = 0;
-int buf_len = 0;
+// Input buffer for numbers
+char *in_buf = NULL;
+int in_cap = 0;
+int in_len = 0;
 
 void buf_add(int c) {
-    if (buf_len + 1 >= buf_cap) {
-        buf_cap = buf_cap < 8 ? 8 : buf_cap * 2;
-        buf = realloc(buf, buf_cap);
+    if (in_len + 1 >= in_cap) {
+        in_cap = in_cap ? in_cap * 2 : 64;
+        void *new_buf = realloc(in_buf, in_cap);
+        if (!new_buf) {
+             fprintf(stderr, "dc: memory exhausted\n");
+             exit(1);
+        }
+        in_buf = new_buf;
     }
-    buf[buf_len++] = c;
-    buf[buf_len] = '\0';
+    in_buf[in_len++] = c;
+    in_buf[in_len] = '\0';
 }
 
 void buf_reset() {
-    buf_len = 0;
-    if (buf) buf[0] = '\0';
+    in_len = 0;
+    if (in_buf) in_buf[0] = '\0';
 }
 
-void push_buf(int sign) {
-    bc_num *n = bc_from_string(buf);
-    if (n->sign != 0) n->sign *= sign;
+void flush_num(int *sign) {
+    if (in_len == 0) return;
+    bc_num *n = bc_from_string(in_buf);
+    if (*sign < 0) n->sign *= -1;
     push(n);
     buf_reset();
+    *sign = 1;
+}
 }
 
 int main(int argc, char *argv[]) {
@@ -63,13 +72,15 @@ int main(int argc, char *argv[]) {
     while ((c = fgetc(in)) != EOF) {
         if (isspace(c)) {
             if (in_num) { 
-                push_buf(sign);
-                in_num = 0; sign = 1;
+            if (in_num) { 
+                flush_num(&sign);
+                in_num = 0;
+            }
             }
             continue;
         }
         
-        if (isdigit(c)) {
+        if (isdigit(c) || c == '.') {
             in_num = 1;
             buf_add(c);
             continue;
@@ -82,8 +93,8 @@ int main(int argc, char *argv[]) {
 
         if (c == '_') {
             if (in_num) {
-                push_buf(sign);
-                sign = 1;
+                flush_num(&sign);
+                in_num = 0;
             }
             sign = -1;
             in_num = 1;
@@ -91,9 +102,10 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
+        // Any other command flushes number
         if (in_num) { 
-            push_buf(sign);
-            in_num = 0; sign = 1;
+            flush_num(&sign);
+            in_num = 0;
         }
 
         bc_num *a, *b, *res;
@@ -119,10 +131,8 @@ int main(int argc, char *argv[]) {
                 while (sp > 0) bc_free(pop());
                 sp = 0;
                 break;
-            case 'd': // Duplicate (deep copy needed for safety?)
-                // For now, simple pointer copy is risky if popped and freed
-                // TODO: bc_dup
-                if (sp > 0) push(bc_from_long(0)); // Placeholder
+            case 'd':
+                if (sp > 0) push(bc_dup(peek()));
                 else printf("dc: stack empty\n");
                 break;
             case '+':
@@ -162,12 +172,12 @@ int main(int argc, char *argv[]) {
                 bc_free(a); bc_free(b);
                 break;
             case 'q':
-                if (buf) free(buf);
+                if (in_buf) free(in_buf);
                 return 0;
             default:
                 break;
         }
     }
-    if (buf) free(buf);
+    if (in_buf) free(in_buf);
     return 0;
 }
