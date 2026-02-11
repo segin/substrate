@@ -144,7 +144,7 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         kfree(block_buf, 4096);
         return -1;
     }
-        return -1;
+
     // Update the inode data
     memcpy(block_buf + inode_offset, inode, sizeof(ext2_inode_t));
     
@@ -489,7 +489,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     node->mask = inode->i_mode & 0xFFF;
     node->uid = inode->i_uid;
     node->gid = inode->i_gid;
-    node->impl = (uint32_t)(uintptr_t)ctx;
+    node->impl = (uintptr_t)ctx;
     
     // Set type and callbacks based on inode mode
     uint16_t type = inode->i_mode & 0xF000;
@@ -1171,6 +1171,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
     int result = -1;
+    uint32_t name_len = strlen(name);
     
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
@@ -1188,7 +1189,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
             if (de->rec_len == 0) break;
             
             // Is this the entry to remove?
-            if (de->inode != 0 && de->name_len == strlen(name) &&
+            if (de->inode != 0 && de->name_len == name_len &&
                 strncmp(de->name, name, de->name_len) == 0) {
                 
                 // Merge with previous entry if possible

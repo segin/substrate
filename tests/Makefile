@@ -1,5 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -I../sys -I../sys/arch/i386 -I../sys/kern -I../sys/drivers/video -I../sys/exec/perso -I../sys/include -DHOST_TEST
+CFLAGS_HOST = -Wall -Wextra -g -I../sys -I../sys/arch/i386 -I../sys/kern -I../sys/drivers/video -I../sys/exec/perso -idirafter ../sys/include -DHOST_TEST
 
 # Core kernel sources for testing
 CORE_SRCS = ../sys/vm/vm_page.c vm_map_host.c ../sys/vm/vm_object.c \
@@ -23,13 +24,17 @@ UNIT_TESTS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
 
 MOCKS = mocks.c
 
-all: test_runner test_minix test_ext2_perf
+all: test_runner test_minix test_ext2_perf test_ext2_remove_perf
 	./test_runner
 	./test_minix
 	./test_ext2_perf
+	./test_ext2_remove_perf
 
 test_ext2_perf: unit/fs/test_ext2_perf_host.c
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS_HOST) $< -o $@
+
+test_ext2_remove_perf: unit/fs/test_ext2_remove_perf.c
+	$(CC) $(CFLAGS_HOST) $< -o $@
 
 test_minix: unit/fs/test_minix_standalone.c
 	$(CC) $(CFLAGS) $< -o $@
