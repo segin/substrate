@@ -4,6 +4,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdint.h>
+#include <sys/mman.h>
+#include <string.h> // For memset, memcpy
 
 void exit(int status) {
     _exit(status);
@@ -17,45 +19,233 @@ void __stack_chk_fail(void) {
     _exit(127);
 }
 
-// Simple bump allocator for now, 1MB heap
-static char heap[1024 * 1024];
-static size_t heap_ptr = 0;
+// Allocator Implementation
+
+#define ALIGNMENT 16
+#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~(ALIGNMENT-1))
+#define BLOCK_META_SIZE ALIGN(sizeof(struct block_meta))
+#define MAGIC 0xDEADBEEF
+
+struct block_meta {
+    size_t size;
+    struct block_meta *next;
+    struct block_meta *prev;
+    int free;
+    int magic;
+};
+
+static struct block_meta *global_base = NULL;
+
+static struct block_meta *request_space(struct block_meta *last, size_t size) {
+    struct block_meta *block;
+    size_t total_size = size + BLOCK_META_SIZE;
+
+    // Request memory in multiples of page size (4096)
+    size_t page_size = 4096;
+    size_t alloc_size = (total_size + page_size - 1) & ~(page_size - 1);
+
+    // If request is small, allocate at least a few pages to reduce syscalls
+    if (alloc_size < 64 * 1024) alloc_size = 64 * 1024;
+
+    void *ptr = mmap(NULL, alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (ptr == MAP_FAILED) {
+        return NULL;
+    }
+
+    block = (struct block_meta *)ptr;
+    block->size = alloc_size - BLOCK_META_SIZE;
+    block->next = NULL;
+    block->prev = last;
+    block->free = 1; // Initially free, will be split/used by caller
+    block->magic = MAGIC;
+
+    if (last) {
+        last->next = block;
+    }
+
+    // If this is the first block, update global_base
+    if (!global_base) {
+        global_base = block;
+    }
+
+    return block;
+}
+
+static struct block_meta *find_free_block(struct block_meta **last, size_t size) {
+    struct block_meta *current = global_base;
+    while (current && !(current->free && current->size >= size)) {
+        *last = current;
+        current = current->next;
+    }
+    return current;
+}
+
+static void split_block(struct block_meta *block, size_t size) {
+    if (block->size >= size + BLOCK_META_SIZE + ALIGNMENT) {
+        struct block_meta *new_block = (struct block_meta *)((char*)block + BLOCK_META_SIZE + size);
+        new_block->size = block->size - size - BLOCK_META_SIZE;
+        new_block->next = block->next;
+        new_block->prev = block;
+        new_block->free = 1;
+        new_block->magic = MAGIC;
+
+        if (new_block->next) {
+            new_block->next->prev = new_block;
+        }
+
+        block->size = size;
+        block->next = new_block;
+    }
+}
+
+static void coalesce_block(struct block_meta *block) {
+    // Coalesce with next
+    if (block->next && block->next->free) {
+        // Check adjacency
+        if ((char*)block + BLOCK_META_SIZE + block->size == (char*)block->next) {
+            block->size += BLOCK_META_SIZE + block->next->size;
+            block->next = block->next->next;
+            if (block->next) {
+                block->next->prev = block;
+            }
+        }
+    }
+    // Coalesce with prev
+    if (block->prev && block->prev->free) {
+        // Check adjacency
+        if ((char*)block->prev + BLOCK_META_SIZE + block->prev->size == (char*)block) {
+            block->prev->size += BLOCK_META_SIZE + block->size;
+            block->prev->next = block->next;
+            if (block->next) {
+                block->next->prev = block->prev;
+            }
+            // Point to prev as the current block (for further coalescing? No need if we just freed block)
+        }
+    }
+}
 
 void *malloc(size_t size) {
-    if (heap_ptr + size > sizeof(heap)) return NULL;
-    void *ptr = &heap[heap_ptr];
-    heap_ptr += size;
-    return ptr;
+    if (size <= 0) return NULL;
+
+    struct block_meta *block;
+    struct block_meta *last = global_base;
+    size_t aligned_size = ALIGN(size);
+
+    if (!global_base) {
+        block = request_space(NULL, aligned_size);
+        if (!block) return NULL;
+        last = block;
+    } else {
+        block = find_free_block(&last, aligned_size);
+        if (!block) {
+            block = request_space(last, aligned_size);
+            if (!block) return NULL;
+        }
+    }
+
+    // If we found a free block (or created one), try to split it
+    if (block->size > aligned_size) {
+        split_block(block, aligned_size);
+    }
+
+    block->free = 0;
+    block->magic = MAGIC;
+    return (block + 1);
 }
 
 void free(void *ptr) {
-    (void)ptr;
+    if (!ptr) return;
+
+    struct block_meta *block = (struct block_meta*)ptr - 1;
+    if (block->magic != MAGIC) {
+        // Corruption or invalid pointer. Abort? Or ignore?
+        // Standard free is undefined on invalid ptr.
+        return;
+    }
+
+    block->free = 1;
+    coalesce_block(block);
 }
 
 void *calloc(size_t nmemb, size_t size) {
     size_t total = nmemb * size;
+    // Check for overflow
+    if (nmemb != 0 && total / nmemb != size) return NULL;
+
     void *ptr = malloc(total);
     if (ptr) {
-        char *p = ptr;
-        for(size_t i=0; i<total; i++) p[i] = 0;
+        memset(ptr, 0, total);
     }
     return ptr;
 }
 
 void *realloc(void *ptr, size_t size) {
     if (!ptr) return malloc(size);
-    return malloc(size); 
+    if (size == 0) {
+        free(ptr);
+        return NULL;
+    }
+
+    struct block_meta *block = (struct block_meta*)ptr - 1;
+    if (block->magic != MAGIC) return NULL;
+
+    if (block->size >= size) {
+        // Can we split?
+        // Note: size is requested size, block->size is aligned size
+        // If we shrink significantly, split.
+        // But for simplicity, we can just return ptr.
+        // Or if block->size is much larger than ALIGN(size), split.
+        if (block->size >= ALIGN(size) + BLOCK_META_SIZE + ALIGNMENT) {
+             split_block(block, ALIGN(size));
+        }
+        return ptr;
+    }
+
+    // Need to grow.
+    // Check if next block is free and contiguous
+    if (block->next && block->next->free &&
+        ((char*)block + BLOCK_META_SIZE + block->size == (char*)block->next) &&
+        (block->size + BLOCK_META_SIZE + block->next->size >= ALIGN(size))) {
+
+        // Merge next block
+        block->size += BLOCK_META_SIZE + block->next->size;
+        block->next = block->next->next;
+        if (block->next) block->next->prev = block;
+
+        // Now split if too big
+        if (block->size >= ALIGN(size) + BLOCK_META_SIZE + ALIGNMENT) {
+            split_block(block, ALIGN(size));
+        }
+        return ptr;
+    }
+
+    // Fallback: allocate new, copy, free old
+    void *new_ptr = malloc(size);
+    if (!new_ptr) return NULL;
+    memcpy(new_ptr, ptr, block->size); // Safe to copy old size
+    free(ptr);
+    return new_ptr;
 }
 
 void *aligned_alloc(size_t alignment, size_t size) {
     if (alignment < sizeof(void*)) alignment = sizeof(void*);
-    size_t rem = heap_ptr % alignment;
-    if (rem) {
-        size_t padding = alignment - rem;
-        if (heap_ptr + padding > sizeof(heap)) return NULL;
-        heap_ptr += padding;
+
+    // If requested alignment is supported by our default allocator (<= 16 bytes),
+    // we can use malloc directly after ensuring size is a multiple of alignment.
+    if (alignment <= ALIGNMENT) {
+        if (size % alignment != 0) size = (size + alignment - 1) & ~(alignment - 1);
+        return malloc(size);
     }
-    return malloc(size);
+
+    // Supporting larger alignments (>16 bytes) requires a more complex allocator
+    // that can store the original pointer offset (e.g., in a preamble) so free()
+    // can find the block metadata. For now, we return NULL for unsupported alignments
+    // to avoid unsafe behavior or memory leaks.
+    //
+    // Note: The previous bump allocator supported arbitrary alignment but leaked memory.
+    // This implementation prioritizes correctness and memory reclamation over rare
+    // high-alignment requirements.
+    return NULL;
 }
 
 void quick_exit(int status) {
@@ -229,7 +419,6 @@ int rand(void) {
         chacha_idx = 0;
     }
     return (int)(chacha_block[chacha_idx++] & 0x7FFFFFFF);
-}
 }
 
 void arc4random_buf(void *buf, size_t n) {
