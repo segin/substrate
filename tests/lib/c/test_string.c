@@ -185,8 +185,50 @@ void run_strncmp_tests(void) {
     printf("All strncmp tests passed.\n");
 }
 
+void run_strrchr_tests(void) {
+    printf("Running strrchr tests...\n");
+    const char *s = "hello world";
+    const char *empty = "";
+
+    // 1. Basic search (character exists)
+    // "hello world"
+    //  01234567890
+    assert(test_strrchr(s, 'h') == s);
+    assert(test_strrchr(s, 'w') == s + 6);
+
+    // 2. Character at end
+    assert(test_strrchr(s, 'd') == s + 10);
+
+    // 3. Multiple occurrences (should find last)
+    // 'o' is at 4 and 7
+    assert(test_strrchr(s, 'o') == s + 7);
+    // 'l' is at 2, 3, 9
+    assert(test_strrchr(s, 'l') == s + 9);
+
+    // 4. Character not found
+    assert(test_strrchr(s, 'z') == NULL);
+    assert(test_strrchr(s, 'H') == NULL); // Case sensitivity
+
+    // 5. Null terminator search
+    // Should return pointer to the null terminator
+    assert(test_strrchr(s, '\0') == s + 11);
+
+    // 6. Empty string
+    assert(test_strrchr(empty, 'a') == NULL);
+    assert(test_strrchr(empty, '\0') == empty);
+
+    // 7. Verify against host implementation
+    // This ensures behavior matches standard expectations
+    assert(test_strrchr(s, 'l') == strrchr(s, 'l'));
+    assert(test_strrchr(s, 0) == strrchr(s, 0));
+    assert(test_strrchr(empty, 0) == strrchr(empty, 0));
+
+    printf("All strrchr tests passed!\n");
+}
+
 int main(void) {
     run_strcmp_tests();
     run_strncmp_tests();
+    run_strrchr_tests();
     return 0;
 }
