@@ -1,12 +1,24 @@
 include ../Makefile.inc
 
-.PHONY: all clean install
+SUBDIRS = bc regex
 
-all:
-	@echo "Building User Libraries (usr.lib)..."
+.PHONY: all clean install $(SUBDIRS)
+
+all: $(SUBDIRS)
+
+$(SUBDIRS):
+	@echo ">>> Entering usr.lib/$@"
+	$(MAKE) -C $@
+	@echo "<<< Leaving usr.lib/$@"
 
 clean:
-	@echo "Cleaning User Libraries..."
+	@for dir in $(SUBDIRS); do \
+		echo ">>> Cleaning usr.lib/$$dir"; \
+		$(MAKE) -C $$dir clean; \
+	done
 
 install:
-	@echo "Installing User Libraries..."
+	@for dir in $(SUBDIRS); do \
+		echo ">>> Installing usr.lib/$$dir"; \
+		$(MAKE) -C $$dir install; \
+	done
