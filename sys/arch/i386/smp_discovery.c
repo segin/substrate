@@ -3,6 +3,27 @@
 #include <kern/console.h>
 #include <string.h>
 #include <stdint.h>
+#include "percpu.h"
+#include "gdt.h"
+#include <sys/proc.h>
+
+// Externs for Scheduler and IDT
+extern process_t processes[];
+extern thread_t *sched_alloc_thread(process_t *proc);
+
+// IDT Pointer (defined in idt.c)
+typedef struct {
+    uint16_t limit;
+    uint32_t base;
+} __attribute__((packed)) idt_ptr_t;
+extern idt_ptr_t idt_ptr;
+extern void idt_flush(uint32_t);
+
+// TSS Flush (defined in isr.S)
+extern void tss_flush(void);
+
+// GDT Flush (defined in gdt.c/isr.S)
+extern void gdt_flush(uint32_t);
 
 cpu_info_t cpus[MAX_CPUS];
 int cpu_count = 0;
@@ -104,7 +125,23 @@ static char ap_stacks[MAX_CPUS][4096] __attribute__((aligned(16)));
 static volatile int aps_ready = 0;
 
 void smp_ap_entry(void) {
-    // Signal that we've started
+    // 1. Initialize AP-local state (GDT, TSS, IDT)
+    // Get per-cpu data (using LAPIC ID)
+    struct percpu_data *pcpu = percpu_get();
+
+    // Load GDT
+    gdt_flush((uint32_t)&pcpu->gdt_ptr);
+
+    // Load IDT
+    idt_flush((uint32_t)&idt_ptr);
+
+    // Load TSS
+    tss_flush();
+
+    // Load LDT (null)
+    __asm__ volatile("lldt %%ax" : : "a" (0));
+
+    // Signal that we've started and initialized
     __sync_fetch_and_add(&aps_ready, 1);
     
     kprint("SMP: AP Core online (LAPIC ID: ");
@@ -121,7 +158,8 @@ void smp_ap_entry(void) {
     extern void lapic_enable(uint8_t);
     lapic_enable(0xFF);  // Spurious vector
     
-    // TODO: Initialize AP-local state (GDT, TSS, IDT, scheduler)
+    // Enable Interrupts
+    __asm__ volatile("sti");
     
     // Halt and wait for work
     while(1) {
@@ -153,6 +191,31 @@ int smp_boot_ap(uint8_t apic_id) {
     }
     if (cpu_idx < 0) return -1;
     
+    // 2a. Initialize Per-CPU structures for the new core
+    percpu_init_cpu(cpu_idx);
+
+    // 2b. Initialize GDT and TSS for the new core
+    gdt_init_cpu(cpu_idx);
+
+    // 2c. Set Kernel Stack (ESP0) in TSS
+    struct percpu_data *pcpu = percpu_get_cpu(cpu_idx);
+    pcpu->tss.esp0 = (uint32_t)&ap_stacks[cpu_idx][4096];
+
+    // 2d. Create Idle Thread for the new core
+    thread_t *idle = sched_alloc_thread(&processes[0]);
+    if (idle) {
+        idle->state = THREAD_RUNNING;
+        idle->on_runqueue = 0;
+        idle->kstack_ptr = pcpu->tss.esp0;
+        idle->kstack_top = pcpu->tss.esp0;
+        idle->priority = 0;
+        idle->sched_class = SCHED_IDLE;
+        idle->proc = &processes[0]; // Ensure it belongs to kernel process
+
+        pcpu->idle = idle;
+        pcpu->current = idle;
+    }
+
     *stk_ptr = (uint32_t)&ap_stacks[cpu_idx][4096];
     *ent_ptr = (uint32_t)smp_ap_entry;
 
@@ -217,4 +280,3 @@ void smp_init(void) {
 int smp_get_cpu_count(void) {
     return cpu_count;
 }
-
