@@ -186,6 +186,8 @@ void run_kernel_tests(void) {
          run_minix_write_tests();
          extern void run_minix_inode_tests(void);
          run_minix_inode_tests();
+         extern void run_minix_readdir_tests(void);
+         run_minix_readdir_tests();
     }
 
     // Wait logic tests are run on host via verify_wait_host.sh
