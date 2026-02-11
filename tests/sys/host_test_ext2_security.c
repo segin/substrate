@@ -57,6 +57,7 @@ int64_t get_time(void) {
 #include "../../sys/fs/ext2/ext2.c"
 
 int main() {
+    // Verified buffer overflow fix: ensures name truncation prevents stack corruption
     printf("Running Ext2 Security Vulnerability Reproduction...\n");
 
     // 1. Setup Filesystem
