@@ -230,7 +230,6 @@ int rand(void) {
     }
     return (int)(chacha_block[chacha_idx++] & 0x7FFFFFFF);
 }
-}
 
 void arc4random_buf(void *buf, size_t n) {
     int fd = open("/dev/urandom", O_RDONLY);

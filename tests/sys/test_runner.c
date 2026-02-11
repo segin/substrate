@@ -138,6 +138,8 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "futex") == 0) {
          extern void test_futex(void);
          test_futex();
+         extern void test_futex_private(void);
+         test_futex_private();
     }
 
     if (all || strcmp(test_arg, "ntsync") == 0) {
