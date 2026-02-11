@@ -26,14 +26,6 @@ static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
     return size;
 }
 
-// /dev/full
-// /dev/full
-static size_t full_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    (void)node; (void)offset; (void)buffer; (void)size;
-    // Always return error (ENOSPC is usually 28)
-    return (size_t)-ENOSPC;
-}
-
 // /dev/port
 // /dev/port
 static size_t port_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
@@ -186,8 +178,6 @@ static fs_node_t null_node;
 
 static fs_node_t zero_node;
 
-static fs_node_t full_node;
-
 static fs_node_t tty_node;
 
 
@@ -219,19 +209,6 @@ void pseudo_init(void) {
     zero_node.write = &null_write; 
     zero_node.rdev = (1 << 8) | 5;
     devfs_register_device(&zero_node);
-
-
-
-    memset(&full_node, 0, sizeof(fs_node_t));
-
-    strcpy(full_node.name, "full");
-
-    full_node.flags = FS_CHARDEVICE;
-
-    full_node.read = &zero_read; // Always returns zeros
-    full_node.write = &full_write; // Always returns error
-    full_node.rdev = (1 << 8) | 7;
-    devfs_register_device(&full_node);
 
     /* Note: /dev/random and /dev/urandom now registered by random_init() */
 

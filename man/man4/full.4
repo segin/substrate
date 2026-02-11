@@ -9,32 +9,60 @@ full \- always full device
 .SH DESCRIPTION
 The
 .B full
-device behaves like
-.B /dev/zero
-when read, returning an endless supply of null bytes.
-However, any attempt to write to
+device is a character device that mimics a full disk.
+.PP
+Any read operation to
 .B /dev/full
-fails with the error
+will succeed and return a buffer filled with zero-valued bytes (0x00).
+This behavior is identical to
+.BR zero (4).
+.PP
+Any write operation to
+.B /dev/full
+will fail with the error
 .B ENOSPC
 (No space left on device).
+This applies to
+.BR write (2),
+.BR pwrite (2),
+.BR writev (2),
+and any other function that attempts to write data to the device.
 .PP
-This device is useful for testing how programs handle disk-full conditions.
-.SH ERRORS
-.TP
-.B ENOSPC
-Returned for all write operations.
-.SH EXAMPLE
-Test error handling:
+The device supports
+.BR lseek (2)
+which allows seeking to arbitrary offsets; however, the read/write behavior remains unchanged regardless of offset.
 .PP
-.nf
-    echo "test" > /dev/full
-    # Outputs: No space left on device
-.fi
+The device supports
+.BR poll (2)
+and indicates that it is always readable
+.RB ( POLLIN )
+and writable
+.RB ( POLLOUT ).
+Note that while it is "writable" in the sense that a write operation will not block, the write operation will immediately fail.
+.PP
+Attempts to map the device using
+.BR mmap (2)
+will fail.
 .SH FILES
 .TP
 .B /dev/full
 The full device special file (character device, major 1, minor 7).
+.SH ERRORS
+.TP
+.B ENOSPC
+Returned for all write operations.
+.TP
+.B ENOTTY
+Returned for any
+.BR ioctl (2)
+operation.
 .SH SEE ALSO
 .BR null (4),
 .BR zero (4),
 .BR intro (4)
+.SH HISTORY
+The
+.B full
+device appeared in 4.3BSD-Reno.
+.SH AUTHORS
+This implementation was written for the Substrate Kernel.
