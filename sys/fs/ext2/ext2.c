@@ -1149,6 +1149,8 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
     
+    size_t name_len = strlen(name);
+
     mutex_lock(&ctx->lock);
 
     // Lazy allocate
@@ -1188,7 +1190,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
             if (de->rec_len == 0) break;
             
             // Is this the entry to remove?
-            if (de->inode != 0 && de->name_len == strlen(name) &&
+            if (de->inode != 0 && de->name_len == name_len &&
                 strncmp(de->name, name, de->name_len) == 0) {
                 
                 // Merge with previous entry if possible
