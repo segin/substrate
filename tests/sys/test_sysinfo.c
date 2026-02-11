@@ -58,18 +58,12 @@ int test_sysinfo(void) {
     }
     
     /* 3. Check invalid pointer */
-    /* This might crash if we don't have safe copyin/out yet? */
-    /* Current implementation uses memcpy, so passing NULL will panic the kernel 
-       if page fault handler catches it, or simply return -EFAULT if implementation checks.
-       sys_sysinfo in sysinfo.c checks if (!info) return -14;
-    */
-    /*
-    ret = sysinfo(NULL);
-    if (ret != -14) {
-         kprint("FAIL: sysinfo(NULL) did not return EFAULT\n");
-         // return -1; // syscall wrapper might not set errno yet
+    extern int sys_sysinfo(struct sysinfo *info);
+    ret = sys_sysinfo(NULL);
+    if (ret != -EFAULT) {
+         kprintf("FAIL: sys_sysinfo(NULL) returned %d, expected -EFAULT\n", ret);
+         return -1;
     }
-    */
     
     kprint("PASS: sysinfo\n");
     return 0;
