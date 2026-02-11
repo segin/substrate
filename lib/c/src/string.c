@@ -161,7 +161,10 @@ char *strcpy(char *dest, const char *src) {
 
 char *strncpy(char *dest, const char *src, size_t n) {
     char *ret = dest;
-    while (n && (*dest++ = *src++)) n--;
+    while (n) {
+        n--;
+        if ((*dest++ = *src++) == 0) break;
+    }
     while (n--) *dest++ = 0;
     return ret;
 }
