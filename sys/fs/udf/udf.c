@@ -476,7 +476,8 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
                 struct udf_fe fe;
                 if (udf_read_fe(ctx->fs, &fid->icb, &fe) == 0) {
                     fs_node_t *result = udf_alloc_node(ctx->fs, &fid->icb, &fe);
-                    strcpy(result->name, fname);
+                    strncpy(result->name, fname, sizeof(result->name));
+                    result->name[sizeof(result->name) - 1] = '\0';
                     return result;
                 }
             }
