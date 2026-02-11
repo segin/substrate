@@ -12,12 +12,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include "scsi.h"
 
-/* Kernel time function - stub until real timer API implemented */
+/* Kernel time function */
 static inline uint64_t kernel_time_ms(void) {
-    /* TODO: Use real kernel timer when available */
-    return 0;
+    return (uint64_t)get_uptime_ms();
 }
 
 /*

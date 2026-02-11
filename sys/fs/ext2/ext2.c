@@ -602,14 +602,14 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
             if (de->inode != 0 && de->name_len > 0) {
                 if (cur_idx == index) {
                     // Found it - store in context specific dirent
-                    ctx->current_dirent.ino = de->inode;
+                    ctx->current_dirent.d_ino = de->inode;
                     uint32_t len = de->name_len;
                     // Fix: Ensure name fits in buffer to prevent overflow
-                    if (len >= sizeof(ctx->current_dirent.name)) {
-                        len = sizeof(ctx->current_dirent.name) - 1;
+                    if (len >= sizeof(ctx->current_dirent.d_name)) {
+                        len = sizeof(ctx->current_dirent.d_name) - 1;
                     }
-                    memcpy(ctx->current_dirent.name, de->name, len);
-                    ctx->current_dirent.name[len] = '\0';
+                    memcpy(ctx->current_dirent.d_name, de->name, len);
+                    ctx->current_dirent.d_name[len] = '\0';
                     result = &ctx->current_dirent;
                     goto cleanup;
                 }

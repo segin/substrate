@@ -4,6 +4,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdatomic.h>
 
 void exit(int status) {
     _exit(status);
@@ -230,25 +233,33 @@ int rand(void) {
     }
     return (int)(chacha_block[chacha_idx++] & 0x7FFFFFFF);
 }
-}
 
 void arc4random_buf(void *buf, size_t n) {
-    int fd = open("/dev/urandom", O_RDONLY);
-    if (fd < 0) {
-        abort();
+    static atomic_int urandom_fd = -1;
+    int fd = atomic_load(&urandom_fd);
+
+    if (fd == -1) {
+        fd = open("/dev/urandom", O_RDONLY);
+        if (fd < 0) {
+            abort();
+        }
+        int expected = -1;
+        if (!atomic_compare_exchange_strong(&urandom_fd, &expected, fd)) {
+            close(fd);
+            fd = expected;
+        }
     }
+
     char *p = (char *)buf;
     size_t left = n;
     while (left > 0) {
         ssize_t r = read(fd, p, left);
         if (r <= 0) {
-             close(fd);
              abort();
         }
         p += r;
         left -= r;
     }
-    close(fd);
 }
 
 uint32_t arc4random(void) {
@@ -273,4 +284,56 @@ uint32_t arc4random_uniform(uint32_t upper_bound) {
     }
 
     return r % upper_bound;
+}
+
+/* getopt implementation */
+char *optarg = NULL;
+int optind = 1;
+int opterr = 1;
+int optopt = 0;
+
+int getopt(int argc, char * const argv[], const char *optstring) {
+    static int sp = 1;
+    int c;
+    char *cp;
+
+    if (sp == 1) {
+        if (optind >= argc ||
+            argv[optind][0] != '-' || argv[optind][1] == '\0')
+            return -1;
+        else if (strcmp(argv[optind], "--") == 0) {
+            optind++;
+            return -1;
+        }
+    }
+    optopt = c = argv[optind][sp];
+    if (c == ':' || (cp = strchr(optstring, c)) == NULL) {
+        if (opterr)
+            fprintf(stderr, "%s: illegal option -- %c\n", argv[0], c);
+        if (argv[optind][++sp] == '\0') {
+            optind++;
+            sp = 1;
+        }
+        return '?';
+    }
+    if (*++cp == ':') {
+        if (argv[optind][sp+1] != '\0')
+            optarg = &argv[optind++][sp+1];
+        else if (++optind >= argc) {
+            if (opterr)
+                fprintf(stderr, "%s: option requires an argument -- %c\n",
+                    argv[0], c);
+            sp = 1;
+            return '?';
+        } else
+            optarg = argv[optind++];
+        sp = 1;
+    } else {
+        if (argv[optind][++sp] == '\0') {
+            sp = 1;
+            optind++;
+        }
+        optarg = NULL;
+    }
+    return c;
 }
