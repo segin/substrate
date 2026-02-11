@@ -3,6 +3,32 @@
 #include <string.h>
 #include "parser.h"
 
+static void *xmalloc(size_t size) {
+    void *ptr = malloc(size);
+    if (!ptr && size != 0) {
+        perror("malloc");
+        exit(1);
+    }
+    return ptr;
+}
+
+static void *xrealloc(void *ptr, size_t size) {
+    void *new_ptr = realloc(ptr, size);
+    if (!new_ptr && size != 0) {
+        perror("realloc");
+        exit(1);
+    }
+    return new_ptr;
+}
+
+static char *xstrdup(const char *s) {
+    char *new_s = strdup(s);
+    if (!new_s) {
+        perror("strdup");
+        exit(1);
+    }
+    return new_s;
+}
 
 static struct input_stream in;
 
@@ -85,11 +111,7 @@ static size_t def_code_cap = 0;
 static void append_def_code(int c) {
     if (def_code_len + 2 > def_code_cap) {
         def_code_cap = (def_code_cap == 0) ? 1024 : def_code_cap * 2;
-        def_code_buf = realloc(def_code_buf, def_code_cap);
-        if (!def_code_buf) {
-            perror("realloc");
-            exit(1);
-        }
+        def_code_buf = xrealloc(def_code_buf, def_code_cap);
     }
     
     /* Check for trigraphs: ??X */
@@ -115,11 +137,7 @@ static size_t sub_code_cap = 0;
 static void append_sub_code(int c) {
     if (sub_code_len + 2 > sub_code_cap) {
         sub_code_cap = (sub_code_cap == 0) ? 4096 : sub_code_cap * 2;
-        sub_code_buf = realloc(sub_code_buf, sub_code_cap);
-        if (!sub_code_buf) {
-            perror("realloc");
-            exit(1);
-        }
+        sub_code_buf = xrealloc(sub_code_buf, sub_code_cap);
     }
     
     /* Check for trigraphs: ??X */
@@ -294,7 +312,7 @@ static void parse_definitions(void) {
 
 /* Read a C action block - handles { } nesting */
 static char *read_action(int first_char) {
-    char *buf = malloc(4096);
+    char *buf = xmalloc(4096);
     int len = 0;
     int cap = 4096;
     int brace_depth = 0;
@@ -306,7 +324,7 @@ static char *read_action(int first_char) {
         while ((c = next_char()) != EOF) {
             if (len + 2 >= cap) {
                 cap *= 2;
-                buf = realloc(buf, cap);
+                buf = xrealloc(buf, cap);
             }
             buf[len++] = c;
             if (c == '{') brace_depth++;
@@ -324,7 +342,7 @@ static char *read_action(int first_char) {
         while ((c = next_char()) != EOF && c != '\n') {
             if (len + 2 >= cap) {
                 cap *= 2;
-                buf = realloc(buf, cap);
+                buf = xrealloc(buf, cap);
             }
             buf[len++] = c;
         }
@@ -373,8 +391,8 @@ static void parse_rules(void) {
             while ((c = next_char()) != EOF && c != '>') {
                 if (c == ',') {
                     sc_buf[sc_len] = '\0';
-                    start_conds = realloc(start_conds, (sc_count + 1) * sizeof(char*));
-                    start_conds[sc_count++] = strdup(sc_buf);
+                    start_conds = xrealloc(start_conds, (sc_count + 1) * sizeof(char*));
+                    start_conds[sc_count++] = xstrdup(sc_buf);
                     sc_len = 0;
                 } else {
                     sc_buf[sc_len++] = c;
@@ -382,8 +400,8 @@ static void parse_rules(void) {
             }
             if (sc_len > 0) {
                 sc_buf[sc_len] = '\0';
-                start_conds = realloc(start_conds, (sc_count + 1) * sizeof(char*));
-                start_conds[sc_count++] = strdup(sc_buf);
+                start_conds = xrealloc(start_conds, (sc_count + 1) * sizeof(char*));
+                start_conds[sc_count++] = xstrdup(sc_buf);
             }
             c = next_char(); /* Get first char of pattern or { */
             
@@ -407,8 +425,8 @@ static void parse_rules(void) {
         /* If we are inside a block and no explicit SC given for this rule, inherit */
         if (sc_count == 0 && in_sc_block) {
             sc_count = active_sc_count;
-            start_conds = malloc(sc_count * sizeof(char*));
-            for (int i = 0; i < sc_count; i++) start_conds[i] = strdup(active_sc[i]);
+            start_conds = xmalloc(sc_count * sizeof(char*));
+            for (int i = 0; i < sc_count; i++) start_conds[i] = xstrdup(active_sc[i]);
         }
         
         /* Read pattern until whitespace */
