@@ -2,6 +2,7 @@
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/signal.h>
+#include <vfs/vfs.h>
 #include <string.h>
 #include <stdio.h>
 #include <vm/vm_kmem.h>
@@ -37,10 +38,53 @@ void tty_default_termios(struct termios *t) {
     t->c_cc[VWERASE] = 23; // ^W
 }
 // ...
+// VFS Proxy functions for specific TTY devices
+static size_t tty_fs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    (void)offset;
+    struct tty *tty = (struct tty *)node->impl;
+    return tty_read(tty, (char *)buffer, size);
+}
+
+static size_t tty_fs_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    (void)offset;
+    struct tty *tty = (struct tty *)node->impl;
+    return tty_write(tty, (const char *)buffer, size);
+}
+
+static int tty_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+    struct tty *tty = (struct tty *)node->impl;
+    return tty_ioctl(tty, request, (unsigned long)arg);
+}
+
+static void tty_fs_open(fs_node_t *node) {
+    struct tty *tty = (struct tty *)node->impl;
+    tty_open(tty);
+}
+
+static void tty_fs_close(fs_node_t *node) {
+    struct tty *tty = (struct tty *)node->impl;
+    tty_close(tty);
+}
+
+// Forward declaration from vfs.h (moved to top)
+
 void tty_register_device(struct tty *tty, char *name) {
-    (void)tty; (void)name;
-    // Wrapper for devfs registration
-    // Not implemented fully yet, need fs_node creation
+    if (!tty || !name) return;
+    
+    fs_node_t *node = kmalloc(sizeof(fs_node_t));
+    if (!node) return;
+    
+    memset(node, 0, sizeof(fs_node_t));
+    strncpy(node->name, name, sizeof(node->name) - 1);
+    node->flags = FS_CHARDEVICE;
+    node->impl = (uintptr_t)tty;
+    node->read = tty_fs_read;
+    node->write = tty_fs_write;
+    node->ioctl = tty_fs_ioctl;
+    node->open = tty_fs_open;
+    node->close = tty_fs_close;
+    
+    devfs_register_device(node);
 }
 
 void tty_init(void) {
@@ -591,6 +635,12 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             break;
         case TIOCGWINSZ:
             if (arg) memcpy((void*)arg, &tty->winsize, sizeof(struct winsize));
+            ret = 0;
+            break;
+        case TIOCSWINSZ:
+            if (arg) memcpy(&tty->winsize, (void*)arg, sizeof(struct winsize));
+            // Send SIGWINCH?
+            if (tty->pgrp > 0) signal_send_group(tty->pgrp, SIGWINCH);
             ret = 0;
             break;
         case TIOCSPGRP:

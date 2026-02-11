@@ -12,48 +12,13 @@
 static console_backend_t *backends = NULL;
 static struct tty *console_tty = NULL;
 
-// TTY Driver Methods Forward Declarations
-static int console_tty_install(struct tty_driver *driver, struct tty *tty);
-static void console_tty_remove(struct tty_driver *driver, struct tty *tty);
-static int console_tty_open(struct tty *tty);
-static void console_tty_close(struct tty *tty);
-static int console_tty_write(struct tty *tty, const unsigned char *buf, int count);
-static int console_tty_put_char(struct tty *tty, unsigned char c);
-static void console_tty_flush_chars(struct tty *tty);
-static int console_tty_write_room(struct tty *tty);
-static int console_tty_chars_in_buffer(struct tty *tty);
-static int console_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg);
-static void console_tty_set_termios(struct tty *tty);
-static void console_tty_throttle(struct tty *tty);
-static void console_tty_unthrottle(struct tty *tty);
-
-// Driver Structure
-static struct tty_driver console_driver = {
-    .driver_name = "console",
-    .name = "console",
-    .major = 5,
-    .minor_start = 1,
-    .install = console_tty_install,
-    .remove = console_tty_remove,
-    .open = console_tty_open,
-    .close = console_tty_close,
-    .write = console_tty_write,
-    .put_char = console_tty_put_char,
-    .flush_chars = console_tty_flush_chars,
-    .write_room = console_tty_write_room,
-    .chars_in_buffer = console_tty_chars_in_buffer,
-    .ioctl = console_tty_ioctl,
-    .set_termios = console_tty_set_termios,
-    .throttle = console_tty_throttle,
-    .unthrottle = console_tty_unthrottle
-};
-
 void console_init(void) {
     backends = NULL;
     tty_init();
-    
-    // Allocate TTY for console
-    console_tty = tty_alloc(&console_driver, 0);
+}
+
+void console_set_tty(struct tty *tty) {
+    console_tty = tty;
 }
 
 void console_register(console_backend_t *backend) {
@@ -83,81 +48,6 @@ static void backend_write(const char *data, size_t len) {
         }
         b = b->next;
     }
-}
-
-// TTY Driver Implementation
-static int console_tty_install(struct tty_driver *driver, struct tty *tty) {
-    (void)driver;
-    if (!tty) return -1;
-    return 0;
-}
-
-static void console_tty_remove(struct tty_driver *driver, struct tty *tty) {
-    (void)driver;
-    if (tty == console_tty) {
-        console_tty = NULL;
-    }
-}
-
-static int console_tty_open(struct tty *tty) {
-    (void)tty;
-    return 0;
-}
-
-static void console_tty_close(struct tty *tty) {
-    (void)tty;
-}
-
-static int console_tty_write(struct tty *tty, const unsigned char *buf, int count) {
-    (void)tty;
-    backend_write((const char*)buf, count);
-    return count;
-}
-
-static int console_tty_put_char(struct tty *tty, unsigned char c) {
-    (void)tty;
-    backend_write((const char*)&c, 1);
-    return 1;
-}
-
-static void console_tty_flush_chars(struct tty *tty) {
-    (void)tty;
-}
-
-static int console_tty_write_room(struct tty *tty) {
-    (void)tty;
-    return TTY_BUF_SIZE;
-}
-
-static int console_tty_chars_in_buffer(struct tty *tty) {
-    (void)tty;
-    return 0;
-}
-
-static int console_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
-    (void)tty;
-    (void)cmd;
-    (void)arg;
-    return -1;
-}
-
-static void console_tty_set_termios(struct tty *tty) {
-    if (!tty) return;
-    console_backend_t *b = backends;
-    while (b) {
-        if (b->set_termios) {
-            b->set_termios(&tty->termios);
-        }
-        b = b->next;
-    }
-}
-
-static void console_tty_throttle(struct tty *tty) {
-    (void)tty;
-}
-
-static void console_tty_unthrottle(struct tty *tty) {
-    (void)tty;
 }
 
 // Public wrapper for kernel printing
