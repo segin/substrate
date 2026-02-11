@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <arch/i386/include/early_boot.h>
+#include <arch/x86-common/include/lapic.h>
 
 #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
 
