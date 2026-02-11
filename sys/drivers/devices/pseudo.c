@@ -19,12 +19,8 @@ static size_t null_write(fs_node_t *node, off_t offset, size_t size, const uint8
     return size; // Discarded
 }
 
-// /dev/zero
-static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node; (void)offset;
-    memset(buffer, 0, size);
-    return size;
-}
+// /dev/zero - Now implemented in zero.c
+// /dev/full - Now implemented in full.c
 
 // /dev/port
 // /dev/port
@@ -159,12 +155,14 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
 
 static fs_node_t null_node;
 
-static fs_node_t zero_node;
+
 
 static fs_node_t tty_node;
 
 
 
+
+extern void zero_init(void);
 
 void pseudo_init(void) {
 
@@ -180,18 +178,8 @@ void pseudo_init(void) {
     null_node.rdev = (1 << 8) | 3;
     devfs_register_device(&null_node);
 
-
-
-    memset(&zero_node, 0, sizeof(fs_node_t));
-
-    strcpy(zero_node.name, "zero");
-
-    zero_node.flags = FS_CHARDEVICE;
-
-    zero_node.read = &zero_read;
-    zero_node.write = &null_write; 
-    zero_node.rdev = (1 << 8) | 5;
-    devfs_register_device(&zero_node);
+    // Initialize new zero driver (registered in zero.c)
+    zero_init();
 
     /* Note: /dev/random and /dev/urandom now registered by random_init() */
 
