@@ -114,6 +114,86 @@ static void test_strlen(void) {
     }
 }
 
+static void test_strcmp(void) {
+    if (strcmp("", "") != 0) {
+        kprint("FAIL: strcmp(\"\", \"\") != 0\n");
+        failed_tests++;
+    }
+    if (strcmp("a", "a") != 0) {
+        kprint("FAIL: strcmp(\"a\", \"a\") != 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abc", "abc") != 0) {
+        kprint("FAIL: strcmp(\"abc\", \"abc\") != 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abc", "abd") >= 0) {
+        kprint("FAIL: strcmp(\"abc\", \"abd\") >= 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abd", "abc") <= 0) {
+        kprint("FAIL: strcmp(\"abd\", \"abc\") <= 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abc", "abcd") >= 0) {
+        kprint("FAIL: strcmp(\"abc\", \"abcd\") >= 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abcd", "abc") <= 0) {
+        kprint("FAIL: strcmp(\"abcd\", \"abc\") <= 0\n");
+        failed_tests++;
+    }
+}
+
+static void test_strncmp(void) {
+    // n=0 cases
+    if (strncmp("", "", 0) != 0) {
+        kprint("FAIL: strncmp(\"\", \"\", 0) != 0\n");
+        failed_tests++;
+    }
+    if (strncmp("abc", "def", 0) != 0) {
+        kprint("FAIL: strncmp(\"abc\", \"def\", 0) != 0\n");
+        failed_tests++;
+    }
+
+    // Equal strings
+    if (strncmp("abc", "abc", 3) != 0) {
+        kprint("FAIL: strncmp(\"abc\", \"abc\", 3) != 0\n");
+        failed_tests++;
+    }
+    // n > length
+    if (strncmp("abc", "abc", 5) != 0) {
+        kprint("FAIL: strncmp(\"abc\", \"abc\", 5) != 0\n");
+        failed_tests++;
+    }
+
+    // Difference after n (should appear equal)
+    if (strncmp("abc", "abd", 2) != 0) {
+        kprint("FAIL: strncmp(\"abc\", \"abd\", 2) != 0\n");
+        failed_tests++;
+    }
+
+    // Difference within n
+    if (strncmp("abc", "abd", 3) >= 0) {
+        kprint("FAIL: strncmp(\"abc\", \"abd\", 3) >= 0\n");
+        failed_tests++;
+    }
+    if (strncmp("abd", "abc", 3) <= 0) {
+        kprint("FAIL: strncmp(\"abd\", \"abc\", 3) <= 0\n");
+        failed_tests++;
+    }
+
+    // Prefix
+    if (strncmp("abc", "abcd", 3) != 0) {
+         kprint("FAIL: strncmp(\"abc\", \"abcd\", 3) != 0\n");
+         failed_tests++;
+    }
+    if (strncmp("abc", "abcd", 4) >= 0) {
+         kprint("FAIL: strncmp(\"abc\", \"abcd\", 4) >= 0\n");
+         failed_tests++;
+    }
+}
+
 // Performance Benchmarks
 
 static void benchmark_memcpy(const char *label, void *dst, const void *src, size_t n, int iterations) {
@@ -143,6 +223,12 @@ void run_string_tests(void) {
 
     kprint("Checking strlen correctness...\n");
     test_strlen();
+
+    kprint("Checking strcmp correctness...\n");
+    test_strcmp();
+
+    kprint("Checking strncmp correctness...\n");
+    test_strncmp();
 
     kprint("Checking memcpy correctness...\n");
     test_memcpy_basic();
