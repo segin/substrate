@@ -6415,6 +6415,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **`fsck`:** Implement `ext2` consistency check.
 - [ ] **Compression Tools:**
     - [x] **`compress`:** Implement `compress`, `uncompress`, `zcat` (LZW).
+    - [ ] **`cpio`:** Implement POSIX-compatible archive utility (`usr.bin/cpio`).
 
 ### 8. Security and Identity
 - [ ] **User & Group Management:**

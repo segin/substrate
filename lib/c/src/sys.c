@@ -323,7 +323,6 @@ int utimes(const char *filename, const struct timeval times[2]) {
     errno = ENOSYS;
     return -1;
 }
-
 int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
     return (int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)filesystemtype, (int)mountflags, (int)data);
 }
