@@ -7,6 +7,7 @@
 #include <kern/sched.h>
 #include <kern/runqueue.h>
 #include <sys/proc.h>
+#include <sys/lock.h>
 #include <string.h>
 
 /* MAX_CPUS defined in sched.h */
@@ -70,15 +71,13 @@ void sched_enqueue(thread_t *t) {
     runqueue_t *rq = &cpu_runqueues[target_cpu];
     
     // Lock runqueue (atomic spinlock)
-    while (__sync_lock_test_and_set(&rq->lock, 1)) {
-        while (rq->lock) __asm__ volatile("pause");
-    }
+    spinlock_acquire(&rq->lock);
     
     runqueue_add(rq, t);
     t->on_runqueue = 1;
     
     // Unlock
-    __sync_lock_release(&rq->lock);
+    spinlock_release(&rq->lock);
 }
 
 // Remove thread from its runqueue
@@ -94,21 +93,21 @@ void sched_dequeue(thread_t *t) {
         }
         
         // Lock
-        while (__sync_lock_test_and_set(&rq->lock, 1)) {
-            while (rq->lock) __asm__ volatile("pause");
-        }
+        spinlock_acquire(&rq->lock);
         
         // Re-check ownership under lock
         if (t->current_queue == rq && t->on_runqueue) {
             runqueue_remove(rq, t);
             t->on_runqueue = 0;
-            __sync_lock_release(&rq->lock);
+            spinlock_release(&rq->lock);
             return;
         }
         
         // Thread moved or was removed while we were waiting for lock
-        __sync_lock_release(&rq->lock);
+        spinlock_release(&rq->lock);
+#if defined(__i386__) || defined(__x86_64__)
         __asm__ volatile("pause");
+#endif
     }
 }
 
@@ -118,9 +117,7 @@ thread_t *sched_pick_next(void) {
     if (!rq) return NULL;
     
     // Lock
-    while (__sync_lock_test_and_set(&rq->lock, 1)) {
-        while (rq->lock) __asm__ volatile("pause");
-    }
+    spinlock_acquire(&rq->lock);
     
     thread_t *t = runqueue_pop(rq);
     if (t) {
@@ -128,7 +125,7 @@ thread_t *sched_pick_next(void) {
     }
     
     // Unlock
-    __sync_lock_release(&rq->lock);
+    spinlock_release(&rq->lock);
     
     return t;
 }
@@ -192,13 +189,11 @@ thread_t *sched_steal_thread(int target_cpu) {
     thread_t *stolen = NULL;
     
     // Lock target runqueue
-    while (__sync_lock_test_and_set(&rq->lock, 1)) {
-        while (rq->lock) __asm__ volatile("pause");
-    }
+    spinlock_acquire(&rq->lock);
     
     // Only steal if they have enough threads
     if (rq->total_threads < 2) {
-        __sync_lock_release(&rq->lock);
+        spinlock_release(&rq->lock);
         return NULL;
     }
     
@@ -226,7 +221,7 @@ thread_t *sched_steal_thread(int target_cpu) {
         break;
     }
     
-    __sync_lock_release(&rq->lock);
+    spinlock_release(&rq->lock);
     return stolen;
 }
 
