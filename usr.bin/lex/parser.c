@@ -373,7 +373,12 @@ static void parse_rules(void) {
             while ((c = next_char()) != EOF && c != '>') {
                 if (c == ',') {
                     sc_buf[sc_len] = '\0';
-                    start_conds = realloc(start_conds, (sc_count + 1) * sizeof(char*));
+                    char **tmp = realloc(start_conds, (sc_count + 1) * sizeof(char*));
+                    if (!tmp) {
+                        perror("realloc");
+                        exit(1);
+                    }
+                    start_conds = tmp;
                     start_conds[sc_count++] = strdup(sc_buf);
                     sc_len = 0;
                 } else {
@@ -382,7 +387,12 @@ static void parse_rules(void) {
             }
             if (sc_len > 0) {
                 sc_buf[sc_len] = '\0';
-                start_conds = realloc(start_conds, (sc_count + 1) * sizeof(char*));
+                char **tmp = realloc(start_conds, (sc_count + 1) * sizeof(char*));
+                if (!tmp) {
+                    perror("realloc");
+                    exit(1);
+                }
+                start_conds = tmp;
                 start_conds[sc_count++] = strdup(sc_buf);
             }
             c = next_char(); /* Get first char of pattern or { */
