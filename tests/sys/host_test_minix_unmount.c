@@ -50,6 +50,10 @@ int sprintf(char *str, const char *format, ...) {
 }
 
 // Mock Kernel Functions
+int64_t get_time(void) {
+    return 0;
+}
+
 void kprint(const char *s) {
     // Use host write if possible, or just ignore
     (void)s;
