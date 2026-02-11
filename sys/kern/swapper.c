@@ -29,8 +29,7 @@ void swapper_init(void) {
     memset(&swapper_proc, 0, sizeof(swapper_proc));
     swapper_proc.pid = 0;
     swapper_proc.ppid = 0;
-    swapper_proc.pgrp = 0;
-    swapper_proc.session = 0;
+    swapper_proc.p_pgrp = NULL;
     swapper_proc.is_kernel_task = 1;
     
     // Set comm name
@@ -105,14 +104,11 @@ void swapper_idle_loop(void) {
         extern thread_t *sched_idle_balance(void);
         thread_t *next = sched_idle_balance();
         if (next) {
-            // Found work - enable interrupts and yield
-            // The yield will happen with interrupts enabled
-            // usually, but we must be careful.
-            // Simplified: just enable and yield.
-            __asm__ volatile("sti");
-            
-            extern void sched_yield(void);
-            sched_yield();
+            // Found work - switch directly to the balanced thread.
+            // This avoids the O(N) scan in sched_yield and ensures we run
+            // the specific thread we just stole/found.
+            // Interrupts remain disabled during the switch for atomicity.
+            sched_switch(next);
             continue;
         }
         

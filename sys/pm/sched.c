@@ -97,9 +97,15 @@ void sched_yield(void) {
 
     if (best_thread == current_thread && current_thread && current_thread->state == THREAD_RUNNING) return;
 
-    // Context Switch
+    sched_switch(best_thread);
+}
+
+void sched_switch(thread_t *next) {
+    if (!next) return;
+
     thread_t *prev = current_thread;
-    thread_t *next = best_thread;
+
+    if (prev == next) return;
     
     if (prev && prev->state == THREAD_RUNNING) prev->state = THREAD_READY;
     next->state = THREAD_RUNNING;
