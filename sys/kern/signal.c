@@ -598,8 +598,9 @@ void signal_handle_pending(registers_t *regs) {
     }
 
     // Deliver signal via personality-specific sendsig
-    if (current_process->pers && current_process->pers->sendsig) {
-        current_process->pers->sendsig((void*)handler, sig, old_mask, flags, regs);
+    struct personality *pers = perso_lookup(current_process->perso_id);
+    if (pers && pers->sendsig) {
+        pers->sendsig((void*)handler, sig, old_mask, flags, regs);
     } else {
         // Fallback to native sendsig if no personality hook (should not happen for valid perso)
         extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
