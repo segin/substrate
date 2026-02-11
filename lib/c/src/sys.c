@@ -180,7 +180,12 @@ void sync(void) {
 }
 
 int kill(pid_t pid, int sig) {
-    return (int)_syscall2(SYS_KILL, pid, sig);
+    int ret = (int)_syscall2(SYS_KILL, pid, sig);
+    if (ret < 0) {
+        errno = -ret;
+        return -1;
+    }
+    return ret;
 }
 
 sighandler_t signal(int signum, sighandler_t handler) {
