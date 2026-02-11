@@ -525,7 +525,8 @@ static struct dirent *minix_readdir(fs_node_t *node, uint64_t index) {
     if (entry.inode == 0) return NULL; // Deleted/Empty
 
     static struct dirent dir; // Static return buffer required by VFS interface
-    strcpy(dir.name, entry.name);
+    strncpy(dir.name, entry.name, 30);
+    dir.name[30] = '\0';
     dir.ino = entry.inode;
     return &dir;
 }
