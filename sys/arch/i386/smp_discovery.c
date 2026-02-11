@@ -3,6 +3,7 @@
 #include <kern/console.h>
 #include <string.h>
 #include <stdint.h>
+#include <arch/i386/include/early_boot.h>
 
 cpu_info_t cpus[MAX_CPUS];
 int cpu_count = 0;
@@ -28,8 +29,10 @@ struct acpi_header {
     uint32_t creator_revision;
 } __attribute__((packed));
 
+#define P2V(x) ((void*)((uintptr_t)(x) + 0xC0000000))
+
 void smp_discover_cores(void) {
-    kprint("SMP: Discovering cores...\n");
+    early_uart_print("SMP: Discovering cores...\n");
     
     // Default to 1 CPU (Bootstrap Processor)
     cpu_count = 1;
@@ -41,25 +44,27 @@ void smp_discover_cores(void) {
     // Standard search: 0xE0000 to 0xFFFFF
     struct rsdp_desc *rsdp = NULL;
     for (uint32_t addr = 0xE0000; addr < 0x100000; addr += 16) {
-        if (memcmp((void*)addr, "RSD PTR ", 8) == 0) {
-            rsdp = (struct rsdp_desc*)addr;
+        if (memcmp(P2V(addr), "RSD PTR ", 8) == 0) {
+            rsdp = (struct rsdp_desc*)P2V(addr);
             break;
         }
     }
 
     if (!rsdp) {
-        kprint("SMP: ACPI not found, falling back to UP.\n");
+        early_uart_print("SMP: ACPI not found, falling back to UP.\n");
         return;
     }
 
     // 2. Locate MADT
-    struct acpi_header *rsdt = (struct acpi_header*)rsdp->rsdt_addr;
+    // rsdp->rsdt_addr is physical
+    struct acpi_header *rsdt = (struct acpi_header*)P2V(rsdp->rsdt_addr);
     int entries = (rsdt->length - sizeof(struct acpi_header)) / 4;
     uint32_t *ptrs = (uint32_t*)((uint32_t)rsdt + sizeof(struct acpi_header));
 
     struct acpi_header *madt = NULL;
     for (int i = 0; i < entries; i++) {
-        struct acpi_header *h = (struct acpi_header*)ptrs[i];
+        // ptrs[i] contains physical address
+        struct acpi_header *h = (struct acpi_header*)P2V(ptrs[i]);
         if (memcmp(h->signature, "APIC", 4) == 0) {
             madt = h;
             break;
@@ -213,4 +218,3 @@ void smp_boot_all_aps(void) {
 int smp_get_cpu_count(void) {
     return cpu_count;
 }
-
