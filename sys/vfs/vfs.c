@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+#include <sys/file.h>
 #include <vm/vm_kmem.h>
 
 struct mountlist mountlist;
@@ -175,6 +176,9 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         mp->mnt_node_root = root;
         mp->mnt_node_covered = mountpoint;
 
+        // Set mount reference on root node
+        root->mp = mp;
+
         TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
     }
 
@@ -232,6 +236,28 @@ struct dirent *readdir_fs(fs_node_t *node, uint64_t index) {
 // Internal with follow control
 static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks);
 
+// Check if a filesystem is busy
+static int vfs_is_busy(struct mount *mp) {
+    if (!mp) return 0;
+
+    // Check all processes
+    for (int i = 0; i < 16; i++) {
+        process_t *p = &processes[i];
+        if (p->pid == -1) continue;
+
+        if (p->cwd_node && p->cwd_node->mp == mp) return 1;
+        if (p->root_node && p->root_node->mp == mp) return 1;
+
+        for (int j = 0; j < MAX_FD; j++) {
+            if (p->fds[j] && p->fds[j]->f_data) {
+                fs_node_t *fn = (fs_node_t*)p->fds[j]->f_data;
+                if (fn->mp == mp) return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     return finddir_fs_internal(node, name, 0, 1);
 }
@@ -250,6 +276,10 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
     if ((node->flags & 0x7) == FS_DIRECTORY && node->finddir != 0) {
         fs_node_t *result = node->finddir(node, name);
         
+        if (result && !result->mp) {
+            result->mp = node->mp;
+        }
+
         // Resolve symlinks (with depth limit)
         if (result && (result->flags & 0x7) == FS_SYMLINK && result->readlink) {
             // Check if we should follow symlinks
@@ -600,10 +630,24 @@ int vfs_unmount_legacy(const char *path) {
         return -22; // EINVAL
     }
     
-    // Check if busy? (Refcounts) - TODO
-    
     // Capture root of mounted fs
     fs_node_t *root = mountpoint->ptr;
+
+    // Find the mount structure first to check busy status
+    struct mount *target_mp = NULL;
+    struct mount *mp_iter;
+    TAILQ_FOREACH(mp_iter, &mountlist, mnt_list) {
+        if (mp_iter->mnt_node_covered == mountpoint && mp_iter->mnt_node_root == root) {
+            target_mp = mp_iter;
+            break;
+        }
+    }
+
+    if (target_mp) {
+        if (vfs_is_busy(target_mp)) {
+            return -16; // EBUSY
+        }
+    }
 
     // Detach
     mountpoint->ptr = NULL;
@@ -614,16 +658,10 @@ int vfs_unmount_legacy(const char *path) {
         root->unmount(root);
     }
     
-    // Remove from mount list
-    struct mount *mp;
-    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
-        if (mp->mnt_node_covered == mountpoint && mp->mnt_node_root == root) {
-            TAILQ_REMOVE(&mountlist, mp, mnt_list);
-            kfree(mp, sizeof(struct mount));
-            break;
-        }
-        // Fallback check by path if nodes match fails or are reused improperly (less safe but covers legacy)
-        // Ideally node check is sufficient.
+    // Remove from mount list and free
+    if (target_mp) {
+        TAILQ_REMOVE(&mountlist, target_mp, mnt_list);
+        kfree(target_mp, sizeof(struct mount));
     }
 
     return 0;

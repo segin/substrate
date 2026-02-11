@@ -13,6 +13,7 @@
 #define FS_MOUNTPOINT  0x08 
 
 struct fs_node;
+struct mount;
 
 #include <sys/types.h>
 
@@ -70,6 +71,7 @@ typedef struct fs_node {
     mknod_type_t mknod;
     unmount_type_t unmount;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
+    struct mount *mp;    // Mount point this node belongs to.
 } fs_node_t;
 
 struct dirent {
