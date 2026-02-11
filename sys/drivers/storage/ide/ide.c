@@ -348,37 +348,24 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     }
     
     /* Start DMA */
+    ide_irq_complete[channel] = 0;
     ide_bm_start(channel, 0);  /* 0 = read from disk */
     
-    /* Wait for completion (polling mode) */
-    /* TODO: Use interrupt-driven completion */
-    while (1) {
-        uint8_t bm_status = ide_bm_status(channel);
-        uint8_t ide_status = ide_read_reg(channel, ATA_REG_STATUS);
-        
-        if (bm_status & BM_STAT_ERROR) {
-            ide_bm_stop(channel);
-            ide_bm_clear_interrupt(channel);
-            return -1;
-        }
-        
-        if (!(bm_status & BM_STAT_ACTIVE)) {
-            /* DMA complete */
-            break;
-        }
-        
-        if (ide_status & ATA_SR_ERR) {
-            ide_bm_stop(channel);
-            ide_bm_clear_interrupt(channel);
-            return -1;
-        }
-        
-        __asm__ volatile("pause");
+    /* Wait for completion (interrupt-driven) */
+    while (!ide_irq_complete[channel]) {
+        __asm__ volatile("hlt");
     }
     
+    uint8_t bm_status = ide_bm_status(channel);
+    uint8_t ide_status = ide_read_reg(channel, ATA_REG_STATUS);
+
     ide_bm_stop(channel);
     ide_bm_clear_interrupt(channel);
     
+    if ((bm_status & BM_STAT_ERROR) || (ide_status & ATA_SR_ERR)) {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -434,35 +421,24 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     }
     
     /* Start DMA */
+    ide_irq_complete[channel] = 0;
     ide_bm_start(channel, 1);  /* 1 = write to disk */
     
     /* Wait for completion */
-    while (1) {
-        uint8_t bm_status = ide_bm_status(channel);
-        uint8_t ide_status = ide_read_reg(channel, ATA_REG_STATUS);
-        
-        if (bm_status & BM_STAT_ERROR) {
-            ide_bm_stop(channel);
-            ide_bm_clear_interrupt(channel);
-            return -1;
-        }
-        
-        if (!(bm_status & BM_STAT_ACTIVE)) {
-            break;
-        }
-        
-        if (ide_status & ATA_SR_ERR) {
-            ide_bm_stop(channel);
-            ide_bm_clear_interrupt(channel);
-            return -1;
-        }
-        
-        __asm__ volatile("pause");
+    while (!ide_irq_complete[channel]) {
+        __asm__ volatile("hlt");
     }
     
+    uint8_t bm_status = ide_bm_status(channel);
+    uint8_t ide_status = ide_read_reg(channel, ATA_REG_STATUS);
+
     ide_bm_stop(channel);
     ide_bm_clear_interrupt(channel);
     
+    if ((bm_status & BM_STAT_ERROR) || (ide_status & ATA_SR_ERR)) {
+        return -1;
+    }
+
     return 0;
 }
 
