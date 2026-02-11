@@ -306,7 +306,12 @@ static char *read_action(int first_char) {
         while ((c = next_char()) != EOF) {
             if (len + 2 >= cap) {
                 cap *= 2;
-                buf = realloc(buf, cap);
+                char *new_buf = realloc(buf, cap);
+                if (!new_buf) {
+                    perror("realloc");
+                    exit(1);
+                }
+                buf = new_buf;
             }
             buf[len++] = c;
             if (c == '{') brace_depth++;
@@ -324,7 +329,12 @@ static char *read_action(int first_char) {
         while ((c = next_char()) != EOF && c != '\n') {
             if (len + 2 >= cap) {
                 cap *= 2;
-                buf = realloc(buf, cap);
+                char *new_buf = realloc(buf, cap);
+                if (!new_buf) {
+                    perror("realloc");
+                    exit(1);
+                }
+                buf = new_buf;
             }
             buf[len++] = c;
         }
@@ -373,7 +383,12 @@ static void parse_rules(void) {
             while ((c = next_char()) != EOF && c != '>') {
                 if (c == ',') {
                     sc_buf[sc_len] = '\0';
-                    start_conds = realloc(start_conds, (sc_count + 1) * sizeof(char*));
+                    char **new_conds = realloc(start_conds, (sc_count + 1) * sizeof(char*));
+                    if (!new_conds) {
+                        perror("realloc");
+                        exit(1);
+                    }
+                    start_conds = new_conds;
                     start_conds[sc_count++] = strdup(sc_buf);
                     sc_len = 0;
                 } else {
@@ -382,7 +397,12 @@ static void parse_rules(void) {
             }
             if (sc_len > 0) {
                 sc_buf[sc_len] = '\0';
-                start_conds = realloc(start_conds, (sc_count + 1) * sizeof(char*));
+                char **new_conds = realloc(start_conds, (sc_count + 1) * sizeof(char*));
+                if (!new_conds) {
+                    perror("realloc");
+                    exit(1);
+                }
+                start_conds = new_conds;
                 start_conds[sc_count++] = strdup(sc_buf);
             }
             c = next_char(); /* Get first char of pattern or { */
