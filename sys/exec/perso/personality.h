@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifndef MAX_SYSCALLS
+#define MAX_SYSCALLS 600
+#endif
+
 // Argument Types for Tracing
 #define ARG_HEX  0
 #define ARG_INT  1

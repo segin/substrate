@@ -14,6 +14,7 @@ void run_signal_tests(void);
 void run_udf_write_tests(void);
 void run_uma_tests(void);
 void run_string_tests(void);
+void run_crc32_tests(void);
 void run_kthread_create_tests(void);
 
 #endif

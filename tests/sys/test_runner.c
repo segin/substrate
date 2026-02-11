@@ -52,6 +52,10 @@ void run_kernel_tests(void) {
         run_string_tests();
     }
 
+    if (all || strcmp(test_arg, "crc32") == 0) {
+        run_crc32_tests();
+    }
+
     if (all || strcmp(test_arg, "pmap") == 0) {
         run_pmap_tests();
     }
