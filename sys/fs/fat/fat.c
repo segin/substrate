@@ -375,14 +375,23 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     
     // Cache FAT table for better performance
     extern void *kmalloc(size_t size);
-    uint32_t fat_table_size = fat_size * fs->bpb.bytes_per_sector;
-    fs->fat_table = (uint8_t *)kmalloc(fat_table_size);
+    uint64_t fat_table_size_64 = (uint64_t)fat_size * fs->bpb.bytes_per_sector;
+    uint32_t fat_table_size = 0;
+
+    if (fat_table_size_64 > 0xFFFFFFFF) {
+        kprint("FAT: FAT table too large for cache\n");
+        fs->fat_table = NULL;
+    } else {
+        fat_table_size = (uint32_t)fat_table_size_64;
+        fs->fat_table = (uint8_t *)kmalloc(fat_table_size);
+    }
+
     if (fs->fat_table) {
         if (fat_read_sectors(fs, fs->fat_start_sector, fat_size, fs->fat_table) != 0) {
             kprint("FAT: Warning - failed to cache FAT table\n");
             // Continue without cache, get_next_cluster will fail gracefully
         }
-    } else {
+    } else if (fat_table_size_64 <= 0xFFFFFFFF) {
         kprint("FAT: Warning - could not allocate FAT table cache\n");
         // Continue without cache
     }
