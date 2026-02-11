@@ -74,9 +74,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         fs = fs->next;
     }
     if (!fs) {
-        char buf[128];
-        sprintf(buf, "VFS: Unknown filesystem type: %s\n", type);
-        kprint(buf);
+        kprintf("VFS: Unknown filesystem type: %s\n", type);
         return -1;
     }
 
@@ -126,9 +124,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         mountpoint = vfs_lookup(fs_root, path);
         
         if (!mountpoint) {
-            kprint("VFS: Mount point not found: ");
-            kprint(path);
-            kprint("\n");
+            kprintf("VFS: Mount point not found: %s\n", path);
             if (root && root->unmount) {
                 root->unmount(root);
             }
@@ -136,9 +132,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         }
 
         if ((mountpoint->flags & 0x7) != FS_DIRECTORY) {
-             kprint("VFS: Mount point is not a directory: ");
-             kprint(path);
-             kprint("\n");
+             kprintf("VFS: Mount point is not a directory: %s\n", path);
              if (root->unmount) {
                  root->unmount(root);
              }
