@@ -8,7 +8,7 @@ SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_exp
 # Add more tests here: test_mmap.c test_gdt.c etc.
 # property_pmap.c needs fixing (missing headers) maybe? Excluding for now to ensure build.
 
-SRCS += bench_sched.c bench_sched_dequeue.c
+SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c
 
 OBJS = $(SRCS:.c=.o)
 
