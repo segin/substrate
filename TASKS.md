@@ -1689,29 +1689,29 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (rmdir empty, ENOTEMPTY, EBUSY for .)
                     - Docs: `vop_rmdir.9`
                     - Acceptance: Empty directory removed
-            - [ ] **Access/Attributes:**
-                - [ ] Implement `vop_access(vp, mode, cred, p)`.
+            - [x] **Access/Attributes:**
+                - [x] Implement `vop_access(vp, mode, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Check r/w/x permissions
                     - Logic: Compare cred uid/gid against vnode owner/group, check mode bits
                     - Tests: unit (owner access, group access, other access, root bypass)
                     - Docs: `vop_access.9`
                     - Acceptance: Permission checks match POSIX semantics
-                - [ ] Implement `vop_getattr(vp, vap, cred, p)`.
+                - [x] Implement `vop_getattr(vp, vap, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Get file attributes (stat equivalent)
                     - Fields: `va_mode`, `va_nlink`, `va_uid`, `va_gid`, `va_size`, `va_atime`, `va_mtime`, `va_ctime`
                     - Tests: unit (all stat fields correct)
                     - Docs: `vop_getattr.9`
                     - Acceptance: All vattr fields populated correctly
-                - [ ] Implement `vop_setattr(vp, vap, cred, p)`.
+                - [x] Implement `vop_setattr(vp, vap, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Set file attributes (chmod/chown/utimes)
                     - Logic: Check permissions, update inode, mark dirty
                     - Tests: unit (chmod, chown, truncate, utimes)
                     - Docs: `vop_setattr.9`
                     - Acceptance: Attributes updated, persisted after sync
-                - [ ] Implement `vop_pathconf(vp, name, retval)`.
+                - [x] Implement `vop_pathconf(vp, name, retval)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: POSIX pathconf support
                     - Names: `_PC_LINK_MAX`, `_PC_NAME_MAX`, `_PC_PATH_MAX`, etc.
