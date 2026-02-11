@@ -114,6 +114,39 @@ static void test_strlen(void) {
     }
 }
 
+static void test_memmove(void) {
+    char buf[32];
+    char expected[32];
+
+    // Basic non-overlapping
+    memset(buf, 0, sizeof(buf));
+    strcpy(buf, "Hello World");
+    memmove(buf + 20, buf, 12);
+    ASSERT_MEM_EQ(buf + 20, "Hello World", 12, "memmove basic");
+
+    // Overlap forward (dest < src)
+    strcpy(buf, "12345678");
+    strcpy(expected, "23456678");
+    memmove(buf, buf + 1, 5);
+    ASSERT_MEM_EQ(buf, expected, 8, "memmove overlap forward (dest < src)");
+
+    // Overlap backward (dest > src)
+    strcpy(buf, "12345678");
+    strcpy(expected, "11234578");
+    memmove(buf + 1, buf, 5);
+    ASSERT_MEM_EQ(buf, expected, 8, "memmove overlap backward (dest > src)");
+
+    // Exact overlap
+    strcpy(buf, "12345678");
+    memmove(buf, buf, 8);
+    ASSERT_MEM_EQ(buf, "12345678", 8, "memmove exact overlap");
+
+    // Zero size
+    strcpy(buf, "12345678");
+    memmove(buf, buf + 1, 0);
+    ASSERT_MEM_EQ(buf, "12345678", 8, "memmove zero size");
+}
+
 // Performance Benchmarks
 
 static void benchmark_memcpy(const char *label, void *dst, const void *src, size_t n, int iterations) {
@@ -149,6 +182,9 @@ void run_string_tests(void) {
     test_memcpy_small();
     test_memcpy_unaligned();
     test_memcpy_large();
+
+    kprint("Checking memmove correctness...\n");
+    test_memmove();
 
     if (failed_tests == 0) {
         kprint("Correctness: PASS\n");
