@@ -21,6 +21,15 @@
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <string.h>
+#include <kern/console.h>
+
+static void full_open(fs_node_t *node) {
+    (void)node;
+}
+
+static void full_close(fs_node_t *node) {
+    (void)node;
+}
 
 // Full read: return zeros
 static size_t full_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
@@ -62,6 +71,11 @@ void full_init(void) {
     memset(&full_node, 0, sizeof(fs_node_t));
     strcpy(full_node.name, "full");
     full_node.flags = FS_CHARDEVICE;
+    full_node.mask = 0666;
+    full_node.uid = 0;
+    full_node.gid = 0;
+    full_node.open = &full_open;
+    full_node.close = &full_close;
     full_node.read = &full_read;
     full_node.write = &full_write;
     full_node.poll = &full_poll;
@@ -71,4 +85,5 @@ void full_init(void) {
 
     // Register device
     devfs_register_device(&full_node);
+    kprint("full: /dev/full registered\n");
 }

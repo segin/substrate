@@ -223,6 +223,9 @@ void run_kernel_tests(void) {
 
         extern int test_device_allocation(void);
         if (test_device_allocation() == 0) kprint("device_allocation: PASS\n"); else kprint("device_allocation: FAIL\n");
+
+        extern void run_devfs_special_device_tests(void);
+        run_devfs_special_device_tests();
     }
 
     if (all || strcmp(test_arg, "kthread") == 0) {
