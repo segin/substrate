@@ -15,5 +15,6 @@ void run_udf_write_tests(void);
 void run_uma_tests(void);
 void run_string_tests(void);
 void run_kthread_create_tests(void);
+void run_div64_tests(void);
 
 #endif
