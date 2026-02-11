@@ -6,11 +6,12 @@
 
 #ifndef HOST_TEST
 typedef int32_t pid_t;
+#endif
+
 typedef int32_t tid_t;
 typedef uint32_t uid_t;
 typedef uint32_t gid_t;
 typedef int32_t register_t;
-#endif
 
 typedef int64_t off_t;
 typedef int64_t time_t;

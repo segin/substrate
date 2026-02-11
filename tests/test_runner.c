@@ -39,6 +39,7 @@ extern bool test_kthread_creation(void);
 extern bool test_timer_tick_increments(void);
 extern bool test_sched_priority(void);
 extern bool test_sched_sleep_wakeup(void);
+extern bool test_sched_decay_suite(void);
 
 // Sync Tests
 extern bool test_mutex_basic(void);
@@ -124,6 +125,7 @@ test_case_t tests[] = {
     {"timer_tick", test_timer_tick_increments},
     {"sched_priority", test_sched_priority},
     {"sched_sleep", test_sched_sleep_wakeup},
+    {"sched_decay", test_sched_decay_suite},
     {"mutex_basic", test_mutex_basic},
     {"mutex_contend", test_mutex_contention},
     {"sema_basic", test_sema_basic},

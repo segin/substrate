@@ -39,9 +39,9 @@ void panic(const char *msg) {
 // Globals Mocks
 #include <sys/proc.h>
 #include "../sys/exec/perso/personality.h"
-struct personality personality_native = { "Native", NULL, 0 };
-struct personality personality_freebsd = { "FreeBSD", NULL, 0 };
-struct personality personality_linux = { "Linux", NULL, 0 };
+struct personality personality_native = { "Native", PERS_NATIVE, NULL, NULL, NULL, 0, NULL, NULL, NULL };
+struct personality personality_freebsd = { "FreeBSD", PERS_FREEBSD, NULL, NULL, NULL, 0, NULL, NULL, NULL };
+struct personality personality_linux = { "Linux", PERS_LINUX, NULL, NULL, NULL, 0, NULL, NULL, NULL };
 
 // Paging Mocks
 void pmap_invalidate_page(uint32_t v) { (void)v; }

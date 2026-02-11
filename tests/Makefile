@@ -8,13 +8,14 @@ CORE_SRCS = ../sys/vm/vm_page.c vm_map_host.c ../sys/vm/vm_object.c \
           ../sys/kern/spinlock.c ../sys/kern/mutex.c ../sys/kern/semaphore.c ../sys/kern/kthread.c ../sys/kern/time.c ../sys/kern/signal.c ../sys/kern/futex.c \
           ../sys/lib/string.c ../sys/lib/printf.c ../sys/lib/div64.c \
           ../sys/exec/perso/compat.c ../sys/kern/acct.c ../sys/kern/sysinfo.c \
-          ../sys/vfs/vfs.c ../sys/arch/i386/syscall.c ../sys/arch/i386/sched.c
+          ../sys/vfs/vfs.c ../sys/arch/i386/syscall.c ../sys/arch/i386/sched.c \
+          ../sys/kern/sched_decay.c
 
 UNIT_TESTS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_object.c unit/vm/test_page.c unit/vm/test_fault.c \
              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_cow.c \
              unit/arch/test_trampoline.c \
-             unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c \
+             unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c unit/kern/test_sched_decay.c \
              unit/kern/test_sync.c unit/kern/test_signal.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
