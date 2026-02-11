@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
+#include <sys/smp.h>
 
 /* Global list of all zones */
 static uma_zone_t *uma_zones = NULL;
@@ -18,9 +19,12 @@ static uma_zone_t *uma_zones = NULL;
 /* Number of CPUs (detected at runtime) */
 static int uma_ncpu = 1;
 
+#define UMA_MAX_CPUS 32
+#define UMA_ZONE_SIZE_MAX (sizeof(uma_zone_t) + (UMA_MAX_CPUS - 1) * sizeof(uma_cache_t))
+
 /* Bootstrap zone pool */
 #define UMA_BOOTSTRAP_ZONES 32
-static uint8_t uma_bootstrap_mem[UMA_BOOTSTRAP_ZONES * sizeof(uma_zone_t)];
+static uint8_t uma_bootstrap_mem[UMA_BOOTSTRAP_ZONES * UMA_ZONE_SIZE_MAX] __attribute__((aligned(16)));
 static int uma_bootstrap_idx = 0;
 static bool uma_dynamic_alloc = false;
 
@@ -76,6 +80,17 @@ void uma_startup(void) {
     uma_bucket_idx = 0;
     uma_zones = NULL;
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
+
+    // Detect number of CPUs
+    int count = smp_get_cpu_count();
+    if (count > 0) {
+        if (count > UMA_MAX_CPUS) {
+            kprint("UMA: WARNING: CPU count exceeds limit, capping to 32\n");
+            count = UMA_MAX_CPUS;
+        }
+        uma_ncpu = count;
+    }
+
     kprint("UMA: subsystem initialized\n");
 }
 
@@ -117,15 +132,16 @@ uma_zone_t *uma_zcreate(
     /* Allocate zone structure */
     if (!uma_dynamic_alloc) {
         if (uma_bootstrap_idx < UMA_BOOTSTRAP_ZONES) {
-            zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * sizeof(uma_zone_t)];
+            zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * UMA_ZONE_SIZE_MAX];
             uma_bootstrap_idx++;
-            memset(zone, 0, sizeof(uma_zone_t));
+            // Zero the entire max zone size to be safe
+            memset(zone, 0, UMA_ZONE_SIZE_MAX);
         } else {
             kprint("UMA: Bootstrap zones exhausted!\n");
             return NULL;
         }
     } else {
-        zone = kzalloc(sizeof(uma_zone_t));
+        zone = kzalloc(sizeof(uma_zone_t) + (uma_ncpu - 1) * sizeof(uma_cache_t));
         if (!zone) return NULL;
     }
     zone->uz_name = name;

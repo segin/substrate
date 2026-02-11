@@ -41,6 +41,7 @@
 #include <sys/smp.h>
 
 #include <sys/tests.h>
+#include <sys/smp.h>
 
 extern void ntsync_init(void);
 
@@ -111,6 +112,10 @@ static void init_memory(multiboot_info_t *mboot_info) {
     vm_page_init();
     vm_object_init();
     vm_zone_init();
+
+    // Discover Cores before UMA startup so UMA can init per-CPU caches
+    smp_discover_cores();
+
     uma_startup();    // Initialize UMA before kmem (kmem uses UMA zones)
     kmem_init();      // Initialize kernel memory allocator
     kprint("VM subsystem initialized.\n");
