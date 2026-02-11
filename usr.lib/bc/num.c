@@ -11,6 +11,10 @@
 
 bc_num *bc_new(void) {
     bc_num *n = malloc(sizeof(bc_num));
+    if (!n) {
+        perror("bc_new: malloc");
+        exit(1);
+    }
     n->digits = NULL;
     n->len = 0;
     n->scale = 0;
@@ -29,7 +33,12 @@ void bc_free(bc_num *n) {
 void bc_expsize(bc_num *n, int needed) {
     if (needed <= n->cap) return;
     int new_cap = needed < 8 ? 8 : needed * 2;
-    n->digits = realloc(n->digits, new_cap);
+    void *new_digits = realloc(n->digits, new_cap);
+    if (!new_digits) {
+        perror("bc_expsize: realloc");
+        exit(1);
+    }
+    n->digits = new_digits;
     memset(n->digits + n->cap, 0, new_cap - n->cap);
     n->cap = new_cap;
 }
