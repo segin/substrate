@@ -93,14 +93,54 @@ void file_free(file_t *f) {
     file_free_list = f;
 }
 
+#define IO_CHUNK_SIZE 4096
+
 int sys_write(int fd, const char *buf, int len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
+    if (len < 0) return -22; // EINVAL
+    if (len == 0) return 0;
+
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
     
     // Check for console node if write_fs isn't fully generic yet
     if (f->f_data && ((fs_node_t*)f->f_data)->write) {
-        return write_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
+        char *kbuf = kmalloc(IO_CHUNK_SIZE);
+        if (!kbuf) return -12; // ENOMEM
+
+        int total_written = 0;
+        while (total_written < len) {
+            int chunk = len - total_written;
+            if (chunk > IO_CHUNK_SIZE) chunk = IO_CHUNK_SIZE;
+
+            if (copyin(buf + total_written, kbuf, chunk) != 0) {
+                kfree(kbuf, IO_CHUNK_SIZE);
+                if (total_written > 0) return total_written;
+                return -14; // EFAULT
+            }
+
+            // Cast result to int to check for negative error codes
+            int bytes = (int)write_fs((fs_node_t*)f->f_data, f->f_offset + total_written, chunk, (uint8_t*)kbuf);
+
+            if (bytes < 0) {
+                // Error occurred
+                if (total_written > 0) {
+                    // We already wrote some data, return that count
+                    break;
+                }
+                kfree(kbuf, IO_CHUNK_SIZE);
+                return bytes; // Return the error code
+            }
+
+            if (bytes == 0) break; // Should not happen for blocking write usually, unless error or EOF
+
+            total_written += bytes;
+            if (bytes < chunk) break; // Short write
+        }
+
+        f->f_offset += total_written;
+        kfree(kbuf, IO_CHUNK_SIZE);
+        return total_written;
     }
     
     return 0;
@@ -108,12 +148,44 @@ int sys_write(int fd, const char *buf, int len) {
 
 int sys_read(int fd, char *buf, int len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
+    if (len < 0) return -22; // EINVAL
+    if (len == 0) return 0;
+
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
     
-    uint32_t bytes = read_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
-    f->f_offset += bytes;
-    return bytes;
+    char *kbuf = kmalloc(IO_CHUNK_SIZE);
+    if (!kbuf) return -12; // ENOMEM
+
+    int total_read = 0;
+    while (total_read < len) {
+        int chunk = len - total_read;
+        if (chunk > IO_CHUNK_SIZE) chunk = IO_CHUNK_SIZE;
+
+        // Cast result to int to check for negative error codes
+        int bytes = (int)read_fs((fs_node_t*)f->f_data, f->f_offset + total_read, chunk, (uint8_t*)kbuf);
+
+        if (bytes < 0) {
+            if (total_read > 0) break;
+            kfree(kbuf, IO_CHUNK_SIZE);
+            return bytes;
+        }
+
+        if (bytes == 0) break; // EOF
+
+        if (copyout(kbuf, buf + total_read, bytes) != 0) {
+            kfree(kbuf, IO_CHUNK_SIZE);
+            if (total_read > 0) return total_read;
+            return -14; // EFAULT
+        }
+
+        total_read += bytes;
+        if (bytes < chunk) break; // Short read
+    }
+
+    f->f_offset += total_read;
+    kfree(kbuf, IO_CHUNK_SIZE);
+    return total_read;
 }
 
 int sys_open(const char *path, int flags, int mode) {
@@ -228,8 +300,9 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
     
-    char *buf = (char*)dirp;
     unsigned int bpos = 0;
+    char temp_buf[512]; // Kernel stack buffer for one entry
+    struct linux_dirent *kld = (struct linux_dirent*)temp_buf;
     
     while (bpos < count) {
         // Read one entry
@@ -253,14 +326,18 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
             break; 
         }
         
-        struct linux_dirent *ld = (struct linux_dirent*)(buf + bpos);
-        ld->d_ino = d->ino;
-        ld->d_off = f->f_offset + 1; // Offset of NEXT entry
-        ld->d_reclen = reclen;
-        for(int i=0; i<name_len; i++) ld->d_name[i] = d->name[i];
-        ld->d_name[name_len] = 0;
-        // Zero pad if needed for alignment
-        // (already done by simple pointer math for next entry, but maybe nice to clear garbage)
+        if (reclen > (int)sizeof(temp_buf)) return -22; // Should not happen for normal filenames
+
+        kld->d_ino = d->ino;
+        kld->d_off = f->f_offset + 1; // Offset of NEXT entry
+        kld->d_reclen = reclen;
+        for(int i=0; i<name_len; i++) kld->d_name[i] = d->name[i];
+        kld->d_name[name_len] = 0;
+
+        if (copyout(kld, (char*)dirp + bpos, reclen) != 0) {
+            if (bpos > 0) return bpos;
+            return -14; // EFAULT
+        }
         
         bpos += reclen;
         f->f_offset++;
@@ -278,30 +355,8 @@ struct utsname {
     char domainname[256];
 };
 
-/* Validate user address range is within user space (below kernel) */
-static int validate_user_buffer(const void *buf, size_t size) {
-    uintptr_t start = (uintptr_t)buf;
-    uintptr_t end = start + size;
-    
-    /* NULL check */
-    if (start < 0x1000) return -1;
-    
-    /* Overflow check */
-    if (end < start) return -1;
-    
-    /* Must be below kernel space at 0xC0000000 */
-    if (end > 0xC0000000) return -1;
-    
-    return 0;
-}
-
 int sys_uname(struct utsname *buf) {
     if (!buf) return -14; /* EFAULT */
-    
-    /* Validate user buffer can hold entire struct */
-    if (validate_user_buffer(buf, sizeof(struct utsname)) != 0) {
-        return -14; /* EFAULT */
-    }
     
     extern char kernel_hostname[MAXHOSTNAMELEN];
     
@@ -321,8 +376,9 @@ int sys_uname(struct utsname *buf) {
     kbuf.machine[255] = '\0';
     kbuf.domainname[0] = '\0';
     
-    /* Copy to user space - already validated above */
-    memcpy(buf, &kbuf, sizeof(struct utsname));
+    if (copyout(&kbuf, buf, sizeof(struct utsname)) != 0) {
+        return -14; /* EFAULT */
+    }
     
     return 0;
 }
@@ -479,46 +535,29 @@ int sys_lstat(const char *path, struct stat *buf) {
 #include <sys/poll.h>
 
 int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
-    // Sanity check
     if (nfds > 1024) return -22; // EINVAL
     
-    // Copy fds from user if needed? 
-    // They are in user memory, we can access directly (assuming kernel has access)
-    // but strict separation requires copy or verify. Substrate has shared addr space roughly.
-    // We should copy to be safe/correct if we modify revents.
-    
-    // Allocate kernel buffer for safety (avoid TOCTOU or paging issues if pmap changes in loop)
-    // For now, assume direct access is fine as we only write revents.
-    
-    // Timeout loop
-    // Convert timeout (ms) to ticks or similar.
-    // Since we don't have full wait queues, we'll do a busy-wait/yield loop 
-    // if no events are ready immediately. This is not efficient but provides the "behavior".
-    
+    size_t ksize = nfds * sizeof(struct pollfd);
+    struct pollfd *kfds = kmalloc(ksize);
+    if (!kfds) return -12; // ENOMEM
 
-    // extern unsigned long get_ticks(void); // Assuming this exists or similar
+    if (copyin(fds, kfds, ksize) != 0) {
+        kfree(kfds, ksize);
+        return -14; // EFAULT
+    }
     
     int ready = 0;
-    
-    // POLL Loop
-    // 1. Scan all FDs
-    // 2. If any ready, return count.
-    // 3. If none ready and timeout expired, return 0.
-    // 4. If none ready types, yield/sleep and retry.
-    
-    // For "Infrastructure", we pass a dummy 'waiter' for now since
-    // we don't have the wait queue object.
     void *waiter = NULL; 
     
     while (1) {
         ready = 0;
         for (unsigned int i = 0; i < nfds; i++) {
-            if (fds[i].fd < 0) {
-                fds[i].revents = 0;
+            if (kfds[i].fd < 0) {
+                kfds[i].revents = 0;
                 continue;
             }
             
-            file_t *f = (fds[i].fd < MAX_FD) ? current_process->fds[fds[i].fd] : NULL;
+            file_t *f = (kfds[i].fd < MAX_FD) ? current_process->fds[kfds[i].fd] : NULL;
             short mask = 0;
             
             if (f && f->f_data) {
@@ -526,42 +565,38 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
                 
                 // Mask against requested events
                 // Always return ERR/HUP/NVAL
-                short ret_mask = mask & (fds[i].events | POLLERR | POLLHUP | POLLNVAL);
+                short ret_mask = mask & (kfds[i].events | POLLERR | POLLHUP | POLLNVAL);
                 
-                // If the node reported nothing, but we requested generic read/write, 
-                // and it didn't support poll (0), poll_fs might return 0.
-                
-                fds[i].revents = ret_mask;
+                kfds[i].revents = ret_mask;
             } else {
-                fds[i].revents = POLLNVAL;
+                kfds[i].revents = POLLNVAL;
             }
             
-            if (fds[i].revents) ready++;
+            if (kfds[i].revents) ready++;
         }
         
-        if (ready > 0) return ready;
-        if (timeout == 0) return 0;
+        if (ready > 0) break;
+        if (timeout == 0) break;
         
         // Timeout handling (simplified)
-        // If timeout > 0, we should decrement or check time.
-        // For now, just return 0 to prevent hanging the shell if it expects instant response.
-        // Busybox shell usually polls with -1 (infinite) for input.
-        // If we return 0 immediately, it will spin 100% CPU.
-        // So we MUST yield at least once.
         if (timeout > 0 && timeout != -1) {
              timeout -= 10; // Approx 10ms per yield?
-             if (timeout <= 0) return 0;
+             if (timeout <= 0) {
+                 ready = 0; // Return 0
+                 break;
+             }
         }
         
-        // Wait/Yield
-        // Ideally: sched_sleep(waiter);
-        // But since drivers don't wake us, we yield.
         sched_yield();
-        
-        // Avoid infinite hang if drivers never change state:
-        // Checking for signals?
-        // if (current_thread->sig_pending) return -4; // EINTR
     }
+
+    if (copyout(kfds, fds, ksize) != 0) {
+        kfree(kfds, ksize);
+        return -14; // EFAULT
+    }
+
+    kfree(kfds, ksize);
+    return ready;
 }
 
 int sys_fstat(int fd, struct stat *buf) {
@@ -689,8 +724,24 @@ int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
     // Check if it's a symlink
     if (!(node->flags & FS_SYMLINK)) return -22; // EINVAL - not a symlink
     
-    // Read the link target
-    int ret = readlink_fs(node, buf, bufsiz);
+    // Alloc kernel buffer
+    // Limit bufsiz to avoid DoS/ENOMEM
+    size_t ksize = (bufsiz > 4096) ? 4096 : bufsiz;
+    char *kbuf = kmalloc(ksize);
+    if (!kbuf) return -12;
+
+    int ret = readlink_fs(node, kbuf, ksize);
+    if (ret < 0) {
+        kfree(kbuf, ksize);
+        return ret;
+    }
+
+    if (copyout(kbuf, buf, ret) != 0) {
+        kfree(kbuf, ksize);
+        return -14;
+    }
+
+    kfree(kbuf, ksize);
     return ret;
 }
 
@@ -963,9 +1014,6 @@ int sys_fchdir(int fd) {
     return 0;
 }
 
-// Forward declaration
-static int validate_user_buffer(const void *buf, size_t size);
-
 // Helper to find name of an inode in a directory
 // Returns allocated string (caller must free) or NULL
 static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
@@ -1004,7 +1052,6 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
 
 int sys_getcwd(char *buf, size_t size) {
     if (!buf || size < 2) return -1;
-    if (validate_user_buffer(buf, size) != 0) return -14; // EFAULT
 
     // Allocate temp kernel buffer
     // Start filling from END
@@ -1078,7 +1125,10 @@ int sys_getcwd(char *buf, size_t size) {
         return -34; // ERANGE
     }
 
-    memcpy(buf, ptr, len + 1); // Copy string + null
+    if (copyout(ptr, buf, len + 1) != 0) {
+        kfree(kbuf, 4096);
+        return -14; // EFAULT
+    }
     kfree(kbuf, 4096);
     return 0;
 }
@@ -1132,7 +1182,7 @@ int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
     strncpy(kinfo.name, target->comm, sizeof(kinfo.name)-1);
     
     // Copy to user
-    memcpy(info, &kinfo, sizeof(kinfo));
+    if (copyout(&kinfo, info, sizeof(kinfo)) != 0) return -14;
     
     return 0;
 }
@@ -1157,7 +1207,9 @@ int sys_proc_list(pid_t *pids, size_t count) {
     int copied = 0;
     for (int i = 0; i < 64 && copied < (int)count; i++) {
         if (processes[i].pid != -1) {
-            pids[copied++] = processes[i].pid;
+            pid_t pid = processes[i].pid;
+            if (copyout(&pid, &pids[copied], sizeof(pid_t)) != 0) return -14;
+            copied++;
         }
     }
     
@@ -1193,10 +1245,11 @@ int sys_hostname(char *buf, size_t len) {
     
     if (len < hlen + 1) {
         // Buffer too small - copy what we can
-        memcpy(buf, kernel_hostname, len - 1);
-        buf[len - 1] = '\0';
+        if (copyout(kernel_hostname, buf, len - 1) != 0) return -14;
+        char null = '\0';
+        if (copyout(&null, buf + len - 1, 1) != 0) return -14;
     } else {
-        memcpy(buf, kernel_hostname, hlen + 1);
+        if (copyout(kernel_hostname, buf, hlen + 1) != 0) return -14;
     }
     
     return 0;
