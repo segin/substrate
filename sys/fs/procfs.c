@@ -217,8 +217,9 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
     char buf[512];
     int len;
     
-    if (current_process->pers && strcmp(current_process->pers->name, "Linux") == 0) {
-        len = sprintf(buf,
+    const char *pname = perso_name(current_process->perso_id);
+    if (pname && strcmp(pname, "Linux") == 0) {
+        len = snprintf(buf, sizeof(buf),
             "Name:\t%s\n"
             "State:\tR (running)\n"
             "Tgid:\t%d\n"
@@ -229,7 +230,7 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
             p->uid, p->uid, p->uid, p->uid,
             p->gid, p->gid, p->gid, p->gid);
     } else {
-        len = sprintf(buf,
+        len = snprintf(buf, sizeof(buf),
             "Name:\t%s\n"
             "Pid:\t%d\n"
             "Uid:\t%d\n"
@@ -307,7 +308,7 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
             if (count == proc_idx) {
-                sprintf(proc_dirent.name, "%d", processes[i].pid);
+                snprintf(proc_dirent.name, sizeof(proc_dirent.name), "%d", processes[i].pid);
                 return &proc_dirent;
             }
             count++;
@@ -345,7 +346,7 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
             if (processes[i].pid == pid) {
                 static fs_node_t pid_dir;
                 memset(&pid_dir, 0, sizeof(fs_node_t));
-                sprintf(pid_dir.name, "%d", pid);
+                snprintf(pid_dir.name, sizeof(pid_dir.name), "%d", pid);
                 pid_dir.flags = FS_DIRECTORY;
                 pid_dir.inode = pid;
                 pid_dir.readdir = &proc_pid_readdir;
