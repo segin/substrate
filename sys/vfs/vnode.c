@@ -14,6 +14,7 @@
 #include <vfs/vnode.h>
 #include <kern/console.h>
 #include <kern/panic.h>
+#include <kern/sched.h>
 #include <sys/lock.h>
 #include <vm/uma.h>
 #include <string.h>
@@ -366,10 +367,10 @@ void vn_unlock(struct vnode *vp)
     vp->v_flag &= ~VXLOCK;
     vp->v_lockowner = NULL;
     
-    /* TODO: Wake up waiters if VXWANT is set */
+    /* Wake up waiters if VXWANT is set */
     if (vp->v_flag & VXWANT) {
         vp->v_flag &= ~VXWANT;
-        /* wakeup(vp); */
+        sched_wakeup(vp);
     }
     
     spinlock_release(&vp->v_interlock);
