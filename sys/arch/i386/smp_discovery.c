@@ -3,6 +3,7 @@
 #include <kern/console.h>
 #include <string.h>
 #include <stdint.h>
+#include <arch/x86-common/include/lapic.h>
 
 cpu_info_t cpus[MAX_CPUS];
 int cpu_count = 0;
@@ -109,7 +110,6 @@ void smp_ap_entry(void) {
     
     kprint("SMP: AP Core online (LAPIC ID: ");
     // Get and print LAPIC ID
-    extern uint32_t lapic_get_id(void);
     uint32_t id = lapic_get_id();
     char buf[4];
     buf[0] = '0' + (id % 10);
@@ -118,7 +118,6 @@ void smp_ap_entry(void) {
     kprint(")\n");
     
     // Enable LAPIC on this AP
-    extern void lapic_enable(uint8_t);
     lapic_enable(0xFF);  // Spurious vector
     
     // TODO: Initialize AP-local state (GDT, TSS, IDT, scheduler)
@@ -131,9 +130,6 @@ void smp_ap_entry(void) {
 
 // Boot a single AP
 int smp_boot_ap(uint8_t apic_id) {
-    extern void lapic_send_init(uint8_t);
-    extern void lapic_send_sipi(uint8_t, uint8_t);
-    
     // 1. Copy trampoline to low memory
     size_t len = (uintptr_t)trampoline_end - (uintptr_t)trampoline_start;
     memcpy((void*)TRAMPOLINE_ADDR, (void*)trampoline_start, len);
@@ -161,20 +157,23 @@ int smp_boot_ap(uint8_t apic_id) {
     // 3. Send INIT IPI -> Wait 10ms -> SIPI -> Wait 200us -> SIPI
     lapic_send_init(apic_id);
     
-    // Delay ~10ms (simple busy wait - TODO: use proper timer)
-    for (volatile int i = 0; i < 1000000; i++) { }
+    // Delay 10ms
+    lapic_timer_delay_ms(10);
     
     // First SIPI
     lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
     
-    // Delay ~200us
-    for (volatile int i = 0; i < 20000; i++) { }
+    // Delay 200us
+    lapic_timer_delay_us(200);
     
     // Second SIPI (per Intel spec)
     lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
     
-    // Wait for AP to signal readiness (timeout ~100ms)
-    for (volatile int i = 0; i < 10000000 && aps_ready == old_ready; i++) { }
+    // Wait for AP to signal readiness (timeout 100ms)
+    for (int i = 0; i < 100; i++) {
+        if (aps_ready > old_ready) break;
+        lapic_timer_delay_ms(1);
+    }
     
     if (aps_ready > old_ready) {
         return 0;  // Success

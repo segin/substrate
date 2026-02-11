@@ -269,6 +269,66 @@ uint32_t lapic_timer_ticks_per_ms(void) {
     return lapic_ticks_per_ms;
 }
 
+// Delay for specified milliseconds using LAPIC timer
+void lapic_timer_delay_ms(uint32_t ms) {
+    if (!lapic_base) return;
+
+    if (lapic_ticks_per_ms == 0) {
+        if (lapic_timer_calibrate() == 0) return;
+    }
+
+    uint32_t ticks = ms * lapic_ticks_per_ms;
+
+    uint32_t old_timer = lapic_read(LAPIC_TIMER);
+    uint32_t old_divide = lapic_read(LAPIC_TDCR);
+    uint32_t old_ticr = lapic_read(LAPIC_TICR);
+
+    lapic_write(LAPIC_TDCR, LAPIC_TDCR_DIV16);
+    lapic_write(LAPIC_TIMER, LAPIC_TIMER_ONESHOT | LAPIC_LVT_MASKED);
+    lapic_write(LAPIC_TICR, ticks);
+
+    while (lapic_read(LAPIC_TCCR) > 0) {
+        __asm__ volatile("pause");
+    }
+
+    lapic_write(LAPIC_TDCR, old_divide);
+    lapic_write(LAPIC_TIMER, old_timer);
+    if (!(old_timer & LAPIC_LVT_MASKED)) {
+        lapic_write(LAPIC_TICR, old_ticr);
+    }
+}
+
+// Delay for specified microseconds using LAPIC timer
+void lapic_timer_delay_us(uint32_t us) {
+    if (!lapic_base) return;
+
+    if (lapic_ticks_per_ms == 0) {
+        if (lapic_timer_calibrate() == 0) return;
+    }
+
+    // Use 64-bit math to prevent overflow: (us * ticks_per_ms) / 1000
+    uint64_t total_ticks = ((uint64_t)us * lapic_ticks_per_ms) / 1000;
+    if (total_ticks == 0 && us > 0) total_ticks = 1; // Minimum 1 tick
+
+    uint32_t old_timer = lapic_read(LAPIC_TIMER);
+    uint32_t old_divide = lapic_read(LAPIC_TDCR);
+    uint32_t old_ticr = lapic_read(LAPIC_TICR);
+
+    lapic_write(LAPIC_TDCR, LAPIC_TDCR_DIV16);
+    lapic_write(LAPIC_TIMER, LAPIC_TIMER_ONESHOT | LAPIC_LVT_MASKED);
+    lapic_write(LAPIC_TICR, (uint32_t)total_ticks);
+
+    while (lapic_read(LAPIC_TCCR) > 0) {
+        __asm__ volatile("pause");
+    }
+
+    lapic_write(LAPIC_TDCR, old_divide);
+    lapic_write(LAPIC_TIMER, old_timer);
+    if (!(old_timer & LAPIC_LVT_MASKED)) {
+        lapic_write(LAPIC_TICR, old_ticr);
+    }
+}
+
 // ==================== LAPIC Error Handling ====================
 
 // Setup LAPIC error handling
