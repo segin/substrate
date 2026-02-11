@@ -38,6 +38,7 @@
 #include <fs/pseudofs.h>
 #include <fs/fuse.h>
 #include <fs/9p.h>
+#include <sys/smp.h>
 
 #include <sys/tests.h>
 
@@ -292,6 +293,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     }
     kprint("\n");
 
+
+    // SMP Discovery (before memory init so UMA knows CPU count)
+    smp_init();
 
     // Memory Subsystem Init (PMM, VM, UMA)
     init_memory(mboot_info);

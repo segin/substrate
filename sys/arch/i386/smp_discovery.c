@@ -210,6 +210,10 @@ void smp_boot_all_aps(void) {
     kprint(" AP(s) online.\n");
 }
 
+void smp_init(void) {
+    smp_discover_cores();
+}
+
 int smp_get_cpu_count(void) {
     return cpu_count;
 }
