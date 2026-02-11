@@ -22,12 +22,33 @@
 #include <sys/poll.h>
 #include <string.h>
 
+// Helper for safe kernel-to-user copy
+extern int copyout(const void *src, void *dst, size_t size);
+
 // Full read: return zeros
 static size_t full_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
-    // memset is efficient enough for kernel buffers (usually 4KB chunks in standard read loops)
-    // For very large reads passed directly from userspace, we rely on standard library optimized memset.
-    memset(buffer, 0, size);
+
+    // We must use copyout to safely write to the user buffer.
+    // Writing directly with memset would bypass security checks and could overwrite kernel memory.
+
+    uint8_t zeros[256];
+    memset(zeros, 0, sizeof(zeros));
+
+    size_t remaining = size;
+    uint8_t *dst = buffer;
+
+    while (remaining > 0) {
+        size_t chunk = (remaining > sizeof(zeros)) ? sizeof(zeros) : remaining;
+
+        if (copyout(zeros, dst, chunk) != 0) {
+            return (size_t)-EFAULT;
+        }
+
+        dst += chunk;
+        remaining -= chunk;
+    }
+
     return size;
 }
 
