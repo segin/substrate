@@ -99,7 +99,8 @@ process_t *proc_create(int perso_id) {
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;
     
     // Acct init
-    strcpy(processes[i].comm, "forked");
+    strncpy(processes[i].comm, "forked", AC_COMM_LEN);
+    processes[i].comm[AC_COMM_LEN - 1] = '\0';
     processes[i].start_time = get_time();
     processes[i].uid = current_process ? current_process->uid : 0;
     processes[i].gid = current_process ? current_process->gid : 0;
@@ -120,8 +121,8 @@ int proc_fork(process_t *parent, void *stack) {
     if (!child_proc) return -1;
     
     // Inherit process name
-    extern char *strcpy(char *, const char *);
-    strcpy(child_proc->comm, parent->comm);
+    strncpy(child_proc->comm, parent->comm, AC_COMM_LEN);
+    child_proc->comm[AC_COMM_LEN - 1] = '\0';
     
     // Clone parent's address space with COW
     if (parent->pmap) {
@@ -237,7 +238,8 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     if (!child) return -1;
     
     // 2. Set Name
-    strcpy(child->comm, "(kinit)"); 
+    strncpy(child->comm, "(kinit)", AC_COMM_LEN);
+    child->comm[AC_COMM_LEN - 1] = '\0';
 
     // 3. Allocate Stack (4KB) - pmm_alloc_block returns virtual address
     void *stack = pmm_alloc_block();

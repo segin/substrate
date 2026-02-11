@@ -74,10 +74,40 @@ void test_pmap_x64_enter_extract(void) {
     kprint("  PASS\n");
 }
 
+void test_pmap_x64_foreign(void) {
+    kprint("Test: x64 foreign pmap modification\n");
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != NULL, "pmap_create");
+
+    // Note: pmap_create does NOT activate the pmap, so it is foreign.
+    // Assuming pmap_kernel() is active.
+    TEST_ASSERT(pmap != pmap_kernel(), "new pmap is not kernel pmap");
+
+    uint64_t va = 0x0000004000000000UL;
+    uint64_t pa = 0x2345000;
+
+    // Enter mapping into inactive pmap
+    int ret = pmap_enter(pmap, va, pa, 0x07, 0);
+    TEST_ASSERT(ret == 0, "pmap_enter on foreign pmap returned 0");
+
+    // Extract from inactive pmap
+    uint64_t extracted_pa = pmap_extract(pmap, va);
+    TEST_ASSERT((extracted_pa & ~0xFFF) == pa, "pmap_extract on foreign pmap matches PA");
+
+    // Remove from inactive pmap
+    pmap_remove(pmap, va);
+    extracted_pa = pmap_extract(pmap, va);
+    TEST_ASSERT(extracted_pa == 0, "pmap_extract returns 0 after remove on foreign pmap");
+
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
 void run_pmap_x64_tests(void) {
     kprint("\n=== PMAP x86_64 Unit Tests ===\n");
     test_pmap_x64_lifecycle();
     test_pmap_x64_enter_extract();
     test_pmap_x64_refcount();
+    test_pmap_x64_foreign();
     kprint("\nDone.\n");
 }

@@ -40,9 +40,7 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
     while (ebr_lba < ext_start + ext_size && logical_count < 60) {
         /* Read EBR */
         if (geom_read_sector(disk, ebr_lba, buf) != 0) {
-            kprint("GEOM: failed to read EBR at LBA ");
-            /* TODO: print LBA - for now skip */
-            kprint("\n");
+            kprintf("GEOM: failed to read EBR at LBA %llu\n", (unsigned long long)ebr_lba);
             break;
         }
         

@@ -118,25 +118,36 @@ void pmap_invalidate_page(uint64_t va) {
  * This implementation assumes pmap == curpmap for recursive access.
  */
 int pmap_enter(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags) {
-    if (pmap != curpmap) return -1; // TODO: handle foreign pmap
-
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
 
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
     // 1. Check PML4E
-    if (!(V_PML4[pml4i] & PTE_P)) {
+    if (!(pml4[pml4i] & PTE_P)) {
         void *page = pmm_alloc_block(); // Virtual address
         if (!page) return -1;
         memset(page, 0, 4096);
         uint64_t page_phys = pmap_kvtop(page);
         
-        V_PML4[pml4i] = page_phys | PTE_P | PTE_W | PTE_U; // Allow user to reach lower levels
+        pml4[pml4i] = page_phys | PTE_P | PTE_W | PTE_U; // Allow user to reach lower levels
     }
 
     // 2. Check PDPTE
-    pdpte_t *pdpt = V_PDPT(pml4i); // Access via recursive slot
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i); // Access via recursive slot
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) {
         void *page = pmm_alloc_block();
         if (!page) return -1;
@@ -147,8 +158,13 @@ int pmap_enter(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t fl
     }
 
     // 3. Check PDE
-    // V_PD_INDEX(pml4i, pdpti, 0) points to entry 0 of the PD.
-    pde_t *pd_table = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0); 
+    pde_t *pd_table;
+    if (pmap == curpmap) {
+        // V_PD_INDEX(pml4i, pdpti, 0) points to entry 0 of the PD.
+        pd_table = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd_table = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
     
     if (!(pd_table[pdi] & PTE_P)) {
         // Large page check could go here
@@ -161,57 +177,113 @@ int pmap_enter(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t fl
     }
 
     // 4. Set PTE
-    pte_t *pt_table = (pte_t *)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt_table;
+    if (pmap == curpmap) {
+        pt_table = (pte_t *)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt_table = (pte_t *)pmap_ptokv(pd_table[pdi] & PTE_ADDR_MASK);
+    }
     
     uint64_t new_pte = (pa & PTE_ADDR_MASK) | PTE_P;
-    if (prot & 2) new_pte |= PTE_W;
-    if (prot & 4) new_pte |= PTE_U; // User
+    if (prot & VM_PROT_WRITE) new_pte |= PTE_W;
+    if (prot & VM_PROT_USER) new_pte |= PTE_U;
     if (flags & PTE_NX) new_pte |= PTE_NX;
     
     pt_table[pti] = new_pte;
     
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
     return 0;
 }
 
 void pmap_remove(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
 
-    if (!(V_PML4[pml4i] & PTE_P)) return;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return;
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return;
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     pt[pti] = 0;
     
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
 }
 
 uint64_t pmap_extract(pmap_t pmap, uint64_t va) {
-    // Only works for kernel/current pmap currently
-    if (pmap != curpmap) return 0;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
 
-    if (!(V_PML4[pml4i] & PTE_P)) return 0;
-    if (!(V_PDPT(pml4i)[pdpti] & PTE_P)) return 0;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return 0;
+
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
+    if (!(pdpt[pdpti] & PTE_P)) return 0;
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return 0;
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return 0;
 
     return (pt[pti] & PTE_ADDR_MASK) | (va & 0xFFF);
@@ -337,8 +409,6 @@ void pmap_reference(pmap_t pmap) {
 
 // Change page protections for a virtual address range
 int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
-    if (pmap != curpmap) return -1; // Only active pmap for now
-    
     // Walk range page by page
     for (uint64_t va = sva; va < eva; va += 0x1000) {
         uint64_t pml4i = PML4_INDEX(va);
@@ -346,29 +416,64 @@ int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
         uint64_t pdi   = PD_INDEX(va);
         uint64_t pti   = PT_INDEX(va);
 
-        if (!(V_PML4[pml4i] & PTE_P)) continue;
+        pml4e_t *pml4;
+        if (pmap == curpmap) {
+            pml4 = V_PML4;
+        } else {
+            pml4 = pmap->pml4;
+        }
+
+        if (!(pml4[pml4i] & PTE_P)) continue;
         
-        pdpte_t *pdpt = V_PDPT(pml4i);
+        pdpte_t *pdpt;
+        if (pmap == curpmap) {
+            pdpt = V_PDPT(pml4i);
+        } else {
+            pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+        }
+
         if (!(pdpt[pdpti] & PTE_P)) continue;
         
-        pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+        pde_t *pd;
+        if (pmap == curpmap) {
+            pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+        } else {
+            pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+        }
+
         if (!(pd[pdi] & PTE_P)) continue;
         
         // Check for Large Pages
         if (pd[pdi] & PTE_PS) {
-             // TODO: Update PDE protection
+             uint64_t pde = pd[pdi];
+             uint64_t new_pde = pde & ~(PTE_W | PTE_NX);
+
+             if (prot & VM_PROT_WRITE) new_pde |= PTE_W;
+             if (!(prot & VM_PROT_EXEC)) new_pde |= PTE_NX;
+
+             pd[pdi] = new_pde;
+             pmap_invalidate_page(va);
+
+             // Advance loop to end of large page
+             va = (va & ~0x1FFFFFULL) + 0x200000 - 0x1000;
              continue;
         }
         
-        pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+        pte_t *pt;
+        if (pmap == curpmap) {
+            pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+        } else {
+            pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+        }
+
         if (!(pt[pti] & PTE_P)) continue;
         
         uint64_t pte = pt[pti];
         uint64_t new_pte = pte & ~(PTE_W | PTE_NX); // Clear W and NX
         
-        if (prot & 2) new_pte |= PTE_W;   // VM_PROT_WRITE
+        if (prot & VM_PROT_WRITE) new_pte |= PTE_W;
         
-        if (!(prot & 4)) { // VM_PROT_EXECUTE
+        if (!(prot & VM_PROT_EXEC)) {
              new_pte |= PTE_NX;
         }
         
@@ -376,7 +481,9 @@ int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
         pt[pti] = new_pte;
         
         // Invalidate TLB
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
     }
     
     return 0;
@@ -391,19 +498,36 @@ int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
  * The CPU sets the A bit automatically on first access.
  */
 int pmap_is_referenced(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return 0;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return 0;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return 0;
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return 0;
     
     // Handle 2MB large pages
@@ -411,7 +535,13 @@ int pmap_is_referenced(pmap_t pmap, uint64_t va) {
         return (pd[pdi] & PTE_A) ? 1 : 0;
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return 0;
     
     return (pt[pti] & PTE_A) ? 1 : 0;
@@ -424,19 +554,36 @@ int pmap_is_referenced(pmap_t pmap, uint64_t va) {
  * The CPU sets the D bit automatically on first write.
  */
 int pmap_is_modified(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return 0;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return 0;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return 0;
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return 0;
     
     // Handle 2MB large pages
@@ -444,7 +591,13 @@ int pmap_is_modified(pmap_t pmap, uint64_t va) {
         return (pd[pdi] & PTE_D) ? 1 : 0;
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return 0;
     
     return (pt[pti] & PTE_D) ? 1 : 0;
@@ -457,33 +610,60 @@ int pmap_is_modified(pmap_t pmap, uint64_t va) {
  * Used by page replacement algorithms (Clock, LRU).
  */
 void pmap_clear_reference(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return;
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return;
     
     // Handle 2MB large pages
     if (pd[pdi] & PTE_PS) {
         pd[pdi] &= ~PTE_A;
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
         return;
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return;
     
     pt[pti] &= ~PTE_A;
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
 }
 
 /*
@@ -493,33 +673,60 @@ void pmap_clear_reference(pmap_t pmap, uint64_t va) {
  * Used for tracking pages that need writeback to backing store.
  */
 void pmap_clear_modify(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return;
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return;
     
     // Handle 2MB large pages
     if (pd[pdi] & PTE_PS) {
         pd[pdi] &= ~PTE_D;
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
         return;
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return;
     
     pt[pti] &= ~PTE_D;
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
 }
 
 /*
@@ -528,8 +735,6 @@ void pmap_clear_modify(pmap_t pmap, uint64_t va) {
  * Returns count of pages with A bit set in [sva, eva).
  */
 int pmap_is_referenced_range(pmap_t pmap, uint64_t sva, uint64_t eva) {
-    if (pmap != curpmap) return 0;
-    
     int count = 0;
     for (uint64_t va = sva; va < eva; va += 0x1000) {
         if (pmap_is_referenced(pmap, va)) {
@@ -545,8 +750,6 @@ int pmap_is_referenced_range(pmap_t pmap, uint64_t sva, uint64_t eva) {
  * Returns count of pages with D bit set in [sva, eva).
  */
 int pmap_is_modified_range(pmap_t pmap, uint64_t sva, uint64_t eva) {
-    if (pmap != curpmap) return 0;
-    
     int count = 0;
     for (uint64_t va = sva; va < eva; va += 0x1000) {
         if (pmap_is_modified(pmap, va)) {
@@ -562,37 +765,64 @@ int pmap_is_modified_range(pmap_t pmap, uint64_t sva, uint64_t eva) {
  * Returns 1 if page was referenced (and is now cleared), 0 otherwise.
  */
 int pmap_test_and_clear_reference(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return 0;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return 0;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return 0;
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return 0;
     
     // Handle 2MB large pages
     if (pd[pdi] & PTE_PS) {
         if (pd[pdi] & PTE_A) {
             pd[pdi] &= ~PTE_A;
-            pmap_invalidate_page(va);
+            if (pmap == curpmap) {
+                pmap_invalidate_page(va);
+            }
             return 1;
         }
         return 0;
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return 0;
     
     if (pt[pti] & PTE_A) {
         pt[pti] &= ~PTE_A;
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
         return 1;
     }
     return 0;
@@ -604,37 +834,64 @@ int pmap_test_and_clear_reference(pmap_t pmap, uint64_t va) {
  * Returns 1 if page was modified (and is now cleared), 0 otherwise.
  */
 int pmap_test_and_clear_modify(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return 0;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return 0;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return 0;
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return 0;
     
     // Handle 2MB large pages
     if (pd[pdi] & PTE_PS) {
         if (pd[pdi] & PTE_D) {
             pd[pdi] &= ~PTE_D;
-            pmap_invalidate_page(va);
+            if (pmap == curpmap) {
+                pmap_invalidate_page(va);
+            }
             return 1;
         }
         return 0;
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return 0;
     
     if (pt[pti] & PTE_D) {
         pt[pti] &= ~PTE_D;
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
         return 1;
     }
     return 0;
@@ -754,30 +1011,53 @@ pmap_t pmap_fork(pmap_t src_pmap) {
  * Returns: 1 if page is present but read-only (COW candidate), 0 otherwise.
  */
 int pmap_page_is_cow(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return 0;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return 0;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return 0;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return 0;
     
     if (pdpt[pdpti] & PTE_PS) {
         return !(pdpt[pdpti] & PTE_W);
     }
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return 0;
     
     if (pd[pdi] & PTE_PS) {
         return !(pd[pdi] & PTE_W);
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return 0;
     
     return !(pt[pti] & PTE_W);
@@ -970,23 +1250,34 @@ int pmap_enter_2mb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_
         return -1; // Not 2MB aligned
     }
     
-    if (pmap != curpmap) return -1;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
     // Ensure PML4E exists
-    if (!(V_PML4[pml4i] & PTE_P)) {
+    if (!(pml4[pml4i] & PTE_P)) {
         void *page = pmm_alloc_block();
         if (!page) return -1;
         memset(page, 0, 4096);
         uint64_t page_phys = pmap_kvtop(page);
-        V_PML4[pml4i] = page_phys | PTE_P | PTE_W | PTE_U;
+        pml4[pml4i] = page_phys | PTE_P | PTE_W | PTE_U;
     }
     
     // Ensure PDPTE exists
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) {
         void *page = pmm_alloc_block();
         if (!page) return -1;
@@ -1001,16 +1292,23 @@ int pmap_enter_2mb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_
     }
     
     // Set up PDE with PS bit for 2MB page
-    pde_t *pd = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
     
     uint64_t pde = (pa & ~0x1FFFFFULL) | PTE_P | PTE_PS;
-    if (prot & 2) pde |= PTE_W;     // VM_PROT_WRITE
-    if (prot & 4) pde |= PTE_U;     // User accessible (implicit for user pages)
+    if (prot & VM_PROT_WRITE) pde |= PTE_W;
+    if (prot & VM_PROT_USER) pde |= PTE_U;
     if (flags & PTE_G) pde |= PTE_G; // Global
-    if (!(prot & 4) || (flags & PTE_NX)) pde |= PTE_NX; // No execute
+    if (!(prot & VM_PROT_EXEC) || (flags & PTE_NX)) pde |= PTE_NX; // No execute
     
     pd[pdi] = pde;
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
     
     pmap->resident_count += 512; // 2MB = 512 * 4KB
     return 0;
@@ -1034,31 +1332,43 @@ int pmap_enter_1gb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_
         return -1; // Not 1GB aligned
     }
     
-    if (pmap != curpmap) return -1;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
     // Ensure PML4E exists
-    if (!(V_PML4[pml4i] & PTE_P)) {
+    if (!(pml4[pml4i] & PTE_P)) {
         void *page = pmm_alloc_block();
         if (!page) return -1;
         memset(page, 0, 4096);
         uint64_t page_phys = pmap_kvtop(page);
-        V_PML4[pml4i] = page_phys | PTE_P | PTE_W | PTE_U;
+        pml4[pml4i] = page_phys | PTE_P | PTE_W | PTE_U;
     }
     
     // Set up PDPTE with PS bit for 1GB page
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
     
     uint64_t pdpte = (pa & ~0x3FFFFFFFULL) | PTE_P | PTE_PS;
-    if (prot & 2) pdpte |= PTE_W;
-    if (prot & 4) pdpte |= PTE_U;
+    if (prot & VM_PROT_WRITE) pdpte |= PTE_W;
+    if (prot & VM_PROT_USER) pdpte |= PTE_U;
     if (flags & PTE_G) pdpte |= PTE_G;
-    if (!(prot & 4) || (flags & PTE_NX)) pdpte |= PTE_NX;
+    if (!(prot & VM_PROT_EXEC) || (flags & PTE_NX)) pdpte |= PTE_NX;
     
     pdpt[pdpti] = pdpte;
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
     
     pmap->resident_count += 262144; // 1GB = 262144 * 4KB
     return 0;
@@ -1068,25 +1378,45 @@ int pmap_enter_1gb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_
  * pmap_remove_2mb - Remove a 2MB large page mapping
  */
 void pmap_remove_2mb(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return;
     if ((va & 0x1FFFFF) != 0) return;
     
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return;
     if (pdpt[pdpti] & PTE_PS) return; // 1GB page, not 2MB
     
-    pde_t *pd = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return;
     if (!(pd[pdi] & PTE_PS)) return; // Not a 2MB page
     
     pd[pdi] = 0;
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
     
     pmap->resident_count -= 512;
 }
@@ -1095,20 +1425,34 @@ void pmap_remove_2mb(pmap_t pmap, uint64_t va) {
  * pmap_remove_1gb - Remove a 1GB huge page mapping
  */
 void pmap_remove_1gb(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return;
     if ((va & 0x3FFFFFFF) != 0) return;
     
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return;
     if (!(pdpt[pdpti] & PTE_PS)) return; // Not a 1GB page
     
     pdpt[pdpti] = 0;
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
     
     pmap->resident_count -= 262144;
 }
@@ -1170,40 +1514,69 @@ void pmap_pge_disable(void) {
  * not be flushed on context switch.
  */
 int pmap_set_global(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return -1;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return -1;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return -1;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return -1;
     
     // Handle 1GB huge pages
     if (pdpt[pdpti] & PTE_PS) {
         pdpt[pdpti] |= PTE_G;
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
         return 0;
     }
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return -1;
     
     // Handle 2MB large pages
     if (pd[pdi] & PTE_PS) {
         pd[pdi] |= PTE_G;
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
         return 0;
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return -1;
     
     pt[pti] |= PTE_G;
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
     return 0;
 }
 
@@ -1211,38 +1584,67 @@ int pmap_set_global(pmap_t pmap, uint64_t va) {
  * pmap_clear_global - Remove global flag from a page
  */
 int pmap_clear_global(pmap_t pmap, uint64_t va) {
-    if (pmap != curpmap) return -1;
-    
     uint64_t pml4i = PML4_INDEX(va);
     uint64_t pdpti = PDPT_INDEX(va);
     uint64_t pdi   = PD_INDEX(va);
     uint64_t pti   = PT_INDEX(va);
     
-    if (!(V_PML4[pml4i] & PTE_P)) return -1;
+    pml4e_t *pml4;
+    if (pmap == curpmap) {
+        pml4 = V_PML4;
+    } else {
+        pml4 = pmap->pml4;
+    }
+
+    if (!(pml4[pml4i] & PTE_P)) return -1;
     
-    pdpte_t *pdpt = V_PDPT(pml4i);
+    pdpte_t *pdpt;
+    if (pmap == curpmap) {
+        pdpt = V_PDPT(pml4i);
+    } else {
+        pdpt = (pdpte_t *)pmap_ptokv(pml4[pml4i] & PTE_ADDR_MASK);
+    }
+
     if (!(pdpt[pdpti] & PTE_P)) return -1;
     
     if (pdpt[pdpti] & PTE_PS) {
         pdpt[pdpti] &= ~PTE_G;
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
         return 0;
     }
     
-    pde_t *pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    pde_t *pd;
+    if (pmap == curpmap) {
+        pd = (pde_t*)V_PD_INDEX(pml4i, pdpti, 0);
+    } else {
+        pd = (pde_t *)pmap_ptokv(pdpt[pdpti] & PTE_ADDR_MASK);
+    }
+
     if (!(pd[pdi] & PTE_P)) return -1;
     
     if (pd[pdi] & PTE_PS) {
         pd[pdi] &= ~PTE_G;
-        pmap_invalidate_page(va);
+        if (pmap == curpmap) {
+            pmap_invalidate_page(va);
+        }
         return 0;
     }
     
-    pte_t *pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    pte_t *pt;
+    if (pmap == curpmap) {
+        pt = (pte_t*)V_PT_INDEX(pml4i, pdpti, pdi, 0);
+    } else {
+        pt = (pte_t *)pmap_ptokv(pd[pdi] & PTE_ADDR_MASK);
+    }
+
     if (!(pt[pti] & PTE_P)) return -1;
     
     pt[pti] &= ~PTE_G;
-    pmap_invalidate_page(va);
+    if (pmap == curpmap) {
+        pmap_invalidate_page(va);
+    }
     return 0;
 }
 

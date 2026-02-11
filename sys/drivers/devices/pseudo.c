@@ -6,25 +6,16 @@
 #include <sys/proc.h>
 #include <vfs/vfs.h>
 #include <sys/tty.h>
+#include "null.h"
+
+extern void mem_init(void);
+extern void mem_test_init(void);
 
 // /dev/null
-// /dev/null
-static size_t null_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node; (void)offset; (void)size; (void)buffer;
-    return 0; // EOF
-}
+// Implemented in null.c
 
-static size_t null_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    (void)node; (void)offset; (void)buffer;
-    return size; // Discarded
-}
-
-// /dev/zero
-static size_t zero_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node; (void)offset;
-    memset(buffer, 0, size);
-    return size;
-}
+// /dev/zero - Now implemented in zero.c
+// /dev/full - Now implemented in full.c
 
 // /dev/port
 // /dev/port
@@ -122,93 +113,28 @@ static size_t dev_tty_write(fs_node_t *node, off_t offset, size_t size, const ui
     return size;
 }
 
-// /dev/mem
-static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node;
-    // Limit to 1GB (Direct Map size)
-    if (offset > 0x3FFFFFFF) return 0; // EOF or Error? EOF for now.
-    
-    // Physical to Virtual (Kernel Direct Map)
-    // 0x00000000 (Phys) -> 0xC0000000 (Virt)
-    uint8_t *src = (uint8_t*)((uintptr_t)offset + 0xC0000000);
-    
-    // Check bounds vs 1GB
-    if (offset + size > 0x40000000) {
-        size = 0x40000000 - offset;
-    }
-    
-    memcpy(buffer, src, size);
-    return size;
-}
+// /dev/mem - Now implemented in mem.c
+// /dev/kmem - Implemented in kmem.c
 
-static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    (void)node;
-    if (offset > 0x3FFFFFFF) return 0;
-    
-    uint8_t *dst = (uint8_t*)((uintptr_t)offset + 0xC0000000);
-    
-    if (offset + size > 0x40000000) {
-        size = 0x40000000 - offset;
-    }
-    
-    memcpy(dst, buffer, size);
-    return size;
-}
 
-// /dev/kmem
-static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node;
-    // Access arbitrary virtual address.
-    // DANGEROUS: If offset is unmapped, we panic.
-    // For now, naive implementation as is standard for kmem in simple kernels.
-    
-    void *src = (void*)(uintptr_t)offset;
-    memcpy(buffer, src, size);
-    return size;
-}
 
-static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    (void)node;
-    void *dst = (void*)(uintptr_t)offset;
-    memcpy(dst, buffer, size);
-    return size;
-}
 
-static fs_node_t null_node;
 
-static fs_node_t zero_node;
 
 static fs_node_t tty_node;
 
 
 
 
+extern void null_init(void);
+extern void zero_init(void);
+
 void pseudo_init(void) {
+    // Initialize /dev/null (from null.c)
+    null_init();
 
-    memset(&null_node, 0, sizeof(fs_node_t));
-
-    strcpy(null_node.name, "null");
-
-    null_node.flags = FS_CHARDEVICE;
-
-    null_node.read = &null_read;
-
-    null_node.write = &null_write;
-    null_node.rdev = (1 << 8) | 3;
-    devfs_register_device(&null_node);
-
-
-
-    memset(&zero_node, 0, sizeof(fs_node_t));
-
-    strcpy(zero_node.name, "zero");
-
-    zero_node.flags = FS_CHARDEVICE;
-
-    zero_node.read = &zero_read;
-    zero_node.write = &null_write; 
-    zero_node.rdev = (1 << 8) | 5;
-    devfs_register_device(&zero_node);
+    // Initialize /dev/zero (from zero.c)
+    zero_init();
 
     /* Note: /dev/random and /dev/urandom now registered by random_init() */
 
@@ -220,25 +146,15 @@ void pseudo_init(void) {
     tty_node.rdev = (5 << 8) | 0;
     devfs_register_device(&tty_node);
 
-    // /dev/mem
-    static fs_node_t mem_node;
-    memset(&mem_node, 0, sizeof(fs_node_t));
-    strcpy(mem_node.name, "mem");
-    mem_node.flags = FS_CHARDEVICE;
-    mem_node.read = &mem_read;
-    mem_node.write = &mem_write;
-    mem_node.rdev = (1 << 8) | 1;
-    devfs_register_device(&mem_node);
+    /* Initialize /dev/mem (handled by mem.c) */
+    mem_init();
+
+    /* Initialize /dev/mem_test (handled by mem_test_helper.c) */
+    mem_test_init();
 
     // /dev/kmem
-    static fs_node_t kmem_node;
-    memset(&kmem_node, 0, sizeof(fs_node_t));
-    strcpy(kmem_node.name, "kmem");
-    kmem_node.flags = FS_CHARDEVICE;
-    kmem_node.read = &kmem_read;
-    kmem_node.write = &kmem_write;
-    kmem_node.rdev = (1 << 8) | 2;
-    devfs_register_device(&kmem_node);
+    extern void kmem_dev_init(void);
+    kmem_dev_init();
 
     // /dev/port
     static fs_node_t port_node;
