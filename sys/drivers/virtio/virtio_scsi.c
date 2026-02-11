@@ -456,7 +456,7 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     }
     
     char log_buf[96];
-    sprintf(log_buf, "virtio_scsi: initialized (channels=%d targets=%d)\n",
+    snprintf(log_buf, sizeof(log_buf), "virtio_scsi: initialized (channels=%d targets=%d)\n",
             dev->max_channel + 1, dev->max_target + 1);
     kprint(log_buf);
     
