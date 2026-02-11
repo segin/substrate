@@ -11,9 +11,11 @@
 extern struct udf_fs udf_ctx;
 extern int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
 extern uint32_t udf_alloc_block(void);
+extern int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
+                   uint32_t offset, uint32_t size, const uint8_t *data);
 
 /* Mock Device */
-static uint8_t mock_disk[UDF_SECTOR_SIZE * 4];
+static uint8_t mock_disk[UDF_SECTOR_SIZE * 16];
 static uint32_t last_write_offset = 0;
 static uint32_t last_write_size = 0;
 static int write_called = 0;
@@ -115,6 +117,88 @@ static void test_udf_allocation_writeback(void) {
     kprintf("test_udf_allocation_writeback: PASSED\n");
 }
 
+static void test_udf_large_file_write(void) {
+    kprintf("Running test_udf_large_file_write...\n");
+
+    memset(mock_disk, 0, sizeof(mock_disk));
+    write_called = 0;
+
+    /* Setup Space Bitmap at sector 0 */
+    struct udf_space_bitmap *sbm = (struct udf_space_bitmap *)mock_disk;
+    sbm->tag.tag_id = UDF_TAG_SBD;
+    sbm->tag.desc_version = 2;
+    sbm->tag.tag_location = 0;
+    sbm->num_bits = 64; /* 8 bytes */
+    sbm->num_bytes = 8;
+
+    /* Mark sector 0 (SBM) and 1 (FE) as allocated */
+    uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
+    bitmap_data[0] = 0x03; // Bits 0 and 1 set
+
+    /* Setup UDF context */
+    udf_ctx.device = &mock_dev;
+    udf_ctx.partition_start = 0;
+
+    /* Load Bitmap */
+    udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 8);
+
+    /* Create a File Entry at sector 1 */
+    struct udf_fe fe;
+    memset(&fe, 0, sizeof(struct udf_fe));
+    fe.tag.tag_id = UDF_TAG_FE;
+    fe.tag.tag_location = 1;
+    fe.icb_tag.strategy_type = 4;
+    fe.icb_tag.flags = UDF_ICB_FLAG_AD_INLINE; // Start with INLINE
+    fe.info_length = 0;
+
+    /* Write FE to disk sector 1 */
+    memcpy(mock_disk + UDF_SECTOR_SIZE, &fe, sizeof(struct udf_fe));
+
+    /* Prepare large data (4KB) */
+    uint8_t large_data[4096];
+    for (int i = 0; i < 4096; i++) large_data[i] = (uint8_t)(i % 256);
+
+    /* Attempt to write 4KB to file */
+    int res = udf_write_file(&mock_dev, &fe, 1, 0, 4096, large_data);
+
+    if (res != 0) {
+        kprintf("test_udf_large_file_write: FAILED (Expected success, got %d)\n", res);
+        /* This is expected to fail currently, so we can consider it passed for reproduction if we want,
+           but for the plan, we want to see it fail first. */
+        return;
+    }
+
+    /* Verify FE updated to SHORT_AD */
+    struct udf_fe *disk_fe = (struct udf_fe *)(mock_disk + UDF_SECTOR_SIZE);
+    if ((disk_fe->icb_tag.flags & 0x7) != UDF_ICB_FLAG_AD_SHORT) {
+        kprintf("test_udf_large_file_write: FAILED (FE flags not updated to SHORT_AD)\n");
+        return;
+    }
+
+    /* Verify size */
+    if (disk_fe->info_length != 4096) {
+        kprintf("test_udf_large_file_write: FAILED (Size mismatch: %lld)\n", disk_fe->info_length);
+        return;
+    }
+
+    /* Verify allocation descriptors */
+    /* Expecting 2 blocks (4KB) allocated. They might be contiguous or not depending on allocator.
+       Since mock disk is clean after sector 1, we expect sector 2 and 3. */
+
+    /* Check data written to sectors 2 and 3 */
+    if (memcmp(mock_disk + 2 * UDF_SECTOR_SIZE, large_data, 2048) != 0) {
+        kprintf("test_udf_large_file_write: FAILED (Data mismatch at sector 2)\n");
+        return;
+    }
+    if (memcmp(mock_disk + 3 * UDF_SECTOR_SIZE, large_data + 2048, 2048) != 0) {
+        kprintf("test_udf_large_file_write: FAILED (Data mismatch at sector 3)\n");
+        return;
+    }
+
+    kprintf("test_udf_large_file_write: PASSED\n");
+}
+
 void run_udf_write_tests(void) {
     test_udf_allocation_writeback();
+    test_udf_large_file_write();
 }
