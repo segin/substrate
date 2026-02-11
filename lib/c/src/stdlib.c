@@ -169,12 +169,19 @@ void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int 
 
 uint32_t arc4random(void);
 
+/*
+ * rand()/srand() must provide deterministic sequences after srand(seed)
+ * for C compatibility. Keep arc4random() for secure randomness APIs.
+ */
+static unsigned int rand_state = 1;
+
 int rand(void) {
-    return (int)(arc4random() & 0x7FFFFFFF);
+    rand_state = rand_state * 1103515245u + 12345u;
+    return (int)((rand_state >> 16) & 0x7FFF);
 }
 
 void srand(unsigned int seed) {
-    (void)seed;
+    rand_state = seed;
 }
 
 void arc4random_buf(void *buf, size_t n) {
