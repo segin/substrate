@@ -83,7 +83,7 @@ char *test_strerror(int errnum);
 #undef strtok_r
 #undef strerror
 
-// Helper macro for testing (from strncmp tests)
+// Helper macros for testing
 #define ASSERT_EQ(actual, expected, msg) do { \
     if ((actual) != (expected)) { \
         fprintf(stderr, "FAIL: %s: expected %d, got %d\n", msg, (int)(expected), (int)(actual)); \
@@ -93,6 +93,13 @@ char *test_strerror(int errnum);
 
 #define ASSERT_TRUE(condition, msg) do { \
     if (!(condition)) { \
+        fprintf(stderr, "FAIL: %s\n", msg); \
+        exit(1); \
+    } \
+} while(0)
+
+#define ASSERT_MEM_EQ(a, b, size, msg) do { \
+    if (memcmp(a, b, size) != 0) { \
         fprintf(stderr, "FAIL: %s\n", msg); \
         exit(1); \
     } \
@@ -115,8 +122,6 @@ void run_strcmp_tests(void) {
     assert(test_strcmp("a", "") > 0);
 
     // High bit characters (unsigned char comparison)
-    // '\xff' is 255, '\x01' is 1. 255 - 1 = 254 (> 0)
-    // If signed char: -1 - 1 = -2 (< 0)
     char s1[] = "\xff";
     char s2[] = "\x01";
     assert(test_strcmp(s1, s2) > 0);
@@ -128,7 +133,6 @@ void run_strcmp_tests(void) {
     int res_test = test_strcmp(h1, h2);
     int res_host = strcmp(h1, h2);
 
-    // Check sign consistency
     if (res_host < 0) assert(res_test < 0);
     else if (res_host > 0) assert(res_test > 0);
     else assert(res_test == 0);
@@ -139,50 +143,26 @@ void run_strcmp_tests(void) {
 void run_strncmp_tests(void) {
     printf("Running strncmp tests...\n");
 
-    // 1. Equal strings, n > length
     ASSERT_EQ(test_strncmp("abc", "abc", 5), 0, "Equal strings, n > len");
-
-    // 2. Equal strings, n == length
     ASSERT_EQ(test_strncmp("abc", "abc", 3), 0, "Equal strings, n == len");
-
-    // 3. Equal strings, n < length
     ASSERT_EQ(test_strncmp("abc", "abc", 2), 0, "Equal strings, n < len");
-
-    // 4. Unequal strings, difference at first char
     ASSERT_TRUE(test_strncmp("abc", "bbc", 3) < 0, "abc < bbc");
     ASSERT_TRUE(test_strncmp("bbc", "abc", 3) > 0, "bbc > abc");
-
-    // 5. Unequal strings, difference at last checked char
     ASSERT_TRUE(test_strncmp("abc", "abd", 3) < 0, "abc < abd");
-
-    // 6. Strings differ AFTER n chars
     ASSERT_EQ(test_strncmp("abc", "abd", 2), 0, "Difference after n ignored");
-
-    // 7. One string is prefix of another
     ASSERT_TRUE(test_strncmp("abc", "abcd", 4) < 0, "abc < abcd");
     ASSERT_TRUE(test_strncmp("abcd", "abc", 4) > 0, "abcd > abc");
-
-    // 8. One string is prefix, but n limits check to common part
     ASSERT_EQ(test_strncmp("abc", "abcd", 3), 0, "Prefix match within n");
-
-    // 9. Zero length check
     ASSERT_EQ(test_strncmp("abc", "def", 0), 0, "n=0 should return 0");
-
-    // 10. Empty strings
     ASSERT_EQ(test_strncmp("", "", 5), 0, "Empty strings equal");
     ASSERT_TRUE(test_strncmp("", "a", 5) < 0, "Empty < a");
     ASSERT_TRUE(test_strncmp("a", "", 5) > 0, "a > Empty");
 
-    // 11. Unsigned char comparison check
-    // '\200' is 128 (unsigned). If signed char, it's -128. 'a' is 97.
-    // If signed comparison: -128 < 97.
-    // If unsigned comparison: 128 > 97.
-    // Standard requires unsigned comparison.
     char s1[] = {'\200', 0};
     char s2[] = {'a', 0};
     ASSERT_TRUE(test_strncmp(s1, s2, 1) > 0, "Unsigned char comparison");
 
-    printf("All strncmp tests passed.\n");
+    printf("strncmp tests passed!\n");
 }
 
 void run_strrchr_tests(void) {
@@ -190,45 +170,86 @@ void run_strrchr_tests(void) {
     const char *s = "hello world";
     const char *empty = "";
 
-    // 1. Basic search (character exists)
-    // "hello world"
-    //  01234567890
     assert(test_strrchr(s, 'h') == s);
     assert(test_strrchr(s, 'w') == s + 6);
-
-    // 2. Character at end
     assert(test_strrchr(s, 'd') == s + 10);
-
-    // 3. Multiple occurrences (should find last)
-    // 'o' is at 4 and 7
     assert(test_strrchr(s, 'o') == s + 7);
-    // 'l' is at 2, 3, 9
     assert(test_strrchr(s, 'l') == s + 9);
-
-    // 4. Character not found
     assert(test_strrchr(s, 'z') == NULL);
-    assert(test_strrchr(s, 'H') == NULL); // Case sensitivity
-
-    // 5. Null terminator search
-    // Should return pointer to the null terminator
+    assert(test_strrchr(s, 'H') == NULL);
     assert(test_strrchr(s, '\0') == s + 11);
-
-    // 6. Empty string
     assert(test_strrchr(empty, 'a') == NULL);
     assert(test_strrchr(empty, '\0') == empty);
-
-    // 7. Verify against host implementation
-    // This ensures behavior matches standard expectations
     assert(test_strrchr(s, 'l') == strrchr(s, 'l'));
     assert(test_strrchr(s, 0) == strrchr(s, 0));
     assert(test_strrchr(empty, 0) == strrchr(empty, 0));
 
-    printf("All strrchr tests passed!\n");
+    printf("strrchr tests passed!\n");
+}
+
+void run_memcpy_tests(void) {
+    printf("Running memcpy tests...\n");
+
+    // Basic memcpy
+    {
+        char src[] = "Hello World";
+        char dest[20] = {0};
+        test_memcpy(dest, src, 12);
+        ASSERT_MEM_EQ(dest, src, 12, "Basic memcpy failed");
+    }
+
+    // Small memcpy consistency
+    {
+        char src[] = "12345678";
+        char dest[10];
+        for (int i = 0; i <= 8; i++) {
+            memset(dest, 0, sizeof(dest));
+            test_memcpy(dest, src, i);
+            ASSERT_MEM_EQ(dest, src, i, "Small memcpy consistency check");
+        }
+    }
+
+    // Unaligned memcpy
+    {
+        char s_buf[64] __attribute__((aligned(16)));
+        char d_buf[64] __attribute__((aligned(16)));
+        for (int i = 0; i < 64; i++) s_buf[i] = (char)i;
+
+        memset(d_buf, 0, 64);
+        test_memcpy(d_buf + 1, s_buf, 10);
+        ASSERT_MEM_EQ(d_buf + 1, s_buf, 10, "Unaligned dest memcpy failed");
+
+        memset(d_buf, 0, 64);
+        test_memcpy(d_buf, s_buf + 1, 10);
+        ASSERT_MEM_EQ(d_buf, s_buf + 1, 10, "Unaligned src memcpy failed");
+
+        memset(d_buf, 0, 64);
+        test_memcpy(d_buf + 1, s_buf + 1, 10);
+        ASSERT_MEM_EQ(d_buf + 1, s_buf + 1, 10, "Both unaligned memcpy failed");
+    }
+
+    // Large memcpy
+    {
+        size_t size = 4096;
+        char *src = malloc(size);
+        char *dest = malloc(size);
+        if (src && dest) {
+            for (size_t i = 0; i < size; i++) src[i] = (char)(i & 0xFF);
+            memset(dest, 0, size);
+            test_memcpy(dest, src, size);
+            ASSERT_MEM_EQ(dest, src, size, "Large memcpy failed");
+            free(src);
+            free(dest);
+        }
+    }
+
+    printf("memcpy tests passed!\n");
 }
 
 int main(void) {
     run_strcmp_tests();
     run_strncmp_tests();
     run_strrchr_tests();
+    run_memcpy_tests();
     return 0;
 }
