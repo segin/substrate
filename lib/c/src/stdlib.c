@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 void exit(int status) {
     _exit(status);
@@ -209,22 +210,31 @@ void srand(unsigned int seed) {
 }
 
 void arc4random_buf(void *buf, size_t n) {
-    int fd = open("/dev/urandom", O_RDONLY);
-    if (fd < 0) {
-        abort();
+    static atomic_int urandom_fd = -1;
+    int fd = atomic_load(&urandom_fd);
+
+    if (fd == -1) {
+        fd = open("/dev/urandom", O_RDONLY);
+        if (fd < 0) {
+            abort();
+        }
+        int expected = -1;
+        if (!atomic_compare_exchange_strong(&urandom_fd, &expected, fd)) {
+            close(fd);
+            fd = expected;
+        }
     }
+
     char *p = (char *)buf;
     size_t left = n;
     while (left > 0) {
         ssize_t r = read(fd, p, left);
         if (r <= 0) {
-             close(fd);
              abort();
         }
         p += r;
         left -= r;
     }
-    close(fd);
 }
 
 uint32_t arc4random(void) {
