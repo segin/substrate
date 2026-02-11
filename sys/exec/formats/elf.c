@@ -308,7 +308,6 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                 current_process->perso_id = PERS_NATIVE;
                 break;
         }
-        current_process->pers = perso_lookup(current_process->perso_id);
         
         // Set Bitness
         if (ehdr.e_ident[EI_CLASS] == ELFCLASS64) {
