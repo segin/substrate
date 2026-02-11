@@ -13,6 +13,25 @@ is an arbitrary precision calculator language interpreter.
 It supports standard POSIX bc features as well as several GNU extensions.
 .Pp
 The calculator supports numbers with arbitrary precision, limited only by available memory.
+.Sh OPERATORS
+.Nm
+supports standard arithmetic operators and relational operators:
+.Bl -tag -width "Relational"
+.It Relational
+.Li ==
+(equal),
+.Li !=
+(not equal),
+.Li <
+(less than),
+.Li <=
+(less than or equal),
+.Li >
+(greater than),
+.Li >=
+(greater than or equal).
+These operators return 1 if the comparison is true, and 0 if false.
+.El
 .Sh EXTENSIONS
 .Nm
 implements the following GNU extensions:
