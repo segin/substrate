@@ -56,7 +56,7 @@ char *test_strtok_r(char *str, const char *delim, char **saveptr);
 char *test_strerror(int errnum);
 
 // Include the source file directly
-#include "../src/string.c"
+#include "../../../lib/c/src/string.c"
 
 // Undef macros to restore original names if needed
 #undef strfry
@@ -83,7 +83,22 @@ char *test_strerror(int errnum);
 #undef strtok_r
 #undef strerror
 
-int main(void) {
+// Helper macro for testing (from strncmp tests)
+#define ASSERT_EQ(actual, expected, msg) do { \
+    if ((actual) != (expected)) { \
+        fprintf(stderr, "FAIL: %s: expected %d, got %d\n", msg, (int)(expected), (int)(actual)); \
+        exit(1); \
+    } \
+} while(0)
+
+#define ASSERT_TRUE(condition, msg) do { \
+    if (!(condition)) { \
+        fprintf(stderr, "FAIL: %s\n", msg); \
+        exit(1); \
+    } \
+} while(0)
+
+void run_strcmp_tests(void) {
     printf("Running strcmp tests...\n");
 
     // Basic equality
@@ -119,5 +134,59 @@ int main(void) {
     else assert(res_test == 0);
 
     printf("strcmp tests passed!\n");
+}
+
+void run_strncmp_tests(void) {
+    printf("Running strncmp tests...\n");
+
+    // 1. Equal strings, n > length
+    ASSERT_EQ(test_strncmp("abc", "abc", 5), 0, "Equal strings, n > len");
+
+    // 2. Equal strings, n == length
+    ASSERT_EQ(test_strncmp("abc", "abc", 3), 0, "Equal strings, n == len");
+
+    // 3. Equal strings, n < length
+    ASSERT_EQ(test_strncmp("abc", "abc", 2), 0, "Equal strings, n < len");
+
+    // 4. Unequal strings, difference at first char
+    ASSERT_TRUE(test_strncmp("abc", "bbc", 3) < 0, "abc < bbc");
+    ASSERT_TRUE(test_strncmp("bbc", "abc", 3) > 0, "bbc > abc");
+
+    // 5. Unequal strings, difference at last checked char
+    ASSERT_TRUE(test_strncmp("abc", "abd", 3) < 0, "abc < abd");
+
+    // 6. Strings differ AFTER n chars
+    ASSERT_EQ(test_strncmp("abc", "abd", 2), 0, "Difference after n ignored");
+
+    // 7. One string is prefix of another
+    ASSERT_TRUE(test_strncmp("abc", "abcd", 4) < 0, "abc < abcd");
+    ASSERT_TRUE(test_strncmp("abcd", "abc", 4) > 0, "abcd > abc");
+
+    // 8. One string is prefix, but n limits check to common part
+    ASSERT_EQ(test_strncmp("abc", "abcd", 3), 0, "Prefix match within n");
+
+    // 9. Zero length check
+    ASSERT_EQ(test_strncmp("abc", "def", 0), 0, "n=0 should return 0");
+
+    // 10. Empty strings
+    ASSERT_EQ(test_strncmp("", "", 5), 0, "Empty strings equal");
+    ASSERT_TRUE(test_strncmp("", "a", 5) < 0, "Empty < a");
+    ASSERT_TRUE(test_strncmp("a", "", 5) > 0, "a > Empty");
+
+    // 11. Unsigned char comparison check
+    // '\200' is 128 (unsigned). If signed char, it's -128. 'a' is 97.
+    // If signed comparison: -128 < 97.
+    // If unsigned comparison: 128 > 97.
+    // Standard requires unsigned comparison.
+    char s1[] = {'\200', 0};
+    char s2[] = {'a', 0};
+    ASSERT_TRUE(test_strncmp(s1, s2, 1) > 0, "Unsigned char comparison");
+
+    printf("All strncmp tests passed.\n");
+}
+
+int main(void) {
+    run_strcmp_tests();
+    run_strncmp_tests();
     return 0;
 }
