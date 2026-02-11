@@ -5950,6 +5950,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Critical Headers (Missing Files):**
         - [ ] Create `string.h` (functions exist in `string.c` but header is missing).
         - [ ] Create `limits.h`, `setjmp.h`, `locale.h`.
+        - [ ] Create `err.h` (BSD error reporting helpers).
         - [ ] Create `stddef.h`, `stdint.h`, `stdarg.h` (wrapping GCC builtins).
     - [ ] **String Manipulation (`<string.h>`):**
         - [ ] `strndup()`: Bounded string duplication.
