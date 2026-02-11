@@ -164,8 +164,8 @@ int pmap_enter(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t fl
     pte_t *pt_table = (pte_t *)V_PT_INDEX(pml4i, pdpti, pdi, 0);
     
     uint64_t new_pte = (pa & PTE_ADDR_MASK) | PTE_P;
-    if (prot & 2) new_pte |= PTE_W;
-    if (prot & 4) new_pte |= PTE_U; // User
+    if (prot & VM_PROT_WRITE) new_pte |= PTE_W;
+    if (prot & VM_PROT_USER) new_pte |= PTE_U;
     if (flags & PTE_NX) new_pte |= PTE_NX;
     
     pt_table[pti] = new_pte;
@@ -356,7 +356,17 @@ int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
         
         // Check for Large Pages
         if (pd[pdi] & PTE_PS) {
-             // TODO: Update PDE protection
+             uint64_t pde = pd[pdi];
+             uint64_t new_pde = pde & ~(PTE_W | PTE_NX);
+
+             if (prot & VM_PROT_WRITE) new_pde |= PTE_W;
+             if (!(prot & VM_PROT_EXEC)) new_pde |= PTE_NX;
+
+             pd[pdi] = new_pde;
+             pmap_invalidate_page(va);
+
+             // Advance loop to end of large page
+             va = (va & ~0x1FFFFFULL) + 0x200000 - 0x1000;
              continue;
         }
         
@@ -366,9 +376,9 @@ int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot) {
         uint64_t pte = pt[pti];
         uint64_t new_pte = pte & ~(PTE_W | PTE_NX); // Clear W and NX
         
-        if (prot & 2) new_pte |= PTE_W;   // VM_PROT_WRITE
+        if (prot & VM_PROT_WRITE) new_pte |= PTE_W;
         
-        if (!(prot & 4)) { // VM_PROT_EXECUTE
+        if (!(prot & VM_PROT_EXEC)) {
              new_pte |= PTE_NX;
         }
         
@@ -1004,10 +1014,10 @@ int pmap_enter_2mb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_
     pde_t *pd = (pde_t *)V_PD_INDEX(pml4i, pdpti, 0);
     
     uint64_t pde = (pa & ~0x1FFFFFULL) | PTE_P | PTE_PS;
-    if (prot & 2) pde |= PTE_W;     // VM_PROT_WRITE
-    if (prot & 4) pde |= PTE_U;     // User accessible (implicit for user pages)
+    if (prot & VM_PROT_WRITE) pde |= PTE_W;
+    if (prot & VM_PROT_USER) pde |= PTE_U;
     if (flags & PTE_G) pde |= PTE_G; // Global
-    if (!(prot & 4) || (flags & PTE_NX)) pde |= PTE_NX; // No execute
+    if (!(prot & VM_PROT_EXEC) || (flags & PTE_NX)) pde |= PTE_NX; // No execute
     
     pd[pdi] = pde;
     pmap_invalidate_page(va);
@@ -1052,10 +1062,10 @@ int pmap_enter_1gb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_
     pdpte_t *pdpt = V_PDPT(pml4i);
     
     uint64_t pdpte = (pa & ~0x3FFFFFFFULL) | PTE_P | PTE_PS;
-    if (prot & 2) pdpte |= PTE_W;
-    if (prot & 4) pdpte |= PTE_U;
+    if (prot & VM_PROT_WRITE) pdpte |= PTE_W;
+    if (prot & VM_PROT_USER) pdpte |= PTE_U;
     if (flags & PTE_G) pdpte |= PTE_G;
-    if (!(prot & 4) || (flags & PTE_NX)) pdpte |= PTE_NX;
+    if (!(prot & VM_PROT_EXEC) || (flags & PTE_NX)) pdpte |= PTE_NX;
     
     pdpt[pdpti] = pdpte;
     pmap_invalidate_page(va);
