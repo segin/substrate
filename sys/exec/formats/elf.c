@@ -9,7 +9,7 @@
 #include <vm/vm_kmem.h>
 #include <exec/perso/personality.h>
 #include <sys/random.h>
-
+#include <sys/signal.h> // For copyin/copyout
 
 
 // Globals for userspace transition
@@ -326,6 +326,47 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     return entry;
 }
 
+static int is_user_ptr(const void *ptr) {
+    return (uintptr_t)ptr < 0xC0000000;
+}
+
+static int capture_ptr(char *const array[], int index, char **out) {
+    if (is_user_ptr(array)) {
+        return copyin(&array[index], out, sizeof(char*));
+    } else {
+        *out = array[index];
+        return 0;
+    }
+}
+
+static int capture_strlen(const char *s, size_t *out_len) {
+    if (is_user_ptr(s)) {
+        // We don't have a safe strnlen for user space that returns length without copying.
+        // We can use copyinstr with a small buffer or a specialized helper.
+        // For now, let's use a 4KB temporary buffer.
+        char tmp[4096];
+        size_t len;
+        int ret = copyinstr(s, tmp, sizeof(tmp), &len);
+        if (ret == 0) {
+            *out_len = len;
+            return 0;
+        }
+        return ret;
+    } else {
+        *out_len = strlen(s) + 1;
+        return 0;
+    }
+}
+
+static int capture_strcpy(char *dst, const char *src) {
+    if (is_user_ptr(src)) {
+        return copyinstr(src, dst, 4096, NULL);
+    } else {
+        strcpy(dst, src);
+        return 0;
+    }
+}
+
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, -1 on failure
 int elf_execve(const char *path, char *const argv[], char *const envp[]) {
@@ -356,19 +397,27 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Capture arguments and environment
     // Count argc and size
     if (argv) {
-        while (argv[argc]) {
-            size_t len = strlen(argv[argc]);
-            strings_size += len + 1;
+        while (1) {
+            char *uarg;
+            if (capture_ptr(argv, argc, &uarg) != 0 || uarg == NULL) break;
+            size_t len;
+            if (capture_strlen(uarg, &len) != 0) return -14;
+            strings_size += len;
             argc++;
+            if (argc > 512) return -7;
         }
     }
 
     // Count envc and size
     if (envp) {
-        while (envp[envc]) {
-            size_t len = strlen(envp[envc]);
-            strings_size += len + 1;
+        while (1) {
+            char *uarg;
+            if (capture_ptr(envp, envc, &uarg) != 0 || uarg == NULL) break;
+            size_t len;
+            if (capture_strlen(uarg, &len) != 0) return -14;
+            strings_size += len;
             envc++;
+            if (envc > 512) return -7;
         }
     }
 
@@ -407,14 +456,22 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     char *p = arg_buffer;
     for (int i = 0; i < argc; i++) {
         k_argv[i] = p;
-        strcpy(p, argv[i]);
-        p += strlen(argv[i]) + 1;
+        char *uarg;
+        capture_ptr(argv, i, &uarg);
+        size_t len;
+        capture_strlen(uarg, &len);
+        capture_strcpy(p, uarg);
+        p += len;
     }
 
     for (int i = 0; i < envc; i++) {
         k_envp[i] = p;
-        strcpy(p, envp[i]);
-        p += strlen(envp[i]) + 1;
+        char *uarg;
+        capture_ptr(envp, i, &uarg);
+        size_t len;
+        capture_strlen(uarg, &len);
+        capture_strcpy(p, uarg);
+        p += len;
     }
     
     // Create new address space for this process

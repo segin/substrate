@@ -23,6 +23,8 @@
 #include <vfs/vfs.h>
 #include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
+#include <sys/kern_syscalls.h>
+#include <sys/utsname.h>
 
 #include <sys/smp.h>
 #include <sys/types.h>
@@ -40,7 +42,6 @@ extern thread_t threads[256];
 
 extern int sys_acct(const char *path);
 extern int64_t sys_time(int64_t *tloc);
-extern int sys_sigaction(int sig, const void *act, void *oact);
 
 // Simple file structure allocator
 #define MAX_SYSTEM_FILES 128
@@ -93,7 +94,7 @@ void file_free(file_t *f) {
     file_free_list = f;
 }
 
-int sys_write(int fd, const char *buf, int len) {
+int kern_write(int fd, const char *buf, int len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
@@ -106,7 +107,39 @@ int sys_write(int fd, const char *buf, int len) {
     return 0;
 }
 
-int sys_read(int fd, char *buf, int len) {
+int sys_write(int fd, const char *buf, int len) {
+    if (len < 0) return -1;
+    if (len == 0) return 0;
+
+    void *kbuf = kmalloc(4096);
+    if (!kbuf) return -12; // ENOMEM
+
+    int total_written = 0;
+    while (len > 0) {
+        int to_write = (len > 4096) ? 4096 : len;
+        if (copyin(buf + total_written, kbuf, to_write) != 0) {
+            kfree(kbuf, 4096);
+            return -14; // EFAULT
+        }
+
+        int bytes = kern_write(fd, kbuf, to_write);
+        if (bytes <= 0) {
+            if (total_written == 0) {
+                kfree(kbuf, 4096);
+                return bytes;
+            }
+            break;
+        }
+
+        total_written += bytes;
+        len -= bytes;
+        if (bytes < to_write) break;
+    }
+    kfree(kbuf, 4096);
+    return total_written;
+}
+
+int kern_read(int fd, char *buf, int len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
@@ -116,7 +149,45 @@ int sys_read(int fd, char *buf, int len) {
     return bytes;
 }
 
+int sys_read(int fd, char *buf, int len) {
+    if (len < 0) return -1;
+    if (len == 0) return 0;
+
+    void *kbuf = kmalloc(4096);
+    if (!kbuf) return -12; // ENOMEM
+
+    int total_read = 0;
+    while (len > 0) {
+        int to_read = (len > 4096) ? 4096 : len;
+        int bytes = kern_read(fd, kbuf, to_read);
+        if (bytes <= 0) {
+            if (total_read == 0) {
+                kfree(kbuf, 4096);
+                return bytes;
+            }
+            break;
+        }
+
+        if (copyout(kbuf, buf + total_read, bytes) != 0) {
+            kfree(kbuf, 4096);
+            return -14; // EFAULT
+        }
+
+        total_read += bytes;
+        len -= bytes;
+        if (bytes < to_read) break;
+    }
+    kfree(kbuf, 4096);
+    return total_read;
+}
+
 int sys_open(const char *path, int flags, int mode) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_open(kpath, flags, mode);
+}
+
+int kern_open(const char *path, int flags, int mode) {
     (void)mode;
     if (!path) return -1;
     
@@ -185,6 +256,10 @@ void file_close_ptr(file_t *f) {
 }
 
 int sys_close(int fd) {
+    return kern_close(fd);
+}
+
+int kern_close(int fd) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
@@ -224,6 +299,21 @@ struct linux_dirent {
 };
 
 int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
+    if (count > 65536) count = 65536;
+    void *kdirp = kmalloc(count);
+    if (!kdirp) return -12;
+    int ret = kern_getdents(fd, kdirp, count);
+    if (ret > 0) {
+        if (copyout(kdirp, dirp, ret) != 0) {
+            kfree(kdirp, count);
+            return -14;
+        }
+    }
+    kfree(kdirp, count);
+    return ret;
+}
+
+int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
     if (fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
@@ -269,39 +359,18 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
     return bpos;
 }
 
-struct utsname {
-    char sysname[256];
-    char nodename[256];
-    char release[256];
-    char version[256];
-    char machine[256];
-    char domainname[256];
-};
-
-/* Validate user address range is within user space (below kernel) */
-static int validate_user_buffer(const void *buf, size_t size) {
-    uintptr_t start = (uintptr_t)buf;
-    uintptr_t end = start + size;
-    
-    /* NULL check */
-    if (start < 0x1000) return -1;
-    
-    /* Overflow check */
-    if (end < start) return -1;
-    
-    /* Must be below kernel space at 0xC0000000 */
-    if (end > 0xC0000000) return -1;
-    
-    return 0;
-}
 
 int sys_uname(struct utsname *buf) {
-    if (!buf) return -14; /* EFAULT */
-    
-    /* Validate user buffer can hold entire struct */
-    if (validate_user_buffer(buf, sizeof(struct utsname)) != 0) {
-        return -14; /* EFAULT */
+    struct utsname kbuf;
+    int ret = kern_uname(&kbuf);
+    if (ret == 0) {
+        if (copyout(&kbuf, buf, sizeof(struct utsname)) != 0) return -14;
     }
+    return ret;
+}
+
+int kern_uname(struct utsname *buf) {
+    if (!buf) return -14; /* EFAULT */
     
     extern char kernel_hostname[MAXHOSTNAMELEN];
     
@@ -340,6 +409,26 @@ int sys__exit(int code) {
 }
 
 int sys_thr_new(struct thr_param *param, int param_size) {
+    struct thr_param kparam;
+    if (param_size < (int)sizeof(struct thr_param)) return -1;
+    if (copyin(param, &kparam, sizeof(struct thr_param)) != 0) return -14;
+
+    // We also need to handle child_tid if it is provided
+    // kern_thr_new writes to *p.child_tid
+    // So we should pass a kernel pointer to child_tid
+    long kchild_tid = 0;
+    long *orig_child_tid = kparam.child_tid;
+    if (orig_child_tid) kparam.child_tid = &kchild_tid;
+
+    int ret = kern_thr_new(&kparam, sizeof(struct thr_param));
+
+    if (ret == 0 && orig_child_tid) {
+        if (copyout(&kchild_tid, orig_child_tid, sizeof(long)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
     void *stack_top = (char*)p.stack_base + p.stack_size;
@@ -392,6 +481,12 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
 }
 
 int sys_chroot(const char *path) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_chroot(kpath);
+}
+
+int kern_chroot(const char *path) {
     if (!path) return -1;
 
     fs_node_t *node = 0;
@@ -413,6 +508,12 @@ int sys_chroot(const char *path) {
 
 extern int vfs_mkdir(const char *path, uint16_t permission);
 int sys_mkdir(const char *p, int m) {
+    char kpath[256];
+    if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_mkdir(kpath, m);
+}
+
+int kern_mkdir(const char *p, int m) {
     if (!p) return -1;
     return vfs_mkdir(p, (uint16_t)m);
 }
@@ -451,7 +552,18 @@ int sys_setgid(int g) {
 int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
 
 
-int sys_stat(const char *path, struct stat *buf) { 
+int sys_stat(const char *path, struct stat *buf) {
+    char kpath[256];
+    struct stat kbuf;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    int ret = kern_stat(kpath, &kbuf);
+    if (ret == 0) {
+        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_stat(const char *path, struct stat *buf) {
     if (!path || !buf) return -1;
     
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
@@ -464,6 +576,17 @@ int sys_stat(const char *path, struct stat *buf) {
 
 
 int sys_lstat(const char *path, struct stat *buf) {
+    char kpath[256];
+    struct stat kbuf;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    int ret = kern_lstat(kpath, &kbuf);
+    if (ret == 0) {
+        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_lstat(const char *path, struct stat *buf) {
     if (!path || !buf) return -1;
     
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
@@ -479,16 +602,27 @@ int sys_lstat(const char *path, struct stat *buf) {
 #include <sys/poll.h>
 
 int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
+    if (nfds > 1024) return -22;
+    struct pollfd *kfds = kmalloc(nfds * sizeof(struct pollfd));
+    if (!kfds) return -12;
+    if (copyin(fds, kfds, nfds * sizeof(struct pollfd)) != 0) {
+        kfree(kfds, nfds * sizeof(struct pollfd));
+        return -14;
+    }
+    int ret = kern_poll(kfds, nfds, timeout);
+    if (ret >= 0) {
+        if (copyout(kfds, fds, nfds * sizeof(struct pollfd)) != 0) {
+            kfree(kfds, nfds * sizeof(struct pollfd));
+            return -14;
+        }
+    }
+    kfree(kfds, nfds * sizeof(struct pollfd));
+    return ret;
+}
+
+int kern_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
     // Sanity check
     if (nfds > 1024) return -22; // EINVAL
-    
-    // Copy fds from user if needed? 
-    // They are in user memory, we can access directly (assuming kernel has access)
-    // but strict separation requires copy or verify. Substrate has shared addr space roughly.
-    // We should copy to be safe/correct if we modify revents.
-    
-    // Allocate kernel buffer for safety (avoid TOCTOU or paging issues if pmap changes in loop)
-    // For now, assume direct access is fine as we only write revents.
     
     // Timeout loop
     // Convert timeout (ms) to ticks or similar.
@@ -565,6 +699,15 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
 }
 
 int sys_fstat(int fd, struct stat *buf) {
+    struct stat kbuf;
+    int ret = kern_fstat(fd, &kbuf);
+    if (ret == 0) {
+        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_fstat(int fd, struct stat *buf) {
     if (fd < 0 || fd >= MAX_FD || !buf) return -1;
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -1;
@@ -574,6 +717,15 @@ int sys_fstat(int fd, struct stat *buf) {
 
 // ioctl - device control
 int sys_ioctl(int fd, uint32_t request, void *arg) {
+    // ioctl arg can be anything. For security, we should really know the size.
+    // However, many ioctls use small structs.
+    // This is hard to fix generically without a table.
+    // For now, at least validate the pointer if it looks like one.
+    // But we don't know if it is a pointer or an int.
+    return kern_ioctl(fd, request, arg);
+}
+
+int kern_ioctl(int fd, uint32_t request, void *arg) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -1;
@@ -591,6 +743,12 @@ extern int sys_setsid(void);
 
 
 int sys_unlink(const char *path) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_unlink(kpath);
+}
+
+int kern_unlink(const char *path) {
     if (!path) return -1;
     
     char dir[256];
@@ -634,6 +792,13 @@ int sys_unlink(const char *path) {
 }
 
 int sys_link(const char *oldpath, const char *newpath) {
+    char kold[256], knew[256];
+    if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -14;
+    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -14;
+    return kern_link(kold, knew);
+}
+
+int kern_link(const char *oldpath, const char *newpath) {
     if (!oldpath || !newpath) return -1;
 
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
@@ -677,6 +842,23 @@ int sys_link(const char *oldpath, const char *newpath) {
 }
 
 int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
+    char kpath[256];
+    if (copyinstr(pathname, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (bufsiz > 4096) bufsiz = 4096;
+    char *kbuf = kmalloc(bufsiz);
+    if (!kbuf) return -12;
+    int ret = kern_readlink(kpath, kbuf, bufsiz);
+    if (ret > 0) {
+        if (copyout(kbuf, buf, ret) != 0) {
+            kfree(kbuf, bufsiz);
+            return -14;
+        }
+    }
+    kfree(kbuf, bufsiz);
+    return ret;
+}
+
+int kern_readlink(const char *pathname, char *buf, size_t bufsiz) {
     if (!pathname || !buf || bufsiz == 0) return -14; // EFAULT
     
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
@@ -695,6 +877,12 @@ int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
 }
 
 int sys_access(const char *path, int mode) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_access(kpath, mode);
+}
+
+int kern_access(const char *path, int mode) {
     if (!path) return -1;
 
     fs_node_t *node = 0;
@@ -740,6 +928,15 @@ extern int sys_stat(const char *p, struct stat *buf);
 extern void pipe_create(fs_node_t **read_node, fs_node_t **write_node);
 
 int sys_pipe(int *fds) {
+    int kfds[2];
+    int ret = kern_pipe(kfds);
+    if (ret == 0) {
+        if (copyout(kfds, fds, 2 * sizeof(int)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_pipe(int *fds) {
     if (!fds) return -1;
 
     fs_node_t *read_node, *write_node;
@@ -865,10 +1062,19 @@ int sys_signal(int sig, void *handler) {
     memset(&act, 0, sizeof(act));
     act.sa_handler = (sig_t)handler;
     act.sa_flags = 0;
-    return sys_sigaction(sig, &act, NULL);
+    return kern_sigaction(sig, &act, NULL);
 }
 
 int sys_waitpid(int pid, int *status, int options) {
+    int kstatus = 0;
+    int ret = kern_waitpid(pid, status ? &kstatus : NULL, options);
+    if (ret > 0 && status) {
+        if (copyout(&kstatus, status, sizeof(int)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_waitpid(int pid, int *status, int options) {
     (void)options;
     while (1) {
         bool found = false;
@@ -903,6 +1109,16 @@ int sys_getpid(void) { if(current_process) return current_process->pid; return 0
 #include <sys/exec.h>
 
 int sys_execve(const char *f, char *const a[], char *const e[]) {
+    char kpath[256];
+    if (copyinstr(f, kpath, sizeof(kpath), NULL) != 0) return -14;
+
+    // We pass untrusted user pointers for a and e.
+    // The ELF loader (elf_execve) has been updated to handle them safely
+    // using capture helpers (copyin/copyinstr).
+    return kern_execve(kpath, a, e);
+}
+
+int kern_execve(const char *f, char *const a[], char *const e[]) {
     return exec_dispatch(f, a, e);
 }
 
@@ -913,6 +1129,18 @@ extern int sys_vfork(void);
 int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0; }
 
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
+    char ksource[256], ktarget[256], ktype[64];
+    if (source) {
+        if (copyinstr(source, ksource, sizeof(ksource), NULL) != 0) return -14;
+    }
+    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
+    if (copyinstr(fstype, ktype, sizeof(ktype), NULL) != 0) return -14;
+
+    // data is filesystem specific, hard to wrap generically.
+    return kern_mount(source ? ksource : NULL, ktarget, ktype, flags, data);
+}
+
+int kern_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
     if (!target || !fstype) return -1;
 
     if (current_process->euid != 0) return -EPERM;
@@ -922,7 +1150,13 @@ int sys_mount(const char *source, const char *target, const char *fstype, unsign
 
 extern int vfs_unmount_legacy(const char *path);
 
-int sys_umount(const char *target) { 
+int sys_umount(const char *target) {
+    char ktarget[256];
+    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
+    return kern_umount(ktarget);
+}
+
+int kern_umount(const char *target) {
     if (!target) return -1;
     if (current_process->euid != 0) return -EPERM;
     return vfs_unmount_legacy(target); 
@@ -933,6 +1167,12 @@ int sys_nanosleep(void *req, void *rem) { (void)req; (void)rem; return 0; }
 
 // Current working directory per-process
 int sys_chdir(const char *path) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_chdir(kpath);
+}
+
+int kern_chdir(const char *path) {
     if (!path) return -1;
     
     fs_node_t *node = NULL;
@@ -963,8 +1203,6 @@ int sys_fchdir(int fd) {
     return 0;
 }
 
-// Forward declaration
-static int validate_user_buffer(const void *buf, size_t size);
 
 // Helper to find name of an inode in a directory
 // Returns allocated string (caller must free) or NULL
@@ -1003,8 +1241,22 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
 }
 
 int sys_getcwd(char *buf, size_t size) {
+    if (size > 4096) size = 4096;
+    char *kbuf = kmalloc(size);
+    if (!kbuf) return -12;
+    int ret = kern_getcwd(kbuf, size);
+    if (ret == 0) {
+        if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) {
+            kfree(kbuf, size);
+            return -14;
+        }
+    }
+    kfree(kbuf, size);
+    return ret;
+}
+
+int kern_getcwd(char *buf, size_t size) {
     if (!buf || size < 2) return -1;
-    if (validate_user_buffer(buf, size) != 0) return -14; // EFAULT
 
     // Allocate temp kernel buffer
     // Start filling from END
@@ -1085,6 +1337,15 @@ int sys_getcwd(char *buf, size_t size) {
 
 // sys_proc_info - Get detailed info for a single process
 int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
+    sys_procinfo_t kinfo;
+    int ret = kern_proc_info(pid, &kinfo);
+    if (ret == 0) {
+        if (copyout(&kinfo, info, sizeof(sys_procinfo_t)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     if (!info) return -1;
     
     // If pid == 0, use current process
@@ -1140,6 +1401,22 @@ int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
 // sys_proc_list - List all active PIDs
 // Returns count of PIDs written, or total count if pids==NULL
 int sys_proc_list(pid_t *pids, size_t count) {
+    if (count == 0 || !pids) return kern_proc_list(NULL, 0);
+    if (count > 1024) count = 1024;
+    pid_t *kpids = kmalloc(count * sizeof(pid_t));
+    if (!kpids) return -12;
+    int ret = kern_proc_list(kpids, count);
+    if (ret > 0) {
+        if (copyout(kpids, pids, ret * sizeof(pid_t)) != 0) {
+            kfree(kpids, count * sizeof(pid_t));
+            return -14;
+        }
+    }
+    kfree(kpids, count * sizeof(pid_t));
+    return ret;
+}
+
+int kern_proc_list(pid_t *pids, size_t count) {
     int total_procs = 0;
     
     // First pass: count active processes
@@ -1184,6 +1461,16 @@ int sys_cpu_count(void) {
 // sys_hostname - Get system hostname
 // Returns: 0 on success, -1 on error
 int sys_hostname(char *buf, size_t len) {
+    if (len > 256) len = 256;
+    char kbuf[256];
+    int ret = kern_hostname(kbuf, len);
+    if (ret == 0) {
+        if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_hostname(char *buf, size_t len) {
     if (!buf || len == 0) return -1;
     
     extern char kernel_hostname[MAXHOSTNAMELEN];

@@ -1,6 +1,7 @@
 #include <sys/acct.h>
 #include <sys/proc.h>
 #include <sys/session.h>
+#include <sys/signal.h>
 #include <vfs/vfs.h>
 #include <drivers/video/vga.h>
 #include <kern/sched.h>
@@ -28,7 +29,7 @@ comp_t compress(uint32_t t) {
     return (exp << 13) + t;
 }
 
-int sys_acct(const char *path) {
+int kern_acct(const char *path) {
     if (path == 0) {
         if (acct_node) {
             close_fs(acct_node);
@@ -47,6 +48,15 @@ int sys_acct(const char *path) {
     acct_node = node;
     open_fs(acct_node, 1, 1); // Open for writing
     return 0;
+}
+
+int sys_acct(const char *path) {
+    char kpath[256];
+    if (path) {
+        if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+        return kern_acct(kpath);
+    }
+    return kern_acct(NULL);
 }
 
 extern uint32_t get_time(void); // Defined in time.c (to be implemented)

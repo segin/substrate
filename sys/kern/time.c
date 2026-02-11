@@ -4,6 +4,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include <sys/signal.h>
 #include <kern/time.h>
 #include <kern/sched.h>
 
@@ -36,18 +37,34 @@ void set_boot_time(time_t time) {
     boot_time = time;
 }
 
-time_t sys_time(time_t *tloc) {
+time_t kern_time(time_t *tloc) {
     time_t t = get_time();
     if (tloc) *tloc = t;
     return t;
 }
 
-int sys_stime(time_t *t) {
+time_t sys_time(time_t *tloc) {
+    time_t t;
+    kern_time(&t);
+    if (tloc) {
+        if (copyout(&t, tloc, sizeof(time_t)) != 0) return -14;
+    }
+    return t;
+}
+
+int kern_stime(time_t *t) {
     if (!t) return -1;
     boot_time = *t - div64_32(ticks, HZ);
     return 0;
 }
-int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
+
+int sys_stime(time_t *t) {
+    time_t kt;
+    if (copyin(t, &kt, sizeof(time_t)) != 0) return -14;
+    return kern_stime(&kt);
+}
+
+int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (!tv) return -1;
     
     time_t total_seconds = boot_time + div64_32(ticks, HZ);
@@ -63,12 +80,23 @@ int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
     return 0;
 }
 
+int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
+    struct timeval ktv;
+    struct timezone ktz;
+    int ret = kern_gettimeofday(tv ? &ktv : NULL, tz ? &ktz : NULL);
+    if (ret == 0) {
+        if (tv && copyout(&ktv, tv, sizeof(struct timeval)) != 0) return -14;
+        if (tz && copyout(&ktz, tz, sizeof(struct timezone)) != 0) return -14;
+    }
+    return ret;
+}
+
 #ifndef CLOCK_REALTIME
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
 #endif
 
-int sys_clock_gettime(clockid_t clk_id, struct timespec *tp) {
+int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
     if (!tp) return -1;
     
     if (clk_id == CLOCK_REALTIME) {
@@ -86,13 +114,31 @@ int sys_clock_gettime(clockid_t clk_id, struct timespec *tp) {
     return 0;
 }
 
-clock_t sys_times(struct tms *buf) {
+int sys_clock_gettime(clockid_t clk_id, struct timespec *tp) {
+    struct timespec ktp;
+    int ret = kern_clock_gettime(clk_id, &ktp);
+    if (ret == 0) {
+        if (copyout(&ktp, tp, sizeof(struct timespec)) != 0) return -14;
+    }
+    return ret;
+}
+
+clock_t kern_times(struct tms *buf) {
     if (!buf) return (clock_t)-1;
     buf->tms_utime = 0;
     buf->tms_stime = 0;
     buf->tms_cutime = 0;
     buf->tms_cstime = 0;
     return (clock_t)ticks;
+}
+
+clock_t sys_times(struct tms *buf) {
+    struct tms kbuf;
+    clock_t ret = kern_times(&kbuf);
+    if (ret != (clock_t)-1) {
+        if (copyout(&kbuf, buf, sizeof(struct tms)) != 0) return (clock_t)-14;
+    }
+    return ret;
 }
 
 void timer_tick(void) {
