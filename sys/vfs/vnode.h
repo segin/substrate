@@ -404,5 +404,19 @@ int vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, 
 int vop_remove(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);
 int vop_rmdir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);
 int vop_whiteout(struct vnode *dvp, struct componentname *cnp, int flags);
+int vop_open(struct vnode *vp, int mode, struct ucred *cred);
+int vop_close(struct vnode *vp, int fflag, struct ucred *cred);
+int vop_access(struct vnode *vp, int mode, struct ucred *cred);
+int vop_getattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_setattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_read(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred);
+int vop_write(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred);
+int vop_ioctl(struct vnode *vp, uint32_t command, void *data, int fflag, struct ucred *cred);
+int vop_poll(struct vnode *vp, int events, struct ucred *cred);
+int vop_fsync(struct vnode *vp, int waitfor, struct ucred *cred);
+int vop_bmap(struct vnode *vp, off_t offset, struct vnode **vpp, uint64_t *bnp,
+    int *runp, int *runb);
+int vop_strategy(struct vnode *vp, void *bp);
+int vop_pathconf(struct vnode *vp, int name, register_t *retval);
 
 #endif /* _SYS_VNODE_H */

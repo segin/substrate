@@ -1718,29 +1718,29 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (all pathconf values)
                     - Docs: `vop_pathconf.9`
                     - Acceptance: Correct limits returned
-            - [ ] **I/O Operations:**
-                - [ ] Implement `vop_open(vp, mode, cred, p)`.
+            - [x] **I/O Operations:**
+                - [x] Implement `vop_open(vp, mode, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: File open callback
                     - Logic: Check access, increment open count, device-specific init
                     - Tests: unit (open read, open write, open RW, EACCES)
                     - Docs: `vop_open.9`
                     - Acceptance: Vnode ready for I/O
-                - [ ] Implement `vop_close(vp, fflag, cred, p)`.
+                - [x] Implement `vop_close(vp, fflag, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: File close callback
                     - Logic: Decrement open count, flush if last close
                     - Tests: unit (close, close last handle triggers sync)
                     - Docs: `vop_close.9`
                     - Acceptance: Resources released on last close
-                - [ ] Implement `vop_read(vp, uio, ioflag, cred)`.
+                - [x] Implement `vop_read(vp, uio, ioflag, cred)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Read data from vnode
                     - Logic: Use buffer cache, handle EOF, update atime
                     - Tests: unit (read full, read partial, read at EOF, read past EOF)
                     - Docs: `vop_read.9`
                     - Acceptance: Correct data returned, uio updated
-                - [ ] Implement `vop_write(vp, uio, ioflag, cred)`.
+                - [x] Implement `vop_write(vp, uio, ioflag, cred)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Write data to vnode
                     - Logic: Extend file if needed, use buffer cache, update mtime
@@ -1748,34 +1748,34 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (write, append, write extends file, ENOSPC)
                     - Docs: `vop_write.9`
                     - Acceptance: Data written, size updated
-                - [ ] Implement `vop_ioctl(vp, command, data, fflag, cred, p)`.
+                - [x] Implement `vop_ioctl(vp, command, data, fflag, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Device control operations
                     - Tests: unit (device-specific ioctls)
                     - Docs: `vop_ioctl.9`
                     - Acceptance: Ioctl dispatched to device
-                - [ ] Implement `vop_poll(vp, events, cred, p)`.
+                - [x] Implement `vop_poll(vp, events, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Select/poll support
                     - Events: `POLLIN`, `POLLOUT`, `POLLHUP`, `POLLERR`
                     - Tests: unit (poll ready, poll wait)
                     - Docs: `vop_poll.9`
                     - Acceptance: Correct events returned
-                - [ ] Implement `vop_fsync(vp, cred, waitfor, p)`.
+                - [x] Implement `vop_fsync(vp, cred, waitfor, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Flush dirty buffers to disk
                     - Flags: `MNT_WAIT` (sync), `MNT_NOWAIT` (async)
                     - Tests: integration (data persisted after fsync)
                     - Docs: `vop_fsync.9`
                     - Acceptance: All dirty data written
-                - [ ] Implement `vop_bmap(vp, bn, vpp, bnp, runp)`.
+                - [x] Implement `vop_bmap(vp, bn, vpp, bnp, runp)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Logical to physical block mapping
                     - Returns: Physical block number, run length for readahead
                     - Tests: unit (contiguous blocks, fragmented blocks)
                     - Docs: `vop_bmap.9`
                     - Acceptance: Correct physical block returned
-                - [ ] Implement `vop_strategy(vp, bp)`.
+                - [x] Implement `vop_strategy(vp, bp)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Block I/O strategy (buffer cache integration)
                     - Logic: Submit buffer to block device driver

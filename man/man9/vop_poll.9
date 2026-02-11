@@ -1,0 +1,23 @@
+.Dd February 11, 2026
+.Dt VOP_POLL 9
+.Os
+.Sh NAME
+.Nm vop_poll
+.Nd query poll/select readiness for a vnode
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/poll.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_poll "struct vnode *vp" "int events" "struct ucred *cred"
+.Sh DESCRIPTION
+.Fn vop_poll
+returns readiness events for select/poll users.
+If the filesystem provides a poll callback, it is used.
+Otherwise, the wrapper returns a conservative mask containing only supported
+poll bits requested by the caller.
+.Sh RETURN VALUES
+Returns a bitmask of ready poll events.
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_ioctl 9
