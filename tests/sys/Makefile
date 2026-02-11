@@ -9,7 +9,7 @@ SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_exp
 # property_pmap.c needs fixing (missing headers) maybe? Excluding for now to ensure build.
 
 SRCS += test_minix_readdir.c
-SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c
+SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vfs_busy.c
 
 OBJS = $(SRCS:.c=.o)
 
