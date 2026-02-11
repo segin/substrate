@@ -61,6 +61,21 @@
 #define VIRTIO_SCSI_T_AN_QUERY         1     /* Async notification query */
 #define VIRTIO_SCSI_T_AN_SUBSCRIBE     2     /* Async notification subscribe */
 
+/* TMF Subtypes */
+#define VIRTIO_SCSI_T_TMF_ABORT_TASK      0
+#define VIRTIO_SCSI_T_TMF_ABORT_TASK_SET  1
+#define VIRTIO_SCSI_T_TMF_CLEAR_ACA       2
+#define VIRTIO_SCSI_T_TMF_CLEAR_TASK_SET  3
+#define VIRTIO_SCSI_T_TMF_I_T_NEXUS_RESET 4
+#define VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET 5
+#define VIRTIO_SCSI_T_TMF_QUERY_TASK      6
+#define VIRTIO_SCSI_T_TMF_QUERY_TASK_SET  7
+
+/* TMF Response Codes */
+#define VIRTIO_SCSI_S_FUNCTION_COMPLETE   0
+#define VIRTIO_SCSI_S_FUNCTION_SUCCEEDED  10
+#define VIRTIO_SCSI_S_FUNCTION_REJECTED   11
+
 /* Event types */
 #define VIRTIO_SCSI_T_NO_EVENT         0
 #define VIRTIO_SCSI_T_TRANSPORT_RESET  1
@@ -72,6 +87,19 @@
  * VirtIO-SCSI Request/Response Structures
  * ============================================================
  */
+
+/* Task Management Function (TMF) Request */
+struct virtio_scsi_ctrl_tmf_req {
+    uint32_t type;
+    uint32_t subtype;
+    uint8_t  lun[8];
+    uint64_t id;
+} __attribute__((packed));
+
+/* Task Management Function (TMF) Response */
+struct virtio_scsi_ctrl_tmf_resp {
+    uint8_t response;
+} __attribute__((packed));
 
 /* SCSI request header (device-readable) */
 struct virtio_scsi_req_hdr {
@@ -295,12 +323,73 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
     return (req->status == SCSI_STATUS_GOOD) ? 0 : -1;
 }
 
-static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *dev) {
-    (void)link;
-    (void)dev;
-    /* TODO: Send TMF_LOGICAL_UNIT_RESET via control queue */
-    kprint("virtio_scsi: reset_device not implemented\n");
-    return 0;
+static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
+    virtio_scsi_dev_t *dev = (virtio_scsi_dev_t *)link->priv;
+    if (!dev || !sdev) return -1;
+
+    virtio_scsi_queue_t *q = &dev->ctrl_queue;
+
+    /* Build TMF request */
+    struct virtio_scsi_ctrl_tmf_req req;
+    memset(&req, 0, sizeof(req));
+
+    req.type = VIRTIO_SCSI_T_TMF;
+    req.subtype = VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET;
+    req.lun[0] = 1;
+    req.lun[1] = sdev->target;
+    req.lun[2] = (sdev->lun >> 8) & 0xFF;
+    req.lun[3] = sdev->lun & 0xFF;
+    req.id = 0;
+
+    /* Build TMF response */
+    struct virtio_scsi_ctrl_tmf_resp resp;
+    memset(&resp, 0, sizeof(resp));
+
+    /* Build descriptor chain */
+    int desc_idx = 0;
+
+    /* Descriptor 0: Request (device-readable) */
+    q->desc[0].addr = (uint64_t)(uint32_t)&req;
+    q->desc[0].len = sizeof(req);
+    q->desc[0].flags = VRING_DESC_F_NEXT;
+    q->desc[0].next = 1;
+    desc_idx = 1;
+
+    /* Descriptor 1: Response (device-writable) */
+    q->desc[desc_idx].addr = (uint64_t)(uint32_t)&resp;
+    q->desc[desc_idx].len = sizeof(resp);
+    q->desc[desc_idx].flags = VRING_DESC_F_WRITE;
+    q->desc[desc_idx].next = 0;
+
+    /* Submit to available ring */
+    q->avail->ring[q->avail->idx % q->size] = 0;  /* Start of chain */
+    __asm__ volatile("mfence" ::: "memory");
+    q->avail->idx++;
+
+    /* Notify device (Queue 0) */
+    outw(dev->io_base + VIRTIO_REG_QUEUE_NOTIFY, 0);
+
+    /* Poll for completion */
+    while (q->last_used_idx == q->used->idx) {
+        __asm__ volatile("pause");
+    }
+    q->last_used_idx++;
+
+    /* Check response */
+    if (resp.response == VIRTIO_SCSI_S_FUNCTION_COMPLETE ||
+        resp.response == VIRTIO_SCSI_S_FUNCTION_SUCCEEDED) {
+        char buf[64];
+        sprintf(buf, "virtio_scsi: reset device %d:%d succeeded\n",
+                sdev->target, sdev->lun);
+        kprint(buf);
+        return 0;
+    }
+
+    char buf[64];
+    sprintf(buf, "virtio_scsi: reset device %d:%d failed (resp=%d)\n",
+            sdev->target, sdev->lun, resp.response);
+    kprint(buf);
+    return -1;
 }
 
 static int vscsi_reset_bus(scsi_link_t *link) {
