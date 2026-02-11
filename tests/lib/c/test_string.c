@@ -294,11 +294,55 @@ void run_memset_tests(void) {
     printf("memset tests passed!\n");
 }
 
+void run_strncpy_tests(void) {
+    printf("Running strncpy tests...\n");
+    char src[] = "hello";
+    char dest[10];
+
+    // 1. n > src length (should pad with nulls)
+    memset(dest, 'X', sizeof(dest));
+    test_strncpy(dest, src, 8);
+    assert(strcmp(dest, "hello") == 0);
+    assert(dest[5] == '\0');
+    assert(dest[6] == '\0');
+    assert(dest[7] == '\0');
+    assert(dest[8] == 'X');
+
+    // 2. n == src length (no null termination if exactly fits)
+    memset(dest, 'X', sizeof(dest));
+    test_strncpy(dest, src, 5);
+    assert(memcmp(dest, "hello", 5) == 0);
+    assert(dest[5] == 'X');
+
+    // 3. n < src length (truncation)
+    memset(dest, 'X', sizeof(dest));
+    test_strncpy(dest, src, 3);
+    assert(memcmp(dest, "hel", 3) == 0);
+    assert(dest[3] == 'X');
+
+    // 4. n = 0
+    memset(dest, 'X', sizeof(dest));
+    test_strncpy(dest, src, 0);
+    assert(dest[0] == 'X');
+
+    // 5. empty src
+    char empty[] = "";
+    memset(dest, 'X', sizeof(dest));
+    test_strncpy(dest, empty, 3);
+    assert(dest[0] == '\0');
+    assert(dest[1] == '\0');
+    assert(dest[2] == '\0');
+    assert(dest[3] == 'X');
+
+    printf("strncpy tests passed!\n");
+}
+
 int main(void) {
     run_strcmp_tests();
     run_strncmp_tests();
     run_strrchr_tests();
     run_memcpy_tests();
     run_memset_tests();
+    run_strncpy_tests();
     return 0;
 }
