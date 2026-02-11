@@ -35,6 +35,7 @@ extern void run_sched_perf_tests(void);
 extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
+extern void run_vnode_lock_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -233,6 +234,10 @@ void run_kernel_tests(void) {
              extern void run_kthread_create_tests(void);
              run_kthread_create_tests();
         }
+    }
+
+    if (all || strcmp(test_arg, "vnode_lock") == 0) {
+        run_vnode_lock_tests();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {
