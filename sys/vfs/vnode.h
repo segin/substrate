@@ -404,5 +404,9 @@ int vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, 
 int vop_remove(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);
 int vop_rmdir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);
 int vop_whiteout(struct vnode *dvp, struct componentname *cnp, int flags);
+int vop_access(struct vnode *vp, int mode, struct ucred *cred);
+int vop_getattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_setattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_pathconf(struct vnode *vp, int name, register_t *retval);
 
 #endif /* _SYS_VNODE_H */

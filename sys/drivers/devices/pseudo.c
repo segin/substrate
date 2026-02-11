@@ -15,6 +15,7 @@ extern void mem_test_init(void);
 // Implemented in null.c
 
 // Shared discard write for /dev/zero and others
+static size_t discard_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) __attribute__((unused));
 static size_t discard_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)buffer;
     return size; // Discarded

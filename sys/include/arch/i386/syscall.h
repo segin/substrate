@@ -1,5 +1,9 @@
 #ifndef _ARCH_SYSCALL_H
 #define _ARCH_SYSCALL_H
+
+// Define max syscalls
+#define MAX_SYSCALLS 600
+
 #define SYS_EXIT    1
 #define SYS_FORK    2
 #define SYS_READ    3
