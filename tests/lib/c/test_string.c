@@ -246,10 +246,59 @@ void run_memcpy_tests(void) {
     printf("memcpy tests passed!\n");
 }
 
+void run_memset_tests(void) {
+    printf("Running memset tests...\n");
+
+    // Basic memset
+    {
+        char buf[100];
+        test_memset(buf, 'A', 100);
+        for (int i = 0; i < 100; i++) assert(buf[i] == 'A');
+        test_memset(buf, 0, 100);
+        for (int i = 0; i < 100; i++) assert(buf[i] == 0);
+    }
+
+    // Alignment and size test
+    {
+        char *buf = malloc(128);
+        if (buf) {
+            for (int offset = 0; offset < 8; offset++) {
+                for (size_t len = 0; len < 64; len++) {
+                    for (int i = 0; i < 128; i++) buf[i] = 0;
+                    int c = (offset + len) % 256;
+                    test_memset(buf + offset, c, len);
+                    for (int i = 0; i < 128; i++) {
+                        if (i >= offset && i < offset + (int)len) {
+                            assert((unsigned char)buf[i] == (unsigned char)c);
+                        } else {
+                            assert(buf[i] == 0);
+                        }
+                    }
+                }
+            }
+            free(buf);
+        }
+    }
+
+    // Large memset
+    {
+        size_t size = 1024 * 1024;
+        char *buf = malloc(size);
+        if (buf) {
+            test_memset(buf, 0x55, size);
+            for (size_t i = 0; i < size; i++) assert((unsigned char)buf[i] == 0x55);
+            free(buf);
+        }
+    }
+
+    printf("memset tests passed!\n");
+}
+
 int main(void) {
     run_strcmp_tests();
     run_strncmp_tests();
     run_strrchr_tests();
     run_memcpy_tests();
+    run_memset_tests();
     return 0;
 }
