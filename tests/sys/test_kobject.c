@@ -7,12 +7,19 @@
 extern int snprintf(char *str, size_t size, const char *format, ...);
 
 static int failed_tests = 0;
+static int release_called = 0;
+static struct kobject *released_obj = NULL;
 
 static void fail(const char *msg) {
     kprint("FAIL: ");
     kprint(msg);
     kprint("\n");
     failed_tests++;
+}
+
+static void my_release(struct kobject *kobj) {
+    release_called++;
+    released_obj = kobj;
 }
 
 static void test_kobject_init(void) {
@@ -56,22 +63,39 @@ static void test_kobject_get(void) {
     if (ret != NULL) fail("kobject_get: NULL input should return NULL");
 }
 
-static void test_kobject_put(void) {
+static void test_kobject_put_basic(void) {
     struct kobject kobj;
     kobject_init(&kobj, "test_put");
 
     // Increase refcount to 2
     kobject_get(&kobj);
-    if (kobj.refcount != 2) fail("kobject_put: setup failed");
+    if (kobj.refcount != 2) fail("kobject_put_basic: setup failed");
 
     kobject_put(&kobj);
-    if (kobj.refcount != 1) fail("kobject_put: decrement failed");
+    if (kobj.refcount != 1) fail("kobject_put_basic: decrement failed");
 
     kobject_put(&kobj);
-    if (kobj.refcount != 0) fail("kobject_put: final decrement failed");
+    if (kobj.refcount != 0) fail("kobject_put_basic: final decrement failed");
 
     // Ensure no crash on NULL
     kobject_put(NULL);
+}
+
+static void test_kobject_release_callback(void) {
+    struct kobject kobj;
+    release_called = 0;
+    released_obj = NULL;
+
+    kobject_init(&kobj, "test_release");
+    kobj.release = my_release;
+
+    kobject_get(&kobj);
+    kobject_put(&kobj);
+    if (release_called != 0) fail("test_kobject_release_callback: called prematurely");
+
+    kobject_put(&kobj);
+    if (release_called != 1) fail("test_kobject_release_callback: not called");
+    if (released_obj != &kobj) fail("test_kobject_release_callback: wrong object");
 }
 
 static void test_kset_init(void) {
@@ -93,7 +117,8 @@ void run_kobject_tests(void) {
     test_kobject_init();
     test_kobject_init_name_truncation();
     test_kobject_get();
-    test_kobject_put();
+    test_kobject_put_basic();
+    test_kobject_release_callback();
     test_kset_init();
 
     if (failed_tests == 0) {

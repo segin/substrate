@@ -1,0 +1,49 @@
+.Dd October 26, 2023
+.Dt UUDECODE 1
+.Os Substrate
+.Sh NAME
+.Nm uudecode
+.Nd decode a binary file
+.Sh SYNOPSIS
+.Nm
+.Op Fl p
+.Op Fl s
+.Op Fl o Ar output_file
+.Op Ar file ...
+.Sh DESCRIPTION
+The
+.Nm
+utility reads a uuencoded file (or standard input) and recreates the original binary file.
+The encoded file must have a header line of the form
+.Dq begin <mode> <file>
+and end with a line containing only
+.Dq end .
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl p
+Write output to standard output instead of the file specified in the header.
+.It Fl s
+Strip directory path components from the output filename (secure mode).
+This prevents the utility from writing to arbitrary locations on the filesystem.
+.It Fl o Ar output_file
+Write output to
+.Ar output_file
+instead of the filename specified in the header.
+.El
+.Sh SEE ALSO
+.Xr uuencode 1
+.Sh STANDARDS
+The
+.Nm
+utility is compliant with the IEEE Std 1003.1-2008 (``POSIX.1'') specification,
+with the exception of the
+.Fl p ,
+.Fl s ,
+and
+.Fl o
+flags, which are extensions.
+.Sh HISTORY
+A
+.Nm
+command appeared in Version 6 AT&T UNIX.

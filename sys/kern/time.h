@@ -27,7 +27,7 @@ uint32_t get_hz(void);
 void timer_tick(void);
 
 // Syscalls
-time_t sys_time(time_t *tloc);
+int sys_time(time_t *tloc);
 
 struct timeval;
 struct timezone;
