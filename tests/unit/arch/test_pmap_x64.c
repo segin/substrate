@@ -1,4 +1,4 @@
-#include "../../../sys/arch/x86_64/pmap.h"
+#include <arch/x86_64/pmap.h>
 #include <stdbool.h>
 #include <stddef.h>
 

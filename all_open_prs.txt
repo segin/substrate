@@ -1,0 +1,56 @@
+| 273 | usr.bin: add POSIX-style pr utility with UTF-8 column support | codex/implement-posix-style-pr-utility | Pending |
+| 272 | Codex-generated pull request | codex/implement-posix-pax-utility | Pending |
+| 271 | Add POSIX tar utility with PAX, streaming, sparse, and incremental support | codex/design-and-implement-posix-compatible-tar-program | Pending |
+| 270 | Codex-generated pull request | codex/implement-posix-compatible-cpio-utility | Pending |
+| 269 | vfs: implement vnode I/O operation wrappers with docs and test coverage | codex/implement-vfs-i/o-operations | Pending |
+| 268 | Follow-up: restore srand semantics for libc rand() | codex/fix-issues-from-codex-review-on-pr-#132 | Pending |
+| 267 | Fix personality cache synchronization during exec transitions | codex/fix-uma-zone-limits-and-kernel-build-issues | Pending |
+| 266 | Harden /dev/null, /dev/full, and /dev/zero semantics and tests | codex/compare-implementations-of-/dev/null,-/dev/full,-/dev/zero | Pending |
+| 265 | Fix Minix readdir race condition security vulnerability | fix-minix-readdir-race-1713143679781319134 | Pending |
+| 264 | ⚡ Optimize ext2_remove_entry strlen usage | optimize-ext2-remove-entry-9981666838844967488 | Pending |
+| 263 | Implement fnmatch flags | fnmatch-flags-11723972617493115648 | Pending |
+| 262 | 🧪 Add tests for process accounting in sys/kern/acct.c | test-sys-acct-improvement-11411557495922440051 | Pending |
+| 261 | ⚡ Optimize bc_mul with delayed carry propagation | perf-bc-mul-delayed-carry-5122991962511979521 | Pending |
+| 260 | Fix kernel memory corruption in /dev/full driver | fix-full-driver-vulnerability-1848060727225942833 | Pending |
+| 259 | Add tests for scheduler priority decay | testing-sched_decay_tests-4652468815522122172 | Pending |
+| 258 | Add tests for sysctl handlers | test-sysctl-handlers-10579558288018219292 | Pending |
+| 257 | tests: Add strcpy and strncpy tests to sys/lib/string.c | test-string-improvement-9072802589397386790 | Pending |
+| 256 | 🧪 Add unit tests for CRC32 implementation | test-crc32-777860107804490481 | Pending |
+| 255 | ⚡ Optimize regex epsilon_closure allocation and fix double-free | regex-epsilon-closure-optimization-4460855979188905059 | Pending |
+| 254 | Implement relational operators in bc | feature-bc-relational-ops-11656035194807219681 | Pending |
+| 253 | 🔒 Fix Missing User Pointer Validation in System Calls | fix-syscall-validation-8253711123022505658 | Pending |
+| 252 | Enable NULL pointer check in sysinfo test | test-sysinfo-null-check-2541804188862678033 | Pending |
+| 251 | Fix buffer overflow in UDF finddir | fix-udf-buffer-overflow-1532312182053948547 | Pending |
+| 250 | Fix unsafe strcpy in sysfs_finddir | sysfs-unsafe-strcpy-fix-8945132579181172798 | Pending |
+| 249 | Add tests for 64-bit division helpers | add-div64-tests-11519423062959504609 | Pending |
+| 248 | test: add memmove overlap tests | memmove-overlap-tests-13436281439976689749 | Pending |
+| 247 | Add unit tests for memset in sys/lib/string.c | add-memset-tests-7413600486587973920 | Pending |
+| 246 | ⚡ Optimize ext2_remove_entry | perf-ext2-remove-entry-strlen-12163760922940955592 | Pending |
+| 245 | [Code Health] Replace unsafe sprintf with snprintf in virtio driver | code-health-virtio-sprintf-fix-14323108118504556883 | Pending |
+| 244 | Add tests for strcmp and strncmp | add-string-tests-14674884598049793118 | Pending |
+| 243 | ⚡ Optimize ext2_finddir strlen usage and fix 64-bit portability | perf-ext2-finddir-optimization-4842221231931580138 | Pending |
+| 242 | 🧪 Add tests for kobject lifecycle | test-kobject-lifecycle-3399338486261452679 | Pending |
+| 241 | ⚡ Optimize regex engine with scratch buffer reuse | regex-perf-optimization-6095147543900369688 | Pending |
+| 240 | feat(udf): implement large file write support with extent allocation | udf-large-write-support-4103120647258685364 | Pending |
+| 239 | Refactor shell builtin handler to use dispatch table | refactor-shell-builtin-dispatch-10573201089519787409 | Pending |
+| 238 | Implement extent allocation for large files in UDF | udf-extent-allocation-10661161313427829815 | Pending |
+| 237 | Implement sys_vm_stats via new syscall | sys_vm_stats-impl-11727494392246146895 | Pending |
+| 236 | Initialize AP-local state for SMP | smp-ap-init-16437905846909714346 | Pending |
+| 235 | Fix broken vnode locking semantics | fix-vnode-locking-1324200281796365818 | Pending |
+| 234 | Fix integer overflow in FAT driver memory allocation | fix-fat-overflow-16972954688507555212 | Pending |
+| 233 | Refactor VM86 stack handling to use assembly trampoline | vm86-stack-cleanup-8754072015208460872 | Pending |
+| 232 | Implement UDF file truncation for extent-based files | udf-truncate-extents-11901801538909466573 | Pending |
+| 231 | 🔒 Fix Missing User Pointer Validation in System Calls | fix-syscall-security-validation-10193277217585305956 | Pending |
+| 230 | Support negative years in gmtime_r | negative-years-gmtime-13977185708273007341 | Pending |
+| 229 | Fix Minix FS stack buffer over-read vulnerability | fix-minix-vuln-6838836172126750388 | Pending |
+| 228 | Use proper timer for SMP boot delays | smp-timer-delay-14671504487296646720 | Pending |
+| 227 | Optimize private futexes using process-local keys | futex-private-optimization-5502444992124166888 | Pending |
+| 226 | Implement UDF large file write support | udf-large-file-write-3567228198276048864 | Pending |
+| 225 | Implement timezone support in localtime_r | libc-localtime-tz-8548011922477863216 | Pending |
+| 224 | ⚡ Optimize strlen in ext2 directory loops | ext2-strlen-opt-6130847536077752812 | Pending |
+| 223 | Wake up waiters in vn_unlock | vn_unlock_wakeup-10768298355229394209 | Pending |
+| 222 | ⚡ Implement mmap-backed free-list allocator | perf-malloc-allocator-12120464357033906098 | Pending |
+| 221 | Implement ASID allocator for x86_64 pmap | asid-allocator-x86_64-1232029628029099010 | Pending |
+| 220 | Add unit tests for libc memmove covering overlapping regions | test-libc-memmove-16398876537657240545 | Pending |
+| 219 | 🧹 Replace unsafe sprintf with snprintf in VirtIO driver | fix-unsafe-sprintf-virtio-16053188742992154854 | Pending |
+| 218 | Code Health: Use proper timer in smp_discovery.c | code-health-lapic-timer-delay-1712904159877921263 | Pending |

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/types.h>
+#include <sys/dirent.h>
 
 #define FS_FILE        0x01
 #define FS_DIRECTORY   0x02
@@ -13,10 +15,7 @@
 #define FS_MOUNTPOINT  0x08 
 
 struct fs_node;
-
-#include <sys/types.h>
-
-/* ... */
+struct mount;
 
 typedef size_t (*read_type_t)(struct fs_node*, off_t, size_t, uint8_t*);
 typedef size_t (*write_type_t)(struct fs_node*, off_t, size_t, const uint8_t*);
@@ -70,12 +69,8 @@ typedef struct fs_node {
     mknod_type_t mknod;
     unmount_type_t unmount;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
+    struct mount *mp;    // Mount point this node belongs to.
 } fs_node_t;
-
-struct dirent {
-    char name[128];
-    uint64_t ino;
-};
 
 typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
 
@@ -91,8 +86,6 @@ typedef struct vfs_mount {
     struct vfs_mount *next;
 } vfs_mount_t;
 
-/* ... */
-
 // Standard VFS functions
 size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
@@ -107,7 +100,6 @@ int readlink_fs(fs_node_t *node, char *buf, size_t size);
 int symlink_fs(fs_node_t *parent, const char *target, const char *name);
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name);
 int unlink_fs(fs_node_t *node, const char *name);
-int unlink_fs(fs_node_t *node, const char *name);
 int vfs_mkdir(const char *path, uint16_t permission);
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev);
 
@@ -116,6 +108,7 @@ int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode)
 void vfs_register_filesystem(filesystem_t *fs);
 filesystem_t *vfs_get_filesystems(void);
 int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data);
+int vfs_unmount_legacy(const char *path);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
 void vfs_init(void);

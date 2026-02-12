@@ -20,10 +20,16 @@
 #include <arch/i386/pmap.h>
 
 /* Mock implementations */
-uintptr_t pmap_extract(void *pmap, uintptr_t va) {
+uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
     return va;
 }
 void sched_sleep(void *chan) {}
+int sched_sleep_until(void *chan, uint64_t deadline) {
+    /* Verify deadline if needed, or return ETIMEDOUT to simulate timeout */
+    return -110; /* ETIMEDOUT in host Linux usually, but generic errno is 110 */
+}
+uint64_t get_ticks(void) { return 1000; }
+uint32_t get_hz(void) { return 1000; }
 void sched_set_priority(int tid, int cls, int prio) {}
 int sleepq_wake_n(void *chan, int n) { return 0; }
 int sleepq_requeue(void *src, void *dst, int wake_n, int requeue_n) { return 0; }
@@ -214,6 +220,16 @@ int main() {
     test_sys_get_robust_list_denied();
     test_sys_get_robust_list_root_allowed();
     test_sys_get_robust_list_not_found();
+
+    printf("Running test_futex_wait_timeout...\n");
+    int futex_word = 42;
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 50000000; /* 50ms */
+
+    int ret = sys_futex(&futex_word, FUTEX_WAIT, 42, &ts, NULL, 0);
+    assert(ret == -110); /* ETIMEDOUT */
+    printf("PASS\n");
 
     printf("All tests passed!\n");
     return 0;
