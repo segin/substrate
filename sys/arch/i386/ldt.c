@@ -10,12 +10,6 @@
 #define GDT_LDT_INDEX 7
 
 extern void kprint(const char *s);
-extern int copy_from_user(void *dest, const void *src, size_t n);
-
-/* Fallback if copy_from_user is not defined elsewhere */
-#ifndef copy_from_user
-#define copy_from_user(dest, src, n) (memcpy(dest, src, n), 0)
-#endif
 
 void ldt_activate(process_t *proc) {
     if (!proc || !proc->ldt) {
@@ -101,7 +95,7 @@ int sys_modify_ldt(int func, struct user_desc *ptr, unsigned long bytecount) {
     }
     
     struct user_desc info;
-    if (copy_from_user(&info, ptr, sizeof(struct user_desc))) {
+    if (copyin(ptr, &info, sizeof(struct user_desc))) {
         return -EFAULT;
     }
     
