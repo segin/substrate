@@ -1,8 +1,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-#include "../../../sys/sys/file.h"
-#include "../../../sys/kern/sched.h"
+#include <sys/file.h"
+#include <kern/sched.h"
 
 extern int sys_chroot(const char *path);
 extern int sys_open(const char *path, int flags, int mode);

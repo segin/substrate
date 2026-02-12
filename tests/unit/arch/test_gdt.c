@@ -1,4 +1,4 @@
-#include "../../../sys/arch/i386/gdt.h"
+#include <arch/i386/gdt.h"
 #include <stdbool.h>
 #include <stdint.h>
 
