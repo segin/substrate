@@ -602,14 +602,14 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
             if (de->inode != 0 && de->name_len > 0) {
                 if (cur_idx == index) {
                     // Found it - store in context specific dirent
-                    ctx->current_dirent.ino = de->inode;
+                    ctx->current_dirent.d_ino = de->inode;
                     uint32_t len = de->name_len;
                     // Fix: Ensure name fits in buffer to prevent overflow
-                    if (len >= sizeof(ctx->current_dirent.name)) {
-                        len = sizeof(ctx->current_dirent.name) - 1;
+                    if (len >= sizeof(ctx->current_dirent.d_name)) {
+                        len = sizeof(ctx->current_dirent.d_name) - 1;
                     }
-                    memcpy(ctx->current_dirent.name, de->name, len);
-                    ctx->current_dirent.name[len] = '\0';
+                    memcpy(ctx->current_dirent.d_name, de->name, len);
+                    ctx->current_dirent.d_name[len] = '\0';
                     result = &ctx->current_dirent;
                     goto cleanup;
                 }
@@ -629,10 +629,12 @@ cleanup:
 
 // Find entry by name in directory
 fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
+    if (!node || !name) return NULL;
+
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
-    uint32_t name_len = strlen(name);
+    size_t name_len = strlen(name);
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
     
@@ -1149,6 +1151,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
+    size_t name_len = strlen(name);
     
     mutex_lock(&ctx->lock);
 
@@ -1189,7 +1192,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
             if (de->rec_len == 0) break;
             
             // Is this the entry to remove?
-            if (de->inode != 0 && de->name_len == strlen(name) &&
+            if (de->inode != 0 && de->name_len == name_len &&
                 strncmp(de->name, name, de->name_len) == 0) {
                 
                 // Merge with previous entry if possible

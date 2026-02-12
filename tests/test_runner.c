@@ -91,6 +91,9 @@ extern bool test_svr4_personality_table(void);
 
 // LibC Tests
 extern bool test_libc_strlen(void);
+extern bool test_gmtime_negative_years(void);
+extern bool test_libc_time(void);
+extern bool test_libc_memmove(void);
 
 typedef struct {
     const char *name;
@@ -145,6 +148,9 @@ test_case_t tests[] = {
     {"svr3_perso", test_svr3_personality_table},
     {"svr4_perso", test_svr4_personality_table},
     {"libc_strlen", test_libc_strlen},
+    {"libc_time_neg", test_gmtime_negative_years},
+    {"libc_time", test_libc_time},
+    {"libc_memmove", test_libc_memmove},
     {NULL, NULL}
 };
 

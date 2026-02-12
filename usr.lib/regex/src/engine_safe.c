@@ -154,6 +154,8 @@ typedef struct regex_iter_safe {
     regex_err_t last_err;
     match_queue queue;
     int finished;
+    uint8_t *scratch_set;
+    size_t scratch_cap;
 } regex_iter_safe;
 
 typedef struct parser {
@@ -1402,15 +1404,11 @@ static int dfa_state_accepts(nfa_prog *prog, uint8_t *set) {
     return 0;
 }
 
-static uint8_t *dfa_move(nfa_prog *prog, uint8_t *set, size_t pos, const char *text, size_t text_len,
-                         uint32_t cp, unsigned flags, size_t *out_bytes) {
-    size_t bytes = bitset_bytes(prog->state_count);
-    uint8_t *next = (uint8_t *)calloc(bytes, 1);
+static void dfa_move(nfa_prog *prog, uint8_t *set, size_t pos, const char *text, size_t text_len,
+                     uint32_t cp, unsigned flags, uint8_t *next, size_t bytes) {
     size_t i;
 
-    if (!next) {
-        return NULL;
-    }
+    memset(next, 0, bytes);
 
     for (i = 0; i < prog->state_count; ++i) {
         if (!bitset_test(set, i)) {
@@ -1459,8 +1457,6 @@ static uint8_t *dfa_move(nfa_prog *prog, uint8_t *set, size_t pos, const char *t
         }
     }
 
-    *out_bytes = bytes;
-    return next;
 }
 
 static dfa_prog *dfa_build(nfa_prog *prog, unsigned flags, size_t max_states) {
@@ -1504,7 +1500,8 @@ static void dfa_free(dfa_prog *dfa) {
 }
 
 static int dfa_step(nfa_prog *prog, dfa_prog *dfa, int state_id, size_t pos,
-                    const char *text, size_t text_len, uint32_t cp, unsigned flags) {
+                    const char *text, size_t text_len, uint32_t cp, unsigned flags,
+                    uint8_t *scratch_set, size_t scratch_cap) {
     dfa_state *state = &dfa->states[state_id];
     int existing = dfa_find_transition(state, cp);
     if (existing >= 0) {
@@ -1512,22 +1509,31 @@ static int dfa_step(nfa_prog *prog, dfa_prog *dfa, int state_id, size_t pos,
     }
 
     {
-        size_t bytes = 0;
-        uint8_t *next = dfa_move(prog, state->nfa_set, pos, text, text_len, cp, flags, &bytes);
+        size_t bytes = scratch_cap;
+        uint8_t *next = scratch_set;
         int target;
-        if (!next) {
-            return -1;
-        }
+
+        dfa_move(prog, state->nfa_set, pos, text, text_len, cp, flags, next, bytes);
+
         target = dfa_find_state(dfa, next, bytes);
         if (target < 0) {
-            int accept = dfa_state_accepts(prog, next);
-            target = dfa_add_state(dfa, next, bytes, accept);
-            if (target < 0) {
-                free(next);
+            uint8_t *new_set;
+            int accept;
+
+            new_set = (uint8_t *)malloc(bytes);
+            if (!new_set) {
                 return -1;
             }
-        } else {
-            free(next);
+            memcpy(new_set, next, bytes);
+
+            accept = dfa_state_accepts(prog, new_set);
+            target = dfa_add_state(dfa, new_set, bytes, accept);
+            if (target < 0) {
+                free(new_set);
+                return -1;
+            }
+            // State array may have been reallocated
+            state = &dfa->states[state_id];
         }
         if (!dfa_add_transition(state, cp, target)) {
             return -1;
@@ -1764,6 +1770,8 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
             for (i = 0; i < clist.count; ++i) {
                 nfa_state *s = clist.threads[i].s;
                 size_t *caps = clist.threads[i].caps;
+                clist.threads[i].caps = NULL;
+
                 switch (s->type) {
                 case NFA_CHAR:
                     if (match_char(s->ch, cp, re->flags)) {
@@ -1825,7 +1833,8 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
 }
 
 static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, size_t text_len,
-                          size_t start_pos, size_t *out_end, regex_err_t *out_err) {
+                          size_t start_pos, size_t *out_end, regex_err_t *out_err,
+                          uint8_t *scratch_set, size_t scratch_cap) {
     dfa_prog *dfa = sre->dfa;
     size_t pos = start_pos;
     int state = dfa->start_state;
@@ -1856,7 +1865,7 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
                 }
                 return 0;
             }
-            state = dfa_step(sre->nfa, dfa, state, pos, text, text_len, cp, re->flags);
+            state = dfa_step(sre->nfa, dfa, state, pos, text, text_len, cp, re->flags, scratch_set, scratch_cap);
             if (state < 0) {
                 if (out_err) {
                     *out_err = REGEX_ERR_COMPILE_LIMIT;
@@ -1866,7 +1875,7 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
             pos = idx;
         } else {
             uint32_t cp = (uint8_t)text[pos];
-            state = dfa_step(sre->nfa, dfa, state, pos, text, text_len, cp, re->flags);
+            state = dfa_step(sre->nfa, dfa, state, pos, text, text_len, cp, re->flags, scratch_set, scratch_cap);
             if (state < 0) {
                 if (out_err) {
                     *out_err = REGEX_ERR_COMPILE_LIMIT;
@@ -1884,9 +1893,10 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
     return 0;
 }
 
-static ssize_t safe_regex_match(const regex_t *re, const char *text, size_t text_len,
-                                size_t *capture_offsets, size_t max_captures,
-                                regex_err_t *out_err) {
+static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, size_t text_len,
+                                         size_t *capture_offsets, size_t max_captures,
+                                         regex_err_t *out_err,
+                                         uint8_t *scratch_set, size_t scratch_cap) {
     safe_regex *sre = (safe_regex *)re->impl;
     size_t cap_count = sre->capture_count * 2;
     size_t start_pos = 0;
@@ -1908,7 +1918,7 @@ static ssize_t safe_regex_match(const regex_t *re, const char *text, size_t text
 
     while (start_pos <= text_len) {
         size_t end_pos = 0;
-        int ok = dfa_match_span(re, sre, text, text_len, start_pos, &end_pos, out_err);
+        int ok = dfa_match_span(re, sre, text, text_len, start_pos, &end_pos, out_err, scratch_set, scratch_cap);
         if (ok) {
             ssize_t cap_res = nfa_capture_match(sre->nfa, re, text, text_len, start_pos,
                                                 capture_offsets, max_captures, out_err);
@@ -1943,6 +1953,35 @@ static ssize_t safe_regex_match(const regex_t *re, const char *text, size_t text
     return -1;
 }
 
+static ssize_t safe_regex_match(const regex_t *re, const char *text, size_t text_len,
+                                size_t *capture_offsets, size_t max_captures,
+                                regex_err_t *out_err) {
+    safe_regex *sre = (safe_regex *)re->impl;
+    size_t scratch_cap;
+    uint8_t *scratch_set;
+    ssize_t res;
+
+    if (!sre || !sre->nfa) {
+        if (out_err) {
+            *out_err = REGEX_ERR_INTERNAL;
+        }
+        return -REGEX_ERR_INTERNAL;
+    }
+
+    scratch_cap = bitset_bytes(sre->nfa->state_count);
+    scratch_set = (uint8_t *)malloc(scratch_cap);
+    if (!scratch_set) {
+        if (out_err) {
+            *out_err = REGEX_ERR_NOMEM;
+        }
+        return -REGEX_ERR_NOMEM;
+    }
+
+    res = safe_regex_match_internal(re, text, text_len, capture_offsets, max_captures, out_err, scratch_set, scratch_cap);
+    free(scratch_set);
+    return res;
+}
+
 static regex_err_t safe_regex_find_all(const regex_t *re, const char *text, size_t text_len,
                                        regex_match_cb cb, void *user, size_t max_matches) {
     size_t pos = 0;
@@ -1952,9 +1991,15 @@ static regex_err_t safe_regex_find_all(const regex_t *re, const char *text, size
     size_t *caps;
     ssize_t res;
     size_t limit = max_matches ? max_matches : re->limits.max_matches;
+    safe_regex *sre = (safe_regex *)re->impl;
+    size_t scratch_cap;
+    uint8_t *scratch_set;
 
     if (!re || !text || !cb) {
         return REGEX_ERR_INVALID_ARGUMENT;
+    }
+    if (!sre || !sre->nfa) {
+        return REGEX_ERR_INTERNAL;
     }
 
     cap_count = regex_capture_count(re) * 2;
@@ -1963,10 +2008,18 @@ static regex_err_t safe_regex_find_all(const regex_t *re, const char *text, size
         return REGEX_ERR_NOMEM;
     }
 
+    scratch_cap = bitset_bytes(sre->nfa->state_count);
+    scratch_set = (uint8_t *)malloc(scratch_cap);
+    if (!scratch_set) {
+        free(caps);
+        return REGEX_ERR_NOMEM;
+    }
+
     while (pos <= text_len) {
-        res = safe_regex_match(re, text + pos, text_len - pos, caps, cap_count, &err);
+        res = safe_regex_match_internal(re, text + pos, text_len - pos, caps, cap_count, &err, scratch_set, scratch_cap);
         if (res < 0 && res != -1) {
             free(caps);
+            free(scratch_set);
             return err;
         }
         if (res == -1) {
@@ -1975,6 +2028,7 @@ static regex_err_t safe_regex_find_all(const regex_t *re, const char *text, size
 
         if (limit && matches >= limit) {
             free(caps);
+            free(scratch_set);
             return REGEX_ERR_MATCH_TIMEOUT;
         }
 
@@ -1999,6 +2053,7 @@ static regex_err_t safe_regex_find_all(const regex_t *re, const char *text, size
         }
     }
 
+    free(scratch_set);
     free(caps);
     return REGEX_OK;
 }
@@ -2058,9 +2113,15 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
     ssize_t res;
     size_t out_len_local = 0;
     size_t *out_len_ptr = out_len ? out_len : &out_len_local;
+    safe_regex *sre = (safe_regex *)re->impl;
+    size_t scratch_cap;
+    uint8_t *scratch_set;
 
     if (!out_buf) {
         return REGEX_ERR_INVALID_ARGUMENT;
+    }
+    if (!sre || !sre->nfa) {
+        return REGEX_ERR_INTERNAL;
     }
 
     caps = (size_t *)malloc(cap_count * sizeof(*caps));
@@ -2068,11 +2129,19 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
         return REGEX_ERR_NOMEM;
     }
 
+    scratch_cap = bitset_bytes(sre->nfa->state_count);
+    scratch_set = (uint8_t *)malloc(scratch_cap);
+    if (!scratch_set) {
+        free(caps);
+        return REGEX_ERR_NOMEM;
+    }
+
     while (pos <= text_len) {
-        res = safe_regex_match(re, text + pos, text_len - pos, caps, cap_count, &err);
+        res = safe_regex_match_internal(re, text + pos, text_len - pos, caps, cap_count, &err, scratch_set, scratch_cap);
         if (res < 0 && res != -1) {
             free(caps);
             free(out);
+            free(scratch_set);
             return err;
         }
         if (res == -1) {
@@ -2086,6 +2155,7 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
             if (!ensure_capacity(&out, &out_cap, *out_len_ptr + (start - pos) + 1)) {
                 free(caps);
                 free(out);
+                free(scratch_set);
                 return REGEX_ERR_NOMEM;
             }
             memcpy(out + *out_len_ptr, text + pos, start - pos);
@@ -2098,6 +2168,7 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
                     if (err != REGEX_OK) {
                         free(caps);
                         free(out);
+                        free(scratch_set);
                         return err;
                     }
                     rpos += 2;
@@ -2109,6 +2180,7 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
                 if (!ensure_capacity(&out, &out_cap, *out_len_ptr + 2)) {
                     free(caps);
                     free(out);
+                    free(scratch_set);
                     return REGEX_ERR_NOMEM;
                 }
                 out[(*out_len_ptr)++] = replacement[rpos++];
@@ -2127,6 +2199,7 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
     if (!ensure_capacity(&out, &out_cap, *out_len_ptr + (text_len - pos) + 1)) {
         free(caps);
         free(out);
+        free(scratch_set);
         return REGEX_ERR_NOMEM;
     }
     memcpy(out + *out_len_ptr, text + pos, text_len - pos);
@@ -2135,6 +2208,7 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
 
     *out_buf = out;
     free(caps);
+    free(scratch_set);
     return REGEX_OK;
 }
 
@@ -2148,9 +2222,15 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
     char **items = NULL;
     regex_err_t err = REGEX_OK;
     ssize_t res;
+    safe_regex *sre = (safe_regex *)re->impl;
+    size_t scratch_cap;
+    uint8_t *scratch_set;
 
     if (!out) {
         return REGEX_ERR_INVALID_ARGUMENT;
+    }
+    if (!sre || !sre->nfa) {
+        return REGEX_ERR_INTERNAL;
     }
 
     caps = (size_t *)malloc(cap_count * sizeof(*caps));
@@ -2158,10 +2238,18 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
         return REGEX_ERR_NOMEM;
     }
 
+    scratch_cap = bitset_bytes(sre->nfa->state_count);
+    scratch_set = (uint8_t *)malloc(scratch_cap);
+    if (!scratch_set) {
+        free(caps);
+        return REGEX_ERR_NOMEM;
+    }
+
     while (pos <= text_len) {
-        res = safe_regex_match(re, text + pos, text_len - pos, caps, cap_count, &err);
+        res = safe_regex_match_internal(re, text + pos, text_len - pos, caps, cap_count, &err, scratch_set, scratch_cap);
         if (res < 0 && res != -1) {
             free(caps);
+            free(scratch_set);
             return err;
         }
         if (res == -1 || (max_splits && count >= max_splits)) {
@@ -2176,6 +2264,7 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
                 char **new_items = (char **)realloc(items, new_cap * sizeof(*new_items));
                 if (!new_items) {
                     free(caps);
+                    free(scratch_set);
                     return REGEX_ERR_NOMEM;
                 }
                 items = new_items;
@@ -2184,6 +2273,7 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
             items[count] = (char *)malloc(seg_len + 1);
             if (!items[count]) {
                 free(caps);
+                free(scratch_set);
                 return REGEX_ERR_NOMEM;
             }
             memcpy(items[count], text + pos, seg_len);
@@ -2203,6 +2293,7 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
             char **new_items = (char **)realloc(items, new_cap * sizeof(*new_items));
             if (!new_items) {
                 free(caps);
+                free(scratch_set);
                 return REGEX_ERR_NOMEM;
             }
             items = new_items;
@@ -2211,6 +2302,7 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
         items[count] = (char *)malloc(seg_len + 1);
         if (!items[count]) {
             free(caps);
+            free(scratch_set);
             return REGEX_ERR_NOMEM;
         }
         memcpy(items[count], text + pos, seg_len);
@@ -2221,6 +2313,7 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
     out->items = items;
     out->count = count;
     free(caps);
+    free(scratch_set);
     return REGEX_OK;
 }
 
@@ -2252,12 +2345,32 @@ static int match_queue_pop(match_queue *q, match_record *rec) {
 
 static regex_iter_t *safe_regex_iter_create(const regex_t *re, unsigned options, regex_err_t *out_err) {
     regex_iter_safe *it = (regex_iter_safe *)calloc(1, sizeof(*it));
+    safe_regex *sre = (safe_regex *)re->impl;
+
     if (!it) {
         if (out_err) {
             *out_err = REGEX_ERR_NOMEM;
         }
         return NULL;
     }
+    if (!sre || !sre->nfa) {
+        if (out_err) {
+            *out_err = REGEX_ERR_INTERNAL;
+        }
+        free(it);
+        return NULL;
+    }
+
+    it->scratch_cap = bitset_bytes(sre->nfa->state_count);
+    it->scratch_set = (uint8_t *)malloc(it->scratch_cap);
+    if (!it->scratch_set) {
+        if (out_err) {
+            *out_err = REGEX_ERR_NOMEM;
+        }
+        free(it);
+        return NULL;
+    }
+
     it->base.engine = regex_engine_safe_vtable();
     it->re = re;
     it->options = options;
@@ -2316,8 +2429,8 @@ static regex_err_t safe_regex_iter_feed(regex_iter_t *it_base, const char *chunk
     }
 
     while (it->scan_pos <= it->buf_len) {
-        res = safe_regex_match(it->re, it->buffer + it->scan_pos, it->buf_len - it->scan_pos,
-                               caps, cap_count, &err);
+        res = safe_regex_match_internal(it->re, it->buffer + it->scan_pos, it->buf_len - it->scan_pos,
+                                        caps, cap_count, &err, it->scratch_set, it->scratch_cap);
         if (res == -1) {
             break;
         }
@@ -2418,6 +2531,7 @@ static void safe_regex_iter_destroy(regex_iter_t *it_base) {
     }
     free(it->queue.items);
     free(it->buffer);
+    free(it->scratch_set);
     free(it);
 }
 
