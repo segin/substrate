@@ -114,6 +114,90 @@ static void test_strlen(void) {
     }
 }
 
+static void test_strcpy(void) {
+    char src[] = "Hello World";
+    char dest[20];
+
+    memset(dest, 'X', sizeof(dest)); // Fill with garbage
+
+    char *ret = strcpy(dest, src);
+
+    if (ret != dest) {
+        kprint("FAIL: strcpy return value mismatch\n");
+        failed_tests++;
+    }
+    if (strcmp(dest, src) != 0) {
+        kprint("FAIL: strcpy content mismatch\n");
+        failed_tests++;
+    }
+    if (dest[strlen(src)] != '\0') {
+         kprint("FAIL: strcpy null terminator missing\n");
+         failed_tests++;
+    }
+    if (dest[sizeof(dest)-1] != 'X') {
+         kprint("FAIL: strcpy buffer overflow check failed\n");
+         failed_tests++;
+    }
+}
+
+static void test_strncpy(void) {
+    char src[] = "Hello";
+    char dest[20];
+
+    // Case 1: n > strlen(src) -> Pad with nulls
+    memset(dest, 'X', sizeof(dest));
+    char *ret = strncpy(dest, src, 10);
+
+    if (ret != dest) {
+        kprint("FAIL: strncpy return value mismatch\n");
+        failed_tests++;
+    }
+    if (strcmp(dest, src) != 0) {
+        kprint("FAIL: strncpy content mismatch\n");
+        failed_tests++;
+    }
+    // Verify padding
+    for (int i = 5; i < 10; i++) {
+        if (dest[i] != '\0') {
+            kprint("FAIL: strncpy padding failed\n");
+            failed_tests++;
+            break;
+        }
+    }
+    if (dest[10] != 'X') {
+        kprint("FAIL: strncpy overflow check failed\n");
+        failed_tests++;
+    }
+
+    // Case 2: n < strlen(src) -> No null terminator
+    memset(dest, 'X', sizeof(dest));
+    strncpy(dest, src, 3);
+
+    // Check first 3 chars match
+    if (memcmp(dest, src, 3) != 0) {
+        kprint("FAIL: strncpy truncation content mismatch\n");
+        failed_tests++;
+    }
+    // Check NO null terminator at index 3
+    if (dest[3] != 'X') {
+        kprint("FAIL: strncpy should not null terminate if truncated\n");
+        failed_tests++;
+    }
+
+    // Case 3: n == strlen(src) -> No null terminator
+    memset(dest, 'X', sizeof(dest));
+    strncpy(dest, src, 5);
+
+    if (memcmp(dest, src, 5) != 0) {
+        kprint("FAIL: strncpy exact length content mismatch\n");
+        failed_tests++;
+    }
+    if (dest[5] != 'X') {
+        kprint("FAIL: strncpy exact length should not null terminate\n");
+        failed_tests++;
+    }
+}
+
 static void test_memmove(void) {
     char buf[32];
     char expected[32];
@@ -317,7 +401,6 @@ static void test_strncmp(void) {
          failed_tests++;
     }
 }
-
 // Performance Benchmarks
 
 static void benchmark_memcpy(const char *label, void *dst, const void *src, size_t n, int iterations) {
@@ -347,6 +430,12 @@ void run_string_tests(void) {
 
     kprint("Checking strlen correctness...\n");
     test_strlen();
+
+    kprint("Checking strcpy correctness...\n");
+    test_strcpy();
+
+    kprint("Checking strncpy correctness...\n");
+    test_strncpy();
 
     kprint("Checking strcmp correctness...\n");
     test_strcmp();
