@@ -50,7 +50,7 @@ typedef struct process {
     struct pgrp *p_pgrp;       // Process group (NULL = none)
     struct process *p_pgrp_link; // Next process in same pgrp (linked list)
     int perso_id; // Personality ID (PERS_NATIVE, PERS_LINUX, etc.)
-    struct personality *pers; // Pointer to personality structure
+    struct personality *pers; // Pointer to personality
     file_t *fds[MAX_FD]; // File Descriptor Table
     int next_fd;         // Hint for next free FD
     fs_node_t *root_node; // Per-process root (for chroot)

@@ -72,21 +72,50 @@ int32_t compat_time32(int32_t *tloc) {
  * that inspect struct stat contents (e.g., if they check st_ino).
  */
 
-/* Stub: returns native stat - ONLY works if struct layouts match! */
+#include <sys/kern_syscalls.h>
+#include <string.h>
+
+/*
+ * compat_stat_stub - Placeholder for personalities where stat layout matches native.
+ * Note: These are legacy entry points and should generally be avoided in favor of
+ * personality-specific translation layers.
+ */
 int compat_stat_stub(const char *path, void *buf) {
-    return sys_stat(path, buf);
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    
+    struct stat kbuf;
+    int ret = kern_stat(kpath, &kbuf);
+    if (ret == 0) {
+        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
+    }
+    return ret;
 }
 
 int compat_lstat_stub(const char *path, void *buf) {
-    return sys_lstat(path, buf);
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    
+    struct stat kbuf;
+    int ret = kern_lstat(kpath, &kbuf);
+    if (ret == 0) {
+        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
+    }
+    return ret;
 }
 
 int compat_fstat_stub(int fd, void *buf) {
-    return sys_fstat(fd, buf);
+    struct stat kbuf;
+    int ret = kern_fstat(fd, &kbuf);
+    if (ret == 0) {
+        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
+    }
+    return ret;
 }
 
 /* FreeBSD Stat Translation */
 static void translate_stat_to_freebsd(struct stat *native, struct freebsd_stat *fbsd) {
+    memset(fbsd, 0, sizeof(struct freebsd_stat));
     fbsd->st_dev = native->st_dev;
     fbsd->st_ino = native->st_ino;
     fbsd->st_mode = (uint16_t)native->st_mode;
@@ -103,36 +132,50 @@ static void translate_stat_to_freebsd(struct stat *native, struct freebsd_stat *
     fbsd->st_size = native->st_size;
     fbsd->st_blocks = native->st_blocks;
     fbsd->st_blksize = native->st_blksize;
-    fbsd->st_flags = 0;
-    fbsd->st_gen = 0;
-    fbsd->st_lspare = 0;
-    fbsd->st_birthtim.tv_sec = 0;
-    fbsd->st_birthtim.tv_nsec = 0;
 }
 
 int sys_freebsd_stat(const char *path, struct freebsd_stat *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    
     struct stat native;
-    int ret = sys_stat(path, &native);
-    if (ret == 0) translate_stat_to_freebsd(&native, buf);
+    int ret = kern_stat(kpath, &native);
+    if (ret == 0) {
+        struct freebsd_stat kfbsd;
+        translate_stat_to_freebsd(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd_stat)) != 0) return -14;
+    }
     return ret;
 }
 
 int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    
     struct stat native;
-    int ret = sys_lstat(path, &native);
-    if (ret == 0) translate_stat_to_freebsd(&native, buf);
+    int ret = kern_lstat(kpath, &native);
+    if (ret == 0) {
+        struct freebsd_stat kfbsd;
+        translate_stat_to_freebsd(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd_stat)) != 0) return -14;
+    }
     return ret;
 }
 
 int sys_freebsd_fstat(int fd, struct freebsd_stat *buf) {
     struct stat native;
-    int ret = sys_fstat(fd, &native);
-    if (ret == 0) translate_stat_to_freebsd(&native, buf);
+    int ret = kern_fstat(fd, &native);
+    if (ret == 0) {
+        struct freebsd_stat kfbsd;
+        translate_stat_to_freebsd(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd_stat)) != 0) return -14;
+    }
     return ret;
 }
 
 /* FreeBSD 11 Stat Translation */
 static void translate_stat_to_freebsd11(struct stat *native, struct freebsd11_stat *fbsd) {
+    memset(fbsd, 0, sizeof(struct freebsd11_stat));
     fbsd->st_dev = native->st_dev;
     fbsd->st_ino = (uint32_t)native->st_ino;
     fbsd->st_mode = (uint16_t)native->st_mode;
@@ -149,31 +192,44 @@ static void translate_stat_to_freebsd11(struct stat *native, struct freebsd11_st
     fbsd->st_size = native->st_size;
     fbsd->st_blocks = native->st_blocks;
     fbsd->st_blksize = native->st_blksize;
-    fbsd->st_flags = 0;
-    fbsd->st_gen = 0;
-    fbsd->st_lspare = 0;
-    fbsd->st_birthtim.tv_sec = 0;
-    fbsd->st_birthtim.tv_nsec = 0;
 }
 
 int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    
     struct stat native;
-    int ret = sys_stat(path, &native);
-    if (ret == 0) translate_stat_to_freebsd11(&native, buf);
+    int ret = kern_stat(kpath, &native);
+    if (ret == 0) {
+        struct freebsd11_stat kfbsd;
+        translate_stat_to_freebsd11(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd11_stat)) != 0) return -14;
+    }
     return ret;
 }
 
 int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    
     struct stat native;
-    int ret = sys_lstat(path, &native);
-    if (ret == 0) translate_stat_to_freebsd11(&native, buf);
+    int ret = kern_lstat(kpath, &native);
+    if (ret == 0) {
+        struct freebsd11_stat kfbsd;
+        translate_stat_to_freebsd11(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd11_stat)) != 0) return -14;
+    }
     return ret;
 }
 
 int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf) {
     struct stat native;
-    int ret = sys_fstat(fd, &native);
-    if (ret == 0) translate_stat_to_freebsd11(&native, buf);
+    int ret = kern_fstat(fd, &native);
+    if (ret == 0) {
+        struct freebsd11_stat kfbsd;
+        translate_stat_to_freebsd11(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd11_stat)) != 0) return -14;
+    }
     return ret;
 }
 

@@ -29,6 +29,15 @@ void kprint(const char *fmt) {
     printf("%s", fmt);
 }
 
+void *kmalloc(size_t size) {
+    return malloc(size);
+}
+
+void kfree(void *ptr, size_t size) {
+    (void)size;
+    free(ptr);
+}
+
 // Include source (real file)
 #include "../../sys/fs/udf/udf_write.c"
 
