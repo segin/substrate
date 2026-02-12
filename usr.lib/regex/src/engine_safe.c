@@ -1227,13 +1227,34 @@ static size_t bitset_bytes(size_t bits) {
 
 static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_t pos,
                             const char *text, size_t text_len, unsigned flags, int ignore_anchors) {
+    int stack_buf[64];
     size_t stack_cap = 64;
     size_t stack_len = 0;
-    int *stack = (int *)malloc(stack_cap * sizeof(*stack));
-    if (!stack) {
-        return;
-    }
-    stack[stack_len++] = (int)start_id;
+    int *stack = stack_buf;
+
+#define PUSH_STACK(id_val) do { \
+    if (stack_len == stack_cap) { \
+        size_t new_cap = stack_cap * 2; \
+        int *new_stack; \
+        if (stack == stack_buf) { \
+            new_stack = (int *)malloc(new_cap * sizeof(*new_stack)); \
+            if (new_stack) { \
+                memcpy(new_stack, stack, stack_len * sizeof(*stack)); \
+            } \
+        } else { \
+            new_stack = (int *)realloc(stack, new_cap * sizeof(*new_stack)); \
+        } \
+        if (!new_stack) { \
+            if (stack != stack_buf) free(stack); \
+            return; \
+        } \
+        stack = new_stack; \
+        stack_cap = new_cap; \
+    } \
+    stack[stack_len++] = (id_val); \
+} while (0)
+
+    PUSH_STACK((int)start_id);
 
     while (stack_len > 0) {
         nfa_state *s;
@@ -1253,50 +1274,22 @@ static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_
         case NFA_EPSILON:
         case NFA_SAVE:
             if (s->out) {
-                if (stack_len == stack_cap) {
-                    stack_cap *= 2;
-                    stack = (int *)realloc(stack, stack_cap * sizeof(*stack));
-                    if (!stack) {
-                        return;
-                    }
-                }
-                stack[stack_len++] = s->out->id;
+                PUSH_STACK(s->out->id);
             }
             break;
         case NFA_SPLIT:
             if (s->out) {
-                if (stack_len == stack_cap) {
-                    stack_cap *= 2;
-                    stack = (int *)realloc(stack, stack_cap * sizeof(*stack));
-                    if (!stack) {
-                        return;
-                    }
-                }
-                stack[stack_len++] = s->out->id;
+                PUSH_STACK(s->out->id);
             }
             if (s->out1) {
-                if (stack_len == stack_cap) {
-                    stack_cap *= 2;
-                    stack = (int *)realloc(stack, stack_cap * sizeof(*stack));
-                    if (!stack) {
-                        return;
-                    }
-                }
-                stack[stack_len++] = s->out1->id;
+                PUSH_STACK(s->out1->id);
             }
             break;
         case NFA_BOL:
             if (ignore_anchors ||
                 pos == 0 || ((flags & REGEX_FLAG_MULTILINE) && pos > 0 && text && text[pos - 1] == '\n')) {
                 if (s->out) {
-                    if (stack_len == stack_cap) {
-                        stack_cap *= 2;
-                        stack = (int *)realloc(stack, stack_cap * sizeof(*stack));
-                        if (!stack) {
-                            return;
-                        }
-                    }
-                    stack[stack_len++] = s->out->id;
+                    PUSH_STACK(s->out->id);
                 }
             }
             break;
@@ -1304,14 +1297,7 @@ static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_
             if (ignore_anchors ||
                 pos == text_len || ((flags & REGEX_FLAG_MULTILINE) && pos < text_len && text && text[pos] == '\n')) {
                 if (s->out) {
-                    if (stack_len == stack_cap) {
-                        stack_cap *= 2;
-                        stack = (int *)realloc(stack, stack_cap * sizeof(*stack));
-                        if (!stack) {
-                            return;
-                        }
-                    }
-                    stack[stack_len++] = s->out->id;
+                    PUSH_STACK(s->out->id);
                 }
             }
             break;
@@ -1320,7 +1306,11 @@ static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_
         }
     }
 
-    free(stack);
+#undef PUSH_STACK
+
+    if (stack != stack_buf) {
+        free(stack);
+    }
 }
 
 static int dfa_state_equal(uint8_t *a, uint8_t *b, size_t bytes) {
