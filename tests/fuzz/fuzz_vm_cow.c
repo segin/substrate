@@ -19,7 +19,7 @@ void fuzz_vm_cow_ops(uint32_t seed) {
     
     for (int i = 0; i < 5; i++) {
         vm_map_init(&maps[i], pmap_kernel(), 0x1000, 0x11000);
-        vm_map_insert(&maps[i], shared_obj, 0, 0x1000, 0x11000);
+        vm_map_insert(&maps[i], shared_obj, 0, 0x1000, 0x11000, 0x3, 0x3, 1);
         vm_object_reference(shared_obj);
     }
 

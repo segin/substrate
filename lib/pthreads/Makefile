@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-CFLAGS := $(CFLAGS) -I. -I../c/include
+CFLAGS := $(CFLAGS) -I. -I../c/include -I../../sys
 LDFLAGS := $(USER_LDFLAGS)
 
 SRCS = pthread.c
