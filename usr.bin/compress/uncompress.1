@@ -1,0 +1,35 @@
+.Dd December 14, 2024
+.Dt UNCOMPRESS 1
+.Os
+.Sh NAME
+.Nm uncompress
+.Nd expand data
+.Sh SYNOPSIS
+.Nm
+.Op Fl cfv
+.Op Ar file ...
+.Sh DESCRIPTION
+The
+.Nm
+utility restores compressed files to their original form.
+.Pp
+The following options are available:
+.Bl -tag -width Ds
+.It Fl c
+Write output on standard output, keep original files unchanged.
+.It Fl f
+Force overwrite of output files.
+.It Fl v
+Print the name of each file as it is processed.
+.El
+.Pp
+If no files are specified, the standard input is uncompressed to the standard output.
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr compress 1 ,
+.Xr gzip 1
+.Sh HISTORY
+The
+.Nm
+utility appeared in Substrate.

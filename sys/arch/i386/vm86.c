@@ -77,6 +77,9 @@ void vm86_monitor_signal_fault(uint32_t eip, uint32_t opcode) {
         current_vm86_monitor->fault_opcode = opcode;
     }
 }
+// Assembly helper to enter VM86 mode (defined in vm86_asm.S)
+extern void vm86_enter(struct vm86_struct *info);
+
 // Access to the syscall return registers (mapped in syscall.c)
 /*
  * sys_vm86: Enter virtual 8086 mode.
@@ -87,88 +90,13 @@ int sys_vm86(struct vm86_struct *info) {
     struct vm86_struct k_info;
     memcpy(&k_info, info, sizeof(struct vm86_struct));
     
-    // Manual IRET Frame Construction
-    // We are going to overwrite the current stack frame and JUMP to IRET.
-    // Frame Layout for VM86 IRET:
-    // [GS] [FS] [DS] [ES] [SS] [ESP] [EFLAGS] [CS] [EIP] -- wait, Stack grows down.
-    // Top of Stack (Low Addr) -> [EIP] [CS] [EFLAGS] [ESP] [SS] [ES] [DS] [FS] [GS] -> Bottom (High Addr)
-    //
-    // EIP, CS, EFLAGS, ESP, SS are standard IRET.
-    // ES, DS, FS, GS are extra for VM86.
+    /* Call assembly helper to build stack frame and execute IRET */
+    vm86_enter(&k_info);
     
-    // We can just use inline assembly to set ESP and execute IRET.
-    // We need to load all registers first.
-    
-    // Note: k_info.regs matches the 'registers' struct somewhat but includes segment registers manually.
-    
-    // Disable interrupts to ensure atomicity
-    __asm__ volatile("cli");
-    
-    // Load general purpose registers
-    // We use a struct pointer to load them via MOV sequences or similar.
-    // But we need to switch stack to the IRET frame first.
-    // We can build the IRET frame on the current stack (below current position).
-    
-    uint32_t eflags = k_info.regs.eflags;
-    eflags |= 0x20000; // VM
-    eflags |= 0x200;   // IF (virtual interrupts enabled)
-    
-    // Prepare the IRET stack
-    // We push in reverse order: GS, FS, DS, ES, SS, ESP, EFLAGS, CS, EIP
-    
-    // We use a temporary pointer to build the stack
-    // We'll trust the compiler to handle local vars until we switch ESP.
-    
-    // Ideally:
-    // mov esp, [stack_base] ?
-    // No, just push current stack deeper.
-    
-    __asm__ volatile(
-        "movl %0, %%eax\n\t" // GS
-        "pushl %%eax\n\t"
-        "movl %1, %%eax\n\t" // FS
-        "pushl %%eax\n\t"
-        "movl %2, %%eax\n\t" // DS
-        "pushl %%eax\n\t"
-        "movl %3, %%eax\n\t" // ES
-        "pushl %%eax\n\t"
-        "movl %4, %%eax\n\t" // SS
-        "pushl %%eax\n\t"
-        "movl %5, %%eax\n\t" // ESP
-        "pushl %%eax\n\t"
-        "movl %6, %%eax\n\t" // EFLAGS
-        "pushl %%eax\n\t"
-        "movl %7, %%eax\n\t" // CS
-        "pushl %%eax\n\t"
-        "movl %8, %%eax\n\t" // EIP
-        "pushl %%eax\n\t"
-        
-        // Load GPRs
-        "movl %9, %%eax\n\t"
-        "movl %10, %%ecx\n\t"
-        "movl %11, %%edx\n\t"
-        "movl %12, %%ebx\n\t"
-        "movl %13, %%esp\n\t" // WAIT, we assume registers_t.esp is ignored? No, internal use?
-                              // We just pushed EIP/CS etc, so Stack is ready.
-                              // We should NOT load ESP from k_info here, user ESP is in the frame.
-                              // But we need to load EBP, ESI, EDI.
-        // We can't clobber ESP here.
-        
-        "movl %13, %%ebp\n\t"
-        "movl %14, %%esi\n\t"
-        "movl %15, %%edi\n\t"
-       
-        // We are ready. IRET will consume the stack we just built.
-        "iret"
-        : 
-        : "m"(k_info.regs.gs), "m"(k_info.regs.fs), "m"(k_info.regs.ds), "m"(k_info.regs.es),
-          "m"(k_info.regs.ss), "m"(k_info.regs.esp), "m"(eflags), "m"(k_info.regs.cs), "m"(k_info.regs.eip),
-          "m"(k_info.regs.eax), "m"(k_info.regs.ecx), "m"(k_info.regs.edx), "m"(k_info.regs.ebx),
-          "m"(k_info.regs.ebp), "m"(k_info.regs.esi), "m"(k_info.regs.edi)
-        : "eax", "memory"
-    );
-    
-    // Unreachable
+    /*
+     * We return here only when VM86 mode exits via vm86_bios_ret_point
+     * (e.g. on HLT in kernel BIOS call).
+     */
     return 0;
 }
 
@@ -324,35 +252,16 @@ void vm86_gpf_handler(registers_t *regs) {
              /* 1. Clear VM bit (bit 17) in EFLAGS */
              regs->eflags &= ~0x20000;
              
-             /* 2. Remove ES, DS, FS, GS, SS, ESP from the "IRET" frame on stack? */
-             /* The CPU pushed them. We must remove them if we return to Ring 0. */
-             /* Ring 0 -> Ring 0 IRET frame is just EIP, CS, EFLAGS. */
-             /* We need to slide EIP, CS, EFLAGS down over GS, FS, DS, ES, SS, ESP? */
-             /* This is tricky in C. */
-             
-             /* HACK: Use the `in_kernel_bios` jmp_buf if we had one. */
-             /* Better: Just change CS:EIP to a kernel assembly label that cleans up stack. */
-             
+             /*
+              * Redirect return to the trampoline that cleans up the stack.
+              * This trampoline (vm86_bios_ret_point) is defined in vm86_asm.S.
+              * It expects to find the VM86 exception frame leftovers (GS, FS, DS, ES, SS, ESP)
+              * on the stack after IRET pops EIP, CS, EFLAGS.
+              */
              extern void vm86_bios_ret_point(void);
              regs->eip = (uint32_t)vm86_bios_ret_point;
              regs->cs = 0x08; // Kernel Code
              
-             /* IMPORTANT: The CPU pushed GS, FS, DS, ES, SS, ESP because of VM86. */
-             /* We cannot change that fact easily. */
-             /* When we IRET, the CPU checks VM bit. If 0, it pops EIP, CS, EFLAGS. */
-             /* It DOES NOT pop the segment registers. */
-             /* So if we clear VM bit, we effectively perform a Ring 0 return. */
-             /* But the stack physically has the extra registers! */
-             /* We must manually pop them or shuffle the stack. */
-             /* Modifying 'regs' struct writes to the stack. */
-             /* But we can't delete words from stack here easily. */
-             
-             /* Setup a flag and just return? The loop in `bios_call` needs to run. */
-             /* But we are TRAPPED inside `sys_vm86` -> `iret` -> VM86 -> INT -> `handler` -> HERE. */
-             /* We are nested. */
-             
-             /* Solution: Change return EIP to a trampoline that fixes stack. */
-             regs->eip = (uint32_t)vm86_bios_ret_point;
              return;
         }
         
@@ -364,41 +273,6 @@ void vm86_gpf_handler(registers_t *regs) {
     kprintf("VM86: Unhandled opcode in GPF (CS:IP %04X:%04X Op %02X)\n", 
            (unsigned)regs->cs, (unsigned)regs->eip, (unsigned)opcode);
     vm86_monitor_signal_fault(regs->eip, opcode);
-}
-
-/* Assembly trampoline to clean up stack after VM86 -> Kernel transition */
-/* Defined in new vm86_asm.S or inline asm here if possible? Inline asm cannot easily define global label callable from C assignment. */
-/* We will produce a .S file or use an `extern` symbol. */
-/* For simplicity, let's look for a `vm86.S` or `isr.S`. */
-/* Better: add a naked function here. */
-
-void __attribute__((naked)) vm86_bios_ret_point(void) {
-    /* We arrive here after IRET from the GPF handler, with VM bit cleared. */
-    /* The stack SHOULD contain the VM86 segment registers that invoke IRET didn't pop because VM=0. */
-    /* WAIT. IRET behavior: */
-    /* If NT=1, task switch. (Assume NT=0). */
-    /* If returning to Virtual Mode (VM=1 in dest EFLAGS) -> Pops GS,FS,DS,ES,SS,ESP,EFLAGS,CS,EIP. */
-    /* If returning to Protected Mode (VM=0): Pops EIP, CS, EFLAGS. (And ESP, SS if priv level change). */
-    /* We forced VM=0 in EFLAGS. We forced CS=0x08 (Kernel). */
-    /* Current CPL=0. Dest CPL=0. No priv change. */
-    /* So IRET popped EIP, CS, EFLAGS. */
-    /* The stack still has ESP, SS, ES, DS, FS, GS ! (from the VM86 exception frame). */
-    /* We must pop them to clean up the stack to the state before `sys_vm86`'s IRET ? */
-    /* Actually, we just need to restore our C environment. */
-    /* sys_vm86 built a frame. We want to return FROM sys_vm86. */
-    
-    /* Pop the junk */
-    __asm__ volatile (
-        "add $24, %esp \n\t" /* Pop ESP, SS, ES, DS, FS, GS (6 * 4 = 24 bytes) */
-        "pop %edi \n\t"
-        "pop %esi \n\t"
-        "pop %ebp \n\t"
-        "pop %ebx \n\t"
-        "pop %edx \n\t"
-        "pop %ecx \n\t"
-        "pop %eax \n\t" /* Determine return value? */
-        "ret \n\t"
-    );
 }
 
 /* Kernel BIOS Call Helper */

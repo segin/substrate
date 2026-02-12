@@ -204,15 +204,15 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
             if (current_idx == index) {
                 if (lfn_len > 0) {
                     lfn_buffer[lfn_len] = '\0';
-                    strncpy(dirent.name, lfn_buffer, 127);
-                    dirent.name[127] = '\0';
+                    strncpy(dirent.d_name, lfn_buffer, 127);
+                    dirent.d_name[127] = '\0';
                     lfn_len = 0;
                 } else {
-                    fat_parse_short_name(entry->name, dirent.name);
+                    fat_parse_short_name(entry->name, dirent.d_name);
                 }
                 
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
-                dirent.ino = cluster_num;
+                dirent.d_ino = cluster_num;
                 return &dirent;
             }
             
@@ -375,14 +375,23 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     
     // Cache FAT table for better performance
     extern void *kmalloc(size_t size);
-    uint32_t fat_table_size = fat_size * fs->bpb.bytes_per_sector;
-    fs->fat_table = (uint8_t *)kmalloc(fat_table_size);
+    uint64_t fat_table_size_64 = (uint64_t)fat_size * fs->bpb.bytes_per_sector;
+    uint32_t fat_table_size = 0;
+
+    if (fat_table_size_64 > 0xFFFFFFFF) {
+        kprint("FAT: FAT table too large for cache\n");
+        fs->fat_table = NULL;
+    } else {
+        fat_table_size = (uint32_t)fat_table_size_64;
+        fs->fat_table = (uint8_t *)kmalloc(fat_table_size);
+    }
+
     if (fs->fat_table) {
         if (fat_read_sectors(fs, fs->fat_start_sector, fat_size, fs->fat_table) != 0) {
             kprint("FAT: Warning - failed to cache FAT table\n");
             // Continue without cache, get_next_cluster will fail gracefully
         }
-    } else {
+    } else if (fat_table_size_64 <= 0xFFFFFFFF) {
         kprint("FAT: Warning - could not allocate FAT table cache\n");
         // Continue without cache
     }

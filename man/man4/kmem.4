@@ -1,0 +1,90 @@
+.Dd January 27, 2026
+.Dt KMEM 4
+.Os
+.Sh NAME
+.Nm kmem
+.Nd kernel virtual memory access device
+.Sh SYNOPSIS
+.In fcntl.h
+.Ft int
+.Fn open "/dev/kmem" "int flags"
+.Sh DESCRIPTION
+The
+.Nm
+device provides access to the kernel virtual address space.
+The file offset corresponds to the kernel virtual address.
+.Pp
+Reading from
+.Nm
+returns the contents of the kernel memory at the specified address.
+Writing to
+.Nm
+writes to the kernel memory at the specified address.
+.Pp
+Access to
+.Nm
+is restricted to privileged processes (effective user ID 0) and is further subject to
+security policies configured via
+.Xr sysctl 8 .
+.Sh SECURITY
+The
+.Nm
+device is a critical security interface.
+Improper use can crash the system or compromise security.
+.Pp
+The following
+.Xr sysctl 8
+variables control access:
+.Bl -tag -width ".Va kern.kmem_allow_write"
+.It Va kern.kmem_allow_read
+Allow reading from
+.Nm .
+Default is 1 (allowed).
+.It Va kern.kmem_allow_write
+Allow writing to
+.Nm .
+Default is 0 (denied).
+.El
+.Pp
+If the system securelevel
+.Pq Va kern.securelevel
+is greater than 0, access to
+.Nm
+may be completely disabled or restricted to read-only regardless of the above settings.
+.Pp
+Memory mapping
+.Pq Xr mmap 2
+of
+.Nm
+is explicitly disallowed to prevent bypassing kernel security mechanisms.
+.Sh FILES
+.Bl -tag -width ".Pa /dev/kmem" -compact
+.It Pa /dev/kmem
+Kernel virtual memory device.
+.El
+.Sh DIAGNOSTICS
+.Bl -tag -width Er
+.It Bq Er EPERM
+Permission denied.
+The process does not have sufficient privileges, or the operation is disallowed by policy or securelevel.
+.It Bq Er EFAULT
+Bad address.
+The specified address is not a valid kernel virtual address or caused a page fault.
+.It Bq Er EINVAL
+Invalid argument.
+Attempted to
+.Xr mmap 2
+the device.
+.It Bq Er ENOTTY
+Inappropriate I/O control operation.
+.Xr ioctl 2
+is not supported.
+.El
+.Sh SEE ALSO
+.Xr sysctl 8 ,
+.Xr mem 4
+.Sh HISTORY
+The
+.Nm
+device appeared in the first version of UNIX.
+This implementation is specific to Substrate OS.
