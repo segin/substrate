@@ -364,16 +364,11 @@ void run_string_tests(void) {
     kprint("Checking memmove correctness...\n");
     test_memmove();
 
-<<<<<<< HEAD
-    kprint("Checking memmove correctness...\n");
-    test_memmove();
-=======
     kprint("Checking memset correctness...\n");
     test_memset_basic();
     test_memset_small();
     test_memset_unaligned();
     test_memset_large();
->>>>>>> main
 
     if (failed_tests == 0) {
         kprint("Correctness: PASS\n");
