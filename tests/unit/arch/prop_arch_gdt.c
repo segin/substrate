@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include "../../../sys/arch/i386/gdt.h"
+#include <arch/i386/gdt.h>
 
 /*
  * Property-based test: TSS Invariant

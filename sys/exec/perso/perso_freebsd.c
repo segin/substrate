@@ -6,6 +6,7 @@
 #include <kern/version.h>
 #include <stddef.h>
 #include <sys/syscall_impl.h>
+#include <sys/kern_syscalls.h>
 
 // FreeBSD syscall numbers (from sys/syscall.h)
 static void *freebsd_syscalls[MAX_SYSCALLS] = {
@@ -150,18 +151,21 @@ extern char *strncpy(char *dest, const char *src, size_t n);
 extern void *memset(void *s, int c, size_t n);
 
 int sys_freebsd4_uname(void *vbuf) {
-    struct freebsd4_utsname *buf = vbuf;
-    if (!buf) return -1;
-    memset(buf, 0, sizeof(struct freebsd4_utsname));
-    strncpy(buf->sysname, "FreeBSD", 32);
-    strncpy(buf->nodename, kernel_hostname, 32);
-    strncpy(buf->release, "4.11-RELEASE", 32);
-    strncpy(buf->version, "FreeBSD 4.11-RELEASE #0", 32);
+    struct freebsd4_utsname kname;
+    if (!vbuf) return -1;
+    
+    memset(&kname, 0, sizeof(struct freebsd4_utsname));
+    strncpy(kname.sysname, "FreeBSD", 32);
+    strncpy(kname.nodename, kernel_hostname, 32);
+    strncpy(kname.release, "4.11-RELEASE", 32);
+    strncpy(kname.version, "FreeBSD 4.11-RELEASE #0", 32);
 #if defined(__x86_64__)
-    strncpy(buf->machine, "amd64", 32);
+    strncpy(kname.machine, "amd64", 32);
 #else
-    strncpy(buf->machine, "i386", 32);
+    strncpy(kname.machine, "i386", 32);
 #endif
+
+    if (copyout(&kname, vbuf, sizeof(struct freebsd4_utsname)) != 0) return -14;
     return 0;
 }
 

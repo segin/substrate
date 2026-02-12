@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
+#include <sys/kern_syscalls.h>
 #include <sys/ioctl.h>
 #include <sys/termios.h>
 #include "compat.h"
@@ -164,7 +165,7 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
             extern void *memset(void*, int, size_t);
             memset(&native, 0, sizeof(native));
             
-            int ret = sys_ioctl(fd, request, &native);
+            int ret = kern_ioctl(fd, request, &native);
             if (ret == 0 && arg) {
                 struct linux_termios *lt = (struct linux_termios *)arg;
                 lt->c_iflag = native.c_iflag;
@@ -199,7 +200,7 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
             }
             native.c_ispeed = 0;
             native.c_ospeed = 0;
-            return sys_ioctl(fd, request, &native);
+            return kern_ioctl(fd, request, &native);
         }
     }
     
