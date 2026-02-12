@@ -122,11 +122,6 @@ static void coalesce_block(struct block_meta *block) {
             if (block->next) {
                 block->next->prev = block->prev;
             }
-            if (block->next) {
-                block->next->prev = block->prev;
-            }
-        }
-    }
         }
     }
 }
