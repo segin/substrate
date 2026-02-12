@@ -407,28 +407,29 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
         if (!(fid->characteristics & UDF_FID_DELETED)) {
             if (cur_idx == index) {
                 if (fid->characteristics & UDF_FID_PARENT) {
-                    strcpy(udf_dirent.name, "..");
+                    strcpy(udf_dirent.d_name, "..");
                 } else {
                     /* Extract filename (after impl_use) */
                     char *name = (char *)fid + 38 + fid->impl_use_length;
-                    uint8_t len = fid->file_id_length;
+                    uint32_t len = fid->file_id_length;
                     /* Handle OSTA compressed unicode (type byte + chars) */
                     if (len > 0 && name[0] == 8) {
-                    /* Ensure len fits in udf_dirent.name to prevent buffer overflow */
-                    if (len > sizeof(udf_dirent.name)) {
-                        len = sizeof(udf_dirent.name);
+                    /* Ensure len fits in udf_dirent.d_name to prevent buffer overflow */
+                    if (len > sizeof(udf_dirent.d_name)) {
+                        len = sizeof(udf_dirent.d_name);
                     }
-                    memcpy(udf_dirent.name, name + 1, len - 1);
-                    udf_dirent.name[len - 1] = '\0';
+                    memcpy(udf_dirent.d_name, name + 1, len - 1);
+                    udf_dirent.d_name[len - 1] = '\0';
                     } else {
-                    /* Ensure len fits in udf_dirent.name to prevent buffer overflow */
-                    if (len > sizeof(udf_dirent.name) - 1) {
-                        len = sizeof(udf_dirent.name) - 1;
+                    /* Ensure len fits in udf_dirent.d_name to prevent buffer overflow */
+                    if (len > sizeof(udf_dirent.d_name) - 1) {
+                        len = sizeof(udf_dirent.d_name) - 1;
                     }
-                    memcpy(udf_dirent.name, name, len);
-                    udf_dirent.name[len] = '\0';
+                    memcpy(udf_dirent.d_name, name, len);
+                    udf_dirent.d_name[len] = '\0';
                     }
                 }
+                udf_dirent.d_ino = fid->icb.block;
                 return &udf_dirent;
             }
             cur_idx++;
