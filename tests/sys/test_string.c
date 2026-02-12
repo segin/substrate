@@ -315,8 +315,6 @@ static void test_strncmp(void) {
     if (strncmp("abc", "abcd", 4) >= 0) {
          kprint("FAIL: strncmp(\"abc\", \"abcd\", 4) >= 0\n");
          failed_tests++;
-    }
->>>>>>> main
 }
 
 // Performance Benchmarks
