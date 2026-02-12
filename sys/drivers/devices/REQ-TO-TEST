@@ -1,0 +1,20 @@
+# Requirement to Test Traceability Matrix
+
+| Requirement ID | Description | Test Function (in `test_zero.c`) | Verification Method |
+| :--- | :--- | :--- | :--- |
+| **U1** | Read-zeroes (infinite stream) | `test_read` | `read()` checks buffer for zeros. |
+| **U2** | Discard-writes (succeed) | `test_write` | `write()` checks return value == count. |
+| **U3** | Seek semantics (succeed) | `test_seek` | `lseek()` checks return value == offset. |
+| **U4** | Open semantics (all modes) | `test_open_stat` | `open()` with `O_RDONLY`, `O_WRONLY`, `O_RDWR` checks success. |
+| **U5** | File attributes (`S_IFCHR`) | `test_open_stat` | `fstat()` checks `S_ISCHR(st_mode)`. |
+| **U6** | Ioctl (`ENOTTY`) | `test_ioctl` | `ioctl()` checks return -1 and `errno == ENOTTY`. |
+| **U7** | Nonblocking (ignored) | `test_open_stat` (implicit) | `open(..., O_NONBLOCK)` behavior is standard for char dev. |
+| **U8** | Concurrency (thread-safe) | `test_concurrency` | Forks child, concurrent reads/writes. |
+| **E1** | Poll readiness (`POLLIN\|POLLOUT`) | `test_poll` | `poll()` checks revents has `POLLIN` and `POLLOUT`. |
+| **UB1** | No partial shortfall | `test_write` | `write()` checks return value == requested count. |
+| **O1** | Mmap (zero-filled pages) | `test_mmap` | `mmap()` checks memory is zeroed; verifies write access (private/shared). |
+| **C1** | Efficiency (large reads) | `test_read` | Large read (>1MB) completes successfully. |
+
+## Notes
+- `U7` (Nonblocking) is implicitly handled by the driver always being ready (poll returns immediately), so blocking flags have no effect.
+- `C1` (Efficiency) relies on kernel implementation using `memset` / zero-page mapping, verified by successful large read completion.

@@ -1,9 +1,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-#include "../../../sys/sys/signal.h"
-#include "../../../sys/sys/proc.h"
-#include "../../../sys/arch/i386/idt.h"
+#include <sys/signal.h"
+#include <sys/proc.h"
+#include <arch/i386/idt.h"
 
 extern int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 extern int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset);

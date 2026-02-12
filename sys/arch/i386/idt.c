@@ -212,6 +212,9 @@ void isr_handler(registers_t *regs) {
     } else if (regs->int_no == 36) {
         extern void uart_handler(registers_t *regs);
         uart_handler(regs);
+    } else if (regs->int_no == 46 || regs->int_no == 47) {
+        extern void ide_irq_handler(int irq);
+        ide_irq_handler(regs->int_no == 47 ? 15 : 14);
     } else if (regs->int_no < 32) {
         // Exception - check if from user mode or kernel mode
         int is_usermode = (regs->cs & 0x3) == 3;

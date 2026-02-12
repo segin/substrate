@@ -177,24 +177,28 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
     
     /* Read existing FE */
     off_t disk_off = (off_t)(udf_ctx.partition_start + fe_block) * UDF_SECTOR_SIZE;
-    dev->read(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+    if (dev->read(dev, disk_off, UDF_SECTOR_SIZE, sector_buf) != UDF_SECTOR_SIZE) {
+        return -1;
+    }
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
+    uint64_t total_size = disk_fe->info_length;
+    if (offset + size > total_size) total_size = offset + size;
+
     uint8_t ad_type = disk_fe->icb_tag.flags & 0x7;
 
     /* For small files, try to use inline data */
     if (ad_type == UDF_ICB_FLAG_AD_INLINE &&
-        size + offset <= UDF_SECTOR_SIZE - sizeof(struct udf_fe) - disk_fe->ext_attr_length - 40) {
+        total_size <= UDF_SECTOR_SIZE - sizeof(struct udf_fe) - disk_fe->ext_attr_length - 40) {
         
         uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
         memcpy(alloc_area + offset, data, size);
         
-        if (offset + size > disk_fe->info_length) {
-            disk_fe->info_length = offset + size;
-        }
+        disk_fe->info_length = total_size;
         disk_fe->alloc_desc_length = (uint32_t)disk_fe->info_length;
         
         ret = 0;
+    }
     }
     else {
         /* Convert Inline to Short AD if needed */
@@ -360,11 +364,11 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
     }
 
     /* Recalculate tag checksum */
-    uint8_t *p = (uint8_t *)&disk_fe->tag;
-    uint8_t sum = 0;
-    for (int i = 0; i < 4; i++) sum += p[i];
-    for (int i = 5; i < 16; i++) sum += p[i];
-    disk_fe->tag.tag_checksum = sum;
+    uint8_t *p2 = (uint8_t *)&disk_fe->tag;
+    uint8_t sum2 = 0;
+    for (int i = 0; i < 4; i++) sum2 += p2[i];
+    for (int i = 5; i < 16; i++) sum2 += p2[i];
+    disk_fe->tag.tag_checksum = sum2;
     
     /* Write back */
     dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);

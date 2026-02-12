@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../../sys/kern/sched.h"
+#include <kern/sched.h"
 
 extern void timer_tick(void);
 extern uint32_t get_time(void);
