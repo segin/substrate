@@ -4,6 +4,7 @@
 
 #include <vm/vm_pager.h>
 #include <vm/vm_kmem.h>
+#include <vfs/vfs.h>
 #include <sys/lock.h>
 #include <stddef.h>
 
@@ -13,6 +14,7 @@
 #define SWAP_BLOCK_NONE 0xFFFFFFFF
 
 static uint32_t swap_bitmap[MAX_SWAP_PAGES / 32];
+static uint32_t swap_num_pages = 0;
 // Real implementation would have a list of swap devices/files
 
 // TODO: Manual initialization due to missing SPINLOCK_INIT
@@ -26,7 +28,7 @@ typedef struct swap_pager {
 
 static int alloc_swap_block(void) {
     spinlock_acquire(&swap_lock);
-    for (int i = 0; i < MAX_SWAP_PAGES; i++) {
+    for (uint32_t i = 0; i < swap_num_pages; i++) {
         if (!(swap_bitmap[i/32] & (1 << (i%32)))) {
             swap_bitmap[i/32] |= (1 << (i%32));
             spinlock_release(&swap_lock);
@@ -39,7 +41,7 @@ static int alloc_swap_block(void) {
 
 static void free_swap_block(int block) {
     spinlock_acquire(&swap_lock);
-    if (block >= 0 && block < MAX_SWAP_PAGES)
+    if (block >= 0 && (uint32_t)block < swap_num_pages)
         swap_bitmap[block/32] &= ~(1 << (block%32));
     spinlock_release(&swap_lock);
 }
@@ -82,9 +84,6 @@ static void swap_pager_dealloc(struct vm_pager *p) {
 // Global swap state
 struct fs_node *swap_node = NULL;
 
-// External VFS helper
-extern uint32_t read_fs(struct fs_node*, int64_t, uint32_t, uint8_t*);
-extern uint32_t write_fs(struct fs_node*, int64_t, uint32_t, uint8_t*);
 #define P2V(x) ((uintptr_t)(x) + 0xC0000000)
 
 static int swap_pager_getpage(struct vm_pager *p, vm_page_t *m, bool sync) {
@@ -164,6 +163,8 @@ vm_pager_ops_t swap_pager_ops = {
 int vm_swapon(void *node) {
     if (!node) return -1;
     
+    fs_node_t *fs_node = (fs_node_t *)node;
+
     spinlock_acquire(&swap_lock);
     if (swap_node) {
         // Swap already active
@@ -171,12 +172,25 @@ int vm_swapon(void *node) {
         return -1; 
     }
     
-    // TODO: Validate node is a file and writable
+    // Validate node is a regular file and writable
+    if ((fs_node->flags & 0x07) != FS_FILE) {
+        spinlock_release(&swap_lock);
+        return -1;
+    }
+
+    if (!fs_node->write) {
+        spinlock_release(&swap_lock);
+        return -1;
+    }
     
-    swap_node = (struct fs_node *)node;
+    swap_node = fs_node;
     
-    // TODO: Calculate swap size from file size
-    // For now, fixed bitmap size
+    // Calculate swap size from file size
+    swap_num_pages = (uint32_t)(fs_node->length / 4096);
+    if (swap_num_pages > MAX_SWAP_PAGES) {
+        swap_num_pages = MAX_SWAP_PAGES;
+    }
+
     spinlock_release(&swap_lock);
     
     extern void kprint(const char *);
