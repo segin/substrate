@@ -164,7 +164,7 @@ struct vnodeops {
                      struct componentname *cnp, struct vattr *vap);
     int (*vop_rmdir)(struct vnode *dvp, struct vnode *vp,
                      struct componentname *cnp);
-    int (*vop_readdir)(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag);
+    int (*vop_readdir)(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag, int *ncookies, uint64_t **cookies);
     int (*vop_readlink)(struct vnode *vp, struct uio *uio, struct ucred *cred);
     int (*vop_symlink)(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
                        struct vattr *vap, const char *target);
@@ -174,6 +174,7 @@ struct vnodeops {
     int (*vop_strategy)(struct vnode *vp, void *bp); /* Using void* for buf for now */
     int (*vop_bmap)(struct vnode *vp, off_t offset, struct vnode **vpp, uint64_t *bnp,
                     int *runp, int *runb);
+    int (*vop_pathconf)(struct vnode *vp, int name, register_t *retval);
     int (*vop_print)(struct vnode *vp);
 };
 
@@ -216,8 +217,8 @@ struct vnodeops {
     ((dvp)->v_op->vop_mkdir(dvp, vpp, cnp, vap))
 #define VOP_RMDIR(dvp, vp, cnp) \
     ((dvp)->v_op->vop_rmdir(dvp, vp, cnp))
-#define VOP_READDIR(vp, uio, cred, eofflag) \
-    ((vp)->v_op->vop_readdir(vp, uio, cred, eofflag))
+#define VOP_READDIR(vp, uio, cred, eofflag, ncookies, cookies) \
+    ((vp)->v_op->vop_readdir(vp, uio, cred, eofflag, ncookies, cookies))
 #define VOP_READLINK(vp, uio, cred) \
     ((vp)->v_op->vop_readlink(vp, uio, cred))
 #define VOP_SYMLINK(dvp, vpp, cnp, vap, target) \
@@ -228,6 +229,8 @@ struct vnodeops {
     ((vp)->v_op->vop_strategy(vp, bp))
 #define VOP_BMAP(vp, offset, vpp, bnp, runp, runb) \
     ((vp)->v_op->vop_bmap(vp, offset, vpp, bnp, runp, runb))
+#define VOP_PATHCONF(vp, name, retval) \
+    ((vp)->v_op->vop_pathconf(vp, name, retval))
 #define VOP_PRINT(vp) \
     ((vp)->v_op->vop_print(vp))
 
@@ -397,9 +400,28 @@ int vop_lookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 int vop_cachedlookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp);
 int vop_create(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap);
 int vop_mknod(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap);
-int vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap);
+int vop_open(struct vnode *vp, int mode, struct ucred *cred);
+int vop_close(struct vnode *vp, int fflag, struct ucred *cred);
+int vop_access(struct vnode *vp, int mode, struct ucred *cred);
+int vop_getattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_setattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_read(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred);
+int vop_write(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred);
+int vop_ioctl(struct vnode *vp, uint32_t command, void *data, int fflag, struct ucred *cred);
+int vop_poll(struct vnode *vp, int events, struct ucred *cred);
+int vop_fsync(struct vnode *vp, int waitfor, struct ucred *cred);
 int vop_remove(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);
+int vop_link(struct vnode *tdvp, struct vnode *vp, struct componentname *cnp);
+int vop_rename(struct vnode *fdvp, struct vnode *fvp, struct componentname *fcnp,
+              struct vnode *tdvp, struct vnode *tvp, struct componentname *tcnp);
+int vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap);
 int vop_rmdir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp);
+int vop_readdir(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag, int *ncookies, uint64_t **cookies);
+int vop_readlink(struct vnode *vp, struct uio *uio, struct ucred *cred);
+int vop_symlink(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
+                struct vattr *vap, const char *target);
 int vop_whiteout(struct vnode *dvp, struct componentname *cnp, int flags);
+int vop_pathconf(struct vnode *vp, int name, register_t *retval);
+int vop_print(struct vnode *vp);
 
 #endif /* _SYS_VNODE_H */

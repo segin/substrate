@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/vm/vm_object.h"
+#include <vm/vm_object.h"
 
 /*
  * Property-based test: Consistency Invariant for VM Object

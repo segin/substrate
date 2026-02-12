@@ -117,17 +117,16 @@ void syscall_handler(registers_t *regs) {
         return;
     }
 
+    // Save regs pointer for special syscalls like fork
+    if (current_thread) {
+        current_thread->syscall_regs = regs;
+    }
+
     struct personality *p = perso_lookup(current_process->perso_id);
     if (!p) {
         regs->eax = -38; // ENOSYS
         return;
     }
-
-    // Save regs pointer for special syscalls like fork
-    if (current_thread) {
-        current_thread->syscall_regs = regs;
-    }
-    
     uint32_t syscall_num = regs->eax;
 
     // Track syscall for SA_RESTART support

@@ -18,6 +18,13 @@
 #define PTE_G           0x100UL    // Global
 #define PTE_NX          (1UL << 63) // No Execute
 
+// VM Protection Flags
+#define VM_PROT_READ    0x01
+#define VM_PROT_WRITE   0x02
+#define VM_PROT_EXEC    0x04
+#define VM_PROT_USER    0x08
+#define VM_PROT_ALL     (VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXEC|VM_PROT_USER)
+
 // Number of entries in each level
 #define NPTE_LEVEL      512
 

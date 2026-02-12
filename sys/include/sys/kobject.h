@@ -11,6 +11,7 @@ struct kobject {
     struct kobject *parent;
     struct kset    *kset;
     uint32_t        refcount;
+    void (*release)(struct kobject *);
 };
 
 struct kset {
