@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/sys/lock.h"
-#include "../../../sys/kern/sched.h"
+#include <sys/lock.h"
+#include <kern/sched.h"
 
 bool test_mutex_basic(void) {
     mutex_t m;
@@ -98,7 +98,7 @@ bool test_sema_blocking(void) {
     return true;
 }
 
-#include "../../../sys/sys/futex.h"
+#include <sys/futex.h"
 
 extern int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3);
 

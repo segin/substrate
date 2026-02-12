@@ -94,7 +94,7 @@ void lapic_timer_oneshot(uint8_t vector, uint32_t ticks);
 void lapic_timer_stop(void);
 uint32_t lapic_timer_ticks_per_ms(void);
 
-// Timer Delay (Busy Wait)
+// Delay
 void lapic_timer_delay_ms(uint32_t ms);
 void lapic_timer_delay_us(uint32_t us);
 

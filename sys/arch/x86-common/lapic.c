@@ -9,16 +9,33 @@ static uintptr_t lapic_base = 0;
 static uint32_t lapic_phys_base = LAPIC_DEFAULT_BASE;
 static bool lapic_initialized = false;
 
+// Memory Access Abstraction (Overridable for Unit Tests)
+#ifndef LAPIC_ACCESS_OPS
+#define LAPIC_READ_MEM(base, reg)       (*((volatile uint32_t*)((base) + (reg))))
+#define LAPIC_WRITE_MEM(base, reg, val) (*((volatile uint32_t*)((base) + (reg))) = (val))
+#else
+// For unit testing, these must be defined by the includer
+extern uint32_t test_lapic_read(uintptr_t base, uint32_t reg);
+extern void test_lapic_write(uintptr_t base, uint32_t reg, uint32_t val);
+#define LAPIC_READ_MEM(base, reg)       test_lapic_read(base, reg)
+#define LAPIC_WRITE_MEM(base, reg, val) test_lapic_write(base, reg, val)
+#endif
+
+// CPU Relax/Pause (Overridable)
+#ifndef cpu_relax
+#define cpu_relax() __asm__ volatile("pause")
+#endif
+
 // Read LAPIC register
 static inline uint32_t lapic_read(uint32_t reg) {
     if (!lapic_base) return 0;
-    return *((volatile uint32_t*)(lapic_base + reg));
+    return LAPIC_READ_MEM(lapic_base, reg);
 }
 
 // Write LAPIC register
 static inline void lapic_write(uint32_t reg, uint32_t val) {
     if (!lapic_base) return;
-    *((volatile uint32_t*)(lapic_base + reg)) = val;
+    LAPIC_WRITE_MEM(lapic_base, reg, val);
 }
 
 // Set LAPIC base address (called from MADT parsing)
@@ -141,6 +158,8 @@ static uint32_t lapic_ticks_per_ms = 0;
 #define PIT_CHANNEL2    0x42
 #define PIT_COMMAND     0x43
 
+// Port I/O Abstraction (Overridable for Unit Tests)
+#ifndef PORT_IO_OPS
 static inline void outb(uint16_t port, uint8_t val) {
     __asm__ volatile("outb %0, %1" :: "a"(val), "Nd"(port));
 }
@@ -150,6 +169,12 @@ static inline uint8_t inb(uint16_t port) {
     __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
     return ret;
 }
+#else
+extern void test_outb(uint16_t port, uint8_t val);
+extern uint8_t test_inb(uint16_t port);
+#define outb(port, val) test_outb(port, val)
+#define inb(port)       test_inb(port)
+#endif
 
 // Calibrate LAPIC timer against PIT
 // Returns: ticks per millisecond
@@ -181,7 +206,7 @@ uint32_t lapic_timer_calibrate(void) {
     
     // Wait for PIT to count down (poll bit 5 of port 0x61)
     while (!(inb(0x61) & 0x20)) {
-        __asm__ volatile("pause");
+        cpu_relax();
     }
     
     // Read LAPIC timer current count
@@ -288,7 +313,7 @@ void lapic_timer_delay_ms(uint32_t ms) {
     lapic_write(LAPIC_TICR, ticks);
 
     while (lapic_read(LAPIC_TCCR) > 0) {
-        __asm__ volatile("pause");
+        cpu_relax();
     }
 
     lapic_write(LAPIC_TDCR, old_divide);
@@ -319,7 +344,7 @@ void lapic_timer_delay_us(uint32_t us) {
     lapic_write(LAPIC_TICR, (uint32_t)total_ticks);
 
     while (lapic_read(LAPIC_TCCR) > 0) {
-        __asm__ volatile("pause");
+        cpu_relax();
     }
 
     lapic_write(LAPIC_TDCR, old_divide);
@@ -391,7 +416,7 @@ uint32_t lapic_get_id(void) {
 // Wait for ICR to be ready
 static void lapic_ipi_wait(void) {
     while (lapic_read(LAPIC_ICRLO) & LAPIC_ICR_PENDING) {
-        __asm__ volatile("pause");
+        cpu_relax();
     }
 }
 

@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/vm/vm_kmem.h"
+#include <vm/vm_kmem.h"
 
 /*
  * Property-based test: Kmem Invariant

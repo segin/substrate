@@ -4,7 +4,7 @@ include ../../../Makefile.inc
 CFLAGS := $(KERNEL_CFLAGS) -I. -I../x86-common/include -Ifpu
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = boot.S gdt.c ldt.c sched.c idt.c isr.S pmm.c pci.c syscall.c pmap.c pmap_dump.c smp_discovery.c trampoline.S fpu/fpu_emu.c efi_boot.c zimage_header.S vm86.c sysarch.c signal.c sig_trampoline.c early_boot.c percpu.c \
+SRCS = boot.S gdt.c ldt.c sched.c idt.c isr.S pmm.c pci.c syscall.c pmap.c pmap_dump.c smp_discovery.c trampoline.S fpu/fpu_emu.c efi_boot.c zimage_header.S vm86.c vm86_asm.S sysarch.c signal.c sig_trampoline.c early_boot.c percpu.c \
        ../x86-common/lapic.c ../x86-common/ioapic.c ../x86-common/rtc.c
 
 OBJS = $(SRCS:.c=.o)

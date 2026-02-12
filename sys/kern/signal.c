@@ -1,6 +1,7 @@
 #include <sys/signal.h>
 #include <sys/proc.h>
 #include <sys/session.h>
+#include <sys/errno.h>
 #include <kern/sched.h>
 #include <arch/i386/idt.h>
 #include <kern/console.h>
@@ -10,13 +11,12 @@
 #include <exec/perso/personality.h>
 #include <sys/time.h>
 #include <kern/time.h>
+#include <sys/kern_syscalls.h>
 
 extern thread_t threads[MAX_THREADS];
 
 // Signal System Calls
-int sys_sigaction(int sig, const void *act_ptr, void *oact_ptr) {
-    const struct sigaction *act = (const struct sigaction *)act_ptr;
-    struct sigaction *oact = (struct sigaction *)oact_ptr;
+int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
     if (sig <= 0 || sig > NSIG || sig == SIGKILL || sig == SIGSTOP) return -1;
     
     uint32_t mask = sigmask(sig);
@@ -42,6 +42,22 @@ int sys_sigaction(int sig, const void *act_ptr, void *oact_ptr) {
     return 0;
 }
 
+int sys_sigaction(int sig, const void *act, void *oact) {
+    struct sigaction kact, koact;
+    struct sigaction *p_kact = NULL;
+    
+    if (act) {
+        if (copyin(act, &kact, sizeof(struct sigaction)) != 0) return -14;
+        p_kact = &kact;
+    }
+    
+    int ret = kern_sigaction(sig, p_kact, oact ? &koact : NULL);
+    if (ret == 0 && oact) {
+        if (copyout(&koact, oact, sizeof(struct sigaction)) != 0) return -14;
+    }
+    return ret;
+}
+
 int sys_sigprocmask(int how, const void *set_ptr, void *oset_ptr) {
     const uint32_t *set = (const uint32_t *)set_ptr;
     uint32_t *oset = (uint32_t *)oset_ptr;
@@ -65,7 +81,11 @@ int sys_sigpending(void *set_ptr) {
 int sys_sigsuspend(const void *mask_ptr) {
     const uint32_t *mask = (const uint32_t *)mask_ptr;
     uint32_t old_mask = current_thread->sig_mask;
-    if (mask) current_thread->sig_mask = *mask;
+    if (mask) {
+        uint32_t kmask;
+        if (copyin(mask, &kmask, sizeof(uint32_t)) != 0) return -14;
+        current_thread->sig_mask = kmask;
+    }
     
     // Sleep until a signal arrives
     while (!(current_thread->sig_pending & ~current_thread->sig_mask)) {
@@ -73,7 +93,38 @@ int sys_sigsuspend(const void *mask_ptr) {
     }
     
     current_thread->sig_mask = old_mask;
-    return -1; // Always returns -1 (EINTR)
+    return -1; // Always returns -1 (EINTR orphan) but personalidad might translate
+}
+
+int kern_sigaltstack(const stack_t *ss, stack_t *oss) {
+    if (oss) *oss = current_thread->sig_alt_stack;
+    
+    if (ss) {
+        if (current_thread->sig_alt_stack.ss_flags & SS_ONSTACK) return -1; // EPERM/EINVAL
+        if (ss->ss_flags & SS_DISABLE) {
+             current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
+        } else {
+             if (ss->ss_size < MINSIGSTKSZ) return -1; // ENOMEM/EINVAL
+             current_thread->sig_alt_stack = *ss;
+        }
+    }
+    return 0;
+}
+
+int sys_sigaltstack(const void *ss, void *oss) {
+    stack_t kss, koss;
+    stack_t *p_kss = NULL;
+    
+    if (ss) {
+        if (copyin(ss, &kss, sizeof(stack_t)) != 0) return -14;
+        p_kss = &kss;
+    }
+    
+    int ret = kern_sigaltstack(p_kss, oss ? &koss : NULL);
+    if (ret == 0 && oss) {
+        if (copyout(&koss, oss, sizeof(stack_t)) != 0) return -14;
+    }
+    return ret;
 }
 
 /*
@@ -436,7 +487,7 @@ void sigexit(process_t *p, int sig) {
 }
 
 int sys_kill(int pid, int sig) {
-    if (sig < 0 || sig > NSIG) return -1; // EINVAL
+    if (sig < 0 || sig > NSIG) return -EINVAL;
 
     // Handle PID > 0: Send to specific process
     if (pid > 0) {
@@ -449,12 +500,12 @@ int sys_kill(int pid, int sig) {
             }
         }
 
-        if (!target) return -1; // ESRCH
+        if (!target) return -ESRCH;
         if (sig == 0) return 0; // Existence check
 
         // Permission check
         if (current_process->uid != 0 && current_process->uid != target->uid) {
-            return -1; // EPERM
+            return -EPERM;
         }
 
         psignal(target, sig);
@@ -462,7 +513,7 @@ int sys_kill(int pid, int sig) {
     }
     else if (pid == 0) {
         // Send to current process group
-        if (!current_process || !current_process->p_pgrp) return -1;
+        if (!current_process || !current_process->p_pgrp) return -ESRCH;
         pgsignal(current_process->p_pgrp->pg_id, sig);
         return 0;
     }
@@ -611,22 +662,4 @@ void signal_handle_pending(registers_t *regs) {
     // but if we delivered it to a handler, the app is "officially" continued.
 }
 
-int sys_sigaltstack(const void *ss_ptr, void *oss_ptr) {
-    const stack_t *ss = (const stack_t *)ss_ptr;
-    stack_t *oss = (stack_t *)oss_ptr;
-    if (oss) {
-        *oss = current_thread->sig_alt_stack;
-    }
-    
-    if (ss) {
-        if (ss->ss_flags & SS_DISABLE) {
-            current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
-        } else {
-            if (current_thread->sig_on_stack) return -1; // EPERM
-            current_thread->sig_alt_stack = *ss;
-            // Validate size?
-            if (ss->ss_size < MINSIGSTKSZ) return -1; // ENOMEM
-        }
-    }
-    return 0;
-}
+
