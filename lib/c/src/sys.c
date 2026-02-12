@@ -181,7 +181,12 @@ void sync(void) {
 }
 
 int kill(pid_t pid, int sig) {
-    return (int)_syscall2(SYS_KILL, pid, sig);
+    int ret = (int)_syscall2(SYS_KILL, pid, sig);
+    if (ret < 0) {
+        errno = -ret;
+        return -1;
+    }
+    return ret;
 }
 
 sighandler_t signal(int signum, sighandler_t handler) {
@@ -323,7 +328,6 @@ int utimes(const char *filename, const struct timeval times[2]) {
     errno = ENOSYS;
     return -1;
 }
-
 int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
     return (int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)filesystemtype, (int)mountflags, (int)data);
 }

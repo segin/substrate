@@ -114,6 +114,210 @@ static void test_strlen(void) {
     }
 }
 
+static void test_memmove(void) {
+    char buf[32];
+    char expected[32];
+
+    // Basic non-overlapping
+    memset(buf, 0, sizeof(buf));
+    strcpy(buf, "Hello World");
+    memmove(buf + 20, buf, 12);
+    ASSERT_MEM_EQ(buf + 20, "Hello World", 12, "memmove basic");
+
+    // Overlap forward (dest < src)
+    strcpy(buf, "12345678");
+    strcpy(expected, "23456678");
+    memmove(buf, buf + 1, 5);
+    ASSERT_MEM_EQ(buf, expected, 8, "memmove overlap forward (dest < src)");
+
+    // Overlap backward (dest > src)
+    strcpy(buf, "12345678");
+    strcpy(expected, "11234578");
+    memmove(buf + 1, buf, 5);
+    ASSERT_MEM_EQ(buf, expected, 8, "memmove overlap backward (dest > src)");
+
+    // Exact overlap
+    strcpy(buf, "12345678");
+    memmove(buf, buf, 8);
+    ASSERT_MEM_EQ(buf, "12345678", 8, "memmove exact overlap");
+
+    // Zero size
+    strcpy(buf, "12345678");
+    memmove(buf, buf + 1, 0);
+    ASSERT_MEM_EQ(buf, "12345678", 8, "memmove zero size");
+}
+
+static void test_memset_basic(void) {
+    char buf[20];
+    char expected[20];
+
+    // Initialize with something else
+    for (int i=0; i<20; i++) {
+        buf[i] = (char)0xAA;
+        expected[i] = (char)0xAA;
+    }
+
+    memset(buf, 0, 10);
+    for (int i=0; i<10; i++) expected[i] = 0;
+
+    ASSERT_MEM_EQ(buf, expected, 20, "Basic memset 0 failed");
+
+    memset(buf, 0x55, 10);
+    for (int i=0; i<10; i++) expected[i] = 0x55;
+
+    ASSERT_MEM_EQ(buf, expected, 20, "Basic memset 0x55 failed");
+}
+
+static void test_memset_small(void) {
+    char buf[16];
+    char expected[16];
+
+    for (int i = 0; i <= 8; i++) {
+        // Reset buffers
+        for (int j=0; j<16; j++) {
+            buf[j] = 0xAA;
+            expected[j] = 0xAA;
+        }
+
+        memset(buf, 0x77, i);
+        for(int j=0; j<i; j++) expected[j] = 0x77;
+
+        ASSERT_MEM_EQ(buf, expected, 16, "Small memset consistency check");
+    }
+}
+
+static void test_memset_unaligned(void) {
+    char buf[64];
+    char expected[64];
+
+    // Initialize
+    for(int i=0; i<64; i++) {
+        buf[i] = 0xAA;
+        expected[i] = 0xAA;
+    }
+
+    // Unaligned start (offset 1)
+    memset(buf + 1, 0xBB, 10);
+    for(int i=0; i<10; i++) expected[1+i] = 0xBB;
+
+    ASSERT_MEM_EQ(buf, expected, 64, "Unaligned start memset failed");
+
+    // Unaligned start (offset 3)
+    for(int i=0; i<64; i++) { buf[i] = 0xAA; expected[i] = 0xAA; }
+    memset(buf + 3, 0xCC, 10);
+    for(int i=0; i<10; i++) expected[3+i] = 0xCC;
+
+    ASSERT_MEM_EQ(buf, expected, 64, "Unaligned start 3 memset failed");
+}
+
+static void test_memset_large(void) {
+    size_t size = 4096;
+    char *buf = kmalloc(size);
+    char *expected = kmalloc(size);
+
+    if (!buf || !expected) {
+        kprint("SKIP: test_memset_large (OOM)\n");
+        if (buf) kfree(buf, size);
+        if (expected) kfree(expected, size);
+        return;
+    }
+
+    // Fill with pattern
+    for(size_t i=0; i<size; i++) {
+        buf[i] = 0xAA;
+        expected[i] = 0xAA;
+    }
+
+    // Memset entire buffer
+    memset(buf, 0xDD, size);
+    for(size_t i=0; i<size; i++) expected[i] = 0xDD;
+
+    ASSERT_MEM_EQ(buf, expected, size, "Large memset failed");
+
+    kfree(buf, size);
+    kfree(expected, size);
+}
+
+static void test_strcmp(void) {
+    if (strcmp("", "") != 0) {
+        kprint("FAIL: strcmp(\"\", \"\") != 0\n");
+        failed_tests++;
+    }
+    if (strcmp("a", "a") != 0) {
+        kprint("FAIL: strcmp(\"a\", \"a\") != 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abc", "abc") != 0) {
+        kprint("FAIL: strcmp(\"abc\", \"abc\") != 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abc", "abd") >= 0) {
+        kprint("FAIL: strcmp(\"abc\", \"abd\") >= 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abd", "abc") <= 0) {
+        kprint("FAIL: strcmp(\"abd\", \"abc\") <= 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abc", "abcd") >= 0) {
+        kprint("FAIL: strcmp(\"abc\", \"abcd\") >= 0\n");
+        failed_tests++;
+    }
+    if (strcmp("abcd", "abc") <= 0) {
+        kprint("FAIL: strcmp(\"abcd\", \"abc\") <= 0\n");
+        failed_tests++;
+    }
+}
+
+static void test_strncmp(void) {
+    // n=0 cases
+    if (strncmp("", "", 0) != 0) {
+        kprint("FAIL: strncmp(\"\", \"\", 0) != 0\n");
+        failed_tests++;
+    }
+    if (strncmp("abc", "def", 0) != 0) {
+        kprint("FAIL: strncmp(\"abc\", \"def\", 0) != 0\n");
+        failed_tests++;
+    }
+
+    // Equal strings
+    if (strncmp("abc", "abc", 3) != 0) {
+        kprint("FAIL: strncmp(\"abc\", \"abc\", 3) != 0\n");
+        failed_tests++;
+    }
+    // n > length
+    if (strncmp("abc", "abc", 5) != 0) {
+        kprint("FAIL: strncmp(\"abc\", \"abc\", 5) != 0\n");
+        failed_tests++;
+    }
+
+    // Difference after n (should appear equal)
+    if (strncmp("abc", "abd", 2) != 0) {
+        kprint("FAIL: strncmp(\"abc\", \"abd\", 2) != 0\n");
+        failed_tests++;
+    }
+
+    // Difference within n
+    if (strncmp("abc", "abd", 3) >= 0) {
+        kprint("FAIL: strncmp(\"abc\", \"abd\", 3) >= 0\n");
+        failed_tests++;
+    }
+    if (strncmp("abd", "abc", 3) <= 0) {
+        kprint("FAIL: strncmp(\"abd\", \"abc\", 3) <= 0\n");
+        failed_tests++;
+    }
+
+    // Prefix
+    if (strncmp("abc", "abcd", 3) != 0) {
+         kprint("FAIL: strncmp(\"abc\", \"abcd\", 3) != 0\n");
+         failed_tests++;
+    }
+    if (strncmp("abc", "abcd", 4) >= 0) {
+         kprint("FAIL: strncmp(\"abc\", \"abcd\", 4) >= 0\n");
+         failed_tests++;
+    }
+}
+
 // Performance Benchmarks
 
 static void benchmark_memcpy(const char *label, void *dst, const void *src, size_t n, int iterations) {
@@ -144,11 +348,26 @@ void run_string_tests(void) {
     kprint("Checking strlen correctness...\n");
     test_strlen();
 
+    kprint("Checking strcmp correctness...\n");
+    test_strcmp();
+
+    kprint("Checking strncmp correctness...\n");
+    test_strncmp();
+
     kprint("Checking memcpy correctness...\n");
     test_memcpy_basic();
     test_memcpy_small();
     test_memcpy_unaligned();
     test_memcpy_large();
+
+    kprint("Checking memmove correctness...\n");
+    test_memmove();
+
+    kprint("Checking memset correctness...\n");
+    test_memset_basic();
+    test_memset_small();
+    test_memset_unaligned();
+    test_memset_large();
 
     if (failed_tests == 0) {
         kprint("Correctness: PASS\n");
