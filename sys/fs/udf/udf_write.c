@@ -199,7 +199,6 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         
         ret = 0;
     }
-    }
     else {
         /* Convert Inline to Short AD if needed */
         if (ad_type == UDF_ICB_FLAG_AD_INLINE) {
