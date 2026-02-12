@@ -19,15 +19,16 @@ int sysinfo(struct sysinfo *info) {
 /*
  * Memory Statistics API - Stub implementations
  */
+#ifndef SYS_VM_STATS
+#define SYS_VM_STATS 255
+#endif
+
 int sys_vm_stats(sys_vmstat_t *stats) {
     if (!stats) {
         errno = EINVAL;
         return -1;
     }
-    memset(stats, 0, sizeof(*stats));
-    /* TODO: Implement via kernel syscall */
-    errno = ENOSYS;
-    return -1;
+    return syscall(SYS_VM_STATS, stats);
 }
 
 int sys_vm_info(sys_vminfo_t *info) {

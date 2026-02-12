@@ -9,31 +9,34 @@
 #include <stddef.h>
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
+#include <sys/kern_syscalls.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
-#include "../../include/sys/resource.h"
-#include "../../include/sys/times.h"
+#include <sys/resource.h>
+#include <sys/times.h>
+#include <string.h>
 
 int netbsd_sys_getrusage(int who, struct rusage *rusage) {
     if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -1;
 
     struct tms t;
-    if ((clock_t)sys_times(&t) == (clock_t)-1) return -1;
+    if ((clock_t)kern_times(&t) == (clock_t)-1) return -1;
 
-    extern void *memset(void *, int, size_t);
-    memset(rusage, 0, sizeof(struct rusage));
+    struct rusage kr;
+    memset(&kr, 0, sizeof(struct rusage));
 
     // Ticks to timeval. HZ=100.
     // user time
     clock_t ut = (who == RUSAGE_SELF) ? t.tms_utime : t.tms_cutime;
-    rusage->ru_utime.tv_sec = ut / 100;
-    rusage->ru_utime.tv_usec = (ut % 100) * 10000;
+    kr.ru_utime.tv_sec = ut / 100;
+    kr.ru_utime.tv_usec = (ut % 100) * 10000;
 
     // system time
     clock_t st = (who == RUSAGE_SELF) ? t.tms_stime : t.tms_cstime;
-    rusage->ru_stime.tv_sec = st / 100;
-    rusage->ru_stime.tv_usec = (st % 100) * 10000;
+    kr.ru_stime.tv_sec = st / 100;
+    kr.ru_stime.tv_usec = (st % 100) * 10000;
 
+    if (copyout(&kr, rusage, sizeof(struct rusage)) != 0) return -14;
     return 0;
 }
 

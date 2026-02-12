@@ -1,29 +1,66 @@
 .\" Process this file with
 .\" groff -man -Tascii null.4
 .\"
-.TH NULL 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.TH NULL 4 "February 2026" "Substrate Kernel" "Device Drivers Manual"
 .SH NAME
-null \- null device (data sink)
+null \- the null device
 .SH SYNOPSIS
 .B /dev/null
 .SH DESCRIPTION
 The
 .B null
-device accepts and discards all data written to it.
-Reading from
-.B /dev/null
-always returns end-of-file (read returns 0).
+device acts as a data sink and source of end-of-file indications.
 .PP
-This device is commonly used to discard unwanted output, for example:
+Writing to the
+.B null
+device discards all data. The write operation always succeeds and returns the count of bytes written.
+.PP
+Reading from the
+.B null
+device always returns 0 (end-of-file).
+.PP
+Seeking on the
+.B null
+device is supported and updating the file offset succeeds, but has no effect on subsequent reads or writes.
+.PP
+The device supports
+.BR poll (2)
+and always reports
+.B POLLOUT
+(writable). It does not report
+.B POLLIN
+(readable) because end-of-file is not considered data availability in this implementation.
+.SH FILES
+.B /dev/null
+.SH ERRORS
+.TP
+.B ENOTTY
+The device does not support any ioctl operations.
+.TP
+.B EINVAL
+Mapping the device via
+.BR mmap (2)
+is not supported.
+.SH EXAMPLES
+Discard standard output of a command:
 .PP
 .nf
-    command > /dev/null 2>&1
+    $ echo "hi" > /dev/null
 .fi
-.SH FILES
-.TP
-.B /dev/null
-The null device special file (character device, major 1, minor 3).
+.PP
+Read EOF immediately:
+.PP
+.nf
+    $ cat /dev/null
+.fi
 .SH SEE ALSO
 .BR zero (4),
-.BR full (4),
-.BR intro (4)
+.BR full (4)
+.SH HISTORY
+The
+.B null
+device appeared in Version 7 AT&T UNIX.
+.SH BUGS
+The implementation does not support
+.BR kqueue (2)
+filters.
