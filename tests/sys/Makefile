@@ -13,7 +13,10 @@ SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test
 
 OBJS = $(SRCS:.c=.o)
 
-all: tests.o
+all: tests.o host_test_minix_vuln
+
+host_test_minix_vuln: host_test_minix_vuln.c
+	$(CC) -m32 -g -Wall -I../../sys/include -I../../include -I../../sys -I. host_test_minix_vuln.c -o $@
 
 tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
