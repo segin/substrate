@@ -295,53 +295,62 @@ uint32_t lapic_timer_ticks_per_ms(void) {
 }
 
 // Delay for specified milliseconds using LAPIC timer
-// Requires lapic_timer_calibrate() to have been called.
 void lapic_timer_delay_ms(uint32_t ms) {
-    if (!lapic_base || lapic_ticks_per_ms == 0) return;
+    if (!lapic_base) return;
 
-    // Calculate total ticks
-    uint64_t total_ticks = (uint64_t)ms * lapic_ticks_per_ms;
-    if (total_ticks > 0xFFFFFFFF) total_ticks = 0xFFFFFFFF;
+    if (lapic_ticks_per_ms == 0) {
+        if (lapic_timer_calibrate() == 0) return;
+    }
 
-    // Set Divider to 16 (consistent with calibration)
+    uint32_t ticks = ms * lapic_ticks_per_ms;
+
+    uint32_t old_timer = lapic_read(LAPIC_TIMER);
+    uint32_t old_divide = lapic_read(LAPIC_TDCR);
+    uint32_t old_ticr = lapic_read(LAPIC_TICR);
+
     lapic_write(LAPIC_TDCR, LAPIC_TDCR_DIV16);
-
-    // Set Timer: One-shot, Masked (no interrupt)
     lapic_write(LAPIC_TIMER, LAPIC_TIMER_ONESHOT | LAPIC_LVT_MASKED);
+    lapic_write(LAPIC_TICR, ticks);
 
-    // Set Initial Count
-    lapic_write(LAPIC_TICR, (uint32_t)total_ticks);
-
-    // Wait until Current Count reaches 0
     while (lapic_read(LAPIC_TCCR) > 0) {
         cpu_relax();
+    }
+
+    lapic_write(LAPIC_TDCR, old_divide);
+    lapic_write(LAPIC_TIMER, old_timer);
+    if (!(old_timer & LAPIC_LVT_MASKED)) {
+        lapic_write(LAPIC_TICR, old_ticr);
     }
 }
 
 // Delay for specified microseconds using LAPIC timer
 void lapic_timer_delay_us(uint32_t us) {
-    if (!lapic_base || lapic_ticks_per_ms == 0) return;
+    if (!lapic_base) return;
 
-    // Calculate total ticks: (us * ticks_per_ms) / 1000
-    // Using 64-bit math to prevent overflow before division
+    if (lapic_ticks_per_ms == 0) {
+        if (lapic_timer_calibrate() == 0) return;
+    }
+
+    // Use 64-bit math to prevent overflow: (us * ticks_per_ms) / 1000
     uint64_t total_ticks = ((uint64_t)us * lapic_ticks_per_ms) / 1000;
+    if (total_ticks == 0 && us > 0) total_ticks = 1; // Minimum 1 tick
 
-    // Ensure at least 1 tick if delay requested
-    if (total_ticks == 0 && us > 0) total_ticks = 1;
-    if (total_ticks > 0xFFFFFFFF) total_ticks = 0xFFFFFFFF;
+    uint32_t old_timer = lapic_read(LAPIC_TIMER);
+    uint32_t old_divide = lapic_read(LAPIC_TDCR);
+    uint32_t old_ticr = lapic_read(LAPIC_TICR);
 
-    // Set Divider to 16
     lapic_write(LAPIC_TDCR, LAPIC_TDCR_DIV16);
-
-    // Set Timer: One-shot, Masked
     lapic_write(LAPIC_TIMER, LAPIC_TIMER_ONESHOT | LAPIC_LVT_MASKED);
-
-    // Set Initial Count
     lapic_write(LAPIC_TICR, (uint32_t)total_ticks);
 
-    // Wait until Current Count reaches 0
     while (lapic_read(LAPIC_TCCR) > 0) {
         cpu_relax();
+    }
+
+    lapic_write(LAPIC_TDCR, old_divide);
+    lapic_write(LAPIC_TIMER, old_timer);
+    if (!(old_timer & LAPIC_LVT_MASKED)) {
+        lapic_write(LAPIC_TICR, old_ticr);
     }
 }
 

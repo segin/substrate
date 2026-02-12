@@ -4,7 +4,6 @@
 #include <arch/i386/early_boot.h>
 #include <string.h>
 #include <stdint.h>
-#include <arch/i386/include/early_boot.h>
 #include <arch/x86-common/include/lapic.h>
 
 #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
@@ -160,7 +159,6 @@ void smp_ap_entry(void) {
     
     kprint("SMP: AP Core online (LAPIC ID: ");
     // Get and print LAPIC ID
-    extern uint32_t lapic_get_id(void);
     uint32_t id = lapic_get_id();
     char buf[4];
     buf[0] = '0' + (id % 10);
@@ -169,7 +167,6 @@ void smp_ap_entry(void) {
     kprint(")\n");
     
     // Enable LAPIC on this AP
-    extern void lapic_enable(uint8_t);
     lapic_enable(0xFF);  // Spurious vector
     
     // TODO: Initialize AP-local state (GDT, TSS, IDT, scheduler)
@@ -182,8 +179,6 @@ void smp_ap_entry(void) {
 
 // Boot a single AP
 int smp_boot_ap(uint8_t apic_id) {
-    extern void lapic_send_init(uint8_t);
-    extern void lapic_send_sipi(uint8_t, uint8_t);
     
     // 1. Copy trampoline to low memory
     size_t len = (uintptr_t)trampoline_end - (uintptr_t)trampoline_start;
@@ -224,8 +219,11 @@ int smp_boot_ap(uint8_t apic_id) {
     // Second SIPI (per Intel spec)
     lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
     
-    // Wait for AP to signal readiness (timeout ~100ms)
-    for (volatile int i = 0; i < 10000000 && aps_ready == old_ready; i++) { }
+    // Wait for AP to signal readiness (timeout 100ms)
+    for (int i = 0; i < 100; i++) {
+        if (aps_ready > old_ready) break;
+        lapic_timer_delay_ms(1);
+    }
     
     if (aps_ready > old_ready) {
         return 0;  // Success
