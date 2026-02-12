@@ -114,6 +114,97 @@ static void test_strlen(void) {
     }
 }
 
+static void test_memset_basic(void) {
+    char buf[20];
+    char expected[20];
+
+    // Initialize with something else
+    for (int i=0; i<20; i++) {
+        buf[i] = (char)0xAA;
+        expected[i] = (char)0xAA;
+    }
+
+    memset(buf, 0, 10);
+    for (int i=0; i<10; i++) expected[i] = 0;
+
+    ASSERT_MEM_EQ(buf, expected, 20, "Basic memset 0 failed");
+
+    memset(buf, 0x55, 10);
+    for (int i=0; i<10; i++) expected[i] = 0x55;
+
+    ASSERT_MEM_EQ(buf, expected, 20, "Basic memset 0x55 failed");
+}
+
+static void test_memset_small(void) {
+    char buf[16];
+    char expected[16];
+
+    for (int i = 0; i <= 8; i++) {
+        // Reset buffers
+        for (int j=0; j<16; j++) {
+            buf[j] = 0xAA;
+            expected[j] = 0xAA;
+        }
+
+        memset(buf, 0x77, i);
+        for(int j=0; j<i; j++) expected[j] = 0x77;
+
+        ASSERT_MEM_EQ(buf, expected, 16, "Small memset consistency check");
+    }
+}
+
+static void test_memset_unaligned(void) {
+    char buf[64];
+    char expected[64];
+
+    // Initialize
+    for(int i=0; i<64; i++) {
+        buf[i] = 0xAA;
+        expected[i] = 0xAA;
+    }
+
+    // Unaligned start (offset 1)
+    memset(buf + 1, 0xBB, 10);
+    for(int i=0; i<10; i++) expected[1+i] = 0xBB;
+
+    ASSERT_MEM_EQ(buf, expected, 64, "Unaligned start memset failed");
+
+    // Unaligned start (offset 3)
+    for(int i=0; i<64; i++) { buf[i] = 0xAA; expected[i] = 0xAA; }
+    memset(buf + 3, 0xCC, 10);
+    for(int i=0; i<10; i++) expected[3+i] = 0xCC;
+
+    ASSERT_MEM_EQ(buf, expected, 64, "Unaligned start 3 memset failed");
+}
+
+static void test_memset_large(void) {
+    size_t size = 4096;
+    char *buf = kmalloc(size);
+    char *expected = kmalloc(size);
+
+    if (!buf || !expected) {
+        kprint("SKIP: test_memset_large (OOM)\n");
+        if (buf) kfree(buf, size);
+        if (expected) kfree(expected, size);
+        return;
+    }
+
+    // Fill with pattern
+    for(size_t i=0; i<size; i++) {
+        buf[i] = 0xAA;
+        expected[i] = 0xAA;
+    }
+
+    // Memset entire buffer
+    memset(buf, 0xDD, size);
+    for(size_t i=0; i<size; i++) expected[i] = 0xDD;
+
+    ASSERT_MEM_EQ(buf, expected, size, "Large memset failed");
+
+    kfree(buf, size);
+    kfree(expected, size);
+}
+
 static void test_strcmp(void) {
     if (strcmp("", "") != 0) {
         kprint("FAIL: strcmp(\"\", \"\") != 0\n");
@@ -235,6 +326,12 @@ void run_string_tests(void) {
     test_memcpy_small();
     test_memcpy_unaligned();
     test_memcpy_large();
+
+    kprint("Checking memset correctness...\n");
+    test_memset_basic();
+    test_memset_small();
+    test_memset_unaligned();
+    test_memset_large();
 
     if (failed_tests == 0) {
         kprint("Correctness: PASS\n");
