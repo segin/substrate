@@ -25,7 +25,7 @@ void virtio_init(void) {
         uint32_t did = dev->device_id;
 
         char buf[64];
-        sprintf(buf, "VirtIO Device Found: %04x:%04x (Bus %d, Dev %d)\n", vid, did, dev->bus, dev->slot);
+        snprintf(buf, sizeof(buf), "VirtIO Device Found: %04x:%04x (Bus %d, Dev %d)\n", vid, did, dev->bus, dev->slot);
         kprint(buf);
 
         if (did == VIRTIO_PCI_DEVICE_ID_BLK) {
@@ -41,6 +41,6 @@ void virtio_init(void) {
     __asm__ volatile("rdtsc" : "=A"(end_tsc));
     char perf_buf[128];
     uint32_t diff_lo = (uint32_t)(end_tsc - start_tsc);
-    sprintf(perf_buf, "VirtIO Scan (Optimized): %u cycles\n", diff_lo);
+    snprintf(perf_buf, sizeof(perf_buf), "VirtIO Scan (Optimized): %u cycles\n", diff_lo);
     kprint(perf_buf);
 }

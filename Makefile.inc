@@ -23,8 +23,8 @@ COMMON_FLAGS = -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-
 USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include)
-CFLAGS += $(COMMON_FLAGS) -std=c2x -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(GCC_INCLUDE)
-CXXFLAGS += $(COMMON_FLAGS) -std=c++2b -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(GCC_INCLUDE)
+CFLAGS += $(COMMON_FLAGS) -std=c2x -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys -I$(GCC_INCLUDE)
+CXXFLAGS += $(COMMON_FLAGS) -std=c++2b -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys -I$(GCC_INCLUDE)
 
 # Freestanding flags (for kernel and standalone utils)
 FREESTANDING_CFLAGS = $(CFLAGS) -ffreestanding -nostdlib -fno-builtin -fno-pie
@@ -49,8 +49,8 @@ ifdef NATIVE_BUILD
     # Ensure no 32-bit override if host is 64-bit (unless HOSTCFLAGS specifies it)
 else
     # Target build configuration (Substrate i386)
-    USER_CFLAGS = $(CFLAGS)
-    USER_LDFLAGS = -m32 -nostdlib -fno-pie
+    USER_CFLAGS = $(CFLAGS) -I$(TOP)/sys
+    USER_LDFLAGS = -m32 -nostdlib -fno-pie -no-pie
 endif
 
 LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)

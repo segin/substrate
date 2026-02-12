@@ -1689,29 +1689,29 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (rmdir empty, ENOTEMPTY, EBUSY for .)
                     - Docs: `vop_rmdir.9`
                     - Acceptance: Empty directory removed
-            - [ ] **Access/Attributes:**
-                - [ ] Implement `vop_access(vp, mode, cred, p)`.
+            - [x] **Access/Attributes:**
+                - [x] Implement `vop_access(vp, mode, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Check r/w/x permissions
                     - Logic: Compare cred uid/gid against vnode owner/group, check mode bits
                     - Tests: unit (owner access, group access, other access, root bypass)
                     - Docs: `vop_access.9`
                     - Acceptance: Permission checks match POSIX semantics
-                - [ ] Implement `vop_getattr(vp, vap, cred, p)`.
+                - [x] Implement `vop_getattr(vp, vap, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Get file attributes (stat equivalent)
                     - Fields: `va_mode`, `va_nlink`, `va_uid`, `va_gid`, `va_size`, `va_atime`, `va_mtime`, `va_ctime`
                     - Tests: unit (all stat fields correct)
                     - Docs: `vop_getattr.9`
                     - Acceptance: All vattr fields populated correctly
-                - [ ] Implement `vop_setattr(vp, vap, cred, p)`.
+                - [x] Implement `vop_setattr(vp, vap, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Set file attributes (chmod/chown/utimes)
                     - Logic: Check permissions, update inode, mark dirty
                     - Tests: unit (chmod, chown, truncate, utimes)
                     - Docs: `vop_setattr.9`
                     - Acceptance: Attributes updated, persisted after sync
-                - [ ] Implement `vop_pathconf(vp, name, retval)`.
+                - [x] Implement `vop_pathconf(vp, name, retval)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: POSIX pathconf support
                     - Names: `_PC_LINK_MAX`, `_PC_NAME_MAX`, `_PC_PATH_MAX`, etc.
@@ -1783,7 +1783,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Docs: `vop_strategy.9`
                     - Acceptance: I/O completed, buffer marked done
             - [ ] **Directories:**
-                - [ ] Implement `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`.
+                - [x] Implement `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Read directory entries
                     - Format: `struct dirent` with d_ino, d_type, d_namlen, d_name
@@ -5950,6 +5950,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Critical Headers (Missing Files):**
         - [ ] Create `string.h` (functions exist in `string.c` but header is missing).
         - [ ] Create `limits.h`, `setjmp.h`, `locale.h`.
+        - [ ] Create `err.h` (BSD error reporting helpers).
         - [ ] Create `stddef.h`, `stdint.h`, `stdarg.h` (wrapping GCC builtins).
     - [ ] **String Manipulation (`<string.h>`):**
         - [ ] `strndup()`: Bounded string duplication.
@@ -6412,6 +6413,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Filesystem Tools (`sbin/`):**
     - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
     - [ ] **`fsck`:** Implement `ext2` consistency check.
+- [ ] **Compression Tools:**
+    - [x] **`compress`:** Implement `compress`, `uncompress`, `zcat` (LZW).
+    - [ ] **`cpio`:** Implement POSIX-compatible archive utility (`usr.bin/cpio`).
 
 ### 8. Security and Identity
 - [ ] **User & Group Management:**
