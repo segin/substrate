@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/vm/vm_map.h"
+#include <vm/vm_map.h>
 
 /*
  * Property-based test: Invariant Check
@@ -15,7 +15,7 @@ bool prop_mmap_munmap_invariant(uintptr_t base, size_t size) {
     size_t initial_size = map.size;
     
     // Action: Map
-    if (vm_map_insert(&map, NULL, 0, base, base + size) != 0) {
+    if (vm_map_insert(&map, NULL, 0, base, base + size, 0x3, 0x3, 1) != 0) {
         return true; // Ignore if mapping was invalid for this test
     }
     

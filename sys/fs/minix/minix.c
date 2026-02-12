@@ -525,8 +525,9 @@ static struct dirent *minix_readdir(fs_node_t *node, uint64_t index) {
     if (entry.inode == 0) return NULL; // Deleted/Empty
 
     static struct dirent dir; // Static return buffer required by VFS interface
-    strcpy(dir.name, entry.name);
-    dir.ino = entry.inode;
+    strncpy(dir.d_name, entry.name, 30);
+    dir.d_name[30] = '\0';
+    dir.d_ino = entry.inode;
     return &dir;
 }
 
@@ -536,11 +537,11 @@ static fs_node_t *minix_finddir(fs_node_t *node, char *name) {
     struct dirent *d;
     uint64_t index = 0;
     while ((d = minix_readdir(node, index++)) != NULL) {
-        if (strcmp(d->name, name) == 0) {
+        if (strcmp(d->d_name, name) == 0) {
             minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
             result = (fs_node_t *)kmalloc(sizeof(fs_node_t));
             memset(result, 0, sizeof(fs_node_t));
-            if (minix_read_inode(fs, d->ino, result) != 0) {
+            if (minix_read_inode(fs, d->d_ino, result) != 0) {
                 kfree(result, sizeof(fs_node_t));
                 return NULL;
             }

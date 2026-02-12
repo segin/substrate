@@ -1,5 +1,8 @@
-#ifndef _SYS_STDARG_H
-#define _SYS_STDARG_H
+#ifdef HOST_TEST
+#include_next <stdarg.h>
+#else
+#ifndef _STDARG_H
+#define _STDARG_H
 
 #ifdef HOST_TEST
 #include_next <stdarg.h>
@@ -11,4 +14,5 @@ typedef __builtin_va_list va_list;
 #define va_copy(d, s)  __builtin_va_copy(d, s)
 #endif
 
+#endif
 #endif

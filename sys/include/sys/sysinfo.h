@@ -67,6 +67,18 @@ struct sysinfo {
     char _f[20-2*sizeof(long)-sizeof(int)]; /* Padding to 64 bytes */
 };
 
+/* VM Statistics Structure */
+typedef struct sys_vmstat {
+    uint64_t total;        /* Total physical memory */
+    uint64_t free;         /* Free memory */
+    uint64_t available;    /* Available memory (includes reclaimable) */
+    uint64_t buffers;      /* Buffer cache */
+    uint64_t cached;       /* Page cache */
+    uint64_t swap_total;   /* Total swap */
+    uint64_t swap_free;    /* Free swap */
+    uint64_t swap_cached;  /* Cached swap */
+} sys_vmstat_t;
+
 #ifndef _KERNEL
 int sysinfo(struct sysinfo *info);
 #endif
