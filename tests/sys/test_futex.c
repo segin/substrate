@@ -10,6 +10,8 @@
  */
 
 #include <sys/futex.h>
+#include <sys/time.h>
+#include <sys/errno.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -81,6 +83,21 @@ static int test_futex_wait_mismatch(void) {
     int futex_word = 42;
     int result = sys_futex(&futex_word, FUTEX_WAIT, 0, NULL, NULL, 0);
     TEST_ASSERT(result == -11 /* EAGAIN */, "Wait with wrong val should return EAGAIN");
+    TEST_PASS();
+}
+
+/*
+ * Test: FUTEX_WAIT with timeout returns -ETIMEDOUT
+ */
+static int test_futex_wait_timeout(void) {
+    int futex_word = 42;
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 50000000; /* 50ms */
+
+    /* Wait with expected value 42, should timeout */
+    int result = sys_futex(&futex_word, FUTEX_WAIT, 42, &ts, NULL, 0);
+    TEST_ASSERT(result == -ETIMEDOUT, "Wait should timeout");
     TEST_PASS();
 }
 
@@ -243,6 +260,7 @@ static struct test_case futex_tests[] = {
     {"futex_validate_unaligned", test_futex_validate_unaligned},
     {"futex_wake_empty", test_futex_wake_empty},
     {"futex_wait_mismatch", test_futex_wait_mismatch},
+    {"futex_wait_timeout", test_futex_wait_timeout},
     {"futex_set_robust_list", test_futex_set_robust_list},
     {"futex_set_robust_list_badsize", test_futex_set_robust_list_badsize},
     {"futex_get_robust_list", test_futex_get_robust_list},

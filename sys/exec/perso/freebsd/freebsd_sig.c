@@ -25,7 +25,11 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
     }
 
     frame.sf_sig = sig;
-    frame.sf_code = 0; // TODO: trap code
+    if (sig == current_thread->trap_signo) {
+        frame.sf_code = current_thread->trap_code;
+    } else {
+        frame.sf_code = 0;
+    }
     frame.sf_scp = esp + offsetof(struct freebsd_sigframe, sf_sc);
     frame.sf_handler = (uint32_t)handler;
 
@@ -45,6 +49,8 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
     frame.sf_sc.sc_es = regs->es;
     frame.sf_sc.sc_fs = regs->fs;
     frame.sf_sc.sc_gs = regs->gs;
+    frame.sf_sc.sc_trapno = regs->int_no;
+    frame.sf_sc.sc_err = regs->err_code;
     frame.sf_sc.sc_mask = mask;
 
     /* FreeBSD doesn't typically use a kernel-mapped trampoline for legacy signals;

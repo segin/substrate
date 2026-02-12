@@ -10,9 +10,7 @@
 #include <exec/perso/personality.h>
 #include <sys/random.h>
 #include <sys/signal.h> // For copyin/copyout
-
-
-// Globals for userspace transition
+#include <sys/kern_syscalls.h>
 
 /*
  * exec_reset_signals - Reset signal handlers on exec
@@ -341,12 +339,8 @@ static int capture_ptr(char *const array[], int index, char **out) {
 
 static int capture_strlen(const char *s, size_t *out_len) {
     if (is_user_ptr(s)) {
-        // We don't have a safe strnlen for user space that returns length without copying.
-        // We can use copyinstr with a small buffer or a specialized helper.
-        // For now, let's use a 4KB temporary buffer.
-        char tmp[4096];
         size_t len;
-        int ret = copyinstr(s, tmp, sizeof(tmp), &len);
+        int ret = copyinstr(s, NULL, 4096, &len);
         if (ret == 0) {
             *out_len = len;
             return 0;
@@ -370,7 +364,8 @@ static int capture_strcpy(char *dst, const char *src) {
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, -1 on failure
 int elf_execve(const char *path, char *const argv[], char *const envp[]) {
-    if (!fs_root) return -1;
+    fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
+    if (!root) return -1;
 
     // Variables for argument capturing
     int argc = 0;
@@ -381,7 +376,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     char *arg_buffer = NULL;
 
     // Lookup the file
-    fs_node_t *file = vfs_lookup(fs_root, path);
+    fs_node_t *file = vfs_lookup(root, path);
     if (!file) {
         kprint("execve: File not found: ");
         kprint(path);
@@ -400,11 +395,18 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         while (1) {
             char *uarg;
             if (capture_ptr(argv, argc, &uarg) != 0 || uarg == NULL) break;
+            
             size_t len;
-            if (capture_strlen(uarg, &len) != 0) return -14;
+            int res = capture_strlen(uarg, &len);
+            if (res == -14) return -14;
+            if (res == -36) return -36;
+            
             strings_size += len;
             argc++;
-            if (argc > 512) return -7;
+            if (strings_size > 32 * 1024) {
+                kprint("execve: Argument list too long\n");
+                return -7; // E2BIG
+            }
         }
     }
 
@@ -413,24 +415,25 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         while (1) {
             char *uarg;
             if (capture_ptr(envp, envc, &uarg) != 0 || uarg == NULL) break;
+            
             size_t len;
-            if (capture_strlen(uarg, &len) != 0) return -14;
+            int res = capture_strlen(uarg, &len);
+            if (res == -14) return -14;
+            if (res == -36) return -36;
+            
             strings_size += len;
             envc++;
-            if (envc > 512) return -7;
+            if (strings_size > 32 * 1024) {
+                kprint("execve: Argument list too long\n");
+                return -7; // E2BIG
+            }
         }
-    }
-
-    // Limit check (e.g. 32KB)
-    if (strings_size > 32 * 1024) {
-        kprint("execve: Argument list too long\n");
-        return -1; // E2BIG
     }
 
     // Allocate buffers
     if (argc > 0) {
         k_argv = kmalloc((argc + 1) * sizeof(char*));
-        if (!k_argv) return -1; // ENOMEM
+        if (!k_argv) return -12; // ENOMEM
         k_argv[argc] = NULL;
     }
 
@@ -438,7 +441,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         k_envp = kmalloc((envc + 1) * sizeof(char*));
         if (!k_envp) {
             if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
-            return -1;
+            return -12;
         }
         k_envp[envc] = NULL;
     }
@@ -448,30 +451,30 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         if (!arg_buffer) {
              if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
              if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
-             return -1;
+             return -12;
         }
     }
 
     // Copy strings
-    char *p = arg_buffer;
+    char *p_buf = arg_buffer;
     for (int i = 0; i < argc; i++) {
-        k_argv[i] = p;
         char *uarg;
         capture_ptr(argv, i, &uarg);
+        k_argv[i] = p_buf;
         size_t len;
         capture_strlen(uarg, &len);
-        capture_strcpy(p, uarg);
-        p += len;
+        capture_strcpy(p_buf, uarg);
+        p_buf += len;
     }
 
     for (int i = 0; i < envc; i++) {
-        k_envp[i] = p;
         char *uarg;
         capture_ptr(envp, i, &uarg);
+        k_envp[i] = p_buf;
         size_t len;
         capture_strlen(uarg, &len);
-        capture_strcpy(p, uarg);
-        p += len;
+        capture_strcpy(p_buf, uarg);
+        p_buf += len;
     }
     
     // Create new address space for this process

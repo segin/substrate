@@ -5,6 +5,7 @@
 #include <vfs/vfs.h>
 #include <drivers/video/vga.h>
 #include <kern/sched.h>
+#include <sys/kern_syscalls.h>
 
 static fs_node_t *acct_node = 0;
 
@@ -51,12 +52,11 @@ int kern_acct(const char *path) {
 }
 
 int sys_acct(const char *path) {
+    if (path == NULL) return kern_acct(NULL);
+    
     char kpath[256];
-    if (path) {
-        if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
-        return kern_acct(kpath);
-    }
-    return kern_acct(NULL);
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_acct(kpath);
 }
 
 extern uint32_t get_time(void); // Defined in time.c (to be implemented)
