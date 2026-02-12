@@ -18,7 +18,7 @@ void fuzz_vm_fault_ops(uint32_t seed) {
     vm_map_init(&map, pmap_kernel(), 0x1000, 0x100000);
     
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x100000);
-    vm_map_insert(&map, obj, 0, 0x1000, 0x50000); // Only map half
+    vm_map_insert(&map, obj, 0, 0x1000, 0x50000, 0x3, 0x3, 1); // Only map half
 
     for (int i = 0; i < 1000; i++) {
         uint32_t addr = (next_rand() % 256) * 4096 + 0x1000;

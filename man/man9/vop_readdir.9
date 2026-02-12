@@ -1,0 +1,68 @@
+.\" Process this file with
+.\" groff -man -Tascii vop_readdir.9
+.\"
+.TH VOP_READDIR 9 "February 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+.B vop_readdir
+\- read directory entries
+.SH SYNOPSIS
+.B #include <vfs/vnode.h>
+.PP
+.BI "int vop_readdir(struct vnode *" vp ", struct uio *" uio ", struct ucred *" cred ", int *" eofflag ", int *" ncookies ", uint64_t **" cookies ");"
+.SH DESCRIPTION
+The
+.B vop_readdir
+operation reads directory entries from the directory
+.I vp
+into the buffer described by
+.I uio
+using the credentials
+.I cred
+for access control.
+.PP
+The arguments are:
+.TP
+.I vp
+The vnode of the directory to be read.
+.TP
+.I uio
+The
+.B struct uio
+describing the target buffer (can be in user space or kernel space). The
+.I uio_offset
+field should be used to track the current position in the directory.
+.TP
+.I cred
+The credentials of the calling process.
+.TP
+.I eofflag
+A pointer to an integer that is set to non-zero if the end of the directory has been reached.
+.TP
+.I ncookies
+A pointer to an integer that, if not NULL, will be set to the number of directory cookies returned.
+.TP
+.I cookies
+A pointer to a pointer that, if not NULL, will be set to an array of directory cookies (for NFS-style seek support).
+.PP
+Directory entries are returned in
+.B struct dirent
+format (defined in
+.I sys/dirent.h
+). Each entry contains the inode number, entry length, type, and name.
+.SH RETURN VALUES
+Returns 0 on success, or an error code:
+.TP
+.B ENOTDIR
+The vnode is not a directory.
+.TP
+.B EFAULT
+The buffer specified by
+.I uio
+is invalid.
+.TP
+.B EINVAL
+Invalid arguments were provided.
+.SH SEE ALSO
+.BR vnode (9),
+.BR uio (9),
+.BR dirent (5)
