@@ -163,7 +163,6 @@ int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type,
 }
 
 /*
-/*
  * Convert inline data to Short Allocation Descriptor
  */
 static int udf_convert_inline_to_short_ad(fs_node_t *dev, struct udf_fe *fe) {
@@ -212,7 +211,6 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
     uint8_t *ad_area = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
     struct udf_short_ad *ads = (struct udf_short_ad *)ad_area;
     
-    uint32_t file_pos = 0;
     uint32_t written = 0;
     uint32_t rem_size = size;
     uint32_t file_offset = offset;
