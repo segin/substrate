@@ -20,6 +20,8 @@ extern int sys_ptrace(int req, int pid, int addr, int data);
 extern int sys_reboot(int cmd);
 extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 extern int sys_vm_stats(sys_vmstat_t *stats);
+extern int sys_setpriority(int which, int who, int prio);
+extern int sys_getpriority(int which, int who);
 
 /* Native-specific syscalls are now in syscall_impl.h */
 
@@ -101,6 +103,8 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_PROC_CMDLINE] = &sys_proc_cmdline,
     [SYS_PROC_ENVIRON] = &sys_proc_environ,
     [SYS_VM_STATS] = &sys_vm_stats,
+    [SYS_SETPRIORITY] = &sys_setpriority,
+    [SYS_GETPRIORITY] = &sys_getpriority,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -180,6 +184,8 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_PROC_CMDLINE] = "proc_cmdline",
     [SYS_PROC_ENVIRON] = "proc_environ",
     [SYS_VM_STATS] = "vm_stats",
+    [SYS_SETPRIORITY] = "setpriority",
+    [SYS_GETPRIORITY] = "getpriority",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -259,6 +265,8 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_PROC_CMDLINE] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
     [SYS_PROC_ENVIRON] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
     [SYS_VM_STATS] = { 1, { ARG_PTR } },
+    [SYS_SETPRIORITY] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [SYS_GETPRIORITY] = { 2, { ARG_INT, ARG_INT } },
 };
 
 extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);

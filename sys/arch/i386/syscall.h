@@ -58,6 +58,8 @@
 #define SYS_MUNMAP  91
 #define SYS_TRUNCATE 92
 #define SYS_FTRUNCATE 93
+#define SYS_SETPRIORITY 96
+#define SYS_GETPRIORITY 100
 #define SYS_UMASK   60
 #define SYS_STAT    106
 #define SYS_LSTAT   107
