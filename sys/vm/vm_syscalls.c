@@ -68,6 +68,12 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         file = p->fds[fd];
     }
 
+    // Check for device-specific mmap handler
+    if (file && file->f_data && ((fs_node_t*)file->f_data)->mmap) {
+        // Delegate to device driver (e.g. /dev/mem)
+        return ((fs_node_t*)file->f_data)->mmap((fs_node_t*)file->f_data, addr, length, prot, flags, offset);
+    }
+
     // Allocate and map pages
     // NOTE: pmm_alloc_block() returns virtual address (kernel direct mapping)
     uint64_t file_offset = offset;

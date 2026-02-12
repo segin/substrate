@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/vm/vm_map.h"
-#include "../../../sys/vm/vm_object.h"
+#include <vm/vm_map.h"
+#include <vm/vm_object.h"
 
 /*
  * User Memory System Call Unit Tests

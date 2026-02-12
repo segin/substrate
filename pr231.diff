@@ -1,0 +1,1198 @@
+diff --git a/sys/exec/exec.c b/sys/exec/exec.c
+index 3e897c21..bb4f9626 100644
+--- a/sys/exec/exec.c
++++ b/sys/exec/exec.c
+@@ -14,6 +14,7 @@
+ #include <sys/stat.h>
+ #include <kern/console.h>
+ #include <sys/syscall_impl.h>
++#include <sys/kern_syscalls.h>
+ #include <sys/fcntl.h>
+ 
+ static struct exec_binary_handler *exec_handlers = NULL;
+@@ -36,15 +37,15 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
+     if (!path) return -ENOENT;
+ 
+     // 1. Open the file to read the header
+-    int fd = sys_open(path, O_RDONLY, 0);
++    int fd = kern_open(path, O_RDONLY, 0);
+     if (fd < 0) return fd; // Propagate error (ENOENT, EACCES)
+ 
+     // 2. Read the header (magic bytes)
+     // 256 bytes should be enough for most magic checks (ELF is 4, Script #!, ELKS 2-4)
+     char header_buf[256];
+-    int len = sys_read(fd, header_buf, sizeof(header_buf));
++    int len = kern_read(fd, header_buf, sizeof(header_buf));
+     
+-    sys_close(fd);
++    kern_close(fd);
+ 
+     if (len < 0) return len;
+     
+diff --git a/sys/exec/formats/elf.c b/sys/exec/formats/elf.c
+index 248d4bee..9bd7ede6 100644
+--- a/sys/exec/formats/elf.c
++++ b/sys/exec/formats/elf.c
+@@ -9,7 +9,7 @@
+ #include <vm/vm_kmem.h>
+ #include <exec/perso/personality.h>
+ #include <sys/random.h>
+-
++#include <sys/signal.h> // For copyin/copyout
+ 
+ 
+ // Globals for userspace transition
+@@ -326,6 +326,47 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
+     return entry;
+ }
+ 
++static int is_user_ptr(const void *ptr) {
++    return (uintptr_t)ptr < 0xC0000000;
++}
++
++static int capture_ptr(char *const array[], int index, char **out) {
++    if (is_user_ptr(array)) {
++        return copyin(&array[index], out, sizeof(char*));
++    } else {
++        *out = array[index];
++        return 0;
++    }
++}
++
++static int capture_strlen(const char *s, size_t *out_len) {
++    if (is_user_ptr(s)) {
++        // We don't have a safe strnlen for user space that returns length without copying.
++        // We can use copyinstr with a small buffer or a specialized helper.
++        // For now, let's use a 4KB temporary buffer.
++        char tmp[4096];
++        size_t len;
++        int ret = copyinstr(s, tmp, sizeof(tmp), &len);
++        if (ret == 0) {
++            *out_len = len;
++            return 0;
++        }
++        return ret;
++    } else {
++        *out_len = strlen(s) + 1;
++        return 0;
++    }
++}
++
++static int capture_strcpy(char *dst, const char *src) {
++    if (is_user_ptr(src)) {
++        return copyinstr(src, dst, 4096, NULL);
++    } else {
++        strcpy(dst, src);
++        return 0;
++    }
++}
++
+ // Execute a binary - loads ELF and prepares for userspace transition
+ // Returns 0 on success, -1 on failure
+ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
+@@ -356,19 +397,27 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
+     // Capture arguments and environment
+     // Count argc and size
+     if (argv) {
+-        while (argv[argc]) {
+-            size_t len = strlen(argv[argc]);
+-            strings_size += len + 1;
++        while (1) {
++            char *uarg;
++            if (capture_ptr(argv, argc, &uarg) != 0 || uarg == NULL) break;
++            size_t len;
++            if (capture_strlen(uarg, &len) != 0) return -14;
++            strings_size += len;
+             argc++;
++            if (argc > 512) return -7;
+         }
+     }
+ 
+     // Count envc and size
+     if (envp) {
+-        while (envp[envc]) {
+-            size_t len = strlen(envp[envc]);
+-            strings_size += len + 1;
++        while (1) {
++            char *uarg;
++            if (capture_ptr(envp, envc, &uarg) != 0 || uarg == NULL) break;
++            size_t len;
++            if (capture_strlen(uarg, &len) != 0) return -14;
++            strings_size += len;
+             envc++;
++            if (envc > 512) return -7;
+         }
+     }
+ 
+@@ -407,14 +456,22 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
+     char *p = arg_buffer;
+     for (int i = 0; i < argc; i++) {
+         k_argv[i] = p;
+-        strcpy(p, argv[i]);
+-        p += strlen(argv[i]) + 1;
++        char *uarg;
++        capture_ptr(argv, i, &uarg);
++        size_t len;
++        capture_strlen(uarg, &len);
++        capture_strcpy(p, uarg);
++        p += len;
+     }
+ 
+     for (int i = 0; i < envc; i++) {
+         k_envp[i] = p;
+-        strcpy(p, envp[i]);
+-        p += strlen(envp[i]) + 1;
++        char *uarg;
++        capture_ptr(envp, i, &uarg);
++        size_t len;
++        capture_strlen(uarg, &len);
++        capture_strcpy(p, uarg);
++        p += len;
+     }
+     
+     // Create new address space for this process
+diff --git a/sys/fs/procfs.c b/sys/fs/procfs.c
+index 0c6434ff..dd446564 100644
+--- a/sys/fs/procfs.c
++++ b/sys/fs/procfs.c
+@@ -238,8 +238,6 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
+     char buf[512];
+     int len;
+     struct personality *pers = perso_lookup(current_process->perso_id);
+-    
+-    struct personality *pers = perso_lookup(current_process->perso_id);
+ 
+     if (pers && strcmp(pers->name, "Linux") == 0) {
+         len = snprintf(buf, sizeof(buf),
+diff --git a/sys/include/sys/kern_syscalls.h b/sys/include/sys/kern_syscalls.h
+new file mode 100644
+index 00000000..5a5a981c
+--- /dev/null
++++ b/sys/include/sys/kern_syscalls.h
+@@ -0,0 +1,64 @@
++#ifndef _SYS_KERN_SYSCALLS_H
++#define _SYS_KERN_SYSCALLS_H
++
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <sys/signal.h>
++#include <sys/utsname.h>
++
++/* Forward declarations */
++struct thr_param;
++struct pollfd;
++struct sys_procinfo;
++typedef struct sys_procinfo sys_procinfo_t;
++struct timespec;
++struct timeval;
++struct timezone;
++struct tms;
++
++/* Internal kernel versions of syscalls that take kernel pointers */
++int kern_open(const char *path, int flags, int mode);
++int kern_read(int fd, char *buf, int len);
++int kern_write(int fd, const char *buf, int len);
++int kern_close(int fd);
++int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
++int kern_getdents(unsigned int fd, void *dirp, unsigned int count);
++int kern_uname(struct utsname *buf);
++int kern_thr_new(struct thr_param *param, int param_size);
++int kern_chroot(const char *path);
++int kern_mkdir(const char *p, int m);
++int kern_stat(const char *path, struct stat *buf);
++int kern_lstat(const char *path, struct stat *buf);
++int kern_poll(struct pollfd *fds, unsigned int nfds, int timeout);
++int kern_fstat(int fd, struct stat *buf);
++int kern_ioctl(int fd, uint32_t request, void *arg);
++int kern_unlink(const char *path);
++int kern_link(const char *oldpath, const char *newpath);
++int kern_readlink(const char *pathname, char *buf, size_t bufsiz);
++int kern_access(const char *path, int mode);
++int kern_pipe(int *fds);
++int kern_waitpid(int pid, int *status, int options);
++int kern_execve(const char *f, char *const a[], char *const e[]);
++int kern_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data);
++int kern_umount(const char *target);
++int kern_chdir(const char *path);
++int kern_getcwd(char *buf, size_t size);
++int kern_proc_info(pid_t pid, sys_procinfo_t *info);
++int kern_proc_list(pid_t *pids, size_t count);
++int kern_hostname(char *buf, size_t len);
++time_t kern_time(time_t *tloc);
++int kern_stime(time_t *t);
++int kern_gettimeofday(struct timeval *tv, struct timezone *tz);
++int kern_clock_gettime(clockid_t clk_id, struct timespec *tp);
++clock_t kern_times(struct tms *buf);
++int kern_acct(const char *path);
++
++/* Signal related internal versions */
++int kern_sigprocmask(int how, const uint32_t *set, uint32_t *oset);
++int kern_sigpending(uint32_t *set);
++int kern_sigsuspend(const uint32_t *mask);
++int kern_sigwait(const uint32_t *set, int *sig);
++int kern_sigtimedwait(const uint32_t *set, siginfo_t *info, const struct timespec *timeout);
++int kern_sigaltstack(const stack_t *ss, stack_t *oss);
++
++#endif
+diff --git a/sys/include/sys/proc.h b/sys/include/sys/proc.h
+index 5ed01d47..e45dba09 100644
+--- a/sys/include/sys/proc.h
++++ b/sys/include/sys/proc.h
+@@ -50,6 +50,7 @@ typedef struct process {
+     struct pgrp *p_pgrp;       // Process group (NULL = none)
+     struct process *p_pgrp_link; // Next process in same pgrp (linked list)
+     int perso_id; // Personality ID (PERS_NATIVE, PERS_LINUX, etc.)
++    struct personality *pers; // Pointer to personality
+     file_t *fds[MAX_FD]; // File Descriptor Table
+     int next_fd;         // Hint for next free FD
+     fs_node_t *root_node; // Per-process root (for chroot)
+diff --git a/sys/include/sys/utsname.h b/sys/include/sys/utsname.h
+new file mode 100644
+index 00000000..989692b5
+--- /dev/null
++++ b/sys/include/sys/utsname.h
+@@ -0,0 +1,13 @@
++#ifndef _SYS_UTSNAME_H
++#define _SYS_UTSNAME_H
++
++struct utsname {
++    char sysname[256];
++    char nodename[256];
++    char release[256];
++    char version[256];
++    char machine[256];
++    char domainname[256];
++};
++
++#endif
+diff --git a/sys/kern/acct.c b/sys/kern/acct.c
+index 05e5885b..8fa22f21 100644
+--- a/sys/kern/acct.c
++++ b/sys/kern/acct.c
+@@ -1,6 +1,7 @@
+ #include <sys/acct.h>
+ #include <sys/proc.h>
+ #include <sys/session.h>
++#include <sys/signal.h>
+ #include <vfs/vfs.h>
+ #include <drivers/video/vga.h>
+ #include <kern/sched.h>
+@@ -28,7 +29,7 @@ comp_t compress(uint32_t t) {
+     return (exp << 13) + t;
+ }
+ 
+-int sys_acct(const char *path) {
++int kern_acct(const char *path) {
+     if (path == 0) {
+         if (acct_node) {
+             close_fs(acct_node);
+@@ -49,6 +50,15 @@ int sys_acct(const char *path) {
+     return 0;
+ }
+ 
++int sys_acct(const char *path) {
++    char kpath[256];
++    if (path) {
++        if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
++        return kern_acct(kpath);
++    }
++    return kern_acct(NULL);
++}
++
+ extern uint32_t get_time(void); // Defined in time.c (to be implemented)
+ 
+ void acct_process(int exitcode) {
+diff --git a/sys/kern/signal.c b/sys/kern/signal.c
+index 832a0f48..42119687 100644
+--- a/sys/kern/signal.c
++++ b/sys/kern/signal.c
+@@ -1,4 +1,5 @@
+ #include <sys/signal.h>
++#include <sys/kern_syscalls.h>
+ #include <sys/proc.h>
+ #include <sys/session.h>
+ #include <kern/sched.h>
+@@ -14,9 +15,7 @@
+ extern thread_t threads[MAX_THREADS];
+ 
+ // Signal System Calls
+-int sys_sigaction(int sig, const void *act_ptr, void *oact_ptr) {
+-    const struct sigaction *act = (const struct sigaction *)act_ptr;
+-    struct sigaction *oact = (struct sigaction *)oact_ptr;
++int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
+     if (sig <= 0 || sig > NSIG || sig == SIGKILL || sig == SIGSTOP) return -1;
+     
+     uint32_t mask = sigmask(sig);
+@@ -42,9 +41,19 @@ int sys_sigaction(int sig, const void *act_ptr, void *oact_ptr) {
+     return 0;
+ }
+ 
+-int sys_sigprocmask(int how, const void *set_ptr, void *oset_ptr) {
+-    const uint32_t *set = (const uint32_t *)set_ptr;
+-    uint32_t *oset = (uint32_t *)oset_ptr;
++int sys_sigaction(int sig, const void *act, void *oact) {
++    struct sigaction kact, koact;
++    if (act) {
++        if (copyin(act, &kact, sizeof(struct sigaction)) != 0) return -14;
++    }
++    int ret = kern_sigaction(sig, act ? &kact : NULL, oact ? &koact : NULL);
++    if (ret == 0 && oact) {
++        if (copyout(&koact, oact, sizeof(struct sigaction)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
+     if (oset) *oset = current_thread->sig_mask;
+     if (set) {
+         uint32_t new_set = *set;
+@@ -56,14 +65,33 @@ int sys_sigprocmask(int how, const void *set_ptr, void *oset_ptr) {
+     return 0;
+ }
+ 
+-int sys_sigpending(void *set_ptr) {
+-    uint32_t *set = (uint32_t *)set_ptr;
++int sys_sigprocmask(int how, const void *set, void *oset) {
++    uint32_t kset, koset;
++    if (set) {
++        if (copyin(set, &kset, sizeof(uint32_t)) != 0) return -14;
++    }
++    int ret = kern_sigprocmask(how, set ? &kset : NULL, oset ? &koset : NULL);
++    if (ret == 0 && oset) {
++        if (copyout(&koset, oset, sizeof(uint32_t)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_sigpending(uint32_t *set) {
+     if (set) *set = current_thread->sig_pending & current_thread->sig_mask;
+     return 0;
+ }
+ 
+-int sys_sigsuspend(const void *mask_ptr) {
+-    const uint32_t *mask = (const uint32_t *)mask_ptr;
++int sys_sigpending(void *set) {
++    uint32_t kset;
++    int ret = kern_sigpending(&kset);
++    if (ret == 0) {
++        if (copyout(&kset, set, sizeof(uint32_t)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_sigsuspend(const uint32_t *mask) {
+     uint32_t old_mask = current_thread->sig_mask;
+     if (mask) current_thread->sig_mask = *mask;
+     
+@@ -76,6 +104,14 @@ int sys_sigsuspend(const void *mask_ptr) {
+     return -1; // Always returns -1 (EINTR)
+ }
+ 
++int sys_sigsuspend(const void *mask) {
++    uint32_t kmask;
++    if (mask) {
++        if (copyin(mask, &kmask, sizeof(uint32_t)) != 0) return -14;
++    }
++    return kern_sigsuspend(mask ? &kmask : NULL);
++}
++
+ /*
+  * sys_sigwait - Synchronously wait for a signal
+  *
+@@ -86,6 +122,19 @@ int sys_sigsuspend(const void *mask_ptr) {
+  * POSIX: Returns 0 on success, error number on failure.
+  */
+ int sys_sigwait(const uint32_t *set, int *sig) {
++    uint32_t kset;
++    int ksig;
++    if (copyin(set, &kset, sizeof(uint32_t)) != 0) return -14; // EFAULT
++    int ret = kern_sigwait(&kset, &ksig);
++    if (ret == 0) {
++        if (copyout(&ksig, sig, sizeof(int)) != 0) return -14;
++    }
++    // POSIX sigwait returns error code, not -1 with errno.
++    // However, our kern_sigwait might return 0 or error.
++    return ret;
++}
++
++int kern_sigwait(const uint32_t *set, int *sig) {
+     if (!set || !sig) return 22; // EINVAL
+     
+     uint32_t wait_mask = *set;
+@@ -136,6 +185,22 @@ int sys_sigwait(const uint32_t *set, int *sig) {
+  */
+ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info, 
+                      const void *timeout) {
++    uint32_t kset;
++    siginfo_t kinfo;
++    struct timespec kts;
++    if (copyin(set, &kset, sizeof(uint32_t)) != 0) return -14;
++    if (timeout) {
++        if (copyin(timeout, &kts, sizeof(struct timespec)) != 0) return -14;
++    }
++    int ret = kern_sigtimedwait(&kset, info ? &kinfo : NULL, timeout ? &kts : NULL);
++    if (ret > 0 && info) {
++        if (copyout(&kinfo, info, sizeof(siginfo_t)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_sigtimedwait(const uint32_t *set, siginfo_t *info,
++                     const struct timespec *timeout) {
+     if (!set) return -22; // EINVAL
+     
+     uint32_t wait_mask = *set;
+@@ -584,7 +649,7 @@ void signal_handle_pending(registers_t *regs) {
+         dfl.sa_handler = SIG_DFL;
+         dfl.sa_flags = 0;
+         dfl.sa_mask = 0;
+-        sys_sigaction(sig, &dfl, NULL);
++        kern_sigaction(sig, &dfl, NULL);
+     }
+ 
+     // SA_RESTART: Restart syscall if it was interrupted and handler has SA_RESTART
+@@ -611,9 +676,19 @@ void signal_handle_pending(registers_t *regs) {
+     // but if we delivered it to a handler, the app is "officially" continued.
+ }
+ 
+-int sys_sigaltstack(const void *ss_ptr, void *oss_ptr) {
+-    const stack_t *ss = (const stack_t *)ss_ptr;
+-    stack_t *oss = (stack_t *)oss_ptr;
++int sys_sigaltstack(const void *ss, void *oss) {
++    stack_t kss, koss;
++    if (ss) {
++        if (copyin(ss, &kss, sizeof(stack_t)) != 0) return -14;
++    }
++    int ret = kern_sigaltstack(ss ? &kss : NULL, oss ? &koss : NULL);
++    if (ret == 0 && oss) {
++        if (copyout(&koss, oss, sizeof(stack_t)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_sigaltstack(const stack_t *ss, stack_t *oss) {
+     if (oss) {
+         *oss = current_thread->sig_alt_stack;
+     }
+diff --git a/sys/kern/syscall.c b/sys/kern/syscall.c
+index 94aaeef7..3e5eb266 100644
+--- a/sys/kern/syscall.c
++++ b/sys/kern/syscall.c
+@@ -23,6 +23,8 @@
+ #include <vfs/vfs.h>
+ #include <drivers/console/uart/uart.h>
+ #include <include/sys/sysinfo.h>
++#include <sys/kern_syscalls.h>
++#include <sys/utsname.h>
+ 
+ #include <sys/smp.h>
+ #include <sys/types.h>
+@@ -40,7 +42,6 @@ extern thread_t threads[256];
+ 
+ extern int sys_acct(const char *path);
+ extern int64_t sys_time(int64_t *tloc);
+-extern int sys_sigaction(int sig, const void *act, void *oact);
+ 
+ // Simple file structure allocator
+ #define MAX_SYSTEM_FILES 128
+@@ -93,7 +94,7 @@ void file_free(file_t *f) {
+     file_free_list = f;
+ }
+ 
+-int sys_write(int fd, const char *buf, int len) {
++int kern_write(int fd, const char *buf, int len) {
+     if (fd < 0 || fd >= MAX_FD) return -1;
+     file_t *f = current_process->fds[fd];
+     if (!f) return -1;
+@@ -106,7 +107,39 @@ int sys_write(int fd, const char *buf, int len) {
+     return 0;
+ }
+ 
+-int sys_read(int fd, char *buf, int len) {
++int sys_write(int fd, const char *buf, int len) {
++    if (len < 0) return -1;
++    if (len == 0) return 0;
++
++    void *kbuf = kmalloc(4096);
++    if (!kbuf) return -12; // ENOMEM
++
++    int total_written = 0;
++    while (len > 0) {
++        int to_write = (len > 4096) ? 4096 : len;
++        if (copyin(buf + total_written, kbuf, to_write) != 0) {
++            kfree(kbuf, 4096);
++            return -14; // EFAULT
++        }
++
++        int bytes = kern_write(fd, kbuf, to_write);
++        if (bytes <= 0) {
++            if (total_written == 0) {
++                kfree(kbuf, 4096);
++                return bytes;
++            }
++            break;
++        }
++
++        total_written += bytes;
++        len -= bytes;
++        if (bytes < to_write) break;
++    }
++    kfree(kbuf, 4096);
++    return total_written;
++}
++
++int kern_read(int fd, char *buf, int len) {
+     if (fd < 0 || fd >= MAX_FD) return -1;
+     file_t *f = current_process->fds[fd];
+     if (!f) return -1;
+@@ -116,7 +149,45 @@ int sys_read(int fd, char *buf, int len) {
+     return bytes;
+ }
+ 
++int sys_read(int fd, char *buf, int len) {
++    if (len < 0) return -1;
++    if (len == 0) return 0;
++
++    void *kbuf = kmalloc(4096);
++    if (!kbuf) return -12; // ENOMEM
++
++    int total_read = 0;
++    while (len > 0) {
++        int to_read = (len > 4096) ? 4096 : len;
++        int bytes = kern_read(fd, kbuf, to_read);
++        if (bytes <= 0) {
++            if (total_read == 0) {
++                kfree(kbuf, 4096);
++                return bytes;
++            }
++            break;
++        }
++
++        if (copyout(kbuf, buf + total_read, bytes) != 0) {
++            kfree(kbuf, 4096);
++            return -14; // EFAULT
++        }
++
++        total_read += bytes;
++        len -= bytes;
++        if (bytes < to_read) break;
++    }
++    kfree(kbuf, 4096);
++    return total_read;
++}
++
+ int sys_open(const char *path, int flags, int mode) {
++    char kpath[256];
++    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
++    return kern_open(kpath, flags, mode);
++}
++
++int kern_open(const char *path, int flags, int mode) {
+     (void)mode;
+     if (!path) return -1;
+     
+@@ -185,6 +256,10 @@ void file_close_ptr(file_t *f) {
+ }
+ 
+ int sys_close(int fd) {
++    return kern_close(fd);
++}
++
++int kern_close(int fd) {
+     if (fd < 0 || fd >= MAX_FD) return -1;
+     file_t *f = current_process->fds[fd];
+     if (!f) return -1;
+@@ -224,6 +299,21 @@ struct linux_dirent {
+ };
+ 
+ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
++    if (count > 65536) count = 65536;
++    void *kdirp = kmalloc(count);
++    if (!kdirp) return -12;
++    int ret = kern_getdents(fd, kdirp, count);
++    if (ret > 0) {
++        if (copyout(kdirp, dirp, ret) != 0) {
++            kfree(kdirp, count);
++            return -14;
++        }
++    }
++    kfree(kdirp, count);
++    return ret;
++}
++
++int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
+     if (fd >= MAX_FD) return -1;
+     file_t *f = current_process->fds[fd];
+     if (!f) return -1;
+@@ -269,40 +359,19 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
+     return bpos;
+ }
+ 
+-struct utsname {
+-    char sysname[256];
+-    char nodename[256];
+-    char release[256];
+-    char version[256];
+-    char machine[256];
+-    char domainname[256];
+-};
+ 
+-/* Validate user address range is within user space (below kernel) */
+-static int validate_user_buffer(const void *buf, size_t size) {
+-    uintptr_t start = (uintptr_t)buf;
+-    uintptr_t end = start + size;
+-    
+-    /* NULL check */
+-    if (start < 0x1000) return -1;
+-    
+-    /* Overflow check */
+-    if (end < start) return -1;
+-    
+-    /* Must be below kernel space at 0xC0000000 */
+-    if (end > 0xC0000000) return -1;
+-    
+-    return 0;
++int sys_uname(struct utsname *buf) {
++    struct utsname kbuf;
++    int ret = kern_uname(&kbuf);
++    if (ret == 0) {
++        if (copyout(&kbuf, buf, sizeof(struct utsname)) != 0) return -14;
++    }
++    return ret;
+ }
+ 
+-int sys_uname(struct utsname *buf) {
++int kern_uname(struct utsname *buf) {
+     if (!buf) return -14; /* EFAULT */
+     
+-    /* Validate user buffer can hold entire struct */
+-    if (validate_user_buffer(buf, sizeof(struct utsname)) != 0) {
+-        return -14; /* EFAULT */
+-    }
+-    
+     extern char kernel_hostname[MAXHOSTNAMELEN];
+     
+     /* Build result in kernel buffer first */
+@@ -340,6 +409,26 @@ int sys__exit(int code) {
+ }
+ 
+ int sys_thr_new(struct thr_param *param, int param_size) {
++    struct thr_param kparam;
++    if (param_size < (int)sizeof(struct thr_param)) return -1;
++    if (copyin(param, &kparam, sizeof(struct thr_param)) != 0) return -14;
++
++    // We also need to handle child_tid if it is provided
++    // kern_thr_new writes to *p.child_tid
++    // So we should pass a kernel pointer to child_tid
++    long kchild_tid = 0;
++    long *orig_child_tid = kparam.child_tid;
++    if (orig_child_tid) kparam.child_tid = &kchild_tid;
++
++    int ret = kern_thr_new(&kparam, sizeof(struct thr_param));
++
++    if (ret == 0 && orig_child_tid) {
++        if (copyout(&kchild_tid, orig_child_tid, sizeof(long)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_thr_new(struct thr_param *param, int param_size) {
+     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
+     struct thr_param p = *param;
+     void *stack_top = (char*)p.stack_base + p.stack_size;
+@@ -392,6 +481,12 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
+ }
+ 
+ int sys_chroot(const char *path) {
++    char kpath[256];
++    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
++    return kern_chroot(kpath);
++}
++
++int kern_chroot(const char *path) {
+     if (!path) return -1;
+ 
+     fs_node_t *node = 0;
+@@ -413,6 +508,12 @@ int sys_chroot(const char *path) {
+ 
+ extern int vfs_mkdir(const char *path, uint16_t permission);
+ int sys_mkdir(const char *p, int m) {
++    char kpath[256];
++    if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
++    return kern_mkdir(kpath, m);
++}
++
++int kern_mkdir(const char *p, int m) {
+     if (!p) return -1;
+     return vfs_mkdir(p, (uint16_t)m);
+ }
+@@ -451,7 +552,18 @@ int sys_setgid(int g) {
+ int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
+ 
+ 
+-int sys_stat(const char *path, struct stat *buf) { 
++int sys_stat(const char *path, struct stat *buf) {
++    char kpath[256];
++    struct stat kbuf;
++    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
++    int ret = kern_stat(kpath, &kbuf);
++    if (ret == 0) {
++        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_stat(const char *path, struct stat *buf) {
+     if (!path || !buf) return -1;
+     
+     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+@@ -464,6 +576,17 @@ int sys_stat(const char *path, struct stat *buf) {
+ 
+ 
+ int sys_lstat(const char *path, struct stat *buf) {
++    char kpath[256];
++    struct stat kbuf;
++    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
++    int ret = kern_lstat(kpath, &kbuf);
++    if (ret == 0) {
++        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_lstat(const char *path, struct stat *buf) {
+     if (!path || !buf) return -1;
+     
+     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+@@ -479,17 +602,28 @@ int sys_lstat(const char *path, struct stat *buf) {
+ #include <sys/poll.h>
+ 
+ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
++    if (nfds > 1024) return -22;
++    struct pollfd *kfds = kmalloc(nfds * sizeof(struct pollfd));
++    if (!kfds) return -12;
++    if (copyin(fds, kfds, nfds * sizeof(struct pollfd)) != 0) {
++        kfree(kfds, nfds * sizeof(struct pollfd));
++        return -14;
++    }
++    int ret = kern_poll(kfds, nfds, timeout);
++    if (ret >= 0) {
++        if (copyout(kfds, fds, nfds * sizeof(struct pollfd)) != 0) {
++            kfree(kfds, nfds * sizeof(struct pollfd));
++            return -14;
++        }
++    }
++    kfree(kfds, nfds * sizeof(struct pollfd));
++    return ret;
++}
++
++int kern_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
+     // Sanity check
+     if (nfds > 1024) return -22; // EINVAL
+     
+-    // Copy fds from user if needed? 
+-    // They are in user memory, we can access directly (assuming kernel has access)
+-    // but strict separation requires copy or verify. Substrate has shared addr space roughly.
+-    // We should copy to be safe/correct if we modify revents.
+-    
+-    // Allocate kernel buffer for safety (avoid TOCTOU or paging issues if pmap changes in loop)
+-    // For now, assume direct access is fine as we only write revents.
+-    
+     // Timeout loop
+     // Convert timeout (ms) to ticks or similar.
+     // Since we don't have full wait queues, we'll do a busy-wait/yield loop 
+@@ -565,6 +699,15 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
+ }
+ 
+ int sys_fstat(int fd, struct stat *buf) {
++    struct stat kbuf;
++    int ret = kern_fstat(fd, &kbuf);
++    if (ret == 0) {
++        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_fstat(int fd, struct stat *buf) {
+     if (fd < 0 || fd >= MAX_FD || !buf) return -1;
+     file_t *f = current_process->fds[fd];
+     if (!f || !f->f_data) return -1;
+@@ -574,6 +717,15 @@ int sys_fstat(int fd, struct stat *buf) {
+ 
+ // ioctl - device control
+ int sys_ioctl(int fd, uint32_t request, void *arg) {
++    // ioctl arg can be anything. For security, we should really know the size.
++    // However, many ioctls use small structs.
++    // This is hard to fix generically without a table.
++    // For now, at least validate the pointer if it looks like one.
++    // But we don't know if it is a pointer or an int.
++    return kern_ioctl(fd, request, arg);
++}
++
++int kern_ioctl(int fd, uint32_t request, void *arg) {
+     if (fd < 0 || fd >= MAX_FD) return -1;
+     file_t *f = current_process->fds[fd];
+     if (!f || !f->f_data) return -1;
+@@ -591,6 +743,12 @@ extern int sys_setsid(void);
+ 
+ 
+ int sys_unlink(const char *path) {
++    char kpath[256];
++    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
++    return kern_unlink(kpath);
++}
++
++int kern_unlink(const char *path) {
+     if (!path) return -1;
+     
+     char dir[256];
+@@ -634,6 +792,13 @@ int sys_unlink(const char *path) {
+ }
+ 
+ int sys_link(const char *oldpath, const char *newpath) {
++    char kold[256], knew[256];
++    if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -14;
++    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -14;
++    return kern_link(kold, knew);
++}
++
++int kern_link(const char *oldpath, const char *newpath) {
+     if (!oldpath || !newpath) return -1;
+ 
+     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+@@ -677,6 +842,23 @@ int sys_link(const char *oldpath, const char *newpath) {
+ }
+ 
+ int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
++    char kpath[256];
++    if (copyinstr(pathname, kpath, sizeof(kpath), NULL) != 0) return -14;
++    if (bufsiz > 4096) bufsiz = 4096;
++    char *kbuf = kmalloc(bufsiz);
++    if (!kbuf) return -12;
++    int ret = kern_readlink(kpath, kbuf, bufsiz);
++    if (ret > 0) {
++        if (copyout(kbuf, buf, ret) != 0) {
++            kfree(kbuf, bufsiz);
++            return -14;
++        }
++    }
++    kfree(kbuf, bufsiz);
++    return ret;
++}
++
++int kern_readlink(const char *pathname, char *buf, size_t bufsiz) {
+     if (!pathname || !buf || bufsiz == 0) return -14; // EFAULT
+     
+     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+@@ -695,6 +877,12 @@ int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
+ }
+ 
+ int sys_access(const char *path, int mode) {
++    char kpath[256];
++    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
++    return kern_access(kpath, mode);
++}
++
++int kern_access(const char *path, int mode) {
+     if (!path) return -1;
+ 
+     fs_node_t *node = 0;
+@@ -740,6 +928,15 @@ extern int sys_stat(const char *p, struct stat *buf);
+ extern void pipe_create(fs_node_t **read_node, fs_node_t **write_node);
+ 
+ int sys_pipe(int *fds) {
++    int kfds[2];
++    int ret = kern_pipe(kfds);
++    if (ret == 0) {
++        if (copyout(kfds, fds, 2 * sizeof(int)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_pipe(int *fds) {
+     if (!fds) return -1;
+ 
+     fs_node_t *read_node, *write_node;
+@@ -865,10 +1062,19 @@ int sys_signal(int sig, void *handler) {
+     memset(&act, 0, sizeof(act));
+     act.sa_handler = (sig_t)handler;
+     act.sa_flags = 0;
+-    return sys_sigaction(sig, &act, NULL);
++    return kern_sigaction(sig, &act, NULL);
+ }
+ 
+ int sys_waitpid(int pid, int *status, int options) {
++    int kstatus = 0;
++    int ret = kern_waitpid(pid, status ? &kstatus : NULL, options);
++    if (ret > 0 && status) {
++        if (copyout(&kstatus, status, sizeof(int)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_waitpid(int pid, int *status, int options) {
+     (void)options;
+     while (1) {
+         bool found = false;
+@@ -903,6 +1109,16 @@ int sys_getpid(void) { if(current_process) return current_process->pid; return 0
+ #include <sys/exec.h>
+ 
+ int sys_execve(const char *f, char *const a[], char *const e[]) {
++    char kpath[256];
++    if (copyinstr(f, kpath, sizeof(kpath), NULL) != 0) return -14;
++
++    // We pass untrusted user pointers for a and e.
++    // The ELF loader (elf_execve) has been updated to handle them safely
++    // using capture helpers (copyin/copyinstr).
++    return kern_execve(kpath, a, e);
++}
++
++int kern_execve(const char *f, char *const a[], char *const e[]) {
+     return exec_dispatch(f, a, e);
+ }
+ 
+@@ -913,6 +1129,18 @@ extern int sys_vfork(void);
+ int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0; }
+ 
+ int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
++    char ksource[256], ktarget[256], ktype[64];
++    if (source) {
++        if (copyinstr(source, ksource, sizeof(ksource), NULL) != 0) return -14;
++    }
++    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
++    if (copyinstr(fstype, ktype, sizeof(ktype), NULL) != 0) return -14;
++
++    // data is filesystem specific, hard to wrap generically.
++    return kern_mount(source ? ksource : NULL, ktarget, ktype, flags, data);
++}
++
++int kern_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
+     if (!target || !fstype) return -1;
+ 
+     if (current_process->euid != 0) return -EPERM;
+@@ -922,7 +1150,13 @@ int sys_mount(const char *source, const char *target, const char *fstype, unsign
+ 
+ extern int vfs_unmount_legacy(const char *path);
+ 
+-int sys_umount(const char *target) { 
++int sys_umount(const char *target) {
++    char ktarget[256];
++    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
++    return kern_umount(ktarget);
++}
++
++int kern_umount(const char *target) {
+     if (!target) return -1;
+     if (current_process->euid != 0) return -EPERM;
+     return vfs_unmount_legacy(target); 
+@@ -933,6 +1167,12 @@ int sys_nanosleep(void *req, void *rem) { (void)req; (void)rem; return 0; }
+ 
+ // Current working directory per-process
+ int sys_chdir(const char *path) {
++    char kpath[256];
++    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
++    return kern_chdir(kpath);
++}
++
++int kern_chdir(const char *path) {
+     if (!path) return -1;
+     
+     fs_node_t *node = NULL;
+@@ -963,8 +1203,6 @@ int sys_fchdir(int fd) {
+     return 0;
+ }
+ 
+-// Forward declaration
+-static int validate_user_buffer(const void *buf, size_t size);
+ 
+ // Helper to find name of an inode in a directory
+ // Returns allocated string (caller must free) or NULL
+@@ -1003,8 +1241,22 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
+ }
+ 
+ int sys_getcwd(char *buf, size_t size) {
++    if (size > 4096) size = 4096;
++    char *kbuf = kmalloc(size);
++    if (!kbuf) return -12;
++    int ret = kern_getcwd(kbuf, size);
++    if (ret == 0) {
++        if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) {
++            kfree(kbuf, size);
++            return -14;
++        }
++    }
++    kfree(kbuf, size);
++    return ret;
++}
++
++int kern_getcwd(char *buf, size_t size) {
+     if (!buf || size < 2) return -1;
+-    if (validate_user_buffer(buf, size) != 0) return -14; // EFAULT
+ 
+     // Allocate temp kernel buffer
+     // Start filling from END
+@@ -1085,6 +1337,15 @@ int sys_getcwd(char *buf, size_t size) {
+ 
+ // sys_proc_info - Get detailed info for a single process
+ int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
++    sys_procinfo_t kinfo;
++    int ret = kern_proc_info(pid, &kinfo);
++    if (ret == 0) {
++        if (copyout(&kinfo, info, sizeof(sys_procinfo_t)) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
+     if (!info) return -1;
+     
+     // If pid == 0, use current process
+@@ -1140,6 +1401,22 @@ int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
+ // sys_proc_list - List all active PIDs
+ // Returns count of PIDs written, or total count if pids==NULL
+ int sys_proc_list(pid_t *pids, size_t count) {
++    if (count == 0 || !pids) return kern_proc_list(NULL, 0);
++    if (count > 1024) count = 1024;
++    pid_t *kpids = kmalloc(count * sizeof(pid_t));
++    if (!kpids) return -12;
++    int ret = kern_proc_list(kpids, count);
++    if (ret > 0) {
++        if (copyout(kpids, pids, ret * sizeof(pid_t)) != 0) {
++            kfree(kpids, count * sizeof(pid_t));
++            return -14;
++        }
++    }
++    kfree(kpids, count * sizeof(pid_t));
++    return ret;
++}
++
++int kern_proc_list(pid_t *pids, size_t count) {
+     int total_procs = 0;
+     
+     // First pass: count active processes
+@@ -1184,6 +1461,16 @@ int sys_cpu_count(void) {
+ // sys_hostname - Get system hostname
+ // Returns: 0 on success, -1 on error
+ int sys_hostname(char *buf, size_t len) {
++    if (len > 256) len = 256;
++    char kbuf[256];
++    int ret = kern_hostname(kbuf, len);
++    if (ret == 0) {
++        if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) return -14;
++    }
++    return ret;
++}
++
++int kern_hostname(char *buf, size_t len) {
+     if (!buf || len == 0) return -1;
+     
+     extern char kernel_hostname[MAXHOSTNAMELEN];
+diff --git a/sys/kern/time.c b/sys/kern/time.c
+index eb9b278a..9459907d 100644
+--- a/sys/kern/time.c
++++ b/sys/kern/time.c
+@@ -4,6 +4,7 @@
+ #include <time.h>
+ #include <sys/time.h>
+ #include <sys/times.h>
++#include <sys/signal.h>
+ #include <kern/time.h>
+ #include <kern/sched.h>
+ 
+@@ -36,18 +37,34 @@ void set_boot_time(time_t time) {
+     boot_time = time;
+ }
+ 
+-time_t sys_time(time_t *tloc) {
++time_t kern_time(time_t *tloc) {
+     time_t t = get_time();
+     if (tloc) *tloc = t;
+     return t;
+ }
+ 
+-int sys_stime(time_t *t) {
++time_t sys_time(time_t *tloc) {
++    time_t t;
++    kern_time(&t);
++    if (tloc) {
++        if (copyout(&t, tloc, sizeof(time_t)) != 0) return -14;
++    }
++    return t;
++}
++
++int kern_stime(time_t *t) {
+     if (!t) return -1;
+     boot_time = *t - div64_32(ticks, HZ);
+     return 0;
+ }
+-int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
++
++int sys_stime(time_t *t) {
++    time_t kt;
++    if (copyin(t, &kt, sizeof(time_t)) != 0) return -14;
++    return kern_stime(&kt);
++}
++
++int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
+     if (!tv) return -1;
+     
+     time_t total_seconds = boot_time + div64_32(ticks, HZ);
+@@ -63,12 +80,23 @@ int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
+     return 0;
+ }
+ 
++int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
++    struct timeval ktv;
++    struct timezone ktz;
++    int ret = kern_gettimeofday(tv ? &ktv : NULL, tz ? &ktz : NULL);
++    if (ret == 0) {
++        if (tv && copyout(&ktv, tv, sizeof(struct timeval)) != 0) return -14;
++        if (tz && copyout(&ktz, tz, sizeof(struct timezone)) != 0) return -14;
++    }
++    return ret;
++}
++
+ #ifndef CLOCK_REALTIME
+ #define CLOCK_REALTIME 0
+ #define CLOCK_MONOTONIC 1
+ #endif
+ 
+-int sys_clock_gettime(clockid_t clk_id, struct timespec *tp) {
++int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
+     if (!tp) return -1;
+     
+     if (clk_id == CLOCK_REALTIME) {
+@@ -86,7 +114,16 @@ int sys_clock_gettime(clockid_t clk_id, struct timespec *tp) {
+     return 0;
+ }
+ 
+-clock_t sys_times(struct tms *buf) {
++int sys_clock_gettime(clockid_t clk_id, struct timespec *tp) {
++    struct timespec ktp;
++    int ret = kern_clock_gettime(clk_id, &ktp);
++    if (ret == 0) {
++        if (copyout(&ktp, tp, sizeof(struct timespec)) != 0) return -14;
++    }
++    return ret;
++}
++
++clock_t kern_times(struct tms *buf) {
+     if (!buf) return (clock_t)-1;
+     buf->tms_utime = 0;
+     buf->tms_stime = 0;
+@@ -95,6 +132,15 @@ clock_t sys_times(struct tms *buf) {
+     return (clock_t)ticks;
+ }
+ 
++clock_t sys_times(struct tms *buf) {
++    struct tms kbuf;
++    clock_t ret = kern_times(&kbuf);
++    if (ret != (clock_t)-1) {
++        if (copyout(&kbuf, buf, sizeof(struct tms)) != 0) return (clock_t)-14;
++    }
++    return ret;
++}
++
+ void timer_tick(void) {
+     ticks++;
+     sched_tick();

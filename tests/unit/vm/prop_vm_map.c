@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/vm/vm_map.h"
+#include <vm/vm_map.h"
 
 /*
  * Property-based test: Order and Overlap Invariant for VM Map

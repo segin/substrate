@@ -1,11 +1,14 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdint.h>
 #include <sys/mman.h>
 #include <string.h> // For memset, memcpy
+#include <stdio.h>
+#include <stdatomic.h>
 
 void exit(int status) {
     _exit(status);
@@ -31,7 +34,7 @@ struct block_meta {
     struct block_meta *next;
     struct block_meta *prev;
     int free;
-    int magic;
+    uint32_t magic;
 };
 
 static struct block_meta *global_base = NULL;
@@ -119,7 +122,11 @@ static void coalesce_block(struct block_meta *block) {
             if (block->next) {
                 block->next->prev = block->prev;
             }
-            // Point to prev as the current block (for further coalescing? No need if we just freed block)
+            if (block->next) {
+                block->next->prev = block->prev;
+            }
+        }
+    }
         }
     }
 }
@@ -158,8 +165,6 @@ void free(void *ptr) {
 
     struct block_meta *block = (struct block_meta*)ptr - 1;
     if (block->magic != MAGIC) {
-        // Corruption or invalid pointer. Abort? Or ignore?
-        // Standard free is undefined on invalid ptr.
         return;
     }
 
@@ -190,11 +195,6 @@ void *realloc(void *ptr, size_t size) {
     if (block->magic != MAGIC) return NULL;
 
     if (block->size >= size) {
-        // Can we split?
-        // Note: size is requested size, block->size is aligned size
-        // If we shrink significantly, split.
-        // But for simplicity, we can just return ptr.
-        // Or if block->size is much larger than ALIGN(size), split.
         if (block->size >= ALIGN(size) + BLOCK_META_SIZE + ALIGNMENT) {
              split_block(block, ALIGN(size));
         }
@@ -222,7 +222,7 @@ void *realloc(void *ptr, size_t size) {
     // Fallback: allocate new, copy, free old
     void *new_ptr = malloc(size);
     if (!new_ptr) return NULL;
-    memcpy(new_ptr, ptr, block->size); // Safe to copy old size
+    memcpy(new_ptr, ptr, block->size); 
     free(ptr);
     return new_ptr;
 }
@@ -422,22 +422,31 @@ int rand(void) {
 }
 
 void arc4random_buf(void *buf, size_t n) {
-    int fd = open("/dev/urandom", O_RDONLY);
-    if (fd < 0) {
-        abort();
+    static atomic_int urandom_fd = -1;
+    int fd = atomic_load(&urandom_fd);
+
+    if (fd == -1) {
+        fd = open("/dev/urandom", O_RDONLY);
+        if (fd < 0) {
+            abort();
+        }
+        int expected = -1;
+        if (!atomic_compare_exchange_strong(&urandom_fd, &expected, fd)) {
+            close(fd);
+            fd = expected;
+        }
     }
+
     char *p = (char *)buf;
     size_t left = n;
     while (left > 0) {
         ssize_t r = read(fd, p, left);
         if (r <= 0) {
-             close(fd);
              abort();
         }
         p += r;
         left -= r;
     }
-    close(fd);
 }
 
 uint32_t arc4random(void) {
@@ -462,4 +471,56 @@ uint32_t arc4random_uniform(uint32_t upper_bound) {
     }
 
     return r % upper_bound;
+}
+
+/* getopt implementation */
+char *optarg = NULL;
+int optind = 1;
+int opterr = 1;
+int optopt = 0;
+
+int getopt(int argc, char * const argv[], const char *optstring) {
+    static int sp = 1;
+    int c;
+    char *cp;
+
+    if (sp == 1) {
+        if (optind >= argc ||
+            argv[optind][0] != '-' || argv[optind][1] == '\0')
+            return -1;
+        else if (strcmp(argv[optind], "--") == 0) {
+            optind++;
+            return -1;
+        }
+    }
+    optopt = c = argv[optind][sp];
+    if (c == ':' || (cp = strchr(optstring, c)) == NULL) {
+        if (opterr)
+            fprintf(stderr, "%s: illegal option -- %c\n", argv[0], c);
+        if (argv[optind][++sp] == '\0') {
+            optind++;
+            sp = 1;
+        }
+        return '?';
+    }
+    if (*++cp == ':') {
+        if (argv[optind][sp+1] != '\0')
+            optarg = &argv[optind++][sp+1];
+        else if (++optind >= argc) {
+            if (opterr)
+                fprintf(stderr, "%s: option requires an argument -- %c\n",
+                    argv[0], c);
+            sp = 1;
+            return '?';
+        } else
+            optarg = argv[optind++];
+        sp = 1;
+    } else {
+        if (argv[optind][++sp] == '\0') {
+            sp = 1;
+            optind++;
+        }
+        optarg = NULL;
+    }
+    return c;
 }
