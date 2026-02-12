@@ -12,12 +12,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include "scsi.h"
 
-/* Kernel time function - stub until real timer API implemented */
+/* Kernel time function */
 static inline uint64_t kernel_time_ms(void) {
-    /* TODO: Use real kernel timer when available */
-    return 0;
+    return (uint64_t)get_uptime_ms();
 }
 
 /*
@@ -595,8 +595,95 @@ int scsi_sense_ascq(const uint8_t *sense, uint8_t len) {
     return -1;
 }
 
+struct scsi_asc_ascq_entry {
+    uint8_t asc;
+    uint8_t ascq;
+    const char *description;
+};
+
+static const struct scsi_asc_ascq_entry scsi_asc_ascq_table[] = {
+    { 0x00, 0x00, "No additional sense information" },
+    { 0x01, 0x00, "No index/sector signal" },
+    { 0x02, 0x00, "No seek complete" },
+    { 0x03, 0x00, "Peripheral device write fault" },
+    { 0x04, 0x00, "Logical unit not ready, cause not reportable" },
+    { 0x04, 0x01, "Logical unit is in process of becoming ready" },
+    { 0x04, 0x02, "Logical unit not ready, initializing command required" },
+    { 0x04, 0x03, "Logical unit not ready, manual intervention required" },
+    { 0x05, 0x00, "Logical unit does not respond to selection" },
+    { 0x06, 0x00, "No reference position found" },
+    { 0x07, 0x00, "Multiple peripheral devices selected" },
+    { 0x08, 0x00, "Logical unit communication failure" },
+    { 0x08, 0x01, "Logical unit communication time-out" },
+    { 0x09, 0x00, "Track following error" },
+    { 0x0A, 0x00, "Error log overflow" },
+    { 0x0B, 0x00, "Warning" },
+    { 0x0C, 0x00, "Write error" },
+    { 0x11, 0x00, "Unrecovered read error" },
+    { 0x14, 0x00, "Recorded entity not found" },
+    { 0x15, 0x00, "Random positioning error" },
+    { 0x17, 0x00, "Recovered data with no error correction applied" },
+    { 0x18, 0x00, "Recovered data with error correction applied" },
+    { 0x1A, 0x00, "Parameter list length error" },
+    { 0x1B, 0x00, "Synchronous data transfer error" },
+    { 0x1D, 0x00, "Miscompare during verify operation" },
+    { 0x20, 0x00, "Invalid command operation code" },
+    { 0x21, 0x00, "Logical block address out of range" },
+    { 0x24, 0x00, "Invalid field in CDB" },
+    { 0x25, 0x00, "Logical unit not supported" },
+    { 0x26, 0x00, "Invalid field in parameter list" },
+    { 0x27, 0x00, "Write protected" },
+    { 0x28, 0x00, "Not ready to ready change, medium may have changed" },
+    { 0x29, 0x00, "Power on, reset, or bus device reset occurred" },
+    { 0x2A, 0x00, "Parameters changed" },
+    { 0x2A, 0x01, "Mode parameters changed" },
+    { 0x2A, 0x02, "Log parameters changed" },
+    { 0x2A, 0x03, "Reservations preempted" },
+    { 0x2C, 0x00, "Command sequence error" },
+    { 0x30, 0x00, "Incompatible medium installed" },
+    { 0x31, 0x00, "Medium format corrupted" },
+    { 0x32, 0x00, "No defect spare location available" },
+    { 0x3A, 0x00, "Medium not present" },
+    { 0x3A, 0x01, "Medium not present - tray closed" },
+    { 0x3A, 0x02, "Medium not present - tray open" },
+    { 0x3B, 0x11, "Medium load or eject failed" },
+    { 0x3D, 0x00, "Invalid bits in identify message" },
+    { 0x3E, 0x00, "Logical unit has not self-configured yet" },
+    { 0x3F, 0x00, "Target operating conditions have changed" },
+    { 0x3F, 0x01, "Microcode has been changed" },
+    { 0x3F, 0x02, "Changed operating definition" },
+    { 0x3F, 0x03, "Inquiry data has changed" },
+    { 0x40, 0x00, "RAM failure" },
+    { 0x41, 0x00, "Data path failure" },
+    { 0x42, 0x00, "Power-on or self-test failure" },
+    { 0x43, 0x00, "Message error" },
+    { 0x44, 0x00, "Internal target failure" },
+    { 0x45, 0x00, "Select or reselect failure" },
+    { 0x46, 0x00, "Unsuccessful soft reset" },
+    { 0x47, 0x00, "SCSI parity error" },
+    { 0x48, 0x00, "Initiator detected error message received" },
+    { 0x49, 0x00, "Invalid message error" },
+    { 0x4A, 0x00, "Command phase error" },
+    { 0x4B, 0x00, "Data phase error" },
+    { 0x4C, 0x00, "Logical unit failed self-configuration" },
+    { 0x4E, 0x00, "Overlapped commands attempted" },
+};
+
+static const char *scsi_asc_ascq_lookup(uint8_t asc, uint8_t ascq) {
+    size_t i;
+    for (i = 0; i < sizeof(scsi_asc_ascq_table) / sizeof(scsi_asc_ascq_table[0]); i++) {
+        if (scsi_asc_ascq_table[i].asc == asc && scsi_asc_ascq_table[i].ascq == ascq) {
+            return scsi_asc_ascq_table[i].description;
+        }
+    }
+    return NULL;
+}
+
 const char *scsi_sense_string(uint8_t key, uint8_t asc, uint8_t ascq) {
-    (void)asc; (void)ascq;  /* TODO: Full ASC/ASCQ table */
+    const char *asc_str = scsi_asc_ascq_lookup(asc, ascq);
+    if (asc_str && (asc != 0 || ascq != 0)) {
+        return asc_str;
+    }
     
     static const char *keys[] = {
         "No Sense",
