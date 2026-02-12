@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/vm/vm_zone.h"
+#include <vm/vm_zone.h"
 
 /*
  * Property-based test: Allocation Symmetry for Zone Allocator

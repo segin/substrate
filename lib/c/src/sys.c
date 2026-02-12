@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <termios.h>
 
 extern int64_t _syscall0(int);
@@ -180,7 +181,12 @@ void sync(void) {
 }
 
 int kill(pid_t pid, int sig) {
-    return (int)_syscall2(SYS_KILL, pid, sig);
+    int ret = (int)_syscall2(SYS_KILL, pid, sig);
+    if (ret < 0) {
+        errno = -ret;
+        return -1;
+    }
+    return ret;
 }
 
 sighandler_t signal(int signum, sighandler_t handler) {
@@ -200,16 +206,6 @@ int sigpending(sigset_t *set) {
 }
 
 int sigsuspend(const sigset_t *mask) {
-    // This function is typically implemented via a syscall that takes a pointer to sigset_t
-    // and potentially a timeout. The provided snippet seems to be a placeholder or incorrect.
-    // Assuming it's meant to be a direct syscall for sigsuspend.
-    // The original code had: return (int)_syscall1(SYS_SIGSUSPEND, (int)mask);
-    // The requested change has: return syscall1(SYS_GETRUSAGE, who, (int)usage);
-    // This looks like a copy-paste error from another function.
-    // I will revert to the original sigsuspend implementation, as the requested change
-    // for sigsuspend is syntactically and semantically incorrect for sigsuspend.
-    // If the intent was to add getrusage, it should be a separate function.
-    // For now, I will keep the original sigsuspend and add umask as requested.
     return (int)_syscall1(SYS_SIGSUSPEND, (int)mask);
 }
 
@@ -263,9 +259,6 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
         return (void *)-1;
     }
     uint32_t pgoff = (uint32_t)(offset >> 12);
-    // Note: We are truncating top bits of 64-bit offset >> 12.
-    // This supports files up to 16TB (2^32 * 4096).
-    // If original offset is huge, pgoff might wrap, but 16TB is enough for now.
     
     return (void *)(uintptr_t)_syscall6(SYS_MMAP, (int)addr, (int)length, prot, flags, fd, (int)pgoff);
 }
@@ -298,6 +291,10 @@ int fstat(int fd, struct stat *buf) {
     return (int)_syscall2(SYS_FSTAT, fd, (int)buf);
 }
 
+int chown(const char *pathname, uid_t owner, gid_t group) {
+    return (int)_syscall3(SYS_LCHOWN, (int)pathname, owner, group);
+}
+
 ssize_t readlink(const char *pathname, char *buf, size_t bufsiz) {
     return (ssize_t)_syscall3(SYS_READLINK, (int)pathname, (int)buf, bufsiz);
 }
@@ -322,6 +319,15 @@ int mknod(const char *pathname, mode_t mode, dev_t dev) {
     return (int)_syscall3(SYS_MKNOD, (int)pathname, mode, dev);
 }
 
+int chmod(const char *pathname, mode_t mode) {
+    return (int)_syscall2(SYS_CHMOD, (int)pathname, mode);
+}
+
+int utimes(const char *filename, const struct timeval times[2]) {
+    (void)filename; (void)times;
+    errno = ENOSYS;
+    return -1;
+}
 int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
     return (int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)filesystemtype, (int)mountflags, (int)data);
 }
@@ -406,4 +412,17 @@ int sethostname(const char *name, size_t len) {
 
 int futex(int *uaddr, int op, int val, const struct timespec *timeout, int *uaddr2, int val3) {
     return _syscall6(240, (int)uaddr, op, val, (int)timeout, (int)uaddr2, val3);
+}
+
+int getpriority(int which, id_t who) {
+    int ret = (int)_syscall2(SYS_GETPRIORITY, which, who);
+    if (ret < 0) {
+        errno = -ret;
+        return -1;
+    }
+    return ret - 20;
+}
+
+int setpriority(int which, id_t who, int prio) {
+    return (int)_syscall3(SYS_SETPRIORITY, which, who, prio);
 }

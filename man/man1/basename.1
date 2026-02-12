@@ -1,0 +1,44 @@
+.TH BASENAME 1
+.SH NAME
+basename \- return non-directory portion of a pathname
+.SH SYNOPSIS
+.B basename
+.I string
+.RI [ suffix ]
+.SH DESCRIPTION
+The
+.B basename
+utility deletes any prefix ending with the last slash
+.B /
+character present in
+.I string
+(after first stripping trailing slashes), and a
+.I suffix,
+if given. The
+.I suffix
+is not removed if it is identical to the remaining characters in
+.I string.
+The resulting filename is written to the standard output.
+.SH EXAMPLES
+.B basename /usr/bin/sort
+.br
+sort
+.PP
+.B basename include/stdio.h .h
+.br
+stdio
+.PP
+.B basename /usr/bin/
+.br
+bin
+.PP
+.B basename /
+.br
+/
+.SH SEE ALSO
+.BR dirname (1),
+.BR basename (3)
+.SH STANDARDS
+The
+.B basename
+utility is expected to be POSIX-compatible.

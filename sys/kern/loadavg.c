@@ -1,13 +1,8 @@
 /*
  * loadavg.c - System Load Average Calculation
  *
-<<<<<<< HEAD
  * Implements exponential moving average for 1, 5, and 15 minute intervals.
  * Sampled every 5 seconds (500 ticks).
-=======
- * Implements the standard UNIX load average calculation (1, 5, 15 minutes).
- * Updates are performed every 5 seconds.
->>>>>>> main
  */
 
 #include <kern/sched.h>

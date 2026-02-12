@@ -340,7 +340,7 @@ int vn_lock(struct vnode *vp, int flags)
     (void)flags;
 
     spinlock_acquire(&vp->v_interlock);
-
+    /* Simple exclusive lock implementation */
     while (vp->v_lockstate != 0) {
         /* Check for recursive locking */
         if (vp->v_lockowner == current_thread) {
