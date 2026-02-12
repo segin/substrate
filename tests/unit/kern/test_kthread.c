@@ -1,4 +1,4 @@
-#include "../../../sys/sys/kthread.h"
+#include <sys/kthread.h"
 #include <stdbool.h>
 #include <stddef.h>
 

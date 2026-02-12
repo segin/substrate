@@ -204,15 +204,15 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
             if (current_idx == index) {
                 if (lfn_len > 0) {
                     lfn_buffer[lfn_len] = '\0';
-                    strncpy(dirent.name, lfn_buffer, 127);
-                    dirent.name[127] = '\0';
+                    strncpy(dirent.d_name, lfn_buffer, 127);
+                    dirent.d_name[127] = '\0';
                     lfn_len = 0;
                 } else {
-                    fat_parse_short_name(entry->name, dirent.name);
+                    fat_parse_short_name(entry->name, dirent.d_name);
                 }
                 
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
-                dirent.ino = cluster_num;
+                dirent.d_ino = cluster_num;
                 return &dirent;
             }
             

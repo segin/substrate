@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/sys/file.h"
-#include "../../../sys/kern/sched.h"
+#include <sys/file.h"
+#include <kern/sched.h"
 
 extern int sys_open(const char *path, int flags, int mode);
 extern int sys_close(int fd);

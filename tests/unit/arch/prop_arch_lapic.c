@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../../sys/arch/i386/lapic.h"
+#include <arch/i386/lapic.h"
 
 /*
  * Property-based test: LAPIC Invariant
