@@ -1018,15 +1018,9 @@ int sys_signal(int sig, void *handler) {
 }
 
 int sys_waitpid(int pid, int *status, int options) {
-<<<<<<< HEAD
     int kstatus = 0;
     int ret = kern_waitpid(pid, status ? &kstatus : NULL, options);
-    if (ret > 0 && status) {
-=======
-    int kstatus;
-    int ret = kern_waitpid(pid, status ? &kstatus : NULL, options);
     if (ret >= 0 && status) {
->>>>>>> main
         if (copyout(&kstatus, status, sizeof(int)) != 0) return -14;
     }
     return ret;
@@ -1067,19 +1061,9 @@ int sys_getpid(void) { if(current_process) return current_process->pid; return 0
 #include <sys/exec.h>
 
 int sys_execve(const char *f, char *const a[], char *const e[]) {
-<<<<<<< HEAD
-    char kpath[256];
-    if (copyinstr(f, kpath, sizeof(kpath), NULL) != 0) return -14;
-
-    // We pass untrusted user pointers for a and e.
-    // The ELF loader (elf_execve) has been updated to handle them safely
-    // using capture helpers (copyin/copyinstr).
-    return kern_execve(kpath, a, e);
-=======
     char kf[256];
     if (copyinstr(f, kf, sizeof(kf), NULL) != 0) return -14;
     return kern_execve(kf, a, e);
->>>>>>> main
 }
 
 int kern_execve(const char *f, char *const a[], char *const e[]) {
@@ -1097,25 +1081,14 @@ int vfs_unmount_legacy(const char *path);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
-<<<<<<< HEAD
-    char ksource[256], ktarget[256], ktype[64];
-=======
     char ksource[256], ktarget[256], kfstype[64];
->>>>>>> main
     if (source) {
         if (copyinstr(source, ksource, sizeof(ksource), NULL) != 0) return -14;
     }
     if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
-<<<<<<< HEAD
-    if (copyinstr(fstype, ktype, sizeof(ktype), NULL) != 0) return -14;
-
-    // data is filesystem specific, hard to wrap generically.
-    return kern_mount(source ? ksource : NULL, ktarget, ktype, flags, data);
-=======
     if (copyinstr(fstype, kfstype, sizeof(kfstype), NULL) != 0) return -14;
 
     return kern_mount(source ? ksource : NULL, ktarget, kfstype, flags, data);
->>>>>>> main
 }
 
 int kern_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
@@ -1130,15 +1103,6 @@ int sys_umount(const char *target) {
     return kern_umount(ktarget);
 }
 
-<<<<<<< HEAD
-int sys_umount(const char *target) {
-    char ktarget[256];
-    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
-    return kern_umount(ktarget);
-}
-
-=======
->>>>>>> main
 int kern_umount(const char *target) {
     if (!target) return -1;
     if (current_process->euid != 0) return -EPERM;
@@ -1188,13 +1152,11 @@ int kern_fchdir(int fd) {
     return 0;
 }
 
-<<<<<<< HEAD
 
-=======
+
 int sys_fchdir(int fd) {
     return kern_fchdir(fd);
 }
->>>>>>> main
 // Helper to find name of an inode in a directory
 // Returns allocated string (caller must free) or NULL
 static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
@@ -1232,16 +1194,10 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
 }
 
 int sys_getcwd(char *buf, size_t size) {
-<<<<<<< HEAD
+    if (size == 0) return -22;
     if (size > 4096) size = 4096;
     char *kbuf = kmalloc(size);
     if (!kbuf) return -12;
-=======
-    if (size == 0) return -22;
-    char *kbuf = kmalloc(size);
-    if (!kbuf) return -12;
-    
->>>>>>> main
     int ret = kern_getcwd(kbuf, size);
     if (ret == 0) {
         if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) {
@@ -1252,12 +1208,6 @@ int sys_getcwd(char *buf, size_t size) {
     kfree(kbuf, size);
     return ret;
 }
-<<<<<<< HEAD
-
-int kern_getcwd(char *buf, size_t size) {
-    if (!buf || size < 2) return -1;
-=======
->>>>>>> main
 
 int kern_getcwd(char *buf, size_t size) {
     if (!buf || size < 2) return -1;
@@ -1377,39 +1327,17 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
 // sys_proc_list - List all active PIDs
 // Returns count of PIDs written, or total count if pids==NULL
 int sys_proc_list(pid_t *pids, size_t count) {
-<<<<<<< HEAD
-    if (count == 0 || !pids) return kern_proc_list(NULL, 0);
-    if (count > 1024) count = 1024;
-    pid_t *kpids = kmalloc(count * sizeof(pid_t));
-    if (!kpids) return -12;
-=======
     if (pids == NULL || count == 0) return kern_proc_list(NULL, 0);
+    if (count > 1024) count = 1024;
 
     pid_t *kpids = kmalloc(count * sizeof(pid_t));
     if (!kpids) return -12;
 
->>>>>>> main
     int ret = kern_proc_list(kpids, count);
     if (ret > 0) {
         if (copyout(kpids, pids, ret * sizeof(pid_t)) != 0) {
             kfree(kpids, count * sizeof(pid_t));
             return -14;
-<<<<<<< HEAD
-        }
-    }
-    kfree(kpids, count * sizeof(pid_t));
-    return ret;
-}
-
-int kern_proc_list(pid_t *pids, size_t count) {
-    int total_procs = 0;
-    
-    // First pass: count active processes
-    for (int i = 0; i < 64; i++) {
-        if (processes[i].pid != -1) {
-            total_procs++;
-=======
->>>>>>> main
         }
     }
     kfree(kpids, count * sizeof(pid_t));
@@ -1462,21 +1390,6 @@ int sys_hostname(char *buf, size_t len) {
     return ret;
 }
 
-int kern_hostname(char *buf, size_t len) {
-    if (!buf || len == 0) return -1;
-    char *kbuf = kmalloc(len);
-    if (!kbuf) return -12;
-
-    int ret = kern_hostname(kbuf, len);
-    if (ret == 0) {
-        if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) {
-            kfree(kbuf, len);
-            return -14;
-        }
-    }
-    kfree(kbuf, len);
-    return ret;
-}
 
 int kern_hostname(char *buf, size_t len) {
     if (!buf || len == 0) return -1;

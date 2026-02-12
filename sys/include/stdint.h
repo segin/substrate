@@ -27,5 +27,9 @@ typedef uint64_t uintmax_t;
 #define INT32_MAX  2147483647
 #define INT32_MIN  (-INT32_MAX - 1)
 
+#define SIZE_MAX    UINT32_MAX
+#define PTRDIFF_MAX INT32_MAX
+#define PTRDIFF_MIN INT32_MIN
+
 #endif
 #endif
