@@ -25,4 +25,6 @@ struct uio {
     struct  thread *uio_td; /* thread doing the I/O */
 };
 
+int uiomove(void *cp, size_t n, struct uio *uio);
+
 #endif /* _SYS_UIO_H */

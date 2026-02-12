@@ -8,6 +8,7 @@
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <string.h>
+#include <vm/vm_kmem.h>
 
 /* External context from udf.c */
 extern struct udf_fs udf_ctx;
@@ -162,30 +163,200 @@ int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type,
 }
 
 /*
- * Write data to a file (simple implementation)
- * For now, only handles inline data for small files
+ * Convert inline data to Short Allocation Descriptor
+ */
+static int udf_convert_inline_to_short_ad(fs_node_t *dev, struct udf_fe *fe) {
+    uint32_t len = (uint32_t)fe->info_length;
+    uint8_t *inline_data = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
+
+    /* Allocate new block */
+    uint32_t block = udf_alloc_block();
+    if (block == 0) return -1;
+
+    /* Write inline data to new block */
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) {
+        udf_free_block(block);
+        return -1;
+    }
+    memset(sector_buf, 0, UDF_SECTOR_SIZE);
+
+    if (len > 0) {
+        memcpy(sector_buf, inline_data, len);
+    }
+
+    off_t disk_off = (off_t)(udf_ctx.partition_start + block) * UDF_SECTOR_SIZE;
+    dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+    kfree(sector_buf, UDF_SECTOR_SIZE);
+
+    /* Update FE to use Short AD */
+    fe->icb_tag.flags = (fe->icb_tag.flags & ~0x7) | UDF_ICB_FLAG_AD_SHORT;
+
+    /* Create first AD */
+    struct udf_short_ad *ad = (struct udf_short_ad *)inline_data;
+    ad->length = UDF_SECTOR_SIZE; /* Allocated size */
+    ad->position = block;
+
+    fe->alloc_desc_length = sizeof(struct udf_short_ad);
+    fe->logical_blocks = 1;
+
+    return 0;
+}
+
+/*
+ * Write data to a file using Short Allocation Descriptors
+ */
+static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
+                                 uint32_t offset, uint32_t size, const uint8_t *data) {
+    uint8_t *ad_area = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
+    struct udf_short_ad *ads = (struct udf_short_ad *)ad_area;
+    
+    uint32_t written = 0;
+    uint32_t rem_size = size;
+    uint32_t file_offset = offset;
+
+    uint8_t *data_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!data_buf) return -1;
+
+    uint32_t current_extent_idx = 0;
+    uint32_t logical_pos = 0;
+
+    /* Loop until all data written */
+    while (rem_size > 0) {
+        uint32_t num_ads = fe->alloc_desc_length / sizeof(struct udf_short_ad);
+        ads = (struct udf_short_ad *)ad_area;
+
+        /* Check if we need to append a new extent */
+        if (current_extent_idx >= num_ads) {
+            uint32_t new_block = udf_alloc_block();
+            if (new_block == 0) {
+                kfree(data_buf, UDF_SECTOR_SIZE);
+                return -1;
+            }
+
+            /* Check if we can merge with previous extent */
+            int merged = 0;
+            uint32_t last_len = 0;
+
+            if (num_ads > 0) {
+                struct udf_short_ad *last = &ads[num_ads - 1];
+                last_len = last->length & 0x3FFFFFFF;
+                uint32_t last_type = last->length >> 30;
+
+                /* Check contiguity and max length (~1GB) */
+                if (last_type == 0 &&
+                    last->position + (last_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE == new_block &&
+                    last_len + UDF_SECTOR_SIZE < 0x3FFFFFFF) {
+
+                    last->length += UDF_SECTOR_SIZE;
+                    merged = 1;
+                }
+            }
+
+            if (merged) {
+                /* We extended the previous extent.
+                 * Adjust indices to point to the previous extent.
+                 */
+                current_extent_idx--;
+                logical_pos -= last_len;
+            } else {
+                /* Check space in FE */
+                if (fe->alloc_desc_length + sizeof(struct udf_short_ad) >
+                    UDF_SECTOR_SIZE - sizeof(struct udf_fe) - fe->ext_attr_length) {
+                    kprint("UDF: File Entry full, AED not implemented\n");
+                    udf_free_block(new_block);
+                    kfree(data_buf, UDF_SECTOR_SIZE);
+                    return -1;
+                }
+
+                struct udf_short_ad *new_ad = &ads[num_ads];
+                new_ad->length = UDF_SECTOR_SIZE;
+                new_ad->position = new_block;
+                fe->alloc_desc_length += sizeof(struct udf_short_ad);
+            }
+
+            fe->logical_blocks++;
+        }
+
+        struct udf_short_ad *cur_ad = &ads[current_extent_idx];
+        uint32_t ext_len = cur_ad->length & 0x3FFFFFFF;
+
+        /* Does this extent cover our current file_offset? */
+        if (file_offset >= logical_pos && file_offset < logical_pos + ext_len) {
+            uint32_t rel_off = file_offset - logical_pos;
+            uint32_t available = ext_len - rel_off;
+            uint32_t to_write = (rem_size < available) ? rem_size : available;
+
+            uint32_t sec_idx = rel_off / UDF_SECTOR_SIZE;
+            uint32_t sec_off = rel_off % UDF_SECTOR_SIZE;
+            uint32_t sector = cur_ad->position + sec_idx;
+
+            off_t disk_addr = (off_t)(udf_ctx.partition_start + sector) * UDF_SECTOR_SIZE;
+
+            /* Partial sector write: read-modify-write */
+            if (sec_off != 0 || to_write < UDF_SECTOR_SIZE) {
+                uint32_t chunk = UDF_SECTOR_SIZE - sec_off;
+                if (chunk > to_write) chunk = to_write;
+
+                dev->read(dev, disk_addr, UDF_SECTOR_SIZE, data_buf);
+                memcpy(data_buf + sec_off, data + written, chunk);
+                dev->write(dev, disk_addr, UDF_SECTOR_SIZE, data_buf);
+
+                written += chunk;
+                rem_size -= chunk;
+                file_offset += chunk;
+            } else {
+                /* Write full sectors */
+                dev->write(dev, disk_addr, UDF_SECTOR_SIZE, data + written);
+                written += UDF_SECTOR_SIZE;
+                rem_size -= UDF_SECTOR_SIZE;
+                file_offset += UDF_SECTOR_SIZE;
+            }
+        } else {
+            /* Advance to next extent */
+            logical_pos += ext_len;
+            current_extent_idx++;
+        }
+    }
+
+    if (file_offset > fe->info_length) {
+        fe->info_length = file_offset;
+    }
+
+    kfree(data_buf, UDF_SECTOR_SIZE);
+    return 0;
+}
+
+/*
+ * Write data to a file
  */
 int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
                    uint32_t offset, uint32_t size, const uint8_t *data) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) return -1;
     
     /* Read existing FE */
     off_t disk_off = (off_t)(udf_ctx.partition_start + fe_block) * UDF_SECTOR_SIZE;
-    dev->read(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+    if (dev->read(dev, disk_off, UDF_SECTOR_SIZE, sector_buf) != UDF_SECTOR_SIZE) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
+        return -1;
+    }
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
-    
-    /* For small files, use inline data */
-    if (size + offset <= UDF_SECTOR_SIZE - sizeof(struct udf_fe) - 100) {
-        disk_fe->icb_tag.flags = UDF_ICB_FLAG_AD_INLINE;
+    uint32_t total_needed = offset + size;
+    uint8_t ad_type = disk_fe->icb_tag.flags & 0x7;
+
+    /* For small files, try to use inline data */
+    if (ad_type == UDF_ICB_FLAG_AD_INLINE &&
+        total_needed <= UDF_SECTOR_SIZE - sizeof(struct udf_fe) - disk_fe->ext_attr_length - 40) {
         
-        uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe);
+        uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
         memcpy(alloc_area + offset, data, size);
         
-        if (offset + size > disk_fe->info_length) {
-            disk_fe->info_length = offset + size;
+        if (total_needed > disk_fe->info_length) {
+            disk_fe->info_length = total_needed;
+            disk_fe->alloc_desc_length = (uint32_t)disk_fe->info_length;
         }
-        disk_fe->alloc_desc_length = (uint32_t)disk_fe->info_length;
         
         /* Recalculate tag checksum */
         uint8_t *p = (uint8_t *)&disk_fe->tag;
@@ -197,11 +368,42 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         /* Write back */
         dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
         memcpy(fe, disk_fe, sizeof(struct udf_fe));
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
     }
     
-    /* TODO: Handle larger files with extent allocation */
-    kprint("UDF: Large file writes not implemented\n");
+    /* If still inline but doesn't fit, convert to Short AD */
+    if (ad_type == UDF_ICB_FLAG_AD_INLINE) {
+        if (udf_convert_inline_to_short_ad(dev, disk_fe) != 0) {
+            kfree(sector_buf, UDF_SECTOR_SIZE);
+            return -1;
+        }
+        ad_type = UDF_ICB_FLAG_AD_SHORT;
+    }
+
+    /* Handle Short AD writes */
+    if (ad_type == UDF_ICB_FLAG_AD_SHORT) {
+        if (udf_write_extent_data(dev, disk_fe, offset, size, data) != 0) {
+            kfree(sector_buf, UDF_SECTOR_SIZE);
+            return -1;
+        }
+
+        /* Recalculate tag checksum */
+        uint8_t *p = (uint8_t *)&disk_fe->tag;
+        uint8_t sum = 0;
+        for (int i = 0; i < 4; i++) sum += p[i];
+        for (int i = 5; i < 16; i++) sum += p[i];
+        disk_fe->tag.tag_checksum = sum;
+
+        /* Write back FE */
+        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        memcpy(fe, disk_fe, sizeof(struct udf_fe));
+        kfree(sector_buf, UDF_SECTOR_SIZE);
+        return 0;
+    }
+    
+    kprint("UDF: Unsupported allocation type or error\n");
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     return -1;
 }
 
@@ -344,5 +546,82 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
     }
     
     /* TODO: Handle extent-based files */
+    if ((disk_fe->icb_tag.flags & 0x7) == UDF_ICB_FLAG_AD_SHORT) {
+        if (new_size > disk_fe->info_length) {
+            /* Extension not fully implemented */
+            kprint("UDF: Extending extent-based files not implemented\n");
+            return -1;
+        }
+
+        uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
+        struct udf_short_ad *ads = (struct udf_short_ad *)alloc_area;
+        uint32_t num_ads = disk_fe->alloc_desc_length / sizeof(struct udf_short_ad);
+
+        uint64_t current_offset = 0;
+        uint32_t new_num_ads = 0;
+
+        for (uint32_t i = 0; i < num_ads; i++) {
+            uint32_t len = ads[i].length & 0x3FFFFFFF;
+            uint32_t type = (ads[i].length >> 30) & 0x3;
+            uint32_t block = ads[i].position;
+
+            if (current_offset >= new_size) {
+                /* This extent is fully beyond new_size, remove it and free blocks */
+                uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+                /* Free blocks if allocated (type 0 or 1, not 2) */
+                if (type != 2) {
+                    for (uint32_t b = 0; b < blocks; b++) {
+                        udf_free_block(block + b);
+                    }
+                }
+                /* Don't increment new_num_ads */
+                continue;
+            }
+
+            if (current_offset + len > new_size) {
+                /* Partial extent - truncate it */
+                uint32_t new_len = (uint32_t)(new_size - current_offset);
+
+                /* Calculate blocks to keep */
+                uint32_t old_blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+                uint32_t new_blocks = (new_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+
+                /* Free excess blocks */
+                if (type != 2 && old_blocks > new_blocks) {
+                    for (uint32_t b = new_blocks; b < old_blocks; b++) {
+                        udf_free_block(block + b);
+                    }
+                }
+
+                /* Update AD in place (or copy to new position if needed, but we shrink so it fits) */
+                ads[new_num_ads].length = new_len | (type << 30);
+                ads[new_num_ads].position = block;
+                new_num_ads++;
+            } else {
+                /* Keep full extent */
+                if (new_num_ads != i) {
+                    ads[new_num_ads] = ads[i];
+                }
+                new_num_ads++;
+            }
+
+            current_offset += len;
+        }
+
+        disk_fe->info_length = new_size;
+        disk_fe->alloc_desc_length = new_num_ads * sizeof(struct udf_short_ad);
+
+        /* Recalculate checksum */
+        uint8_t *p = (uint8_t *)&disk_fe->tag;
+        uint8_t sum = 0;
+        for (int i = 0; i < 4; i++) sum += p[i];
+        for (int i = 5; i < 16; i++) sum += p[i];
+        disk_fe->tag.tag_checksum = sum;
+
+        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        memcpy(fe, disk_fe, sizeof(struct udf_fe));
+        return 0;
+    }
+
     return -1;
 }
