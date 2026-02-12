@@ -149,3 +149,110 @@ vop_whiteout(struct vnode *dvp, struct componentname *cnp, int flags)
 
     return EOPNOTSUPP;
 }
+
+/*
+ * vop_access:
+ * Check if the given credentials have access to the vnode.
+ */
+int
+vop_access(struct vnode *vp, int mode, struct ucred *cred)
+{
+    if (vp->v_op && vp->v_op->vop_access)
+        return vp->v_op->vop_access(vp, mode, cred);
+
+    /* Generic fallback */
+    struct vattr va;
+    int error = VOP_GETATTR(vp, &va, cred);
+    if (error)
+        return error;
+
+    /* Root always has access */
+    if (cred->cr_uid == 0)
+        return 0;
+
+    int mask = 0;
+    if (cred->cr_uid == va.va_uid) {
+        if (mode & 4) mask |= 0400;
+        if (mode & 2) mask |= 0200;
+        if (mode & 1) mask |= 0100;
+    } else {
+        int is_group = 0;
+        if (cred->cr_gid == va.va_gid) {
+            is_group = 1;
+        } else {
+            for (int i = 0; i < (int)cred->cr_ngroups; i++) {
+                if (cred->cr_groups[i] == va.va_gid) {
+                    is_group = 1;
+                    break;
+                }
+            }
+        }
+
+        if (is_group) {
+            if (mode & 4) mask |= 0040;
+            if (mode & 2) mask |= 0020;
+            if (mode & 1) mask |= 0010;
+        } else {
+            if (mode & 4) mask |= 0004;
+            if (mode & 2) mask |= 0002;
+            if (mode & 1) mask |= 0001;
+        }
+    }
+
+    return (va.va_mode & mask) == mask ? 0 : -13; /* EACCES */
+}
+
+/*
+ * vop_getattr:
+ * Get vnode attributes.
+ */
+int
+vop_getattr(struct vnode *vp, struct vattr *vap, struct ucred *cred)
+{
+    if (vp->v_op && vp->v_op->vop_getattr)
+        return vp->v_op->vop_getattr(vp, vap, cred);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_setattr:
+ * Set vnode attributes.
+ */
+int
+vop_setattr(struct vnode *vp, struct vattr *vap, struct ucred *cred)
+{
+    if (vp->v_op && vp->v_op->vop_setattr)
+        return vp->v_op->vop_setattr(vp, vap, cred);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_pathconf:
+ * Get configurable pathname variables.
+ */
+int
+vop_pathconf(struct vnode *vp, int name, register_t *retval)
+{
+    if (vp->v_op && vp->v_op->vop_pathconf)
+        return vp->v_op->vop_pathconf(vp, name, retval);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_readdir:
+ * Read directory entries.
+ */
+int
+vop_readdir(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag, int *ncookies, uint64_t **cookies)
+{
+    if (vp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (vp->v_op && vp->v_op->vop_readdir)
+        return vp->v_op->vop_readdir(vp, uio, cred, eofflag, ncookies, cookies);
+
+    return EOPNOTSUPP;
+}

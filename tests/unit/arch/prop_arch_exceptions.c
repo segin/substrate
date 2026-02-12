@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../../sys/arch/i386/idt.h"
+#include <arch/i386/idt.h"
 
 /*
  * Property-based test: IDT Invariant

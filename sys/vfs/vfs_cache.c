@@ -26,6 +26,10 @@ struct namecache {
 static LIST_HEAD(nchash_head, namecache) nchash[NCHASH_SIZE];
 static TAILQ_HEAD(nclru_head, namecache) nclru;
 
+/* Global cache limits */
+int vfs_cache_limit = 10240;
+int vfs_cache_count = 0;
+
 /* Simple hash function for name cache */
 static uint32_t
 cache_hash(struct vnode *dvp, const char *name, size_t len)
@@ -94,6 +98,17 @@ cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len)
     ncp = kmalloc(sizeof(struct namecache) + len + 1);
     if (ncp == NULL) return;
 
+    /* Enforce cache limit */
+    if (vfs_cache_count >= vfs_cache_limit) {
+        struct namecache *lru = TAILQ_FIRST(&nclru);
+        if (lru) {
+            LIST_REMOVE(lru, nc_hash);
+            TAILQ_REMOVE(&nclru, lru, nc_lru);
+            kfree(lru, sizeof(struct namecache) + lru->nc_nlen + 1);
+            vfs_cache_count--;
+        }
+    }
+
     ncp->nc_dvp = dvp;
     ncp->nc_vp = vp;
     ncp->nc_nlen = len;
@@ -102,8 +117,7 @@ cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len)
 
     LIST_INSERT_HEAD(&nchash[hash], ncp, nc_hash);
     TAILQ_INSERT_TAIL(&nclru, ncp, nc_lru);
-
-    /* TODO: Limit total number of cache entries and evict LRU */
+    vfs_cache_count++;
 }
 
 /*
@@ -121,6 +135,7 @@ cache_purge(struct vnode *vp)
                 LIST_REMOVE(ncp, nc_hash);
                 TAILQ_REMOVE(&nclru, ncp, nc_lru);
                 kfree(ncp, sizeof(struct namecache) + ncp->nc_nlen + 1);
+                vfs_cache_count--;
             }
         }
     }

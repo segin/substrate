@@ -9,6 +9,7 @@
 #define _KERN_DEVICE_H
 
 #include <stdint.h>
+#include <sys/lock.h>
 
 /* Forward declarations */
 struct driver;
@@ -68,6 +69,9 @@ struct device {
 
     /* Status */
     uint32_t flags;
+
+    /* Locking */
+    spinlock_t lock;
 };
 
 /* Core Device API */

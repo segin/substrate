@@ -171,38 +171,156 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
     
     /* Read existing FE */
     off_t disk_off = (off_t)(udf_ctx.partition_start + fe_block) * UDF_SECTOR_SIZE;
-    dev->read(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+    if (dev->read(dev, disk_off, UDF_SECTOR_SIZE, sector_buf) != UDF_SECTOR_SIZE) {
+        return -1;
+    }
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
     
-    /* For small files, use inline data */
-    if (size + offset <= UDF_SECTOR_SIZE - sizeof(struct udf_fe) - 100) {
-        disk_fe->icb_tag.flags = UDF_ICB_FLAG_AD_INLINE;
+    uint64_t total_size = disk_fe->info_length;
+    if (offset + size > total_size) total_size = offset + size;
+
+    int is_inline = (disk_fe->icb_tag.flags & 0x7) == UDF_ICB_FLAG_AD_INLINE;
+    int fits_inline = (total_size <= UDF_SECTOR_SIZE - sizeof(struct udf_fe) - disk_fe->ext_attr_length - 100);
+
+    /* Case 1: Write fits in INLINE */
+    if (is_inline && fits_inline) {
+        disk_fe->icb_tag.flags = (disk_fe->icb_tag.flags & ~0x7) | UDF_ICB_FLAG_AD_INLINE;
         
-        uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe);
+        uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
         memcpy(alloc_area + offset, data, size);
         
-        if (offset + size > disk_fe->info_length) {
-            disk_fe->info_length = offset + size;
-        }
+        disk_fe->info_length = total_size;
         disk_fe->alloc_desc_length = (uint32_t)disk_fe->info_length;
         
-        /* Recalculate tag checksum */
-        uint8_t *p = (uint8_t *)&disk_fe->tag;
-        uint8_t sum = 0;
-        for (int i = 0; i < 4; i++) sum += p[i];
-        for (int i = 5; i < 16; i++) sum += p[i];
-        disk_fe->tag.tag_checksum = sum;
+        disk_fe->tag.tag_checksum = udf_tag_checksum(&disk_fe->tag);
         
-        /* Write back */
-        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        if (dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf) != UDF_SECTOR_SIZE) {
+            return -1;
+        }
         memcpy(fe, disk_fe, sizeof(struct udf_fe));
         return 0;
     }
     
-    /* TODO: Handle larger files with extent allocation */
-    kprint("UDF: Large file writes not implemented\n");
-    return -1;
+    /* Case 2: Convert INLINE to SHORT_AD */
+    if (is_inline) {
+        uint32_t new_block = udf_alloc_block();
+        if (new_block == 0) return -1;
+
+        uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
+        uint32_t inline_len = (uint32_t)disk_fe->info_length;
+
+        /* Write existing inline data to new block */
+        if (inline_len > 0) {
+            if (dev->write(dev, (off_t)(udf_ctx.partition_start + new_block) * UDF_SECTOR_SIZE, inline_len, alloc_area) != inline_len) {
+                udf_free_block(new_block);
+                return -1;
+            }
+        }
+
+        disk_fe->icb_tag.flags = (disk_fe->icb_tag.flags & ~0x7) | UDF_ICB_FLAG_AD_SHORT;
+        disk_fe->alloc_desc_length = sizeof(struct udf_short_ad);
+
+        struct udf_short_ad *ad = (struct udf_short_ad *)alloc_area;
+        ad->length = inline_len > 0 ? UDF_SECTOR_SIZE : UDF_SECTOR_SIZE; /* Alloc full block */
+        ad->position = new_block;
+    }
+
+    /* Case 3: Write using SHORT_ADs */
+    struct udf_short_ad *ads = (struct udf_short_ad *)(sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length);
+    uint32_t num_ads = disk_fe->alloc_desc_length / sizeof(struct udf_short_ad);
+
+    uint32_t written = 0;
+
+    while (written < size) {
+        uint32_t target_offset = offset + written;
+        uint32_t target_len = size - written;
+
+        int ad_idx = -1;
+        uint32_t ad_pos = 0;
+
+        /* Find AD covering target_offset */
+        for (uint32_t i = 0; i < num_ads; i++) {
+            uint32_t len = ads[i].length & 0x3FFFFFFF;
+            if (target_offset >= ad_pos && target_offset < ad_pos + len) {
+                ad_idx = i;
+                break;
+            }
+            ad_pos += len;
+        }
+
+        if (ad_idx != -1) {
+            /* Write to existing extent */
+            struct udf_short_ad *ad = &ads[ad_idx];
+            uint32_t ad_len = ad->length & 0x3FFFFFFF;
+            uint32_t ad_offset = target_offset - ad_pos;
+
+            uint32_t space_in_ad = ad_len - ad_offset;
+            uint32_t chunk = (target_len > space_in_ad) ? space_in_ad : target_len;
+
+            uint32_t block_off = ad_offset / UDF_SECTOR_SIZE;
+            uint32_t byte_off = ad_offset % UDF_SECTOR_SIZE;
+
+            off_t phys_addr = (off_t)(udf_ctx.partition_start + ad->position + block_off) * UDF_SECTOR_SIZE + byte_off;
+            if (dev->write(dev, phys_addr, chunk, data + written) != chunk) {
+                return -1;
+            }
+
+            written += chunk;
+        } else {
+            /* Append new extent */
+            /* Calculate current end of file based on ADs */
+            ad_pos = 0;
+            for (uint32_t i = 0; i < num_ads; i++) ad_pos += (ads[i].length & 0x3FFFFFFF);
+
+            if (target_offset > ad_pos) {
+                kprint("UDF: Sparse write not implemented\n");
+                return -1;
+            }
+
+            uint32_t new_block = udf_alloc_block();
+            if (new_block == 0) return -1;
+
+            /* Try to merge with last AD */
+            int merged = 0;
+            if (num_ads > 0) {
+                struct udf_short_ad *last_ad = &ads[num_ads - 1];
+                uint32_t len = last_ad->length & 0x3FFFFFFF;
+                uint32_t last_block_start = last_ad->position;
+                uint32_t last_block_count = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+
+                if (last_block_start + last_block_count == new_block) {
+                    last_ad->length += UDF_SECTOR_SIZE;
+                    merged = 1;
+                }
+            }
+
+            if (!merged) {
+                if (sizeof(struct udf_fe) + disk_fe->ext_attr_length + (num_ads + 1) * sizeof(struct udf_short_ad) > UDF_SECTOR_SIZE) {
+                    kprint("UDF: File Entry full\n");
+                    udf_free_block(new_block);
+                    return -1;
+                }
+
+                ads[num_ads].position = new_block;
+                ads[num_ads].length = UDF_SECTOR_SIZE;
+                num_ads++;
+                disk_fe->alloc_desc_length += sizeof(struct udf_short_ad);
+            }
+        }
+    }
+
+    if (total_size > disk_fe->info_length) {
+        disk_fe->info_length = total_size;
+    }
+
+    disk_fe->tag.tag_checksum = udf_tag_checksum(&disk_fe->tag);
+
+    if (dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf) != UDF_SECTOR_SIZE) {
+        return -1;
+    }
+    memcpy(fe, disk_fe, sizeof(struct udf_fe));
+    return 0;
 }
 
 /*

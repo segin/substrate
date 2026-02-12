@@ -1,0 +1,42 @@
+.Dd October 16, 2024
+.Dt ZERO 4
+.Os Substrate
+.Sh NAME
+.Nm zero
+.Nd source of zeroed memory
+.Sh SYNOPSIS
+.In sys/mman.h
+.Sh DESCRIPTION
+The
+.Nm
+device is a source of infinite zero bytes.
+Reading from
+.Nm
+returns as many null characters (0x00) as requested.
+Writing to
+.Nm
+discards the data and returns the number of bytes written.
+.Pp
+Memory mapping
+.Nm
+creates an anonymous zero-filled memory region. The mapping can be private (copy-on-write behavior) or shared (though behavior is effectively anonymous).
+.Sh FILES
+.Pa /dev/zero
+.Sh EXAMPLES
+Create a 1MB zero-filled file:
+.Bd -literal -offset indent
+dd if=/dev/zero of=file.bin bs=1M count=1
+.Ed
+.Pp
+Map anonymous memory:
+.Bd -literal -offset indent
+int fd = open("/dev/zero", O_RDWR);
+void *ptr = mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
+.Ed
+.Sh SEE ALSO
+.Xr null 4 ,
+.Xr full 4
+.Sh HISTORY
+The
+.Nm
+device appeared in Substrate.
