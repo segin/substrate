@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 #define SECS_PER_MIN  60
 #define SECS_PER_HOUR 3600
@@ -257,7 +258,7 @@ static time_t internal_timegm(struct tm *tm) {
     }
     days += (tm->tm_mday - 1);
 
-    time_t t = days * SECS_PER_DAY;
+    time_t t = (time_t)days * SECS_PER_DAY;
     t += tm->tm_hour * SECS_PER_HOUR;
     t += tm->tm_min * SECS_PER_MIN;
     t += tm->tm_sec;
