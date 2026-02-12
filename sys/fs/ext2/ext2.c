@@ -1152,8 +1152,6 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
     size_t name_len = strlen(name);
-    
-    size_t name_len = strlen(name);
 
     mutex_lock(&ctx->lock);
 
