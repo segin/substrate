@@ -34,7 +34,7 @@ int64_t get_time(void) {
 
 // Include the source under test
 // This is relative to tests/unit/fs/
-#include <fs/ext2/ext2.c"
+#include <fs/ext2/ext2.c>
 
 // ------------------------------------------------------------------
 // Test Logic

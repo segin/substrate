@@ -39,9 +39,9 @@ void panic(const char *msg) {
 // Globals Mocks
 #include <sys/proc.h>
 #include "../sys/exec/perso/personality.h"
-struct personality personality_native = { "Native", NULL, 0 };
-struct personality personality_freebsd = { "FreeBSD", NULL, 0 };
-struct personality personality_linux = { "Linux", NULL, 0 };
+struct personality personality_native = { .name = "Native", .id = PERS_NATIVE };
+struct personality personality_freebsd = { .name = "FreeBSD", .id = PERS_FREEBSD };
+struct personality personality_linux = { .name = "Linux", .id = PERS_LINUX };
 
 // Paging Mocks
 void pmap_invalidate_page(uint32_t v) { (void)v; }
@@ -97,3 +97,95 @@ void switch_to(void *prev, void *next) {
 }
 
 void isr128() {}
+
+// Copy mocks
+int copyin(const void *src, void *dst, size_t size) {
+    memcpy(dst, src, size);
+    return 0;
+}
+
+int copyout(const void *src, void *dst, size_t size) {
+    memcpy(dst, src, size);
+    return 0;
+}
+
+int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
+    size_t l = strlen(src);
+    if (l >= maxlen) return -1;
+    strcpy(dst, src);
+    if (len) *len = l;
+    return 0;
+}
+
+// VFS Mocks
+#include <vfs/vfs.h>
+fs_node_t mock_root;
+void vfs_init_mock_root() {
+    memset(&mock_root, 0, sizeof(mock_root));
+    strcpy(mock_root.name, "/");
+    mock_root.flags = FS_DIRECTORY;
+    fs_root = &mock_root;
+}
+
+// Print Mocks
+#include <stdarg.h>
+void kprint(const char *s) {
+    if (!s) return;
+    printf("%s", s);
+}
+
+void kprintf(const char *fmt, ...) {
+    if (!fmt) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+}
+
+// Additional Kernel Mocks for Linker
+void pmap_activate(pmap_t pmap) { (void)pmap; }
+pmap_t pmap_fork(pmap_t pmap) { (void)pmap; return NULL; }
+void pmap_release(pmap_t pmap) { (void)pmap; }
+void sched_periodic_balance(void) {}
+void rusage_init(process_t *p) { (void)p; }
+void rusage_finalize(process_t *p) { (void)p; }
+void tty_hangup(struct tty *tty) { (void)tty; }
+int swap_out(void) { return 0; }
+int swap_in(void *page, uint32_t slot) { (void)page; (void)slot; return 0; }
+int sys_fork(void) { return 0; }
+void psignal(struct process *p, int sig) { (void)p; (void)sig; }
+void futex_thread_exit(thread_t *t) { (void)t; }
+void acct_process(int code) { (void)code; }
+void close_fs(fs_node_t *node) { (void)node; }
+void file_close_ptr(file_t *f) { (void)f; }
+void nchinit(void) {}
+void sched_init_generic(void) {}
+void sched_smp_init(int n) { (void)n; }
+thread_t *sched_alloc_thread(process_t *p) { (void)p; return NULL; }
+void arch_set_kernel_stack(uintptr_t s) { (void)s; }
+void arch_switch_to(thread_t *prev, thread_t *next) { (void)prev; (void)next; }
+uint64_t get_ticks(void) { return 0; }
+void pmap_bootstrap(void) {}
+void pmap_map_trampoline(void) {}
+void random_init(void) {}
+void crc32_init(void) {}
+void sysctl_init(void) {}
+void virtio_init(void) {}
+void ntsync_init(void) {}
+void run_kernel_tests(void) {}
+void vfs_init(void) {}
+void console_register_devfs(void) {}
+void pmm_reclaim_setup(void) {}
+void pmm_reclaim_range(uint32_t s, uint32_t e) { (void)s; (void)e; }
+void ldt_activate(process_t *p) { (void)p; }
+void pmap_activate_direct(pmap_t pmap) { (void)pmap; }
+void sched_yield(void) {}
+void sched_tick(void) {}
+void sched_wakeup(void *chan) { (void)chan; }
+void sched_wakeup_n(void *chan, int n) { (void)chan; (void)n; }
+thread_t *sched_get_thread(int tid) { (void)tid; return NULL; }
+void sched_sleep(void *chan) { (void)chan; }
+int64_t get_time(void) { return 0; }
+int smp_get_cpu_count(void) { return 1; }
+char kernel_hostname[64] = "host";
+void fork_child_return(void) {}

@@ -1,7 +1,8 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <sys/file.h"
-#include <kern/sched.h"
+#include <sys/file.h>
+#include <vfs/vfs.h>
+#include <kern/sched.h>
 
 extern int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
 

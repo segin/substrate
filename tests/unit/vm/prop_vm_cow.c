@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <vm/vm_fault.h"
-#include <arch/i386/pmap.h"
+#include <vm/vm_fault.h>
+#include <arch/i386/pmap.h>
 
 /*
  * Property-based test: CoW Invariant

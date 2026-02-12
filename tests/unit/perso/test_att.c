@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <exec/perso/personality.h"
-#include <arch/i386/syscall.h"
+#include <exec/perso/personality.h>
+#include <arch/i386/syscall.h>
 
 extern int sys_exit(int);
 extern int sys_read(int, char*, int);
