@@ -33,7 +33,6 @@ runqueue_t *sched_get_runqueue(int cpu_id) {
 }
 
 // Get current CPU's runqueue
-// Get current CPU's runqueue
 runqueue_t *sched_get_current_runqueue(void) {
     // In full SMP, use percpu_get_cpu_id()
     extern int percpu_get_cpu_id(void);
