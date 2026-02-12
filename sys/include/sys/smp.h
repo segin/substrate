@@ -5,5 +5,6 @@
 
 void smp_init(void);
 int smp_get_cpu_count(void);
+void smp_discover_cores(void);
 
 #endif

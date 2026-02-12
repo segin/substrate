@@ -35,8 +35,10 @@ void syscall_init_64(void) {
 
 void syscall_handler_64(uint64_t syscall_number, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6) {
     if (!current_task) return;
+
     struct personality *p = perso_lookup(current_task->perso_id);
     if (!p) return;
+
     if (syscall_number >= p->syscall_count) return;
 
     void *func = p->syscall_table[syscall_number];
