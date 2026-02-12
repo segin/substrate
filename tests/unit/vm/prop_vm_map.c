@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/vm/vm_map.h"
+#include <vm/vm_map.h>
 
 /*
  * Property-based test: Order and Overlap Invariant for VM Map
@@ -33,8 +33,8 @@ void run_vm_map_properties(void) {
     vm_map_init(&map, NULL, 0x1000, 0xFFFFFFFF);
     
     // Add some random entries and check
-    vm_map_insert(&map, NULL, 0, 0x2000, 0x3000);
-    vm_map_insert(&map, NULL, 0, 0x5000, 0x6000);
+    vm_map_insert(&map, NULL, 0, 0x2000, 0x3000, 0x3, 0x3, 1);
+    vm_map_insert(&map, NULL, 0, 0x5000, 0x6000, 0x3, 0x3, 1);
     
     prop_vm_map_integrity(&map);
 }

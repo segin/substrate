@@ -236,13 +236,36 @@ void test_scsi(void) {
      * Test 12: Sense string lookup
      */
     {
-        const char *str = scsi_sense_string(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
-        if (strcmp(str, "Medium Error") == 0) {
-            kprint("PASS: scsi_sense_string\n");
+        /* Test fallback to key description */
+        const char *str1 = scsi_sense_string(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
+
+        /* Test specific ASC/ASCQ description */
+        const char *str2 = scsi_sense_string(SCSI_SENSE_ILLEGAL_REQUEST, 0x24, 0x00);
+
+        /* Test unit attention ASC/ASCQ */
+        const char *str3 = scsi_sense_string(SCSI_SENSE_UNIT_ATTENTION, 0x29, 0x00);
+
+        int ok = 1;
+        if (strcmp(str1, "Medium Error") != 0) {
+            sprintf(buf, "FAIL: scsi_sense_string(key=3, 0, 0) returned '%s'\n", str1);
+            kprint(buf);
+            ok = 0;
+        }
+        if (strcmp(str2, "Invalid field in CDB") != 0) {
+            sprintf(buf, "FAIL: scsi_sense_string(key=5, 0x24, 0) returned '%s'\n", str2);
+            kprint(buf);
+            ok = 0;
+        }
+        if (strcmp(str3, "Power on, reset, or bus device reset occurred") != 0) {
+            sprintf(buf, "FAIL: scsi_sense_string(key=6, 0x29, 0) returned '%s'\n", str3);
+            kprint(buf);
+            ok = 0;
+        }
+
+        if (ok) {
+            kprint("PASS: scsi_sense_string (including ASC/ASCQ)\n");
             pass++;
         } else {
-            sprintf(buf, "FAIL: scsi_sense_string returned '%s'\n", str);
-            kprint(buf);
             fail++;
         }
     }

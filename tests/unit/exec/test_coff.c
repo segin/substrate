@@ -1,4 +1,4 @@
-#include "../../../sys/fs/exec/coff.h"
+#include <fs/exec/coff.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
