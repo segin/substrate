@@ -14,6 +14,8 @@ typedef int32_t tid_t;
 #include <stddef.h>
 
 typedef int32_t pid_t;
+#endif
+
 typedef int32_t tid_t;
 typedef uint32_t uid_t;
 typedef uint32_t gid_t;

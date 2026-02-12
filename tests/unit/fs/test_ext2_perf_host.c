@@ -19,6 +19,21 @@ void kprint(const char *msg) {
     printf("[KERNEL] %s", msg);
 }
 
+void *kmalloc(size_t size) {
+    return calloc(1, size);
+}
+
+void kfree(void *ptr, size_t size) {
+    (void)size;
+    free(ptr);
+}
+
+// Mock Mutex
+#include <sys/lock.h>
+void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
+void mutex_lock(mutex_t *m) { (void)m; }
+void mutex_unlock(mutex_t *m) { (void)m; }
+
 // Mock VFS functions
 void vfs_register_filesystem(filesystem_t *fs) {
     (void)fs;
