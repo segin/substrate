@@ -1,0 +1,33 @@
+.TH BASENAME 3
+.SH NAME
+basename, dirname \- parse pathname components
+.SH SYNOPSIS
+.B #include <libgen.h>
+.PP
+.BI "char *basename(char *" path ");"
+.br
+.BI "char *dirname(char *" path ");"
+.SH DESCRIPTION
+The
+.B basename()
+function returns the last component of the pathname pointed to by
+.I path.
+Trailing slashes are removed. If
+.I path
+consists entirely of slashes, a pointer to the string "/" is returned.
+If
+.I path
+is a null pointer or points to an empty string, a pointer to the string "." is returned.
+.PP
+The
+.B dirname()
+function returns the parent directory of the pathname pointed to by
+.I path.
+Trailing slashes are removed. If
+.I path
+does not contain a slash, "." is returned.
+.SH RETURN VALUE
+Both functions return a pointer to the result. This pointer may point to static storage or into the modified input string.
+.SH SEE ALSO
+.BR basename (1),
+.BR dirname (1)
