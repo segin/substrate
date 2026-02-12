@@ -1,6 +1,7 @@
 #include <sys/acct.h>
 #include <sys/proc.h>
 #include <sys/session.h>
+#include <sys/signal.h>
 #include <vfs/vfs.h>
 #include <drivers/video/vga.h>
 #include <kern/sched.h>

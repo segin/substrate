@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <sys/lock.h"
-#include <kern/sched.h"
+#include <sys/lock.h>
+#include <kern/sched.h>
 
 bool test_mutex_basic(void) {
     mutex_t m;
@@ -22,7 +22,7 @@ bool test_mutex_contention(void) {
     mutex_init(&m, "contend");
     
     char s1[4096];
-    int tid1 = sched_create_thread(current_process, (void*)0x1, s1 + 4096, NULL);
+    thread_t *t_tid1 = sched_create_thread(current_process, (void*)0x1, s1 + 4096, NULL); int tid1 = t_tid1->tid;
     thread_t *t1 = sched_get_thread(tid1);
     
     // Simulate tid1 holding the lock
@@ -31,7 +31,7 @@ bool test_mutex_contention(void) {
     mutex_lock(&m);
     
     char s2[4096];
-    int tid2 = sched_create_thread(current_process, (void*)0x2, s2 + 4096, NULL);
+    thread_t *t_tid2 = sched_create_thread(current_process, (void*)0x2, s2 + 4096, NULL); int tid2 = t_tid2->tid;
     thread_t *t2 = sched_get_thread(tid2);
     
     // Simulate tid2 trying to lock and failing (blocking)
@@ -75,7 +75,7 @@ bool test_sema_blocking(void) {
     sema_init(&s, 0, "block-sema"); // Start at 0
     
     char stack[4096];
-    int tid = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL);
+    thread_t *t_tid = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL); int tid = t_tid->tid;
     thread_t *t = sched_get_thread(tid);
     
     // Simulate t trying to wait and blocking
@@ -98,7 +98,7 @@ bool test_sema_blocking(void) {
     return true;
 }
 
-#include <sys/futex.h"
+#include <sys/futex.h>
 
 extern int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3);
 
@@ -119,7 +119,7 @@ bool test_futex_blocking(void) {
     int futex_val = 10;
     
     char stack[4096];
-    int tid = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL);
+    thread_t *t_tid = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL); int tid = t_tid->tid;
     thread_t *t = sched_get_thread(tid);
     
     // Simulate t calling FUTEX_WAIT

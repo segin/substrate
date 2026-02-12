@@ -7,7 +7,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <sys/mman.h>
 
 // Mock Kernel Functions
 void kprint(const char *s) {
@@ -23,91 +22,86 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
-// Mock VFS types
+// Include VFS header to get types
+#include <vfs/vfs.h>
 
-struct fs_node {
-    uint32_t inode;
-    void *ptr;
-};
-
-typedef struct fs_node fs_node_t;
-
-struct dirent {
-    char name[256];
-    uint32_t ino;
-};
-
-// Mock Minix structures
-struct minix_dir_entry {
-    uint16_t inode;
-    char name[30];
-};
-
-// Functions to mock read_fs
+// Mock read_fs
 size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
-    if (size >= 32) {
-        // Construct entry with 30 'A's and no null terminator
-        uint16_t inode = 123;
-        memcpy(buffer, &inode, 2);
-        memset(buffer + 2, 'A', 30);
-        
-        // Fill the rest of the buffer with 'B's to detect over-read
-        if (size > 32) {
-            memset(buffer + 32, 'B', size - 32);
+    if (size > 0) {
+        memset(buffer, 0, size);
+        if (size >= 32) {
+            uint16_t inode = 1;
+            memcpy(buffer, &inode, 2);
+            // Fill name with 30 'A's (no null)
+            memset(buffer + 2, 'A', 30);
+            // Fill the rest with garbage
+            if (size > 32) memset(buffer + 32, 'B', size - 32);
         }
+        return size;
     }
-    return size;
+    return 0;
 }
 
-// Poison stack helper
-void poison_stack(void) {
-    char buf[1024];
-    memset(buf, 0xCC, sizeof(buf));
-    (void)buf;
+size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    (void)node; (void)offset; (void)size; (void)buffer;
+    return 0;
 }
 
-// The function under test (extracted from minix.c or mocked to match)
-// In a real test, we would include minix.c, but for a simple host reproduction:
-static struct dirent *minix_readdir_mock(fs_node_t *node, uint64_t index) {
-    struct minix_dir_entry entry;
-    // Simulate reading one entry
-    read_fs(node, index * 32, 32, (uint8_t *)&entry);
-    
-    if (entry.inode == 0) return NULL;
+void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }
 
-    static struct dirent dir;
-    // THE FIX:
-    strncpy(dir.name, entry.name, 30);
-    dir.name[30] = '\0';
-    dir.ino = entry.inode;
-    
-    return &dir;
+// Include the real source
+#include "../../sys/fs/minix/minix.c"
+
+// Mock time
+int64_t get_time(void) {
+    return 1234567890;
+}
+
+// Helper to poison stack
+void poison_stack() {
+    char buf[4096];
+    memset(buf, 'X', sizeof(buf));
+    volatile char *p = buf;
+    (void)p;
 }
 
 int main() {
-    printf("Starting Minix readdir stack over-read reproduction test...\n");
+    printf("Starting Minix Vuln Test (Real Code)...\n");
 
     fs_node_t node;
-    node.inode = 1;
+    memset(&node, 0, sizeof(node));
+    node.flags = FS_DIRECTORY;
+    node.length = 1024;
+
+    minix_fs_t fs;
+    memset(&fs, 0, sizeof(fs));
+    fs.sb.s_magic = MINIX_V1_Magic;
+    fs.block_device = &node;
+
+    node.impl = (uintptr_t)&fs;
     
+    struct minix_inode_v1 inode_v1;
+    memset(&inode_v1, 0, sizeof(inode_v1));
+    inode_v1.i_zone[0] = 10;
+    node.ptr = (struct fs_node *)&inode_v1;
+
     poison_stack();
-    
-    struct dirent *d = minix_readdir_mock(&node, 0);
-    
+
+    struct dirent *d = minix_readdir(&node, 0);
+
     if (!d) {
-        printf("FAIL: readdir returned NULL\n");
+        printf("FAIL: minix_readdir returned NULL\n");
         return 1;
     }
 
-    printf("Read entry name: '%s'\n", d->name);
-    printf("Length: %zu\n", strlen(d->name));
+    printf("Read entry: d_name='%.35s' (len=%lu)\n", d->d_name, strlen(d->d_name));
 
-    if (strlen(d->name) > 30) {
-        printf("VULNERABLE: Buffer over-read detected! Length is %zu\n", strlen(d->name));
+    if (strlen(d->d_name) > 30) {
+        printf("VULNERABLE: d_name length %lu > 30. Stack over-read detected!\n", strlen(d->d_name));
         return 1;
     } else {
-        printf("SAFE: readdir handled non-null-terminated name correctly.\n");
+        printf("SAFE: d_name length %lu <= 30.\n", strlen(d->d_name));
     }
 
     return 0;

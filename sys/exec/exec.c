@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <kern/console.h>
 #include <sys/syscall_impl.h>
+#include <sys/kern_syscalls.h>
 #include <sys/fcntl.h>
 #include <sys/kern_syscalls.h>
 
@@ -36,13 +37,9 @@ void exec_register_handler(struct exec_binary_handler *handler) {
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     if (!path) return -ENOENT;
 
-    // 1. Lookup the file to check its existence and permissions
-    fs_node_t *file = vfs_lookup(fs_root, path);
-    if (!file) return -ENOENT;
-
-    // 2. Open the file to read the header
+    // 1. Open the file to read the header
     int fd = kern_open(path, O_RDONLY, 0);
-    if (fd < 0) return fd;
+    if (fd < 0) return fd; // Propagate error (ENOENT, EACCES)
 
     // 3. Read the header (magic bytes)
     char header_buf[256];

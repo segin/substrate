@@ -1,4 +1,4 @@
-#include <arch/i386/smp.h"
+#include <arch/i386/smp.h>
 #include <stdbool.h>
 #include <string.h>
 

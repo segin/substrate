@@ -23,6 +23,8 @@
 #include <vfs/vfs.h>
 #include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
+#include <sys/kern_syscalls.h>
+#include <sys/utsname.h>
 
 #include <sys/smp.h>
 #include <sys/types.h>
@@ -92,24 +94,6 @@ void file_free(file_t *f) {
     file_free_list = f;
 }
 
-int sys_write(int fd, const char *buf, int len) {
-    if (len < 0) return -22;
-    if (len == 0) return 0;
-    
-    // For large writes, we might want to do it in chunks to avoid large kmalloc.
-    // For now, let's assume direct access or validation is handled by VFS/Personality.
-    // But strict Substrate way: copy to kernel.
-    char *kbuf = kmalloc(len);
-    if (!kbuf) return -12;
-    if (copyin(buf, kbuf, len) != 0) {
-        kfree(kbuf, len);
-        return -14;
-    }
-    int ret = kern_write(fd, kbuf, len);
-    kfree(kbuf, len);
-    return ret;
-}
-
 int kern_write(int fd, const char *buf, int len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
@@ -123,21 +107,36 @@ int kern_write(int fd, const char *buf, int len) {
     return 0;
 }
 
-int sys_read(int fd, char *buf, int len) {
-    if (len < 0) return -22;
+int sys_write(int fd, const char *buf, int len) {
+    if (len < 0) return -1;
     if (len == 0) return 0;
-    
-    char *kbuf = kmalloc(len);
-    if (!kbuf) return -12;
-    int ret = kern_read(fd, kbuf, len);
-    if (ret > 0) {
-        if (copyout(kbuf, buf, ret) != 0) {
-            kfree(kbuf, len);
-            return -14;
+
+    void *kbuf = kmalloc(4096);
+    if (!kbuf) return -12; // ENOMEM
+
+    int total_written = 0;
+    while (len > 0) {
+        int to_write = (len > 4096) ? 4096 : len;
+        if (copyin(buf + total_written, kbuf, to_write) != 0) {
+            kfree(kbuf, 4096);
+            return -14; // EFAULT
         }
+
+        int bytes = kern_write(fd, kbuf, to_write);
+        if (bytes <= 0) {
+            if (total_written == 0) {
+                kfree(kbuf, 4096);
+                return bytes;
+            }
+            break;
+        }
+
+        total_written += bytes;
+        len -= bytes;
+        if (bytes < to_write) break;
     }
-    kfree(kbuf, len);
-    return ret;
+    kfree(kbuf, 4096);
+    return total_written;
 }
 
 int kern_read(int fd, char *buf, int len) {
@@ -148,6 +147,38 @@ int kern_read(int fd, char *buf, int len) {
     uint32_t bytes = read_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
     f->f_offset += bytes;
     return bytes;
+}
+
+int sys_read(int fd, char *buf, int len) {
+    if (len < 0) return -1;
+    if (len == 0) return 0;
+
+    void *kbuf = kmalloc(4096);
+    if (!kbuf) return -12; // ENOMEM
+
+    int total_read = 0;
+    while (len > 0) {
+        int to_read = (len > 4096) ? 4096 : len;
+        int bytes = kern_read(fd, kbuf, to_read);
+        if (bytes <= 0) {
+            if (total_read == 0) {
+                kfree(kbuf, 4096);
+                return bytes;
+            }
+            break;
+        }
+
+        if (copyout(kbuf, buf + total_read, bytes) != 0) {
+            kfree(kbuf, 4096);
+            return -14; // EFAULT
+        }
+
+        total_read += bytes;
+        len -= bytes;
+        if (bytes < to_read) break;
+    }
+    kfree(kbuf, 4096);
+    return total_read;
 }
 
 int sys_open(const char *path, int flags, int mode) {
@@ -372,6 +403,26 @@ int sys__exit(int code) {
 }
 
 int sys_thr_new(struct thr_param *param, int param_size) {
+    struct thr_param kparam;
+    if (param_size < (int)sizeof(struct thr_param)) return -1;
+    if (copyin(param, &kparam, sizeof(struct thr_param)) != 0) return -14;
+
+    // We also need to handle child_tid if it is provided
+    // kern_thr_new writes to *p.child_tid
+    // So we should pass a kernel pointer to child_tid
+    long kchild_tid = 0;
+    long *orig_child_tid = kparam.child_tid;
+    if (orig_child_tid) kparam.child_tid = &kchild_tid;
+
+    int ret = kern_thr_new(&kparam, sizeof(struct thr_param));
+
+    if (ret == 0 && orig_child_tid) {
+        if (copyout(&kchild_tid, orig_child_tid, sizeof(long)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
     void *stack_top = (char*)p.stack_base + p.stack_size;
@@ -601,7 +652,6 @@ int kern_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
 }
 
 int sys_fstat(int fd, struct stat *buf) {
-    if (fd < 0 || fd >= MAX_FD || !buf) return -1;
     struct stat kbuf;
     int ret = kern_fstat(fd, &kbuf);
     if (ret == 0) {
@@ -609,6 +659,7 @@ int sys_fstat(int fd, struct stat *buf) {
     }
     return ret;
 }
+
 
 int kern_fstat(int fd, struct stat *buf) {
     if (fd < 0 || fd >= MAX_FD || !buf) return -1;
@@ -963,11 +1014,11 @@ int sys_signal(int sig, void *handler) {
     memset(&act, 0, sizeof(act));
     act.sa_handler = (sig_t)handler;
     act.sa_flags = 0;
-    return sys_sigaction(sig, &act, NULL);
+    return kern_sigaction(sig, &act, NULL);
 }
 
 int sys_waitpid(int pid, int *status, int options) {
-    int kstatus;
+    int kstatus = 0;
     int ret = kern_waitpid(pid, status ? &kstatus : NULL, options);
     if (ret >= 0 && status) {
         if (copyout(&kstatus, status, sizeof(int)) != 0) return -14;
@@ -1101,6 +1152,8 @@ int kern_fchdir(int fd) {
     return 0;
 }
 
+
+
 int sys_fchdir(int fd) {
     return kern_fchdir(fd);
 }
@@ -1142,9 +1195,9 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
 
 int sys_getcwd(char *buf, size_t size) {
     if (size == 0) return -22;
+    if (size > 4096) size = 4096;
     char *kbuf = kmalloc(size);
     if (!kbuf) return -12;
-    
     int ret = kern_getcwd(kbuf, size);
     if (ret == 0) {
         if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) {
@@ -1275,6 +1328,7 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
 // Returns count of PIDs written, or total count if pids==NULL
 int sys_proc_list(pid_t *pids, size_t count) {
     if (pids == NULL || count == 0) return kern_proc_list(NULL, 0);
+    if (count > 1024) count = 1024;
 
     pid_t *kpids = kmalloc(count * sizeof(pid_t));
     if (!kpids) return -12;
@@ -1327,20 +1381,15 @@ int sys_cpu_count(void) {
 // sys_hostname - Get system hostname
 // Returns: 0 on success, -1 on error
 int sys_hostname(char *buf, size_t len) {
-    if (!buf || len == 0) return -1;
-    char *kbuf = kmalloc(len);
-    if (!kbuf) return -12;
-
+    if (len > 256) len = 256;
+    char kbuf[256];
     int ret = kern_hostname(kbuf, len);
     if (ret == 0) {
-        if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) {
-            kfree(kbuf, len);
-            return -14;
-        }
+        if (copyout(kbuf, buf, strlen(kbuf) + 1) != 0) return -14;
     }
-    kfree(kbuf, len);
     return ret;
 }
+
 
 int kern_hostname(char *buf, size_t len) {
     if (!buf || len == 0) return -1;

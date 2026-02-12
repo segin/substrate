@@ -23,7 +23,7 @@ void fuzz_vm_map_ops(uint32_t seed) {
 
         if (op == 0) {
             // Insert
-            vm_map_insert(&map, NULL, 0, addr, addr + len);
+            vm_map_insert(&map, NULL, 0, addr, addr + len, 0x3, 0x3, 1);
         } else if (op == 1) {
             // Remove
             vm_map_remove(&map, addr, addr + len);
