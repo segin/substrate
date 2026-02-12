@@ -24,7 +24,7 @@ UNIT_TESTS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
 
 MOCKS = mocks.c
 
-all: test_runner test_minix test_ext2_perf test_libc_string
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -40,6 +40,8 @@ test_libc_string: lib/c/test_string.c ../lib/c/src/string.c
 	$(CC) $(CFLAGS_LIBC) -fno-builtin -c ../lib/c/src/string.c -o string.o
 	objcopy --prefix-symbols=libc_ string.o string_prefixed.o
 	$(CC) $(CFLAGS_LIBC) lib/c/test_string.c string_prefixed.o -o $@
+test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
+	$(CC) $(CFLAGS_LIBC) -fno-builtin lib/c/test_time_standalone.c -o $@
 
 test_runner: $(CORE_SRCS) $(UNIT_TESTS) $(MOCKS) test_runner.c
 	$(CC) $(CFLAGS) -DNO_MAIN $^ -o $@
