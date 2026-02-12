@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include "../../../sys/arch/x86_64/pmap.h"
+#include <arch/x86_64/pmap.h"
 
 /*
  * Property-based test: Identity Invariant for PMAP (x86_64)

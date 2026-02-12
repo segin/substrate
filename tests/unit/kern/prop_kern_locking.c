@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../../sys/sys/lock.h"
+#include <sys/lock.h"
 
 /*
  * Property-based test: Spinlock Invariant
