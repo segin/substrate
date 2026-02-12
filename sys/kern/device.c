@@ -37,13 +37,16 @@ struct device *device_create(const char *name, struct device *parent) {
     /* Initialize state */
     dev->ref_count = 1;
     dev->power_state = 0; /* D0 */
+    spinlock_init(&dev->lock, "device_lock");
 
     /* Link to parent */
     if (parent) {
         dev->parent = parent;
         /* Insert at head of parent's children list */
+        spinlock_acquire(&parent->lock);
         dev->sibling = parent->children;
         parent->children = dev;
+        spinlock_release(&parent->lock);
     }
 
     return dev;
@@ -132,9 +135,7 @@ int device_unregister(struct device *dev) {
     /* 2. Remove from Parent */
     parent = dev->parent;
     if (parent) {
-        /* Note: Parent list locking not implemented yet, assuming single-thread or external sync for hierarchy changes */
-        /* TODO: Add hierarchy lock if needed */
-        
+        spinlock_acquire(&parent->lock);
         curr = parent->children;
         prev = NULL;
         while (curr) {
@@ -149,11 +150,14 @@ int device_unregister(struct device *dev) {
             prev = curr;
             curr = curr->sibling;
         }
+        spinlock_release(&parent->lock);
+
         dev->parent = NULL;
         dev->sibling = NULL;
     }
     
     /* 3. Handle Children (Orphan them) */
+    spinlock_acquire(&dev->lock);
     curr = dev->children;
     while (curr) {
          struct device *next = curr->sibling;
@@ -166,6 +170,7 @@ int device_unregister(struct device *dev) {
          curr = next;
     }
     dev->children = NULL;
+    spinlock_release(&dev->lock);
     
     return 0;
 }
@@ -207,17 +212,21 @@ void device_put(struct device *dev) {
  */
 struct device *device_find_child(struct device *parent, const char *name) {
     struct device *curr;
+    struct device *found = NULL;
     
     if (!parent || !name) return NULL;
     
+    spinlock_acquire(&parent->lock);
     curr = parent->children;
     while (curr) {
         if (curr->name[0] && strcmp(curr->name, name) == 0) {
-            return curr;
+            found = curr;
+            break;
         }
         curr = curr->sibling;
     }
+    spinlock_release(&parent->lock);
     
-    return NULL;
+    return found;
 }
 

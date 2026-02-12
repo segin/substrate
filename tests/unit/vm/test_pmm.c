@@ -1,4 +1,4 @@
-#include "../../../sys/arch/i386/pmm.h"
+#include <arch/i386/pmm.h>
 #include <stdbool.h>
 #include <stddef.h>
 

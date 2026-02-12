@@ -7,13 +7,13 @@ static struct dirent sys_dirent;
 
 static struct dirent *sysfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
-    if (index == 0) { strcpy(sys_dirent.name, "."); return &sys_dirent; }
-    if (index == 1) { strcpy(sys_dirent.name, ".."); return &sys_dirent; }
+    if (index == 0) { strncpy(sys_dirent.d_name, ".", sizeof(sys_dirent.d_name)); return &sys_dirent; }
+    if (index == 1) { strncpy(sys_dirent.d_name, "..", sizeof(sys_dirent.d_name)); return &sys_dirent; }
     
     // Static list for prototype
-    if (index == 2) { strcpy(sys_dirent.name, "bus"); return &sys_dirent; }
-    if (index == 3) { strcpy(sys_dirent.name, "class"); return &sys_dirent; }
-    if (index == 4) { strcpy(sys_dirent.name, "devices"); return &sys_dirent; }
+    if (index == 2) { strncpy(sys_dirent.d_name, "bus", sizeof(sys_dirent.d_name)); return &sys_dirent; }
+    if (index == 3) { strncpy(sys_dirent.d_name, "class", sizeof(sys_dirent.d_name)); return &sys_dirent; }
+    if (index == 4) { strncpy(sys_dirent.d_name, "devices", sizeof(sys_dirent.d_name)); return &sys_dirent; }
     
     return NULL;
 }
@@ -45,7 +45,7 @@ static filesystem_t sysfs_fs = {
 
 void sysfs_init(void) {
     memset(&sysfs_root_node, 0, sizeof(fs_node_t));
-    strcpy(sysfs_root_node.name, "sys");
+    strncpy(sysfs_root_node.name, "sys", sizeof(sysfs_root_node.name));
     sysfs_root_node.flags = FS_DIRECTORY;
     sysfs_root_node.readdir = &sysfs_readdir;
     sysfs_root_node.finddir = &sysfs_finddir;
