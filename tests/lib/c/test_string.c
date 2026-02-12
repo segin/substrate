@@ -29,6 +29,8 @@
 #define strpbrk libc_strpbrk
 #define strtok_r libc_strtok_r
 #define strerror libc_strerror
+#define strcasecmp libc_strcasecmp
+#define strncasecmp libc_strncasecmp
 
 // Forward declarations for renamed functions
 char *libc_strfry(char *string);
@@ -54,6 +56,8 @@ char *libc_strtok(char *str, const char *delim);
 char *libc_strpbrk(const char *s1, const char *s2);
 char *libc_strtok_r(char *str, const char *delim, char **saveptr);
 char *libc_strerror(int errnum);
+int libc_strcasecmp(const char *s1, const char *s2);
+int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 
 // Include the source file directly
 #ifdef COMPILE_DIRECTLY
@@ -170,6 +174,36 @@ void run_strncmp_tests(void) {
     ASSERT_TRUE(libc_strncmp(s1, s2, 1) > 0, "Unsigned char comparison");
 
     printf("strncmp tests passed!\n");
+}
+
+void run_strcasecmp_tests(void) {
+    printf("Running strcasecmp tests...\n");
+
+    ASSERT_EQ(libc_strcasecmp("abc", "abc"), 0, "abc == abc");
+    ASSERT_EQ(libc_strcasecmp("abc", "ABC"), 0, "abc == ABC");
+    ASSERT_EQ(libc_strcasecmp("ABC", "abc"), 0, "ABC == abc");
+    ASSERT_EQ(libc_strcasecmp("", ""), 0, "Empty strings");
+    ASSERT_TRUE(libc_strcasecmp("abc", "abd") < 0, "abc < abd");
+    ASSERT_TRUE(libc_strcasecmp("abc", "ABD") < 0, "abc < ABD");
+    ASSERT_TRUE(libc_strcasecmp("ABC", "abd") < 0, "ABC < abd");
+    ASSERT_TRUE(libc_strcasecmp("abd", "abc") > 0, "abd > abc");
+    ASSERT_TRUE(libc_strcasecmp("abc", "abcd") < 0, "abc < abcd");
+    ASSERT_TRUE(libc_strcasecmp("abcd", "abc") > 0, "abcd > abc");
+
+    printf("strcasecmp tests passed!\n");
+}
+
+void run_strncasecmp_tests(void) {
+    printf("Running strncasecmp tests...\n");
+
+    ASSERT_EQ(libc_strncasecmp("abc", "abc", 3), 0, "abc == abc (n=3)");
+    ASSERT_EQ(libc_strncasecmp("abc", "ABC", 3), 0, "abc == ABC (n=3)");
+    ASSERT_EQ(libc_strncasecmp("abc", "abd", 2), 0, "abc == abd (n=2)");
+    ASSERT_EQ(libc_strncasecmp("abc", "def", 0), 0, "n=0");
+    ASSERT_TRUE(libc_strncasecmp("abc", "abd", 3) < 0, "abc < abd (n=3)");
+    ASSERT_EQ(libc_strncasecmp("abc", "abcd", 3), 0, "Prefix match within n");
+
+    printf("strncasecmp tests passed!\n");
 }
 
 void run_strrchr_tests(void) {
@@ -422,6 +456,8 @@ bool libc_libc_memmove(void) {
 int main(void) {
     run_strcmp_tests();
     run_strncmp_tests();
+    run_strcasecmp_tests();
+    run_strncasecmp_tests();
     run_strrchr_tests();
     run_memcpy_tests();
     run_memset_tests();
