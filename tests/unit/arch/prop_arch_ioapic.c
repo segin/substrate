@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../../sys/arch/i386/ioapic.h"
+#include <arch/i386/ioapic.h>
 
 /*
  * Property-based test: IO-APIC Invariant

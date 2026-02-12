@@ -19,9 +19,8 @@
 extern int sys_sigaction(int sig, const void *act, void *oact);
 extern int sys_sigprocmask(int how, const void *set, void *oset);
 extern void psignal(process_t *p, int sig);
-extern process_t *proc_create(struct personality *pers);
+extern process_t *proc_create(int perso_id);
 extern thread_t *sched_alloc_thread(process_t *proc);
-extern struct personality personality_native;
 
 static int test_sigstop_immutability(void) {
     kprint("Test: SIGSTOP immutability... ");
@@ -67,7 +66,7 @@ static int test_sigstop_delivery(void) {
     kprint("Test: SIGSTOP pending delivery... ");
 
     // Create dummy process/thread
-    process_t *p = proc_create(&personality_native);
+    process_t *p = proc_create(0); // PERS_NATIVE
     if (!p) return -1;
     
     thread_t *t1 = sched_alloc_thread(p);

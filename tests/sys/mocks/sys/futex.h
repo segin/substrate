@@ -30,7 +30,7 @@ struct robust_list_head {
 
 int sys_set_robust_list(struct robust_list_head *head, size_t len);
 int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len_ptr);
-int futex_lock_pi(int *uaddr, int detect, int trylock);
-int futex_unlock_pi(int *uaddr);
+int futex_lock_pi(int *uaddr, int detect, int trylock, int private);
+int futex_unlock_pi(int *uaddr, int private);
 
 #endif
