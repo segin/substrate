@@ -5,8 +5,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdint.h>
+#include <sys/mman.h>
+#include <string.h> // For memset, memcpy
 #include <stdio.h>
-#include <string.h>
 #include <stdatomic.h>
 
 void exit(int status) {
@@ -121,6 +122,11 @@ static void coalesce_block(struct block_meta *block) {
             if (block->next) {
                 block->next->prev = block->prev;
             }
+            if (block->next) {
+                block->next->prev = block->prev;
+            }
+        }
+    }
         }
     }
 }
@@ -224,11 +230,21 @@ void *realloc(void *ptr, size_t size) {
 void *aligned_alloc(size_t alignment, size_t size) {
     if (alignment < sizeof(void*)) alignment = sizeof(void*);
 
+    // If requested alignment is supported by our default allocator (<= 16 bytes),
+    // we can use malloc directly after ensuring size is a multiple of alignment.
     if (alignment <= ALIGNMENT) {
         if (size % alignment != 0) size = (size + alignment - 1) & ~(alignment - 1);
         return malloc(size);
     }
 
+    // Supporting larger alignments (>16 bytes) requires a more complex allocator
+    // that can store the original pointer offset (e.g., in a preamble) so free()
+    // can find the block metadata. For now, we return NULL for unsupported alignments
+    // to avoid unsafe behavior or memory leaks.
+    //
+    // Note: The previous bump allocator supported arbitrary alignment but leaked memory.
+    // This implementation prioritizes correctness and memory reclamation over rare
+    // high-alignment requirements.
     return NULL;
 }
 
