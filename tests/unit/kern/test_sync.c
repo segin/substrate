@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <sys/lock.h"
-#include <kern/sched.h"
+#include <sys/lock.h>
+#include <kern/sched.h>
 
 bool test_mutex_basic(void) {
     mutex_t m;
@@ -16,14 +16,96 @@ bool test_mutex_basic(void) {
     return true;
 }
 
+bool test_mutex_trylock(void) {
+    mutex_t m;
+    mutex_init(&m, "trylock");
+
+    if (!mutex_trylock(&m)) return false;
+    if (m.locked != 1) return false;
+    if (!mutex_is_held(&m)) return false;
+
+    // Second try should fail
+    if (mutex_trylock(&m)) return false;
+
+    mutex_unlock(&m);
+    if (m.locked != 0) return false;
+
+    // Should succeed now
+    if (!mutex_trylock(&m)) return false;
+    mutex_unlock(&m);
+
+    return true;
+}
+
+bool test_mutex_ownership(void) {
+    sched_init();
+    mutex_t m;
+    mutex_init(&m, "owner");
+
+    char s1[4096], s2[4096];
+    thread_t *t1 = sched_create_thread(current_process, (void*)0x1, s1+4096, NULL);
+    thread_t *t2 = sched_create_thread(current_process, (void*)0x2, s2+4096, NULL);
+
+    current_thread = t1;
+    mutex_lock(&m);
+    if (!mutex_is_held(&m)) return false;
+
+    current_thread = t2;
+    if (mutex_is_held(&m)) return false; // Held by t1, not t2
+
+    current_thread = t1;
+    mutex_unlock(&m);
+    if (mutex_is_held(&m)) return false;
+
+    return true;
+}
+
+bool test_mutex_multiple_waiters(void) {
+    sched_init();
+    mutex_t m;
+    mutex_init(&m, "multi");
+
+    char s1[4096], s2[4096], s3[4096];
+    thread_t *t1 = sched_create_thread(current_process, (void*)0x1, s1+4096, NULL);
+    thread_t *t2 = sched_create_thread(current_process, (void*)0x2, s2+4096, NULL);
+    thread_t *t3 = sched_create_thread(current_process, (void*)0x3, s3+4096, NULL);
+
+    // t1 holds lock
+    current_thread = t1;
+    mutex_lock(&m);
+
+    // t2 and t3 block
+    extern void sleepq_add(void *chan, thread_t *t);
+    current_thread = t2; sleepq_add(&m, t2);
+    current_thread = t3; sleepq_add(&m, t3);
+
+    if (t2->state != THREAD_BLOCKED || t3->state != THREAD_BLOCKED) return false;
+
+    // t1 unlocks, should wake t2 (FIFO)
+    current_thread = t1;
+    mutex_unlock(&m);
+
+    if (t2->state != THREAD_READY) return false;
+    if (t3->state != THREAD_BLOCKED) return false;
+
+    // Simulate t2 taking the lock
+    current_thread = t2;
+    mutex_lock(&m);
+
+    // t2 unlocks, should wake t3
+    mutex_unlock(&m);
+    if (t3->state != THREAD_READY) return false;
+
+    return true;
+}
+
 bool test_mutex_contention(void) {
     sched_init();
     mutex_t m;
     mutex_init(&m, "contend");
     
     char s1[4096];
-    int tid1 = sched_create_thread(current_process, (void*)0x1, s1 + 4096, NULL);
-    thread_t *t1 = sched_get_thread(tid1);
+    thread_t *t1 = sched_create_thread(current_process, (void*)0x1, s1 + 4096, NULL);
     
     // Simulate tid1 holding the lock
     current_thread = t1;
@@ -31,18 +113,18 @@ bool test_mutex_contention(void) {
     mutex_lock(&m);
     
     char s2[4096];
-    int tid2 = sched_create_thread(current_process, (void*)0x2, s2 + 4096, NULL);
-    thread_t *t2 = sched_get_thread(tid2);
+    thread_t *t2 = sched_create_thread(current_process, (void*)0x2, s2 + 4096, NULL);
     
     // Simulate tid2 trying to lock and failing (blocking)
-    // We call sched_sleep manually because calling mutex_lock would loop forever 
+    // We call sleepq_add manually because calling mutex_lock would loop forever
     // since sched_yield() doesn't actually stop the execution of the caller in host mocks.
     current_thread = t2;
     current_thread->state = THREAD_RUNNING;
-    sched_sleep(&m);
+    extern void sleepq_add(void *chan, thread_t *t);
+    sleepq_add(&m, t2);
     
-    if (t2->state != THREAD_BLOCKED) return false;
-    if (t2->wait_chan != &m) return false;
+    if (t2->state != THREAD_BLOCKED) { printf("t2 state %d != BLOCKED\n", t2->state); return false; }
+    if (t2->wait_chan != &m) { printf("t2 wait_chan %p != %p\n", t2->wait_chan, &m); return false; }
     
     // Now switch back to tid1 and unlock
     current_thread = t1;
@@ -50,8 +132,8 @@ bool test_mutex_contention(void) {
     mutex_unlock(&m);
     
     // tid2 should now be ready
-    if (t2->state != THREAD_READY) return false;
-    if (t2->wait_chan != NULL) return false;
+    if (t2->state != THREAD_READY) { printf("t2 state %d != READY\n", t2->state); return false; }
+    if (t2->wait_chan != NULL) { printf("t2 wait_chan %p != NULL\n", t2->wait_chan); return false; }
     
     return true;
 }
@@ -75,8 +157,7 @@ bool test_sema_blocking(void) {
     sema_init(&s, 0, "block-sema"); // Start at 0
     
     char stack[4096];
-    int tid = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL);
-    thread_t *t = sched_get_thread(tid);
+    thread_t *t = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL);
     
     // Simulate t trying to wait and blocking
     current_thread = t;
@@ -98,7 +179,7 @@ bool test_sema_blocking(void) {
     return true;
 }
 
-#include <sys/futex.h"
+#include <sys/futex.h>
 
 extern int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3);
 
@@ -119,8 +200,7 @@ bool test_futex_blocking(void) {
     int futex_val = 10;
     
     char stack[4096];
-    int tid = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL);
-    thread_t *t = sched_get_thread(tid);
+    thread_t *t = sched_create_thread(current_process, (void*)0x1, stack + 4096, NULL);
     
     // Simulate t calling FUTEX_WAIT
     current_thread = t;

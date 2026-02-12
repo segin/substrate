@@ -1,4 +1,4 @@
-#include <arch/i386/lapic.h"
+#include <arch/i386/lapic.h>
 #include <stdbool.h>
 #include <stddef.h>
 

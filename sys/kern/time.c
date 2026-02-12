@@ -95,7 +95,7 @@ clock_t kern_times(struct tms *buf) {
     return (clock_t)ticks;
 }
 
-int sys_time(time_t *tloc) {
+time_t sys_time(time_t *tloc) {
     time_t t = kern_time(NULL);
     if (tloc) {
         if (copyout(&t, tloc, sizeof(time_t)) != 0) return -14;

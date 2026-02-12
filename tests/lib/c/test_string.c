@@ -4,6 +4,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 // Rename implemented functions to avoid conflicts with host libc
 #define strfry libc_strfry
@@ -60,6 +61,7 @@ int libc_strcasecmp(const char *s1, const char *s2);
 int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 
 // Include the source file directly
+#define COMPILE_DIRECTLY
 #ifdef COMPILE_DIRECTLY
 #include "../../../lib/c/src/string.c"
 #endif

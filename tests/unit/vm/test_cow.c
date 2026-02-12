@@ -1,6 +1,6 @@
-#include <vm/vm_fault.h"
-#include <vm/vm_object.h"
-#include <vm/vm_map.h"
+#include <vm/vm_fault.h>
+#include <vm/vm_object.h>
+#include <vm/vm_map.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -16,7 +16,7 @@ bool test_vm_fault_cow_trigger(void) {
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 4096);
     vm_object_reference(obj); 
     
-    vm_map_insert(&map, obj, 0, 0x1000, 0x2000);
+    vm_map_insert(&map, obj, 0, 0x1000, 0x2000, 0x3, 0x3, 0x1);
     
     // 2. Pre-populate a page
     vm_page_t p1;
@@ -25,7 +25,7 @@ bool test_vm_fault_cow_trigger(void) {
     vm_object_add_page(obj, &p1);
     
     // 3. Trigger a write fault
-    int result = vm_fault(&map, 0x1500, VM_PROT_WRITE);
+    int result = vm_fault(&map, 0x1500, 0x02);
     
     // In our implementation, vm_fault should call vm_page_alloc 
     // to create a new page if ref_count > 1.

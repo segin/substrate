@@ -92,4 +92,9 @@ test_output.txt
 
 # Tests
 test_minix
+test_runner
+test_mutex
+test_ext2_perf
+test_libc_string
+test_libc_time
 *.img

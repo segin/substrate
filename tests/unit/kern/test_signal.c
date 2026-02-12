@@ -1,12 +1,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/signal.h"
-#include <sys/proc.h"
-#include <arch/i386/idt.h"
+#include <sys/signal.h>
+#include <sys/proc.h>
+#include <arch/i386/idt.h>
 
-extern int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
-extern int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset);
+// removed extern
+// removed extern
 extern int sys_kill(int pid, int sig);
 extern void signal_handle_pending(registers_t *regs);
 extern void sched_init(void);

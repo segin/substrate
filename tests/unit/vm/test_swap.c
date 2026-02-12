@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <vm/vm_page.h"
+#include <vm/vm_page.h>
 
 /*
  * Swap Subsystem Unit Tests

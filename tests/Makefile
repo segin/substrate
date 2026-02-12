@@ -9,7 +9,8 @@ CORE_SRCS = ../sys/vm/vm_page.c vm_map_host.c ../sys/vm/vm_object.c \
           ../sys/kern/spinlock.c ../sys/kern/mutex.c ../sys/kern/semaphore.c ../sys/kern/kthread.c ../sys/kern/time.c ../sys/kern/signal.c ../sys/kern/futex.c \
           ../sys/lib/string.c ../sys/lib/printf.c ../sys/lib/div64.c \
           ../sys/exec/perso/compat.c ../sys/kern/acct.c ../sys/kern/sysinfo.c \
-          ../sys/vfs/vfs.c ../sys/arch/i386/syscall.c ../sys/arch/i386/sched.c
+          ../sys/vfs/vfs.c ../sys/arch/i386/syscall.c ../sys/arch/i386/sched.c \
+          ../sys/pm/sched.c ../sys/pm/process.c
 
 UNIT_TESTS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_object.c unit/vm/test_page.c unit/vm/test_fault.c \

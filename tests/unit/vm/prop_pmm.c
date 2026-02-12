@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <arch/i386/pmm.h"
+#include <arch/i386/pmm.h>
 
 /*
  * Property-based test: Invariant Check for PMM

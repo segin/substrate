@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <vm/vm_map.h"
+#include <vm/vm_map.h>
 
 /*
  * Property-based test: Invariant Check
