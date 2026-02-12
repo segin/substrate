@@ -160,14 +160,15 @@ int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
 
     for (i = 0; i < maxlen; i++) {
         /* This access may trigger a page fault */
-        *d = *s;
-        if (*d == '\0') {
+        char c = *s;
+        if (d) *d = c;
+        if (c == '\0') {
             if (len) *len = i + 1;
             current_thread->on_fault = 0;
             return 0;
         }
         s++;
-        d++;
+        if (d) d++;
     }
 
     /* Buffer full but no null terminator found */

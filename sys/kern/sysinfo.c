@@ -71,3 +71,24 @@ int sys_sysinfo(struct sysinfo *info) {
 
     return do_sysinfo(info);
 }
+
+int sys_vm_stats(sys_vmstat_t *stats) {
+    if (!stats) return -14; // EFAULT
+    if ((uintptr_t)stats >= 0xC0000000) return -14;
+    if ((uintptr_t)stats + sizeof(sys_vmstat_t) > 0xC0000000) return -14; // EFAULT
+
+    sys_vmstat_t kstats;
+    memset(&kstats, 0, sizeof(kstats));
+
+    size_t free_pages = vm_phys_get_free();
+    size_t used_pages = vm_phys_get_used();
+
+    kstats.total = (uint64_t)(free_pages + used_pages) * PAGE_SIZE;
+    kstats.free = (uint64_t)free_pages * PAGE_SIZE;
+    kstats.available = kstats.free;
+
+    // Other fields 0
+
+    memcpy(stats, &kstats, sizeof(kstats));
+    return 0;
+}
