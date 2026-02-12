@@ -38,6 +38,7 @@ static pmap_t kernel_pmap_ptr = &kernel_pmap_store;
 // Global pmap list and lock
 struct pmap_list global_pmap_list;
 spinlock_t pmap_list_lock;
+static spinlock_t pcid_lock;
 
 // Current pmap (per-cpu var?)
 static pmap_t curpmap = &kernel_pmap_store;
@@ -61,6 +62,7 @@ static int cpuid_check_nx(void) {
 void pmap_init(void) {
     // 0. Initialize global list and lock
     spinlock_init(&pmap_list_lock, "pmap_list");
+    spinlock_init(&pcid_lock, "pcid_lock");
     TAILQ_INIT(&global_pmap_list);
 
     // 1. Setup Recursive Mapping at Slot 510
@@ -317,7 +319,17 @@ pmap_t pmap_create(void) {
     pmap->resident_count = 0;
     pmap->wired_count = 0;
     pmap->lock = 0;
-    pmap->asid = 0; // TODO: Allocate from pool
+    pmap->asid = 0;
+
+    // Allocate PCID from pool
+    int pcid = pmap_pcid_alloc(pmap);
+    if (pcid == 0 && cpuid_check_pcid()) {
+        // Failed to allocate PCID, but PCID is supported.
+        // Clean up and fail.
+        pmm_free_block(p);
+        kfree(pmap, sizeof(struct pmap));
+        return NULL;
+    }
     
     memset(&pmap->stats, 0, sizeof(struct pmap_stats));
     
@@ -340,6 +352,9 @@ void pmap_destroy(pmap_t pmap) {
     
     // 1. Atomic decrement ref count
     if (__sync_sub_and_fetch(&pmap->ref_count, 1) > 0) return;
+
+    // Free PCID
+    pmap_pcid_free(pmap);
 
     // Remove from global list
     spinlock_acquire(&pmap_list_lock);
@@ -1690,6 +1705,10 @@ static uint16_t pcid_next = 1; // 0 is reserved for kernel/default
 static uint16_t pcid_pool[PCID_MAX];
 static int pcid_pool_count = 0;
 
+#ifdef HOST_TEST
+extern int host_pcid_supported;
+#endif
+
 /*
  * cpuid_check_pcid - Check if PCID is supported
  * 
@@ -1701,7 +1720,7 @@ int cpuid_check_pcid(void) {
     __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
     return (ecx >> 17) & 1;
 #else
-    return 0;
+    return host_pcid_supported;
 #endif
 }
 
@@ -1744,26 +1763,33 @@ void pmap_pcid_enable(void) {
  * Returns an unused PCID, or recycles one if pool is exhausted.
  */
 int pmap_pcid_alloc(pmap_t pmap) {
-    if (!cpuid_check_pcid()) return 0;
+    if (!cpuid_check_pcid()) {
+        pmap->asid = 0;
+        return 0;
+    }
     
+    spinlock_acquire(&pcid_lock);
+
     // Try to reuse from pool
     if (pcid_pool_count > 0) {
         uint16_t pcid = pcid_pool[--pcid_pool_count];
         pmap->asid = pcid;
+        spinlock_release(&pcid_lock);
         return pcid;
     }
     
     // Allocate new PCID
     if (pcid_next < PCID_MAX) {
         pmap->asid = pcid_next++;
+        spinlock_release(&pcid_lock);
         return pmap->asid;
     }
     
-    // Pool exhausted, flush and reuse PCID 1
-    // (Real implementation would use LRU or clock)
-    pmap_invalidate_all();
-    pmap->asid = 1;
-    return 1;
+    spinlock_release(&pcid_lock);
+
+    // Pool exhausted
+    pmap->asid = 0;
+    return 0;
 }
 
 /*
@@ -1773,9 +1799,12 @@ void pmap_pcid_free(pmap_t pmap) {
     if (!cpuid_check_pcid()) return;
     if (pmap->asid == 0) return; // Kernel PCID
     
+    spinlock_acquire(&pcid_lock);
     if (pcid_pool_count < PCID_MAX) {
         pcid_pool[pcid_pool_count++] = pmap->asid;
     }
+    spinlock_release(&pcid_lock);
+
     pmap->asid = 0;
 }
 
