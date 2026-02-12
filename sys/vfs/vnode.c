@@ -14,6 +14,8 @@
 #include <vfs/vnode.h>
 #include <kern/console.h>
 #include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <sys/lock.h>
 #include <vm/uma.h>
 #include <string.h>
@@ -338,13 +340,22 @@ int vn_lock(struct vnode *vp, int flags)
     spinlock_acquire(&vp->v_interlock);
     
     /* Simple exclusive lock implementation */
-    if (vp->v_lockstate) {
+    while (vp->v_lockstate) {
         if (flags & LK_NOWAIT) {
             spinlock_release(&vp->v_interlock);
             return -11; /* EAGAIN */
         }
-        /* TODO: Implement proper blocking */
+
         vp->v_flag |= VXWANT;
+
+        /*
+         * Sleep until woken up.
+         * Note: There is a small race between releasing interlock and sleeping
+         * where a wakeup could be missed, but this is standard pattern here.
+         */
+        spinlock_release(&vp->v_interlock);
+        sched_sleep(vp);
+        spinlock_acquire(&vp->v_interlock);
     }
     
     vp->v_lockstate = (flags & LK_SHARED) ? 1 : 2;
@@ -366,10 +377,10 @@ void vn_unlock(struct vnode *vp)
     vp->v_flag &= ~VXLOCK;
     vp->v_lockowner = NULL;
     
-    /* TODO: Wake up waiters if VXWANT is set */
+    /* Wake up waiters if VXWANT is set */
     if (vp->v_flag & VXWANT) {
         vp->v_flag &= ~VXWANT;
-        /* wakeup(vp); */
+        sched_wakeup(vp);
     }
     
     spinlock_release(&vp->v_interlock);

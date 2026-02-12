@@ -1,6 +1,6 @@
-#include "../../../sys/vm/vm_fault.h"
-#include "../../../sys/vm/vm_object.h"
-#include "../../../sys/vm/vm_map.h"
+#include <vm/vm_fault.h"
+#include <vm/vm_object.h"
+#include <vm/vm_map.h"
 #include <stdbool.h>
 #include <stddef.h>
 

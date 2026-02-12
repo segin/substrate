@@ -117,6 +117,7 @@ void sleepq_init(void) {
     sleepq_pool_next = 0;
 }
 
+// Internal helper to add thread
 static void sleepq_add_internal(void *chan, thread_t *t, int type, int pid) {
     if (!chan || !t)
         return;
@@ -155,14 +156,18 @@ static void sleepq_add_internal(void *chan, thread_t *t, int type, int pid) {
     sq_unlock(hash);
 }
 
+// Add a thread to shared sleep queue
 void sleepq_add(void *chan, thread_t *t) {
     sleepq_add_internal(chan, t, SLEEPQ_TYPE_SHARED, 0);
 }
 
+// Add a thread to private sleep queue
 void sleepq_add_private(void *chan, thread_t *t) {
+    if (!current_process) return;
     sleepq_add_internal(chan, t, SLEEPQ_TYPE_PRIVATE, current_process->pid);
 }
 
+// Wake thread(s) internal helper
 static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
     if (!chan)
         return(NULL);
@@ -173,17 +178,15 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq || sq->sq_count == 0) {
         sq_unlock(hash);
-        return(NULL);
+        return NULL;
     }
     
-    // Remove head thread (FIFO)
     thread_t *t = sq->sq_head;
     sq->sq_head = t->next;
     if (!sq->sq_head)
         sq->sq_tail = NULL;
     sq->sq_count--;
-    
-    // Clear wait state
+
     t->next = NULL;
     t->wait_chan = NULL;
     t->state = THREAD_READY;
@@ -191,7 +194,6 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
     // Remove sleep queue if empty
     if (sq->sq_count == 0) {
         sleepq_remove(sq, hash);
-        // Could return sq to pool here
     }
     
     sq_unlock(hash);
@@ -232,7 +234,6 @@ static int sleepq_wake_all_internal(void *chan, int type, int pid) {
     
     // Remove sleep queue
     sleepq_remove(sq, hash);
-    // Could return sq to pool
     
     sq_unlock(hash);
     return(woken);
@@ -288,6 +289,7 @@ int sleepq_wake_n(void *chan, int n) {
 }
 
 int sleepq_wake_n_private(void *chan, int n) {
+    if (!current_process) return 0;
     return sleepq_wake_n_internal(chan, n, SLEEPQ_TYPE_PRIVATE, current_process->pid);
 }
 
@@ -310,6 +312,7 @@ int sleepq_has_waiters(void *chan) {
 }
 
 int sleepq_has_waiters_private(void *chan) {
+    if (!current_process) return 0;
     return sleepq_has_waiters_internal(chan, SLEEPQ_TYPE_PRIVATE, current_process->pid);
 }
 
@@ -328,7 +331,7 @@ static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, i
         sq_lock(dst_hash);
         sq_lock(src_hash);
     } else {
-        sq_lock(src_hash); // Same bucket
+        sq_lock(src_hash);
     }
     
     // 1. Wake phase
@@ -336,7 +339,6 @@ static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, i
     int woken_count = 0;
     
     if (src_sq && src_sq->sq_count > 0) {
-        // Wake up to wake_n threads
         while (src_sq->sq_head && woken_count < wake_n) {
             thread_t *t = src_sq->sq_head;
             src_sq->sq_head = t->next;
@@ -412,5 +414,6 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
 }
 
 int sleepq_requeue_private(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
+    if (!current_process) return 0;
     return sleepq_requeue_internal(src_chan, dst_chan, wake_n, requeue_n, SLEEPQ_TYPE_PRIVATE, current_process->pid);
 }

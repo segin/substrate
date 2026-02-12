@@ -1,6 +1,7 @@
 #include <sys/signal.h>
 #include <sys/proc.h>
 #include <sys/session.h>
+#include <sys/errno.h>
 #include <kern/sched.h>
 #include <arch/i386/idt.h>
 #include <kern/console.h>
@@ -436,7 +437,7 @@ void sigexit(process_t *p, int sig) {
 }
 
 int sys_kill(int pid, int sig) {
-    if (sig < 0 || sig > NSIG) return -1; // EINVAL
+    if (sig < 0 || sig > NSIG) return -EINVAL;
 
     // Handle PID > 0: Send to specific process
     if (pid > 0) {
@@ -449,12 +450,12 @@ int sys_kill(int pid, int sig) {
             }
         }
 
-        if (!target) return -1; // ESRCH
+        if (!target) return -ESRCH;
         if (sig == 0) return 0; // Existence check
 
         // Permission check
         if (current_process->uid != 0 && current_process->uid != target->uid) {
-            return -1; // EPERM
+            return -EPERM;
         }
 
         psignal(target, sig);
@@ -462,7 +463,7 @@ int sys_kill(int pid, int sig) {
     }
     else if (pid == 0) {
         // Send to current process group
-        if (!current_process || !current_process->p_pgrp) return -1;
+        if (!current_process || !current_process->p_pgrp) return -ESRCH;
         pgsignal(current_process->p_pgrp->pg_id, sig);
         return 0;
     }

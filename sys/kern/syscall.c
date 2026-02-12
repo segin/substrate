@@ -242,7 +242,7 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
         
         // Calculate size
         int name_len = 0;
-        while(d->name[name_len]) name_len++;
+        while(d->d_name[name_len]) name_len++;
         
         int reclen = sizeof(unsigned long) * 2 + sizeof(unsigned short) + name_len + 1;
         reclen = (reclen + 3) & ~3; // Align to 4 bytes
@@ -254,10 +254,10 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
         }
         
         struct linux_dirent *ld = (struct linux_dirent*)(buf + bpos);
-        ld->d_ino = d->ino;
+        ld->d_ino = d->d_ino;
         ld->d_off = f->f_offset + 1; // Offset of NEXT entry
         ld->d_reclen = reclen;
-        for(int i=0; i<name_len; i++) ld->d_name[i] = d->name[i];
+        for(int i=0; i<name_len; i++) ld->d_name[i] = d->d_name[i];
         ld->d_name[name_len] = 0;
         // Zero pad if needed for alignment
         // (already done by simple pointer math for next entry, but maybe nice to clear garbage)
@@ -981,19 +981,19 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
         struct dirent *d = readdir_fs(dir, index);
         if (!d) break; // End of directory
 
-        if (d->ino == inode) {
+        if (d->d_ino == inode) {
             // Match found
             // Skip . and ..
-            if (strcmp(d->name, ".") == 0 || strcmp(d->name, "..") == 0) {
+            if (strcmp(d->d_name, ".") == 0 || strcmp(d->d_name, "..") == 0) {
                  index++;
                  continue;
             }
 
             // Allocate and copy
-            int len = strlen(d->name);
+            int len = strlen(d->d_name);
             char *name = kmalloc(len + 1);
             if (!name) return NULL;
-            memcpy(name, d->name, len);
+            memcpy(name, d->d_name, len);
             name[len] = '\0';
             return name;
         }
@@ -1250,4 +1250,124 @@ int sys_reboot(int cmd) {
     __asm__ volatile("lidt %0; int3"::"m"((uint16_t[3]){0,0,0}));
     
     return 0;
+}
+
+/* sys_setpriority - Set program scheduling priority (nice value) */
+int sys_setpriority(int which, int who, int prio) {
+    if (which > PRIO_USER || which < PRIO_PROCESS) return -EINVAL;
+    if (prio < -20 || prio > 19) return -EINVAL;
+
+    int found = 0;
+    int affected = 0;
+    int error = 0;
+
+    int target_id = who;
+    if (target_id == 0) {
+        if (which == PRIO_PROCESS) target_id = current_process->pid;
+        else if (which == PRIO_PGRP) target_id = current_process->p_pgrp ? current_process->p_pgrp->pg_id : 0;
+        else if (which == PRIO_USER) target_id = current_process->uid;
+    }
+
+    /* Iterate over processes using hardcoded limit matching syscall.c conventions */
+    for (int i = 0; i < 64; i++) {
+        process_t *p = &processes[i];
+        if (p->pid == -1) continue;
+
+        bool match = false;
+        if (which == PRIO_PROCESS && p->pid == target_id) match = true;
+        else if (which == PRIO_PGRP && p->p_pgrp && p->p_pgrp->pg_id == target_id) match = true;
+        else if (which == PRIO_USER && (int)p->uid == target_id) match = true;
+
+        if (!match) continue;
+        found++;
+
+        /* Permission check:
+         * Root can change anything.
+         * Unprivileged users can only change their own processes (uid matches euid/uid of target).
+         * AND unprivileged users can only INCREASE nice value (lower priority).
+         */
+        if (current_process->euid != 0) {
+            if (current_process->euid != p->uid && current_process->euid != p->euid) {
+                error = -EPERM;
+                continue;
+            }
+        }
+
+        /* Determine current nice value of the target process */
+        int current_nice = 0;
+        int thread_prio = 20; /* Default */
+
+        /* Find a thread belonging to p to get its priority */
+        /* Use MAX_THREADS from sched.h */
+        for (int t = 0; t < MAX_THREADS; t++) {
+            if (threads[t].tid != -1 && threads[t].proc == p) {
+                thread_prio = threads[t].base_priority;
+                break;
+            }
+        }
+        current_nice = 20 - thread_prio;
+
+        /* Check nice value direction for unprivileged users */
+        if (current_process->euid != 0 && prio < current_nice) {
+            error = -EACCES;
+            continue;
+        }
+
+        /* Apply new priority */
+        int new_base_prio = 20 - prio;
+        if (new_base_prio < 1) new_base_prio = 1;
+        if (new_base_prio > 40) new_base_prio = 40;
+
+        for (int t = 0; t < MAX_THREADS; t++) {
+            if (threads[t].tid != -1 && threads[t].proc == p) {
+                sched_set_priority(threads[t].tid, threads[t].sched_class, new_base_prio);
+            }
+        }
+        affected++;
+    }
+
+    if (found == 0) return -ESRCH;
+    if (affected == 0 && error != 0) return error;
+    return 0;
+}
+
+/* sys_getpriority - Get program scheduling priority */
+int sys_getpriority(int which, int who) {
+    int target_id = who;
+    if (target_id == 0) {
+        if (which == PRIO_PROCESS) target_id = current_process->pid;
+        else if (which == PRIO_PGRP) target_id = current_process->p_pgrp ? current_process->p_pgrp->pg_id : 0;
+        else if (which == PRIO_USER) target_id = current_process->uid;
+    }
+
+    int found = 0;
+    int best_nice = 20; /* Start with lowest priority (highest nice) */
+
+    for (int i = 0; i < 64; i++) {
+        process_t *p = &processes[i];
+        if (p->pid == -1) continue;
+
+        bool match = false;
+        if (which == PRIO_PROCESS && p->pid == target_id) match = true;
+        else if (which == PRIO_PGRP && p->p_pgrp && p->p_pgrp->pg_id == target_id) match = true;
+        else if (which == PRIO_USER && (int)p->uid == target_id) match = true;
+
+        if (!match) continue;
+        found++;
+
+        int thread_prio = 20;
+        for (int t = 0; t < MAX_THREADS; t++) {
+            if (threads[t].tid != -1 && threads[t].proc == p) {
+                thread_prio = threads[t].base_priority;
+                break;
+            }
+        }
+        int nice = 20 - thread_prio;
+        if (nice < best_nice) best_nice = nice;
+    }
+
+    if (found == 0) return -ESRCH;
+
+    /* Return nice + 20 to avoid negative return values */
+    return best_nice + 20;
 }

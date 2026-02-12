@@ -8,6 +8,10 @@
 #include <sys/types.h>
 #include <sys/proc.h>
 
+/* Sleep Queue Types */
+#define SLEEPQ_TYPE_SHARED  0
+#define SLEEPQ_TYPE_PRIVATE 1
+
 void sleepq_init(void);
 
 /* Standard API (for shared/kernel objects) */

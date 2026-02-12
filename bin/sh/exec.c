@@ -501,11 +501,13 @@ static int handle_builtin(int argc, char **argv, ast_simple_command_t *cmd_node)
             for (int i = 1; i < argc; i++) total_len += strlen(argv[i]) + 1;
             char *line = malloc(total_len + 1);
             if (line) {
-                line[0] = 0;
+                char *ptr = line;
                 for (int i = 1; i < argc; i++) {
-                    strcat(line, argv[i]);
-                    if (i < argc - 1) strcat(line, " ");
+                    char *arg = argv[i];
+                    while (*arg) *ptr++ = *arg++;
+                    if (i < argc - 1) *ptr++ = ' ';
                 }
+                *ptr = '\0';
                 status = execute_line(line);
                 free(line);
             }
