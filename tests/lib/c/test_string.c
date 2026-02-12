@@ -337,6 +337,81 @@ void run_strncpy_tests(void) {
     printf("strncpy tests passed!\n");
 }
 
+void run_strlen_tests(void) {
+    printf("Running strlen tests...\n");
+    // Empty string
+    ASSERT_EQ(test_strlen(""), 0, "Empty string");
+    // Single character
+    ASSERT_EQ(test_strlen("a"), 1, "Single character");
+    // Regular string
+    ASSERT_EQ(test_strlen("abc"), 3, "abc length");
+    ASSERT_EQ(test_strlen("hello world"), 11, "hello world length");
+
+    // String with embedded null (should stop at first null)
+    char buf[] = {'h', 'i', '\0', 'x'};
+    ASSERT_EQ(test_strlen(buf), 2, "Embedded null");
+
+    // Longer string
+    char long_str[1025];
+    for(int i = 0; i < 1024; i++) long_str[i] = 'A';
+    long_str[1024] = '\0';
+    ASSERT_EQ(test_strlen(long_str), 1024, "Longer string");
+    printf("strlen tests passed!\n");
+}
+
+void run_memmove_tests(void) {
+    printf("Running memmove tests...\n");
+    char buf[256];
+
+    // Case 1: Non-overlapping copy (forward)
+    strcpy(buf, "Hello World");
+    memset(buf + 20, 0, 20);
+    test_memmove(buf + 20, buf, 12);
+    ASSERT_TRUE(strcmp(buf + 20, "Hello World") == 0, "Non-overlapping forward");
+
+    // Case 2: Overlapping copy (backward) - dest > src
+    strcpy(buf, "0123456789");
+    test_memmove(buf + 2, buf, 4);
+    ASSERT_TRUE(strncmp(buf, "0101236789", 10) == 0, "Overlapping backward");
+
+    // Case 3: Overlapping copy (forward) - dest < src
+    strcpy(buf, "0123456789");
+    test_memmove(buf, buf + 2, 4);
+    ASSERT_TRUE(strncmp(buf, "2345456789", 10) == 0, "Overlapping forward");
+
+    // Case 4: Exact overlap (dest == src)
+    strcpy(buf, "abcdef");
+    test_memmove(buf, buf, 6);
+    ASSERT_TRUE(strcmp(buf, "abcdef") == 0, "Exact overlap");
+
+    // Case 5: Zero length
+    strcpy(buf, "abcdef");
+    test_memmove(buf + 1, buf, 0);
+    ASSERT_TRUE(strcmp(buf, "abcdef") == 0, "Zero length");
+
+    // Case 6: Unaligned access / boundaries
+    for(int i = 0; i < 64; i++) buf[i] = (char)i;
+    test_memmove(buf + 4, buf + 1, 7);
+    for(int i = 0; i < 7; i++) {
+        ASSERT_EQ(buf[4+i], (char)(i+1), "Unaligned boundary");
+    }
+    ASSERT_EQ(buf[3], 3, "Surrounding byte check (before)");
+    ASSERT_EQ(buf[11], 11, "Surrounding byte check (after)");
+
+    printf("memmove tests passed!\n");
+}
+
+bool test_libc_strlen(void) {
+    run_strlen_tests();
+    return true;
+}
+
+bool test_libc_memmove(void) {
+    run_memmove_tests();
+    return true;
+}
+
+#ifndef NO_MAIN
 int main(void) {
     run_strcmp_tests();
     run_strncmp_tests();
@@ -344,5 +419,8 @@ int main(void) {
     run_memcpy_tests();
     run_memset_tests();
     run_strncpy_tests();
+    run_strlen_tests();
+    run_memmove_tests();
     return 0;
 }
+#endif
