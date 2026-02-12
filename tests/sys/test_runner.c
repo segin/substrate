@@ -54,6 +54,10 @@ void run_kernel_tests(void) {
         run_string_tests();
     }
 
+    if (all || strcmp(test_arg, "crc32") == 0) {
+        run_crc32_tests();
+    }
+
     if (all || strcmp(test_arg, "div64") == 0) {
         run_div64_tests();
     }
