@@ -61,7 +61,6 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "kobject") == 0) {
         run_kobject_tests();
     }
-    }
 
     if (all || strcmp(test_arg, "pmap") == 0) {
         run_pmap_tests();
