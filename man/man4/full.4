@@ -1,68 +1,61 @@
 .\" Process this file with
 .\" groff -man -Tascii full.4
 .\"
-.TH FULL 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.TH FULL 4 "February 2026" "Substrate Kernel" "Device Drivers Manual"
 .SH NAME
-full \- always full device
+full \- always-full device
 .SH SYNOPSIS
 .B /dev/full
 .SH DESCRIPTION
 The
 .B full
-device is a character device that mimics a full disk.
+character device emulates a storage target with no free space.
 .PP
-Any read operation to
+Reads from
 .B /dev/full
-will succeed and return a buffer filled with zero-valued bytes (0x00).
-This behavior is identical to
-.BR zero (4).
+return zero-filled bytes (same read behavior as
+.BR zero (4) ).
 .PP
-Any write operation to
+Writes to
 .B /dev/full
-will fail with the error
+always fail with
 .B ENOSPC
-(No space left on device).
-This applies to
-.BR write (2),
-.BR pwrite (2),
-.BR writev (2),
-and any other function that attempts to write data to the device.
+and never report partial success.
 .PP
-The device supports
 .BR lseek (2)
-which allows seeking to arbitrary offsets; however, the read/write behavior remains unchanged regardless of offset.
+operations succeed and update file offsets, but offsets do not change read/write semantics.
 .PP
-The device supports
 .BR poll (2)
-and indicates that it is always readable
-.RB ( POLLIN )
-and writable
-.RB ( POLLOUT ).
-Note that while it is "writable" in the sense that a write operation will not block, the write operation will immediately fail.
+reports both
+.B POLLIN
+and
+.B POLLOUT
+as ready: reads return immediately and writes fail immediately without blocking.
+.BR ioctl (2)
+is not supported.
 .PP
-Attempts to map the device using
 .BR mmap (2)
-will fail.
+is not supported for
+.BR /dev/full .
 .SH FILES
-.TP
 .B /dev/full
-The full device special file (character device, major 1, minor 7).
+(character device, major 1, minor 7)
 .SH ERRORS
 .TP
 .B ENOSPC
-Returned for all write operations.
+Any write-like operation.
 .TP
 .B ENOTTY
-Returned for any
+Any
 .BR ioctl (2)
-operation.
+request.
+.TP
+.B EINVAL
+Any
+.BR mmap (2)
+attempt.
 .SH SEE ALSO
 .BR null (4),
 .BR zero (4),
-.BR intro (4)
-.SH HISTORY
-The
-.B full
-device appeared in 4.3BSD-Reno.
-.SH AUTHORS
-This implementation was written for the Substrate Kernel.
+.BR poll (2),
+.BR mmap (2)

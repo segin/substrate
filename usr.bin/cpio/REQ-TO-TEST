@@ -1,0 +1,7 @@
+R1 Create-fidelity -> tests/test_roundtrip.sh
+R2 Extract-safety -> tests/test_safety.sh
+R3 Sparse -> tests/test_sparse.sh
+R4 Links -> tests/test_links.sh
+R5 Device nodes -> tests/test_devices.sh
+R6 Streaming -> tests/test_roundtrip.sh (pipe mode)
+R7 Interoperability(newc) -> tests/test_interop.sh

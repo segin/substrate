@@ -1,0 +1,29 @@
+.Dd February 11, 2026
+.Dt VOP_STRATEGY 9
+.Os
+.Sh NAME
+.Nm vop_strategy
+.Nd dispatch a buffer strategy I/O request
+.Sh SYNOPSIS
+.In sys/param.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_strategy "struct vnode *vp" "void *bp"
+.Sh DESCRIPTION
+.Fn vop_strategy
+submits a prepared buffer operation to a filesystem or device strategy
+callback.
+It is typically used by the buffer cache to execute block reads/writes.
+.Sh RETURN VALUES
+Returns 0 on success, or an error number.
+.Sh ERRORS
+.Bl -tag -width "[EOPNOTSUPP]"
+.It Bq Er EINVAL
+.Fa bp
+is NULL.
+.It Bq Er EOPNOTSUPP
+No strategy callback is available.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_bmap 9

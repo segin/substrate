@@ -48,7 +48,7 @@ static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **en
     return false;
 }
 
-int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end) {
+int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end, uint8_t prot, uint8_t max_prot, uint8_t inheritance) {
     vm_map_entry_t *prev_entry;
     if (vm_map_lookup_entry(map, start, &prev_entry)) return -1;
     if (prev_entry->next != map->header && prev_entry->next->start < end) return -1;
@@ -58,6 +58,9 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     new_entry->end = end;
     new_entry->object = obj;
     new_entry->offset = offset;
+    new_entry->protection = prot;
+    new_entry->max_protection = max_prot;
+    new_entry->inheritance = inheritance;
     new_entry->prev = prev_entry;
     new_entry->next = prev_entry->next;
     prev_entry->next->prev = new_entry;

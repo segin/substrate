@@ -116,7 +116,7 @@ int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len
 void futex_exit_cleanup(void);
 
 /* PI futex operations */
-int futex_lock_pi(int *uaddr, int detect, int trylock);
-int futex_unlock_pi(int *uaddr);
+int futex_lock_pi(int *uaddr, int detect, int trylock, int private);
+int futex_unlock_pi(int *uaddr, int private);
 
 #endif /* _SYS_FUTEX_H */

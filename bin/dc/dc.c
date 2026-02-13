@@ -24,38 +24,58 @@ bc_num *peek() {
     return bc_from_long(0);
 }
 
-// Input buffer for numbers
-char *in_buf = NULL;
-int in_cap = 0;
-int in_len = 0;
+// Dynamic buffer for input parsing
+struct {
+    char *data;
+    int len;
+    int cap;
+} input_buf;
 
-void buf_add(int c) {
-    if (in_len + 1 >= in_cap) {
-        in_cap = in_cap ? in_cap * 2 : 64;
-        void *new_buf = realloc(in_buf, in_cap);
-        if (!new_buf) {
-             fprintf(stderr, "dc: memory exhausted\n");
-             exit(1);
-        }
-        in_buf = new_buf;
+void buf_init() {
+    input_buf.cap = 1024;
+    input_buf.len = 0;
+    input_buf.data = malloc(input_buf.cap);
+    if (!input_buf.data) {
+        perror("dc: malloc");
+        exit(1);
     }
-    in_buf[in_len++] = c;
-    in_buf[in_len] = '\0';
+}
+
+void buf_append(char c) {
+    if (input_buf.len + 1 >= input_buf.cap) {
+        input_buf.cap *= 2;
+        input_buf.data = realloc(input_buf.data, input_buf.cap);
+        if (!input_buf.data) {
+            perror("dc: realloc");
+            exit(1);
+        }
+    }
+    input_buf.data[input_buf.len++] = c;
 }
 
 void buf_reset() {
-    in_len = 0;
-    if (in_buf) in_buf[0] = '\0';
+    input_buf.len = 0;
 }
 
-void flush_num(int *sign) {
-    if (in_len == 0) return;
-    bc_num *n = bc_from_string(in_buf);
-    if (*sign < 0) n->sign *= -1;
-    push(n);
-    buf_reset();
-    *sign = 1;
-}
+// Flush current number in buffer to stack
+void flush_num(int *in_num, int *sign, int *dot_seen) {
+    if (*in_num) {
+        // Null terminate
+        if (input_buf.len + 1 > input_buf.cap) {
+             buf_append(0);
+        } else {
+             input_buf.data[input_buf.len] = 0;
+        }
+
+        bc_num *n = bc_from_string(input_buf.data);
+        if (*sign < 0 && !bc_is_zero(n)) n->sign = -1;
+        push(n);
+
+        buf_reset();
+        *in_num = 0;
+        *sign = 1;
+        *dot_seen = 0;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -65,24 +85,32 @@ int main(int argc, char *argv[]) {
         if (!in) { perror("dc"); return 1; }
     }
 
+    buf_init();
+
     int c;
     int in_num = 0;
     int sign = 1;
+    int dot_seen = 0;
 
     while ((c = fgetc(in)) != EOF) {
         if (isspace(c)) {
-            if (in_num) { 
-            if (in_num) { 
-                flush_num(&sign);
-                in_num = 0;
-            }
-            }
+            flush_num(&in_num, &sign, &dot_seen);
             continue;
         }
         
+        // Number chars (digits or dot)
         if (isdigit(c) || c == '.') {
+            if (c == '.' && dot_seen) {
+                flush_num(&in_num, &sign, &dot_seen);
+                // Start new number with this dot
+                in_num = 1;
+                buf_append(c);
+                dot_seen = 1;
+                continue;
+            }
+            if (c == '.') dot_seen = 1;
             in_num = 1;
-            buf_add(c);
+            buf_append(c);
             continue;
         }
         
@@ -92,21 +120,14 @@ int main(int argc, char *argv[]) {
         }
 
         if (c == '_') {
-            if (in_num) {
-                flush_num(&sign);
-                in_num = 0;
-            }
+            flush_num(&in_num, &sign, &dot_seen);
             sign = -1;
             in_num = 1;
-            buf_reset();
             continue;
         }
 
-        // Any other command flushes number
-        if (in_num) { 
-            flush_num(&sign);
-            in_num = 0;
-        }
+        // Other char => command. Flush number first.
+        flush_num(&in_num, &sign, &dot_seen);
 
         bc_num *a, *b, *res;
         switch (c) {
@@ -131,7 +152,7 @@ int main(int argc, char *argv[]) {
                 while (sp > 0) bc_free(pop());
                 sp = 0;
                 break;
-            case 'd':
+            case 'd': // Duplicate
                 if (sp > 0) push(bc_dup(peek()));
                 else printf("dc: stack empty\n");
                 break;
@@ -172,12 +193,12 @@ int main(int argc, char *argv[]) {
                 bc_free(a); bc_free(b);
                 break;
             case 'q':
-                if (in_buf) free(in_buf);
+                if (input_buf.data) free(input_buf.data);
                 return 0;
             default:
                 break;
         }
     }
-    if (in_buf) free(in_buf);
+    if (input_buf.data) free(input_buf.data);
     return 0;
 }

@@ -9,7 +9,26 @@
 #include <vfs/vnode.h>
 #include <sys/namei.h>
 #include <sys/mount.h>
+#include <sys/fcntl.h>
+#include <sys/uio.h>
+#include <sys/poll.h>
 #include <string.h>
+
+#ifndef IO_APPEND
+#define IO_APPEND O_APPEND
+#endif
+
+#ifndef IO_SYNC
+#define IO_SYNC O_SYNC
+#endif
+
+#ifndef MNT_WAIT
+#define MNT_WAIT 1
+#endif
+
+#ifndef MNT_NOWAIT
+#define MNT_NOWAIT 2
+#endif
 
 /*
  * vop_lookup:
@@ -237,6 +256,251 @@ vop_pathconf(struct vnode *vp, int name, register_t *retval)
 {
     if (vp->v_op && vp->v_op->vop_pathconf)
         return vp->v_op->vop_pathconf(vp, name, retval);
+
+    return EOPNOTSUPP;
+}
+
+/*
+<<<<<<< HEAD
+ * vop_open:
+ * Open a vnode for I/O.
+ */
+int
+vop_open(struct vnode *vp, int mode, struct ucred *cred)
+{
+    int error;
+    int access_mode;
+
+    access_mode = 0;
+    switch (mode & O_ACCMODE) {
+    case O_WRONLY:
+        access_mode = 2;
+        break;
+    case O_RDWR:
+        access_mode = 6;
+        break;
+    case O_RDONLY:
+    default:
+        access_mode = 4;
+        break;
+    }
+
+    error = vop_access(vp, access_mode, cred);
+    if (error)
+        return error;
+
+    if (vp->v_op && vp->v_op->vop_open) {
+        error = vp->v_op->vop_open(vp, mode, cred);
+        if (error)
+            return error;
+    }
+
+    spinlock_acquire(&vp->v_interlock);
+    if ((mode & O_ACCMODE) == O_WRONLY || (mode & O_ACCMODE) == O_RDWR)
+        vp->v_writecount++;
+    vp->v_usecount++;
+    spinlock_release(&vp->v_interlock);
+
+    return 0;
+}
+
+/*
+ * vop_close:
+ * Close a vnode and flush dirty data when last writer closes.
+ */
+int
+vop_close(struct vnode *vp, int fflag, struct ucred *cred)
+{
+    int error;
+    int do_fsync;
+
+    if (vp->v_op && vp->v_op->vop_close) {
+        error = vp->v_op->vop_close(vp, fflag, cred);
+        if (error)
+            return error;
+    }
+
+    do_fsync = 0;
+    spinlock_acquire(&vp->v_interlock);
+    if ((fflag & O_ACCMODE) == O_WRONLY || (fflag & O_ACCMODE) == O_RDWR) {
+        if (vp->v_writecount > 0)
+            vp->v_writecount--;
+        if (vp->v_writecount == 0)
+            do_fsync = 1;
+    }
+    if (vp->v_usecount > 0)
+        vp->v_usecount--;
+    spinlock_release(&vp->v_interlock);
+
+    if (do_fsync)
+        return vop_fsync(vp, MNT_WAIT, cred);
+
+    return 0;
+}
+
+/*
+ * vop_read:
+ * Read data from vnode and update access timestamp state.
+ */
+int
+vop_read(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
+{
+    size_t resid_before;
+    int error;
+
+    (void)ioflag;
+
+    if (uio == NULL || uio->uio_iov == NULL || uio->uio_iovcnt <= 0)
+        return EINVAL;
+
+    if (uio->uio_resid == 0)
+        return 0;
+
+    if ((vp->v_type == VREG || vp->v_type == VDIR) && uio->uio_offset >= vp->v_size)
+        return 0;
+
+    if (!(vp->v_op && vp->v_op->vop_read))
+        return EOPNOTSUPP;
+
+    resid_before = uio->uio_resid;
+    error = vp->v_op->vop_read(vp, uio, ioflag, cred);
+    if (error)
+        return error;
+
+    if (uio->uio_resid < resid_before)
+        vp->v_flag |= VACCESSTIME;
+
+    return 0;
+}
+
+/*
+ * vop_write:
+ * Write data to vnode, honoring append/sync semantics.
+ */
+int
+vop_write(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
+{
+    size_t resid_before;
+    off_t offset_before;
+    int error;
+
+    if (uio == NULL || uio->uio_iov == NULL || uio->uio_iovcnt <= 0)
+        return EINVAL;
+
+    if (!(vp->v_op && vp->v_op->vop_write))
+        return EOPNOTSUPP;
+
+    if (ioflag & IO_APPEND)
+        uio->uio_offset = vp->v_size;
+
+    resid_before = uio->uio_resid;
+    offset_before = uio->uio_offset;
+    error = vp->v_op->vop_write(vp, uio, ioflag, cred);
+    if (error)
+        return error;
+
+    if (uio->uio_resid < resid_before) {
+        off_t bytes_written;
+
+        bytes_written = (off_t)(resid_before - uio->uio_resid);
+        if (uio->uio_offset > vp->v_size)
+            vp->v_size = uio->uio_offset;
+        else if (offset_before + bytes_written > vp->v_size)
+            vp->v_size = offset_before + bytes_written;
+        vp->v_flag |= VMODIFIED;
+    }
+
+    if (ioflag & IO_SYNC)
+        return vop_fsync(vp, MNT_WAIT, cred);
+
+    return 0;
+}
+
+/*
+ * vop_ioctl:
+ * Issue a device/file specific ioctl.
+ */
+int
+vop_ioctl(struct vnode *vp, uint32_t command, void *data, int fflag, struct ucred *cred)
+{
+    if (vp->v_op && vp->v_op->vop_ioctl)
+        return vp->v_op->vop_ioctl(vp, command, data, fflag, cred);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_poll:
+ * Poll/select readiness for a vnode.
+ */
+int
+vop_poll(struct vnode *vp, int events, struct ucred *cred)
+{
+    if (vp->v_op && vp->v_op->vop_poll)
+        return vp->v_op->vop_poll(vp, events, cred);
+
+    (void)cred;
+    return events & (POLLIN | POLLOUT | POLLHUP | POLLERR);
+}
+
+/*
+ * vop_fsync:
+ * Flush pending dirty data to storage.
+ */
+int
+vop_fsync(struct vnode *vp, int waitfor, struct ucred *cred)
+{
+    int error;
+
+    if (waitfor != MNT_WAIT && waitfor != MNT_NOWAIT)
+        return EINVAL;
+
+    if (vp->v_op && vp->v_op->vop_fsync) {
+        error = vp->v_op->vop_fsync(vp, waitfor, cred);
+        if (error)
+            return error;
+    }
+
+    vp->v_flag &= ~VMODIFIED;
+    return 0;
+}
+
+/*
+ * vop_bmap:
+ * Map vnode logical blocks to physical blocks.
+ */
+int
+vop_bmap(struct vnode *vp, off_t offset, struct vnode **vpp, uint64_t *bnp,
+    int *runp, int *runb)
+{
+    if (vp->v_op && vp->v_op->vop_bmap)
+        return vp->v_op->vop_bmap(vp, offset, vpp, bnp, runp, runb);
+
+    if (bnp == NULL)
+        return EINVAL;
+
+    if (vpp)
+        *vpp = vp;
+    *bnp = (uint64_t)offset;
+    if (runp)
+        *runp = 0;
+    if (runb)
+        *runb = 0;
+    return 0;
+}
+
+/*
+ * vop_strategy:
+ * Submit an I/O request strategy call to filesystem/device.
+ */
+int
+vop_strategy(struct vnode *vp, void *bp)
+{
+    if (bp == NULL)
+        return EINVAL;
+
+    if (vp->v_op && vp->v_op->vop_strategy)
+        return vp->v_op->vop_strategy(vp, bp);
 
     return EOPNOTSUPP;
 }

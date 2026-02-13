@@ -1,0 +1,28 @@
+.Dd February 11, 2026
+.Dt VOP_BMAP 9
+.Os
+.Sh NAME
+.Nm vop_bmap
+.Nd map logical vnode offsets to physical blocks
+.Sh SYNOPSIS
+.In sys/param.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_bmap "struct vnode *vp" "off_t offset" "struct vnode **vpp" "uint64_t *bnp" "int *runp" "int *runb"
+.Sh DESCRIPTION
+.Fn vop_bmap
+translates a vnode logical offset into a physical block number and optional
+forward/backward run lengths for read-ahead clustering.
+If the vnode does not provide a filesystem-specific mapper, a direct fallback
+mapping is returned.
+.Sh RETURN VALUES
+Returns 0 on success, or an error number.
+.Sh ERRORS
+.Bl -tag -width "[EOPNOTSUPP]"
+.It Bq Er EINVAL
+.Fa bnp
+is NULL.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_strategy 9

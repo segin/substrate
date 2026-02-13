@@ -13,6 +13,7 @@ typedef struct process {
     fs_node_t *cwd_node;
     fs_node_t *root_node;
     /* Added for futex tests */
+    int pid;
     uint32_t uid;
     uint32_t euid;
     pmap_t pmap;
