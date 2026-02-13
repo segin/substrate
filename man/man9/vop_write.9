@@ -1,0 +1,34 @@
+.Dd February 11, 2026
+.Dt VOP_WRITE 9
+.Os
+.Sh NAME
+.Nm vop_write
+.Nd write data from a uio into a vnode
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/uio.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_write "struct vnode *vp" "struct uio *uio" "int ioflag" "struct ucred *cred"
+.Sh DESCRIPTION
+.Fn vop_write
+validates write requests, honors append mode by writing at end-of-file,
+delegates to the filesystem callback, updates vnode size when writes extend the
+file, and marks modification state.
+If
+.Dv IO_SYNC
+is present, data is synchronously flushed via
+.Fn vop_fsync .
+.Sh RETURN VALUES
+Returns 0 on success, or an error number.
+.Sh ERRORS
+.Bl -tag -width "[EOPNOTSUPP]"
+.It Bq Er EINVAL
+Invalid uio descriptor.
+.It Bq Er EOPNOTSUPP
+The vnode does not implement write.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_read 9 ,
+.Xr vop_fsync 9

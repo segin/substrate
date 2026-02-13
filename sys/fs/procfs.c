@@ -269,7 +269,7 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
 
     char buf[1024];
     int len;
-    
+
     len = proc_generate_status(buf, sizeof(buf), p);
 
     char *source_buf = buf;
@@ -282,7 +282,6 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
             len = proc_generate_status(alloc_buf, alloc_size, p);
             source_buf = alloc_buf;
         }
-    }
     }
 
     if (len < 0) len = 0;

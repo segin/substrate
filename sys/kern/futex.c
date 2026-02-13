@@ -17,8 +17,8 @@
 #include <sys/errno.h>
 #include <sys/time.h>
 #include <kern/sched.h>
-#include <kern/time.h>
 #include <kern/sleepq.h>
+#include <kern/time.h>
 #include <arch/i386/pmap.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -68,11 +68,11 @@ static int futex_read_timespec(void *uaddr, struct timespec *out) {
  *
  * Futexes use physical addresses as keys so that shared memory
  * futexes work correctly across processes. Private futexes
- * can optimize by using (process_id, vaddr) tuple.
+ * could optimize by using (process_id, vaddr) tuple.
  *
  * Returns NULL if page is not mapped.
  */
-static void *futex_validate_and_get_phys_key(uintptr_t uaddr) {
+static void *futex_get_key(uintptr_t uaddr) {
     if (!current_process || !current_process->pmap) return NULL;
     
     /* Use pmap_extract to get physical address */
@@ -81,8 +81,9 @@ static void *futex_validate_and_get_phys_key(uintptr_t uaddr) {
     /* Page must be present */
     if (pa == 0) return NULL;
     
-    /* Include page offset for correct key */
-    return (void *)(pa + (uaddr & 0xFFF));
+    /* pmap_extract returns the exact physical address (including offset).
+       We use it directly as the key. */
+    return (void *)pa;
 }
 
 /*
@@ -95,7 +96,16 @@ static int futex_read_user(int *uaddr, int *value) {
      * with validation that page is mapped. */
     if (!validate_uaddr((uintptr_t)uaddr)) return -EFAULT;
     
-    void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
+    /* We only need to check mapping presence if we are about to access it.
+       If we trust validate_uaddr and pmap, we might skip full key check here
+       if performance critical, but for safety lets check mapping exists.
+       However, for private futexes we might want to avoid pmap_extract.
+       But we still need to know if memory is accessible.
+       Let's assume validate_uaddr is enough for VA range,
+       and page fault handler handles the rest (if we had copyin).
+       Since we dereference directly, we MUST ensure mapping exists.
+    */
+    void *key = futex_get_key((uintptr_t)uaddr);
     if (!key) return -EFAULT;
     
     *value = *uaddr;
@@ -112,7 +122,7 @@ static int futex_cmpxchg_user(int *uaddr, int oldval, int newval, int *err) {
         return 0;
     }
     
-    void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
+    void *key = futex_get_key((uintptr_t)uaddr);
     if (!key) {
         *err = -EFAULT;
         return 0;
@@ -141,6 +151,10 @@ static int futex_cmpxchg_user(int *uaddr, int oldval, int newval, int *err) {
     return prev;
 }
 
+/* Forward declarations for PI functions */
+int futex_lock_pi(int *uaddr, int detect, int trylock, int private);
+int futex_unlock_pi(int *uaddr, int private);
+
 /*
  * Mark a futex as having a dead owner
  * Sets FUTEX_OWNER_DIED bit and wakes one waiter
@@ -157,8 +171,17 @@ static void futex_handle_dead_owner(int *uaddr) {
     } while (futex_cmpxchg_user(uaddr, oldval, newval, &err) != oldval && err == 0);
     
     if (err == 0) {
-        /* Wake one waiter so they can acquire the lock */
-        void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
+        /* Wake one waiter so they can acquire the lock.
+           Robust lists don't specify private/shared in the list entry.
+           But usually robust mutexes are shared.
+           However, we need to know if it's private.
+           The robust list entry contains 'futex_offset'.
+           It doesn't contain flags.
+           Linux kernel assumes shared for robust list cleanup?
+           Or maybe it tries both?
+           For now, assume shared (safe default).
+        */
+        void *key = futex_get_key((uintptr_t)uaddr);
         if (key) {
             sleepq_wake_n(key, 1);
         }
@@ -290,10 +313,6 @@ int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len
     return 0;
 }
 
-/* Forward declarations */
-int futex_lock_pi(int *uaddr, int detect, int trylock);
-int futex_unlock_pi(int *uaddr);
-
 /*
  * Main futex syscall dispatcher
  */
@@ -304,25 +323,16 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
 
     /* Extract operation and flags */
     int cmd = op & FUTEX_CMD_MASK;
-    int is_private = (op & FUTEX_PRIVATE_FLAG) != 0;
+    int private_flag = (op & FUTEX_PRIVATE_FLAG) != 0;
 
-    void *key = NULL;
-
-    /* Determine key to use based on private flag */
-    if (is_private) {
-        /*
-         * For private futexes, use virtual address as key.
-         * We skip pmap_extract for performance, but still ensure
-         * basic address validity.
-         */
-        key = (void *)((uintptr_t)uaddr);
+    void *key;
+    if (private_flag) {
+        key = (void *)uaddr;
     } else {
-        /*
-         * For shared futexes, use physical address as key.
-         * This requires pmap_extract.
-         */
-        key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
-        if (!key) return -EFAULT;
+        key = futex_get_key((uintptr_t)uaddr);
+        if (!key) {
+            return -EFAULT;
+        }
     }
 
     switch (cmd) {
@@ -334,11 +344,6 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
              * 3. Otherwise, sleep on the futex key
              */
             int current_val;
-
-            /*
-             * Note: futex_read_user validates mapping even for private keys,
-             * ensuring we don't sleep on unmapped memory that we need to read.
-             */
             if (futex_read_user(uaddr, &current_val) != 0) {
                 return -EFAULT;
             }
@@ -362,25 +367,26 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                 uint64_t ticks = (uint64_t)ts.tv_sec * hz;
                 ticks += ((uint64_t)ts.tv_nsec * hz) / 1000000000ULL;
 
-                current_thread->sleep_expiry = get_ticks() + ticks;
+                uint64_t deadline = get_ticks() + ticks;
+                current_thread->sleep_expiry = deadline;
                 current_thread->sleep_status = 0;
             }
 
-            if (is_private) {
+            if (private_flag)
                 sleepq_add_private(key, current_thread);
-            } else {
+            else
                 sleepq_add(key, current_thread);
-            }
+
             sched_yield();
 
             if (timeout) {
-                int status = current_thread->sleep_status;
                 current_thread->sleep_expiry = 0;
-                if (status == -ETIMEDOUT) return -ETIMEDOUT;
+                if (current_thread->sleep_status == -ETIMEDOUT)
+                    return -ETIMEDOUT;
             }
 
             /* Check for signal interruption */
-            if (current_thread && (current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
+            if ((current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
                 (current_thread->sig_pending & ~current_thread->sig_mask)) {
                 return -EINTR;
             }
@@ -393,11 +399,12 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
             /*
              * Wake up to 'val' threads waiting on this futex
              */
-            if (is_private) {
-                return sleepq_wake_n_private(key, val);
-            } else {
-                return sleepq_wake_n(key, val);
-            }
+            int ret;
+            if (private_flag)
+                ret = sleepq_wake_n_private(key, val);
+            else
+                ret = sleepq_wake_n(key, val);
+            return ret;
         }
 
         case FUTEX_REQUEUE:
@@ -423,43 +430,44 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                 return -EFAULT;
             }
             
-            /* Validate destination address */
             void *key2;
-            if (is_private) {
-                key2 = (void *)((uintptr_t)uaddr2);
+            if (private_flag) {
+                key2 = (void *)uaddr2;
             } else {
-                void *phys_key2 = futex_validate_and_get_phys_key((uintptr_t)uaddr2);
-                if (!phys_key2) return -EFAULT;
-                key2 = phys_key2;
+                key2 = futex_get_key((uintptr_t)uaddr2);
+                if (!key2) return -EFAULT;
             }
             
             /* 'timeout' is repurposed as val2 (requeue limit) */
             int requeue_limit = (int)(uintptr_t)timeout;
             
-            int ret = sleepq_requeue(key, key2, val, requeue_limit, is_private);
+            int ret;
+            if (private_flag)
+                ret = sleepq_requeue_private(key, key2, val, requeue_limit);
+            else
+                ret = sleepq_requeue(key, key2, val, requeue_limit);
             return ret;
         }
 
         case FUTEX_LOCK_PI: {
             /*
              * Priority Inheritance lock acquisition
-             * TODO: Full PI implementation with priority boosting
              */
-            return futex_lock_pi(uaddr, 0, 0);
+            return futex_lock_pi(uaddr, 0, 0, private_flag);
         }
 
         case FUTEX_UNLOCK_PI: {
             /*
              * Priority Inheritance unlock
              */
-            return futex_unlock_pi(uaddr);
+            return futex_unlock_pi(uaddr, private_flag);
         }
 
         case FUTEX_TRYLOCK_PI: {
             /*
              * Non-blocking PI lock attempt
              */
-            return futex_lock_pi(uaddr, 0, 1);
+            return futex_lock_pi(uaddr, 0, 1, private_flag);
         }
 
         default:
@@ -494,6 +502,8 @@ typedef struct pi_waiter {
 /* PI futex state (kernel-side) */
 typedef struct pi_state {
     void              *key;        /* Futex key (physical addr) */
+    int                type;       /* 0=Shared, 1=Private */
+    int                pid;        /* PID for private */
     thread_t          *owner;      /* Current owner thread */
     int                owner_prio; /* Owner's original priority */
     pi_waiter_t       *waiters;    /* Priority-sorted waiter list */
@@ -521,7 +531,10 @@ static inline void pi_unlock(void) {
     __sync_lock_release(&pi_lock);
 }
 
-static inline int pi_hash_func(void *key) {
+static inline int pi_hash_func(void *key, int type, int pid) {
+    if (type == 1) { // Private
+        return (((uintptr_t)key >> 3) ^ pid) & PI_HASH_MASK;
+    }
     return ((uintptr_t)key >> 3) & PI_HASH_MASK;
 }
 
@@ -529,6 +542,8 @@ static pi_state_t *pi_state_alloc(void) {
     if (pi_pool_idx >= PI_POOL_SIZE) return NULL;
     pi_state_t *ps = &pi_pool[pi_pool_idx++];
     ps->key = NULL;
+    ps->type = 0;
+    ps->pid = 0;
     ps->owner = NULL;
     ps->owner_prio = 0;
     ps->waiters = NULL;
@@ -547,25 +562,30 @@ static pi_waiter_t *pi_waiter_alloc(void) {
     return pw;
 }
 
-static pi_state_t *pi_lookup(void *key) {
-    int hash = pi_hash_func(key);
+static pi_state_t *pi_lookup(void *key, int type, int pid) {
+    int hash = pi_hash_func(key, type, pid);
     pi_state_t *ps = pi_hash[hash];
     while (ps) {
-        if (ps->key == key) return ps;
+        if (ps->key == key && ps->type == type) {
+            if (type == 0 || ps->pid == pid)
+                return ps;
+        }
         ps = ps->next;
     }
     return NULL;
 }
 
-static pi_state_t *pi_get_or_create(void *key) {
-    int hash = pi_hash_func(key);
-    pi_state_t *ps = pi_lookup(key);
+static pi_state_t *pi_get_or_create(void *key, int type, int pid) {
+    int hash = pi_hash_func(key, type, pid);
+    pi_state_t *ps = pi_lookup(key, type, pid);
     if (ps) return ps;
     
     ps = pi_state_alloc();
     if (!ps) return NULL;
     
     ps->key = key;
+    ps->type = type;
+    ps->pid = pid;
     ps->next = pi_hash[hash];
     pi_hash[hash] = ps;
     return ps;
@@ -651,7 +671,7 @@ static void pi_deboost_owner(pi_state_t *ps) {
  * 3. Sleep until woken
  * 4. On wake, retry acquire
  */
-int futex_lock_pi(int *uaddr, int detect, int trylock) {
+int futex_lock_pi(int *uaddr, int detect, int trylock, int private) {
     (void)detect;
     
     if (!current_thread) return -EFAULT;
@@ -683,12 +703,19 @@ int futex_lock_pi(int *uaddr, int detect, int trylock) {
     }
     
     /* Slow path: contended - need PI handling */
-    void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
-    if (!key) return -EFAULT;
+    void *key;
+    if (private) {
+        key = (void *)uaddr;
+    } else {
+        key = futex_get_key((uintptr_t)uaddr);
+        if (!key) return -EFAULT;
+    }
+
+    int pid = private ? current_process->pid : 0;
     
     pi_spinlock();
     
-    pi_state_t *ps = pi_get_or_create(key);
+    pi_state_t *ps = pi_get_or_create(key, private, pid);
     if (!ps) {
         pi_unlock();
         return -ENOMEM;
@@ -745,8 +772,11 @@ int futex_lock_pi(int *uaddr, int detect, int trylock) {
             }
         }
         
-        /* Sleep */
-        sleepq_add(key, current_thread);
+        /* Sleep using sleepq mechanism */
+        if (private)
+            sleepq_add_private(key, current_thread);
+        else
+            sleepq_add(key, current_thread);
         sched_yield();
         
         /* Woken: try to acquire */
@@ -805,7 +835,7 @@ int futex_lock_pi(int *uaddr, int detect, int trylock) {
  * 3. Deboost priority
  * 4. Wake highest priority waiter
  */
-int futex_unlock_pi(int *uaddr) {
+int futex_unlock_pi(int *uaddr, int private) {
     if (!current_thread) return -EFAULT;
     
     int tid = current_thread->tid;
@@ -819,12 +849,19 @@ int futex_unlock_pi(int *uaddr) {
         return -EPERM;
     }
     
-    void *key = futex_validate_and_get_phys_key((uintptr_t)uaddr);
-    if (!key) return -EFAULT;
+    void *key;
+    if (private) {
+        key = (void *)uaddr;
+    } else {
+        key = futex_get_key((uintptr_t)uaddr);
+        if (!key) return -EFAULT;
+    }
+
+    int pid = private ? current_process->pid : 0;
     
     pi_spinlock();
     
-    pi_state_t *ps = pi_lookup(key);
+    pi_state_t *ps = pi_lookup(key, private, pid);
     
     /* Deboost before releasing */
     if (ps) {
@@ -849,7 +886,10 @@ int futex_unlock_pi(int *uaddr) {
     newval = 0;
     if (futex_cmpxchg_user(uaddr, oldval, newval, &err) == oldval) {
         /* Wake highest priority waiter */
-        sleepq_wake_n(key, 1);
+        if (private)
+            sleepq_wake_n_private(key, 1);
+        else
+            sleepq_wake_n(key, 1);
         return 0;
     }
     

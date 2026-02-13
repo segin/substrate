@@ -23,7 +23,7 @@ static fs_node_t *sysfs_finddir(fs_node_t *node, char *name) {
     if (strcmp(name, "bus") == 0 || strcmp(name, "class") == 0 || strcmp(name, "devices") == 0) {
         static fs_node_t sub_node;
         memset(&sub_node, 0, sizeof(fs_node_t));
-        strncpy(sub_node.name, name, sizeof(sub_node.name));
+        strncpy(sub_node.name, name, sizeof(sub_node.name) - 1);
         sub_node.flags = FS_DIRECTORY;
         sub_node.readdir = &sysfs_readdir; // Simple reuse for proto
         return &sub_node;

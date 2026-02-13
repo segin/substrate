@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <string.h>
-#include "../../../sys/exec/perso/freebsd/freebsd_user.h"
-#include "../../../sys/sys/proc.h"
+#include <exec/perso/freebsd/freebsd_user.h>
+#include <sys/proc.h>
 
 /*
  * Property-based test: Translation Fidelity for kinfo_proc

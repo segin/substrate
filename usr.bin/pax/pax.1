@@ -1,83 +1,87 @@
-.Dd October 26, 2023
+.Dd February 11, 2026
 .Dt PAX 1
 .Os Substrate
 .Sh NAME
 .Nm pax
-.Nd read and write file archives and copy directory hierarchies
+.Nd POSIX archive interchange utility
 .Sh SYNOPSIS
 .Nm
 .Op Fl cdnv
 .Op Fl f Ar archive
 .Op Fl s Ar replstr
-.Ar ...
-.br
+.Op Ar pattern ...
 .Nm
 .Fl r
-.Op Fl cdiknuv
+.Op Fl cdiknuvL
 .Op Fl f Ar archive
-.Op Fl o Ar options
 .Op Fl p Ar string
 .Op Fl s Ar replstr
 .Op Ar pattern ...
-.br
 .Nm
 .Fl w
-.Op Fl dituvX
-.Op Fl b Ar blocksize
-.Op Fl a
+.Op Fl dituvXL
 .Op Fl f Ar archive
-.Op Fl o Ar options
 .Op Fl s Ar replstr
 .Op Fl x Ar format
 .Op Ar file ...
-.br
 .Nm
 .Fl r
 .Fl w
-.Op Fl diklntuvX
+.Op Fl diklntuvXL
 .Op Fl p Ar string
 .Op Fl s Ar replstr
 .Op Ar file ...
 .Ar directory
 .Sh DESCRIPTION
-.Nm
-will read, write, and list the members of an archive file and will copy directory hierarchies.
-.Pp
-The modes of operation are:
-.Bl -tag -width flag
-.It list
-(default) List the contents of an archive.
-.It read
-.Pq Fl r
-Read an archive and extract the files.
-.It write
-.Pq Fl w
-Write files to an archive.
-.It copy
-.Pq Fl rw
-Copy files to a destination directory.
-.El
-.Sh OPTIONS
-.Bl -tag -width flag
-.It Fl r
-Read an archive file.
-.It Fl w
-Write files to an archive file.
-.It Fl f Ar archive
-Specify the name of the archive file.
-.It Fl s Ar replstr
-Modify file or archive member names according to the substitution expression
-.Ar replstr .
-.It Fl v
-Verbose operation.
-.It Fl x Ar format
-Specify the output archive format (ustar, cpio, pax).
-.El
-.Sh STANDARDS
 The
 .Nm
-utility is expected to be compliant with the
-.St -p1003.2
-specification.
-.Sh AUTHORS
-Implemented for Substrate OS.
+utility reads, writes, lists, and copies archive members in a POSIX style interface.
+This implementation supports ustar, pax extended headers, and cpio newc.
+.Pp
+By default extraction behavior is path-safe and strips leading
+.Sq /
+semantics equivalent to
+.Fl -no-absolute-paths .
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl r
+Read/extract mode.
+.It Fl w
+Write/create mode.
+.It Fl f Ar archive
+Archive file path. If omitted, standard input/output is used.
+.It Fl x Ar format
+Output format for create mode: 
+.Cm pax ,
+.Cm ustar , or
+.Cm cpio
+(newc).
+.It Fl s Ar replstr
+Apply deterministic substitution rules in argument order.
+.It Fl L
+Follow symbolic links while archiving.
+.It Fl n , Fl k
+Do not overwrite existing extraction targets.
+.It Fl p Ar string
+Preserve attributes while extracting.
+Recognized letters are
+.Cm m
+(mode),
+.Cm e/t
+(timestamps), and
+.Cm o
+(owner/group).
+.It Fl v
+Verbose operation.
+.It Fl -no-absolute-paths
+Reject unsafe archive paths and avoid extracting absolute paths.
+.El
+.Sh EXIT STATUS
+.Ex -std pax
+.Sh SEE ALSO
+.Xr cpio 1 ,
+.Xr tar 1
+.Sh STANDARDS
+The interface follows the POSIX
+.Nm
+model with pax extended header support for long or overflowing metadata.

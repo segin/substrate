@@ -1,0 +1,24 @@
+.Dd February 11, 2026
+.Dt CPIO 5
+.Os
+.Sh NAME
+.Nm cpio
+.Nd cpio archive formats
+.Sh DESCRIPTION
+This document describes cpio formats supported by
+.Xr cpio 1 :
+.Pp
+.Bl -bullet
+.It
+newc (SVR4 ASCII header, magic 070701)
+.It
+odc (portable old character format, magic 070707)
+.It
+bin (old binary format, magic 070707 in 16-bit binary)
+.El
+.Pp
+Each archive entry contains a header, pathname, file payload (if any), and
+format-specific alignment padding.
+.Sh SEE ALSO
+.Xr cpio 1 ,
+.Xr pax 1
