@@ -1175,7 +1175,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
     int result = -1;
-    uint32_t name_len = strlen(name);
+    // uint32_t name_len = strlen(name); // Removed duplicate
     
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
