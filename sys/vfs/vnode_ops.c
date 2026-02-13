@@ -240,3 +240,19 @@ vop_pathconf(struct vnode *vp, int name, register_t *retval)
 
     return EOPNOTSUPP;
 }
+
+/*
+ * vop_readdir:
+ * Read directory entries.
+ */
+int
+vop_readdir(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag, int *ncookies, uint64_t **cookies)
+{
+    if (vp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (vp->v_op && vp->v_op->vop_readdir)
+        return vp->v_op->vop_readdir(vp, uio, cred, eofflag, ncookies, cookies);
+
+    return EOPNOTSUPP;
+}

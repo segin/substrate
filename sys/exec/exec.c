@@ -14,7 +14,9 @@
 #include <sys/stat.h>
 #include <kern/console.h>
 #include <sys/syscall_impl.h>
+#include <sys/kern_syscalls.h>
 #include <sys/fcntl.h>
+#include <sys/kern_syscalls.h>
 
 static struct exec_binary_handler *exec_handlers = NULL;
 
@@ -36,19 +38,18 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     if (!path) return -ENOENT;
 
     // 1. Open the file to read the header
-    int fd = sys_open(path, O_RDONLY, 0);
+    int fd = kern_open(path, O_RDONLY, 0);
     if (fd < 0) return fd; // Propagate error (ENOENT, EACCES)
 
-    // 2. Read the header (magic bytes)
-    // 256 bytes should be enough for most magic checks (ELF is 4, Script #!, ELKS 2-4)
+    // 3. Read the header (magic bytes)
     char header_buf[256];
-    int len = sys_read(fd, header_buf, sizeof(header_buf));
+    int len = kern_read(fd, header_buf, sizeof(header_buf));
     
-    sys_close(fd);
+    kern_close(fd);
 
     if (len < 0) return len;
     
-    // 3. Iterate through handlers
+    // 4. Iterate through handlers
     struct exec_binary_handler *h = exec_handlers;
     while (h) {
         if (h->check && h->check(path, header_buf, len) == 0) {
@@ -60,5 +61,5 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         h = h->next;
     }
 
-    return -ENOEXEC; // No handler recognized this format
+    return -ENOEXEC;
 }
