@@ -1,41 +1,108 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -I../sys -I../sys/arch/i386 -I../sys/kern -I../sys/drivers/video -I../sys/exec/perso -I../sys/include -DHOST_TEST
+CFLAGS_COMMON = -Wall -Wextra -g -DHOST_TEST
+CFLAGS_KERN = $(CFLAGS_COMMON) -I../sys -I../sys/arch/i386 -I../sys/kern -I../sys/drivers/video -I../sys/exec/perso -I../sys/include
+CFLAGS_TEST = $(CFLAGS_COMMON) -I../sys/include -I../sys -I.
 
-# Core kernel sources for testing
-CORE_SRCS = ../sys/vm/vm_page.c vm_map_host.c ../sys/vm/vm_object.c \
-          ../sys/vm/vm_fault.c ../sys/vm/vm_syscalls.c ../sys/vm/vm_swap.c \
-          ../sys/vm/vm_zone.c \
-          ../sys/kern/spinlock.c ../sys/kern/mutex.c ../sys/kern/semaphore.c ../sys/kern/kthread.c ../sys/kern/time.c ../sys/kern/signal.c ../sys/kern/futex.c \
-          ../sys/lib/string.c ../sys/lib/printf.c ../sys/lib/div64.c \
-          ../sys/exec/perso/compat.c ../sys/kern/acct.c ../sys/kern/sysinfo.c \
-          ../sys/vfs/vfs.c ../sys/arch/i386/syscall.c ../sys/arch/i386/sched.c
+CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_swap.o vm_zone.o \
+            spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
+            string.o printf.o div64.o compat.o acct.o sysinfo.o \
+            vfs.o syscall.o sched_i386.o sched_pm.o process.o sched_decay.o
 
-UNIT_TESTS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
+# Unit tests
+UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_object.c unit/vm/test_page.c unit/vm/test_fault.c \
              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_cow.c \
              unit/arch/test_trampoline.c \
-             unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c \
+             unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c unit/kern/test_sched_decay.c \
              unit/kern/test_sync.c unit/kern/test_signal.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
-             sys/test_sysinfo.c unit/lib/test_string.c
+             sys/test_sysinfo.c lib/c/test_string.c unit/lib/test_time.c
 
-MOCKS = mocks.c
+UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
-all: test_runner test_minix test_ext2_perf
+MOCKS_OBJ = mocks.o
+
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_ext2_remove_perf
 	./test_runner
 	./test_minix
 	./test_ext2_perf
+	./test_libc_string
+	./test_ext2_remove_perf
 
 test_ext2_perf: unit/fs/test_ext2_perf_host.c
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< -o $@
+
+test_ext2_remove_perf: unit/fs/test_ext2_remove_perf.c
+	$(CC) $(CFLAGS_KERN) $< -o $@
 
 test_minix: unit/fs/test_minix_standalone.c
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< -o $@
 
-test_runner: $(CORE_SRCS) $(UNIT_TESTS) $(MOCKS) test_runner.c
-	$(CC) $(CFLAGS) $^ -o $@
+test_libc_string: lib/c/test_string.c ../lib/c/src/string.c
+	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
+	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
+	$(CC) $(CFLAGS_COMMON) lib/c/test_string.c string_prefixed.o -o $@
+
+test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
+	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_time_standalone.c -o $@
+
+# Rules for objects
+%.o: ../sys/vm/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+%.o: ../sys/kern/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+%.o: ../sys/lib/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+%.o: ../sys/exec/perso/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+%.o: ../sys/vfs/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+%.o: ../sys/pm/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+sched_i386.o: ../sys/arch/i386/sched.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+sched_pm.o: ../sys/pm/sched.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+vm_map_host.o: vm_map_host.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+# Unit test objects
+%.o: unit/vm/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/arch/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/kern/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/vfs/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/perso/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: fuzz/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: sys/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: lib/c/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/lib/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+
+mocks.o: mocks.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+test_runner.o: test_runner.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+
+test_runner: $(CORE_OBJS) $(UNIT_OBJS) $(MOCKS_OBJ) string_prefixed.o test_runner.o
+	$(CC) $(CFLAGS_COMMON) $^ -o $@
+
+string_prefixed.o: ../lib/c/src/string.c
+	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
+	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f test_runner test_minix test_ext2_perf
+	rm -f test_runner test_minix test_ext2_perf test_libc_string *.o

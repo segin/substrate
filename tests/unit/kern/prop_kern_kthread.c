@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../../sys/sys/kthread.h"
-#include "../../../sys/sys/proc.h"
+#include <sys/kthread.h>
+#include <sys/proc.h>
 
 /*
  * Property-based test: kthread Invariant

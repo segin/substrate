@@ -50,7 +50,7 @@ ifdef NATIVE_BUILD
 else
     # Target build configuration (Substrate i386)
     USER_CFLAGS = $(CFLAGS) -I$(TOP)/sys
-    USER_LDFLAGS = -m32 -nostdlib -fno-pie
+    USER_LDFLAGS = -m32 -nostdlib -fno-pie -no-pie
 endif
 
 LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
