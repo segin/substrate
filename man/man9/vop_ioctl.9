@@ -1,0 +1,26 @@
+.Dd February 11, 2026
+.Dt VOP_IOCTL 9
+.Os
+.Sh NAME
+.Nm vop_ioctl
+.Nd perform a vnode ioctl operation
+.Sh SYNOPSIS
+.In sys/param.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_ioctl "struct vnode *vp" "uint32_t command" "void *data" "int fflag" "struct ucred *cred"
+.Sh DESCRIPTION
+The
+.Fn vop_ioctl
+wrapper dispatches control requests to filesystem or device-specific
+ioctl handlers associated with the vnode.
+.Sh RETURN VALUES
+Returns 0 on success, or an error number.
+.Sh ERRORS
+.Bl -tag -width "[EOPNOTSUPP]"
+.It Bq Er EOPNOTSUPP
+The vnode has no ioctl handler.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_poll 9
