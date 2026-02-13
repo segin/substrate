@@ -24,6 +24,8 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
+int64_t get_time(void) { return 0; } // Mock get_time for minix.c
+
 // Needed types
 #include <sys/types.h>
 #include <vfs/vfs.h>
@@ -48,7 +50,7 @@ void vfs_register_filesystem(filesystem_t *fs) {
 
 // Include the source under test
 // This allows us to access static functions like minix_read_inode
-#include "../../../sys/fs/minix/minix.c"
+#include <fs/minix/minix.c>
 
 // ------------------------------------------------------------------
 // Test Helpers

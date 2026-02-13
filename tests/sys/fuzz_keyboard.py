@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # Simple fuzzing test for scancode processing logic
-import sys
 
 def simulate_scancode(scancode, shifted=False):
     # This simulates the logic in keyboard.c

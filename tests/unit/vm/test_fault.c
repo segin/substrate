@@ -1,6 +1,6 @@
-#include "../../../sys/vm/vm_fault.h"
-#include "../../../sys/vm/vm_object.h"
-#include "../../../sys/vm/vm_map.h"
+#include <vm/vm_fault.h>
+#include <vm/vm_object.h>
+#include <vm/vm_map.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -17,7 +17,7 @@ bool test_vm_fault_anonymous(void) {
     if (!obj) return false;
     
     // 2. Map the object
-    if (vm_map_insert(&map, obj, 0, 0x1000, 0x2000) != 0) return false;
+    if (vm_map_insert(&map, obj, 0, 0x1000, 0x2000, 0x3, 0x3, 1) != 0) return false;
     
     // 3. Trigger a read fault
     int result = vm_fault(&map, 0x1500, 0x01); // Read access
@@ -34,7 +34,7 @@ bool test_vm_fault_protection_violation(void) {
     vm_map_init(&map, NULL, 0x1000, 0x2000);
     
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 4096);
-    if (vm_map_insert(&map, obj, 0, 0x1000, 0x2000) != 0) return false;
+    if (vm_map_insert(&map, obj, 0, 0x1000, 0x2000, 0x3, 0x3, 1) != 0) return false;
     
     // Set entry to Read Only (0x01)
     map.header->next->protection = 0x01;
