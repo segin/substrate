@@ -1,40 +1,53 @@
 .\" Process this file with
 .\" groff -man -Tascii zero.4
 .\"
-.TH ZERO 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.TH ZERO 4 "February 2026" "Substrate Kernel" "Device Drivers Manual"
 .SH NAME
-zero \- zero byte source
+zero \- zero-byte source
 .SH SYNOPSIS
 .B /dev/zero
 .SH DESCRIPTION
 The
 .B zero
-device provides an endless supply of null bytes (0x00) when read.
+character device returns an endless stream of null bytes (0x00) on read.
+.PP
 Writes to
 .B /dev/zero
-are accepted and discarded (similar to
-.BR /dev/null ).
+are accepted and discarded, returning the requested byte count.
 .PP
-This device is commonly used to:
-.IP \(bu 2
-Initialize memory regions with zeros via
+.BR lseek (2)
+operations succeed and update file offsets, but offsets do not affect read/write behavior.
+.PP
+.BR poll (2)
+reports both
+.B POLLIN
+and
+.B POLLOUT
+as ready.
+.BR ioctl (2)
+is not supported.
+.PP
 .BR mmap (2)
-.IP \(bu 2
-Create sparse files or zero-filled files
-.IP \(bu 2
-Benchmark read performance
-.PP
+of
+.B /dev/zero
+is supported and returns zero-filled memory.
+.SH FILES
+.B /dev/zero
+(character device, major 1, minor 5)
+.SH ERRORS
+.TP
+.B ENOTTY
+Any
+.BR ioctl (2)
+request.
 .SH EXAMPLE
-Create a 1MB zero-filled file:
+Create a 1 MiB zero-filled file:
 .PP
 .nf
-    dd if=/dev/zero of=zeros.bin bs=1M count=1
+    $ dd if=/dev/zero of=zeros.bin bs=1M count=1
 .fi
-.SH FILES
-.TP
-.B /dev/zero
-The zero device special file (character device, major 1, minor 5).
 .SH SEE ALSO
 .BR null (4),
+.BR full (4),
 .BR mmap (2),
-.BR intro (4)
+.BR poll (2)

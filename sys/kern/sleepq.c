@@ -10,6 +10,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#define SLEEPQ_TYPE_SHARED 0
+#define SLEEPQ_TYPE_PRIVATE 1
+
 // Sleep queue hash table size (power of 2 for fast modulo)
 #define SLEEPQ_HASH_SIZE 256
 #define SLEEPQ_HASH_MASK (SLEEPQ_HASH_SIZE - 1)
@@ -17,12 +20,12 @@
 // Sleep queue entry
 typedef struct sleepq {
     void *sq_chan;              // Wait channel
+    int sq_type;                // SLEEPQ_TYPE_SHARED or SLEEPQ_TYPE_PRIVATE
+    int sq_pid;                 // PID for private queues
     thread_t *sq_head;          // Head of waiter list
     thread_t *sq_tail;          // Tail of waiter list
     int sq_count;               // Number of waiters
     struct sleepq *sq_next;     // Hash chain link
-    int type;                   // SLEEPQ_TYPE_SHARED or SLEEPQ_TYPE_PRIVATE
-    int pid;                    // PID for private queues
 } sleepq_t;
 
 // Sleep queue hash table
@@ -37,7 +40,11 @@ static int sleepq_pool_next = 0;
 static volatile uint32_t pool_lock = 0;
 
 // Hash function for wait channels
-static inline int sleepq_hash_func(void *chan) {
+static inline int sleepq_hash_func(void *chan, int type, int pid) {
+    if (type == SLEEPQ_TYPE_PRIVATE) {
+        /* Mix PID into hash to distribute private futexes */
+        return (((uintptr_t)chan >> 3) ^ pid) & SLEEPQ_HASH_MASK;
+    }
     return ((uintptr_t)chan >> 3) & SLEEPQ_HASH_MASK;
 }
 
@@ -72,16 +79,16 @@ static sleepq_t *sleepq_alloc(void) {
 }
 
 // Find sleep queue for a channel (must hold bucket lock)
-static sleepq_t *sleepq_lookup(void *chan, int hash, int type, int pid) {
+static sleepq_t *sleepq_lookup(void *chan, int type, int pid, int hash) {
     sleepq_t *sq = sleepq_hash[hash];
     while (sq) {
-        if (sq->sq_chan == chan && sq->type == type) {
+        if (sq->sq_chan == chan && sq->sq_type == type) {
             if (type == SLEEPQ_TYPE_SHARED) return sq;
-            if (sq->pid == pid) return sq;
+            if (sq->sq_pid == pid) return sq;
         }
         sq = sq->sq_next;
     }
-    return(NULL);
+    return NULL;
 }
 
 // Insert sleep queue into hash table
@@ -115,11 +122,11 @@ static void sleepq_add_internal(void *chan, thread_t *t, int type, int pid) {
     if (!chan || !t)
         return;
     
-    int hash = sleepq_hash_func(chan);
+    int hash = sleepq_hash_func(chan, type, pid);
     sq_lock(hash);
     
     // Find or create sleep queue
-    sleepq_t *sq = sleepq_lookup(chan, hash, type, pid);
+    sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq) {
         sq = sleepq_alloc();
         if (!sq) {
@@ -127,8 +134,8 @@ static void sleepq_add_internal(void *chan, thread_t *t, int type, int pid) {
             return;  // Out of sleep queues
         }
         sq->sq_chan = chan;
-        sq->type = type;
-        sq->pid = pid;
+        sq->sq_type = type;
+        sq->sq_pid = pid;
         sleepq_insert(sq, hash);
     }
     
@@ -161,70 +168,14 @@ void sleepq_add_private(void *chan, thread_t *t) {
 }
 
 // Wake thread(s) internal helper
-static int sleepq_wake_internal(void *chan, int n, int type, int pid) {
-    if (!chan || n == 0)
-        return(0);
-
-    int hash = sleepq_hash_func(chan);
+static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
+    if (!chan)
+        return(NULL);
+    
+    int hash = sleepq_hash_func(chan, type, pid);
     sq_lock(hash);
     
-    sleepq_t *sq = sleepq_lookup(chan, hash, type, pid);
-    if (!sq || sq->sq_count == 0) {
-        sq_unlock(hash);
-        return(0);
-    }
-    
-    // Determine how many to wake
-    int wake_all = (n < 0);
-    int woken = 0;
-
-    if (wake_all) {
-        thread_t *t = sq->sq_head;
-        while (t) {
-            thread_t *next = t->next;
-            t->next = NULL;
-            t->wait_chan = NULL;
-            t->state = THREAD_READY;
-            woken++;
-            t = next;
-        }
-    } else {
-        while (sq->sq_head && woken < n) {
-            thread_t *t = sq->sq_head;
-            sq->sq_head = t->next;
-            if (!sq->sq_head)
-                sq->sq_tail = NULL;
-            sq->sq_count--;
-
-            t->next = NULL;
-            t->wait_chan = NULL;
-            t->state = THREAD_READY;
-            woken++;
-        }
-    }
-    
-    // Remove sleep queue if empty
-    if (sq->sq_count == 0 || wake_all) { // wake_all empties it completely
-        sleepq_remove(sq, hash);
-        // Could return sq to pool
-    }
-    
-    sq_unlock(hash);
-    return(woken);
-}
-
-// Wake one thread from shared sleep queue
-thread_t *sleepq_wake_one(void *chan) {
-    // Note: This API returns thread_t*, but internal helper returns count.
-    // Existing API expects specific thread return.
-    // We reimplement simplified version matching helper logic.
-
-    if (!chan) return NULL;
-    
-    int hash = sleepq_hash_func(chan);
-    sq_lock(hash);
-    
-    sleepq_t *sq = sleepq_lookup(chan, hash, SLEEPQ_TYPE_SHARED, 0);
+    sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq || sq->sq_count == 0) {
         sq_unlock(hash);
         return NULL;
@@ -240,59 +191,139 @@ thread_t *sleepq_wake_one(void *chan) {
     t->wait_chan = NULL;
     t->state = THREAD_READY;
     
-    if (sq->sq_count == 0)
+    // Remove sleep queue if empty
+    if (sq->sq_count == 0) {
         sleepq_remove(sq, hash);
-
+    }
+    
     sq_unlock(hash);
-    return t;
+    return(t);
 }
 
-// Wake all threads from shared sleep queue
-int sleepq_wake_all(void *chan) {
-    return sleepq_wake_internal(chan, -1, SLEEPQ_TYPE_SHARED, 0);
+thread_t *sleepq_wake_one(void *chan) {
+    return sleepq_wake_one_internal(chan, SLEEPQ_TYPE_SHARED, 0);
 }
 
-// Wake N threads from shared sleep queue
-int sleepq_wake_n(void *chan, int n) {
-    return sleepq_wake_internal(chan, n, SLEEPQ_TYPE_SHARED, 0);
+thread_t *sleepq_wake_one_private(void *chan) {
+    return sleepq_wake_one_internal(chan, SLEEPQ_TYPE_PRIVATE, current_process->pid);
 }
 
-// Wake N threads from private sleep queue
-int sleepq_wake_n_private(void *chan, int n) {
-    if (!current_process) return 0;
-    return sleepq_wake_internal(chan, n, SLEEPQ_TYPE_PRIVATE, current_process->pid);
-}
-
-// Check if any threads are waiting on a channel
-int sleepq_has_waiters(void *chan) {
+static int sleepq_wake_all_internal(void *chan, int type, int pid) {
     if (!chan)
         return(0);
     
-    int hash = sleepq_hash_func(chan);
+    int hash = sleepq_hash_func(chan, type, pid);
     sq_lock(hash);
     
-    // We assume shared check for generic API, or we check both?
-    // Existing API assumes shared.
-    sleepq_t *sq = sleepq_lookup(chan, hash, SLEEPQ_TYPE_SHARED, 0);
+    sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
+    if (!sq || sq->sq_count == 0) {
+        sq_unlock(hash);
+        return(0);
+    }
+    
+    int woken = 0;
+    thread_t *t = sq->sq_head;
+    while (t) {
+        thread_t *next = t->next;
+        t->next = NULL;
+        t->wait_chan = NULL;
+        t->state = THREAD_READY;
+        woken++;
+        t = next;
+    }
+    
+    // Remove sleep queue
+    sleepq_remove(sq, hash);
+    
+    sq_unlock(hash);
+    return(woken);
+}
+
+int sleepq_wake_all(void *chan) {
+    return sleepq_wake_all_internal(chan, SLEEPQ_TYPE_SHARED, 0);
+}
+
+int sleepq_wake_all_private(void *chan) {
+    return sleepq_wake_all_internal(chan, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+}
+
+static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
+    if (!chan || n == 0)
+        return(0);
+    if (n < 0)
+        return(sleepq_wake_all_internal(chan, type, pid));
+    
+    int hash = sleepq_hash_func(chan, type, pid);
+    sq_lock(hash);
+    
+    sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
+    if (!sq || sq->sq_count == 0) {
+        sq_unlock(hash);
+        return(0);
+    }
+    
+    int woken = 0;
+    while (sq->sq_head && woken < n) {
+        thread_t *t = sq->sq_head;
+        sq->sq_head = t->next;
+        if (!sq->sq_head)
+            sq->sq_tail = NULL;
+        sq->sq_count--;
+        
+        t->next = NULL;
+        t->wait_chan = NULL;
+        t->state = THREAD_READY;
+        woken++;
+    }
+    
+    // Remove sleep queue if empty
+    if (sq->sq_count == 0)
+        sleepq_remove(sq, hash);
+    
+    sq_unlock(hash);
+    return(woken);
+}
+
+int sleepq_wake_n(void *chan, int n) {
+    return sleepq_wake_n_internal(chan, n, SLEEPQ_TYPE_SHARED, 0);
+}
+
+int sleepq_wake_n_private(void *chan, int n) {
+    if (!current_process) return 0;
+    return sleepq_wake_n_internal(chan, n, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+}
+
+static int sleepq_has_waiters_internal(void *chan, int type, int pid) {
+    if (!chan)
+        return(0);
+    
+    int hash = sleepq_hash_func(chan, type, pid);
+    sq_lock(hash);
+    
+    sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     int has = (sq && sq->sq_count > 0);
     
     sq_unlock(hash);
     return(has);
 }
 
-// Requeue waiters from src_chan to dst_chan
-// Supports both shared and private via flag.
-int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n, int private_op) {
+int sleepq_has_waiters(void *chan) {
+    return sleepq_has_waiters_internal(chan, SLEEPQ_TYPE_SHARED, 0);
+}
+
+int sleepq_has_waiters_private(void *chan) {
+    if (!current_process) return 0;
+    return sleepq_has_waiters_internal(chan, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+}
+
+static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, int requeue_n, int type, int pid) {
     if (!src_chan || !dst_chan)
         return(0);
-
-    int type = private_op ? SLEEPQ_TYPE_PRIVATE : SLEEPQ_TYPE_SHARED;
-    int pid = private_op && current_process ? current_process->pid : 0;
     
-    int src_hash = sleepq_hash_func(src_chan);
-    int dst_hash = sleepq_hash_func(dst_chan);
+    int src_hash = sleepq_hash_func(src_chan, type, pid);
+    int dst_hash = sleepq_hash_func(dst_chan, type, pid);
     
-    // Lock ordering
+    // Lock ordering to prevent deadlock (lower hash first)
     if (src_hash < dst_hash) {
         sq_lock(src_hash);
         sq_lock(dst_hash);
@@ -304,7 +335,7 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n, in
     }
     
     // 1. Wake phase
-    sleepq_t *src_sq = sleepq_lookup(src_chan, src_hash, type, pid);
+    sleepq_t *src_sq = sleepq_lookup(src_chan, type, pid, src_hash);
     int woken_count = 0;
     
     if (src_sq && src_sq->sq_count > 0) {
@@ -325,13 +356,13 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n, in
     // 2. Requeue phase
     if (src_sq && src_sq->sq_count > 0 && requeue_n > 0) {
         // Prepare destination queue
-        sleepq_t *dst_sq = sleepq_lookup(dst_chan, dst_hash, type, pid);
+        sleepq_t *dst_sq = sleepq_lookup(dst_chan, type, pid, dst_hash);
         if (!dst_sq) {
             dst_sq = sleepq_alloc();
             if (dst_sq) {
                 dst_sq->sq_chan = dst_chan;
-                dst_sq->type = type;
-                dst_sq->pid = pid;
+                dst_sq->sq_type = type;
+                dst_sq->sq_pid = pid;
                 sleepq_insert(dst_sq, dst_hash);
             }
         }
@@ -376,4 +407,13 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n, in
     }
     
     return(woken_count);
+}
+
+int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
+    return sleepq_requeue_internal(src_chan, dst_chan, wake_n, requeue_n, SLEEPQ_TYPE_SHARED, 0);
+}
+
+int sleepq_requeue_private(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
+    if (!current_process) return 0;
+    return sleepq_requeue_internal(src_chan, dst_chan, wake_n, requeue_n, SLEEPQ_TYPE_PRIVATE, current_process->pid);
 }
