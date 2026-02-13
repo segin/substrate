@@ -1,0 +1,104 @@
+.Dd February 11, 2026
+.Dt PR 1
+.Os Substrate
+.Sh NAME
+.Nm pr
+.Nd paginate or columnate files for printing
+.Sh SYNOPSIS
+.Nm
+.Op Fl a
+.Op Fl h Ar header
+.Op Fl l Ar lines
+.Op Fl m
+.Op Fl n Op Ar sep Ns Op Ar digits
+.Op Fl s Op Ar char
+.Op Fl t
+.Op Fl w Ar width
+.Op Fl Ar columns
+.Op Ar file ...
+.Sh DESCRIPTION
+The
+.Nm
+utility formats text files into pages suitable for printing.
+By default,
+.Nm
+prints 66-line pages with a date and page header.
+.Pp
+If no
+.Ar file
+operands are given,
+or if a
+.Ar file
+operand is
+.Sq - ,
+.Nm
+reads standard input.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl a
+In multi-column mode, print columns across the page (row-major order)
+instead of down the page.
+.It Fl h Ar header
+Use
+.Ar header
+instead of the file name in the page header.
+.It Fl l Ar lines
+Set page length to
+.Ar lines .
+Default is 66.
+.It Fl m
+Merge all input files side-by-side in parallel columns.
+.It Fl n Op Ar sep Ns Op Ar digits
+Enable line numbering.
+The optional
+.Ar sep
+character separates the number from text
+(default tab), and
+.Ar digits
+sets number field width (default 5).
+.It Fl s Op Ar char
+Use
+.Ar char
+as the inter-column separator.
+If omitted, a tab is used.
+.It Fl t
+Suppress page headers and trailers.
+.It Fl w Ar width
+Set page width to
+.Ar width
+columns.
+.It Fl Ar columns
+Set number of output columns using legacy
+.Fl 3 ,
+.Fl 4 ,
+and similar forms.
+.El
+.Sh COMPATIBILITY
+This implementation follows POSIX
+.Nm
+behavior for core pagination and columns,
+with UTF-8 display width handling using
+.Xr wcwidth 3
+for better multibyte alignment.
+.Pp
+To avoid conflicts with POSIX
+.Fl n
+line numbering,
+column count is selected with the legacy
+.Fl Ar columns
+form.
+.Sh EXAMPLES
+Format a report with custom page length:
+.Bd -literal -offset indent
+$ pr -l 50 -h "Report" file1 file2
+.Ed
+.Pp
+Read from standard input:
+.Bd -literal -offset indent
+$ cat input.txt | pr -w 100 -2
+.Ed
+.Sh SEE ALSO
+.Xr nl 1 ,
+.Xr paste 1 ,
+.Xr wcwidth 3
