@@ -24,13 +24,17 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_ext2_remove_perf
 	./test_runner
 	./test_minix
 	./test_ext2_perf
 	./test_libc_string
+	./test_ext2_remove_perf
 
 test_ext2_perf: unit/fs/test_ext2_perf_host.c
+	$(CC) $(CFLAGS_KERN) $< -o $@
+
+test_ext2_remove_perf: unit/fs/test_ext2_remove_perf.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 test_minix: unit/fs/test_minix_standalone.c
