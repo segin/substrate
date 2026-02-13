@@ -261,6 +261,7 @@ vop_pathconf(struct vnode *vp, int name, register_t *retval)
 }
 
 /*
+<<<<<<< HEAD
  * vop_open:
  * Open a vnode for I/O.
  */
@@ -500,6 +501,22 @@ vop_strategy(struct vnode *vp, void *bp)
 
     if (vp->v_op && vp->v_op->vop_strategy)
         return vp->v_op->vop_strategy(vp, bp);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_readdir:
+ * Read directory entries.
+ */
+int
+vop_readdir(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag, int *ncookies, uint64_t **cookies)
+{
+    if (vp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (vp->v_op && vp->v_op->vop_readdir)
+        return vp->v_op->vop_readdir(vp, uio, cred, eofflag, ncookies, cookies);
 
     return EOPNOTSUPP;
 }

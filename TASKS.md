@@ -1783,7 +1783,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Docs: `vop_strategy.9`
                     - Acceptance: I/O completed, buffer marked done
             - [ ] **Directories:**
-                - [ ] Implement `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`.
+                - [x] Implement `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Read directory entries
                     - Format: `struct dirent` with d_ino, d_type, d_namlen, d_name

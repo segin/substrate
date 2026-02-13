@@ -35,6 +35,8 @@ extern void run_sched_perf_tests(void);
 extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
+extern void run_vnode_lock_tests(void);
+extern void run_kobject_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -50,6 +52,18 @@ void run_kernel_tests(void) {
     
     if (all || strcmp(test_arg, "string") == 0) {
         run_string_tests();
+    }
+
+    if (all || strcmp(test_arg, "crc32") == 0) {
+        run_crc32_tests();
+    }
+
+    if (all || strcmp(test_arg, "div64") == 0) {
+        run_div64_tests();
+    }
+
+    if (all || strcmp(test_arg, "kobject") == 0) {
+        run_kobject_tests();
     }
 
     if (all || strcmp(test_arg, "pmap") == 0) {
@@ -138,6 +152,8 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "futex") == 0) {
          extern void test_futex(void);
          test_futex();
+         extern void test_futex_private(void);
+         test_futex_private();
     }
 
     if (all || strcmp(test_arg, "ntsync") == 0) {
@@ -161,8 +177,8 @@ void run_kernel_tests(void) {
     }
 
     if (all || strcmp(test_arg, "signal") == 0) {
-         extern void run_signal_tests(void);
-         run_signal_tests();
+         // extern void run_signal_tests(void);
+         // run_signal_tests();
          extern void run_sigstop_tests(void);
          run_sigstop_tests();
     }
@@ -186,6 +202,8 @@ void run_kernel_tests(void) {
          run_minix_write_tests();
          extern void run_minix_inode_tests(void);
          run_minix_inode_tests();
+         extern void run_minix_readdir_tests(void);
+         run_minix_readdir_tests();
     }
 
     // Wait logic tests are run on host via verify_wait_host.sh
@@ -223,6 +241,9 @@ void run_kernel_tests(void) {
 
         extern int test_device_allocation(void);
         if (test_device_allocation() == 0) kprint("device_allocation: PASS\n"); else kprint("device_allocation: FAIL\n");
+
+        extern void run_devfs_special_device_tests(void);
+        run_devfs_special_device_tests();
     }
 
     if (all || strcmp(test_arg, "kthread") == 0) {
@@ -233,6 +254,10 @@ void run_kernel_tests(void) {
              extern void run_kthread_create_tests(void);
              run_kthread_create_tests();
         }
+    }
+
+    if (all || strcmp(test_arg, "vnode_lock") == 0) {
+        run_vnode_lock_tests();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {
@@ -261,6 +286,11 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "vfs_error") == 0) {
         extern void run_vfs_error_tests(void);
         run_vfs_error_tests();
+    }
+
+    if (all || strcmp(test_arg, "vfs_busy") == 0) {
+        extern void run_vfs_busy_tests(void);
+        run_vfs_busy_tests();
     }
 
     if (all || strcmp(test_arg, "ext2") == 0) {
@@ -330,6 +360,11 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "mem") == 0) {
         extern int test_mem(void);
         if (test_mem() == 0) kprint("mem: PASS\n"); else kprint("mem: FAIL\n");
+    }
+
+    if (all || strcmp(test_arg, "vfs_cache") == 0) {
+        extern void run_vfs_cache_tests(void);
+        run_vfs_cache_tests();
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");

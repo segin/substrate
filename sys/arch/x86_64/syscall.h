@@ -2,7 +2,7 @@
 #define _ARCH_SYSCALL_H
 
 #include <stdint.h>
-#include "../../kern/personality.h"
+#include <exec/perso/personality.h>
 
 // x86_64 Syscall Entry (Assembly)
 extern void syscall_entry(void);
