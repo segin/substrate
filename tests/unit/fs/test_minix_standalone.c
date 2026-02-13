@@ -24,6 +24,8 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
+int64_t get_time(void) { return 0; } // Mock get_time for minix.c
+
 // Needed types
 #include <sys/types.h>
 #include <vfs/vfs.h>
