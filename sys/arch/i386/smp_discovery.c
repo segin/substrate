@@ -4,9 +4,30 @@
 #include <arch/i386/early_boot.h>
 #include <string.h>
 #include <stdint.h>
-#include <arch/i386/include/early_boot.h>
+#include "percpu.h"
+#include "gdt.h"
+#include <sys/proc.h>
+#include <arch/x86-common/include/lapic.h>
 
-#define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
+// Externs for Scheduler and IDT
+extern process_t processes[];
+extern thread_t *sched_alloc_thread(process_t *proc);
+
+// IDT Pointer (defined in idt.c)
+typedef struct {
+    uint16_t limit;
+    uint32_t base;
+} __attribute__((packed)) idt_ptr_t;
+extern idt_ptr_t idt_ptr;
+extern void idt_flush(uint32_t);
+
+// TSS Flush (defined in isr.S)
+extern void tss_flush(void);
+
+// GDT Flush (defined in gdt.c/isr.S)
+extern void gdt_flush(uint32_t);
+
+#define P2V(x) ((void*)((uintptr_t)(x) + 0xC0000000))
 
 cpu_info_t cpus[MAX_CPUS];
 int cpu_count = 0;
@@ -64,8 +85,8 @@ void smp_discover_cores(void) {
     struct rsdp_desc *rsdp = NULL;
     for (uint32_t addr = 0xE0000; addr < 0x100000; addr += 16) {
         // Access via virtual address in higher half
-        if (memcmp(VIRTUAL_d(addr), "RSD PTR ", 8) == 0) {
-            rsdp = (struct rsdp_desc*)VIRTUAL_d(addr);
+        if (memcmp(P2V(addr), "RSD PTR ", 8) == 0) {
+            rsdp = (struct rsdp_desc*)P2V(addr);
             break;
         }
     }
@@ -77,7 +98,7 @@ void smp_discover_cores(void) {
 
     // 2. Locate MADT
     // rsdp->rsdt_addr is physical, convert to virtual
-    struct acpi_header *rsdt = (struct acpi_header*)VIRTUAL_d(rsdp->rsdt_addr);
+    struct acpi_header *rsdt = (struct acpi_header*)P2V(rsdp->rsdt_addr);
 
     // Validate RSDT signature
     if (memcmp(rsdt->signature, "RSDT", 4) != 0) {
@@ -90,7 +111,7 @@ void smp_discover_cores(void) {
     struct acpi_header *madt = NULL;
     for (int i = 0; i < entries; i++) {
         // ptrs[i] contains physical address of a table
-        struct acpi_header *h = (struct acpi_header*)VIRTUAL_d(ptrs[i]);
+        struct acpi_header *h = (struct acpi_header*)P2V(ptrs[i]);
         if (memcmp(h->signature, "APIC", 4) == 0) {
             madt = h;
             break;
@@ -154,12 +175,27 @@ static char ap_stacks[MAX_CPUS][4096] __attribute__((aligned(16)));
 static volatile int aps_ready = 0;
 
 void smp_ap_entry(void) {
-    // Signal that we've started
+    // 1. Initialize AP-local state (GDT, TSS, IDT)
+    // Get per-cpu data (using LAPIC ID)
+    struct percpu_data *pcpu = percpu_get();
+
+    // Load GDT
+    gdt_flush((uint32_t)&pcpu->gdt_ptr);
+
+    // Load IDT
+    idt_flush((uint32_t)&idt_ptr);
+
+    // Load TSS
+    tss_flush();
+
+    // Load LDT (null)
+    __asm__ volatile("lldt %%ax" : : "a" (0));
+
+    // Signal that we've started and initialized
     __sync_fetch_and_add(&aps_ready, 1);
     
     kprint("SMP: AP Core online (LAPIC ID: ");
     // Get and print LAPIC ID
-    extern uint32_t lapic_get_id(void);
     uint32_t id = lapic_get_id();
     char buf[4];
     buf[0] = '0' + (id % 10);
@@ -168,10 +204,10 @@ void smp_ap_entry(void) {
     kprint(")\n");
     
     // Enable LAPIC on this AP
-    extern void lapic_enable(uint8_t);
     lapic_enable(0xFF);  // Spurious vector
     
-    // TODO: Initialize AP-local state (GDT, TSS, IDT, scheduler)
+    // Enable Interrupts
+    __asm__ volatile("sti");
     
     // Halt and wait for work
     while(1) {
@@ -181,8 +217,6 @@ void smp_ap_entry(void) {
 
 // Boot a single AP
 int smp_boot_ap(uint8_t apic_id) {
-    extern void lapic_send_init(uint8_t);
-    extern void lapic_send_sipi(uint8_t, uint8_t);
     
     // 1. Copy trampoline to low memory
     size_t len = (uintptr_t)trampoline_end - (uintptr_t)trampoline_start;
@@ -203,6 +237,31 @@ int smp_boot_ap(uint8_t apic_id) {
     }
     if (cpu_idx < 0) return -1;
     
+    // 2a. Initialize Per-CPU structures for the new core
+    percpu_init_cpu(cpu_idx);
+
+    // 2b. Initialize GDT and TSS for the new core
+    gdt_init_cpu(cpu_idx);
+
+    // 2c. Set Kernel Stack (ESP0) in TSS
+    struct percpu_data *pcpu = percpu_get_cpu(cpu_idx);
+    pcpu->tss.esp0 = (uint32_t)&ap_stacks[cpu_idx][4096];
+
+    // 2d. Create Idle Thread for the new core
+    thread_t *idle = sched_alloc_thread(&processes[0]);
+    if (idle) {
+        idle->state = THREAD_RUNNING;
+        idle->on_runqueue = 0;
+        idle->kstack_ptr = pcpu->tss.esp0;
+        idle->kstack_top = pcpu->tss.esp0;
+        idle->priority = 0;
+        idle->sched_class = SCHED_IDLE;
+        idle->proc = &processes[0]; // Ensure it belongs to kernel process
+
+        pcpu->idle = idle;
+        pcpu->current = idle;
+    }
+
     *stk_ptr = (uint32_t)&ap_stacks[cpu_idx][4096];
     *ent_ptr = (uint32_t)smp_ap_entry;
 
@@ -211,20 +270,23 @@ int smp_boot_ap(uint8_t apic_id) {
     // 3. Send INIT IPI -> Wait 10ms -> SIPI -> Wait 200us -> SIPI
     lapic_send_init(apic_id);
     
-    // Delay ~10ms (simple busy wait - TODO: use proper timer)
-    for (volatile int i = 0; i < 1000000; i++) { }
+    // Delay 10ms
+    lapic_timer_delay_ms(10);
     
     // First SIPI
     lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
     
-    // Delay ~200us
-    for (volatile int i = 0; i < 20000; i++) { }
+    // Delay 200us
+    lapic_timer_delay_us(200);
     
     // Second SIPI (per Intel spec)
     lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
     
-    // Wait for AP to signal readiness (timeout ~100ms)
-    for (volatile int i = 0; i < 10000000 && aps_ready == old_ready; i++) { }
+    // Wait for AP to signal readiness (timeout 100ms)
+    for (int i = 0; i < 100; i++) {
+        if (aps_ready > old_ready) break;
+        lapic_timer_delay_ms(1);
+    }
     
     if (aps_ready > old_ready) {
         return 0;  // Success

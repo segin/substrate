@@ -1,0 +1,107 @@
+.TH TAR 1 "February 2026" "Substrate" "User Commands"
+.SH NAME
+tar \- create, list, append, update, and extract tar archives
+.SH SYNOPSIS
+.B tar
+.B -cxtur
+.RB [ -v ]
+.RB [ -f " archive" ]
+.RI [ options ]
+.RI [ files ...]
+.SH DESCRIPTION
+.B tar
+implements a POSIX-style archiver with ustar and PAX support.
+The default output format is PAX to preserve long paths and large numeric metadata.
+.SH OPTIONS
+.TP
+.BR -c
+Create an archive.
+.TP
+.BR -x
+Extract an archive.
+.TP
+.BR -t
+List archive contents.
+.TP
+.BR -r , " --concatenate"
+Append files to an existing regular-file archive.
+.TP
+.BR -u
+Update archive with files changed since the existing archive/snapshot state.
+.TP
+.BR -f " file"
+Use archive
+.IR file .
+Use
+.B -
+for standard input/output.
+.TP
+.BR --format=ustar | pax
+Choose archive format.
+.TP
+.BR -z , " --gzip"
+Use external
+.B gzip
+for compression/decompression.
+.TP
+.BR -J , " --xz"
+Use external
+.B xz
+for compression/decompression.
+.TP
+.BR -j , " --bzip2"
+Use external
+.B bzip2
+for compression/decompression.
+.TP
+.BR --safe-extract
+Reject archive entries that are absolute or contain parent traversal components.
+.TP
+.BR --strip-components = N
+Strip the first
+.I N
+path components while extracting.
+.TP
+.BR --no-overwrite
+Do not overwrite existing files while extracting.
+.TP
+.BR --no-same-owner
+Do not restore archived ownership.
+.TP
+.BR --preserve-permissions
+Restore archived permissions.
+.TP
+.BR --keep-directory-symlink
+Fail when extracting through symlinked parent directories.
+.TP
+.BR --listed-incremental = SNAP
+Enable snapshot-based incremental creation/update.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 2
+Usage error or archive processing error.
+.SH EXAMPLES
+Create archive:
+.PP
+.EX
+tar -cf src.tar src/
+.EE
+.PP
+Extract safely:
+.PP
+.EX
+tar -xf src.tar --safe-extract --strip-components=1
+.EE
+.PP
+Incremental backup:
+.PP
+.EX
+tar -cf backup.tar --listed-incremental=.snap project/
+tar -uf backup.tar --listed-incremental=.snap project/
+.EE
+.SH SEE ALSO
+.BR pax (1),
+.BR cpio (1)
