@@ -1,30 +1,41 @@
-# PAX - POSIX Archive Interchange
+# pax(1) for Substrate
 
-This is a clean-room implementation of the POSIX `pax` utility for Substrate OS.
-It supports `ustar` and `cpio` formats, along with the PAX extended header format.
+`usr.bin/pax` provides a standalone POSIX-style archive interchange utility.
 
-## Features
+## Implemented capabilities
 
-- **Read/Write/List/Copy/Append** modes as per POSIX.
-- **ustar** and **cpio** (odc/newc) support.
-- **PAX** extended headers (stubbed).
-- **Substitution** (`-s`) via regex (stubbed).
-- **Directory Traversal** and safe file handling.
+- Read/list/extract (`-r`) and write/create (`-w`) archives.
+- Copy mode (`-r -w`) for file tree copies.
+- Archive selection with `-f` and output format selection with `-x pax|ustar|cpio`.
+- PAX extended headers are generated and parsed for long names and numeric overflow.
+- Reads/writes ustar and cpio newc for interoperability.
+- Substitution rules (`-s`) are applied in command-line order.
+- Path safety defaults to `--no-absolute-paths` style extraction behavior.
+- Symlink behavior controls (`-L`) and overwrite suppression (`-n`/`-k`).
+- Preservation controls (`-p`) for mode/time/owner restoration.
 
 ## Build
 
-    make
+```sh
+make -C usr.bin/pax
+```
 
-## Usage
+Host build:
 
-    pax -w -f archive.tar file1 file2
-    pax -r -f archive.tar
-    pax -rw src_dir dest_dir
+```sh
+make -C usr.bin/pax NATIVE_BUILD=1
+```
 
-## Status
+## Interop quick examples
 
-- Core infrastructure: Complete
-- Format handling: Basic ustar/cpio identification and parsing.
-- I/O: Buffered I/O stubs.
-- Regex: Stubs.
-- Traversal: Non-recursive argument walking.
+```sh
+# create pax archive
+./usr.bin/pax/pax -w -x pax -f out.pax dir
+
+# extract to current directory
+./usr.bin/pax/pax -r -f out.pax
+
+# convert ustar -> pax
+./usr.bin/pax/pax -r -f old.tar
+./usr.bin/pax/pax -w -x pax -f new.pax extracted-tree
+```
