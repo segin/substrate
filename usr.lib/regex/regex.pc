@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: regex
+Description: Substrate regex library
+Version: 0.1.0
+Libs: -L${libdir} -lregex
+Cflags: -I${includedir}

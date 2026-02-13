@@ -12,6 +12,7 @@
 
 extern process_t *current_process;
 extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+extern void test_sysctl_handlers(void);
 
 /* Custom sysctl handler to verify request parameters */
 static int test_uid_check(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
@@ -57,6 +58,9 @@ struct sysctl_oid sysctl_debug_test_uid = {
 
 void test_sysctl(void) {
     kprint("sysctl: starting tests...\n");
+
+    /* Run handler unit tests */
+    test_sysctl_handlers();
 
     int name[] = { CTL_DEBUG, OID_DEBUG_TEST_UID };
     int error;

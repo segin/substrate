@@ -73,9 +73,9 @@ static struct dirent dev_dirent;
 static struct dirent *storage_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     if (index < (uint64_t)storage_device_count) {
-        strncpy(dev_dirent.name, storage_devices[index]->name, sizeof(dev_dirent.name) - 1);
-        dev_dirent.name[sizeof(dev_dirent.name) - 1] = '\0';
-        dev_dirent.ino = index + 1;
+        strncpy(dev_dirent.d_name, storage_devices[index]->name, sizeof(dev_dirent.d_name) - 1);
+        dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
+        dev_dirent.d_ino = index + 1;
         return &dev_dirent;
     }
     return NULL;
@@ -103,22 +103,22 @@ static struct dirent *devfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     // First entry: storage subdirectory
     if (index == 0) {
-        strcpy(dev_dirent.name, "storage");
-        dev_dirent.ino = 1;
+        strcpy(dev_dirent.d_name, "storage");
+        dev_dirent.d_ino = 1;
         return &dev_dirent;
     }
     // Then tty
     if (index == 1) {
-        strcpy(dev_dirent.name, "tty");
-        dev_dirent.ino = 2;
+        strcpy(dev_dirent.d_name, "tty");
+        dev_dirent.d_ino = 2;
         return &dev_dirent;
     }
     // Then char devices
     uint64_t char_idx = index - 2;
     if (char_idx < (uint64_t)char_device_count) {
-        strncpy(dev_dirent.name, char_devices[char_idx]->name, sizeof(dev_dirent.name) - 1);
-        dev_dirent.name[sizeof(dev_dirent.name) - 1] = '\0';
-        dev_dirent.ino = char_idx + 3;
+        strncpy(dev_dirent.d_name, char_devices[char_idx]->name, sizeof(dev_dirent.d_name) - 1);
+        dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
+        dev_dirent.d_ino = char_idx + 3;
         return &dev_dirent;
     }
     return NULL;

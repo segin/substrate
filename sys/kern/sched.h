@@ -2,10 +2,10 @@
 #define _KERN_SCHED_H
 
 #include <sys/proc.h>
+#include <sys/smp.h>
 
 /* Thread and CPU limits */
 #define MAX_THREADS 64
-#define MAX_CPUS 32
 
 /* IPI vector for scheduler preemption (must match IDT setup) */
 #define SCHED_IPI_VECTOR 0xFD
@@ -42,6 +42,7 @@ int sched_fork_process(process_t *parent, void *stack);
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg);
 
 void sched_yield(void);
+void sched_switch(thread_t *next);
 int sched_get_current_tid(void);
 void sched_set_priority(int tid, sched_class_t cls, int prio);
 void sched_tick(void);

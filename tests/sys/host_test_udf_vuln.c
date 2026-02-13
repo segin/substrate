@@ -5,11 +5,6 @@
 #include <stddef.h>
 #include <assert.h>
 
-// Mocking headers and types
-typedef int64_t off_t;
-typedef uint32_t uid_t;
-typedef uint32_t gid_t;
-
 // Mock kprint
 void kprint(const char *str) {
     // printf("kprint: %s", str);
@@ -21,6 +16,7 @@ void *kzalloc(size_t size) { return calloc(1, size); }
 void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
 
 // Include UDF and VFS headers to get types
+// Use mocks for sys/types.h (via -I tests/sys/vuln_mocks)
 #include <fs/udf/udf.h>
 #include <vfs/vfs.h>
 #include <vfs/vnode.h>
@@ -91,6 +87,8 @@ int main() {
 
     char *name_ptr = (char *)alloc_area + 38 + fid->impl_use_length;
     memset(name_ptr, 'A', name_len);
+    // Mark compressed unicode (8)
+    name_ptr[0] = 8;
 
     uint32_t fid_size = 38 + fid->impl_use_length + fid->file_id_length;
     fid_size = (fid_size + 3) & ~3;
@@ -121,7 +119,7 @@ int main() {
     // Check for corruption
     printf("udf_root byte 0 after:  %02X\n", root_bytes[0]);
 
-    if (root_bytes[0] == 0x41) {
+    if (root_bytes[0] == 0x41) { // 'A'
         printf("FAILURE: udf_root was corrupted! Vulnerability reproduced.\n");
         return 1;
     } else if (root_bytes[0] == 0x55) {

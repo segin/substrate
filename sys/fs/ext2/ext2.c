@@ -144,7 +144,7 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         kfree(block_buf, 4096);
         return -1;
     }
-        return -1;
+
     // Update the inode data
     memcpy(block_buf + inode_offset, inode, sizeof(ext2_inode_t));
     
@@ -249,24 +249,31 @@ void ext2_get_blocks_extent(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_i
 }
 
 // Read data from an inode at a given offset
-uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, void *buffer) {
+uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *buffer) {
+    ext2_fs_t *fs = node->fs;
+    ext2_inode_t *inode = &node->inode;
+
     if (offset >= inode->i_size) return 0;
     if (offset + size > inode->i_size) size = inode->i_size - offset;
     
-    // Allocate scratch buffers
-    uint32_t block_size = fs->block_size;
-    uint8_t *block_buf = kmalloc(block_size);
-    uint32_t *indirect = kmalloc(block_size);
-    uint32_t *dindirect = kmalloc(block_size);
-    uint32_t *tindirect = kmalloc(block_size);
+    mutex_lock(&node->lock);
 
-    if (!block_buf || !indirect || !dindirect || !tindirect) {
-        if (block_buf) kfree(block_buf, block_size);
-        if (indirect) kfree(indirect, block_size);
-        if (dindirect) kfree(dindirect, block_size);
-        if (tindirect) kfree(tindirect, block_size);
+    // Lazy allocate scratch buffers
+    uint32_t block_size = fs->block_size;
+    if (!node->block_buf) node->block_buf = kmalloc(block_size);
+    if (!node->indirect_buf) node->indirect_buf = kmalloc(block_size);
+    if (!node->dindirect_buf) node->dindirect_buf = kmalloc(block_size);
+    if (!node->tindirect_buf) node->tindirect_buf = kmalloc(block_size);
+
+    if (!node->block_buf || !node->indirect_buf || !node->dindirect_buf || !node->tindirect_buf) {
+        mutex_unlock(&node->lock);
         return 0;
     }
+
+    uint8_t *block_buf = node->block_buf;
+    uint32_t *indirect = node->indirect_buf;
+    uint32_t *dindirect = node->dindirect_buf;
+    uint32_t *tindirect = node->tindirect_buf;
 
     uint8_t *buf = (uint8_t *)buffer;
     uint32_t total_read = 0;
@@ -333,11 +340,7 @@ uint32_t ext2_inode_read(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint3
         }
     }
     
-    kfree(block_buf, block_size);
-    kfree(indirect, block_size);
-    kfree(dindirect, block_size);
-    kfree(tindirect, block_size);
-
+    mutex_unlock(&node->lock);
     return total_read;
 }
 
@@ -385,20 +388,28 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
 }
 
 // Write data to an inode at a given offset
-uint32_t ext2_inode_write(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint32_t size, const void *buffer) {
-    uint32_t block_size = fs->block_size;
-    uint8_t *block_buf = kmalloc(block_size);
-    uint32_t *indirect = kmalloc(block_size);
-    uint32_t *dindirect = kmalloc(block_size);
-    uint32_t *tindirect = kmalloc(block_size);
+uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const void *buffer) {
+    ext2_fs_t *fs = node->fs;
+    ext2_inode_t *inode = &node->inode;
 
-    if (!block_buf || !indirect || !dindirect || !tindirect) {
-        if (block_buf) kfree(block_buf, block_size);
-        if (indirect) kfree(indirect, block_size);
-        if (dindirect) kfree(dindirect, block_size);
-        if (tindirect) kfree(tindirect, block_size);
+    mutex_lock(&node->lock);
+
+    // Lazy allocate
+    uint32_t block_size = fs->block_size;
+    if (!node->block_buf) node->block_buf = kmalloc(block_size);
+    if (!node->indirect_buf) node->indirect_buf = kmalloc(block_size);
+    if (!node->dindirect_buf) node->dindirect_buf = kmalloc(block_size);
+    if (!node->tindirect_buf) node->tindirect_buf = kmalloc(block_size);
+
+    if (!node->block_buf || !node->indirect_buf || !node->dindirect_buf || !node->tindirect_buf) {
+        mutex_unlock(&node->lock);
         return 0;
     }
+
+    uint8_t *block_buf = node->block_buf;
+    uint32_t *indirect = node->indirect_buf;
+    uint32_t *dindirect = node->dindirect_buf;
+    uint32_t *tindirect = node->tindirect_buf;
 
     const uint8_t *buf = (const uint8_t *)buffer;
     uint32_t total_written = 0;
@@ -442,11 +453,7 @@ uint32_t ext2_inode_write(ext2_fs_t *fs, ext2_inode_t *inode, off_t offset, uint
     extern int64_t get_time(void);
     inode->i_mtime = (uint32_t)get_time();
     
-    kfree(block_buf, block_size);
-    kfree(indirect, block_size);
-    kfree(dindirect, block_size);
-    kfree(tindirect, block_size);
-
+    mutex_unlock(&node->lock);
     return total_written;
 }
 
@@ -461,13 +468,28 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     ctx->inode_num = inode_num;
     memcpy(&ctx->inode, inode, sizeof(ext2_inode_t));
     
+    // Initialize lock for scratch buffers
+    mutex_init(&ctx->lock, "ext2_node");
+
+    // If this cache slot was previously used, it might have allocated buffers.
+    // We should free them to avoid leaks when reusing the slot for a new inode.
+    // In a more sophisticated cache, we might reuse them, but here we prioritize correctness.
+    uint32_t block_size = fs->block_size; // Assumption: block_size matches what was allocated
+    // Note: If block_size changed (unlikely for same FS mount), we definitely need to free.
+    // Since we only support one mount (ext2_fs) globally right now, block_size is constant.
+
+    if (ctx->block_buf) { kfree(ctx->block_buf, block_size); ctx->block_buf = NULL; }
+    if (ctx->indirect_buf) { kfree(ctx->indirect_buf, block_size); ctx->indirect_buf = NULL; }
+    if (ctx->dindirect_buf) { kfree(ctx->dindirect_buf, block_size); ctx->dindirect_buf = NULL; }
+    if (ctx->tindirect_buf) { kfree(ctx->tindirect_buf, block_size); ctx->tindirect_buf = NULL; }
+
     memset(node, 0, sizeof(fs_node_t));
     node->inode = inode_num;
     node->length = inode->i_size;
     node->mask = inode->i_mode & 0xFFF;
     node->uid = inode->i_uid;
     node->gid = inode->i_gid;
-    node->impl = (uint32_t)(uintptr_t)ctx;
+    node->impl = (uintptr_t)ctx;
     
     // Set type and callbacks based on inode mode
     uint16_t type = inode->i_mode & 0xF000;
@@ -505,7 +527,7 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
         memcpy(buf, (char *)inode->i_block, link_size);
     } else {
         // Slow symlink: target is in data blocks
-        ext2_inode_read(ctx->fs, inode, 0, link_size, (uint8_t *)buf);
+        ext2_inode_read(ctx, 0, link_size, (uint8_t *)buf);
     }
     buf[link_size] = '\0';
     return link_size;
@@ -514,7 +536,7 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
 // File read operation
 size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
-    return ext2_inode_read(ctx->fs, &ctx->inode, offset, size, buffer);
+    return ext2_inode_read(ctx, offset, size, buffer);
 }
 
 // File write operation
@@ -522,7 +544,7 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
-    uint32_t written = ext2_inode_write(fs, &ctx->inode, offset, size, buffer);
+    uint32_t written = ext2_inode_write(ctx, offset, size, buffer);
     
     // Write updated inode back to disk
     if (written > 0) {
@@ -543,19 +565,24 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
     uint32_t pos = 0;
     uint32_t cur_idx = 0;
     
-    uint32_t block_size = fs->block_size;
-    uint8_t *ext2_dir_buf = kmalloc(block_size);
-    uint32_t *indirect = kmalloc(block_size);
-    uint32_t *dindirect = kmalloc(block_size);
-    uint32_t *tindirect = kmalloc(block_size);
+    mutex_lock(&ctx->lock);
 
-    if (!ext2_dir_buf || !indirect || !dindirect || !tindirect) {
-        if (ext2_dir_buf) kfree(ext2_dir_buf, block_size);
-        if (indirect) kfree(indirect, block_size);
-        if (dindirect) kfree(dindirect, block_size);
-        if (tindirect) kfree(tindirect, block_size);
+    // Lazy allocate
+    uint32_t block_size = fs->block_size;
+    if (!ctx->block_buf) ctx->block_buf = kmalloc(block_size);
+    if (!ctx->indirect_buf) ctx->indirect_buf = kmalloc(block_size);
+    if (!ctx->dindirect_buf) ctx->dindirect_buf = kmalloc(block_size);
+    if (!ctx->tindirect_buf) ctx->tindirect_buf = kmalloc(block_size);
+
+    if (!ctx->block_buf || !ctx->indirect_buf || !ctx->dindirect_buf || !ctx->tindirect_buf) {
+        mutex_unlock(&ctx->lock);
         return NULL;
     }
+
+    uint8_t *ext2_dir_buf = ctx->block_buf;
+    uint32_t *indirect = ctx->indirect_buf;
+    uint32_t *dindirect = ctx->dindirect_buf;
+    uint32_t *tindirect = ctx->tindirect_buf;
 
     struct dirent *result = NULL;
 
@@ -575,13 +602,14 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
             if (de->inode != 0 && de->name_len > 0) {
                 if (cur_idx == index) {
                     // Found it - store in context specific dirent
-                    ctx->current_dirent.ino = de->inode;
+                    ctx->current_dirent.d_ino = de->inode;
                     uint32_t len = de->name_len;
-                    if (len >= sizeof(ctx->current_dirent.name)) {
-                        len = sizeof(ctx->current_dirent.name) - 1;
+                    // Fix: Ensure name fits in buffer to prevent overflow
+                    if (len >= sizeof(ctx->current_dirent.d_name)) {
+                        len = sizeof(ctx->current_dirent.d_name) - 1;
                     }
-                    memcpy(ctx->current_dirent.name, de->name, len);
-                    ctx->current_dirent.name[len] = '\0';
+                    memcpy(ctx->current_dirent.d_name, de->name, len);
+                    ctx->current_dirent.d_name[len] = '\0';
                     result = &ctx->current_dirent;
                     goto cleanup;
                 }
@@ -595,34 +623,39 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
     }
     
 cleanup:
-    kfree(ext2_dir_buf, block_size);
-    kfree(indirect, block_size);
-    kfree(dindirect, block_size);
-    kfree(tindirect, block_size);
+    mutex_unlock(&ctx->lock);
     return result;
 }
 
 // Find entry by name in directory
 fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
+    if (!node || !name) return NULL;
+
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
+    size_t name_len = strlen(name);
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
     
-    uint32_t block_size = fs->block_size;
-    uint8_t *ext2_dir_buf = kmalloc(block_size);
-    uint32_t *indirect = kmalloc(block_size);
-    uint32_t *dindirect = kmalloc(block_size);
-    uint32_t *tindirect = kmalloc(block_size);
+    mutex_lock(&ctx->lock);
 
-    if (!ext2_dir_buf || !indirect || !dindirect || !tindirect) {
-        if (ext2_dir_buf) kfree(ext2_dir_buf, block_size);
-        if (indirect) kfree(indirect, block_size);
-        if (dindirect) kfree(dindirect, block_size);
-        if (tindirect) kfree(tindirect, block_size);
+    // Lazy allocate
+    uint32_t block_size = fs->block_size;
+    if (!ctx->block_buf) ctx->block_buf = kmalloc(block_size);
+    if (!ctx->indirect_buf) ctx->indirect_buf = kmalloc(block_size);
+    if (!ctx->dindirect_buf) ctx->dindirect_buf = kmalloc(block_size);
+    if (!ctx->tindirect_buf) ctx->tindirect_buf = kmalloc(block_size);
+
+    if (!ctx->block_buf || !ctx->indirect_buf || !ctx->dindirect_buf || !ctx->tindirect_buf) {
+        mutex_unlock(&ctx->lock);
         return NULL;
     }
+
+    uint8_t *ext2_dir_buf = ctx->block_buf;
+    uint32_t *indirect = ctx->indirect_buf;
+    uint32_t *dindirect = ctx->dindirect_buf;
+    uint32_t *tindirect = ctx->tindirect_buf;
 
     fs_node_t *result_node = NULL;
 
@@ -639,7 +672,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
             
             if (de->inode != 0 && de->name_len > 0) {
                 // Compare names
-                if (de->name_len == strlen(name) && 
+                if (de->name_len == name_len &&
                     strncmp(de->name, name, de->name_len) == 0) {
                     // Found it - read the inode and return a node
                     ext2_inode_t inode;
@@ -664,10 +697,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     }
     
 cleanup:
-    kfree(ext2_dir_buf, block_size);
-    kfree(indirect, block_size);
-    kfree(dindirect, block_size);
-    kfree(tindirect, block_size);
+    mutex_unlock(&ctx->lock);
     return result_node;
 }
 
@@ -738,7 +768,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_root.flags = FS_DIRECTORY;
     ext2_root.inode = EXT2_ROOT_INO;
     ext2_root.length = root_inode.i_size;
-    ext2_root.impl = (uint32_t)(uintptr_t)&ext2_root_ctx;
+    ext2_root.impl = (uintptr_t)&ext2_root_ctx;
     ext2_root.readdir = ext2_readdir;
     ext2_root.finddir = ext2_finddir;
     
@@ -996,19 +1026,24 @@ int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) {
     // Calculate required entry size (aligned to 4 bytes)
     uint32_t required_size = ((8 + name_len + 3) / 4) * 4;
     
-    uint32_t block_size = fs->block_size;
-    uint8_t *block_buf = kmalloc(block_size);
-    uint32_t *indirect = kmalloc(block_size);
-    uint32_t *dindirect = kmalloc(block_size);
-    uint32_t *tindirect = kmalloc(block_size);
+    mutex_lock(&ctx->lock);
 
-    if (!block_buf || !indirect || !dindirect || !tindirect) {
-        if (block_buf) kfree(block_buf, block_size);
-        if (indirect) kfree(indirect, block_size);
-        if (dindirect) kfree(dindirect, block_size);
-        if (tindirect) kfree(tindirect, block_size);
+    // Lazy allocate
+    uint32_t block_size = fs->block_size;
+    if (!ctx->block_buf) ctx->block_buf = kmalloc(block_size);
+    if (!ctx->indirect_buf) ctx->indirect_buf = kmalloc(block_size);
+    if (!ctx->dindirect_buf) ctx->dindirect_buf = kmalloc(block_size);
+    if (!ctx->tindirect_buf) ctx->tindirect_buf = kmalloc(block_size);
+
+    if (!ctx->block_buf || !ctx->indirect_buf || !ctx->dindirect_buf || !ctx->tindirect_buf) {
+        mutex_unlock(&ctx->lock);
         return -1;
     }
+
+    uint8_t *block_buf = ctx->block_buf;
+    uint32_t *indirect = ctx->indirect_buf;
+    uint32_t *dindirect = ctx->dindirect_buf;
+    uint32_t *tindirect = ctx->tindirect_buf;
 
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
@@ -1106,10 +1141,7 @@ int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) {
     result = 0;
     
 cleanup:
-    kfree(block_buf, block_size);
-    kfree(indirect, block_size);
-    kfree(dindirect, block_size);
-    kfree(tindirect, block_size);
+    mutex_unlock(&ctx->lock);
     return result;
 }
 
@@ -1119,24 +1151,31 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
-    
-    uint32_t block_size = fs->block_size;
-    uint8_t *block_buf = kmalloc(block_size);
-    uint32_t *indirect = kmalloc(block_size);
-    uint32_t *dindirect = kmalloc(block_size);
-    uint32_t *tindirect = kmalloc(block_size);
+    size_t name_len = strlen(name);
 
-    if (!block_buf || !indirect || !dindirect || !tindirect) {
-        if (block_buf) kfree(block_buf, block_size);
-        if (indirect) kfree(indirect, block_size);
-        if (dindirect) kfree(dindirect, block_size);
-        if (tindirect) kfree(tindirect, block_size);
+    mutex_lock(&ctx->lock);
+
+    // Lazy allocate
+    uint32_t block_size = fs->block_size;
+    if (!ctx->block_buf) ctx->block_buf = kmalloc(block_size);
+    if (!ctx->indirect_buf) ctx->indirect_buf = kmalloc(block_size);
+    if (!ctx->dindirect_buf) ctx->dindirect_buf = kmalloc(block_size);
+    if (!ctx->tindirect_buf) ctx->tindirect_buf = kmalloc(block_size);
+
+    if (!ctx->block_buf || !ctx->indirect_buf || !ctx->dindirect_buf || !ctx->tindirect_buf) {
+        mutex_unlock(&ctx->lock);
         return -1;
     }
+
+    uint8_t *block_buf = ctx->block_buf;
+    uint32_t *indirect = ctx->indirect_buf;
+    uint32_t *dindirect = ctx->dindirect_buf;
+    uint32_t *tindirect = ctx->tindirect_buf;
 
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
     int result = -1;
+    // uint32_t name_len = strlen(name); // Removed duplicate
     
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
@@ -1154,7 +1193,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
             if (de->rec_len == 0) break;
             
             // Is this the entry to remove?
-            if (de->inode != 0 && de->name_len == strlen(name) &&
+            if (de->inode != 0 && de->name_len == name_len &&
                 strncmp(de->name, name, de->name_len) == 0) {
                 
                 // Merge with previous entry if possible
@@ -1183,9 +1222,6 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     }
     
 cleanup:
-    kfree(block_buf, block_size);
-    kfree(indirect, block_size);
-    kfree(dindirect, block_size);
-    kfree(tindirect, block_size);
+    mutex_unlock(&ctx->lock);
     return result;
 }

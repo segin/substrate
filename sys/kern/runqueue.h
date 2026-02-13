@@ -8,6 +8,7 @@
 #define _KERN_RUNQUEUE_H
 
 #include <sys/proc.h>
+#include <sys/lock.h>
 #include <stdint.h>
 
 // Priority levels within each class
@@ -49,7 +50,7 @@ typedef struct runqueue {
     uint64_t last_update;   // Timestamp of last load update
     
     // Lock (for SMP)
-    volatile uint32_t lock;
+    spinlock_t lock;
     
     // CPU ID owning this runqueue
     uint32_t cpu_id;

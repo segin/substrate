@@ -1,40 +1,61 @@
 .\" Process this file with
 .\" groff -man -Tascii full.4
 .\"
-.TH FULL 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.TH FULL 4 "February 2026" "Substrate Kernel" "Device Drivers Manual"
 .SH NAME
-full \- always full device
+full \- always-full device
 .SH SYNOPSIS
 .B /dev/full
 .SH DESCRIPTION
 The
 .B full
-device behaves like
-.B /dev/zero
-when read, returning an endless supply of null bytes.
-However, any attempt to write to
-.B /dev/full
-fails with the error
-.B ENOSPC
-(No space left on device).
+character device emulates a storage target with no free space.
 .PP
-This device is useful for testing how programs handle disk-full conditions.
+Reads from
+.B /dev/full
+return zero-filled bytes (same read behavior as
+.BR zero (4) ).
+.PP
+Writes to
+.B /dev/full
+always fail with
+.B ENOSPC
+and never report partial success.
+.PP
+.BR lseek (2)
+operations succeed and update file offsets, but offsets do not change read/write semantics.
+.PP
+.BR poll (2)
+reports both
+.B POLLIN
+and
+.B POLLOUT
+as ready: reads return immediately and writes fail immediately without blocking.
+.BR ioctl (2)
+is not supported.
+.PP
+.BR mmap (2)
+is not supported for
+.BR /dev/full .
+.SH FILES
+.B /dev/full
+(character device, major 1, minor 7)
 .SH ERRORS
 .TP
 .B ENOSPC
-Returned for all write operations.
-.SH EXAMPLE
-Test error handling:
-.PP
-.nf
-    echo "test" > /dev/full
-    # Outputs: No space left on device
-.fi
-.SH FILES
+Any write-like operation.
 .TP
-.B /dev/full
-The full device special file (character device, major 1, minor 7).
+.B ENOTTY
+Any
+.BR ioctl (2)
+request.
+.TP
+.B EINVAL
+Any
+.BR mmap (2)
+attempt.
 .SH SEE ALSO
 .BR null (4),
 .BR zero (4),
-.BR intro (4)
+.BR poll (2),
+.BR mmap (2)

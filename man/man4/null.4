@@ -1,29 +1,62 @@
 .\" Process this file with
 .\" groff -man -Tascii null.4
 .\"
-.TH NULL 4 "January 2026" "Substrate Kernel" "Device Drivers Manual"
+.TH NULL 4 "February 2026" "Substrate Kernel" "Device Drivers Manual"
 .SH NAME
-null \- null device (data sink)
+null \- the null device
 .SH SYNOPSIS
 .B /dev/null
 .SH DESCRIPTION
 The
 .B null
-device accepts and discards all data written to it.
-Reading from
-.B /dev/null
-always returns end-of-file (read returns 0).
+character device discards all bytes written to it and returns end-of-file on read.
 .PP
-This device is commonly used to discard unwanted output, for example:
+Reads always return
+.B 0
+(EOF).
+Writes always succeed and return the requested byte count.
+.PP
+.BR lseek (2)
+operations succeed and update file offsets, but offsets do not affect device behavior.
+.PP
+.BR poll (2)
+reports
+.B POLLOUT
+as ready and does not report
+.BR POLLIN .
+.BR ioctl (2)
+is not supported.
+.PP
+.BR mmap (2)
+is not supported for
+.BR /dev/null .
+.SH FILES
+.B /dev/null
+.SH ERRORS
+.TP
+.B ENOTTY
+Any
+.BR ioctl (2)
+request.
+.TP
+.B EINVAL
+Any
+.BR mmap (2)
+attempt.
+.SH EXAMPLES
+Discard command output:
 .PP
 .nf
-    command > /dev/null 2>&1
+    $ echo "hi" > /dev/null
 .fi
-.SH FILES
-.TP
-.B /dev/null
-The null device special file (character device, major 1, minor 3).
+.PP
+Read EOF immediately:
+.PP
+.nf
+    $ cat /dev/null
+.fi
 .SH SEE ALSO
-.BR zero (4),
 .BR full (4),
-.BR intro (4)
+.BR zero (4),
+.BR poll (2),
+.BR mmap (2)

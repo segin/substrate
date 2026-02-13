@@ -58,6 +58,8 @@
 #define SYS_MUNMAP  91
 #define SYS_TRUNCATE 92
 #define SYS_FTRUNCATE 93
+#define SYS_SETPRIORITY 96
+#define SYS_GETPRIORITY 100
 #define SYS_UMASK   60
 #define SYS_STAT    106
 #define SYS_LSTAT   107
@@ -95,6 +97,7 @@
 #define SYS_PROC_EXE     252
 #define SYS_PROC_CMDLINE 253
 #define SYS_PROC_ENVIRON 254
+#define SYS_VM_STATS     255
 #define SYS_CLOCK_GETTIME 265
 #define SYS_mlock       150
 #define SYS_munlock     151
