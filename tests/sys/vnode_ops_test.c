@@ -6,6 +6,12 @@
 #include <string.h>
 #include "tests.h"
 
+/* Missing prototypes in vnode.h */
+int vop_access(struct vnode *vp, int mode, struct ucred *cred);
+int vop_getattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_setattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_pathconf(struct vnode *vp, int name, register_t *retval);
+
 static int
 mock_vop_create(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap)
 {
@@ -75,6 +81,13 @@ mock_vop_pathconf(struct vnode *vp, int name, register_t *retval)
     return 0;
 }
 
+static int
+mock_vop_readdir(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag, int *ncookies, uint64_t **cookies)
+{
+    (void)vp; (void)uio; (void)cred; (void)eofflag; (void)ncookies; (void)cookies;
+    return 0; // Success
+}
+
 static struct vnodeops mock_ops = {
     .vop_create = mock_vop_create,
     .vop_mknod = mock_vop_mknod,
@@ -85,6 +98,7 @@ static struct vnodeops mock_ops = {
     .vop_getattr = mock_vop_getattr,
     .vop_setattr = mock_vop_setattr,
     .vop_pathconf = mock_vop_pathconf,
+    .vop_readdir = mock_vop_readdir,
 };
 
 void run_vnode_ops_tests(void) {
@@ -210,5 +224,19 @@ void run_vnode_ops_tests(void) {
         kprint("PASS: vop_access (other) denied write\n");
     } else {
         kprint("FAIL: vop_access (other) allowed write unexpectedly\n");
+    }
+
+    // Test vop_readdir
+    int eof = 0;
+    if (vop_readdir(&mock_dir, NULL, &cred, &eof, NULL, NULL) == 0) {
+        kprint("PASS: vop_readdir delegates correctly\n");
+    } else {
+        kprint("FAIL: vop_readdir failed\n");
+    }
+
+    if (vop_readdir(&mock_file, NULL, &cred, &eof, NULL, NULL) == ENOTDIR) {
+        kprint("PASS: vop_readdir checks ENOTDIR\n");
+    } else {
+        kprint("FAIL: vop_readdir allowed non-dir\n");
     }
 }
