@@ -12,28 +12,13 @@
 static console_backend_t *backends = NULL;
 static struct tty *console_tty = NULL;
 
-// TTY Driver Methods Forward Declarations
-static int console_tty_write(struct tty *tty, const unsigned char *buf, int count);
-static int console_tty_put_char(struct tty *tty, unsigned char c);
-static void console_tty_set_termios(struct tty *tty);
-
-// Driver Structure
-static struct tty_driver console_driver = {
-    .driver_name = "console",
-    .name = "console",
-    .major = 5,
-    .minor_start = 1,
-    .write = console_tty_write,
-    .put_char = console_tty_put_char,
-    .set_termios = console_tty_set_termios
-};
-
 void console_init(void) {
     backends = NULL;
     tty_init();
-    
-    // Allocate TTY for console
-    console_tty = tty_alloc(&console_driver, 0);
+}
+
+void console_set_tty(struct tty *tty) {
+    console_tty = tty;
 }
 
 void console_register(console_backend_t *backend) {
@@ -60,30 +45,6 @@ static void backend_write(const char *data, size_t len) {
             for (size_t i = 0; i < len; i++) {
                 b->putchar(data[i]);
             }
-        }
-        b = b->next;
-    }
-}
-
-// TTY Driver Implementation
-static int console_tty_write(struct tty *tty, const unsigned char *buf, int count) {
-    (void)tty;
-    backend_write((const char*)buf, count);
-    return count;
-}
-
-static int console_tty_put_char(struct tty *tty, unsigned char c) {
-    (void)tty;
-    backend_write((const char*)&c, 1);
-    return 1;
-}
-
-static void console_tty_set_termios(struct tty *tty) {
-    if (!tty) return;
-    console_backend_t *b = backends;
-    while (b) {
-        if (b->set_termios) {
-            b->set_termios(&tty->termios);
         }
         b = b->next;
     }
@@ -175,6 +136,11 @@ int kprintf(const char *fmt, ...) {
     return ret;
 }
 
+#include <kern/file.h>
+#include <sys/proc.h>
+#include <sys/tty.h>
+#include <string.h>
+
 void console_attach_std_fds(struct process *proc) {
     if (!proc) return;
     
@@ -188,19 +154,37 @@ void console_attach_std_fds(struct process *proc) {
         return;
     }
 
-    // Manually populate FDs 0, 1, 2
+    // Associate process with console TTY
+    if (console_tty) {
+        proc->tty = console_tty;
+    }
+
+    // Populate FDs 0, 1, 2 (stdin, stdout, stderr)
     for (int i = 0; i < 3; i++) {
-        file_t *f = (file_t*)kmalloc(sizeof(file_t));
+        // If FD is already occupied (unlikely for PID 1 at this stage), skip it.
+        if (proc->fds[i]) continue;
+
+        file_t *f = file_alloc();
         if (!f) {
-            kprint("console: OOM during std fd init\n");
+            kprint("console: system file table full during std fd init\n");
             return;
         }
+
         memset(f, 0, sizeof(file_t));
+        f->f_type = DTYPE_VNODE;
         f->f_data = node;
         f->f_offset = 0;
-        f->f_flag = 2; // R/W
+        f->f_flag = FREAD | FWRITE;
         f->f_count = 1;
         
+        // Notify VFS that we've opened the node
+        open_fs(node, 1, 1);
+        
         proc->fds[i] = f;
+    }
+
+    // Update next_fd hint if it was 0
+    if (proc->next_fd < 3) {
+        proc->next_fd = 3;
     }
 }

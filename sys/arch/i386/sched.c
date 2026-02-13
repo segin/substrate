@@ -1,4 +1,5 @@
 #include <kern/sched.h>
+#include <sys/smp.h>
 #include <pm/pm.h>
 #include <sys/acct.h>
 #include <exec/perso/personality.h>
@@ -51,6 +52,10 @@ static void thread_exit_wrapper(void) {
 
 void sched_init(void) {
     sched_init_generic();
+
+    // Initialize SMP scheduler with detected CPU count
+    extern void sched_smp_init(int);
+    sched_smp_init(smp_get_cpu_count());
 
     // Arch-Specific: Setup Initial Kernel Thread (TID 1)
     // sched_init_generic zeroes things. We rely on it.

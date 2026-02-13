@@ -6,6 +6,9 @@
 #include <pm/pm.h>
 #include <exec/perso/personality.h>
 #include <string.h>
+#include <sys/errno.h>
+#include <exec/perso/personality.h>
+#include <stdio.h>
 
 /*
  * Kernel-side signal property tests
@@ -24,10 +27,43 @@ static int test_sigmask(void) {
     return 0;
 }
 
+static int test_sys_kill_errors(void) {
+    kprint("Test: sys_kill error handling... ");
+    char buf[128];
+
+    // 1. Invalid signal number
+    int ret = sys_kill(1, -1);
+    if (ret != -EINVAL) {
+        sprintf(buf, "FAIL: sys_kill(-1) returned %d, expected %d (-EINVAL)\n", ret, -EINVAL);
+        kprint(buf);
+        return -1;
+    }
+
+    ret = sys_kill(1, NSIG + 1);
+    if (ret != -EINVAL) {
+        sprintf(buf, "FAIL: sys_kill(NSIG+1) returned %d, expected %d (-EINVAL)\n", ret, -EINVAL);
+        kprint(buf);
+        return -1;
+    }
+
+    // 2. Non-existent process (ESRCH)
+    // Use a large PID unlikely to exist
+    ret = sys_kill(9999, 0);
+    if (ret != -ESRCH) {
+        sprintf(buf, "FAIL: sys_kill(9999) returned %d, expected %d (-ESRCH)\n", ret, -ESRCH);
+        kprint(buf);
+        return -1;
+    }
+
+    kprint("OK\n");
+    return 0;
+}
+
 static int test_psignal_delivery(void) {
     kprint("Test: psignal delivery logic... ");
     
     // Create a dummy process and thread
+    extern process_t *proc_create(int perso_id);
     process_t *p = proc_create(PERS_NATIVE);
     if (!p) return -1;
     
@@ -108,5 +144,6 @@ void run_signal_tests(void) {
     test_sigmask();
     test_psignal_delivery();
     test_init_protection();
+    test_sys_kill_errors();
     kprint("--- Signal Tests Complete ---\n");
 }

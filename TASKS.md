@@ -1034,70 +1034,70 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **Echoing Logic:**
                     - [x] Raw echo (input char -> output).
                     - [x] Control char echo (`^C`).
-                    - [ ] Erase echo (backspace-space-backspace sequence).
-            - [ ] **Driver Interface (`tty_driver`):**
-                - [ ] `install` / `remove`: setup private data.
-                - [ ] `open` / `close`: hardware init/shutdown.
-                - [ ] `write`: device output path.
-                - [ ] `put_char`: optimized single-char write.
-                - [ ] `flush_chars`: kick hardware transmission.
-                - [ ] `write_room`: check available hardware buffer space.
-                - [ ] `chars_in_buffer`: check pending bytes.
-                - [ ] `ioctl`: hardware-specific controls.
-                - [ ] `throttle` / `unthrottle`: hardware flow control hooks.
+                    - [x] Erase echo (backspace-space-backspace sequence).
+            - [x] **Driver Interface (`tty_driver`):**
+                - [x] `install` / `remove`: setup private data.
+                - [x] `open` / `close`: hardware init/shutdown.
+                - [x] `write`: device output path.
+                - [x] `put_char`: optimized single-char write.
+                - [x] `flush_chars`: kick hardware transmission.
+                - [x] `write_room`: check available hardware buffer space.
+                - [x] `chars_in_buffer`: check pending bytes.
+                - [x] `ioctl`: hardware-specific controls.
+                - [x] `throttle` / `unthrottle`: hardware flow control hooks.
             - [x] **Session/Job Control:**
                 - [x] `tty_struct.session`: Pointer to current session.
                 - [x] `tty_struct.pgrp`: Pointer to foreground process group.
                 - [x] `tty_check_change()`: Verify background writes (`SIGTTOU`).
-        - [ ] **API:**
-            - [ ] `tty_init()`: Initialize subsystem.
-            - [ ] `tty_alloc()`: Create a new TTY device.
-            - [ ] `tty_register_device()`: Register with DevFS `/dev/ttyX`.
-            - [ ] `tty_open`, `tty_close`: Refcounting and session logic.
-            - [ ] `tty_read`, `tty_write`: Dispatch to ldisc.
-            - [ ] `tty_ioctl`:
+        - [x] **API:**
+            - [x] `tty_init()`: Initialize subsystem.
+            - [x] `tty_alloc()`: Create a new TTY device.
+            - [x] `tty_register_device()`: Register with DevFS `/dev/ttyX`.
+            - [x] `tty_open`, `tty_close`: Refcounting and session logic.
+            - [x] `tty_read`, `tty_write`: Dispatch to ldisc.
+            - [x] `tty_ioctl`:
                 - [x] `TIOCSCTTY`: Become controlling TTY.
                 - [x] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group.
-                - [ ] `TCGETS` / `TCSETS`: Termios get/set.
-                - [ ] `TIOCGWINSZ`: Window size.
-    - [ ] **Virtual Terminal (VT) Layer:**
-        - [ ] **VT Management:** Array of `tty_t` structures (tty0..ttyN).
-        - [ ] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`).
+                - [x] `TCGETS` / `TCSETS`: Termios get/set.
+                - [x] `TIOCGWINSZ`: Window size.
+    - [x] **Virtual Terminal (VT) Layer:**
+        - [x] **VT Management:** Array of `vt_state_t` structures (vt0..vtN).
+        - [x] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`).
         - [ ] **Emulation:** VT102 state machine (escape codes).
-    - [ ] **Backend Drivers:**
-        - [ ] **VGA Text Mode Console:**
-            - [ ] **Initialization:**
-                - [ ] Detect VGA presence (BIOS/PCI enumeration).
-                - [ ] Set 80x25 or 80x50 text mode.
-                - [ ] Map video memory (0xB8000) into kernel address space.
-                - [ ] Initialize attribute byte defaults (white on black).
-            - [ ] **Text Output:**
-                - [ ] Implement `vga_putchar(char c, uint8_t attr)`.
-                - [ ] Handle control characters (CR, LF, BS, TAB, BEL).
-                - [ ] Implement `vga_write(const char *buf, size_t len)`.
-                - [ ] Tab stop handling (configurable tab width).
-            - [ ] **Cursor Control:**
-                - [ ] Read/write hardware cursor position (CRTC registers 0x0E/0x0F).
-                - [ ] Cursor shape control (underline, block, invisible).
-                - [ ] Cursor blink enable/disable.
-            - [ ] **Scrolling:**
-                - [ ] Software scroll (memmove video buffer).
-                - [ ] Hardware scroll (CRTC start address register).
-                - [ ] Scroll region support (VT102 DECSTBM).
-            - [ ] **Attributes:**
-                - [ ] 16-color foreground/background palette.
-                - [ ] Blink/bright background toggle (attribute controller).
-                - [ ] Reverse video, bold, underline emulation.
-            - [ ] **TTY Binding:**
-                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`.
-                - [ ] Implement `tty_driver->write()` callback.
+    - [x] **Backend Drivers:**
+        - [x] **VGA Text Mode Console:**
+            - [x] **Initialization:**
+                - [x] Detect VGA presence (BIOS/PCI enumeration).
+                - [x] Set 80x25 or 80x50 text mode.
+                - [x] Map video memory (0xB8000) into kernel address space.
+                - [x] Initialize attribute byte defaults (white on black).
+            - [x] **Text Output:**
+                - [x] Implement `vga_putchar(char c, uint8_t attr)`.
+                - [x] Handle control characters (CR, LF, BS, TAB, BEL).
+                - [x] Implement `vga_write(const char *buf, size_t len)`.
+                - [x] Tab stop handling (configurable tab width).
+            - [x] **Cursor Control:**
+                - [x] Read/write hardware cursor position (CRTC registers 0x0E/0x0F).
+                - [x] Cursor shape control (underline, block, invisible).
+                - [x] Cursor blink enable/disable.
+            - [x] **Scrolling:**
+                - [x] Software scroll (memmove video buffer).
+                - [x] Hardware scroll (CRTC start address register).
+                - [x] Scroll region support (VT102 DECSTBM).
+            - [x] **Attributes:**
+                - [x] 16-color foreground/background palette.
+                - [x] Blink/bright background toggle (attribute controller).
+                - [x] Reverse video, bold, underline emulation.
+            - [x] **TTY Binding:**
+                - [x] Register as `tty_driver` for `/dev/tty[1-N]`.
+                - [x] Implement `tty_driver->write()` callback.
                 - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls.
-        - [ ] **Keyboard Input (PS/2 to TTY):**
+        - [x] **Keyboard Input (PS/2 to TTY):**
             - [x] Fix PS/2 driver build errors (constant mismatches in `test_ps2.c`).
-            - [ ] **Input Path:**
-                - [ ] Hook keyboard driver to TTY input queue.
-                - [ ] Convert scancodes to ASCII via keymap.
-                - [ ] Handle modifier keys (Shift, Ctrl, Alt, AltGr).
+            - [x] **Input Path:**
+                - [x] Hook keyboard driver to TTY input queue.
+                - [x] Convert scancodes to ASCII via keymap.
+                - [x] Handle modifier keys (Shift, Ctrl, Alt, AltGr).
                 - [ ] Generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A).
             - [ ] **Special Keys:**
                 - [ ] Function keys (F1-F12) to escape sequences.
@@ -1689,29 +1689,29 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (rmdir empty, ENOTEMPTY, EBUSY for .)
                     - Docs: `vop_rmdir.9`
                     - Acceptance: Empty directory removed
-            - [ ] **Access/Attributes:**
-                - [ ] Implement `vop_access(vp, mode, cred, p)`.
+            - [x] **Access/Attributes:**
+                - [x] Implement `vop_access(vp, mode, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Check r/w/x permissions
                     - Logic: Compare cred uid/gid against vnode owner/group, check mode bits
                     - Tests: unit (owner access, group access, other access, root bypass)
                     - Docs: `vop_access.9`
                     - Acceptance: Permission checks match POSIX semantics
-                - [ ] Implement `vop_getattr(vp, vap, cred, p)`.
+                - [x] Implement `vop_getattr(vp, vap, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Get file attributes (stat equivalent)
                     - Fields: `va_mode`, `va_nlink`, `va_uid`, `va_gid`, `va_size`, `va_atime`, `va_mtime`, `va_ctime`
                     - Tests: unit (all stat fields correct)
                     - Docs: `vop_getattr.9`
                     - Acceptance: All vattr fields populated correctly
-                - [ ] Implement `vop_setattr(vp, vap, cred, p)`.
+                - [x] Implement `vop_setattr(vp, vap, cred, p)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Set file attributes (chmod/chown/utimes)
                     - Logic: Check permissions, update inode, mark dirty
                     - Tests: unit (chmod, chown, truncate, utimes)
                     - Docs: `vop_setattr.9`
                     - Acceptance: Attributes updated, persisted after sync
-                - [ ] Implement `vop_pathconf(vp, name, retval)`.
+                - [x] Implement `vop_pathconf(vp, name, retval)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: POSIX pathconf support
                     - Names: `_PC_LINK_MAX`, `_PC_NAME_MAX`, `_PC_PATH_MAX`, etc.
@@ -1783,7 +1783,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Docs: `vop_strategy.9`
                     - Acceptance: I/O completed, buffer marked done
             - [ ] **Directories:**
-                - [ ] Implement `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`.
+                - [x] Implement `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`.
                     - Files: `sys/vfs/vnode_ops.c`
                     - API: Read directory entries
                     - Format: `struct dirent` with d_ino, d_type, d_namlen, d_name
@@ -2924,28 +2924,28 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
             - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
 - [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:**
-    - [ ] **1. Specification & Design:**
-        - [ ] **Design Document:**
-            - [ ] Write authoritative design doc for `ld.so` in `docs/ld.so-design.md`.
-            - [ ] Document goals: POSIX/ELF-ABI compliance, BSD compatibility, performance.
-            - [ ] Document ABI targets: i386 (primary), x86_64 (future).
-            - [ ] Document supported ELF features: REL/RELA, PLT/GOT, TLS models.
-            - [ ] Document environment variables: `LD_LIBRARY_PATH`, `LD_PRELOAD`, `LD_DEBUG`, etc.
-            - [ ] Document secure behavior for setuid/setgid binaries.
-            - [ ] Acceptance: design doc reviewed and approved.
-        - [ ] **Architecture Matrix:**
-            - [ ] Enumerate all supported relocation types per architecture.
-            - [ ] Document ABI differences (i386 vs x86_64).
-            - [ ] Create `docs/ld.so-reloc-matrix.md` with full relocation table.
-            - [ ] Acceptance: matrix covers all targeted architectures.
-        - [ ] **Symbol Resolution Specification:**
-            - [ ] Define symbol resolution algorithm and precedence rules.
-            - [ ] Document order: LD_PRELOAD → executable → DT_RPATH/RUNPATH → system paths.
-            - [ ] Define versioning policy (DT_VERSYM, DT_VERNEED, DT_VERDEF).
-            - [ ] Define SONAME handling policy.
-            - [ ] Document DT_RPATH vs DT_RUNPATH semantics.
-            - [ ] Document DT_HASH vs GNU_HASH interaction.
-            - [ ] Acceptance: specification reviewed and edge cases documented.
+    - [x] **1. Specification & Design:**
+        - [x] **Design Document:**
+            - [x] Write authoritative design doc for `ld.so` in `docs/ld.so-design.md`.
+            - [x] Document goals: POSIX/ELF-ABI compliance, BSD compatibility, performance.
+            - [x] Document ABI targets: i386 (primary), x86_64 (future).
+            - [x] Document supported ELF features: REL/RELA, PLT/GOT, TLS models.
+            - [x] Document environment variables: `LD_LIBRARY_PATH`, `LD_PRELOAD`, `LD_DEBUG`, etc.
+            - [x] Document secure behavior for setuid/setgid binaries.
+            - [x] Acceptance: design doc reviewed and approved.
+        - [x] **Architecture Matrix:**
+            - [x] Enumerate all supported relocation types per architecture.
+            - [x] Document ABI differences (i386 vs x86_64).
+            - [x] Create `docs/ld.so-reloc-matrix.md` with full relocation table.
+            - [x] Acceptance: matrix covers all targeted architectures.
+        - [x] **Symbol Resolution Specification:**
+            - [x] Define symbol resolution algorithm and precedence rules.
+            - [x] Document order: LD_PRELOAD → executable → DT_RPATH/RUNPATH → system paths.
+            - [x] Define versioning policy (DT_VERSYM, DT_VERNEED, DT_VERDEF).
+            - [x] Define SONAME handling policy.
+            - [x] Document DT_RPATH vs DT_RUNPATH semantics.
+            - [x] Document DT_HASH vs GNU_HASH interaction.
+            - [x] Acceptance: specification reviewed and edge cases documented.
     - [ ] **2. Loader Core: ELF Parsing & Mapping:**
         - [ ] **ELF Header Parsing:**
             - [ ] Implement ELF header validation (magic, class, endianness, version).
@@ -5950,6 +5950,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Critical Headers (Missing Files):**
         - [ ] Create `string.h` (functions exist in `string.c` but header is missing).
         - [ ] Create `limits.h`, `setjmp.h`, `locale.h`.
+        - [ ] Create `err.h` (BSD error reporting helpers).
         - [ ] Create `stddef.h`, `stdint.h`, `stdarg.h` (wrapping GCC builtins).
     - [ ] **String Manipulation (`<string.h>`):**
         - [ ] `strndup()`: Bounded string duplication.
@@ -6412,6 +6413,9 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Filesystem Tools (`sbin/`):**
     - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
     - [ ] **`fsck`:** Implement `ext2` consistency check.
+- [ ] **Compression Tools:**
+    - [x] **`compress`:** Implement `compress`, `uncompress`, `zcat` (LZW).
+    - [ ] **`cpio`:** Implement POSIX-compatible archive utility (`usr.bin/cpio`).
 
 ### 8. Security and Identity
 - [ ] **User & Group Management:**

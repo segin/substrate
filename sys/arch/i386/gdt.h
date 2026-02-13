@@ -55,6 +55,7 @@ struct tss_entry_struct {
 typedef struct tss_entry_struct tss_entry_t;
 
 void gdt_init();
+void gdt_init_cpu(int cpu_id);
 void set_kernel_stack(uint32_t stack);
 void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
 

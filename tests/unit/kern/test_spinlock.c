@@ -1,4 +1,4 @@
-#include "../../../sys/sys/lock.h"
+#include <sys/lock.h>
 #include <stdbool.h>
 #include <stddef.h>
 

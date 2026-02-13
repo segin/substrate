@@ -139,6 +139,27 @@ int next_token(void) {
             ungetc(n, stdin);
             return token = TOK_ASSIGN;
         }
+
+        if (c == '!') {
+            int n = getchar();
+            if (n == '=') return token = TOK_NE;
+            ungetc(n, stdin);
+            return token = '!';
+        }
+
+        if (c == '<') {
+            int n = getchar();
+            if (n == '=') return token = TOK_LE;
+            ungetc(n, stdin);
+            return token = '<';
+        }
+
+        if (c == '>') {
+            int n = getchar();
+            if (n == '=') return token = TOK_GE;
+            ungetc(n, stdin);
+            return token = '>';
+        }
         
         // Logical ops
         if (c == '&') {
@@ -212,7 +233,7 @@ bc_num *term(void) {
     return a;
 }
 
-bc_num *expr(void) {
+bc_num *arith_expr(void) {
     bc_num *a = term();
     while (token == '+' || token == '-') {
         int op = token;
@@ -227,11 +248,36 @@ bc_num *expr(void) {
     return a;
 }
 
-// Logic expr? For now standard expr IS logic expr (non-zero true)
-// TODO: RELATIONAL OPS (==, <= etc) return 0 or 1
-// Implement if needed.
+bc_num *rel_expr(void) {
+    bc_num *a = arith_expr();
+    while (token == TOK_EQ || token == TOK_NE ||
+           token == TOK_LE || token == TOK_GE ||
+           token == '<' || token == '>') {
+        int op = token;
+        next_token();
+        bc_num *b = arith_expr();
+        int cmp = bc_compare(a, b);
+        int val = 0;
+        switch (op) {
+            case TOK_EQ: val = (cmp == 0); break;
+            case TOK_NE: val = (cmp != 0); break;
+            case TOK_LE: val = (cmp <= 0); break;
+            case TOK_GE: val = (cmp >= 0); break;
+            case '<':    val = (cmp < 0); break;
+            case '>':    val = (cmp > 0); break;
+        }
+        bc_free(a); bc_free(b);
+        a = bc_from_long(val);
+    }
+    return a;
+}
+
+bc_num *expr(void) {
+    return rel_expr();
+}
 
 void stmt(void);
+void skip_stmt(void);
 
 void stmt_list(void) {
     while (token != '}' && token != TOK_EOF && token != TOK_ELSE) {
@@ -286,26 +332,14 @@ void stmt(void) {
         if (is_true) {
             stmt();
         } else {
-            // Skip statement
-            // Hard without tokenizer support to skip block...
-            // For now: Only support single line or block skipping if we implement skipper.
-            // HACK: Execute empty? No.
-            // PROPER WAY: We need to parse but not execute.
-            // Or simple recursive skipper.
-            // For v0.1: if(0) doesn't run stmt.
-            // We need `skip_stmt()` function.
-            // Let's implement minimal skip.
-            // Actually, for this iteration, let's just claim if/else works for executed branch
-            // and maybe fail/run weirdly on skip?
-            // "skip_stmt" is essential.
-            // I'll define it recursively.
+            skip_stmt();
         }
         
         if (token == TOK_ELSE) {
             next_token();
             if (!is_true) stmt();
             else {
-                // skip else stmt
+                skip_stmt();
             }
         }
         return;
@@ -335,10 +369,74 @@ void stmt(void) {
 }
 
 
-// Skipper (Stub)
+// Skipper
 void skip_stmt(void) {
-    // consume tokens until ; \n or balanced }
-    // This is tricky.
+    if (token == TOK_EOF) return;
+
+    if (token == '{') {
+        next_token();
+        while (token != '}' && token != TOK_EOF && token != TOK_ELSE) {
+            skip_stmt();
+        }
+        if (token == '}') next_token();
+        return;
+    }
+
+    if (token == TOK_IF) {
+        next_token();
+        // Skip condition
+        int p = 0;
+        if (token == '(') {
+             p++;
+             next_token();
+             while (p > 0 && token != TOK_EOF) {
+                 if (token == '(') p++;
+                 if (token == ')') p--;
+                 next_token();
+             }
+        } else {
+             while (token != ')' && token != TOK_EOF) next_token();
+             if (token == ')') next_token();
+        }
+        skip_stmt();
+        if (token == TOK_ELSE) {
+            next_token();
+            skip_stmt();
+        }
+        return;
+    }
+
+    if (token == TOK_WHILE) {
+        next_token();
+        int p = 0;
+        if (token == '(') {
+             p++;
+             next_token();
+             while (p > 0 && token != TOK_EOF) {
+                 if (token == '(') p++;
+                 if (token == ')') p--;
+                 next_token();
+             }
+        } else {
+             while (token != ')' && token != TOK_EOF) next_token();
+             if (token == ')') next_token();
+        }
+        skip_stmt();
+        return;
+    }
+
+    if (token == TOK_PRINT) {
+        next_token();
+        while (token != ';' && token != '\n' && token != TOK_EOF) next_token();
+        if (token == ';' || token == '\n') next_token();
+        return;
+    }
+
+    // Default: consume until ; or \n
+    while (token != ';' && token != '\n' && token != '}' && token != TOK_EOF) {
+        next_token();
+    }
+    if (token == ';' || token == '\n') next_token();
 }
 
 int main(int argc, char *argv[]) {

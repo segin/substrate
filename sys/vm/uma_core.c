@@ -11,16 +11,20 @@
 #include <stddef.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
+#include <sys/smp.h>
 
 /* Global list of all zones */
 static uma_zone_t *uma_zones = NULL;
 
-/* Number of CPUs (TODO: detect at runtime) */
-#define UMA_NCPU    1
+/* Number of CPUs (detected at runtime) */
+static int uma_ncpu = 1;
+
+#define UMA_MAX_CPUS 32
+#define UMA_ZONE_SIZE_MAX (sizeof(uma_zone_t) + (UMA_MAX_CPUS - 1) * sizeof(uma_cache_t))
 
 /* Bootstrap zone pool */
 #define UMA_BOOTSTRAP_ZONES 32
-static uint8_t uma_bootstrap_mem[UMA_BOOTSTRAP_ZONES * sizeof(uma_zone_t)];
+static uint8_t uma_bootstrap_mem[UMA_BOOTSTRAP_ZONES * UMA_ZONE_SIZE_MAX] __attribute__((aligned(16)));
 static int uma_bootstrap_idx = 0;
 static bool uma_dynamic_alloc = false;
 
@@ -71,10 +75,25 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item);
  * Initialize UMA subsystem
  */
 void uma_startup(void) {
+    uma_ncpu = smp_get_cpu_count();
     uma_bootstrap_idx = 0;
     uma_bucket_idx = 0;
     uma_zones = NULL;
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
+
+    // Detect number of CPUs
+    // Detect number of CPUs
+    int count = smp_get_cpu_count();
+    if (count > 0) {
+        if (count > UMA_MAX_CPUS) {
+            kprint("UMA: WARNING: CPU count exceeds limit, capping to 32\n");
+            count = UMA_MAX_CPUS;
+        }
+        uma_ncpu = count;
+    } else {
+        uma_ncpu = 1;
+    }
+
     kprint("UMA: subsystem initialized\n");
 }
 
@@ -116,15 +135,16 @@ uma_zone_t *uma_zcreate(
     /* Allocate zone structure */
     if (!uma_dynamic_alloc) {
         if (uma_bootstrap_idx < UMA_BOOTSTRAP_ZONES) {
-            zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * sizeof(uma_zone_t)];
+            zone = (uma_zone_t *)&uma_bootstrap_mem[uma_bootstrap_idx * UMA_ZONE_SIZE_MAX];
             uma_bootstrap_idx++;
-            memset(zone, 0, sizeof(uma_zone_t));
+            // Zero the entire max zone size to be safe
+            memset(zone, 0, UMA_ZONE_SIZE_MAX);
         } else {
             kprint("UMA: Bootstrap zones exhausted!\n");
             return NULL;
         }
     } else {
-        zone = kzalloc(sizeof(uma_zone_t));
+        zone = kzalloc(sizeof(uma_zone_t) + (uma_ncpu - 1) * sizeof(uma_cache_t));
         if (!zone) return NULL;
     }
     zone->uz_name = name;
@@ -177,7 +197,7 @@ uma_zone_t *uma_zcreate(
     zone->uz_arg = NULL;
     
     /* Initialize per-CPU cache */
-    for (int i = 0; i < UMA_NCPU; i++) {
+    for (int i = 0; i < uma_ncpu; i++) {
         zone->uz_cpu[i].uc_freebucket = NULL;
         zone->uz_cpu[i].uc_allocbucket = NULL;
         zone->uz_cpu[i].uc_allocs = 0;
@@ -236,7 +256,7 @@ void uma_zdestroy(uma_zone_t *zone) {
     uintptr_t bend = bstart + sizeof(uma_bootstrap_mem);
 
     if (zaddr < bstart || zaddr >= bend) {
-        kfree(zone, sizeof(uma_zone_t));
+        kfree(zone, sizeof(uma_zone_t) + (uma_ncpu - 1) * sizeof(uma_cache_t));
     }
 }
 
@@ -599,7 +619,7 @@ void uma_reclaim(void) {
         if (zone->uz_flags & UMA_ZONE_NOFREE) continue;
         
         /* Drain per-CPU buckets */
-        for (int cpu = 0; cpu < UMA_NCPU; cpu++) {
+        for (int cpu = 0; cpu < uma_ncpu; cpu++) {
             uma_cache_t *cache = &zone->uz_cpu[cpu];
             
             if (cache->uc_allocbucket) {

@@ -49,6 +49,7 @@ The kernel is the core of the operating system, structured as follows:
         - **Fonts:** Compiled-in CP437 fonts (`font_8x16.c`, `font_8x8.c`) covering full 256 charsets.
         - **Architecture:** Table-driven mode setting with specific CRTC register dumps (6845/VGA).
     - **`serial/`**: UART driver.
+    - **`console/`**: TTY core and console device driver stack, using a `tty_driver` callback interface (install/remove, open/close, write/put_char, buffer state queries, and flow-control hooks).
     - **`input/`**: PS/2 Keyboard and Mouse drivers.
     - **`storage/`**: Drivers for SCSI, IDE, AHCI, NVMe.
     - **`virtio/`**: Virtualized devices (Block, 9P, Net).
@@ -87,6 +88,7 @@ The kernel is the core of the operating system, structured as follows:
 ### Core Userland (`bin/`, `lib/`)
 These components are essential for booting and basic system operation.
 - **`bin/`**: Fundamental Unix utilities (`sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, `kill`, `sync`, etc.).
+- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`).
 - **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:
     - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.
@@ -103,6 +105,42 @@ These components are essential for booting and basic system operation.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
     - **`dbm/`**: Database Manager library.
 - `sbin/`: System binaries (Currently empty/stubbed as we rely on external rootfs/busybox for init).
+
+### Regex Library (`usr.lib/regex/`)
+The Substrate regex library provides a safe, deterministic matching engine for system code. It ships as `libregex.a`
+and installs headers to `/usr/include` and a pkg-config file `regex.pc`.
+
+**Design**
+- **Engines:** Default safe engine (DFA prefilter + bounded NFA capture pass). Optional adapters for PCRE2 and RE2
+  are enabled at build time via `USE_PCRE2=1` or `USE_RE2=1`. `DEFAULT_ENGINE_RE2=1` selects RE2 when the safe
+  engine flag is not set.
+- **UTF-8:** `REGEX_FLAG_UTF8` enables UTF-8 decoding. Case-insensitive matching is ASCII-only by default and can
+  be upgraded with ICU (`USE_ICU=1`) for Unicode casefolding.
+- **Limits:** `regex_limits_t` provides explicit ceilings for compiled states, captures, match steps, match count,
+  and streaming buffer size.
+
+**API & ABI**
+- **Stable ABI:** Opaque `regex_t` and `regex_iter_t` types. Public API in `include/regex.h` and `include/regex/flags.h`.
+- **Core Functions:** `regex_compile`, `regex_match`, `regex_find_all`, `regex_replace`, `regex_split`, streaming
+  iterator APIs, and `regex_escape_literal`.
+- **Error Model:** `regex_err_t` values returned directly or via output parameters.
+
+**Integration**
+- Build: `make -C usr.lib/regex` (classic Makefile).
+- Install: `make install` installs `libregex.a`, headers, man page `regex(3)`, and `regex.pc`.
+- Tests: `tests/usr.lib/regex/` with unit, integration, security, streaming, and encoding suites.
+- CI: `tests/ci/test-regex.sh` and `tests/ci/bench-regex.sh` (CI scripts live under `tests/ci/`).
+
+**Security & Performance**
+- The default engine avoids catastrophic backtracking. DFA prefilter is used for fast rejection; bounded NFA capture
+  ensures predictable time via `match_steps`. `max_states` caps compilation and DFA growth.
+
+**REQ-TO-TEST Matrix**
+- **Compile/Match correctness:** `tests/usr.lib/regex/unit/test_api.c`
+- **Replace/Split APIs:** `tests/usr.lib/regex/integration/test_replace.c`
+- **DoS resistance / limits:** `tests/usr.lib/regex/security/test_dos.c`
+- **Streaming matches:** `tests/usr.lib/regex/streaming/test_streaming.c`
+- **UTF-8 handling:** `tests/usr.lib/regex/encoding/test_utf8.c`
 
 ## Personality Emulation
 - **Linux:** Emulates Linux 2.6.x i386 syscalls. Handles `rt_sigaction` (174) and `rt_sigprocmask` (175) by mapping to internal signal infrastructure.
@@ -121,6 +159,13 @@ These tools are compiled using the host's compiler (`cc`) and C library, but str
 
 > [!CAUTION]
 > **Host Builds NEVER use Substrate's libc.** When `NATIVE_BUILD=1` is set, programs link against the host OS's standard C library (glibc, musl, etc.), not `lib/c/`. The Substrate libc (`lib/c/`, `lib/sys/`) is exclusively for the Substrate kernel and target binaries. Never modify these libraries to support Linux or other host operating systems.
+
+### Testing
+- **Kernel Tests:** Located in `tests/unit/`, `tests/sys/`. Compiled via `tests/Makefile` and run on the host.
+- **Libc Tests:** Located in `tests/lib/c/`.
+    - **Strategy:** These tests verify the target libc implementation (`lib/c/src/`) by compiling it for the host environment.
+    - **Symbol Prefixing:** To avoid conflicts with the host's standard library (e.g., `memcpy` vs `libc_memcpy`), object files are processed with `objcopy --prefix-symbols=libc_` before linking.
+    - **Execution:** Run via `make test_libc_string` in `tests/`.
 
 ## Recent Progress (as of Jan 2026)
 - Implemented `sys_brk` for dynamic heap allocation.

@@ -2,8 +2,7 @@
 #define _ARCH_I386_SMP_H
 
 #include <stdint.h>
-
-#define MAX_CPUS 32
+#include <sys/smp.h>
 
 typedef struct {
     uint8_t lapic_id;
