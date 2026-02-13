@@ -32,6 +32,9 @@
 #define P9_TWSTAT   126
 #define P9_RWSTAT   127
 
+#define P9_NOTAG    ((uint16_t)~0)
+#define P9_NOFID    ((uint32_t)~0)
+
 struct p9_header {
     uint32_t size;
     uint8_t  type;

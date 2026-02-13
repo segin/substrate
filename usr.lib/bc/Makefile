@@ -9,7 +9,7 @@ libbc.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 %.o: %.c
-	$(CC) $(CFLAGS) -I../../include -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(OBJS) libbc.a

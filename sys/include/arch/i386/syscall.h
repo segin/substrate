@@ -1,5 +1,7 @@
 #ifndef _ARCH_SYSCALL_H
 #define _ARCH_SYSCALL_H
+
+#define MAX_SYSCALLS 600
 #define SYS_EXIT    1
 #define SYS_FORK    2
 #define SYS_READ    3
@@ -88,6 +90,7 @@
 #define SYS_PROC_EXE     252
 #define SYS_PROC_CMDLINE 253
 #define SYS_PROC_ENVIRON 254
+#define SYS_VM_STATS     255
 #define SYS_CLOCK_GETTIME 265
 #define SYS_mlock       150
 #define SYS_munlock     151

@@ -8,7 +8,7 @@ extern struct personality personality_netbsd;
 extern struct personality personality_openbsd;
 extern struct personality personality_svr3;
 extern struct personality personality_svr4;
-// extern struct personality personality_solaris;
+
 extern struct personality personality_sunos;
 
 static struct personality *personalities[PERS_MAX] = {
