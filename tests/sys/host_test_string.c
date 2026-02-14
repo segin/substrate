@@ -118,10 +118,43 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
+void test_memset_unaligned(void) {
+    #define ALIGN_BUF_SIZE 128
+    char buf[ALIGN_BUF_SIZE];
+    char expected[ALIGN_BUF_SIZE];
+
+    // Check various offsets and lengths
+    for (int offset = 0; offset < 16; offset++) {
+        for (int len = 0; len < 64; len++) {
+            // Setup
+            for (int i = 0; i < ALIGN_BUF_SIZE; i++) {
+                buf[i] = 0xAA;
+                expected[i] = 0xAA;
+            }
+
+            // Expected
+            for (int i = 0; i < len; i++) {
+                expected[offset + i] = 0xBB;
+            }
+
+            // Actual
+            kernel_memset(buf + offset, 0xBB, len);
+
+            // Verify
+            if (memcmp(buf, expected, ALIGN_BUF_SIZE) != 0) {
+                 printf("FAIL: memset alignment mismatch at offset %d len %d\n", offset, len);
+                 exit(1);
+            }
+        }
+    }
+    printf("test_memset_unaligned: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
+    test_memset_unaligned();
     printf("All Tests Passed\n");
     return 0;
 }

@@ -271,27 +271,37 @@ static void test_memset_small(void) {
 }
 
 static void test_memset_unaligned(void) {
-    char buf[64];
-    char expected[64];
+    #define ALIGN_BUF_SIZE 128
+    char buf[ALIGN_BUF_SIZE];
+    char expected[ALIGN_BUF_SIZE];
+    char msg[64];
 
-    // Initialize
-    for(int i=0; i<64; i++) {
-        buf[i] = 0xAA;
-        expected[i] = 0xAA;
+    // Check various offsets and lengths
+    for (int offset = 0; offset < 16; offset++) {
+        for (int len = 0; len < 64; len++) {
+            // Setup
+            for (int i = 0; i < ALIGN_BUF_SIZE; i++) {
+                buf[i] = 0xAA;
+                expected[i] = 0xAA;
+            }
+
+            // Expected
+            for (int i = 0; i < len; i++) {
+                expected[offset + i] = 0xBB;
+            }
+
+            // Actual
+            memset(buf + offset, 0xBB, len);
+
+            // Verify
+            if (memcmp(buf, expected, ALIGN_BUF_SIZE) != 0) {
+                 snprintf(msg, sizeof(msg), "memset alignment failed off=%d len=%d", offset, len);
+                 kprint("FAIL: "); kprint(msg); kprint("\n");
+                 failed_tests++;
+                 return; // Stop on first failure
+            }
+        }
     }
-
-    // Unaligned start (offset 1)
-    memset(buf + 1, 0xBB, 10);
-    for(int i=0; i<10; i++) expected[1+i] = 0xBB;
-
-    ASSERT_MEM_EQ(buf, expected, 64, "Unaligned start memset failed");
-
-    // Unaligned start (offset 3)
-    for(int i=0; i<64; i++) { buf[i] = 0xAA; expected[i] = 0xAA; }
-    memset(buf + 3, 0xCC, 10);
-    for(int i=0; i<10; i++) expected[3+i] = 0xCC;
-
-    ASSERT_MEM_EQ(buf, expected, 64, "Unaligned start 3 memset failed");
 }
 
 static void test_memset_large(void) {
