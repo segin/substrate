@@ -25,6 +25,7 @@ void my_release(struct kobject *kobj) {
 }
 
 void test_kobject_init(void) {
+    printf("Running test_kobject_init...\n");
     struct kobject kobj;
     // Fill with garbage to ensure init clears it properly
     memset(&kobj, 0xAA, sizeof(kobj));
@@ -38,7 +39,8 @@ void test_kobject_init(void) {
     if (kobj.release != NULL) fail("kobject_init: release callback should be NULL");
 }
 
-void test_kobject_init_truncation(void) {
+void test_kobject_init_name_truncation(void) {
+    printf("Running test_kobject_init_name_truncation...\n");
     struct kobject kobj;
     const char *long_name = "this_is_a_very_long_name_that_exceeds_31_characters_limit";
     char expected_name[32];
@@ -56,6 +58,7 @@ void test_kobject_init_truncation(void) {
 }
 
 void test_kobject_get(void) {
+    printf("Running test_kobject_get...\n");
     struct kobject kobj;
     kobject_init(&kobj, "test_get");
 
@@ -68,6 +71,7 @@ void test_kobject_get(void) {
 }
 
 void test_kobject_put(void) {
+    printf("Running test_kobject_put...\n");
     struct kobject kobj;
     kobject_init(&kobj, "test_put");
     kobj.release = my_release;
@@ -104,6 +108,7 @@ void test_kobject_put_no_release(void) {
 }
 
 void test_kset_init(void) {
+    printf("Running test_kset_init...\n");
     struct kset kset;
     memset(&kset, 0xBB, sizeof(kset));
 
@@ -123,7 +128,7 @@ int main(void) {
     printf("Running kobject tests...\n");
 
     test_kobject_init();
-    test_kobject_init_truncation();
+    test_kobject_init_name_truncation();
     test_kobject_get();
     test_kobject_put();
     test_kobject_put_no_release();
