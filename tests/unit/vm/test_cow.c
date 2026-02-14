@@ -1,6 +1,6 @@
-#include <vm/vm_fault.h"
-#include <vm/vm_object.h"
-#include <vm/vm_map.h"
+#include <vm/vm_fault.h>
+#include <vm/vm_object.h>
+#include <vm/vm_map.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -16,7 +16,7 @@ bool test_vm_fault_cow_trigger(void) {
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 4096);
     vm_object_reference(obj); 
     
-    vm_map_insert(&map, obj, 0, 0x1000, 0x2000);
+    vm_map_insert(&map, obj, 0, 0x1000, 0x2000, 0x3, 0x3, 1);
     
     // 2. Pre-populate a page
     vm_page_t p1;

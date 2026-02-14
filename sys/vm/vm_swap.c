@@ -9,7 +9,6 @@
 #include <stddef.h>
 
 // Simple bitmap-based swap allocator
-// Simple bitmap-based swap allocator
 #define MAX_SWAP_PAGES 1024
 #define SWAP_BLOCK_NONE 0xFFFFFFFF
 

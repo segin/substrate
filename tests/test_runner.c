@@ -39,6 +39,7 @@ extern bool test_kthread_creation(void);
 extern bool test_timer_tick_increments(void);
 extern bool test_sched_priority(void);
 extern bool test_sched_sleep_wakeup(void);
+extern bool test_sched_decay_suite(void);
 
 // Sync Tests
 extern bool test_mutex_basic(void);
@@ -91,6 +92,8 @@ extern bool test_svr4_personality_table(void);
 
 // LibC Tests
 extern bool test_libc_strlen(void);
+extern bool test_gmtime_negative_years(void);
+extern bool test_libc_time(void);
 extern bool test_libc_memmove(void);
 
 typedef struct {
@@ -125,6 +128,7 @@ test_case_t tests[] = {
     {"timer_tick", test_timer_tick_increments},
     {"sched_priority", test_sched_priority},
     {"sched_sleep", test_sched_sleep_wakeup},
+    {"sched_decay", test_sched_decay_suite},
     {"mutex_basic", test_mutex_basic},
     {"mutex_contend", test_mutex_contention},
     {"sema_basic", test_sema_basic},
@@ -146,6 +150,8 @@ test_case_t tests[] = {
     {"svr3_perso", test_svr3_personality_table},
     {"svr4_perso", test_svr4_personality_table},
     {"libc_strlen", test_libc_strlen},
+    {"libc_time_neg", test_gmtime_negative_years},
+    {"libc_time", test_libc_time},
     {"libc_memmove", test_libc_memmove},
     {NULL, NULL}
 };

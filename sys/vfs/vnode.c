@@ -17,6 +17,7 @@
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <sys/lock.h>
+#include <sys/errno.h>
 #include <vm/uma.h>
 #include <string.h>
 
@@ -335,33 +336,38 @@ void vdrop(struct vnode *vp)
  */
 int vn_lock(struct vnode *vp, int flags)
 {
-    (void)flags;  /* TODO: Implement full locking semantics */
-    
+    /* TODO: Implement shared locking support (currently treats all as exclusive) */
+    (void)flags;
+
     spinlock_acquire(&vp->v_interlock);
-    
     /* Simple exclusive lock implementation */
-    while (vp->v_lockstate) {
-        if (flags & LK_NOWAIT) {
+    while (vp->v_lockstate != 0) {
+        /* Check for recursive locking */
+        if (vp->v_lockowner == current_thread) {
             spinlock_release(&vp->v_interlock);
-            return -11; /* EAGAIN */
+            return -EDEADLK;
         }
 
-        vp->v_flag |= VXWANT;
+        if (flags & LK_NOWAIT) {
+            spinlock_release(&vp->v_interlock);
+            return -EAGAIN;
+        }
 
-        /*
-         * Sleep until woken up.
-         * Note: There is a small race between releasing interlock and sleeping
-         * where a wakeup could be missed, but this is standard pattern here.
-         */
+        /* We must block */
+        vp->v_flag |= VXWANT;
+        sleepq_add(vp, current_thread);
         spinlock_release(&vp->v_interlock);
-        sched_sleep(vp);
+        sched_yield();
+
+        /* Re-acquire interlock to check state again */
         spinlock_acquire(&vp->v_interlock);
     }
-    
-    vp->v_lockstate = (flags & LK_SHARED) ? 1 : 2;
+
+    /* Take the lock */
+    vp->v_lockstate = (flags & LK_SHARED) ? 1 : 2; /* 1=Shared, 2=Excl */
     vp->v_flag |= VXLOCK;
-    /* vp->v_lockowner = curthread; */
-    
+    vp->v_lockowner = current_thread;
+
     spinlock_release(&vp->v_interlock);
     return 0;
 }
@@ -372,15 +378,26 @@ int vn_lock(struct vnode *vp, int flags)
 void vn_unlock(struct vnode *vp)
 {
     spinlock_acquire(&vp->v_interlock);
-    
+
+    /* Ensure we are the owner */
+    if (vp->v_lockowner != current_thread) {
+        /* If not owner, panic? Or just return?
+         * For robustness, panic is safer to catch bugs early.
+         */
+         panic("vn_unlock: not owner");
+    }
+
     vp->v_lockstate = 0;
     vp->v_flag &= ~VXLOCK;
     vp->v_lockowner = NULL;
     
-    /* Wake up waiters if VXWANT is set */
+    /* Wake up one waiter if any */
     if (vp->v_flag & VXWANT) {
-        vp->v_flag &= ~VXWANT;
-        sched_wakeup(vp);
+        sleepq_wake_one(vp);
+        /* Only clear VXWANT if no more waiters */
+        if (!sleepq_has_waiters(vp)) {
+            vp->v_flag &= ~VXWANT;
+        }
     }
     
     spinlock_release(&vp->v_interlock);

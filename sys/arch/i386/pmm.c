@@ -20,7 +20,6 @@
 
 // ==================== PMM Data Structures ====================
 // Static bitmap for 128MB (Fallback)
-// Static bitmap for 128MB (Fallback)
 static uint8_t pmm_bitmap_static[4096];
 
 

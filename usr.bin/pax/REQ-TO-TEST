@@ -1,12 +1,9 @@
-# Requirements to Test Matrix
+# pax REQ-TO-TEST Matrix
 
-| Req ID | Requirement Description | Test Case | Status |
-|--------|-------------------------|-----------|--------|
-| R1 | PAX created archives SHALL use extended headers for overflows | `tests/pax/test_pax_header.sh` | Stubbed |
-| R2 | Read legacy ustar/cpio and convert to pax | `tests/pax/test_compat.sh` | Implemented (Basic) |
-| R3 | Substitution rules SHALL be applied deterministically | `tests/pax/test_subs.sh` | Stubbed |
-| F1 | Mode -r (Read) | `pax -r -f archive.tar` | Implemented |
-| F2 | Mode -w (Write) | `pax -w -f archive.tar file` | Implemented |
-| F3 | Mode -rw (Copy) | `pax -rw src dst` | Implemented |
-| F4 | Format ustar | `pax -w -x ustar` | Implemented |
-| F5 | Format cpio | `pax -w -x cpio` | Implemented |
+| Requirement | Description | Test |
+|---|---|---|
+| R1 | PAX output uses extended headers when values exceed ustar limits. | `tests/pax/test_pax.sh` case `pax_extended_header_roundtrip` |
+| R2 | Read legacy ustar and cpio newc and convert to pax. | `tests/pax/test_pax.sh` cases `interop_tar_to_pax` and `interop_cpio_to_pax` |
+| R3 | Substitution rules apply deterministically in declaration order. | `tests/pax/test_pax.sh` case `subst_order` |
+| SEC-1 | Extraction rejects unsafe traversal and absolute extraction paths by default. | `tests/pax/test_pax.sh` case `safe_extract` |
+| MODE-1 | Supports `-r`, `-w`, and `-r -w` copy behavior. | `tests/pax/test_pax.sh` cases `roundtrip_rw` and `copy_mode` |
