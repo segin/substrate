@@ -58,10 +58,10 @@ int test_sysinfo(void) {
     }
     
     /* 3. Check invalid pointer */
-    /* do_sysinfo explicitly checks for NULL and returns -EFAULT (-14) */
+    /* do_sysinfo explicitly checks for NULL and returns -EFAULT */
     ret = do_sysinfo(NULL);
-    if (ret != -14) {
-         kprintf("FAIL: sysinfo(NULL) returned %d, expected -14\n", ret);
+    if (ret != -EFAULT) {
+         kprintf("FAIL: sysinfo(NULL) returned %d, expected %d\n", ret, -EFAULT);
          return -1;
     }
     

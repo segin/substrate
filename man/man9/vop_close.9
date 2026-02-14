@@ -1,0 +1,32 @@
+.Dd February 11, 2026
+.Dt VOP_CLOSE 9
+.Os
+.Sh NAME
+.Nm vop_close
+.Nd close a vnode and release open state
+.Sh SYNOPSIS
+.In sys/param.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_close "struct vnode *vp" "int fflag" "struct ucred *cred"
+.Sh DESCRIPTION
+The
+.Fn vop_close
+wrapper delegates close handling to the filesystem callback and updates vnode
+open/write counters.
+When the final writer is released,
+.Fn vop_fsync
+is invoked with synchronous semantics so dirty data is flushed.
+.Sh RETURN VALUES
+Returns 0 on success, or an error number on failure.
+.Sh ERRORS
+.Bl -tag -width "[EOPNOTSUPP]"
+.It Bq Er EIO
+I/O synchronization failed during last-close flush.
+.It Bq Er EOPNOTSUPP
+The operation is not supported for the vnode.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_open 9 ,
+.Xr vop_fsync 9

@@ -86,26 +86,17 @@ bc_num *bc_mul(bc_num *a, bc_num *b) {
     
     r->sign = a->sign * b->sign;
     bc_expsize(r, a->len + b->len);
-    r->len = a->len + b->len - 1; // provisional
+    r->len = a->len + b->len; // Max possible length
     
     for (int i = 0; i < a->len; i++) {
+        int carry = 0;
         for (int j = 0; j < b->len; j++) {
             int pos = i + j;
-            int val = r->digits[pos] + (a->digits[i] * b->digits[j]);
+            int val = r->digits[pos] + (a->digits[i] * b->digits[j]) + carry;
             r->digits[pos] = val % 100;
-            int carry = val / 100;
-            
-            // Ripple carry
-            int k = pos + 1;
-            while (carry) {
-                if (k >= r->cap) bc_expsize(r, k + 2);
-                val = r->digits[k] + carry;
-                r->digits[k] = val % 100;
-                carry = val / 100;
-                if (k >= r->len) r->len = k + 1;
-                k++;
-            }
+            carry = val / 100;
         }
+        r->digits[i + b->len] += carry;
     }
     
     // Exact length check

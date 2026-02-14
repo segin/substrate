@@ -35,6 +35,7 @@ extern void run_sched_perf_tests(void);
 extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
+extern void run_vnode_lock_tests(void);
 extern void run_kobject_tests(void);
 
 void run_kernel_tests(void) {
@@ -51,6 +52,14 @@ void run_kernel_tests(void) {
     
     if (all || strcmp(test_arg, "string") == 0) {
         run_string_tests();
+    }
+
+    if (all || strcmp(test_arg, "crc32") == 0) {
+        run_crc32_tests();
+    }
+
+    if (all || strcmp(test_arg, "div64") == 0) {
+        run_div64_tests();
     }
 
     if (all || strcmp(test_arg, "kobject") == 0) {
@@ -232,6 +241,9 @@ void run_kernel_tests(void) {
 
         extern int test_device_allocation(void);
         if (test_device_allocation() == 0) kprint("device_allocation: PASS\n"); else kprint("device_allocation: FAIL\n");
+
+        extern void run_devfs_special_device_tests(void);
+        run_devfs_special_device_tests();
     }
 
     if (all || strcmp(test_arg, "kthread") == 0) {
@@ -242,6 +254,10 @@ void run_kernel_tests(void) {
              extern void run_kthread_create_tests(void);
              run_kthread_create_tests();
         }
+    }
+
+    if (all || strcmp(test_arg, "vnode_lock") == 0) {
+        run_vnode_lock_tests();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {

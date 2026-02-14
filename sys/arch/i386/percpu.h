@@ -2,6 +2,7 @@
 #define _ARCH_I386_PERCPU_H
 
 #include <stdint.h>
+#include "gdt.h"
 
 // Forward declaration
 struct thread;
@@ -12,6 +13,11 @@ struct percpu_data {
     uint32_t cpu_id;            // CPU index (0 = BSP)
     uint32_t lapic_id;          // Local APIC ID
     
+    // GDT & TSS (CPU-local)
+    gdt_entry_t gdt[10];        // 10 GDT entries
+    gdt_ptr_t   gdt_ptr;        // GDT pointer
+    tss_entry_t tss;            // Task State Segment
+
     // Current execution context
     struct thread *current;     // Currently running thread
     struct thread *idle;        // Idle thread for this CPU
