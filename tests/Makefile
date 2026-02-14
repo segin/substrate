@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS_COMMON = -Wall -Wextra -g -DHOST_TEST
-CFLAGS_KERN = $(CFLAGS_COMMON) -I../sys -I../sys/arch/i386 -I../sys/kern -I../sys/drivers/video -I../sys/exec/perso -I../sys/include
+CFLAGS_COMMON = -Wall -Wextra -g -DHOST_TEST -D_GNU_SOURCE
+CFLAGS_KERN = $(CFLAGS_COMMON) -I../sys -I../sys/arch/i386 -I../sys/drivers/video -I../sys/exec/perso -I../sys/include
 CFLAGS_TEST = $(CFLAGS_COMMON) -I../sys/include -I../sys -I.
 
 # Core kernel objects for testing
