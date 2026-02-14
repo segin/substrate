@@ -49,7 +49,10 @@ The kernel is the core of the operating system, structured as follows:
         - **Fonts:** Compiled-in CP437 fonts (`font_8x16.c`, `font_8x8.c`) covering full 256 charsets.
         - **Architecture:** Table-driven mode setting with specific CRTC register dumps (6845/VGA).
     - **`serial/`**: UART driver.
-    - **`console/`**: TTY core and console device driver stack, using a `tty_driver` callback interface (install/remove, open/close, write/put_char, buffer state queries, and flow-control hooks).
+- **`console/`**: TTY core and console device driver stack.
+    - **Current Design**: Monolithic TTY implementation handling canonical processing and signal generation in common paths.
+    - **Planned Refactor**: Transitioning to a pluggable **Line Discipline (ldisc)** interface to support alternative disciplines (PPP, SLIP) and better separation of concerns (POSIX canonical processing vs. raw I/O).
+    - **Interface**: Uses a `tty_driver` callback interface for hardware interaction.
     - **`input/`**: PS/2 Keyboard and Mouse drivers.
     - **`storage/`**: Drivers for SCSI, IDE, AHCI, NVMe.
     - **`virtio/`**: Virtualized devices (Block, 9P, Net).
@@ -104,6 +107,10 @@ These components are essential for booting and basic system operation.
     - **`dl/`**: Dynamic linker.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
     - **`dbm/`**: Database Manager library.
+- **`libexec/`**:
+    - **`ld.so`**: Dynamic linker/loader for ELF shared objects.
+        - **Features**: PT_TLS support, GNU hash lookups, lazy/eager binding, and secure-exec handling for setuid binaries.
+        - **Policy**: Follows BSD-style search paths (`/lib`, `/usr/lib`, `/usr/local/lib`) and System V ELF ABI.
 - `sbin/`: System binaries (Currently empty/stubbed as we rely on external rootfs/busybox for init).
 
 ### Regex Library (`usr.lib/regex/`)

@@ -64,6 +64,19 @@ extern bool test_vfs_chroot_basic(void);
 extern bool test_vfs_chroot_effect(void);
 extern bool test_vop_readdir_basic(void);
 extern bool test_vop_readdir_notdir(void);
+extern bool test_vop_link_basic(void);
+extern bool test_vop_link_notdir(void);
+extern bool test_vop_link_dir_target(void);
+extern bool test_vop_link_notsupp(void);
+extern bool test_vop_rename_basic(void);
+extern bool test_vop_rename_notsupp(void);
+extern bool test_vop_rename_bad_mount(void);
+extern bool test_vop_symlink_basic(void);
+extern bool test_vop_symlink_notdir(void);
+extern bool test_vop_symlink_notsupp(void);
+extern bool test_vop_readlink_basic(void);
+extern bool test_vop_readlink_notlink(void);
+extern bool test_vop_readlink_notsupp(void);
 
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
@@ -71,7 +84,6 @@ extern bool prop_realtime_preempts_timeshare(void);
 extern bool prop_sleep_wakeup_consistency(void);
 extern void fuzz_timer_interrupt(const uint8_t *data, size_t size);
 extern void fuzz_sched_priority(const uint8_t *data, size_t size);
-
 bool test_sched_properties(void) {
     return prop_time_is_monotonic(1000) && 
            prop_realtime_preempts_timeshare() &&
@@ -149,6 +161,19 @@ test_case_t tests[] = {
     {"vfs_chroot_effect", test_vfs_chroot_effect},
     {"vfs_readdir_basic", test_vop_readdir_basic},
     {"vfs_readdir_notdir", test_vop_readdir_notdir},
+    { "vfs_link_basic", test_vop_link_basic },
+    { "vfs_link_notdir", test_vop_link_notdir },
+    { "vfs_link_dir_target", test_vop_link_dir_target },
+    { "vfs_link_notsupp", test_vop_link_notsupp },
+    { "vfs_rename_basic", test_vop_rename_basic },
+    { "vfs_rename_notsupp", test_vop_rename_notsupp },
+    { "vfs_rename_bad_mount", test_vop_rename_bad_mount },
+    { "vfs_symlink_basic", test_vop_symlink_basic },
+    { "vfs_symlink_notdir", test_vop_symlink_notdir },
+    { "vfs_symlink_notsupp", test_vop_symlink_notsupp },
+    { "vfs_readlink_basic", test_vop_readlink_basic },
+    { "vfs_readlink_notlink", test_vop_readlink_notlink },
+    { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
