@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include <kern/sched.h"
+#include <kern/sched.h>
 
 extern void timer_tick(void);
 extern uint32_t get_time(void);
@@ -23,8 +23,8 @@ bool test_sched_priority(void) {
     char stack2[4096];
     
     // Create two threads
-    int tid1 = sched_create_thread(current_process, (void*)0x100, stack1 + 4096, NULL);
-    int tid2 = sched_create_thread(current_process, (void*)0x200, stack2 + 4096, NULL);
+    thread_t *t_tid1 = sched_create_thread(current_process, (void*)0x100, stack1 + 4096, NULL); int tid1 = t_tid1->tid;
+    thread_t *t_tid2 = sched_create_thread(current_process, (void*)0x200, stack2 + 4096, NULL); int tid2 = t_tid2->tid;
     
     // Set tid2 to higher priority (Realtime)
     sched_set_priority(tid2, SCHED_REALTIME, 50);
@@ -48,7 +48,7 @@ bool test_sched_sleep_wakeup(void) {
     sched_init();
     
     char s1[4096];
-    int tid1 = sched_create_thread(current_process, (void*)0x100, s1 + 4096, NULL);
+    thread_t *t_tid1 = sched_create_thread(current_process, (void*)0x100, s1 + 4096, NULL); int tid1 = t_tid1->tid;
     
     void *chan = (void*)0xDEADBEEF;
     

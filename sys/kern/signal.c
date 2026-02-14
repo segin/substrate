@@ -1,4 +1,5 @@
 #include <sys/signal.h>
+#include <sys/kern_syscalls.h>
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/errno.h>
@@ -58,9 +59,7 @@ int sys_sigaction(int sig, const void *act, void *oact) {
     return ret;
 }
 
-int sys_sigprocmask(int how, const void *set_ptr, void *oset_ptr) {
-    const uint32_t *set = (const uint32_t *)set_ptr;
-    uint32_t *oset = (uint32_t *)oset_ptr;
+int kern_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
     if (oset) *oset = current_thread->sig_mask;
     if (set) {
         uint32_t new_set = *set;
@@ -72,14 +71,33 @@ int sys_sigprocmask(int how, const void *set_ptr, void *oset_ptr) {
     return 0;
 }
 
-int sys_sigpending(void *set_ptr) {
-    uint32_t *set = (uint32_t *)set_ptr;
+int sys_sigprocmask(int how, const void *set, void *oset) {
+    uint32_t kset, koset;
+    if (set) {
+        if (copyin(set, &kset, sizeof(uint32_t)) != 0) return -14;
+    }
+    int ret = kern_sigprocmask(how, set ? &kset : NULL, oset ? &koset : NULL);
+    if (ret == 0 && oset) {
+        if (copyout(&koset, oset, sizeof(uint32_t)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_sigpending(uint32_t *set) {
     if (set) *set = current_thread->sig_pending & current_thread->sig_mask;
     return 0;
 }
 
-int sys_sigsuspend(const void *mask_ptr) {
-    const uint32_t *mask = (const uint32_t *)mask_ptr;
+int sys_sigpending(void *set) {
+    uint32_t kset;
+    int ret = kern_sigpending(&kset);
+    if (ret == 0) {
+        if (copyout(&kset, set, sizeof(uint32_t)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_sigsuspend(const uint32_t *mask) {
     uint32_t old_mask = current_thread->sig_mask;
     if (mask) {
         uint32_t kmask;
@@ -127,6 +145,14 @@ int sys_sigaltstack(const void *ss, void *oss) {
     return ret;
 }
 
+int sys_sigsuspend(const void *mask) {
+    uint32_t kmask;
+    if (mask) {
+        if (copyin(mask, &kmask, sizeof(uint32_t)) != 0) return -14;
+    }
+    return kern_sigsuspend(mask ? &kmask : NULL);
+}
+
 /*
  * sys_sigwait - Synchronously wait for a signal
  *
@@ -137,6 +163,19 @@ int sys_sigaltstack(const void *ss, void *oss) {
  * POSIX: Returns 0 on success, error number on failure.
  */
 int sys_sigwait(const uint32_t *set, int *sig) {
+    uint32_t kset;
+    int ksig;
+    if (copyin(set, &kset, sizeof(uint32_t)) != 0) return -14; // EFAULT
+    int ret = kern_sigwait(&kset, &ksig);
+    if (ret == 0) {
+        if (copyout(&ksig, sig, sizeof(int)) != 0) return -14;
+    }
+    // POSIX sigwait returns error code, not -1 with errno.
+    // However, our kern_sigwait might return 0 or error.
+    return ret;
+}
+
+int kern_sigwait(const uint32_t *set, int *sig) {
     if (!set || !sig) return 22; // EINVAL
     
     uint32_t wait_mask = *set;
@@ -187,6 +226,22 @@ int sys_sigwait(const uint32_t *set, int *sig) {
  */
 int sys_sigtimedwait(const uint32_t *set, siginfo_t *info, 
                      const void *timeout) {
+    uint32_t kset;
+    siginfo_t kinfo;
+    struct timespec kts;
+    if (copyin(set, &kset, sizeof(uint32_t)) != 0) return -14;
+    if (timeout) {
+        if (copyin(timeout, &kts, sizeof(struct timespec)) != 0) return -14;
+    }
+    int ret = kern_sigtimedwait(&kset, info ? &kinfo : NULL, timeout ? &kts : NULL);
+    if (ret > 0 && info) {
+        if (copyout(&kinfo, info, sizeof(siginfo_t)) != 0) return -14;
+    }
+    return ret;
+}
+
+int kern_sigtimedwait(const uint32_t *set, siginfo_t *info,
+                     const struct timespec *timeout) {
     if (!set) return -22; // EINVAL
     
     uint32_t wait_mask = *set;
@@ -635,7 +690,7 @@ void signal_handle_pending(registers_t *regs) {
         dfl.sa_handler = SIG_DFL;
         dfl.sa_flags = 0;
         dfl.sa_mask = 0;
-        sys_sigaction(sig, &dfl, NULL);
+        kern_sigaction(sig, &dfl, NULL);
     }
 
     // SA_RESTART: Restart syscall if it was interrupted and handler has SA_RESTART
@@ -661,5 +716,4 @@ void signal_handle_pending(registers_t *regs) {
     // Set P_CONTINUED was already done in psignal for SIGCONT, 
     // but if we delivered it to a handler, the app is "officially" continued.
 }
-
 

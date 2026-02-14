@@ -442,12 +442,12 @@ void run_memmove_tests(void) {
     printf("memmove tests passed!\n");
 }
 
-bool libc_libc_strlen(void) {
+bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
 }
 
-bool libc_libc_memmove(void) {
+bool test_libc_memmove(void) {
     run_memmove_tests();
     return true;
 }

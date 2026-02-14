@@ -9,40 +9,42 @@ null \- the null device
 .SH DESCRIPTION
 The
 .B null
-device acts as a data sink and source of end-of-file indications.
+character device discards all bytes written to it and returns end-of-file on read.
 .PP
-Writing to the
-.B null
-device discards all data. The write operation always succeeds and returns the count of bytes written.
+Reads always return
+.B 0
+(EOF).
+Writes always succeed and return the requested byte count.
 .PP
-Reading from the
-.B null
-device always returns 0 (end-of-file).
+.BR lseek (2)
+operations succeed and update file offsets, but offsets do not affect device behavior.
 .PP
-Seeking on the
-.B null
-device is supported and updating the file offset succeeds, but has no effect on subsequent reads or writes.
-.PP
-The device supports
 .BR poll (2)
-and always reports
+reports
 .B POLLOUT
-(writable). It does not report
-.B POLLIN
-(readable) because end-of-file is not considered data availability in this implementation.
+as ready and does not report
+.BR POLLIN .
+.BR ioctl (2)
+is not supported.
+.PP
+.BR mmap (2)
+is not supported for
+.BR /dev/null .
 .SH FILES
 .B /dev/null
 .SH ERRORS
 .TP
 .B ENOTTY
-The device does not support any ioctl operations.
+Any
+.BR ioctl (2)
+request.
 .TP
 .B EINVAL
-Mapping the device via
+Any
 .BR mmap (2)
-is not supported.
+attempt.
 .SH EXAMPLES
-Discard standard output of a command:
+Discard command output:
 .PP
 .nf
     $ echo "hi" > /dev/null
@@ -54,13 +56,7 @@ Read EOF immediately:
     $ cat /dev/null
 .fi
 .SH SEE ALSO
+.BR full (4),
 .BR zero (4),
-.BR full (4)
-.SH HISTORY
-The
-.B null
-device appeared in Version 7 AT&T UNIX.
-.SH BUGS
-The implementation does not support
-.BR kqueue (2)
-filters.
+.BR poll (2),
+.BR mmap (2)

@@ -6,6 +6,12 @@
 #include <string.h>
 #include "tests.h"
 
+/* Missing prototypes in vnode.h */
+int vop_access(struct vnode *vp, int mode, struct ucred *cred);
+int vop_getattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_setattr(struct vnode *vp, struct vattr *vap, struct ucred *cred);
+int vop_pathconf(struct vnode *vp, int name, register_t *retval);
+
 static int
 mock_vop_create(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap)
 {

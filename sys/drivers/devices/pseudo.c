@@ -18,7 +18,6 @@ extern void mem_test_init(void);
 // /dev/full - Now implemented in full.c
 
 // /dev/port
-// /dev/port
 static size_t port_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     if (offset >= 65536) return 0;
@@ -80,7 +79,6 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
  * with a proper ChaCha20-based CSPRNG implementation.
  */
 
-// /dev/tty - proxy to current process's controlling terminal
 // /dev/tty - proxy to current process's controlling terminal
 static size_t dev_tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;

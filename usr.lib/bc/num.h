@@ -46,7 +46,6 @@ bc_num *bc_mod(bc_num *a, bc_num *b);
 bc_num *bc_pow(bc_num *a, bc_num *b);
 
 // Comparison
-// Comparison
 // Returns -1 (a<b), 0 (a=b), 1 (a>b)
 int bc_compare(bc_num *a, bc_num *b);
 int bc_abs_cmp(bc_num *a, bc_num *b);

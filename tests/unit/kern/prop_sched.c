@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include <kern/sched.h"
+#include <kern/sched.h>
 
 extern void timer_tick(void);
 extern uint32_t get_time(void);
@@ -19,8 +19,8 @@ bool prop_time_is_monotonic(int iterations) {
 bool prop_realtime_preempts_timeshare(void) {
     sched_init();
     char s1[4096], s2[4096];
-    int t_ts = sched_create_thread(current_process, (void*)0x1, s1+4096, NULL);
-    int t_rt = sched_create_thread(current_process, (void*)0x2, s2+4096, NULL);
+    thread_t *t_t_ts = sched_create_thread(current_process, (void*)0x1, s1+4096, NULL); int t_ts = t_t_ts->tid;
+    thread_t *t_t_rt = sched_create_thread(current_process, (void*)0x2, s2+4096, NULL); int t_rt = t_t_rt->tid;
     
     // RT with lower priority than TS
     sched_set_priority(t_ts, SCHED_TIMESHARE, 100);
@@ -33,8 +33,8 @@ bool prop_realtime_preempts_timeshare(void) {
 bool prop_sleep_wakeup_consistency(void) {
     sched_init();
     char s1[4096], s2[4096];
-    int t1 = sched_create_thread(current_process, (void*)0x1, s1+4096, NULL);
-    int t2 = sched_create_thread(current_process, (void*)0x2, s2+4096, NULL);
+    thread_t *t_t1 = sched_create_thread(current_process, (void*)0x1, s1+4096, NULL); int t1 = t_t1->tid;
+    thread_t *t_t2 = sched_create_thread(current_process, (void*)0x2, s2+4096, NULL); int t2 = t_t2->tid;
     
     void *chan1 = (void*)0x111;
     void *chan2 = (void*)0x222;

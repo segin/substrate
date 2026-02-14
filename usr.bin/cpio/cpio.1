@@ -1,0 +1,92 @@
+.Dd February 11, 2026
+.Dt CPIO 1
+.Os
+.Sh NAME
+.Nm cpio
+.Nd copy file archives in and out
+.Sh SYNOPSIS
+.Nm
+.Fl o
+.Op Fl v
+.Op Fl H Ar format
+.Op Fl F Ar archive
+.Op Fl R Ar uid:gid
+.Nm
+.Fl i
+.Op Fl t
+.Op Fl v
+.Op Fl dmu
+.Op Fl H Ar format
+.Op Fl F Ar archive
+.Op Fl -safe-extract
+.Op Fl -no-absolute-paths
+.Op Fl -no-overwrite
+.Op Fl -numeric-owner
+.Nm
+.Fl p
+.Op Fl v
+.Op Fl dmu
+.Ar directory
+.Sh DESCRIPTION
+The
+.Nm
+utility reads and writes cpio archives using copy-out
+.Pq Fl o ,
+copy-in
+.Pq Fl i ,
+and pass-through
+.Pq Fl p
+modes.
+.Pp
+Pathnames for
+.Fl o
+and
+.Fl p
+are read from standard input, one per line.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl o
+Create archive.
+.It Fl i
+Extract archive.
+.It Fl p
+Pass-through copy to directory.
+.It Fl F Ar archive
+Read/write archive file instead of stdin/stdout.
+.It Fl H Ar format
+Archive format: bin, odc, newc.
+.It Fl t
+Table of contents only.
+.It Fl v
+Verbose output.
+.It Fl d
+Create leading directories.
+.It Fl m
+Preserve modification time on extraction/copy.
+.It Fl u
+Allow overwrite behavior (accepted for compatibility).
+.It Fl R Ar uid:gid
+Set owner fields while writing archive.
+.It Fl -safe-extract
+Reject absolute and parent-traversal path entries.
+.It Fl -no-absolute-paths
+Reject absolute path entries during extraction.
+.It Fl -no-overwrite
+Do not replace existing files on extraction.
+.It Fl -numeric-owner
+Apply numeric owner/group on extraction (root only).
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Bl -tag -width Ds
+.It 0
+Success.
+.It 1
+Non-fatal errors occurred (partial success).
+.It 2
+Fatal error.
+.El
+.Sh SEE ALSO
+.Xr pax 1
+.Sh STANDARDS
+Behavior follows POSIX cpio model with pragmatic safety extensions.

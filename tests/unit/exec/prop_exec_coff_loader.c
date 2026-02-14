@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include <fs/exec/coff.h"
+#include <fs/exec/coff.h>
 
 /*
  * Property-based test: COFF Loader Invariant

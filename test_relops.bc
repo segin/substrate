@@ -1,0 +1,26 @@
+print "Testing Equality\n"
+1 == 1
+1 == 2
+print "Testing Inequality\n"
+1 != 2
+1 != 1
+print "Testing Less Than\n"
+1 < 2
+2 < 1
+print "Testing Greater Than\n"
+2 > 1
+1 > 2
+print "Testing Less or Equal\n"
+1 <= 1
+1 <= 2
+2 <= 1
+print "Testing Greater or Equal\n"
+1 >= 1
+2 >= 1
+1 >= 2
+print "Testing Chain\n"
+1 < 2 == 1
+1 < 2 != 0
+print "Testing IF\n"
+if (1 < 2) print "1 < 2 is True\n"
+if (2 < 1) print "2 < 1 is True\n"
