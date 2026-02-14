@@ -88,11 +88,11 @@ pmap_t pmap_fork(pmap_t src_pmap); // Fork with COW
 
 // Mapping Operations
 // Returns 0 on success, < 0 on error
-int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
-int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags); // Deprecated name match
-int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
-void pmap_remove(pmap_t pmap, uint32_t va);
-uint32_t pmap_extract(pmap_t pmap, uint32_t va); // Get PA from VA
+int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
+int pmap_enter_pse(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t flags); // Deprecated name match
+int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
+void pmap_remove(pmap_t pmap, uintptr_t va);
+uintptr_t pmap_extract(pmap_t pmap, uintptr_t va); // Get PA from VA
 
 // Protection flags for pmap_enter
 #define VM_PROT_READ    0x01
@@ -102,37 +102,37 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va); // Get PA from VA
 #define VM_PROT_ALL     (VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXEC|VM_PROT_USER)
 
 // Kernel-only fast paths (no locking, assumes kernel pmap active)
-void pmap_kenter(uint32_t va, uint32_t pa);
-void pmap_kremove(uint32_t va);
+void pmap_kenter(uintptr_t va, uintptr_t pa);
+void pmap_kremove(uintptr_t va);
 
 // Protection and copying
-int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot);
-int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int cow);
-int pmap_page_is_cow(pmap_t pmap, uint32_t va);
+int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot);
+int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uintptr_t sva, uintptr_t eva, int cow);
+int pmap_page_is_cow(pmap_t pmap, uintptr_t va);
 
 // Optimized page operations
 void pmap_copy_page(uintptr_t src_pa, uintptr_t dst_pa);
 void pmap_zero_page(uintptr_t pa);
 
 // Helper to flush TLB
-void pmap_invalidate_page(uint32_t va);
+void pmap_invalidate_page(uintptr_t va);
 void pmap_invalidate_all(void);  // CR3 reload, flushes entire TLB
 void pmap_flush_global_pages(void);  // CR4 toggle, flushes TLB including global pages
 
 // SMP TLB Shootdown (invalidate on all CPUs)
-void pmap_shootdown_page(uint32_t va);
-void pmap_shootdown_range(uint32_t va, uint32_t len);
+void pmap_shootdown_page(uintptr_t va);
+void pmap_shootdown_range(uintptr_t va, uint32_t len);
 void pmap_shootdown_all(void);
 void pmap_shootdown_handler(void);  // Called by IPI handler
-void pmap_shootdown_defer(uint32_t va);  // Batch accumulator
+void pmap_shootdown_defer(uintptr_t va);  // Batch accumulator
 void pmap_shootdown_commit(void);        // Flush accumulated pages
 void pmap_shootdown_wait(int expected_cpus);  // Completion barrier
 
 // Page reference/modification tracking
-int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva);
-int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va);
-int pmap_is_modified_range(pmap_t pmap, uint32_t sva, uint32_t eva);
-int pmap_test_and_clear_modify(pmap_t pmap, uint32_t va);
+int pmap_is_referenced_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
+int pmap_test_and_clear_ref(pmap_t pmap, uintptr_t va);
+int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
+int pmap_test_and_clear_modify(pmap_t pmap, uintptr_t va);
 
 // Debug and Diagnostic Functions
 void pmap_dump(pmap_t pmap);

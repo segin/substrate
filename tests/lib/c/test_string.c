@@ -4,6 +4,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 // Rename implemented functions to avoid conflicts with host libc
 #define strfry libc_strfry
@@ -59,10 +60,8 @@ char *libc_strerror(int errnum);
 int libc_strcasecmp(const char *s1, const char *s2);
 int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 
-// Include the source file directly
-#ifdef COMPILE_DIRECTLY
-#include "../../../lib/c/src/string.c"
-#endif
+// Include the source file directly - Removed to avoid redefinitions
+// The test now relies on string_prefixed.o linked by the Makefile
 
 // libgcc/libc wrappers for prefixed builds
 void* libc_malloc(size_t s) { return malloc(s); }

@@ -156,21 +156,39 @@ test_case_t tests[] = {
     {NULL, NULL}
 };
 
-int main() {
+#include <string.h>
+extern void sleepq_init(void);
+
+int main(int argc, char **argv) {
+    const char *target_test = NULL;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--test") == 0 && i + 1 < argc) {
+            target_test = argv[i+1];
+            i++;
+        }
+    }
+
     int passed = 0;
     int total = 0;
 
     // Initialize subsystems
     vm_object_init();
     vm_page_init();
+    sleepq_init();
     sched_init();
 
-    printf("Starting Substrate Unit Tests...\n");
+    printf("Starting Substrate Unit Tests%s%s%s...\n", 
+           target_test ? " (Target: " : "",
+           target_test ? target_test : "",
+           target_test ? ")" : "");
     printf("--------------------------------\n");
 
     for (int i = 0; tests[i].name != NULL; i++) {
+        if (target_test && strcmp(tests[i].name, target_test) != 0) {
+            continue;
+        }
         total++;
-        printf("[%02d] Testing %-20s ... ", total, tests[i].name);
+        printf("[%02d] Testing %-20s ... ", i + 1, tests[i].name);
         if (tests[i].func()) {
             printf("PASS\n");
             passed++;
@@ -180,6 +198,10 @@ int main() {
     }
 
     printf("--------------------------------\n");
+    if (total == 0 && target_test) {
+        printf("Error: Test '%s' not found!\n", target_test);
+        return 1;
+    }
     printf("Result: %d/%d passed.\n", passed, total);
     return (passed == total) ? 0 : 1;
 }

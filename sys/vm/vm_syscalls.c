@@ -137,7 +137,7 @@ int sys_munmap(void *addr, size_t length) {
 
 #include <string.h>
 
-extern int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags);
+extern int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
 extern pmap_t pmap_kernel(void);
 extern void *pmm_alloc_block(void);
 
@@ -151,30 +151,30 @@ void *sys_brk(void *addr) {
             extern void kprint(const char*);
             char buf[64];
             char *digits = "0123456789ABCDEF";
-            uint32_t val = current_process->brk;
+            uintptr_t val = (uintptr_t)current_process->brk;
             kprint("BRK: Query/Early returning 0x");
             for(int i=0;i<8;i++) buf[7-i] = digits[(val>>(i*4))&0xF];
             buf[8] = '\n'; buf[9]=0;
             kprint(buf);
         }
-        return (void *)current_process->brk;
+        return (void *)(uintptr_t)current_process->brk;
     }
 
-    uint32_t new_brk = (uint32_t)addr;
-    uint32_t old_brk = current_process->brk;
+    uintptr_t new_brk = (uintptr_t)addr;
+    uintptr_t old_brk = (uintptr_t)current_process->brk;
 
     // Don't shrink below start
     if (new_brk < current_process->brk_start) 
-        return (void *)old_brk;
+        return (void *)(uintptr_t)old_brk;
 
     // Align to page boundaries
-    uint32_t old_page_end = (old_brk + 0xFFF) & 0xFFFFF000;
-    uint32_t new_page_end = (new_brk + 0xFFF) & 0xFFFFF000;
+    uintptr_t old_page_end = (old_brk + 0xFFF) & ~0xFFFULL;
+    uintptr_t new_page_end = (new_brk + 0xFFF) & ~0xFFFULL;
 
 
     if (new_page_end > old_page_end) {
         // Allocate and map new pages
-        for (uint32_t va = old_page_end; va < new_page_end; va += 0x1000) {
+        for (uintptr_t va = old_page_end; va < new_page_end; va += 0x1000) {
             void *pa_virt = pmm_alloc_block();
             if (!pa_virt) {
                 extern int syscall_trace_enabled;
@@ -182,11 +182,11 @@ void *sys_brk(void *addr) {
                     extern void kprint(const char*);
                     kprint("BRK: pmm_alloc failed!\n");
                 }
-                return (void *)old_brk; // Out of memory
+                return (void *)(uintptr_t)old_brk; // Out of memory
             }
             
             // Convert virtual to physical for pmap_enter
-            uint32_t pa_phys = (uint32_t)(uintptr_t)pa_virt - 0xC0000000;
+            uintptr_t pa_phys = (uintptr_t)pa_virt - 0xC0000000;
             
             // Map page with Read/Write permissions (USER handled by pmap for user addresses)
             if (pmap_enter(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(), va, pa_phys, VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
@@ -195,7 +195,7 @@ void *sys_brk(void *addr) {
                      extern void kprint(const char*);
                      kprint("BRK: pmap_enter failed!\n");
                  }
-                 return (void *)old_brk;
+                 return (void *)(uintptr_t)old_brk;
             }
             // Zero the page - pa_virt is already virtual, use directly
             memset(pa_virt, 0, 0x1000);
@@ -204,7 +204,7 @@ void *sys_brk(void *addr) {
     // If shrinking, we leak pages for now (lazy unmap). 
     // This is safe for stability, just wasteful.
 
-    current_process->brk = new_brk;
+    current_process->brk = (uint32_t)new_brk;
     
     // Debug print for success (restored and gated)
     extern int syscall_trace_enabled;
@@ -212,14 +212,14 @@ void *sys_brk(void *addr) {
         extern void kprint(const char*);
         char buf[64];
         char *digits = "0123456789ABCDEF";
-        uint32_t val = new_brk;
+        uintptr_t val = (uintptr_t)new_brk;
         kprint("BRK: Returning 0x");
         for(int i=0;i<8;i++) buf[7-i] = digits[(val>>(i*4))&0xF];
         buf[8] = '\n'; buf[9]=0;
         kprint(buf);
     }
     
-    return (void *)new_brk;
+    return (void *)(uintptr_t)new_brk;
 }
 
 // msync flags (from sys/mman.h)

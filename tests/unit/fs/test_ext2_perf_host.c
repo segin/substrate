@@ -44,6 +44,34 @@ int64_t get_time(void) {
     return 0;
 }
 
+// UMA Mocks for Ext2
+#include <vm/uma.h>
+
+uma_zone_t *uma_zcreate(const char *name, size_t size, uma_ctor ctor, uma_dtor dtor, uma_init init, uma_fini fini, int align, uint32_t flags) {
+    (void)ctor; (void)dtor; (void)init; (void)fini; (void)align; (void)flags;
+    uma_zone_t *zone = (uma_zone_t *)calloc(1, sizeof(uma_zone_t)); // use calloc to avoid uninit
+    if (zone) {
+        zone->uz_name = name;
+        zone->uz_size = size;
+        zone->uz_flags = flags;
+    }
+    return zone;
+}
+
+void *uma_zalloc(uma_zone_t *zone, int flags) {
+    (void)flags;
+    if (!zone) return NULL;
+    return calloc(1, zone->uz_size);
+}
+
+void uma_zfree(uma_zone_t *zone, void *item) {
+    (void)zone;
+    free(item);
+}
+
+void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
+
+
 // Rename colliding kernel function
 #define vasprintf kernel_vasprintf
 

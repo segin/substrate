@@ -11,6 +11,7 @@ extern int swap_in(vm_page_t *m);
 
 bool test_swap_lifecycle(void) {
     vm_page_t m;
+    m.magic_head = m.magic_tail = VM_PAGE_MAGIC;
     m.flags = PG_VALID;
     m.phys_addr = 0x1000;
     
@@ -31,10 +32,12 @@ bool test_swap_full(void) {
     // Fill up the 1024 pages
     vm_page_t pages[1025];
     for (int i = 0; i < 1024; i++) {
+        pages[i].magic_head = pages[i].magic_tail = VM_PAGE_MAGIC;
         if (swap_out(&pages[i]) != 0) return false;
     }
     
     // 1025th should fail
+    pages[1024].magic_head = pages[1024].magic_tail = VM_PAGE_MAGIC;
     if (swap_out(&pages[1024]) == 0) return false;
     
     return true;

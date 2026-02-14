@@ -1,6 +1,15 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stddef.h>
+
+#ifdef HOST_TEST
+#undef memchr
+#undef strchr
+#undef strrchr
+#undef strstr
+#undef strpbrk
+#endif
 
 char *strfry(char *string) {
     if (!string) return NULL;
