@@ -4,8 +4,7 @@
 #include <sys/signal.h>
 #include <sys/proc.h>
 #include <arch/i386/idt.h>
-
-
+extern int sys_kill(int pid, int sig);
 extern void signal_handle_pending(registers_t *regs);
 extern void sched_init(void);
 

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <sys/types.h>
 #include "../sys/arch/i386/pmap.h"
 #include "../sys/vm/vm_map.h"
 
@@ -29,8 +30,9 @@ void fuse_init() {}
 void fuse_fs_init() {}
 void p9_init() {}
 void devfs_init() {}
+void vfs_init_mock_root(void);
 void nchinit(void) {}
-
+struct fs_node *fs_root = NULL;
 
 // Driver init mocks
 void scsi_init() {}
@@ -98,6 +100,7 @@ void pmm_free_contiguous(void *p, size_t c) { (void)p; (void)c; }
 // idt/gdt/io mocks
 void idt_flush(uint32_t p) { (void)p; }
 void gdt_flush(uint32_t p) { (void)p; }
+void gdt_set_gate(int n, uint32_t b, uint32_t l, uint8_t a, uint8_t g) { (void)n; (void)b; (void)l; (void)a; (void)g; }
 void tss_flush() {}
 void idt_set_gate(uint8_t n, uint32_t b, uint16_t s, uint8_t f) { (void)n; (void)b; (void)s; (void)f; }
 void outb(uint16_t p, uint8_t v) { (void)p; (void)v; }
@@ -108,7 +111,7 @@ void sched_smp_init() {}
 
 // kmem mocks for host
 void *kmalloc(size_t size) {
-    if (size > 4096) return NULL;
+    // Host tests use standard malloc for kmalloc
     return malloc(size);
 }
 void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
@@ -124,9 +127,42 @@ void switch_to(void *prev, void *next) {
 void isr128() {}
 void fork_child_return(void) {}
 
-// Syscall Mocks
-
-
+// Syscall Mocks for those not linked from core
+int sys_unlink(const char *path) { (void)path; return -1; }
+int sys_execve(const char *path, char **argv, char **envp) { (void)path; (void)argv; (void)envp; return -1; }
+int sys_chdir(const char *path) { (void)path; return -1; }
+int sys_mknod(const char *path, int mode, int dev) { (void)path; (void)mode; (void)dev; return -1; }
+int sys_chmod(const char *path, int mode) { (void)path; (void)mode; return -1; }
+int sys_lchown(const char *path, int uid, int gid) { (void)path; (void)uid; (void)gid; return -1; }
+int sys_stat(const char *path, void *buf) { (void)path; (void)buf; return -1; }
+int64_t sys_lseek(int fd, uint32_t hi, uint32_t lo, int whence) { (void)fd; (void)hi; (void)lo; (void)whence; return -1; }
+int sys_getpid(void) { return 1; }
+int sys_mount(const char *dev, const char *dir, const char *type, unsigned long flags, void *data) { (void)dev; (void)dir; (void)type; (void)flags; (void)data; return -1; }
+int sys_umount(const char *dir) { (void)dir; return -1; }
+int sys_setuid(int uid) { (void)uid; return -1; }
+int sys_getuid(void) { return 0; }
+int sys_access(const char *path, int mode) { (void)path; (void)mode; return -1; }
+int sys_sync(void) { return 0; }
+int sys_dup(int fd) { (void)fd; return -1; }
+int sys_pipe(int *fds) { (void)fds; return -1; }
+int sys_setgid(int gid) { (void)gid; return -1; }
+int sys_getgid(void) { return 0; }
+int sys_ioctl(int fd, uint32_t cmd, void *arg) { (void)fd; (void)cmd; (void)arg; return -1; }
+int sys_chroot(const char *path) { (void)path; return -1; }
+int sys_fcntl(int fd, int cmd, int arg) { (void)fd; (void)cmd; (void)arg; return -1; }
+int sys_dup2(int oldfd, int newfd) { (void)oldfd; (void)newfd; return -1; }
+int sys_rmdir(const char *path) { (void)path; return -1; }
+int sys_mkdir(const char *path, int mode) { (void)path; (void)mode; return -1; }
+int sys_getdents(unsigned int fd, void *dirp, unsigned int count) { (void)fd; (void)dirp; (void)count; return -1; }
+int sys_getcwd(char *buf, size_t size) { (void)buf; (void)size; return -1; }
+int sys_waitpid(int pid, int *status, int options) { (void)pid; (void)status; (void)options; return -1; }
+int sys_creat(const char *path, int mode) { (void)path; (void)mode; return -1; }
+int sys_exit(int status) { exit(status); }
+int sys_read(int fd, char *buf, int len) { (void)fd; (void)buf; (void)len; return -1; }
+int sys_write(int fd, const char *buf, int len) { (void)fd; (void)buf; (void)len; return -1; }
+int sys_open(const char *path, int flags, int mode) { (void)path; (void)flags; (void)mode; return -1; }
+int sys_close(int fd) { (void)fd; return -1; }
+int sys_fork(void) { return 0; }
 
 // Other missing functions
 void kprint(const char *s) {
@@ -142,11 +178,6 @@ void kprintf(const char *fmt, ...) {
     va_end(ap);
 }
 
-// Map some missing functions used in tests
-bool test_libc_strlen(void) { return true; }
-bool test_libc_memmove(void) { return true; }
-bool test_fd_ref_counting(void) { return true; }
-
 // Copy functions mocks
 int copyin(const void *src, void *dst, size_t size) {
     memcpy(dst, src, size);
@@ -160,17 +191,19 @@ int copyout(const void *src, void *dst, size_t size) {
 
 int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     size_t l = strlen(src);
-    if (l >= maxlen) return -1;
-    strcpy(dst, src);
-    if (len) *len = l;
+    if (l >= maxlen) {
+        l = maxlen - 1;
+    }
+    memcpy(dst, src, l);
+    ((char *)dst)[l] = '\0';
+    if (len) *len = l + 1;
     return 0;
 }
 
 // PM/Sched globals and mocks
-// process/time globals removed (linked from core)
 void sched_periodic_balance(void) {}
 void sched_update_loadavg(void) {}
-int syscall_trace_enabled(int syscall_num) { (void)syscall_num; return 0; }
+int syscall_trace_enabled_fn(int syscall_num) { (void)syscall_num; return 0; }
 
 // VFS Mocks
 #include <vfs/vfs.h>
@@ -217,7 +250,6 @@ int swap_in(void *m) {
     return 0;
 }
 void reset_swap_mock(void) { mock_swap_count = 0; }
-int sys_fork(void) { return 0; }
 
 void pmap_bootstrap(void) {}
 void pmap_map_trampoline(void) {}
@@ -242,8 +274,11 @@ typedef int boolean_t;
 #define _BOOLEAN_T_DEFINED
 #endif
 
-int pmap_is_referenced(pmap_t pmap, uint32_t va) { (void)pmap; (void)va; return 0; }
-void pmap_clear_reference(pmap_t pmap, uint32_t va) { (void)pmap; (void)va; }
+int pmap_is_referenced_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)pmap; (void)sva; (void)eva; return 0; }
+int pmap_test_and_clear_ref(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; return 0; }
+int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)pmap; (void)sva; (void)eva; return 0; }
+int pmap_test_and_clear_modify(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; return 0; }
+
 void pmap_copy_page(uintptr_t src, uintptr_t dst) { (void)src; (void)dst; }
 void pmap_zero_page(uintptr_t pa) { (void)pa; }
 void pmap_remove(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; }
@@ -254,7 +289,7 @@ int pgrp_is_orphaned(struct pgrp *pgrp) { (void)pgrp; return 0; }
 struct personality *perso_lookup(int id) { (void)id; return &personality_native; }
 void sendsig(void *sf, struct process *p, int sig) { (void)sf; (void)p; (void)sig; }
 
-const uint8_t sigprop[32] = {0}; // Mock array
+const uint8_t sigprop[NSIG] = {0}; 
 
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) { (void)path; (void)argv; (void)envp; return 0; }
 
@@ -264,14 +299,12 @@ void pipe_create() {}
 struct fs_node *devfs_root_node_ptr;
 struct nameidata;
 int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
+int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 struct vnode;
 void vput(struct vnode *vp) { (void)vp; }
 void vrele(struct vnode *vp) { (void)vp; }
 
-// vm_map_lookup stub if missing (usually in vm_map.c but we use vm_map_host.c)
-struct vm_map_entry *vm_map_lookup_entry(struct vm_map *map, uint32_t vaddr) { (void)map; (void)vaddr; return NULL; }
-
-struct vm_map_entry;
+// vm_map_lookup stub
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
     (void)map; (void)va;
     return NULL;
@@ -280,7 +313,7 @@ vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
 // vm_pager stubs
 int vm_pager_has_page(void *obj, uint32_t offset) { (void)obj; (void)offset; return 0; }
 int vm_pager_get_pages(void *obj, void **m, int count, int *reqpage) { (void)obj; (void)m; (void)count; (void)reqpage; return 0; }
-void vm_pager_put_pages(void *obj, void **m, int count, int flags, int *rtvals) { (void)obj; (void)m; (void)count; (void)flags; (void)rtvals; }
+void vm_pager_put_pages(void *obj, void **m, int count, bool sync) { (void)obj; (void)m; (void)count; (void)sync; }
 
 // vm_phys stubs
 void vm_phys_get_free(uint64_t *free) { *free = 0; }
@@ -300,7 +333,6 @@ typedef struct uma_zone {
     size_t uz_size;
 } uma_zone_t;
 
-// Function pointers for uma_zcreate
 typedef int (*uma_ctor)(void *obj, int size, void *arg, int flags);
 typedef void (*uma_dtor)(void *obj, int size, void *arg);
 typedef int (*uma_init)(void *obj, int size, int flags);
@@ -319,7 +351,6 @@ uma_zone_t *uma_zcreate(const char *name, size_t size, uma_ctor ctor, uma_dtor d
 void *uma_zalloc(uma_zone_t *zone, int flags) {
     (void)flags;
     if (!zone) return NULL;
-    // Always zero-fill for tests to avoid uninitialized garbage
     return calloc(1, zone->uz_size);
 }
 
@@ -329,4 +360,3 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 }
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
-

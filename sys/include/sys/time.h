@@ -1,3 +1,6 @@
+#ifdef HOST_TEST
+#include_next <sys/time.h>
+#else
 #ifndef _SYS_TIME_H
 #define _SYS_TIME_H
 
@@ -45,4 +48,5 @@ int utimes(const char *path, const struct timeval times[2]);
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
 
+#endif
 #endif

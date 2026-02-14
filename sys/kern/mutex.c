@@ -11,14 +11,49 @@ void mutex_init(mutex_t *m, const char *name) {
     spinlock_init(&m->guard, "mutex_guard");
 }
 
+bool mutex_trylock(mutex_t *m) {
+    if (__sync_bool_compare_and_swap(&m->locked, 0, 1)) {
+        m->owner = current_thread;
+        return true;
+    }
+    return false;
+}
+
 void mutex_lock(mutex_t *m) {
     thread_t *me = current_thread;
 
     // Fast path: Uncontended optimization
     // Try to grab lock without heavy spinlock first
-    if (__sync_bool_compare_and_swap(&m->locked, 0, 1)) {
-        m->owner = me;
+    if (mutex_trylock(m)) {
         return;
+    }
+
+    // Adaptive Spin: Spin if the owner is currently running on another CPU.
+    // This avoids expensive context switches for short-held locks.
+    for (int i = 0; i < 1000; i++) {
+        if (!m->locked) {
+            if (mutex_trylock(m)) return;
+        }
+
+        // Defensive check: only dereference owner if lock is still held
+        // and owner is not NULL.
+        thread_t *owner = (thread_t *)m->owner;
+        if (owner) {
+            // Verify owner is still the owner and lock is held before dereferencing state
+            if (m->locked && m->owner == owner) {
+                if (owner->state != THREAD_RUNNING) {
+                    break;
+                }
+            } else {
+                // Lock was released or owner changed
+                if (mutex_trylock(m)) return;
+                break;
+            }
+        }
+
+#if defined(__i386__) || defined(__x86_64__)
+        __asm__ volatile("pause");
+#endif
     }
 
     // Slow path

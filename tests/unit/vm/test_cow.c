@@ -25,7 +25,7 @@ bool test_vm_fault_cow_trigger(void) {
     vm_object_add_page(obj, &p1);
     
     // 3. Trigger a write fault
-    int result = vm_fault(&map, 0x1500, VM_PROT_WRITE);
+    int result = vm_fault(&map, 0x1500, 0x02);
     
     // In our implementation, vm_fault should call vm_page_alloc 
     // to create a new page if ref_count > 1.

@@ -25,6 +25,7 @@ typedef struct {
 
 void mutex_init(mutex_t *m, const char *name);
 void mutex_lock(mutex_t *m);
+bool mutex_trylock(mutex_t *m);
 void mutex_unlock(mutex_t *m);
 bool mutex_is_held(mutex_t *m);
 

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <string.h>
 
 // Fixed host-side implementation of vm_map.c
 
@@ -25,6 +26,7 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     
     // Fix: Allocate unique sentinel
     vm_map_entry_t *sentinel = malloc(sizeof(vm_map_entry_t));
+    memset(sentinel, 0, sizeof(vm_map_entry_t));
     sentinel->next = sentinel;
     sentinel->prev = sentinel;
     sentinel->start = sentinel->end = 0;
@@ -54,6 +56,7 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     if (prev_entry->next != map->header && prev_entry->next->start < end) return -1;
     vm_map_entry_t *new_entry = alloc_entry();
     if (!new_entry) return -1;
+    memset(new_entry, 0, sizeof(vm_map_entry_t));
     new_entry->start = start;
     new_entry->end = end;
     new_entry->object = obj;

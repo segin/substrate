@@ -3,6 +3,7 @@ CFLAGS_COMMON = -Wall -Wextra -g -DHOST_TEST
 CFLAGS_KERN = $(CFLAGS_COMMON) -I../sys -I../sys/arch/i386 -I../sys/kern -I../sys/drivers/video -I../sys/exec/perso -I../sys/include
 CFLAGS_TEST = $(CFLAGS_COMMON) -I../sys/include -I../sys -I.
 
+# Core kernel objects for testing
 CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_swap.o vm_zone.o \
             spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
             string.o printf.o div64.o compat.o acct.o sysinfo.o \
