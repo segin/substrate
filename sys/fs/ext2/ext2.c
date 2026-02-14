@@ -3,6 +3,7 @@
 #include <kern/console.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
+#include <vm/uma.h>
 
 // Static filesystem context (single mount for now)
 static ext2_fs_t ext2_fs;
@@ -15,6 +16,8 @@ static fs_node_t ext2_root;
 static ext2_node_t ext2_node_cache[EXT2_NODE_CACHE_SIZE];
 static fs_node_t ext2_fs_node_cache[EXT2_NODE_CACHE_SIZE];
 static int ext2_node_cache_idx = 0;
+
+static uma_zone_t *ext2_block_cache;
 
 // Forward declarations
 fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
@@ -98,16 +101,16 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     uint32_t inode_offset = (index % inodes_per_block) * fs->inode_size;
     
     // Read the block containing the inode
-    uint8_t *block_buf = kmalloc(4096);
+    uint8_t *block_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
     if (!block_buf) return -1;
 
     if (ext2_read_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
-        kfree(block_buf, 4096);
+        uma_zfree(ext2_block_cache, block_buf);
         return -1;
     }
     
     memcpy(inode, block_buf + inode_offset, sizeof(ext2_inode_t));
-    kfree(block_buf, 4096);
+    uma_zfree(ext2_block_cache, block_buf);
     return 0;
 }
 
@@ -137,11 +140,11 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     uint32_t inode_offset = (index % inodes_per_block) * fs->inode_size;
     
     // Read the block containing the inode
-    uint8_t *block_buf = kmalloc(4096);
+    uint8_t *block_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
     if (!block_buf) return -1;
 
     if (ext2_read_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
-        kfree(block_buf, 4096);
+        uma_zfree(ext2_block_cache, block_buf);
         return -1;
     }
 
@@ -150,11 +153,11 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     
     // Write the block back to disk
     if (ext2_write_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
-        kfree(block_buf, 4096);
+        uma_zfree(ext2_block_cache, block_buf);
         return -1;
     }
     
-    kfree(block_buf, 4096);
+    uma_zfree(ext2_block_cache, block_buf);
     return 0;
 }
 
@@ -783,6 +786,7 @@ static filesystem_t ext2_filesystem = {
 
 void ext2_init(void) {
     kprint("Initializing EXT2 Driver...\n");
+    ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
     vfs_register_filesystem(&ext2_filesystem);
 }
 
@@ -790,7 +794,7 @@ void ext2_init(void) {
 uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     if (!fs) return 0;
     
-    uint8_t *bitmap_buf = kmalloc(4096);
+    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
     if (!bitmap_buf) return 0;
     
     // Search each block group for a free block, starting from last allocation
@@ -846,14 +850,14 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             fs->last_alloc_group = group;
             fs->last_alloc_bit = (found_idx + 1) % bits_in_group;
 
-            kfree(bitmap_buf, 4096);
+            uma_zfree(ext2_block_cache, bitmap_buf);
             return block_num;
         }
 
         group = (group + 1) % fs->group_count;
     } while (group != start_group);
     
-    kfree(bitmap_buf, 4096);
+    uma_zfree(ext2_block_cache, bitmap_buf);
     return 0; // No free blocks
 }
 
@@ -867,12 +871,12 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     
     if (group >= fs->group_count) return;
     
-    uint8_t *bitmap_buf = kmalloc(4096);
+    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
     if (!bitmap_buf) return;
     
     // Read the block bitmap
     if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf) != fs->block_size) {
-        kfree(bitmap_buf, 4096);
+        uma_zfree(ext2_block_cache, bitmap_buf);
         return;
     }
     
@@ -891,14 +895,14 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     // Update superblock
     fs->sb.s_free_blocks_count++;
 
-    kfree(bitmap_buf, 4096);
+    uma_zfree(ext2_block_cache, bitmap_buf);
 }
 
 // Allocate an inode
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
     if (!fs) return 0;
     
-    uint8_t *bitmap_buf = kmalloc(4096);
+    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
     if (!bitmap_buf) return 0;
     
     // Search each block group for a free inode
@@ -963,13 +967,13 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 
                 ext2_write_inode(fs, inode_num, &inode);
                 
-                kfree(bitmap_buf, 4096);
+                uma_zfree(ext2_block_cache, bitmap_buf);
                 return inode_num;
             }
         }
     }
     
-    kfree(bitmap_buf, 4096);
+    uma_zfree(ext2_block_cache, bitmap_buf);
     return 0; // No free inodes
 }
 
@@ -983,12 +987,12 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     
     if (group >= fs->group_count) return;
     
-    uint8_t *bitmap_buf = kmalloc(4096);
+    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
     if (!bitmap_buf) return;
     
     // Read the inode bitmap
     if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf) != fs->block_size) {
-        kfree(bitmap_buf, 4096);
+        uma_zfree(ext2_block_cache, bitmap_buf);
         return;
     }
     
@@ -1010,7 +1014,7 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     // Update superblock
     fs->sb.s_free_inodes_count++;
 
-    kfree(bitmap_buf, 4096);
+    uma_zfree(ext2_block_cache, bitmap_buf);
 }
 
 // Add directory entry
