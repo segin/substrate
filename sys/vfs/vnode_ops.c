@@ -154,6 +154,25 @@ vop_rmdir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 }
 
 /*
+ * vop_link:
+ * Link a new name to an existing vnode.
+ */
+int
+vop_link(struct vnode *tdvp, struct vnode *vp, struct componentname *cnp)
+{
+    if (tdvp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (vp->v_type == VDIR)
+        return EPERM;
+
+    if (tdvp->v_op && tdvp->v_op->vop_link)
+        return tdvp->v_op->vop_link(tdvp, vp, cnp);
+
+    return EOPNOTSUPP;
+}
+
+/*
  * vop_whiteout:
  * Create/delete/lookup a whiteout entry.
  */
@@ -261,7 +280,6 @@ vop_pathconf(struct vnode *vp, int name, register_t *retval)
 }
 
 /*
-<<<<<<< HEAD
  * vop_open:
  * Open a vnode for I/O.
  */
@@ -517,6 +535,99 @@ vop_readdir(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag,
 
     if (vp->v_op && vp->v_op->vop_readdir)
         return vp->v_op->vop_readdir(vp, uio, cred, eofflag, ncookies, cookies);
+
+    return EOPNOTSUPP;
+}
+
+
+/*
+ * vop_rename:
+ * Rename a file or directory.
+ */
+int
+vop_rename(struct vnode *fdvp, struct vnode *fvp, struct componentname *fcnp,
+           struct vnode *tdvp, struct vnode *tvp, struct componentname *tcnp)
+{
+    if (fdvp->v_type != VDIR || tdvp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (fdvp->v_mount != tdvp->v_mount)
+        return EXDEV;
+
+    if (fdvp->v_op && fdvp->v_op->vop_rename)
+        return fdvp->v_op->vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_symlink:
+ * Create a symbolic link.
+ */
+int
+vop_symlink(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
+            struct vattr *vap, const char *target)
+{
+    if (dvp->v_type != VDIR)
+        return ENOTDIR;
+
+    if (dvp->v_op && dvp->v_op->vop_symlink)
+        return dvp->v_op->vop_symlink(dvp, vpp, cnp, vap, target);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_readlink:
+ * Read the target of a symbolic link.
+ */
+int
+vop_readlink(struct vnode *vp, struct uio *uio, struct ucred *cred)
+{
+    if (vp->v_type != VLNK)
+        return EINVAL;
+
+    if (vp->v_op && vp->v_op->vop_readlink)
+        return vp->v_op->vop_readlink(vp, uio, cred);
+
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_inactive:
+ * Mark vnode as inactive.
+ */
+int
+vop_inactive(struct vnode *vp, struct ucred *cred)
+{
+    if (vp->v_op && vp->v_op->vop_inactive)
+        return vp->v_op->vop_inactive(vp, cred);
+
+    return 0; /* Not an error if no implementation */
+}
+
+/*
+ * vop_reclaim:
+ * Reclaim vnode from filesystem.
+ */
+int
+vop_reclaim(struct vnode *vp, struct ucred *cred)
+{
+    if (vp->v_op && vp->v_op->vop_reclaim)
+        return vp->v_op->vop_reclaim(vp, cred);
+
+    return 0;
+}
+
+/*
+ * vop_print:
+ * Print vnode details for debugging.
+ */
+int
+vop_print(struct vnode *vp)
+{
+    if (vp->v_op && vp->v_op->vop_print)
+        return vp->v_op->vop_print(vp);
 
     return EOPNOTSUPP;
 }
