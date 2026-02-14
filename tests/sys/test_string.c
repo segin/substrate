@@ -231,6 +231,61 @@ static void test_memmove(void) {
     ASSERT_MEM_EQ(buf, "12345678", 8, "memmove zero size");
 }
 
+static void test_memmove_comprehensive(void) {
+    const int buffer_size = 256;
+    char *buffer = kmalloc(buffer_size);
+    char *control = kmalloc(buffer_size);
+
+    if (!buffer || !control) {
+        kprint("SKIP: test_memmove_comprehensive (OOM)\n");
+        if (buffer) kfree(buffer, buffer_size);
+        if (control) kfree(control, buffer_size);
+        return;
+    }
+
+    // Initialize with a pattern
+    for (int i = 0; i < buffer_size; i++) {
+        buffer[i] = (char)(i & 0xFF);
+        control[i] = (char)(i & 0xFF);
+    }
+
+    // Iterate through various src/dst offsets and lengths
+    for (int src_off = 0; src_off < buffer_size - 16; src_off += 13) {
+        for (int dst_off = 0; dst_off < buffer_size - 16; dst_off += 17) {
+            for (int len = 0; len < 64; len++) {
+                 // Reset buffer content for next iteration
+                 for (int i = 0; i < buffer_size; i++) {
+                     buffer[i] = (char)(i & 0xFF);
+                     control[i] = (char)(i & 0xFF);
+                 }
+
+                 if (src_off + len > buffer_size || dst_off + len > buffer_size) continue;
+
+                 // Perform operation on control buffer (using reference implementation via temp buffer)
+                 char tmp[64];
+                 memcpy(tmp, control + src_off, len);
+                 memcpy(control + dst_off, tmp, len);
+
+                 // Perform operation on test buffer
+                 memmove(buffer + dst_off, buffer + src_off, len);
+
+                 // Compare
+                 if (memcmp(buffer, control, buffer_size) != 0) {
+                     char msg[128];
+                     snprintf(msg, sizeof(msg), "FAIL: memmove comprehensive mismatch at src=%d dst=%d len=%d\n", src_off, dst_off, len);
+                     kprint(msg);
+                     failed_tests++;
+                     goto cleanup;
+                 }
+            }
+        }
+    }
+
+cleanup:
+    kfree(buffer, buffer_size);
+    kfree(control, buffer_size);
+}
+
 static void test_memset_basic(void) {
     char buf[20];
     char expected[20];
@@ -451,6 +506,7 @@ void run_string_tests(void) {
 
     kprint("Checking memmove correctness...\n");
     test_memmove();
+    test_memmove_comprehensive();
 
     kprint("Checking memset correctness...\n");
     test_memset_basic();
