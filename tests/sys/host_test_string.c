@@ -68,9 +68,25 @@ void test_strcpy(void) {
     ASSERT_EQ((uintptr_t)ret, (uintptr_t)dest, "strcpy return value");
     ASSERT_STREQ(dest, src, "strcpy content");
     ASSERT_EQ(dest[strlen(src)], '\0', "strcpy null terminator");
-    ASSERT_EQ(dest[sizeof(dest)-1], 'X', "strcpy buffer overflow check"); // Check we didn't write past end (though this is risky if src is too long, here it's fine)
+    ASSERT_EQ(dest[sizeof(dest)-1], 'X', "strcpy buffer overflow check");
 
     printf("test_strcpy: PASS\n");
+}
+
+void test_strcpy_empty(void) {
+    char src[] = "";
+    char dest[20];
+
+    memset(dest, 'X', sizeof(dest));
+
+    char *ret = kernel_strcpy(dest, src);
+
+    ASSERT_EQ((uintptr_t)ret, (uintptr_t)dest, "strcpy empty return value");
+    ASSERT_STREQ(dest, "", "strcpy empty content");
+    ASSERT_EQ(dest[0], '\0', "strcpy empty null terminator");
+    ASSERT_EQ(dest[1], 'X', "strcpy empty buffer check");
+
+    printf("test_strcpy_empty: PASS\n");
 }
 
 void test_strncpy(void) {
@@ -104,8 +120,7 @@ void test_strncpy(void) {
     // Check NO null terminator at index 3
     ASSERT_EQ(dest[3], 'X', "strncpy should not null terminate if truncated");
 
-    // Case 3: n == strlen(src) -> No null terminator (standard behavior? let's check man page)
-    // man strncpy: "Warning: If there is no null byte among the first n bytes of src, the string placed in dest will not be null-terminated."
+    // Case 3: n == strlen(src) -> No null terminator
     memset(dest, 'X', sizeof(dest));
     kernel_strncpy(dest, src, 5);
 
@@ -118,10 +133,45 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
+void test_strncpy_empty(void) {
+    char src[] = "";
+    char dest[20];
+
+    memset(dest, 'X', sizeof(dest));
+    kernel_strncpy(dest, src, 5);
+
+    // Verify padding (all 5 bytes should be null)
+    for (int i = 0; i < 5; i++) {
+        if (dest[i] != '\0') {
+            printf("FAIL: strncpy empty padding at index %d\n", i);
+            exit(1);
+        }
+    }
+    ASSERT_EQ(dest[5], 'X', "strncpy empty overflow check");
+
+    printf("test_strncpy_empty: PASS\n");
+}
+
+void test_strncpy_zero(void) {
+    char src[] = "Hello";
+    char dest[20];
+
+    memset(dest, 'X', sizeof(dest));
+    kernel_strncpy(dest, src, 0);
+
+    // Verify nothing changed
+    ASSERT_EQ(dest[0], 'X', "strncpy n=0 should not modify dest");
+
+    printf("test_strncpy_zero: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
+    test_strcpy_empty();
     test_strncpy();
+    test_strncpy_empty();
+    test_strncpy_zero();
     printf("All Tests Passed\n");
     return 0;
 }

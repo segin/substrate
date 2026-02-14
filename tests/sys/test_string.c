@@ -140,6 +140,32 @@ static void test_strcpy(void) {
     }
 }
 
+static void test_strcpy_empty(void) {
+    char src[] = "";
+    char dest[20];
+
+    memset(dest, 'X', sizeof(dest));
+
+    char *ret = strcpy(dest, src);
+
+    if (ret != dest) {
+        kprint("FAIL: strcpy empty return value mismatch\n");
+        failed_tests++;
+    }
+    if (strcmp(dest, "") != 0) {
+        kprint("FAIL: strcpy empty content mismatch\n");
+        failed_tests++;
+    }
+    if (dest[0] != '\0') {
+        kprint("FAIL: strcpy empty null terminator missing\n");
+        failed_tests++;
+    }
+    if (dest[1] != 'X') {
+        kprint("FAIL: strcpy empty buffer check failed\n");
+        failed_tests++;
+    }
+}
+
 static void test_strncpy(void) {
     char src[] = "Hello";
     char dest[20];
@@ -194,6 +220,40 @@ static void test_strncpy(void) {
     }
     if (dest[5] != 'X') {
         kprint("FAIL: strncpy exact length should not null terminate\n");
+        failed_tests++;
+    }
+}
+
+static void test_strncpy_empty(void) {
+    char src[] = "";
+    char dest[20];
+
+    memset(dest, 'X', sizeof(dest));
+    strncpy(dest, src, 5);
+
+    // Verify padding (all 5 bytes should be null)
+    for (int i = 0; i < 5; i++) {
+        if (dest[i] != '\0') {
+            kprint("FAIL: strncpy empty padding failed\n");
+            failed_tests++;
+            break;
+        }
+    }
+    if (dest[5] != 'X') {
+        kprint("FAIL: strncpy empty overflow check failed\n");
+        failed_tests++;
+    }
+}
+
+static void test_strncpy_zero(void) {
+    char src[] = "Hello";
+    char dest[20];
+
+    memset(dest, 'X', sizeof(dest));
+    strncpy(dest, src, 0);
+
+    if (dest[0] != 'X') {
+        kprint("FAIL: strncpy n=0 should not modify dest\n");
         failed_tests++;
     }
 }
@@ -433,9 +493,12 @@ void run_string_tests(void) {
 
     kprint("Checking strcpy correctness...\n");
     test_strcpy();
+    test_strcpy_empty();
 
     kprint("Checking strncpy correctness...\n");
     test_strncpy();
+    test_strncpy_empty();
+    test_strncpy_zero();
 
     kprint("Checking strcmp correctness...\n");
     test_strcmp();
