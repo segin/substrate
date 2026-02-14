@@ -39,6 +39,17 @@
 typedef struct filesystem filesystem_t;
 void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }
 
+// Mock strlcpy for host test
+size_t strlcpy(char *dst, const char *src, size_t size) {
+    size_t srclen = strlen(src);
+    if (size > 0) {
+        size_t len = (srclen >= size) ? size - 1 : srclen;
+        memcpy(dst, src, len);
+        dst[len] = '\0';
+    }
+    return srclen;
+}
+
 // We need to include sysfs.c
 // But first we need to make sure its includes work.
 // We will compile with -I../../sys/include -I../../include

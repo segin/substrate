@@ -30,6 +30,7 @@ void kfree(void *ptr, size_t size) {
 #define strchr kernel_strchr
 #define strspn kernel_strspn
 #define strpbrk kernel_strpbrk
+#define strlcpy kernel_strlcpy
 
 // Include the source file directly
 #include "../../sys/lib/string.c"
@@ -118,10 +119,53 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
+void test_strlcpy(void) {
+    char src[] = "Hello";
+    char dest[20];
+    size_t ret;
+
+    // Case 1: size > strlen(src) -> Copy all, null terminate
+    memset(dest, 'X', sizeof(dest));
+    ret = kernel_strlcpy(dest, src, 10);
+    ASSERT_EQ(ret, strlen(src), "strlcpy return value (full copy)");
+    ASSERT_STREQ(dest, src, "strlcpy content (full copy)");
+    ASSERT_EQ(dest[strlen(src)], '\0', "strlcpy null terminator");
+    // Verify NO padding (unlike strncpy)
+    if (dest[6] != 'X') {
+         printf("FAIL: strlcpy should NOT pad with nulls\n");
+         exit(1);
+    }
+
+    // Case 2: size < strlen(src) -> Truncate, null terminate
+    memset(dest, 'X', sizeof(dest));
+    ret = kernel_strlcpy(dest, src, 3); // size 3 means max 2 chars + null
+    ASSERT_EQ(ret, strlen(src), "strlcpy return value (truncation)");
+    if (memcmp(dest, "He", 2) != 0 || dest[2] != '\0') {
+         printf("FAIL: strlcpy truncation failed: '%s'\n", dest);
+         exit(1);
+    }
+    ASSERT_EQ(dest[3], 'X', "strlcpy buffer overflow check");
+
+    // Case 3: size == 0 -> Do nothing, return length
+    memset(dest, 'X', sizeof(dest));
+    ret = kernel_strlcpy(dest, src, 0);
+    ASSERT_EQ(ret, strlen(src), "strlcpy return value (size 0)");
+    ASSERT_EQ(dest[0], 'X', "strlcpy size 0 should not touch buffer");
+
+    // Case 4: size == strlen(src) + 1 -> Exact fit
+    memset(dest, 'X', sizeof(dest));
+    ret = kernel_strlcpy(dest, src, 6);
+    ASSERT_EQ(ret, strlen(src), "strlcpy return value (exact fit)");
+    ASSERT_STREQ(dest, src, "strlcpy content (exact fit)");
+
+    printf("test_strlcpy: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
+    test_strlcpy();
     printf("All Tests Passed\n");
     return 0;
 }

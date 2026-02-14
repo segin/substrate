@@ -175,3 +175,13 @@ char *strpbrk(const char *s1, const char *s2) {
     }
     return NULL;
 }
+
+size_t strlcpy(char *dst, const char *src, size_t size) {
+    size_t srclen = strlen(src);
+    if (size > 0) {
+        size_t len = (srclen >= size) ? size - 1 : srclen;
+        memcpy(dst, src, len);
+        dst[len] = '\0';
+    }
+    return srclen;
+}
