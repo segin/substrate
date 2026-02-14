@@ -1155,6 +1155,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
+    // Optimization: Calculate strlen once
     size_t name_len = strlen(name);
 
     mutex_lock(&ctx->lock);
@@ -1179,7 +1180,6 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
     int result = -1;
-    // uint32_t name_len = strlen(name); // Removed duplicate
     
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
