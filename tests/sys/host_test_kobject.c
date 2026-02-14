@@ -16,7 +16,8 @@ void my_release(struct kobject *kobj) {
     printf("Release called for %s\n", kobj->name);
 }
 
-int main() {
+void test_kobject_init(void) {
+    printf("Running test_kobject_init...\n");
     struct kobject kobj;
 
     // Ensure memory is dirty before init to test zeroing
@@ -25,63 +26,91 @@ int main() {
     kobject_init(&kobj, "test_obj");
 
     // Test initialization
-    if (kobj.refcount != 1) {
-        printf("FAIL: Initial refcount should be 1, got %u\n", kobj.refcount);
-        return 1;
-    }
-    if (kobj.release != NULL) {
-        printf("FAIL: Initial release callback should be NULL\n");
-        return 1;
-    }
-    if (strcmp(kobj.name, "test_obj") != 0) {
-        printf("FAIL: Name mismatch, got %s\n", kobj.name);
-        return 1;
-    }
+    assert(kobj.refcount == 1);
+    assert(kobj.release == NULL);
+    assert(strcmp(kobj.name, "test_obj") == 0);
+    assert(kobj.parent == NULL);
+    assert(kobj.kset == NULL);
+}
 
-    // Set release callback
+void test_kobject_init_name_truncation(void) {
+    printf("Running test_kobject_init_name_truncation...\n");
+    struct kobject kobj;
+    const char *long_name = "this_is_a_very_long_name_that_exceeds_31_characters_limit";
+    char expected_name[32];
+
+    memset(&kobj, 0, sizeof(kobj));
+    kobject_init(&kobj, long_name);
+
+    // Expected behavior: first 31 chars copied, last char is null terminator (due to memset 0)
+    // strncpy copies 31 chars, leaving 32nd char as 0 if initialized to 0.
+    strncpy(expected_name, long_name, 31);
+    expected_name[31] = '\0';
+
+    assert(strcmp(kobj.name, expected_name) == 0);
+    assert(kobj.name[31] == '\0');
+}
+
+void test_kobject_get(void) {
+    printf("Running test_kobject_get...\n");
+    struct kobject kobj;
+    kobject_init(&kobj, "test_get");
+
+    struct kobject *ret = kobject_get(&kobj);
+    assert(ret == &kobj);
+    assert(kobj.refcount == 2);
+
+    // Test NULL handling
+    ret = kobject_get(NULL);
+    assert(ret == NULL);
+}
+
+void test_kobject_put(void) {
+    printf("Running test_kobject_put...\n");
+    struct kobject kobj;
+    kobject_init(&kobj, "test_put");
     kobj.release = my_release;
+    release_called = 0;
+    released_obj = NULL;
 
-    // Test get
+    // Increase refcount to 2
     kobject_get(&kobj);
-    if (kobj.refcount != 2) {
-        printf("FAIL: Refcount after get should be 2, got %u\n", kobj.refcount);
-        return 1;
-    }
+    assert(kobj.refcount == 2);
 
-    // Test put (refcount 2 -> 1, no release)
+    // Decrement (2 -> 1)
     kobject_put(&kobj);
-    if (kobj.refcount != 1) {
-        printf("FAIL: Refcount after first put should be 1, got %u\n", kobj.refcount);
-        return 1;
-    }
-    if (release_called != 0) {
-        printf("FAIL: Release callback called prematurely\n");
-        return 1;
-    }
+    assert(kobj.refcount == 1);
+    assert(release_called == 0);
 
-    // Test put (refcount 1 -> 0, release called)
+    // Decrement (1 -> 0, release called)
     kobject_put(&kobj);
-    if (kobj.refcount != 0) {
-        printf("FAIL: Refcount after final put should be 0, got %u\n", kobj.refcount);
-        return 1;
-    }
-    if (release_called != 1) {
-        printf("FAIL: Release callback not called\n");
-        return 1;
-    }
-    if (released_obj != &kobj) {
-        printf("FAIL: Release callback called with wrong object\n");
-        return 1;
-    }
+    assert(kobj.refcount == 0);
+    assert(release_called == 1);
+    assert(released_obj == &kobj);
 
-    // Test with NULL release
-    struct kobject kobj2;
-    kobject_init(&kobj2, "test_obj2");
-    kobject_put(&kobj2); // Should not crash
-    if (kobj2.refcount != 0) {
-        printf("FAIL: Refcount for kobj2 should be 0, got %u\n", kobj2.refcount);
-        return 1;
-    }
+    // Test NULL handling
+    kobject_put(NULL); // Should not crash
+}
+
+void test_kset_init(void) {
+    printf("Running test_kset_init...\n");
+    struct kset kset;
+    memset(&kset, 0xBB, sizeof(kset));
+
+    kset_init(&kset, "test_kset");
+
+    assert(strcmp(kset.kobj.name, "test_kset") == 0);
+    assert(kset.kobj.refcount == 1);
+    assert(kset.list == NULL);
+    assert(kset.count == 0);
+}
+
+int main() {
+    test_kobject_init();
+    test_kobject_init_name_truncation();
+    test_kobject_get();
+    test_kobject_put();
+    test_kset_init();
 
     printf("All tests passed!\n");
     return 0;
