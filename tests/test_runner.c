@@ -55,13 +55,15 @@ extern bool test_signal_mask(void);
 extern bool test_signal_delivery_default(void);
 
 // VFS Tests
-extern bool test_fd_ref_counting(void);
+extern bool test_fd_f_counting(void);
 extern bool test_fd_dup2(void);
 extern bool test_vfs_permissions_root(void);
 extern bool test_vfs_permissions_user(void);
 extern bool test_vfs_permissions_group(void);
 extern bool test_vfs_chroot_basic(void);
 extern bool test_vfs_chroot_effect(void);
+extern bool test_vop_readdir_basic(void);
+extern bool test_vop_readdir_notdir(void);
 
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
@@ -138,13 +140,15 @@ test_case_t tests[] = {
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},
-    {"fd_refcnt", test_fd_ref_counting},
+    {"fd_refcnt", test_fd_f_counting},
     {"fd_dup2", test_fd_dup2},
     {"vfs_perm_root", test_vfs_permissions_root},
     {"vfs_perm_user", test_vfs_permissions_user},
     {"vfs_perm_group", test_vfs_permissions_group},
     {"vfs_chroot_basic", test_vfs_chroot_basic},
     {"vfs_chroot_effect", test_vfs_chroot_effect},
+    {"vfs_readdir_basic", test_vop_readdir_basic},
+    {"vfs_readdir_notdir", test_vop_readdir_notdir},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
