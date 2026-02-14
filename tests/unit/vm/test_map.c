@@ -1,4 +1,4 @@
-#include <vm/vm_map.h"
+#include <vm/vm_map.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -22,7 +22,7 @@ bool test_vm_map_insert_and_find(void) {
     vm_map_init(&map, NULL, 0x1000, 0x10000);
     
     // 1. Insert at 0x2000
-    if (vm_map_insert(&map, NULL, 0, 0x2000, 0x3000) != 0) return false;
+    if (vm_map_insert(&map, NULL, 0, 0x2000, 0x3000, 0x3, 0x3, 1) != 0) return false;
     if (map.nentries != 1) return false;
     
     // 2. Find space for 4KB (should find 0x1000)
@@ -41,8 +41,8 @@ bool test_vm_map_remove(void) {
     vm_map_t map;
     vm_map_init(&map, NULL, 0x1000, 0x10000);
     
-    vm_map_insert(&map, NULL, 0, 0x2000, 0x3000);
-    vm_map_insert(&map, NULL, 0, 0x4000, 0x5000);
+    vm_map_insert(&map, NULL, 0, 0x2000, 0x3000, 0x3, 0x3, 1);
+    vm_map_insert(&map, NULL, 0, 0x4000, 0x5000, 0x3, 0x3, 1);
     if (map.nentries != 2) return false;
     
     // Remove 0x4000-0x5000 (entire entry)

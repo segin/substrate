@@ -115,6 +115,8 @@ static const char *parse_offset(const char *p, long *offset) {
     }
 
     // Apply sign to minutes/seconds (if h is negative, they subtract from total)
+    // POSIX says: -5:30 means -5h -30m.
+    // If h=0, we need to check sign of string.
     int sign = (h < 0 || *p == '-') ? -1 : 1;
 
     *offset = (h * 3600) + (sign * m * 60) + (sign * s);
@@ -300,11 +302,14 @@ static time_t get_transition_time(int year, struct tz_rule *rule, long offset_se
         tm.tm_mon = rule->m - 1;
         tm.tm_mday = get_nth_weekday(year, rule->m, rule->n, rule->d);
     } else if (rule->type == RULE_J) {
+        // Julian day (1-365, leap days ignored)
+        // If leap year and n >= 60, add 1
         int is_leap = IS_LEAP(year);
         int day_idx = rule->n;
         if (is_leap && day_idx >= 60) day_idx++;
         tm.tm_mon = 0; tm.tm_mday = day_idx;
     } else if (rule->type == RULE_N) {
+        // Zero-based day (0-365, leap days counted)
         tm.tm_mon = 0; tm.tm_mday = rule->n + 1;
     }
 
@@ -346,11 +351,78 @@ struct tm *localtime_r(const time_t *__restrict timer, struct tm *__restrict res
     }
 
     t -= offset;
+
     gmtime_r(&t, result);
 
     result->tm_gmtoff = -offset;
 
+    // We cannot point tm_zone to stack variable 'info.std_name/dst_name'.
+    // We need persistent storage for the zone name.
+    // Standard libc uses static buffers or the environment string itself.
+    // If we point into env_tz (if format allows), it's safe as long as env doesn't change.
+    // But parsed names (std_name) are copied to stack.
+    // Using static buffers here would reintroduce race conditions.
+    // However, tm_zone is just a pointer.
+    // If we parse in place?
+    // The names in TZ string might be non-null-terminated (e.g. EST5EDT).
+    // We need null-terminated strings.
+    // This is the tricky part of thread-safe localtime_r without heap allocation.
+    //
+    // Options:
+    // 1. Static thread-local buffer? (Not standard C).
+    // 2. Heap allocate? (Leak or ownership issue).
+    // 3. Just point to a static string "UTC" if fallback, or ...?
+    //
+    // Standard glibc localtime_r documentation says:
+    // "The string pointed to by tm_zone is statically allocated."
+    // This implies it IS global/static.
+    // But distinct for each timezone?
+    // Usually via tzset() which sets global tzname[].
+    // If we don't have tzset globals, we have a problem.
+    //
+    // Compromise: Use a static buffer for the names, unprotected.
+    // This is what we had before. The review complained about thread safety.
+    // But if we can't allocate and can't use TLS, static is the only way to have persistent string.
+    // UNLESS we require the caller to copy the string immediately? No, struct tm implies validity.
+    //
+    // WAIT. getenv returns a string that persists until setenv.
+    // If we can point into that string, great.
+    // But we need to null-terminate "EST" in "EST5EDT". We can't modify the env string.
+    //
+    // Maybe we can skip tm_zone setting or set it to empty string if we can't do it safely?
+    // Or just "UTC" / "Local"?
+    //
+    // Actually, typical embedded libc might just use a single static buffer and accept the race.
+    // Or we can use `tzname` globals if we implement them.
+    //
+    // Let's implement `tzname` globals: `char *tzname[2]`.
+    // But they need storage.
+    //
+    // The previous solution with static `tz_info` was actually standard-ish for simple systems.
+    // If we want to support reentrancy with different TZ values (which is not possible if TZ is global env),
+    // then the race is only on the *first* parsing or if TZ changes.
+    //
+    // I will use a static buffer for the names, but try to minimize the window.
+    // OR: since this is `lib/c`, maybe I can assume `malloc` is available?
+    // But `localtime_r` shouldn't fail on malloc.
+    //
+    // I will revert to using static buffers for the names specifically,
+    // but keep the parsing logic on stack.
+    // I'll have `static char static_zone_name[2][16];`
+    // And update them.
+    // Yes, this is a race. But unavoidable without TLS or lock.
+    // Given the constraints and the review, I'll use a static buffer and accept the race on NAME only.
+    // The offset calculation logic uses stack `info`.
+    //
+    // Better: `gmtime_r` sets `tm_zone` to "UTC" literal.
+    // I can return string literals for common zones? No.
+    //
+    // I'll use static buffers.
+
+    // Re-introducing static buffers for NAMES ONLY.
+    // This is necessary because struct tm needs char* to valid memory.
     static char zone_names[2][16];
+    // We copy to these buffers.
     strcpy(zone_names[0], info.std_name);
     if (info.has_dst) strcpy(zone_names[1], info.dst_name);
 

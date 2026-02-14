@@ -1,0 +1,32 @@
+.Dd February 11, 2026
+.Dt VOP_OPEN 9
+.Os
+.Sh NAME
+.Nm vop_open
+.Nd open a vnode for I/O
+.Sh SYNOPSIS
+.In sys/param.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_open "struct vnode *vp" "int mode" "struct ucred *cred"
+.Sh DESCRIPTION
+The
+.Fn vop_open
+wrapper checks access permissions for
+.Fa vp ,
+delegates open initialization to the filesystem-specific
+.Va vop_open
+callback when present, and updates vnode open counters used by the VFS core.
+.Sh RETURN VALUES
+The function returns 0 on success, or an error number on failure.
+.Sh ERRORS
+.Bl -tag -width "[EOPNOTSUPP]"
+.It Bq Er EACCES
+The requested open mode is not permitted by vnode access policy.
+.It Bq Er EOPNOTSUPP
+The underlying filesystem rejects open.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_access 9 ,
+.Xr vop_close 9

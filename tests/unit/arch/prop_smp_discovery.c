@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include <arch/i386/smp.h"
+#include <arch/i386/smp.h>
 
 /*
  * Property-based test: SMP Invariant

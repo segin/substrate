@@ -9,10 +9,8 @@
 #include <vm/vm_kmem.h>
 #include <exec/perso/personality.h>
 #include <sys/random.h>
-
-
-
-// Globals for userspace transition
+#include <sys/signal.h> // For copyin/copyout
+#include <sys/kern_syscalls.h>
 
 /*
  * exec_reset_signals - Reset signal handlers on exec
@@ -326,7 +324,42 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     return entry;
 }
 
-#include <sys/kern_syscalls.h>
+static int is_user_ptr(const void *ptr) {
+    return (uintptr_t)ptr < 0xC0000000;
+}
+
+static int capture_ptr(char *const array[], int index, char **out) {
+    if (is_user_ptr(array)) {
+        return copyin(&array[index], out, sizeof(char*));
+    } else {
+        *out = array[index];
+        return 0;
+    }
+}
+
+static int capture_strlen(const char *s, size_t *out_len) {
+    if (is_user_ptr(s)) {
+        size_t len;
+        int ret = copyinstr(s, NULL, 4096, &len);
+        if (ret == 0) {
+            *out_len = len;
+            return 0;
+        }
+        return ret;
+    } else {
+        *out_len = strlen(s) + 1;
+        return 0;
+    }
+}
+
+static int capture_strcpy(char *dst, const char *src) {
+    if (is_user_ptr(src)) {
+        return copyinstr(src, dst, 4096, NULL);
+    } else {
+        strcpy(dst, src);
+        return 0;
+    }
+}
 
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, -1 on failure
@@ -360,14 +393,13 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Count argc and size
     if (argv) {
         while (1) {
-            char *uptr;
-            if (copyin(&argv[argc], &uptr, sizeof(char*)) != 0) return -14;
-            if (!uptr) break;
+            char *uarg;
+            if (capture_ptr(argv, argc, &uarg) != 0 || uarg == NULL) break;
             
             size_t len;
-            int res = copyinstr(uptr, NULL, 4096, &len);
-            if (res == -1) return -14;
-            if (res == -2) return -36;
+            int res = capture_strlen(uarg, &len);
+            if (res == -14) return -14;
+            if (res == -36) return -36;
             
             strings_size += len;
             argc++;
@@ -381,14 +413,13 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Count envc and size
     if (envp) {
         while (1) {
-            char *uptr;
-            if (copyin(&envp[envc], &uptr, sizeof(char*)) != 0) return -14;
-            if (!uptr) break;
+            char *uarg;
+            if (capture_ptr(envp, envc, &uarg) != 0 || uarg == NULL) break;
             
             size_t len;
-            int res = copyinstr(uptr, NULL, 4096, &len);
-            if (res == -1) return -14;
-            if (res == -2) return -36;
+            int res = capture_strlen(uarg, &len);
+            if (res == -14) return -14;
+            if (res == -36) return -36;
             
             strings_size += len;
             envc++;
@@ -427,20 +458,22 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Copy strings
     char *p_buf = arg_buffer;
     for (int i = 0; i < argc; i++) {
-        char *uptr;
-        copyin(&argv[i], &uptr, sizeof(char*));
+        char *uarg;
+        capture_ptr(argv, i, &uarg);
         k_argv[i] = p_buf;
         size_t len;
-        copyinstr(uptr, p_buf, strings_size - (p_buf - arg_buffer), &len);
+        capture_strlen(uarg, &len);
+        capture_strcpy(p_buf, uarg);
         p_buf += len;
     }
 
     for (int i = 0; i < envc; i++) {
-        char *uptr;
-        copyin(&envp[i], &uptr, sizeof(char*));
+        char *uarg;
+        capture_ptr(envp, i, &uarg);
         k_envp[i] = p_buf;
         size_t len;
-        copyinstr(uptr, p_buf, strings_size - (p_buf - arg_buffer), &len);
+        capture_strlen(uarg, &len);
+        capture_strcpy(p_buf, uarg);
         p_buf += len;
     }
     

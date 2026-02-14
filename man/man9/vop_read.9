@@ -1,0 +1,30 @@
+.Dd February 11, 2026
+.Dt VOP_READ 9
+.Os
+.Sh NAME
+.Nm vop_read
+.Nd read data from a vnode into a uio
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/uio.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_read "struct vnode *vp" "struct uio *uio" "int ioflag" "struct ucred *cred"
+.Sh DESCRIPTION
+.Fn vop_read
+validates the uio request, handles regular-file EOF fast-paths,
+and calls the filesystem read callback.
+On successful data transfer, access-time update state is marked in
+.Fa vp->v_flag .
+.Sh RETURN VALUES
+Returns 0 on success, or an error number.
+.Sh ERRORS
+.Bl -tag -width "[EOPNOTSUPP]"
+.It Bq Er EINVAL
+Invalid uio descriptor.
+.It Bq Er EOPNOTSUPP
+The vnode does not implement read.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_write 9

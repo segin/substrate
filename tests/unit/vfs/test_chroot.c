@@ -1,8 +1,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/file.h"
-#include <kern/sched.h"
+#include <vfs/vfs.h>
+#include <sys/file.h>
+#include <kern/sched.h>
 
 extern int sys_chroot(const char *path);
 extern int sys_open(const char *path, int flags, int mode);
@@ -42,7 +43,7 @@ bool test_vfs_chroot_effect(void) {
     int fd = sys_open("/", 0, 0);
     if (fd < 0) return false;
     
-    if (current_process->fds[fd]->node != &fake_dir) return false;
+    if (current_process->fds[fd]->f_data != &fake_dir) return false;
     
     sys_close(fd);
     return true;

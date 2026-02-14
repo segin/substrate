@@ -1,0 +1,37 @@
+.Dd February 11, 2026
+.Dt VOP_FSYNC 9
+.Os
+.Sh NAME
+.Nm vop_fsync
+.Nd flush dirty vnode data to backing storage
+.Sh SYNOPSIS
+.In sys/param.h
+.In vfs/vnode.h
+.Ft int
+.Fn vop_fsync "struct vnode *vp" "int waitfor" "struct ucred *cred"
+.Sh DESCRIPTION
+The
+.Fn vop_fsync
+wrapper validates
+.Fa waitfor
+mode
+.Po
+.Dv MNT_WAIT
+or
+.Dv MNT_NOWAIT
+.Pc ,
+delegates flushing to the filesystem callback, and clears vnode modified state
+when synchronization succeeds.
+.Sh RETURN VALUES
+Returns 0 on success, or an error number.
+.Sh ERRORS
+.Bl -tag -width "[EOPNOTSUPP]"
+.It Bq Er EINVAL
+Invalid wait mode.
+.It Bq Er EIO
+Backing I/O failed.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr vop_write 9 ,
+.Xr vfs_sync 9
