@@ -5,6 +5,7 @@
 #include <sys/session.h>
 #include <kern/console.h>
 #include <kern/sched.h> // For MAX_THREADS, thread creation
+#include <kern/sleepq.h>
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmap.h>
@@ -443,10 +444,11 @@ void proc_exit(int code) {
     current_process->exit_code = code;
     current_process->state = SZOMB;
     
-    // 7. Prevent further scheduling of ALL process threads
+    // 7. Prevent further scheduling of ALL process threads and wake joiners
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].proc == current_process) {
             threads[i].state = THREAD_ZOMBIE;
+            sleepq_wake_all(&threads[i]);
         }
     }
     

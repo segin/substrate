@@ -8,6 +8,7 @@
 
 /* Kernel internal includes */
 #include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/console.h>
@@ -41,7 +42,7 @@
 extern thread_t *current_thread; 
 extern process_t *current_process;
 extern process_t processes[64];
-extern thread_t threads[256];
+extern thread_t threads[MAX_THREADS];
 
 // Simple file structure allocator
 #define MAX_SYSTEM_FILES 128
@@ -503,6 +504,38 @@ int kern_thr_new(struct thr_param *param, int param_size) {
         return 0;
     }
     return -1;
+}
+
+int sys_thr_exit(void *status) {
+    current_thread->exit_status = status;
+    current_thread->state = THREAD_ZOMBIE;
+    sleepq_wake_all(current_thread);
+    sched_yield();
+    return 0; // Not reached
+}
+
+int sys_thr_join(tid_t tid, void **status) {
+    thread_t *thread = sched_get_thread(tid);
+    if (!thread || thread->proc != current_process) return -ESRCH;
+
+    while (thread->state != THREAD_ZOMBIE) {
+        sleepq_add(thread, current_thread);
+        sched_yield();
+
+        // Re-check after wake-up
+        thread = sched_get_thread(tid);
+        if (!thread || thread->proc != current_process) return -ESRCH;
+    }
+
+    if (status) {
+        void *kstatus = thread->exit_status;
+        if (copyout(&kstatus, status, sizeof(void*)) != 0) return -14;
+    }
+
+    // Reap the thread
+    thread->tid = -1;
+
+    return 0;
 }
 
 extern int sys_vm86(void *v);

@@ -4,7 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef int32_t wchar_t;
 typedef uint32_t wint_t;
 
 #define WEOF ((wint_t)-1)
