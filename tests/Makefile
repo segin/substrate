@@ -25,12 +25,13 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_ext2_remove_perf
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_ext2_remove_perf test_libc_libgen
 	./test_runner
 	./test_minix
 	./test_ext2_perf
 	./test_libc_string
 	./test_ext2_remove_perf
+	./test_libc_libgen
 
 test_ext2_perf: unit/fs/test_ext2_perf_host.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
@@ -45,6 +46,11 @@ test_libc_string: lib/c/test_string.c ../lib/c/src/string.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 	$(CC) $(CFLAGS_COMMON) lib/c/test_string.c string_prefixed.o -o $@
+
+test_libc_libgen: lib/c/test_libgen.c ../lib/c/src/libgen.c
+	$(CC) $(CFLAGS_COMMON) -I../include -fno-builtin -c ../lib/c/src/libgen.c -o libgen_raw.o
+	objcopy --prefix-symbols=libc_ libgen_raw.o libgen_prefixed.o
+	$(CC) $(CFLAGS_COMMON) lib/c/test_libgen.c libgen_prefixed.o -o $@
 
 test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_time_standalone.c -o $@
@@ -106,4 +112,4 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f test_runner test_minix test_ext2_perf test_libc_string *.o
+	rm -f test_runner test_minix test_ext2_perf test_libc_string test_libc_libgen *.o
