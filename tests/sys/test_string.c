@@ -322,6 +322,50 @@ static void test_memset_large(void) {
     kfree(expected, size);
 }
 
+static void test_memset_unaligned_comprehensive(void) {
+    #define TEST_BUF_SIZE 512
+    char *buf = kmalloc(TEST_BUF_SIZE);
+    char *expected = kmalloc(TEST_BUF_SIZE);
+
+    if (!buf || !expected) {
+        kprint("SKIP: test_memset_unaligned_comprehensive (OOM)\n");
+        if (buf) kfree(buf, TEST_BUF_SIZE);
+        if (expected) kfree(expected, TEST_BUF_SIZE);
+        return;
+    }
+
+    // Test various offsets and lengths to trigger all code paths (byte loop, word loop, unrolled loop)
+    for (int offset = 0; offset < 32; offset++) {
+        for (size_t len = 0; len < 256; len++) {
+            if (offset + len > TEST_BUF_SIZE) break;
+
+            // Initialize
+            for (int i = 0; i < TEST_BUF_SIZE; i++) {
+                buf[i] = 0xAA;
+                expected[i] = 0xAA;
+            }
+
+            // Expected result
+            for (size_t i = 0; i < len; i++) {
+                expected[offset + i] = 0x55;
+            }
+
+            // Run memset
+            memset(buf + offset, 0x55, len);
+
+            // Verify
+            if (memcmp(buf, expected, TEST_BUF_SIZE) != 0) {
+                 kprint("FAIL: Comprehensive memset failed\n");
+                 failed_tests++;
+                 goto cleanup;
+            }
+        }
+    }
+cleanup:
+    kfree(buf, TEST_BUF_SIZE);
+    kfree(expected, TEST_BUF_SIZE);
+}
+
 static void test_strcmp(void) {
     if (strcmp("", "") != 0) {
         kprint("FAIL: strcmp(\"\", \"\") != 0\n");
@@ -457,6 +501,7 @@ void run_string_tests(void) {
     test_memset_small();
     test_memset_unaligned();
     test_memset_large();
+    test_memset_unaligned_comprehensive();
 
     if (failed_tests == 0) {
         kprint("Correctness: PASS\n");

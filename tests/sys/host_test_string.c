@@ -118,10 +118,161 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
+void test_memset_basic(void) {
+    char buf[20];
+    char expected[20];
+
+    // Initialize with something else
+    for (int i=0; i<20; i++) {
+        buf[i] = (char)0xAA;
+        expected[i] = (char)0xAA;
+    }
+
+    kernel_memset(buf, 0, 10);
+    for (int i=0; i<10; i++) expected[i] = 0;
+
+    ASSERT_MEM_EQ(buf, expected, 20, "Basic memset 0 failed");
+
+    kernel_memset(buf, 0x55, 10);
+    for (int i=0; i<10; i++) expected[i] = 0x55;
+
+    ASSERT_MEM_EQ(buf, expected, 20, "Basic memset 0x55 failed");
+    printf("test_memset_basic: PASS\n");
+}
+
+void test_memset_small(void) {
+    char buf[16];
+    char expected[16];
+
+    for (int i = 0; i <= 8; i++) {
+        // Reset buffers
+        for (int j=0; j<16; j++) {
+            buf[j] = 0xAA;
+            expected[j] = 0xAA;
+        }
+
+        kernel_memset(buf, 0x77, i);
+        for(int j=0; j<i; j++) expected[j] = 0x77;
+
+        ASSERT_MEM_EQ(buf, expected, 16, "Small memset consistency check");
+    }
+    printf("test_memset_small: PASS\n");
+}
+
+void test_memset_unaligned(void) {
+    char buf[64];
+    char expected[64];
+
+    // Initialize
+    for(int i=0; i<64; i++) {
+        buf[i] = 0xAA;
+        expected[i] = 0xAA;
+    }
+
+    // Unaligned start (offset 1)
+    kernel_memset(buf + 1, 0xBB, 10);
+    for(int i=0; i<10; i++) expected[1+i] = 0xBB;
+
+    ASSERT_MEM_EQ(buf, expected, 64, "Unaligned start memset failed");
+
+    // Unaligned start (offset 3)
+    for(int i=0; i<64; i++) { buf[i] = 0xAA; expected[i] = 0xAA; }
+    kernel_memset(buf + 3, 0xCC, 10);
+    for(int i=0; i<10; i++) expected[3+i] = 0xCC;
+
+    ASSERT_MEM_EQ(buf, expected, 64, "Unaligned start 3 memset failed");
+    printf("test_memset_unaligned: PASS\n");
+}
+
+void test_memset_large(void) {
+    size_t size = 4096;
+    char *buf = kmalloc(size);
+    char *expected = kmalloc(size);
+
+    if (!buf || !expected) {
+        printf("SKIP: test_memset_large (OOM)\n");
+        if (buf) kfree(buf, size);
+        if (expected) kfree(expected, size);
+        return;
+    }
+
+    // Fill with pattern
+    for(size_t i=0; i<size; i++) {
+        buf[i] = 0xAA;
+        expected[i] = 0xAA;
+    }
+
+    // Memset entire buffer
+    kernel_memset(buf, 0xDD, size);
+    for(size_t i=0; i<size; i++) expected[i] = 0xDD;
+
+    ASSERT_MEM_EQ(buf, expected, size, "Large memset failed");
+
+    kfree(buf, size);
+    kfree(expected, size);
+    printf("test_memset_large: PASS\n");
+}
+
+void test_memset_unaligned_comprehensive(void) {
+    #define TEST_BUF_SIZE 512
+    char *buf = kmalloc(TEST_BUF_SIZE);
+    char *expected = kmalloc(TEST_BUF_SIZE);
+
+    if (!buf || !expected) {
+        printf("SKIP: test_memset_unaligned_comprehensive (OOM)\n");
+        if (buf) kfree(buf, TEST_BUF_SIZE);
+        if (expected) kfree(expected, TEST_BUF_SIZE);
+        return;
+    }
+
+    // Test various offsets and lengths to trigger all code paths (byte loop, word loop, unrolled loop)
+    for (int offset = 0; offset < 32; offset++) {
+        for (size_t len = 0; len < 256; len++) {
+            if (offset + len > TEST_BUF_SIZE) break;
+
+            // Initialize
+            for (int i = 0; i < TEST_BUF_SIZE; i++) {
+                buf[i] = 0xAA;
+                expected[i] = 0xAA;
+            }
+
+            // Expected result
+            for (size_t i = 0; i < len; i++) {
+                expected[offset + i] = 0x55;
+            }
+
+            // Run memset
+            kernel_memset(buf + offset, 0x55, len);
+
+            // Verify
+            if (memcmp(buf, expected, TEST_BUF_SIZE) != 0) {
+                 printf("FAIL: Comprehensive memset failed at offset %d, len %zu\n", offset, len);
+                 // Dump first few mismatches
+                 for(int i=0; i<TEST_BUF_SIZE; i++) {
+                     if (buf[i] != expected[i]) {
+                         printf("  Mismatch at index %d: expected %02x, got %02x\n", i, (unsigned char)expected[i], (unsigned char)buf[i]);
+                         break;
+                     }
+                 }
+                 goto cleanup;
+            }
+        }
+    }
+cleanup:
+    kfree(buf, TEST_BUF_SIZE);
+    kfree(expected, TEST_BUF_SIZE);
+    printf("test_memset_unaligned_comprehensive: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
+    test_memset_basic();
+    test_memset_small();
+    test_memset_unaligned();
+    test_memset_large();
+    test_memset_unaligned_comprehensive();
     printf("All Tests Passed\n");
     return 0;
 }
