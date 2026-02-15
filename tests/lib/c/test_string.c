@@ -441,6 +441,38 @@ void run_memmove_tests(void) {
     printf("memmove tests passed!\n");
 }
 
+void run_strdup_tests(void) {
+    printf("Running strdup tests...\n");
+
+    // Test 1: Basic string duplication
+    {
+        const char *orig = "hello world";
+        char *dup = libc_strdup(orig);
+        ASSERT_TRUE(dup != NULL, "strdup returned NULL");
+        ASSERT_TRUE(dup != orig, "strdup returned same pointer");
+        ASSERT_EQ(strcmp(dup, orig), 0, "strdup content mismatch");
+
+        // Verify independence
+        dup[0] = 'H';
+        ASSERT_EQ(orig[0], 'h', "modifying duplicate affected original");
+        ASSERT_EQ(strcmp(dup, "Hello world"), 0, "duplicate modification failed");
+
+        free(dup);
+    }
+
+    // Test 2: Empty string duplication
+    {
+        const char *empty = "";
+        char *dup = libc_strdup(empty);
+        ASSERT_TRUE(dup != NULL, "strdup empty string returned NULL");
+        ASSERT_TRUE(dup != empty, "strdup empty returned same pointer");
+        ASSERT_EQ(strlen(dup), 0, "strdup empty content mismatch");
+        free(dup);
+    }
+
+    printf("strdup tests passed!\n");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -463,6 +495,7 @@ int main(void) {
     run_strncpy_tests();
     run_strlen_tests();
     run_memmove_tests();
+    run_strdup_tests();
     return 0;
 }
 #endif
