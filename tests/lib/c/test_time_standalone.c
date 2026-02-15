@@ -113,8 +113,68 @@ bool test_gmtime_negative_years(void) {
     return passed;
 }
 
+bool test_difftime(void) {
+    bool passed = true;
+    printf("Running difftime tests...\n");
+
+    // Test 1: Positive difference
+    time_t t1 = 100;
+    time_t t0 = 50;
+    double diff = difftime(t1, t0);
+    if (diff != 50.0) {
+        printf("FAILED: difftime(100, 50) expected 50.0, got %f\n", diff);
+        passed = false;
+    }
+
+    // Test 2: Negative difference
+    t1 = 50;
+    t0 = 100;
+    diff = difftime(t1, t0);
+    if (diff != -50.0) {
+        printf("FAILED: difftime(50, 100) expected -50.0, got %f\n", diff);
+        passed = false;
+    }
+
+    // Test 3: Zero difference
+    t1 = 100;
+    t0 = 100;
+    diff = difftime(t1, t0);
+    if (diff != 0.0) {
+        printf("FAILED: difftime(100, 100) expected 0.0, got %f\n", diff);
+        passed = false;
+    }
+
+    // Test 4: Large positive difference
+    // 2^32 = 4294967296
+    t1 = 4294967296LL;
+    t0 = 0;
+    diff = difftime(t1, t0);
+    if (diff != 4294967296.0) {
+        printf("FAILED: difftime(4294967296, 0) expected 4294967296.0, got %f\n", diff);
+        passed = false;
+    }
+
+    // Test 5: Large negative difference
+    t1 = 0;
+    t0 = 4294967296LL;
+    diff = difftime(t1, t0);
+    if (diff != -4294967296.0) {
+        printf("FAILED: difftime(0, 4294967296) expected -4294967296.0, got %f\n", diff);
+        passed = false;
+    }
+
+    if (passed) {
+        printf("difftime tests passed!\n");
+    }
+    return passed;
+}
+
 int main(void) {
-    if (test_gmtime_negative_years()) {
+    bool all_passed = true;
+    if (!test_gmtime_negative_years()) all_passed = false;
+    if (!test_difftime()) all_passed = false;
+
+    if (all_passed) {
         return 0;
     } else {
         return 1;

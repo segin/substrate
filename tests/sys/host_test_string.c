@@ -27,6 +27,7 @@ void kfree(void *ptr, size_t size) {
 #define strcpy kernel_strcpy
 #define strncpy kernel_strncpy
 #define strcmp kernel_strcmp
+#define strncmp kernel_strncmp
 #define strchr kernel_strchr
 #define strspn kernel_strspn
 #define strpbrk kernel_strpbrk
@@ -212,6 +213,66 @@ void test_memmove_comprehensive(void) {
     free(buffer);
     free(control);
     printf("test_memmove_comprehensive: PASS\n");
+void test_strcmp(void) {
+    ASSERT_EQ(kernel_strcmp("", ""), 0, "strcmp empty-empty");
+    ASSERT_EQ(kernel_strcmp("a", "a"), 0, "strcmp equal single char");
+    ASSERT_EQ(kernel_strcmp("abc", "abc"), 0, "strcmp equal string");
+
+    // Check signs (implementation specific, but standard says <0, >0)
+    // Our implementation returns difference of unsigned chars
+    int res;
+
+    res = kernel_strcmp("abc", "abd");
+    if (res >= 0) {
+        printf("FAIL: strcmp('abc', 'abd') >= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    res = kernel_strcmp("abd", "abc");
+    if (res <= 0) {
+        printf("FAIL: strcmp('abd', 'abc') <= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    res = kernel_strcmp("abc", "abcd");
+    if (res >= 0) {
+        printf("FAIL: strcmp('abc', 'abcd') >= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    printf("test_strcmp: PASS\n");
+}
+
+void test_strncmp(void) {
+    ASSERT_EQ(kernel_strncmp("", "", 0), 0, "strncmp empty-empty 0");
+    ASSERT_EQ(kernel_strncmp("abc", "def", 0), 0, "strncmp different 0");
+    ASSERT_EQ(kernel_strncmp("abc", "abc", 3), 0, "strncmp equal 3");
+    ASSERT_EQ(kernel_strncmp("abc", "abc", 5), 0, "strncmp equal >len");
+
+    int res;
+
+    // Difference after n
+    res = kernel_strncmp("abc", "abd", 2);
+    ASSERT_EQ(res, 0, "strncmp equal prefix");
+
+    // Difference within n
+    res = kernel_strncmp("abc", "abd", 3);
+    if (res >= 0) {
+        printf("FAIL: strncmp('abc', 'abd', 3) >= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    // Prefix
+    res = kernel_strncmp("abc", "abcd", 3);
+    ASSERT_EQ(res, 0, "strncmp prefix equal");
+
+    res = kernel_strncmp("abc", "abcd", 4);
+    if (res >= 0) {
+        printf("FAIL: strncmp('abc', 'abcd', 4) >= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    printf("test_strncmp: PASS\n");
 }
 
 int main(void) {
@@ -220,6 +281,8 @@ int main(void) {
     test_strncpy();
     test_memmove();
     test_memmove_comprehensive();
+    test_strcmp();
+    test_strncmp();
     printf("All Tests Passed\n");
     return 0;
 }

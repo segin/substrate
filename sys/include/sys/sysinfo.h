@@ -48,8 +48,6 @@ typedef struct sys_map {
     char name[256];
 } sys_map_t;
 
-#endif
-
 struct sysinfo {
     long uptime;             /* Seconds since boot */
     unsigned long loads[3];  /* 1, 5, and 15 minute load averages */
@@ -83,3 +81,4 @@ typedef struct sys_vmstat {
 int sysinfo(struct sysinfo *info);
 #endif
 
+#endif

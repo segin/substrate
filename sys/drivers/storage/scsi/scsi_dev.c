@@ -146,7 +146,7 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     sbd->dev_num = scsi_dev_count;
     
     /* Create device name: scsi0, scsi1, etc. */
-    sprintf(sbd->blkdev.name, "scsi%u", scsi_dev_count);
+    snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", scsi_dev_count);
     
     /* Set sector size based on device type */
     if (scsi_dev->type == SCSI_TYPE_ROM || scsi_dev->type == SCSI_TYPE_OPTICAL) {
@@ -177,7 +177,7 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     }
     
     char log_buf[128];
-    sprintf(log_buf, "scsi: attached %s (%s) [%s %s]\n",
+    snprintf(log_buf, sizeof(log_buf), "scsi: attached %s (%s) [%s %s]\n",
             sbd->blkdev.name,
             type_str,
             scsi_dev->vendor,
@@ -199,7 +199,7 @@ int scsi_dev_detach(scsi_device_t *scsi_dev) {
             *pp = sbd->next;
             
             char log_buf[64];
-            sprintf(log_buf, "scsi: detached %s\n", sbd->blkdev.name);
+            snprintf(log_buf, sizeof(log_buf), "scsi: detached %s\n", sbd->blkdev.name);
             kprint(log_buf);
             return 0;
         }
