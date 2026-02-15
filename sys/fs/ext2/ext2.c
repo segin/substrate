@@ -676,7 +676,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
             if (de->inode != 0 && de->name_len > 0) {
                 // Compare names
                 if (de->name_len == name_len &&
-                    strncmp(de->name, name, de->name_len) == 0) {
+                    memcmp(de->name, name, name_len) == 0) {
                     // Found it - read the inode and return a node
                     ext2_inode_t inode;
                     if (ext2_read_inode(fs, de->inode, &inode) == 0) {
@@ -1198,7 +1198,7 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
             
             // Is this the entry to remove?
             if (de->inode != 0 && de->name_len == name_len &&
-                strncmp(de->name, name, de->name_len) == 0) {
+                memcmp(de->name, name, name_len) == 0) {
                 
                 // Merge with previous entry if possible
                 if (prev_de) {
