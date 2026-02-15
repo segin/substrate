@@ -60,6 +60,31 @@ void mutex_unlock(mutex_t *m) {
 // This is relative to tests/unit/fs/
 #include "../../../sys/fs/ext2/ext2.c"
 
+// Mock UMA functions
+// Implement them after including ext2.c (which includes uma.h), so we have the types.
+
+uma_zone_t *uma_zcreate(const char *name, size_t size, uma_ctor ctor, uma_dtor dtor, uma_init init, uma_fini fini, int align, uint32_t flags) {
+    (void)name; (void)ctor; (void)dtor; (void)init; (void)fini; (void)align; (void)flags;
+    // We can't safely cast size_t* to uma_zone_t* if they have different alignment/size requirements strictly speaking,
+    // but here we just need to store the size.
+    size_t *s = malloc(sizeof(size_t));
+    *s = size;
+    return (uma_zone_t *)s;
+}
+
+void *uma_zalloc(uma_zone_t *zone, int flags) {
+    (void)flags;
+    if (!zone) return NULL;
+    size_t size = *(size_t *)zone;
+    return calloc(1, size);
+}
+
+void uma_zfree(uma_zone_t *zone, void *item) {
+    (void)zone;
+    free(item);
+}
+
+
 // ------------------------------------------------------------------
 // Test Logic
 // ------------------------------------------------------------------
@@ -225,6 +250,7 @@ void run_ext2_remove_perf_test(void) {
 
 int main() {
     setbuf(stdout, NULL);
+    ext2_init(); // Initialize block cache
     for (int i = 0; i < 10; i++) {
         run_ext2_remove_perf_test();
     }
