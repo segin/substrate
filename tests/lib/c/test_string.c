@@ -101,6 +101,13 @@ int libc_rand(void) { return rand(); }
     } \
 } while(0)
 
+#define ASSERT_PTR_EQ(actual, expected, msg) do { \
+    if ((actual) != (expected)) { \
+        fprintf(stderr, "FAIL: %s: expected %p, got %p\n", msg, (void*)(expected), (void*)(actual)); \
+        exit(1); \
+    } \
+} while(0)
+
 #define ASSERT_TRUE(condition, msg) do { \
     if (!(condition)) { \
         fprintf(stderr, "FAIL: %s\n", msg); \
@@ -451,6 +458,41 @@ bool test_libc_memmove(void) {
     return true;
 }
 
+void run_memchr_tests(void) {
+    printf("Running memchr tests...\n");
+
+    const char *str = "Hello World";
+
+    // 1. Basic search
+    ASSERT_PTR_EQ(libc_memchr(str, 'H', 11), (void *)str, "Found at beginning");
+    ASSERT_PTR_EQ(libc_memchr(str, 'W', 11), (void *)(str + 6), "Found in middle");
+    ASSERT_PTR_EQ(libc_memchr(str, 'd', 11), (void *)(str + 10), "Found at end");
+
+    // 2. Character not found
+    ASSERT_PTR_EQ(libc_memchr(str, 'z', 11), NULL, "Not found");
+
+    // 3. Search limit (n)
+    ASSERT_PTR_EQ(libc_memchr(str, 'W', 5), NULL, "Exists but beyond limit");
+    ASSERT_PTR_EQ(libc_memchr(str, 'o', 5), (void *)(str + 4), "Found at limit boundary");
+
+    // 4. Empty buffer (n=0)
+    ASSERT_PTR_EQ(libc_memchr(str, 'H', 0), NULL, "n=0");
+
+    // 5. Binary data / high bit
+    char bin[] = {0x01, (char)0xFF, 0x00, (char)0x80};
+    ASSERT_PTR_EQ(libc_memchr(bin, 0xFF, 4), (void *)(bin + 1), "High bit character");
+    ASSERT_PTR_EQ(libc_memchr(bin, 0x00, 4), (void *)(bin + 2), "Null byte in binary");
+
+    // 6. Multiple occurrences (should return first)
+    const char *dup = "banana";
+    ASSERT_PTR_EQ(libc_memchr(dup, 'a', 6), (void *)(dup + 1), "First occurrence");
+
+    // 7. Large value for c (should only consider unsigned char)
+    ASSERT_PTR_EQ(libc_memchr(bin, 0xFF + 256, 4), (void *)(bin + 1), "Value > 255");
+
+    printf("memchr tests passed!\n");
+}
+
 #ifndef NO_MAIN
 int main(void) {
     run_strcmp_tests();
@@ -463,6 +505,7 @@ int main(void) {
     run_strncpy_tests();
     run_strlen_tests();
     run_memmove_tests();
+    run_memchr_tests();
     return 0;
 }
 #endif
