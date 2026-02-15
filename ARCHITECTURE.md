@@ -158,6 +158,84 @@ These components are essential for booting and basic system operation.
 - `sbin/`: System binaries (Currently empty/stubbed as we rely on external rootfs/busybox for init).
 
 
+
+**Design**
+- **Engines:** Default safe engine (DFA prefilter + bounded NFA capture pass). Optional adapters for PCRE2 and RE2
+  are enabled at build time via `USE_PCRE2=1` or `USE_RE2=1`. `DEFAULT_ENGINE_RE2=1` selects RE2 when the safe
+  engine flag is not set.
+- **UTF-8:** `REGEX_FLAG_UTF8` enables UTF-8 decoding. Case-insensitive matching is ASCII-only by default and can
+  be upgraded with ICU (`USE_ICU=1`) for Unicode casefolding.
+- **Limits:** `regex_limits_t` provides explicit ceilings for compiled states, captures, match steps, match count,
+  and streaming buffer size.
+
+**API & ABI**
+- **Stable ABI:** Opaque `regex_t` and `regex_iter_t` types. Public API in `include/regex.h` and `include/regex/flags.h`.
+- **Core Functions:** `regex_compile`, `regex_match`, `regex_find_all`, `regex_replace`, `regex_split`, streaming
+  iterator APIs, and `regex_escape_literal`.
+- **Error Model:** `regex_err_t` values returned directly or via output parameters.
+
+**Integration**
+- Build: `make -C usr.lib/regex` (classic Makefile).
+- Install: `make install` installs `libregex.a`, headers, man page `regex(3)`, and `regex.pc`.
+- Tests: `tests/usr.lib/regex/` with unit, integration, security, streaming, and encoding suites.
+- CI: `tests/ci/test-regex.sh` and `tests/ci/bench-regex.sh` (CI scripts live under `tests/ci/`).
+
+**Security & Performance**
+- The default engine avoids catastrophic backtracking. DFA prefilter is used for fast rejection; bounded NFA capture
+  ensures predictable time via `match_steps`. `max_states` caps compilation and DFA growth.
+
+**REQ-TO-TEST Matrix**
+- **Compile/Match correctness:** `tests/usr.lib/regex/unit/test_api.c`
+- **Replace/Split APIs:** `tests/usr.lib/regex/integration/test_replace.c`
+- **DoS resistance / limits:** `tests/usr.lib/regex/security/test_dos.c`
+- **Streaming matches:** `tests/usr.lib/regex/streaming/test_streaming.c`
+- **UTF-8 handling:** `tests/usr.lib/regex/encoding/test_utf8.c`
+
+## Personality Emulation
+- **Linux:** Emulates Linux 2.6.x i386 syscalls. Handles `rt_sigaction` (174) and `rt_sigprocmask` (175) by mapping to internal signal infrastructure.
+- **FreeBSD:** Planned support for FreeBSD 8/10+ i386 binaries.
+
+## Build System & Host Tools
+The project supports generating a complete set of native tools for the host operating system (Linux/BSD) to facilitate testing and cross-compilation independent of the target environment.
+
+### Host Distribution (`host_dist`)
+Running `make host_dist` builds and installs the core utilities into a local `host_dist/` directory. This includes:
+- **`bin/`**: `sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, etc.
+- **`usr/bin/`**: `yacc`, `brandelf`.
+- **`sbin/`**: `mkfs`, `fsck`.
+
+These tools are compiled using the host's compiler (`cc`) and C library, but strictly adhering to the project's own Makefiles and source code, allowing verification of logic and behavior on a stable host.
+
+> [!CAUTION]
+> **Host Builds NEVER use Substrate's libc.** When `NATIVE_BUILD=1` is set, programs link against the host OS's standard C library (glibc, musl, etc.), not `lib/c/`. The Substrate libc (`lib/c/`, `lib/sys/`) is exclusively for the Substrate kernel and target binaries. Never modify these libraries to support Linux or other host operating systems.
+
+### Testing
+- **Kernel Tests:** Located in `tests/unit/`, `tests/sys/`. Compiled via `tests/Makefile` and run on the host.
+- **Libc Tests:** Located in `tests/lib/c/`.
+    - **Strategy:** These tests verify the target libc implementation (`lib/c/src/`) by compiling it for the host environment.
+    - **Symbol Prefixing:** To avoid conflicts with the host's standard library (e.g., `memcpy` vs `libc_memcpy`), object files are processed with `objcopy --prefix-symbols=libc_` before linking.
+    - **Execution:** Run via `make test_libc_string` in `tests/`.
+
+## Recent Progress (as of Jan 2026)
+- Implemented `sys_brk` for dynamic heap allocation.
+- Stabilized BusyBox TLS (GS segment and Variant II offsets).
+- Resolved shell input race conditions via atomic sleep in `console_read`.
+- Upgraded syscall handler to 6-register passing.
+
+## Design Patterns & Standards
+- **ABIs:**
+  - **C:** Standard Intel C ABI.
+  - **Syscalls:** Interrupt `0x80`. Supports multiple personalities with distinct ABIs:
+    - **Native (Substrate):** BSD-style calling convention. Arguments are passed on the stack. Syscall number in `EAX`.
+    - **Linux i386:** Linux-style calling convention. Arguments in registers (`EBX`, `ECX`, `EDX`, `ESI`, `EDI`, `EBP`). Syscall number in `EAX`.
+    - **FreeBSD i386:** BSD-style calling convention (Stack-based).
+- **Tooling:** Built with modern GCC (`-m32`).
+- **Threading Model:**
+  - **BSD-style:** 1:1 Kernel threading model using `kthread` infrastructure.
+  - **Userspace:** POSIX Threads (pthreads) implemented via `libthr` wrapping kernel primitives.
+  - **Scheduler:** Round-Robin with support for Processes and Threads.
+- **Exec:** ELF binaries are "branded" via `EI_OSABI` to select the correct personality.
+
 - **Naming Conventions & Namespaces:**
     - **Network Interfaces:** Naming follows the `driver`+`instance` pattern (BSD-style).
       - Examples: `em0` (Intel PRO/1000), `re0` (Realtek 8139/8169), `bge0` (Broadcom), `lo0` (Loopback).
