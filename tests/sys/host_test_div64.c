@@ -119,11 +119,60 @@ void test_umoddi3() {
     printf("PASS\n");
 }
 
+void test_shifts() {
+    printf("Testing shifts...\n");
+
+    // Logical right shift (__lshrdi3)
+    assert(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 0) == 0xFFFFFFFFFFFFFFFFULL);
+    assert(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 1) == 0x7FFFFFFFFFFFFFFFULL);
+    assert(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 32) == 0x00000000FFFFFFFFULL);
+    assert(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 63) == 1ULL);
+    assert(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 64) == 0xFFFFFFFFFFFFFFFFULL); // 64 & 63 == 0
+
+    // Left shift (__ashldi3)
+    assert(__ashldi3(1ULL, 0) == 1ULL);
+    assert(__ashldi3(1ULL, 1) == 2ULL);
+    assert(__ashldi3(1ULL, 32) == 0x100000000ULL);
+    assert(__ashldi3(1ULL, 63) == 0x8000000000000000ULL);
+    assert(__ashldi3(1ULL, 64) == 1ULL);
+
+    // Arithmetic right shift (__ashrdi3)
+    assert(__ashrdi3(0x7FFFFFFFFFFFFFFFULL, 1) == 0x3FFFFFFFFFFFFFFFULL);
+    assert(__ashrdi3(0x8000000000000000LL, 1) == 0xC000000000000000LL);
+    assert(__ashrdi3(0xFFFFFFFFFFFFFFFFLL, 1) == 0xFFFFFFFFFFFFFFFFLL);
+    assert(__ashrdi3(0x8000000000000000LL, 63) == 0xFFFFFFFFFFFFFFFFLL);
+
+    printf("PASS\n");
+}
+
+void test_mul() {
+    printf("Testing __muldi3 (multiplication)...\n");
+    assert(__muldi3(10, 10) == 100);
+    assert(__muldi3(-10, 10) == -100);
+    assert(__muldi3(10, -10) == -100);
+    assert(__muldi3(-10, -10) == 100);
+    assert(__muldi3(0x100000000LL, 2) == 0x200000000LL);
+    assert(__muldi3(0xFFFFFFFFLL, 0xFFFFFFFFLL) == 0xFFFFFFFE00000001LL);
+    printf("PASS\n");
+}
+
+void test_neg() {
+    printf("Testing __negdi2 (negation)...\n");
+    assert(__negdi2(100) == -100);
+    assert(__negdi2(-100) == 100);
+    assert(__negdi2(0) == 0);
+    assert(__negdi2(INT64_MIN) == INT64_MIN); // -(-2^63) = -2^63 due to overflow
+    printf("PASS\n");
+}
+
 int main() {
     test_udiv64();
     test_divdi3();
     test_moddi3();
     test_umoddi3();
+    test_shifts();
+    test_mul();
+    test_neg();
     printf("All host tests passed!\n");
     return 0;
 }
