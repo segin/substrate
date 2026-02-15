@@ -36,8 +36,7 @@
 #include "../../../lib/c/src/stdlib.c"
 
 // Undefine macros to allow testing
-#undef atoi
-#undef atol
+#undef abs
 #undef strtol
 
 void test_strtol(void) {
@@ -134,10 +133,15 @@ void test_atol_basic(void) {
 }
 
 void test_abs(void) {
+    assert(tested_abs(0) == 0);
+    assert(tested_abs(1) == 1);
+    assert(tested_abs(-1) == 1);
     assert(tested_abs(10) == 10);
     assert(tested_abs(-10) == 10);
-    assert(tested_abs(0) == 0);
+    assert(tested_abs(12345) == 12345);
+    assert(tested_abs(-12345) == 12345);
     assert(tested_abs(INT_MAX) == INT_MAX);
+    assert(tested_abs(-INT_MAX - 1) == (-INT_MAX - 1));
     printf("test_abs passed\n");
 }
 
@@ -157,7 +161,6 @@ void test_llabs(void) {
     assert(tested_llabs(-LLONG_MAX) == LLONG_MAX);
     printf("test_llabs passed\n");
 }
-
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
