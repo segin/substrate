@@ -358,6 +358,10 @@ static uint32_t chacha_block[16];
 static int chacha_idx = 16;
 static int seeded = 0;
 
+/* Process-wide entropy for srand/rand to prevent sole dependency on 32-bit seed */
+static uint32_t process_secret[11];
+static atomic_int secret_initialized = 0;
+
 static void chacha20_block(uint32_t out[16], const uint32_t in[16]) {
     int i;
     uint32_t x[16];
@@ -380,26 +384,30 @@ static void chacha20_block(uint32_t out[16], const uint32_t in[16]) {
 }
 
 void srand(unsigned int seed) {
+    if (!atomic_load(&secret_initialized)) {
+        arc4random_buf(process_secret, sizeof(process_secret));
+        atomic_store(&secret_initialized, 1);
+    }
+
     // "expand 32-byte k"
     chacha_state[0] = 0x61707865;
     chacha_state[1] = 0x3320646e;
     chacha_state[2] = 0x79622d32;
     chacha_state[3] = 0x6b206574;
-    // Key (use seed repeated/modified)
-    chacha_state[4] = seed;
-    chacha_state[5] = seed ^ 0xCAFEBABE;
-    chacha_state[6] = seed ^ 0xDEADBEEF;
-    chacha_state[7] = seed ^ 0xFEEDFACE;
-    chacha_state[8] = seed;
-    chacha_state[9] = seed;
-    chacha_state[10] = seed;
-    chacha_state[11] = seed;
+    // Key (use seed mixed with secret)
+    uint32_t s = seed;
+    for (int i = 0; i < 8; i++) {
+        chacha_state[4 + i] = process_secret[i] ^ s;
+        s = (s << 7) | (s >> 25);
+    }
     // Counter
     chacha_state[12] = 0;
-    // Nonce
-    chacha_state[13] = 0;
-    chacha_state[14] = 0;
-    chacha_state[15] = 0;
+    // Nonce (use seed mixed with secret)
+    s = seed;
+    for (int i = 0; i < 3; i++) {
+        chacha_state[13 + i] = process_secret[8 + i] ^ s;
+        s = (s >> 7) | (s << 25);
+    }
 
     chacha_idx = 16;
     seeded = 1;

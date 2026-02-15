@@ -1,0 +1,2 @@
+# <device>       <mount>  <type>  <options>  <dump> <pass>
+/dev/storage/ide0  /        ext2    rw         0      1

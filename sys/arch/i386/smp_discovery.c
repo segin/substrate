@@ -329,3 +329,7 @@ void smp_init(void) {
 int smp_get_cpu_count(void) {
     return cpu_count;
 }
+
+int smp_get_cpu_id(void) {
+    return percpu_get_cpu_id();
+}
