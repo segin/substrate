@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <limits.h>
 
 // Rename standard library functions to avoid conflicts with host libc
 #define exit tested_exit
@@ -32,7 +33,7 @@
 #define arc4random_uniform tested_arc4random_uniform
 
 // Include the source file directly
-#include "../src/stdlib.c"
+#include "../../../lib/c/src/stdlib.c"
 
 // Undefine macros to allow testing
 #undef atoi
@@ -71,6 +72,31 @@ void test_atol_basic(void) {
     printf("test_atol_basic passed\n");
 }
 
+void test_abs(void) {
+    assert(tested_abs(10) == 10);
+    assert(tested_abs(-10) == 10);
+    assert(tested_abs(0) == 0);
+    assert(tested_abs(INT_MAX) == INT_MAX);
+    printf("test_abs passed\n");
+}
+
+void test_labs(void) {
+    assert(tested_labs(10L) == 10L);
+    assert(tested_labs(-10L) == 10L);
+    assert(tested_labs(0L) == 0L);
+    assert(tested_labs(LONG_MAX) == LONG_MAX);
+    printf("test_labs passed\n");
+}
+
+void test_llabs(void) {
+    assert(tested_llabs(10LL) == 10LL);
+    assert(tested_llabs(-10LL) == 10LL);
+    assert(tested_llabs(0LL) == 0LL);
+    assert(tested_llabs(LLONG_MAX) == LLONG_MAX);
+    assert(tested_llabs(-LLONG_MAX) == LLONG_MAX);
+    printf("test_llabs passed\n");
+}
+
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
@@ -78,6 +104,9 @@ int main(void) {
     test_atoi_sign();
     test_atoi_invalid();
     test_atol_basic();
+    test_abs();
+    test_labs();
+    test_llabs();
     printf("All tests passed!\n");
     return 0;
 }
