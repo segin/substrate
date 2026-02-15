@@ -193,6 +193,9 @@ typedef struct thread {
     // Syscall registers (for fork/vfork)
     void *syscall_regs;
 
+    // Thread exit status for join
+    void *exit_status;
+
     thread_state_t state;
     struct thread *next;
 } thread_t;
