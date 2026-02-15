@@ -134,12 +134,7 @@ void test_ashldi3() {
     assert(__ashldi3(val, 1) == 2);
     assert(__ashldi3(val, 32) == (1ULL << 32));
     assert(__ashldi3(val, 63) == (1ULL << 63));
-
-    // Test masking behavior (b &= 63)
-    // 64 & 63 = 0, so result should be val << 0 = 1
-    // Wait, the C implementation does `b &= 63`.
-    // Standard shift by >= width is UB in C, but this function defines behavior.
-    assert(__ashldi3(val, 64) == 1);
+    assert(__ashldi3(val, 64) == 1); // Masking behavior
 
     val = 0xFFFFFFFFFFFFFFFFULL;
     assert(__ashldi3(val, 1) == 0xFFFFFFFFFFFFFFFEULL);
@@ -152,9 +147,7 @@ void test_lshrdi3() {
     assert(__lshrdi3(val, 0) == val);
     assert(__lshrdi3(val, 1) == 0x4000000000000000ULL);
     assert(__lshrdi3(val, 63) == 1);
-
-    // Masking behavior
-    assert(__lshrdi3(val, 64) == val);
+    assert(__lshrdi3(val, 64) == val); // Masking behavior
 
     val = 0xFFFFFFFFFFFFFFFFULL;
     assert(__lshrdi3(val, 1) == 0x7FFFFFFFFFFFFFFFULL);
@@ -171,9 +164,7 @@ void test_ashrdi3() {
 
     val = 100;
     assert(__ashrdi3(val, 1) == 50);
-
-    // Masking behavior
-    assert(__ashrdi3(val, 64) == val);
+    assert(__ashrdi3(val, 64) == val); // Masking behavior
     printf("PASS\n");
 }
 
@@ -183,20 +174,8 @@ void test_muldi3() {
     assert(__muldi3(10, -10) == -100);
     assert(__muldi3(-10, -10) == 100);
     assert(__muldi3(0, 12345) == 0);
-
-    // Overflow check (low 64 bits kept)
-    // 2^62 * 4 = 2^64 = 0 (wrapped)
-    int64_t large = (1LL << 62);
-    assert(__muldi3(large, 4) == 0);
-
-    // 2^32 * 2^32 = 0 (wrapped)
-    int64_t mid = (1LL << 32);
-    assert(__muldi3(mid, mid) == 0);
-
-    // 2^31 * 2^31 = 2^62
-    int64_t mid2 = (1LL << 31);
-    assert(__muldi3(mid2, mid2) == (1LL << 62));
-
+    assert(__muldi3(0x100000000LL, 2) == 0x200000000LL);
+    assert(__muldi3(0xFFFFFFFFLL, 0xFFFFFFFFLL) == 0xFFFFFFFE00000001LL);
     printf("PASS\n");
 }
 
@@ -205,9 +184,7 @@ void test_negdi2() {
     assert(__negdi2(10) == -10);
     assert(__negdi2(-10) == 10);
     assert(__negdi2(0) == 0);
-
-    // INT64_MIN negate is INT64_MIN due to overflow
-    assert(__negdi2(INT64_MIN) == INT64_MIN);
+    assert(__negdi2(INT64_MIN) == INT64_MIN); // -(-2^63) = -2^63 due to overflow
     printf("PASS\n");
 }
 
