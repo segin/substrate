@@ -98,6 +98,18 @@ pmm_free_block(virt);  // CORRECT - convert first
 - **VGA Hardware Cursor:** Fixed to sync with software cursor position
 - Debugging remaining TLS access issue (ESI pointing to PT_TLS template instead of allocated block)
 
+## Substrate System Patterns (CRITICAL)
+- **Device Naming:** Storage devices reside in `/dev/storage/` and use a `type`+`instance` pattern:
+    - `ide0`, `ide1`, ... (IDE)
+    - `sata0`, `sata1`, ... (SATA)
+    - `scs0`, `scsi0`, ... (SCSI)
+- **Mounting:**
+    - The `mount` utility usage is: `mount <device> <mount_point> <filesystem_type>`.
+    - `fstab` entries follow the same logic as the `mount` command.
+    - The kernel automatically mounts `/proc`, `/sys`, and `/dev` after the root filesystem is established.
+- **Initialization:**
+    - `sbin/init` (or `etc/init.sh` copied to `/sbin/init`) should focus on starting system services and getty, as basic pseudo-filesystems are kernel-managed.
+
 ## Directives
 1.  **Architecture Maintenance:** Always read `ARCHITECTURE.md` before starting complex tasks. Update `ARCHITECTURE.md` if your changes impact the system structure or design.
 2.  **Code Style:** Adhere to standard kernel coding styles (similar to BSD/Linux) for C and C++.

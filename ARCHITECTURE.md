@@ -49,7 +49,10 @@ The kernel is the core of the operating system, structured as follows:
         - **Fonts:** Compiled-in CP437 fonts (`font_8x16.c`, `font_8x8.c`) covering full 256 charsets.
         - **Architecture:** Table-driven mode setting with specific CRTC register dumps (6845/VGA).
     - **`serial/`**: UART driver.
-    - **`console/`**: TTY core and console device driver stack, using a `tty_driver` callback interface (install/remove, open/close, write/put_char, buffer state queries, and flow-control hooks).
+- **`console/`**: TTY core and console device driver stack.
+    - **Current Design**: Monolithic TTY implementation handling canonical processing and signal generation in common paths.
+    - **Planned Refactor**: Transitioning to a pluggable **Line Discipline (ldisc)** interface to support alternative disciplines (PPP, SLIP) and better separation of concerns (POSIX canonical processing vs. raw I/O).
+    - **Interface**: Uses a `tty_driver` callback interface for hardware interaction.
     - **`input/`**: PS/2 Keyboard and Mouse drivers.
     - **`storage/`**: Drivers for SCSI, IDE, AHCI, NVMe.
     - **`virtio/`**: Virtualized devices (Block, 9P, Net).
@@ -104,6 +107,10 @@ These components are essential for booting and basic system operation.
     - **`dl/`**: Dynamic linker.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
     - **`dbm/`**: Database Manager library.
+- **`libexec/`**:
+    - **`ld.so`**: Dynamic linker/loader for ELF shared objects.
+        - **Features**: PT_TLS support, GNU hash lookups, lazy/eager binding, and secure-exec handling for setuid binaries.
+        - **Policy**: Follows BSD-style search paths (`/lib`, `/usr/lib`, `/usr/local/lib`) and System V ELF ABI.
 - `sbin/`: System binaries (Currently empty/stubbed as we rely on external rootfs/busybox for init).
 
 ### Regex Library (`usr.lib/regex/`)
@@ -187,17 +194,14 @@ These tools are compiled using the host's compiler (`cc`) and C library, but str
   - **Scheduler:** Round-Robin with support for Processes and Threads.
 - **Exec:** ELF binaries are "branded" via `EI_OSABI` to select the correct personality.
 
-## Naming Conventions & Namespaces
+- **Naming Conventions & Namespaces:**
 - **Network Interfaces:** Naming follows the `driver`+`instance` pattern (BSD-style).
   - Examples: `em0` (Intel PRO/1000), `re0` (Realtek 8139/8169), `bge0` (Broadcom), `lo0` (Loopback).
 - **Storage Devices:** Naming follows the `/dev/storage/`+`type`+`instance` pattern.
   - **Types:**
-    - `sata`: SATA devices (AHCI).
-    - `ide`: Legacy IDE devices.
-    - `scsi`: SCSI devices.
-        - `/dev/storage/scsi/B:T:L`: Generic SCSI access (Bus:Target:LUN).
-        - `/dev/storage/scsi/B`: Bus controller (ioctl enumeration).
-        - `/dev/storage/scsiN`: High-level block device alias (e.g., `scsi0` -> first disk).
+    - `ide`: Legacy IDE devices (e.g., `/dev/storage/ide0`).
+    - `sata`: SATA devices (e.g., `/dev/storage/sata0`).
+    - `scs` / `scsi`: SCSI devices (e.g., `/dev/storage/scsi0`).
     - `usb`: USB Mass Storage.
     - `nvme`: NVMe Namespaces (e.g., `nvme0`).
     - `floppy`: Floppy Disk.
