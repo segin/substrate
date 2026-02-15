@@ -194,17 +194,14 @@ These tools are compiled using the host's compiler (`cc`) and C library, but str
   - **Scheduler:** Round-Robin with support for Processes and Threads.
 - **Exec:** ELF binaries are "branded" via `EI_OSABI` to select the correct personality.
 
-## Naming Conventions & Namespaces
+- **Naming Conventions & Namespaces:**
 - **Network Interfaces:** Naming follows the `driver`+`instance` pattern (BSD-style).
   - Examples: `em0` (Intel PRO/1000), `re0` (Realtek 8139/8169), `bge0` (Broadcom), `lo0` (Loopback).
 - **Storage Devices:** Naming follows the `/dev/storage/`+`type`+`instance` pattern.
   - **Types:**
-    - `sata`: SATA devices (AHCI).
-    - `ide`: Legacy IDE devices.
-    - `scsi`: SCSI devices.
-        - `/dev/storage/scsi/B:T:L`: Generic SCSI access (Bus:Target:LUN).
-        - `/dev/storage/scsi/B`: Bus controller (ioctl enumeration).
-        - `/dev/storage/scsiN`: High-level block device alias (e.g., `scsi0` -> first disk).
+    - `ide`: Legacy IDE devices (e.g., `/dev/storage/ide0`).
+    - `sata`: SATA devices (e.g., `/dev/storage/sata0`).
+    - `scs` / `scsi`: SCSI devices (e.g., `/dev/storage/scsi0`).
     - `usb`: USB Mass Storage.
     - `nvme`: NVMe Namespaces (e.g., `nvme0`).
     - `floppy`: Floppy Disk.

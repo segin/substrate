@@ -1,83 +1,135 @@
 #!/bin/bash
-# Build script to create root filesystem in dist/
+# Build script to create root filesystem and images
 
 set -e
 
 TOP="$(cd "$(dirname "$0")" && pwd)"
 DIST="$TOP/dist"
+IMAGE="$TOP/rootfs.img"
+IMAGE_SIZE_MIB=100
 
-echo "Building Substrate root filesystem..."
+usage() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  --dist     Prepare the dist/ directory with all distribution files"
+    echo "  --image    Create a ${IMAGE_SIZE_MIB}MiB ext2 filesystem image (rootfs.img)"
+    echo "  --help     Show this help message"
+    echo ""
+    exit 1
+}
 
-# Clean dist directory
-rm -rf "$DIST"
+clean_dist() {
+    echo "Cleaning dist directory..."
+    rm -rf "$DIST"
+    mkdir -p "$DIST"/{bin,sbin,usr/{bin,lib,include},lib,dev,etc,proc,tmp,var,home,root,boot}
+}
 
-# Create directory structure
-mkdir -p "$DIST"/{bin,sbin,usr/{bin,lib,include},lib,dev,etc,proc,tmp,var,home,root}
+build_components() {
+    echo "Building kernel..."
+    make -C "$TOP/sys" -j4
 
-# Build kernel
-echo "Building kernel..."
-make -C "$TOP/sys" -j4
+    echo "Building libc..."
+    make -C "$TOP/lib/c" -j4
 
-# Copy kernel
-cp "$TOP/sys/kernel.bin" "$DIST/boot/"
-cp "$TOP/sys/kernel.multiboot" "$DIST/boot/"
+    echo "Building userland..."
+    make -C "$TOP/bin" -j4
+}
 
-# Build libc
-echo "Building libc..."
-make -C "$TOP/lib/c" -j4
+install_to_dist() {
+    echo "Installing kernel to dist/boot..."
+    cp "$TOP/sys/kernel.bin" "$DIST/boot/"
+    cp "$TOP/sys/kernel.multiboot" "$DIST/boot/"
 
-# Install libc
-cp "$TOP/lib/c/libc.a" "$DIST/usr/lib/"
-mkdir -p "$DIST/usr/include"
-cp -r "$TOP/lib/c/include"/* "$DIST/usr/include/"
+    echo "Installing libc to dist/usr/lib..."
+    cp "$TOP/lib/c/libc.a" "$DIST/usr/lib/"
+    mkdir -p "$DIST/usr/include"
+    cp -r "$TOP/include/"* "$DIST/usr/include/"
 
-# Build and install userland binaries
-echo "Building userland..."
-make -C "$TOP/bin" -j4
-
-# Install binaries to dist/bin
-for dir in "$TOP/bin"/*/ ; do
-    if [ -d "$dir" ]; then
-        name=$(basename "$dir")
-        if [ -f "$dir/$name" ]; then
-            cp "$dir/$name" "$DIST/bin/"
+    echo "Installing userland binaries to dist/bin..."
+    for dir in "$TOP/bin"/*/ ; do
+        if [ -d "$dir" ]; then
+            name=$(basename "$dir")
+            if [ -f "$dir/$name" ]; then
+                cp "$dir/$name" "$DIST/bin/"
+            fi
         fi
+    done
+
+    echo "Installing configuration from etc/..."
+    cp "$TOP/etc/passwd" "$DIST/etc/"
+    cp "$TOP/etc/group" "$DIST/etc/"
+    cp "$TOP/etc/fstab" "$DIST/etc/"
+    cp "$TOP/etc/init.sh" "$DIST/sbin/init"
+    chmod +x "$DIST/sbin/init"
+
+    echo "Root filesystem prepared in: $DIST"
+}
+
+create_image() {
+    echo "Creating ${IMAGE_SIZE_MIB}MiB ext2 filesystem image: $IMAGE"
+    
+    # Check if dist directory exists and is not empty
+    if [ ! -d "$DIST" ] || [ -z "$(ls -A "$DIST")" ]; then
+        echo "Error: dist/ directory is empty. Run with --dist first."
+        exit 1
     fi
+
+    # Create empty sparse file
+    rm -f "$IMAGE"
+    truncate -s "${IMAGE_SIZE_MIB}M" "$IMAGE"
+
+    # Create ext2 filesystem and populate with dist/ content
+    # Using -d option to populate the image root-less
+    mkfs.ext2 -F -d "$DIST" "$IMAGE"
+
+    echo "Image created: $IMAGE"
+}
+
+# Parse arguments
+if [ $# -eq 0 ]; then
+    usage
+fi
+
+DO_DIST=false
+DO_IMAGE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dist)
+            DO_DIST=true
+            shift
+            ;;
+        --image)
+            DO_IMAGE=true
+            shift
+            ;;
+        --help)
+            usage
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            ;;
+    esac
 done
 
-# Create essential device nodes (placeholders - real system would use devfs)
-echo "Creating device nodes..."
-mkdir -p "$DIST/dev"
-# These would normally be created by the kernel/devfs
+if [ "$DO_DIST" = true ]; then
+    clean_dist
+    build_components
+    install_to_dist
+fi
 
-# Create basic etc files
-echo "root:x:0:0:root:/root:/bin/sh" > "$DIST/etc/passwd"
-echo "root:x:0:" > "$DIST/etc/group"
-
-cat > "$DIST/etc/fstab" << 'EOF'
-# <device>       <mount>  <type>  <options>  <dump> <pass>
-/dev/storage/hda1  /        ext2    rw         0      1
-EOF
-
-# Create init script
-cat > "$DIST/sbin/init" << 'EOF'
-#!/bin/sh
-# System initialization script
-
-echo "Substrate initializing..."
-
-# Mount filesystems
-mount -t proc proc /proc
-
-# Start getty on console
-/sbin/getty /dev/console
-
-exec /bin/sh
-EOF
-
-chmod +x "$DIST/sbin/init"
+if [ "$DO_IMAGE" = true ]; then
+    create_image
+fi
 
 echo ""
-echo "Root filesystem created in: $DIST"
-echo "Contents:"
-du -sh "$DIST"
+if [ "$DO_DIST" = true ]; then
+    echo "Dist contents:"
+    du -sh "$DIST"
+fi
+if [ "$DO_IMAGE" = true ]; then
+    echo "Image size:"
+    ls -lh "$IMAGE"
+fi
