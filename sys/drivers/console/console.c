@@ -180,7 +180,7 @@ void console_attach_std_fds(struct process *proc) {
         // Notify VFS that we've opened the node
         open_fs(node, 1, 1);
         
-        proc->fds[i] = f;
+        proc_set_fd(proc, i, f);
     }
 
     // Update next_fd hint if it was 0
