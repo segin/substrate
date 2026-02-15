@@ -259,29 +259,8 @@ int kern_open(const char *path, int flags, int mode) {
     if (!path) return -1;
     
     // Find free FD using hint
-    int fd = -1;
-    int start = current_process->next_fd;
-    if (start < 0 || start >= MAX_FD) start = 0;
-
-    for (int i = start; i < MAX_FD; i++) {
-        if (!current_process->fds[i]) {
-            fd = i;
-            break;
-        }
-    }
-
-    // Wrap around search
-    if (fd == -1 && start > 0) {
-        for (int i = 0; i < start; i++) {
-            if (!current_process->fds[i]) {
-                fd = i;
-                break;
-            }
-        }
-    }
-
+    int fd = proc_alloc_fd(current_process);
     if (fd == -1) return -1;
-    current_process->next_fd = fd + 1;
 
     // Lookup file
     // Handle absolute/relative. For now assume root relative if starts with /
@@ -296,17 +275,23 @@ int kern_open(const char *path, int flags, int mode) {
         node = finddir_fs(root, (char*)path);
     }
 
-    if (!node) return -1;
+    if (!node) {
+        proc_clear_fd(current_process, fd);
+        return -1;
+    }
 
     file_t *f = file_alloc();
-    if (!f) return -1;
+    if (!f) {
+        proc_clear_fd(current_process, fd);
+        return -1;
+    }
 
     f->f_data = node;
     f->f_offset = 0;
     f->f_flag = (short)flags;
     f->f_count = 1;
 
-    current_process->fds[fd] = f;
+    proc_set_fd(current_process, fd, f);
     open_fs(node, 1, 0); // Open read/write?
 
     return fd;
@@ -328,7 +313,7 @@ int kern_close(int fd) {
     if (!f) return -1;
     
     file_close_ptr(f);
-    current_process->fds[fd] = 0;
+    proc_clear_fd(current_process, fd);
 
     // Update hint if we freed a lower FD
     if (fd < current_process->next_fd) {
@@ -985,40 +970,48 @@ int kern_pipe(int *fds) {
     fs_node_t *read_node, *write_node;
     pipe_create(&read_node, &write_node);
 
-    int f1 = -1, f2 = -1;
-    int start = current_process->next_fd;
-    if (start < 0 || start >= MAX_FD) start = 0;
-
-    // Search from hint
-    for (int i = start; i < MAX_FD; i++) {
-        if (!current_process->fds[i]) {
-            if (f1 == -1) f1 = i;
-            else if (f2 == -1) { f2 = i; break; }
-        }
+    int f1 = proc_alloc_fd(current_process);
+    if (f1 == -1) return -1;
+    int f2 = proc_alloc_fd(current_process);
+    if (f2 == -1) {
+        // No second FD, but we already "allocated" f1.
+        // next_fd was updated. We should probably clear f1 if we can't get both.
+        // However, the previous code also had this potential issue if it only found one.
+        // Actually the previous code checked if both were found.
+        // Let's be safe.
+        // Wait, the previous code didn't actually "allocate" until it found both.
+        // My proc_alloc_fd updates next_fd.
+        // Let's just find both first if possible.
+        // Actually, for simplicity, I'll just use proc_alloc_fd twice.
+        // If the second fails, we should free the first.
+        // Since we didn't set the pointer yet, we just need to clear the bit.
+        proc_clear_fd(current_process, f1);
+        return -1;
     }
-
-    // Wrap around if needed
-    if (f2 == -1 && start > 0) {
-        for (int i = 0; i < start; i++) {
-            if (!current_process->fds[i]) {
-                if (f1 == -1) f1 = i;
-                else if (f2 == -1) { f2 = i; break; }
-            }
-        }
-    }
-
-    if (f1 == -1 || f2 == -1) return -1;
-    current_process->next_fd = f2 + 1;
 
     file_t *rf = file_alloc();
+    if (!rf) {
+        proc_clear_fd(current_process, f1);
+        proc_clear_fd(current_process, f2);
+        return -1;
+    }
     rf->f_data = read_node;
     rf->f_flag = 0; // O_RDONLY
-    current_process->fds[f1] = rf;
+    proc_set_fd(current_process, f1, rf);
 
     file_t *wf = file_alloc();
+    if (!wf) {
+        // rf is already in fds[f1], so proc_clear_fd will close it?
+        // No, proc_clear_fd doesn't call file_close_ptr.
+        // We should close rf.
+        file_close_ptr(rf);
+        proc_clear_fd(current_process, f1);
+        proc_clear_fd(current_process, f2);
+        return -1;
+    }
     wf->f_data = write_node;
     wf->f_flag = 0; // O_WRONLY
-    current_process->fds[f2] = wf;
+    proc_set_fd(current_process, f2, wf);
 
     fds[0] = f1;
     fds[1] = f2;
@@ -1031,31 +1024,10 @@ int sys_dup(int oldfd) {
     if (!f) return -1;
 
     // Find free FD with hint
-    int newfd = -1;
-    int start = current_process->next_fd;
-    if (start < 0 || start >= MAX_FD) start = 0;
-
-    for (int i = start; i < MAX_FD; i++) {
-        if (!current_process->fds[i]) {
-            newfd = i;
-            break;
-        }
-    }
-
-    // Wrap around
-    if (newfd == -1 && start > 0) {
-        for (int i = 0; i < start; i++) {
-            if (!current_process->fds[i]) {
-                newfd = i;
-                break;
-            }
-        }
-    }
-
+    int newfd = proc_alloc_fd(current_process);
     if (newfd == -1) return -1;
-    current_process->next_fd = newfd + 1;
 
-    current_process->fds[newfd] = f;
+    proc_set_fd(current_process, newfd, f);
     f->f_count++;
     return newfd;
 }
@@ -1070,9 +1042,10 @@ int sys_dup2(int oldfd, int newfd) {
 
     if (current_process->fds[newfd]) {
         file_close_ptr(current_process->fds[newfd]);
+        proc_clear_fd(current_process, newfd);
     }
 
-    current_process->fds[newfd] = f;
+    proc_set_fd(current_process, newfd, f);
     f->f_count++;
     return newfd;
 }
