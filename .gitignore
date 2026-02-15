@@ -98,3 +98,4 @@ test_ext2_perf
 test_libc_string
 test_libc_time
 *.img
+test_libc_stdlib
