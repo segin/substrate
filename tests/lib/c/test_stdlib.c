@@ -32,11 +32,72 @@
 #define arc4random_uniform tested_arc4random_uniform
 
 // Include the source file directly
-#include "../src/stdlib.c"
+#include "../../../lib/c/src/stdlib.c"
 
 // Undefine macros to allow testing
 #undef atoi
 #undef atol
+#undef strtol
+
+void test_strtol(void) {
+    // Basic base 10
+    assert(tested_strtol("123", NULL, 10) == 123);
+    assert(tested_strtol("-123", NULL, 10) == -123);
+    assert(tested_strtol("+123", NULL, 10) == 123);
+
+    // Whitespace
+    assert(tested_strtol("  123", NULL, 10) == 123);
+    assert(tested_strtol("\t\n 456", NULL, 10) == 456);
+
+    // Base 16
+    assert(tested_strtol("1A", NULL, 16) == 26);
+    assert(tested_strtol("1a", NULL, 16) == 26);
+    assert(tested_strtol("0x1A", NULL, 16) == 26);
+    assert(tested_strtol("-0x1A", NULL, 16) == -26);
+
+    // Base 8
+    assert(tested_strtol("10", NULL, 8) == 8);
+    assert(tested_strtol("77", NULL, 8) == 63);
+
+    // Base 36 (max base)
+    assert(tested_strtol("Z", NULL, 36) == 35);
+    assert(tested_strtol("z", NULL, 36) == 35);
+    assert(tested_strtol("10", NULL, 36) == 36);
+
+    // Auto-detect base (0)
+    assert(tested_strtol("123", NULL, 0) == 123); // Decimal
+    assert(tested_strtol("010", NULL, 0) == 8);   // Octal
+    assert(tested_strtol("0x1A", NULL, 0) == 26); // Hex
+    assert(tested_strtol("0X1A", NULL, 0) == 26); // Hex upper
+
+    // Endptr
+    char *endptr;
+    const char *str = "123xyz";
+    assert(tested_strtol(str, &endptr, 10) == 123);
+    assert(*endptr == 'x');
+    assert(endptr == str + 3);
+
+    str = "  123   ";
+    assert(tested_strtol(str, &endptr, 10) == 123);
+    assert(*endptr == ' ');
+
+    // Invalid input
+    str = "xyz";
+    assert(tested_strtol(str, &endptr, 10) == 0);
+    assert(endptr == str); // No conversion performed
+
+    // Invalid base
+    assert(tested_strtol("123", NULL, 1) == 0);
+    assert(tested_strtol("123", NULL, 37) == 0);
+
+    // Overflow/Underflow (assuming 32-bit long as per implementation)
+    // Implementation uses simplified LONG_MAX/MIN: 2147483647L, -2147483648L
+    // Note: The implementation returns these values on overflow.
+    assert(tested_strtol("2147483648", NULL, 10) == 2147483647L);
+    assert(tested_strtol("-2147483649", NULL, 10) == -2147483648L);
+
+    printf("test_strtol passed\n");
+}
 
 void test_atoi_basic(void) {
     assert(tested_atoi("123") == 123);
@@ -78,6 +139,7 @@ int main(void) {
     test_atoi_sign();
     test_atoi_invalid();
     test_atol_basic();
+    test_strtol();
     printf("All tests passed!\n");
     return 0;
 }
