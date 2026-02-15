@@ -1227,8 +1227,10 @@ static size_t bitset_bytes(size_t bits) {
 
 static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_t pos,
                             const char *text, size_t text_len, unsigned flags, int ignore_anchors) {
-    int stack_buf[64];
-    size_t stack_cap = 64;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfree-nonheap-object"
+    int stack_buf[2048];
+    size_t stack_cap = 2048;
     size_t stack_len = 0;
     int *stack = stack_buf;
 
@@ -1311,6 +1313,7 @@ static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_
     if (stack != stack_buf) {
         free(stack);
     }
+#pragma GCC diagnostic pop
 }
 
 static int dfa_state_equal(uint8_t *a, uint8_t *b, size_t bytes) {
