@@ -379,14 +379,14 @@ static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
     if (resp.response == VIRTIO_SCSI_S_FUNCTION_COMPLETE ||
         resp.response == VIRTIO_SCSI_S_FUNCTION_SUCCEEDED) {
         char buf[64];
-        sprintf(buf, "virtio_scsi: reset device %d:%d succeeded\n",
+        snprintf(buf, sizeof(buf), "virtio_scsi: reset device %d:%d succeeded\n",
                 sdev->target, sdev->lun);
         kprint(buf);
         return 0;
     }
 
     char buf[64];
-    sprintf(buf, "virtio_scsi: reset device %d:%d failed (resp=%d)\n",
+    snprintf(buf, sizeof(buf), "virtio_scsi: reset device %d:%d failed (resp=%d)\n",
             sdev->target, sdev->lun, resp.response);
     kprint(buf);
     return -1;

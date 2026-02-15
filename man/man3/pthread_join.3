@@ -1,0 +1,44 @@
+.\"
+.\" PTHREAD_JOIN(3) - Substrate Pthreads Library
+.\"
+.TH PTHREAD_JOIN 3 "January 2026" "Substrate OS" "Library Functions"
+.SH NAME
+pthread_join \- join with a terminated thread
+.SH SYNOPSIS
+.nf
+.B #include <pthread.h>
+.PP
+.BI "int pthread_join(pthread_t " thread ", void **" retval ");
+.fi
+.SH DESCRIPTION
+The
+.BR pthread_join ()
+function waits for the thread specified by
+.I thread
+to terminate.  If that thread has already terminated, then
+.BR pthread_join ()
+returns immediately.
+.PP
+If
+.I retval
+is not NULL, then
+.BR pthread_join ()
+copies the exit status of the target thread (i.e., the value that the
+target thread supplied to
+.BR pthread_exit (3))
+into the location pointed to by
+.IR retval .
+.SH RETURN VALUE
+On success,
+.BR pthread_join ()
+returns 0; on error, it returns an error number.
+.SH ERRORS
+.TP
+.B ESRCH
+No thread with the ID
+.I thread
+could be found.
+.SH SEE ALSO
+.BR pthread_create (3),
+.BR pthread_exit (3),
+.BR thr_join (2)

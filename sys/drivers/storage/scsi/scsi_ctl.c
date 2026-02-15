@@ -13,6 +13,9 @@
 #include <kern/console.h>
 #include <vfs/vfs.h>
 #include <drivers/storage/blkdev.h>
+#include <sys/kern_syscalls.h>
+#include <sys/errno.h>
+#include <vm/vm_kmem.h>
 #include "scsi.h"
 
 /* Forward declarations from scsi_dev.c */
@@ -83,37 +86,72 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     
     switch (request) {
     case SCSI_IOCTL_GET_INFO: {
-        if (!arg) return -1;
-        scsi_ioctl_info_t *info = (scsi_ioctl_info_t *)arg;
+        if (!arg) return -EINVAL;
+        scsi_ioctl_info_t kinfo;
+        memset(&kinfo, 0, sizeof(kinfo));
         scsi_device_t *dev = sg->dev;
         
-        info->bus = dev->bus;
-        info->target = dev->target;
-        info->lun = (uint8_t)dev->lun;
-        info->type = dev->type;
-        strncpy(info->vendor, dev->vendor, 8);
-        info->vendor[8] = '\0';
-        strncpy(info->product, dev->product, 16);
-        info->product[16] = '\0';
-        strncpy(info->revision, dev->revision, 4);
-        info->revision[4] = '\0';
-        info->capacity = dev->capacity;
-        info->sector_size = dev->sector_size;
+        kinfo.bus = dev->bus;
+        kinfo.target = dev->target;
+        kinfo.lun = (uint8_t)dev->lun;
+        kinfo.type = dev->type;
+        strncpy(kinfo.vendor, dev->vendor, 8);
+        kinfo.vendor[8] = '\0';
+        strncpy(kinfo.product, dev->product, 16);
+        kinfo.product[16] = '\0';
+        strncpy(kinfo.revision, dev->revision, 4);
+        kinfo.revision[4] = '\0';
+        kinfo.capacity = dev->capacity;
+        kinfo.sector_size = dev->sector_size;
+
+        if (copyout(&kinfo, arg, sizeof(kinfo)) != 0) return -EFAULT;
         return 0;
     }
     
     case SCSI_IOCTL_SEND_CMD: {
-        if (!arg) return -1;
-        scsi_ioctl_cmd_t *cmd = (scsi_ioctl_cmd_t *)arg;
+        if (!arg) return -EINVAL;
+        scsi_ioctl_cmd_t kcmd;
+        if (copyin(arg, &kcmd, sizeof(kcmd)) != 0) return -EFAULT;
+
+        /* Limit data length to avoid excessive kernel allocation (64KB) */
+        if (kcmd.data_len > 65536) return -EINVAL;
+
+        void *kdata = NULL;
+        if (kcmd.data_len > 0) {
+            kdata = kmalloc(kcmd.data_len);
+            if (!kdata) return -ENOMEM;
+
+            if (kcmd.direction == 2) { /* WRITE */
+                if (copyin(kcmd.data, kdata, kcmd.data_len) != 0) {
+                    kfree(kdata, kcmd.data_len);
+                    return -EFAULT;
+                }
+            }
+        }
         
         uint16_t flags = 0;
-        if (cmd->direction == 1) flags = SCSI_REQ_READ;
-        else if (cmd->direction == 2) flags = SCSI_REQ_WRITE;
+        if (kcmd.direction == 1) flags = SCSI_REQ_READ;
+        else if (kcmd.direction == 2) flags = SCSI_REQ_WRITE;
         
-        int ret = scsi_execute_sync(sg->dev, cmd->cdb, cmd->cdb_len,
-                                     cmd->data, cmd->data_len,
+        int ret = scsi_execute_sync(sg->dev, kcmd.cdb, kcmd.cdb_len,
+                                     kdata, kcmd.data_len,
                                      flags, 30000);
-        cmd->error = ret;
+
+        kcmd.error = ret;
+
+        if (ret >= 0 && kcmd.direction == 1 && kcmd.data_len > 0) { /* READ */
+            if (copyout(kdata, kcmd.data, kcmd.data_len) != 0) {
+                if (kdata) kfree(kdata, kcmd.data_len);
+                return -EFAULT;
+            }
+        }
+
+        if (copyout(&kcmd, arg, sizeof(kcmd)) != 0) {
+            if (kdata) kfree(kdata, kcmd.data_len);
+            return -EFAULT;
+        }
+
+        if (kdata) kfree(kdata, kcmd.data_len);
         return ret;
     }
     
@@ -134,7 +172,7 @@ static int scsi_create_generic_node(scsi_device_t *dev) {
     sg->dev = dev;
     
     /* Name format: B:T:L */
-    sprintf(sg->node.name, "%d:%d:%d",
+    snprintf(sg->node.name, sizeof(sg->node.name), "%d:%d:%d",
              dev->bus, dev->target, dev->lun);
     
     sg->node.flags = FS_CHARDEVICE;
@@ -173,7 +211,7 @@ static int bus_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     switch (request) {
     case SCSI_IOCTL_SCAN_BUS: {
         char log_buf[48];
-        sprintf(log_buf, "scsi: rescanning bus %d\n", bn->bus_id);
+        snprintf(log_buf, sizeof(log_buf), "scsi: rescanning bus %d\n", bn->bus_id);
         kprint(log_buf);
         scsi_scan_bus(bn->link, bn->bus_id);
         return 0;
@@ -184,7 +222,7 @@ static int bus_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         return -1;
         
     case SCSI_IOCTL_GET_COUNT: {
-        if (!arg) return -1;
+        if (!arg) return -EINVAL;
         /* Count devices on this bus */
         int count = 0;
         for (uint8_t t = 0; t < 16; t++) {
@@ -192,7 +230,7 @@ static int bus_ioctl(fs_node_t *node, uint32_t request, void *arg) {
                 if (scsi_device_lookup(bn->bus_id, t, l)) count++;
             }
         }
-        *(int *)arg = count;
+        if (copyout(&count, arg, sizeof(int)) != 0) return -EFAULT;
         return 0;
     }
     
@@ -212,7 +250,7 @@ int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id) {
     
     bn->link = link;
     bn->bus_id = bus_id;
-    sprintf(bn->node.name, "%d", bus_id);
+    snprintf(bn->node.name, sizeof(bn->node.name), "%d", bus_id);
     bn->node.flags = FS_CHARDEVICE;
     bn->node.impl = (uint32_t)(uintptr_t)bn;
     bn->node.ioctl = bus_ioctl;
@@ -221,7 +259,7 @@ int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id) {
     bus_count++;
     
     char log_buf[64];
-    sprintf(log_buf, "scsi: registered bus controller /dev/storage/scsi/%d\n", bus_id);
+    snprintf(log_buf, sizeof(log_buf), "scsi: registered bus controller /dev/storage/scsi/%d\n", bus_id);
     kprint(log_buf);
     return 0;
 }

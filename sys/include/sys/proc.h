@@ -53,6 +53,7 @@ typedef struct process {
     struct personality *pers; // Pointer to personality
     file_t *fds[MAX_FD]; // File Descriptor Table
     int next_fd;         // Hint for next free FD
+    uint32_t fd_bitmap;  // Bitmap of allocated FDs
     fs_node_t *root_node; // Per-process root (for chroot)
     
     // Signals
@@ -192,6 +193,9 @@ typedef struct thread {
     // Syscall registers (for fork/vfork)
     void *syscall_regs;
 
+    // Thread exit status for join
+    void *exit_status;
+
     thread_state_t state;
     struct thread *next;
 } thread_t;
@@ -200,5 +204,10 @@ typedef struct thread {
 extern thread_t *current_thread;
 extern process_t *current_process;
 extern process_t processes[];
+
+// File Descriptor Management
+int  proc_alloc_fd(process_t *p);
+void proc_set_fd(process_t *p, int fd, file_t *f);
+void proc_clear_fd(process_t *p, int fd);
 
 #endif

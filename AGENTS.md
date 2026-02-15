@@ -111,7 +111,9 @@ pmm_free_block(virt);  // CORRECT - convert first
     - `sbin/init` (or `etc/init.sh` copied to `/sbin/init`) should focus on starting system services and getty, as basic pseudo-filesystems are kernel-managed.
 
 ## Directives
-1.  **Architecture Maintenance:** Always read `ARCHITECTURE.md` before starting complex tasks. Update `ARCHITECTURE.md` if your changes impact the system structure or design.
+1.  **Architecture Maintenance:** **CRITICAL:** Always read `ARCHITECTURE.md` before starting complex tasks. Update `ARCHITECTURE.md` if your changes impact the system structure or design.
+    - **Format:** Maintain the structure and format defined in `ARCHITECTURE.md` (based on the template at `https://architecture.md/`).
+    - **Frequency:** Update `ARCHITECTURE.md` whenever major components are added, refactored, or when directory structures change.
 2.  **Code Style:** Adhere to standard kernel coding styles (similar to BSD/Linux) for C and C++.
 3.  **Documentation:** Keep documentation close to the code.
 4.  **Safety:** Always verify file contents before replacing.
