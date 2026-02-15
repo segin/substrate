@@ -10,7 +10,11 @@
 // External declaration for snprintf if not in a header
 extern int snprintf(char *str, size_t size, const char *format, ...);
 
-// Helper function declarations
+// External declarations for div64 functions to ensure we are testing the library
+extern uint64_t __udivdi3(uint64_t n, uint64_t d);
+extern uint64_t __umoddi3(uint64_t n, uint64_t d);
+extern int64_t __divdi3(int64_t a, int64_t b);
+extern int64_t __moddi3(int64_t a, int64_t b);
 extern uint64_t __ashldi3(uint64_t a, int b);
 extern uint64_t __lshrdi3(uint64_t a, int b);
 extern int64_t __ashrdi3(int64_t a, int b);
@@ -159,6 +163,20 @@ static void test_neg(void) {
     assert_eq_i64(__negdi2(100), -100, "neg 100");
     assert_eq_i64(__negdi2(-100), 100, "neg -100");
     assert_eq_i64(__negdi2(0), 0, "neg 0");
+    assert_eq_i64(__negdi2(INT64_MIN), INT64_MIN, "neg min");
+}
+
+static void test_explicit_calls(void) {
+    // Call functions directly to ensure symbols are available and correct
+    assert_eq_u64(__udivdi3(100, 10), 10, "__udivdi3(100, 10)");
+    assert_eq_u64(__umoddi3(100, 3), 1, "__umoddi3(100, 3)");
+    assert_eq_i64(__divdi3(-100, 10), -10, "__divdi3(-100, 10)");
+    assert_eq_i64(__moddi3(-10, 3), -1, "__moddi3(-10, 3)");
+    assert_eq_u64(__ashldi3(1, 1), 2, "__ashldi3(1, 1)");
+    assert_eq_u64(__lshrdi3(2, 1), 1, "__lshrdi3(2, 1)");
+    assert_eq_i64(__ashrdi3(-2, 1), -1, "__ashrdi3(-2, 1)");
+    assert_eq_i64(__muldi3(10, 10), 100, "__muldi3(10, 10)");
+    assert_eq_i64(__negdi2(10), -10, "__negdi2(10)");
 }
 
 void run_div64_tests(void) {
@@ -169,6 +187,11 @@ void run_div64_tests(void) {
     test_unsigned_mod();
     test_signed_div();
     test_signed_mod();
+    test_shifts();
+    test_mul();
+    test_neg();
+
+    test_explicit_calls();
     test_shifts();
     test_mul();
     test_neg();

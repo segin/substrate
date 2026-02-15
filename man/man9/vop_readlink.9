@@ -1,0 +1,45 @@
+.Dd February 14, 2026
+.Dt VOP_READLINK 9
+.Os
+.Sh NAME
+.Nm VOP_READLINK
+.Nd read target of a symbolic link
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/vnode.h
+.Ft int
+.Fn VOP_READLINK "struct vnode *vp" "struct uio *uio" "struct ucred *cred"
+.Sh DESCRIPTION
+The
+.Fn VOP_READLINK
+entry point reads the target path of a symbolic link.
+.Pp
+The arguments are:
+.Bl -tag -width cred
+.It Fa vp
+The vnode of the symbolic link.
+.It Fa uio
+The location of the data to be read.
+.It Fa cred
+The user credentials to use for authorization.
+.El
+.Sh LOCKS
+The vnode
+.Fa vp
+should be locked on entry and remains locked on return.
+.Sh RETURN VALUES
+Zero is returned on success, otherwise an error code is returned.
+.Sh ERRORS
+.Bl -tag -width EOPNOTSUPP
+.It Bq Er EOPNOTSUPP
+The file system does not support symbolic links.
+.It Bq Er EINVAL
+The argument
+.Fa vp
+is not a symbolic link.
+.It Bq Er EIO
+An I/O error occurred while reading the link.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr VOP_SYMLINK 9
