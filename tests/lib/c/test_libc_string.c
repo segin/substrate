@@ -63,10 +63,12 @@ int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 // Include the source file directly - Removed to avoid redefinitions
 // The test now relies on string_prefixed.o linked by the Makefile
 
+#ifndef NO_MAIN
 // libgcc/libc wrappers for prefixed builds
 void* libc_malloc(size_t s) { return malloc(s); }
 void libc_free(void* p) { free(p); }
 int libc_rand(void) { return rand(); }
+#endif
 
 // Undef macros to restore original names if needed
 #undef strfry
@@ -111,6 +113,13 @@ int libc_rand(void) { return rand(); }
 #define ASSERT_MEM_EQ(a, b, size, msg) do { \
     if (memcmp(a, b, size) != 0) { \
         fprintf(stderr, "FAIL: %s\n", msg); \
+        exit(1); \
+    } \
+} while(0)
+
+#define ASSERT_PTR_EQ(actual, expected, msg) do { \
+    if ((actual) != (expected)) { \
+        fprintf(stderr, "FAIL: %s: expected %p, got %p\n", msg, (void*)(expected), (void*)(actual)); \
         exit(1); \
     } \
 } while(0)
@@ -203,6 +212,50 @@ void run_strncasecmp_tests(void) {
     ASSERT_EQ(libc_strncasecmp("abc", "abcd", 3), 0, "Prefix match within n");
 
     printf("strncasecmp tests passed!\n");
+}
+
+void run_strncat_tests(void) {
+    printf("Running strncat tests...\n");
+
+    char buf[20];
+
+    // 1. Basic concatenation (n > src len)
+    strcpy(buf, "Hello ");
+    ASSERT_PTR_EQ(libc_strncat(buf, "World", 10), buf, "Return value");
+    ASSERT_EQ(strcmp(buf, "Hello World"), 0, "Basic append");
+
+    // 2. Concatenation with limit (n < src len)
+    strcpy(buf, "Hello ");
+    libc_strncat(buf, "World", 3);
+    ASSERT_EQ(strcmp(buf, "Hello Wor"), 0, "Limited append");
+
+    // 3. Concatenation of empty string
+    strcpy(buf, "Hello");
+    libc_strncat(buf, "", 5);
+    ASSERT_EQ(strcmp(buf, "Hello"), 0, "Append empty");
+
+    // 4. Concatenation to empty string
+    strcpy(buf, "");
+    libc_strncat(buf, "World", 10);
+    ASSERT_EQ(strcmp(buf, "World"), 0, "Append to empty");
+
+    // 5. Concatenation with n=0
+    strcpy(buf, "Hello");
+    libc_strncat(buf, "World", 0);
+    ASSERT_EQ(strcmp(buf, "Hello"), 0, "Append n=0");
+
+    // 6. Check null termination and bounds
+    memset(buf, 'X', sizeof(buf));
+    strcpy(buf, "He"); // buf[0]='H', buf[1]='e', buf[2]='\0'
+    // append "llo" with n=3.
+    // "llo" has length 3. n=3 means copy 3 chars.
+    // resulting string "Hello". null terminator at buf[5].
+    libc_strncat(buf, "llo", 3);
+    ASSERT_EQ(strcmp(buf, "Hello"), 0, "Check content");
+    ASSERT_EQ(buf[5], '\0', "Null terminator");
+    ASSERT_EQ(buf[6], 'X', "Buffer overrun check");
+
+    printf("strncat tests passed!\n");
 }
 
 void run_strrchr_tests(void) {
@@ -457,6 +510,7 @@ int main(void) {
     run_strncmp_tests();
     run_strcasecmp_tests();
     run_strncasecmp_tests();
+    run_strncat_tests();
     run_strrchr_tests();
     run_memcpy_tests();
     run_memset_tests();
