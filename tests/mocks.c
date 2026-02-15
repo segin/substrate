@@ -31,8 +31,7 @@ void fuse_fs_init() {}
 void p9_init() {}
 void devfs_init() {}
 void vfs_init_mock_root(void);
-void nchinit(void) {}
-struct fs_node *fs_root = NULL;
+// nchinit and fs_root removed (linked from vfs)
 
 // Driver init mocks
 void scsi_init() {}
@@ -111,6 +110,7 @@ void sched_smp_init() {}
 
 // kmem mocks for host
 void *kmalloc(size_t size) {
+    if (size > 4096) return NULL;
     // Host tests use standard malloc for kmalloc
     return malloc(size);
 }
@@ -127,41 +127,6 @@ void switch_to(void *prev, void *next) {
 void isr128() {}
 void fork_child_return(void) {}
 
-// Syscall Mocks for those not linked from core
-int sys_unlink(const char *path) { (void)path; return -1; }
-int sys_execve(const char *path, char **argv, char **envp) { (void)path; (void)argv; (void)envp; return -1; }
-int sys_chdir(const char *path) { (void)path; return -1; }
-int sys_mknod(const char *path, int mode, int dev) { (void)path; (void)mode; (void)dev; return -1; }
-int sys_chmod(const char *path, int mode) { (void)path; (void)mode; return -1; }
-int sys_lchown(const char *path, int uid, int gid) { (void)path; (void)uid; (void)gid; return -1; }
-int sys_stat(const char *path, void *buf) { (void)path; (void)buf; return -1; }
-int64_t sys_lseek(int fd, uint32_t hi, uint32_t lo, int whence) { (void)fd; (void)hi; (void)lo; (void)whence; return -1; }
-int sys_getpid(void) { return 1; }
-int sys_mount(const char *dev, const char *dir, const char *type, unsigned long flags, void *data) { (void)dev; (void)dir; (void)type; (void)flags; (void)data; return -1; }
-int sys_umount(const char *dir) { (void)dir; return -1; }
-int sys_setuid(int uid) { (void)uid; return -1; }
-int sys_getuid(void) { return 0; }
-int sys_access(const char *path, int mode) { (void)path; (void)mode; return -1; }
-int sys_sync(void) { return 0; }
-int sys_dup(int fd) { (void)fd; return -1; }
-int sys_pipe(int *fds) { (void)fds; return -1; }
-int sys_setgid(int gid) { (void)gid; return -1; }
-int sys_getgid(void) { return 0; }
-int sys_ioctl(int fd, uint32_t cmd, void *arg) { (void)fd; (void)cmd; (void)arg; return -1; }
-int sys_chroot(const char *path) { (void)path; return -1; }
-int sys_fcntl(int fd, int cmd, int arg) { (void)fd; (void)cmd; (void)arg; return -1; }
-int sys_dup2(int oldfd, int newfd) { (void)oldfd; (void)newfd; return -1; }
-int sys_rmdir(const char *path) { (void)path; return -1; }
-int sys_mkdir(const char *path, int mode) { (void)path; (void)mode; return -1; }
-int sys_getdents(unsigned int fd, void *dirp, unsigned int count) { (void)fd; (void)dirp; (void)count; return -1; }
-int sys_getcwd(char *buf, size_t size) { (void)buf; (void)size; return -1; }
-int sys_waitpid(int pid, int *status, int options) { (void)pid; (void)status; (void)options; return -1; }
-int sys_creat(const char *path, int mode) { (void)path; (void)mode; return -1; }
-int sys_exit(int status) { exit(status); }
-int sys_read(int fd, char *buf, int len) { (void)fd; (void)buf; (void)len; return -1; }
-int sys_write(int fd, const char *buf, int len) { (void)fd; (void)buf; (void)len; return -1; }
-int sys_open(const char *path, int flags, int mode) { (void)path; (void)flags; (void)mode; return -1; }
-int sys_close(int fd) { (void)fd; return -1; }
 int sys_fork(void) { return 0; }
 
 // Other missing functions
@@ -301,8 +266,6 @@ struct nameidata;
 int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 struct vnode;
-void vput(struct vnode *vp) { (void)vp; }
-void vrele(struct vnode *vp) { (void)vp; }
 
 // vm_map_lookup stub
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
@@ -324,8 +287,7 @@ void sched_get_system_load(uint32_t *loads) { loads[0]=0; loads[1]=0; loads[2]=0
 uint32_t pmm_get_page(void) { return (uint32_t)(uintptr_t)malloc(4096); }
 
 void uma_reclaim(void) {}
-int libc_rand(void) { return rand(); }
-void *libc_malloc(size_t size) { return malloc(size); }
+// libc mocks removed (in test_string.c)
 
 // UMA Mocks
 typedef struct uma_zone {

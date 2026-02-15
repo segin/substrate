@@ -58,6 +58,14 @@ void test_udiv64() {
     printf("PASS\n");
 }
 
+void test_udivdi3_explicit() {
+    printf("Testing __udivdi3 (explicit wrapper)...\n");
+    assert(__udivdi3(100, 10) == 10);
+    assert(__udivdi3(100, 3) == 33);
+    assert(__udivdi3(0xFFFFFFFFFFFFFFFFULL, 2) == 0x7FFFFFFFFFFFFFFFULL);
+    printf("PASS\n");
+}
+
 void test_divdi3() {
     printf("Testing __divdi3 (signed division)...\n");
 
@@ -119,11 +127,78 @@ void test_umoddi3() {
     printf("PASS\n");
 }
 
+void test_ashldi3() {
+    printf("Testing __ashldi3 (left shift)...\n");
+    uint64_t val = 1;
+    assert(__ashldi3(val, 0) == 1);
+    assert(__ashldi3(val, 1) == 2);
+    assert(__ashldi3(val, 32) == (1ULL << 32));
+    assert(__ashldi3(val, 63) == (1ULL << 63));
+    assert(__ashldi3(val, 64) == 1); // Masking behavior
+
+    val = 0xFFFFFFFFFFFFFFFFULL;
+    assert(__ashldi3(val, 1) == 0xFFFFFFFFFFFFFFFEULL);
+    printf("PASS\n");
+}
+
+void test_lshrdi3() {
+    printf("Testing __lshrdi3 (logical right shift)...\n");
+    uint64_t val = 0x8000000000000000ULL;
+    assert(__lshrdi3(val, 0) == val);
+    assert(__lshrdi3(val, 1) == 0x4000000000000000ULL);
+    assert(__lshrdi3(val, 63) == 1);
+    assert(__lshrdi3(val, 64) == val); // Masking behavior
+
+    val = 0xFFFFFFFFFFFFFFFFULL;
+    assert(__lshrdi3(val, 1) == 0x7FFFFFFFFFFFFFFFULL);
+    printf("PASS\n");
+}
+
+void test_ashrdi3() {
+    printf("Testing __ashrdi3 (arithmetic right shift)...\n");
+    int64_t val = -2LL; // 0xFF...FE
+    assert(__ashrdi3(val, 1) == -1LL); // 0xFF...FF
+
+    val = 0x8000000000000000LL; // INT64_MIN
+    assert(__ashrdi3(val, 1) == (int64_t)0xC000000000000000ULL); // Sign extended
+
+    val = 100;
+    assert(__ashrdi3(val, 1) == 50);
+    assert(__ashrdi3(val, 64) == val); // Masking behavior
+    printf("PASS\n");
+}
+
+void test_muldi3() {
+    printf("Testing __muldi3 (multiplication)...\n");
+    assert(__muldi3(10, 10) == 100);
+    assert(__muldi3(10, -10) == -100);
+    assert(__muldi3(-10, -10) == 100);
+    assert(__muldi3(0, 12345) == 0);
+    assert(__muldi3(0x100000000LL, 2) == 0x200000000LL);
+    assert(__muldi3(0xFFFFFFFFLL, 0xFFFFFFFFLL) == 0xFFFFFFFE00000001LL);
+    printf("PASS\n");
+}
+
+void test_negdi2() {
+    printf("Testing __negdi2 (negate)...\n");
+    assert(__negdi2(10) == -10);
+    assert(__negdi2(-10) == 10);
+    assert(__negdi2(0) == 0);
+    assert(__negdi2(INT64_MIN) == INT64_MIN); // -(-2^63) = -2^63 due to overflow
+    printf("PASS\n");
+}
+
 int main() {
     test_udiv64();
+    test_udivdi3_explicit();
     test_divdi3();
     test_moddi3();
     test_umoddi3();
+    test_ashldi3();
+    test_lshrdi3();
+    test_ashrdi3();
+    test_muldi3();
+    test_negdi2();
     printf("All host tests passed!\n");
     return 0;
 }

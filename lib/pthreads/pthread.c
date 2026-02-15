@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
+extern int _syscall1(int, int);
 extern int _syscall2(int, int, int);
 
 // FreeBSD-style param
@@ -64,16 +65,13 @@ void __pthread_trampoline(void *arg) {
 }
 
 void pthread_exit(void *retval) {
-    // TODO: store retval for join
-    (void)retval;
+    _syscall1(SYS_THR_EXIT, (int)retval);
+    /* Should not be reached */
     _exit(0);
 }
 
 int pthread_join(pthread_t thread, void **retval) {
-    (void)thread;
-    (void)retval;
-    // TODO: sys_waitpid or similar
-    return 0;
+    return _syscall2(SYS_THR_JOIN, thread, (int)retval);
 }
 
 // Mutex stubs

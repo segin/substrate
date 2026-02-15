@@ -1,0 +1,64 @@
+.\"
+.\" Copyright (c) 2024 The Substrate Project
+.\"
+.Dd February 14, 2026
+.Dt VOP_RENAME 9
+.Os
+.Sh NAME
+.Nm VOP_RENAME
+.Nd rename a file or directory
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/vnode.h
+.Ft int
+.Fn VOP_RENAME "struct vnode *fdvp" "struct vnode *fvp" "struct componentname *fcnp" "struct vnode *tdvp" "struct vnode *tvp" "struct componentname *tcnp"
+.Sh DESCRIPTION
+The
+.Fn VOP_RENAME
+entry point renames a file or directory.
+.Pp
+The arguments are:
+.Bl -tag -width tdvp
+.It Fa fdvp
+The vnode of the directory from which the file is being renamed.
+.It Fa fvp
+The vnode of the file being renamed.
+.It Fa fcnp
+Pathname information for the file being renamed.
+.It Fa tdvp
+The vnode of the directory to which the file is being renamed.
+.It Fa tvp
+The vnode of the target file, if it exists, otherwise NULL.
+.It Fa tcnp
+Pathname information for the new name.
+.El
+.Pp
+All vnodes involved (source directory, source file, target directory, target file) are locked on entry and must remain locked on return, except as noted below.
+.Sh LOCKS
+The locking protocol for rename is complex. Generally, all involved vnodes are locked. The implementation is responsible for correct locking order to avoid deadlocks.
+.Sh RETURN VALUES
+Zero is returned on success, otherwise an error code is returned.
+.Sh ERRORS
+.Bl -tag -width EOPNOTSUPP
+.It Bq Er ENOTDIR
+The vnode
+.Fa fdvp
+or
+.Fa tdvp
+is not a directory.
+.It Bq Er EPERM
+The parent directory of the file to be renamed is sticky, and the user is not the owner of the file, the directory, or super-user.
+.It Bq Er EXDEV
+The vnodes
+.Fa fdvp
+and
+.Fa tdvp
+are on different filesystems.
+.It Bq Er EOPNOTSUPP
+The filesystem does not support renaming.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr VOP_LOOKUP 9
+.Sh AUTHORS
+This manual page was written for the Substrate project.
