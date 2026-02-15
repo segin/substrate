@@ -280,7 +280,7 @@ long strtol(const char *nptr, char **endptr, int base) {
     cutoff = neg ? -(unsigned long)-2147483648L : 2147483647L; // Simplified LONG_MAX/MIN for 32-bit
     cutlim = cutoff % (unsigned long)base;
     cutoff /= (unsigned long)base;
-    for (acc = 0, any = 0;; c = *s++) {
+    for (acc = 0, any = 0, c = *s++;; c = *s++) {
         if (isdigit(c)) c -= '0';
         else if (isalpha(c)) c -= isupper(c) ? 'A' - 10 : 'a' - 10;
         else break;
