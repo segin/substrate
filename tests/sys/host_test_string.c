@@ -118,10 +118,65 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
+void test_strcpy_edge_cases(void) {
+    char dest[20];
+
+    // Empty string
+    memset(dest, 'X', sizeof(dest));
+    kernel_strcpy(dest, "");
+    ASSERT_STREQ(dest, "", "strcpy empty string");
+    ASSERT_EQ(dest[1], 'X', "strcpy empty string overflow check");
+
+    // Single character
+    memset(dest, 'X', sizeof(dest));
+    kernel_strcpy(dest, "A");
+    ASSERT_STREQ(dest, "A", "strcpy single char");
+    ASSERT_EQ(dest[2], 'X', "strcpy single char overflow check");
+
+    printf("test_strcpy_edge_cases: PASS\n");
+}
+
+void test_strncpy_edge_cases(void) {
+    char dest[20];
+    char src[] = "Hello";
+
+    // n = 0
+    memset(dest, 'X', sizeof(dest));
+    kernel_strncpy(dest, src, 0);
+    ASSERT_EQ(dest[0], 'X', "strncpy n=0 should not write");
+
+    // n = 1, src empty
+    memset(dest, 'X', sizeof(dest));
+    kernel_strncpy(dest, "", 1);
+    ASSERT_EQ(dest[0], '\0', "strncpy empty src n=1");
+    ASSERT_EQ(dest[1], 'X', "strncpy empty src n=1 overflow");
+
+    // n = 1, src not empty
+    memset(dest, 'X', sizeof(dest));
+    kernel_strncpy(dest, "A", 1);
+    ASSERT_EQ(dest[0], 'A', "strncpy n=1 src='A'");
+    ASSERT_EQ(dest[1], 'X', "strncpy n=1 src='A' overflow"); // Should NOT null terminate if len >= n
+
+    // src empty, n large
+    memset(dest, 'X', sizeof(dest));
+    kernel_strncpy(dest, "", 5);
+    for(int i=0; i<5; i++) {
+        if (dest[i] != '\0') {
+            printf("FAIL: strncpy empty src large n padding at %d\n", i);
+            exit(1);
+        }
+    }
+    ASSERT_EQ(dest[5], 'X', "strncpy empty src large n overflow");
+
+    printf("test_strncpy_edge_cases: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
+    test_strcpy_edge_cases();
     test_strncpy();
+    test_strncpy_edge_cases();
     printf("All Tests Passed\n");
     return 0;
 }

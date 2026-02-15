@@ -401,6 +401,87 @@ static void test_strncmp(void) {
          failed_tests++;
     }
 }
+
+static void test_strcpy_edge_cases(void) {
+    char dest[20];
+
+    // Empty string
+    memset(dest, 'X', sizeof(dest));
+    strcpy(dest, "");
+    if (strcmp(dest, "") != 0) {
+        kprint("FAIL: strcpy empty string content\n");
+        failed_tests++;
+    }
+    if (dest[1] != 'X') {
+        kprint("FAIL: strcpy empty string overflow check\n");
+        failed_tests++;
+    }
+
+    // Single character
+    memset(dest, 'X', sizeof(dest));
+    strcpy(dest, "A");
+    if (strcmp(dest, "A") != 0) {
+        kprint("FAIL: strcpy single char content\n");
+        failed_tests++;
+    }
+    if (dest[2] != 'X') {
+        kprint("FAIL: strcpy single char overflow check\n");
+        failed_tests++;
+    }
+}
+
+static void test_strncpy_edge_cases(void) {
+    char dest[20];
+    char src[] = "Hello";
+
+    // n = 0
+    memset(dest, 'X', sizeof(dest));
+    strncpy(dest, src, 0);
+    if (dest[0] != 'X') {
+        kprint("FAIL: strncpy n=0 should not write\n");
+        failed_tests++;
+    }
+
+    // n = 1, src empty
+    memset(dest, 'X', sizeof(dest));
+    strncpy(dest, "", 1);
+    if (dest[0] != '\0') {
+        kprint("FAIL: strncpy empty src n=1 content\n");
+        failed_tests++;
+    }
+    if (dest[1] != 'X') {
+        kprint("FAIL: strncpy empty src n=1 overflow\n");
+        failed_tests++;
+    }
+
+    // n = 1, src not empty
+    memset(dest, 'X', sizeof(dest));
+    strncpy(dest, "A", 1);
+    if (dest[0] != 'A') {
+        kprint("FAIL: strncpy n=1 src='A' content\n");
+        failed_tests++;
+    }
+    if (dest[1] != 'X') {
+        kprint("FAIL: strncpy n=1 src='A' overflow\n"); // Should NOT null terminate
+        failed_tests++;
+    }
+
+    // src empty, n large
+    memset(dest, 'X', sizeof(dest));
+    strncpy(dest, "", 5);
+    for(int i=0; i<5; i++) {
+        if (dest[i] != '\0') {
+            kprint("FAIL: strncpy empty src large n padding failed\n");
+            failed_tests++;
+            break;
+        }
+    }
+    if (dest[5] != 'X') {
+        kprint("FAIL: strncpy empty src large n overflow\n");
+        failed_tests++;
+    }
+}
+
 // Performance Benchmarks
 
 static void benchmark_memcpy(const char *label, void *dst, const void *src, size_t n, int iterations) {
@@ -433,9 +514,11 @@ void run_string_tests(void) {
 
     kprint("Checking strcpy correctness...\n");
     test_strcpy();
+    test_strcpy_edge_cases();
 
     kprint("Checking strncpy correctness...\n");
     test_strncpy();
+    test_strncpy_edge_cases();
 
     kprint("Checking strcmp correctness...\n");
     test_strcmp();
