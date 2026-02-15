@@ -95,6 +95,7 @@ extern bool test_libc_strlen(void);
 extern bool test_gmtime_negative_years(void);
 extern bool test_libc_time(void);
 extern bool test_libc_memmove(void);
+extern bool test_libc_strchr(void);
 
 typedef struct {
     const char *name;
@@ -153,6 +154,7 @@ test_case_t tests[] = {
     {"libc_time_neg", test_gmtime_negative_years},
     {"libc_time", test_libc_time},
     {"libc_memmove", test_libc_memmove},
+    {"libc_strchr", test_libc_strchr},
     {NULL, NULL}
 };
 

@@ -64,9 +64,11 @@ int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 // The test now relies on string_prefixed.o linked by the Makefile
 
 // libgcc/libc wrappers for prefixed builds
+#ifndef NO_MAIN
 void* libc_malloc(size_t s) { return malloc(s); }
 void libc_free(void* p) { free(p); }
 int libc_rand(void) { return rand(); }
+#endif
 
 // Undef macros to restore original names if needed
 #undef strfry
@@ -441,6 +443,40 @@ void run_memmove_tests(void) {
     printf("memmove tests passed!\n");
 }
 
+void run_strchr_tests(void) {
+    printf("Running strchr tests...\n");
+    const char *s = "hello world";
+    const char *empty = "";
+
+    // Basic find
+    assert(libc_strchr(s, 'h') == s);
+    assert(libc_strchr(s, 'e') == s + 1);
+    assert(libc_strchr(s, 'l') == s + 2); // First 'l'
+    assert(libc_strchr(s, 'o') == s + 4);
+    assert(libc_strchr(s, ' ') == s + 5);
+
+    // Not found
+    assert(libc_strchr(s, 'z') == NULL);
+    assert(libc_strchr(s, 'H') == NULL); // Case sensitive
+
+    // Find null terminator
+    assert(libc_strchr(s, '\0') == s + 11);
+
+    // Empty string
+    assert(libc_strchr(empty, 'a') == NULL);
+    assert(libc_strchr(empty, '\0') == empty);
+
+    // Check with int conversion
+    assert(libc_strchr(s, 'e' + 256) == s + 1); // Should cast to char
+
+    printf("strchr tests passed!\n");
+}
+
+bool test_libc_strchr(void) {
+    run_strchr_tests();
+    return true;
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -454,6 +490,7 @@ bool test_libc_memmove(void) {
 #ifndef NO_MAIN
 int main(void) {
     run_strcmp_tests();
+    run_strchr_tests();
     run_strncmp_tests();
     run_strcasecmp_tests();
     run_strncasecmp_tests();
