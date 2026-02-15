@@ -441,6 +441,113 @@ void run_memmove_tests(void) {
     printf("memmove tests passed!\n");
 }
 
+#define ASSERT_STREQ(actual, expected, msg) do { \
+    const char *act = (actual); \
+    const char *exp = (expected); \
+    if (act == NULL && exp == NULL) { \
+        /* both NULL is OK */ \
+    } else if (act == NULL || exp == NULL) { \
+        fprintf(stderr, "FAIL: %s: expected '%s', got '%s'\n", msg, exp ? exp : "NULL", act ? act : "NULL"); \
+        exit(1); \
+    } else if (strcmp(act, exp) != 0) { \
+        fprintf(stderr, "FAIL: %s: expected '%s', got '%s'\n", msg, exp, act); \
+        exit(1); \
+    } \
+} while(0)
+
+void run_strtok_tests(void) {
+    printf("Running strtok tests...\n");
+
+    // 1. Basic usage
+    {
+        char str[] = "A string to tokenize";
+        const char *delim = " ";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "A", "First token incorrect");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "string", "Second token incorrect");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "to", "Third token incorrect");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "tokenize", "Fourth token incorrect");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Expected NULL after tokens exhausted");
+    }
+
+    // 2. Multiple delimiters
+    {
+        char str[] = "abc,def;ghi";
+        const char *delim = ",;";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Multiple delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Multiple delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "ghi", "Multiple delim 3");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Multiple delim end");
+    }
+
+    // 3. Consecutive delimiters
+    {
+        char str[] = "abc,,def";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Consecutive delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Consecutive delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Consecutive delim end");
+    }
+
+    // 4. Leading delimiters
+    {
+        char str[] = ",,abc,def";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Leading delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Leading delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Leading delim end");
+    }
+
+    // 5. Trailing delimiters
+    {
+        char str[] = "abc,def,,";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Trailing delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Trailing delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Trailing delim end");
+    }
+
+    // 6. No delimiters
+    {
+        char str[] = "abcdef";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abcdef", "No delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "No delim end");
+    }
+
+    // 7. Empty string
+    {
+        char str[] = "";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), NULL, "Empty string");
+    }
+
+    // 8. String with only delimiters
+    {
+        char str[] = ",,,";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), NULL, "Only delimiters");
+    }
+
+    // 9. Changing delimiter
+    {
+        char str[] = "abc,def;ghi";
+
+        ASSERT_STREQ(libc_strtok(str, ","), "abc", "Changing delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, ";"), "def", "Changing delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, ","), "ghi", "Changing delim 3");
+    }
+
+    printf("strtok tests passed!\n");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -463,6 +570,7 @@ int main(void) {
     run_strncpy_tests();
     run_strlen_tests();
     run_memmove_tests();
+    run_strtok_tests();
     return 0;
 }
 #endif
