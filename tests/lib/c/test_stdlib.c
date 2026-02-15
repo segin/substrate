@@ -32,11 +32,12 @@
 #define arc4random_uniform tested_arc4random_uniform
 
 // Include the source file directly
-#include "../src/stdlib.c"
+#include "../../../lib/c/src/stdlib.c"
 
 // Undefine macros to allow testing
 #undef atoi
 #undef atol
+#undef abs
 
 void test_atoi_basic(void) {
     assert(tested_atoi("123") == 123);
@@ -71,6 +72,17 @@ void test_atol_basic(void) {
     printf("test_atol_basic passed\n");
 }
 
+void test_abs(void) {
+    assert(tested_abs(0) == 0);
+    assert(tested_abs(1) == 1);
+    assert(tested_abs(-1) == 1);
+    assert(tested_abs(12345) == 12345);
+    assert(tested_abs(-12345) == 12345);
+    assert(tested_abs(2147483647) == 2147483647);
+    assert(tested_abs(-2147483647 - 1) == (-2147483647 - 1));
+    printf("test_abs passed\n");
+}
+
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
@@ -78,6 +90,7 @@ int main(void) {
     test_atoi_sign();
     test_atoi_invalid();
     test_atol_basic();
+    test_abs();
     printf("All tests passed!\n");
     return 0;
 }
