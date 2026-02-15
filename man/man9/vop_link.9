@@ -1,0 +1,71 @@
+.\"
+.\" Copyright (c) 2024 The Substrate Project
+.\"
+.Dd February 14, 2026
+.Dt VOP_LINK 9
+.Os
+.Sh NAME
+.Nm VOP_LINK
+.Nd link a new name to a vnode
+.Sh SYNOPSIS
+.In sys/param.h
+.In sys/vnode.h
+.Ft int
+.Fn VOP_LINK "struct vnode *tdvp" "struct vnode *vp" "struct componentname *cnp"
+.Sh DESCRIPTION
+The
+.Fn VOP_LINK
+entry point links a new name to an existing vnode.
+.Pp
+The arguments are:
+.Bl -tag -width tdvp
+.It Fa tdvp
+The vnode of the directory into which the name is to be linked.
+.It Fa vp
+The vnode to be linked.
+.It Fa cnp
+Pathname information for the new name.
+.El
+.Pp
+.Fa tdvp
+is locked on entry and must remain locked on return.
+.Fa vp
+is not locked on entry or return.
+.Sh LOCKS
+The directory
+.Fa tdvp
+should be locked on entry.
+.Sh RETURN VALUES
+Zero is returned on success, otherwise an error code is returned.
+.Sh ERRORS
+.Bl -tag -width EOPNOTSUPP
+.It Bq Er ENOTDIR
+The vnode
+.Fa tdvp
+is not a directory.
+.It Bq Er EPERM
+The vnode
+.Fa vp
+is a directory.
+.It Bq Er EEXIST
+The name
+.Fa cnp
+already exists.
+.It Bq Er EMLINK
+The maximum number of links to
+.Fa vp
+has been reached.
+.It Bq Er EXDEV
+The vnode
+.Fa vp
+and the directory
+.Fa tdvp
+are on different filesystems.
+.It Bq Er EOPNOTSUPP
+ The filesystem does not support linking.
+.El
+.Sh SEE ALSO
+.Xr vnode 9 ,
+.Xr VOP_LOOKUP 9
+.Sh AUTHORS
+This manual page was written for the Substrate project.
