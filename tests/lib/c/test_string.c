@@ -115,6 +115,13 @@ int libc_rand(void) { return rand(); }
     } \
 } while(0)
 
+#define ASSERT_PTR_EQ(actual, expected, msg) do { \
+    if ((actual) != (expected)) { \
+        fprintf(stderr, "FAIL: %s: expected %p, got %p\n", msg, (void*)(expected), (void*)(actual)); \
+        exit(1); \
+    } \
+} while(0)
+
 void run_strcmp_tests(void) {
     printf("Running strcmp tests...\n");
 
@@ -441,6 +448,131 @@ void run_memmove_tests(void) {
     printf("memmove tests passed!\n");
 }
 
+void run_strtok_r_tests(void) {
+    printf("Running strtok_r tests...\n");
+
+    // Test 1: Basic functionality
+    {
+        char str[] = "a,b,c";
+        char *saveptr;
+        char *token;
+
+        token = libc_strtok_r(str, ",", &saveptr);
+        ASSERT_EQ(strcmp(token, "a"), 0, "First token should be 'a'");
+
+        token = libc_strtok_r(NULL, ",", &saveptr);
+        ASSERT_EQ(strcmp(token, "b"), 0, "Second token should be 'b'");
+
+        token = libc_strtok_r(NULL, ",", &saveptr);
+        ASSERT_EQ(strcmp(token, "c"), 0, "Third token should be 'c'");
+
+        token = libc_strtok_r(NULL, ",", &saveptr);
+        ASSERT_PTR_EQ(token, NULL, "Fourth token should be NULL");
+    }
+
+    // Test 2: Multiple delimiters
+    {
+        char str[] = "a,;b c";
+        char *saveptr;
+        char *token;
+
+        token = libc_strtok_r(str, ",; ", &saveptr);
+        ASSERT_EQ(strcmp(token, "a"), 0, "First token should be 'a'");
+
+        token = libc_strtok_r(NULL, ",; ", &saveptr);
+        ASSERT_EQ(strcmp(token, "b"), 0, "Second token should be 'b'");
+
+        token = libc_strtok_r(NULL, ",; ", &saveptr);
+        ASSERT_EQ(strcmp(token, "c"), 0, "Third token should be 'c'");
+
+        token = libc_strtok_r(NULL, ",; ", &saveptr);
+        ASSERT_PTR_EQ(token, NULL, "Fourth token should be NULL");
+    }
+
+    // Test 3: Leading/trailing delimiters
+    {
+        char str[] = ",a,b,";
+        char *saveptr;
+        char *token;
+
+        token = libc_strtok_r(str, ",", &saveptr);
+        ASSERT_EQ(strcmp(token, "a"), 0, "First token should be 'a'");
+
+        token = libc_strtok_r(NULL, ",", &saveptr);
+        ASSERT_EQ(strcmp(token, "b"), 0, "Second token should be 'b'");
+
+        token = libc_strtok_r(NULL, ",", &saveptr);
+        ASSERT_PTR_EQ(token, NULL, "Third token should be NULL");
+    }
+
+    // Test 4: Consecutive delimiters
+    {
+        char str[] = "a,,b";
+        char *saveptr;
+        char *token;
+
+        token = libc_strtok_r(str, ",", &saveptr);
+        ASSERT_EQ(strcmp(token, "a"), 0, "First token should be 'a'");
+
+        token = libc_strtok_r(NULL, ",", &saveptr);
+        ASSERT_EQ(strcmp(token, "b"), 0, "Second token should be 'b'");
+
+        token = libc_strtok_r(NULL, ",", &saveptr);
+        ASSERT_PTR_EQ(token, NULL, "Third token should be NULL");
+    }
+
+    // Test 5: Reentrancy
+    {
+        char str1[] = "a,b,c";
+        char str2[] = "1:2:3";
+        char *saveptr1, *saveptr2;
+        char *token1, *token2;
+
+        token1 = libc_strtok_r(str1, ",", &saveptr1);
+        ASSERT_EQ(strcmp(token1, "a"), 0, "str1 first token");
+
+        token2 = libc_strtok_r(str2, ":", &saveptr2);
+        ASSERT_EQ(strcmp(token2, "1"), 0, "str2 first token");
+
+        token1 = libc_strtok_r(NULL, ",", &saveptr1);
+        ASSERT_EQ(strcmp(token1, "b"), 0, "str1 second token");
+
+        token2 = libc_strtok_r(NULL, ":", &saveptr2);
+        ASSERT_EQ(strcmp(token2, "2"), 0, "str2 second token");
+
+        token1 = libc_strtok_r(NULL, ",", &saveptr1);
+        ASSERT_EQ(strcmp(token1, "c"), 0, "str1 third token");
+
+        token2 = libc_strtok_r(NULL, ":", &saveptr2);
+        ASSERT_EQ(strcmp(token2, "3"), 0, "str2 third token");
+    }
+
+    // Test 6: Empty string
+    {
+        char str[] = "";
+        char *saveptr;
+        char *token;
+
+        token = libc_strtok_r(str, ",", &saveptr);
+        ASSERT_PTR_EQ(token, NULL, "Empty string should return NULL");
+    }
+
+    // Test 7: String without delimiters
+    {
+        char str[] = "abc";
+        char *saveptr;
+        char *token;
+
+        token = libc_strtok_r(str, ",", &saveptr);
+        ASSERT_EQ(strcmp(token, "abc"), 0, "No delimiter should return whole string");
+
+        token = libc_strtok_r(NULL, ",", &saveptr);
+        ASSERT_PTR_EQ(token, NULL, "Next call should return NULL");
+    }
+
+    printf("strtok_r tests passed!\n");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -463,6 +595,7 @@ int main(void) {
     run_strncpy_tests();
     run_strlen_tests();
     run_memmove_tests();
+    run_strtok_r_tests();
     return 0;
 }
 #endif
