@@ -95,6 +95,7 @@ process_t *proc_create(int perso_id) {
     processes[i].perso_id = perso_id;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
     processes[i].next_fd = 0; // Reset FD hint
+    processes[i].fd_bitmap = 0;
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;
     
     // Acct init
@@ -142,6 +143,7 @@ int proc_fork(process_t *parent, void *stack) {
     child_proc->tty = parent->tty;
     child_proc->bitness = parent->bitness;
 
+    child_proc->fd_bitmap = parent->fd_bitmap;
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];
@@ -267,9 +269,51 @@ void fd_close_all(process_t *p) {
             // For now, let's assume we can call an external 'file_close(file_t*)'
             extern void file_close_ptr(file_t *f); // Need to add this to syscall.c or file.c
             file_close_ptr(p->fds[i]);
-            p->fds[i] = NULL;
+            proc_clear_fd(p, i);
         }
     }
+}
+
+int proc_alloc_fd(process_t *p) {
+    if (!p) return -1;
+
+    uint32_t valid_mask = (MAX_FD == 32) ? 0xFFFFFFFF : ((1U << MAX_FD) - 1);
+    uint32_t free_bits = (~p->fd_bitmap) & valid_mask;
+    if (free_bits == 0) return -1;
+
+    int start = p->next_fd;
+    if (start < 0 || start >= MAX_FD) start = 0;
+
+    uint32_t mask = free_bits & ~((1U << start) - 1);
+    int fd = -1;
+
+    if (mask != 0) {
+        fd = __builtin_ctz(mask);
+    } else {
+        // Wrap around
+        fd = __builtin_ctz(free_bits);
+    }
+
+    if (fd != -1) {
+        p->next_fd = (fd + 1) % MAX_FD;
+        p->fd_bitmap |= (1U << fd); // Mark as reserved
+    }
+
+    return fd;
+}
+
+void proc_set_fd(process_t *p, int fd, file_t *f) {
+    if (!p || fd < 0 || fd >= MAX_FD) return;
+    p->fds[fd] = f;
+    if (f) {
+        p->fd_bitmap |= (1U << fd);
+    } else {
+        p->fd_bitmap &= ~(1U << fd);
+    }
+}
+
+void proc_clear_fd(process_t *p, int fd) {
+    proc_set_fd(p, fd, NULL);
 }
 
 // Reparent children to init
