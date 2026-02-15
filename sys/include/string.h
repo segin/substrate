@@ -27,5 +27,6 @@ char *strpbrk(const char *s1, const char *s2);
 char *strerror(int errnum);
 char *strtok_r(char *str, const char *delim, char **saveptr);
 char *strfry(char *string);
+size_t strlcpy(char *dst, const char *src, size_t size);
 
 #endif

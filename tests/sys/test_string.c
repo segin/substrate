@@ -424,6 +424,67 @@ static void benchmark_memcpy(const char *label, void *dst, const void *src, size
     kprint(msg);
 }
 
+
+static void test_strlcpy(void) {
+    char src[] = "Hello World";
+    char dest[20];
+    size_t ret;
+
+    // Case 1: normal copy
+    memset(dest, 'X', sizeof(dest));
+    ret = strlcpy(dest, src, sizeof(dest));
+
+    if (ret != strlen(src)) {
+        kprint("FAIL: strlcpy return value mismatch (normal)\n");
+        failed_tests++;
+    }
+    if (strcmp(dest, src) != 0) {
+        kprint("FAIL: strlcpy content mismatch (normal)\n");
+        failed_tests++;
+    }
+    if (dest[strlen(src)] != '\0') {
+         kprint("FAIL: strlcpy null terminator missing (normal)\n");
+         failed_tests++;
+    }
+    if (dest[sizeof(dest)-1] != 'X') {
+         kprint("FAIL: strlcpy buffer overflow check failed (normal)\n");
+         failed_tests++;
+    }
+
+    // Case 2: truncation
+    memset(dest, 'X', sizeof(dest));
+    ret = strlcpy(dest, src, 5); // size 5 -> copy 4 chars + null
+
+    if (ret != strlen(src)) {
+        kprint("FAIL: strlcpy return value mismatch (truncation)\n");
+        failed_tests++;
+    }
+    if (memcmp(dest, "Hell", 5) != 0) { // "Hell\0"
+        kprint("FAIL: strlcpy truncation content mismatch\n");
+        failed_tests++;
+    }
+    if (dest[4] != '\0') {
+        kprint("FAIL: strlcpy truncation null terminator check failed\n");
+        failed_tests++;
+    }
+    if (dest[5] != 'X') {
+        kprint("FAIL: strlcpy overflow check failed (truncation)\n");
+        failed_tests++;
+    }
+
+    // Case 3: size 0
+    memset(dest, 'X', sizeof(dest));
+    ret = strlcpy(dest, src, 0);
+
+    if (ret != strlen(src)) {
+        kprint("FAIL: strlcpy return value mismatch (size 0)\n");
+        failed_tests++;
+    }
+    if (dest[0] != 'X') {
+        kprint("FAIL: strlcpy size 0 should not write\n");
+        failed_tests++;
+    }
+}
 void run_string_tests(void) {
     kprint("\n=== STRING TESTS ===\n");
     failed_tests = 0;
@@ -436,6 +497,8 @@ void run_string_tests(void) {
 
     kprint("Checking strncpy correctness...\n");
     test_strncpy();
+    kprint("Checking strlcpy correctness...\n");
+    test_strlcpy();
 
     kprint("Checking strcmp correctness...\n");
     test_strcmp();

@@ -30,6 +30,7 @@ void kfree(void *ptr, size_t size) {
 #define strchr kernel_strchr
 #define strspn kernel_strspn
 #define strpbrk kernel_strpbrk
+#define strlcpy kernel_strlcpy
 
 // Include the source file directly
 #include "../../sys/lib/string.c"
@@ -118,10 +119,49 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
+
+void test_strlcpy(void) {
+    char src[] = "Hello World";
+    char dest[20];
+    size_t ret;
+
+    // Case 1: normal copy
+    memset(dest, 'X', sizeof(dest));
+    ret = kernel_strlcpy(dest, src, sizeof(dest));
+
+    ASSERT_EQ(ret, strlen(src), "strlcpy normal return");
+    ASSERT_STREQ(dest, src, "strlcpy normal content");
+    ASSERT_EQ(dest[strlen(src)], '\0', "strlcpy normal null terminator");
+    ASSERT_EQ(dest[sizeof(dest)-1], 'X', "strlcpy buffer overflow check");
+
+    // Case 2: truncation
+    memset(dest, 'X', sizeof(dest));
+    ret = kernel_strlcpy(dest, src, 5); // size 5 -> copy 4 chars + null
+
+    ASSERT_EQ(ret, strlen(src), "strlcpy truncation return");
+    // "Hell\0"
+    if (memcmp(dest, "Hell", 5) != 0) {
+         printf("FAIL: strlcpy truncation content mismatch: %s\n", dest);
+         exit(1);
+    }
+    ASSERT_EQ(dest[4], '\0', "strlcpy truncation null terminator");
+    ASSERT_EQ(dest[5], 'X', "strlcpy overflow check");
+
+    // Case 3: size 0
+    memset(dest, 'X', sizeof(dest));
+    ret = kernel_strlcpy(dest, src, 0);
+
+    ASSERT_EQ(ret, strlen(src), "strlcpy size 0 return");
+    ASSERT_EQ(dest[0], 'X', "strlcpy size 0 should not write");
+
+    printf("test_strlcpy: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
+    test_strlcpy();
     printf("All Tests Passed\n");
     return 0;
 }
