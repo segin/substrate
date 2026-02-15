@@ -441,6 +441,49 @@ void run_memmove_tests(void) {
     printf("memmove tests passed!\n");
 }
 
+void run_strcat_tests(void) {
+    printf("Running strcat tests...\n");
+
+    // 1. Basic concatenation
+    {
+        char dest[20] = "Hello";
+        const char *src = " World";
+        libc_strcat(dest, src);
+        ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strcat failed");
+    }
+
+    // 2. Concatenate empty string
+    {
+        char dest[20] = "Hello World";
+        libc_strcat(dest, "");
+        ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Concatenate empty string failed");
+    }
+
+    // 3. Concatenate to empty string
+    {
+        char dest[20] = "";
+        libc_strcat(dest, "Testing");
+        ASSERT_EQ(strcmp(dest, "Testing"), 0, "Concatenate to empty string failed");
+    }
+
+    // 4. Return value check
+    {
+        char dest[20] = "Start";
+        char *ret = libc_strcat(dest, "End");
+        ASSERT_TRUE(ret == dest, "Return value incorrect");
+        ASSERT_EQ(strcmp(dest, "StartEnd"), 0, "Concatenation failed in return value check");
+    }
+
+    // 5. Concatenate two empty strings
+    {
+        char dest[20] = "";
+        libc_strcat(dest, "");
+        ASSERT_EQ(strcmp(dest, ""), 0, "Concatenate two empty strings failed");
+    }
+
+    printf("strcat tests passed!\n");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -463,6 +506,7 @@ int main(void) {
     run_strncpy_tests();
     run_strlen_tests();
     run_memmove_tests();
+    run_strcat_tests();
     return 0;
 }
 #endif
