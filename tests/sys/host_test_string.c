@@ -27,7 +27,9 @@ void kfree(void *ptr, size_t size) {
 #define strcpy kernel_strcpy
 #define strncpy kernel_strncpy
 #define strcmp kernel_strcmp
+#define strncmp kernel_strncmp
 #define strchr kernel_strchr
+#define strstr kernel_strstr
 #define strspn kernel_strspn
 #define strpbrk kernel_strpbrk
 
@@ -55,6 +57,21 @@ void kfree(void *ptr, size_t size) {
         exit(1); \
     } \
 } while(0)
+
+#define ASSERT_NOT_NULL(a, msg) do { \
+    if ((a) == NULL) { \
+        printf("FAIL: %s\n  Expected: not NULL\n  Actual:   NULL\n", msg); \
+        exit(1); \
+    } \
+} while(0)
+
+#define ASSERT_NULL(a, msg) do { \
+    if ((a) != NULL) { \
+        printf("FAIL: %s\n  Expected: NULL\n  Actual:   %p\n", msg, (void*)(a)); \
+        exit(1); \
+    } \
+} while(0)
+
 
 // Tests
 void test_strcpy(void) {
@@ -118,10 +135,129 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
+void test_strcmp(void) {
+    // Equal strings
+    if (kernel_strcmp("abc", "abc") != 0) {
+        printf("FAIL: strcmp(\"abc\", \"abc\") != 0\n");
+        exit(1);
+    }
+    if (kernel_strcmp("", "") != 0) {
+        printf("FAIL: strcmp(\"\", \"\") != 0\n");
+        exit(1);
+    }
+
+    // Inequality
+    if (kernel_strcmp("a", "b") >= 0) {
+        printf("FAIL: strcmp(\"a\", \"b\") >= 0\n");
+        exit(1);
+    }
+    if (kernel_strcmp("b", "a") <= 0) {
+        printf("FAIL: strcmp(\"b\", \"a\") <= 0\n");
+        exit(1);
+    }
+    if (kernel_strcmp("abc", "abcd") >= 0) {
+        printf("FAIL: strcmp(\"abc\", \"abcd\") >= 0\n");
+        exit(1);
+    }
+
+    // High-bit characters (unsigned check)
+    // '\xff' (255) vs 'a' (97). If signed char, '\xff' is -1, so -1 < 97.
+    // If unsigned char (correct), 255 > 97.
+    char s1[] = { (char)0xff, '\0' };
+    char s2[] = "a";
+    if (kernel_strcmp(s1, s2) <= 0) {
+        printf("FAIL: strcmp unsigned comparison check (0xFF vs 'a')\n");
+        exit(1);
+    }
+
+    printf("test_strcmp: PASS\n");
+}
+
+void test_strncmp(void) {
+    // Equal strings, n covers full length
+    if (kernel_strncmp("abc", "abc", 5) != 0) {
+        printf("FAIL: strncmp(\"abc\", \"abc\", 5) != 0\n");
+        exit(1);
+    }
+
+    // Equal strings, n limits check
+    if (kernel_strncmp("abc", "abc", 2) != 0) {
+        printf("FAIL: strncmp(\"abc\", \"abc\", 2) != 0\n");
+        exit(1);
+    }
+
+    // Difference after n
+    if (kernel_strncmp("abc", "abd", 2) != 0) {
+        printf("FAIL: strncmp(\"abc\", \"abd\", 2) != 0 (should be equal)\n");
+        exit(1);
+    }
+
+    // Difference within n
+    if (kernel_strncmp("abc", "abd", 3) >= 0) {
+        printf("FAIL: strncmp(\"abc\", \"abd\", 3) >= 0\n");
+        exit(1);
+    }
+
+    // n = 0
+    if (kernel_strncmp("abc", "def", 0) != 0) {
+        printf("FAIL: strncmp with n=0 should return 0\n");
+        exit(1);
+    }
+
+    // High-bit characters
+    char s1[] = { (char)0xff, '\0' };
+    char s2[] = "a";
+    if (kernel_strncmp(s1, s2, 1) <= 0) {
+        printf("FAIL: strncmp unsigned comparison check\n");
+        exit(1);
+    }
+
+    printf("test_strncmp: PASS\n");
+}
+
+void test_strstr(void) {
+    const char *haystack = "Hello World";
+
+    // Found at start
+    char *res = kernel_strstr(haystack, "Hello");
+    ASSERT_NOT_NULL(res, "strstr found at start");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)haystack, "strstr pointer match start");
+
+    // Found in middle
+    res = kernel_strstr(haystack, "World");
+    ASSERT_NOT_NULL(res, "strstr found in middle");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)(haystack + 6), "strstr pointer match middle");
+
+    // Not found
+    res = kernel_strstr(haystack, "Universe");
+    ASSERT_NULL(res, "strstr not found");
+
+    // Empty needle
+    res = kernel_strstr(haystack, "");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)haystack, "strstr empty needle");
+
+    // Needle longer than haystack
+    res = kernel_strstr(haystack, "Hello World Longer");
+    ASSERT_NULL(res, "strstr needle too long");
+
+    // Partial match backtracking
+    // "aabaaa", find "aaa"
+    // Should skip "aa" at start (match 'a', 'a', fail 'b') and find "aaa" at end.
+    const char *h2 = "aabaaa";
+    res = kernel_strstr(h2, "aaa");
+    ASSERT_NOT_NULL(res, "strstr backtracking");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)(h2 + 3), "strstr backtracking pointer");
+
+    printf("test_strstr: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
+    test_strcmp();
+    test_strncmp();
+    test_strstr();
     printf("All Tests Passed\n");
     return 0;
 }

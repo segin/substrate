@@ -175,3 +175,24 @@ char *strpbrk(const char *s1, const char *s2) {
     }
     return NULL;
 }
+
+int strncmp(const char *s1, const char *s2, size_t n) {
+    while (n && *s1 && (*s1 == *s2)) { s1++; s2++; n--; }
+    if (n == 0) return 0;
+    return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+}
+
+char *strstr(const char *haystack, const char *needle) {
+    if (!*needle) return (char*)haystack;
+    for (; *haystack; haystack++) {
+        if (*haystack == *needle) {
+             const char *h = haystack;
+             const char *n = needle;
+             while (*h && *n && *h == *n) {
+                 h++; n++;
+             }
+             if (!*n) return (char*)haystack;
+        }
+    }
+    return NULL;
+}
