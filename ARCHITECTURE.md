@@ -158,59 +158,29 @@ These components are essential for booting and basic system operation.
 - `sbin/`: System binaries (Currently empty/stubbed as we rely on external rootfs/busybox for init).
 
 
-## 3. Core Components
-
-### 3.1. Userland (Frontend)
-
-Name: Userland Utilities & Shell
-
-Description: The user-facing interface of the OS, comprising the shell (`bin/sh`) and standard Unix utilities. It interacts with the kernel via system calls to perform file operations, process management, and I/O.
-
-Technologies: C11 (LibC), Assembly (Startup), Makefiles
-
-Deployment: Staged in `dist/` and bundled into the final OS image.
-
-### 3.2. Kernel Services (Backend)
-
-#### 3.2.1. Process Management
-
-Name: Process & Thread Manager
-
-Description: Manages the lifecycle of processes and threads, including creation (`fork`, `exec`), scheduling (MLFQ), and termination. Handles signals and process groups.
-
-Technologies: C, Inline Assembly (Context Switching)
-
-Location: `sys/pm/`, `sys/kern/`, `sys/arch/i386/sched.c`
-
-#### 3.2.2. Memory Management
-
-Name: Virtual & Physical Memory Manager
-
-Description: Manages physical RAM (PMM) and virtual address spaces (PMAP). Implements paging, demand allocation, copy-on-write, and kernel memory pools.
-
-Technologies: C, x86 Paging Structures
-
-Location: `sys/vm/`, `sys/arch/i386/pmm.c`, `sys/arch/i386/pmap.c`
-
-#### 3.2.3. Virtual File System (VFS)
-
-Name: VFS Layer
-
-Description: Abstracts specific filesystem implementations. Provides a uniform API (`open`, `read`, `write`) for file access and handles path resolution, mounting, and file descriptors.
-
-Technologies: C
-
-Location: `sys/vfs/`, `sys/fs/`
-
-#### 3.2.4. Hardware Drivers
-
-Name: Device Drivers
-
-Description: Interfaces with physical hardware. Includes Video (VGA/BGA), Input (PS/2), Storage (IDE/AHCI/NVMe/VirtIO), and Serial (UART).
-
-Technologies: C, x86 I/O Ports, MMIO
-
-Location: `sys/drivers/`
+- **Naming Conventions & Namespaces:**
+    - **Network Interfaces:** Naming follows the `driver`+`instance` pattern (BSD-style).
+      - Examples: `em0` (Intel PRO/1000), `re0` (Realtek 8139/8169), `bge0` (Broadcom), `lo0` (Loopback).
+    - **Storage Devices:** Naming follows the `/dev/storage/`+`type`+`instance` pattern.
+      - **Types:**
+        - `ide`: Legacy IDE devices (e.g., `/dev/storage/ide0`).
+        - `sata`: SATA devices (e.g., `/dev/storage/sata0`).
+        - `scs` / `scsi`: SCSI devices (e.g., `/dev/storage/scsi0`).
+        - `usb`: USB Mass Storage.
+        - `nvme`: NVMe Namespaces (e.g., `nvme0`).
+        - `floppy`: Floppy Disk.
+        - `optical`: CD-ROM/DVD (ATAPI/SCSI).
+      - **Partitions:**
+        - **MBR/BSD Slices:** `s1`, `s2` (e.g., `/dev/storage/sata0s1`).
+        - **BSD Labels:** `a`-`h` suffix inside a slice (e.g., `/dev/storage/sata0s1a`).
+        - **GPT:** `p1`, `p2` (e.g., `/dev/storage/nvme0p1`).
+- **Audio API:**
+    - **Native:** Sun AudioIO (`/dev/audio`, `ioctl` based) for simplicity and POSIX-like design.
+    - **Compatibility:** OSS v3/v4 emulation provided via `ossp` personality or userland wrapper.
+- **Kernel Object Namespace (KObject):**
+    - All kernel subsystems (Drivers, Buses, Classes) are registered in a hierarchical object tree.
+    - Rooted at `/sys` (exported via SysFS).
+    - Provides reference counting (`kref`) and unified lifecycle management.
 
 ## 4. Data Stores
 
