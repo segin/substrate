@@ -27,6 +27,7 @@
 #include <sys/utsname.h>
 
 #include <sys/smp.h>
+#include <sys/lock.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
@@ -48,6 +49,33 @@ extern thread_t threads[256];
 static file_t system_files[MAX_SYSTEM_FILES];
 static file_t *file_free_list = NULL;
 static bool file_system_initialized = false;
+
+#define IO_CHUNK_SIZE 4096
+
+static struct {
+    mutex_t lock;
+    char buf[IO_CHUNK_SIZE];
+} io_buffers[MAX_CPUS];
+
+static volatile int io_buffers_initialized = 0;
+
+static void ensure_io_buffers_init(void) {
+    if (io_buffers_initialized) return;
+
+    static volatile int init_lock = 0;
+    while (__sync_lock_test_and_set(&init_lock, 1)) {
+        while (init_lock) __asm__("pause");
+    }
+
+    if (!io_buffers_initialized) {
+        for (int i = 0; i < MAX_CPUS; i++) {
+            mutex_init(&io_buffers[i].lock, "io_buf");
+        }
+        io_buffers_initialized = 1;
+    }
+
+    __sync_lock_release(&init_lock);
+}
 
 static void file_init_list(void) {
     for (int i = 0; i < MAX_SYSTEM_FILES - 1; i++) {
@@ -94,8 +122,6 @@ void file_free(file_t *f) {
     file_free_list = f;
 }
 
-#define IO_CHUNK_SIZE 4096
-
 int kern_write(int fd, const char *buf, int len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     if (len < 0) return -22; // EINVAL
@@ -106,8 +132,20 @@ int kern_write(int fd, const char *buf, int len) {
     
     // Check for console node if write_fs isn't fully generic yet
     if (f->f_data && ((fs_node_t*)f->f_data)->write) {
-        char *kbuf = kmalloc(IO_CHUNK_SIZE);
-        if (!kbuf) return -12; // ENOMEM
+        // Use per-CPU buffer if available, otherwise fallback to kmalloc
+        ensure_io_buffers_init();
+        int cpu = smp_get_cpu_id();
+        if (cpu < 0 || cpu >= MAX_CPUS) cpu = 0;
+
+        char *kbuf = NULL;
+        bool use_static = mutex_trylock(&io_buffers[cpu].lock);
+
+        if (use_static) {
+            kbuf = io_buffers[cpu].buf;
+        } else {
+            kbuf = kmalloc(IO_CHUNK_SIZE);
+            if (!kbuf) return -12; // ENOMEM
+        }
 
         int total_written = 0;
         while (total_written < len) {
@@ -126,7 +164,8 @@ int kern_write(int fd, const char *buf, int len) {
                     // We already wrote some data, return that count
                     break;
                 }
-                kfree(kbuf, IO_CHUNK_SIZE);
+                if (use_static) mutex_unlock(&io_buffers[cpu].lock);
+                else kfree(kbuf, IO_CHUNK_SIZE);
                 return bytes; // Return the error code
             }
 
@@ -137,7 +176,8 @@ int kern_write(int fd, const char *buf, int len) {
         }
 
         f->f_offset += total_written;
-        kfree(kbuf, IO_CHUNK_SIZE);
+        if (use_static) mutex_unlock(&io_buffers[cpu].lock);
+        else kfree(kbuf, IO_CHUNK_SIZE);
         return total_written;
     }
     
