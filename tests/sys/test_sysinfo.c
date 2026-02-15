@@ -64,6 +64,23 @@ int test_sysinfo(void) {
          kprintf("FAIL: sysinfo(NULL) returned %d, expected %d\n", ret, -EFAULT);
          return -1;
     }
+
+    /* 4. Check syscall wrapper with kernel pointer */
+    extern int sys_sysinfo(struct sysinfo *info);
+    /* In kernel mode, stack address &info is high (> 0xC0000000).
+       sys_sysinfo checks for user pointer validity. */
+    ret = sys_sysinfo(&info);
+    if (ret != -EFAULT) {
+         kprint("FAIL: sys_sysinfo(kernel_ptr) did not return EFAULT\n");
+         return -1;
+    }
+
+    /* 5. Check syscall wrapper with NULL pointer */
+    ret = sys_sysinfo(NULL);
+    if (ret != -EFAULT) {
+         kprint("FAIL: sys_sysinfo(NULL) did not return EFAULT\n");
+         return -1;
+    }
     
     kprint("PASS: sysinfo\n");
     return 0;
