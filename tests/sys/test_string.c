@@ -231,6 +231,54 @@ static void test_memmove(void) {
     ASSERT_MEM_EQ(buf, "12345678", 8, "memmove zero size");
 }
 
+static void test_memmove_comprehensive(void) {
+    #define TEST_BUF_SIZE 64
+    uint8_t buf[TEST_BUF_SIZE];
+    uint8_t expected[TEST_BUF_SIZE];
+    uint8_t temp_buf[TEST_BUF_SIZE]; // For reference implementation
+
+    // Exhaustive overlap testing for small buffer
+    // Iterate over all valid src, dst, and length combinations
+    for (int src_off = 0; src_off < TEST_BUF_SIZE; src_off++) {
+        for (int dst_off = 0; dst_off < TEST_BUF_SIZE; dst_off++) {
+            // Maximum length is limited by both src and dst fitting in buffer
+            int max_len_src = TEST_BUF_SIZE - src_off;
+            int max_len_dst = TEST_BUF_SIZE - dst_off;
+            int max_len = (max_len_src < max_len_dst) ? max_len_src : max_len_dst;
+
+            for (int len = 0; len <= max_len; len++) {
+                // Initialize buffers with a pattern
+                for (int i = 0; i < TEST_BUF_SIZE; i++) {
+                    buf[i] = (uint8_t)(i & 0xFF);
+                    expected[i] = (uint8_t)(i & 0xFF);
+                }
+
+                // Run kernel implementation
+                memmove(buf + dst_off, buf + src_off, len);
+
+                // Run reference implementation (using temp buffer to handle overlap safely)
+                // Copy src to temp
+                for(int i = 0; i < len; i++) {
+                    temp_buf[i] = expected[src_off + i];
+                }
+                // Copy temp to dst
+                for(int i = 0; i < len; i++) {
+                    expected[dst_off + i] = temp_buf[i];
+                }
+
+                // Compare
+                if (memcmp(buf, expected, TEST_BUF_SIZE) != 0) {
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "FAIL: memmove comprehensive mismatch s=%d d=%d l=%d\n", src_off, dst_off, len);
+                    kprint(msg);
+                    failed_tests++;
+                    return; // Stop on first failure
+                }
+            }
+        }
+    }
+}
+
 static void test_memset_basic(void) {
     char buf[20];
     char expected[20];
@@ -451,6 +499,7 @@ void run_string_tests(void) {
 
     kprint("Checking memmove correctness...\n");
     test_memmove();
+    test_memmove_comprehensive();
 
     kprint("Checking memset correctness...\n");
     test_memset_basic();

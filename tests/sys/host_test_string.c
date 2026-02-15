@@ -34,6 +34,19 @@ void kfree(void *ptr, size_t size) {
 // Include the source file directly
 #include "../../sys/lib/string.c"
 
+// Undefine macros to use host libc functions for verification
+#undef memcpy
+#undef memset
+#undef memmove
+#undef memcmp
+#undef strlen
+#undef strcpy
+#undef strncpy
+#undef strcmp
+#undef strchr
+#undef strspn
+#undef strpbrk
+
 // Test Helper Macros
 #define ASSERT_STREQ(a, b, msg) do { \
     if (strcmp(a, b) != 0) { \
@@ -118,10 +131,55 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
+void test_memmove_comprehensive(void) {
+    #define TEST_BUF_SIZE 64
+    uint8_t buf[TEST_BUF_SIZE];
+    uint8_t expected[TEST_BUF_SIZE];
+
+    // Exhaustive overlap testing for small buffer
+    // Iterate over all valid src, dst, and length combinations
+    for (int src_off = 0; src_off < TEST_BUF_SIZE; src_off++) {
+        for (int dst_off = 0; dst_off < TEST_BUF_SIZE; dst_off++) {
+            // Maximum length is limited by both src and dst fitting in buffer
+            int max_len_src = TEST_BUF_SIZE - src_off;
+            int max_len_dst = TEST_BUF_SIZE - dst_off;
+            int max_len = (max_len_src < max_len_dst) ? max_len_src : max_len_dst;
+
+            for (int len = 0; len <= max_len; len++) {
+                // Initialize buffers with a pattern
+                for (int i = 0; i < TEST_BUF_SIZE; i++) {
+                    buf[i] = (uint8_t)(i & 0xFF);
+                    expected[i] = (uint8_t)(i & 0xFF);
+                }
+
+                // Run kernel implementation
+                kernel_memmove(buf + dst_off, buf + src_off, len);
+
+                // Run host implementation (reference)
+                memmove(expected + dst_off, expected + src_off, len);
+
+                // Compare
+                if (memcmp(buf, expected, TEST_BUF_SIZE) != 0) {
+                    printf("FAIL: memmove mismatch\n");
+                    printf("  src_off=%d, dst_off=%d, len=%d\n", src_off, dst_off, len);
+                    printf("  Expected: ");
+                    for (int i = 0; i < TEST_BUF_SIZE; i++) printf("%02x ", expected[i]);
+                    printf("\n  Actual:   ");
+                    for (int i = 0; i < TEST_BUF_SIZE; i++) printf("%02x ", buf[i]);
+                    printf("\n");
+                    exit(1);
+                }
+            }
+        }
+    }
+    printf("test_memmove_comprehensive: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
+    test_memmove_comprehensive();
     printf("All Tests Passed\n");
     return 0;
 }
