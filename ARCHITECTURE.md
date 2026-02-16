@@ -73,6 +73,10 @@ The system follows a monolithic kernel architecture with a strict separation bet
             - **Watermark Allocator:** Early boot bump allocator used before buddy system is ready. Memory is never freed.
             - **Bitmap:** Kept for diagnostics only, not used for allocation decisions.
             - **No Static Limit:** Dynamic metadata sizing supports all detected RAM.
+        - **Thread Management:**
+            - **`thr_new(param)`**: Create a new kernel thread.
+            - **`thr_self()`**: Get the current thread ID (TID).
+            - **`thr_exit(state)`**: Terminate the current thread. If `state` is non-NULL, the kernel atomically sets the value to 1 and performs a `futex` wake after the thread has finished using its stack.
         - **Virtual Memory Manager (PMAP):**
             - **Per-Process Address Spaces:** Each process has its own `pmap_t` representing its virtual address space:
                 - **User Space:** 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767)
