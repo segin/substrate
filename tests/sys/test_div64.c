@@ -26,7 +26,7 @@ static int failed_tests = 0;
 static void assert_eq_u64(uint64_t actual, uint64_t expected, const char *msg) {
     if (actual != expected) {
         char buf[256];
-        snprintf(buf, sizeof(buf), "FAIL: %s (expected %llu, got %llu)\n", msg, expected, actual);
+        snprintf(buf, sizeof(buf), "FAIL: %s (expected %llu, got %llu)\n", msg, (unsigned long long)expected, (unsigned long long)actual);
         kprint(buf);
         failed_tests++;
     }
@@ -35,7 +35,7 @@ static void assert_eq_u64(uint64_t actual, uint64_t expected, const char *msg) {
 static void assert_eq_i64(int64_t actual, int64_t expected, const char *msg) {
     if (actual != expected) {
         char buf[256];
-        snprintf(buf, sizeof(buf), "FAIL: %s (expected %lld, got %lld)\n", msg, expected, actual);
+        snprintf(buf, sizeof(buf), "FAIL: %s (expected %lld, got %lld)\n", msg, (long long)expected, (long long)actual);
         kprint(buf);
         failed_tests++;
     }
@@ -132,7 +132,10 @@ static void test_shifts(void) {
     // Logical right shift (__lshrdi3)
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 0), 0xFFFFFFFFFFFFFFFFULL, "lshr 0");
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 1), 0x7FFFFFFFFFFFFFFFULL, "lshr 1");
+    assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 4), 0x0FFFFFFFFFFFFFFFULL, "lshr 4");
+    assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 16), 0x0000FFFFFFFFFFFFULL, "lshr 16");
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 32), 0x00000000FFFFFFFFULL, "lshr 32");
+    assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 48), 0x000000000000FFFFULL, "lshr 48");
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 63), 1ULL, "lshr 63");
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 64), 0xFFFFFFFFFFFFFFFFULL, "lshr 64 (mask)");
 
@@ -179,8 +182,10 @@ static void test_explicit_calls(void) {
     assert_eq_i64(__negdi2(10), -10, "__negdi2(10)");
 }
 
-void run_div64_tests(void) {
+bool run_div64_tests(void) {
+#ifndef HOST_TEST
     kprint("\n=== DIV64 TESTS ===\n");
+#endif
     failed_tests = 0;
 
     test_unsigned_div();
@@ -192,10 +197,12 @@ void run_div64_tests(void) {
     test_neg();
 
     test_explicit_calls();
-    test_shifts();
-    test_mul();
-    test_neg();
+    // Redundant calls removed
+    // test_shifts();
+    // test_mul();
+    // test_neg();
 
+#ifndef HOST_TEST
     if (failed_tests == 0) {
         kprint("DIV64: PASS\n");
     } else {
@@ -204,4 +211,6 @@ void run_div64_tests(void) {
         kprint(buf);
     }
     kprint("=== DIV64 TESTS COMPLETE ===\n\n");
+#endif
+    return failed_tests == 0;
 }
