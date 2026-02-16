@@ -1,0 +1,31 @@
+.\"
+.\" THR_EXIT(2) - Substrate Native Personality
+.\"
+.TH THR_EXIT 2 "May 2024" "Substrate OS" "System Calls"
+.SH NAME
+thr_exit \- terminate the current thread
+.SH SYNOPSIS
+.nf
+.B #include <sys/thr.h>
+.PP
+.BI "void thr_exit(int *" state ");
+.fi
+.SH DESCRIPTION
+.BR thr_exit ()
+terminates the current thread.
+If
+.I state
+is not NULL, the kernel will set the value at that location to 1 and perform a
+.BR futex (2)
+WAKE operation on it after the thread has finished using its stack.
+This allows other threads to safely join the exiting thread and free its resources.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 431
+Arguments:      state (on stack)
+.fi
+.SH SEE ALSO
+.BR pthread_exit (3),
+.BR thr_new (2),
+.BR futex (2)

@@ -391,7 +391,6 @@ static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
     kprint(buf);
     return -1;
 }
-}
 
 static int vscsi_reset_bus(scsi_link_t *link) {
     (void)link;

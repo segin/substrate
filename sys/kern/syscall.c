@@ -493,6 +493,19 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     return ret;
 }
 
+int sys_thr_exit(int *state) {
+    if (current_thread) {
+        current_thread->exit_tid_ptr = state;
+        current_thread->state = THREAD_ZOMBIE;
+    }
+    sched_yield();
+    return 0;
+}
+
+int sys_thr_self(void) {
+    return sched_get_current_tid();
+}
+
 int kern_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;

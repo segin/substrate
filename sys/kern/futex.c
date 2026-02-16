@@ -72,7 +72,7 @@ static int futex_read_timespec(void *uaddr, struct timespec *out) {
  *
  * Returns NULL if page is not mapped.
  */
-static void *futex_get_key(uintptr_t uaddr) {
+void *futex_get_key(uintptr_t uaddr) {
     if (!current_process || !current_process->pmap) return NULL;
     
     /* Use pmap_extract to get physical address */
@@ -245,6 +245,21 @@ void futex_thread_exit(thread_t *t) {
 
 void futex_exit_cleanup(void) {
     futex_thread_exit(current_thread);
+}
+
+void futex_wake_exited_thread(int *uaddr) {
+    if (!uaddr) return;
+
+    /* We assume the caller is the scheduler and we are still in the pmap
+     * of the exiting thread. */
+    void *key = futex_get_key((uintptr_t)uaddr);
+    if (!key) return;
+
+    /* Write 1 to signify exit */
+    *uaddr = 1;
+
+    /* Wake all waiters (should only be one, but safe) */
+    sleepq_wake_all(key);
 }
 
 /*

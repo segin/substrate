@@ -192,6 +192,9 @@ typedef struct thread {
     // Syscall registers (for fork/vfork)
     void *syscall_regs;
 
+    // FreeBSD-style exit notification
+    int *exit_tid_ptr;
+
     thread_state_t state;
     struct thread *next;
 } thread_t;
