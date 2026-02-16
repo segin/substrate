@@ -213,6 +213,8 @@ void test_memmove_comprehensive(void) {
     free(buffer);
     free(control);
     printf("test_memmove_comprehensive: PASS\n");
+}
+
 void test_strcmp(void) {
     ASSERT_EQ(kernel_strcmp("", ""), 0, "strcmp empty-empty");
     ASSERT_EQ(kernel_strcmp("a", "a"), 0, "strcmp equal single char");
@@ -275,6 +277,47 @@ void test_strncmp(void) {
     printf("test_strncmp: PASS\n");
 }
 
+void test_strpbrk(void) {
+    const char *s = "hello world";
+    char *res;
+
+    // Basic match: 'e' is in "abcde"
+    res = kernel_strpbrk(s, "abcde");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)(s + 1), "strpbrk basic match 'e'");
+
+    // Basic match: 'o' is in "wor"
+    res = kernel_strpbrk(s, "wor");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)(s + 4), "strpbrk basic match 'o'");
+
+    // No match
+    res = kernel_strpbrk(s, "xyz");
+    ASSERT_EQ((uintptr_t)res, 0, "strpbrk no match");
+
+    // Match at beginning
+    res = kernel_strpbrk(s, "h");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)s, "strpbrk match start");
+
+    // Match at end
+    res = kernel_strpbrk(s, "d");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)(s + 10), "strpbrk match end");
+
+    // Empty s1
+    res = kernel_strpbrk("", "abc");
+    ASSERT_EQ((uintptr_t)res, 0, "strpbrk empty s1");
+
+    // Empty s2
+    res = kernel_strpbrk(s, "");
+    ASSERT_EQ((uintptr_t)res, 0, "strpbrk empty s2");
+
+    // Multiple matches (should return first occurrence in s1)
+    // s = "hello world"
+    // accept = "lo" -> first 'l' at index 2
+    res = kernel_strpbrk(s, "lo");
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)(s + 2), "strpbrk multiple matches");
+
+    printf("test_strpbrk: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
@@ -283,6 +326,7 @@ int main(void) {
     test_memmove_comprehensive();
     test_strcmp();
     test_strncmp();
+    test_strpbrk();
     printf("All Tests Passed\n");
     return 0;
 }
