@@ -15,17 +15,13 @@ UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_cow.c \
              unit/arch/test_trampoline.c \
              unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c unit/kern/test_sched_decay.c \
-<<<<<<< HEAD
              unit/kern/test_sync.c unit/kern/test_signal.c unit/kern/test_pthread_exit.c \
-             unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c \
-=======
-             unit/kern/test_sync.c unit/kern/test_signal.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
              unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
->>>>>>> main
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
-             sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c
+             sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c \
+             sys/test_div64.c
 
 UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
@@ -125,5 +121,3 @@ test_runner: test_runner.o $(CORE_OBJS) $(UNIT_OBJS) $(MOCKS_OBJ) string_prefixe
 string_prefixed.o: ../lib/c/src/string.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
-
-	rm -f test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype *.o
