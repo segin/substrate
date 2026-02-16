@@ -213,6 +213,61 @@ void test_memmove_comprehensive(void) {
     free(buffer);
     free(control);
     printf("test_memmove_comprehensive: PASS\n");
+}
+
+void test_memcmp(void) {
+    char b1[20];
+    char b2[20];
+
+    // Identity
+    memset(b1, 0, sizeof(b1));
+    memset(b2, 0, sizeof(b2));
+    ASSERT_EQ(kernel_memcmp(b1, b2, sizeof(b1)), 0, "memcmp identity zero");
+
+    strcpy(b1, "Hello");
+    strcpy(b2, "Hello");
+    ASSERT_EQ(kernel_memcmp(b1, b2, 6), 0, "memcmp identity string");
+
+    // Difference
+    b2[0] = 'h'; // 'H' vs 'h'
+    // 'H' (72) < 'h' (104) -> returns negative
+    int res = kernel_memcmp(b1, b2, 1);
+    if (res >= 0) {
+        printf("FAIL: memcmp('H', 'h') >= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    // Check sign (b1 > b2)
+    b1[0] = 'b';
+    b2[0] = 'a';
+    res = kernel_memcmp(b1, b2, 1);
+    if (res <= 0) {
+        printf("FAIL: memcmp('b', 'a') <= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    // Length limit
+    strcpy(b1, "Hello");
+    strcpy(b2, "Help!");
+    // Match up to 3 chars ("Hel")
+    ASSERT_EQ(kernel_memcmp(b1, b2, 3), 0, "memcmp length limit");
+
+    // Unsigned comparison
+    unsigned char u1[] = { 0xFF };
+    unsigned char u2[] = { 0x00 };
+    // 0xFF (255) > 0x00 (0) -> positive
+    res = kernel_memcmp(u1, u2, 1);
+    if (res <= 0) {
+        printf("FAIL: memcmp(0xFF, 0x00) <= 0 (got %d) - Unsigned check\n", res);
+        exit(1);
+    }
+
+    // Zero length
+    ASSERT_EQ(kernel_memcmp(b1, b2, 0), 0, "memcmp zero length");
+
+    printf("test_memcmp: PASS\n");
+}
+
 void test_strcmp(void) {
     ASSERT_EQ(kernel_strcmp("", ""), 0, "strcmp empty-empty");
     ASSERT_EQ(kernel_strcmp("a", "a"), 0, "strcmp equal single char");
@@ -275,14 +330,95 @@ void test_strncmp(void) {
     printf("test_strncmp: PASS\n");
 }
 
+void test_strspn(void) {
+    // Basic functionality
+    ASSERT_EQ(kernel_strspn("hello", "he"), 2, "strspn basic prefix");
+    ASSERT_EQ(kernel_strspn("hello", "l"), 0, "strspn no match at start");
+    ASSERT_EQ(kernel_strspn("hello", "hel"), 4, "strspn longer prefix");
+    ASSERT_EQ(kernel_strspn("hello", "oleh"), 5, "strspn full string match (scrambled set)");
+    ASSERT_EQ(kernel_strspn("", "anything"), 0, "strspn empty string");
+    ASSERT_EQ(kernel_strspn("hello", ""), 0, "strspn empty accept");
+
+    // Comprehensive check against libc strspn
+    const char *test_strings[] = {
+        "hello world",
+        "1234567890",
+        "abcdef",
+        "",
+        "   leading spaces",
+        "trailing spaces   ",
+        "!@#$%^&*()",
+        NULL
+    };
+
+    const char *accept_sets[] = {
+        "helo",
+        "123",
+        " ",
+        "abc",
+        "xyz",
+        "",
+        "!@#",
+        NULL
+    };
+
+    for (int i = 0; test_strings[i]; i++) {
+        for (int j = 0; accept_sets[j]; j++) {
+            size_t k_res = kernel_strspn(test_strings[i], accept_sets[j]);
+            size_t l_res = strspn(test_strings[i], accept_sets[j]);
+
+            if (k_res != l_res) {
+                 printf("FAIL: strspn mismatch for s='%s', accept='%s'. Kernel: %zu, Libc: %zu\n",
+                        test_strings[i], accept_sets[j], k_res, l_res);
+                 exit(1);
+            }
+        }
+    }
+
+    printf("test_strspn: PASS\n");
+}
+
+void test_strchr(void) {
+    char buf[] = "Hello World";
+
+    // Found at beginning
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'H'), (uintptr_t)buf, "strchr 'H' (beginning)");
+
+    // Found in middle
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'W'), (uintptr_t)(buf + 6), "strchr 'W' (middle)");
+
+    // Found at end
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'd'), (uintptr_t)(buf + 10), "strchr 'd' (end)");
+
+    // Not found
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'z'), (uintptr_t)NULL, "strchr 'z' (not found)");
+
+    // Null terminator search
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, '\0'), (uintptr_t)(buf + 11), "strchr '\\0' (terminator)");
+
+    // Empty string
+    char empty[] = "";
+    ASSERT_EQ((uintptr_t)kernel_strchr(empty, '\0'), (uintptr_t)empty, "strchr empty string '\\0'");
+    ASSERT_EQ((uintptr_t)kernel_strchr(empty, 'a'), (uintptr_t)NULL, "strchr empty string 'a'");
+
+    // Multiple occurrences
+    char repeated[] = "bananana";
+    ASSERT_EQ((uintptr_t)kernel_strchr(repeated, 'a'), (uintptr_t)(repeated + 1), "strchr multiple 'a' (first occurrence)");
+
+    printf("test_strchr: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
     test_memmove();
     test_memmove_comprehensive();
+    test_memcmp();
     test_strcmp();
     test_strncmp();
+    test_strspn();
+    test_strchr();
     printf("All Tests Passed\n");
     return 0;
 }

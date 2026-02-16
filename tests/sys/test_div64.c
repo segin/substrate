@@ -132,7 +132,10 @@ static void test_shifts(void) {
     // Logical right shift (__lshrdi3)
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 0), 0xFFFFFFFFFFFFFFFFULL, "lshr 0");
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 1), 0x7FFFFFFFFFFFFFFFULL, "lshr 1");
+    assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 4), 0x0FFFFFFFFFFFFFFFULL, "lshr 4");
+    assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 16), 0x0000FFFFFFFFFFFFULL, "lshr 16");
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 32), 0x00000000FFFFFFFFULL, "lshr 32");
+    assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 48), 0x000000000000FFFFULL, "lshr 48");
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 63), 1ULL, "lshr 63");
     assert_eq_u64(__lshrdi3(0xFFFFFFFFFFFFFFFFULL, 64), 0xFFFFFFFFFFFFFFFFULL, "lshr 64 (mask)");
 
@@ -189,8 +192,10 @@ static void test_explicit_calls(void) {
     assert_eq_i64(__negdi2(10), -10, "__negdi2(10)");
 }
 
-int test_div64(void) {
+bool run_div64_tests(void) {
+#ifndef HOST_TEST
     kprint("\n=== DIV64 TESTS ===\n");
+#endif
     failed_tests = 0;
 
     test_unsigned_div();
@@ -202,10 +207,12 @@ int test_div64(void) {
     test_neg();
 
     test_explicit_calls();
-    test_shifts();
-    test_mul();
-    test_neg();
+    // Redundant calls removed
+    // test_shifts();
+    // test_mul();
+    // test_neg();
 
+#ifndef HOST_TEST
     if (failed_tests == 0) {
         kprint("DIV64: PASS\n");
         kprint("=== DIV64 TESTS COMPLETE ===\n\n");
@@ -217,4 +224,6 @@ int test_div64(void) {
         kprint("=== DIV64 TESTS COMPLETE ===\n\n");
         return 1;
     }
+#endif
+    return failed_tests == 0;
 }
