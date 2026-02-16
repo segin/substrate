@@ -46,6 +46,7 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
 
     *files = NULL;
     *file_count = 0;
+    size_t capacity = 0;
 
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-' && argv[i][1] != '\0') {
@@ -205,8 +206,13 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                 }
             }
         } else {
-            *files = realloc(*files, sizeof(char*) * (*file_count + 1));
-            if (!*files) return -1; // OOM
+            if (*file_count >= capacity) {
+                size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
+                char **temp = realloc(*files, sizeof(char*) * new_capacity);
+                if (!temp) return -1; // OOM
+                *files = temp;
+                capacity = new_capacity;
+            }
             (*files)[(*file_count)++] = argv[i];
         }
     }
