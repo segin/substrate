@@ -519,6 +519,19 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     return ret;
 }
 
+int sys_thr_exit(int *state) {
+    if (current_thread) {
+        current_thread->exit_tid_ptr = state;
+        current_thread->state = THREAD_ZOMBIE;
+    }
+    sched_yield();
+    return 0;
+}
+
+int sys_thr_self(void) {
+    return sched_get_current_tid();
+}
+
 int kern_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
@@ -531,6 +544,17 @@ int kern_thr_new(struct thr_param *param, int param_size) {
     return -1;
 }
 
+<<<<<<< HEAD
+int sys_thr_exit(void *retval) {
+    current_thread->retval = retval;
+    current_thread->state = THREAD_ZOMBIE;
+
+    // Wake up anybody waiting on this thread (e.g. for join)
+    sched_wakeup(&current_thread->tid);
+
+    sched_yield();
+    return 0; // Should not be reached
+=======
 int sys_thr_exit(void *status) {
     current_thread->exit_status = status;
     current_thread->state = THREAD_ZOMBIE;
@@ -561,6 +585,7 @@ int sys_thr_join(tid_t tid, void **status) {
     thread->tid = -1;
 
     return 0;
+>>>>>>> main
 }
 
 extern int sys_vm86(void *v);

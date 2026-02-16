@@ -1,6 +1,7 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <sys/errno.h>
+#include <sys/futex.h>
 #include <pm/pm.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -66,6 +67,13 @@ thread_t *sched_alloc_thread(process_t *proc) {
 
 static void sched_context_switch(thread_t *prev, thread_t *next) {
     if (prev && prev->state == THREAD_RUNNING) prev->state = THREAD_READY;
+
+    // Handle thread exit notification after switching out but before changing address space
+    if (prev && prev->state == THREAD_ZOMBIE && prev->exit_tid_ptr) {
+        futex_wake_exited_thread(prev->exit_tid_ptr);
+        prev->exit_tid_ptr = NULL;
+    }
+
     next->state = THREAD_RUNNING;
 
     current_thread = next;

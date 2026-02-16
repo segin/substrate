@@ -9,7 +9,7 @@ extern int sys_dup(int oldfd);
 extern int sys_dup2(int oldfd, int newfd);
 extern void vfs_init_mock_root(void);
 
-bool test_fd_f_counting(void) {
+bool test_fd_ref_counting(void) {
     sched_init();
     vfs_init_mock_root();
     
