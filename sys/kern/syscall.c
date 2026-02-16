@@ -519,14 +519,7 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     return ret;
 }
 
-int sys_thr_exit(int *state) {
-    if (current_thread) {
-        current_thread->exit_tid_ptr = state;
-        current_thread->state = THREAD_ZOMBIE;
-    }
-    sched_yield();
-    return 0;
-}
+// Duplicate sys_thr_exit removed
 
 int sys_thr_self(void) {
     return sched_get_current_tid();
@@ -544,19 +537,8 @@ int kern_thr_new(struct thr_param *param, int param_size) {
     return -1;
 }
 
-<<<<<<< HEAD
 int sys_thr_exit(void *retval) {
     current_thread->retval = retval;
-    current_thread->state = THREAD_ZOMBIE;
-
-    // Wake up anybody waiting on this thread (e.g. for join)
-    sched_wakeup(&current_thread->tid);
-
-    sched_yield();
-    return 0; // Should not be reached
-=======
-int sys_thr_exit(void *status) {
-    current_thread->exit_status = status;
     current_thread->state = THREAD_ZOMBIE;
     sleepq_wake_all(current_thread);
     sched_yield();
@@ -565,7 +547,7 @@ int sys_thr_exit(void *status) {
 
 int sys_thr_join(tid_t tid, void **status) {
     thread_t *thread = sched_get_thread(tid);
-    if (!thread || thread->proc != current_process) return -ESRCH;
+    if (!thread || thread->proc != current_process) return -3; // ESRCH
 
     while (thread->state != THREAD_ZOMBIE) {
         sleepq_add(thread, current_thread);
@@ -573,19 +555,18 @@ int sys_thr_join(tid_t tid, void **status) {
 
         // Re-check after wake-up
         thread = sched_get_thread(tid);
-        if (!thread || thread->proc != current_process) return -ESRCH;
+        if (!thread || thread->proc != current_process) return -3; // ESRCH
     }
 
     if (status) {
-        void *kstatus = thread->exit_status;
-        if (copyout(&kstatus, status, sizeof(void*)) != 0) return -14;
+        void *kstatus = thread->retval;
+        if (copyout(&kstatus, status, sizeof(void*)) != 0) return -14; // EFAULT
     }
 
     // Reap the thread
     thread->tid = -1;
 
     return 0;
->>>>>>> main
 }
 
 extern int sys_vm86(void *v);

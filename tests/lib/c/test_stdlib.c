@@ -1,3 +1,5 @@
+#undef bsearch
+#undef qsort
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
@@ -24,7 +26,9 @@
 #define abs tested_abs
 #define labs tested_labs
 #define llabs tested_llabs
+#undef qsort
 #define qsort tested_qsort
+#undef bsearch
 #define bsearch tested_bsearch
 #define rand tested_rand
 #define srand tested_srand

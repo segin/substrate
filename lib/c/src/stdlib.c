@@ -1,4 +1,8 @@
 #include <stdlib.h>
+#ifdef HOST_TEST
+#undef bsearch
+#undef qsort
+#endif
 #include <unistd.h>
 #include <ctype.h>
 #include <sys/mman.h>

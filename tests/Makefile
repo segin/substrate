@@ -7,7 +7,7 @@ CFLAGS_TEST = $(CFLAGS_COMMON) -I../sys/include -I../sys -I. -DNO_MAIN
 CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_swap.o vm_zone.o \
             spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
             string.o printf.o div64.o compat.o acct.o sysinfo.o \
-            vfs.o vfs_cache.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o sched_decay.o
+            vfs.o vfs_cache.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o sched_decay.o libc_wrappers.o
 
 # Unit tests
 UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
@@ -37,8 +37,7 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libc_ctype
 	./test_ext2_remove_perf
 
-test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
-	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_stdlib.c -o $@
+# Duplicate rule removed
 
 test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_ctype.c -o $@
@@ -55,7 +54,7 @@ test_minix: unit/fs/test_minix_standalone.c
 test_libc_string: lib/c/test_libc_string_unit.c ../lib/c/src/string.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
-	$(CC) $(CFLAGS_COMMON) lib/c/test_libc_string_unit.c string_prefixed.o -o $@
+	$(CC) $(CFLAGS_COMMON) lib/c/test_libc_string_unit.c string_prefixed.o libc_wrappers.o -o $@
 
 test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_time_standalone.c -o $@
@@ -109,15 +108,22 @@ test_libc_string_unit.o: lib/c/test_libc_string_unit.c
 %.o: unit/lib/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 
+libc_wrappers.o: libc_wrappers.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+
 mocks.o: mocks.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 
 test_runner.o: test_runner.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 
-test_runner: test_runner.o $(CORE_OBJS) $(UNIT_OBJS) $(MOCKS_OBJ) string_prefixed.o
+test_runner: test_runner.o $(CORE_OBJS) $(UNIT_OBJS) $(MOCKS_OBJ) libc_wrappers.o string_prefixed.o
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
 
 string_prefixed.o: ../lib/c/src/string.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
+
+clean:
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf
+	$(MAKE) -C sys clean

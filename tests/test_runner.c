@@ -56,7 +56,7 @@ extern bool test_signal_mask(void);
 extern bool test_signal_delivery_default(void);
 
 // VFS Tests
-extern bool test_fd_f_counting(void);
+extern bool test_fd_ref_counting(void);
 extern bool test_fd_dup2(void);
 extern bool test_vfs_permissions_root(void);
 extern bool test_vfs_permissions_user(void);
@@ -110,6 +110,8 @@ extern bool test_libc_strlen(void);
 extern bool test_gmtime_negative_years(void);
 extern bool test_libc_time(void);
 extern bool test_libc_memmove(void);
+extern bool test_libc_strcat(void);
+extern bool test_libc_strtok(void);
 
 // Div64 Tests
 extern bool run_div64_tests(void);
@@ -157,7 +159,7 @@ test_case_t tests[] = {
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},
-    {"fd_refcnt", test_fd_f_counting},
+    {"fd_refcnt", test_fd_ref_counting},
     {"fd_dup2", test_fd_dup2},
     {"vfs_perm_root", test_vfs_permissions_root},
     {"vfs_perm_user", test_vfs_permissions_user},
@@ -187,6 +189,8 @@ test_case_t tests[] = {
     {"libc_time_neg", test_gmtime_negative_years},
     {"libc_time", test_libc_time},
     {"libc_memmove", test_libc_memmove},
+    {"libc_strcat", test_libc_strcat},
+    {"libc_strtok", test_libc_strtok},
     {"div64", run_div64_tests},
     {NULL, NULL}
 };

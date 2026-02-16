@@ -4,6 +4,12 @@
 
 #include <kern/console.h>
 #include <stdint.h>
+#ifndef INT64_MIN
+#define INT64_MIN (-9223372036854775807LL - 1LL)
+#endif
+#ifndef INT64_MAX
+#define INT64_MAX 9223372036854775807LL
+#endif
 #include <string.h>
 #include "tests.h"
 

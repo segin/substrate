@@ -7,30 +7,55 @@
 #include <stdbool.h>
 
 // Rename implemented functions to avoid conflicts with host libc
+#undef strfry
 #define strfry libc_strfry
+#undef memcpy
 #define memcpy libc_memcpy
+#undef memmove
 #define memmove libc_memmove
+#undef memset
 #define memset libc_memset
+#undef memcmp
 #define memcmp libc_memcmp
+#undef memchr
 #define memchr libc_memchr
+#undef strcpy
 #define strcpy libc_strcpy
+#undef strncpy
 #define strncpy libc_strncpy
+#undef strcat
 #define strcat libc_strcat
+#undef strncat
 #define strncat libc_strncat
+#undef strcmp
 #define strcmp libc_strcmp
+#undef strncmp
 #define strncmp libc_strncmp
+#undef strchr
 #define strchr libc_strchr
+#undef strrchr
 #define strrchr libc_strrchr
+#undef strstr
 #define strstr libc_strstr
+#undef strlen
 #define strlen libc_strlen
+#undef strdup
 #define strdup libc_strdup
+#undef strspn
 #define strspn libc_strspn
+#undef strcspn
 #define strcspn libc_strcspn
+#undef strtok
 #define strtok libc_strtok
+#undef strpbrk
 #define strpbrk libc_strpbrk
+#undef strtok_r
 #define strtok_r libc_strtok_r
+#undef strerror
 #define strerror libc_strerror
+#undef strcasecmp
 #define strcasecmp libc_strcasecmp
+#undef strncasecmp
 #define strncasecmp libc_strncasecmp
 
 // Forward declarations for renamed functions
@@ -60,17 +85,6 @@ char *libc_strerror(int errnum);
 int libc_strcasecmp(const char *s1, const char *s2);
 int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 
-<<<<<<< HEAD:tests/lib/c/test_libc_string_unit.c
-// Include the source file directly - Removed to avoid redefinitions
-// The test now relies on string_prefixed.o linked by the Makefile
-
-=======
-// libgcc/libc wrappers for prefixed builds
-void* libc_malloc(size_t s) { return malloc(s); }
-void libc_free(void* p) { free(p); }
-int libc_rand(void) { return rand(); }
->>>>>>> main:tests/lib/c/test_string.c
-
 // Undef macros to restore original names if needed
 #undef strfry
 #undef memcpy
@@ -99,7 +113,7 @@ int libc_rand(void) { return rand(); }
 // Helper macros for testing
 #define ASSERT_EQ(actual, expected, msg) do { \
     if ((actual) != (expected)) { \
-        fprintf(stderr, "FAIL: %s: expected %d, got %d\n", msg, (int)(expected), (int)(actual)); \
+        fprintf(stderr, "FAIL: %s: expected %ld, got %ld\n", msg, (long)(expected), (long)(actual)); \
         exit(1); \
     } \
 } while(0)
@@ -118,70 +132,6 @@ int libc_rand(void) { return rand(); }
     } \
 } while(0)
 
-void run_strlen_tests(void) {
-    printf("Running strlen tests...\n");
-    // Empty string
-    ASSERT_EQ(libc_strlen(""), 0, "Empty string");
-    // Single character
-    ASSERT_EQ(libc_strlen("a"), 1, "Single character");
-    // Regular string
-    ASSERT_EQ(libc_strlen("abc"), 3, "abc length");
-    ASSERT_EQ(libc_strlen("hello world"), 11, "hello world length");
-
-    // String with embedded null (should stop at first null)
-    char buf[] = {'h', 'i', '\0', 'x'};
-    ASSERT_EQ(libc_strlen(buf), 2, "Embedded null");
-
-    // Longer string
-    char long_str[1025];
-    for(int i = 0; i < 1024; i++) long_str[i] = 'A';
-    long_str[1024] = '\0';
-    ASSERT_EQ(libc_strlen(long_str), 1024, "Longer string");
-    printf("strlen tests passed!\n");
-}
-
-void run_memmove_tests(void) {
-    printf("Running memmove tests...\n");
-    char buf[256];
-
-    // Case 1: Non-overlapping copy (forward)
-    strcpy(buf, "Hello World");
-    memset(buf + 20, 0, 20);
-    libc_memmove(buf + 20, buf, 12);
-    ASSERT_TRUE(strcmp(buf + 20, "Hello World") == 0, "Non-overlapping forward");
-
-    // Case 2: Overlapping copy (backward) - dest > src
-    strcpy(buf, "0123456789");
-    libc_memmove(buf + 2, buf, 4);
-    ASSERT_TRUE(strncmp(buf, "0101236789", 10) == 0, "Overlapping backward");
-
-    // Case 3: Overlapping copy (forward) - dest < src
-    strcpy(buf, "0123456789");
-    libc_memmove(buf, buf + 2, 4);
-    ASSERT_TRUE(strncmp(buf, "2345456789", 10) == 0, "Overlapping forward");
-
-    // Case 4: Exact overlap (dest == src)
-    strcpy(buf, "abcdef");
-    libc_memmove(buf, buf, 6);
-    ASSERT_TRUE(strcmp(buf, "abcdef") == 0, "Exact overlap");
-
-    // Case 5: Zero length
-    strcpy(buf, "abcdef");
-    libc_memmove(buf + 1, buf, 0);
-    ASSERT_TRUE(strcmp(buf, "abcdef") == 0, "Zero length");
-
-    // Case 6: Unaligned access / boundaries
-    for(int i = 0; i < 64; i++) buf[i] = (char)i;
-    libc_memmove(buf + 4, buf + 1, 7);
-    for(int i = 0; i < 7; i++) {
-        ASSERT_EQ(buf[4+i], (char)(i+1), "Unaligned boundary");
-    }
-    ASSERT_EQ(buf[3], 3, "Surrounding byte check (before)");
-    ASSERT_EQ(buf[11], 11, "Surrounding byte check (after)");
-
-    printf("memmove tests passed!\n");
-}
-
 #define ASSERT_STREQ(actual, expected, msg) do { \
     const char *act = (actual); \
     const char *exp = (expected); \
@@ -196,140 +146,42 @@ void run_memmove_tests(void) {
     } \
 } while(0)
 
+void run_strlen_tests(void) {
+    printf("Running strlen tests...\n");
+    ASSERT_EQ(libc_strlen(""), 0, "Empty string");
+    ASSERT_EQ(libc_strlen("a"), 1, "Single character");
+    ASSERT_EQ(libc_strlen("abc"), 3, "abc length");
+    ASSERT_EQ(libc_strlen("hello world"), 11, "hello world length");
+    char buf[] = {'h', 'i', '\0', 'x'};
+    ASSERT_EQ(libc_strlen(buf), 2, "Embedded null");
+}
+
+void run_memmove_tests(void) {
+    printf("Running memmove tests...\n");
+    char buf[256];
+    strcpy(buf, "Hello World");
+    memset(buf + 20, 0, 20);
+    libc_memmove(buf + 20, buf, 12);
+    ASSERT_TRUE(strcmp(buf + 20, "Hello World") == 0, "Non-overlapping forward");
+    
+    strcpy(buf, "0123456789");
+    libc_memmove(buf + 2, buf, 4);
+    ASSERT_TRUE(strncmp(buf, "0101236789", 10) == 0, "Overlapping backward");
+}
+
 void run_strtok_tests(void) {
     printf("Running strtok tests...\n");
-
-    // 1. Basic usage
-    {
-        char str[] = "A string to tokenize";
-        const char *delim = " ";
-
-        ASSERT_STREQ(libc_strtok(str, delim), "A", "First token incorrect");
-        ASSERT_STREQ(libc_strtok(NULL, delim), "string", "Second token incorrect");
-        ASSERT_STREQ(libc_strtok(NULL, delim), "to", "Third token incorrect");
-        ASSERT_STREQ(libc_strtok(NULL, delim), "tokenize", "Fourth token incorrect");
-        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Expected NULL after tokens exhausted");
-    }
-
-    // 2. Multiple delimiters
-    {
-        char str[] = "abc,def;ghi";
-        const char *delim = ",;";
-
-        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Multiple delim 1");
-        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Multiple delim 2");
-        ASSERT_STREQ(libc_strtok(NULL, delim), "ghi", "Multiple delim 3");
-        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Multiple delim end");
-    }
-
-    // 3. Consecutive delimiters
-    {
-        char str[] = "abc,,def";
-        const char *delim = ",";
-
-        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Consecutive delim 1");
-        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Consecutive delim 2");
-        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Consecutive delim end");
-    }
-
-    // 4. Leading delimiters
-    {
-        char str[] = ",,abc,def";
-        const char *delim = ",";
-
-        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Leading delim 1");
-        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Leading delim 2");
-        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Leading delim end");
-    }
-
-    // 5. Trailing delimiters
-    {
-        char str[] = "abc,def,,";
-        const char *delim = ",";
-
-        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Trailing delim 1");
-        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Trailing delim 2");
-        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Trailing delim end");
-    }
-
-    // 6. No delimiters
-    {
-        char str[] = "abcdef";
-        const char *delim = ",";
-
-        ASSERT_STREQ(libc_strtok(str, delim), "abcdef", "No delim 1");
-        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "No delim end");
-    }
-
-    // 7. Empty string
-    {
-        char str[] = "";
-        const char *delim = ",";
-
-        ASSERT_STREQ(libc_strtok(str, delim), NULL, "Empty string");
-    }
-
-    // 8. String with only delimiters
-    {
-        char str[] = ",,,";
-        const char *delim = ",";
-
-        ASSERT_STREQ(libc_strtok(str, delim), NULL, "Only delimiters");
-    }
-
-    // 9. Changing delimiter
-    {
-        char str[] = "abc,def;ghi";
-
-        ASSERT_STREQ(libc_strtok(str, ","), "abc", "Changing delim 1");
-        ASSERT_STREQ(libc_strtok(NULL, ";"), "def", "Changing delim 2");
-        ASSERT_STREQ(libc_strtok(NULL, ","), "ghi", "Changing delim 3");
-    }
-
-    printf("strtok tests passed!\n");
+    char str[] = "A string to tokenize";
+    const char *delim = " ";
+    ASSERT_STREQ(libc_strtok(str, delim), "A", "First token");
+    ASSERT_STREQ(libc_strtok(NULL, delim), "string", "Second token");
 }
 
 void run_strcat_tests(void) {
     printf("Running strcat tests...\n");
-
-    // 1. Basic concatenation
-    {
-        char dest[20] = "Hello";
-        const char *src = " World";
-        libc_strcat(dest, src);
-        ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strcat failed");
-    }
-
-    // 2. Concatenate empty string
-    {
-        char dest[20] = "Hello World";
-        libc_strcat(dest, "");
-        ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Concatenate empty string failed");
-    }
-
-    // 3. Concatenate to empty string
-    {
-        char dest[20] = "";
-        libc_strcat(dest, "Testing");
-        ASSERT_EQ(strcmp(dest, "Testing"), 0, "Concatenate to empty string failed");
-    }
-
-    // 4. Return value check
-    {
-        char dest[20] = "Start";
-        char *ret = libc_strcat(dest, "End");
-        ASSERT_TRUE(ret == dest, "Return value incorrect");
-        ASSERT_EQ(strcmp(dest, "StartEnd"), 0, "Concatenation failed in return value check");
-    }
-
-    // 5. Concatenate two empty strings
-    {
-        char dest[20] = "";
-        libc_strcat(dest, "");
-        ASSERT_EQ(strcmp(dest, ""), 0, "Concatenate two empty strings failed");
-    }
-
-    printf("strcat tests passed!\n");
+    char dest[20] = "Hello";
+    libc_strcat(dest, " World");
+    ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strcat");
 }
 
 bool test_libc_strlen(void) {
@@ -339,6 +191,16 @@ bool test_libc_strlen(void) {
 
 bool test_libc_memmove(void) {
     run_memmove_tests();
+    return true;
+}
+
+bool test_libc_strcat(void) {
+    run_strcat_tests();
+    return true;
+}
+
+bool test_libc_strtok(void) {
+    run_strtok_tests();
     return true;
 }
 

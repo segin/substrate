@@ -242,9 +242,7 @@ typedef int boolean_t;
 #endif
 
 int pmap_is_referenced_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)pmap; (void)sva; (void)eva; return 0; }
-int pmap_is_referenced(void *page) { (void)page; return 0; }
 int pmap_test_and_clear_ref(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; return 0; }
-void pmap_clear_reference(void *page) { (void)page; }
 int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)pmap; (void)sva; (void)eva; return 0; }
 int pmap_test_and_clear_modify(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; return 0; }
 
@@ -327,9 +325,3 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
-// Libc mocks for prefixed builds
-void* libc_malloc(size_t s) { return malloc(s); }
-void libc_free(void* p) { (void)p; }
-int libc_rand(void) { return rand(); }
-
-int syscall_trace_enabled = 0;

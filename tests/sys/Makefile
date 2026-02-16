@@ -13,7 +13,7 @@ SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test
 
 OBJS = $(SRCS:.c=.o)
 
-all: tests.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2
+all: tests.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64
 
 host_test_negdi2: host_test_negdi2.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_negdi2.c -o $@
@@ -30,8 +30,14 @@ host_test_crc32: host_test_crc32.c
 host_test_elf_execve_toctou: host_test_elf_execve_toctou.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_elf_execve_toctou.c -o $@
 
+host_test_string: host_test_string.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_string.c -o $@
+
+host_test_div64: host_test_div64.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_div64.c -o $@
+
 tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:
-	rm -f *.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2
+	rm -f *.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64
