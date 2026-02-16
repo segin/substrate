@@ -18,7 +18,7 @@ extern int64_t _syscall6(int, int, int, int, int, int, int);
 
 struct pthread_info {
     pthread_t tid;
-    void *retval;
+    void *exit_status; // Thread exit status for join
     int exited;
     int used;
     void *stack;

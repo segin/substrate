@@ -153,7 +153,7 @@ These components are essential for booting and basic system operation.
         - **Type Variants:** Float (`f` suffix) and long double (`l` suffix) versions.
         - **Error Handling:** `math_errhandling` set to `MATH_ERRNO`.
     - **`dl/`**: Dynamic linker.
-    - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
+    - **`pthreads/`**: POSIX Threads library (wraps `thr_new` and `thr_exit`).
     - **`dbm/`**: Database Manager library.
 - **`libexec/`**:
     - **`ld.so`**: Dynamic linker/loader for ELF shared objects.
