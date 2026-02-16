@@ -102,7 +102,7 @@ These components are essential for booting and basic system operation.
         - **Type Variants:** Float (`f` suffix) and long double (`l` suffix) versions.
         - **Error Handling:** `math_errhandling` set to `MATH_ERRNO`.
     - **`dl/`**: Dynamic linker.
-    - **`pthreads/`**: POSIX Threads library (wraps `thr_new`).
+    - **`pthreads/`**: POSIX Threads library (wraps `thr_new` and `thr_exit`).
     - **`dbm/`**: Database Manager library.
 - `sbin/`: System binaries (Currently empty/stubbed as we rely on external rootfs/busybox for init).
 

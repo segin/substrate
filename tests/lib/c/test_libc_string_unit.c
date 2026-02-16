@@ -63,10 +63,6 @@ int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 // Include the source file directly - Removed to avoid redefinitions
 // The test now relies on string_prefixed.o linked by the Makefile
 
-// libgcc/libc wrappers for prefixed builds
-void* libc_malloc(size_t s) { return malloc(s); }
-void libc_free(void* p) { free(p); }
-int libc_rand(void) { return rand(); }
 
 // Undef macros to restore original names if needed
 #undef strfry

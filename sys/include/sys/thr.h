@@ -18,5 +18,6 @@ struct thr_param {
 
 // Syscall number (arbitrary choice for Substrate native, or matching FreeBSD 455)
 #define SYS_THR_NEW 455
+#define SYS_THR_EXIT 431
 
 #endif

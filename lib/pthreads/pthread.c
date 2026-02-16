@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
+extern int _syscall1(int, int);
 extern int _syscall2(int, int, int);
 
 // FreeBSD-style param
@@ -64,9 +65,9 @@ void __pthread_trampoline(void *arg) {
 }
 
 void pthread_exit(void *retval) {
-    // TODO: store retval for join
-    (void)retval;
-    _exit(0);
+    _syscall1(SYS_THR_EXIT, (int)(uintptr_t)retval);
+    // Should not reach here
+    for(;;);
 }
 
 int pthread_join(pthread_t thread, void **retval) {

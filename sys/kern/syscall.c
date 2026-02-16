@@ -505,6 +505,17 @@ int kern_thr_new(struct thr_param *param, int param_size) {
     return -1;
 }
 
+int sys_thr_exit(void *retval) {
+    current_thread->retval = retval;
+    current_thread->state = THREAD_ZOMBIE;
+
+    // Wake up anybody waiting on this thread (e.g. for join)
+    sched_wakeup(&current_thread->tid);
+
+    sched_yield();
+    return 0; // Should not be reached
+}
+
 extern int sys_vm86(void *v);
 extern int sys_sysarch(int op, void *args);
 
