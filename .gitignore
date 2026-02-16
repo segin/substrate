@@ -95,6 +95,13 @@ test_minix
 test_runner
 test_mutex
 test_ext2_perf
+test_ext2_remove_perf
 test_libc_string
 test_libc_time
+test_libc_stdlib
+test_libc_ctype
+udf_test
+stat_verify
+host_test_*
+tests/sys/host_test_*
 *.img
