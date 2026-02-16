@@ -151,6 +151,16 @@ static void test_shifts(void) {
     assert_eq_i64(__ashrdi3(0x8000000000000000LL, 1), 0xC000000000000000LL, "ashr neg 1");
     assert_eq_i64(__ashrdi3(-1LL, 1), -1LL, "ashr -1 1");
     assert_eq_i64(__ashrdi3(0x8000000000000000LL, 63), -1LL, "ashr neg 63");
+
+    // Additional __ashrdi3 tests
+    assert_eq_i64(__ashrdi3(0x1234567890ABCDEFLL, 0), 0x1234567890ABCDEFLL, "ashr 0");
+    assert_eq_i64(__ashrdi3(0, 1), 0, "ashr 0 1");
+    assert_eq_i64(__ashrdi3(-100LL, 0), -100LL, "ashr -100 0");
+
+    // Masking behavior (b &= 63)
+    assert_eq_i64(__ashrdi3(0x7FFFFFFFFFFFFFFFULL, 64), 0x7FFFFFFFFFFFFFFFULL, "ashr 64 (mask)");
+    assert_eq_i64(__ashrdi3(-100LL, 64), -100LL, "ashr -100 64 (mask)");
+    assert_eq_i64(__ashrdi3(0x8000000000000000LL, 65), 0xC000000000000000LL, "ashr neg 65 (mask=1)");
 }
 
 static void test_mul(void) {
@@ -205,12 +215,15 @@ bool run_div64_tests(void) {
 #ifndef HOST_TEST
     if (failed_tests == 0) {
         kprint("DIV64: PASS\n");
+        kprint("=== DIV64 TESTS COMPLETE ===\n\n");
+        return 0;
     } else {
         char buf[64];
         snprintf(buf, sizeof(buf), "DIV64: FAIL (%d failures)\n", failed_tests);
         kprint(buf);
+        kprint("=== DIV64 TESTS COMPLETE ===\n\n");
+        return 1;
     }
-    kprint("=== DIV64 TESTS COMPLETE ===\n\n");
 #endif
     return failed_tests == 0;
 }
