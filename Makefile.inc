@@ -19,7 +19,7 @@ BRANDELF = $(TOP)/usr.bin/brandelf/brandelf
 DESTDIR ?= $(TOP)/dist
 
 # Base flags for 32-bit x86
-COMMON_FLAGS = -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx
+COMMON_FLAGS = -m32 -Wall -Wextra -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx
 USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include)

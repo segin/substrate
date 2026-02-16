@@ -64,6 +64,22 @@ int test_sysinfo(void) {
          kprintf("FAIL: sysinfo(NULL) returned %d, expected %d\n", ret, -EFAULT);
          return -1;
     }
+
+    /* 4. Check user pointer validation in sys_sysinfo */
+    /* Passing a kernel pointer (stack address) should fail */
+    extern int sys_sysinfo(struct sysinfo *info);
+    ret = sys_sysinfo(&info);
+    if (ret != -EFAULT) {
+         kprintf("FAIL: sys_sysinfo(&kernel_var) returned %d, expected %d\n", ret, -EFAULT);
+         return -1;
+    }
+
+    /* 5. Check NULL pointer validation in sys_sysinfo */
+    ret = sys_sysinfo(NULL);
+    if (ret != -EFAULT) {
+         kprintf("FAIL: sys_sysinfo(NULL) returned %d, expected %d\n", ret, -EFAULT);
+         return -1;
+    }
     
     kprint("PASS: sysinfo\n");
     return 0;

@@ -118,9 +118,9 @@ extern int sys_umask(int);
 extern int sys_reboot(int);
 extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
-/* Native specific */
-struct thr_param;
-extern int sys_thr_new(struct thr_param*, int);
+extern int sys_thr_exit(void*);
+extern int sys_thr_join(tid_t, void**);
+extern int sys_thr_self(void);
 struct pmap_stats;
 extern int sys_pmap_stats(struct pmap_stats*);
 extern int sys_proc_info(int, void*);

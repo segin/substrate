@@ -48,6 +48,7 @@ extern bool test_sema_basic(void);
 extern bool test_sema_blocking(void);
 extern bool test_futex_basic(void);
 extern bool test_futex_blocking(void);
+extern bool test_pthread_exit_logic(void);
 
 // Signal Tests
 extern bool test_signal_action(void);
@@ -55,13 +56,28 @@ extern bool test_signal_mask(void);
 extern bool test_signal_delivery_default(void);
 
 // VFS Tests
-extern bool test_fd_ref_counting(void);
+extern bool test_fd_f_counting(void);
 extern bool test_fd_dup2(void);
 extern bool test_vfs_permissions_root(void);
 extern bool test_vfs_permissions_user(void);
 extern bool test_vfs_permissions_group(void);
 extern bool test_vfs_chroot_basic(void);
 extern bool test_vfs_chroot_effect(void);
+extern bool test_vop_readdir_basic(void);
+extern bool test_vop_readdir_notdir(void);
+extern bool test_vop_link_basic(void);
+extern bool test_vop_link_notdir(void);
+extern bool test_vop_link_dir_target(void);
+extern bool test_vop_link_notsupp(void);
+extern bool test_vop_rename_basic(void);
+extern bool test_vop_rename_notsupp(void);
+extern bool test_vop_rename_bad_mount(void);
+extern bool test_vop_symlink_basic(void);
+extern bool test_vop_symlink_notdir(void);
+extern bool test_vop_symlink_notsupp(void);
+extern bool test_vop_readlink_basic(void);
+extern bool test_vop_readlink_notlink(void);
+extern bool test_vop_readlink_notsupp(void);
 
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
@@ -69,7 +85,6 @@ extern bool prop_realtime_preempts_timeshare(void);
 extern bool prop_sleep_wakeup_consistency(void);
 extern void fuzz_timer_interrupt(const uint8_t *data, size_t size);
 extern void fuzz_sched_priority(const uint8_t *data, size_t size);
-
 bool test_sched_properties(void) {
     return prop_time_is_monotonic(1000) && 
            prop_realtime_preempts_timeshare() &&
@@ -95,6 +110,9 @@ extern bool test_libc_strlen(void);
 extern bool test_gmtime_negative_years(void);
 extern bool test_libc_time(void);
 extern bool test_libc_memmove(void);
+
+// Div64 Tests
+extern bool run_div64_tests(void);
 
 typedef struct {
     const char *name;
@@ -135,16 +153,32 @@ test_case_t tests[] = {
     {"sema_block", test_sema_blocking},
     {"futex_basic", test_futex_basic},
     {"futex_block", test_futex_blocking},
+    {"pthread_exit", test_pthread_exit_logic},
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},
-    {"fd_refcnt", test_fd_ref_counting},
+    {"fd_refcnt", test_fd_f_counting},
     {"fd_dup2", test_fd_dup2},
     {"vfs_perm_root", test_vfs_permissions_root},
     {"vfs_perm_user", test_vfs_permissions_user},
     {"vfs_perm_group", test_vfs_permissions_group},
     {"vfs_chroot_basic", test_vfs_chroot_basic},
     {"vfs_chroot_effect", test_vfs_chroot_effect},
+    {"vfs_readdir_basic", test_vop_readdir_basic},
+    {"vfs_readdir_notdir", test_vop_readdir_notdir},
+    { "vfs_link_basic", test_vop_link_basic },
+    { "vfs_link_notdir", test_vop_link_notdir },
+    { "vfs_link_dir_target", test_vop_link_dir_target },
+    { "vfs_link_notsupp", test_vop_link_notsupp },
+    { "vfs_rename_basic", test_vop_rename_basic },
+    { "vfs_rename_notsupp", test_vop_rename_notsupp },
+    { "vfs_rename_bad_mount", test_vop_rename_bad_mount },
+    { "vfs_symlink_basic", test_vop_symlink_basic },
+    { "vfs_symlink_notdir", test_vop_symlink_notdir },
+    { "vfs_symlink_notsupp", test_vop_symlink_notsupp },
+    { "vfs_readlink_basic", test_vop_readlink_basic },
+    { "vfs_readlink_notlink", test_vop_readlink_notlink },
+    { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
@@ -153,6 +187,7 @@ test_case_t tests[] = {
     {"libc_time_neg", test_gmtime_negative_years},
     {"libc_time", test_libc_time},
     {"libc_memmove", test_libc_memmove},
+    {"div64", run_div64_tests},
     {NULL, NULL}
 };
 
