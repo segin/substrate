@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <limits.h>
+#include <time.h>
 
 // Mock __builtin_trap to exit with error instead of crashing, for better test reporting?
 // But __builtin_trap is compiler builtin.
@@ -170,12 +171,65 @@ void test_ashrdi3() {
 
 void test_muldi3() {
     printf("Testing __muldi3 (multiplication)...\n");
+
+    // Basic cases
     assert(__muldi3(10, 10) == 100);
     assert(__muldi3(10, -10) == -100);
     assert(__muldi3(-10, -10) == 100);
     assert(__muldi3(0, 12345) == 0);
+    assert(__muldi3(12345, 0) == 0);
+
+    // Edge cases
+    assert(__muldi3(1, 123456789) == 123456789);
+    assert(__muldi3(-1, 123456789) == -123456789);
+    assert(__muldi3(INT64_MAX, 1) == INT64_MAX);
+    assert(__muldi3(INT64_MIN, 1) == INT64_MIN);
+
+    // Overflow/Wrap-around cases (valid in 2's complement)
+    // INT64_MAX * -1 = -INT64_MAX = -(2^63 - 1) = -2^63 + 1 = INT64_MIN + 1
+    assert(__muldi3(INT64_MAX, -1) == -INT64_MAX);
+
+    // INT64_MIN * -1 -> Overflow 2^63 -> Wraps to -2^63 (INT64_MIN)
+    // (unsigned)INT64_MIN = 0x8000...0000
+    // (unsigned)-1 = 0xFFFF...FFFF
+    // Product = 0x8000...0000 << 64 - 0x8000...0000 = 0x8000...0000 (low 64 bits)
+    assert(__muldi3(INT64_MIN, -1) == INT64_MIN);
+
+    // Large numbers and bit patterns
+    // 2^32 * 2 = 2^33
     assert(__muldi3(0x100000000LL, 2) == 0x200000000LL);
+
+    // (2^32 - 1) * (2^32 - 1) = 2^64 - 2*2^32 + 1 -> wraps to -2*2^32 + 1
+    // 0xFFFFFFFF * 0xFFFFFFFF = 0xFFFFFFFE00000001
     assert(__muldi3(0xFFFFFFFFLL, 0xFFFFFFFFLL) == 0xFFFFFFFE00000001LL);
+
+    // Cross product test (exercising the hi_lo + lo_hi logic)
+    // A = 2^32 + 1, B = 2^32 + 2
+    // A * B = (2^32 * 2^32) + 2*2^32 + 1*2^32 + 2 = 2^64 + 3*2^32 + 2 -> wraps to 3*2^32 + 2
+    int64_t bigA = (1LL << 32) + 1;
+    int64_t bigB = (1LL << 32) + 2;
+    int64_t expected = (3LL << 32) + 2;
+    assert(__muldi3(bigA, bigB) == expected);
+
+    // Randomized testing against host multiplication
+    printf("  > Running 100,000 randomized multiplication tests...\n");
+    srand(time(NULL));
+    for (int i = 0; i < 100000; i++) {
+        uint64_t ua = ((uint64_t)rand() << 32) | rand();
+        uint64_t ub = ((uint64_t)rand() << 32) | rand();
+        int64_t a = (int64_t)ua;
+        int64_t b = (int64_t)ub;
+
+        int64_t host_res = a * b;
+        int64_t lib_res = __muldi3(a, b);
+
+        if (host_res != lib_res) {
+            printf("FAIL: %lld * %lld = %lld (expected %lld)\n",
+                   (long long)a, (long long)b, (long long)lib_res, (long long)host_res);
+            assert(0);
+        }
+    }
+
     printf("PASS\n");
 }
 
