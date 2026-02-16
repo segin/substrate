@@ -213,6 +213,8 @@ void test_memmove_comprehensive(void) {
     free(buffer);
     free(control);
     printf("test_memmove_comprehensive: PASS\n");
+}
+
 void test_strcmp(void) {
     ASSERT_EQ(kernel_strcmp("", ""), 0, "strcmp empty-empty");
     ASSERT_EQ(kernel_strcmp("a", "a"), 0, "strcmp equal single char");
@@ -275,6 +277,36 @@ void test_strncmp(void) {
     printf("test_strncmp: PASS\n");
 }
 
+void test_strchr(void) {
+    char buf[] = "Hello World";
+
+    // Found at beginning
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'H'), (uintptr_t)buf, "strchr 'H' (beginning)");
+
+    // Found in middle
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'W'), (uintptr_t)(buf + 6), "strchr 'W' (middle)");
+
+    // Found at end
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'd'), (uintptr_t)(buf + 10), "strchr 'd' (end)");
+
+    // Not found
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'z'), (uintptr_t)NULL, "strchr 'z' (not found)");
+
+    // Null terminator search
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, '\0'), (uintptr_t)(buf + 11), "strchr '\\0' (terminator)");
+
+    // Empty string
+    char empty[] = "";
+    ASSERT_EQ((uintptr_t)kernel_strchr(empty, '\0'), (uintptr_t)empty, "strchr empty string '\\0'");
+    ASSERT_EQ((uintptr_t)kernel_strchr(empty, 'a'), (uintptr_t)NULL, "strchr empty string 'a'");
+
+    // Multiple occurrences
+    char repeated[] = "bananana";
+    ASSERT_EQ((uintptr_t)kernel_strchr(repeated, 'a'), (uintptr_t)(repeated + 1), "strchr multiple 'a' (first occurrence)");
+
+    printf("test_strchr: PASS\n");
+}
+
 int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
@@ -283,6 +315,7 @@ int main(void) {
     test_memmove_comprehensive();
     test_strcmp();
     test_strncmp();
+    test_strchr();
     printf("All Tests Passed\n");
     return 0;
 }
