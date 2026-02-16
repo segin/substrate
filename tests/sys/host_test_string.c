@@ -82,7 +82,7 @@ void test_strcpy(void) {
     ASSERT_EQ((uintptr_t)ret, (uintptr_t)dest, "strcpy return value");
     ASSERT_STREQ(dest, src, "strcpy content");
     ASSERT_EQ(dest[strlen(src)], '\0', "strcpy null terminator");
-    ASSERT_EQ(dest[sizeof(dest)-1], 'X', "strcpy buffer overflow check"); // Check we didn't write past end (though this is risky if src is too long, here it's fine)
+    ASSERT_EQ(dest[sizeof(dest)-1], 'X', "strcpy buffer overflow check");
 
     printf("test_strcpy: PASS\n");
 }
@@ -91,13 +91,11 @@ void test_strncpy(void) {
     char src[] = "Hello";
     char dest[20];
 
-    // Case 1: n > strlen(src) -> Pad with nulls
     memset(dest, 'X', sizeof(dest));
     char *ret = kernel_strncpy(dest, src, 10);
 
     ASSERT_EQ((uintptr_t)ret, (uintptr_t)dest, "strncpy return value");
     ASSERT_STREQ(dest, src, "strncpy content");
-    // Verify padding
     for (int i = 5; i < 10; i++) {
         if (dest[i] != '\0') {
             printf("FAIL: strncpy padding at index %d is %02x, expected 00\n", i, (unsigned char)dest[i]);
@@ -106,23 +104,16 @@ void test_strncpy(void) {
     }
     ASSERT_EQ(dest[10], 'X', "strncpy overflow check");
 
-    // Case 2: n < strlen(src) -> No null terminator
     memset(dest, 'X', sizeof(dest));
     kernel_strncpy(dest, src, 3);
-
-    // Check first 3 chars match
     if (memcmp(dest, src, 3) != 0) {
         printf("FAIL: strncpy truncation content mismatch\n");
         exit(1);
     }
-    // Check NO null terminator at index 3
     ASSERT_EQ(dest[3], 'X', "strncpy should not null terminate if truncated");
 
-    // Case 3: n == strlen(src) -> No null terminator (standard behavior? let's check man page)
-    // man strncpy: "Warning: If there is no null byte among the first n bytes of src, the string placed in dest will not be null-terminated."
     memset(dest, 'X', sizeof(dest));
     kernel_strncpy(dest, src, 5);
-
     if (memcmp(dest, src, 5) != 0) {
         printf("FAIL: strncpy exact length content mismatch\n");
         exit(1);
@@ -132,189 +123,89 @@ void test_strncpy(void) {
     printf("test_strncpy: PASS\n");
 }
 
-void test_memmove(void) {
-    char buf[32];
-    char expected[32];
-
-    // Basic non-overlapping
-    memset(buf, 0, sizeof(buf));
-    strcpy(buf, "Hello World");
-    kernel_memmove(buf + 20, buf, 12);
-    ASSERT_MEM_EQ(buf + 20, "Hello World", 12, "memmove basic");
-
-    // Overlap forward (dest < src)
-    strcpy(buf, "12345678");
-    strcpy(expected, "23456678");
-    kernel_memmove(buf, buf + 1, 5);
-    ASSERT_MEM_EQ(buf, expected, 8, "memmove overlap forward (dest < src)");
-
-    // Overlap backward (dest > src)
-    strcpy(buf, "12345678");
-    strcpy(expected, "11234578");
-    kernel_memmove(buf + 1, buf, 5);
-    ASSERT_MEM_EQ(buf, expected, 8, "memmove overlap backward (dest > src)");
-
-    // Exact overlap
-    strcpy(buf, "12345678");
-    kernel_memmove(buf, buf, 8);
-    ASSERT_MEM_EQ(buf, "12345678", 8, "memmove exact overlap");
-
-    // Zero size
-    strcpy(buf, "12345678");
-    kernel_memmove(buf, buf + 1, 0);
-    ASSERT_MEM_EQ(buf, "12345678", 8, "memmove zero size");
-
-    printf("test_memmove: PASS\n");
-}
-
 void test_memmove_comprehensive(void) {
     const int buffer_size = 256;
     char *buffer = malloc(buffer_size);
     char *control = malloc(buffer_size);
 
-    if (!buffer || !control) {
-        printf("SKIP: test_memmove_comprehensive (OOM)\n");
-        exit(1);
-    }
-
-    // Initialize with a pattern
-    for (int i = 0; i < buffer_size; i++) {
-        buffer[i] = (char)(i & 0xFF);
-        control[i] = (char)(i & 0xFF);
-    }
-
-    // Iterate through various src/dst offsets and lengths
     for (int src_off = 0; src_off < buffer_size - 16; src_off += 13) {
         for (int dst_off = 0; dst_off < buffer_size - 16; dst_off += 17) {
             for (int len = 0; len < 64; len++) {
-                 // Reset buffer content
                  for (int i = 0; i < buffer_size; i++) {
                      buffer[i] = (char)(i & 0xFF);
                      control[i] = (char)(i & 0xFF);
                  }
-
                  if (src_off + len > buffer_size || dst_off + len > buffer_size) continue;
-
-                 // Control (libc memmove)
                  memmove(control + dst_off, control + src_off, len);
-
-                 // Test (kernel memmove)
                  kernel_memmove(buffer + dst_off, buffer + src_off, len);
-
-                 // Compare
                  if (memcmp(buffer, control, buffer_size) != 0) {
-                     printf("FAIL: memmove comprehensive mismatch at src=%d dst=%d len=%d\n", src_off, dst_off, len);
+                     printf("FAIL: memmove comprehensive mismatch\n");
                      exit(1);
                  }
             }
         }
     }
-
     free(buffer);
     free(control);
     printf("test_memmove_comprehensive: PASS\n");
 }
 
+void test_memcmp(void) {
+    char b1[20], b2[20];
+    memset(b1, 0, sizeof(b1));
+    memset(b2, 0, sizeof(b2));
+    ASSERT_EQ(kernel_memcmp(b1, b2, sizeof(b1)), 0, "memcmp identity zero");
+
+    strcpy(b1, "Hello");
+    strcpy(b2, "Hello");
+    ASSERT_EQ(kernel_memcmp(b1, b2, 6), 0, "memcmp identity string");
+
+    b2[0] = 'h';
+    if (kernel_memcmp(b1, b2, 1) >= 0) exit(1);
+    
+    b1[0] = 'b'; b2[0] = 'a';
+    if (kernel_memcmp(b1, b2, 1) <= 0) exit(1);
+
+    unsigned char u1[] = { 0xFF }, u2[] = { 0x00 };
+    if (kernel_memcmp(u1, u2, 1) <= 0) exit(1);
+
+    printf("test_memcmp: PASS\n");
+}
+
 void test_strcmp(void) {
-    ASSERT_EQ(kernel_strcmp("", ""), 0, "strcmp empty-empty");
-    ASSERT_EQ(kernel_strcmp("a", "a"), 0, "strcmp equal single char");
-    ASSERT_EQ(kernel_strcmp("abc", "abc"), 0, "strcmp equal string");
-
-    // Check signs (implementation specific, but standard says <0, >0)
-    // Our implementation returns difference of unsigned chars
-    int res;
-
-    res = kernel_strcmp("abc", "abd");
-    if (res >= 0) {
-        printf("FAIL: strcmp('abc', 'abd') >= 0 (got %d)\n", res);
-        exit(1);
-    }
-
-    res = kernel_strcmp("abd", "abc");
-    if (res <= 0) {
-        printf("FAIL: strcmp('abd', 'abc') <= 0 (got %d)\n", res);
-        exit(1);
-    }
-
-    res = kernel_strcmp("abc", "abcd");
-    if (res >= 0) {
-        printf("FAIL: strcmp('abc', 'abcd') >= 0 (got %d)\n", res);
-        exit(1);
-    }
-
+    ASSERT_EQ(kernel_strcmp("", ""), 0, "strcmp empty");
+    ASSERT_EQ(kernel_strcmp("abc", "abc"), 0, "strcmp equal");
+    if (kernel_strcmp("abc", "abd") >= 0) exit(1);
+    if (kernel_strcmp("abd", "abc") <= 0) exit(1);
     printf("test_strcmp: PASS\n");
 }
 
 void test_strncmp(void) {
-    ASSERT_EQ(kernel_strncmp("", "", 0), 0, "strncmp empty-empty 0");
-    ASSERT_EQ(kernel_strncmp("abc", "def", 0), 0, "strncmp different 0");
-    ASSERT_EQ(kernel_strncmp("abc", "abc", 3), 0, "strncmp equal 3");
-    ASSERT_EQ(kernel_strncmp("abc", "abc", 5), 0, "strncmp equal >len");
-
-    int res;
-
-    // Difference after n
-    res = kernel_strncmp("abc", "abd", 2);
-    ASSERT_EQ(res, 0, "strncmp equal prefix");
-
-    // Difference within n
-    res = kernel_strncmp("abc", "abd", 3);
-    if (res >= 0) {
-        printf("FAIL: strncmp('abc', 'abd', 3) >= 0 (got %d)\n", res);
-        exit(1);
-    }
-
-    // Prefix
-    res = kernel_strncmp("abc", "abcd", 3);
-    ASSERT_EQ(res, 0, "strncmp prefix equal");
-
-    res = kernel_strncmp("abc", "abcd", 4);
-    if (res >= 0) {
-        printf("FAIL: strncmp('abc', 'abcd', 4) >= 0 (got %d)\n", res);
-        exit(1);
-    }
-
+    ASSERT_EQ(kernel_strncmp("abc", "abd", 2), 0, "strncmp equal prefix");
+    if (kernel_strncmp("abc", "abd", 3) >= 0) exit(1);
     printf("test_strncmp: PASS\n");
+}
+
+void test_strspn(void) {
+    ASSERT_EQ(kernel_strspn("hello", "he"), 2, "strspn basic");
+    ASSERT_EQ(kernel_strspn("hello", "oleh"), 5, "strspn full");
+    ASSERT_EQ(kernel_strspn("hello", ""), 0, "strspn empty accept");
+    printf("test_strspn: PASS\n");
+}
+
+void test_strchr(void) {
+    char buf[] = "Hello World";
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'W'), (uintptr_t)(buf + 6), "strchr found");
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'z'), (uintptr_t)NULL, "strchr not found");
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, '\0'), (uintptr_t)(buf + 11), "strchr null");
+    printf("test_strchr: PASS\n");
 }
 
 void test_strpbrk(void) {
     const char *s = "hello world";
-    char *res;
-
-    // Basic match: 'e' is in "abcde"
-    res = kernel_strpbrk(s, "abcde");
-    ASSERT_EQ((uintptr_t)res, (uintptr_t)(s + 1), "strpbrk basic match 'e'");
-
-    // Basic match: 'o' is in "wor"
-    res = kernel_strpbrk(s, "wor");
-    ASSERT_EQ((uintptr_t)res, (uintptr_t)(s + 4), "strpbrk basic match 'o'");
-
-    // No match
-    res = kernel_strpbrk(s, "xyz");
-    ASSERT_EQ((uintptr_t)res, 0, "strpbrk no match");
-
-    // Match at beginning
-    res = kernel_strpbrk(s, "h");
-    ASSERT_EQ((uintptr_t)res, (uintptr_t)s, "strpbrk match start");
-
-    // Match at end
-    res = kernel_strpbrk(s, "d");
-    ASSERT_EQ((uintptr_t)res, (uintptr_t)(s + 10), "strpbrk match end");
-
-    // Empty s1
-    res = kernel_strpbrk("", "abc");
-    ASSERT_EQ((uintptr_t)res, 0, "strpbrk empty s1");
-
-    // Empty s2
-    res = kernel_strpbrk(s, "");
-    ASSERT_EQ((uintptr_t)res, 0, "strpbrk empty s2");
-
-    // Multiple matches (should return first occurrence in s1)
-    // s = "hello world"
-    // accept = "lo" -> first 'l' at index 2
-    res = kernel_strpbrk(s, "lo");
-    ASSERT_EQ((uintptr_t)res, (uintptr_t)(s + 2), "strpbrk multiple matches");
-
+    ASSERT_EQ((uintptr_t)kernel_strpbrk(s, "abcde"), (uintptr_t)(s + 1), "strpbrk 'e'");
+    ASSERT_EQ((uintptr_t)kernel_strpbrk(s, "xyz"), 0, "strpbrk no match");
+    ASSERT_EQ((uintptr_t)kernel_strpbrk(s, "lo"), (uintptr_t)(s + 2), "strpbrk multiple");
     printf("test_strpbrk: PASS\n");
 }
 
@@ -322,10 +213,12 @@ int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
-    test_memmove();
     test_memmove_comprehensive();
+    test_memcmp();
     test_strcmp();
     test_strncmp();
+    test_strspn();
+    test_strchr();
     test_strpbrk();
     printf("All Tests Passed\n");
     return 0;

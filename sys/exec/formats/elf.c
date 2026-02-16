@@ -352,15 +352,6 @@ static int capture_strlen(const char *s, size_t *out_len) {
     }
 }
 
-static int capture_strcpy(char *dst, const char *src) {
-    if (is_user_ptr(src)) {
-        return copyinstr(src, dst, 4096, NULL);
-    } else {
-        strcpy(dst, src);
-        return 0;
-    }
-}
-
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, -1 on failure
 int elf_execve(const char *path, char *const argv[], char *const envp[]) {
@@ -457,24 +448,64 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
 
     // Copy strings
     char *p_buf = arg_buffer;
+    size_t remaining = strings_size;
+
     for (int i = 0; i < argc; i++) {
         char *uarg;
-        capture_ptr(argv, i, &uarg);
+        if (capture_ptr(argv, i, &uarg) != 0) goto cleanup;
         k_argv[i] = p_buf;
-        size_t len;
-        capture_strlen(uarg, &len);
-        capture_strcpy(p_buf, uarg);
-        p_buf += len;
+
+        size_t copied_len = 0;
+        int ret;
+        if (is_user_ptr(uarg)) {
+            ret = copyinstr(uarg, p_buf, remaining, &copied_len);
+        } else {
+            size_t len = strlen(uarg) + 1;
+            if (len > remaining) {
+                ret = -36; // ENAMETOOLONG
+            } else {
+                strcpy(p_buf, uarg);
+                copied_len = len;
+                ret = 0;
+            }
+        }
+
+        if (ret != 0) {
+            kprint("execve: Failed to copy argument (changed?)\n");
+            goto cleanup;
+        }
+
+        p_buf += copied_len;
+        remaining -= copied_len;
     }
 
     for (int i = 0; i < envc; i++) {
         char *uarg;
-        capture_ptr(envp, i, &uarg);
+        if (capture_ptr(envp, i, &uarg) != 0) goto cleanup;
         k_envp[i] = p_buf;
-        size_t len;
-        capture_strlen(uarg, &len);
-        capture_strcpy(p_buf, uarg);
-        p_buf += len;
+
+        size_t copied_len = 0;
+        int ret;
+        if (is_user_ptr(uarg)) {
+            ret = copyinstr(uarg, p_buf, remaining, &copied_len);
+        } else {
+            size_t len = strlen(uarg) + 1;
+            if (len > remaining) {
+                ret = -36; // ENAMETOOLONG
+            } else {
+                strcpy(p_buf, uarg);
+                copied_len = len;
+                ret = 0;
+            }
+        }
+
+        if (ret != 0) {
+            kprint("execve: Failed to copy env (changed?)\n");
+            goto cleanup;
+        }
+
+        p_buf += copied_len;
+        remaining -= copied_len;
     }
     
     // Create new address space for this process

@@ -8,6 +8,7 @@
 #include <vm/vm_kmem.h>
 #include <kern/sched.h>
 #include <sys/poll.h>
+#include <sys/errno.h>
 #include <intr.h>
 
 #define TTY_MAGIC 0x5401
@@ -617,38 +618,59 @@ int tty_write(struct tty *tty, const char *buf, int len) {
 
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     if (!tty) return -1;
+
+    struct termios k_termios;
+    struct winsize k_winsize;
+    int k_int;
     int ret = -1;
+
+    /*
+     * Copy-in phase (unlocked)
+     * We must not hold spinlocks while accessing user memory via copyin/copyout.
+     */
+    switch (cmd) {
+        case TCSETS:
+        case TCSETSW:
+        case TCSETSF:
+            if (copyin((void*)arg, &k_termios, sizeof(struct termios)) != 0) return -EFAULT;
+            break;
+        case TIOCSWINSZ:
+            if (copyin((void*)arg, &k_winsize, sizeof(struct winsize)) != 0) return -EFAULT;
+            break;
+        case TIOCSPGRP:
+            if (copyin((void*)arg, &k_int, sizeof(int)) != 0) return -EFAULT;
+            break;
+    }
 
     TTY_LOCK(tty);
 
     switch (cmd) {
         case TCGETS:
-            if (arg) memcpy((void*)arg, &tty->termios, sizeof(struct termios));
+            k_termios = tty->termios;
             ret = 0;
             break;
         case TCSETS:
         case TCSETSW:
         case TCSETSF:
-            if (arg) memcpy(&tty->termios, (void*)arg, sizeof(struct termios));
+            tty->termios = k_termios;
             if (tty->driver->set_termios) tty->driver->set_termios(tty);
             ret = 0;
             break;
         case TIOCGWINSZ:
-            if (arg) memcpy((void*)arg, &tty->winsize, sizeof(struct winsize));
+            k_winsize = tty->winsize;
             ret = 0;
             break;
         case TIOCSWINSZ:
-            if (arg) memcpy(&tty->winsize, (void*)arg, sizeof(struct winsize));
-            // Send SIGWINCH?
+            tty->winsize = k_winsize;
             if (tty->pgrp > 0) signal_send_group(tty->pgrp, SIGWINCH);
             ret = 0;
             break;
         case TIOCSPGRP:
-            if (arg) tty->pgrp = *(int*)arg;
+            tty->pgrp = k_int;
             ret = 0;
             break;
         case TIOCGPGRP:
-            if (arg) *(int*)arg = tty->pgrp;
+            k_int = tty->pgrp;
             ret = 0;
             break;
         case TIOCSCTTY: {
@@ -700,10 +722,32 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             break;
         }
     }
+
+    /*
+     * Call driver ioctl if not handled (still locked to preserve existing semantics)
+     * Warning: drivers accessing user pointers via arg directly will still be vulnerable/unsafe.
+     */
     if (ret == -1 && tty->driver->ioctl) {
         ret = tty->driver->ioctl(tty, cmd, arg);
     }
+
     TTY_UNLOCK(tty);
+
+    /* Copy-out phase (unlocked) */
+    if (ret == 0) {
+        switch (cmd) {
+            case TCGETS:
+                if (copyout(&k_termios, (void*)arg, sizeof(struct termios)) != 0) return -EFAULT;
+                break;
+            case TIOCGWINSZ:
+                if (copyout(&k_winsize, (void*)arg, sizeof(struct winsize)) != 0) return -EFAULT;
+                break;
+            case TIOCGPGRP:
+                if (copyout(&k_int, (void*)arg, sizeof(int)) != 0) return -EFAULT;
+                break;
+        }
+    }
+
     return ret;
 }
 

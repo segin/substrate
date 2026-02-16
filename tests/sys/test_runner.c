@@ -59,7 +59,7 @@ void run_kernel_tests(void) {
     }
 
     if (all || strcmp(test_arg, "div64") == 0) {
-        run_div64_tests();
+        test_div64();
     }
 
     if (all || strcmp(test_arg, "kobject") == 0) {
