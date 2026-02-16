@@ -48,6 +48,7 @@ extern bool test_sema_basic(void);
 extern bool test_sema_blocking(void);
 extern bool test_futex_basic(void);
 extern bool test_futex_blocking(void);
+extern bool test_pthread_exit_logic(void);
 
 // Signal Tests
 extern bool test_signal_action(void);
@@ -110,6 +111,9 @@ extern bool test_gmtime_negative_years(void);
 extern bool test_libc_time(void);
 extern bool test_libc_memmove(void);
 
+// Div64 Tests
+extern bool run_div64_tests(void);
+
 typedef struct {
     const char *name;
     bool (*func)(void);
@@ -149,6 +153,7 @@ test_case_t tests[] = {
     {"sema_block", test_sema_blocking},
     {"futex_basic", test_futex_basic},
     {"futex_block", test_futex_blocking},
+    {"pthread_exit", test_pthread_exit_logic},
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},
@@ -182,6 +187,7 @@ test_case_t tests[] = {
     {"libc_time_neg", test_gmtime_negative_years},
     {"libc_time", test_libc_time},
     {"libc_memmove", test_libc_memmove},
+    {"div64", run_div64_tests},
     {NULL, NULL}
 };
 

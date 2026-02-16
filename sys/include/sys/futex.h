@@ -119,4 +119,7 @@ void futex_exit_cleanup(void);
 int futex_lock_pi(int *uaddr, int detect, int trylock, int private);
 int futex_unlock_pi(int *uaddr, int private);
 
+/* Internal: Wake thread after exit */
+void futex_wake_exited_thread(int *uaddr);
+
 #endif /* _SYS_FUTEX_H */

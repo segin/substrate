@@ -40,6 +40,10 @@ static unsigned long line_number = 1;
 static int at_line_start = 1;
 static int prev_blank = 0;
 
+/* Output buffer */
+static char out_buf[BUFSIZE];
+static size_t out_buf_idx = 0;
+
 /* Exit status */
 static int exit_status = 0;
 
@@ -66,11 +70,48 @@ static ssize_t write_all(int fd, const char *buf, size_t count)
 }
 
 /*
+ * Flush the output buffer
+ */
+static int flush_buf(void)
+{
+    if (out_buf_idx == 0)
+        return 0;
+
+    int ret = write_all(STDOUT_FILENO, out_buf, out_buf_idx) < 0 ? -1 : 0;
+    out_buf_idx = 0;
+    return ret;
+}
+
+/*
+ * Write to the output buffer
+ */
+static int write_buf(const char *s, size_t len)
+{
+    if (opt_unbuffered)
+        return write_all(STDOUT_FILENO, s, len) == (ssize_t)len ? 0 : -1;
+
+    if (len > BUFSIZE) {
+        if (flush_buf() < 0)
+            return -1;
+        return write_all(STDOUT_FILENO, s, len) == (ssize_t)len ? 0 : -1;
+    }
+
+    if (out_buf_idx + len > BUFSIZE) {
+        if (flush_buf() < 0)
+            return -1;
+    }
+
+    memcpy(out_buf + out_buf_idx, s, len);
+    out_buf_idx += len;
+    return 0;
+}
+
+/*
  * Write a single character
  */
 static int write_char(char c)
 {
-    return write_all(STDOUT_FILENO, &c, 1) == 1 ? 0 : -1;
+    return write_buf(&c, 1);
 }
 
 /*
@@ -78,8 +119,7 @@ static int write_char(char c)
  */
 static int write_str(const char *s)
 {
-    size_t len = strlen(s);
-    return write_all(STDOUT_FILENO, s, len) == (ssize_t)len ? 0 : -1;
+    return write_buf(s, strlen(s));
 }
 
 /*
@@ -90,7 +130,7 @@ static int output_line_number(void)
     char numbuf[16];
     int len = snprintf(numbuf, sizeof(numbuf), "%6lu\t", line_number);
     line_number++;
-    return write_all(STDOUT_FILENO, numbuf, len) == len ? 0 : -1;
+    return write_buf(numbuf, len);
 }
 
 /*
@@ -184,6 +224,7 @@ static int cat_file_with_options(int fd, const char *name)
 {
     unsigned char buf[BUFSIZE];
     ssize_t n;
+    int ret = 0;
     
     while ((n = read(fd, buf, sizeof(buf))) > 0) {
         for (ssize_t i = 0; i < n; i++) {
@@ -193,17 +234,21 @@ static int cat_file_with_options(int fd, const char *name)
                     exit(exit_status);
                 }
                 fprintf(stderr, "%s: write error: %s\n", progname, strerror(errno));
-                return -1;
+                ret = -1;
+                goto out;
             }
         }
     }
     
     if (n < 0) {
         fprintf(stderr, "%s: %s: %s\n", progname, name, strerror(errno));
-        return -1;
+        ret = -1;
     }
     
-    return 0;
+out:
+    if (flush_buf() < 0 && ret == 0)
+        ret = -1;
+    return ret;
 }
 
 /*

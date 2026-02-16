@@ -15,12 +15,13 @@ UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_cow.c \
              unit/arch/test_trampoline.c \
              unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c unit/kern/test_sched_decay.c \
-             unit/kern/test_sync.c unit/kern/test_signal.c \
+             unit/kern/test_sync.c unit/kern/test_signal.c unit/kern/test_pthread_exit.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
              unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
-             sys/test_sysinfo.c lib/c/test_string.c unit/lib/test_time.c
+             sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c \
+             sys/test_div64.c
 
 UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
@@ -51,10 +52,10 @@ test_ext2_remove_perf: unit/fs/test_ext2_remove_perf.c
 test_minix: unit/fs/test_minix_standalone.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
-test_libc_string: lib/c/test_string.c ../lib/c/src/string.c
+test_libc_string: lib/c/test_libc_string_unit.c ../lib/c/src/string.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
-	$(CC) $(CFLAGS_COMMON) lib/c/test_string.c string_prefixed.o -o $@
+	$(CC) $(CFLAGS_COMMON) lib/c/test_libc_string_unit.c string_prefixed.o -o $@
 
 test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_time_standalone.c -o $@
@@ -100,6 +101,9 @@ vm_map_host.o: vm_map_host.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: sys/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
+test_libc_string_unit.o: lib/c/test_libc_string_unit.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+
 %.o: lib/c/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/lib/%.c
@@ -117,5 +121,3 @@ test_runner: test_runner.o $(CORE_OBJS) $(UNIT_OBJS) $(MOCKS_OBJ) string_prefixe
 string_prefixed.o: ../lib/c/src/string.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
-
-	rm -f test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype *.o

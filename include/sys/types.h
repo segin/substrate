@@ -2,6 +2,7 @@
 #define _SYS_TYPES_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 typedef int32_t pid_t;
 typedef int32_t tid_t;
@@ -12,7 +13,7 @@ typedef int64_t blkcnt_t;
 typedef uint64_t ino_t;
 typedef uint32_t nlink_t;
 typedef uint32_t blksize_t;
-typedef uint32_t size_t;
+// size_t from stddef.h
 typedef int32_t ssize_t;
 typedef int32_t mode_t;
 typedef uint32_t dev_t;

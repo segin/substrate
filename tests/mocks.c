@@ -106,6 +106,7 @@ void outb(uint16_t p, uint8_t v) { (void)p; (void)v; }
 uint8_t inb(uint16_t p) { (void)p; return 0; }
 uint32_t lapic_get_id() { return 0; }
 int smp_get_cpu_count() { return 1; }
+int smp_get_cpu_id() { return 0; }
 void sched_smp_init() {}
 
 // kmem mocks for host
@@ -127,6 +128,7 @@ void switch_to(void *prev, void *next) {
 void isr128() {}
 void fork_child_return(void) {}
 
+// Syscall Mocks - Only keep those NOT in syscall.c or other linked files
 int sys_fork(void) { return 0; }
 
 // Other missing functions
@@ -240,7 +242,9 @@ typedef int boolean_t;
 #endif
 
 int pmap_is_referenced_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)pmap; (void)sva; (void)eva; return 0; }
+int pmap_is_referenced(void *page) { (void)page; return 0; }
 int pmap_test_and_clear_ref(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; return 0; }
+void pmap_clear_reference(void *page) { (void)page; }
 int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)pmap; (void)sva; (void)eva; return 0; }
 int pmap_test_and_clear_modify(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; return 0; }
 
@@ -287,7 +291,7 @@ void sched_get_system_load(uint32_t *loads) { loads[0]=0; loads[1]=0; loads[2]=0
 uint32_t pmm_get_page(void) { return (uint32_t)(uintptr_t)malloc(4096); }
 
 void uma_reclaim(void) {}
-// libc mocks removed (in test_string.c)
+// libc mocks removed (in test_libc_string_unit.c)
 
 // UMA Mocks
 typedef struct uma_zone {
@@ -322,3 +326,10 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 }
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
+
+// Libc mocks for prefixed builds
+void* libc_malloc(size_t s) { return malloc(s); }
+void libc_free(void* p) { (void)p; }
+int libc_rand(void) { return rand(); }
+
+int syscall_trace_enabled = 0;

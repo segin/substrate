@@ -1230,27 +1230,29 @@ static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wfree-nonheap-object"
     int stack_buf[2048];
+    int *heap_stack = NULL;
+    int *stack = stack_buf;
     size_t stack_cap = 2048;
     size_t stack_len = 0;
-    int *stack = stack_buf;
 
 #define PUSH_STACK(id_val) do { \
     if (stack_len == stack_cap) { \
         size_t new_cap = stack_cap * 2; \
         int *new_stack; \
-        if (stack == stack_buf) { \
+        if (!heap_stack) { \
             new_stack = (int *)malloc(new_cap * sizeof(*new_stack)); \
             if (new_stack) { \
-                memcpy(new_stack, stack, stack_len * sizeof(*stack)); \
+                memcpy(new_stack, stack_buf, stack_len * sizeof(*stack_buf)); \
             } \
         } else { \
-            new_stack = (int *)realloc(stack, new_cap * sizeof(*new_stack)); \
+            new_stack = (int *)realloc(heap_stack, new_cap * sizeof(*new_stack)); \
         } \
         if (!new_stack) { \
-            if (stack != stack_buf) free(stack); \
+            if (heap_stack) free(heap_stack); \
             return; \
         } \
-        stack = new_stack; \
+        heap_stack = new_stack; \
+        stack = heap_stack; \
         stack_cap = new_cap; \
     } \
     stack[stack_len++] = (id_val); \
@@ -1310,8 +1312,8 @@ static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_
 
 #undef PUSH_STACK
 
-    if (stack != stack_buf) {
-        free(stack);
+    if (heap_stack) {
+        free(heap_stack);
     }
 #pragma GCC diagnostic pop
 }
