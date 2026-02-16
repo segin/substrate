@@ -1,0 +1,28 @@
+.\"
+.\" THR_SELF(2) - Substrate Native Personality
+.\"
+.TH THR_SELF 2 "May 2024" "Substrate OS" "System Calls"
+.SH NAME
+thr_self \- get the current thread ID
+.SH SYNOPSIS
+.nf
+.B #include <sys/thr.h>
+.PP
+.BI "long thr_self(void);
+.fi
+.SH DESCRIPTION
+.BR thr_self ()
+returns the thread ID (TID) of the calling thread.
+Each thread in the system has a unique TID.
+The main thread of a process has a TID equal to the process's PID.
+.SH RETURN VALUE
+The ID of the current thread.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 432
+Arguments:      None
+.fi
+.SH SEE ALSO
+.BR getpid (2),
+.BR thr_new (2)

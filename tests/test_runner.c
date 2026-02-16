@@ -48,6 +48,7 @@ extern bool test_sema_basic(void);
 extern bool test_sema_blocking(void);
 extern bool test_futex_basic(void);
 extern bool test_futex_blocking(void);
+extern bool test_pthread_exit_logic(void);
 
 // Signal Tests
 extern bool test_signal_action(void);
@@ -152,6 +153,7 @@ test_case_t tests[] = {
     {"sema_block", test_sema_blocking},
     {"futex_basic", test_futex_basic},
     {"futex_block", test_futex_blocking},
+    {"pthread_exit", test_pthread_exit_logic},
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},
