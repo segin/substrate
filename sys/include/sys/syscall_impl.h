@@ -121,6 +121,7 @@ extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldle
 extern int sys_thr_exit(void*);
 extern int sys_thr_join(tid_t, void**);
 extern int sys_thr_self(void);
+extern int sys_thr_new(struct thr_param*, int);
 struct pmap_stats;
 extern int sys_pmap_stats(struct pmap_stats*);
 extern int sys_proc_info(int, void*);
