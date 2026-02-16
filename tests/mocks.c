@@ -31,7 +31,7 @@ void fuse_fs_init() {}
 void p9_init() {}
 void devfs_init() {}
 void vfs_init_mock_root(void);
-void nchinit(void) {}
+// nchinit and fs_root removed (linked from vfs)
 
 // Driver init mocks
 void scsi_init() {}
@@ -110,6 +110,7 @@ void sched_smp_init() {}
 
 // kmem mocks for host
 void *kmalloc(size_t size) {
+    if (size > 4096) return NULL;
     // Host tests use standard malloc for kmalloc
     return malloc(size);
 }
@@ -268,8 +269,6 @@ struct nameidata;
 int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 struct vnode;
-void vput(struct vnode *vp) { (void)vp; }
-void vrele(struct vnode *vp) { (void)vp; }
 
 // vm_map_lookup stub
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
@@ -291,6 +290,7 @@ void sched_get_system_load(uint32_t *loads) { loads[0]=0; loads[1]=0; loads[2]=0
 uint32_t pmm_get_page(void) { return (uint32_t)(uintptr_t)malloc(4096); }
 
 void uma_reclaim(void) {}
+// libc mocks removed (in test_libc_string_unit.c)
 
 // UMA Mocks
 typedef struct uma_zone {

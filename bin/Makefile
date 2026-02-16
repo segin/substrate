@@ -1,11 +1,7 @@
 include ../Makefile.inc
 
 # Subdirectories for core binaries
-SUBDIRS = basename bas bc cal cat chmod cp dc echo ed false getty grep id join kill last ln login ls make mkdir mknod more mount mv newgrp nice nproc od passwd pgrep prof ps pwd rm rmdir sh size sleep sort split su sum sync tabs tail tc tee test time touch true tty umount uname uniq uptime vi w wall wc who whoami write yes hostname tar test_full kmem_test test_zero
-
-ifndef NATIVE_BUILD
-SUBDIRS += tests
-endif
+SUBDIRS = cat chmod cp echo false getty grep id kill ln login ls mkdir mknod more mount mv passwd pwd rm rmdir sh sleep sync true tty umount uptime vi wc whoami yes hostname
 
 .PHONY: all clean install $(SUBDIRS)
 

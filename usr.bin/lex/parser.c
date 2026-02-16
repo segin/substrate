@@ -324,16 +324,12 @@ static char *read_action(int first_char) {
         while ((c = next_char()) != EOF) {
             if (len + 2 >= cap) {
                 cap *= 2;
-<<<<<<< HEAD
-                buf = xrealloc(buf, cap);
-=======
                 char *tmp = realloc(buf, cap);
                 if (!tmp) {
                     perror("realloc");
                     exit(1);
                 }
                 buf = tmp;
->>>>>>> origin/fix-lex-realloc-vulnerability-8814905146543153864
             }
             buf[len++] = c;
             if (c == '{') brace_depth++;
@@ -351,16 +347,12 @@ static char *read_action(int first_char) {
         while ((c = next_char()) != EOF && c != '\n') {
             if (len + 2 >= cap) {
                 cap *= 2;
-<<<<<<< HEAD
-                buf = xrealloc(buf, cap);
-=======
                 char *tmp = realloc(buf, cap);
                 if (!tmp) {
                     perror("realloc");
                     exit(1);
                 }
                 buf = tmp;
->>>>>>> origin/fix-lex-realloc-vulnerability-8814905146543153864
             }
             buf[len++] = c;
         }
@@ -409,10 +401,6 @@ static void parse_rules(void) {
             while ((c = next_char()) != EOF && c != '>') {
                 if (c == ',') {
                     sc_buf[sc_len] = '\0';
-<<<<<<< HEAD
-                    start_conds = xrealloc(start_conds, (sc_count + 1) * sizeof(char*));
-                    start_conds[sc_count++] = xstrdup(sc_buf);
-=======
                     char *tmp = realloc(start_conds, (sc_count + 1) * sizeof(char*));
                     if (!tmp) {
                         perror("realloc");
@@ -420,7 +408,6 @@ static void parse_rules(void) {
                     }
                     start_conds = (char **)tmp;
                     start_conds[sc_count++] = strdup(sc_buf);
->>>>>>> origin/fix-lex-realloc-vulnerability-8814905146543153864
                     sc_len = 0;
                 } else {
                     sc_buf[sc_len++] = c;
@@ -428,10 +415,6 @@ static void parse_rules(void) {
             }
             if (sc_len > 0) {
                 sc_buf[sc_len] = '\0';
-<<<<<<< HEAD
-                start_conds = xrealloc(start_conds, (sc_count + 1) * sizeof(char*));
-                start_conds[sc_count++] = xstrdup(sc_buf);
-=======
                 char *tmp = realloc(start_conds, (sc_count + 1) * sizeof(char*));
                 if (!tmp) {
                     perror("realloc");
@@ -439,7 +422,6 @@ static void parse_rules(void) {
                 }
                 start_conds = (char **)tmp;
                 start_conds[sc_count++] = strdup(sc_buf);
->>>>>>> origin/fix-lex-realloc-vulnerability-8814905146543153864
             }
             c = next_char(); /* Get first char of pattern or { */
             

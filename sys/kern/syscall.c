@@ -8,6 +8,7 @@
 
 /* Kernel internal includes */
 #include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/console.h>
@@ -27,6 +28,7 @@
 #include <sys/utsname.h>
 
 #include <sys/smp.h>
+#include <sys/lock.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
@@ -41,13 +43,40 @@
 extern thread_t *current_thread; 
 extern process_t *current_process;
 extern process_t processes[64];
-extern thread_t threads[256];
+extern thread_t threads[MAX_THREADS];
 
 // Simple file structure allocator
 #define MAX_SYSTEM_FILES 128
 static file_t system_files[MAX_SYSTEM_FILES];
 static file_t *file_free_list = NULL;
 static bool file_system_initialized = false;
+
+#define IO_CHUNK_SIZE 4096
+
+static struct {
+    mutex_t lock;
+    char buf[IO_CHUNK_SIZE];
+} io_buffers[MAX_CPUS];
+
+static volatile int io_buffers_initialized = 0;
+
+static void ensure_io_buffers_init(void) {
+    if (io_buffers_initialized) return;
+
+    static volatile int init_lock = 0;
+    while (__sync_lock_test_and_set(&init_lock, 1)) {
+        while (init_lock) __asm__("pause");
+    }
+
+    if (!io_buffers_initialized) {
+        for (int i = 0; i < MAX_CPUS; i++) {
+            mutex_init(&io_buffers[i].lock, "io_buf");
+        }
+        io_buffers_initialized = 1;
+    }
+
+    __sync_lock_release(&init_lock);
+}
 
 static void file_init_list(void) {
     for (int i = 0; i < MAX_SYSTEM_FILES - 1; i++) {
@@ -94,8 +123,6 @@ void file_free(file_t *f) {
     file_free_list = f;
 }
 
-#define IO_CHUNK_SIZE 4096
-
 int kern_write(int fd, const char *buf, int len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     if (len < 0) return -22; // EINVAL
@@ -106,8 +133,20 @@ int kern_write(int fd, const char *buf, int len) {
     
     // Check for console node if write_fs isn't fully generic yet
     if (f->f_data && ((fs_node_t*)f->f_data)->write) {
-        char *kbuf = kmalloc(IO_CHUNK_SIZE);
-        if (!kbuf) return -12; // ENOMEM
+        // Use per-CPU buffer if available, otherwise fallback to kmalloc
+        ensure_io_buffers_init();
+        int cpu = smp_get_cpu_id();
+        if (cpu < 0 || cpu >= MAX_CPUS) cpu = 0;
+
+        char *kbuf = NULL;
+        bool use_static = mutex_trylock(&io_buffers[cpu].lock);
+
+        if (use_static) {
+            kbuf = io_buffers[cpu].buf;
+        } else {
+            kbuf = kmalloc(IO_CHUNK_SIZE);
+            if (!kbuf) return -12; // ENOMEM
+        }
 
         int total_written = 0;
         while (total_written < len) {
@@ -126,7 +165,8 @@ int kern_write(int fd, const char *buf, int len) {
                     // We already wrote some data, return that count
                     break;
                 }
-                kfree(kbuf, IO_CHUNK_SIZE);
+                if (use_static) mutex_unlock(&io_buffers[cpu].lock);
+                else kfree(kbuf, IO_CHUNK_SIZE);
                 return bytes; // Return the error code
             }
 
@@ -137,7 +177,8 @@ int kern_write(int fd, const char *buf, int len) {
         }
 
         f->f_offset += total_written;
-        kfree(kbuf, IO_CHUNK_SIZE);
+        if (use_static) mutex_unlock(&io_buffers[cpu].lock);
+        else kfree(kbuf, IO_CHUNK_SIZE);
         return total_written;
     }
     
@@ -259,29 +300,8 @@ int kern_open(const char *path, int flags, int mode) {
     if (!path) return -1;
     
     // Find free FD using hint
-    int fd = -1;
-    int start = current_process->next_fd;
-    if (start < 0 || start >= MAX_FD) start = 0;
-
-    for (int i = start; i < MAX_FD; i++) {
-        if (!current_process->fds[i]) {
-            fd = i;
-            break;
-        }
-    }
-
-    // Wrap around search
-    if (fd == -1 && start > 0) {
-        for (int i = 0; i < start; i++) {
-            if (!current_process->fds[i]) {
-                fd = i;
-                break;
-            }
-        }
-    }
-
+    int fd = proc_alloc_fd(current_process);
     if (fd == -1) return -1;
-    current_process->next_fd = fd + 1;
 
     // Lookup file
     // Handle absolute/relative. For now assume root relative if starts with /
@@ -296,17 +316,23 @@ int kern_open(const char *path, int flags, int mode) {
         node = finddir_fs(root, (char*)path);
     }
 
-    if (!node) return -1;
+    if (!node) {
+        proc_clear_fd(current_process, fd);
+        return -1;
+    }
 
     file_t *f = file_alloc();
-    if (!f) return -1;
+    if (!f) {
+        proc_clear_fd(current_process, fd);
+        return -1;
+    }
 
     f->f_data = node;
     f->f_offset = 0;
     f->f_flag = (short)flags;
     f->f_count = 1;
 
-    current_process->fds[fd] = f;
+    proc_set_fd(current_process, fd, f);
     open_fs(node, 1, 0); // Open read/write?
 
     return fd;
@@ -328,7 +354,7 @@ int kern_close(int fd) {
     if (!f) return -1;
     
     file_close_ptr(f);
-    current_process->fds[fd] = 0;
+    proc_clear_fd(current_process, fd);
 
     // Update hint if we freed a lower FD
     if (fd < current_process->next_fd) {
@@ -493,6 +519,19 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     return ret;
 }
 
+int sys_thr_exit(int *state) {
+    if (current_thread) {
+        current_thread->exit_tid_ptr = state;
+        current_thread->state = THREAD_ZOMBIE;
+    }
+    sched_yield();
+    return 0;
+}
+
+int sys_thr_self(void) {
+    return sched_get_current_tid();
+}
+
 int kern_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
     struct thr_param p = *param;
@@ -505,6 +544,7 @@ int kern_thr_new(struct thr_param *param, int param_size) {
     return -1;
 }
 
+<<<<<<< HEAD
 int sys_thr_exit(void *retval) {
     current_thread->retval = retval;
     current_thread->state = THREAD_ZOMBIE;
@@ -514,6 +554,38 @@ int sys_thr_exit(void *retval) {
 
     sched_yield();
     return 0; // Should not be reached
+=======
+int sys_thr_exit(void *status) {
+    current_thread->exit_status = status;
+    current_thread->state = THREAD_ZOMBIE;
+    sleepq_wake_all(current_thread);
+    sched_yield();
+    return 0; // Not reached
+}
+
+int sys_thr_join(tid_t tid, void **status) {
+    thread_t *thread = sched_get_thread(tid);
+    if (!thread || thread->proc != current_process) return -ESRCH;
+
+    while (thread->state != THREAD_ZOMBIE) {
+        sleepq_add(thread, current_thread);
+        sched_yield();
+
+        // Re-check after wake-up
+        thread = sched_get_thread(tid);
+        if (!thread || thread->proc != current_process) return -ESRCH;
+    }
+
+    if (status) {
+        void *kstatus = thread->exit_status;
+        if (copyout(&kstatus, status, sizeof(void*)) != 0) return -14;
+    }
+
+    // Reap the thread
+    thread->tid = -1;
+
+    return 0;
+>>>>>>> main
 }
 
 extern int sys_vm86(void *v);
@@ -996,40 +1068,48 @@ int kern_pipe(int *fds) {
     fs_node_t *read_node, *write_node;
     pipe_create(&read_node, &write_node);
 
-    int f1 = -1, f2 = -1;
-    int start = current_process->next_fd;
-    if (start < 0 || start >= MAX_FD) start = 0;
-
-    // Search from hint
-    for (int i = start; i < MAX_FD; i++) {
-        if (!current_process->fds[i]) {
-            if (f1 == -1) f1 = i;
-            else if (f2 == -1) { f2 = i; break; }
-        }
+    int f1 = proc_alloc_fd(current_process);
+    if (f1 == -1) return -1;
+    int f2 = proc_alloc_fd(current_process);
+    if (f2 == -1) {
+        // No second FD, but we already "allocated" f1.
+        // next_fd was updated. We should probably clear f1 if we can't get both.
+        // However, the previous code also had this potential issue if it only found one.
+        // Actually the previous code checked if both were found.
+        // Let's be safe.
+        // Wait, the previous code didn't actually "allocate" until it found both.
+        // My proc_alloc_fd updates next_fd.
+        // Let's just find both first if possible.
+        // Actually, for simplicity, I'll just use proc_alloc_fd twice.
+        // If the second fails, we should free the first.
+        // Since we didn't set the pointer yet, we just need to clear the bit.
+        proc_clear_fd(current_process, f1);
+        return -1;
     }
-
-    // Wrap around if needed
-    if (f2 == -1 && start > 0) {
-        for (int i = 0; i < start; i++) {
-            if (!current_process->fds[i]) {
-                if (f1 == -1) f1 = i;
-                else if (f2 == -1) { f2 = i; break; }
-            }
-        }
-    }
-
-    if (f1 == -1 || f2 == -1) return -1;
-    current_process->next_fd = f2 + 1;
 
     file_t *rf = file_alloc();
+    if (!rf) {
+        proc_clear_fd(current_process, f1);
+        proc_clear_fd(current_process, f2);
+        return -1;
+    }
     rf->f_data = read_node;
     rf->f_flag = 0; // O_RDONLY
-    current_process->fds[f1] = rf;
+    proc_set_fd(current_process, f1, rf);
 
     file_t *wf = file_alloc();
+    if (!wf) {
+        // rf is already in fds[f1], so proc_clear_fd will close it?
+        // No, proc_clear_fd doesn't call file_close_ptr.
+        // We should close rf.
+        file_close_ptr(rf);
+        proc_clear_fd(current_process, f1);
+        proc_clear_fd(current_process, f2);
+        return -1;
+    }
     wf->f_data = write_node;
     wf->f_flag = 0; // O_WRONLY
-    current_process->fds[f2] = wf;
+    proc_set_fd(current_process, f2, wf);
 
     fds[0] = f1;
     fds[1] = f2;
@@ -1042,31 +1122,10 @@ int sys_dup(int oldfd) {
     if (!f) return -1;
 
     // Find free FD with hint
-    int newfd = -1;
-    int start = current_process->next_fd;
-    if (start < 0 || start >= MAX_FD) start = 0;
-
-    for (int i = start; i < MAX_FD; i++) {
-        if (!current_process->fds[i]) {
-            newfd = i;
-            break;
-        }
-    }
-
-    // Wrap around
-    if (newfd == -1 && start > 0) {
-        for (int i = 0; i < start; i++) {
-            if (!current_process->fds[i]) {
-                newfd = i;
-                break;
-            }
-        }
-    }
-
+    int newfd = proc_alloc_fd(current_process);
     if (newfd == -1) return -1;
-    current_process->next_fd = newfd + 1;
 
-    current_process->fds[newfd] = f;
+    proc_set_fd(current_process, newfd, f);
     f->f_count++;
     return newfd;
 }
@@ -1081,9 +1140,10 @@ int sys_dup2(int oldfd, int newfd) {
 
     if (current_process->fds[newfd]) {
         file_close_ptr(current_process->fds[newfd]);
+        proc_clear_fd(current_process, newfd);
     }
 
-    current_process->fds[newfd] = f;
+    proc_set_fd(current_process, newfd, f);
     f->f_count++;
     return newfd;
 }
