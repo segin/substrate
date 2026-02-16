@@ -1,0 +1,52 @@
+.\"
+.\" THR_JOIN(2) - Substrate Native Personality
+.\"
+.TH THR_JOIN 2 "January 2026" "Substrate OS" "System Calls"
+.SH NAME
+thr_join \- wait for thread termination
+.SH SYNOPSIS
+.nf
+.B #include <sys/thr.h>
+.PP
+.BI "int thr_join(long " tid ", void **" status ");
+.fi
+.SH DESCRIPTION
+.BR thr_join ()
+suspends execution of the calling thread until the thread specified by
+.I tid
+terminates.
+.PP
+If
+.I status
+is not NULL, the exit status of the terminated thread is stored in
+the location pointed to by
+.IR status .
+.PP
+The target thread must be in the same process as the caller.
+.SH RETURN VALUE
+On success, zero is returned.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B ESRCH
+No thread with the given
+.I tid
+could be found in the current process.
+.TP
+.B EINVAL
+The specified thread is not joinable.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 457
+Arguments:      tid, status (on stack)
+.fi
+.SH SEE ALSO
+.BR thr_new (2),
+.BR thr_exit (2),
+.BR pthread_join (3)
+.SH HISTORY
+Based on FreeBSD's thr_join(2) for BSD compatibility.

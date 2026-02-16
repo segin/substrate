@@ -1,9 +1,17 @@
 .\"
+<<<<<<< HEAD
 .\" PTHREAD_EXIT(3)
 .\"
 .TH PTHREAD_EXIT 3 "May 2024" "Substrate OS" "Thread Library"
 .SH NAME
 pthread_exit \- terminate the calling thread
+=======
+.\" PTHREAD_EXIT(3) - Substrate Pthreads Library
+.\"
+.TH PTHREAD_EXIT 3 "January 2026" "Substrate OS" "Library Functions"
+.SH NAME
+pthread_exit \- terminate calling thread
+>>>>>>> main
 .SH SYNOPSIS
 .nf
 .B #include <pthread.h>
@@ -15,7 +23,12 @@ The
 .BR pthread_exit ()
 function terminates the calling thread and returns a value via
 .I retval
+<<<<<<< HEAD
 that (if the thread is joinable) is available to another thread in the same process that calls
+=======
+that (if the thread is joinable) is available to another thread in the same
+process that calls
+>>>>>>> main
 .BR pthread_join (3).
 .SH RETURN VALUE
 This function does not return to the caller.

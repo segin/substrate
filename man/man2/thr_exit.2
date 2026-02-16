@@ -1,31 +1,43 @@
+```
 .\"
 .\" THR_EXIT(2) - Substrate Native Personality
 .\"
-.TH THR_EXIT 2 "May 2024" "Substrate OS" "System Calls"
+.TH THR_EXIT 2 "January 2026" "Substrate OS" "System Calls"
 .SH NAME
-thr_exit \- terminate the current thread
+thr_exit \- terminate the calling thread
 .SH SYNOPSIS
 .nf
 .B #include <sys/thr.h>
 .PP
-.BI "void thr_exit(int *" state ");
+.BI "void thr_exit(void *" status ");
 .fi
 .SH DESCRIPTION
 .BR thr_exit ()
-terminates the current thread.
-If
-.I state
-is not NULL, the kernel will set the value at that location to 1 and perform a
-.BR futex (2)
-WAKE operation on it after the thread has finished using its stack.
-This allows other threads to safely join the exiting thread and free its resources.
+terminates the calling thread. The
+.I status
+value is made available to any other thread in the same process that
+calls
+.BR thr_join (2)
+for this thread.
+.PP
+If the thread is the last thread in the process, the process exits
+as if
+.BR exit (3)
+was called with a status of 0.
+.SH RETURN VALUE
+The
+.BR thr_exit ()
+function does not return.
 .SH NOTES
 .SS Substrate Native ABI
 .nf
-Syscall Number: 431
-Arguments:      state (on stack)
+Syscall Number: 456
+Arguments:      status (on stack)
 .fi
 .SH SEE ALSO
-.BR pthread_exit (3),
 .BR thr_new (2),
-.BR futex (2)
+.BR thr_join (2),
+.BR pthread_exit (3)
+.SH HISTORY
+Based on FreeBSD's thr_exit(2) for BSD compatibility.
+```

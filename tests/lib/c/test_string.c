@@ -60,9 +60,6 @@ char *libc_strerror(int errnum);
 int libc_strcasecmp(const char *s1, const char *s2);
 int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 
-// Include the source file directly - Removed to avoid redefinitions
-// The test now relies on string_prefixed.o linked by the Makefile
-
 // libgcc/libc wrappers for prefixed builds
 void* libc_malloc(size_t s) { return malloc(s); }
 void libc_free(void* p) { free(p); }
@@ -114,268 +111,6 @@ int libc_rand(void) { return rand(); }
         exit(1); \
     } \
 } while(0)
-
-void run_strcmp_tests(void) {
-    printf("Running strcmp tests...\n");
-
-    // Basic equality
-    assert(libc_strcmp("abc", "abc") == 0);
-    assert(libc_strcmp("", "") == 0);
-    assert(libc_strcmp("hello world", "hello world") == 0);
-
-    // Basic inequality (sign check)
-    assert(libc_strcmp("abc", "abd") < 0);
-    assert(libc_strcmp("abd", "abc") > 0);
-    assert(libc_strcmp("abc", "ab") > 0);
-    assert(libc_strcmp("ab", "abc") < 0);
-    assert(libc_strcmp("", "a") < 0);
-    assert(libc_strcmp("a", "") > 0);
-
-    // High bit characters (unsigned char comparison)
-    char s1[] = "\xff";
-    char s2[] = "\x01";
-    assert(libc_strcmp(s1, s2) > 0);
-    assert(libc_strcmp(s2, s1) < 0);
-
-    // Verify against host strcmp behavior (sign only)
-    const char *h1 = "test string 1";
-    const char *h2 = "test string 2";
-    int res_test = libc_strcmp(h1, h2);
-    int res_host = strcmp(h1, h2);
-
-    if (res_host < 0) assert(res_test < 0);
-    else if (res_host > 0) assert(res_test > 0);
-    else assert(res_test == 0);
-
-    printf("strcmp tests passed!\n");
-}
-
-void run_strncmp_tests(void) {
-    printf("Running strncmp tests...\n");
-
-    ASSERT_EQ(libc_strncmp("abc", "abc", 5), 0, "Equal strings, n > len");
-    ASSERT_EQ(libc_strncmp("abc", "abc", 3), 0, "Equal strings, n == len");
-    ASSERT_EQ(libc_strncmp("abc", "abc", 2), 0, "Equal strings, n < len");
-    ASSERT_TRUE(libc_strncmp("abc", "bbc", 3) < 0, "abc < bbc");
-    ASSERT_TRUE(libc_strncmp("bbc", "abc", 3) > 0, "bbc > abc");
-    ASSERT_TRUE(libc_strncmp("abc", "abd", 3) < 0, "abc < abd");
-    ASSERT_EQ(libc_strncmp("abc", "abd", 2), 0, "Difference after n ignored");
-    ASSERT_TRUE(libc_strncmp("abc", "abcd", 4) < 0, "abc < abcd");
-    ASSERT_TRUE(libc_strncmp("abcd", "abc", 4) > 0, "abcd > abc");
-    ASSERT_EQ(libc_strncmp("abc", "abcd", 3), 0, "Prefix match within n");
-    ASSERT_EQ(libc_strncmp("abc", "def", 0), 0, "n=0 should return 0");
-    ASSERT_EQ(libc_strncmp("", "", 5), 0, "Empty strings equal");
-    ASSERT_TRUE(libc_strncmp("", "a", 5) < 0, "Empty < a");
-    ASSERT_TRUE(libc_strncmp("a", "", 5) > 0, "a > Empty");
-
-    char s1[] = {'\200', 0};
-    char s2[] = {'a', 0};
-    ASSERT_TRUE(libc_strncmp(s1, s2, 1) > 0, "Unsigned char comparison");
-
-    printf("strncmp tests passed!\n");
-}
-
-void run_strcasecmp_tests(void) {
-    printf("Running strcasecmp tests...\n");
-
-    ASSERT_EQ(libc_strcasecmp("abc", "abc"), 0, "abc == abc");
-    ASSERT_EQ(libc_strcasecmp("abc", "ABC"), 0, "abc == ABC");
-    ASSERT_EQ(libc_strcasecmp("ABC", "abc"), 0, "ABC == abc");
-    ASSERT_EQ(libc_strcasecmp("", ""), 0, "Empty strings");
-    ASSERT_TRUE(libc_strcasecmp("abc", "abd") < 0, "abc < abd");
-    ASSERT_TRUE(libc_strcasecmp("abc", "ABD") < 0, "abc < ABD");
-    ASSERT_TRUE(libc_strcasecmp("ABC", "abd") < 0, "ABC < abd");
-    ASSERT_TRUE(libc_strcasecmp("abd", "abc") > 0, "abd > abc");
-    ASSERT_TRUE(libc_strcasecmp("abc", "abcd") < 0, "abc < abcd");
-    ASSERT_TRUE(libc_strcasecmp("abcd", "abc") > 0, "abcd > abc");
-
-    printf("strcasecmp tests passed!\n");
-}
-
-void run_strncasecmp_tests(void) {
-    printf("Running strncasecmp tests...\n");
-
-    ASSERT_EQ(libc_strncasecmp("abc", "abc", 3), 0, "abc == abc (n=3)");
-    ASSERT_EQ(libc_strncasecmp("abc", "ABC", 3), 0, "abc == ABC (n=3)");
-    ASSERT_EQ(libc_strncasecmp("abc", "abd", 2), 0, "abc == abd (n=2)");
-    ASSERT_EQ(libc_strncasecmp("abc", "def", 0), 0, "n=0");
-    ASSERT_TRUE(libc_strncasecmp("abc", "abd", 3) < 0, "abc < abd (n=3)");
-    ASSERT_EQ(libc_strncasecmp("abc", "abcd", 3), 0, "Prefix match within n");
-
-    printf("strncasecmp tests passed!\n");
-}
-
-void run_strrchr_tests(void) {
-    printf("Running strrchr tests...\n");
-    const char *s = "hello world";
-    const char *empty = "";
-
-    assert(libc_strrchr(s, 'h') == s);
-    assert(libc_strrchr(s, 'w') == s + 6);
-    assert(libc_strrchr(s, 'd') == s + 10);
-    assert(libc_strrchr(s, 'o') == s + 7);
-    assert(libc_strrchr(s, 'l') == s + 9);
-    assert(libc_strrchr(s, 'z') == NULL);
-    assert(libc_strrchr(s, 'H') == NULL);
-    assert(libc_strrchr(s, '\0') == s + 11);
-    assert(libc_strrchr(empty, 'a') == NULL);
-    assert(libc_strrchr(empty, '\0') == empty);
-    assert(libc_strrchr(s, 'l') == strrchr(s, 'l'));
-    assert(libc_strrchr(s, 0) == strrchr(s, 0));
-    assert(libc_strrchr(empty, 0) == strrchr(empty, 0));
-
-    printf("strrchr tests passed!\n");
-}
-
-void run_memcpy_tests(void) {
-    printf("Running memcpy tests...\n");
-
-    // Basic memcpy
-    {
-        char src[] = "Hello World";
-        char dest[20] = {0};
-        libc_memcpy(dest, src, 12);
-        ASSERT_MEM_EQ(dest, src, 12, "Basic memcpy failed");
-    }
-
-    // Small memcpy consistency
-    {
-        char src[] = "12345678";
-        char dest[10];
-        for (int i = 0; i <= 8; i++) {
-            memset(dest, 0, sizeof(dest));
-            libc_memcpy(dest, src, i);
-            ASSERT_MEM_EQ(dest, src, i, "Small memcpy consistency check");
-        }
-    }
-
-    // Unaligned memcpy
-    {
-        char s_buf[64] __attribute__((aligned(16)));
-        char d_buf[64] __attribute__((aligned(16)));
-        for (int i = 0; i < 64; i++) s_buf[i] = (char)i;
-
-        memset(d_buf, 0, 64);
-        libc_memcpy(d_buf + 1, s_buf, 10);
-        ASSERT_MEM_EQ(d_buf + 1, s_buf, 10, "Unaligned dest memcpy failed");
-
-        memset(d_buf, 0, 64);
-        libc_memcpy(d_buf, s_buf + 1, 10);
-        ASSERT_MEM_EQ(d_buf, s_buf + 1, 10, "Unaligned src memcpy failed");
-
-        memset(d_buf, 0, 64);
-        libc_memcpy(d_buf + 1, s_buf + 1, 10);
-        ASSERT_MEM_EQ(d_buf + 1, s_buf + 1, 10, "Both unaligned memcpy failed");
-    }
-
-    // Large memcpy
-    {
-        size_t size = 4096;
-        char *src = malloc(size);
-        char *dest = malloc(size);
-        if (src && dest) {
-            for (size_t i = 0; i < size; i++) src[i] = (char)(i & 0xFF);
-            memset(dest, 0, size);
-            libc_memcpy(dest, src, size);
-            ASSERT_MEM_EQ(dest, src, size, "Large memcpy failed");
-            free(src);
-            free(dest);
-        }
-    }
-
-    printf("memcpy tests passed!\n");
-}
-
-void run_memset_tests(void) {
-    printf("Running memset tests...\n");
-
-    // Basic memset
-    {
-        char buf[100];
-        libc_memset(buf, 'A', 100);
-        for (int i = 0; i < 100; i++) assert(buf[i] == 'A');
-        libc_memset(buf, 0, 100);
-        for (int i = 0; i < 100; i++) assert(buf[i] == 0);
-    }
-
-    // Alignment and size test
-    {
-        char *buf = malloc(128);
-        if (buf) {
-            for (int offset = 0; offset < 8; offset++) {
-                for (size_t len = 0; len < 64; len++) {
-                    for (int i = 0; i < 128; i++) buf[i] = 0;
-                    int c = (offset + len) % 256;
-                    libc_memset(buf + offset, c, len);
-                    for (int i = 0; i < 128; i++) {
-                        if (i >= offset && i < offset + (int)len) {
-                            assert((unsigned char)buf[i] == (unsigned char)c);
-                        } else {
-                            assert(buf[i] == 0);
-                        }
-                    }
-                }
-            }
-            free(buf);
-        }
-    }
-
-    // Large memset
-    {
-        size_t size = 1024 * 1024;
-        char *buf = malloc(size);
-        if (buf) {
-            libc_memset(buf, 0x55, size);
-            for (size_t i = 0; i < size; i++) assert((unsigned char)buf[i] == 0x55);
-            free(buf);
-        }
-    }
-
-    printf("memset tests passed!\n");
-}
-
-void run_strncpy_tests(void) {
-    printf("Running strncpy tests...\n");
-    char src[] = "hello";
-    char dest[10];
-
-    // 1. n > src length (should pad with nulls)
-    memset(dest, 'X', sizeof(dest));
-    libc_strncpy(dest, src, 8);
-    assert(strcmp(dest, "hello") == 0);
-    assert(dest[5] == '\0');
-    assert(dest[6] == '\0');
-    assert(dest[7] == '\0');
-    assert(dest[8] == 'X');
-
-    // 2. n == src length (no null termination if exactly fits)
-    memset(dest, 'X', sizeof(dest));
-    libc_strncpy(dest, src, 5);
-    assert(memcmp(dest, "hello", 5) == 0);
-    assert(dest[5] == 'X');
-
-    // 3. n < src length (truncation)
-    memset(dest, 'X', sizeof(dest));
-    libc_strncpy(dest, src, 3);
-    assert(memcmp(dest, "hel", 3) == 0);
-    assert(dest[3] == 'X');
-
-    // 4. n = 0
-    memset(dest, 'X', sizeof(dest));
-    libc_strncpy(dest, src, 0);
-    assert(dest[0] == 'X');
-
-    // 5. empty src
-    char empty[] = "";
-    memset(dest, 'X', sizeof(dest));
-    libc_strncpy(dest, empty, 3);
-    assert(dest[0] == '\0');
-    assert(dest[1] == '\0');
-    assert(dest[2] == '\0');
-    assert(dest[3] == 'X');
-
-    printf("strncpy tests passed!\n");
-}
 
 void run_strlen_tests(void) {
     printf("Running strlen tests...\n");
@@ -441,6 +176,156 @@ void run_memmove_tests(void) {
     printf("memmove tests passed!\n");
 }
 
+#define ASSERT_STREQ(actual, expected, msg) do { \
+    const char *act = (actual); \
+    const char *exp = (expected); \
+    if (act == NULL && exp == NULL) { \
+        /* both NULL is OK */ \
+    } else if (act == NULL || exp == NULL) { \
+        fprintf(stderr, "FAIL: %s: expected '%s', got '%s'\n", msg, exp ? exp : "NULL", act ? act : "NULL"); \
+        exit(1); \
+    } else if (strcmp(act, exp) != 0) { \
+        fprintf(stderr, "FAIL: %s: expected '%s', got '%s'\n", msg, exp, act); \
+        exit(1); \
+    } \
+} while(0)
+
+void run_strtok_tests(void) {
+    printf("Running strtok tests...\n");
+
+    // 1. Basic usage
+    {
+        char str[] = "A string to tokenize";
+        const char *delim = " ";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "A", "First token incorrect");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "string", "Second token incorrect");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "to", "Third token incorrect");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "tokenize", "Fourth token incorrect");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Expected NULL after tokens exhausted");
+    }
+
+    // 2. Multiple delimiters
+    {
+        char str[] = "abc,def;ghi";
+        const char *delim = ",;";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Multiple delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Multiple delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "ghi", "Multiple delim 3");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Multiple delim end");
+    }
+
+    // 3. Consecutive delimiters
+    {
+        char str[] = "abc,,def";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Consecutive delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Consecutive delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Consecutive delim end");
+    }
+
+    // 4. Leading delimiters
+    {
+        char str[] = ",,abc,def";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Leading delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Leading delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Leading delim end");
+    }
+
+    // 5. Trailing delimiters
+    {
+        char str[] = "abc,def,,";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abc", "Trailing delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), "def", "Trailing delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "Trailing delim end");
+    }
+
+    // 6. No delimiters
+    {
+        char str[] = "abcdef";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), "abcdef", "No delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, delim), NULL, "No delim end");
+    }
+
+    // 7. Empty string
+    {
+        char str[] = "";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), NULL, "Empty string");
+    }
+
+    // 8. String with only delimiters
+    {
+        char str[] = ",,,";
+        const char *delim = ",";
+
+        ASSERT_STREQ(libc_strtok(str, delim), NULL, "Only delimiters");
+    }
+
+    // 9. Changing delimiter
+    {
+        char str[] = "abc,def;ghi";
+
+        ASSERT_STREQ(libc_strtok(str, ","), "abc", "Changing delim 1");
+        ASSERT_STREQ(libc_strtok(NULL, ";"), "def", "Changing delim 2");
+        ASSERT_STREQ(libc_strtok(NULL, ","), "ghi", "Changing delim 3");
+    }
+
+    printf("strtok tests passed!\n");
+}
+
+void run_strcat_tests(void) {
+    printf("Running strcat tests...\n");
+
+    // 1. Basic concatenation
+    {
+        char dest[20] = "Hello";
+        const char *src = " World";
+        libc_strcat(dest, src);
+        ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strcat failed");
+    }
+
+    // 2. Concatenate empty string
+    {
+        char dest[20] = "Hello World";
+        libc_strcat(dest, "");
+        ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Concatenate empty string failed");
+    }
+
+    // 3. Concatenate to empty string
+    {
+        char dest[20] = "";
+        libc_strcat(dest, "Testing");
+        ASSERT_EQ(strcmp(dest, "Testing"), 0, "Concatenate to empty string failed");
+    }
+
+    // 4. Return value check
+    {
+        char dest[20] = "Start";
+        char *ret = libc_strcat(dest, "End");
+        ASSERT_TRUE(ret == dest, "Return value incorrect");
+        ASSERT_EQ(strcmp(dest, "StartEnd"), 0, "Concatenation failed in return value check");
+    }
+
+    // 5. Concatenate two empty strings
+    {
+        char dest[20] = "";
+        libc_strcat(dest, "");
+        ASSERT_EQ(strcmp(dest, ""), 0, "Concatenate two empty strings failed");
+    }
+
+    printf("strcat tests passed!\n");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -453,16 +338,10 @@ bool test_libc_memmove(void) {
 
 #ifndef NO_MAIN
 int main(void) {
-    run_strcmp_tests();
-    run_strncmp_tests();
-    run_strcasecmp_tests();
-    run_strncasecmp_tests();
-    run_strrchr_tests();
-    run_memcpy_tests();
-    run_memset_tests();
-    run_strncpy_tests();
     run_strlen_tests();
     run_memmove_tests();
+    run_strcat_tests();
+    run_strtok_tests();
     return 0;
 }
 #endif

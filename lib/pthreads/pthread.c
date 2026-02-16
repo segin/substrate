@@ -6,14 +6,6 @@
 #include <sys/thr.h>
 #include <stdint.h>
 
-/*
- * pthreads implementation for Substrate.
- *
- * Uses a global thread table for storing return values and synchronization.
- * Note: TIDs in this kernel are structured as (generation << 6) | index,
- * allowing O(1) mapping from TID to slot index (tid & 63).
- */
-
 extern int64_t _syscall0(int);
 extern int64_t _syscall1(int, int);
 extern int64_t _syscall2(int, int, int);
@@ -120,54 +112,13 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 }
 
 void pthread_exit(void *retval) {
-    int tid = (int)_syscall0(SYS_THR_SELF);
-    int slot = tid & (MAX_PTHREADS - 1);
-    int *exited_ptr = NULL;
-
-    while (__sync_lock_test_and_set(&thread_table_lock, 1));
-    if (thread_table[slot].used && thread_table[slot].tid == tid) {
-        thread_table[slot].retval = retval;
-        exited_ptr = &thread_table[slot].exited;
-    }
-    __sync_lock_release(&thread_table_lock);
-
-    /*
-     * Kernel will set *exited_ptr = 1 and wake any waiters via futex
-     * AFTER the thread has finished using its stack, preventing use-after-free.
-     */
-    _syscall1(SYS_THR_EXIT, (int)exited_ptr);
-    while(1);
+    _syscall1(SYS_THR_EXIT, (int)(uintptr_t)retval);
+    /* Should not be reached */
+    _exit(0);
 }
 
 int pthread_join(pthread_t thread, void **retval) {
-    int slot = thread & (MAX_PTHREADS - 1);
-    struct pthread_info *ti = &thread_table[slot];
-
-    while (1) {
-        while (__sync_lock_test_and_set(&thread_table_lock, 1));
-        if (!ti->used || ti->tid != thread) {
-            __sync_lock_release(&thread_table_lock);
-            return -1; // ESRCH
-        }
-
-        if (ti->exited) {
-            if (retval) *retval = ti->retval;
-
-            // Safe to release resources now that thread has truly exited
-            if (ti->stack) {
-                free(ti->stack);
-                ti->stack = NULL;
-            }
-            ti->used = 0;
-            ti->tid = -1;
-            __sync_lock_release(&thread_table_lock);
-            return 0;
-        }
-        __sync_lock_release(&thread_table_lock);
-
-        // Wait for kernel to set ti->exited and wake us
-        _syscall6(SYS_FUTEX, (int)&ti->exited, FUTEX_WAIT, 0, 0, 0, 0);
-    }
+    return (int)_syscall2(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
 }
 
 // Mutex stubs

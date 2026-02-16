@@ -443,7 +443,13 @@ static void extract_tar(FILE *f, const struct opts *o) {
             if (sz % TAR_BLOCK) fseek(f, (long)(TAR_BLOCK - (sz % TAR_BLOCK)), SEEK_CUR);
             continue;
         }
-        snprintf(raw, sizeof(raw), "%s", kv.has_path ? kv.path : h.name);
+        if (kv.has_path) {
+            snprintf(raw, sizeof(raw), "%s", kv.path);
+        } else if (h.prefix[0] != '\0') {
+            snprintf(raw, sizeof(raw), "%.*s/%.*s", (int)sizeof(h.prefix), h.prefix, (int)sizeof(h.name), h.name);
+        } else {
+            snprintf(raw, sizeof(raw), "%.*s", (int)sizeof(h.name), h.name);
+        }
         apply_subst(o, raw, sizeof(raw));
         sanitize_path(o, raw, path, sizeof(path));
         if (!path[0]) { if (sz) fseek(f, (long)((sz + 511) & ~511), SEEK_CUR); memset(&kv,0,sizeof(kv)); continue; }

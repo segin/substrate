@@ -24,9 +24,17 @@ int
 ustar_rd(ARCH_HDR *arcn, char *buf)
 {
     HD_USTAR *hd = (HD_USTAR *)buf;
+    char namebuf[MAXPATHLEN];
 
-    arcn->name = strdup(hd->name);
-    /* TODO: Handle prefix */
+    if (hd->prefix[0] != '\0') {
+        snprintf(namebuf, sizeof(namebuf), "%.*s/%.*s",
+            (int)sizeof(hd->prefix), hd->prefix,
+            (int)sizeof(hd->name), hd->name);
+    } else {
+        snprintf(namebuf, sizeof(namebuf), "%.*s",
+            (int)sizeof(hd->name), hd->name);
+    }
+    arcn->name = strdup(namebuf);
 
     arcn->mode = strtol(hd->mode, NULL, 8);
     arcn->uid = strtol(hd->uid, NULL, 8);
