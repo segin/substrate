@@ -106,6 +106,7 @@ void outb(uint16_t p, uint8_t v) { (void)p; (void)v; }
 uint8_t inb(uint16_t p) { (void)p; return 0; }
 uint32_t lapic_get_id() { return 0; }
 int smp_get_cpu_count() { return 1; }
+int smp_get_cpu_id() { return 0; }
 void sched_smp_init() {}
 
 // kmem mocks for host

@@ -16,7 +16,7 @@ void run_uma_tests(void);
 void run_string_tests(void);
 void run_crc32_tests(void);
 void run_kthread_create_tests(void);
-void run_div64_tests(void);
+int test_div64(void);
 void run_kobject_tests(void);
 
 #endif
