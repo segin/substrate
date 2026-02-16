@@ -213,6 +213,61 @@ void test_memmove_comprehensive(void) {
     free(buffer);
     free(control);
     printf("test_memmove_comprehensive: PASS\n");
+}
+
+void test_memcmp(void) {
+    char b1[20];
+    char b2[20];
+
+    // Identity
+    memset(b1, 0, sizeof(b1));
+    memset(b2, 0, sizeof(b2));
+    ASSERT_EQ(kernel_memcmp(b1, b2, sizeof(b1)), 0, "memcmp identity zero");
+
+    strcpy(b1, "Hello");
+    strcpy(b2, "Hello");
+    ASSERT_EQ(kernel_memcmp(b1, b2, 6), 0, "memcmp identity string");
+
+    // Difference
+    b2[0] = 'h'; // 'H' vs 'h'
+    // 'H' (72) < 'h' (104) -> returns negative
+    int res = kernel_memcmp(b1, b2, 1);
+    if (res >= 0) {
+        printf("FAIL: memcmp('H', 'h') >= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    // Check sign (b1 > b2)
+    b1[0] = 'b';
+    b2[0] = 'a';
+    res = kernel_memcmp(b1, b2, 1);
+    if (res <= 0) {
+        printf("FAIL: memcmp('b', 'a') <= 0 (got %d)\n", res);
+        exit(1);
+    }
+
+    // Length limit
+    strcpy(b1, "Hello");
+    strcpy(b2, "Help!");
+    // Match up to 3 chars ("Hel")
+    ASSERT_EQ(kernel_memcmp(b1, b2, 3), 0, "memcmp length limit");
+
+    // Unsigned comparison
+    unsigned char u1[] = { 0xFF };
+    unsigned char u2[] = { 0x00 };
+    // 0xFF (255) > 0x00 (0) -> positive
+    res = kernel_memcmp(u1, u2, 1);
+    if (res <= 0) {
+        printf("FAIL: memcmp(0xFF, 0x00) <= 0 (got %d) - Unsigned check\n", res);
+        exit(1);
+    }
+
+    // Zero length
+    ASSERT_EQ(kernel_memcmp(b1, b2, 0), 0, "memcmp zero length");
+
+    printf("test_memcmp: PASS\n");
+}
+
 void test_strcmp(void) {
     ASSERT_EQ(kernel_strcmp("", ""), 0, "strcmp empty-empty");
     ASSERT_EQ(kernel_strcmp("a", "a"), 0, "strcmp equal single char");
@@ -281,6 +336,7 @@ int main(void) {
     test_strncpy();
     test_memmove();
     test_memmove_comprehensive();
+    test_memcmp();
     test_strcmp();
     test_strncmp();
     printf("All Tests Passed\n");
