@@ -63,7 +63,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 
     struct pthread_info *ti = &thread_table[slot];
     ti->exited = 0;
-    ti->retval = NULL;
+    ti->exit_status = NULL;
 
     ti->stack_size = 64 * 1024;
     ti->stack = malloc(ti->stack_size);
