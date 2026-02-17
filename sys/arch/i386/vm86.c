@@ -5,8 +5,8 @@
 #include <errno.h>
 #include <kern/console.h>
 #include <include/sys/proc.h>
-#include "idt.h" 
-#include "pmap.h"
+#include <arch/i386/idt.h> 
+#include <arch/i386/pmap.h>
 #include <arch/i386/pmap.h> 
 
 // Access to current process/thread
