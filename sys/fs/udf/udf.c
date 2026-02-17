@@ -270,6 +270,7 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
         
         for (uint32_t i = 0; i < num_ads && size > 0; i++) {
             uint32_t ext_len = ads[i].length & 0x3FFFFFFF;
+            uint32_t type = (ads[i].length >> 30) & 0x3;
             uint32_t ext_start = fs->partition_start + ads[i].position;
             
             if (offset >= file_pos + ext_len) {
@@ -282,6 +283,17 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
             uint32_t ext_read = ext_len - ext_off;
             if (ext_read > size) ext_read = size;
             
+            if (type == 1 || type == 2) {
+                memset(buffer, 0, ext_read);
+                buffer += ext_read;
+                total_read += ext_read;
+                size -= ext_read;
+                offset += ext_read;
+                ext_read = 0;
+            } else if (type == 3) {
+                return total_read;
+            }
+
             /* Read sector by sector */
             while (ext_read > 0) {
                 uint32_t sector = ext_start + (ext_off / UDF_SECTOR_SIZE);
@@ -306,7 +318,64 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
         return total_read;
     }
     
-    /* Long ADs similar - not implemented yet */
+    if (ad_type == UDF_ICB_FLAG_AD_LONG) {
+        /* Long allocation descriptors */
+        struct udf_long_ad *ads = (struct udf_long_ad *)alloc_area;
+        uint32_t num_ads = fe->alloc_desc_length / sizeof(struct udf_long_ad);
+        uint32_t total_read = 0;
+        uint32_t file_pos = 0;
+
+        for (uint32_t i = 0; i < num_ads && size > 0; i++) {
+            uint32_t ext_len = ads[i].length & 0x3FFFFFFF;
+            uint32_t type = (ads[i].length >> 30) & 0x3;
+            /* Note: ignoring partition reference, assuming single partition */
+            uint32_t ext_start = fs->partition_start + ads[i].block;
+
+            if (offset >= file_pos + ext_len) {
+                file_pos += ext_len;
+                continue;
+            }
+
+            /* Read from this extent */
+            uint32_t ext_off = (offset > file_pos) ? offset - file_pos : 0;
+            uint32_t ext_read = ext_len - ext_off;
+            if (ext_read > size) ext_read = size;
+
+            if (type == 1 || type == 2) {
+                memset(buffer, 0, ext_read);
+                buffer += ext_read;
+                total_read += ext_read;
+                size -= ext_read;
+                offset += ext_read;
+                ext_read = 0;
+            } else if (type == 3) {
+                return total_read;
+            }
+
+            /* Read sector by sector */
+            while (ext_read > 0) {
+                uint32_t sector = ext_start + (ext_off / UDF_SECTOR_SIZE);
+                uint32_t sec_off = ext_off % UDF_SECTOR_SIZE;
+                uint32_t to_read = UDF_SECTOR_SIZE - sec_off;
+                if (to_read > ext_read) to_read = ext_read;
+
+                fs->device->read(fs->device, (off_t)sector * UDF_SECTOR_SIZE,
+                                 UDF_SECTOR_SIZE, sector_buf);
+                memcpy(buffer, sector_buf + sec_off, to_read);
+
+                buffer += to_read;
+                total_read += to_read;
+                ext_off += to_read;
+                ext_read -= to_read;
+                size -= to_read;
+                offset += to_read;
+            }
+
+            file_pos += ext_len;
+        }
+        return total_read;
+    }
+
     return 0;
 }
 
