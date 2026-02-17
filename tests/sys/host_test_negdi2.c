@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <limits.h>
+#include <time.h>
 
 /* Mock environment for freestanding div64.c */
 /* We don't expect __builtin_trap to be called for negation, but define it just in case */
@@ -47,12 +48,38 @@ static void test_negdi2_edge_cases(void) {
     assert(__negdi2(min) == min);
 }
 
+static uint64_t rand64(void) {
+    uint64_t r = 0;
+    for (int i = 0; i < 4; i++) {
+        r = (r << 16) | (rand() & 0xFFFF);
+    }
+    return r;
+}
+
+static void test_negdi2_randomized(void) {
+    printf("Testing randomized inputs (1,000,000 iterations)...\n");
+    srand(time(NULL));
+
+    for (int i = 0; i < 1000000; i++) {
+        int64_t val = (int64_t)rand64();
+        int64_t expected = -val;
+        int64_t actual = __negdi2(val);
+
+        if (actual != expected) {
+            fprintf(stderr, "FAIL: __negdi2(%lld) = %lld, expected %lld\n",
+                    (long long)val, (long long)actual, (long long)expected);
+            exit(1);
+        }
+    }
+}
+
 int main(void) {
     printf("=== TEST: __negdi2 ===\n");
 
     test_negdi2_basic();
     test_negdi2_large();
     test_negdi2_edge_cases();
+    test_negdi2_randomized();
 
     printf("PASS\n");
     return 0;
