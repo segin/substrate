@@ -31,6 +31,38 @@ void test_uma_zcreate(void) {
     kprint("  PASS\n");
 }
 
+/* Test large objects (off-page slab headers) */
+void test_uma_large_objects(void) {
+    kprint("Test: large objects (off-page slabs)\n");
+
+    // Create zone with 4096 byte objects (full page)
+    // This should trigger off-page slab header
+    uma_zone_t *zone = uma_zcreate("test-large", 4096, NULL, NULL, NULL, NULL, 0, 0);
+    TEST_ASSERT(zone != NULL, "zone created");
+    TEST_ASSERT(zone->uz_ipers == 1, "items per slab is 1");
+    TEST_ASSERT(zone->uz_flags & UMA_ZONE_OFFPAGE, "UMA_ZONE_OFFPAGE flag set");
+
+    void *obj1 = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj1 != NULL, "alloc large object 1");
+
+    void *obj2 = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj2 != NULL, "alloc large object 2");
+
+    TEST_ASSERT(obj1 != obj2, "different addresses");
+
+    // Check alignment/page boundary
+    // Since it's 4096 bytes and off-page header, it should be page aligned
+    TEST_ASSERT(((uintptr_t)obj1 & 0xFFF) == 0, "obj1 is page aligned (implies off-page header)");
+
+    uma_zfree(zone, obj1);
+    uma_zfree(zone, obj2);
+
+    TEST_ASSERT(zone->uz_count == 0, "count back to 0");
+
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
 /* Test allocation and free */
 void test_uma_alloc_free(void) {
     kprint("Test: uma_zalloc/uma_zfree\n");
@@ -260,6 +292,7 @@ void test_uma_limits(void) {
 void run_uma_tests(void) {
     kprint("\n=== UMA Tests ===\n");
     test_uma_dynamic_stress(); // Run this first to ensure it runs before any panic
+    test_uma_large_objects();
     test_uma_zcreate();
     test_uma_alloc_free();
     test_uma_zero_fill();

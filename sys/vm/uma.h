@@ -43,6 +43,8 @@ typedef struct uma_cache uma_cache_t;
 #define UMA_ZONE_VTOSLAB    0x4000  /* Track slab from virtual address */
 #define UMA_ZONE_LEAK       0x8000  /* Enable leak tracking for this zone */
 
+#define UMA_ZONE_OFFPAGE    0x10000 /* Slab header is off-page */
+
 /*
  * Allocation flags (passed to uma_zalloc)
  */

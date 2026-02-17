@@ -15,6 +15,7 @@
 
 /* Global list of all zones */
 static uma_zone_t *uma_zones = NULL;
+static uma_zone_t *uma_slab_zone = NULL;
 
 /* Number of CPUs (detected at runtime) */
 static int uma_ncpu = 1;
@@ -80,6 +81,10 @@ void uma_startup(void) {
     uma_bucket_idx = 0;
     uma_zones = NULL;
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
+
+    /* Create slab zone for off-page headers */
+    /* Size = sizeof(uma_slab_t) + 1 (for at least 1 byte of freelist) */
+    uma_slab_zone = uma_zcreate("uma_slabs", sizeof(uma_slab_t) + 1, NULL, NULL, NULL, NULL, 0, 0);
 
     // Detect number of CPUs
     // Detect number of CPUs
@@ -189,6 +194,11 @@ uma_zone_t *uma_zcreate(
         zone->uz_ipers = 1; /* Large objects get 1 per page */
     }
     
+    /* Check if object fits with header */
+    if (zone->uz_rsize * zone->uz_ipers + sizeof(uma_slab_t) + zone->uz_ipers > 4096) {
+        zone->uz_flags |= UMA_ZONE_OFFPAGE;
+    }
+
     /* Set callbacks */
     zone->uz_ctor = ctor;
     zone->uz_dtor = dtor;
@@ -280,11 +290,14 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         /* On-page slab header */
         slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
     } else {
-        /* TODO: Off-page slab header for large objects */
-        extern void kprint(const char*);
-        kprint("uma_slab_alloc: slab too large for on-page header!\n");
-        pmm_free_block(page);
-        return NULL;
+        /* Off-page slab header for large objects */
+        slab = uma_zalloc(uma_slab_zone, M_NOWAIT);
+        if (!slab) {
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: failed to allocate off-page header!\n");
+            pmm_free_block(page);
+            return NULL;
+        }
     }
     
     slab->us_data = page;
@@ -336,6 +349,11 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
     uma_hash_remove(slab);
 
     pmm_free_block(slab->us_data);
+
+    /* Free slab header if off-page */
+    if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
+        uma_zfree(uma_slab_zone, slab);
+    }
 }
 
 /*
