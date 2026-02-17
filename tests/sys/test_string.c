@@ -64,6 +64,29 @@ static void test_strpbrk(void) {
     ASSERT_EQ(res, s + 2, "strpbrk multiple matches");
 }
 
+static void test_strcmp(void) {
+    // Basic equality
+    ASSERT_EQ(strcmp("", ""), 0, "strcmp empty");
+    ASSERT_EQ(strcmp("abc", "abc"), 0, "strcmp equal");
+
+    // Basic inequality
+    if (strcmp("abc", "abd") >= 0) fail("strcmp('abc', 'abd') should be negative");
+    if (strcmp("abd", "abc") <= 0) fail("strcmp('abd', 'abc') should be positive");
+
+    // Prefix handling
+    if (strcmp("abc", "abcd") >= 0) fail("strcmp prefix ('abc', 'abcd') should be negative");
+    if (strcmp("abcd", "abc") <= 0) fail("strcmp prefix ('abcd', 'abc') should be positive");
+
+    // Empty vs Non-empty
+    if (strcmp("", "a") >= 0) fail("strcmp empty vs 'a' should be negative");
+    if (strcmp("a", "") <= 0) fail("strcmp 'a' vs empty should be positive");
+
+    // Unsigned char comparison (High bit set)
+    // '\xff' is 255 (unsigned), so it should be greater than '\x01' (1)
+    if (strcmp("\xff", "\x01") <= 0) fail("strcmp unsigned comparison ('\\xff', '\\x01') should be positive");
+    if (strcmp("\x01", "\xff") >= 0) fail("strcmp unsigned comparison ('\\x01', '\\xff') should be negative");
+}
+
 static void test_strchr_basic(void) {
     char buf[] = "Hello World";
 
@@ -121,6 +144,7 @@ void run_string_tests(void) {
     test_strpbrk();
     test_strchr_basic();
     test_strchr_empty();
+    test_strcmp();
 
     if (failed_tests == 0) {
         kprint("String Tests: PASS\n");
