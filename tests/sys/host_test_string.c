@@ -169,7 +169,69 @@ void test_memcmp(void) {
     unsigned char u1[] = { 0xFF }, u2[] = { 0x00 };
     if (kernel_memcmp(u1, u2, 1) <= 0) exit(1);
 
+    ASSERT_EQ(kernel_memcmp(b1, b2, 0), 0, "memcmp n=0");
+
     printf("test_memcmp: PASS\n");
+}
+
+void test_memcmp_comprehensive(void) {
+    const int buffer_size = 256;
+    unsigned char *b1 = malloc(buffer_size);
+    unsigned char *b2 = malloc(buffer_size);
+
+    // Test 1: Identical buffers
+    for (int i = 0; i < buffer_size; i++) {
+        b1[i] = (unsigned char)i;
+        b2[i] = (unsigned char)i;
+    }
+    ASSERT_EQ(kernel_memcmp(b1, b2, buffer_size), 0, "memcmp comprehensive identical");
+    ASSERT_EQ(kernel_memcmp(b1, b2, 0), 0, "memcmp comprehensive n=0");
+
+    // Test 2: Single byte differences
+    for (int i = 0; i < buffer_size; i++) {
+        if (b1[i] < 255) {
+            b2[i] = b1[i] + 1;
+            // kernel_memcmp should return negative since b1[i] < b2[i]
+            if (kernel_memcmp(b1, b2, buffer_size) >= 0) {
+                printf("FAIL: memcmp comprehensive < mismatch at index %d\n", i);
+                exit(1);
+            }
+            b2[i] = b1[i]; // Restore
+        }
+
+        if (b1[i] > 0) {
+            b2[i] = b1[i] - 1;
+            // kernel_memcmp should return positive since b1[i] > b2[i]
+            if (kernel_memcmp(b1, b2, buffer_size) <= 0) {
+                printf("FAIL: memcmp comprehensive > mismatch at index %d\n", i);
+                exit(1);
+            }
+            b2[i] = b1[i]; // Restore
+        }
+    }
+
+    // Test 3: Unsigned comparison logic check
+    // b1 has 0x00, b2 has 0xFF. b1 < b2.
+    memset(b1, 0, buffer_size);
+    memset(b2, 0, buffer_size);
+    b1[0] = 0x00;
+    b2[0] = 0xFF;
+    if (kernel_memcmp(b1, b2, 1) >= 0) {
+        printf("FAIL: memcmp unsigned comparison (0x00 vs 0xFF)\n");
+        exit(1);
+    }
+
+    // b1 has 0x7F, b2 has 0x80. b1 < b2.
+    b1[0] = 0x7F;
+    b2[0] = 0x80;
+    if (kernel_memcmp(b1, b2, 1) >= 0) {
+        printf("FAIL: memcmp unsigned comparison (0x7F vs 0x80)\n");
+        exit(1);
+    }
+
+    free(b1);
+    free(b2);
+    printf("test_memcmp_comprehensive: PASS\n");
 }
 
 void test_strcmp(void) {
@@ -215,6 +277,7 @@ int main(void) {
     test_strncpy();
     test_memmove_comprehensive();
     test_memcmp();
+    test_memcmp_comprehensive();
     test_strcmp();
     test_strncmp();
     test_strspn();
