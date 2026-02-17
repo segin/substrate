@@ -6,13 +6,7 @@
 #include <sys/thr.h>
 #include <stdint.h>
 
-extern int64_t _syscall0(int);
-extern int64_t _syscall1(int, int);
-extern int64_t _syscall2(int, int, int);
-extern int64_t _syscall3(int, int, int, int);
-extern int64_t _syscall4(int, int, int, int, int);
-extern int64_t _syscall5(int, int, int, int, int, int);
-extern int64_t _syscall6(int, int, int, int, int, int, int);
+
 
 #define MAX_PTHREADS 64
 
@@ -96,7 +90,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     param.parent_tid = NULL;
     param.flags = 0;
     
-    int ret = (int)_syscall2(SYS_THR_NEW, (int)&param, sizeof(param));
+    int ret = (int)syscall(SYS_THR_NEW, (int)&param, sizeof(param));
     
     if (ret != 0) {
         free(ta);
@@ -112,13 +106,13 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 }
 
 void pthread_exit(void *retval) {
-    _syscall1(SYS_THR_EXIT, (int)(uintptr_t)retval);
+    syscall(SYS_THR_EXIT, (int)(uintptr_t)retval);
     /* Should not be reached */
     _exit(0);
 }
 
 int pthread_join(pthread_t thread, void **retval) {
-    return (int)_syscall2(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
+    return (int)syscall(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
 }
 
 // Mutex stubs

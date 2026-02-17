@@ -5,6 +5,7 @@
 #include <sys/acct.h>
 #include <sys/signal.h>
 #include <sys/resource.h>
+#include <sys/lock.h>
 
 // Process States (BSD style)
 #define SIDL   1 // Process being created by fork
@@ -211,5 +212,7 @@ extern process_t processes[];
 int  proc_alloc_fd(process_t *p);
 void proc_set_fd(process_t *p, int fd, file_t *f);
 void proc_clear_fd(process_t *p, int fd);
+
+extern mutex_t proctree_lock;
 
 #endif
