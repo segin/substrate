@@ -636,7 +636,7 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
     /* Setup fs_node for this object */
     memset(&obj->node, 0, sizeof(fs_node_t));
     obj->node.flags = FS_CHARDEVICE;
-    obj->node.impl = (uint32_t)(uintptr_t)obj;
+    obj->node.impl = (uintptr_t)obj;
     obj->node.ioctl = ntsync_obj_ioctl;
     
     /* Add to instance's object list */
@@ -1147,11 +1147,11 @@ static void ntsync_open_callback(fs_node_t *node) {
     memset(&inst->node, 0, sizeof(fs_node_t));
     strcpy(inst->node.name, "ntsync_inst");
     inst->node.flags = FS_CHARDEVICE;
-    inst->node.impl = (uint32_t)(uintptr_t)inst;
+    inst->node.impl = (uintptr_t)inst;
     inst->node.ioctl = ntsync_ioctl;
     
     /* Store in the node's impl for later access */
-    node->impl = (uint32_t)(uintptr_t)inst;
+    node->impl = (uintptr_t)inst;
 }
 
 static void ntsync_close(fs_node_t *node) {
