@@ -53,11 +53,19 @@ static int char_device_count = 0;
 static fs_node_t *storage_devices[MAX_DEVICES];
 static int storage_device_count = 0;
 
+static fs_node_t *input_devices[MAX_DEVICES];
+static int input_device_count = 0;
+
 void devfs_register_device(fs_node_t *node) {
     if (node->flags == FS_BLOCKDEVICE) {
         // Storage devices go under /dev/storage
         if (storage_device_count < MAX_DEVICES) {
             storage_devices[storage_device_count++] = node;
+        }
+    } else if (strncmp(node->name, "input/", 6) == 0) {
+        // Input devices go under /dev/input
+        if (input_device_count < MAX_DEVICES) {
+            input_devices[input_device_count++] = node;
         }
     } else {
         // Character devices in /dev root
@@ -98,6 +106,37 @@ static fs_node_t storage_dir_node = {
     .finddir = storage_finddir
 };
 
+// /dev/input directory operations
+static struct dirent *input_readdir(fs_node_t *node, uint64_t index) {
+    (void)node;
+    if (index < (uint64_t)input_device_count) {
+        // Strip "input/" prefix
+        strncpy(dev_dirent.d_name, input_devices[index]->name + 6, sizeof(dev_dirent.d_name) - 1);
+        dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
+        dev_dirent.d_ino = index + 1;
+        return &dev_dirent;
+    }
+    return NULL;
+}
+
+static fs_node_t *input_finddir(fs_node_t *node, char *name) {
+    (void)node;
+    for (int i = 0; i < input_device_count; i++) {
+        // Compare stripping "input/" prefix
+        if (strcmp(input_devices[i]->name + 6, name) == 0) {
+            return input_devices[i];
+        }
+    }
+    return NULL;
+}
+
+static fs_node_t input_dir_node = {
+    .name = "input",
+    .flags = FS_DIRECTORY,
+    .readdir = input_readdir,
+    .finddir = input_finddir
+};
+
 // /dev root directory operations
 static struct dirent *devfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
@@ -107,18 +146,24 @@ static struct dirent *devfs_readdir(fs_node_t *node, uint64_t index) {
         dev_dirent.d_ino = 1;
         return &dev_dirent;
     }
-    // Then tty
+    // Then input subdirectory
     if (index == 1) {
-        strcpy(dev_dirent.d_name, "tty");
+        strcpy(dev_dirent.d_name, "input");
         dev_dirent.d_ino = 2;
         return &dev_dirent;
     }
+    // Then tty
+    if (index == 2) {
+        strcpy(dev_dirent.d_name, "tty");
+        dev_dirent.d_ino = 3;
+        return &dev_dirent;
+    }
     // Then char devices
-    uint64_t char_idx = index - 2;
+    uint64_t char_idx = index - 3;
     if (char_idx < (uint64_t)char_device_count) {
         strncpy(dev_dirent.d_name, char_devices[char_idx]->name, sizeof(dev_dirent.d_name) - 1);
         dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
-        dev_dirent.d_ino = char_idx + 3;
+        dev_dirent.d_ino = char_idx + 4;
         return &dev_dirent;
     }
     return NULL;
@@ -127,6 +172,7 @@ static struct dirent *devfs_readdir(fs_node_t *node, uint64_t index) {
 static fs_node_t *devfs_finddir(fs_node_t *node, char *name) {
     (void)node;
     if (strcmp(name, "storage") == 0) return &storage_dir_node;
+    if (strcmp(name, "input") == 0) return &input_dir_node;
     if (strcmp(name, "tty") == 0) return &tty_node;
     for (int i = 0; i < char_device_count; i++) {
         if (strcmp(char_devices[i]->name, name) == 0) {
