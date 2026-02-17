@@ -724,14 +724,20 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     }
 
     /*
-     * Call driver ioctl if not handled (still locked to preserve existing semantics)
-     * Warning: drivers accessing user pointers via arg directly will still be vulnerable/unsafe.
+     * Call driver ioctl if not handled.
+     * We must release the lock before calling the driver to allow it to
+     * safely access user memory (copyin/copyout) which might sleep.
      */
-    if (ret == -1 && tty->driver->ioctl) {
-        ret = tty->driver->ioctl(tty, cmd, arg);
+    int (*driver_ioctl)(struct tty *, uint32_t, unsigned long) = NULL;
+    if (ret == -1 && tty->driver && tty->driver->ioctl) {
+        driver_ioctl = tty->driver->ioctl;
     }
 
     TTY_UNLOCK(tty);
+
+    if (driver_ioctl) {
+        ret = driver_ioctl(tty, cmd, arg);
+    }
 
     /* Copy-out phase (unlocked) */
     if (ret == 0) {
