@@ -7,12 +7,12 @@
 #include <stdint.h>
 
 extern int64_t _syscall0(int);
-extern int64_t _syscall1(int, int);
-extern int64_t _syscall2(int, int, int);
-extern int64_t _syscall3(int, int, int, int);
-extern int64_t _syscall4(int, int, int, int, int);
-extern int64_t _syscall5(int, int, int, int, int, int);
-extern int64_t _syscall6(int, int, int, int, int, int, int);
+extern int64_t _syscall1(int, long);
+extern int64_t _syscall2(int, long, long);
+extern int64_t _syscall3(int, long, long, long);
+extern int64_t _syscall4(int, long, long, long, long);
+extern int64_t _syscall5(int, long, long, long, long, long);
+extern int64_t _syscall6(int, long, long, long, long, long, long);
 
 #define MAX_PTHREADS 64
 
@@ -63,7 +63,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 
     struct pthread_info *ti = &thread_table[slot];
     ti->exited = 0;
-    ti->retval = NULL;
+    ti->exit_status = NULL;
 
     ti->stack_size = 64 * 1024;
     ti->stack = malloc(ti->stack_size);
@@ -96,7 +96,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     param.parent_tid = NULL;
     param.flags = 0;
     
-    int ret = (int)_syscall2(SYS_THR_NEW, (int)&param, sizeof(param));
+    int ret = (int)_syscall2(SYS_THR_NEW, (long)&param, sizeof(param));
     
     if (ret != 0) {
         free(ta);
@@ -112,13 +112,35 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 }
 
 void pthread_exit(void *retval) {
-    _syscall1(SYS_THR_EXIT, (int)(uintptr_t)retval);
+    _syscall1(SYS_THR_EXIT, (long)retval);
     /* Should not be reached */
     _exit(0);
 }
 
 int pthread_join(pthread_t thread, void **retval) {
-    return (int)_syscall2(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
+    int slot = -1;
+
+    while (__sync_lock_test_and_set(&thread_table_lock, 1));
+    for (int i = 0; i < MAX_PTHREADS; i++) {
+        if (thread_table[i].used && thread_table[i].tid == thread) {
+            slot = i;
+            break;
+        }
+    }
+    __sync_lock_release(&thread_table_lock);
+
+    int ret = (int)_syscall2(SYS_THR_JOIN, thread, (long)retval);
+
+    if (ret == 0 && slot != -1) {
+        while (__sync_lock_test_and_set(&thread_table_lock, 1));
+        if (thread_table[slot].used && thread_table[slot].tid == thread) {
+            free(thread_table[slot].stack);
+            thread_table[slot].stack = NULL;
+            thread_table[slot].used = 0;
+        }
+        __sync_lock_release(&thread_table_lock);
+    }
+    return ret;
 }
 
 // Mutex stubs
