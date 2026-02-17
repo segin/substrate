@@ -1,5 +1,5 @@
-#ifndef _SYS_ACCT_H
-#define _SYS_ACCT_H
+#ifndef _SUBSTRATE_SYS_ACCT_H
+#define _SUBSTRATE_SYS_ACCT_H
 
 #include <stdint.h>
 #include <sys/types.h>
