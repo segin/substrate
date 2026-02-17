@@ -548,9 +548,45 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
     /* TODO: Handle extent-based files */
     if ((disk_fe->icb_tag.flags & 0x7) == UDF_ICB_FLAG_AD_SHORT) {
         if (new_size > disk_fe->info_length) {
-            /* Extension not fully implemented */
-            kprint("UDF: Extending extent-based files not implemented\n");
-            return -1;
+            /* Check for 32-bit limit due to udf_write_extent_data signature */
+            if (new_size > 0xFFFFFFFF) {
+                kprint("UDF: File too large for 32-bit implementation\n");
+                return -1;
+            }
+
+            uint64_t current_len = disk_fe->info_length;
+            uint64_t bytes_to_add = new_size - current_len;
+
+            /* Allocate zero buffer for writing */
+            uint8_t *zero_buf = kmalloc(UDF_SECTOR_SIZE);
+            if (!zero_buf) return -1;
+            memset(zero_buf, 0, UDF_SECTOR_SIZE);
+
+            while (bytes_to_add > 0) {
+                uint32_t chunk = (bytes_to_add > UDF_SECTOR_SIZE) ? UDF_SECTOR_SIZE : (uint32_t)bytes_to_add;
+
+                /* Note: udf_write_extent_data takes uint32_t offset, limiting write support to 4GB */
+                if (udf_write_extent_data(dev, disk_fe, (uint32_t)current_len, chunk, zero_buf) != 0) {
+                    kfree(zero_buf, UDF_SECTOR_SIZE);
+                    return -1;
+                }
+
+                current_len += chunk;
+                bytes_to_add -= chunk;
+            }
+
+            kfree(zero_buf, UDF_SECTOR_SIZE);
+
+            /* Recalculate checksum */
+            uint8_t *p = (uint8_t *)&disk_fe->tag;
+            uint8_t sum = 0;
+            for (int i = 0; i < 4; i++) sum += p[i];
+            for (int i = 5; i < 16; i++) sum += p[i];
+            disk_fe->tag.tag_checksum = sum;
+
+            dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+            memcpy(fe, disk_fe, sizeof(struct udf_fe));
+            return 0;
         }
 
         uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
