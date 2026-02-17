@@ -207,7 +207,8 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
             }
         } else {
             if (*file_count >= capacity) {
-                size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
+                // Geometric growth (x2) to avoid O(N^2) reallocation
+                size_t new_capacity = capacity == 0 ? 32 : capacity * 2;
                 char **temp = realloc(*files, sizeof(char*) * new_capacity);
                 if (!temp) return -1; // OOM
                 *files = temp;
