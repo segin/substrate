@@ -114,6 +114,34 @@ static void test_strchr_empty(void) {
     }
 }
 
+static void test_strchr_comprehensive(void) {
+    char buf[] = "Hello World";
+
+    // Test: Search for a character not present in the string
+    ASSERT_EQ(strchr(buf, 'z'), NULL, "strchr comprehensive not found");
+
+    // Test: Search for the null terminator
+    ASSERT_EQ(strchr(buf, '\0'), buf + 11, "strchr comprehensive null terminator");
+
+    // Test: Search in an empty string
+    char empty[] = "";
+    ASSERT_EQ(strchr(empty, 'a'), NULL, "strchr comprehensive empty string not found");
+    ASSERT_EQ(strchr(empty, '\0'), empty, "strchr comprehensive empty string null terminator");
+
+    // Test: Verify int c argument conversion (e.g., c values > 255)
+    ASSERT_EQ(strchr(buf, 'W' + 256), buf + 6, "strchr comprehensive int conversion > 255");
+
+    // Test: Search for high-bit characters (0x80-0xFF)
+    unsigned char high_bit_buf[] = { 0x80, 0xFF, 0x00 };
+    ASSERT_EQ(strchr((char *)high_bit_buf, 0x80), high_bit_buf, "strchr comprehensive high bit 0x80");
+    ASSERT_EQ(strchr((char *)high_bit_buf, 0xFF), high_bit_buf + 1, "strchr comprehensive high bit 0xFF");
+
+    // Test: Verify function returns the first occurrence
+    char multiple[] = "ababa";
+    ASSERT_EQ(strchr(multiple, 'a'), multiple, "strchr comprehensive first occurrence 'a'");
+    ASSERT_EQ(strchr(multiple, 'b'), multiple + 1, "strchr comprehensive first occurrence 'b'");
+}
+
 void run_string_tests(void) {
     kprint("\n=== STRING TESTS ===\n");
     failed_tests = 0;
@@ -121,6 +149,7 @@ void run_string_tests(void) {
     test_strpbrk();
     test_strchr_basic();
     test_strchr_empty();
+    test_strchr_comprehensive();
 
     if (failed_tests == 0) {
         kprint("String Tests: PASS\n");
