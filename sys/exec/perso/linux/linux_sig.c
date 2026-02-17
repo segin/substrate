@@ -11,6 +11,18 @@ extern int copyout(const void *src, void *dst, size_t size);
 extern int copyin(const void *src, void *dst, size_t size);
 extern int validate_user_addr(const void *addr, size_t size);
 
+static void populate_linux_siginfo(linux_siginfo_t *info, int lsig) {
+    memset(info, 0, sizeof(*info));
+    info->si_signo = lsig;
+    info->si_errno = 0;
+    info->si_code = 0; /* SI_USER */
+
+    if (current_process) {
+        info->_sifields._kill._pid = current_process->pid;
+        info->_sifields._kill._uid = current_process->uid;
+    }
+}
+
 void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
     uint32_t esp = regs->useresp;
@@ -33,8 +45,17 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         frame.pinfo = esp + offsetof(struct linux_rt_sigframe, info);
         frame.puc = esp + offsetof(struct linux_rt_sigframe, uc);
         
-        /* info and uc would be populated here (translation needed) */
-        // TODO: info translation
+        /* info and uc populated here */
+        populate_linux_siginfo(&frame.info, lsig);
+
+        frame.uc.uc_flags = 0;
+        frame.uc.uc_link = 0;
+        if (current_thread) {
+            frame.uc.uc_stack.ss_sp = (uint32_t)current_thread->sig_alt_stack.ss_sp;
+            frame.uc.uc_stack.ss_size = current_thread->sig_alt_stack.ss_size;
+            frame.uc.uc_stack.ss_flags = current_thread->sig_alt_stack.ss_flags;
+        }
+
         frame.uc.uc_sigmask.sig[0] = mask;
         frame.uc.uc_mcontext.eip = regs->eip;
         frame.uc.uc_mcontext.eax = regs->eax;
