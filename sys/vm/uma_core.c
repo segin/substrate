@@ -189,6 +189,12 @@ uma_zone_t *uma_zcreate(
         zone->uz_ipers = 1; /* Large objects get 1 per page */
     }
     
+    /* Check if we need off-page slab headers */
+    size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
+    if (zone->uz_rsize * zone->uz_ipers + slab_overhead > 4096) {
+        zone->uz_flags |= UMA_ZONE_OFFPAGE;
+    }
+
     /* Set callbacks */
     zone->uz_ctor = ctor;
     zone->uz_dtor = dtor;
@@ -264,30 +270,63 @@ void uma_zdestroy(uma_zone_t *zone) {
  * Allocate a slab page and carve into objects
  */
 static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
-    /* Allocate raw page from PMM */
-    void *page = pmm_alloc_block();
-    if (!page) {
-        extern void kprint(const char*);
-        kprint("uma_slab_alloc: pmm_alloc_block failed!\n");
-        return NULL;
-    }
-    
-    /* Slab header is at the end of the page (for small objects) */
-    uma_slab_t *slab;
-    size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
-    
-    if (zone->uz_rsize * zone->uz_ipers + slab_overhead <= 4096) {
-        /* On-page slab header */
-        slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
+    void *page = NULL;
+    uma_slab_t *slab = NULL;
+
+    /* Check if we need off-page slab headers */
+    if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
+        /* Off-page slab header */
+        size_t total_size = zone->uz_rsize * zone->uz_ipers;
+        size_t pages_needed = (total_size + 4095) / 4096;
+
+        if (pages_needed > 1) {
+            page = pmm_alloc_contiguous(pages_needed);
+        } else {
+            page = pmm_alloc_block();
+        }
+
+        if (!page) {
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: pmm_alloc failed for off-page slab!\n");
+            return NULL;
+        }
+
+        /* Allocate separate slab header */
+        slab = kzalloc(sizeof(uma_slab_t) + zone->uz_ipers);
+        if (!slab) {
+            if (pages_needed > 1) {
+                pmm_free_contiguous(page, pages_needed);
+            } else {
+                pmm_free_block(page);
+            }
+            return NULL;
+        }
+
+        slab->us_data = page;
     } else {
-        /* TODO: Off-page slab header for large objects */
-        extern void kprint(const char*);
-        kprint("uma_slab_alloc: slab too large for on-page header!\n");
-        pmm_free_block(page);
-        return NULL;
+        /* On-page slab header */
+        /* Allocate raw page from PMM */
+        page = pmm_alloc_block();
+        if (!page) {
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: pmm_alloc_block failed!\n");
+            return NULL;
+        }
+
+        size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
+
+        if (zone->uz_rsize * zone->uz_ipers + slab_overhead <= 4096) {
+            /* On-page slab header */
+            slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
+            slab->us_data = page;
+        } else {
+            /* This should not be reached if UMA_ZONE_OFFPAGE logic in uma_zcreate is correct */
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: slab too large for on-page header but OFF_PAGE not set!\n");
+            pmm_free_block(page);
+            return NULL;
+        }
     }
-    
-    slab->us_data = page;
     slab->us_zone = zone;
     slab->us_freecount = zone->uz_ipers;
     slab->us_firstfree = 0;
@@ -335,7 +374,20 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
     /* Remove from global hash */
     uma_hash_remove(slab);
 
-    pmm_free_block(slab->us_data);
+    if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
+        size_t total_size = zone->uz_rsize * zone->uz_ipers;
+        size_t pages_needed = (total_size + 4095) / 4096;
+
+        if (pages_needed > 1) {
+            pmm_free_contiguous(slab->us_data, pages_needed);
+        } else {
+            pmm_free_block(slab->us_data);
+        }
+
+        kfree(slab, sizeof(uma_slab_t) + zone->uz_ipers);
+    } else {
+        pmm_free_block(slab->us_data);
+    }
 }
 
 /*
