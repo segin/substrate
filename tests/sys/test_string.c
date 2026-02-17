@@ -62,6 +62,36 @@ static void test_strpbrk(void) {
     // accept = "lo" -> first 'l' at index 2
     res = strpbrk(s, "lo");
     ASSERT_EQ(res, s + 2, "strpbrk multiple matches");
+
+    // Accept string with characters not in source
+    res = strpbrk("abc", "z");
+    ASSERT_EQ(res, NULL, "strpbrk not in source");
+
+    // Accept string is substring of source
+    // "hello", accept "el" -> first match 'e' at index 1
+    const char *s_subset = "hello";
+    res = strpbrk(s_subset, "el");
+    ASSERT_EQ(res, s_subset + 1, "strpbrk accept subset");
+
+    // Source contains duplicates, accept matches one
+    // "banana", accept "n" -> first 'n' at index 2
+    const char *s_banana = "banana";
+    res = strpbrk(s_banana, "n");
+    ASSERT_EQ(res, s_banana + 2, "strpbrk source dups");
+
+    // Accept contains duplicates
+    // "hello", accept "ll" -> matches first 'l' at index 2
+    const char *s_hello = "hello";
+    res = strpbrk(s_hello, "ll");
+    ASSERT_EQ(res, s_hello + 2, "strpbrk accept dups");
+
+    // Long string test
+    char long_str[100];
+    memset(long_str, 'a', 99);
+    long_str[99] = '\0';
+    long_str[50] = 'b';
+    res = strpbrk(long_str, "b");
+    ASSERT_EQ(res, long_str + 50, "strpbrk long string");
 }
 
 static void test_strchr_basic(void) {
