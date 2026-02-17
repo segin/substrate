@@ -221,6 +221,8 @@ void run_kernel_tests(void) {
          test_printf_new();
          extern void test_printf_star(void);
          test_printf_star();
+         extern void test_printf_flags(void);
+         test_printf_flags();
     }
 
     if (strcmp(test_arg, "benchmark") == 0) {

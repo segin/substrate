@@ -10,10 +10,14 @@ SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_exp
 
 SRCS += test_minix_readdir.c
 SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vfs_busy.c
+SRCS += test_printf_flags.c
 
 OBJS = $(SRCS:.c=.o)
 
-all: tests.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64
+all: tests.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_flags
+
+host_test_printf_flags: host_test_printf_flags.c
+	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys host_test_printf_flags.c -o $@
 
 host_test_negdi2: host_test_negdi2.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_negdi2.c -o $@
@@ -40,4 +44,4 @@ tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:
-	rm -f *.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64
+	rm -f *.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_flags
