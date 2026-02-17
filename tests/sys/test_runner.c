@@ -223,6 +223,10 @@ void run_kernel_tests(void) {
          test_printf_star();
     }
 
+    if (all || strcmp(test_arg, "nanosleep") == 0) {
+        run_nanosleep_tests();
+    }
+
     if (strcmp(test_arg, "benchmark") == 0) {
          extern void run_vm_map_benchmark(void);
          run_vm_map_benchmark();

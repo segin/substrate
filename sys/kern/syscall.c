@@ -39,6 +39,8 @@
 
 #include <sys/kern_syscalls.h>
 #include <sys/utsname.h>
+#include <sys/time.h>
+#include <kern/time.h>
 
 extern thread_t *current_thread; 
 extern process_t *current_process;
@@ -1253,7 +1255,60 @@ int kern_umount(const char *target) {
 }
 
 
-int sys_nanosleep(void *req, void *rem) { (void)req; (void)rem; return 0; }
+int sys_nanosleep(void *req, void *rem) {
+    if (!req) return -EFAULT;
+
+    struct timespec kreq;
+    if (copyin(req, &kreq, sizeof(struct timespec)) != 0) return -EFAULT;
+
+    if (kreq.tv_nsec < 0 || kreq.tv_nsec >= 1000000000) return -EINVAL;
+    if (kreq.tv_sec < 0) return -EINVAL;
+
+    // Handle 0 sleep request - yield but don't sleep
+    if (kreq.tv_sec == 0 && kreq.tv_nsec == 0) {
+        sched_yield();
+        return 0;
+    }
+
+    uint32_t hz = get_hz();
+
+    // Calculate duration in ticks
+    // We use ceiling division for nanoseconds to ensure we sleep AT LEAST the requested time
+    // ticks = sec*HZ + ceil(nsec*HZ / 10^9)
+    uint64_t ticks = (uint64_t)kreq.tv_sec * hz;
+    ticks += ((uint64_t)kreq.tv_nsec * hz + 999999999) / 1000000000;
+
+    // Ensure at least 1 tick if request was > 0 (handled by ceiling above usually,
+    // unless hz is very small or nsec is very small. If nsec=1, hz=100 -> ticks=1)
+
+    uint64_t now = get_ticks();
+    uint64_t deadline = now + ticks;
+
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+    int ret = sched_sleep_until(&current_thread->sig_pending, deadline);
+    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+
+    if (ret == -ETIMEDOUT) {
+        return 0;
+    }
+
+    // Interrupted by signal (ret == 0)
+    if (rem) {
+        now = get_ticks();
+        if (now < deadline) {
+             uint64_t diff = deadline - now;
+             struct timespec remaining;
+             remaining.tv_sec = diff / hz;
+             remaining.tv_nsec = ((diff % hz) * 1000000000) / hz;
+             if (copyout(&remaining, rem, sizeof(struct timespec)) != 0) return -EFAULT;
+        } else {
+             // Deadline passed but we were woken up? Treat as success.
+             return 0;
+        }
+    }
+
+    return -EINTR;
+}
 
 // Current working directory per-process
 int sys_chdir(const char *path) {
