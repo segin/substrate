@@ -6,6 +6,7 @@
 #include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
 #include <sys/lock.h>
+#include <vm/vm_swap.h>
 #include <stddef.h>
 
 // Simple bitmap-based swap allocator
@@ -140,6 +141,26 @@ static int swap_pager_putpage(struct vm_pager *p, vm_page_t *m, bool sync) {
     if (bytes != 4096) return -1;
     
     return 0;
+}
+
+void vm_swap_get_stats(uint64_t *total_pages, uint64_t *free_pages) {
+    if (!total_pages && !free_pages) return;
+
+    spinlock_acquire(&swap_lock);
+
+    if (total_pages) *total_pages = swap_num_pages;
+
+    if (free_pages) {
+        uint32_t used = 0;
+        for (uint32_t i = 0; i < swap_num_pages; i++) {
+             if (swap_bitmap[i/32] & (1 << (i%32))) {
+                 used++;
+             }
+        }
+        *free_pages = swap_num_pages - used;
+    }
+
+    spinlock_release(&swap_lock);
 }
 
 static bool swap_pager_haspage(struct vm_pager *p, uint64_t pindex) {
