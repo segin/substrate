@@ -643,7 +643,25 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
     ntsync_spinlock_acquire(&inst->lock);
     
     if (inst->object_count >= inst->object_capacity) {
-        int new_cap = inst->object_capacity ? inst->object_capacity * 2 : 16;
+        int new_cap;
+
+        if (inst->object_capacity == 0) {
+            new_cap = 16;
+        } else {
+            if (inst->object_capacity > INT32_MAX / 2) {
+                spinlock_release(&inst->lock);
+                kfree(obj);
+                return -ENOMEM;
+            }
+            new_cap = inst->object_capacity * 2;
+        }
+
+        if (new_cap > SIZE_MAX / sizeof(ntsync_object_t *)) {
+            spinlock_release(&inst->lock);
+            kfree(obj);
+            return -ENOMEM;
+        }
+
         ntsync_object_t **new_objs = kmalloc(new_cap * sizeof(ntsync_object_t *));
         if (!new_objs) {
             ntsync_spinlock_release(&inst->lock);
