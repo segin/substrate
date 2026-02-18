@@ -1,10 +1,7 @@
-#include "pci.h"
-#include "io.h"
+#include <arch/i386/pci.h>
+#include <arch/x86-common/include/io.h>
 #include <kern/console.h>
 #include <stdio.h>
-
-#define PCI_CONFIG_ADDRESS 0xCF8
-#define PCI_CONFIG_DATA    0xCFC
 
 uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address;

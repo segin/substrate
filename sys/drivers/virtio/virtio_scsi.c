@@ -324,7 +324,7 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
 }
 
 static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
-                          const uint8_t *lun, uint64_t id) {
+                          uint8_t target, uint16_t lun) {
     if (!dev) return -1;
 
     virtio_scsi_queue_t *q = &dev->ctrl_queue;
@@ -335,10 +335,11 @@ static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
 
     req.type = VIRTIO_SCSI_T_TMF;
     req.subtype = subtype;
-    if (lun) {
-        memcpy(req.lun, lun, 8);
-    }
-    req.id = id;
+    req.lun[0] = 1;
+    req.lun[1] = target;
+    req.lun[2] = (lun >> 8) & 0xFF;
+    req.lun[3] = lun & 0xFF;
+    req.id = 0;
 
     /* Build TMF response */
     struct virtio_scsi_ctrl_tmf_resp resp;
@@ -387,14 +388,8 @@ static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
     virtio_scsi_dev_t *dev = (virtio_scsi_dev_t *)link->priv;
     if (!dev || !sdev) return -1;
 
-    uint8_t lun[8];
-    memset(lun, 0, 8);
-    lun[0] = 1;
-    lun[1] = sdev->target;
-    lun[2] = (sdev->lun >> 8) & 0xFF;
-    lun[3] = sdev->lun & 0xFF;
-
-    int ret = vscsi_send_tmf(dev, VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET, lun, 0);
+    int ret = vscsi_send_tmf(dev, VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET,
+                             sdev->target, sdev->lun);
 
     if (ret == 0) {
         char buf[64];
@@ -417,30 +412,20 @@ static int vscsi_reset_bus(scsi_link_t *link) {
 
     kprint("virtio_scsi: resetting bus (I_T Nexus Reset)\n");
 
-    int max_t = dev->max_target;
-    if (max_t >= SCSI_MAX_TARGETS) max_t = SCSI_MAX_TARGETS - 1;
+    /* Iterate over all possible targets and reset their I_T nexus */
+    for (uint16_t target = 0; target <= dev->max_target; target++) {
+        int ret = vscsi_send_tmf(dev, VIRTIO_SCSI_T_TMF_I_T_NEXUS_RESET,
+                                 (uint8_t)target, 0);
 
-    for (int t = 0; t <= max_t; t++) {
-        uint8_t lun[8];
-        memset(lun, 0, 8);
-        lun[0] = 1;
-        lun[1] = t;
-        /* Nexus reset targets the I_T nexus (initiator-target), LUN bytes are ignored or specific */
-
-        /* Using VIRTIO_SCSI_T_TMF_I_T_NEXUS_RESET */
-        int ret = vscsi_send_tmf(dev, VIRTIO_SCSI_T_TMF_I_T_NEXUS_RESET, lun, 0);
-
-        /*
-         * Ignore VIRTIO_SCSI_S_BAD_TARGET because we are blindly iterating.
-         * Other errors might be worth logging.
-         */
         if (ret != 0 && ret != VIRTIO_SCSI_S_BAD_TARGET) {
-             char buf[64];
-             snprintf(buf, sizeof(buf), "virtio_scsi: reset target %d failed (resp=%d)\n", t, ret);
-             kprint(buf);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "virtio_scsi: reset target %d failed (resp=%d)\n",
+                    target, ret);
+            kprint(buf);
         }
     }
 
+    kprint("virtio_scsi: bus reset complete\n");
     return 0;
 }
 
