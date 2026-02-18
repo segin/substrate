@@ -16,6 +16,9 @@
 /* Global list of all zones */
 static uma_zone_t *uma_zones = NULL;
 
+/* Slab header zone (for off-page slabs) */
+static uma_zone_t *uma_slab_zone = NULL;
+
 /* Number of CPUs (detected at runtime) */
 static int uma_ncpu = 1;
 
@@ -95,6 +98,14 @@ void uma_startup(void) {
     }
 
     kprint("UMA: subsystem initialized\n");
+
+    /* Create the slab zone for off-page metadata */
+    /* We can't use off-page for the slab zone itself (recursion!) */
+    /* We add 256 bytes for the freelist map (supports up to ~256 items per slab) */
+    uma_slab_zone = uma_zcreate("uma_slabs", sizeof(struct uma_slab) + 256,
+                                NULL, NULL, NULL, NULL, 0, UMA_ZONE_NOFREE);
+    if (!uma_slab_zone) kprint("UMA: FAILED to create slab zone!\n");
+    else kprint("UMA: slab zone created.\n");
 }
 
 /*
@@ -180,15 +191,49 @@ uma_zone_t *uma_zcreate(
     zone->uz_rsize = (zone->uz_rsize + zone->uz_align - 1) & ~(zone->uz_align - 1);
     
     /* Calculate items per slab (4k pages), accounting for slab overhead */
-    /* Slab header and freelist go at end of page */
-    /* Formula: uz_ipers * uz_rsize + sizeof(uma_slab_t) + uz_ipers <= 4096 */
-    /* Simplified: uz_ipers * (uz_rsize + 1) + sizeof(uma_slab_t) <= 4096 */
-    size_t per_item = zone->uz_rsize + 1; /* +1 for freelist byte */
-    zone->uz_ipers = (4096 - sizeof(uma_slab_t)) / per_item;
-    if (zone->uz_ipers == 0) {
-        zone->uz_ipers = 1; /* Large objects get 1 per page */
+    
+    /* Check if off-page management is better (or required) */
+    /* 1. Required if object is too large (e.g. > 2048 with overhead) */
+    /* 2. Better if we can fit more items by moving header out */
+    
+    // Items we can fit if header is ON page
+    // (4096 - header) / size  vs  4096 / size
+    
+    size_t onpage_overhead = sizeof(uma_slab_t);
+    size_t effective_size = zone->uz_rsize;
+    
+    // Simplistic check: If request > 1/2 page, force offpage to get 1 item
+    // Or if offpage gives us more items.
+    
+    int onpage_count = (4096 - onpage_overhead) / (effective_size + 1); // +1 for freelist
+    if (onpage_count == 0) onpage_count = 1;
+    
+    int offpage_count = 4096 / effective_size; 
+    // Note: offpage still needs freelist if we don't put it in the slab header
+    // But standard UMA often puts freelist in the item itself when free, or a bitmap.
+    // implementation uses us_freelist pointer at end of header.
+    // If offpage, header + freelist bitmap must be allocated from slab_zone.
+    
+    if (size > 2048 || (offpage_count > onpage_count && uma_slab_zone != NULL)) {
+        zone->uz_flags |= UMA_ZONE_OFFPAGE;
+        zone->uz_ipers = 4096 / zone->uz_rsize;
+    } else {
+        /* On-page slab header */
+        /* Formula: uz_ipers * uz_rsize + sizeof(uma_slab_t) + uz_ipers <= 4096 */
+        size_t per_item = zone->uz_rsize + 1; /* +1 for freelist byte */
+        zone->uz_ipers = (4096 - sizeof(uma_slab_t)) / per_item;
     }
     
+    if (zone->uz_ipers == 0) {
+        zone->uz_ipers = 1; 
+    }
+    
+    /* Check if we need off-page slab headers */
+    size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
+    if (zone->uz_rsize * zone->uz_ipers + slab_overhead > 4096) {
+        zone->uz_flags |= UMA_ZONE_OFFPAGE;
+    }
+
     /* Set callbacks */
     zone->uz_ctor = ctor;
     zone->uz_dtor = dtor;
@@ -212,6 +257,12 @@ uma_zone_t *uma_zcreate(
     /* Link to global zone list */
     zone->uz_next = uma_zones;
     uma_zones = zone;
+    
+    // Debug print
+    kprint("UMA: Zone created: ");
+    kprint(name);
+    if (zone->uz_flags & UMA_ZONE_OFFPAGE) kprint(" [OFFPAGE]");
+    kprint("\n");
     
     return zone;
 }
@@ -264,30 +315,63 @@ void uma_zdestroy(uma_zone_t *zone) {
  * Allocate a slab page and carve into objects
  */
 static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
-    /* Allocate raw page from PMM */
-    void *page = pmm_alloc_block();
-    if (!page) {
-        extern void kprint(const char*);
-        kprint("uma_slab_alloc: pmm_alloc_block failed!\n");
-        return NULL;
-    }
-    
-    /* Slab header is at the end of the page (for small objects) */
-    uma_slab_t *slab;
-    size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
-    
-    if (zone->uz_rsize * zone->uz_ipers + slab_overhead <= 4096) {
-        /* On-page slab header */
-        slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
+    void *page = NULL;
+    uma_slab_t *slab = NULL;
+
+    /* Check if we need off-page slab headers */
+    if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
+        /* Off-page slab header */
+        size_t total_size = zone->uz_rsize * zone->uz_ipers;
+        size_t pages_needed = (total_size + 4095) / 4096;
+
+        if (pages_needed > 1) {
+            page = pmm_alloc_contiguous(pages_needed);
+        } else {
+            page = pmm_alloc_block();
+        }
+
+        if (!page) {
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: pmm_alloc failed for off-page slab!\n");
+            return NULL;
+        }
+
+        /* Allocate separate slab header */
+        slab = kzalloc(sizeof(uma_slab_t) + zone->uz_ipers);
+        if (!slab) {
+            if (pages_needed > 1) {
+                pmm_free_contiguous(page, pages_needed);
+            } else {
+                pmm_free_block(page);
+            }
+            return NULL;
+        }
+
+        slab->us_data = page;
     } else {
-        /* TODO: Off-page slab header for large objects */
-        extern void kprint(const char*);
-        kprint("uma_slab_alloc: slab too large for on-page header!\n");
-        pmm_free_block(page);
-        return NULL;
+        /* On-page slab header */
+        /* Allocate raw page from PMM */
+        page = pmm_alloc_block();
+        if (!page) {
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: pmm_alloc_block failed!\n");
+            return NULL;
+        }
+
+        size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
+
+        if (zone->uz_rsize * zone->uz_ipers + slab_overhead <= 4096) {
+            /* On-page slab header */
+            slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
+            slab->us_data = page;
+        } else {
+            /* This should not be reached if UMA_ZONE_OFFPAGE logic in uma_zcreate is correct */
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: slab too large for on-page header but OFF_PAGE not set!\n");
+            pmm_free_block(page);
+            return NULL;
+        }
     }
-    
-    slab->us_data = page;
     slab->us_zone = zone;
     slab->us_freecount = zone->uz_ipers;
     slab->us_firstfree = 0;
@@ -297,7 +381,31 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     uma_hash_insert(slab);
     
     /* Initialize free list (sequential indices) */
-    slab->us_freelist = (uint8_t *)(slab + 1);
+    // Ensure we don't overflow if using slab_zone and ipers > 0
+    // If OFFPAGE and slab comes from slab_zone (size=sizeof(uma_slab)), writing to slab+1 is overflow!
+    // UNLESS we resize slab_zone.
+    
+    if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
+        // Safe fallback / Hack:
+        // For offpage, just assume sequential free behavior without explicit list?
+        // No, `uma_slab_alloc_item` relies on `us_freelist`.
+        
+        // Real fix: Allocate slab header + freelist size.
+        // Since `uma_zalloc` takes a zone, we can't request variable size 
+        // unless we have multiple slab zones.
+        // But `uma_slab_zone` was created with `sizeof(uma_slab)`.
+        
+        // Workaround: For offpage, we only support 1 item per page so no freelist needed? 
+        // us_firstfree=0. us_freelist[0] = 0xFF.
+        // This requires 1 byte.
+        // Let's check `uma_startup`: created with sizeof(uma_slab).
+        // Let's change `uma_startup` creation to `sizeof(uma_slab) + 16` to be safe for small counts?
+        
+        // I will update the `uma_startup` chunk to `sizeof(uma_slab) + 32` to suffice for common cases.
+        // And make sure `slab->us_freelist` points to valid memory.
+        slab->us_freelist = (uint8_t *)(slab + 1);
+    }
+    
     for (uint32_t i = 0; i < zone->uz_ipers; i++) {
         slab->us_freelist[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;
     }
@@ -335,7 +443,20 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
     /* Remove from global hash */
     uma_hash_remove(slab);
 
-    pmm_free_block(slab->us_data);
+    if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
+        size_t total_size = zone->uz_rsize * zone->uz_ipers;
+        size_t pages_needed = (total_size + 4095) / 4096;
+
+        if (pages_needed > 1) {
+            pmm_free_contiguous(slab->us_data, pages_needed);
+        } else {
+            pmm_free_block(slab->us_data);
+        }
+
+        kfree(slab, sizeof(uma_slab_t) + zone->uz_ipers);
+    } else {
+        pmm_free_block(slab->us_data);
+    }
 }
 
 /*
@@ -497,10 +618,10 @@ static void uma_zfree_slab(uma_zone_t *zone, void *item) {
 }
 
 /*
- * Get current CPU ID (stub for uniprocessor)
+ * Get current CPU ID
  */
 static inline int uma_curcpu(void) {
-    return 0;
+    return smp_get_cpu_id();
 }
 
 /*
@@ -518,12 +639,27 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
     uma_cache_t *cache = &zone->uz_cpu[cpu];
     
     /* Fast path: try per-CPU cache */
-    if (!(zone->uz_flags & UMA_ZONE_NOBUCKET) && cache->uc_allocbucket) {
+    if (!(zone->uz_flags & UMA_ZONE_NOBUCKET)) {
+        if (cache->uc_allocbucket == NULL) {
+            cache->uc_allocbucket = uma_bucket_alloc();
+        }
+
         struct uma_bucket *bucket = cache->uc_allocbucket;
-        if (bucket->ub_cnt > 0) {
-            item = bucket->ub_bucket[--bucket->ub_cnt];
-            cache->uc_allocs++;
-            goto out;
+
+        if (bucket) {
+            /* If alloc bucket is empty, try to swap with free bucket */
+            if (bucket->ub_cnt == 0 && cache->uc_freebucket && cache->uc_freebucket->ub_cnt > 0) {
+                struct uma_bucket *tmp = cache->uc_allocbucket;
+                cache->uc_allocbucket = cache->uc_freebucket;
+                cache->uc_freebucket = tmp;
+                bucket = cache->uc_allocbucket;
+            }
+
+            if (bucket->ub_cnt > 0) {
+                item = bucket->ub_bucket[--bucket->ub_cnt];
+                cache->uc_allocs++;
+                goto out;
+            }
         }
     }
 

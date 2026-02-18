@@ -346,13 +346,12 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // ARG_MAX: Maximum bytes for arguments + environment
     // We use a fixed 32KB buffer to avoid Double Fetch / TOCTOU issues.
     const size_t ARG_MAX_BYTES = 32 * 1024;
-
-    // Variables for argument capturing
-    int argc = 0;
-    int envc = 0;
     char **k_argv = NULL;
     char **k_envp = NULL;
     char *arg_buffer = NULL;
+    int argc = 0;
+    int envc = 0;
+    int error_code = -1;
 
     // Lookup the file
     fs_node_t *file = vfs_lookup(root, path);
@@ -375,7 +374,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
             char *uarg;
             if (capture_ptr(argv, argc, &uarg) != 0 || uarg == NULL) break;
             argc++;
-            if (argc > ARG_MAX_BYTES) { // Sanity limit for argc count (impossible to exceed ARG_MAX_BYTES bytes)
+            if (argc > (int)(ARG_MAX_BYTES / 4)) { // Sanity limit for argc count
                 kprint("execve: Too many arguments\n");
                 return -7; // E2BIG
             }
@@ -388,7 +387,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
             char *uarg;
             if (capture_ptr(envp, envc, &uarg) != 0 || uarg == NULL) break;
             envc++;
-            if (envc > ARG_MAX_BYTES) {
+            if (envc > (int)(ARG_MAX_BYTES / 4)) {
                 kprint("execve: Too many env vars\n");
                 return -7; // E2BIG
             }
@@ -425,17 +424,20 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
 
     for (int i = 0; i < argc; i++) {
         char *uarg;
-        if (capture_ptr(argv, i, &uarg) != 0) goto cleanup;
+        int ret;
+        if ((ret = capture_ptr(argv, i, &uarg)) != 0) {
+            error_code = (ret == -1) ? -14 : -1; // Map EFAULT
+            goto cleanup;
+        }
         k_argv[i] = p_buf;
 
         size_t copied_len = 0;
-        int ret;
         if (is_user_ptr(uarg)) {
             ret = copyinstr(uarg, p_buf, remaining, &copied_len);
         } else {
             size_t len = strlen(uarg) + 1;
             if (len > remaining) {
-                ret = -36; // ENAMETOOLONG
+                ret = -7; // E2BIG
             } else {
                 strcpy(p_buf, uarg);
                 copied_len = len;
@@ -444,7 +446,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         }
 
         if (ret != 0) {
-            kprint("execve: Failed to copy argument (changed?)\n");
+            if (ret == -2) error_code = -7; // E2BIG
+            else if (ret == -1) error_code = -14; // EFAULT
+            else error_code = (ret < 0) ? ret : -1;
+
+            kprint("execve: Failed to copy argument\n");
             goto cleanup;
         }
 
@@ -454,17 +460,20 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
 
     for (int i = 0; i < envc; i++) {
         char *uarg;
-        if (capture_ptr(envp, i, &uarg) != 0) goto cleanup;
+        int ret;
+        if ((ret = capture_ptr(envp, i, &uarg)) != 0) {
+            error_code = (ret == -1) ? -14 : -1; // Map EFAULT
+            goto cleanup;
+        }
         k_envp[i] = p_buf;
 
         size_t copied_len = 0;
-        int ret;
         if (is_user_ptr(uarg)) {
             ret = copyinstr(uarg, p_buf, remaining, &copied_len);
         } else {
             size_t len = strlen(uarg) + 1;
             if (len > remaining) {
-                ret = -36; // ENAMETOOLONG
+                ret = -7; // E2BIG
             } else {
                 strcpy(p_buf, uarg);
                 copied_len = len;
@@ -473,7 +482,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         }
 
         if (ret != 0) {
-            kprint("execve: Failed to copy env (changed?)\n");
+            if (ret == -2) error_code = -7; // E2BIG
+            else if (ret == -1) error_code = -14; // EFAULT
+            else error_code = (ret < 0) ? ret : -1;
+
+            kprint("execve: Failed to copy env\n");
             goto cleanup;
         }
 
@@ -894,7 +907,7 @@ cleanup:
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
-    return -1;
+    return error_code;
 }
 
 // Legacy function for compatibility

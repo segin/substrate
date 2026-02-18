@@ -37,4 +37,4 @@ struct acct {
 int sys_acct(const char *path);
 void acct_process(int exitcode);
 
-#endif
+#endif // _SUBSTRATE_SYS_ACCT_H
