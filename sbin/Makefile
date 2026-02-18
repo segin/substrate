@@ -4,7 +4,7 @@ include ../Makefile.inc
 ifdef NATIVE_BUILD
 SUBDIRS = mkfs fsck
 else
-SUBDIRS = init ld.so mkfs fsck
+SUBDIRS = init mkfs fsck
 endif 
 
 

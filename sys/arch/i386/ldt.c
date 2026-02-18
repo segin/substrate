@@ -4,12 +4,11 @@
 #include <sys/ldt.h>
 #include <sys/proc.h>
 #include <vm/vm_kmem.h>
-#include "gdt.h"
+#include <kern/console.h>
+#include <arch/i386/gdt.h>
 
 /* GDT index 7 is reserved for the active process LDT */
 #define GDT_LDT_INDEX 7
-
-extern void kprint(const char *s);
 
 void ldt_activate(process_t *proc) {
     if (!proc || !proc->ldt) {

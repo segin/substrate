@@ -36,14 +36,13 @@ typedef struct uma_cache uma_cache_t;
 #define UMA_ZONE_NOTOUCH    0x0040  /* Don't touch freed memory */
 #define UMA_ZONE_MAXBUCKET  0x0080  /* Use maximum bucket size */
 #define UMA_ZONE_NOBUCKET   0x0100  /* No per-CPU caching */
+#define UMA_ZONE_OFFPAGE    0x0200  /* Use off-page slab header */
 
 /* Debug flags (enabled via boot option or compile-time) */
 #define UMA_ZONE_TRASH      0x1000  /* Fill free/alloc with patterns */
 #define UMA_ZONE_REDZONE    0x2000  /* Add guard bytes around objects */
 #define UMA_ZONE_VTOSLAB    0x4000  /* Track slab from virtual address */
 #define UMA_ZONE_LEAK       0x8000  /* Enable leak tracking for this zone */
-
-#define UMA_ZONE_OFFPAGE    0x10000 /* Slab header is off-page */
 
 /*
  * Allocation flags (passed to uma_zalloc)
