@@ -5,7 +5,7 @@
 #include <sys/proc.h>
 #include <vm/vm_kmem.h>
 #include <kern/console.h>
-#include "gdt.h"
+#include <arch/i386/gdt.h>
 
 /* GDT index 7 is reserved for the active process LDT */
 #define GDT_LDT_INDEX 7

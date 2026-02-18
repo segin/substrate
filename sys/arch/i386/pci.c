@@ -3,9 +3,6 @@
 #include <kern/console.h>
 #include <stdio.h>
 
-#define PCI_CONFIG_ADDRESS 0xCF8
-#define PCI_CONFIG_DATA    0xCFC
-
 uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address;
     uint32_t lbus  = (uint32_t)bus;

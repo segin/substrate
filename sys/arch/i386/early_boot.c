@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <early_boot.h>
+#include <arch/i386/early_boot.h>
 
 /* Hex digit lookup */
 static const char hex_digits[] = "0123456789ABCDEF";

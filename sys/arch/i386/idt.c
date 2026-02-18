@@ -1,16 +1,16 @@
-#include "idt.h"
+#include <arch/i386/idt.h>
 #include <drivers/video/vga.h>
-#include "io.h"
+#include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdio.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/input/mouse.h>
 #include <kern/console.h>
 #include <kern/panic.h>
-#include "fpu/fpu_emu.h"
+#include <arch/i386/fpu/fpu_emu.h>
 
 #include <sys/proc.h>
-#include "pmap.h"
+#include <arch/i386/fpu/fpu_emu.h>
 
 idt_entry_t idt_entries[256] __attribute__((aligned(16)));
 idt_ptr_t   idt_ptr;
@@ -21,8 +21,8 @@ idt_ptr_t   idt_ptr;
 #include <kern/debug.h>
 #include <drivers/console/uart/uart.h>
 #include <drivers/storage/ide/ide.h>
-#include "vm86.h"
-#include "pmap.h"
+#include <arch/i386/vm86.h>
+#include <arch/i386/pmap.h>
 // isr externs are in idt.h now
 
 
