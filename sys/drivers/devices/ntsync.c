@@ -649,7 +649,7 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
             new_cap = 16;
         } else {
             if (inst->object_capacity > INT32_MAX / 2) {
-                spinlock_release(&inst->lock);
+                ntsync_spinlock_release(&inst->lock);
                 kfree(obj);
                 return -ENOMEM;
             }
@@ -657,7 +657,7 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
         }
 
         if (new_cap > SIZE_MAX / sizeof(ntsync_object_t *)) {
-            spinlock_release(&inst->lock);
+            ntsync_spinlock_release(&inst->lock);
             kfree(obj);
             return -ENOMEM;
         }
