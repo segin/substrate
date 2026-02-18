@@ -173,10 +173,51 @@ void test_memcmp(void) {
 }
 
 void test_strcmp(void) {
+    // Basic equality
     ASSERT_EQ(kernel_strcmp("", ""), 0, "strcmp empty");
     ASSERT_EQ(kernel_strcmp("abc", "abc"), 0, "strcmp equal");
-    if (kernel_strcmp("abc", "abd") >= 0) exit(1);
-    if (kernel_strcmp("abd", "abc") <= 0) exit(1);
+
+    // Basic inequality
+    if (kernel_strcmp("abc", "abd") >= 0) {
+        printf("FAIL: strcmp('abc', 'abd') should be negative\n");
+        exit(1);
+    }
+    if (kernel_strcmp("abd", "abc") <= 0) {
+        printf("FAIL: strcmp('abd', 'abc') should be positive\n");
+        exit(1);
+    }
+
+    // Prefix handling
+    if (kernel_strcmp("abc", "abcd") >= 0) {
+        printf("FAIL: strcmp prefix ('abc', 'abcd') should be negative\n");
+        exit(1);
+    }
+    if (kernel_strcmp("abcd", "abc") <= 0) {
+        printf("FAIL: strcmp prefix ('abcd', 'abc') should be positive\n");
+        exit(1);
+    }
+
+    // Empty vs Non-empty
+    if (kernel_strcmp("", "a") >= 0) {
+        printf("FAIL: strcmp empty vs 'a' should be negative\n");
+        exit(1);
+    }
+    if (kernel_strcmp("a", "") <= 0) {
+        printf("FAIL: strcmp 'a' vs empty should be positive\n");
+        exit(1);
+    }
+
+    // Unsigned char comparison (High bit set)
+    // '\xff' is 255 (unsigned), so it should be greater than '\x01' (1)
+    if (kernel_strcmp("\xff", "\x01") <= 0) {
+        printf("FAIL: strcmp unsigned comparison ('\\xff', '\\x01') should be positive\n");
+        exit(1);
+    }
+    if (kernel_strcmp("\x01", "\xff") >= 0) {
+        printf("FAIL: strcmp unsigned comparison ('\\x01', '\\xff') should be negative\n");
+        exit(1);
+    }
+
     printf("test_strcmp: PASS\n");
 }
 
