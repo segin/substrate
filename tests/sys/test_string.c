@@ -165,6 +165,59 @@ static void test_strchr_comprehensive(void) {
     ASSERT_EQ(strchr(multiple, 'b'), multiple + 1, "strchr comprehensive first occurrence 'b'");
 }
 
+static void test_memcmp(void) {
+    char b1[256], b2[256];
+    memset(b1, 0, sizeof(b1));
+    memset(b2, 0, sizeof(b2));
+
+    if (memcmp(b1, b2, 256) != 0) {
+        fail("memcmp identity failed");
+    }
+
+    for (int i = 0; i < 256; i++) {
+        b1[i] = (char)i;
+        b2[i] = (char)i;
+    }
+
+    if (memcmp(b1, b2, 256) != 0) {
+        fail("memcmp sequence identity failed");
+    }
+
+    for (int i = 0; i < 256; i++) {
+        // Test smaller
+        if (b1[i] < (char)255) {
+            b2[i] = b1[i] + 1;
+            if (memcmp(b1, b2, 256) >= 0) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "memcmp < failed at %d", i);
+                fail(msg);
+            }
+            b2[i] = b1[i];
+        }
+        if (b1[i] > 0) {
+            b2[i] = b1[i] - 1;
+            if (memcmp(b1, b2, 256) <= 0) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "memcmp > failed at %d", i);
+                fail(msg);
+            }
+            b2[i] = b1[i];
+        }
+    }
+
+    // Unsigned comparison check
+    unsigned char u1[] = { 0x00 };
+    unsigned char u2[] = { 0xFF };
+    if (memcmp(u1, u2, 1) >= 0) {
+        fail("memcmp unsigned 0x00 vs 0xFF failed");
+    }
+
+    u1[0] = 0x7F; u2[0] = 0x80;
+    if (memcmp(u1, u2, 1) >= 0) {
+        fail("memcmp unsigned 0x7F vs 0x80 failed");
+    }
+}
+
 void run_string_tests(void) {
     kprint("\n=== STRING TESTS ===\n");
     failed_tests = 0;
@@ -174,6 +227,7 @@ void run_string_tests(void) {
     test_strchr_empty();
     test_strchr_comprehensive();
     test_strcmp();
+    test_memcmp();
 
     if (failed_tests == 0) {
         kprint("String Tests: PASS\n");
