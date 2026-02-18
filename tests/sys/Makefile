@@ -14,10 +14,13 @@ SRCS += test_nanosleep.c
 
 OBJS = $(SRCS:.c=.o)
 
-all: tests.o host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers
+all: tests.o host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_lshrdi3 host_test_string host_test_div64 host_test_printf_specifiers
 
 host_test_negdi2: host_test_negdi2.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_negdi2.c -o $@
+
+host_test_lshrdi3: host_test_lshrdi3.c
+	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_lshrdi3.c -o $@
 
 host_test_udf_large_write: host_test_udf_large_write.c
 	$(CC) -g -Wall -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_udf_large_write.c -o $@
@@ -47,4 +50,4 @@ tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:
-	rm -f *.o host_test_udf_large_write host_test_udf_truncate_expand host_test_udf_extent host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers
+	rm -f *.o host_test_udf_large_write host_test_udf_truncate_expand host_test_udf_extent host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_lshrdi3 host_test_string host_test_div64 host_test_printf_specifiers
