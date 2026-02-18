@@ -612,10 +612,10 @@ static void uma_zfree_slab(uma_zone_t *zone, void *item) {
 }
 
 /*
- * Get current CPU ID (stub for uniprocessor)
+ * Get current CPU ID
  */
 static inline int uma_curcpu(void) {
-    return 0;
+    return smp_get_cpu_id();
 }
 
 /*
@@ -633,12 +633,27 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
     uma_cache_t *cache = &zone->uz_cpu[cpu];
     
     /* Fast path: try per-CPU cache */
-    if (!(zone->uz_flags & UMA_ZONE_NOBUCKET) && cache->uc_allocbucket) {
+    if (!(zone->uz_flags & UMA_ZONE_NOBUCKET)) {
+        if (cache->uc_allocbucket == NULL) {
+            cache->uc_allocbucket = uma_bucket_alloc();
+        }
+
         struct uma_bucket *bucket = cache->uc_allocbucket;
-        if (bucket->ub_cnt > 0) {
-            item = bucket->ub_bucket[--bucket->ub_cnt];
-            cache->uc_allocs++;
-            goto out;
+
+        if (bucket) {
+            /* If alloc bucket is empty, try to swap with free bucket */
+            if (bucket->ub_cnt == 0 && cache->uc_freebucket && cache->uc_freebucket->ub_cnt > 0) {
+                struct uma_bucket *tmp = cache->uc_allocbucket;
+                cache->uc_allocbucket = cache->uc_freebucket;
+                cache->uc_freebucket = tmp;
+                bucket = cache->uc_allocbucket;
+            }
+
+            if (bucket->ub_cnt > 0) {
+                item = bucket->ub_bucket[--bucket->ub_cnt];
+                cache->uc_allocs++;
+                goto out;
+            }
         }
     }
 
