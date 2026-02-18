@@ -4,7 +4,7 @@
  * Manages interrupt routing from external devices to CPUs via the I/O APIC.
  */
 
-#include "include/ioapic.h"
+#include <ioapic.h>
 #include <kern/console.h>
 
 // Maximum number of IO-APICs supported

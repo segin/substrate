@@ -7,6 +7,9 @@
 /* Thread and CPU limits */
 #define MAX_THREADS 64
 
+extern thread_t threads[MAX_THREADS];
+extern thread_t *current_thread;
+
 /* IPI vector for scheduler preemption (must match IDT setup) */
 #define SCHED_IPI_VECTOR 0xFD
 
