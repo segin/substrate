@@ -729,7 +729,7 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
      * Call driver ioctl if not handled (unlocked to allow copyin/copyout)
      * Warning: drivers accessing user pointers via arg directly will still be vulnerable/unsafe.
      */
-    if (ret == -1 && tty->driver->ioctl) {
+    if (ret == -1 && tty->driver && tty->driver->ioctl) {
         ret = tty->driver->ioctl(tty, cmd, arg);
     }
 
