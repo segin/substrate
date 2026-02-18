@@ -201,6 +201,37 @@ void test_strchr(void) {
     printf("test_strchr: PASS\n");
 }
 
+void test_strchr_comprehensive(void) {
+    char buf[] = "Hello World";
+
+    // Test: Search for a character not present in the string
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'z'), (uintptr_t)NULL, "strchr comprehensive not found");
+
+    // Test: Search for the null terminator
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, '\0'), (uintptr_t)(buf + 11), "strchr comprehensive null terminator");
+
+    // Test: Search in an empty string
+    char empty[] = "";
+    ASSERT_EQ((uintptr_t)kernel_strchr(empty, 'a'), (uintptr_t)NULL, "strchr comprehensive empty string not found");
+    ASSERT_EQ((uintptr_t)kernel_strchr(empty, '\0'), (uintptr_t)empty, "strchr comprehensive empty string null terminator");
+
+    // Test: Verify int c argument conversion (e.g., c values > 255)
+    // 'W' is 87. 87 + 256 = 343. (char)343 is 87 ('W').
+    ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'W' + 256), (uintptr_t)(buf + 6), "strchr comprehensive int conversion > 255");
+
+    // Test: Search for high-bit characters (0x80-0xFF)
+    unsigned char high_bit_buf[] = { 0x80, 0xFF, 0x00 };
+    ASSERT_EQ((uintptr_t)kernel_strchr((char *)high_bit_buf, 0x80), (uintptr_t)high_bit_buf, "strchr comprehensive high bit 0x80");
+    ASSERT_EQ((uintptr_t)kernel_strchr((char *)high_bit_buf, 0xFF), (uintptr_t)(high_bit_buf + 1), "strchr comprehensive high bit 0xFF");
+
+    // Test: Verify function returns the first occurrence
+    char multiple[] = "ababa";
+    ASSERT_EQ((uintptr_t)kernel_strchr(multiple, 'a'), (uintptr_t)multiple, "strchr comprehensive first occurrence 'a'");
+    ASSERT_EQ((uintptr_t)kernel_strchr(multiple, 'b'), (uintptr_t)(multiple + 1), "strchr comprehensive first occurrence 'b'");
+
+    printf("test_strchr_comprehensive: PASS\n");
+}
+
 void test_strpbrk(void) {
     const char *s = "hello world";
     ASSERT_EQ((uintptr_t)kernel_strpbrk(s, "abcde"), (uintptr_t)(s + 1), "strpbrk 'e'");
@@ -219,6 +250,7 @@ int main(void) {
     test_strncmp();
     test_strspn();
     test_strchr();
+    test_strchr_comprehensive();
     test_strpbrk();
     printf("All Tests Passed\n");
     return 0;
