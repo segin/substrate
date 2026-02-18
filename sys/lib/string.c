@@ -120,9 +120,39 @@ int memcmp(const void *s1, const void *s2, size_t n) {
 }
 
 size_t strlen(const char *s) {
-    size_t len = 0;
-    while (s[len]) len++;
-    return len;
+    const char *start = s;
+
+    // Align to word boundary
+    while ((uintptr_t)s % sizeof(unsigned long)) {
+        if (!*s) return s - start;
+        s++;
+    }
+
+    const unsigned long *ls = (const unsigned long *)s;
+    unsigned long himagic = 0x80808080UL;
+    unsigned long lomagic = 0x01010101UL;
+    if (sizeof(unsigned long) > 4) {
+        // Expand to 64-bit constants
+        himagic = ((himagic << 16) << 16) | himagic;
+        lomagic = ((lomagic << 16) << 16) | lomagic;
+    }
+
+    while (1) {
+        unsigned long word = *ls++;
+        if (((word - lomagic) & ~word & himagic) != 0) {
+            const char *cp = (const char *)(ls - 1);
+            if (!cp[0]) return cp - start;
+            if (!cp[1]) return cp - start + 1;
+            if (!cp[2]) return cp - start + 2;
+            if (!cp[3]) return cp - start + 3;
+            if (sizeof(unsigned long) > 4) {
+                if (!cp[4]) return cp - start + 4;
+                if (!cp[5]) return cp - start + 5;
+                if (!cp[6]) return cp - start + 6;
+                if (!cp[7]) return cp - start + 7;
+            }
+        }
+    }
 }
 
 char *strcpy(char *dest, const char *src) {
