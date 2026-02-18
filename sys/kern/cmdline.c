@@ -11,13 +11,8 @@ void cmdline_init(const char *cmdline) {
         return;
     }
     
-    // Copy safely
-    size_t i = 0;
-    while (cmdline[i] && i < sizeof(kernel_cmdline) - 1) {
-        kernel_cmdline[i] = cmdline[i];
-        i++;
-    }
-    kernel_cmdline[i] = 0;
+    strncpy(kernel_cmdline, cmdline, sizeof(kernel_cmdline));
+    kernel_cmdline[sizeof(kernel_cmdline) - 1] = 0;
     initialized = 1;
     
     // Print it
