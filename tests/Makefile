@@ -15,7 +15,7 @@ UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_cow.c \
              unit/arch/test_trampoline.c \
              unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c unit/kern/test_sched_decay.c \
-             unit/kern/test_sync.c unit/kern/test_signal.c unit/kern/test_pthread_exit.c \
+             unit/kern/test_sync.c unit/kern/test_sleepq.c unit/kern/test_signal.c unit/kern/test_pthread_exit.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
              unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
