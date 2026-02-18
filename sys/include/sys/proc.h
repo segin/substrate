@@ -215,4 +215,6 @@ void proc_clear_fd(process_t *p, int fd);
 
 extern mutex_t proctree_lock;
 
+void rusage_add_tick(struct process *p, int is_usermode);
+
 #endif

@@ -7,7 +7,8 @@
 #include <include/sys/proc.h>
 #include <arch/i386/idt.h> 
 #include <arch/i386/pmap.h>
-#include <arch/i386/pmap.h> 
+#include <arch/i386/pmap.h>
+#include "vm86.h" 
 
 // Access to current process/thread
 extern struct process *current_process;
