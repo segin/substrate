@@ -13,10 +13,7 @@
 #include <vm/vm_kmem.h>
 #include <sys/smp.h>
 
-/* Global list of all zones */
 static uma_zone_t *uma_zones = NULL;
-
-/* Slab header zone (for off-page slabs) */
 static uma_zone_t *uma_slab_zone = NULL;
 
 /* Number of CPUs (detected at runtime) */
@@ -83,19 +80,6 @@ void uma_startup(void) {
     uma_bucket_idx = 0;
     uma_zones = NULL;
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
-
-    // Detect number of CPUs
-    // Detect number of CPUs
-    int count = smp_get_cpu_count();
-    if (count > 0) {
-        if (count > UMA_MAX_CPUS) {
-            kprint("UMA: WARNING: CPU count exceeds limit, capping to 32\n");
-            count = UMA_MAX_CPUS;
-        }
-        uma_ncpu = count;
-    } else {
-        uma_ncpu = 1;
-    }
 
     kprint("UMA: subsystem initialized\n");
 
@@ -453,7 +437,7 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
             pmm_free_block(slab->us_data);
         }
 
-        kfree(slab, sizeof(uma_slab_t) + zone->uz_ipers);
+        uma_zfree(uma_slab_zone, slab);
     } else {
         pmm_free_block(slab->us_data);
     }

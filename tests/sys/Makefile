@@ -35,7 +35,7 @@ host_test_udf_truncate_expand: host_test_udf_truncate_expand.c
 	$(CC) -g -Wall -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_udf_truncate_expand.c -o $@
 
 host_test_minix_vuln: host_test_minix_vuln.c
-	$(CC) -m32 -g -Wall -I../../sys/include -I../../include -I../../sys -I. host_test_minix_vuln.c -o $@
+	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys -idirafter ../../sys/include host_test_minix_vuln.c -o $@
 
 host_test_crc32: host_test_crc32.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_crc32.c -o $@
