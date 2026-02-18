@@ -343,14 +343,14 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
     if (!root) return -1;
 
-    // Variables for argument capturing
-    int argc = 0;
-    int envc = 0;
-    // Limit total size of arguments and environment strings
+    // ARG_MAX: Maximum bytes for arguments + environment
+    // We use a fixed 32KB buffer to avoid Double Fetch / TOCTOU issues.
     const size_t ARG_MAX_BYTES = 32 * 1024;
     char **k_argv = NULL;
     char **k_envp = NULL;
     char *arg_buffer = NULL;
+    int argc = 0;
+    int envc = 0;
     int error_code = -1;
 
     // Lookup the file
@@ -368,21 +368,29 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     }
 
     // Capture arguments and environment
-    // Count argc
+    // Count argc only (avoid double fetch of strings)
     if (argv) {
         while (1) {
             char *uarg;
             if (capture_ptr(argv, argc, &uarg) != 0 || uarg == NULL) break;
             argc++;
+            if (argc > (int)(ARG_MAX_BYTES / 4)) { // Sanity limit for argc count
+                kprint("execve: Too many arguments\n");
+                return -7; // E2BIG
+            }
         }
     }
 
-    // Count envc
+    // Count envc only
     if (envp) {
         while (1) {
             char *uarg;
             if (capture_ptr(envp, envc, &uarg) != 0 || uarg == NULL) break;
             envc++;
+            if (envc > (int)(ARG_MAX_BYTES / 4)) {
+                kprint("execve: Too many env vars\n");
+                return -7; // E2BIG
+            }
         }
     }
 
@@ -402,7 +410,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         k_envp[envc] = NULL;
     }
 
-    // Allocate fixed-size argument buffer to prevent double-fetch issues
+    // Always allocate full buffer to avoid TOCTOU re-measurement
     arg_buffer = kmalloc(ARG_MAX_BYTES);
     if (!arg_buffer) {
          if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
