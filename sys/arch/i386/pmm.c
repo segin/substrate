@@ -9,14 +9,16 @@
 #include <sys/lock.h>
 #include <kern/console.h>
 
-// Locking Strategy:
-// The machine-dependent PMM (this file) primarily delegates to the Machine Independent
-// `vm_phys` subsystem for page allocation and management. The `vm_phys` layer implements
-// its own fine-grained locking (`vm_phys_lock`) to protect the free lists and page queues.
-// 
-// Local pmm_lock is reserved for protecting architecture-specific metadata if necessary,
-// though currently most state is managed by `vm_phys`. The watermark allocator runs
-// only during single-threaded early boot, thus requiring no explicit synchronization.
+/*
+ * Locking Strategy:
+ * The machine-dependent PMM (this file) primarily delegates to the Machine Independent
+ * `vm_phys` subsystem for page allocation and management. The `vm_phys` layer implements
+ * its own fine-grained locking (`vm_phys_lock`) to protect the free lists and page queues.
+ * 
+ * Local pmm_lock is reserved for protecting architecture-specific metadata if necessary,
+ * though currently most state is managed by `vm_phys`. The watermark allocator runs
+ * only during single-threaded early boot, thus requiring no explicit synchronization.
+ */
 
 // ==================== PMM Data Structures ====================
 // Static bitmap for 128MB (Fallback)
