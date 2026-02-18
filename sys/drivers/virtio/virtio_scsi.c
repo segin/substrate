@@ -323,9 +323,9 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
     return (req->status == SCSI_STATUS_GOOD) ? 0 : -1;
 }
 
-static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
-    virtio_scsi_dev_t *dev = (virtio_scsi_dev_t *)link->priv;
-    if (!dev || !sdev) return -1;
+static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
+                          uint8_t target, uint16_t lun) {
+    if (!dev) return -1;
 
     virtio_scsi_queue_t *q = &dev->ctrl_queue;
 
@@ -334,11 +334,11 @@ static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
     memset(&req, 0, sizeof(req));
 
     req.type = VIRTIO_SCSI_T_TMF;
-    req.subtype = VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET;
+    req.subtype = subtype;
     req.lun[0] = 1;
-    req.lun[1] = sdev->target;
-    req.lun[2] = (sdev->lun >> 8) & 0xFF;
-    req.lun[3] = sdev->lun & 0xFF;
+    req.lun[1] = target;
+    req.lun[2] = (lun >> 8) & 0xFF;
+    req.lun[3] = lun & 0xFF;
     req.id = 0;
 
     /* Build TMF response */
@@ -378,6 +378,20 @@ static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
     /* Check response */
     if (resp.response == VIRTIO_SCSI_S_FUNCTION_COMPLETE ||
         resp.response == VIRTIO_SCSI_S_FUNCTION_SUCCEEDED) {
+        return 0;
+    }
+
+    return resp.response;
+}
+
+static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
+    virtio_scsi_dev_t *dev = (virtio_scsi_dev_t *)link->priv;
+    if (!dev || !sdev) return -1;
+
+    int ret = vscsi_send_tmf(dev, VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET,
+                             sdev->target, sdev->lun);
+
+    if (ret == 0) {
         char buf[64];
         snprintf(buf, sizeof(buf), "virtio_scsi: reset device %d:%d succeeded\n",
                 sdev->target, sdev->lun);
@@ -387,15 +401,31 @@ static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
 
     char buf[64];
     snprintf(buf, sizeof(buf), "virtio_scsi: reset device %d:%d failed (resp=%d)\n",
-            sdev->target, sdev->lun, resp.response);
+            sdev->target, sdev->lun, ret);
     kprint(buf);
     return -1;
 }
 
 static int vscsi_reset_bus(scsi_link_t *link) {
-    (void)link;
-    /* TODO: Send device reset */
-    kprint("virtio_scsi: reset_bus not implemented\n");
+    virtio_scsi_dev_t *dev = (virtio_scsi_dev_t *)link->priv;
+    if (!dev) return -1;
+
+    kprint("virtio_scsi: resetting bus (I_T Nexus Reset)\n");
+
+    /* Iterate over all possible targets and reset their I_T nexus */
+    for (uint16_t target = 0; target <= dev->max_target; target++) {
+        int ret = vscsi_send_tmf(dev, VIRTIO_SCSI_T_TMF_I_T_NEXUS_RESET,
+                                 (uint8_t)target, 0);
+
+        if (ret != 0 && ret != VIRTIO_SCSI_S_BAD_TARGET) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "virtio_scsi: reset target %d failed (resp=%d)\n",
+                    target, ret);
+            kprint(buf);
+        }
+    }
+
+    kprint("virtio_scsi: bus reset complete\n");
     return 0;
 }
 
