@@ -326,7 +326,6 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
 static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
                           uint8_t target, uint16_t lun) {
     if (!dev) return -1;
-
     virtio_scsi_queue_t *q = &dev->ctrl_queue;
 
     /* Build TMF request */
