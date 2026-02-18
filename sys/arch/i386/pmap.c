@@ -502,7 +502,6 @@ void pmap_activate(pmap_t pmap) {
     uint32_t current_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
     
-    // PCID TODO: Check if we can skip flush
     if (current_cr3 != pmap->pdir_phys) {
         __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pdir_phys));
     }

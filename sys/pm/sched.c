@@ -13,8 +13,7 @@ static uint32_t slot_generations[MAX_THREADS];
 thread_t *current_thread = NULL;
 
 
-extern void arch_switch_to(thread_t *prev, thread_t *next);
-extern void arch_set_kernel_stack(uintptr_t stack);
+#include <kern/arch.h>
 
 
 

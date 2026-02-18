@@ -1,7 +1,7 @@
 
 
-#include "syscall.h"
-#include "idt.h"
+#include <arch/i386/syscall.h>
+#include <arch/i386/idt.h>
 
 /* NetBSD-style kernel internal includes */
 #include <kern/sched.h>
