@@ -8,14 +8,11 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <sys/time.h>
+#include <sys/proc.h>
 
 #ifndef MAP_32BIT
 #define MAP_32BIT 0x40
-#endif
-
-// Force define AC_COMM_LEN if missing
-#ifndef AC_COMM_LEN
-#define AC_COMM_LEN 16
 #endif
 
 // Mocks for copyin/copyout tracking
@@ -47,10 +44,6 @@ void kfree(void *ptr) {
     // munmap size unknown, leak for test simplicity
 }
 
-// Stub spinlocks - removed as ntsync.c provides static inline implementation
-// void spinlock_acquire(volatile int *lock) { *lock = 1; }
-// void spinlock_release(volatile int *lock) { *lock = 0; }
-
 // kprint stub
 void kprint(const char *str) {
     printf("%s", str);
@@ -76,7 +69,8 @@ long get_uptime(void) { return 0; }
 
 // Stub devfs
 struct fs_node;
-void devfs_register_device(struct fs_node *node) {}
+#include <vfs/vfs.h>
+void devfs_register_device(fs_node_t *node) {}
 
 // Include necessary headers to fix types before including ntsync.c
 // sys/proc.h needs thread_t and AC_COMM_LEN
