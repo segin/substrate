@@ -228,6 +228,12 @@ uma_zone_t *uma_zcreate(
         zone->uz_ipers = 1; 
     }
     
+    /* Check if we need off-page slab headers */
+    size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
+    if (zone->uz_rsize * zone->uz_ipers + slab_overhead > 4096) {
+        zone->uz_flags |= UMA_ZONE_OFFPAGE;
+    }
+
     /* Set callbacks */
     zone->uz_ctor = ctor;
     zone->uz_dtor = dtor;
@@ -309,72 +315,63 @@ void uma_zdestroy(uma_zone_t *zone) {
  * Allocate a slab page and carve into objects
  */
 static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
-    /* Allocate raw page from PMM */
-    void *page = pmm_alloc_block();
-    if (!page) {
-        extern void kprint(const char*);
-        kprint("uma_slab_alloc: pmm_alloc_block failed!\n");
-        return NULL;
-    }
-    
-    /* Slab header is at the end of the page (for small objects) */
-    uma_slab_t *slab;
-    
+    void *page = NULL;
+    uma_slab_t *slab = NULL;
+
+    /* Check if we need off-page slab headers */
     if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
-        /* Allocate header from slab zone */
-        if (!uma_slab_zone) {
-            // Should not happen for dynamic allocs
-             kprint("uma_slab_alloc: offpage but no slab zone!\n");
-             pmm_free_block(page);
-             return NULL;
+        /* Off-page slab header */
+        size_t total_size = zone->uz_rsize * zone->uz_ipers;
+        size_t pages_needed = (total_size + 4095) / 4096;
+
+        if (pages_needed > 1) {
+            page = pmm_alloc_contiguous(pages_needed);
+        } else {
+            page = pmm_alloc_block();
         }
-        
-        // We need extra space for the free list (1 byte per item) if it doesn't fit in slab struct
-        // But uma_slab has 'us_freelist' as a pointer. 
-        // For offpage, we might need a larger allocation if freelist is big.
-        // For now, assume freelist fits after slab struct or we allocate a bigger chunk.
-        // Or simpler: The slab zone items are sizeof(uma_slab) + something?
-        // Let's assume slab zone items are standard 'uma_slab' size.
-        // AND we rely on the fact that we stashed the freelist pointer.
-        // Wait, standard implementation puts freelist immediately after uma_slab struct.
-        // We need to request a size that accommodates that.
-        
-        // Actually, let's just use the slab zone for the struct, and assume
-        // for offpage objects (usually large), ipers is small, so freelist fits.
-        // Current uma_slab_zone definition: sizeof(struct uma_slab).
-        
-        slab = uma_zalloc(uma_slab_zone, M_NOWAIT);
+
+        if (!page) {
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: pmm_alloc failed for off-page slab!\n");
+            return NULL;
+        }
+
+        /* Allocate separate slab header */
+        slab = kzalloc(sizeof(uma_slab_t) + zone->uz_ipers);
         if (!slab) {
-             pmm_free_block(page);
-             return NULL;
+            if (pages_needed > 1) {
+                pmm_free_contiguous(page, pages_needed);
+            } else {
+                pmm_free_block(page);
+            }
+            return NULL;
         }
-        
+
         slab->us_data = page;
-        slab->us_freelist = (uint8_t *)(slab + 1); // Danger if slab zone item too small
-        // For large objects (offpage), ipers is small (e.g. 1 or 2).
-        // sizeof(uma_slab) is approx 32 bytes?
-        // If we allocate from slab_zone which uses sizeof(uma_slab), we have 0 extra bytes.
-        // FIX: The freelist needs to be somewhere. 
-        // For OFF PAGE, we can put the freelist at the START of the page? No, that ruins alignment.
-        // We can malloc it? Too slow.
-        // For this implementation, let's assume OFF_PAGE implies ipers=1 for now (common case for large allocs)
-        // or we need to fix slab_zone size.
-        // Actually, let's just put the freelist at the END of the data page for OFF_PAGE?
-        // No, that ruins contiguous guarantees if expected.
-        
-        // Hack: Use the page itself for freelist? No.
-        
-        // Let's assume for now 1 item per page for offpage, so freelist is trivial.
-        // Or better: update uma_slab_zone to be larger, e.g. 64 bytes.
-        
     } else {
         /* On-page slab header */
-        size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
-        slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
-        slab->us_data = page;
-        slab->us_freelist = (uint8_t *)(slab + 1);
-    }
+        /* Allocate raw page from PMM */
+        page = pmm_alloc_block();
+        if (!page) {
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: pmm_alloc_block failed!\n");
+            return NULL;
+        }
 
+        size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
+
+        if (zone->uz_rsize * zone->uz_ipers + slab_overhead <= 4096) {
+            /* On-page slab header */
+            slab = (uma_slab_t *)((uintptr_t)page + 4096 - slab_overhead);
+            slab->us_data = page;
+        } else {
+            /* This should not be reached if UMA_ZONE_OFFPAGE logic in uma_zcreate is correct */
+            extern void kprint(const char*);
+            kprint("uma_slab_alloc: slab too large for on-page header but OFF_PAGE not set!\n");
+            pmm_free_block(page);
+            return NULL;
+        }
+    }
     slab->us_zone = zone;
     slab->us_freecount = zone->uz_ipers;
     slab->us_firstfree = 0;
@@ -446,10 +443,19 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
     /* Remove from global hash */
     uma_hash_remove(slab);
 
-    pmm_free_block(slab->us_data);
-    
     if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
-        uma_zfree(uma_slab_zone, slab);
+        size_t total_size = zone->uz_rsize * zone->uz_ipers;
+        size_t pages_needed = (total_size + 4095) / 4096;
+
+        if (pages_needed > 1) {
+            pmm_free_contiguous(slab->us_data, pages_needed);
+        } else {
+            pmm_free_block(slab->us_data);
+        }
+
+        kfree(slab, sizeof(uma_slab_t) + zone->uz_ipers);
+    } else {
+        pmm_free_block(slab->us_data);
     }
 }
 
