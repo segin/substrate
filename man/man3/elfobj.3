@@ -1,0 +1,105 @@
+.\" Process this file with
+.\" groff -man -Tascii elfobj.3
+.TH ELFOBJ 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+elfobj, elf_open, elf_open_memory, elf_write_file, elf_close, elf_add_section, elf_section_set_data, elf_find_section, elf_add_symbol, elf_find_symbol, elf_add_relocation, elf_link, elf_validate, elf_hash_sysv, elf_hash_gnu \- ELF object handling API
+.SH LIBRARY
+ELF object library (libelfobj, -lelfobj)
+.SH SYNOPSIS
+.B #include <elfobj.h>
+.PP
+.BI "elf_err_t elf_open(const char *path, elfobj_t **out);"
+.br
+.BI "elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out);"
+.br
+.BI "elf_err_t elf_write_file(elfobj_t *obj, const char *path);"
+.br
+.BI "void elf_close(elfobj_t *obj);"
+.PP
+.BI "elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, uint64_t flags);"
+.br
+.BI "elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t size);"
+.br
+.BI "elf_section_t *elf_find_section(elfobj_t *obj, const char *name);"
+.PP
+.BI "elf_symbol_t *elf_add_symbol(elfobj_t *obj, const char *name, uint64_t value,"
+.br
+.BI "    uint64_t size, uint8_t bind, uint8_t type);"
+.br
+.BI "elf_symbol_t *elf_find_symbol(elfobj_t *obj, const char *name);"
+.PP
+.BI "elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol_t *symbol,"
+.br
+.BI "    uint32_t type, int64_t addend);"
+.PP
+.BI "elf_err_t elf_link(elfobj_t **inputs, size_t count, elfobj_t **output);"
+.br
+.BI "elf_err_t elf_validate(elfobj_t *obj, char **diagnostics);"
+.PP
+.BI "uint32_t elf_hash_sysv(const char *name);"
+.br
+.BI "uint32_t elf_hash_gnu(const char *name);"
+.SH DESCRIPTION
+The
+.B libelfobj
+library provides structured reading, mutation, validation, and writing of ELF objects.
+It supports ET_REL, ET_EXEC, ET_DYN, and read-only ET_CORE parsing.
+.PP
+Objects loaded via
+.B elf_open
+or
+.B elf_open_memory
+are parsed with bounds checking. Creation and mutation flows use
+.B elf_create
+plus section/symbol/relocation APIs, and the result is serialized with
+.BR elf_write_file .
+.PP
+.B elf_validate
+returns an allocated diagnostics string describing malformed offsets,
+overlap conditions, and relocation/symbol consistency issues.
+.SH RETURN VALUE
+Functions returning
+.B elf_err_t
+use
+.B ELF_OK
+on success. Pointer-returning APIs return NULL on failure.
+.SH ERRORS
+.TP
+.B ELF_ERR_IO
+Input/output failure while reading or writing files.
+.TP
+.B ELF_ERR_FORMAT
+Malformed ELF structure, unsupported table layout, or invalid metadata.
+.TP
+.B ELF_ERR_RELOC
+Relocation semantic failure (unsupported backend/type/application).
+.TP
+.B ELF_ERR_OOM
+Memory allocation failure.
+.TP
+.B ELF_ERR_BOUNDS
+Offset/size pair exceeds input bounds.
+.TP
+.B ELF_ERR_UNSUPPORTED
+Feature is valid ELF but not implemented by current backend/path.
+.TP
+.B ELF_ERR_STATE
+Invalid API call ordering or NULL/invalid object state.
+.SH EXAMPLES
+Create a minimal relocatable object with one text section and one symbol:
+.PP
+.nf
+elfobj_t *obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+elf_section_t *text = elf_add_section(obj, ".text", SHT_PROGBITS, SHF_ALLOC|SHF_EXECINSTR);
+unsigned char code[] = { 0x90, 0xC3 };
+elf_section_set_data(text, code, sizeof(code));
+elf_add_symbol(obj, "func", 0, sizeof(code), STB_GLOBAL, STT_FUNC);
+elf_write_file(obj, "out.o");
+elf_close(obj);
+.fi
+.SH THREAD SAFETY
+Distinct
+.B elfobj_t
+instances may be processed concurrently. Mutable operations are not internally synchronized.
+.SH SEE ALSO
+ld(1), objdump(1), readelf(1), elf(5)

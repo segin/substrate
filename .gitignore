@@ -6,6 +6,14 @@
 *.a
 *.so
 *.lib
+!usr.lib/
+!usr.lib/**/Makefile
+!usr.lib/**/*.c
+!usr.lib/**/*.h
+!usr.lib/**/*.S
+!usr.lib/**/*.md
+!usr.lib/**/LICENSE
+!usr.lib/**/*.pc
 *.dll
 
 # Binaries and executables

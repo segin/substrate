@@ -18,6 +18,7 @@ This section provides a high-level overview of the project's directory and file 
 │   └── vm/               # Virtual Memory Manager (PMM, PMAP)
 ├── bin/                  # Fundamental Userland Utilities (sh, ls, cp, etc.)
 ├── usr.bin/              # User Tools (yacc, brandelf, etc.)
+├── usr.lib/              # User Libraries (regex, elfobj, etc.)
 ├── lib/                  # Userspace Libraries
 │   ├── c/                # Standard C Library (libc)
 │   ├── sys/              # System Call Wrappers (libsys)
@@ -194,6 +195,26 @@ These components are essential for booting and basic system operation.
 - **DoS resistance / limits:** `tests/usr.lib/regex/security/test_dos.c`
 - **Streaming matches:** `tests/usr.lib/regex/streaming/test_streaming.c`
 - **UTF-8 handling:** `tests/usr.lib/regex/encoding/test_utf8.c`
+
+## `usr.lib/elf`
+- **Goals:** Provide a stable C API (`include/elfobj.h`) for reading, writing, validating, and linker-oriented manipulation of ELF objects without depending on ad-hoc parsers.
+- **Design Overview:** Layered implementation in `usr.lib/elf/src/`:
+  - parser (`elf_read.c`)
+  - object model and mutators (`elf_sections.c`, `elf_symbols.c`, `elf_reloc.c`)
+  - writer/layout (`elf_write.c`, `elf_layout.c`, `elf_strtab.c`)
+  - validation/link helpers (`elf_validate.c`, `elf_link.c`)
+  - utility/hash/extension helpers (`elf_util.c`, `elf_hash.c`, `elf_gnu_ext.c`, `elf_dwarf.c`)
+- **Object Model:** Opaque `elfobj_t`, `elf_section_t`, `elf_symbol_t`, `elf_reloc_t` with explicit lifetime (`elf_open*` / `elf_close`) and error-code returns (`elf_err_t`).
+- **Relocation Backend Architecture:** Optional backend registry via `elf_register_reloc_backend()` with per-machine callbacks (`apply_reloc`, `reloc_size`, `is_pc_relative`) for architecture-specific relocation handling.
+- **Assembler/Linker Integration:** Assembler-facing creation path uses `elf_create` + section/symbol/reloc APIs and emits `.o` via `elf_write_file`; linker-facing merge path uses `elf_link` and validation hooks.
+- **ABI Stability:** Public ABI is constrained to `include/elfobj.h`; internal structs and parser/writer internals remain private in `usr.lib/elf/src/elf_private.h`.
+- **Testing/Fuzzing Strategy:** Unit/round-trip/link tests in `usr.lib/elf/tests/`, parser fuzz entrypoint in `usr.lib/elf/fuzz/`, and micro-benchmark coverage in `usr.lib/elf/bench/`.
+- **Migration Plan:** Replace per-tool manual ELF parsing/relocation paths incrementally with `libelfobj` API calls; keep old paths as fallback until functional parity and artifact validation with `readelf/objdump` are complete.
+
+```text
+Assembler -> libelfobj -> ET_REL (.o)
+Linker    -> libelfobj -> ET_EXEC/ET_DYN
+```
 
 ## Personality Emulation
 - **Linux:** Emulates Linux 2.6.x i386 syscalls. Handles `rt_sigaction` (174) and `rt_sigprocmask` (175) by mapping to internal signal infrastructure.
