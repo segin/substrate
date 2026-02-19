@@ -6,14 +6,6 @@
 #include <sys/thr.h>
 #include <stdint.h>
 
-extern int64_t _syscall0(int);
-extern int64_t _syscall1(int, long);
-extern int64_t _syscall2(int, long, long);
-extern int64_t _syscall3(int, long, long, long);
-extern int64_t _syscall4(int, long, long, long, long);
-extern int64_t _syscall5(int, long, long, long, long, long);
-extern int64_t _syscall6(int, long, long, long, long, long, long);
-
 #define MAX_PTHREADS 64
 
 struct pthread_info {
@@ -96,7 +88,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     param.parent_tid = NULL;
     param.flags = 0;
     
-    int ret = (int)_syscall2(SYS_THR_NEW, (long)&param, sizeof(param));
+    int ret = (int)syscall(SYS_THR_NEW, (int)&param, sizeof(param));
     
     if (ret != 0) {
         free(ta);
@@ -112,35 +104,47 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 }
 
 void pthread_exit(void *retval) {
-    _syscall1(SYS_THR_EXIT, (long)retval);
+    syscall(SYS_THR_EXIT, (int)(uintptr_t)retval);
     /* Should not be reached */
     _exit(0);
 }
 
 int pthread_join(pthread_t thread, void **retval) {
-    int slot = -1;
+    int ret = (int)syscall(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
+    if (ret != 0) return ret;
 
-    while (__sync_lock_test_and_set(&thread_table_lock, 1));
+    /* Find the thread table entry to cleanup resources */
+    int slot = -1;
+    /* Optimistic search without lock - TID shouldn't be reused while we hold a reference/join it */
     for (int i = 0; i < MAX_PTHREADS; i++) {
         if (thread_table[i].used && thread_table[i].tid == thread) {
             slot = i;
             break;
         }
     }
-    __sync_lock_release(&thread_table_lock);
 
-    int ret = (int)_syscall2(SYS_THR_JOIN, thread, (long)retval);
+    if (slot != -1) {
+        struct pthread_info *ti = &thread_table[slot];
 
-    if (ret == 0 && slot != -1) {
+        /* Mark slot as free safely and free resources */
         while (__sync_lock_test_and_set(&thread_table_lock, 1));
-        if (thread_table[slot].used && thread_table[slot].tid == thread) {
-            free(thread_table[slot].stack);
-            thread_table[slot].stack = NULL;
-            thread_table[slot].used = 0;
+
+        /* Re-check usage inside lock in case of race (unlikely given tid match) */
+        if (ti->used && ti->tid == thread) {
+            if (ti->stack) {
+                free(ti->stack);
+                ti->stack = NULL;
+            }
+            ti->used = 0;
+            ti->tid = 0;
+            ti->exited = 0;
+            ti->exit_status = NULL;
         }
+
         __sync_lock_release(&thread_table_lock);
     }
-    return ret;
+
+    return 0;
 }
 
 // Mutex stubs

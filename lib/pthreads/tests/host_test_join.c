@@ -4,6 +4,7 @@
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
+#include <stdarg.h>
 
 // Rename to avoid conflict with system headers
 #define pthread_t       my_pthread_t
@@ -27,15 +28,13 @@ int mock_next_tid = 1;
 // Forward declarations
 void *mock_malloc(size_t size);
 void mock_free(void *ptr);
-int64_t mock_syscall2(int num, long arg1, long arg2);
-int64_t mock_syscall1(int num, long arg1);
+int64_t mock_syscall(int num, ...);
 void mock_exit(int status);
 
 // Redefine symbols to use mocks
 #define malloc mock_malloc
 #define free mock_free
-#define _syscall2 mock_syscall2
-#define _syscall1 mock_syscall1
+#define syscall mock_syscall
 #define _exit mock_exit
 
 // Include the source file
@@ -44,8 +43,7 @@ void mock_exit(int status);
 // Undefine so we can implement mocks using real libc
 #undef malloc
 #undef free
-#undef _syscall2
-#undef _syscall1
+#undef syscall
 #undef _exit
 
 extern void *calloc(size_t nmemb, size_t size);
@@ -63,7 +61,13 @@ void mock_free(void *ptr) {
     }
 }
 
-int64_t mock_syscall2(int num, long arg1, long arg2) {
+int64_t mock_syscall(int num, ...) {
+    va_list args;
+    va_start(args, num);
+    long arg1 = va_arg(args, long);
+    // long arg2 = va_arg(args, long);
+    va_end(args);
+
     if (num == SYS_THR_NEW) {
         mock_thr_new_calls++;
         struct thr_param *param = (struct thr_param *)arg1;
@@ -74,25 +78,15 @@ int64_t mock_syscall2(int num, long arg1, long arg2) {
         mock_thr_join_calls++;
         return 0;
     }
+    if (num == SYS_THR_EXIT) {
+        return 0;
+    }
     return -1;
-}
-
-int64_t mock_syscall1(int num, long arg1) {
-    (void)num; (void)arg1;
-    return 0;
 }
 
 void mock_exit(int status) {
     exit(status);
 }
-
-// Add missing mocks for linking
-int64_t _syscall0(int n) { (void)n; return 0; }
-int64_t _syscall3(int n, long a, long b, long c) { (void)n; (void)a; (void)b; (void)c; return 0; }
-int64_t _syscall4(int n, long a, long b, long c, long d) { (void)n; (void)a; (void)b; (void)c; (void)d; return 0; }
-int64_t _syscall5(int n, long a, long b, long c, long d, long e) { (void)n; (void)a; (void)b; (void)c; (void)d; (void)e; return 0; }
-int64_t _syscall6(int n, long a, long b, long c, long d, long e, long f) { (void)n; (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return 0; }
-
 
 int main() {
     printf("Running host_test_join...\n");
