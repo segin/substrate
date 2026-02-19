@@ -1,15 +1,16 @@
 #include <arch/x86_64/pmap.h>
-#include <arch/i386/pmm.h>
+#include <arch/x86_64/msr.h>
+#include <vm/vm_kmem.h>
 
 // MSR definitions for NX bit
+#ifndef MSR_EFER
 #define MSR_EFER    0xC0000080
+#endif
+#ifndef EFER_NXE
 #define EFER_NXE    (1UL << 11)
+#endif
 
-// MSR helpers from pmap_asm.S
-extern uint64_t pmap_rdmsr(uint32_t msr);
-extern void pmap_wrmsr(uint32_t msr, uint64_t val);
-#include <vm/vm_kmem.h> // For kmalloc/kfree
-#include <string.h> // for memset
+
 
 extern uint64_t boot_pml4[]; // From boot.S
 
@@ -85,8 +86,8 @@ void pmap_init(void) {
 
     // 3. Enable NX (EFER.NXE) - MSR 0xC0000080 bit 11
     if (cpuid_check_nx()) {
-        uint64_t efer = pmap_rdmsr(MSR_EFER);
-        pmap_wrmsr(MSR_EFER, efer | EFER_NXE);
+        uint64_t efer = rdmsr(MSR_EFER);
+        wrmsr(MSR_EFER, efer | EFER_NXE);
     }
 
     // 4. Load CR3 to refresh

@@ -33,8 +33,8 @@
 #include <sys/signal.h>
 #include <sys/proc.h>
 #include <kern/console.h>
-#include "idt.h"
-#include "include/signal_arch.h"
+#include <arch/i386/idt.h>
+#include <arch/i386/include/signal_arch.h>
 #include <string.h>
 
 /* Kernel/User space boundary */

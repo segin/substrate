@@ -132,9 +132,9 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
         }
 
         if (strcmp(path, ".") == 0 || strcmp(path, "/") == 0) {
-             sprintf(files[count].full_path, "%s%s", (strcmp(path, "/")==0) ? "/" : "", ent->d_name);
+             snprintf(files[count].full_path, len, "%s%s", (strcmp(path, "/")==0) ? "/" : "", ent->d_name);
         } else {
-             sprintf(files[count].full_path, "%s/%s", path, ent->d_name);
+             snprintf(files[count].full_path, len, "%s/%s", path, ent->d_name);
         }
         
         // -L: follow symlinks when statting

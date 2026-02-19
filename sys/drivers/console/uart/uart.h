@@ -11,6 +11,8 @@ struct console_backend; // Forward declaration
 struct console_backend *uart_get_console(void);
 void uart_putc(char c);
 void uart_write(const char* data, size_t size);
+struct registers;
+void uart_handler(struct registers *regs);
 char uart_getc(void);
 
 #endif
