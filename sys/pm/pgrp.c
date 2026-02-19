@@ -7,14 +7,12 @@
 
 #include <sys/proc.h>
 #include <sys/session.h>
+#include <sys/lock.h>
 #include <stddef.h>
 #include <string.h>
-#include <pm/pm.h>
+#include <vm/vm_kmem.h>
 
-extern void *kmalloc(size_t size);
-extern void kfree(void *ptr);
-extern process_t *current_process;
-extern process_t processes[];
+
 
 /* Global pgrp hash table for O(1) lookup by pgid */
 #define PGRP_HASH_SIZE 16
@@ -63,7 +61,7 @@ void session_free(struct session *sess) {
     if (--sess->s_count > 0) return;
     
     /* Session should have no pgrps at this point */
-    kfree(sess);
+    kfree(sess, sizeof(struct session));
 }
 
 /*
@@ -119,7 +117,7 @@ void pgrp_free(struct pgrp *pgrp) {
     }
     mutex_unlock(&proctree_lock);
     
-    kfree(pgrp);
+    kfree(pgrp, sizeof(struct pgrp));
 }
 
 /*

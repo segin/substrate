@@ -1,6 +1,7 @@
 .global _start
 .extern main
 .extern exit
+.extern environ
 
 _start:
     # Setup stack frame?
@@ -12,7 +13,17 @@ _start:
     
     mov (%esp), %eax   # argc
     lea 4(%esp), %ebx  # argv
+
+    # Calculate envp = argv + (argc + 1) * 4
+    mov %eax, %ecx
+    inc %ecx
+    shl $2, %ecx
+    lea (%ebx, %ecx), %edx # edx = envp
+
+    # Store envp in environ
+    mov %edx, environ
     
+    push %edx # envp
     push %ebx # argv
     push %eax # argc
     
