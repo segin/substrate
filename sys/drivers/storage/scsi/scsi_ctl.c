@@ -113,6 +113,9 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         scsi_ioctl_cmd_t kcmd;
         if (copyin(arg, &kcmd, sizeof(kcmd)) != 0) return -EFAULT;
 
+        /* Validate CDB length */
+        if (kcmd.cdb_len > sizeof(kcmd.cdb)) return -EINVAL;
+
         /* Limit data length to avoid excessive kernel allocation (64KB) */
         if (kcmd.data_len > 65536) return -EINVAL;
 
