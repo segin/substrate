@@ -4,9 +4,9 @@
  * Provides CPU-local storage via GS segment on i386.
  */
 
-#include "percpu.h"
-#include "gdt.h"
-#include "smp.h"
+#include <arch/i386/percpu.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/smp.h>
 #include <kern/console.h>
 #include <string.h>
 
