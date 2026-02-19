@@ -346,14 +346,14 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
     if (!root) return -1;
 
-    // Variables for argument capturing
-    int argc = 0;
-    int envc = 0;
-    size_t total_size = ARG_MAX_BYTES;
+    // ARG_MAX: Maximum bytes for arguments + environment
+    // We use a fixed 32KB buffer to avoid Double Fetch / TOCTOU issues.
     char **k_argv = NULL;
     char **k_envp = NULL;
     char *arg_buffer = NULL;
-    int error_code = -1; // Default error
+    int argc = 0;
+    int envc = 0;
+    int error_code = -1;
 
     // Lookup the file
     fs_node_t *file = vfs_lookup(root, path);
@@ -370,21 +370,29 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     }
 
     // Capture arguments and environment
-    // Count argc
+    // Count argc only (avoid double fetch of strings)
     if (argv) {
         while (argc < ARG_MAX_COUNT) {
             char *uarg;
             if (capture_ptr(argv, argc, &uarg) != 0 || uarg == NULL) break;
             argc++;
+            if (argc > (int)(ARG_MAX_BYTES / 4)) { // Sanity limit for argc count
+                kprint("execve: Too many arguments\n");
+                return -7; // E2BIG
+            }
         }
     }
 
-    // Count envc
+    // Count envc only
     if (envp) {
         while (envc < ARG_MAX_COUNT) {
             char *uarg;
             if (capture_ptr(envp, envc, &uarg) != 0 || uarg == NULL) break;
             envc++;
+            if (envc > (int)(ARG_MAX_BYTES / 4)) {
+                kprint("execve: Too many env vars\n");
+                return -7; // E2BIG
+            }
         }
     }
 
@@ -404,34 +412,34 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         k_envp[envc] = NULL;
     }
 
-    // Always allocate the fixed size buffer
-    arg_buffer = kmalloc(total_size);
+    // Always allocate full buffer to avoid TOCTOU re-measurement
+    arg_buffer = kmalloc(ARG_MAX_BYTES);
     if (!arg_buffer) {
-         if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
-         if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
-         return -12;
+        if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
+        if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+        return -12;
     }
 
     // Copy strings
     char *p_buf = arg_buffer;
-    size_t remaining = total_size;
+    size_t remaining = ARG_MAX_BYTES;
 
     for (int i = 0; i < argc; i++) {
         char *uarg;
-        if (capture_ptr(argv, i, &uarg) != 0) {
-            error_code = -14; // EFAULT
+        int ret;
+        if ((ret = capture_ptr(argv, i, &uarg)) != 0) {
+            error_code = (ret == -1) ? -14 : -1; // Map EFAULT
             goto cleanup;
         }
         k_argv[i] = p_buf;
 
         size_t copied_len = 0;
-        int ret;
         if (is_user_ptr(uarg)) {
             ret = copyinstr(uarg, p_buf, remaining, &copied_len);
         } else {
             size_t len = strlen(uarg) + 1;
             if (len > remaining) {
-                ret = -36; // ENAMETOOLONG
+                ret = -7; // E2BIG
             } else {
                 strcpy(p_buf, uarg);
                 copied_len = len;
@@ -440,10 +448,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         }
 
         if (ret != 0) {
-            kprint("execve: Failed to copy argument (too long?)\n");
-            if (ret == -7 || ret == -2) error_code = -7; // E2BIG
+            if (ret == -2) error_code = -7; // E2BIG
             else if (ret == -1) error_code = -14; // EFAULT
-            else error_code = ret;
+            else error_code = (ret < 0) ? ret : -1;
+
+            kprint("execve: Failed to copy argument\n");
             goto cleanup;
         }
 
@@ -453,20 +462,20 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
 
     for (int i = 0; i < envc; i++) {
         char *uarg;
-        if (capture_ptr(envp, i, &uarg) != 0) {
-            error_code = -14; // EFAULT
+        int ret;
+        if ((ret = capture_ptr(envp, i, &uarg)) != 0) {
+            error_code = (ret == -1) ? -14 : -1; // Map EFAULT
             goto cleanup;
         }
         k_envp[i] = p_buf;
 
         size_t copied_len = 0;
-        int ret;
         if (is_user_ptr(uarg)) {
             ret = copyinstr(uarg, p_buf, remaining, &copied_len);
         } else {
             size_t len = strlen(uarg) + 1;
             if (len > remaining) {
-                ret = -36; // ENAMETOOLONG
+                ret = -7; // E2BIG
             } else {
                 strcpy(p_buf, uarg);
                 copied_len = len;
@@ -475,10 +484,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         }
 
         if (ret != 0) {
-            kprint("execve: Failed to copy env (too long?)\n");
-            if (ret == -7 || ret == -2) error_code = -7; // E2BIG
+            if (ret == -2) error_code = -7; // E2BIG
             else if (ret == -1) error_code = -14; // EFAULT
-            else error_code = ret;
+            else error_code = (ret < 0) ? ret : -1;
+
+            kprint("execve: Failed to copy env\n");
             goto cleanup;
         }
 
@@ -885,7 +895,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Cleanup kernel arguments
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+<<<<<<< HEAD
     if (arg_buffer) kfree(arg_buffer, total_size);
+=======
+    if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
+>>>>>>> main
 
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
@@ -898,7 +912,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
 cleanup:
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+<<<<<<< HEAD
     if (arg_buffer) kfree(arg_buffer, total_size);
+=======
+    if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
+>>>>>>> main
     return error_code;
 }
 

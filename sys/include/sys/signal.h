@@ -1,5 +1,5 @@
-#ifndef _SYS_SIGNAL_H
-#define _SYS_SIGNAL_H
+#ifndef _SUBSTRATE_SYS_SIGNAL_H
+#define _SUBSTRATE_SYS_SIGNAL_H
 
 #include <stdint.h>
 

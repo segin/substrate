@@ -1,5 +1,6 @@
 #include <vm/vm_zone.h>
 #include <stddef.h>
+#include <string.h>
 #include <arch/i386/pmm.h> // For raw page allocation
 
 // Internal structure for free list items
@@ -7,19 +8,21 @@ struct vm_zone_item {
     struct vm_zone_item *next;
 };
 
-// Static pool for bootstrap zones
+// Bootstrap zone management
 #define MAX_BOOTSTRAP_ZONES 16
-static vm_zone_t bootstrap_zones[MAX_BOOTSTRAP_ZONES];
-static int next_bootstrap_zone = 0;
+static struct {
+    vm_zone_t zones[MAX_BOOTSTRAP_ZONES];
+    int next;
+} vm_zone_bootstrap;
 
 void vm_zone_init(void) {
-    next_bootstrap_zone = 0;
+    memset(&vm_zone_bootstrap, 0, sizeof(vm_zone_bootstrap));
 }
 
 vm_zone_t *vm_zone_create(const char *name, size_t size, size_t align) {
-    if (next_bootstrap_zone >= MAX_BOOTSTRAP_ZONES) return NULL;
+    if (vm_zone_bootstrap.next >= MAX_BOOTSTRAP_ZONES) return NULL;
 
-    vm_zone_t *zone = &bootstrap_zones[next_bootstrap_zone++];
+    vm_zone_t *zone = &vm_zone_bootstrap.zones[vm_zone_bootstrap.next++];
     zone->name = name;
     zone->size = size;
     zone->align = align;
