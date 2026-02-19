@@ -6,8 +6,6 @@
 #include <sys/thr.h>
 #include <stdint.h>
 
-
-
 #define MAX_PTHREADS 64
 
 struct pthread_info {
