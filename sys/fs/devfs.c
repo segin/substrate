@@ -4,6 +4,7 @@
 #include <sys/tty.h>
 #include <string.h>
 #include <stddef.h>
+#include <vm/vm_kmem.h>
 
 extern fs_node_t *console_get_node(void);
 
@@ -45,141 +46,139 @@ static fs_node_t tty_node = {
     .ioctl = tty_ioctl_proxy
 };
 
-// Device registry - split into char devices and storage devices
-#define MAX_DEVICES 64
-static fs_node_t *char_devices[MAX_DEVICES];
-static int char_device_count = 0;
+typedef struct devfs_entry {
+    char name[128];
+    fs_node_t *node;
+    struct devfs_entry *parent;
+    struct devfs_entry *child;
+    struct devfs_entry *next;
+} devfs_entry_t;
 
-static fs_node_t *storage_devices[MAX_DEVICES];
-static int storage_device_count = 0;
+static devfs_entry_t *root_entry = NULL;
+static struct dirent dev_dirent;
 
-static fs_node_t *input_devices[MAX_DEVICES];
-static int input_device_count = 0;
+static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index);
+static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name);
+
+static devfs_entry_t *devfs_find_child(devfs_entry_t *parent, const char *name) {
+    devfs_entry_t *curr = parent->child;
+    while (curr) {
+        if (strcmp(curr->name, name) == 0) return curr;
+        curr = curr->next;
+    }
+    return NULL;
+}
+
+static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node, devfs_entry_t *parent) {
+    devfs_entry_t *entry = kmalloc(sizeof(devfs_entry_t));
+    if (!entry) return NULL;
+    memset(entry, 0, sizeof(devfs_entry_t));
+    strncpy(entry->name, name, 127);
+    entry->node = node;
+    entry->parent = parent;
+
+    // Link to parent
+    entry->next = parent->child;
+    parent->child = entry;
+
+    // If it's a directory node we created, set impl to point to entry
+    // so we can find children later.
+    if (node->flags == FS_DIRECTORY) {
+        node->impl = (uintptr_t)entry;
+    }
+
+    return entry;
+}
+
+static fs_node_t *devfs_create_dir_node(const char *name) {
+    fs_node_t *node = kmalloc(sizeof(fs_node_t));
+    if (!node) return NULL;
+    memset(node, 0, sizeof(fs_node_t));
+    strncpy(node->name, name, 127);
+    node->flags = FS_DIRECTORY;
+    node->readdir = &devfs_dir_readdir;
+    node->finddir = &devfs_dir_finddir;
+    return node;
+}
+
+static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
+    devfs_entry_t *entry = (devfs_entry_t *)node->impl;
+    if (!entry) return NULL;
+
+    devfs_entry_t *child = entry->child;
+    uint64_t i = 0;
+    while (child && i < index) {
+        child = child->next;
+        i++;
+    }
+
+    if (child) {
+        strncpy(dev_dirent.d_name, child->name, sizeof(dev_dirent.d_name) - 1);
+        dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
+        dev_dirent.d_ino = (uintptr_t)child; // Use pointer as inode
+        return &dev_dirent;
+    }
+    return NULL;
+}
+
+static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
+    devfs_entry_t *entry = (devfs_entry_t *)node->impl;
+    if (!entry) return NULL;
+
+    devfs_entry_t *child = devfs_find_child(entry, name);
+    if (child) return child->node;
+
+    return NULL;
+}
+
+static void devfs_add_entry(const char *path, fs_node_t *node) {
+    devfs_entry_t *current = root_entry;
+    if (!current) return; // Should not happen if initialized
+
+    char name_buf[128];
+    const char *p = path;
+
+    while (1) {
+        const char *sep = strchr(p, '/');
+        if (sep) {
+            size_t len = sep - p;
+            if (len >= sizeof(name_buf)) len = sizeof(name_buf) - 1;
+            strncpy(name_buf, p, len);
+            name_buf[len] = '\0';
+
+            // Find or create directory
+            devfs_entry_t *next = devfs_find_child(current, name_buf);
+            if (!next) {
+                // Create directory node
+                fs_node_t *dir_node = devfs_create_dir_node(name_buf);
+                if (dir_node) {
+                    next = devfs_create_entry(name_buf, dir_node, current);
+                }
+            }
+            if (!next) return; // Failed to create directory
+            current = next;
+            p = sep + 1;
+        } else {
+            // Last component
+            strncpy(name_buf, p, sizeof(name_buf) - 1);
+            name_buf[sizeof(name_buf) - 1] = '\0';
+            devfs_create_entry(name_buf, node, current);
+            break;
+        }
+    }
+}
 
 void devfs_register_device(fs_node_t *node) {
     if (node->flags == FS_BLOCKDEVICE) {
-        // Storage devices go under /dev/storage
-        if (storage_device_count < MAX_DEVICES) {
-            storage_devices[storage_device_count++] = node;
-        }
-    } else if (strncmp(node->name, "input/", 6) == 0) {
-        // Input devices go under /dev/input
-        if (input_device_count < MAX_DEVICES) {
-            input_devices[input_device_count++] = node;
-        }
+        // Storage devices go under storage/
+        char path[128];
+        strcpy(path, "storage/");
+        strncat(path, node->name, sizeof(path) - strlen(path) - 1);
+        devfs_add_entry(path, node);
     } else {
-        // Character devices in /dev root
-        if (char_device_count < MAX_DEVICES) {
-            char_devices[char_device_count++] = node;
-        }
+        // Character devices use their name (which may include slashes)
+        devfs_add_entry(node->name, node);
     }
-}
-
-static struct dirent dev_dirent;
-
-// /dev/storage directory operations
-static struct dirent *storage_readdir(fs_node_t *node, uint64_t index) {
-    (void)node;
-    if (index < (uint64_t)storage_device_count) {
-        strncpy(dev_dirent.d_name, storage_devices[index]->name, sizeof(dev_dirent.d_name) - 1);
-        dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
-        dev_dirent.d_ino = index + 1;
-        return &dev_dirent;
-    }
-    return NULL;
-}
-
-static fs_node_t *storage_finddir(fs_node_t *node, char *name) {
-    (void)node;
-    for (int i = 0; i < storage_device_count; i++) {
-        if (strcmp(storage_devices[i]->name, name) == 0) {
-            return storage_devices[i];
-        }
-    }
-    return NULL;
-}
-
-static fs_node_t storage_dir_node = {
-    .name = "storage",
-    .flags = FS_DIRECTORY,
-    .readdir = storage_readdir,
-    .finddir = storage_finddir
-};
-
-// /dev/input directory operations
-static struct dirent *input_readdir(fs_node_t *node, uint64_t index) {
-    (void)node;
-    if (index < (uint64_t)input_device_count) {
-        // Strip "input/" prefix
-        strncpy(dev_dirent.d_name, input_devices[index]->name + 6, sizeof(dev_dirent.d_name) - 1);
-        dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
-        dev_dirent.d_ino = index + 1;
-        return &dev_dirent;
-    }
-    return NULL;
-}
-
-static fs_node_t *input_finddir(fs_node_t *node, char *name) {
-    (void)node;
-    for (int i = 0; i < input_device_count; i++) {
-        // Compare stripping "input/" prefix
-        if (strcmp(input_devices[i]->name + 6, name) == 0) {
-            return input_devices[i];
-        }
-    }
-    return NULL;
-}
-
-static fs_node_t input_dir_node = {
-    .name = "input",
-    .flags = FS_DIRECTORY,
-    .readdir = input_readdir,
-    .finddir = input_finddir
-};
-
-// /dev root directory operations
-static struct dirent *devfs_readdir(fs_node_t *node, uint64_t index) {
-    (void)node;
-    // First entry: storage subdirectory
-    if (index == 0) {
-        strcpy(dev_dirent.d_name, "storage");
-        dev_dirent.d_ino = 1;
-        return &dev_dirent;
-    }
-    // Then input subdirectory
-    if (index == 1) {
-        strcpy(dev_dirent.d_name, "input");
-        dev_dirent.d_ino = 2;
-        return &dev_dirent;
-    }
-    // Then tty
-    if (index == 2) {
-        strcpy(dev_dirent.d_name, "tty");
-        dev_dirent.d_ino = 3;
-        return &dev_dirent;
-    }
-    // Then char devices
-    uint64_t char_idx = index - 3;
-    if (char_idx < (uint64_t)char_device_count) {
-        strncpy(dev_dirent.d_name, char_devices[char_idx]->name, sizeof(dev_dirent.d_name) - 1);
-        dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
-        dev_dirent.d_ino = char_idx + 4;
-        return &dev_dirent;
-    }
-    return NULL;
-}
-
-static fs_node_t *devfs_finddir(fs_node_t *node, char *name) {
-    (void)node;
-    if (strcmp(name, "storage") == 0) return &storage_dir_node;
-    if (strcmp(name, "input") == 0) return &input_dir_node;
-    if (strcmp(name, "tty") == 0) return &tty_node;
-    for (int i = 0; i < char_device_count; i++) {
-        if (strcmp(char_devices[i]->name, name) == 0) {
-            return char_devices[i];
-        }
-    }
-    return NULL;
 }
 
 static fs_node_t devfs_root_node;
@@ -196,13 +195,27 @@ static filesystem_t devfs_fs = {
 };
 
 void devfs_init(void) {
+    // Initialize root node
     memset(&devfs_root_node, 0, sizeof(fs_node_t));
     strcpy(devfs_root_node.name, "dev");
     devfs_root_node.flags = FS_DIRECTORY;
-    devfs_root_node.readdir = &devfs_readdir;
-    devfs_root_node.finddir = &devfs_finddir;
+    devfs_root_node.readdir = &devfs_dir_readdir;
+    devfs_root_node.finddir = &devfs_dir_finddir;
+
+    // Create root entry
+    root_entry = kmalloc(sizeof(devfs_entry_t));
+    if (root_entry) {
+        memset(root_entry, 0, sizeof(devfs_entry_t));
+        strcpy(root_entry->name, "dev");
+        root_entry->node = &devfs_root_node;
+
+        devfs_root_node.impl = (uintptr_t)root_entry;
+    }
     
     devfs_root_node_ptr = &devfs_root_node; // Export for VFS device lookup
 
     vfs_register_filesystem(&devfs_fs);
+
+    // Register TTY
+    devfs_register_device(&tty_node);
 }

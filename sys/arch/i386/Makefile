@@ -1,7 +1,7 @@
 include ../../../Makefile.inc
 
 # Override flags for kernel - use KERNEL_CFLAGS for NetBSD-style includes
-CFLAGS := $(KERNEL_CFLAGS) -I. -I../x86-common/include -Ifpu
+CFLAGS := $(KERNEL_CFLAGS) -I. -Iinclude -I../x86-common/include -Ifpu
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = boot.S gdt.c ldt.c sched.c idt.c isr.S pmm.c pci.c syscall.c pmap.c pmap_dump.c smp_discovery.c trampoline.S fpu/fpu_emu.c efi_boot.c zimage_header.S vm86.c vm86_asm.S sysarch.c signal.c sig_trampoline.c early_boot.c percpu.c \
