@@ -44,14 +44,14 @@ void kfree(void *ptr, size_t size) {
 // Mocks for test
 static uint8_t mock_disk[UDF_SECTOR_SIZE * 16];
 
-static uint32_t mock_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     if (offset + size > sizeof(mock_disk)) return 0;
     memcpy(buffer, mock_disk + offset, size);
     return size;
 }
 
-static uint32_t mock_write(fs_node_t *node, off_t offset, uint32_t size, const uint8_t *buffer) {
+static size_t mock_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     if (offset + size > sizeof(mock_disk)) return 0;
     memcpy(mock_disk + offset, buffer, size);

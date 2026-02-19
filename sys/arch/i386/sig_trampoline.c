@@ -1,5 +1,5 @@
 
-#include "syscall.h"
+#include <arch/i386/syscall.h>
 
 /*
  * Signal Trampoline Code (VDSO-like)
