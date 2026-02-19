@@ -230,6 +230,8 @@ void run_kernel_tests(void) {
          test_printf_new();
          extern void test_printf_star(void);
          test_printf_star();
+         extern void test_printf_flags(void);
+         test_printf_flags();
     }
     
     if (all || strcmp(test_arg, "printf_specifiers") == 0) {
