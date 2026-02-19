@@ -122,6 +122,24 @@ void test_kset_init(void) {
     // Verify internal kobject structure is correct
     if (kset.kobj.parent != NULL) fail("kset_init: kobj parent not NULL");
     if (kset.kobj.kset != NULL) fail("kset_init: kobj kset not NULL");
+    if (kset.kobj.release != NULL) fail("kset_init: kobj release should be NULL");
+}
+
+void test_kset_init_name_truncation(void) {
+    printf("Running test_kset_init_name_truncation...\n");
+    struct kset kset;
+    const char *long_name = "this_is_a_very_long_name_that_exceeds_31_characters_limit_kset";
+    char expected_name[32];
+
+    memset(&kset, 0xCC, sizeof(kset));
+    kset_init(&kset, long_name);
+
+    // Expected behavior: first 31 chars copied, last char is null terminator
+    strncpy(expected_name, long_name, 31);
+    expected_name[31] = '\0';
+
+    if (strcmp(kset.kobj.name, expected_name) != 0) fail("kset_init: name truncation failed");
+    if (kset.kobj.name[31] != '\0') fail("kset_init: name not null terminated");
 }
 
 int main(void) {
@@ -133,6 +151,7 @@ int main(void) {
     test_kobject_put();
     test_kobject_put_no_release();
     test_kset_init();
+    test_kset_init_name_truncation();
 
     if (failed_tests == 0) {
         printf("All kobject tests passed!\n");

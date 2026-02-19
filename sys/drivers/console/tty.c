@@ -701,18 +701,17 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
         }
     }
 
+    TTY_UNLOCK(tty);
+
     /*
      * Call driver ioctl if not handled.
      * We unlock before calling driver ioctl to allow it to sleep/copyin safely.
      * We assume tty pointer remains valid (held by open file reference).
      */
     if (ret == -1 && tty->driver->ioctl) {
-        TTY_UNLOCK(tty);
         ret = tty->driver->ioctl(tty, cmd, (unsigned long)arg);
-        return ret;
     }
 
-    TTY_UNLOCK(tty);
     return ret;
 }
 
