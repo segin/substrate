@@ -5,7 +5,7 @@
 #include <assert.h>
 
 /* Mock kernel environment */
-#define HOST_TEST
+/* HOST_TEST must be defined on command line or before includes */
 
 /* Mock errno values if not available */
 #ifndef EINVAL
@@ -165,6 +165,40 @@ void test_send_cmd() {
     printf("SCSI_IOCTL_SEND_CMD pass\n");
 }
 
+void test_send_cmd_cdb_overflow() {
+    printf("Testing SCSI_IOCTL_SEND_CMD overflow check...\n");
+    scsi_device_t dev;
+    memset(&dev, 0, sizeof(dev));
+
+    scsi_generic_node_t sg;
+    memset(&sg, 0, sizeof(sg));
+    sg.dev = &dev;
+
+    fs_node_t node;
+    memset(&node, 0, sizeof(node));
+    node.impl = (uintptr_t)&sg;
+
+    scsi_ioctl_cmd_t cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.direction = 1; /* READ */
+    cmd.data_len = 100;
+    char data_buf[100];
+    cmd.data = data_buf;
+    cmd.cdb_len = 20; /* Larger than 16 */
+
+    int ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
+
+    /* Before fix, this returns 0 (success) because mock execute returns 0.
+       We assert that it should return -EINVAL. */
+    if (ret == 0) {
+        printf("FAILED: Expected -EINVAL for cdb_len > 16, got 0\n");
+        exit(1);
+    }
+    assert(ret == -EINVAL);
+
+    printf("SCSI_IOCTL_SEND_CMD overflow check pass\n");
+}
+
 void test_get_count() {
     printf("Testing SCSI_IOCTL_GET_COUNT...\n");
     scsi_bus_node_t bn;
@@ -197,6 +231,7 @@ int main() {
     test_get_info();
     test_send_cmd();
     test_get_count();
+    test_send_cmd_cdb_overflow();
     printf("All scsi_ctl tests passed!\n");
     return 0;
 }
