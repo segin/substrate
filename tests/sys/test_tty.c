@@ -122,12 +122,9 @@ void test_tty_termios(void) {
     t.c_cflag = CS8 | CSTOPB | PARENB;
     t.c_ospeed = B115200;
     
-    // We can't call tty_ioctl easily because it expects user pointer for legacy TCSETS? 
-    // Wait, our implementation in tty.c casts arg to void* and runs memcpy.
-    // Assuming arg is a pointer to kernel memory for this test context is risky if copyin/out is used.
-    // But tty.c currently uses memcpy directly from arg. So kernel pointer is valid.
-    
-    int ret = tty_ioctl(tty, TCSETS, (unsigned long)&t);
+    // Use internal kernel helper to bypass copyin/out checks
+    // since we are passing kernel stack address.
+    int ret = tty_ioctl_kern(tty, TCSETS, (uintptr_t)&t);
     ASSERT(ret == 0);
     ASSERT(mock_set_termios_called == 1);
     ASSERT(tty->termios.c_cflag == (CS8 | CSTOPB | PARENB));
