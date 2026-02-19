@@ -18,6 +18,18 @@
 /* Include the implementation directly to test it in isolation */
 #include "../../sys/lib/div64.c"
 
+/* Helper to generate full 64-bit random numbers */
+static uint64_t rand64(void) {
+    uint64_t r = 0;
+    /* Combine 15-bit chunks from rand() to cover full 64-bit range */
+    r |= ((uint64_t)rand() & 0x7FFF);
+    r |= ((uint64_t)rand() & 0x7FFF) << 15;
+    r |= ((uint64_t)rand() & 0x7FFF) << 30;
+    r |= ((uint64_t)rand() & 0x7FFF) << 45;
+    r |= ((uint64_t)rand() & 0xF) << 60;
+    return r;
+}
+
 static void test_negdi2_basic(void) {
     printf("Testing basic negation...\n");
     assert(__negdi2(0) == 0);
@@ -48,17 +60,8 @@ static void test_negdi2_edge_cases(void) {
     assert(__negdi2(min) == min);
 }
 
-static uint64_t rand64(void) {
-    uint64_t r = 0;
-    for (int i = 0; i < 4; i++) {
-        r = (r << 16) | (rand() & 0xFFFF);
-    }
-    return r;
-}
-
 static void test_negdi2_randomized(void) {
-    printf("Testing randomized inputs (1,000,000 iterations)...\n");
-    srand(time(NULL));
+    printf("Testing randomized property-based verification (1,000,000 iterations)...\n");
 
     for (int i = 0; i < 1000000; i++) {
         int64_t val = (int64_t)rand64();
@@ -66,8 +69,9 @@ static void test_negdi2_randomized(void) {
         int64_t actual = __negdi2(val);
 
         if (actual != expected) {
-            fprintf(stderr, "FAIL: __negdi2(%lld) = %lld, expected %lld\n",
-                    (long long)val, (long long)actual, (long long)expected);
+            fprintf(stderr, "FAIL: iteration %d, input %lld (0x%llx), expected %lld, got %lld\n",
+                    i, (long long)val, (unsigned long long)val,
+                    (long long)expected, (long long)actual);
             exit(1);
         }
     }
@@ -75,6 +79,10 @@ static void test_negdi2_randomized(void) {
 
 int main(void) {
     printf("=== TEST: __negdi2 ===\n");
+
+    unsigned int seed = (unsigned int)time(NULL);
+    printf("Seed: %u\n", seed);
+    srand(seed);
 
     test_negdi2_basic();
     test_negdi2_large();

@@ -50,6 +50,15 @@ extern bool test_futex_basic(void);
 extern bool test_futex_blocking(void);
 extern bool test_pthread_exit_logic(void);
 
+// Sleepq Tests
+extern bool test_sleepq_basic(void);
+extern bool test_sleepq_fifo(void);
+extern bool test_sleepq_wake_all(void);
+extern bool test_sleepq_wake_n(void);
+extern bool test_sleepq_private(void);
+extern bool test_sleepq_collisions(void);
+extern bool test_sleepq_requeue(void);
+
 // Signal Tests
 extern bool test_signal_action(void);
 extern bool test_signal_mask(void);
@@ -156,6 +165,13 @@ test_case_t tests[] = {
     {"futex_basic", test_futex_basic},
     {"futex_block", test_futex_blocking},
     {"pthread_exit", test_pthread_exit_logic},
+    {"sleepq_basic", test_sleepq_basic},
+    {"sleepq_fifo", test_sleepq_fifo},
+    {"sleepq_wake_all", test_sleepq_wake_all},
+    {"sleepq_wake_n", test_sleepq_wake_n},
+    {"sleepq_private", test_sleepq_private},
+    {"sleepq_collis", test_sleepq_collisions},
+    {"sleepq_requeue", test_sleepq_requeue},
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},

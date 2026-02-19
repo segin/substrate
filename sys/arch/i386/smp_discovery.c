@@ -1,11 +1,11 @@
-#include "smp.h"
+#include <arch/i386/smp.h>
 #include <sys/smp.h>
 #include <kern/console.h>
 #include <arch/i386/early_boot.h>
 #include <string.h>
 #include <stdint.h>
-#include "percpu.h"
-#include "gdt.h"
+#include <arch/i386/percpu.h>
+#include <arch/i386/gdt.h>
 #include <sys/proc.h>
 #include <arch/x86-common/include/lapic.h>
 
