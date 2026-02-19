@@ -32,6 +32,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
+#include <sys/reboot.h>
 #include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdbool.h>
@@ -1642,9 +1643,21 @@ int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
 }
 
 int sys_reboot(int cmd) {
-    (void)cmd;
-    // For now, always reboot. 
-    // In a real system we'd check cmd for RB_HALT, RB_POWEROFF etc.
+    if (current_process->euid != 0) {
+        return -EPERM;
+    }
+
+    switch (cmd) {
+    case RB_AUTOBOOT:
+    case RB_HALT_SYSTEM:
+    case RB_POWER_OFF:
+        // For now, all these perform a hard reset.
+        // In the future, we would differentiate between halt, poweroff, and reboot.
+        break;
+    default:
+        return -EINVAL;
+    }
+
     // Keyboard controller reset
     while (inb(0x64) & 0x02);
     outb(0x64, 0xFE);
