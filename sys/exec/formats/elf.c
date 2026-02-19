@@ -28,7 +28,7 @@ static void exec_reset_signals(void) {
         // If handler is a function pointer (caught signal), reset to default
         if (act->sa_handler != SIG_IGN && act->sa_handler != SIG_DFL) {
             act->sa_handler = SIG_DFL;
-            act->sa_mask = 0;
+            memset(&act->sa_mask, 0, sizeof(act->sa_mask));
             act->sa_flags = 0;
         }
     }
@@ -337,15 +337,17 @@ static int capture_ptr(char *const array[], int index, char **out) {
     }
 }
 
+#define ARG_MAX_BYTES (32 * 1024)
+#define ARG_MAX_COUNT 4096
+
 // Execute a binary - loads ELF and prepares for userspace transition
-// Returns 0 on success, -1 on failure
+// Returns 0 on success, negative error code on failure
 int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
     if (!root) return -1;
 
     // ARG_MAX: Maximum bytes for arguments + environment
     // We use a fixed 32KB buffer to avoid Double Fetch / TOCTOU issues.
-    const size_t ARG_MAX_BYTES = 32 * 1024;
     char **k_argv = NULL;
     char **k_envp = NULL;
     char *arg_buffer = NULL;
@@ -359,7 +361,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         kprint("execve: File not found: ");
         kprint(path);
         kprint("\n");
-        return -1;
+        return -2; // ENOENT
     }
     
     if ((file->flags & 0x7) != FS_FILE) {
@@ -370,7 +372,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Capture arguments and environment
     // Count argc only (avoid double fetch of strings)
     if (argv) {
-        while (1) {
+        while (argc < ARG_MAX_COUNT) {
             char *uarg;
             if (capture_ptr(argv, argc, &uarg) != 0 || uarg == NULL) break;
             argc++;
@@ -383,7 +385,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
 
     // Count envc only
     if (envp) {
-        while (1) {
+        while (envc < ARG_MAX_COUNT) {
             char *uarg;
             if (capture_ptr(envp, envc, &uarg) != 0 || uarg == NULL) break;
             envc++;
@@ -413,9 +415,9 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Always allocate full buffer to avoid TOCTOU re-measurement
     arg_buffer = kmalloc(ARG_MAX_BYTES);
     if (!arg_buffer) {
-         if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
-         if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
-         return -12;
+        if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
+        if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+        return -12;
     }
 
     // Copy strings
@@ -649,7 +651,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
             uint32_t user_ptr;
             PUSH_STRING(k_envp[i], user_ptr);
             // Store user pointer back into k_envp array (reusing storage)
-            k_envp[i] = (char*)user_ptr;
+            k_envp[i] = (char*)(uintptr_t)user_ptr;
         }
     }
     
@@ -658,7 +660,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         for (int i = argc - 1; i >= 0; i--) {
             uint32_t user_ptr;
             PUSH_STRING(k_argv[i], user_ptr);
-            k_argv[i] = (char*)user_ptr;
+            k_argv[i] = (char*)(uintptr_t)user_ptr;
         }
     }
     
@@ -893,7 +895,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Cleanup kernel arguments
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+<<<<<<< HEAD
+    if (arg_buffer) kfree(arg_buffer, total_size);
+=======
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
+>>>>>>> main
 
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
@@ -906,7 +912,11 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
 cleanup:
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
+<<<<<<< HEAD
+    if (arg_buffer) kfree(arg_buffer, total_size);
+=======
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
+>>>>>>> main
     return error_code;
 }
 
