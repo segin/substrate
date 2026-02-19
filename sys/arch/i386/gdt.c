@@ -1,10 +1,9 @@
-#include "gdt.h"
-#include "percpu.h"
+#include <arch/i386/gdt.h>
+#include <arch/i386/percpu.h>
 #include <stdint.h>
 #include <string.h>
 
-extern void gdt_flush(uint32_t);
-extern void tss_flush();
+
 
 // Static helper to set GDT gate
 static void set_gate(gdt_entry_t *gdt, int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {

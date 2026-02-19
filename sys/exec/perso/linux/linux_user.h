@@ -212,31 +212,31 @@ typedef struct {
 
         /* kill() */
         struct {
-            int _pid;           /* sender's pid */
-            unsigned int _uid;  /* sender's uid */
+            int _pid;       /* sender's pid */
+            unsigned int _uid; /* sender's uid */
         } _kill;
 
         /* POSIX.1b timers */
         struct {
-            int _tid;           /* timer id */
-            int _overrun;       /* overrun count */
-            char _pad[sizeof(unsigned int) - sizeof(int)];
-            void *_sigval_ptr;
-            int _sys_private;   /* not to be passed to user */
+            int _tid;       /* timer id */
+            int _overrun;   /* overrun count */
+            char _pad[sizeof(int) - sizeof(int)];
+            void *_sigval;  /* same as below */
+            int _sys_private;  /* not to be passed to user */
         } _timer;
 
         /* POSIX.1b signals */
         struct {
-            int _pid;           /* sender's pid */
-            unsigned int _uid;  /* sender's uid */
-            void *_sigval_ptr;
+            int _pid;       /* sender's pid */
+            unsigned int _uid; /* sender's uid */
+            void *_sigval;
         } _rt;
 
         /* SIGCHLD */
         struct {
-            int _pid;           /* which child */
-            unsigned int _uid;  /* sender's uid */
-            int _status;        /* exit code */
+            int _pid;       /* which child */
+            unsigned int _uid; /* sender's uid */
+            int _status;    /* exit code */
             long _utime;
             long _stime;
         } _sigchld;

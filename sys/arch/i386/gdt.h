@@ -64,4 +64,8 @@ void tss_iomap_init(void);              /* Initialize I/O bitmap (deny all) */
 void tss_set_iomap(uint16_t port, int allow);  /* Allow/deny single port */
 void tss_set_iomap_range(uint16_t start, uint16_t end, int allow); /* Allow/deny range */
 
+/* Assembly helpers */
+void gdt_flush(uint32_t gdt_ptr);
+void tss_flush();
+
 #endif
