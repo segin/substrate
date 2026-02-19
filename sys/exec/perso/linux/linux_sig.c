@@ -69,6 +69,14 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         /* Populate linux_siginfo_t */
         populate_linux_siginfo(&frame.info, lsig, code);
 
+        frame.uc.uc_flags = 0;
+        frame.uc.uc_link = 0;
+        if (current_thread) {
+            frame.uc.uc_stack.ss_sp = (uint32_t)current_thread->sig_alt_stack.ss_sp;
+            frame.uc.uc_stack.ss_size = current_thread->sig_alt_stack.ss_size;
+            frame.uc.uc_stack.ss_flags = current_thread->sig_alt_stack.ss_flags;
+        }
+
         frame.uc.uc_sigmask.sig[0] = mask;
         frame.uc.uc_mcontext.eip = regs->eip;
         frame.uc.uc_mcontext.eax = regs->eax;

@@ -203,9 +203,9 @@ struct linux_sigframe {
 
 /* Linux siginfo_t (128 bytes) */
 typedef struct {
-    int      si_signo;
-    int      si_errno;
-    int      si_code;
+    int si_signo;
+    int si_errno;
+    int si_code;
 
     union {
         int _pad[29];
