@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <sys/ldt.h>
 #include <sys/proc.h>
+#include <sys/kern_syscalls.h>
 #include <vm/vm_kmem.h>
 #include <kern/console.h>
 #include <arch/i386/gdt.h>
@@ -81,11 +82,27 @@ static void fill_ldt_entry(gdt_entry_t *entry, struct user_desc *info) {
 
 int sys_modify_ldt(int func, struct user_desc *ptr, unsigned long bytecount) {
     if (func == LDT_READ) {
-        /* TODO: Implement reading LDT */
-        return -ENOSYS;
+        if (!current_process->ldt) {
+            return 0;
+        }
+
+        size_t ldt_size = current_process->ldt_entry_count * 8;
+        if (bytecount < ldt_size) {
+            ldt_size = bytecount;
+        }
+
+        if (ldt_size > 0 && copyout(current_process->ldt, ptr, ldt_size)) {
+            return -EFAULT;
+        }
+
+        return (int)ldt_size;
     }
     
-    if (func != LDT_WRITE && func != LDT_READ_DEFAULT) {
+    if (func == LDT_READ_DEFAULT) {
+        return 0;
+    }
+
+    if (func != LDT_WRITE) {
         return -EINVAL;
     }
     

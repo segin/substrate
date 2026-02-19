@@ -21,5 +21,6 @@ void run_kthread_create_tests(void);
 bool run_div64_tests(void);
 void run_kobject_tests(void);
 void run_nanosleep_tests(void);
+void run_ldt_tests(void);
 
 #endif
