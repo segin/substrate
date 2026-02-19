@@ -56,4 +56,8 @@ tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:
+<<<<<<< HEAD
+	rm -f *.o host_test_udf_large_write host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_devfs_input
+=======
 	rm -f *.o host_test_udf_large_write host_test_udf_truncate_expand host_test_udf_extent host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_lshrdi3 host_test_string host_test_div64 host_test_printf_specifiers host_test_tty_lock host_test_ntsync_trunc
+>>>>>>> main
