@@ -11,18 +11,8 @@
 #include <sys/proc.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <sys/param.h>
 #include <string.h>
-
-/*
- * Timer frequency in Hz. This should match the PIT configuration
- * in the kernel's timer setup.
- */
-#define HZ 100
-
-/*
- * Microseconds per tick = 1000000 / HZ
- */
-#define USEC_PER_TICK (1000000 / HZ)
 
 /*
  * rusage_add_tick - Add one timer tick to rusage

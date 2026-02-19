@@ -1,11 +1,11 @@
 include ../../Makefile.inc
 
-CFLAGS := $(CFLAGS) -I../../include -I$(TOP)/sys
+CFLAGS := $(CFLAGS) -Iinclude -I../../include -I$(TOP)/sys
 LDFLAGS := $(USER_LDFLAGS)
 
 SRCS = src/sys.c src/stdlib.c src/string.c src/ctype.c src/assert.c src/dirent.c \
        src/pwd.c src/grp.c src/time/time.c src/div64.c fnmatch.c src/getopt.c src/wchar.c src/libgen.c \
-       stdio/stdio_core.c stdio/stdstreams.c stdio/printf.c
+       stdio/stdio_core.c stdio/stdstreams.c stdio/printf.c sys_generic.c
 ASM_SRCS = arch/i386/syscall.S arch/i386/crt0.S
 
 OBJS = $(SRCS:.c=.o) $(ASM_SRCS:.S=.o)
