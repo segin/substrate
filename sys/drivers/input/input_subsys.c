@@ -138,14 +138,7 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
 
 void input_register_devfs(void) {
     memset(&event_node, 0, sizeof(fs_node_t));
-    strcpy(event_node.name, "input/event0"); // Todo: directory support in devfs? 
-    // If devfs is flat, maybe just "event0"? 
-    // Let's try "event0" to be safe and accessible as /dev/event0 for now.
-    // Or if I want simple access.
-    // Ideally user wants /dev/input/event0.
-    // Assuming devfs handles slashes? Probably not.
-    // Let's use "input0" for now.
-    strcpy(event_node.name, "input0");
+    strcpy(event_node.name, "input/event0");
     event_node.flags = FS_CHARDEVICE;
     event_node.read = &input_read;
     devfs_register_device(&event_node);

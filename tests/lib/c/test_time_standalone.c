@@ -169,10 +169,65 @@ bool test_difftime(void) {
     return passed;
 }
 
+bool test_asctime_r_security(void) {
+    bool passed = true;
+    printf("Running asctime_r security tests...\n");
+
+    struct tm t = {0};
+    char buf[100];
+    char *res;
+
+    // Test 1: Valid year
+    t.tm_year = 100; // 2000
+    t.tm_mon = 0;
+    t.tm_mday = 1;
+    t.tm_wday = 0; // Sun
+
+    memset(buf, 'X', sizeof(buf));
+    res = substrate_asctime_r(&t, buf);
+    if (res == NULL) {
+        printf("FAILED: asctime_r returned NULL for valid input\n");
+        passed = false;
+    } else {
+        if (buf[26] != 'X') {
+            printf("FAILED: Buffer overflow on valid input\n");
+            passed = false;
+        }
+    }
+
+    // Test 2: Large year (overflow)
+    t.tm_year = 8100; // 10000
+    memset(buf, 'X', sizeof(buf));
+    res = substrate_asctime_r(&t, buf);
+    if (res != NULL) {
+        printf("FAILED: asctime_r did NOT return NULL for large year (buffer overflow risk)\n");
+        passed = false;
+    } else {
+        // Expected behavior, check overflow
+        if (buf[26] != 'X') {
+            printf("FAILED: Buffer overflow occurred even though NULL returned!\n");
+            passed = false;
+        }
+    }
+
+    // Test 3: Invalid wday
+    t.tm_year = 100;
+    t.tm_wday = 7; // Invalid
+    res = substrate_asctime_r(&t, buf);
+    if (res != NULL) {
+        printf("FAILED: asctime_r did NOT return NULL for invalid wday\n");
+        passed = false;
+    }
+
+    if (passed) printf("asctime_r security tests passed!\n");
+    return passed;
+}
+
 int main(void) {
     bool all_passed = true;
     if (!test_gmtime_negative_years()) all_passed = false;
     if (!test_difftime()) all_passed = false;
+    if (!test_asctime_r_security()) all_passed = false;
 
     if (all_passed) {
         return 0;

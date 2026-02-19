@@ -66,6 +66,10 @@ void run_kernel_tests(void) {
         run_kobject_tests();
     }
 
+    if (all || strcmp(test_arg, "tty") == 0) {
+        run_tty_tests();
+    }
+
     if (all || strcmp(test_arg, "pmap") == 0) {
         run_pmap_tests();
     }
@@ -221,6 +225,15 @@ void run_kernel_tests(void) {
          test_printf_new();
          extern void test_printf_star(void);
          test_printf_star();
+    }
+    
+    if (all || strcmp(test_arg, "printf_specifiers") == 0) {
+         extern void run_printf_specifier_tests(void);
+         run_printf_specifier_tests();
+    }
+
+    if (all || strcmp(test_arg, "nanosleep") == 0) {
+        run_nanosleep_tests();
     }
 
     if (strcmp(test_arg, "benchmark") == 0) {
