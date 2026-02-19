@@ -3,6 +3,8 @@
 #include <string.h>
 #include <vm/vm_kmem.h>
 
+#define STACK_BUF_SIZE 512
+
 static blkdev_t *blkdev_list = NULL;
 
 // VFS read wrapper - translates byte reads to sector reads
@@ -62,16 +64,21 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
     size_t total_read = 0;
     uint8_t *buf = (uint8_t *)buffer;
     
-    // Use kmalloc for temporary buffer to be safe with stack size
+    // Use stack buffer for small sectors to avoid kmalloc overhead
+    uint8_t stack_buf[STACK_BUF_SIZE];
     uint8_t *sector_buf = NULL;
     
     // 1. Handle unaligned start
     if (sector_offset > 0) {
-        sector_buf = kmalloc(sector_size);
-        if (!sector_buf) return 0;
+        if (sector_size <= STACK_BUF_SIZE) {
+            sector_buf = stack_buf;
+        } else {
+            sector_buf = kmalloc(sector_size);
+            if (!sector_buf) return 0;
+        }
 
         if (dev->read(dev, start_sector, 1, sector_buf) != 0) {
-            kfree(sector_buf, sector_size);
+            if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return 0; // Read error
         }
         
@@ -84,10 +91,6 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
         total_read += copy_size;
         size -= copy_size;
         start_sector++;
-
-        // Don't free yet if we might need it for tail (optimization: free if big gap? No, keep it simple)
-        // Actually, if we enter bulk read, we don't need it.
-        // But reallocating is expensive. Keep it if allocated.
     }
 
     // 2. Handle aligned full sectors (Bulk Read)
@@ -96,7 +99,7 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
 
         // Read directly into user buffer
         if (dev->read(dev, start_sector, sector_count, buf) != 0) {
-            if (sector_buf) kfree(sector_buf, sector_size);
+            if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_read;
         }
 
@@ -110,19 +113,23 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
     // 3. Handle unaligned end (tail)
     if (size > 0) {
         if (!sector_buf) {
-            sector_buf = kmalloc(sector_size);
-            if (!sector_buf) return total_read;
+            if (sector_size <= STACK_BUF_SIZE) {
+                sector_buf = stack_buf;
+            } else {
+                sector_buf = kmalloc(sector_size);
+                if (!sector_buf) return total_read;
+            }
         }
 
         if (dev->read(dev, start_sector, 1, sector_buf) != 0) {
-            kfree(sector_buf, sector_size);
+            if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_read;
         }
         memcpy(buf, sector_buf, size);
         total_read += size;
     }
 
-    if (sector_buf) kfree(sector_buf, sector_size);
+    if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
     return total_read;
 }
 
@@ -136,26 +143,32 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
     size_t total_written = 0;
     const uint8_t *buf = (const uint8_t *)buffer;
     
+    // Use stack buffer for small sectors to avoid kmalloc overhead
+    uint8_t stack_buf[STACK_BUF_SIZE];
     uint8_t *sector_buf = NULL;
     
     // 1. Handle unaligned start
     if (sector_offset > 0) {
-        sector_buf = kmalloc(sector_size);
-        if (!sector_buf) return 0;
+        if (sector_size <= STACK_BUF_SIZE) {
+            sector_buf = stack_buf;
+        } else {
+            sector_buf = kmalloc(sector_size);
+            if (!sector_buf) return 0;
+        }
 
         uint32_t copy_size = sector_size - sector_offset;
         if (copy_size > size) copy_size = size;
         
         // Read-Modify-Write
         if (dev->read && dev->read(dev, start_sector, 1, sector_buf) != 0) {
-            kfree(sector_buf, sector_size);
+            if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return 0;
         }
         
         memcpy(sector_buf + sector_offset, buf, copy_size);
         
         if (dev->write(dev, start_sector, 1, sector_buf) != 0) {
-            kfree(sector_buf, sector_size);
+            if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return 0;
         }
         
@@ -171,7 +184,7 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
 
         // Write directly from user buffer
         if (dev->write(dev, start_sector, sector_count, buf) != 0) {
-            if (sector_buf) kfree(sector_buf, sector_size);
+            if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_written;
         }
 
@@ -185,26 +198,30 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
     // 3. Handle unaligned end (tail)
     if (size > 0) {
         if (!sector_buf) {
-            sector_buf = kmalloc(sector_size);
-            if (!sector_buf) return total_written;
+            if (sector_size <= STACK_BUF_SIZE) {
+                sector_buf = stack_buf;
+            } else {
+                sector_buf = kmalloc(sector_size);
+                if (!sector_buf) return total_written;
+            }
         }
 
         // Read-Modify-Write
         if (dev->read && dev->read(dev, start_sector, 1, sector_buf) != 0) {
-            kfree(sector_buf, sector_size);
+            if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_written;
         }
 
         memcpy(sector_buf, buf, size);
 
         if (dev->write(dev, start_sector, 1, sector_buf) != 0) {
-            kfree(sector_buf, sector_size);
+            if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_written;
         }
 
         total_written += size;
     }
 
-    if (sector_buf) kfree(sector_buf, sector_size);
+    if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
     return total_written;
 }

@@ -37,6 +37,9 @@ static volatile int pmap_lock = 0;
 // Global Statistics
 static struct pmap_stats global_pmap_stats = {0};
 
+// Feature flags
+static int pmap_has_pcid = 0;
+
 // Helper to increment stats (global + pmap)
 static void pmap_stat_inc(pmap_t pmap, int field_offset) {
     // Increment per-pmap stat
@@ -111,6 +114,7 @@ void pmap_bootstrap(void) {
     __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
     int has_pge = (edx >> 13) & 1;  // PGE bit 13 in EDX
     int has_pse = (edx >> 3) & 1;   // PSE bit 3 in EDX
+    pmap_has_pcid = (ecx >> 17) & 1; // PCID bit 17 in ECX
 
     if (has_pse) {
         uint32_t cr4;
@@ -129,6 +133,10 @@ void pmap_bootstrap(void) {
         cr4 |= 0x80;  // CR4.PGE bit 7
         __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
         kprint("PMAP: PGE (Global Pages) enabled\n");
+    }
+
+    if (pmap_has_pcid) {
+        kprint("PMAP: PCID supported by CPU (but disabled in 32-bit mode)\n");
     }
 
     // Map first 128MB (32 page tables x 4MB each) to support PMM allocations
@@ -502,7 +510,11 @@ void pmap_activate(pmap_t pmap) {
     uint32_t current_cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
     
-    // PCID TODO: Check if we can skip flush
+    // Optimization: Skip flush if context hasn't changed.
+    //
+    // Note on PCID: While pmap_has_pcid may be true on modern hardware,
+    // PCID features (CR4.PCIDE) are only available in IA-32e (64-bit) mode.
+    // In 32-bit protected mode, we rely on checking the physical address of the PD.
     if (current_cr3 != pmap->pdir_phys) {
         __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pdir_phys));
     }

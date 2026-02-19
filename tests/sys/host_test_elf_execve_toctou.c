@@ -15,9 +15,14 @@
 #define __kernel_ssize_t ssize_t
 #define __kernel_off_t off_t
 
+// Missing definitions for host test
+#define AC_COMM_LEN 16
+#define BITNESS_32 32
+#define BITNESS_64 64
+
 // Mock functions
 void kprint(const char *str) {
-    // printf("[KERNEL] %s", str); // Uncomment for debug
+    printf("[KERNEL] %s", str);
 }
 
 void panic(const char *str) {
@@ -78,10 +83,10 @@ int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
         copyinstr_call_count++;
         const char *real_s;
         if (copyinstr_call_count == 1) {
-            // First call (sizing): return "attack" (len 7)
+            // First call: return "attack" (len 7)
             real_s = "attack";
         } else {
-            // Second call (copying): return "attack_overflow_now" (len 20)
+            // Second call: return "attack_overflow_now" (len 20)
             real_s = "attack_overflow_now";
         }
 
@@ -122,6 +127,27 @@ int copyin(const void *src, void *dst, size_t size) {
 #include <vfs/vfs.h>
 #include <vm/vm_map.h> // for vm_map_create declaration
 #include <arch/i386/pmap.h> // for pmap_t
+#include <exec/formats/elf.h> // For Elf32_Ehdr
+
+// Missing ELF definitions
+#define EI_DATA     5
+#define EI_VERSION  6
+#define ELFDATA2LSB 1
+#define EV_CURRENT  1
+#define ET_EXEC     2
+#define EM_386      3
+typedef struct {
+    uint32_t sh_name;
+    uint32_t sh_type;
+    uint32_t sh_flags;
+    uint32_t sh_addr;
+    uint32_t sh_offset;
+    uint32_t sh_size;
+    uint32_t sh_link;
+    uint32_t sh_info;
+    uint32_t sh_addralign;
+    uint32_t sh_entsize;
+} Elf32_Shdr;
 
 // Global variables required by elf.c
 fs_node_t *fs_root = NULL;
@@ -132,7 +158,27 @@ process_t *current_process = &mock_process;
 // Signature must match fs_node_t read function pointer type
 // On host (64-bit), off_t is 64-bit, size_t is 64-bit.
 static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    // Return zeros
+    if (offset == 0 && size == sizeof(Elf32_Ehdr)) {
+        Elf32_Ehdr *hdr = (Elf32_Ehdr*)buffer;
+        memset(hdr, 0, sizeof(*hdr));
+        hdr->e_ident[0] = ELFMAG0;
+        hdr->e_ident[1] = ELFMAG1;
+        hdr->e_ident[2] = ELFMAG2;
+        hdr->e_ident[3] = ELFMAG3;
+        hdr->e_ident[EI_CLASS] = ELFCLASS32;
+        hdr->e_ident[EI_DATA] = ELFDATA2LSB;
+        hdr->e_ident[EI_VERSION] = EV_CURRENT;
+        hdr->e_type = ET_EXEC;
+        hdr->e_machine = EM_386;
+        hdr->e_version = EV_CURRENT;
+        hdr->e_entry = 0x08048000;
+        hdr->e_phoff = sizeof(Elf32_Ehdr);
+        hdr->e_phnum = 0; // No segments to simplify
+        hdr->e_shentsize = sizeof(Elf32_Shdr);
+        hdr->e_phentsize = sizeof(Elf32_Phdr);
+        return size;
+    }
+    // Return zeros for other reads
     memset(buffer, 0, size);
     return size;
 }
@@ -163,7 +209,12 @@ int random_get_bytes(void *buf, size_t len) { return 0; }
 
 // Stub jump_to_userspace
 void jump_to_userspace(uint32_t entry, uint32_t stack) {
-    printf("JUMP TO USERSPACE REACHED\n");
+    // Verify that copyinstr was called exactly once for the attack string
+    if (copyinstr_call_count != 1) {
+        printf("FAILED: copyinstr called %d times for attack string, expected 1 (Single Pass)\n", copyinstr_call_count);
+        exit(1);
+    }
+    printf("PASSED: elf_execve succeeded and single-pass verified\n");
     exit(0);
 }
 
@@ -219,19 +270,17 @@ int main() {
     use_toctou_attack = 1;
     copyinstr_call_count = 0;
 
+    // Initialize fs_root
+    fs_root = vfs_lookup(NULL, "/");
+
     int ret = elf_execve("/bin/prog", u_argv, u_envp);
 
-    // printf("elf_execve returned %d\n", ret);
-
-    // With vulnerability, we expect Heap Corruption to be detected by kfree.
-    // If we reach here with success (0), it's bad.
-
-    if (ret == 0) {
-        printf("FAILED: elf_execve succeeded but should have failed due to TOCTOU or error\n");
+    // If we reach here, it means failure (because success exits in jump_to_userspace)
+    if (ret != 0) {
+        printf("FAILED: elf_execve failed with code %d\n", ret);
         return 1;
     }
 
-    printf("PASSED: elf_execve handled TOCTOU gracefully\n");
-
-    return 0;
+    // Should not happen
+    return 1;
 }
