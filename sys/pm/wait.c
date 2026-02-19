@@ -6,9 +6,6 @@
 #include <kern/sched.h> // for sched_sleep
 #include <pm/pm.h>
 
-extern thread_t *current_thread;
-extern void sched_sleep(void *chan);
-
 /*
  * find_waitable_child: Search for a child matching the wait criteria.
  * 

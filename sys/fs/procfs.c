@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <vm/vm_kmem.h>
+#include <sys/lock.h>
 
 /* External declarations */
 extern uint32_t get_time(void);
@@ -187,6 +188,29 @@ static struct procfs_entry procfs_entries[] = {
 
 #define PROCFS_STATIC_COUNT (sizeof(procfs_entries) / sizeof(procfs_entries[0]) - 1)
 
+/* Static nodes for permanent entries to avoid dynamic allocation/races */
+static fs_node_t procfs_static_nodes[PROCFS_STATIC_COUNT];
+
+/*
+ * Node Cache for dynamic entries (PIDs, etc.)
+ * Used to avoid static return variables which are not thread-safe.
+ */
+#define PROCFS_NODE_CACHE_SIZE 128
+static fs_node_t procfs_node_cache[PROCFS_NODE_CACHE_SIZE];
+static spinlock_t procfs_lock;
+static uint32_t procfs_cache_idx = 0;
+
+static fs_node_t *procfs_get_node(void) {
+    spinlock_acquire(&procfs_lock);
+    uint32_t idx = procfs_cache_idx;
+    procfs_cache_idx = (procfs_cache_idx + 1) % PROCFS_NODE_CACHE_SIZE;
+    spinlock_release(&procfs_lock);
+
+    fs_node_t *node = &procfs_node_cache[idx];
+    memset(node, 0, sizeof(fs_node_t));
+    return node;
+}
+
 /*
  * Generic read function for table-driven entries
  * The entry pointer is stored in node->impl
@@ -326,21 +350,21 @@ static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
 }
 
 static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
-    static fs_node_t pid_file;
-    
-    memset(&pid_file, 0, sizeof(fs_node_t));
-    pid_file.inode = node->inode;
-    pid_file.flags = FS_FILE;
-    
     if (strcmp(name, "status") == 0) {
-        strcpy(pid_file.name, "status");
-        pid_file.read = &proc_pid_status_read;
-        return &pid_file;
+        fs_node_t *pid_file = procfs_get_node();
+        pid_file->inode = node->inode;
+        pid_file->flags = FS_FILE;
+        strcpy(pid_file->name, "status");
+        pid_file->read = &proc_pid_status_read;
+        return pid_file;
     }
     if (strcmp(name, "cmdline") == 0) {
-        strcpy(pid_file.name, "cmdline");
-        pid_file.read = &proc_pid_cmdline_read;
-        return &pid_file;
+        fs_node_t *pid_file = procfs_get_node();
+        pid_file->inode = node->inode;
+        pid_file->flags = FS_FILE;
+        strcpy(pid_file->name, "cmdline");
+        pid_file->read = &proc_pid_cmdline_read;
+        return pid_file;
     }
     return NULL;
 }
@@ -380,17 +404,11 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
 
 static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
     (void)node;
-    static fs_node_t entry_node;
     
     /* Search static entries table */
     for (int i = 0; procfs_entries[i].name != NULL; i++) {
         if (strcmp(name, procfs_entries[i].name) == 0) {
-            memset(&entry_node, 0, sizeof(fs_node_t));
-            strcpy(entry_node.name, procfs_entries[i].name);
-            entry_node.flags = FS_FILE;
-            entry_node.impl = (uintptr_t)&procfs_entries[i];
-            entry_node.read = &procfs_generic_read;
-            return &entry_node;
+            return &procfs_static_nodes[i];
         }
     }
 
@@ -405,14 +423,13 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
     if (pid > 0 && *p == '\0') {
         for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid == pid) {
-                static fs_node_t pid_dir;
-                memset(&pid_dir, 0, sizeof(fs_node_t));
-                snprintf(pid_dir.name, sizeof(pid_dir.name), "%d", pid);
-                pid_dir.flags = FS_DIRECTORY;
-                pid_dir.inode = pid;
-                pid_dir.readdir = &proc_pid_readdir;
-                pid_dir.finddir = &proc_pid_finddir;
-                return &pid_dir;
+                fs_node_t *pid_dir = procfs_get_node();
+                snprintf(pid_dir->name, sizeof(pid_dir->name), "%d", pid);
+                pid_dir->flags = FS_DIRECTORY;
+                pid_dir->inode = pid;
+                pid_dir->readdir = &proc_pid_readdir;
+                pid_dir->finddir = &proc_pid_finddir;
+                return pid_dir;
             }
         }
     }
@@ -434,6 +451,19 @@ static filesystem_t procfs_fs = {
 };
 
 void procfs_init(void) {
+    spinlock_init(&procfs_lock, "procfs_cache");
+
+    // Initialize static nodes for race-free access
+    for (size_t i = 0; i < PROCFS_STATIC_COUNT; i++) {
+        memset(&procfs_static_nodes[i], 0, sizeof(fs_node_t));
+        // Use strncpy to prevent overflow, although names are known to be short
+        strncpy(procfs_static_nodes[i].name, procfs_entries[i].name, sizeof(procfs_static_nodes[i].name) - 1);
+        procfs_static_nodes[i].name[sizeof(procfs_static_nodes[i].name) - 1] = '\0';
+        procfs_static_nodes[i].flags = FS_FILE;
+        procfs_static_nodes[i].impl = (uintptr_t)&procfs_entries[i];
+        procfs_static_nodes[i].read = &procfs_generic_read;
+    }
+
     memset(&procfs_root_node, 0, sizeof(fs_node_t));
     strcpy(procfs_root_node.name, "proc");
     procfs_root_node.flags = FS_DIRECTORY;
