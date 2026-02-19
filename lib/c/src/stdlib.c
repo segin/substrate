@@ -332,8 +332,16 @@ double atof(const char *nptr) {
     return 0.0;
 }
 
+extern char **environ;
+
 char *getenv(const char *name) {
-    (void)name;
+    if (!name || !environ) return NULL;
+    size_t len = strlen(name);
+    for (char **env = environ; *env; ++env) {
+        if (strncmp(*env, name, len) == 0 && (*env)[len] == '=') {
+            return *env + len + 1;
+        }
+    }
     return NULL;
 }
 

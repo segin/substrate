@@ -1,78 +1,30 @@
-#include "idt.h"
+#include <arch/i386/idt.h>
 #include <drivers/video/vga.h>
-#include "io.h"
+#include <arch/x86-common/include/io.h>
 #include <string.h>
 #include <stdio.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/input/mouse.h>
 #include <kern/console.h>
 #include <kern/panic.h>
-#include "fpu/fpu_emu.h"
+#include <arch/i386/fpu/fpu_emu.h>
 
 #include <sys/proc.h>
-#include "pmap.h"
+#include <arch/i386/fpu/fpu_emu.h>
 
 idt_entry_t idt_entries[256] __attribute__((aligned(16)));
 idt_ptr_t   idt_ptr;
 
-extern void idt_flush(uint32_t);
-void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
+#include <kern/time.h>
+#include <kern/sched.h>
+#include <kern/cmdline.h>
+#include <kern/debug.h>
+#include <drivers/console/uart/uart.h>
+#include <drivers/storage/ide/ide.h>
+#include <arch/i386/vm86.h>
+#include <arch/i386/pmap.h>
+// isr externs are in idt.h now
 
-// ISR Handlers (defined in isr.S)
-extern void isr0(void);
-extern void isr1(void);
-extern void isr2(void);
-extern void isr3(void);
-extern void isr4(void);
-extern void isr5(void);
-extern void isr6(void);
-extern void isr7(void);
-extern void isr8(void);
-extern void isr9(void);
-extern void isr10(void);
-extern void isr11(void);
-extern void isr12(void);
-extern void isr13(void);
-extern void isr14(void);
-extern void isr15(void);
-extern void isr16(void);
-extern void isr17(void);
-extern void isr18(void);
-extern void isr19(void);
-extern void isr20(void);
-extern void isr21(void);
-extern void isr22(void);
-extern void isr23(void);
-extern void isr24(void);
-extern void isr25(void);
-extern void isr26(void);
-extern void isr27(void);
-extern void isr28(void);
-extern void isr29(void);
-extern void isr30(void);
-extern void isr31(void);
-extern void isr32(void);  // IRQ0 (Timer)
-extern void isr33(void);  // IRQ1 (Keyboard)
-extern void isr34(void);  // IRQ2 (Cascade)
-extern void isr35(void);  // IRQ3 (COM2)
-extern void isr36(void);  // IRQ4 (COM1)
-extern void isr37(void);  // IRQ5 (LPT2)
-extern void isr38(void);  // IRQ6 (Floppy)
-extern void isr39(void);  // IRQ7 (LPT1/Spurious)
-extern void isr40(void);  // IRQ8 (RTC)
-extern void isr41(void);  // IRQ9
-extern void isr42(void);  // IRQ10
-extern void isr43(void);  // IRQ11
-extern void isr44(void);  // IRQ12 (Mouse)
-extern void isr45(void);  // IRQ13 (FPU)
-extern void isr46(void);  // IRQ14 (IDE Primary)
-extern void isr47(void);  // IRQ15 (IDE Secondary)
-extern void isr128(void); // Syscall (0x80)
-
-extern void timer_tick(void);
-extern void sched_yield(void);
-extern void signal_handle_pending(registers_t *regs);
-extern void rusage_add_tick(process_t *p, int is_usermode);
 
 static const char *exception_messages[] = {
     "Division By Zero", "Debug", "Non Maskable Interrupt", "Breakpoint",
@@ -210,10 +162,8 @@ void isr_handler(registers_t *regs) {
     } else if (regs->int_no == 7) {
         fpu_handler(regs);
     } else if (regs->int_no == 36) {
-        extern void uart_handler(registers_t *regs);
         uart_handler(regs);
     } else if (regs->int_no == 46 || regs->int_no == 47) {
-        extern void ide_irq_handler(int irq);
         ide_irq_handler(regs->int_no == 47 ? 15 : 14);
     } else if (regs->int_no < 32) {
         // Exception - check if from user mode or kernel mode
@@ -229,7 +179,6 @@ void isr_handler(registers_t *regs) {
 
         // VM86 Mode Check for GPF (13)
         if (regs->int_no == 13 && (regs->eflags & 0x20000)) { // EFLAGS_VM = 0x20000
-            extern void vm86_gpf_handler(registers_t *regs);
             vm86_gpf_handler(regs);
             return;
         }
@@ -270,7 +219,6 @@ void isr_handler(registers_t *regs) {
             
             // Try to handle page fault (e.g. COW)
             // We pass error code and faulting address
-            extern int pmap_fault(uint32_t err_code, uint32_t cr2);
             if (pmap_fault(regs->err_code, cr2)) {
                 return; // Fault handled successfully
             }
@@ -283,8 +231,6 @@ void isr_handler(registers_t *regs) {
             // User-mode crash - kill the process
             kprint("Killing user process.\n\n");
             if (current_process && current_process->pid == 1) {
-                extern void debug_dump_processes(void);
-                extern void pmap_dump(pmap_t pmap);
                 extern int cmdline_has(const char *key);
                 
                 // Dump memory if procmem argument present

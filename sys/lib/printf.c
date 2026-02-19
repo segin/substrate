@@ -272,15 +272,33 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
             int force_sign = 0;
             int space_prefix = 0;
             int alternate_form = 0;
-            if (*f == '-') { left_align = 1; f++; }
-            if (*f == '+') { force_sign = 1; f++; }
-            if (*f == ' ' && !force_sign) { space_prefix = 1; f++; }
-            if (*f == '#') { alternate_form = 1; f++; }
+            int pad_zero = 0;
             
+            while (1) {
+                if (*f == '-') {
+                    left_align = 1;
+                    pad_zero = 0;
+                    f++;
+                } else if (*f == '+') {
+                    force_sign = 1;
+                    space_prefix = 0;
+                    f++;
+                } else if (*f == ' ') {
+                    if (!force_sign) space_prefix = 1;
+                    f++;
+                } else if (*f == '#') {
+                    alternate_form = 1;
+                    f++;
+                } else if (*f == '0') {
+                    if (!left_align) pad_zero = 1;
+                    f++;
+                } else {
+                    break;
+                }
+            }
+
             // Parse width
             int width = 0;
-            int pad_zero = 0;
-            if (*f == '0' && !left_align) { pad_zero = 1; f++; }
             if (*f == '*') {
                 width = va_arg(ap, int);
                 if (width < 0) {

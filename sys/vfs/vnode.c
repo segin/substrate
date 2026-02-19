@@ -336,37 +336,81 @@ void vdrop(struct vnode *vp)
  */
 int vn_lock(struct vnode *vp, int flags)
 {
-    /* TODO: Implement shared locking support (currently treats all as exclusive) */
-    (void)flags;
-
     spinlock_acquire(&vp->v_interlock);
-    /* Simple exclusive lock implementation */
-    while (vp->v_lockstate != 0) {
-        /* Check for recursive locking */
-        if (vp->v_lockowner == current_thread) {
+
+    if (flags & LK_SHARED) {
+        /* Try to acquire shared lock */
+        while (1) {
+            /* If locked exclusively or someone wants exclusive (and we are not owner), wait */
+            if (vp->v_flag & VXLOCK) {
+                if (vp->v_lockowner == current_thread) {
+                    /* Recursive lock by exclusive owner -> downgrade or error?
+                     * For now, error/no-op recursive logic.
+                     * BSD allows recursive shared.
+                     */
+                     /* Currently return EDEADLK for simplicity or if we don't support recursion yet */
+                    spinlock_release(&vp->v_interlock);
+                    return -EDEADLK;
+                }
+            } else {
+                /* Not exclusively locked.
+                 * If there are writers waiting (VXWANT), we might want to wait (writer preference)
+                 * OR we can just grab it if we are implementing reader preference or weak writer preference.
+                 * Let's stick to simple logic: Block only if VXLOCK is held.
+                 * TODO: Check VXWANT to prevent writer starvation.
+                 */
+                 break;
+            }
+
+            if (flags & LK_NOWAIT) {
+                spinlock_release(&vp->v_interlock);
+                return -EAGAIN;
+            }
+
+            vp->v_flag |= VXWANT;
+            sleepq_add(vp, current_thread);
             spinlock_release(&vp->v_interlock);
-            return -EDEADLK;
+            sched_yield();
+            spinlock_acquire(&vp->v_interlock);
         }
 
-        if (flags & LK_NOWAIT) {
+        /* Acquired shared lock */
+        /* If not already locked, set LK_SHARED (1) */
+        /* If already locked shared, v_lockstate increments */
+        /* v_lockstate acts as reader count */
+        vp->v_lockstate++;
+    } else {
+        /* LK_EXCLUSIVE */
+        while (1) {
+            /* If locked (shared or exclusive), wait */
+            if (vp->v_lockstate > 0) {
+                if (vp->v_lockowner == current_thread) {
+                    /* Recursive exclusive lock */
+                    spinlock_release(&vp->v_interlock);
+                    return -EDEADLK;
+                }
+            } else {
+                /* Not locked */
+                break;
+            }
+
+            if (flags & LK_NOWAIT) {
+                spinlock_release(&vp->v_interlock);
+                return -EAGAIN;
+            }
+
+            vp->v_flag |= VXWANT;
+            sleepq_add(vp, current_thread);
             spinlock_release(&vp->v_interlock);
-            return -EAGAIN;
+            sched_yield();
+            spinlock_acquire(&vp->v_interlock);
         }
 
-        /* We must block */
-        vp->v_flag |= VXWANT;
-        sleepq_add(vp, current_thread);
-        spinlock_release(&vp->v_interlock);
-        sched_yield();
-
-        /* Re-acquire interlock to check state again */
-        spinlock_acquire(&vp->v_interlock);
+        /* Acquired exclusive lock */
+        vp->v_lockstate = 1; /* Using 1 to mark locked, but VXLOCK distinguishes it */
+        vp->v_flag |= VXLOCK;
+        vp->v_lockowner = current_thread;
     }
-
-    /* Take the lock */
-    vp->v_lockstate = (flags & LK_SHARED) ? 1 : 2; /* 1=Shared, 2=Excl */
-    vp->v_flag |= VXLOCK;
-    vp->v_lockowner = current_thread;
 
     spinlock_release(&vp->v_interlock);
     return 0;
@@ -379,22 +423,33 @@ void vn_unlock(struct vnode *vp)
 {
     spinlock_acquire(&vp->v_interlock);
 
-    /* Ensure we are the owner */
-    if (vp->v_lockowner != current_thread) {
-        /* If not owner, panic? Or just return?
-         * For robustness, panic is safer to catch bugs early.
-         */
-         panic("vn_unlock: not owner");
+    if (vp->v_flag & VXLOCK) {
+        /* Exclusive unlock */
+        if (vp->v_lockowner != current_thread) {
+             panic("vn_unlock: not owner");
+        }
+        vp->v_lockstate = 0;
+        vp->v_flag &= ~VXLOCK;
+        vp->v_lockowner = NULL;
+    } else {
+        /* Shared unlock */
+        if (vp->v_lockstate > 0) {
+            vp->v_lockstate--;
+        } else {
+            panic("vn_unlock: not locked");
+        }
     }
-
-    vp->v_lockstate = 0;
-    vp->v_flag &= ~VXLOCK;
-    vp->v_lockowner = NULL;
     
-    /* Wake up one waiter if any */
-    if (vp->v_flag & VXWANT) {
+    /* Wake up waiters if lock is now free */
+    /* For shared: only wake if count dropped to 0 */
+    /* For exclusive: always wake */
+    if ((vp->v_lockstate == 0) && (vp->v_flag & VXWANT)) {
         sleepq_wake_one(vp);
-        /* Only clear VXWANT if no more waiters */
+        /* We can't clear VXWANT safely without checking if more waiters exist.
+           The sleepq implementation will handle waking one.
+           If we are draining, we might need to wake all or ensure propagation.
+           Wake one is usually sufficient as the woken thread will wake next.
+        */
         if (!sleepq_has_waiters(vp)) {
             vp->v_flag &= ~VXWANT;
         }
@@ -408,7 +463,9 @@ void vn_unlock(struct vnode *vp)
  */
 int vn_islocked(struct vnode *vp)
 {
-    return (vp->v_flag & VXLOCK) ? 1 : 0;
+    if (vp->v_flag & VXLOCK) return 2; /* Exclusive */
+    if (vp->v_lockstate > 0) return 1; /* Shared */
+    return 0;
 }
 
 /*

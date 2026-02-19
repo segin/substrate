@@ -109,9 +109,19 @@ static int write_buf(const char *s, size_t len)
 /*
  * Write a single character
  */
-static int write_char(char c)
+static inline int write_char(char c)
 {
-    return write_buf(&c, 1);
+    if (opt_unbuffered) {
+        return write_all(STDOUT_FILENO, &c, 1) == 1 ? 0 : -1;
+    }
+
+    if (out_buf_idx >= BUFSIZE) {
+        if (flush_buf() < 0)
+            return -1;
+    }
+
+    out_buf[out_buf_idx++] = c;
+    return 0;
 }
 
 /*
