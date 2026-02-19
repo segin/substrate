@@ -97,7 +97,11 @@ int sys_modify_ldt(int func, struct user_desc *ptr, unsigned long bytecount) {
         return copy_size;
     }
     
-    if (func != LDT_WRITE && func != LDT_READ_DEFAULT) {
+    if (func == LDT_READ_DEFAULT) {
+        return 0;
+    }
+
+    if (func != LDT_WRITE) {
         return -EINVAL;
     }
     
