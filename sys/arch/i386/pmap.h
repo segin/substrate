@@ -145,4 +145,6 @@ void pmap_null_allow(int enable); // Re-map page 0 for VM86/legacy mode
 // Signal Trampoline
 void pmap_map_trampoline(void);
 
+int pmap_fault(uint32_t err_code, uint32_t cr2);
+
 #endif
