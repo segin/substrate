@@ -10,9 +10,9 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "bus.h"
-#include "driver.h"
-#include "device.h"
+#include <kern/bus.h>
+#include <kern/driver.h>
+#include <kern/device.h>
 
 /*
  * bus_match_device - Find the best driver for a device

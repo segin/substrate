@@ -2,6 +2,9 @@
 #define _PCI_H
 
 #include <stdint.h>
+ 
+#define PCI_CONFIG_ADDRESS 0xCF8
+#define PCI_CONFIG_DATA    0xCFC
 
 typedef struct pci_device {
     uint8_t bus;
