@@ -114,3 +114,18 @@ elf_section_t *elf_find_section(elfobj_t *obj, const char *name) {
     }
     return NULL;
 }
+
+elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align) {
+    if (section == NULL || section->obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (section->obj->readonly || section->obj->finalized) {
+        elf__set_err(section->obj, ELF_ERR_STATE, "cannot mutate finalized/read-only object");
+        return ELF_ERR_STATE;
+    }
+    if (align == 0) {
+        align = 1;
+    }
+    section->addralign = align;
+    return ELF_OK;
+}

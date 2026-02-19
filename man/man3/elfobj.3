@@ -1,105 +1,410 @@
-.\" Process this file with
-.\" groff -man -Tascii elfobj.3
-.TH ELFOBJ 3 "February 2026" "Substrate" "Library Functions Manual"
-.SH NAME
-elfobj, elf_open, elf_open_memory, elf_write_file, elf_close, elf_add_section, elf_section_set_data, elf_find_section, elf_add_symbol, elf_find_symbol, elf_add_relocation, elf_link, elf_validate, elf_hash_sysv, elf_hash_gnu \- ELF object handling API
-.SH LIBRARY
-ELF object library (libelfobj, -lelfobj)
-.SH SYNOPSIS
-.B #include <elfobj.h>
-.PP
-.BI "elf_err_t elf_open(const char *path, elfobj_t **out);"
-.br
-.BI "elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out);"
-.br
-.BI "elf_err_t elf_write_file(elfobj_t *obj, const char *path);"
-.br
-.BI "void elf_close(elfobj_t *obj);"
-.PP
-.BI "elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, uint64_t flags);"
-.br
-.BI "elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t size);"
-.br
-.BI "elf_section_t *elf_find_section(elfobj_t *obj, const char *name);"
-.PP
-.BI "elf_symbol_t *elf_add_symbol(elfobj_t *obj, const char *name, uint64_t value,"
-.br
-.BI "    uint64_t size, uint8_t bind, uint8_t type);"
-.br
-.BI "elf_symbol_t *elf_find_symbol(elfobj_t *obj, const char *name);"
-.PP
-.BI "elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol_t *symbol,"
-.br
-.BI "    uint32_t type, int64_t addend);"
-.PP
-.BI "elf_err_t elf_link(elfobj_t **inputs, size_t count, elfobj_t **output);"
-.br
-.BI "elf_err_t elf_validate(elfobj_t *obj, char **diagnostics);"
-.PP
-.BI "uint32_t elf_hash_sysv(const char *name);"
-.br
-.BI "uint32_t elf_hash_gnu(const char *name);"
-.SH DESCRIPTION
+.Dd February 19, 2026
+.Dt ELFOBJ 3
+.Os Substrate
+.Sh NAME
+.Nm elf_open ,
+.Nm elf_open_memory ,
+.Nm elf_create ,
+.Nm elf_write_file ,
+.Nm elf_close ,
+.Nm elf_finalize ,
+.Nm elf_errstr
+.Nd ELF object handling library core API
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fo elf_open
+.Fa "const char *path"
+.Fa "elfobj_t **out"
+.Fc
+.Ft elf_err_t
+.Fo elf_open_memory
+.Fa "const void *buf"
+.Fa "size_t size"
+.Fa "elfobj_t **out"
+.Fc
+.Ft elfobj_t *
+.Fo elf_create
+.Fa "uint16_t type"
+.Fa "uint16_t machine"
+.Fa "elfobj_class_t cls"
+.Fa "elfobj_endian_t endian"
+.Fc
+.Ft elf_err_t
+.Fo elf_write_file
+.Fa "elfobj_t *obj"
+.Fa "const char *path"
+.Fc
+.Ft elf_err_t
+.Fo elf_finalize
+.Fa "elfobj_t *obj"
+.Fc
+.Ft void
+.Fo elf_close
+.Fa "elfobj_t *obj"
+.Fc
+.Ft const char *
+.Fo elf_errstr
+.Fa "elf_err_t err"
+.Fc
+.Sh DESCRIPTION
 The
-.B libelfobj
-library provides structured reading, mutation, validation, and writing of ELF objects.
-It supports ET_REL, ET_EXEC, ET_DYN, and read-only ET_CORE parsing.
-.PP
-Objects loaded via
-.B elf_open
+.Nm libelfobj
+library provides a C API for reading, creating, modifying, and writing
+ELF (Executable and Linkable Format) object files.
+It supports both 32-bit and 64-bit ELF formats, little-endian and big-endian
+byte orders, and multiple architectures through a plugin-based relocation
+backend system.
+.Pp
+The library operates on
+.Vt elfobj_t
+handles which represent parsed or constructed ELF objects.
+An ELF object contains sections, symbols, and relocations that can be
+queried and manipulated through the library's API.
+.Ss Object Lifecycle
+Objects are created in one of two ways:
+.Bl -bullet
+.It
+By parsing an existing ELF file using
+.Fn elf_open
 or
-.B elf_open_memory
-are parsed with bounds checking. Creation and mutation flows use
-.B elf_create
-plus section/symbol/relocation APIs, and the result is serialized with
-.BR elf_write_file .
-.PP
-.B elf_validate
-returns an allocated diagnostics string describing malformed offsets,
-overlap conditions, and relocation/symbol consistency issues.
-.SH RETURN VALUE
-Functions returning
-.B elf_err_t
-use
-.B ELF_OK
-on success. Pointer-returning APIs return NULL on failure.
-.SH ERRORS
-.TP
-.B ELF_ERR_IO
-Input/output failure while reading or writing files.
-.TP
-.B ELF_ERR_FORMAT
-Malformed ELF structure, unsupported table layout, or invalid metadata.
-.TP
-.B ELF_ERR_RELOC
-Relocation semantic failure (unsupported backend/type/application).
-.TP
-.B ELF_ERR_OOM
-Memory allocation failure.
-.TP
-.B ELF_ERR_BOUNDS
-Offset/size pair exceeds input bounds.
-.TP
-.B ELF_ERR_UNSUPPORTED
-Feature is valid ELF but not implemented by current backend/path.
-.TP
-.B ELF_ERR_STATE
-Invalid API call ordering or NULL/invalid object state.
-.SH EXAMPLES
-Create a minimal relocatable object with one text section and one symbol:
-.PP
-.nf
-elfobj_t *obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
-elf_section_t *text = elf_add_section(obj, ".text", SHT_PROGBITS, SHF_ALLOC|SHF_EXECINSTR);
-unsigned char code[] = { 0x90, 0xC3 };
-elf_section_set_data(text, code, sizeof(code));
-elf_add_symbol(obj, "func", 0, sizeof(code), STB_GLOBAL, STT_FUNC);
-elf_write_file(obj, "out.o");
-elf_close(obj);
-.fi
-.SH THREAD SAFETY
-Distinct
-.B elfobj_t
-instances may be processed concurrently. Mutable operations are not internally synchronized.
-.SH SEE ALSO
-ld(1), objdump(1), readelf(1), elf(5)
+.Fn elf_open_memory .
+These objects are initially read-only.
+.It
+By constructing a new object using
+.Fn elf_create .
+These objects are mutable until finalized.
+.El
+.Pp
+Once an object is no longer needed, it must be released using
+.Fn elf_close ,
+which frees all associated resources.
+.Ss Functions
+.Bl -tag -width Ds
+.It Fn elf_open "path" "out"
+Opens and parses the ELF file at
+.Fa path .
+On success,
+.Fa *out
+is set to a newly allocated
+.Vt elfobj_t
+handle.
+The returned object is marked read-only; attempts to modify it will fail
+with
+.Dv ELF_ERR_STATE .
+.It Fn elf_open_memory "buf" "size" "out"
+Parses an ELF image from memory.
+The buffer at
+.Fa buf
+must contain a valid ELF image of
+.Fa size
+bytes.
+The library makes a private copy of the buffer.
+On success,
+.Fa *out
+is set to a newly allocated handle.
+.It Fn elf_create "type" "machine" "cls" "endian"
+Creates a new empty ELF object.
+.Fa type
+is the ELF type
+.Po Dv ET_REL ,
+.Dv ET_EXEC ,
+.Dv ET_DYN ,
+or
+.Dv ET_CORE
+.Pc .
+.Fa machine
+is the architecture
+.Po e.g.,
+.Dv EM_386
+.Pc .
+.Fa cls
+is either
+.Dv ELFOBJ_CLASS_32
+or
+.Dv ELFOBJ_CLASS_64 .
+.Fa endian
+is either
+.Dv ELFOBJ_ENDIAN_LE
+or
+.Dv ELFOBJ_ENDIAN_BE .
+Returns NULL on allocation failure.
+.It Fn elf_write_file "obj" "path"
+Writes the ELF object to a file at
+.Fa path .
+The object must have been created with
+.Fn elf_create
+or modified after opening.
+For objects opened with
+.Fn elf_open ,
+this function returns
+.Dv ELF_ERR_STATE
+unless the object has been explicitly made writable.
+.It Fn elf_finalize "obj"
+Prepares an object for writing by computing section layouts,
+building string tables, and resolving internal references.
+This is called automatically by
+.Fn elf_write_file
+if not already done.
+Once finalized, the object becomes read-only.
+.It Fn elf_close "obj"
+Releases all resources associated with the ELF object.
+After this call,
+.Fa obj
+is invalid and must not be used.
+Passing NULL is safe and has no effect.
+.It Fn elf_errstr "err"
+Returns a human-readable string describing the error code
+.Fa err .
+The returned string is static and must not be freed.
+.El
+.Ss Error Codes
+The
+.Vt elf_err_t
+enumeration defines the following error codes:
+.Bl -tag -width "ELF_ERR_UNSUPPORTED"
+.It Dv ELF_OK
+Operation completed successfully.
+.It Dv ELF_ERR_IO
+Input/output error (file not found, read error, write error).
+.It Dv ELF_ERR_FORMAT
+Invalid or malformed ELF format.
+.It Dv ELF_ERR_RELOC
+Relocation processing error.
+.It Dv ELF_ERR_OOM
+Out of memory.
+.It Dv ELF_ERR_BOUNDS
+Offset or size exceeds file bounds.
+.It Dv ELF_ERR_UNSUPPORTED
+Feature not supported for this object.
+.It Dv ELF_ERR_STATE
+Invalid object state (e.g., modifying a read-only object).
+.It Dv ELF_ERR_NOTFOUND
+Requested entity not found.
+.El
+.Sh RETURN VALUES
+.Fn elf_open ,
+.Fn elf_open_memory ,
+.Fn elf_write_file ,
+.Fn elf_finalize ,
+and
+.Fn elf_validate
+return
+.Dv ELF_OK
+on success or an appropriate error code on failure.
+.Pp
+.Fn elf_create
+returns a pointer to a new
+.Vt elfobj_t
+on success, or NULL on failure.
+.Pp
+.Fn elf_errstr
+returns a pointer to a static string describing the error.
+.Sh THREAD SAFETY
+The
+.Nm libelfobj
+library provides the following thread-safety guarantees:
+.Bl -bullet
+.It
+.Fn elf_errstr
+is thread-safe.
+.It
+.Fn elf_register_reloc_backend
+is thread-safe for concurrent registration of different architectures,
+but concurrent registration of the same architecture is undefined.
+.It
+All other functions operating on the same
+.Vt elfobj_t
+handle are NOT thread-safe.
+Callers must provide external synchronization when sharing objects
+between threads.
+.It
+Different
+.Vt elfobj_t
+handles may be used concurrently without synchronization.
+.El
+.Sh MEMORY OWNERSHIP
+.Bl -bullet
+.It
+Objects returned by
+.Fn elf_open ,
+.Fn elf_open_memory ,
+and
+.Fn elf_create
+are owned by the caller and must be freed with
+.Fn elf_close .
+.It
+Section data returned by
+.Fn elf_section_data
+is owned by the object and remains valid until
+.Fn elf_close
+is called or the section data is replaced.
+.It
+Symbol and section handles remain valid for the lifetime of the
+containing object.
+.It
+Diagnostic strings returned via
+.Fn elf_validate
+must be freed by the caller using
+.Xr free 3 .
+.El
+.Sh ABI STABILITY
+The
+.Nm libelfobj
+library maintains a stable ABI.
+Programs linked against
+.Pa libelfobj.so.1
+will continue to work with future releases of the library without
+recompilation.
+.Pp
+The following are guaranteed to remain stable:
+.Bl -bullet
+.It
+All public function signatures declared in
+.In elfobj.h .
+.It
+Layout and values of the
+.Vt elf_err_t
+enumeration.
+.It
+Layout and values of the
+.Vt elfobj_class_t
+and
+.Vt elfobj_endian_t
+enumerations.
+.It
+The
+.Vt elf_reloc_backend
+structure layout.
+.El
+.Pp
+The following are NOT part of the stable ABI:
+.Bl -bullet
+.It
+Layout of
+.Vt elfobj_t ,
+.Vt elf_section_t ,
+.Vt elf_symbol_t ,
+and
+.Vt elf_reloc_t
+.Pq opaque types .
+.It
+Private functions and internal data structures.
+.El
+.Sh EXAMPLES
+.Ss Creating a Minimal ELF Object
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+int main(void) {
+    elfobj_t *obj;
+    elf_section_t *text;
+    unsigned char code[] = {0xC3};  /* ret instruction */
+
+    /* Create a new 32-bit little-endian relocatable object for i386 */
+    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        fprintf(stderr, "Failed to create ELF object\\n");
+        return 1;
+    }
+
+    /* Add an executable .text section */
+    text = elf_add_section(obj, ".text", SHT_PROGBITS,
+                           SHF_ALLOC | SHF_EXECINSTR);
+    if (text == NULL) {
+        fprintf(stderr, "Failed to add section: %s\\n",
+                elf_errstr(ELF_ERR_OOM));
+        elf_close(obj);
+        return 1;
+    }
+
+    /* Set section contents */
+    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK) {
+        fprintf(stderr, "Failed to set section data\\n");
+        elf_close(obj);
+        return 1;
+    }
+
+    /* Write to file */
+    if (elf_write_file(obj, "minimal.o") != ELF_OK) {
+        fprintf(stderr, "Failed to write ELF file\\n");
+        elf_close(obj);
+        return 1;
+    }
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Ss Reading an ELF Object
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+int main(int argc, char *argv[]) {
+    elfobj_t *obj;
+    elf_section_t *sec;
+    elf_err_t err;
+    size_t i;
+
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <elf-file>\\n", argv[0]);
+        return 1;
+    }
+
+    err = elf_open(argv[1], &obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Failed to open %s: %s\\n",
+                argv[1], elf_errstr(err));
+        return 1;
+    }
+
+    printf("Sections in %s:\\n", argv[1]);
+    for (i = 0; i < elf_section_count(obj); i++) {
+        /* Iterate sections by finding them; see elf_section.3 */
+    }
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elf_section 3 ,
+.Xr elf_symbol 3 ,
+.Xr elf_reloc 3 ,
+.Xr elf_link 3 ,
+.Xr elf_validate 3 ,
+.Xr elf_backend 3 ,
+.Xr elfobj_architecture 7 ,
+.Xr elf 5
+.Sh STANDARDS
+The library implements the ELF format as specified in:
+.Rs
+.%A TIS (Tool Interface Standards)
+.%T Executable and Linking Format (ELF) Specification
+.%D May 1995
+.Re
+.Rs
+.%A System V Application Binary Interface
+.%T System V ABI
+.%D 2010
+.Re
+.Sh HISTORY
+The
+.Nm libelfobj
+library was written for the Substrate operating system to provide
+a lightweight, embeddable ELF handling library suitable for use in
+toolchain components, debuggers, and the dynamic linker.
+.Sh BUGS
+The library does not currently support:
+.Bl -bullet
+.It
+ELF program headers (segments).
+.It
+Dynamic linking entries.
+.It
+Version scripts and symbol versioning.
+.It
+COMDAT group section garbage collection.
+.El

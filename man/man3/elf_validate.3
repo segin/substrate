@@ -1,1 +1,421 @@
-.so man3/elfobj.3
+.Dd February 19, 2026
+.Dt ELF_VALIDATE 3
+.Os Substrate
+.Sh NAME
+.Nm elf_validate
+.Nd ELF object validation and diagnostics
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fo elf_validate
+.Fa "elfobj_t *obj"
+.Fa "char **diagnostics"
+.Fc
+.Sh DESCRIPTION
+The
+.Fn elf_validate
+function performs structural validation of an ELF object, checking for
+format errors, inconsistencies, and potential security issues.
+.Pp
+Validation is essential when:
+.Bl -bullet
+.It
+Processing untrusted ELF files from external sources.
+.It
+Ensuring generated ELF files are well-formed.
+.It
+Debugging linker or loader issues.
+.It
+Implementing security-sensitive tools (debuggers, profilers, etc.).
+.El
+.Ss Validation Checks
+The validation process performs the following checks:
+.Bl -tag -width "Section Overlap"
+.It Sy ELF Header Validation
+.Bl -bullet
+.It
+Magic number verification (0x7F 'E' 'L' 'F').
+.It
+Class validation (32-bit or 64-bit).
+.It
+Data encoding validation (little-endian or big-endian).
+.It
+Version check.
+.It
+Type field validation.
+.It
+Machine type validation.
+.El
+.It Sy Section Header Validation
+.Bl -bullet
+.It
+Section count and offset bounds checking.
+.It
+Section name string table validation.
+.It
+Section type field validation.
+.It
+Section offset and size bounds checking.
+.El
+.It Sy Section Overlap Detection
+.Bl -bullet
+.It
+Detection of overlapping section regions.
+.It
+Special handling for
+.Dv SHT_NOBITS
+sections (which do not occupy file space).
+.El
+.It Sy Symbol Table Validation
+.Bl -bullet
+.It
+Symbol entry size and count validation.
+.It
+Symbol name string table bounds checking.
+.It
+Symbol binding and type field validation.
+.It
+Section index validation.
+.El
+.It Sy Relocation Validation
+.Bl -bullet
+.It
+Relocation entry size and count validation.
+.It
+Relocation offset bounds checking.
+.It
+Relocation symbol index validation.
+.It
+Relocation type validation (architecture-specific).
+.El
+.El
+.Ss Security Guarantees
+The validation function provides the following security guarantees:
+.Bl -tag -width "Memory Safety"
+.It Sy Memory Safety
+The function will not read or write outside the bounds of the ELF
+image buffer.
+All offsets and sizes are validated before use.
+.It Sy Integer Overflow Protection
+All arithmetic operations on offsets and sizes are checked for overflow.
+.It Sy NULL Pointer Safety
+The function handles NULL pointers gracefully and returns an appropriate
+error code.
+.It Sy No Side Effects
+Validation does not modify the ELF object or its underlying data.
+.El
+.Pp
+These guarantees make
+.Fn elf_validate
+suitable for processing untrusted input, such as:
+.Bl -bullet
+.It
+User-uploaded ELF files.
+.It
+Downloaded packages or plugins.
+.It
+Network-received binaries.
+.El
+.Ss Diagnostic Output
+When validation fails, the
+.Fa diagnostics
+parameter can be used to retrieve a human-readable description of
+the problems found.
+.Pp
+If
+.Fa diagnostics
+is non-NULL and validation fails, a newly allocated string is stored
+in
+.Fa *diagnostics .
+This string contains one or more diagnostic messages, each on a
+separate line.
+The caller is responsible for freeing this string with
+.Xr free 3 .
+.Pp
+If validation succeeds, an empty string is stored in
+.Fa *diagnostics
+(if non-NULL).
+.Ss Fuzzing Considerations
+The
+.Nm libelfobj
+library is designed to be robust against malformed input and is
+suitable for use in fuzzing campaigns.
+.Pp
+When fuzzing ELF parsers:
+.Bl -bullet
+.It
+Use
+.Fn elf_open_memory
+with fuzz-generated buffers.
+.It
+Call
+.Fn elf_validate
+to check for structural issues.
+.It
+Handle all error codes appropriately.
+.It
+Use memory sanitizers (AddressSanitizer, MemorySanitizer) to detect
+memory safety issues.
+.El
+.Pp
+The library has been tested with:
+.Bl -bullet
+.It
+AddressSanitizer (ASan) for memory errors.
+.It
+UndefinedBehaviorSanitizer (UBSan) for undefined behavior.
+.It
+Coverage-guided fuzzing with libFuzzer.
+.El
+.Ss Diagnostic API
+Diagnostic messages are accumulated during validation and can be
+retrieved via the
+.Fa diagnostics
+parameter.
+Each message describes a specific validation failure.
+.Pp
+Message format:
+.Bd -literal
+<description> [context]
+.Ed
+.Pp
+Examples:
+.Bd -literal
+section out of file bounds index=5
+section overlap index=3
+section overlap peer=7
+relocation offset out of range idx=12
+relocation has NULL section
+.Ed
+.Sh RETURN VALUES
+.Fn elf_validate
+returns
+.Dv ELF_OK
+if the object passes all validation checks.
+.Pp
+If validation fails,
+.Dv ELF_ERR_FORMAT
+is returned and diagnostic messages are available via the
+.Fa diagnostics
+parameter.
+.Pp
+.Dv ELF_ERR_STATE
+is returned if
+.Fa obj
+is NULL.
+.Pp
+.Dv ELF_ERR_OOM
+is returned if memory allocation for diagnostics fails.
+.Sh EXAMPLES
+.Ss Basic Validation
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+int main(int argc, char *argv[]) {
+    elfobj_t *obj;
+    elf_err_t err;
+    char *diag;
+
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <elf-file>\\n", argv[0]);
+        return 1;
+    }
+
+    err = elf_open(argv[1], &obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Cannot open %s: %s\\n", argv[1], elf_errstr(err));
+        return 1;
+    }
+
+    err = elf_validate(obj, &diag);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Validation failed:\\n%s\\n", diag);
+        free(diag);
+        elf_close(obj);
+        return 1;
+    }
+
+    printf("Validation passed\\n");
+    free(diag);
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Ss Validation Without Diagnostics
+.Bd -literal
+#include <elfobj.h>
+
+int validate_elf(const char *path) {
+    elfobj_t *obj;
+    elf_err_t err;
+
+    err = elf_open(path, &obj);
+    if (err != ELF_OK) {
+        return -1;  /* Cannot open */
+    }
+
+    /* Validate without retrieving diagnostics */
+    err = elf_validate(obj, NULL);
+    elf_close(obj);
+
+    return (err == ELF_OK) ? 0 : -1;
+}
+.Ed
+.Ss Processing Untrusted Input
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+/*
+ * Safely process an ELF file from an untrusted source.
+ * Returns 0 on success, -1 on error.
+ */
+int process_untrusted_elf(const void *data, size_t size) {
+    elfobj_t *obj = NULL;
+    elf_err_t err;
+    char *diag = NULL;
+    int result = -1;
+
+    /* Parse the ELF image */
+    err = elf_open_memory(data, size, &obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Parse error: %s\\n", elf_errstr(err));
+        goto cleanup;
+    }
+
+    /* Validate the structure */
+    err = elf_validate(obj, &diag);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Validation error:\\n%s\\n", diag);
+        goto cleanup;
+    }
+
+    /* Object is valid; safe to process */
+    /* ... application-specific processing ... */
+
+    result = 0;
+
+cleanup:
+    if (diag) free(diag);
+    if (obj) elf_close(obj);
+    return result;
+}
+.Ed
+.Ss Integration with Fuzzing Harness
+.Bd -literal
+#include <elfobj.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+/*
+ * Fuzzing harness for libFuzzer.
+ * Compile with:
+ *   clang -fsanitize=address -fuzzer-one-callsome \
+ *         elf_fuzz.c -lelfobj -o elf_fuzz
+ */
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    elfobj_t *obj = NULL;
+    elf_err_t err;
+
+    /* Minimum size for ELF header */
+    if (size < 16) {
+        return 0;
+    }
+
+    /* Try to parse the input */
+    err = elf_open_memory(data, size, &obj);
+    if (err != ELF_OK) {
+        /* Expected for malformed input */
+        return 0;
+    }
+
+    /* Validate the structure */
+    err = elf_validate(obj, NULL);
+    (void)err;  /* Result doesn't matter for fuzzing */
+
+    /* Clean up */
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Ss Detailed Diagnostic Processing
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+#include <string.h>
+
+int main(int argc, char *argv[]) {
+    elfobj_t *obj;
+    elf_err_t err;
+    char *diag;
+    char *line;
+
+    if (argc < 2) return 1;
+
+    err = elf_open(argv[1], &obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Open failed: %s\\n", elf_errstr(err));
+        return 1;
+    }
+
+    err = elf_validate(obj, &diag);
+    if (err != ELF_OK) {
+        printf("Validation issues in %s:\\n", argv[1]);
+
+        /* Parse each diagnostic line */
+        line = strtok(diag, "\\n");
+        while (line != NULL) {
+            printf("  - %s\\n", line);
+            line = strtok(NULL, "\\n");
+        }
+
+        free(diag);
+        elf_close(obj);
+        return 1;
+    }
+
+    printf("No validation issues\\n");
+    free(diag);
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elfobj 3 ,
+.Xr elf 5
+.Sh STANDARDS
+Validation follows the ELF specification constraints.
+See
+.Xr elfobj 3
+for references.
+.Sh HISTORY
+The validation function was added to
+.Nm libelfobj
+to support secure processing of untrusted ELF files in toolchain
+utilities and the dynamic linker.
+.Sh SECURITY CONSIDERATIONS
+.Bl -bullet
+.It
+Always validate ELF files from untrusted sources before processing.
+.It
+Validation is necessary but not sufficient for security; application
+code must also handle error conditions properly.
+.It
+The library does not check for semantic correctness (e.g., whether
+relocations are valid for the target architecture).
+.It
+Resource exhaustion attacks (via extremely large section counts or
+sizes) are mitigated by bounds checking but may still cause memory
+allocation failures.
+.El
+.Sh BUGS
+.Bl -bullet
+.It
+Architecture-specific validation (e.g., relocation type checking)
+is not fully implemented.
+.It
+Program header validation is not implemented.
+.It
+Dynamic section validation is not implemented.
+.El

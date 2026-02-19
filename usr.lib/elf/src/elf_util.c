@@ -285,6 +285,33 @@ elf_err_t elf_finalize(elfobj_t *obj) {
     return ELF_OK;
 }
 
+elf_err_t elf_set_type(elfobj_t *obj, uint16_t type) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    obj->type = type;
+    return ELF_OK;
+}
+
+uint16_t elf_type(const elfobj_t *obj) {
+    return obj == NULL ? 0 : obj->type;
+}
+
+uint16_t elf_machine(const elfobj_t *obj) {
+    return obj == NULL ? 0 : obj->machine;
+}
+
+elfobj_class_t elf_class(const elfobj_t *obj) {
+    return obj == NULL ? ELFOBJ_CLASS_NONE : obj->cls;
+}
+
+elfobj_endian_t elf_endian(const elfobj_t *obj) {
+    return obj == NULL ? ELFOBJ_ENDIAN_NONE : obj->endian;
+}
+
 size_t elf_section_count(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->section_count;
 }

@@ -1,1 +1,457 @@
-.so man3/elfobj.3
+.Dd February 19, 2026
+.Dt ELF_SECTION 3
+.Os Substrate
+.Sh NAME
+.Nm elf_add_section ,
+.Nm elf_find_section ,
+.Nm elf_section_set_data ,
+.Nm elf_section_count ,
+.Nm elf_section_name ,
+.Nm elf_section_type ,
+.Nm elf_section_flags ,
+.Nm elf_section_size ,
+.Nm elf_section_data
+.Nd ELF section manipulation
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_section_t *
+.Fo elf_add_section
+.Fa "elfobj_t *obj"
+.Fa "const char *name"
+.Fa "uint32_t type"
+.Fa "uint64_t flags"
+.Fc
+.Ft elf_section_t *
+.Fo elf_find_section
+.Fa "elfobj_t *obj"
+.Fa "const char *name"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_data
+.Fa "elf_section_t *section"
+.Fa "const void *data"
+.Fa "size_t size"
+.Fc
+.Ft size_t
+.Fo elf_section_count
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft const char *
+.Fo elf_section_name
+.Fa "const elf_section_t *section"
+.Fc
+.Ft uint32_t
+.Fo elf_section_type
+.Fa "const elf_section_t *section"
+.Fc
+.Ft uint64_t
+.Fo elf_section_flags
+.Fa "const elf_section_t *section"
+.Fc
+.Ft uint64_t
+.Fo elf_section_size
+.Fa "const elf_section_t *section"
+.Fc
+.Ft const void *
+.Fo elf_section_data
+.Fa "const elf_section_t *section"
+.Fa "size_t *size_out"
+.Fc
+.Sh DESCRIPTION
+These functions manipulate ELF sections within an
+.Vt elfobj_t
+handle.
+Sections are the fundamental organizational unit of ELF files,
+containing code, data, symbol tables, relocation entries, and other
+information.
+.Ss Section Types
+The
+.Fa type
+argument to
+.Fn elf_add_section
+specifies the section type.
+Standard types include:
+.Bl -tag -width "SHT_PROGBITS"
+.It Dv SHT_NULL
+Section header entry is unused.
+.It Dv SHT_PROGBITS
+Section contains program-defined contents.
+.It Dv SHT_SYMTAB
+Section contains a symbol table.
+.It Dv SHT_STRTAB
+Section contains a string table.
+.It Dv SHT_RELA
+Section contains relocation entries with explicit addends.
+.It Dv SHT_REL
+Section contains relocation entries without explicit addends.
+.It Dv SHT_DYNAMIC
+Section contains dynamic linking information.
+.It Dv SHT_NOTE
+Section contains note information.
+.It Dv SHT_NOBITS
+Section occupies no file space but has a virtual address.
+.It Dv SHT_DYNSYM
+Section contains a dynamic symbol table.
+.El
+.Ss Section Flags
+The
+.Fa flags
+argument to
+.Fn elf_add_section
+is a bitmask of the following values:
+.Bl -tag -width "SHF_EXECINSTR"
+.It Dv SHF_WRITE
+Section is writable during program execution.
+.It Dv SHF_ALLOC
+Section occupies memory during execution.
+.It Dv SHF_EXECINSTR
+Section contains executable instructions.
+.It Dv SHF_MERGE
+Section contains data that can be merged.
+.It Dv SHF_STRINGS
+Section contains null-terminated strings.
+.It Dv SHF_GROUP
+Section is a member of a section group.
+.It Dv SHF_TLS
+Section contains thread-local storage.
+.El
+.Ss Functions
+.Bl -tag -width Ds
+.It Fn elf_add_section "obj" "name" "type" "flags"
+Creates a new section with the given
+.Fa name ,
+.Fa type ,
+and
+.Fa flags .
+The section is appended to the object's section list.
+Returns a pointer to the new section, or NULL on failure.
+.Pp
+The object must be mutable (created with
+.Fn elf_create
+and not yet finalized).
+.It Fn elf_find_section "obj" "name"
+Searches for a section by name.
+Returns the section handle if found, or NULL if no section with the
+given name exists.
+.It Fn elf_section_set_data "section" "data" "size"
+Sets the contents of a section.
+The data is copied into internal storage; the caller's buffer may be
+freed after this call.
+.Pp
+For
+.Dv SHT_NOBITS
+sections (such as
+.Pa .bss ) ,
+the
+.Fa data
+argument is ignored and only the
+.Fa size
+is recorded; no file space is allocated.
+.Pp
+Passing
+.Fa size
+as 0 clears any existing section data.
+.It Fn elf_section_count "obj"
+Returns the number of sections in the object.
+.It Fn elf_section_name "section"
+Returns the section name.
+The returned string is owned by the object and must not be freed.
+.It Fn elf_section_type "section"
+Returns the section type
+.Pq one of the SHT_* constants .
+.It Fn elf_section_flags "section"
+Returns the section flags
+.Pq a bitmask of SHF_* constants .
+.It Fn elf_section_size "section"
+Returns the section size in bytes.
+For
+.Dv SHT_NOBITS
+sections, this is the virtual size.
+.It Fn elf_section_data "section" "size_out"
+Returns a pointer to the section contents.
+If
+.Fa size_out
+is non-NULL, the size is stored there.
+For
+.Dv SHT_NOBITS
+sections, NULL is returned and the size is stored in
+.Fa size_out .
+.Pp
+The returned pointer is owned by the object and remains valid until
+the object is closed or the section data is replaced.
+.El
+.Ss Section Ordering
+Sections are maintained in the order they are added.
+When writing an ELF file, the library automatically generates the
+required internal sections
+.Pq Pa .symtab , Pa .strtab , Pa .shstrtab
+and any relocation sections.
+.Pp
+The first section (index 0) is always the null section header.
+User-added sections begin at index 1.
+.Ss Alignment Handling
+Each section has an alignment constraint stored in the
+.Va addralign
+field.
+The library automatically aligns section offsets when writing.
+.Pp
+For sections created with
+.Fn elf_add_section ,
+the default alignment is 1 (no alignment constraint).
+To set a different alignment, modify the section's
+.Va addralign
+field directly:
+.Bd -literal
+elf_section_t *text = elf_add_section(obj, ".text",
+    SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+if (text) {
+    /* Internal field; requires access to private header */
+    /* ((struct elf_section *)text)->addralign = 16; */
+}
+.Ed
+.Ss TLS Sections
+Thread-Local Storage (TLS) sections are marked with
+.Dv SHF_TLS .
+These sections contain data that should have a separate instance per thread.
+The runtime allocates TLS blocks and manages access via the
+thread pointer or TLS register.
+.Pp
+TLS sections typically have the following characteristics:
+.Bl -bullet
+.It
+Type is
+.Dv SHT_PROGBITS
+or
+.Dv SHT_NOBITS
+.Pq for .tbss .
+.It
+Flags include
+.Dv SHF_TLS
+and usually
+.Dv SHF_ALLOC .
+.It
+Alignment is typically 8 or 16 bytes.
+.El
+.Ss COMDAT Groups
+COMDAT groups allow multiple object files to define the same section
+without causing duplicate symbol errors at link time.
+Sections in a COMDAT group are marked with
+.Dv SHF_GROUP .
+.Pp
+The current version of
+.Nm libelfobj
+has limited support for COMDAT groups:
+.Bl -bullet
+.It
+COMDAT sections can be read from input files.
+.It
+Group signatures are not automatically processed.
+.It
+Group-based garbage collection is not implemented.
+.El
+.Sh RETURN VALUES
+.Fn elf_add_section
+and
+.Fn elf_find_section
+return a pointer to a section handle on success, or NULL on failure.
+.Pp
+.Fn elf_section_set_data
+returns
+.Dv ELF_OK
+on success, or an appropriate error code on failure.
+.Pp
+.Fn elf_section_count
+returns the number of sections (may be 0 for an empty object).
+.Pp
+.Fn elf_section_name ,
+.Fn elf_section_type ,
+.Fn elf_section_flags ,
+and
+.Fn elf_section_size
+return the requested attribute.
+For NULL section pointers, the behavior is undefined.
+.Pp
+.Fn elf_section_data
+returns a pointer to section data or NULL for
+.Dv SHT_NOBITS
+sections or empty sections.
+.Sh ERRORS
+.Fn elf_add_section
+may fail with:
+.Bl -tag -width Ds
+.It Dv ELF_ERR_OOM
+Memory allocation failed.
+.It Dv ELF_ERR_STATE
+The object is read-only or already finalized.
+.El
+.Pp
+.Fn elf_section_set_data
+may fail with:
+.Bl -tag -width Ds
+.It Dv ELF_ERR_OOM
+Memory allocation failed.
+.It Dv ELF_ERR_STATE
+The object is read-only or already finalized.
+.El
+.Sh EXAMPLES
+.Ss Creating Multiple Sections
+.Bd -literal
+#include <elfobj.h>
+
+int main(void) {
+    elfobj_t *obj;
+    elf_section_t *text, *data, *bss;
+    unsigned char code[] = { 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3 };
+    int values[] = { 1, 2, 3, 4, 5 };
+
+    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (!obj) return 1;
+
+    /* Create .text section for code */
+    text = elf_add_section(obj, ".text", SHT_PROGBITS,
+                           SHF_ALLOC | SHF_EXECINSTR);
+    if (!text) goto err;
+    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK)
+        goto err;
+
+    /* Create .data section for initialized data */
+    data = elf_add_section(obj, ".data", SHT_PROGBITS,
+                           SHF_ALLOC | SHF_WRITE);
+    if (!data) goto err;
+    if (elf_section_set_data(data, values, sizeof(values)) != ELF_OK)
+        goto err;
+
+    /* Create .bss section for uninitialized data */
+    bss = elf_add_section(obj, ".bss", SHT_NOBITS,
+                          SHF_ALLOC | SHF_WRITE);
+    if (!bss) goto err;
+    /* For NOBITS, we set size but no data */
+    if (elf_section_set_data(bss, NULL, 1024) != ELF_OK)
+        goto err;
+
+    if (elf_write_file(obj, "example.o") != ELF_OK) goto err;
+    elf_close(obj);
+    return 0;
+
+err:
+    elf_close(obj);
+    return 1;
+}
+.Ed
+.Ss Finding and Inspecting Sections
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+int main(int argc, char *argv[]) {
+    elfobj_t *obj;
+    elf_section_t *sec;
+    elf_err_t err;
+    size_t size;
+    const void *data;
+
+    if (argc < 2) return 1;
+
+    err = elf_open(argv[1], &obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Cannot open %s: %s\\n", argv[1], elf_errstr(err));
+        return 1;
+    }
+
+    /* Find the .text section */
+    sec = elf_find_section(obj, ".text");
+    if (sec) {
+        printf(".text section found:\\n");
+        printf("  Type: %u\\n", elf_section_type(sec));
+        printf("  Flags: 0x%llx\\n",
+               (unsigned long long)elf_section_flags(sec));
+        printf("  Size: %llu bytes\\n",
+               (unsigned long long)elf_section_size(sec));
+
+        data = elf_section_data(sec, &size);
+        if (data && size > 0) {
+            printf("  First 16 bytes:");
+            for (size_t i = 0; i < 16 && i < size; i++) {
+                printf(" %02x", ((const unsigned char *)data)[i]);
+            }
+            printf("\\n");
+        }
+    } else {
+        printf(".text section not found\\n");
+    }
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Ss Iterating All Sections
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+static const char *section_type_name(uint32_t type) {
+    switch (type) {
+    case SHT_NULL:     return "NULL";
+    case SHT_PROGBITS: return "PROGBITS";
+    case SHT_SYMTAB:   return "SYMTAB";
+    case SHT_STRTAB:   return "STRTAB";
+    case SHT_RELA:     return "RELA";
+    case SHT_REL:      return "REL";
+    case SHT_NOBITS:   return "NOBITS";
+    case SHT_DYNSYM:   return "DYNSYM";
+    default:           return "UNKNOWN";
+    }
+}
+
+int main(int argc, char *argv[]) {
+    elfobj_t *obj;
+    elf_err_t err;
+    size_t i, count;
+
+    if (argc < 2) return 1;
+
+    err = elf_open(argv[1], &obj);
+    if (err != ELF_OK) return 1;
+
+    count = elf_section_count(obj);
+    printf("Found %zu sections:\\n", count);
+
+    /* Note: This example requires storing section pointers during
+     * iteration. In practice, use elf_find_section for known names
+     * or maintain your own index. */
+    for (i = 0; i < count; i++) {
+        /* Sections must be accessed by name or stored during creation.
+         * See elfobj.3 for object model details. */
+    }
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elfobj 3 ,
+.Xr elf_symbol 3 ,
+.Xr elf_reloc 3 ,
+.Xr elf 5
+.Sh STANDARDS
+Section types and flags follow the ELF specification.
+See
+.Xr elfobj 3
+for references.
+.Sh HISTORY
+Section handling has been a core feature of
+.Nm libelfobj
+since its initial implementation.
+.Sh BUGS
+.Bl -bullet
+.It
+There is no API to iterate sections by index directly.
+Applications must either store section handles during creation
+or use
+.Fn elf_find_section
+with known names.
+.It
+COMDAT group processing is incomplete.
+.It
+Section-to-segment mapping for executable files is not implemented.
+.El

@@ -100,3 +100,20 @@ elf_symbol_t *elf_find_symbol(elfobj_t *obj, const char *name) {
     }
     return NULL;
 }
+
+elf_err_t elf_symbol_define(elf_symbol_t *symbol, elf_section_t *section, uint64_t value) {
+    if (symbol == NULL || section == NULL || symbol->obj == NULL || section->obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (symbol->obj != section->obj) {
+        return ELF_ERR_STATE;
+    }
+    if (symbol->obj->readonly || symbol->obj->finalized) {
+        elf__set_err(symbol->obj, ELF_ERR_STATE, "cannot mutate finalized/read-only object");
+        return ELF_ERR_STATE;
+    }
+
+    symbol->value = value;
+    symbol->shndx = (uint16_t)(section->index + 1);
+    return ELF_OK;
+}

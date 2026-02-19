@@ -1,1 +1,444 @@
-.so man3/elfobj.3
+.Dd February 19, 2026
+.Dt ELF_SYMBOL 3
+.Os Substrate
+.Sh NAME
+.Nm elf_add_symbol ,
+.Nm elf_find_symbol ,
+.Nm elf_symbol_count ,
+.Nm elf_symbol_name ,
+.Nm elf_symbol_value ,
+.Nm elf_symbol_size ,
+.Nm elf_hash_sysv ,
+.Nm elf_hash_gnu
+.Nd ELF symbol table manipulation
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_symbol_t *
+.Fo elf_add_symbol
+.Fa "elfobj_t *obj"
+.Fa "const char *name"
+.Fa "uint64_t value"
+.Fa "uint64_t size"
+.Fa "uint8_t bind"
+.Fa "uint8_t type"
+.Fc
+.Ft elf_symbol_t *
+.Fo elf_find_symbol
+.Fa "elfobj_t *obj"
+.Fa "const char *name"
+.Fc
+.Ft size_t
+.Fo elf_symbol_count
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft const char *
+.Fo elf_symbol_name
+.Fa "const elf_symbol_t *symbol"
+.Fc
+.Ft uint64_t
+.Fo elf_symbol_value
+.Fa "const elf_symbol_t *symbol"
+.Fc
+.Ft uint64_t
+.Fo elf_symbol_size
+.Fa "const elf_symbol_t *symbol"
+.Fc
+.Ft uint32_t
+.Fo elf_hash_sysv
+.Fa "const char *name"
+.Fc
+.Ft uint32_t
+.Fo elf_hash_gnu
+.Fa "const char *name"
+.Fc
+.Sh DESCRIPTION
+These functions manipulate ELF symbol table entries within an
+.Vt elfobj_t
+handle.
+Symbols represent named entities in an ELF file: functions, variables,
+sections, and other objects.
+.Ss Symbol Binding
+The
+.Fa bind
+argument to
+.Fn elf_add_symbol
+specifies the symbol's binding, which determines linkage visibility:
+.Bl -tag -width "STB_WEAK"
+.It Dv STB_LOCAL
+Symbol is local to the object file.
+Local symbols are not visible to the linker and cannot be referenced
+from other object files.
+All local symbols must appear before global symbols in the symbol table.
+.It Dv STB_GLOBAL
+Symbol is globally visible.
+If multiple object files define a global symbol with the same name,
+the linker will report a multiple-definition error unless one is
+a common symbol or weak symbol.
+.It Dv STB_WEAK
+Symbol is weakly bound.
+Weak symbols are similar to global symbols but have lower precedence.
+If both a global and weak symbol with the same name exist, the global
+symbol takes precedence.
+Weak symbols are used for optional functionality and default implementations.
+.El
+.Ss Symbol Types
+The
+.Fa type
+argument to
+.Fn elf_add_symbol
+specifies the symbol's type:
+.Bl -tag -width "STT_SECTION"
+.It Dv STT_NOTYPE
+Symbol type is unspecified or unknown.
+.It Dv STT_OBJECT
+Symbol is a data object (variable, array, etc.).
+.It Dv STT_FUNC
+Symbol is a function or executable code.
+.It Dv STT_SECTION
+Symbol is associated with a section.
+Section symbols are used primarily for relocations and have no name.
+.It Dv STT_FILE
+Symbol gives the name of the source file.
+File symbols are local and appear at the beginning of the symbol table.
+.It Dv STT_TLS
+Symbol is thread-local storage.
+.El
+.Ss Symbol Visibility
+Symbol visibility determines how the symbol is exported from a shared
+library or executable.
+Visibility is stored in the symbol's
+.Va other
+field (st_other) and can have the following values:
+.Bl -tag -width "STV_PROTECTED"
+.It Dv STV_DEFAULT
+Default visibility.
+Symbol is exported and can be interposed by another definition.
+.It Dv STV_INTERNAL
+Symbol is not visible outside the defining module.
+.It Dv STV_HIDDEN
+Symbol is not visible to other modules but may be accessed via
+a pointer.
+.It Dv STV_PROTECTED
+Symbol is exported but cannot be interposed.
+.El
+.Pp
+To set visibility after creating a symbol:
+.Bd -literal
+elf_symbol_t *sym = elf_add_symbol(obj, "internal_func", 0, 0,
+                                   STB_GLOBAL, STT_FUNC);
+if (sym) {
+    /* Access internal field via private header */
+    /* ((struct elf_symbol *)sym)->other = STV_HIDDEN; */
+}
+.Ed
+.Ss Functions
+.Bl -tag -width Ds
+.It Fn elf_add_symbol "obj" "name" "value" "size" "bind" "type"
+Creates a new symbol with the given attributes.
+The symbol is appended to the object's symbol table.
+Returns a pointer to the new symbol, or NULL on failure.
+.Pp
+The object must be mutable (created with
+.Fn elf_create
+and not yet finalized).
+.Pp
+Adding a global symbol with a name that already exists as a global
+or weak symbol will fail with
+.Dv ELF_ERR_FORMAT .
+.It Fn elf_find_symbol "obj" "name"
+Searches for a symbol by name.
+Returns the symbol handle if found, or NULL if no symbol with the
+given name exists.
+.Pp
+If multiple symbols have the same name (which can happen with local
+symbols), the first match is returned.
+.It Fn elf_symbol_count "obj"
+Returns the number of symbols in the object's symbol table.
+.It Fn elf_symbol_name "symbol"
+Returns the symbol name.
+The returned string is owned by the object and must not be freed.
+May return an empty string for unnamed symbols (e.g., section symbols).
+.It Fn elf_symbol_value "symbol"
+Returns the symbol value.
+For defined symbols, this is typically the virtual address or offset.
+For undefined symbols, this is typically 0.
+.It Fn elf_symbol_size "symbol"
+Returns the symbol size in bytes.
+A size of 0 indicates that the size is unknown or unspecified.
+.It Fn elf_hash_sysv "name"
+Computes the SYSV hash of a symbol name.
+This hash function is used by the
+.Dv DT_HASH
+dynamic symbol table hash table.
+.It Fn elf_hash_gnu "name"
+Computes the GNU hash of a symbol name.
+This hash function is used by the
+.Dv DT_GNU_HASH
+dynamic symbol table hash table, which provides better performance
+than SYSV hash for large symbol tables.
+.El
+.Ss Symbol Resolution Semantics
+When linking multiple object files, symbols are resolved according
+to the following rules:
+.Bl -enum
+.It
+Local symbols are always resolved within the same object file.
+.It
+Global symbols take precedence over weak symbols with the same name.
+.It
+If multiple global symbols with the same name exist, the linker
+reports a multiple-definition error.
+.It
+Common symbols
+.Pq symbols with type STT_OBJECT and section index SHN_COMMON
+are merged according to their alignment and size.
+.It
+Archive members are extracted only if they satisfy an undefined
+global or weak symbol reference.
+.El
+.Ss Versioned Symbols
+Symbol versioning allows multiple versions of a symbol to coexist
+in a shared library.
+Versioned symbols have an associated version index stored in the
+.Va ver_index
+field.
+.Pp
+The current version of
+.Nm libelfobj
+has limited support for versioned symbols:
+.Bl -bullet
+.It
+Version indices can be read from input files.
+.It
+The
+.Dv .gnu.version
+and
+.Dv .gnu.version_r
+sections are not automatically processed.
+.It
+Creating versioned symbols requires manual version index assignment.
+.El
+.Ss Hash Tables
+Symbol hash tables enable fast symbol lookup in dynamic linking.
+Two hash table formats are supported:
+.Bl -tag -width "GNU hash"
+.It SYSV hash
+The traditional ELF hash table, stored in a
+.Dv DT_HASH
+entry.
+Uses the
+.Fn elf_hash_sysv
+function.
+Provides O(1) average-case lookup.
+.It GNU hash
+An optimized hash table format, stored in a
+.Dv DT_GNU_HASH
+entry.
+Uses the
+.Fn elf_hash_gnu
+function.
+Provides better cache locality and faster lookup for large symbol tables.
+.El
+.Pp
+When creating shared libraries, the library automatically generates
+the appropriate hash table based on the symbol set.
+.Sh RETURN VALUES
+.Fn elf_add_symbol
+and
+.Fn elf_find_symbol
+return a pointer to a symbol handle on success, or NULL on failure.
+.Pp
+.Fn elf_symbol_count
+returns the number of symbols (may be 0 for an empty object).
+.Pp
+.Fn elf_symbol_name ,
+.Fn elf_symbol_value ,
+and
+.Fn elf_symbol_size
+return the requested attribute.
+For NULL symbol pointers, the behavior is undefined.
+.Pp
+.Fn elf_hash_sysv
+and
+.Fn elf_hash_gnu
+return a 32-bit hash value.
+For NULL input, 0 is returned.
+.Sh ERRORS
+.Fn elf_add_symbol
+may fail with:
+.Bl -tag -width Ds
+.It Dv ELF_ERR_OOM
+Memory allocation failed.
+.It Dv ELF_ERR_STATE
+The object is read-only or already finalized.
+.It Dv ELF_ERR_FORMAT
+A global symbol with the same name already exists.
+.El
+.Sh EXAMPLES
+.Ss Adding Symbols to an Object
+.Bd -literal
+#include <elfobj.h>
+
+int main(void) {
+    elfobj_t *obj;
+    elf_section_t *text;
+    elf_symbol_t *main_sym, *helper_sym;
+    unsigned char code[] = { 0xC3 };  /* ret */
+
+    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (!obj) return 1;
+
+    text = elf_add_section(obj, ".text", SHT_PROGBITS,
+                           SHF_ALLOC | SHF_EXECINSTR);
+    if (!text) goto err;
+    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK)
+        goto err;
+
+    /* Add a global function symbol */
+    main_sym = elf_add_symbol(obj, "main", 0, sizeof(code),
+                              STB_GLOBAL, STT_FUNC);
+    if (!main_sym) goto err;
+
+    /* Add a local helper function symbol */
+    helper_sym = elf_add_symbol(obj, "helper", 0, 0,
+                                STB_LOCAL, STT_FUNC);
+    if (!helper_sym) goto err;
+
+    if (elf_write_file(obj, "symbols.o") != ELF_OK) goto err;
+    elf_close(obj);
+    return 0;
+
+err:
+    elf_close(obj);
+    return 1;
+}
+.Ed
+.Ss Resolving Symbols Across Objects
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+int main(int argc, char *argv[]) {
+    elfobj_t *obj1, *obj2;
+    elf_symbol_t *sym;
+    elf_err_t err;
+
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s <obj1> <obj2>\\n", argv[0]);
+        return 1;
+    }
+
+    err = elf_open(argv[1], &obj1);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Cannot open %s: %s\\n", argv[1], elf_errstr(err));
+        return 1;
+    }
+
+    err = elf_open(argv[2], &obj2);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Cannot open %s: %s\\n", argv[2], elf_errstr(err));
+        elf_close(obj1);
+        return 1;
+    }
+
+    /* Look for a symbol in the first object */
+    sym = elf_find_symbol(obj1, "main");
+    if (sym) {
+        printf("Found 'main' in %s:\\n", argv[1]);
+        printf("  Value: 0x%llx\\n",
+               (unsigned long long)elf_symbol_value(sym));
+        printf("  Size: %llu\\n",
+               (unsigned long long)elf_symbol_size(sym));
+    }
+
+    /* Check if the same symbol exists in the second object */
+    sym = elf_find_symbol(obj2, "main");
+    if (sym) {
+        printf("Found 'main' in %s:\\n", argv[2]);
+        printf("  Value: 0x%llx\\n",
+               (unsigned long long)elf_symbol_value(sym));
+        printf("  Size: %llu\\n",
+               (unsigned long long)elf_symbol_size(sym));
+    }
+
+    elf_close(obj1);
+    elf_close(obj2);
+    return 0;
+}
+.Ed
+.Ss Using Hash Functions
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+int main(void) {
+    const char *names[] = { "main", "printf", "malloc", NULL };
+
+    for (int i = 0; names[i]; i++) {
+        uint32_t sysv = elf_hash_sysv(names[i]);
+        uint32_t gnu = elf_hash_gnu(names[i]);
+
+        printf("%-10s: SYSV=0x%08x GNU=0x%08x\\n",
+               names[i], sysv, gnu);
+    }
+
+    return 0;
+}
+.Ed
+.Ss Creating Weak Symbols for Optional Dependencies
+.Bd -literal
+#include <elfobj.h>
+
+int main(void) {
+    elfobj_t *obj;
+    elf_symbol_t *weak_sym;
+
+    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (!obj) return 1;
+
+    /* Create a weak symbol for an optional function.
+     * The linker will use this definition only if no strong
+     * definition is found. */
+    weak_sym = elf_add_symbol(obj, "optional_hook", 0, 0,
+                              STB_WEAK, STT_FUNC);
+    if (!weak_sym) {
+        elf_close(obj);
+        return 1;
+    }
+
+    /* The object can now be linked with another object that
+     * provides a strong definition of optional_hook, or used
+     * as-is with the weak definition. */
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elfobj 3 ,
+.Xr elf_section 3 ,
+.Xr elf_reloc 3 ,
+.Xr elf_link 3 ,
+.Xr elf 5
+.Sh STANDARDS
+Symbol binding, type, and visibility values follow the ELF specification.
+See
+.Xr elfobj 3
+for references.
+.Sh HISTORY
+Symbol handling has been a core feature of
+.Nm libelfobj
+since its initial implementation.
+.Sh BUGS
+.Bl -bullet
+.It
+There is no API to iterate symbols by index directly.
+Applications must either store symbol handles during creation
+or use
+.Fn elf_find_symbol
+with known names.
+.It
+Symbol versioning support is incomplete.
+.It
+Visibility attributes cannot be set through the public API.
+.El

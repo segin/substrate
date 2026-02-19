@@ -118,10 +118,12 @@ void elf_close(elfobj_t *obj);
 
 elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, uint64_t flags);
 elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t size);
+elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align);
 elf_section_t *elf_find_section(elfobj_t *obj, const char *name);
 
 elf_symbol_t *elf_add_symbol(elfobj_t *obj, const char *name, uint64_t value,
                               uint64_t size, uint8_t bind, uint8_t type);
+elf_err_t elf_symbol_define(elf_symbol_t *symbol, elf_section_t *section, uint64_t value);
 elf_symbol_t *elf_find_symbol(elfobj_t *obj, const char *name);
 
 elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol_t *symbol,
@@ -135,6 +137,11 @@ elf_err_t elf_register_reloc_backend(const struct elf_reloc_backend *backend);
 
 elfobj_t *elf_create(uint16_t type, uint16_t machine, elfobj_class_t cls, elfobj_endian_t endian);
 elf_err_t elf_finalize(elfobj_t *obj);
+elf_err_t elf_set_type(elfobj_t *obj, uint16_t type);
+uint16_t elf_type(const elfobj_t *obj);
+uint16_t elf_machine(const elfobj_t *obj);
+elfobj_class_t elf_class(const elfobj_t *obj);
+elfobj_endian_t elf_endian(const elfobj_t *obj);
 
 size_t elf_section_count(const elfobj_t *obj);
 size_t elf_symbol_count(const elfobj_t *obj);
