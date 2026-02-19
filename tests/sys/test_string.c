@@ -247,6 +247,7 @@ static void test_memcmp(void) {
         fail("memcmp unsigned 0x7F vs 0x80 failed");
     }
 }
+
 void run_string_tests(void) {
     kprint("\n=== STRING TESTS ===\n");
     failed_tests = 0;
