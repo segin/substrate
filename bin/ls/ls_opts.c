@@ -44,9 +44,10 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
     config->color = isatty(STDOUT_FILENO) ? 1 : 0;
     config->multi_column = isatty(STDOUT_FILENO);
 
-    *files = NULL;
     *file_count = 0;
-    size_t capacity = 0;
+    // Pre-allocate based on argc. The number of file arguments is bounded by argc.
+    *files = malloc(sizeof(char*) * argc);
+    if (!*files) return -1;
 
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-' && argv[i][1] != '\0') {
@@ -206,14 +207,6 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                 }
             }
         } else {
-            if (*file_count >= capacity) {
-                // Geometric growth (x2) to avoid O(N^2) reallocation
-                size_t new_capacity = capacity == 0 ? 32 : capacity * 2;
-                char **temp = realloc(*files, sizeof(char*) * new_capacity);
-                if (!temp) return -1; // OOM
-                *files = temp;
-                capacity = new_capacity;
-            }
             (*files)[(*file_count)++] = argv[i];
         }
     }

@@ -12,6 +12,8 @@
 #include <kern/time.h>
 #include <vm/phys_mem.h>
 #include <arch/i386/pmm.h> /* For PMM constants */
+#include <vm/vm_page.h>
+#include <vm/vm_swap.h>
 #include <string.h>
 
 #define PAGE_SIZE 4096
@@ -85,9 +87,23 @@ int sys_vm_stats(sys_vmstat_t *stats) {
 
     kstats.total = (uint64_t)(free_pages + used_pages) * PAGE_SIZE;
     kstats.free = (uint64_t)free_pages * PAGE_SIZE;
-    kstats.available = kstats.free;
 
-    // Other fields 0
+    // Page stats (cache, buffers)
+    vm_page_stats_t pstats;
+    vm_page_get_stats(&pstats);
+
+    kstats.cached = (uint64_t)(pstats.active_count + pstats.inactive_count) * PAGE_SIZE;
+    kstats.buffers = 0; // Not tracked separately
+    kstats.available = kstats.free + kstats.cached; // Cache is reclaimable
+
+    // Swap stats
+    uint64_t swap_total = 0;
+    uint64_t swap_free = 0;
+    vm_swap_get_stats(&swap_total, &swap_free);
+
+    kstats.swap_total = swap_total * PAGE_SIZE;
+    kstats.swap_free = swap_free * PAGE_SIZE;
+    kstats.swap_cached = 0; // Not tracked separately
 
     memcpy(stats, &kstats, sizeof(kstats));
     return 0;

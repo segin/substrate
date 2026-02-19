@@ -146,7 +146,7 @@ clean:
 	rm -f kernel.bin kernel.zimage
 
 tests:
-	$(MAKE) -C ../tests/sys
+	$(MAKE) -C ../tests/sys tests.o
 
 install: kernel.bin
 	@echo "Installing Kernel to $(DESTDIR)/vmunix..."

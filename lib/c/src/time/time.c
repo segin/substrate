@@ -483,7 +483,16 @@ char *asctime_r(const struct tm *__restrict timeptr, char *__restrict buf) {
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     };
 
-    sprintf(buf, "%.3s %.3s%3d %.2d:%.2d:%.2d %d\n",
+    if (timeptr->tm_wday < 0 || timeptr->tm_wday > 6) {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (timeptr->tm_mon < 0 || timeptr->tm_mon > 11) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    int ret = snprintf(buf, 26, "%.3s %.3s%3d %.2d:%.2d:%.2d %d\n",
         wday_name[timeptr->tm_wday],
         mon_name[timeptr->tm_mon],
         timeptr->tm_mday,
@@ -491,6 +500,12 @@ char *asctime_r(const struct tm *__restrict timeptr, char *__restrict buf) {
         timeptr->tm_min,
         timeptr->tm_sec,
         1900 + timeptr->tm_year);
+
+    if (ret < 0 || ret >= 26) {
+        errno = EOVERFLOW;
+        return NULL;
+    }
+
     return buf;
 }
 
