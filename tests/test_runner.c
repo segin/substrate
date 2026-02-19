@@ -49,6 +49,7 @@ extern bool test_sema_blocking(void);
 extern bool test_futex_basic(void);
 extern bool test_futex_blocking(void);
 extern bool test_pthread_exit_logic(void);
+extern bool test_reboot_permissions(void);
 
 // Sleepq Tests
 extern bool test_sleepq_basic(void);
@@ -165,6 +166,7 @@ test_case_t tests[] = {
     {"futex_basic", test_futex_basic},
     {"futex_block", test_futex_blocking},
     {"pthread_exit", test_pthread_exit_logic},
+    {"reboot_perm", test_reboot_permissions},
     {"sleepq_basic", test_sleepq_basic},
     {"sleepq_fifo", test_sleepq_fifo},
     {"sleepq_wake_all", test_sleepq_wake_all},

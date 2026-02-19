@@ -14,7 +14,9 @@
 void ldt_activate(process_t *proc) {
     if (!proc || !proc->ldt) {
         /* Deactivate LDT by loading a null selector */
+#ifndef HOST_TEST
         __asm__ volatile("lldt %0" : : "r"((uint16_t)0));
+#endif
         return;
     }
 
@@ -29,7 +31,9 @@ void ldt_activate(process_t *proc) {
     gdt_set_gate(GDT_LDT_INDEX, base, limit, 0x82, 0x40);
 
     /* Load LDTR with selector (Index 7, GDT, RPL 0) = 0x38 */
+#ifndef HOST_TEST
     __asm__ volatile("lldt %0" : : "r"((uint16_t)(GDT_LDT_INDEX << 3)));
+#endif
 }
 
 void ldt_init_process(process_t *proc) {
@@ -82,20 +86,15 @@ static void fill_ldt_entry(gdt_entry_t *entry, struct user_desc *info) {
 
 int sys_modify_ldt(int func, struct user_desc *ptr, unsigned long bytecount) {
     if (func == LDT_READ) {
-        if (!current_process->ldt) {
-            return 0;
-        }
+        unsigned int actual_size = current_process->ldt_entry_count * LDT_ENTRY_SIZE;
+        unsigned int copy_size = (bytecount < actual_size) ? bytecount : actual_size;
 
-        size_t ldt_size = current_process->ldt_entry_count * 8;
-        if (bytecount < ldt_size) {
-            ldt_size = bytecount;
+        if (copy_size > 0 && current_process->ldt) {
+            if (copyout(current_process->ldt, ptr, copy_size)) {
+                return -EFAULT;
+            }
         }
-
-        if (ldt_size > 0 && copyout(current_process->ldt, ptr, ldt_size)) {
-            return -EFAULT;
-        }
-
-        return (int)ldt_size;
+        return copy_size;
     }
     
     if (func == LDT_READ_DEFAULT) {

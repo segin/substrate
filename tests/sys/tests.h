@@ -22,5 +22,6 @@ bool run_div64_tests(void);
 void run_kobject_tests(void);
 void run_nanosleep_tests(void);
 void run_ldt_tests(void);
+void run_reboot_tests(void);
 
 #endif

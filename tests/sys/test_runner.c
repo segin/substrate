@@ -37,6 +37,7 @@ extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
 extern void run_kobject_tests(void);
+void run_reboot_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -64,6 +65,10 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "kobject") == 0) {
         run_kobject_tests();
+    }
+
+    if (all || strcmp(test_arg, "tty") == 0) {
+        run_tty_tests();
     }
 
     if (all || strcmp(test_arg, "pmap") == 0) {
@@ -174,6 +179,10 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "scsi") == 0) {
          extern void run_scsi_tests(void);
          run_scsi_tests();
+    }
+
+    if (all || strcmp(test_arg, "reboot") == 0) {
+         run_reboot_tests();
     }
 
     if (all || strcmp(test_arg, "signal") == 0) {
