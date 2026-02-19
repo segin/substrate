@@ -201,13 +201,66 @@ struct linux_sigframe {
     char     retcode[8];
 };
 
+/* Linux siginfo_t (128 bytes) */
+typedef struct {
+    int si_signo;
+    int si_errno;
+    int si_code;
+
+    union {
+        int _pad[29];
+
+        /* kill() */
+        struct {
+            int _pid;       /* sender's pid */
+            unsigned int _uid; /* sender's uid */
+        } _kill;
+
+        /* POSIX.1b timers */
+        struct {
+            int _tid;       /* timer id */
+            int _overrun;   /* overrun count */
+            char _pad[sizeof(int) - sizeof(int)];
+            void *_sigval;  /* same as below */
+            int _sys_private;  /* not to be passed to user */
+        } _timer;
+
+        /* POSIX.1b signals */
+        struct {
+            int _pid;       /* sender's pid */
+            unsigned int _uid; /* sender's uid */
+            void *_sigval;
+        } _rt;
+
+        /* SIGCHLD */
+        struct {
+            int _pid;       /* which child */
+            unsigned int _uid; /* sender's uid */
+            int _status;    /* exit code */
+            long _utime;
+            long _stime;
+        } _sigchld;
+
+        /* SIGILL, SIGFPE, SIGSEGV, SIGBUS */
+        struct {
+            void *_addr; /* faulting insn/memory ref. */
+        } _sigfault;
+
+        /* SIGPOLL */
+        struct {
+            long _band;  /* POLL_IN, POLL_OUT, POLL_MSG */
+            int _fd;
+        } _sigpoll;
+    } _sifields;
+} linux_siginfo_t;
+
 /* Linux rt_sigframe (real-time signals) */
 struct linux_rt_sigframe {
     uint32_t pretcode;
     int32_t  sig;
     uint32_t pinfo;
     uint32_t puc;
-    siginfo_t info; // We'll need to translate siginfo_t
+    linux_siginfo_t info;
     struct linux_ucontext uc;
     char     retcode[8];
 };

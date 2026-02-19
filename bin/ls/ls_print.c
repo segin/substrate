@@ -209,7 +209,7 @@ void ls_print_list(file_info_t *files, int count, const ls_config_t *config) {
         int len = strlen(files[i].name);
         if (config->inode) {
              char tmp[32];
-             sprintf(tmp, "%lu ", (unsigned long)files[i].st.st_ino);
+             snprintf(tmp, sizeof(tmp), "%lu ", (unsigned long)files[i].st.st_ino);
              len += strlen(tmp);
         }
         if (config->show_blocks) len += 5;
@@ -240,7 +240,7 @@ void ls_print_list(file_info_t *files, int count, const ls_config_t *config) {
                     if (config->quote_names) len += 2;
                     if (config->inode) {
                         char tmp[32];
-                        sprintf(tmp, "%lu ", (unsigned long)files[idx].st.st_ino);
+                        snprintf(tmp, sizeof(tmp), "%lu ", (unsigned long)files[idx].st.st_ino);
                         len += strlen(tmp);
                     }
                     if (config->show_blocks) len += 5;
