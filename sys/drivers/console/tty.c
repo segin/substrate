@@ -616,62 +616,39 @@ int tty_write(struct tty *tty, const char *buf, int len) {
     return len;
 }
 
-int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
+int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
     if (!tty) return -1;
-
-    struct termios k_termios;
-    struct winsize k_winsize;
-    int k_int;
-    int (*driver_ioctl)(struct tty *, uint32_t, unsigned long) = NULL;
     int ret = -1;
-
-    /*
-     * Copy-in phase (unlocked)
-     * We must not hold spinlocks while accessing user memory via copyin/copyout.
-     */
-    switch (cmd) {
-        case TCSETS:
-        case TCSETSW:
-        case TCSETSF:
-            if (copyin((void*)arg, &k_termios, sizeof(struct termios)) != 0) return -EFAULT;
-            break;
-        case TIOCSWINSZ:
-            if (copyin((void*)arg, &k_winsize, sizeof(struct winsize)) != 0) return -EFAULT;
-            break;
-        case TIOCSPGRP:
-            if (copyin((void*)arg, &k_int, sizeof(int)) != 0) return -EFAULT;
-            break;
-    }
 
     TTY_LOCK(tty);
 
     switch (cmd) {
         case TCGETS:
-            k_termios = tty->termios;
+            if (arg) *(struct termios*)arg = tty->termios;
             ret = 0;
             break;
         case TCSETS:
         case TCSETSW:
         case TCSETSF:
-            tty->termios = k_termios;
+            if (arg) tty->termios = *(struct termios*)arg;
             if (tty->driver->set_termios) tty->driver->set_termios(tty);
             ret = 0;
             break;
         case TIOCGWINSZ:
-            k_winsize = tty->winsize;
+            if (arg) *(struct winsize*)arg = tty->winsize;
             ret = 0;
             break;
         case TIOCSWINSZ:
-            tty->winsize = k_winsize;
+            if (arg) tty->winsize = *(struct winsize*)arg;
             if (tty->pgrp > 0) signal_send_group(tty->pgrp, SIGWINCH);
             ret = 0;
             break;
         case TIOCSPGRP:
-            tty->pgrp = k_int;
+            if (arg) tty->pgrp = *(int*)arg;
             ret = 0;
             break;
         case TIOCGPGRP:
-            k_int = tty->pgrp;
+            if (arg) *(int*)arg = tty->pgrp;
             ret = 0;
             break;
         case TIOCSCTTY: {
@@ -724,20 +701,68 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         }
     }
 
-    /*
-     * Call driver ioctl if not handled.
-     * We unlock before calling the driver to allow it to copyin/copyout safely.
-     * The driver is responsible for its own locking if it needs to access tty internals.
-     */
-    if (ret == -1 && tty->driver && tty->driver->ioctl) {
-        driver_ioctl = tty->driver->ioctl;
-    }
-
     TTY_UNLOCK(tty);
 
-    if (driver_ioctl) {
-        ret = driver_ioctl(tty, cmd, arg);
+    /*
+     * Call driver ioctl if not handled.
+     * We unlock before calling driver ioctl to allow it to sleep/copyin safely.
+     * We assume tty pointer remains valid (held by open file reference).
+     */
+    if (ret == -1 && tty->driver->ioctl) {
+        ret = tty->driver->ioctl(tty, cmd, (unsigned long)arg);
     }
+
+    return ret;
+}
+
+int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
+    if (!tty) return -1;
+
+    struct termios k_termios;
+    struct winsize k_winsize;
+    int k_int;
+    uintptr_t karg = 0;
+
+    /*
+     * Copy-in phase (unlocked)
+     * We copy user data to kernel stack buffers.
+     */
+    switch (cmd) {
+        case TCSETS:
+        case TCSETSW:
+        case TCSETSF:
+            if (copyin((void*)arg, &k_termios, sizeof(struct termios)) != 0) return -EFAULT;
+            karg = (uintptr_t)&k_termios;
+            break;
+        case TIOCSWINSZ:
+            if (copyin((void*)arg, &k_winsize, sizeof(struct winsize)) != 0) return -EFAULT;
+            karg = (uintptr_t)&k_winsize;
+            break;
+        case TIOCSPGRP:
+            if (copyin((void*)arg, &k_int, sizeof(int)) != 0) return -EFAULT;
+            karg = (uintptr_t)&k_int;
+            break;
+        case TCGETS:
+            karg = (uintptr_t)&k_termios;
+            break;
+        case TIOCGWINSZ:
+            karg = (uintptr_t)&k_winsize;
+            break;
+        case TIOCGPGRP:
+            karg = (uintptr_t)&k_int;
+            break;
+        case TIOCSCTTY:
+            karg = (uintptr_t)arg; // Value passed directly
+            break;
+        case TIOCNOTTY:
+            karg = 0;
+            break;
+        default:
+            karg = (uintptr_t)arg; // Pass user pointer directly for driver ioctls
+            break;
+    }
+
+    int ret = tty_ioctl_kern(tty, cmd, karg);
 
     /* Copy-out phase (unlocked) */
     if (ret == 0) {
