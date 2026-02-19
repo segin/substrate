@@ -66,6 +66,10 @@ void run_kernel_tests(void) {
         run_kobject_tests();
     }
 
+    if (all || strcmp(test_arg, "tty") == 0) {
+        run_tty_tests();
+    }
+
     if (all || strcmp(test_arg, "pmap") == 0) {
         run_pmap_tests();
     }
