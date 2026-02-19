@@ -3,7 +3,7 @@ include ../../Makefile.inc
 CFLAGS := $(CFLAGS) -I../../include -I../../sys/include
 LDFLAGS := $(USER_LDFLAGS)
 
-SRCS = src/compile.c src/exec.c src/util.c src/engine_safe.c \
+SRCS = src/compile.c src/exec.c src/util.c src/engine_posix.c src/engine_safe.c \
        src/engine_pcre2_adapter.c src/engine_re2_adapter.c
 
 OBJS = $(SRCS:.c=.o)
@@ -30,6 +30,10 @@ endif
 
 ifeq ($(USE_ICU),1)
 CFLAGS += -DREGEX_USE_ICU
+endif
+
+ifdef NATIVE_BUILD
+CFLAGS += -DREGEX_USE_HOST_POSIX
 endif
 
 .PHONY: all clean install

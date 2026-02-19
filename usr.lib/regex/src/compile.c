@@ -58,9 +58,17 @@ regex_t *regex_compile(const char *pattern, unsigned flags, regex_err_t *out_err
             err = REGEX_ERR_UNSUPPORTED;
             goto fail;
         }
+    } else if (flags & REGEX_FLAG_SAFE_ENGINE) {
+        engine = regex_engine_safe_vtable();
     } else if (!(flags & REGEX_FLAG_SAFE_ENGINE)) {
+        engine = regex_engine_posix_vtable();
+        if (!engine) {
+            engine = regex_engine_safe_vtable();
+        }
 #ifdef REGEX_DEFAULT_ENGINE_RE2
-        engine = regex_engine_re2_vtable();
+        if (!engine) {
+            engine = regex_engine_re2_vtable();
+        }
 #endif
     }
 

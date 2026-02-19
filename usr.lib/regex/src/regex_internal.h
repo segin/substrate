@@ -47,6 +47,7 @@ struct regex_engine_vtable {
 };
 
 regex_err_t regex_engine_safe_init(regex_t *re, const char *pattern, unsigned flags);
+const regex_engine_vtable *regex_engine_posix_vtable(void);
 const regex_engine_vtable *regex_engine_safe_vtable(void);
 
 const regex_engine_vtable *regex_engine_pcre2_vtable(void);

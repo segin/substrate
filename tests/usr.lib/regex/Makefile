@@ -1,8 +1,8 @@
 CC ?= cc
 CFLAGS ?= -O2 -Wall -Wextra -g
 
-INCLUDES = -I../../include -I../../sys/include
-LIBREGEX = ../../usr.lib/regex/libregex.a
+INCLUDES = -I../../../include -I../../../sys/include
+LIBREGEX = ../../../usr.lib/regex/libregex.a
 
 SRCS = test_main.c \
        unit/test_api.c \
@@ -21,7 +21,7 @@ test_regex: $(OBJS) $(LIBREGEX)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $(OBJS) $(LIBREGEX)
 
 $(LIBREGEX):
-	$(MAKE) -C ../../usr.lib/regex
+	$(MAKE) -C ../../../usr.lib/regex NATIVE_BUILD=1
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
