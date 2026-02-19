@@ -5,9 +5,10 @@
 #include <errno.h>
 #include <kern/console.h>
 #include <include/sys/proc.h>
-#include "idt.h" 
-#include "pmap.h"
-#include <arch/i386/pmap.h> 
+#include <arch/i386/idt.h> 
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmap.h>
+#include "vm86.h" 
 
 // Access to current process/thread
 extern struct process *current_process;
@@ -34,6 +35,8 @@ struct vm86_monitor {
     int signal_pending;     /* Signal monitor for unhandled opcode */
     uint32_t fault_eip;     /* EIP of faulting instruction */
     uint32_t fault_opcode;  /* Opcode that triggered fault */
+
+    struct vm86_regs *out_regs; /* Output registers for kernel BIOS calls */
 };
 
 /* Per-process VM86 monitor (NULL if not using VM86) */
@@ -56,6 +59,7 @@ void vm86_monitor_init(struct vm86_monitor *mon) {
     mon->signal_pending = 0;
     mon->fault_eip = 0;
     mon->fault_opcode = 0;
+    mon->out_regs = NULL;
     
     current_vm86_monitor = mon;
 }
@@ -242,6 +246,33 @@ void vm86_gpf_handler(registers_t *regs) {
              
              current_vm86_monitor->in_vm86 = 0;
              current_vm86_monitor->req_exit = 1;
+
+             if (current_vm86_monitor->out_regs) {
+                 struct vm86_regs *out = current_vm86_monitor->out_regs;
+                 out->eax = regs->eax;
+                 out->ebx = regs->ebx;
+                 out->ecx = regs->ecx;
+                 out->edx = regs->edx;
+                 out->esi = regs->esi;
+                 out->edi = regs->edi;
+                 out->ebp = regs->ebp;
+                 out->esp = regs->useresp;
+                 out->eip = regs->eip;
+                 out->cs  = (unsigned short)regs->cs;
+                 out->eflags = regs->eflags;
+                 out->ss = (unsigned short)regs->ss;
+
+                 /*
+                  * VM86 segments (ES, DS, FS, GS) are pushed by CPU after SS/ESP
+                  * on the exception stack. They are located immediately above SS.
+                  * Layout (High to Low): GS, FS, DS, ES, SS, ESP...
+                  */
+                 uint32_t *ext_stack = (uint32_t *)&regs->ss;
+                 out->es = (unsigned short)ext_stack[1];
+                 out->ds = (unsigned short)ext_stack[2];
+                 out->fs = (unsigned short)ext_stack[3];
+                 out->gs = (unsigned short)ext_stack[4];
+             }
              
              /* We advance EIP to skip HLT, but we want to STOP. */
              /* Let's just return and let the monitor loop catch it? */
@@ -291,6 +322,7 @@ int vm86_bios_call(int int_no, struct vm86_regs *regs) {
     struct vm86_monitor mon;
     vm86_monitor_init(&mon);
     mon.in_kernel_bios = 1;
+    mon.out_regs = regs;
     
     /* 3. Setup VM86 Struct */
     struct vm86_struct info;
@@ -318,13 +350,10 @@ int vm86_bios_call(int int_no, struct vm86_regs *regs) {
     sys_vm86(&info);
     
     /* 6. Copy back registers */
-    /* We need to capture the registers from the monitor/state? */
-    /* Validating how we get output regs... */
-    /* The trampoline restores registers popped from stack. */
-    /* But we need the values from the VM86 end state. */
-    /* The `registers_t` passed to handler has them. */
-    /* We should copy them to `regs` in the handler before exiting. */
-    /* TODO: Optimize later. For now, assume we just run it. */
+    /*
+     * The registers are copied back to `regs` in vm86_gpf_handler
+     * when the HLT opcode is encountered.
+     */
     
     return 0;
 }

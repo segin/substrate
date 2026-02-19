@@ -16,7 +16,7 @@ process_t *current_process = NULL;
 process_t *kernel_process = NULL;
 static int next_pid = 1;
 static spinlock_t pid_lock;
-extern thread_t threads[MAX_THREADS];
+
 
 /*
  * proctree_lock - Protects the process tree structure

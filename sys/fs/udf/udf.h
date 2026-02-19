@@ -313,6 +313,15 @@ struct udf_efe {
 } __attribute__((packed));
 
 /*
+ * Allocation Extended Descriptor (ECMA-167 4/14.5)
+ */
+struct udf_aed {
+    struct udf_tag tag;
+    uint32_t prev_aed_loc;      /* Previous AED location */
+    uint32_t alloc_desc_length; /* Length of ADs in this AED */
+} __attribute__((packed));
+
+/*
  * File Identifier Descriptor (ECMA-167 4/14.4) - Directory entry
  */
 struct udf_fid {
