@@ -247,6 +247,11 @@ void run_kernel_tests(void) {
         run_ldt_tests();
     }
 
+    if (all || strcmp(test_arg, "printf_specifiers") == 0) {
+         extern void run_printf_specifier_tests(void);
+         run_printf_specifier_tests();
+    }
+
     if (strcmp(test_arg, "benchmark") == 0) {
          extern void run_vm_map_benchmark(void);
          run_vm_map_benchmark();
