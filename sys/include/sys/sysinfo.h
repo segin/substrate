@@ -1,5 +1,5 @@
-#ifndef _SYS_SYSINFO_H
-#define _SYS_SYSINFO_H
+#ifndef _SUBSTRATE_SYS_SYSINFO_H
+#define _SUBSTRATE_SYS_SYSINFO_H
 
 #include <stdint.h>
 #include <sys/types.h>
@@ -79,6 +79,6 @@ typedef struct sys_vmstat {
 
 #ifndef _KERNEL
 int sysinfo(struct sysinfo *info);
-#endif
+#endif // _SUBSTRATE_SYS_SYSINFO_H
 
 #endif
