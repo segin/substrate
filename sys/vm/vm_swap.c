@@ -17,8 +17,7 @@ static uint32_t swap_bitmap[MAX_SWAP_PAGES / 32];
 static uint32_t swap_num_pages = 0;
 // Real implementation would have a list of swap devices/files
 
-// TODO: Manual initialization due to missing SPINLOCK_INIT
-static spinlock_t swap_lock = { 0, 0xFFFFFFFF, "swap_lock" };
+static spinlock_t swap_lock = SPINLOCK_INIT("swap_lock");
 
 typedef struct swap_pager {
     vm_pager_t base;
