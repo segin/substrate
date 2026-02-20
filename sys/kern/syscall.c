@@ -1276,14 +1276,29 @@ int sys_nanosleep(void *req, void *rem) {
     // Calculate duration in ticks
     // We use ceiling division for nanoseconds to ensure we sleep AT LEAST the requested time
     // ticks = sec*HZ + ceil(nsec*HZ / 10^9)
-    uint64_t ticks = (uint64_t)kreq.tv_sec * hz;
-    ticks += ((uint64_t)kreq.tv_nsec * hz + 999999999) / 1000000000;
+    uint64_t ticks;
+    if ((uint64_t)kreq.tv_sec > UINT64_MAX / hz) {
+        ticks = UINT64_MAX;
+    } else {
+        ticks = (uint64_t)kreq.tv_sec * hz;
+        uint64_t nsec_ticks = ((uint64_t)kreq.tv_nsec * hz + 999999999) / 1000000000;
+        if (UINT64_MAX - ticks < nsec_ticks) {
+            ticks = UINT64_MAX;
+        } else {
+            ticks += nsec_ticks;
+        }
+    }
 
     // Ensure at least 1 tick if request was > 0 (handled by ceiling above usually,
     // unless hz is very small or nsec is very small. If nsec=1, hz=100 -> ticks=1)
 
     uint64_t now = get_ticks();
-    uint64_t deadline = now + ticks;
+    uint64_t deadline;
+    if (ticks > UINT64_MAX - now) {
+        deadline = UINT64_MAX;
+    } else {
+        deadline = now + ticks;
+    }
 
     current_thread->flags |= THREAD_F_INTERRUPTIBLE;
     int ret = sched_sleep_until(&current_thread->sig_pending, deadline);
