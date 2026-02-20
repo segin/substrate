@@ -32,8 +32,7 @@
 #define arc4random_uniform tested_arc4random_uniform
 
 // Include the source file directly.
-// Assuming this is compiled from the repository root with -Itests/lib/c
-#include "lib/c/src/stdlib.c"
+#include "../../../lib/c/src/stdlib.c"
 
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "--verify-determinism") == 0) {
