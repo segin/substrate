@@ -2,6 +2,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <stddef.h>
+#include <stdio.h>
 #include "tests.h"
 
 // Externs from sys/pm/wait.c
@@ -20,11 +21,15 @@ extern void kprint(const char *msg);
 } while(0)
 
 
+#include <sys/session.h>
+
 // Mocks
 static process_t mock_parent;
 static process_t mock_child1;
 static process_t mock_child2;
 static process_t mock_child3;
+static struct pgrp mock_pg1;
+static struct pgrp mock_pg2;
 
 // Test globals
 static int sched_sleep_calls = 0;
@@ -49,18 +54,21 @@ void sched_sleep(void *chan) {
 
 // Helper to reset mocks
 void setup_mocks(void) {
-    mock_parent.pid = 100; mock_parent.pgrp = 100;
+    mock_pg1.pg_id = 100;
+    mock_pg2.pg_id = 200;
+
+    mock_parent.pid = 100; mock_parent.p_pgrp = &mock_pg1;
     
     // Child 1: Zombie, Group 100, Exit 10
-    mock_child1.pid = 101; mock_child1.pgrp = 100; mock_child1.state = SZOMB; 
+    mock_child1.pid = 101; mock_child1.p_pgrp = &mock_pg1; mock_child1.state = SZOMB;
     mock_child1.p_sibling = &mock_child2; mock_child1.p_parent = &mock_parent; mock_child1.exit_code = 10;
     
     // Child 2: Running, Group 100, Exit 0 (will change)
-    mock_child2.pid = 102; mock_child2.pgrp = 100; mock_child2.state = SRUN; 
+    mock_child2.pid = 102; mock_child2.p_pgrp = &mock_pg1; mock_child2.state = SRUN;
     mock_child2.p_sibling = &mock_child3; mock_child2.p_parent = &mock_parent; mock_child2.exit_code = 0;
 
     // Child 3: Zombie, Group 200, Exit 20
-    mock_child3.pid = 103; mock_child3.pgrp = 200; mock_child3.state = SZOMB; 
+    mock_child3.pid = 103; mock_child3.p_pgrp = &mock_pg2; mock_child3.state = SZOMB;
     mock_child3.p_sibling = NULL; mock_child3.p_parent = &mock_parent; mock_child3.exit_code = 20;
 
     mock_parent.p_children = &mock_child1;

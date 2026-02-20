@@ -1172,33 +1172,7 @@ int sys_waitpid(int pid, int *status, int options) {
 }
 
 int kern_waitpid(int pid, int *status, int options) {
-    (void)options;
-    while (1) {
-        bool found = false;
-        for (int i = 0; i < 16; i++) {
-            if (processes[i].pid == -1) continue;
-            if (processes[i].ppid != current_process->pid) continue;
-            if (pid != -1 && processes[i].pid != pid) continue;
-            found = true;
-            bool all_zombies = true;
-            for (int j = 0; j < 64; j++) {
-                if (threads[j].proc == &processes[i] && threads[j].tid != -1) {
-                    if (threads[j].state != THREAD_ZOMBIE) {
-                        all_zombies = false;
-                        break;
-                    }
-                }
-            }
-            if (all_zombies) {
-                if (status) *status = processes[i].exit_code;
-                int child_pid = processes[i].pid;
-                processes[i].pid = -1;
-                return child_pid;
-            }
-        }
-        if (!found) return -1;
-        sched_sleep(&current_process->pid);
-    }
+    return kern_wait4(pid, status, options, NULL);
 }
 
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }

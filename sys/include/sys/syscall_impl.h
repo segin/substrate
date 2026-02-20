@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <sys/resource.h>
 
 /* Process management */
 extern int sys_exit(int);
@@ -18,6 +19,7 @@ extern int sys_fork(void);
 extern int sys_vfork(void);
 extern int sys_execve(const char*, char**, char**);
 extern int sys_waitpid(int, int*, int);
+extern int sys_wait4(pid_t, int*, int, struct rusage*);
 extern int sys_getpid(void);
 extern int sys_getppid(void);
 extern int sys_setsid(void);

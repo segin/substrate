@@ -51,6 +51,8 @@ int kern_link(const char *oldpath, const char *newpath);
 int kern_readlink(const char *pathname, char *buf, size_t bufsiz);
 int kern_access(const char *path, int mode);
 int kern_pipe(int *fds);
+struct rusage;
+int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 int kern_waitpid(int pid, int *status, int options);
 int kern_execve(const char *f, char *const a[], char *const e[]);
 int kern_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data);

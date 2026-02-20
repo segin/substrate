@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <kern/sched.h> // for sched_sleep
 #include <pm/pm.h>
+#include <sys/kern_syscalls.h>
 
 /*
  * find_waitable_child: Search for a child matching the wait criteria.
@@ -85,7 +86,7 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
 }
 
 
-int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
+int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
     process_t *cur = current_process;
     process_t *target = NULL;
     int any_exists = 0;
@@ -180,4 +181,17 @@ int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
         // current_process->p_children address is unique to this process
         sched_sleep(&cur->p_children);
     }
+}
+
+int sys_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
+    int kstatus = 0;
+    struct rusage krusage;
+    int ret = kern_wait4(pid, status ? &kstatus : NULL, options, rusage ? &krusage : NULL);
+
+    if (ret >= 0) {
+        if (status && copyout(&kstatus, status, sizeof(int)) != 0) return -EFAULT;
+        if (rusage && copyout(&krusage, rusage, sizeof(struct rusage)) != 0) return -EFAULT;
+    }
+
+    return ret;
 }
