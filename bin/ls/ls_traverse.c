@@ -117,9 +117,14 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
              return;
         }
         
-        size_t len = strlen(path) + strlen(ent->d_name) + 2;
-        files[count].full_path = malloc(len);
-        if (!files[count].full_path) {
+        int ret;
+        if (strcmp(path, ".") == 0 || strcmp(path, "/") == 0) {
+             ret = asprintf(&files[count].full_path, "%s%s", (strcmp(path, "/")==0) ? "/" : "", ent->d_name);
+        } else {
+             ret = asprintf(&files[count].full_path, "%s/%s", path, ent->d_name);
+        }
+
+        if (ret == -1) {
              fprintf(stderr, "ls: out of memory\n");
              free(files[count].name);
              for (int i = 0; i < count; i++) {
@@ -129,12 +134,6 @@ static void list_single_dir(const char *path, const ls_config_t *config) {
              free(files);
              closedir(d);
              return;
-        }
-
-        if (strcmp(path, ".") == 0 || strcmp(path, "/") == 0) {
-             snprintf(files[count].full_path, len, "%s%s", (strcmp(path, "/")==0) ? "/" : "", ent->d_name);
-        } else {
-             snprintf(files[count].full_path, len, "%s/%s", path, ent->d_name);
         }
         
         // -L: follow symlinks when statting
