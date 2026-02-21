@@ -142,15 +142,6 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     return 0;
 }
 
-static int var_set(var_entry_t *vars, size_t var_count, const char *name, int depth, int value) {
-    int idx = var_find_visible(vars, var_count, name, depth);
-    if (idx < 0) {
-        return -1;
-    }
-    vars[idx].value = value;
-    return 0;
-}
-
 static const cc_function_t *find_fn(const cc_translation_unit_t *tu, const char *name) {
     size_t i;
     for (i = 0; i < tu->func_count; ++i) {
@@ -381,10 +372,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         if (rhs < 0) {
             return -1;
         }
-        if (var_set(vars, var_count, e->ident, depth, rhs) != 0) {
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_MOV;
+        in.dst = vars[idx].value;
+        in.lhs = rhs;
+        in.rhs = -1;
+        if (push_instr(sf, in) != 0) {
+            set_diag(diag, "out of memory appending assignment move");
             return -1;
         }
-        return rhs;
+        return vars[idx].value;
     }
 
     default:
@@ -427,12 +424,24 @@ static int emit_br_cond_instr(cc_ssa_function_t *sf, int cond, int label_true, i
     return push_instr(sf, in);
 }
 
+static int emit_mov_instr(cc_ssa_function_t *sf, int dst, int src) {
+    cc_ssa_instr_t in;
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_MOV;
+    in.dst = dst;
+    in.lhs = src;
+    in.rhs = -1;
+    return push_instr(sf, in);
+}
+
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
-                      int depth, const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag) {
+                      int depth, int break_label, int continue_label, const cc_stmt_t *s, int *saw_ret,
+                      cc_diag_t *diag) {
     size_t j;
 
     if (s->kind == CC_STMT_DECL) {
         int v;
+        int varv;
         if (s->expr != NULL) {
             v = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
             if (v < 0) {
@@ -442,22 +451,35 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (v < 0) {
                 return -1;
             }
+            varv = new_value(sf, type_to_val(s->type));
+            if (varv < 0) {
+                set_diag(diag, "out of memory allocating local variable value");
+                return -1;
+            }
+            if (emit_mov_instr(sf, varv, v) != 0) {
+                set_diag(diag, "out of memory appending declaration move");
+                return -1;
+            }
         } else {
             cc_ssa_instr_t in;
+            varv = new_value(sf, type_to_val(s->type));
+            if (varv < 0) {
+                set_diag(diag, "out of memory allocating local variable value");
+                return -1;
+            }
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_CONST;
-            in.dst = new_value(sf, type_to_val(s->type));
+            in.dst = varv;
             in.lhs = -1;
             in.rhs = -1;
             in.imm = 0;
             in.fimm = 0.0;
-            if (in.dst < 0 || push_instr(sf, in) != 0) {
+            if (push_instr(sf, in) != 0) {
                 set_diag(diag, "out of memory appending declaration default const");
                 return -1;
             }
-            v = in.dst;
         }
-        if (var_define(vars, var_count, s->decl_name, s->type, v, depth) != 0) {
+        if (var_define(vars, var_count, s->decl_name, s->type, varv, depth) != 0) {
             set_diag(diag, "out of memory defining local variable");
             return -1;
         }
@@ -523,7 +545,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, depth, s->then_branch, saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, depth, break_label, continue_label, s->then_branch, saw_ret,
+                           diag) != 0) {
                 return -1;
             }
             while (*var_count > saved) {
@@ -541,7 +564,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             {
                 size_t saved = *var_count;
-                if (lower_stmt(tu, sf, vars, var_count, depth, s->else_branch, saw_ret, diag) != 0) {
+                if (lower_stmt(tu, sf, vars, var_count, depth, break_label, continue_label, s->else_branch, saw_ret,
+                               diag) != 0) {
                     return -1;
                 }
                 while (*var_count > saved) {
@@ -560,10 +584,129 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         return 0;
     }
 
+    if (s->kind == CC_STMT_WHILE) {
+        int l_cond = new_label(sf);
+        int l_body = new_label(sf);
+        int l_end = new_label(sf);
+        int cond;
+
+        if (emit_label_instr(sf, l_cond) != 0) {
+            return -1;
+        }
+        cond = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+        if (cond < 0) {
+            return -1;
+        }
+        cond = cast_value(sf, cond, CC_VAL_I64, diag);
+        if (cond < 0) {
+            return -1;
+        }
+        if (emit_br_cond_instr(sf, cond, l_body, l_end) != 0) {
+            return -1;
+        }
+        if (emit_label_instr(sf, l_body) != 0) {
+            return -1;
+        }
+        {
+            size_t saved = *var_count;
+            if (lower_stmt(tu, sf, vars, var_count, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
+                return -1;
+            }
+            while (*var_count > saved) {
+                (*var_count)--;
+                free((*vars)[*var_count].name);
+            }
+        }
+        if (emit_br_instr(sf, l_cond) != 0) {
+            return -1;
+        }
+        if (emit_label_instr(sf, l_end) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (s->kind == CC_STMT_FOR) {
+        int l_cond = new_label(sf);
+        int l_body = new_label(sf);
+        int l_post = new_label(sf);
+        int l_end = new_label(sf);
+
+        if (s->init_expr != NULL && lower_expr(tu, sf, *vars, *var_count, depth, s->init_expr, diag) < 0) {
+            return -1;
+        }
+        if (emit_label_instr(sf, l_cond) != 0) {
+            return -1;
+        }
+        if (s->expr != NULL) {
+            int cond = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+            if (cond < 0) {
+                return -1;
+            }
+            cond = cast_value(sf, cond, CC_VAL_I64, diag);
+            if (cond < 0) {
+                return -1;
+            }
+            if (emit_br_cond_instr(sf, cond, l_body, l_end) != 0) {
+                return -1;
+            }
+        } else {
+            if (emit_br_instr(sf, l_body) != 0) {
+                return -1;
+            }
+        }
+        if (emit_label_instr(sf, l_body) != 0) {
+            return -1;
+        }
+        {
+            size_t saved = *var_count;
+            if (lower_stmt(tu, sf, vars, var_count, depth, l_end, l_post, s->then_branch, saw_ret, diag) != 0) {
+                return -1;
+            }
+            while (*var_count > saved) {
+                (*var_count)--;
+                free((*vars)[*var_count].name);
+            }
+        }
+        if (emit_br_instr(sf, l_post) != 0) {
+            return -1;
+        }
+        if (emit_label_instr(sf, l_post) != 0) {
+            return -1;
+        }
+        if (s->post_expr != NULL && lower_expr(tu, sf, *vars, *var_count, depth, s->post_expr, diag) < 0) {
+            return -1;
+        }
+        if (emit_br_instr(sf, l_cond) != 0) {
+            return -1;
+        }
+        if (emit_label_instr(sf, l_end) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (s->kind == CC_STMT_BREAK) {
+        if (break_label < 0) {
+            set_diag(diag, "break used outside loop in lowering");
+            return -1;
+        }
+        return emit_br_instr(sf, break_label);
+    }
+
+    if (s->kind == CC_STMT_CONTINUE) {
+        if (continue_label < 0) {
+            set_diag(diag, "continue used outside loop in lowering");
+            return -1;
+        }
+        return emit_br_instr(sf, continue_label);
+    }
+
     if (s->kind == CC_STMT_BLOCK) {
         size_t saved = *var_count;
         for (j = 0; j < s->block_count; ++j) {
-            if (lower_stmt(tu, sf, vars, var_count, depth + 1, &s->block_stmts[j], saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, depth + 1, break_label, continue_label, &s->block_stmts[j],
+                           saw_ret, diag) != 0) {
                 return -1;
             }
         }
@@ -695,7 +838,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
 
         for (j = 0; j < af->stmt_count; ++j) {
-            if (lower_stmt(tu, sf, &vars, &var_count, 0, &af->stmts[j], &saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, &vars, &var_count, 0, -1, -1, &af->stmts[j], &saw_ret, diag) != 0) {
                 cc_ssa_module_free(out);
                 return -1;
             }

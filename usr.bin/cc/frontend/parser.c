@@ -22,6 +22,10 @@ typedef enum {
     TOK_KW_RETURN,
     TOK_KW_IF,
     TOK_KW_ELSE,
+    TOK_KW_WHILE,
+    TOK_KW_FOR,
+    TOK_KW_BREAK,
+    TOK_KW_CONTINUE,
     TOK_ELLIPSIS,
     TOK_LPAREN,
     TOK_RPAREN,
@@ -142,6 +146,8 @@ static void free_stmt(cc_stmt_t *s) {
     }
     free(s->decl_name);
     free_expr(s->expr);
+    free_expr(s->init_expr);
+    free_expr(s->post_expr);
     if (s->then_branch != NULL) {
         free_stmt(s->then_branch);
         free(s->then_branch);
@@ -568,6 +574,92 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
             }
         }
         return 0;
+    }
+
+    if (p->tok.kind == TOK_KW_WHILE) {
+        s->kind = CC_STMT_WHILE;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (expect(p, TOK_LPAREN, "expected '(' after while") != 0) {
+            return -1;
+        }
+        s->expr = parse_expr(p);
+        if (s->expr == NULL) {
+            return -1;
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' after while condition") != 0) {
+            return -1;
+        }
+        s->then_branch = (cc_stmt_t *)calloc(1, sizeof(*s->then_branch));
+        if (s->then_branch == NULL) {
+            return -1;
+        }
+        if (parse_stmt(p, s->then_branch) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (p->tok.kind == TOK_KW_FOR) {
+        s->kind = CC_STMT_FOR;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (expect(p, TOK_LPAREN, "expected '(' after for") != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_SEMI) {
+            s->init_expr = parse_expr(p);
+            if (s->init_expr == NULL) {
+                return -1;
+            }
+        }
+        if (expect(p, TOK_SEMI, "expected ';' after for-init") != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_SEMI) {
+            s->expr = parse_expr(p);
+            if (s->expr == NULL) {
+                return -1;
+            }
+        }
+        if (expect(p, TOK_SEMI, "expected ';' after for-condition") != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_RPAREN) {
+            s->post_expr = parse_expr(p);
+            if (s->post_expr == NULL) {
+                return -1;
+            }
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' after for clauses") != 0) {
+            return -1;
+        }
+        s->then_branch = (cc_stmt_t *)calloc(1, sizeof(*s->then_branch));
+        if (s->then_branch == NULL) {
+            return -1;
+        }
+        if (parse_stmt(p, s->then_branch) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (p->tok.kind == TOK_KW_BREAK) {
+        s->kind = CC_STMT_BREAK;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        return expect(p, TOK_SEMI, "expected ';' after break");
+    }
+
+    if (p->tok.kind == TOK_KW_CONTINUE) {
+        s->kind = CC_STMT_CONTINUE;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        return expect(p, TOK_SEMI, "expected ';' after continue");
     }
 
     if (p->tok.kind == TOK_KW_INT || p->tok.kind == TOK_KW_DOUBLE) {

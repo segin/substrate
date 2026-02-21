@@ -222,17 +222,17 @@ These components are essential for booting and basic system operation.
   - explicit temporary `--bootstrap-gcc` path for C->assembly fallback
 - **Native C Subset Pipeline:** In-tree compile path now exists for a strict subset:
   - `frontend/lexer.c` + `frontend/parser.c` parse scalar `int`/`double`/`void` functions with declarations, assignments, calls, and returns
-  - phase-5 parser/sema extension: `if/else` statements, block statements, and integer comparison operators
-  - `frontend/sema.c` resolves parameters/locals and validates subset constraints
-  - `middle/ast2ir.c` lowers AST to SSA-like instructions (`param`, `const`, arithmetic, comparisons, typed casts, labels/branches, `call`, `ret`)
+  - phase-6 parser/sema extension: `if/else`, block statements, `while`, `for`, `break`, `continue`, and integer comparison operators
+  - `frontend/sema.c` resolves parameters/locals, validates loop-context rules (`break`/`continue`), and validates subset constraints
+  - `middle/ast2ir.c` lowers AST to SSA-like instructions (`param`, `const`, `mov`, arithmetic, comparisons, typed casts, labels/branches, `call`, `ret`)
   - `middle/passes/opt.c` provides phase-3 optimization passes (constant folding + dead temporary elimination) at `-O1+`
   - `backend/emit_s.c` emits:
     - SysV AMD64 GAS assembly with stack-frame/value-slot lowering, integer/SSE2 scalar ops, variadic call `%al` metadata, and register+stack argument ABI mapping
     - i386 cdecl ABI lowering (`.code32`) for integer and double subset
   - phase-4 backend tuning adds stack-slot reuse (live-range based slot recycling) to reduce per-function frame footprint for both x86_64 and i386 emission.
-  - phase-5 safety rule: assignments within conditional blocks are currently rejected pending phi/merge-aware variable modeling.
+  - phase-6 assignment modeling updates mutable locals through explicit `mov` writes to variable value slots, enabling assignments inside branches/loops without phi nodes.
 - **Verifier Coverage:** Existing SSA verifier enforces block terminators, phi placement/arity, unique defs, use-before-def, and dominance checks.
-- **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases, variadic calls, `if/else` branching, optimization behavior, `-m32` ELF32 object generation including `double`, and stack-slot pressure/frame-size regressions), staged assembly/linking, and bootstrap fallback behavior.
+- **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases, variadic calls, `if/else`/loop branching, `break`/`continue` validation, optimization behavior, `-m32` ELF32 object generation including `double`, and stack-slot pressure/frame-size regressions), staged assembly/linking, and bootstrap fallback behavior.
 - **Integration Path:** Expand native subset toward full C99 while preserving current driver UX and `-emit-ssa` observability; keep bootstrap mode only as temporary compatibility path.
 
 ## `usr.lib/elf`

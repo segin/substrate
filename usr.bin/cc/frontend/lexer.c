@@ -20,6 +20,10 @@ typedef enum {
     TOK_KW_RETURN,
     TOK_KW_IF,
     TOK_KW_ELSE,
+    TOK_KW_WHILE,
+    TOK_KW_FOR,
+    TOK_KW_BREAK,
+    TOK_KW_CONTINUE,
     TOK_ELLIPSIS,
     TOK_LPAREN,
     TOK_RPAREN,
@@ -182,6 +186,18 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         } else if (out->len == 4 && out->start[0] == 'e' && out->start[1] == 'l' &&
                    out->start[2] == 's' && out->start[3] == 'e') {
             out->kind = TOK_KW_ELSE;
+        } else if (out->len == 5 && out->start[0] == 'w' && out->start[1] == 'h' &&
+                   out->start[2] == 'i' && out->start[3] == 'l' && out->start[4] == 'e') {
+            out->kind = TOK_KW_WHILE;
+        } else if (out->len == 3 && out->start[0] == 'f' && out->start[1] == 'o' && out->start[2] == 'r') {
+            out->kind = TOK_KW_FOR;
+        } else if (out->len == 5 && out->start[0] == 'b' && out->start[1] == 'r' &&
+                   out->start[2] == 'e' && out->start[3] == 'a' && out->start[4] == 'k') {
+            out->kind = TOK_KW_BREAK;
+        } else if (out->len == 8 && out->start[0] == 'c' && out->start[1] == 'o' &&
+                   out->start[2] == 'n' && out->start[3] == 't' && out->start[4] == 'i' &&
+                   out->start[5] == 'n' && out->start[6] == 'u' && out->start[7] == 'e') {
+            out->kind = TOK_KW_CONTINUE;
         } else {
             out->kind = TOK_IDENT;
         }

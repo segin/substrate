@@ -11,6 +11,13 @@ typedef struct {
     double f;
 } const_state_t;
 
+static void clear_known(const_state_t *st, int count) {
+    int i;
+    for (i = 0; i < count; ++i) {
+        st[i].known = 0;
+    }
+}
+
 static int fold_function(cc_ssa_function_t *f) {
     const_state_t *st;
     size_t i;
@@ -41,6 +48,14 @@ static int fold_function(cc_ssa_function_t *f) {
                 st[dst].type = vt;
                 st[dst].i = in->imm;
                 st[dst].f = in->fimm;
+            }
+            break;
+
+        case CC_SSA_MOV:
+            if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known) {
+                st[dst] = st[in->lhs];
+            } else if (dst >= 0) {
+                st[dst].known = 0;
             }
             break;
 
@@ -175,6 +190,15 @@ static int fold_function(cc_ssa_function_t *f) {
             break;
 
         case CC_SSA_LABEL:
+            /*
+             * The current IR stream is linearized and does not maintain
+             * per-block dataflow states. Clear known constants at labels so
+             * values from one predecessor path cannot be propagated across
+             * control-flow joins.
+             */
+            clear_known(st, f->value_count);
+            break;
+
         case CC_SSA_BR:
         case CC_SSA_BR_COND:
         case CC_SSA_RET:
@@ -205,6 +229,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     switch (in->op) {
     case CC_SSA_PARAM:
     case CC_SSA_CONST:
+    case CC_SSA_MOV:
     case CC_SSA_ADD:
     case CC_SSA_SUB:
     case CC_SSA_MUL:

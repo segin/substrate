@@ -57,3 +57,14 @@
   - branch-capable emission works on both x86_64 and i386 paths.
 - Current limitation:
   - assignments inside conditional blocks are rejected to avoid incorrect merge semantics before phi/memory-SSA support lands.
+
+## Phase 6
+- Loop control-flow subset enabled:
+  - frontend/parser/sema support `while`, `for`, `break`, and `continue`.
+  - `break`/`continue` outside loops now produce semantic errors.
+- Assignment merge safety improvement:
+  - variable assignments now lower to explicit `mov` updates on dedicated variable value slots, allowing assignments inside conditional/loop bodies without rejecting valid C.
+- Backend parity:
+  - x86_64 and i386 emitters both support `mov` SSA updates for integer and double values.
+- Optimizer safety:
+  - constant-propagation state is cleared at label boundaries to avoid incorrect cross-branch folding in linearized CFG streams.

@@ -800,7 +800,7 @@ int cc_main(int argc, char **argv) {
                     }
                     fprintf(stderr,
                             "cc: note: current native pipeline supports a strict subset "
-                            "(int/double functions, declarations, calls, if/else blocks, integer comparisons, and returns)\n");
+                            "(int/double functions, declarations, assignments/calls, if/else, while/for, break/continue, integer comparisons, and returns)\n");
                     goto out;
                 }
             }

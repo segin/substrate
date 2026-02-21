@@ -57,7 +57,11 @@ typedef enum {
     CC_STMT_EXPR,
     CC_STMT_RETURN,
     CC_STMT_IF,
-    CC_STMT_BLOCK
+    CC_STMT_BLOCK,
+    CC_STMT_WHILE,
+    CC_STMT_FOR,
+    CC_STMT_BREAK,
+    CC_STMT_CONTINUE
 } cc_stmt_kind_t;
 
 typedef struct cc_stmt cc_stmt_t;
@@ -67,6 +71,8 @@ struct cc_stmt {
     cc_stmt_kind_t kind;
     char *decl_name;
     cc_expr_t *expr;
+    cc_expr_t *init_expr;
+    cc_expr_t *post_expr;
     cc_stmt_t *then_branch;
     cc_stmt_t *else_branch;
     cc_stmt_t *block_stmts;

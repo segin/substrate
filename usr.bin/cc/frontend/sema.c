@@ -102,25 +102,6 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     return CC_TYPE_INT;
 }
 
-static int expr_has_assign(const cc_expr_t *e) {
-    size_t i;
-    if (e == NULL) {
-        return 0;
-    }
-    if (e->kind == CC_EXPR_ASSIGN) {
-        return 1;
-    }
-    if (expr_has_assign(e->lhs) || expr_has_assign(e->rhs)) {
-        return 1;
-    }
-    for (i = 0; i < e->arg_count; ++i) {
-        if (expr_has_assign(e->args[i])) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 static int is_cmp_op(cc_binop_t op) {
     return op == CC_BIN_EQ || op == CC_BIN_NE || op == CC_BIN_LT || op == CC_BIN_LE || op == CC_BIN_GT ||
            op == CC_BIN_GE;
@@ -246,7 +227,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 }
 
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int in_conditional, int *saw_return, cc_diag_t *diag) {
+                      cc_type_t fn_ret_type, int loop_depth, int *saw_return, cc_diag_t *diag) {
     size_t i;
 
     switch (s->kind) {
@@ -261,10 +242,6 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         if (s->expr != NULL) {
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (in_conditional && expr_has_assign(s->expr)) {
-                set_diag(diag, "assignments in conditional blocks are not yet supported");
                 return -1;
             }
             if (!can_convert(s->type, s->expr->value_type)) {
@@ -282,10 +259,6 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
-        if (in_conditional && expr_has_assign(s->expr)) {
-            set_diag(diag, "assignments in conditional blocks are not yet supported");
-            return -1;
-        }
         return 0;
 
     case CC_STMT_RETURN:
@@ -300,10 +273,6 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 return -1;
             }
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (in_conditional && expr_has_assign(s->expr)) {
-                set_diag(diag, "assignments in conditional blocks are not yet supported");
                 return -1;
             }
             if (!can_convert(fn_ret_type, s->expr->value_type)) {
@@ -328,7 +297,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         {
             size_t saved = *var_count;
-            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, 1, saw_return, diag) != 0) {
+            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth, saw_return, diag) != 0) {
                 return -1;
             }
             for (i = saved; i < *var_count; ++i) {
@@ -338,7 +307,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         if (s->else_branch != NULL) {
             size_t saved = *var_count;
-            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret_type, 1, saw_return, diag) != 0) {
+            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret_type, loop_depth, saw_return, diag) != 0) {
                 return -1;
             }
             for (i = saved; i < *var_count; ++i) {
@@ -352,7 +321,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         {
             size_t saved = *var_count;
             for (i = 0; i < s->block_count; ++i) {
-                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, depth + 1, fn_ret_type, in_conditional,
+                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, depth + 1, fn_ret_type, loop_depth,
                                saw_return, diag) != 0) {
                     return -1;
                 }
@@ -363,6 +332,56 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             *var_count = saved;
             return 0;
         }
+
+    case CC_STMT_WHILE:
+        if (s->expr == NULL || s->then_branch == NULL) {
+            set_diag(diag, "malformed while statement");
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (s->expr->value_type == CC_TYPE_VOID) {
+            set_diag(diag, "while condition cannot be void");
+            return -1;
+        }
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth + 1, saw_return, diag);
+
+    case CC_STMT_FOR:
+        if (s->then_branch == NULL) {
+            set_diag(diag, "malformed for statement");
+            return -1;
+        }
+        if (s->init_expr != NULL && check_expr(tu, s->init_expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (s->expr != NULL) {
+            if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (s->expr->value_type == CC_TYPE_VOID) {
+                set_diag(diag, "for condition cannot be void");
+                return -1;
+            }
+        }
+        if (s->post_expr != NULL && check_expr(tu, s->post_expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth + 1, saw_return, diag);
+
+    case CC_STMT_BREAK:
+        if (loop_depth <= 0) {
+            set_diag(diag, "break used outside loop");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_CONTINUE:
+        if (loop_depth <= 0) {
+            set_diag(diag, "continue used outside loop");
+            return -1;
+        }
+        return 0;
 
     default:
         set_diag(diag, "unsupported statement kind");

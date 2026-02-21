@@ -116,6 +116,7 @@ static void mark_use(int *last_use, int nvals, int v, int at) {
 static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *out, cc_diag_t *diag) {
     int nvals;
     int ninstr;
+    int has_cfg = 0;
     int *def_at;
     int *last_use;
     int *active_vals;
@@ -135,6 +136,32 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
 
     nvals = f->value_count;
     ninstr = (int)f->instr_count;
+
+    for (i = 0; i < ninstr; ++i) {
+        cc_ssa_opcode_t op = f->instrs[i].op;
+        if (op == CC_SSA_LABEL || op == CC_SSA_BR || op == CC_SSA_BR_COND) {
+            has_cfg = 1;
+            break;
+        }
+    }
+
+    /*
+     * Linear liveness/reuse is only sound for straight-line code. Once labels
+     * and branches are present, keep one slot per value id to preserve
+     * loop/back-edge semantics.
+     */
+    if (has_cfg) {
+        out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
+        if (out->slot_of == NULL) {
+            set_diag(diag, "out of memory building stack slot layout");
+            return -1;
+        }
+        for (i = 0; i < nvals; ++i) {
+            out->slot_of[i] = i;
+        }
+        out->slot_count = nvals;
+        return 0;
+    }
 
     out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
     def_at = (int *)malloc((size_t)nvals * sizeof(*def_at));
@@ -359,6 +386,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
                     fprintf(fp, "\tmovq $%ld, %%rax\n", in->imm);
+                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                }
+                break;
+
+            case CC_SSA_MOV:
+                if (f->value_types[in->dst] == CC_VAL_F64) {
+                    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                } else {
+                    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 }
                 break;
@@ -615,6 +652,16 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     fprintf(fp, "\tmovl $0x%x, %d(%%ebp)\n", hi, slot_off(&lay, in->dst) + 4);
                 } else {
                     fprintf(fp, "\tmovl $%ld, %%eax\n", in->imm);
+                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                }
+                break;
+
+            case CC_SSA_MOV:
+                if (f->value_types[in->dst] == CC_VAL_F64) {
+                    fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                } else {
+                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                     fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 }
                 break;

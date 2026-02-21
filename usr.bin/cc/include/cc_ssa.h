@@ -25,6 +25,7 @@ typedef enum {
     CC_SSA_SUB,
     CC_SSA_MUL,
     CC_SSA_DIV,
+    CC_SSA_MOV,
     CC_SSA_CMP,
     CC_SSA_I2F,
     CC_SSA_F2I,
