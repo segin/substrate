@@ -222,10 +222,10 @@ These components are essential for booting and basic system operation.
   - explicit temporary `--bootstrap-gcc` path for C->assembly fallback
 - **Native C Subset Pipeline:** In-tree compile path now exists for a strict subset:
   - `frontend/lexer.c` + `frontend/parser.c` parse scalar `_Bool`/`char`/`int`/`long long`/`float`/`double`/`void` functions with declarations, assignments, calls, and returns
-  - phase-9 parser/sema extension: C99 declaration-specifier combinations for supported scalar types, `for`-init declarations with loop-local scope, and expression extensions (`%`, unary `+`/`!`, compound assignment operators, prefix/postfix `++/--`, and `&&`/`||`)
+  - phase-9 parser/sema extension: C99 declaration-specifier combinations for supported scalar types, `for`-init declarations with loop-local scope, labels/`goto`, and expression extensions (`%`, unary `+`/`!`/`~`, bitwise/shift/comma operators, compound assignment operators, prefix/postfix `++/--`, and `&&`/`||`)
   - phase-8 parser/sema extension: `if/else`, block statements, `while`, `do-while`, `for`, `switch/case/default`, `break`, `continue`, integer comparison operators, and C95 lexical compatibility (digraph/trigraph forms)
   - `frontend/sema.c` resolves parameters/locals, validates loop/switch context rules (`break`, `continue`, `case`, `default`), and validates subset constraints
-  - `middle/ast2ir.c` lowers AST to SSA-like instructions (`param`, `const`, `mov`, arithmetic, comparisons, typed casts, labels/branches, `call`, `ret`) including switch compare-chain dispatch and short-circuit logical lowering via explicit branch/label control flow
+  - `middle/ast2ir.c` lowers AST to SSA-like instructions (`param`, `const`, `mov`, arithmetic/bitwise/shift, comparisons, typed casts, labels/branches, `call`, `ret`) including switch compare-chain dispatch, short-circuit logical lowering via explicit branch/label control flow, and direct label/goto branch emission.
   - `middle/passes/opt.c` provides phase-3 optimization passes (constant folding + dead temporary elimination) at `-O1+`
   - `backend/emit_s.c` emits:
     - SysV AMD64 GAS assembly with stack-frame/value-slot lowering, integer/SSE2 scalar ops, variadic call `%al` metadata, and register+stack argument ABI mapping
@@ -234,9 +234,9 @@ These components are essential for booting and basic system operation.
   - phase-6 assignment modeling updates mutable locals through explicit `mov` writes to variable value slots, enabling assignments inside branches/loops without phi nodes.
   - phase-7 adds structured do-while and switch/case/default lowering without introducing SSA phi nodes yet.
   - phase-8 adds C95 digraph braces and trigraph normalization in frontend lexical path.
-  - phase-9 adds operator lowering for `%` plus compound/update operators and short-circuit logical expressions without introducing full phi-form SSA yet.
+  - phase-9 adds operator lowering for `%` plus bitwise/shift/comma, compound/update operators, short-circuit logical expressions, and label/goto flow without introducing full phi-form SSA yet.
 - **Verifier Coverage:** Existing SSA verifier enforces block terminators, phi placement/arity, unique defs, use-before-def, and dominance checks.
-- **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases, variadic calls, `if/else`/loop/switch branching, `break`/`continue`/`case`/`default` validation, C95 digraph/trigraph lexical forms, C99 `for`-declaration scope checks, short-circuit logical behavior, compound/update operators, optimization behavior, `-m32` ELF32 object generation including `double`, and stack-slot pressure/frame-size regressions), staged assembly/linking, and bootstrap fallback behavior.
+- **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases, variadic calls, `if/else`/loop/switch branching, `goto`/label flow, `break`/`continue`/`case`/`default` validation, C95 digraph/trigraph lexical forms, C99 `for`-declaration scope checks, short-circuit logical behavior, bitwise/shift/comma/compound/update operators, optimization behavior, `-m32` ELF32 object generation including `double`, and stack-slot pressure/frame-size regressions), staged assembly/linking, and bootstrap fallback behavior.
 - **Integration Path:** Expand native subset toward full C99 while preserving current driver UX and `-emit-ssa` observability; keep bootstrap mode only as temporary compatibility path.
 
 ## `usr.lib/elf`

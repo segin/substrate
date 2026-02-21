@@ -4,7 +4,7 @@
 
 ## Status
 
-Phase-9 (early C99 expression/declaration slice) is implemented:
+Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
 
 - `cc` driver skeleton (`cmd/cc.c`) with Unix-style stage control.
 - preprocessing stage (`-E`) via system `cpp`.
@@ -20,7 +20,8 @@ Phase-9 (early C99 expression/declaration slice) is implemented:
   - C95 lexical forms: digraph braces (`<%`/`%>`) and trigraph normalization
   - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`, `long long`, `float`, qualifiers/storage-class keywords)
   - C99 `for`-init declarations with loop-local scope
-  - expression extensions: `%`, unary `+`/`!`, short-circuit `&&`/`||`, compound assignments (`+= -= *= /= %=`), and `++/--`
+  - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and `++/--`
+  - control-flow extensions: C labels + `goto`
 - existing SSA utilities remain available:
   - `ir-verifier`
   - `ir-normalize`
@@ -30,15 +31,14 @@ Native C support is intentionally limited for now:
 - scalar types: `_Bool`, `char`, `int`, `long long`, `float`, `double`, `void`
 - statement subset: local declarations, assignments, expression statements, `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
-- statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, `break;`, `continue;`
-- expressions: numeric literals, identifiers, `+ - * / %`, comparisons (`== != < <= > >=`), logical operators (`! && ||`), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
+- statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
+- expressions: numeric literals, identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), comparisons (`== != < <= > >=`), logical operators (`! && ||`), comma operator, parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
 - function declarations/definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
 - i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)
 - assignments inside conditional/loop blocks are supported via explicit SSA `mov` variable updates
 - C95 lexing support includes digraph/trigraph forms for punctuation
-- `goto`/labeled statements are not implemented yet
 - no pointers/structs/arrays yet
 
 For non-supported C sources, use `--bootstrap-gcc` as a temporary fallback.

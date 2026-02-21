@@ -10,6 +10,11 @@ typedef struct {
     int depth;
 } var_entry_t;
 
+typedef struct {
+    char **items;
+    size_t count;
+} name_list_t;
+
 static void set_diag(cc_diag_t *d, const char *msg) {
     if (d == NULL || d->message[0] != '\0') {
         return;
@@ -72,6 +77,100 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     return 0;
 }
 
+static void name_list_free(name_list_t *l) {
+    size_t i;
+    if (l == NULL) {
+        return;
+    }
+    for (i = 0; i < l->count; ++i) {
+        free(l->items[i]);
+    }
+    free(l->items);
+    l->items = NULL;
+    l->count = 0;
+}
+
+static int name_list_push(name_list_t *l, const char *name) {
+    char **next;
+    char *dup;
+    next = (char **)realloc(l->items, (l->count + 1) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    l->items = next;
+    dup = (char *)malloc(strlen(name) + 1);
+    if (dup == NULL) {
+        return -1;
+    }
+    strcpy(dup, name);
+    l->items[l->count++] = dup;
+    return 0;
+}
+
+static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, name_list_t *gotos, cc_diag_t *diag) {
+    size_t i;
+    if (s == NULL) {
+        return 0;
+    }
+    switch (s->kind) {
+    case CC_STMT_LABEL:
+        if (s->label_name == NULL || s->label_name[0] == '\0') {
+            set_diag(diag, "malformed label statement");
+            return -1;
+        }
+        if (names_find(labels->items, labels->count, s->label_name) >= 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "duplicate label: %s", s->label_name);
+            }
+            return -1;
+        }
+        if (name_list_push(labels, s->label_name) != 0) {
+            set_diag(diag, "out of memory collecting labels");
+            return -1;
+        }
+        return collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag);
+
+    case CC_STMT_GOTO:
+        if (s->label_name == NULL || s->label_name[0] == '\0') {
+            set_diag(diag, "malformed goto statement");
+            return -1;
+        }
+        if (names_find(gotos->items, gotos->count, s->label_name) < 0 && name_list_push(gotos, s->label_name) != 0) {
+            set_diag(diag, "out of memory collecting goto targets");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_IF:
+        if (collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag) != 0) {
+            return -1;
+        }
+        return collect_labels_gotos_stmt(s->else_branch, labels, gotos, diag);
+
+    case CC_STMT_WHILE:
+    case CC_STMT_DO:
+    case CC_STMT_SWITCH:
+        return collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag);
+
+    case CC_STMT_FOR:
+        if (collect_labels_gotos_stmt(s->init_stmt, labels, gotos, diag) != 0) {
+            return -1;
+        }
+        return collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag);
+
+    case CC_STMT_BLOCK:
+        for (i = 0; i < s->block_count; ++i) {
+            if (collect_labels_gotos_stmt(&s->block_stmts[i], labels, gotos, diag) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+
+    default:
+        return 0;
+    }
+}
+
 static const cc_function_t *find_function(const cc_translation_unit_t *tu, const char *name) {
     size_t i;
     for (i = 0; i < tu->func_count; ++i) {
@@ -132,6 +231,14 @@ static int is_logical_op(cc_binop_t op) {
     return op == CC_BIN_LAND || op == CC_BIN_LOR;
 }
 
+static int is_shift_op(cc_binop_t op) {
+    return op == CC_BIN_SHL || op == CC_BIN_SHR;
+}
+
+static int is_bitwise_op(cc_binop_t op) {
+    return op == CC_BIN_BAND || op == CC_BIN_BXOR || op == CC_BIN_BOR;
+}
+
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
     size_t i;
@@ -169,12 +276,40 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
+        if (e->op == CC_BIN_COMMA) {
+            e->value_type = e->rhs->value_type;
+            return 0;
+        }
         if (is_logical_op(e->op)) {
             if (!is_numeric_type(e->lhs->value_type) || !is_numeric_type(e->rhs->value_type)) {
                 set_diag(diag, "logical operators require numeric operands");
                 return -1;
             }
             e->value_type = CC_TYPE_INT;
+            return 0;
+        }
+        if (is_shift_op(e->op)) {
+            if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
+                set_diag(diag, "shift operators require integer operands");
+                return -1;
+            }
+            e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
+            if (e->value_type == CC_TYPE_VOID) {
+                set_diag(diag, "void expression used in arithmetic operation");
+                return -1;
+            }
+            return 0;
+        }
+        if (is_bitwise_op(e->op)) {
+            if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
+                set_diag(diag, "bitwise operators require integer operands");
+                return -1;
+            }
+            e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
+            if (e->value_type == CC_TYPE_VOID) {
+                set_diag(diag, "void expression used in arithmetic operation");
+                return -1;
+            }
             return 0;
         }
         if (is_cmp_op(e->op)) {
@@ -514,6 +649,17 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         return 0;
 
+    case CC_STMT_GOTO:
+        return 0;
+
+    case CC_STMT_LABEL:
+        if (s->then_branch == NULL) {
+            set_diag(diag, "malformed labeled statement");
+            return -1;
+        }
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth, switch_depth,
+                          saw_return, diag);
+
     default:
         set_diag(diag, "unsupported statement kind");
         return -1;
@@ -571,6 +717,8 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
     for (i = 0; i < tu->func_count; ++i) {
         const cc_function_t *f = &tu->funcs[i];
         var_entry_t *vars = NULL;
+        name_list_t labels = {0};
+        name_list_t gotos = {0};
         size_t var_count = 0;
         size_t j;
         int saw_return = 0;
@@ -596,6 +744,20 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         }
 
         for (j = 0; j < f->stmt_count; ++j) {
+            if (collect_labels_gotos_stmt(&f->stmts[j], &labels, &gotos, diag) != 0) {
+                goto fail_func;
+            }
+        }
+        for (j = 0; j < gotos.count; ++j) {
+            if (names_find(labels.items, labels.count, gotos.items[j]) < 0) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "goto to unknown label: %s", gotos.items[j]);
+                }
+                goto fail_func;
+            }
+        }
+
+        for (j = 0; j < f->stmt_count; ++j) {
                 if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_type, 0, 0, &saw_return, diag) != 0) {
                     goto fail_func;
                 }
@@ -610,6 +772,8 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             free(vars[j].name);
         }
         free(vars);
+        name_list_free(&labels);
+        name_list_free(&gotos);
         continue;
 
 fail_func:
@@ -617,6 +781,8 @@ fail_func:
             free(vars[j].name);
         }
         free(vars);
+        name_list_free(&labels);
+        name_list_free(&gotos);
         goto fail_global;
     }
 

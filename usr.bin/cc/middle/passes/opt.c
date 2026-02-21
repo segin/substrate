@@ -95,6 +95,11 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_SUB:
         case CC_SSA_MUL:
         case CC_SSA_DIV:
+        case CC_SSA_AND:
+        case CC_SSA_OR:
+        case CC_SSA_XOR:
+        case CC_SSA_SHL:
+        case CC_SSA_SHR:
             if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 &&
                 st[in->lhs].known && st[in->rhs].known &&
                 st[in->lhs].type == st[in->rhs].type) {
@@ -112,8 +117,18 @@ static int fold_function(cc_ssa_function_t *f) {
                         out = a - b;
                     } else if (in->op == CC_SSA_MUL) {
                         out = a * b;
-                    } else {
+                    } else if (in->op == CC_SSA_DIV) {
                         out = a / b;
+                    } else if (in->op == CC_SSA_AND) {
+                        out = a & b;
+                    } else if (in->op == CC_SSA_OR) {
+                        out = a | b;
+                    } else if (in->op == CC_SSA_XOR) {
+                        out = a ^ b;
+                    } else if (in->op == CC_SSA_SHL) {
+                        out = a << (b & 63);
+                    } else {
+                        out = a >> (b & 63);
                     }
                     in->op = CC_SSA_CONST;
                     in->lhs = -1;
@@ -133,8 +148,11 @@ static int fold_function(cc_ssa_function_t *f) {
                         out = a - b;
                     } else if (in->op == CC_SSA_MUL) {
                         out = a * b;
-                    } else {
+                    } else if (in->op == CC_SSA_DIV) {
                         out = a / b;
+                    } else {
+                        st[dst].known = 0;
+                        break;
                     }
                     in->op = CC_SSA_CONST;
                     in->lhs = -1;
@@ -234,6 +252,11 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_SUB:
     case CC_SSA_MUL:
     case CC_SSA_DIV:
+    case CC_SSA_AND:
+    case CC_SSA_OR:
+    case CC_SSA_XOR:
+    case CC_SSA_SHL:
+    case CC_SSA_SHR:
     case CC_SSA_CMP:
     case CC_SSA_I2F:
     case CC_SSA_F2I:

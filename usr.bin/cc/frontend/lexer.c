@@ -43,6 +43,7 @@ typedef enum {
     TOK_KW_DEFAULT,
     TOK_KW_BREAK,
     TOK_KW_CONTINUE,
+    TOK_KW_GOTO,
     TOK_ELLIPSIS,
     TOK_LPAREN,
     TOK_RPAREN,
@@ -57,11 +58,18 @@ typedef enum {
     TOK_STAR_EQ,
     TOK_SLASH_EQ,
     TOK_PERCENT_EQ,
+    TOK_LSHIFT_EQ,
+    TOK_RSHIFT_EQ,
+    TOK_AND_EQ,
+    TOK_XOR_EQ,
+    TOK_OR_EQ,
     TOK_PLUS_PLUS,
     TOK_MINUS_MINUS,
     TOK_AND_AND,
     TOK_OR_OR,
     TOK_BANG,
+    TOK_LSHIFT,
+    TOK_RSHIFT,
     TOK_EQ,
     TOK_NE,
     TOK_LT,
@@ -72,7 +80,11 @@ typedef enum {
     TOK_MINUS,
     TOK_STAR,
     TOK_SLASH,
-    TOK_PERCENT
+    TOK_PERCENT,
+    TOK_AMP,
+    TOK_PIPE,
+    TOK_CARET,
+    TOK_TILDE
 } cc_tok_kind_t;
 
 typedef struct {
@@ -295,6 +307,9 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                    out->start[2] == 'n' && out->start[3] == 't' && out->start[4] == 'i' &&
                    out->start[5] == 'n' && out->start[6] == 'u' && out->start[7] == 'e') {
             out->kind = TOK_KW_CONTINUE;
+        } else if (out->len == 4 && out->start[0] == 'g' && out->start[1] == 'o' &&
+                   out->start[2] == 't' && out->start[3] == 'o') {
+            out->kind = TOK_KW_GOTO;
         } else {
             out->kind = TOK_IDENT;
         }
@@ -409,6 +424,78 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     }
     if (c == '>' && lx_peekn(lx, 1) == '=') {
         out->kind = TOK_GE;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '<' && lx_peekn(lx, 1) == '<' && lx_peekn(lx, 2) == '=') {
+        out->kind = TOK_LSHIFT_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 3;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '>' && lx_peekn(lx, 1) == '>' && lx_peekn(lx, 2) == '=') {
+        out->kind = TOK_RSHIFT_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 3;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '<' && lx_peekn(lx, 1) == '<') {
+        out->kind = TOK_LSHIFT;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '>' && lx_peekn(lx, 1) == '>') {
+        out->kind = TOK_RSHIFT;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '&' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_AND_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '^' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_XOR_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '|' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_OR_EQ;
         out->start = lx->src + lx->pos;
         out->len = 2;
         out->line = line;
@@ -559,6 +646,18 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     case '%':
         out->kind = TOK_PERCENT;
+        return 0;
+    case '&':
+        out->kind = TOK_AMP;
+        return 0;
+    case '|':
+        out->kind = TOK_PIPE;
+        return 0;
+    case '^':
+        out->kind = TOK_CARET;
+        return 0;
+    case '~':
+        out->kind = TOK_TILDE;
         return 0;
     default:
         out->kind = TOK_EOF;

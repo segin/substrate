@@ -404,7 +404,18 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_SUB:
             case CC_SSA_MUL:
             case CC_SSA_DIV:
+            case CC_SSA_AND:
+            case CC_SSA_OR:
+            case CC_SSA_XOR:
+            case CC_SSA_SHL:
+            case CC_SSA_SHR:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
+                    if (in->op == CC_SSA_AND || in->op == CC_SSA_OR || in->op == CC_SSA_XOR || in->op == CC_SSA_SHL ||
+                        in->op == CC_SSA_SHR) {
+                        slot_layout_free(&lay);
+                        set_diag(diag, "bitwise/shift operation on floating value");
+                        return -1;
+                    }
                     fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
                     if (in->op == CC_SSA_ADD) {
                         fprintf(fp, "\taddsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
@@ -424,9 +435,23 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         fprintf(fp, "\tsubq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_MUL) {
                         fprintf(fp, "\timulq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
-                    } else {
+                    } else if (in->op == CC_SSA_DIV) {
                         fprintf(fp, "\tcqto\n");
                         fprintf(fp, "\tidivq %d(%%rbp)\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_AND) {
+                        fprintf(fp, "\tandq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_OR) {
+                        fprintf(fp, "\torq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_XOR) {
+                        fprintf(fp, "\txorq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_SHL) {
+                        fprintf(fp, "\tmovq %d(%%rbp), %%rcx\n", slot_off(&lay, in->rhs));
+                        fprintf(fp, "\tandq $63, %%rcx\n");
+                        fprintf(fp, "\tshlq %%cl, %%rax\n");
+                    } else {
+                        fprintf(fp, "\tmovq %d(%%rbp), %%rcx\n", slot_off(&lay, in->rhs));
+                        fprintf(fp, "\tandq $63, %%rcx\n");
+                        fprintf(fp, "\tsarq %%cl, %%rax\n");
                     }
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 }
@@ -670,7 +695,18 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_SUB:
             case CC_SSA_MUL:
             case CC_SSA_DIV:
+            case CC_SSA_AND:
+            case CC_SSA_OR:
+            case CC_SSA_XOR:
+            case CC_SSA_SHL:
+            case CC_SSA_SHR:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
+                    if (in->op == CC_SSA_AND || in->op == CC_SSA_OR || in->op == CC_SSA_XOR || in->op == CC_SSA_SHL ||
+                        in->op == CC_SSA_SHR) {
+                        slot_layout_free(&lay);
+                        set_diag(diag, "bitwise/shift operation on floating value");
+                        return -1;
+                    }
                     fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
                     if (in->op == CC_SSA_ADD) {
                         fprintf(fp, "\taddsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
@@ -690,9 +726,23 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                         fprintf(fp, "\tsubl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_MUL) {
                         fprintf(fp, "\timull %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
-                    } else {
+                    } else if (in->op == CC_SSA_DIV) {
                         fprintf(fp, "\tcltd\n");
                         fprintf(fp, "\tidivl %d(%%ebp)\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_AND) {
+                        fprintf(fp, "\tandl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_OR) {
+                        fprintf(fp, "\torl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_XOR) {
+                        fprintf(fp, "\txorl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_SHL) {
+                        fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", slot_off(&lay, in->rhs));
+                        fprintf(fp, "\tandl $31, %%ecx\n");
+                        fprintf(fp, "\tshll %%cl, %%eax\n");
+                    } else {
+                        fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", slot_off(&lay, in->rhs));
+                        fprintf(fp, "\tandl $31, %%ecx\n");
+                        fprintf(fp, "\tsarl %%cl, %%eax\n");
                     }
                     fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 }

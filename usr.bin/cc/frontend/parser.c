@@ -45,6 +45,7 @@ typedef enum {
     TOK_KW_DEFAULT,
     TOK_KW_BREAK,
     TOK_KW_CONTINUE,
+    TOK_KW_GOTO,
     TOK_ELLIPSIS,
     TOK_LPAREN,
     TOK_RPAREN,
@@ -59,11 +60,18 @@ typedef enum {
     TOK_STAR_EQ,
     TOK_SLASH_EQ,
     TOK_PERCENT_EQ,
+    TOK_LSHIFT_EQ,
+    TOK_RSHIFT_EQ,
+    TOK_AND_EQ,
+    TOK_XOR_EQ,
+    TOK_OR_EQ,
     TOK_PLUS_PLUS,
     TOK_MINUS_MINUS,
     TOK_AND_AND,
     TOK_OR_OR,
     TOK_BANG,
+    TOK_LSHIFT,
+    TOK_RSHIFT,
     TOK_EQ,
     TOK_NE,
     TOK_LT,
@@ -74,7 +82,11 @@ typedef enum {
     TOK_MINUS,
     TOK_STAR,
     TOK_SLASH,
-    TOK_PERCENT
+    TOK_PERCENT,
+    TOK_AMP,
+    TOK_PIPE,
+    TOK_CARET,
+    TOK_TILDE
 } cc_tok_kind_t;
 
 typedef struct {
@@ -130,6 +142,15 @@ static int expect(parser_t *p, cc_tok_kind_t k, const char *what) {
         return -1;
     }
     return next_tok(p);
+}
+
+static cc_tok_kind_t peek_kind(parser_t *p) {
+    cc_lexer_t lx = p->lx;
+    cc_token_t t;
+    if (cc_lexer_next(&lx, &t) != 0) {
+        return TOK_EOF;
+    }
+    return t.kind;
 }
 
 static int is_declspec_tok(cc_tok_kind_t k) {
@@ -302,6 +323,7 @@ static void free_stmt(cc_stmt_t *s) {
         return;
     }
     free(s->decl_name);
+    free(s->label_name);
     free_expr(s->expr);
     if (s->init_stmt != NULL) {
         free_stmt(s->init_stmt);
@@ -406,6 +428,7 @@ static size_t normalize_c95_trigraphs(char *buf, size_t len) {
 }
 
 static cc_expr_t *parse_expr(parser_t *p);
+static cc_expr_t *parse_assign(parser_t *p);
 static int parse_stmt(parser_t *p, cc_stmt_t *s);
 
 static cc_expr_t *parse_primary(parser_t *p) {
@@ -457,7 +480,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
             }
             if (p->tok.kind != TOK_RPAREN) {
                 for (;;) {
-                    cc_expr_t *arg = parse_expr(p);
+                    cc_expr_t *arg = parse_assign(p);
                     if (arg == NULL) {
                         free_expr(e);
                         return NULL;
@@ -641,6 +664,23 @@ static cc_expr_t *parse_unary(parser_t *p) {
         }
         return new_bin_expr(CC_BIN_EQ, rhs, z);
     }
+    if (p->tok.kind == TOK_TILDE) {
+        cc_expr_t *rhs;
+        cc_expr_t *mask;
+        if (next_tok(p) != 0) {
+            return NULL;
+        }
+        rhs = parse_unary(p);
+        if (rhs == NULL) {
+            return NULL;
+        }
+        mask = new_int_expr(-1);
+        if (mask == NULL) {
+            free_expr(rhs);
+            return NULL;
+        }
+        return new_bin_expr(CC_BIN_BXOR, rhs, mask);
+    }
     if (p->tok.kind == TOK_PLUS_PLUS || p->tok.kind == TOK_MINUS_MINUS) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
@@ -715,8 +755,30 @@ static cc_expr_t *parse_add(parser_t *p) {
     return lhs;
 }
 
-static cc_expr_t *parse_rel(parser_t *p) {
+static cc_expr_t *parse_shift(parser_t *p) {
     cc_expr_t *lhs = parse_add(p);
+    while (lhs != NULL && (p->tok.kind == TOK_LSHIFT || p->tok.kind == TOK_RSHIFT)) {
+        cc_tok_kind_t op = p->tok.kind;
+        cc_expr_t *rhs;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_add(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        lhs = new_bin_expr(op == TOK_LSHIFT ? CC_BIN_SHL : CC_BIN_SHR, lhs, rhs);
+        if (lhs == NULL) {
+            return NULL;
+        }
+    }
+    return lhs;
+}
+
+static cc_expr_t *parse_rel(parser_t *p) {
+    cc_expr_t *lhs = parse_shift(p);
     while (lhs != NULL &&
            (p->tok.kind == TOK_LT || p->tok.kind == TOK_LE || p->tok.kind == TOK_GT || p->tok.kind == TOK_GE)) {
         cc_tok_kind_t op = p->tok.kind;
@@ -726,7 +788,7 @@ static cc_expr_t *parse_rel(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        rhs = parse_add(p);
+        rhs = parse_shift(p);
         if (rhs == NULL) {
             free_expr(lhs);
             return NULL;
@@ -770,8 +832,71 @@ static cc_expr_t *parse_eq(parser_t *p) {
     return lhs;
 }
 
-static cc_expr_t *parse_land(parser_t *p) {
+static cc_expr_t *parse_band(parser_t *p) {
     cc_expr_t *lhs = parse_eq(p);
+    while (lhs != NULL && p->tok.kind == TOK_AMP) {
+        cc_expr_t *rhs;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_eq(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        lhs = new_bin_expr(CC_BIN_BAND, lhs, rhs);
+        if (lhs == NULL) {
+            return NULL;
+        }
+    }
+    return lhs;
+}
+
+static cc_expr_t *parse_bxor(parser_t *p) {
+    cc_expr_t *lhs = parse_band(p);
+    while (lhs != NULL && p->tok.kind == TOK_CARET) {
+        cc_expr_t *rhs;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_band(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        lhs = new_bin_expr(CC_BIN_BXOR, lhs, rhs);
+        if (lhs == NULL) {
+            return NULL;
+        }
+    }
+    return lhs;
+}
+
+static cc_expr_t *parse_bor(parser_t *p) {
+    cc_expr_t *lhs = parse_bxor(p);
+    while (lhs != NULL && p->tok.kind == TOK_PIPE) {
+        cc_expr_t *rhs;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_bxor(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        lhs = new_bin_expr(CC_BIN_BOR, lhs, rhs);
+        if (lhs == NULL) {
+            return NULL;
+        }
+    }
+    return lhs;
+}
+
+static cc_expr_t *parse_land(parser_t *p) {
+    cc_expr_t *lhs = parse_bor(p);
     while (lhs != NULL && p->tok.kind == TOK_AND_AND) {
         cc_expr_t *rhs;
         if (next_tok(p) != 0) {
@@ -816,8 +941,9 @@ static cc_expr_t *parse_assign(parser_t *p) {
     cc_expr_t *lhs = parse_lor(p);
 
     if (lhs != NULL && (p->tok.kind == TOK_ASSIGN || p->tok.kind == TOK_PLUS_EQ || p->tok.kind == TOK_MINUS_EQ ||
-                        p->tok.kind == TOK_STAR_EQ || p->tok.kind == TOK_SLASH_EQ ||
-                        p->tok.kind == TOK_PERCENT_EQ)) {
+                        p->tok.kind == TOK_STAR_EQ || p->tok.kind == TOK_SLASH_EQ || p->tok.kind == TOK_PERCENT_EQ ||
+                        p->tok.kind == TOK_LSHIFT_EQ || p->tok.kind == TOK_RSHIFT_EQ || p->tok.kind == TOK_AND_EQ ||
+                        p->tok.kind == TOK_XOR_EQ || p->tok.kind == TOK_OR_EQ)) {
         cc_tok_kind_t aop = p->tok.kind;
         cc_expr_t *rhs;
         cc_expr_t *e;
@@ -859,8 +985,18 @@ static cc_expr_t *parse_assign(parser_t *p) {
                 bop = CC_BIN_MUL;
             } else if (aop == TOK_SLASH_EQ) {
                 bop = CC_BIN_DIV;
-            } else {
+            } else if (aop == TOK_PERCENT_EQ) {
                 bop = CC_BIN_MOD;
+            } else if (aop == TOK_LSHIFT_EQ) {
+                bop = CC_BIN_SHL;
+            } else if (aop == TOK_RSHIFT_EQ) {
+                bop = CC_BIN_SHR;
+            } else if (aop == TOK_AND_EQ) {
+                bop = CC_BIN_BAND;
+            } else if (aop == TOK_XOR_EQ) {
+                bop = CC_BIN_BXOR;
+            } else {
+                bop = CC_BIN_BOR;
             }
             rhs = new_bin_expr(bop, lhs_read, rhs);
             if (rhs == NULL) {
@@ -883,8 +1019,29 @@ static cc_expr_t *parse_assign(parser_t *p) {
     return lhs;
 }
 
+static cc_expr_t *parse_comma(parser_t *p) {
+    cc_expr_t *lhs = parse_assign(p);
+    while (lhs != NULL && p->tok.kind == TOK_COMMA) {
+        cc_expr_t *rhs;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_assign(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        lhs = new_bin_expr(CC_BIN_COMMA, lhs, rhs);
+        if (lhs == NULL) {
+            return NULL;
+        }
+    }
+    return lhs;
+}
+
 static cc_expr_t *parse_expr(parser_t *p) {
-    return parse_assign(p);
+    return parse_comma(p);
 }
 
 static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
@@ -948,6 +1105,25 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
 
     if (p->tok.kind == TOK_LBRACE) {
         return parse_block_stmt(p, s);
+    }
+
+    if (p->tok.kind == TOK_IDENT && peek_kind(p) == TOK_COLON) {
+        s->kind = CC_STMT_LABEL;
+        s->label_name = xstrdup_n(p->tok.start, p->tok.len);
+        if (s->label_name == NULL) {
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (expect(p, TOK_COLON, "expected ':' after label") != 0) {
+            return -1;
+        }
+        s->then_branch = (cc_stmt_t *)calloc(1, sizeof(*s->then_branch));
+        if (s->then_branch == NULL) {
+            return -1;
+        }
+        return parse_stmt(p, s->then_branch);
     }
 
     if (p->tok.kind == TOK_KW_IF) {
@@ -1156,6 +1332,25 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
             return -1;
         }
         return expect(p, TOK_SEMI, "expected ';' after continue");
+    }
+
+    if (p->tok.kind == TOK_KW_GOTO) {
+        s->kind = CC_STMT_GOTO;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_IDENT) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected label identifier after goto");
+            return -1;
+        }
+        s->label_name = xstrdup_n(p->tok.start, p->tok.len);
+        if (s->label_name == NULL) {
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        return expect(p, TOK_SEMI, "expected ';' after goto");
     }
 
     if (is_declspec_tok(p->tok.kind)) {

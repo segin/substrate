@@ -98,7 +98,12 @@
 - Expression grammar expansion:
   - added `%`, unary `+`/`!`, compound assignments (`+= -= *= /= %=`), and prefix/postfix `++/--`.
   - added logical `&&`/`||` with short-circuit lowering in AST->SSA via branch+label control flow and mutable SSA value slots.
+- Additional C99 control/expression expansion:
+  - added `goto` and labeled statements with function-scope label validation.
+  - added bitwise/shift/comma operators and compound assignments (`&= |= ^= <<= >>=`) across parser/sema/SSA/backend.
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
   - i386 assembly checks for the new expression forms.
+  - positive compile/run tests for `goto` flow, comma operator sequencing, and bitwise/shift codegen.
+  - negative tests for unknown goto target, duplicate labels, and bitwise-on-float type errors.

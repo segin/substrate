@@ -12,6 +12,16 @@ typedef struct {
     int depth;
 } var_entry_t;
 
+typedef struct {
+    char *name;
+    int label;
+} label_entry_t;
+
+typedef struct {
+    label_entry_t *labels;
+    size_t label_count;
+} lower_ctx_t;
+
 static char *xstrdup(const char *s) {
     size_t n;
     char *p;
@@ -67,11 +77,83 @@ static int is_logical_op(cc_binop_t op) {
     return op == CC_BIN_LAND || op == CC_BIN_LOR;
 }
 
+static int new_label(cc_ssa_function_t *f);
 static int emit_label_instr(cc_ssa_function_t *sf, int label);
 static int emit_br_instr(cc_ssa_function_t *sf, int label);
 static int emit_br_cond_instr(cc_ssa_function_t *sf, int cond, int label_true, int label_false);
 static int emit_mov_instr(cc_ssa_function_t *sf, int dst, int src);
 static int emit_const_i64_instr(cc_ssa_function_t *sf, long v);
+
+static int lower_find_label(const lower_ctx_t *ctx, const char *name) {
+    size_t i;
+    for (i = 0; i < ctx->label_count; ++i) {
+        if (strcmp(ctx->labels[i].name, name) == 0) {
+            return ctx->labels[i].label;
+        }
+    }
+    return -1;
+}
+
+static int lower_collect_labels(cc_ssa_function_t *sf, const cc_stmt_t *s, lower_ctx_t *ctx, cc_diag_t *diag) {
+    size_t i;
+    if (s == NULL) {
+        return 0;
+    }
+    if (s->kind == CC_STMT_LABEL) {
+        label_entry_t *next;
+        if (s->label_name == NULL || s->label_name[0] == '\0') {
+            set_diag(diag, "malformed labeled statement in lowering");
+            return -1;
+        }
+        if (lower_find_label(ctx, s->label_name) >= 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "duplicate label in lowering: %s", s->label_name);
+            }
+            return -1;
+        }
+        next = (label_entry_t *)realloc(ctx->labels, (ctx->label_count + 1) * sizeof(*next));
+        if (next == NULL) {
+            set_diag(diag, "out of memory collecting labels");
+            return -1;
+        }
+        ctx->labels = next;
+        ctx->labels[ctx->label_count].name = xstrdup(s->label_name);
+        if (ctx->labels[ctx->label_count].name == NULL) {
+            set_diag(diag, "out of memory duplicating label name");
+            return -1;
+        }
+        ctx->labels[ctx->label_count].label = new_label(sf);
+        if (ctx->labels[ctx->label_count].label < 0) {
+            set_diag(diag, "out of memory assigning label id");
+            return -1;
+        }
+        ctx->label_count++;
+        return lower_collect_labels(sf, s->then_branch, ctx, diag);
+    }
+    if (s->kind == CC_STMT_IF) {
+        if (lower_collect_labels(sf, s->then_branch, ctx, diag) != 0) {
+            return -1;
+        }
+        return lower_collect_labels(sf, s->else_branch, ctx, diag);
+    }
+    if (s->kind == CC_STMT_WHILE || s->kind == CC_STMT_DO || s->kind == CC_STMT_SWITCH) {
+        return lower_collect_labels(sf, s->then_branch, ctx, diag);
+    }
+    if (s->kind == CC_STMT_FOR) {
+        if (lower_collect_labels(sf, s->init_stmt, ctx, diag) != 0) {
+            return -1;
+        }
+        return lower_collect_labels(sf, s->then_branch, ctx, diag);
+    }
+    if (s->kind == CC_STMT_BLOCK) {
+        for (i = 0; i < s->block_count; ++i) {
+            if (lower_collect_labels(sf, &s->block_stmts[i], ctx, diag) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
 
 static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
     if (f->instr_count == f->instr_cap) {
@@ -193,8 +275,8 @@ static int cast_value(cc_ssa_function_t *sf, int v, cc_value_type_t dst, cc_diag
     return in.dst;
 }
 
-static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t *vars, size_t var_count,
-                      int depth, const cc_expr_t *e, cc_diag_t *diag) {
+static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                      var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     int lhs;
     int rhs;
@@ -255,7 +337,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             int l_rhs = new_label(sf);
             int l_end = new_label(sf);
 
-            lhs = lower_expr(tu, sf, vars, var_count, depth, e->lhs, diag);
+            lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
                 return -1;
             }
@@ -281,7 +363,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (emit_label_instr(sf, l_rhs) != 0) {
                     return -1;
                 }
-                rhs = lower_expr(tu, sf, vars, var_count, depth, e->rhs, diag);
+                rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
                 if (rhs < 0) {
                     return -1;
                 }
@@ -330,7 +412,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (emit_label_instr(sf, l_rhs) != 0) {
                 return -1;
             }
-            rhs = lower_expr(tu, sf, vars, var_count, depth, e->rhs, diag);
+            rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
             if (rhs < 0) {
                 return -1;
             }
@@ -359,13 +441,17 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             return dst;
         }
 
-        lhs = lower_expr(tu, sf, vars, var_count, depth, e->lhs, diag);
+        lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
         if (lhs < 0) {
             return -1;
         }
-        rhs = lower_expr(tu, sf, vars, var_count, depth, e->rhs, diag);
+        rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
         if (rhs < 0) {
             return -1;
+        }
+
+        if (e->op == CC_BIN_COMMA) {
+            return rhs;
         }
 
         if (is_cmp_op(e->op)) {
@@ -404,6 +490,51 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             break;
         case CC_BIN_DIV:
             in.op = CC_SSA_DIV;
+            break;
+        case CC_BIN_BAND:
+            lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
+            rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
+            if (lhs < 0 || rhs < 0) {
+                return -1;
+            }
+            in.op = CC_SSA_AND;
+            vt = CC_VAL_I64;
+            break;
+        case CC_BIN_BOR:
+            lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
+            rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
+            if (lhs < 0 || rhs < 0) {
+                return -1;
+            }
+            in.op = CC_SSA_OR;
+            vt = CC_VAL_I64;
+            break;
+        case CC_BIN_BXOR:
+            lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
+            rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
+            if (lhs < 0 || rhs < 0) {
+                return -1;
+            }
+            in.op = CC_SSA_XOR;
+            vt = CC_VAL_I64;
+            break;
+        case CC_BIN_SHL:
+            lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
+            rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
+            if (lhs < 0 || rhs < 0) {
+                return -1;
+            }
+            in.op = CC_SSA_SHL;
+            vt = CC_VAL_I64;
+            break;
+        case CC_BIN_SHR:
+            lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
+            rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
+            if (lhs < 0 || rhs < 0) {
+                return -1;
+            }
+            in.op = CC_SSA_SHR;
+            vt = CC_VAL_I64;
             break;
         case CC_BIN_MOD: {
             cc_ssa_instr_t q;
@@ -472,7 +603,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
 
         for (i = 0; i < in.arg_count; ++i) {
             cc_value_type_t want;
-            int av = lower_expr(tu, sf, vars, var_count, depth, e->args[i], diag);
+            int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
             if (av < 0) {
                 free(in.sym);
                 free(in.args);
@@ -520,7 +651,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             return -1;
         }
-        rhs = lower_expr(tu, sf, vars, var_count, depth, e->rhs, diag);
+        rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
         if (rhs < 0) {
             return -1;
         }
@@ -685,7 +816,8 @@ static int find_switch_label_for_stmt(const switch_case_site_t *sites, size_t co
 }
 
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
-                      int depth, int break_label, int continue_label, const cc_stmt_t *s, int *saw_ret,
+                      const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
+                      int *saw_ret,
                       cc_diag_t *diag) {
     size_t j;
 
@@ -693,7 +825,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         int v;
         int varv;
         if (s->expr != NULL) {
-            v = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+            v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
             if (v < 0) {
                 return -1;
             }
@@ -737,7 +869,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     }
 
     if (s->kind == CC_STMT_EXPR) {
-        if (s->expr != NULL && lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag) < 0) {
+        if (s->expr != NULL && lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag) < 0) {
             return -1;
         }
         return 0;
@@ -748,7 +880,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         int rv = -1;
 
         if (s->expr != NULL) {
-            rv = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+            rv = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
             if (rv < 0) {
                 return -1;
             }
@@ -778,7 +910,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         int l_else = new_label(sf);
         int l_end = new_label(sf);
 
-        cond = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+        cond = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
         if (cond < 0) {
             return -1;
         }
@@ -795,7 +927,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, depth, break_label, continue_label, s->then_branch, saw_ret,
+            if (lower_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s->then_branch, saw_ret,
                            diag) != 0) {
                 return -1;
             }
@@ -814,7 +946,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             {
                 size_t saved = *var_count;
-                if (lower_stmt(tu, sf, vars, var_count, depth, break_label, continue_label, s->else_branch, saw_ret,
+                if (lower_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s->else_branch, saw_ret,
                                diag) != 0) {
                     return -1;
                 }
@@ -843,7 +975,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         if (emit_label_instr(sf, l_cond) != 0) {
             return -1;
         }
-        cond = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+        cond = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
         if (cond < 0) {
             return -1;
         }
@@ -859,7 +991,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
             while (*var_count > saved) {
@@ -887,7 +1019,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
             while (*var_count > saved) {
@@ -898,7 +1030,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         if (emit_label_instr(sf, l_cond) != 0) {
             return -1;
         }
-        cond = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+        cond = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
         if (cond < 0) {
             return -1;
         }
@@ -924,19 +1056,19 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         int for_depth = depth;
 
         if (s->init_stmt != NULL) {
-            if (lower_stmt(tu, sf, vars, var_count, depth + 1, break_label, continue_label, s->init_stmt, saw_ret,
+            if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, break_label, continue_label, s->init_stmt, saw_ret,
                            diag) != 0) {
                 return -1;
             }
             for_depth = depth + 1;
-        } else if (s->init_expr != NULL && lower_expr(tu, sf, *vars, *var_count, depth, s->init_expr, diag) < 0) {
+        } else if (s->init_expr != NULL && lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->init_expr, diag) < 0) {
             return -1;
         }
         if (emit_label_instr(sf, l_cond) != 0) {
             return -1;
         }
         if (s->expr != NULL) {
-            int cond = lower_expr(tu, sf, *vars, *var_count, for_depth, s->expr, diag);
+            int cond = lower_expr(tu, sf, ctx, *vars, *var_count, for_depth, s->expr, diag);
             if (cond < 0) {
                 return -1;
             }
@@ -957,7 +1089,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t body_saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, for_depth, l_end, l_post, s->then_branch, saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, ctx, for_depth, l_end, l_post, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
             while (*var_count > body_saved) {
@@ -971,7 +1103,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         if (emit_label_instr(sf, l_post) != 0) {
             return -1;
         }
-        if (s->post_expr != NULL && lower_expr(tu, sf, *vars, *var_count, for_depth, s->post_expr, diag) < 0) {
+        if (s->post_expr != NULL && lower_expr(tu, sf, ctx, *vars, *var_count, for_depth, s->post_expr, diag) < 0) {
             return -1;
         }
         if (emit_br_instr(sf, l_cond) != 0) {
@@ -1009,7 +1141,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             return -1;
         }
 
-        cond = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+        cond = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
         if (cond < 0) {
             return -1;
         }
@@ -1132,7 +1264,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
                 continue;
             }
-            if (lower_stmt(tu, sf, vars, var_count, depth + 1, l_end, continue_label, bst, saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, l_end, continue_label, bst, saw_ret, diag) != 0) {
                 free(sites);
                 free(cmp_labels);
                 free(case_labels);
@@ -1170,10 +1302,41 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         return emit_br_instr(sf, continue_label);
     }
 
+    if (s->kind == CC_STMT_GOTO) {
+        int l = lower_find_label(ctx, s->label_name);
+        if (l < 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "goto to unknown label in lowering: %s",
+                         s->label_name ? s->label_name : "<null>");
+            }
+            return -1;
+        }
+        return emit_br_instr(sf, l);
+    }
+
+    if (s->kind == CC_STMT_LABEL) {
+        int l = lower_find_label(ctx, s->label_name);
+        if (l < 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "label not collected in lowering: %s",
+                         s->label_name ? s->label_name : "<null>");
+            }
+            return -1;
+        }
+        if (emit_label_instr(sf, l) != 0) {
+            return -1;
+        }
+        if (s->then_branch != NULL) {
+            return lower_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s->then_branch,
+                              saw_ret, diag);
+        }
+        return 0;
+    }
+
     if (s->kind == CC_STMT_BLOCK) {
         size_t saved = *var_count;
         for (j = 0; j < s->block_count; ++j) {
-            if (lower_stmt(tu, sf, vars, var_count, depth + 1, break_label, continue_label, &s->block_stmts[j],
+            if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, break_label, continue_label, &s->block_stmts[j],
                            saw_ret, diag) != 0) {
                 return -1;
             }
@@ -1257,9 +1420,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         cc_ssa_function_t *sf = &out->funcs[i];
         const cc_function_t *af = &tu->funcs[i];
         var_entry_t *vars = NULL;
+        lower_ctx_t lctx;
         size_t var_count = 0;
         size_t j;
         int saw_ret = 0;
+
+        memset(&lctx, 0, sizeof(lctx));
 
         sf->name = xstrdup(af->name);
         if (sf->name == NULL) {
@@ -1311,7 +1477,14 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
 
         for (j = 0; j < af->stmt_count; ++j) {
-            if (lower_stmt(tu, sf, &vars, &var_count, 0, -1, -1, &af->stmts[j], &saw_ret, diag) != 0) {
+            if (lower_collect_labels(sf, &af->stmts[j], &lctx, diag) != 0) {
+                cc_ssa_module_free(out);
+                return -1;
+            }
+        }
+
+        for (j = 0; j < af->stmt_count; ++j) {
+            if (lower_stmt(tu, sf, &vars, &var_count, &lctx, 0, -1, -1, &af->stmts[j], &saw_ret, diag) != 0) {
                 cc_ssa_module_free(out);
                 return -1;
             }
@@ -1329,6 +1502,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             free(vars[j].name);
         }
         free(vars);
+        for (j = 0; j < lctx.label_count; ++j) {
+            free(lctx.labels[j].name);
+        }
+        free(lctx.labels);
     }
 
     return 0;

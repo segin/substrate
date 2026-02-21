@@ -25,6 +25,11 @@ typedef enum {
     CC_BIN_MUL,
     CC_BIN_DIV,
     CC_BIN_MOD,
+    CC_BIN_SHL,
+    CC_BIN_SHR,
+    CC_BIN_BAND,
+    CC_BIN_BXOR,
+    CC_BIN_BOR,
     CC_BIN_EQ,
     CC_BIN_NE,
     CC_BIN_LT,
@@ -32,7 +37,8 @@ typedef enum {
     CC_BIN_GT,
     CC_BIN_GE,
     CC_BIN_LAND,
-    CC_BIN_LOR
+    CC_BIN_LOR,
+    CC_BIN_COMMA
 } cc_binop_t;
 
 typedef enum {
@@ -72,7 +78,9 @@ typedef enum {
     CC_STMT_CASE,
     CC_STMT_DEFAULT,
     CC_STMT_BREAK,
-    CC_STMT_CONTINUE
+    CC_STMT_CONTINUE,
+    CC_STMT_GOTO,
+    CC_STMT_LABEL
 } cc_stmt_kind_t;
 
 typedef struct cc_stmt cc_stmt_t;
@@ -81,6 +89,7 @@ struct cc_stmt {
     cc_type_t type;
     cc_stmt_kind_t kind;
     char *decl_name;
+    char *label_name;
     cc_expr_t *expr;
     cc_stmt_t *init_stmt;
     cc_expr_t *init_expr;
