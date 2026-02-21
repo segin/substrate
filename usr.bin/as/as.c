@@ -79,33 +79,30 @@ static void strvec_free(strvec_t *v) {
     v->cap = 0;
 }
 
-static int run_gcc_assembler(const as_ctx_t *ctx) {
+static int run_gas_backend(const as_ctx_t *ctx) {
     size_t i;
     size_t argc;
     char **argv;
     pid_t pid;
     int status;
 
-    argc = 8 + ctx->pass.count;
+    argc = 5 + ctx->pass.count;
     argv = (char **)calloc(argc + 1, sizeof(*argv));
     if (argv == NULL) {
         return -1;
     }
 
-    argv[0] = "gcc";
-    argv[1] = "-c";
-    argv[2] = "-x";
-    argv[3] = "assembler";
-    argv[4] = ctx->mode64 ? "-m64" : "-m32";
+    argv[0] = "as";
+    argv[1] = ctx->mode64 ? "--64" : "--32";
 
     for (i = 0; i < ctx->pass.count; ++i) {
-        argv[5 + i] = ctx->pass.items[i];
+        argv[2 + i] = ctx->pass.items[i];
     }
 
-    argv[5 + ctx->pass.count] = "-o";
-    argv[6 + ctx->pass.count] = (char *)ctx->out_path;
-    argv[7 + ctx->pass.count] = (char *)ctx->in_path;
-    argv[8 + ctx->pass.count] = NULL;
+    argv[2 + ctx->pass.count] = "-o";
+    argv[3 + ctx->pass.count] = (char *)ctx->out_path;
+    argv[4 + ctx->pass.count] = (char *)ctx->in_path;
+    argv[5 + ctx->pass.count] = NULL;
 
     pid = fork();
     if (pid < 0) {
@@ -183,11 +180,11 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        if (strcmp(argv[i], "-32") == 0) {
+        if (strcmp(argv[i], "-32") == 0 || strcmp(argv[i], "--32") == 0) {
             ctx.mode64 = 0;
             continue;
         }
-        if (strcmp(argv[i], "-64") == 0) {
+        if (strcmp(argv[i], "-64") == 0 || strcmp(argv[i], "--64") == 0) {
             ctx.mode64 = 1;
             continue;
         }
@@ -255,7 +252,7 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    if (run_gcc_assembler(&ctx) != 0) {
+    if (run_gas_backend(&ctx) != 0) {
         fprintf(stderr, "as.x86: backend assembly failed\n");
         strvec_free(&ctx.pass);
         return 1;
