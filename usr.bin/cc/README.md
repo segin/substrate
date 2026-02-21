@@ -21,6 +21,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - C95 lexical forms: digraph braces (`<%`/`%>`) and trigraph normalization
   - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`/`unsigned char`, `short`/`unsigned short`, `int`/`unsigned int`, `long long`/`unsigned long long`, `float`, qualifiers/storage-class keywords)
   - C99 `for`-init declarations with loop-local scope
+  - one-level typed pointers (`T*`) in declarations, parameters, and return types
   - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and prefix/postfix `++/--` with C expression-value semantics
   - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), and `sizeof` for supported scalar types
   - integer literal suffix typing for unsigned/long-long forms (`u`, `ul`, `ull`, etc.) in semantic/lowering paths
@@ -32,10 +33,12 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
 
 Native C support is intentionally limited for now:
 - scalar types: `_Bool`, `char`, `unsigned char`, `short`, `unsigned short`, `int`, `unsigned int`, `long long`, `unsigned long long`, `float`, `double`, `void`
+- pointer types: one-level typed pointers to supported scalar/void types (e.g., `int *`, `double *`, `void *`)
 - statement subset: local declarations, assignments, expression statements, `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
 - expressions: numeric/character literals (decimal/octal/hex integers, simple character escapes), identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
+- pointer expressions: unary address-of (`&`) for identifier lvalues, unary dereference (`*`) for pointers, pointer/null equality comparisons, and pointer argument/return lowering
 - unsigned integer semantics are modeled for comparisons/division/modulo/right-shift in native lowering/codegen (`seta/setb`, `div`, logical right-shift)
 - function declarations/prototypes and definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
@@ -43,7 +46,7 @@ Native C support is intentionally limited for now:
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)
 - assignments inside conditional/loop blocks are supported via explicit SSA `mov` variable updates
 - C95 lexing support includes digraph/trigraph forms for punctuation
-- no pointers/structs/arrays yet
+- no structs/arrays yet (pointer arithmetic and indirect stores are still limited)
 
 For non-supported C sources, use `--bootstrap-gcc` as a temporary fallback.
 

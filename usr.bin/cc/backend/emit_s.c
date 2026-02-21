@@ -436,6 +436,22 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 }
                 break;
 
+            case CC_SSA_ADDR:
+                fprintf(fp, "\tleaq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_LOAD:
+                fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                if (f->value_types[in->dst] == CC_VAL_F64) {
+                    fprintf(fp, "\tmovsd (%%rax), %%xmm0\n");
+                    fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                } else {
+                    fprintf(fp, "\tmovq (%%rax), %%rax\n");
+                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                }
+                break;
+
             case CC_SSA_ADD:
             case CC_SSA_SUB:
             case CC_SSA_MUL:
@@ -734,6 +750,22 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 } else {
                     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                }
+                break;
+
+            case CC_SSA_ADDR:
+                fprintf(fp, "\tleal %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_LOAD:
+                fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                if (f->value_types[in->dst] == CC_VAL_F64) {
+                    fprintf(fp, "\tmovsd (%%eax), %%xmm0\n");
+                    fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                } else {
+                    fprintf(fp, "\tmovl (%%eax), %%eax\n");
                     fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 }
                 break;

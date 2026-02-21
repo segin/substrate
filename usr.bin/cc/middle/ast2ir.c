@@ -97,6 +97,19 @@ static long type_size_bytes(cc_type_t t) {
     case CC_TYPE_ULONG_LONG:
     case CC_TYPE_DOUBLE:
         return 8;
+    case CC_TYPE_PTR_VOID:
+    case CC_TYPE_PTR_BOOL:
+    case CC_TYPE_PTR_CHAR:
+    case CC_TYPE_PTR_UCHAR:
+    case CC_TYPE_PTR_SHORT:
+    case CC_TYPE_PTR_USHORT:
+    case CC_TYPE_PTR_INT:
+    case CC_TYPE_PTR_UINT:
+    case CC_TYPE_PTR_LONG_LONG:
+    case CC_TYPE_PTR_ULONG_LONG:
+    case CC_TYPE_PTR_FLOAT:
+    case CC_TYPE_PTR_DOUBLE:
+        return 8;
     default:
         return -1;
     }
@@ -381,6 +394,55 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         return vars[idx].value;
     }
+
+    case CC_EXPR_ADDR: {
+        int idx;
+        if (e->lhs == NULL) {
+            set_diag(diag, "malformed address-of expression in lowering");
+            return -1;
+        }
+        if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
+            return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs->lhs, diag);
+        }
+        if (e->lhs->kind != CC_EXPR_IDENT || e->lhs->ident == NULL) {
+            set_diag(diag, "address-of lowering currently requires identifier operand");
+            return -1;
+        }
+        idx = var_find_visible(vars, var_count, e->lhs->ident, depth);
+        if (idx < 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "unknown identifier during address-of lowering: %s",
+                         e->lhs->ident);
+            }
+            return -1;
+        }
+        in.op = CC_SSA_ADDR;
+        in.dst = new_value(sf, CC_VAL_I64);
+        in.lhs = vars[idx].value;
+        in.rhs = -1;
+        if (in.dst < 0 || push_instr(sf, in) != 0) {
+            return -1;
+        }
+        return in.dst;
+    }
+
+    case CC_EXPR_DEREF:
+        lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+        if (lhs < 0) {
+            return -1;
+        }
+        lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
+        if (lhs < 0) {
+            return -1;
+        }
+        in.op = CC_SSA_LOAD;
+        in.dst = new_value(sf, type_to_val(e->value_type));
+        in.lhs = lhs;
+        in.rhs = -1;
+        if (in.dst < 0 || push_instr(sf, in) != 0) {
+            return -1;
+        }
+        return in.dst;
 
     case CC_EXPR_BIN: {
         cc_value_type_t vt;

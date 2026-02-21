@@ -198,6 +198,10 @@ static int is_float_type(cc_type_t t) {
     return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE;
 }
 
+static int is_pointer_type(cc_type_t t) {
+    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_DOUBLE;
+}
+
 static int is_unsigned_integral_type(cc_type_t t) {
     return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
 }
@@ -212,12 +216,101 @@ static int is_numeric_type(cc_type_t t) {
     return is_integral_type(t) || is_float_type(t);
 }
 
+static int is_scalar_type(cc_type_t t) {
+    return is_numeric_type(t) || is_pointer_type(t);
+}
+
+static cc_type_t ptr_of_type(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_VOID:
+        return CC_TYPE_PTR_VOID;
+    case CC_TYPE_BOOL:
+        return CC_TYPE_PTR_BOOL;
+    case CC_TYPE_CHAR:
+        return CC_TYPE_PTR_CHAR;
+    case CC_TYPE_UCHAR:
+        return CC_TYPE_PTR_UCHAR;
+    case CC_TYPE_SHORT:
+        return CC_TYPE_PTR_SHORT;
+    case CC_TYPE_USHORT:
+        return CC_TYPE_PTR_USHORT;
+    case CC_TYPE_INT:
+        return CC_TYPE_PTR_INT;
+    case CC_TYPE_UINT:
+        return CC_TYPE_PTR_UINT;
+    case CC_TYPE_LONG_LONG:
+        return CC_TYPE_PTR_LONG_LONG;
+    case CC_TYPE_ULONG_LONG:
+        return CC_TYPE_PTR_ULONG_LONG;
+    case CC_TYPE_FLOAT:
+        return CC_TYPE_PTR_FLOAT;
+    case CC_TYPE_DOUBLE:
+        return CC_TYPE_PTR_DOUBLE;
+    default:
+        return CC_TYPE_VOID;
+    }
+}
+
+static cc_type_t ptr_base_type(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_PTR_VOID:
+        return CC_TYPE_VOID;
+    case CC_TYPE_PTR_BOOL:
+        return CC_TYPE_BOOL;
+    case CC_TYPE_PTR_CHAR:
+        return CC_TYPE_CHAR;
+    case CC_TYPE_PTR_UCHAR:
+        return CC_TYPE_UCHAR;
+    case CC_TYPE_PTR_SHORT:
+        return CC_TYPE_SHORT;
+    case CC_TYPE_PTR_USHORT:
+        return CC_TYPE_USHORT;
+    case CC_TYPE_PTR_INT:
+        return CC_TYPE_INT;
+    case CC_TYPE_PTR_UINT:
+        return CC_TYPE_UINT;
+    case CC_TYPE_PTR_LONG_LONG:
+        return CC_TYPE_LONG_LONG;
+    case CC_TYPE_PTR_ULONG_LONG:
+        return CC_TYPE_ULONG_LONG;
+    case CC_TYPE_PTR_FLOAT:
+        return CC_TYPE_FLOAT;
+    case CC_TYPE_PTR_DOUBLE:
+        return CC_TYPE_DOUBLE;
+    default:
+        return CC_TYPE_VOID;
+    }
+}
+
+static int is_null_ptr_constant(const cc_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_INT && e->int_val == 0) {
+        return 1;
+    }
+    if (e->kind == CC_EXPR_CAST) {
+        return is_null_ptr_constant(e->lhs);
+    }
+    if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_COMMA) {
+        return is_null_ptr_constant(e->rhs);
+    }
+    return 0;
+}
+
 static int can_convert(cc_type_t dst, cc_type_t src) {
     if (dst == src) {
         return 1;
     }
     if (is_numeric_type(dst) && is_numeric_type(src)) {
         return 1;
+    }
+    if (is_pointer_type(dst) && is_pointer_type(src)) {
+        cc_type_t dbase = ptr_base_type(dst);
+        cc_type_t sbase = ptr_base_type(src);
+        if (dbase == CC_TYPE_VOID || sbase == CC_TYPE_VOID || dbase == sbase) {
+            return 1;
+        }
     }
     return 0;
 }
@@ -295,6 +388,19 @@ static long type_size_bytes(cc_type_t t) {
     case CC_TYPE_LONG_LONG:
     case CC_TYPE_ULONG_LONG:
     case CC_TYPE_DOUBLE:
+        return 8;
+    case CC_TYPE_PTR_VOID:
+    case CC_TYPE_PTR_BOOL:
+    case CC_TYPE_PTR_CHAR:
+    case CC_TYPE_PTR_UCHAR:
+    case CC_TYPE_PTR_SHORT:
+    case CC_TYPE_PTR_USHORT:
+    case CC_TYPE_PTR_INT:
+    case CC_TYPE_PTR_UINT:
+    case CC_TYPE_PTR_LONG_LONG:
+    case CC_TYPE_PTR_ULONG_LONG:
+    case CC_TYPE_PTR_FLOAT:
+    case CC_TYPE_PTR_DOUBLE:
         return 8;
     default:
         return -1;
@@ -458,8 +564,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return 0;
         }
         if (is_logical_op(e->op)) {
-            if (!is_numeric_type(e->lhs->value_type) || !is_numeric_type(e->rhs->value_type)) {
-                set_diag(diag, "logical operators require numeric operands");
+            if (!is_scalar_type(e->lhs->value_type) || !is_scalar_type(e->rhs->value_type)) {
+                set_diag(diag, "logical operators require scalar operands");
                 return -1;
             }
             e->value_type = CC_TYPE_INT;
@@ -490,8 +596,35 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return 0;
         }
         if (is_cmp_op(e->op)) {
+            if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE) {
+                if (is_numeric_type(e->lhs->value_type) && is_numeric_type(e->rhs->value_type)) {
+                    e->value_type = CC_TYPE_INT;
+                    return 0;
+                }
+                if (is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
+                    if (can_convert(e->lhs->value_type, e->rhs->value_type) ||
+                        can_convert(e->rhs->value_type, e->lhs->value_type)) {
+                        e->value_type = CC_TYPE_INT;
+                        return 0;
+                    }
+                    set_diag(diag, "incompatible pointer types in comparison");
+                    return -1;
+                }
+                if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type) &&
+                    is_null_ptr_constant(e->rhs)) {
+                    e->value_type = CC_TYPE_INT;
+                    return 0;
+                }
+                if (is_pointer_type(e->rhs->value_type) && is_integral_type(e->lhs->value_type) &&
+                    is_null_ptr_constant(e->lhs)) {
+                    e->value_type = CC_TYPE_INT;
+                    return 0;
+                }
+                set_diag(diag, "comparison operators require compatible scalar operands");
+                return -1;
+            }
             if (!is_numeric_type(e->lhs->value_type) || !is_numeric_type(e->rhs->value_type)) {
-                set_diag(diag, "comparison operators require numeric operands");
+                set_diag(diag, "ordered comparison operators require numeric operands");
                 return -1;
             }
             e->value_type = CC_TYPE_INT;
@@ -543,7 +676,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (i < callee->param_count && !can_convert(callee->params[i].type, e->args[i]->value_type)) {
+            if (i < callee->param_count && !can_convert(callee->params[i].type, e->args[i]->value_type) &&
+                !(is_pointer_type(callee->params[i].type) && is_integral_type(e->args[i]->value_type) &&
+                  is_null_ptr_constant(e->args[i]))) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "cannot convert arg %zu in call to %s", i,
                              e->ident);
@@ -567,7 +702,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
-        if (!can_convert(vars[idx].type, e->rhs->value_type)) {
+        if (!can_convert(vars[idx].type, e->rhs->value_type) &&
+            !(is_pointer_type(vars[idx].type) && is_integral_type(e->rhs->value_type) &&
+              is_null_ptr_constant(e->rhs))) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "cannot assign expression to %s", e->ident);
             }
@@ -576,6 +713,52 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         e->value_type = vars[idx].type;
         return 0;
     }
+
+    case CC_EXPR_ADDR:
+        if (e->lhs == NULL) {
+            set_diag(diag, "malformed address-of expression");
+            return -1;
+        }
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->lhs->kind == CC_EXPR_DEREF) {
+            e->value_type = e->lhs->lhs != NULL ? e->lhs->lhs->value_type : CC_TYPE_VOID;
+            if (!is_pointer_type(e->value_type)) {
+                set_diag(diag, "address-of dereference requires pointer operand");
+                return -1;
+            }
+            return 0;
+        }
+        if (e->lhs->kind != CC_EXPR_IDENT) {
+            set_diag(diag, "address-of currently requires an identifier lvalue");
+            return -1;
+        }
+        e->value_type = ptr_of_type(e->lhs->value_type);
+        if (!is_pointer_type(e->value_type)) {
+            set_diag(diag, "cannot take address of this expression type");
+            return -1;
+        }
+        return 0;
+
+    case CC_EXPR_DEREF:
+        if (e->lhs == NULL) {
+            set_diag(diag, "malformed dereference expression");
+            return -1;
+        }
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!is_pointer_type(e->lhs->value_type)) {
+            set_diag(diag, "dereference requires pointer operand");
+            return -1;
+        }
+        e->value_type = ptr_base_type(e->lhs->value_type);
+        if (e->value_type == CC_TYPE_VOID) {
+            set_diag(diag, "cannot dereference void pointer");
+            return -1;
+        }
+        return 0;
 
     case CC_EXPR_UPDATE: {
         int idx = vars_find_visible(vars, var_count, e->ident, depth);
@@ -649,6 +832,28 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "conditional expression arms cannot be void");
             return -1;
         }
+        if (is_pointer_type(e->rhs->value_type) && is_pointer_type(e->third->value_type)) {
+            if (can_convert(e->rhs->value_type, e->third->value_type)) {
+                e->value_type = e->rhs->value_type;
+                return 0;
+            }
+            if (can_convert(e->third->value_type, e->rhs->value_type)) {
+                e->value_type = e->third->value_type;
+                return 0;
+            }
+            set_diag(diag, "incompatible pointer types in conditional expression");
+            return -1;
+        }
+        if (is_pointer_type(e->rhs->value_type) && is_integral_type(e->third->value_type) &&
+            is_null_ptr_constant(e->third)) {
+            e->value_type = e->rhs->value_type;
+            return 0;
+        }
+        if (is_pointer_type(e->third->value_type) && is_integral_type(e->rhs->value_type) &&
+            is_null_ptr_constant(e->rhs)) {
+            e->value_type = e->third->value_type;
+            return 0;
+        }
         e->value_type = common_arith_type(e->rhs->value_type, e->third->value_type);
         if (e->value_type == CC_TYPE_VOID) {
             set_diag(diag, "incompatible types in conditional expression");
@@ -680,7 +885,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!can_convert(s->type, s->expr->value_type)) {
+            if (!can_convert(s->type, s->expr->value_type) &&
+                !(is_pointer_type(s->type) && is_integral_type(s->expr->value_type) &&
+                  is_null_ptr_constant(s->expr))) {
                 set_diag(diag, "cannot initialize variable with incompatible type");
                 return -1;
             }

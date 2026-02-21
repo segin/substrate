@@ -319,6 +319,71 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
     return 0;
 }
 
+static int is_decl_qual_tok(cc_tok_kind_t k) {
+    return k == TOK_KW_CONST || k == TOK_KW_VOLATILE || k == TOK_KW_RESTRICT;
+}
+
+static cc_type_t ptr_of_type(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_VOID:
+        return CC_TYPE_PTR_VOID;
+    case CC_TYPE_BOOL:
+        return CC_TYPE_PTR_BOOL;
+    case CC_TYPE_CHAR:
+        return CC_TYPE_PTR_CHAR;
+    case CC_TYPE_UCHAR:
+        return CC_TYPE_PTR_UCHAR;
+    case CC_TYPE_SHORT:
+        return CC_TYPE_PTR_SHORT;
+    case CC_TYPE_USHORT:
+        return CC_TYPE_PTR_USHORT;
+    case CC_TYPE_INT:
+        return CC_TYPE_PTR_INT;
+    case CC_TYPE_UINT:
+        return CC_TYPE_PTR_UINT;
+    case CC_TYPE_LONG_LONG:
+        return CC_TYPE_PTR_LONG_LONG;
+    case CC_TYPE_ULONG_LONG:
+        return CC_TYPE_PTR_ULONG_LONG;
+    case CC_TYPE_FLOAT:
+        return CC_TYPE_PTR_FLOAT;
+    case CC_TYPE_DOUBLE:
+        return CC_TYPE_PTR_DOUBLE;
+    default:
+        return CC_TYPE_VOID;
+    }
+}
+
+static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name,
+                                  const char *name_err) {
+    cc_type_t ty = base_type;
+    while (p->tok.kind == TOK_STAR) {
+        ty = ptr_of_type(ty);
+        if (ty == CC_TYPE_VOID) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 1 is not yet supported");
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        while (is_decl_qual_tok(p->tok.kind)) {
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+        }
+    }
+    if (p->tok.kind != TOK_IDENT) {
+        set_diag(p->diag, p->tok.line, p->tok.col, name_err);
+        return -1;
+    }
+    *out_name = xstrdup_n(p->tok.start, p->tok.len);
+    if (*out_name == NULL) {
+        return -1;
+    }
+    *out_type = ty;
+    return next_tok(p);
+}
+
 static cc_expr_t *new_expr(cc_expr_kind_t kind) {
     cc_expr_t *e = (cc_expr_t *)calloc(1, sizeof(*e));
     if (e != NULL) {
@@ -685,6 +750,40 @@ static cc_expr_t *parse_unary(parser_t *p) {
             return NULL;
         }
         if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
+            free_expr(e);
+            return NULL;
+        }
+        e->lhs = parse_unary(p);
+        if (e->lhs == NULL) {
+            free_expr(e);
+            return NULL;
+        }
+        return e;
+    }
+
+    if (p->tok.kind == TOK_AMP) {
+        cc_expr_t *e = new_expr(CC_EXPR_ADDR);
+        if (e == NULL) {
+            return NULL;
+        }
+        if (next_tok(p) != 0) {
+            free_expr(e);
+            return NULL;
+        }
+        e->lhs = parse_unary(p);
+        if (e->lhs == NULL) {
+            free_expr(e);
+            return NULL;
+        }
+        return e;
+    }
+
+    if (p->tok.kind == TOK_STAR) {
+        cc_expr_t *e = new_expr(CC_EXPR_DEREF);
+        if (e == NULL) {
+            return NULL;
+        }
+        if (next_tok(p) != 0) {
             free_expr(e);
             return NULL;
         }
@@ -1158,15 +1257,8 @@ static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
     if (parse_declspec(p, &s->type, 0, "expected declaration type") != 0) {
         return -1;
     }
-    if (p->tok.kind != TOK_IDENT) {
-        set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier after declaration type");
-        return -1;
-    }
-    s->decl_name = xstrdup_n(p->tok.start, p->tok.len);
-    if (s->decl_name == NULL) {
-        return -1;
-    }
-    if (next_tok(p) != 0) {
+    if (parse_named_declarator(p, s->type, &s->type, &s->decl_name, "expected identifier after declaration type") !=
+        0) {
         return -1;
     }
     if (p->tok.kind == TOK_ASSIGN) {
@@ -1527,6 +1619,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
 
     while (p->tok.kind != TOK_RPAREN) {
         cc_type_t ptype;
+        char *pname = NULL;
 
         if (p->tok.kind == TOK_ELLIPSIS) {
             f->is_variadic = 1;
@@ -1539,22 +1632,19 @@ static int parse_params(parser_t *p, cc_function_t *f) {
         if (parse_declspec(p, &ptype, 1, "expected parameter type") != 0) {
             return -1;
         }
+        if (parse_named_declarator(p, ptype, &ptype, &pname, "expected parameter name") != 0) {
+            return -1;
+        }
         if (ptype == CC_TYPE_VOID) {
+            free(pname);
             set_diag(p->diag, p->tok.line, p->tok.col, "void is not a valid named parameter type");
             return -1;
         }
-
-        if (p->tok.kind != TOK_IDENT) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "expected parameter name");
+        if (push_param(f, ptype, pname, strlen(pname)) != 0) {
+            free(pname);
             return -1;
         }
-
-        if (push_param(f, ptype, p->tok.start, p->tok.len) != 0) {
-            return -1;
-        }
-        if (next_tok(p) != 0) {
-            return -1;
-        }
+        free(pname);
 
         if (p->tok.kind != TOK_COMMA) {
             break;
@@ -1572,21 +1662,14 @@ static int parse_params(parser_t *p, cc_function_t *f) {
 }
 
 static int parse_function(parser_t *p, cc_function_t *f) {
+    cc_type_t ftype;
     memset(f, 0, sizeof(*f));
     f->has_body = 0;
 
-    if (parse_declspec(p, &f->ret_type, 1, "expected function return type") != 0) {
+    if (parse_declspec(p, &ftype, 1, "expected function return type") != 0) {
         return -1;
     }
-    if (p->tok.kind != TOK_IDENT) {
-        set_diag(p->diag, p->tok.line, p->tok.col, "expected function name");
-        return -1;
-    }
-    f->name = xstrdup_n(p->tok.start, p->tok.len);
-    if (f->name == NULL) {
-        return -1;
-    }
-    if (next_tok(p) != 0) {
+    if (parse_named_declarator(p, ftype, &f->ret_type, &f->name, "expected function name") != 0) {
         return -1;
     }
 
