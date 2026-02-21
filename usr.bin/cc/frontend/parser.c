@@ -1180,22 +1180,7 @@ static cc_expr_t *parse_assign(parser_t *p) {
         }
 
         if (aop != TOK_ASSIGN) {
-            if (!lhs_is_ident) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "compound assignment currently requires identifier lvalue");
-                free_expr(lhs);
-                free_expr(rhs);
-                return NULL;
-            }
-            name = lhs->ident;
-            lhs->ident = NULL;
-            free_expr(lhs);
-            cc_expr_t *lhs_read = new_ident_expr(name);
             cc_binop_t bop;
-            if (lhs_read == NULL) {
-                free(name);
-                free_expr(rhs);
-                return NULL;
-            }
             if (aop == TOK_PLUS_EQ) {
                 bop = CC_BIN_ADD;
             } else if (aop == TOK_MINUS_EQ) {
@@ -1217,12 +1202,56 @@ static cc_expr_t *parse_assign(parser_t *p) {
             } else {
                 bop = CC_BIN_BOR;
             }
-            rhs = new_bin_expr(bop, lhs_read, rhs);
-            if (rhs == NULL) {
-                free(name);
-                return NULL;
+
+            if (lhs_is_ident) {
+                cc_expr_t *lhs_read;
+                name = lhs->ident;
+                lhs->ident = NULL;
+                free_expr(lhs);
+                lhs = NULL;
+                lhs_read = new_ident_expr(name);
+                if (lhs_read == NULL) {
+                    free(name);
+                    free_expr(rhs);
+                    return NULL;
+                }
+                rhs = new_bin_expr(bop, lhs_read, rhs);
+                if (rhs == NULL) {
+                    free(name);
+                    return NULL;
+                }
+            } else {
+                cc_expr_t *lhs_read;
+                cc_expr_t *ptr_ident;
+
+                if (lhs->lhs == NULL || lhs->lhs->kind != CC_EXPR_IDENT || lhs->lhs->ident == NULL) {
+                    set_diag(p->diag, p->tok.line, p->tok.col,
+                             "compound assignment through dereference currently requires *identifier lvalue");
+                    free_expr(lhs);
+                    free_expr(rhs);
+                    return NULL;
+                }
+
+                ptr_ident = new_ident_expr(lhs->lhs->ident);
+                if (ptr_ident == NULL) {
+                    free_expr(lhs);
+                    free_expr(rhs);
+                    return NULL;
+                }
+                lhs_read = new_expr(CC_EXPR_DEREF);
+                if (lhs_read == NULL) {
+                    free_expr(ptr_ident);
+                    free_expr(lhs);
+                    free_expr(rhs);
+                    return NULL;
+                }
+                lhs_read->lhs = ptr_ident;
+                rhs = new_bin_expr(bop, lhs_read, rhs);
+                if (rhs == NULL) {
+                    free_expr(lhs);
+                    return NULL;
+                }
             }
-            lhs = NULL;
         } else if (lhs_is_ident) {
             name = lhs->ident;
             lhs->ident = NULL;
