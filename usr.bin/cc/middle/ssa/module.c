@@ -14,6 +14,17 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
         return;
     }
 
+    for (i = 0; i < m->global_count; ++i) {
+        size_t j;
+        free(m->globals[i].name);
+        free(m->globals[i].init_str);
+        for (j = 0; j < m->globals[i].init_item_count; ++j) {
+            free(m->globals[i].init_items[j].init_str);
+        }
+        free(m->globals[i].init_items);
+    }
+    free(m->globals);
+
     for (i = 0; i < m->func_count; ++i) {
         size_t j;
         free(m->funcs[i].name);

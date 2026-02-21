@@ -9,6 +9,10 @@ typedef struct {
     char message[256];
 } cc_diag_t;
 
+#define CC_STORAGE_STATIC  (1 << 0)
+#define CC_STORAGE_EXTERN  (1 << 1)
+#define CC_STORAGE_INLINE  (1 << 2)
+
 typedef enum {
     CC_TYPE_VOID = 0,
     CC_TYPE_BOOL,
@@ -97,8 +101,10 @@ typedef enum {
 typedef enum {
     CC_EXPR_INT = 0,
     CC_EXPR_FLOAT,
+    CC_EXPR_STR,
     CC_EXPR_IDENT,
     CC_EXPR_BIN,
+    CC_EXPR_MEMBER,
     CC_EXPR_CALL,
     CC_EXPR_ASSIGN,
     CC_EXPR_UPDATE,
@@ -106,6 +112,7 @@ typedef enum {
     CC_EXPR_DEREF,
     CC_EXPR_CAST,
     CC_EXPR_SIZEOF,
+    CC_EXPR_INIT_LIST,
     CC_EXPR_TERNARY
 } cc_expr_kind_t;
 
@@ -114,15 +121,19 @@ typedef struct cc_expr cc_expr_t;
 struct cc_expr {
     cc_expr_kind_t kind;
     cc_type_t value_type;
+    int struct_id;
     long int_val;
     double float_val;
     char *ident;
     cc_binop_t op;
+    int member_is_arrow;
+    long member_offset;
     cc_expr_t *lhs;
     cc_expr_t *rhs;
     cc_expr_t *third;
     int update_postfix;
     cc_type_t aux_type;
+    int aux_struct_id;
     cc_expr_t **args;
     size_t arg_count;
 };
@@ -149,6 +160,9 @@ typedef struct cc_stmt cc_stmt_t;
 
 struct cc_stmt {
     cc_type_t type;
+    int type_struct_id;
+    long array_len;
+    int storage;
     cc_stmt_kind_t kind;
     char *decl_name;
     char *label_name;
@@ -165,11 +179,31 @@ struct cc_stmt {
 typedef struct {
     char *name;
     cc_type_t type;
+    int type_struct_id;
 } cc_param_t;
 
 typedef struct {
     char *name;
+    cc_type_t type;
+    int type_struct_id;
+    long offset;
+    long size;
+} cc_struct_member_t;
+
+typedef struct {
+    char *tag;
+    cc_struct_member_t *members;
+    size_t member_count;
+    long size;
+    long align;
+    int complete;
+} cc_struct_def_t;
+
+typedef struct {
+    char *name;
     cc_type_t ret_type;
+    int ret_struct_id;
+    int storage;
     int has_body;
     int is_variadic;
     cc_param_t *params;
@@ -179,8 +213,21 @@ typedef struct {
 } cc_function_t;
 
 typedef struct {
+    char *name;
+    cc_type_t type;
+    int type_struct_id;
+    long array_len;
+    int storage;
+    cc_expr_t *init;
+} cc_global_t;
+
+typedef struct {
     cc_function_t *funcs;
     size_t func_count;
+    cc_global_t *globals;
+    size_t global_count;
+    cc_struct_def_t *structs;
+    size_t struct_count;
 } cc_translation_unit_t;
 
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag);

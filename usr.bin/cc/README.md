@@ -26,6 +26,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and prefix/postfix `++/--` with C expression-value semantics
   - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), pointer/integer casts (`(void *)p`, `(unsigned long long)p`, `(int *)n`), and `sizeof` for supported scalar types
   - integer literal suffix typing for unsigned/long-long forms (`u`, `ul`, `ull`, etc.) in semantic/lowering paths
+  - builtin varargs forms: `__builtin_va_start`, `__builtin_va_arg`, `__builtin_va_end`, `__builtin_va_copy`
   - control-flow extensions: C labels + `goto`
 - existing SSA utilities remain available:
   - `ir-verifier`
@@ -44,13 +45,14 @@ Native C support is intentionally limited for now:
 - pointer-size semantics follow target ABI (`sizeof(void*) == 8` on `-m64`, `sizeof(void*) == 4` on `-m32`)
 - unsigned integer semantics are modeled for comparisons/division/modulo/right-shift in native lowering/codegen (`seta/setb`, `div`, logical right-shift)
 - function declarations/prototypes and definitions with fixed params or `...` variadics
+- variadic builtins and stack-based lowering for in-tree `stdarg.h` macros
 - typedef aliases for supported scalar/pointer types (usable in declarations, casts, and `sizeof(type)`)
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
 - i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)
 - assignments inside conditional/loop blocks are supported via explicit SSA `mov` variable updates
 - C95 lexing support includes digraph/trigraph forms for punctuation
-- no structs/arrays yet (pointer depth is currently limited to `T****`; deeper pointer chains are not yet supported)
+- pointer depth is currently limited to `T****`; deeper pointer chains are not yet supported
 
 For non-supported C sources, use `--bootstrap-gcc` as a temporary fallback.
 

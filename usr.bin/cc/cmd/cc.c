@@ -427,7 +427,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             continue;
         }
 
-        if (strcmp(a, "-I") == 0 || strcmp(a, "-D") == 0 || strcmp(a, "-U") == 0) {
+        if (strcmp(a, "-I") == 0 || strcmp(a, "-D") == 0 || strcmp(a, "-U") == 0 || strcmp(a, "-iquote") == 0 ||
+            strcmp(a, "-isystem") == 0) {
             if (i + 1 >= argc) {
                 return -1;
             }
@@ -439,7 +440,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             continue;
         }
 
-        if (strncmp(a, "-I", 2) == 0 || strncmp(a, "-D", 2) == 0 || strncmp(a, "-U", 2) == 0) {
+        if (strncmp(a, "-I", 2) == 0 || strncmp(a, "-D", 2) == 0 || strncmp(a, "-U", 2) == 0 ||
+            strncmp(a, "-iquote", 7) == 0 || strncmp(a, "-isystem", 8) == 0) {
             if (strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->c_flags, a) != 0) {
                 return -1;
             }
@@ -660,13 +662,13 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
         argv[at++] = crti;
         argv[at++] = crtbegin;
     }
-    for (i = 0; i < o->ld_flags.count; ++i) {
-        argv[at++] = o->ld_flags.items[i];
-    }
     argv[at++] = "-o";
     argv[at++] = (char *)out;
     for (i = 0; i < objs->count; ++i) {
         argv[at++] = objs->items[i];
+    }
+    for (i = 0; i < o->ld_flags.count; ++i) {
+        argv[at++] = o->ld_flags.items[i];
     }
     if (want_default_runtime) {
         argv[at++] = "-lc";
@@ -885,7 +887,7 @@ int cc_main(int argc, char **argv) {
             continue;
         }
 
-        if (has_ext(in, ".o")) {
+        if (has_ext(in, ".o") || has_ext(in, ".a") || has_ext(in, ".so")) {
             if (strvec_push(&obj_files, in) != 0) {
                 goto out;
             }

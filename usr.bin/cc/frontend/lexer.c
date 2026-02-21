@@ -62,6 +62,8 @@ typedef enum {
     TOK_QUESTION,
     TOK_COLON,
     TOK_SEMI,
+    TOK_DOT,
+    TOK_ARROW,
     TOK_ASSIGN,
     TOK_PLUS_EQ,
     TOK_MINUS_EQ,
@@ -148,6 +150,25 @@ static int lx_peekn(const cc_lexer_t *lx, size_t n) {
     return (unsigned char)lx->src[lx->pos + n];
 }
 
+static int lx_at_directive_start(const cc_lexer_t *lx) {
+    size_t i;
+    if (lx->pos >= lx->len || lx->src[lx->pos] != '#') {
+        return 0;
+    }
+    i = lx->pos;
+    while (i > 0) {
+        char p = lx->src[i - 1];
+        if (p == '\n') {
+            return 1;
+        }
+        if (p != ' ' && p != '\t' && p != '\r' && p != '\f' && p != '\v') {
+            return 0;
+        }
+        i--;
+    }
+    return 1;
+}
+
 static void lx_skip_ws_comments(cc_lexer_t *lx) {
     for (;;) {
         int c = lx_peek(lx);
@@ -173,6 +194,12 @@ static void lx_skip_ws_comments(cc_lexer_t *lx) {
                     lx_adv(lx);
                     break;
                 }
+                lx_adv(lx);
+            }
+            continue;
+        }
+        if (c == '#' && lx_at_directive_start(lx)) {
+            while ((c = lx_peek(lx)) >= 0 && c != '\n') {
                 lx_adv(lx);
             }
             continue;
@@ -311,7 +338,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
             out->kind = TOK_KW_STRUCT;
         } else if (out->len == 5 && out->start[0] == 'u' && out->start[1] == 'n' &&
                    out->start[2] == 'i' && out->start[3] == 'o' && out->start[4] == 'n') {
-            out->kind = TOK_KW_UNION;
+            out->kind = TOK_KW_STRUCT;
         } else if (out->len == 4 && out->start[0] == 'e' && out->start[1] == 'n' &&
                    out->start[2] == 'u' && out->start[3] == 'm') {
             out->kind = TOK_KW_ENUM;
@@ -326,6 +353,15 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         } else if (out->len == 6 && out->start[0] == 'd' && out->start[1] == 'o' &&
                    out->start[2] == 'u' && out->start[3] == 'b' && out->start[4] == 'l' &&
                    out->start[5] == 'e') {
+            out->kind = TOK_KW_DOUBLE;
+        } else if ((out->len == 9 && out->start[0] == '_' && out->start[1] == 'F' &&
+                    out->start[2] == 'l' && out->start[3] == 'o' && out->start[4] == 'a' &&
+                    out->start[5] == 't' && out->start[6] == '1' && out->start[7] == '2' &&
+                    out->start[8] == '8') ||
+                   (out->len == 10 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'f' && out->start[3] == 'l' && out->start[4] == 'o' &&
+                    out->start[5] == 'a' && out->start[6] == 't' && out->start[7] == '1' &&
+                    out->start[8] == '2' && out->start[9] == '8')) {
             out->kind = TOK_KW_DOUBLE;
         } else if ((out->len == 8 && out->start[0] == 'v' && out->start[1] == 'o' &&
                     out->start[2] == 'l' && out->start[3] == 'a' && out->start[4] == 't' &&
@@ -395,24 +431,48 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         lx_adv(lx); /* opening quote */
         c = lx_peek(lx);
         if (c == '\\') {
+            int d;
             lx_adv(lx);
             c = lx_peek(lx);
-            if (c == 'n') {
+            if (c >= '0' && c <= '7') {
+                int digits = 0;
+                v = 0;
+                while (digits < 3 && (d = lx_peek(lx)) >= '0' && d <= '7') {
+                    v = (v << 3) + (d - '0');
+                    lx_adv(lx);
+                    digits++;
+                }
+            } else if (c == 'n') {
                 v = '\n';
+                lx_adv(lx);
             } else if (c == 't') {
                 v = '\t';
+                lx_adv(lx);
             } else if (c == 'r') {
                 v = '\r';
-            } else if (c == '0') {
-                v = '\0';
+                lx_adv(lx);
+            } else if (c == 'a') {
+                v = '\a';
+                lx_adv(lx);
+            } else if (c == 'b') {
+                v = '\b';
+                lx_adv(lx);
+            } else if (c == 'f') {
+                v = '\f';
+                lx_adv(lx);
+            } else if (c == 'v') {
+                v = '\v';
+                lx_adv(lx);
             } else if (c == '\\') {
                 v = '\\';
+                lx_adv(lx);
             } else if (c == '\'') {
                 v = '\'';
+                lx_adv(lx);
             } else if (c == '\"') {
                 v = '\"';
+                lx_adv(lx);
             } else if (c == 'x') {
-                int d;
                 long hv = 0;
                 int seen = 0;
                 lx_adv(lx);
@@ -431,11 +491,12 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                 v = seen ? hv : 0;
             } else {
                 v = c;
+                if (c >= 0) {
+                    lx_adv(lx);
+                }
             }
         } else if (c >= 0) {
             v = c;
-        }
-        if (c >= 0) {
             lx_adv(lx);
         }
         if (lx_peek(lx) == '\'') {
@@ -739,6 +800,16 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         lx_adv(lx);
         return 0;
     }
+    if (c == '-' && lx_peekn(lx, 1) == '>') {
+        out->kind = TOK_ARROW;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
     if (c == '*' && lx_peekn(lx, 1) == '=') {
         out->kind = TOK_STAR_EQ;
         out->start = lx->src + lx->pos;
@@ -823,6 +894,9 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     case ';':
         out->kind = TOK_SEMI;
+        return 0;
+    case '.':
+        out->kind = TOK_DOT;
         return 0;
     case '=':
         out->kind = TOK_ASSIGN;

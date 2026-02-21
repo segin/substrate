@@ -4,11 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+void cc_parser_set_pointer_size(int bytes);
+
 static int g_pointer_size_bytes = 8;
 
 typedef struct {
     char *name;
     cc_type_t type;
+    int struct_id;
     int depth;
 } var_entry_t;
 
@@ -57,7 +60,7 @@ static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, in
     return -1;
 }
 
-static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int depth) {
+static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, int depth) {
     var_entry_t *next;
     char *dup;
 
@@ -74,6 +77,7 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     strcpy(dup, name);
     (*vars)[*count].name = dup;
     (*vars)[*count].type = type;
+    (*vars)[*count].struct_id = struct_id;
     (*vars)[*count].depth = depth;
     (*count)++;
     return 0;
@@ -183,13 +187,49 @@ static const cc_function_t *find_function(const cc_translation_unit_t *tu, const
     return NULL;
 }
 
+static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
+    size_t i;
+    if (tu == NULL || name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < tu->global_count; ++i) {
+        if (strcmp(tu->globals[i].name, name) == 0) {
+            return &tu->globals[i];
+        }
+    }
+    return NULL;
+}
+
+static const cc_struct_def_t *find_struct_def(const cc_translation_unit_t *tu, int struct_id) {
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        return NULL;
+    }
+    return &tu->structs[struct_id];
+}
+
+static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t *tu, int struct_id, const char *name) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    sd = find_struct_def(tu, struct_id);
+    if (sd == NULL || !sd->complete || name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        if (strcmp(sd->members[i].name, name) == 0) {
+            return &sd->members[i];
+        }
+    }
+    return NULL;
+}
+
 static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) {
     size_t i;
-    if (a->ret_type != b->ret_type || a->is_variadic != b->is_variadic || a->param_count != b->param_count) {
+    if (a->ret_type != b->ret_type || a->ret_struct_id != b->ret_struct_id || a->is_variadic != b->is_variadic ||
+        a->param_count != b->param_count) {
         return 0;
     }
     for (i = 0; i < a->param_count; ++i) {
-        if (a->params[i].type != b->params[i].type) {
+        if (a->params[i].type != b->params[i].type || a->params[i].type_struct_id != b->params[i].type_struct_id) {
             return 0;
         }
     }
@@ -518,6 +558,57 @@ static int is_bitwise_op(cc_binop_t op) {
     return op == CC_BIN_BAND || op == CC_BIN_BXOR || op == CC_BIN_BOR;
 }
 
+static int builtin_bswap_bits(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "__builtin_bswap16") == 0) {
+        return 16;
+    }
+    if (strcmp(name, "__builtin_bswap32") == 0) {
+        return 32;
+    }
+    if (strcmp(name, "__builtin_bswap64") == 0) {
+        return 64;
+    }
+    return 0;
+}
+
+typedef enum {
+    BUILTIN_NONE = 0,
+    BUILTIN_VA_START,
+    BUILTIN_VA_END,
+    BUILTIN_VA_COPY,
+    BUILTIN_VA_ARG,
+    BUILTIN_EXPECT,
+    BUILTIN_CONSTANT_P
+} builtin_kind_t;
+
+static builtin_kind_t builtin_kind(const char *name) {
+    if (name == NULL) {
+        return BUILTIN_NONE;
+    }
+    if (strcmp(name, "__builtin_va_start") == 0) {
+        return BUILTIN_VA_START;
+    }
+    if (strcmp(name, "__builtin_va_end") == 0) {
+        return BUILTIN_VA_END;
+    }
+    if (strcmp(name, "__builtin_va_copy") == 0) {
+        return BUILTIN_VA_COPY;
+    }
+    if (strcmp(name, "__builtin_va_arg") == 0) {
+        return BUILTIN_VA_ARG;
+    }
+    if (strcmp(name, "__builtin_expect") == 0) {
+        return BUILTIN_EXPECT;
+    }
+    if (strcmp(name, "__builtin_constant_p") == 0) {
+        return BUILTIN_CONSTANT_P;
+    }
+    return BUILTIN_NONE;
+}
+
 static long type_size_bytes(cc_type_t t) {
     switch (t) {
     case CC_TYPE_BOOL:
@@ -587,6 +678,18 @@ static long type_size_bytes(cc_type_t t) {
     default:
         return -1;
     }
+}
+
+static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
+    long n = type_size_bytes(t);
+    if (n > 0) {
+        return n;
+    }
+    if (t == CC_TYPE_VOID && tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count &&
+        tu->structs[struct_id].complete) {
+        return tu->structs[struct_id].size;
+    }
+    return -1;
 }
 
 static int eval_const_int_expr(const cc_expr_t *e, long *out) {
@@ -716,21 +819,82 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (!is_integral_type(e->value_type)) {
             e->value_type = CC_TYPE_INT;
         }
+        e->struct_id = -1;
         return 0;
 
     case CC_EXPR_FLOAT:
         e->value_type = CC_TYPE_DOUBLE;
+        e->struct_id = -1;
+        return 0;
+
+    case CC_EXPR_STR:
+        e->value_type = CC_TYPE_PTR_CHAR;
+        e->struct_id = -1;
         return 0;
 
     case CC_EXPR_IDENT: {
         int idx = vars_find_visible(vars, var_count, e->ident, depth);
-        if (idx < 0) {
+        if (idx >= 0) {
+            e->value_type = vars[idx].type;
+            e->struct_id = vars[idx].struct_id;
+            return 0;
+        }
+        {
+            const cc_global_t *g = find_global(tu, e->ident);
+            if (g != NULL) {
+                e->value_type = g->type;
+                e->struct_id = g->type_struct_id;
+                return 0;
+            }
+            if (find_function(tu, e->ident) != NULL) {
+                e->value_type = CC_TYPE_PTR_VOID;
+                e->struct_id = -1;
+                return 0;
+            }
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "unknown identifier: %s", e->ident);
             }
             return -1;
         }
-        e->value_type = vars[idx].type;
+    }
+
+    case CC_EXPR_MEMBER: {
+        const cc_struct_member_t *m;
+        int sid = -1;
+        if (e->lhs == NULL || e->ident == NULL) {
+            set_diag(diag, "malformed member expression");
+            return -1;
+        }
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->member_is_arrow) {
+            if (!is_pointer_type(e->lhs->value_type)) {
+                set_diag(diag, "-> requires pointer operand");
+                return -1;
+            }
+            sid = e->lhs->struct_id;
+            if (sid < 0) {
+                set_diag(diag, "-> requires pointer to known struct type");
+                return -1;
+            }
+        } else {
+            sid = e->lhs->struct_id;
+            if (sid < 0) {
+                set_diag(diag, ". requires struct operand");
+                return -1;
+            }
+        }
+        m = find_struct_member(tu, sid, e->ident);
+        if (m == NULL) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "unknown member '%s' for struct", e->ident);
+            }
+            return -1;
+        }
+        e->value_type = m->type;
+        e->struct_id = m->type_struct_id;
+        e->member_offset = m->offset;
         return 0;
     }
 
@@ -823,33 +987,23 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
             if (e->op == CC_BIN_SUB && is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
-                if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID ||
-                    ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
-                    set_diag(diag, "pointer arithmetic on void pointer is unsupported");
-                    return -1;
-                }
                 if (!can_convert(e->lhs->value_type, e->rhs->value_type) &&
                     !can_convert(e->rhs->value_type, e->lhs->value_type)) {
                     set_diag(diag, "incompatible pointer types in subtraction");
                     return -1;
                 }
                 e->value_type = CC_TYPE_INT;
+                e->struct_id = -1;
                 return 0;
             }
             if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type)) {
-                if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID) {
-                    set_diag(diag, "pointer arithmetic on void pointer is unsupported");
-                    return -1;
-                }
                 e->value_type = e->lhs->value_type;
+                e->struct_id = e->lhs->struct_id;
                 return 0;
             }
             if (e->op == CC_BIN_ADD && is_integral_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
-                if (ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
-                    set_diag(diag, "pointer arithmetic on void pointer is unsupported");
-                    return -1;
-                }
                 e->value_type = e->rhs->value_type;
+                e->struct_id = e->rhs->struct_id;
                 return 0;
             }
             if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
@@ -880,21 +1034,176 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         return 0;
 
     case CC_EXPR_CALL: {
-        const cc_function_t *callee = find_function(tu, e->ident);
-        if (callee == NULL) {
+        const cc_function_t *callee = NULL;
+        builtin_kind_t bk = builtin_kind(e->ident);
+        int bswap_bits = builtin_bswap_bits(e->ident);
+        if (e->ident != NULL) {
+            callee = find_function(tu, e->ident);
+        }
+        if (bk == BUILTIN_VA_START) {
+            if (e->arg_count != 2) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "__builtin_va_start expects exactly 2 arguments");
+                }
+                return -1;
+            }
+            for (i = 0; i < e->arg_count; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!is_pointer_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_va_start first argument must be a pointer");
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_VA_END) {
+            if (e->arg_count != 1) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "__builtin_va_end expects exactly 1 argument");
+                }
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_pointer_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_va_end argument must be a pointer");
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_VA_COPY) {
+            if (e->arg_count != 2) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "__builtin_va_copy expects exactly 2 arguments");
+                }
+                return -1;
+            }
+            for (i = 0; i < e->arg_count; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                if (!is_pointer_type(e->args[i]->value_type)) {
+                    set_diag(diag, "__builtin_va_copy arguments must be pointers");
+                    return -1;
+                }
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_VA_ARG) {
+            if (e->arg_count != 1) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "__builtin_va_arg expects va_list and a type");
+                }
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_pointer_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_va_arg first operand must be a pointer");
+                return -1;
+            }
+            if (e->aux_type == CC_TYPE_VOID) {
+                set_diag(diag, "__builtin_va_arg requires a non-void type");
+                return -1;
+            }
+            e->value_type = e->aux_type;
+            e->struct_id = e->aux_struct_id;
+            return 0;
+        }
+        if (bk == BUILTIN_EXPECT) {
+            if (e->arg_count != 2) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "__builtin_expect expects exactly 2 arguments");
+                }
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+                check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_scalar_type(e->args[0]->value_type) || !is_integral_type(e->args[1]->value_type)) {
+                set_diag(diag, "__builtin_expect expects (scalar, integer)");
+                return -1;
+            }
+            e->value_type = e->args[0]->value_type;
+            e->struct_id = e->args[0]->struct_id;
+            return 0;
+        }
+        if (bk == BUILTIN_CONSTANT_P) {
+            if (e->arg_count != 1) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "__builtin_constant_p expects exactly 1 argument");
+                }
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (e->ident != NULL && callee == NULL && bswap_bits != 0) {
+            if (e->arg_count != 1) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "%s expects exactly 1 argument", e->ident);
+                }
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_integral_type(e->args[0]->value_type)) {
+                set_diag(diag, "byte-swap builtin requires integral argument");
+                return -1;
+            }
+            if (bswap_bits == 16) {
+                e->value_type = CC_TYPE_USHORT;
+            } else if (bswap_bits == 32) {
+                e->value_type = CC_TYPE_UINT;
+            } else {
+                e->value_type = CC_TYPE_ULONG_LONG;
+            }
+            e->struct_id = -1;
+            return 0;
+        }
+        if (e->ident != NULL && callee == NULL) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "unknown function: %s", e->ident);
             }
             return -1;
         }
-        if (!callee->is_variadic && e->arg_count != callee->param_count) {
+        if (e->ident == NULL) {
+            if (e->lhs == NULL) {
+                set_diag(diag, "malformed call expression");
+                return -1;
+            }
+            if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_pointer_type(e->lhs->value_type)) {
+                set_diag(diag, "call target must be a function pointer");
+                return -1;
+            }
+        }
+        if (callee != NULL && !callee->is_variadic && e->arg_count != callee->param_count) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "call to %s has %zu args but %zu required", e->ident,
                          e->arg_count, callee->param_count);
             }
             return -1;
         }
-        if (callee->is_variadic && e->arg_count < callee->param_count) {
+        if (callee != NULL && callee->is_variadic && e->arg_count < callee->param_count) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),
                          "variadic call to %s has %zu args but needs at least %zu", e->ident, e->arg_count,
@@ -906,7 +1215,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (i < callee->param_count && !can_convert(callee->params[i].type, e->args[i]->value_type) &&
+            if (callee != NULL && i < callee->param_count && !can_convert(callee->params[i].type, e->args[i]->value_type) &&
                 !(is_pointer_type(callee->params[i].type) && is_integral_type(e->args[i]->value_type) &&
                   is_null_ptr_constant(e->args[i]))) {
                 if (diag != NULL && diag->message[0] == '\0') {
@@ -916,7 +1225,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         }
-        e->value_type = callee->ret_type;
+        if (callee != NULL) {
+            e->value_type = callee->ret_type;
+            e->struct_id = callee->ret_struct_id;
+        } else {
+            e->value_type = ptr_base_type(e->lhs->value_type);
+            e->struct_id = -1;
+        }
         return 0;
     }
 
@@ -924,21 +1239,26 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         cc_type_t dst_type;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
-            if (idx < 0) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "assignment to undeclared identifier: %s",
-                             e->ident);
+            if (idx >= 0) {
+                dst_type = vars[idx].type;
+            } else {
+                const cc_global_t *g = find_global(tu, e->ident);
+                if (g == NULL) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "assignment to undeclared identifier: %s",
+                                 e->ident);
+                    }
+                    return -1;
                 }
-                return -1;
+                dst_type = g->type;
             }
-            dst_type = vars[idx].type;
-        } else if (e->lhs != NULL && e->lhs->kind == CC_EXPR_DEREF) {
+        } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             dst_type = e->lhs->value_type;
         } else {
-            set_diag(diag, "assignment target must be identifier or dereference");
+            set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
             return -1;
         }
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
@@ -956,6 +1276,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return -1;
         }
         e->value_type = dst_type;
+        e->struct_id = -1;
         return 0;
     }
 
@@ -973,10 +1294,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "address-of dereference requires pointer operand");
                 return -1;
             }
+            e->struct_id = e->lhs->lhs != NULL ? e->lhs->lhs->struct_id : -1;
             return 0;
         }
-        if (e->lhs->kind != CC_EXPR_IDENT) {
-            set_diag(diag, "address-of currently requires an identifier lvalue");
+        if (e->lhs->kind != CC_EXPR_IDENT && e->lhs->kind != CC_EXPR_MEMBER) {
+            set_diag(diag, "address-of currently requires an identifier or member lvalue");
             return -1;
         }
         e->value_type = ptr_of_type(e->lhs->value_type);
@@ -984,6 +1306,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "cannot take address of this expression type");
             return -1;
         }
+        e->struct_id = e->lhs->struct_id;
         return 0;
 
     case CC_EXPR_DEREF:
@@ -999,7 +1322,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return -1;
         }
         e->value_type = ptr_base_type(e->lhs->value_type);
+        e->struct_id = -1;
         if (e->value_type == CC_TYPE_VOID) {
+            if (e->lhs->struct_id >= 0) {
+                e->struct_id = e->lhs->struct_id;
+                return 0;
+            }
             set_diag(diag, "cannot dereference void pointer");
             return -1;
         }
@@ -1009,33 +1337,36 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         cc_type_t t;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
-            if (idx < 0) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "update of undeclared identifier: %s",
-                             e->ident ? e->ident : "<null>");
+            if (idx >= 0) {
+                t = vars[idx].type;
+            } else {
+                const cc_global_t *g = find_global(tu, e->ident);
+                if (g == NULL) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "update of undeclared identifier: %s",
+                                 e->ident ? e->ident : "<null>");
+                    }
+                    return -1;
                 }
-                return -1;
+                t = g->type;
             }
-            t = vars[idx].type;
-        } else if (e->lhs != NULL && e->lhs->kind == CC_EXPR_DEREF) {
+        } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             t = e->lhs->value_type;
         } else {
-            set_diag(diag, "++/-- target must be identifier or dereference lvalue");
+            set_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
             return -1;
         }
         if (is_pointer_type(t)) {
-            if (ptr_base_type(t) == CC_TYPE_VOID) {
-                set_diag(diag, "++/-- on void pointer is unsupported");
-                return -1;
-            }
+            /* GNU-style extension: treat void* increments as byte-wise. */
         } else if (!is_numeric_type(t)) {
             set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
             return -1;
         }
         e->value_type = t;
+        e->struct_id = -1;
         return 0;
     }
 
@@ -1049,19 +1380,23 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (e->aux_type == CC_TYPE_VOID) {
             e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
             return 0;
         }
         if (is_numeric_type(e->lhs->value_type) && is_numeric_type(e->aux_type)) {
             e->value_type = e->aux_type;
+            e->struct_id = -1;
             return 0;
         }
         if (is_pointer_type(e->aux_type) &&
             (is_pointer_type(e->lhs->value_type) || is_integral_type(e->lhs->value_type))) {
             e->value_type = e->aux_type;
+            e->struct_id = -1;
             return 0;
         }
         if (is_integral_type(e->aux_type) && is_pointer_type(e->lhs->value_type)) {
             e->value_type = e->aux_type;
+            e->struct_id = -1;
             return 0;
         }
         set_diag(diag, "cast currently supports numeric and pointer/integer conversions only");
@@ -1072,17 +1407,33 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (type_size_bytes(e->lhs->value_type) < 0) {
+            if (type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id) < 0) {
                 set_diag(diag, "sizeof unsupported for this operand type");
                 return -1;
             }
         } else {
-            if (type_size_bytes(e->aux_type) < 0) {
+            if (type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id) < 0) {
                 set_diag(diag, "sizeof unsupported for this type");
                 return -1;
             }
         }
         e->value_type = CC_TYPE_INT;
+        e->struct_id = -1;
+        return 0;
+
+    case CC_EXPR_INIT_LIST:
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (e->arg_count > 0) {
+            e->value_type = e->args[0]->value_type;
+            e->struct_id = e->args[0]->struct_id;
+        } else {
+            e->value_type = CC_TYPE_INT;
+            e->struct_id = -1;
+        }
         return 0;
 
     case CC_EXPR_TERNARY:
@@ -1106,10 +1457,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (is_pointer_type(e->rhs->value_type) && is_pointer_type(e->third->value_type)) {
             if (can_convert(e->rhs->value_type, e->third->value_type)) {
                 e->value_type = e->rhs->value_type;
+                e->struct_id = e->rhs->struct_id;
                 return 0;
             }
             if (can_convert(e->third->value_type, e->rhs->value_type)) {
                 e->value_type = e->third->value_type;
+                e->struct_id = e->third->struct_id;
                 return 0;
             }
             set_diag(diag, "incompatible pointer types in conditional expression");
@@ -1118,11 +1471,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (is_pointer_type(e->rhs->value_type) && is_integral_type(e->third->value_type) &&
             is_null_ptr_constant(e->third)) {
             e->value_type = e->rhs->value_type;
+            e->struct_id = e->rhs->struct_id;
             return 0;
         }
         if (is_pointer_type(e->third->value_type) && is_integral_type(e->rhs->value_type) &&
             is_null_ptr_constant(e->rhs)) {
             e->value_type = e->third->value_type;
+            e->struct_id = e->third->struct_id;
             return 0;
         }
         e->value_type = common_arith_type(e->rhs->value_type, e->third->value_type);
@@ -1130,6 +1485,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "incompatible types in conditional expression");
             return -1;
         }
+        e->struct_id = -1;
         return 0;
 
     default:
@@ -1138,36 +1494,209 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     }
 }
 
+static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
+                                    var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag) {
+    size_t i;
+    const cc_struct_def_t *sd;
+
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        set_diag(diag, "struct initializer uses unknown struct type");
+        return -1;
+    }
+    if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "struct initializer for %s must use braces",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    sd = &tu->structs[struct_id];
+    if (init->arg_count > sd->member_count) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "too many initializers for struct %s",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    for (i = 0; i < init->arg_count; ++i) {
+        cc_expr_t *item = init->args[i];
+        const cc_struct_member_t *m = &sd->members[i];
+        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            if (item->kind != CC_EXPR_INIT_LIST) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "member initializer %zu for struct %s must use braces", i,
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+            if (check_struct_initializer(tu, name, m->type_struct_id, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!can_convert(m->type, item->value_type) &&
+            !(is_pointer_type(m->type) && is_integral_type(item->value_type) && is_null_ptr_constant(item))) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "cannot convert member initializer %zu for struct %s", i,
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, cc_type_t array_type,
+                                   int array_struct_id, long array_len, cc_expr_t *init, var_entry_t *vars,
+                                   size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag) {
+    size_t i;
+    cc_type_t elem_type;
+
+    if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+        set_diag(diag, "array initializer must use an initializer list");
+        return -1;
+    }
+    if (!is_pointer_type(array_type) || array_len < 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "cannot initialize non-array object %s with initializer list",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+
+    elem_type = ptr_base_type(array_type);
+    if (elem_type == CC_TYPE_VOID && array_struct_id < 0) {
+        set_diag(diag, "array initializer has unsupported element type");
+        return -1;
+    }
+    if (array_len > 0 && init->arg_count > (size_t)array_len) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "too many initializers for array %s",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    if (array_len == 0 && init->arg_count == 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "cannot deduce array size for %s from empty initializer list",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    for (i = 0; i < init->arg_count; ++i) {
+        cc_expr_t *item = init->args[i];
+        if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
+            if (item->kind != CC_EXPR_INIT_LIST) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "array initializer %zu for %s must use braces for struct elements", i,
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+            if (check_struct_initializer(tu, name, array_struct_id, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        } else {
+            if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!can_convert(elem_type, item->value_type) &&
+                !(is_pointer_type(elem_type) && is_integral_type(item->value_type) && is_null_ptr_constant(item))) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "cannot convert initializer %zu for array %s", i,
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+        }
+    }
+    if (out_inferred_len != NULL && array_len == 0) {
+        *out_inferred_len = (long)init->arg_count;
+    }
+    return 0;
+}
+
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
                       cc_type_t fn_ret_type, int loop_depth, int switch_depth, int *saw_return, cc_diag_t *diag) {
     size_t i;
 
     switch (s->kind) {
     case CC_STMT_DECL:
-        if (s->type == CC_TYPE_VOID) {
-            set_diag(diag, "void variable declarations are not supported");
-            return -1;
-        }
-        if (vars_find_depth(*vars, *var_count, s->decl_name, depth) >= 0) {
-            set_diag(diag, "duplicate local/parameter name");
-            return -1;
-        }
-        if (s->expr != NULL) {
-            if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+        {
+            cc_type_t init_type = s->type;
+            if (s->array_len >= 0 && is_pointer_type(s->type)) {
+                init_type = ptr_base_type(s->type);
+            }
+            if (s->type == CC_TYPE_VOID && s->type_struct_id < 0) {
+                set_diag(diag, "void variable declarations are not supported");
                 return -1;
             }
-            if (!can_convert(s->type, s->expr->value_type) &&
-                !(is_pointer_type(s->type) && is_integral_type(s->expr->value_type) &&
-                  is_null_ptr_constant(s->expr))) {
-                set_diag(diag, "cannot initialize variable with incompatible type");
+            if (vars_find_depth(*vars, *var_count, s->decl_name, depth) >= 0) {
+                set_diag(diag, "duplicate local/parameter name");
                 return -1;
             }
+            if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, depth) != 0) {
+                set_diag(diag, "out of memory adding local variable");
+                return -1;
+            }
+            if (s->expr != NULL) {
+                if (s->expr->kind == CC_EXPR_INIT_LIST) {
+                    if (is_pointer_type(s->type) && s->array_len >= 0) {
+                        long inferred_len = -1;
+                        if (check_array_initializer(tu, s->decl_name, s->type, s->type_struct_id, s->array_len, s->expr,
+                                                    *vars, *var_count, depth, &inferred_len, diag) != 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        if (s->array_len == 0 && inferred_len > 0) {
+                            s->array_len = inferred_len;
+                        }
+                    } else if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+                        if (check_struct_initializer(tu, s->decl_name, s->type_struct_id, s->expr, *vars, *var_count,
+                                                     depth, diag) != 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                    } else {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message),
+                                     "initializer list is unsupported for variable '%s'",
+                                     s->decl_name != NULL ? s->decl_name : "<anon>");
+                        }
+                        free((*vars)[*var_count - 1].name);
+                        (*var_count)--;
+                        return -1;
+                    }
+                } else {
+                    if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                        free((*vars)[*var_count - 1].name);
+                        (*var_count)--;
+                        return -1;
+                    }
+                    if (!can_convert(init_type, s->expr->value_type) &&
+                        !(is_pointer_type(init_type) && is_integral_type(s->expr->value_type) &&
+                          is_null_ptr_constant(s->expr))) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message),
+                                     "cannot initialize variable '%s' (type=%d) with expression type=%d",
+                                     s->decl_name != NULL ? s->decl_name : "<anon>", (int)init_type,
+                                     (int)s->expr->value_type);
+                        }
+                        free((*vars)[*var_count - 1].name);
+                        (*var_count)--;
+                        return -1;
+                    }
+                }
+            }
+            return 0;
         }
-        if (vars_push(vars, var_count, s->decl_name, s->type, depth) != 0) {
-            set_diag(diag, "out of memory adding local variable");
-            return -1;
-        }
-        return 0;
 
     case CC_STMT_EXPR:
         if (s->expr == NULL) {
@@ -1458,9 +1987,76 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         diag->message[0] = '\0';
     }
 
-    if (tu == NULL || tu->func_count == 0) {
+    if (tu == NULL || (tu->func_count == 0 && tu->global_count == 0)) {
         set_diag(diag, "translation unit is empty");
         return -1;
+    }
+
+    for (i = 0; i < tu->global_count; ++i) {
+        const cc_global_t *g = &tu->globals[i];
+        size_t j;
+        if (g->name == NULL || g->name[0] == '\0') {
+            set_diag(diag, "file-scope declaration with missing name");
+            goto fail_global;
+        }
+        if (g->type == CC_TYPE_VOID && g->type_struct_id < 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "invalid void file-scope object: %s", g->name);
+            }
+            goto fail_global;
+        }
+        for (j = 0; j < i; ++j) {
+            if (strcmp(tu->globals[j].name, g->name) == 0) {
+                const cc_global_t *prev = &tu->globals[j];
+                if (prev->type != g->type || prev->type_struct_id != g->type_struct_id) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "conflicting file-scope object types: %s",
+                                 g->name);
+                    }
+                    goto fail_global;
+                }
+                if (prev->init != NULL && g->init != NULL) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "duplicate file-scope definition: %s", g->name);
+                    }
+                    goto fail_global;
+                }
+                break;
+            }
+        }
+        if (g->init != NULL) {
+            if (g->init->kind == CC_EXPR_INIT_LIST) {
+                if (is_pointer_type(g->type) && g->array_len >= 0) {
+                    if (check_array_initializer(tu, g->name, g->type, g->type_struct_id, g->array_len, g->init, NULL,
+                                                0, 0, NULL, diag) != 0) {
+                        goto fail_global;
+                    }
+                } else if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
+                    if (check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
+                        goto fail_global;
+                    }
+                } else {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "initializer list is unsupported for file-scope object %s", g->name);
+                    }
+                    goto fail_global;
+                }
+            } else {
+                if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0) {
+                    goto fail_global;
+                }
+                if (!can_convert(g->type, g->init->value_type) &&
+                    !(is_pointer_type(g->type) && is_integral_type(g->init->value_type) &&
+                      is_null_ptr_constant(g->init))) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
+                                 g->name);
+                    }
+                    goto fail_global;
+                }
+            }
+        }
     }
 
     for (i = 0; i < tu->func_count; ++i) {
@@ -1506,7 +2102,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         }
 
         for (j = 0; j < f->param_count; ++j) {
-            if (f->params[j].type == CC_TYPE_VOID) {
+            if (f->params[j].type == CC_TYPE_VOID && f->params[j].type_struct_id < 0) {
                 set_diag(diag, "void is not valid for named parameter type");
                 goto fail_func;
             }
@@ -1514,7 +2110,8 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 set_diag(diag, "duplicate parameter name");
                 goto fail_func;
             }
-            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, 0) != 0) {
+            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, 0) !=
+                0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }
@@ -1540,10 +2137,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 }
         }
 
-        if (!saw_return && f->ret_type != CC_TYPE_VOID) {
-            set_diag(diag, "non-void function requires at least one return statement");
-            goto fail_func;
-        }
+        (void)saw_return;
 
         for (j = 0; j < var_count; ++j) {
             free(vars[j].name);
@@ -1572,5 +2166,6 @@ fail_global:
 void cc_frontend_set_pointer_size(int bytes) {
     if (bytes == 4 || bytes == 8) {
         g_pointer_size_bytes = bytes;
+        cc_parser_set_pointer_size(bytes);
     }
 }

@@ -106,6 +106,276 @@ static void emit_local_label(FILE *fp, const char *fn, int label) {
     fprintf(fp, ".L%s_%d", fn, label);
 }
 
+static void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_index, const char *literal) {
+    fprintf(fp, "\t.section .rodata\n");
+    fprintf(fp, ".L__cc_str_%zu_%zu:\n", fn_index, instr_index);
+    fprintf(fp, "\t.asciz %s\n", literal != NULL ? literal : "\"\"");
+    fprintf(fp, "\t.text\n");
+}
+
+static int is_pointer_type(cc_type_t t) {
+    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
+}
+
+static cc_type_t ptr_base_type(cc_type_t t) {
+    if (t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_DOUBLE) {
+        return (cc_type_t)(CC_TYPE_VOID + (t - CC_TYPE_PTR_VOID));
+    }
+    if (t >= CC_TYPE_PTR_PTR_VOID && t <= CC_TYPE_PTR_PTR_DOUBLE) {
+        return (cc_type_t)(CC_TYPE_PTR_VOID + (t - CC_TYPE_PTR_PTR_VOID));
+    }
+    if (t >= CC_TYPE_PTR_PTR_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_DOUBLE) {
+        return (cc_type_t)(CC_TYPE_PTR_PTR_VOID + (t - CC_TYPE_PTR_PTR_PTR_VOID));
+    }
+    if (t >= CC_TYPE_PTR_PTR_PTR_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE) {
+        return (cc_type_t)(CC_TYPE_PTR_PTR_PTR_VOID + (t - CC_TYPE_PTR_PTR_PTR_PTR_VOID));
+    }
+    return CC_TYPE_VOID;
+}
+
+static long global_type_size_bytes(cc_type_t t, int pointer_size) {
+    if (t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE) {
+        return pointer_size;
+    }
+    switch (t) {
+    case CC_TYPE_BOOL:
+    case CC_TYPE_CHAR:
+    case CC_TYPE_UCHAR:
+        return 1;
+    case CC_TYPE_SHORT:
+    case CC_TYPE_USHORT:
+        return 2;
+    case CC_TYPE_INT:
+    case CC_TYPE_UINT:
+    case CC_TYPE_FLOAT:
+        return 4;
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
+    case CC_TYPE_DOUBLE:
+        return 8;
+    default:
+        return -1;
+    }
+}
+
+static size_t decoded_c_string_len(const char *literal) {
+    const char *p;
+    size_t n = 0;
+    if (literal == NULL) {
+        return 0;
+    }
+    p = literal;
+    if (*p == '"') {
+        p++;
+    }
+    while (*p != '\0' && *p != '"') {
+        if (*p != '\\') {
+            n++;
+            p++;
+            continue;
+        }
+        p++;
+        if (*p == '\0') {
+            break;
+        }
+        if (*p == 'x') {
+            int seen = 0;
+            p++;
+            while ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) {
+                seen = 1;
+                p++;
+            }
+            n += seen ? 1 : 0;
+            continue;
+        }
+        if (*p >= '0' && *p <= '7') {
+            int digits = 0;
+            while (digits < 3 && *p >= '0' && *p <= '7') {
+                p++;
+                digits++;
+            }
+            n++;
+            continue;
+        }
+        n++;
+        p++;
+    }
+    return n;
+}
+
+static long global_object_size_bytes(const cc_ssa_global_t *g, int pointer_size) {
+    long sz = global_type_size_bytes(g->type, pointer_size);
+    if (g->array_len >= 0 && is_pointer_type(g->type)) {
+        cc_type_t base = ptr_base_type(g->type);
+        long elem = global_type_size_bytes(base, pointer_size);
+        long elems = g->array_len;
+        if (elem <= 0) {
+            elem = 1;
+        }
+        if (elems <= 0 && g->init_item_count > 0) {
+            elems = (long)g->init_item_count;
+        } else if (elems <= 0 && g->init_is_string && base == CC_TYPE_CHAR) {
+            elems = (long)(decoded_c_string_len(g->init_str) + 1);
+        } else if (elems <= 0) {
+            elems = 1;
+        }
+        sz = elem * elems;
+    }
+    if (sz <= 0) {
+        sz = pointer_size;
+    }
+    return sz;
+}
+
+static void emit_integer_data(FILE *fp, long size, long value) {
+    if (size <= 1) {
+        fprintf(fp, "\t.byte %ld\n", value);
+    } else if (size == 2) {
+        fprintf(fp, "\t.short %ld\n", value);
+    } else if (size == 4) {
+        fprintf(fp, "\t.long %ld\n", value);
+    } else {
+        fprintf(fp, "\t.quad %ld\n", value);
+    }
+}
+
+static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc_diag_t *diag) {
+    size_t i;
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+        long sz = global_object_size_bytes(g, pointer_size);
+        int is_static = (g->storage & CC_STORAGE_STATIC) != 0;
+        int is_extern = (g->storage & CC_STORAGE_EXTERN) != 0;
+
+        if (is_extern) {
+            continue;
+        }
+        if (g->name == NULL || g->name[0] == '\0') {
+            set_diag(diag, "malformed global symbol");
+            return -1;
+        }
+        if (!g->has_init) {
+            fprintf(fp, ".bss\n");
+            if (!is_static) {
+                fprintf(fp, ".globl %s\n", g->name);
+            }
+            if (sz >= 8) {
+                fprintf(fp, ".align 8\n");
+            } else if (sz >= 4) {
+                fprintf(fp, ".align 4\n");
+            } else if (sz >= 2) {
+                fprintf(fp, ".align 2\n");
+            }
+            fprintf(fp, "%s:\n", g->name);
+            fprintf(fp, "\t.zero %ld\n", sz);
+            continue;
+        }
+        fprintf(fp, ".data\n");
+        if (!is_static) {
+            fprintf(fp, ".globl %s\n", g->name);
+        }
+        if (sz >= 8) {
+            fprintf(fp, ".align 8\n");
+        } else if (sz >= 4) {
+            fprintf(fp, ".align 4\n");
+        } else if (sz >= 2) {
+            fprintf(fp, ".align 2\n");
+        }
+        fprintf(fp, "%s:\n", g->name);
+        if (g->init_item_count > 0) {
+            size_t j;
+            cc_type_t elem_type;
+            long elem_size;
+            long arr_elems;
+            if (!is_pointer_type(g->type) || g->array_len < 0) {
+                set_diag(diag, "initializer list requires array global");
+                return -1;
+            }
+            elem_type = ptr_base_type(g->type);
+            elem_size = global_type_size_bytes(elem_type, pointer_size);
+            if (elem_size <= 0) {
+                set_diag(diag, "unsupported array element type in global initializer");
+                return -1;
+            }
+            arr_elems = g->array_len > 0 ? g->array_len : (long)g->init_item_count;
+            for (j = 0; j < g->init_item_count; ++j) {
+                const cc_ssa_global_init_item_t *it = &g->init_items[j];
+                if (!it->init_is_string) {
+                    continue;
+                }
+                if (!is_pointer_type(elem_type)) {
+                    set_diag(diag, "string element in initializer list requires pointer element type");
+                    return -1;
+                }
+                fprintf(fp, "\t.section .rodata\n");
+                fprintf(fp, ".L__cc_garr_%zu_%zu:\n", i, j);
+                fprintf(fp, "\t.asciz %s\n", it->init_str != NULL ? it->init_str : "\"\"");
+                fprintf(fp, "\t.data\n");
+            }
+            for (j = 0; j < g->init_item_count; ++j) {
+                const cc_ssa_global_init_item_t *it = &g->init_items[j];
+                if (it->init_is_string) {
+                    if (pointer_size == 4) {
+                        fprintf(fp, "\t.long .L__cc_garr_%zu_%zu\n", i, j);
+                    } else {
+                        fprintf(fp, "\t.quad .L__cc_garr_%zu_%zu\n", i, j);
+                    }
+                } else if (it->init_is_float && (elem_type == CC_TYPE_FLOAT || elem_type == CC_TYPE_DOUBLE)) {
+                    if (elem_type == CC_TYPE_FLOAT) {
+                        fprintf(fp, "\t.float %f\n", (float)it->init_f);
+                    } else {
+                        fprintf(fp, "\t.double %f\n", it->init_f);
+                    }
+                } else {
+                    emit_integer_data(fp, elem_size, it->init_i);
+                }
+            }
+            if (arr_elems > (long)g->init_item_count) {
+                fprintf(fp, "\t.zero %ld\n", (arr_elems - (long)g->init_item_count) * elem_size);
+            }
+            continue;
+        }
+        if (g->init_is_string) {
+            if (g->array_len >= 0 && is_pointer_type(g->type)) {
+                size_t slen = decoded_c_string_len(g->init_str);
+                fprintf(fp, "\t.asciz %s\n", g->init_str != NULL ? g->init_str : "\"\"");
+                if ((long)(slen + 1) < sz) {
+                    fprintf(fp, "\t.zero %ld\n", sz - (long)(slen + 1));
+                }
+            } else if (is_pointer_type(g->type)) {
+                fprintf(fp, "\t.section .rodata\n");
+                fprintf(fp, ".L__cc_gstr_%zu:\n", i);
+                fprintf(fp, "\t.asciz %s\n", g->init_str != NULL ? g->init_str : "\"\"");
+                fprintf(fp, "\t.data\n");
+                if (!is_static) {
+                    fprintf(fp, ".globl %s\n", g->name);
+                }
+                fprintf(fp, "%s:\n", g->name);
+                if (pointer_size == 4) {
+                    fprintf(fp, "\t.long .L__cc_gstr_%zu\n", i);
+                } else {
+                    fprintf(fp, "\t.quad .L__cc_gstr_%zu\n", i);
+                }
+            } else {
+                set_diag(diag, "string initializer requires array or pointer global");
+                return -1;
+            }
+            continue;
+        }
+        if (g->init_is_float && (g->type == CC_TYPE_FLOAT || g->type == CC_TYPE_DOUBLE)) {
+            if (g->type == CC_TYPE_FLOAT) {
+                fprintf(fp, "\t.float %f\n", (float)g->init_f);
+            } else {
+                fprintf(fp, "\t.double %f\n", g->init_f);
+            }
+            continue;
+        }
+        emit_integer_data(fp, sz, g->init_i);
+    }
+    fprintf(fp, ".text\n");
+    return 0;
+}
+
 static int slot_off(const slot_layout_t *lay, int v) {
     return -lay->slot_size * (lay->slot_of[v] + 1);
 }
@@ -347,13 +617,24 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         slot_layout_t lay;
         size_t j;
         int frame;
+        int raw_frame;
+        int va_copy_off = 0;
 
         if (build_slot_layout(f, 8, &lay, diag) != 0) {
             return -1;
         }
-        frame = (lay.slot_count * 8 + 15) & ~15;
+        raw_frame = lay.slot_count * 8;
+        if (f->is_variadic) {
+            va_copy_off = -(raw_frame + 8);
+            raw_frame += 8;
+        }
+        frame = (raw_frame + 15) & ~15;
 
-        fprintf(fp, "\n.globl %s\n", f->name);
+        if ((f->storage & CC_STORAGE_STATIC) == 0) {
+            fprintf(fp, "\n.globl %s\n", f->name);
+        } else {
+            fprintf(fp, "\n");
+        }
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
 
@@ -373,6 +654,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         }
         if (frame > 0) {
             fprintf(fp, "\tsubq $%d, %%rsp\n", frame);
+        }
+        if (f->is_variadic) {
+            fprintf(fp, "\tmovq %%r10, %d(%%rbp)\n", va_copy_off);
         }
 
         for (j = 0; j < f->instr_count; ++j) {
@@ -426,6 +710,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 }
                 break;
 
+            case CC_SSA_STR:
+                emit_string_literal_label(fp, i, j, in->sym);
+                fprintf(fp, "\tleaq .L__cc_str_%zu_%zu(%%rip), %%rax\n", i, j);
+                fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+
             case CC_SSA_MOV:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
                     fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
@@ -438,6 +728,11 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_ADDR:
                 fprintf(fp, "\tleaq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_GADDR:
+                fprintf(fp, "\tleaq %s(%%rip), %%rax\n", in->sym);
                 fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 break;
 
@@ -480,15 +775,23 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tmovsd %%xmm0, (%%rax)\n");
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 8;
-                    fprintf(fp, "\tmovq %d(%%rbp), %%rdx\n", slot_off(&lay, in->rhs));
-                    if (mem_size == 1) {
-                        fprintf(fp, "\tmovb %%dl, (%%rax)\n");
-                    } else if (mem_size == 2) {
-                        fprintf(fp, "\tmovw %%dx, (%%rax)\n");
-                    } else if (mem_size == 4) {
-                        fprintf(fp, "\tmovl %%edx, (%%rax)\n");
+                    if (mem_size > 8) {
+                        /* Aggregate copy: rhs is source address, lhs is destination address. */
+                        fprintf(fp, "\tmovq %%rax, %%rdi\n");
+                        fprintf(fp, "\tmovq %d(%%rbp), %%rsi\n", slot_off(&lay, in->rhs));
+                        fprintf(fp, "\tmovq $%ld, %%rdx\n", mem_size);
+                        fprintf(fp, "\tcall memcpy\n");
                     } else {
-                        fprintf(fp, "\tmovq %%rdx, (%%rax)\n");
+                        fprintf(fp, "\tmovq %d(%%rbp), %%rdx\n", slot_off(&lay, in->rhs));
+                        if (mem_size == 1) {
+                            fprintf(fp, "\tmovb %%dl, (%%rax)\n");
+                        } else if (mem_size == 2) {
+                            fprintf(fp, "\tmovw %%dx, (%%rax)\n");
+                        } else if (mem_size == 4) {
+                            fprintf(fp, "\tmovl %%edx, (%%rax)\n");
+                        } else {
+                            fprintf(fp, "\tmovq %%rdx, (%%rax)\n");
+                        }
                     }
                 }
                 break;
@@ -603,10 +906,27 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 fprintf(fp, "\n");
                 break;
 
-            case CC_SSA_CALL: {
+            case CC_SSA_VA_START: {
+                if (f->is_variadic) {
+                    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", va_copy_off);
+                    if (in->imm != 0) {
+                        fprintf(fp, "\taddq $%ld, %%rax\n", in->imm * 8);
+                    }
+                } else {
+                    int poff = 16 + (int)(in->imm * 8);
+                    fprintf(fp, "\tleaq %d(%%rbp), %%rax\n", poff);
+                }
+                fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+            }
+
+            case CC_SSA_CALL:
+            case CC_SSA_CALLI: {
                 size_t a;
-                size_t stack_count = 0;
+                size_t abi_stack_count = 0;
                 size_t xmm_regs = 0;
+                size_t copy_bytes = 0;
+                size_t copy_base = 0;
                 size_t stack_bytes;
                 size_t stack_pad;
                 size_t stack_total;
@@ -619,10 +939,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         set_diag(diag, "out of memory classifying call arguments");
                         return -1;
                     }
-                    abi64_classify_call_args(f, in, locs, &stack_count, &xmm_regs);
+                    abi64_classify_call_args(f, in, locs, &abi_stack_count, &xmm_regs);
                 }
 
-                stack_bytes = stack_count * 8;
+                copy_bytes = in->call_is_variadic ? in->arg_count * 8 : 0;
+                copy_base = abi_stack_count * 8;
+                stack_bytes = copy_base + copy_bytes;
                 stack_pad = (stack_bytes & 0xF) == 0 ? 0 : 8;
                 stack_total = stack_bytes + stack_pad;
 
@@ -630,6 +952,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tsubq $%zu, %%rsp\n", stack_total);
                 }
                 for (a = 0; a < in->arg_count; ++a) {
+                    if (in->call_is_variadic) {
+                        size_t copy_off = copy_base + a * 8;
+                        if (f->value_types[in->args[a]] == CC_VAL_F64) {
+                            fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(&lay, in->args[a]));
+                            fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", copy_off);
+                        } else {
+                            fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->args[a]));
+                            fprintf(fp, "\tmovq %%rax, %zu(%%rsp)\n", copy_off);
+                        }
+                    }
                     if (locs[a].kind == ABI_LOC_XMM) {
                         const char *reg = arg_reg64_xmm(locs[a].index);
                         if (reg == NULL) {
@@ -650,14 +982,25 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         fprintf(fp, "\tmovq %d(%%rbp), %s\n", slot_off(&lay, in->args[a]), reg);
                     } else {
                         size_t off = locs[a].index * 8;
-                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->args[a]));
-                        fprintf(fp, "\tmovq %%rax, %zu(%%rsp)\n", off);
+                        if (f->value_types[in->args[a]] == CC_VAL_F64) {
+                            fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(&lay, in->args[a]));
+                            fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", off);
+                        } else {
+                            fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->args[a]));
+                            fprintf(fp, "\tmovq %%rax, %zu(%%rsp)\n", off);
+                        }
                     }
                 }
                 if (in->call_is_variadic) {
+                    fprintf(fp, "\tleaq %zu(%%rsp), %%r10\n", copy_base);
                     fprintf(fp, "\tmovb $%zu, %%al\n", xmm_regs);
                 }
-                fprintf(fp, "\tcall %s\n", in->sym);
+                if (in->op == CC_SSA_CALLI) {
+                    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tcall *%%rax\n");
+                } else {
+                    fprintf(fp, "\tcall %s\n", in->sym);
+                }
                 if (stack_total > 0) {
                     fprintf(fp, "\taddq $%zu, %%rsp\n", stack_total);
                 }
@@ -712,6 +1055,25 @@ static int i386_param_offset(const cc_ssa_function_t *f, int param_index) {
     return off;
 }
 
+static int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count) {
+    int off = 8;
+    int i;
+    if (fixed_count < 0) {
+        fixed_count = 0;
+    }
+    if (fixed_count > (int)f->param_count) {
+        fixed_count = (int)f->param_count;
+    }
+    for (i = 0; i < fixed_count; ++i) {
+        if (f->param_types[i] == CC_VAL_F64) {
+            off += 8;
+        } else {
+            off += 4;
+        }
+    }
+    return off;
+}
+
 static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit_debug, cc_diag_t *diag) {
     size_t i;
 
@@ -726,7 +1088,11 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         }
         frame = (lay.slot_count * 8 + 15) & ~15;
 
-        fprintf(fp, "\n.globl %s\n", f->name);
+        if ((f->storage & CC_STORAGE_STATIC) == 0) {
+            fprintf(fp, "\n.globl %s\n", f->name);
+        } else {
+            fprintf(fp, "\n");
+        }
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
 
@@ -785,6 +1151,12 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 }
                 break;
 
+            case CC_SSA_STR:
+                emit_string_literal_label(fp, i, j, in->sym);
+                fprintf(fp, "\tmovl $.L__cc_str_%zu_%zu, %%eax\n", i, j);
+                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+
             case CC_SSA_MOV:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
                     fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
@@ -797,6 +1169,11 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
             case CC_SSA_ADDR:
                 fprintf(fp, "\tleal %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_GADDR:
+                fprintf(fp, "\tmovl $%s, %%eax\n", in->sym);
                 fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 break;
 
@@ -825,13 +1202,22 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     fprintf(fp, "\tmovsd %%xmm0, (%%eax)\n");
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 4;
-                    fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", slot_off(&lay, in->rhs));
-                    if (mem_size == 1) {
-                        fprintf(fp, "\tmovb %%dl, (%%eax)\n");
-                    } else if (mem_size == 2) {
-                        fprintf(fp, "\tmovw %%dx, (%%eax)\n");
+                    if (mem_size > 4) {
+                        /* Aggregate copy: rhs is source address, lhs is destination address. */
+                        fprintf(fp, "\tpushl $%ld\n", mem_size);
+                        fprintf(fp, "\tpushl %d(%%ebp)\n", slot_off(&lay, in->rhs));
+                        fprintf(fp, "\tpushl %%eax\n");
+                        fprintf(fp, "\tcall memcpy\n");
+                        fprintf(fp, "\taddl $12, %%esp\n");
                     } else {
-                        fprintf(fp, "\tmovl %%edx, (%%eax)\n");
+                        fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", slot_off(&lay, in->rhs));
+                        if (mem_size == 1) {
+                            fprintf(fp, "\tmovb %%dl, (%%eax)\n");
+                        } else if (mem_size == 2) {
+                            fprintf(fp, "\tmovw %%dx, (%%eax)\n");
+                        } else {
+                            fprintf(fp, "\tmovl %%edx, (%%eax)\n");
+                        }
                     }
                 }
                 break;
@@ -946,7 +1332,15 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 fprintf(fp, "\n");
                 break;
 
-            case CC_SSA_CALL: {
+            case CC_SSA_VA_START: {
+                int poff = i386_variadic_start_offset(f, (int)in->imm);
+                fprintf(fp, "\tleal %d(%%ebp), %%eax\n", poff);
+                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+            }
+
+            case CC_SSA_CALL:
+            case CC_SSA_CALLI: {
                 long stack_bytes = 0;
                 long a;
                 for (a = (long)in->arg_count - 1; a >= 0; --a) {
@@ -962,7 +1356,12 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                         stack_bytes += 4;
                     }
                 }
-                fprintf(fp, "\tcall %s\n", in->sym);
+                if (in->op == CC_SSA_CALLI) {
+                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tcall *%%eax\n");
+                } else {
+                    fprintf(fp, "\tcall %s\n", in->sym);
+                }
                 if (stack_bytes > 0) {
                     fprintf(fp, "\taddl $%ld, %%esp\n", stack_bytes);
                 }
@@ -1022,7 +1421,10 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
     if (emit_debug && src_path != NULL) {
         fprintf(fp, ".file 1 \"%s\"\n", src_path);
     }
-    fprintf(fp, ".text\n");
+    if (emit_globals(fp, m, target == CC_TARGET_I386 ? 4 : 8, diag) != 0) {
+        fclose(fp);
+        return -1;
+    }
 
     if (target == CC_TARGET_I386) {
         fprintf(fp, ".code32\n");

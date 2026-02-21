@@ -21,6 +21,8 @@ typedef enum {
 typedef enum {
     CC_SSA_PARAM = 0,
     CC_SSA_CONST,
+    CC_SSA_STR,
+    CC_SSA_GADDR,
     CC_SSA_ADD,
     CC_SSA_SUB,
     CC_SSA_MUL,
@@ -40,7 +42,9 @@ typedef enum {
     CC_SSA_LABEL,
     CC_SSA_BR,
     CC_SSA_BR_COND,
+    CC_SSA_VA_START,
     CC_SSA_CALL,
+    CC_SSA_CALLI,
     CC_SSA_RET
 } cc_ssa_opcode_t;
 
@@ -58,14 +62,40 @@ typedef struct {
     cc_cmp_kind_t cmp_kind;
     int is_unsigned;
     int call_is_variadic;
+    int call_fixed_count;
     char *sym;
     int *args;
     size_t arg_count;
 } cc_ssa_instr_t;
 
 typedef struct {
+    long init_i;
+    double init_f;
+    int init_is_float;
+    int init_is_string;
+    char *init_str;
+} cc_ssa_global_init_item_t;
+
+typedef struct {
+    char *name;
+    cc_type_t type;
+    int type_struct_id;
+    long array_len;
+    int storage;
+    int has_init;
+    long init_i;
+    double init_f;
+    int init_is_float;
+    int init_is_string;
+    char *init_str;
+    cc_ssa_global_init_item_t *init_items;
+    size_t init_item_count;
+} cc_ssa_global_t;
+
+typedef struct {
     char *name;
     cc_value_type_t ret_type;
+    int storage;
     int is_variadic;
 
     size_t param_count;
@@ -83,6 +113,8 @@ typedef struct {
 } cc_ssa_function_t;
 
 typedef struct {
+    cc_ssa_global_t *globals;
+    size_t global_count;
     cc_ssa_function_t *funcs;
     size_t func_count;
 } cc_ssa_module_t;

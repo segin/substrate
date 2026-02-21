@@ -60,6 +60,8 @@ static int fold_function(cc_ssa_function_t *f) {
             break;
 
         case CC_SSA_ADDR:
+        case CC_SSA_STR:
+        case CC_SSA_GADDR:
         case CC_SSA_LOAD:
             if (dst >= 0) {
                 st[dst].known = 0;
@@ -235,7 +237,9 @@ static int fold_function(cc_ssa_function_t *f) {
             break;
 
         case CC_SSA_PARAM:
+        case CC_SSA_VA_START:
         case CC_SSA_CALL:
+        case CC_SSA_CALLI:
             if (dst >= 0) {
                 st[dst].known = 0;
             }
@@ -283,6 +287,8 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_CONST:
     case CC_SSA_MOV:
     case CC_SSA_ADDR:
+    case CC_SSA_STR:
+    case CC_SSA_GADDR:
     case CC_SSA_LOAD:
     case CC_SSA_ADD:
     case CC_SSA_SUB:
@@ -300,8 +306,10 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_LABEL:
     case CC_SSA_BR:
     case CC_SSA_BR_COND:
+    case CC_SSA_VA_START:
     case CC_SSA_STORE:
     case CC_SSA_CALL:
+    case CC_SSA_CALLI:
     case CC_SSA_RET:
         return 0;
     }
