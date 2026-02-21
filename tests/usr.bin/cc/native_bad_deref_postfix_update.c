@@ -1,6 +1,5 @@
 int main(void) {
     int x = 1;
-    int *p = &x;
-    (*p)++;
+    (x + 0)++;
     return x;
 }

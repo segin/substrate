@@ -810,24 +810,36 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         return 0;
 
     case CC_EXPR_UPDATE: {
-        int idx = vars_find_visible(vars, var_count, e->ident, depth);
-        if (idx < 0) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "update of undeclared identifier: %s",
-                         e->ident ? e->ident : "<null>");
+        cc_type_t t;
+        if (e->ident != NULL) {
+            int idx = vars_find_visible(vars, var_count, e->ident, depth);
+            if (idx < 0) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "update of undeclared identifier: %s",
+                             e->ident ? e->ident : "<null>");
+                }
+                return -1;
             }
+            t = vars[idx].type;
+        } else if (e->lhs != NULL && e->lhs->kind == CC_EXPR_DEREF) {
+            if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            t = e->lhs->value_type;
+        } else {
+            set_diag(diag, "++/-- target must be identifier or dereference lvalue");
             return -1;
         }
-        if (is_pointer_type(vars[idx].type)) {
-            if (ptr_base_type(vars[idx].type) == CC_TYPE_VOID) {
+        if (is_pointer_type(t)) {
+            if (ptr_base_type(t) == CC_TYPE_VOID) {
                 set_diag(diag, "++/-- on void pointer is unsupported");
                 return -1;
             }
-        } else if (!is_numeric_type(vars[idx].type)) {
+        } else if (!is_numeric_type(t)) {
             set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
             return -1;
         }
-        e->value_type = vars[idx].type;
+        e->value_type = t;
         return 0;
     }
 

@@ -924,71 +924,150 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     }
 
     case CC_EXPR_UPDATE: {
-        int idx = var_find_visible(vars, var_count, e->ident, depth);
-        cc_value_type_t want;
+        cc_value_type_t want = type_to_val(e->value_type);
         int one;
         int cur;
         int nextv;
         long step = 1;
 
-        if (idx < 0) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message),
-                         "update of unknown identifier during AST->SSA lowering: %s", e->ident);
-            }
-            return -1;
-        }
-
-        want = type_to_val(vars[idx].type);
-        cur = cast_value(sf, vars[idx].value, want, diag);
-        if (cur < 0) {
-            return -1;
-        }
-
-        if (is_pointer_type(vars[idx].type)) {
-            step = type_size_bytes(ptr_base_type(vars[idx].type));
-            if (step <= 0) {
-                set_diag(diag, "unsupported pointer ++/-- type in lowering");
+        if (e->ident != NULL) {
+            int idx = var_find_visible(vars, var_count, e->ident, depth);
+            if (idx < 0) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "update of unknown identifier during AST->SSA lowering: %s", e->ident);
+                }
                 return -1;
             }
-        }
 
-        one = emit_const_i64_instr(sf, step);
-        if (one < 0) {
-            return -1;
-        }
-        if (!is_pointer_type(vars[idx].type)) {
-            one = cast_value(sf, one, want, diag);
+            cur = cast_value(sf, vars[idx].value, want, diag);
+            if (cur < 0) {
+                return -1;
+            }
+
+            if (is_pointer_type(vars[idx].type)) {
+                step = type_size_bytes(ptr_base_type(vars[idx].type));
+                if (step <= 0) {
+                    set_diag(diag, "unsupported pointer ++/-- type in lowering");
+                    return -1;
+                }
+            }
+
+            one = emit_const_i64_instr(sf, step);
             if (one < 0) {
                 return -1;
             }
-        }
+            if (!is_pointer_type(vars[idx].type)) {
+                one = cast_value(sf, one, want, diag);
+                if (one < 0) {
+                    return -1;
+                }
+            }
 
-        memset(&in, 0, sizeof(in));
-        in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
-        in.dst = new_value(sf, want);
-        in.lhs = cur;
-        in.rhs = one;
-        if (in.dst < 0 || push_instr(sf, in) != 0) {
-            return -1;
-        }
-        nextv = in.dst;
-
-        if (e->update_postfix) {
-            int retv = new_value(sf, want);
-            if (retv < 0 || emit_mov_instr(sf, retv, vars[idx].value) != 0) {
+            memset(&in, 0, sizeof(in));
+            in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
+            in.dst = new_value(sf, want);
+            in.lhs = cur;
+            in.rhs = one;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
                 return -1;
             }
+            nextv = in.dst;
+
+            if (e->update_postfix) {
+                int retv = new_value(sf, want);
+                if (retv < 0 || emit_mov_instr(sf, retv, vars[idx].value) != 0) {
+                    return -1;
+                }
+                if (emit_mov_instr(sf, vars[idx].value, nextv) != 0) {
+                    return -1;
+                }
+                return retv;
+            }
+
             if (emit_mov_instr(sf, vars[idx].value, nextv) != 0) {
                 return -1;
             }
-            return retv;
+            return vars[idx].value;
         }
 
-        if (emit_mov_instr(sf, vars[idx].value, nextv) != 0) {
-            return -1;
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
+            long mem_size = type_size_bytes(e->lhs->value_type);
+            int ptrv;
+
+            if (is_pointer_type(e->value_type)) {
+                step = type_size_bytes(ptr_base_type(e->value_type));
+                if (step <= 0) {
+                    set_diag(diag, "unsupported pointer ++/-- type in lowering");
+                    return -1;
+                }
+            }
+
+            ptrv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs->lhs, diag);
+            if (ptrv < 0) {
+                return -1;
+            }
+            ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
+            if (ptrv < 0) {
+                return -1;
+            }
+            if (mem_size <= 0) {
+                set_diag(diag, "unsupported dereference update type size in lowering");
+                return -1;
+            }
+
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_LOAD;
+            in.dst = new_value(sf, want);
+            in.lhs = ptrv;
+            in.rhs = -1;
+            in.imm = mem_size;
+            in.is_unsigned = is_unsigned_load_type(e->value_type) ? 1 : 0;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                return -1;
+            }
+            cur = in.dst;
+
+            one = emit_const_i64_instr(sf, step);
+            if (one < 0) {
+                return -1;
+            }
+            if (!is_pointer_type(e->value_type)) {
+                one = cast_value(sf, one, want, diag);
+                if (one < 0) {
+                    return -1;
+                }
+            }
+
+            memset(&in, 0, sizeof(in));
+            in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
+            in.dst = new_value(sf, want);
+            in.lhs = cur;
+            in.rhs = one;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                return -1;
+            }
+            nextv = in.dst;
+
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_STORE;
+            in.dst = -1;
+            in.lhs = ptrv;
+            in.rhs = nextv;
+            in.imm = mem_size;
+            if (push_instr(sf, in) != 0) {
+                set_diag(diag, "out of memory appending pointer update store");
+                return -1;
+            }
+
+            if (e->update_postfix) {
+                return cur;
+            }
+            return nextv;
         }
-        return vars[idx].value;
+
+        set_diag(diag, "unsupported update target in lowering");
+        return -1;
     }
 
     case CC_EXPR_CAST: {

@@ -114,7 +114,7 @@
   - parser now accepts `void*` declarators for locals/params while preserving `void`-only empty parameter list semantics.
   - indirect pointer stores (`*p = expr`) now lower through explicit SSA store operations for supported scalar pointee types.
   - dereference compound assignments (`*p op= rhs`) are accepted for dereference lvalues in the current subset.
-  - prefix update on dereference lvalues (`++*p`, `--*p`) is accepted via assignment-style lowering in the current subset.
+  - prefix/postfix updates on dereference lvalues (`++*p`, `--*p`, `(*p)++`, `(*p)--`) are accepted and lower through direct load/compute/store update nodes.
   - pointer arithmetic lowering now supports scaled `ptr +/- int` and `int + ptr` for non-`void*` pointers in the current subset.
   - prefix/postfix `++/--` now support identifier pointer lvalues with element-size stepping semantics.
   - ordered pointer comparisons (`< <= > >=`) are accepted for compatible pointer types and lower as unsigned address compares.
@@ -147,7 +147,6 @@
   - negative tests for unsupported pointer-plus-pointer arithmetic and pointer-plus-float arithmetic.
   - negative test for incompatible ordered pointer comparison across mismatched pointer base types.
   - negative test for invalid compound-assignment lvalue forms (non-assignable expressions).
-  - negative test for unsupported postfix update over dereference lvalues (`(*p)++` / `(*p)--`) in current subset.
   - negative test for unsupported `void*` arithmetic.
-  - negative test for unsupported compound assignment on indirect lvalues (`*p += ...`) in current subset.
+  - negative test for invalid postfix `++/--` lvalue forms (non-assignable expressions).
   - negative test for unsupported `sizeof(void)` in current subset.
