@@ -30,6 +30,7 @@ typedef enum {
     TOK_KW_SHORT,
     TOK_KW_SIGNED,
     TOK_KW_STATIC,
+    TOK_KW_TYPEDEF,
     TOK_KW_UNSIGNED,
     TOK_KW_DOUBLE,
     TOK_KW_VOLATILE,
@@ -106,6 +107,12 @@ typedef struct {
     size_t col;
 } cc_token_t;
 
+typedef struct {
+    char *name;
+    cc_type_t type;
+    int depth;
+} typedef_entry_t;
+
 int cc_lexer_init(cc_lexer_t *lx, const char *src, size_t len);
 int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out);
 
@@ -132,6 +139,10 @@ typedef struct {
     cc_lexer_t lx;
     cc_token_t tok;
     cc_diag_t *diag;
+    typedef_entry_t *typedefs;
+    size_t typedef_count;
+    size_t typedef_cap;
+    int scope_depth;
 } parser_t;
 
 static int next_tok(parser_t *p) {
@@ -159,6 +170,87 @@ static cc_tok_kind_t peek_kind(parser_t *p) {
     return t.kind;
 }
 
+static int peek_tok(parser_t *p, cc_token_t *out) {
+    cc_lexer_t lx = p->lx;
+    return cc_lexer_next(&lx, out);
+}
+
+static int typedef_find_visible_n(const parser_t *p, const char *name, size_t len) {
+    size_t i = p->typedef_count;
+    while (i > 0) {
+        i--;
+        if (strlen(p->typedefs[i].name) == len && strncmp(p->typedefs[i].name, name, len) == 0 &&
+            p->typedefs[i].depth <= p->scope_depth) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int typedef_find_visible(const parser_t *p, const char *name) {
+    return typedef_find_visible_n(p, name, strlen(name));
+}
+
+static int typedef_push(parser_t *p, const char *name, cc_type_t type) {
+    typedef_entry_t *next;
+    char *dup;
+
+    if (typedef_find_visible(p, name) >= 0) {
+        return 1;
+    }
+    if (p->typedef_count == p->typedef_cap) {
+        size_t ncap = p->typedef_cap == 0 ? 16 : p->typedef_cap * 2;
+        next = (typedef_entry_t *)realloc(p->typedefs, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        p->typedefs = next;
+        p->typedef_cap = ncap;
+    }
+    dup = xstrdup_n(name, strlen(name));
+    if (dup == NULL) {
+        return -1;
+    }
+    p->typedefs[p->typedef_count].name = dup;
+    p->typedefs[p->typedef_count].type = type;
+    p->typedefs[p->typedef_count].depth = p->scope_depth;
+    p->typedef_count++;
+    return 0;
+}
+
+static void typedef_pop_to_depth(parser_t *p, int depth) {
+    while (p->typedef_count > 0 && p->typedefs[p->typedef_count - 1].depth > depth) {
+        free(p->typedefs[p->typedef_count - 1].name);
+        p->typedef_count--;
+    }
+}
+
+static void parser_free_typedefs(parser_t *p) {
+    size_t i;
+    for (i = 0; i < p->typedef_count; ++i) {
+        free(p->typedefs[i].name);
+    }
+    free(p->typedefs);
+    p->typedefs = NULL;
+    p->typedef_count = 0;
+    p->typedef_cap = 0;
+}
+
+static int is_declspec_tok(cc_tok_kind_t k);
+
+static int is_declspec_start(parser_t *p) {
+    return is_declspec_tok(p->tok.kind) ||
+           (p->tok.kind == TOK_IDENT && typedef_find_visible_n(p, p->tok.start, p->tok.len) >= 0);
+}
+
+static int is_type_name_start_after_lparen(parser_t *p) {
+    cc_token_t t;
+    if (peek_tok(p, &t) != 0) {
+        return 0;
+    }
+    return is_declspec_tok(t.kind) || (t.kind == TOK_IDENT && typedef_find_visible_n(p, t.start, t.len) >= 0);
+}
+
 static int is_declspec_tok(cc_tok_kind_t k) {
     switch (k) {
     case TOK_KW_AUTO:
@@ -175,6 +267,7 @@ static int is_declspec_tok(cc_tok_kind_t k) {
     case TOK_KW_SHORT:
     case TOK_KW_SIGNED:
     case TOK_KW_STATIC:
+    case TOK_KW_TYPEDEF:
     case TOK_KW_UNSIGNED:
     case TOK_KW_DOUBLE:
     case TOK_KW_VOLATILE:
@@ -185,7 +278,7 @@ static int is_declspec_tok(cc_tok_kind_t k) {
     }
 }
 
-static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, const char *what) {
+static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, const char *what, int *out_typedef) {
     int seen = 0;
     int seen_type = 0;
     int seen_void = 0;
@@ -198,8 +291,31 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
     int seen_short = 0;
     int seen_signed = 0;
     int seen_unsigned = 0;
+    int seen_typedef = 0;
+    int seen_alias = 0;
+    cc_type_t alias_type = CC_TYPE_VOID;
 
-    while (is_declspec_tok(p->tok.kind)) {
+    if (out_typedef != NULL) {
+        *out_typedef = 0;
+    }
+
+    while (1) {
+        if (p->tok.kind == TOK_IDENT) {
+            int tidx = typedef_find_visible_n(p, p->tok.start, p->tok.len);
+            if (tidx >= 0) {
+                seen = 1;
+                seen_type = 1;
+                seen_alias = 1;
+                alias_type = p->typedefs[tidx].type;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+        }
+        if (!is_declspec_tok(p->tok.kind)) {
+            break;
+        }
         seen = 1;
         switch (p->tok.kind) {
         case TOK_KW_VOID:
@@ -242,6 +358,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
             seen_unsigned = 1;
             seen_type = 1;
             break;
+        case TOK_KW_TYPEDEF:
+            seen_typedef = 1;
+            break;
         default:
             break;
         }
@@ -259,12 +378,38 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
         return -1;
     }
 
+    if (seen_alias) {
+        if (seen_void || seen_bool || seen_char || seen_int || seen_float || seen_double || seen_long || seen_short ||
+            seen_signed || seen_unsigned) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "invalid typedef type combination");
+            return -1;
+        }
+        if (!allow_void && alias_type == CC_TYPE_VOID) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "invalid use of void in declaration specifiers");
+            return -1;
+        }
+        *out_type = alias_type;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
+        return 0;
+    }
+
     if (seen_void) {
         if (!allow_void || seen_bool || seen_char || seen_int || seen_float || seen_double || seen_long || seen_short) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid use of void in declaration specifiers");
             return -1;
         }
         *out_type = CC_TYPE_VOID;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
 
@@ -284,40 +429,94 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
 
     if (seen_double) {
         *out_type = CC_TYPE_DOUBLE;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
     if (seen_float) {
         *out_type = CC_TYPE_FLOAT;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
     if (seen_bool) {
         *out_type = CC_TYPE_BOOL;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
     if (seen_char) {
         *out_type = seen_unsigned ? CC_TYPE_UCHAR : CC_TYPE_CHAR;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
     if (seen_long > 0) {
         *out_type = seen_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
     if (seen_short) {
         *out_type = seen_unsigned ? CC_TYPE_USHORT : CC_TYPE_SHORT;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
     if (seen_int) {
         *out_type = seen_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
 
     /* e.g. signed/unsigned without explicit base type => int */
     if (seen_signed || seen_unsigned) {
         *out_type = seen_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
         return 0;
     }
 
     *out_type = CC_TYPE_INT;
+    if (out_typedef != NULL) {
+        *out_typedef = seen_typedef;
+    } else if (seen_typedef) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+        return -1;
+    }
     return 0;
 }
 
@@ -460,7 +659,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
 
 static int parse_type_name(parser_t *p, cc_type_t *out_type, int allow_void, const char *what) {
     cc_type_t ty;
-    if (parse_declspec(p, &ty, allow_void, what) != 0) {
+    if (parse_declspec(p, &ty, allow_void, what, NULL) != 0) {
         return -1;
     }
     while (p->tok.kind == TOK_STAR) {
@@ -932,7 +1131,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (e == NULL) {
             return NULL;
         }
-        if (p->tok.kind == TOK_LPAREN && is_declspec_tok(peek_kind(p))) {
+        if (p->tok.kind == TOK_LPAREN && is_type_name_start_after_lparen(p)) {
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -956,7 +1155,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
         return e;
     }
 
-    if (p->tok.kind == TOK_LPAREN && is_declspec_tok(peek_kind(p))) {
+    if (p->tok.kind == TOK_LPAREN && is_type_name_start_after_lparen(p)) {
         cc_expr_t *e = new_expr(CC_EXPR_CAST);
         if (e == NULL) {
             return NULL;
@@ -1515,9 +1714,14 @@ static cc_expr_t *parse_expr(parser_t *p) {
 }
 
 static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
+    int is_typedef = 0;
     memset(s, 0, sizeof(*s));
     s->kind = CC_STMT_DECL;
-    if (parse_declspec(p, &s->type, 1, "expected declaration type") != 0) {
+    if (parse_declspec(p, &s->type, 1, "expected declaration type", &is_typedef) != 0) {
+        return -1;
+    }
+    if (is_typedef) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "typedef declaration is not allowed here");
         return -1;
     }
     if (parse_named_declarator(p, s->type, &s->type, &s->decl_name, "expected identifier after declaration type") !=
@@ -1541,8 +1745,9 @@ static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
 
 static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int need_semi) {
     cc_type_t base_type;
+    int is_typedef = 0;
 
-    if (parse_declspec(p, &base_type, 1, "expected declaration type") != 0) {
+    if (parse_declspec(p, &base_type, 1, "expected declaration type", &is_typedef) != 0) {
         return -1;
     }
 
@@ -1568,9 +1773,34 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 return -1;
             }
         }
-        if (push_stmt_arr(arr, count, s) != 0) {
+        if (is_typedef) {
+            int trc;
+            if (s.expr != NULL) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "typedef declarator cannot have an initializer");
+                free_stmt(&s);
+                return -1;
+            }
+            trc = typedef_push(p, s.decl_name, s.type);
+            if (trc > 0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "duplicate typedef name in this scope");
+                free_stmt(&s);
+                return -1;
+            }
+            if (trc < 0) {
+                free_stmt(&s);
+                return -1;
+            }
             free_stmt(&s);
-            return -1;
+        } else {
+            if (arr == NULL || count == NULL) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "only typedef declarations are allowed at file scope");
+                free_stmt(&s);
+                return -1;
+            }
+            if (push_stmt_arr(arr, count, s) != 0) {
+                free_stmt(&s);
+                return -1;
+            }
         }
 
         if (p->tok.kind != TOK_COMMA) {
@@ -1588,33 +1818,50 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
 }
 
 static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
+    int saved_depth = p->scope_depth;
     memset(s, 0, sizeof(*s));
     s->kind = CC_STMT_BLOCK;
     if (expect(p, TOK_LBRACE, "expected '{'") != 0) {
         return -1;
     }
+    p->scope_depth = saved_depth + 1;
     while (p->tok.kind != TOK_RBRACE) {
         cc_stmt_t child;
         if (p->tok.kind == TOK_EOF) {
             set_diag(p->diag, p->tok.line, p->tok.col, "unexpected end of file in block");
+            typedef_pop_to_depth(p, saved_depth);
+            p->scope_depth = saved_depth;
             return -1;
         }
-        if (is_declspec_tok(p->tok.kind)) {
+        if (is_declspec_start(p)) {
             if (parse_decl_stmt_list(p, &s->block_stmts, &s->block_count, 1) != 0) {
+                typedef_pop_to_depth(p, saved_depth);
+                p->scope_depth = saved_depth;
                 return -1;
             }
             continue;
         }
         if (parse_stmt(p, &child) != 0) {
             free_stmt(&child);
+            typedef_pop_to_depth(p, saved_depth);
+            p->scope_depth = saved_depth;
             return -1;
         }
         if (push_stmt_arr(&s->block_stmts, &s->block_count, child) != 0) {
             free_stmt(&child);
+            typedef_pop_to_depth(p, saved_depth);
+            p->scope_depth = saved_depth;
             return -1;
         }
     }
-    return expect(p, TOK_RBRACE, "expected '}' after block");
+    if (expect(p, TOK_RBRACE, "expected '}' after block") != 0) {
+        typedef_pop_to_depth(p, saved_depth);
+        p->scope_depth = saved_depth;
+        return -1;
+    }
+    typedef_pop_to_depth(p, saved_depth);
+    p->scope_depth = saved_depth;
+    return 0;
 }
 
 static int parse_stmt(parser_t *p, cc_stmt_t *s) {
@@ -1748,7 +1995,7 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
             return -1;
         }
         if (p->tok.kind != TOK_SEMI) {
-            if (is_declspec_tok(p->tok.kind)) {
+            if (is_declspec_start(p)) {
                 s->init_stmt = (cc_stmt_t *)calloc(1, sizeof(*s->init_stmt));
                 if (s->init_stmt == NULL) {
                     return -1;
@@ -1878,7 +2125,7 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         return expect(p, TOK_SEMI, "expected ';' after goto");
     }
 
-    if (is_declspec_tok(p->tok.kind)) {
+    if (is_declspec_start(p)) {
         return parse_decl_stmt(p, s, 1);
     }
 
@@ -1950,7 +2197,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
             break;
         }
 
-        if (parse_declspec(p, &ptype, 1, "expected parameter type") != 0) {
+        if (parse_declspec(p, &ptype, 1, "expected parameter type", NULL) != 0) {
             return -1;
         }
         if (parse_named_declarator(p, ptype, &ptype, &pname, "expected parameter name") != 0) {
@@ -1984,10 +2231,16 @@ static int parse_params(parser_t *p, cc_function_t *f) {
 
 static int parse_function(parser_t *p, cc_function_t *f) {
     cc_type_t ftype;
+    int is_typedef = 0;
+    int saved_depth = p->scope_depth;
     memset(f, 0, sizeof(*f));
     f->has_body = 0;
 
-    if (parse_declspec(p, &ftype, 1, "expected function return type") != 0) {
+    if (parse_declspec(p, &ftype, 1, "expected function return type", &is_typedef) != 0) {
+        return -1;
+    }
+    if (is_typedef) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not valid in function definition");
         return -1;
     }
     if (parse_named_declarator(p, ftype, &f->ret_type, &f->name, "expected function name") != 0) {
@@ -2016,6 +2269,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         return -1;
     }
     f->has_body = 1;
+    p->scope_depth = saved_depth + 1;
 
     while (p->tok.kind != TOK_RBRACE) {
         cc_stmt_t s;
@@ -2023,7 +2277,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             set_diag(p->diag, p->tok.line, p->tok.col, "unexpected end of file in function body");
             return -1;
         }
-        if (is_declspec_tok(p->tok.kind)) {
+        if (is_declspec_start(p)) {
             if (parse_decl_stmt_list(p, &f->stmts, &f->stmt_count, 1) != 0) {
                 return -1;
             }
@@ -2042,6 +2296,8 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     if (expect(p, TOK_RBRACE, "expected '}' after function body") != 0) {
         return -1;
     }
+    typedef_pop_to_depth(p, saved_depth);
+    p->scope_depth = saved_depth;
     return 0;
 }
 
@@ -2094,17 +2350,29 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
 
     memset(&p, 0, sizeof(p));
     p.diag = diag;
+    p.scope_depth = 0;
     cc_lexer_init(&p.lx, buf, (size_t)sz);
     if (next_tok(&p) != 0) {
+        parser_free_typedefs(&p);
         free(buf);
         cc_tu_free(out);
         return -1;
     }
 
     while (p.tok.kind != TOK_EOF) {
+        if (p.tok.kind == TOK_KW_TYPEDEF) {
+            if (parse_decl_stmt_list(&p, NULL, NULL, 1) != 0) {
+                parser_free_typedefs(&p);
+                free(buf);
+                cc_tu_free(out);
+                return -1;
+            }
+            continue;
+        }
         cc_function_t f;
         cc_function_t *next = (cc_function_t *)realloc(out->funcs, (out->func_count + 1) * sizeof(*next));
         if (next == NULL) {
+            parser_free_typedefs(&p);
             free(buf);
             cc_tu_free(out);
             set_diag(diag, 0, 0, "out of memory");
@@ -2113,6 +2381,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         out->funcs = next;
 
         if (parse_function(&p, &f) != 0) {
+            parser_free_typedefs(&p);
             free(buf);
             cc_tu_free(out);
             return -1;
@@ -2120,6 +2389,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         out->funcs[out->func_count++] = f;
     }
 
+    parser_free_typedefs(&p);
     free(buf);
     return 0;
 }

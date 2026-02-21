@@ -20,6 +20,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - loop flow statements: `break` and `continue`
   - C95 lexical forms: digraph braces (`<%`/`%>`) and trigraph normalization
   - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`/`unsigned char`, `short`/`unsigned short`, `int`/`unsigned int`, `long long`/`unsigned long long`, `float`, qualifiers/storage-class keywords)
+  - typedef alias declarations for supported scalar/pointer types at file scope and block scope
   - C99 `for`-init declarations with loop-local scope
   - one/two/three/four-level typed pointers (`T*`, `T**`, `T***`, `T****`) in declarations, parameters, and return types
   - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and prefix/postfix `++/--` with C expression-value semantics
@@ -43,6 +44,7 @@ Native C support is intentionally limited for now:
 - pointer-size semantics follow target ABI (`sizeof(void*) == 8` on `-m64`, `sizeof(void*) == 4` on `-m32`)
 - unsigned integer semantics are modeled for comparisons/division/modulo/right-shift in native lowering/codegen (`seta/setb`, `div`, logical right-shift)
 - function declarations/prototypes and definitions with fixed params or `...` variadics
+- typedef aliases for supported scalar/pointer types (usable in declarations, casts, and `sizeof(type)`)
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
 - i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)

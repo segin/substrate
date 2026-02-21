@@ -28,6 +28,7 @@ typedef enum {
     TOK_KW_SHORT,
     TOK_KW_SIGNED,
     TOK_KW_STATIC,
+    TOK_KW_TYPEDEF,
     TOK_KW_UNSIGNED,
     TOK_KW_DOUBLE,
     TOK_KW_VOLATILE,
@@ -270,6 +271,10 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                    out->start[2] == 'a' && out->start[3] == 't' && out->start[4] == 'i' &&
                    out->start[5] == 'c') {
             out->kind = TOK_KW_STATIC;
+        } else if (out->len == 7 && out->start[0] == 't' && out->start[1] == 'y' &&
+                   out->start[2] == 'p' && out->start[3] == 'e' && out->start[4] == 'd' &&
+                   out->start[5] == 'e' && out->start[6] == 'f') {
+            out->kind = TOK_KW_TYPEDEF;
         } else if (out->len == 8 && out->start[0] == 'u' && out->start[1] == 'n' &&
                    out->start[2] == 's' && out->start[3] == 'i' && out->start[4] == 'g' &&
                    out->start[5] == 'n' && out->start[6] == 'e' && out->start[7] == 'd') {
