@@ -925,6 +925,10 @@ static cc_expr_t *parse_unary(parser_t *p) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
         cc_expr_t *upd;
+        cc_expr_t *rhs_read;
+        cc_expr_t *one;
+        cc_expr_t *calc;
+        cc_expr_t *asn;
         if (next_tok(p) != 0) {
             return NULL;
         }
@@ -932,14 +936,41 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (rhs == NULL) {
             return NULL;
         }
-        if (rhs->kind != CC_EXPR_IDENT || rhs->ident == NULL) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "++/-- requires an identifier lvalue");
+        if (rhs->kind == CC_EXPR_IDENT && rhs->ident != NULL) {
+            upd = new_update_expr(rhs->ident, op == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 0);
             free_expr(rhs);
-            return NULL;
+            return upd;
         }
-        upd = new_update_expr(rhs->ident, op == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 0);
+        if (rhs->kind == CC_EXPR_DEREF && rhs->lhs != NULL) {
+            rhs_read = clone_expr(rhs);
+            if (rhs_read == NULL) {
+                free_expr(rhs);
+                return NULL;
+            }
+            one = new_int_expr(1);
+            if (one == NULL) {
+                free_expr(rhs_read);
+                free_expr(rhs);
+                return NULL;
+            }
+            calc = new_bin_expr(op == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, rhs_read, one);
+            if (calc == NULL) {
+                free_expr(rhs);
+                return NULL;
+            }
+            asn = new_expr(CC_EXPR_ASSIGN);
+            if (asn == NULL) {
+                free_expr(calc);
+                free_expr(rhs);
+                return NULL;
+            }
+            asn->lhs = rhs;
+            asn->rhs = calc;
+            return asn;
+        }
+        set_diag(p->diag, p->tok.line, p->tok.col, "++/-- requires an identifier or dereference lvalue");
         free_expr(rhs);
-        return upd;
+        return NULL;
     }
     return parse_postfix(p);
 }
