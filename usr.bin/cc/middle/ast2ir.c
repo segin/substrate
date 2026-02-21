@@ -632,6 +632,50 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return in.dst;
         }
 
+        if (e->op == CC_BIN_SUB && is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
+            long elem_size = type_size_bytes(ptr_base_type(e->lhs->value_type));
+            int diffv;
+
+            lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
+            rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
+            if (lhs < 0 || rhs < 0) {
+                return -1;
+            }
+            if (elem_size <= 0) {
+                set_diag(diag, "unsupported pointer base type in subtraction lowering");
+                return -1;
+            }
+
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_SUB;
+            in.dst = new_value(sf, CC_VAL_I64);
+            in.lhs = lhs;
+            in.rhs = rhs;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                return -1;
+            }
+            diffv = in.dst;
+
+            if (elem_size != 1) {
+                int csz = emit_const_i64_instr(sf, elem_size);
+                if (csz < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_DIV;
+                in.is_unsigned = 0;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = diffv;
+                in.rhs = csz;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    return -1;
+                }
+                diffv = in.dst;
+            }
+
+            return cast_value(sf, diffv, type_to_val(e->value_type), diag);
+        }
+
         if ((e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && is_pointer_type(e->value_type)) {
             int ptrv = -1;
             int idxv = -1;
