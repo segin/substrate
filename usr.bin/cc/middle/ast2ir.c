@@ -924,6 +924,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         int one;
         int cur;
         int nextv;
+        long step = 1;
 
         if (idx < 0) {
             if (diag != NULL && diag->message[0] == '\0') {
@@ -939,13 +940,23 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
 
-        one = emit_const_i64_instr(sf, 1);
+        if (is_pointer_type(vars[idx].type)) {
+            step = type_size_bytes(ptr_base_type(vars[idx].type));
+            if (step <= 0) {
+                set_diag(diag, "unsupported pointer ++/-- type in lowering");
+                return -1;
+            }
+        }
+
+        one = emit_const_i64_instr(sf, step);
         if (one < 0) {
             return -1;
         }
-        one = cast_value(sf, one, want, diag);
-        if (one < 0) {
-            return -1;
+        if (!is_pointer_type(vars[idx].type)) {
+            one = cast_value(sf, one, want, diag);
+            if (one < 0) {
+                return -1;
+            }
         }
 
         memset(&in, 0, sizeof(in));

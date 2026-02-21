@@ -809,8 +809,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             return -1;
         }
-        if (!is_numeric_type(vars[idx].type)) {
-            set_diag(diag, "++/-- currently require numeric scalar operands");
+        if (is_pointer_type(vars[idx].type)) {
+            if (ptr_base_type(vars[idx].type) == CC_TYPE_VOID) {
+                set_diag(diag, "++/-- on void pointer is unsupported");
+                return -1;
+            }
+        } else if (!is_numeric_type(vars[idx].type)) {
+            set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
             return -1;
         }
         e->value_type = vars[idx].type;

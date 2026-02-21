@@ -113,6 +113,7 @@
   - one-level typed pointer declarations/params/returns (`T*`) plus unary address/dereference expressions now lower through explicit SSA addr/load operations; sema supports pointer/null equality comparisons.
   - indirect pointer stores (`*p = expr`) now lower through explicit SSA store operations for supported scalar pointee types.
   - pointer arithmetic lowering now supports scaled `ptr +/- int` and `int + ptr` for non-`void*` pointers in the current subset.
+  - prefix/postfix `++/--` now support identifier pointer lvalues with element-size stepping semantics.
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
@@ -133,6 +134,7 @@
   - positive compile/run tests for local pointer dereference and pointer-parameter calls; i386 emission checks for addr/load codegen.
   - positive compile/run tests for pointer indirect stores (local + parameter path); i386 emission check for indirect store codegen.
   - positive compile/run test for pointer arithmetic semantics with heap-backed pointer indexing plus x86_64/i386 emission checks for scaled index arithmetic.
+  - positive compile/run test for pointer prefix/postfix `++/--` semantics over pointer lvalues.
   - negative tests for dereferencing non-pointer expressions and invalid address-of non-lvalue expressions.
   - negative tests for unsupported pointer-plus-pointer arithmetic and pointer-plus-float arithmetic.
   - negative test for unsupported compound assignment on indirect lvalues (`*p += ...`) in current subset.
