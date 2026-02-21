@@ -113,6 +113,7 @@ typedef struct {
 typedef struct {
     char *name;
     cc_type_t ret_type;
+    int has_body;
     int is_variadic;
     cc_param_t *params;
     size_t param_count;

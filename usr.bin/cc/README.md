@@ -11,6 +11,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
 - assembly and link stages via system `as` and `ld`.
 - native C subset pipeline:
   - lexer/parser/sema for a strict C subset
+  - function declarations/prototypes with signature compatibility checks across declarations/definitions
   - AST to SSA-like lowering
   - SSA middle-end optimization passes (`-O1+`): constant folding + dead temp elimination
   - GAS emitter for x86-64 and x86-32
@@ -34,7 +35,7 @@ Native C support is intentionally limited for now:
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
 - expressions: numeric literals, identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
-- function declarations/definitions with fixed params or `...` variadics
+- function declarations/prototypes and definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
 - i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)

@@ -1562,6 +1562,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
 
 static int parse_function(parser_t *p, cc_function_t *f) {
     memset(f, 0, sizeof(*f));
+    f->has_body = 0;
 
     if (parse_declspec(p, &f->ret_type, 1, "expected function return type") != 0) {
         return -1;
@@ -1589,9 +1590,17 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
         return -1;
     }
+    if (p->tok.kind == TOK_SEMI) {
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        f->has_body = 0;
+        return 0;
+    }
     if (expect(p, TOK_LBRACE, "expected '{' before function body") != 0) {
         return -1;
     }
+    f->has_body = 1;
 
     while (p->tok.kind != TOK_RBRACE) {
         cc_stmt_t s;
@@ -1691,9 +1700,5 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     }
 
     free(buf);
-    if (out->func_count == 0) {
-        set_diag(diag, 0, 0, "no function definitions found");
-        return -1;
-    }
     return 0;
 }

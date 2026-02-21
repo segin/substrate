@@ -181,6 +181,19 @@ static const cc_function_t *find_function(const cc_translation_unit_t *tu, const
     return NULL;
 }
 
+static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) {
+    size_t i;
+    if (a->ret_type != b->ret_type || a->is_variadic != b->is_variadic || a->param_count != b->param_count) {
+        return 0;
+    }
+    for (i = 0; i < a->param_count; ++i) {
+        if (a->params[i].type != b->params[i].type) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int is_float_type(cc_type_t t) {
     return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE;
 }
@@ -746,8 +759,6 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
     size_t i;
-    char **fn_names = NULL;
-    size_t fn_name_count = 0;
 
     if (diag != NULL) {
         diag->line = 0;
@@ -762,33 +773,30 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
 
     for (i = 0; i < tu->func_count; ++i) {
         const cc_function_t *f = &tu->funcs[i];
-        char *dup;
+        size_t j;
 
         if (f->name == NULL || f->name[0] == '\0') {
             set_diag(diag, "function with missing name");
             goto fail_global;
         }
-        if (names_find(fn_names, fn_name_count, f->name) >= 0) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "duplicate function definition: %s", f->name);
+        for (j = 0; j < i; ++j) {
+            const cc_function_t *prev = &tu->funcs[j];
+            if (strcmp(prev->name, f->name) != 0) {
+                continue;
             }
-            goto fail_global;
-        }
-        dup = (char *)malloc(strlen(f->name) + 1);
-        if (dup == NULL) {
-            set_diag(diag, "out of memory");
-            goto fail_global;
-        }
-        strcpy(dup, f->name);
-        {
-            char **next = (char **)realloc(fn_names, (fn_name_count + 1) * sizeof(*next));
-            if (next == NULL) {
-                free(dup);
-                set_diag(diag, "out of memory");
+            if (!func_decl_compatible(prev, f)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "conflicting declarations for function: %s",
+                             f->name);
+                }
                 goto fail_global;
             }
-            fn_names = next;
-            fn_names[fn_name_count++] = dup;
+            if (prev->has_body && f->has_body) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "duplicate function definition: %s", f->name);
+                }
+                goto fail_global;
+            }
         }
     }
 
@@ -800,6 +808,10 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         size_t var_count = 0;
         size_t j;
         int saw_return = 0;
+
+        if (!f->has_body) {
+            continue;
+        }
 
         for (j = 0; j < f->param_count; ++j) {
             if (f->params[j].type == CC_TYPE_VOID) {
@@ -864,16 +876,8 @@ fail_func:
         goto fail_global;
     }
 
-    for (i = 0; i < fn_name_count; ++i) {
-        free(fn_names[i]);
-    }
-    free(fn_names);
     return 0;
 
 fail_global:
-    for (i = 0; i < fn_name_count; ++i) {
-        free(fn_names[i]);
-    }
-    free(fn_names);
     return -1;
 }

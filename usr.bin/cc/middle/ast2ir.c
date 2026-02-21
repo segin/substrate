@@ -1548,6 +1548,8 @@ static int append_default_return(cc_ssa_function_t *sf) {
 
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag) {
     size_t i;
+    size_t def_count = 0;
+    size_t out_i = 0;
 
     cc_ssa_module_init(out);
     if (diag != NULL) {
@@ -1556,21 +1558,37 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         diag->message[0] = '\0';
     }
 
-    out->funcs = (cc_ssa_function_t *)calloc(tu->func_count, sizeof(*out->funcs));
+    for (i = 0; i < tu->func_count; ++i) {
+        if (tu->funcs[i].has_body) {
+            def_count++;
+        }
+    }
+    if (def_count == 0) {
+        out->funcs = NULL;
+        out->func_count = 0;
+        return 0;
+    }
+
+    out->funcs = (cc_ssa_function_t *)calloc(def_count, sizeof(*out->funcs));
     if (out->funcs == NULL) {
         set_diag(diag, "out of memory allocating SSA functions");
         return -1;
     }
-    out->func_count = tu->func_count;
+    out->func_count = def_count;
 
     for (i = 0; i < tu->func_count; ++i) {
-        cc_ssa_function_t *sf = &out->funcs[i];
         const cc_function_t *af = &tu->funcs[i];
+        cc_ssa_function_t *sf;
         var_entry_t *vars = NULL;
         lower_ctx_t lctx;
         size_t var_count = 0;
         size_t j;
         int saw_ret = 0;
+
+        if (!af->has_body) {
+            continue;
+        }
+        sf = &out->funcs[out_i++];
 
         memset(&lctx, 0, sizeof(lctx));
 
