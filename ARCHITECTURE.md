@@ -204,6 +204,19 @@ These components are essential for booting and basic system operation.
 - **Streaming matches:** `tests/usr.lib/regex/streaming/test_streaming.c`
 - **UTF-8 handling:** `tests/usr.lib/regex/encoding/test_utf8.c`
 
+
+## `usr.bin/cc`
+- **Goals:** Provide a deterministic textual SSA IR foundation for `usr.bin/cc` passes (parse, verify, normalize, compare) before full AST/MIR integration.
+- **Components:** `usr.bin/cc/` now includes:
+  - IR model/lifetime (`ir.h`, `ir.c`)
+  - textual parser (`parser.c`)
+  - SSA/CFG verifier (`verifier.c`)
+  - canonical serializer (`serialize.c`)
+  - tools (`ir-verifier`, `ir-normalize`, `ir-diff`)
+- **Verifier Coverage:** Enforces core SSA invariants (terminators, phi placement/arity, unique defs, use-before-def, dominance for non-phi uses, reachable CFG).
+- **Testing Strategy:** Host-executable regression tests under `tests/usr.bin/cc/` validate positive and negative IR cases plus normalization-equivalence checks.
+- **Integration Path:** Compiler stages can emit textual IR (`-emit-ssa`) to this verifier/normalizer and gate optimization/codegen on successful verification.
+
 ## `usr.lib/elf`
 - **Goals:** Provide a stable C API (`include/elfobj.h`) for reading, writing, validating, and linker-oriented manipulation of ELF objects without depending on ad-hoc parsers.
 - **Design Overview:** Layered implementation in `usr.lib/elf/src/`:

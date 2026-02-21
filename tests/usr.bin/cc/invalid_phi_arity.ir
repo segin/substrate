@@ -1,0 +1,12 @@
+module "m" {
+  target lp64;
+  func @badphi : fn(i32 %a) -> i32 {
+  entry:
+    br merge;
+  left:
+    br merge;
+  merge:
+    %x = phi i32 [ %a, entry ];
+    ret i32 %x;
+  }
+}

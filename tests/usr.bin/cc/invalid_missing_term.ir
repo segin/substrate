@@ -1,0 +1,7 @@
+module "m" {
+  target lp64;
+  func @bad : fn(i32 %a) -> i32 {
+  entry:
+    %x = add i32 %a, 1;
+  }
+}
