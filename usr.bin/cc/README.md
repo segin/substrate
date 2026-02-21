@@ -4,7 +4,7 @@
 
 ## Status
 
-Phase-8 (C95 lexical compatibility slice) is implemented:
+Phase-9 (early C99 expression/declaration slice) is implemented:
 
 - `cc` driver skeleton (`cmd/cc.c`) with Unix-style stage control.
 - preprocessing stage (`-E`) via system `cpp`.
@@ -18,17 +18,20 @@ Phase-8 (C95 lexical compatibility slice) is implemented:
   - branch-capable lowering/emission for `if`/`else`, `while`, `do-while`, `for`, and `switch`/`case`/`default` control flow
   - loop flow statements: `break` and `continue`
   - C95 lexical forms: digraph braces (`<%`/`%>`) and trigraph normalization
+  - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`, `long long`, `float`, qualifiers/storage-class keywords)
+  - C99 `for`-init declarations with loop-local scope
+  - expression extensions: `%`, unary `+`/`!`, short-circuit `&&`/`||`, compound assignments (`+= -= *= /= %=`), and `++/--`
 - existing SSA utilities remain available:
   - `ir-verifier`
   - `ir-normalize`
   - `ir-diff`
 
 Native C support is intentionally limited for now:
-- scalar types: `int`, `double`, `void`
+- scalar types: `_Bool`, `char`, `int`, `long long`, `float`, `double`, `void`
 - statement subset: local declarations, assignments, expression statements, `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, `break;`, `continue;`
-- expressions: numeric literals, identifiers, `+ - * /`, comparisons (`== != < <= > >=`), parentheses, function calls, assignment expressions
+- expressions: numeric literals, identifiers, `+ - * / %`, comparisons (`== != < <= > >=`), logical operators (`! && ||`), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
 - function declarations/definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
 - i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling

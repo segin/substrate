@@ -11,7 +11,11 @@ typedef struct {
 
 typedef enum {
     CC_TYPE_VOID = 0,
+    CC_TYPE_BOOL,
+    CC_TYPE_CHAR,
     CC_TYPE_INT,
+    CC_TYPE_LONG_LONG,
+    CC_TYPE_FLOAT,
     CC_TYPE_DOUBLE
 } cc_type_t;
 
@@ -20,12 +24,15 @@ typedef enum {
     CC_BIN_SUB,
     CC_BIN_MUL,
     CC_BIN_DIV,
+    CC_BIN_MOD,
     CC_BIN_EQ,
     CC_BIN_NE,
     CC_BIN_LT,
     CC_BIN_LE,
     CC_BIN_GT,
-    CC_BIN_GE
+    CC_BIN_GE,
+    CC_BIN_LAND,
+    CC_BIN_LOR
 } cc_binop_t;
 
 typedef enum {
@@ -75,6 +82,7 @@ struct cc_stmt {
     cc_stmt_kind_t kind;
     char *decl_name;
     cc_expr_t *expr;
+    cc_stmt_t *init_stmt;
     cc_expr_t *init_expr;
     cc_expr_t *post_expr;
     cc_stmt_t *then_branch;

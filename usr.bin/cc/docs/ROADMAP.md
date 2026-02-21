@@ -89,3 +89,16 @@
 - Regression coverage expanded:
   - positive tests compiling/running digraph and trigraph source forms.
   - i386 emission checks for C95 lexical forms.
+
+## Phase 9
+- Early C99 declaration/specifier coverage for the current scalar subset:
+  - declaration-specifier parser accepts common C99 specifier/qualifier/storage-class tokens and normalizes to supported scalar IR types.
+  - `_Bool`, `char`, `long long`, and `float` map through sema/lowering/backend paths.
+  - `for (type name = ...; ...)` declaration init clauses now have loop-local scope.
+- Expression grammar expansion:
+  - added `%`, unary `+`/`!`, compound assignments (`+= -= *= /= %=`), and prefix/postfix `++/--`.
+  - added logical `&&`/`||` with short-circuit lowering in AST->SSA via branch+label control flow and mutable SSA value slots.
+- Regression coverage expanded:
+  - positive compile/run tests for logical short-circuit semantics and update/compound operators.
+  - negative parser test for invalid `++/--` lvalues.
+  - i386 assembly checks for the new expression forms.

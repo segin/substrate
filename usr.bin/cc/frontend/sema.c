@@ -82,11 +82,23 @@ static const cc_function_t *find_function(const cc_translation_unit_t *tu, const
     return NULL;
 }
 
+static int is_float_type(cc_type_t t) {
+    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE;
+}
+
+static int is_integral_type(cc_type_t t) {
+    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_INT || t == CC_TYPE_LONG_LONG;
+}
+
+static int is_numeric_type(cc_type_t t) {
+    return is_integral_type(t) || is_float_type(t);
+}
+
 static int can_convert(cc_type_t dst, cc_type_t src) {
     if (dst == src) {
         return 1;
     }
-    if ((dst == CC_TYPE_INT || dst == CC_TYPE_DOUBLE) && (src == CC_TYPE_INT || src == CC_TYPE_DOUBLE)) {
+    if (is_numeric_type(dst) && is_numeric_type(src)) {
         return 1;
     }
     return 0;
@@ -99,12 +111,25 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     if (a == CC_TYPE_DOUBLE || b == CC_TYPE_DOUBLE) {
         return CC_TYPE_DOUBLE;
     }
+    if (a == CC_TYPE_FLOAT || b == CC_TYPE_FLOAT) {
+        return CC_TYPE_FLOAT;
+    }
+    if (a == CC_TYPE_LONG_LONG || b == CC_TYPE_LONG_LONG) {
+        return CC_TYPE_LONG_LONG;
+    }
+    if (a == CC_TYPE_CHAR || b == CC_TYPE_CHAR || a == CC_TYPE_BOOL || b == CC_TYPE_BOOL) {
+        return CC_TYPE_INT;
+    }
     return CC_TYPE_INT;
 }
 
 static int is_cmp_op(cc_binop_t op) {
     return op == CC_BIN_EQ || op == CC_BIN_NE || op == CC_BIN_LT || op == CC_BIN_LE || op == CC_BIN_GT ||
            op == CC_BIN_GE;
+}
+
+static int is_logical_op(cc_binop_t op) {
+    return op == CC_BIN_LAND || op == CC_BIN_LOR;
 }
 
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
@@ -144,12 +169,32 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
+        if (is_logical_op(e->op)) {
+            if (!is_numeric_type(e->lhs->value_type) || !is_numeric_type(e->rhs->value_type)) {
+                set_diag(diag, "logical operators require numeric operands");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
+            return 0;
+        }
         if (is_cmp_op(e->op)) {
-            if (e->lhs->value_type != CC_TYPE_INT || e->rhs->value_type != CC_TYPE_INT) {
+            if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
                 set_diag(diag, "comparison operators currently require integer operands");
                 return -1;
             }
             e->value_type = CC_TYPE_INT;
+            return 0;
+        }
+        if (e->op == CC_BIN_MOD) {
+            if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
+                set_diag(diag, "modulo operator requires integer operands");
+                return -1;
+            }
+            e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
+            if (e->value_type == CC_TYPE_VOID) {
+                set_diag(diag, "void expression used in arithmetic operation");
+                return -1;
+            }
             return 0;
         }
         e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
@@ -374,23 +419,42 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "malformed for statement");
             return -1;
         }
-        if (s->init_expr != NULL && check_expr(tu, s->init_expr, *vars, *var_count, depth, diag) != 0) {
-            return -1;
-        }
-        if (s->expr != NULL) {
-            if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+        {
+            size_t saved = *var_count;
+            int for_depth = depth;
+
+            if (s->init_stmt != NULL) {
+                if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, loop_depth, switch_depth,
+                               saw_return, diag) != 0) {
+                    return -1;
+                }
+                for_depth = depth + 1;
+            } else if (s->init_expr != NULL && check_expr(tu, s->init_expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (s->expr->value_type == CC_TYPE_VOID) {
-                set_diag(diag, "for condition cannot be void");
+
+            if (s->expr != NULL) {
+                if (check_expr(tu, s->expr, *vars, *var_count, for_depth, diag) != 0) {
+                    return -1;
+                }
+                if (s->expr->value_type == CC_TYPE_VOID) {
+                    set_diag(diag, "for condition cannot be void");
+                    return -1;
+                }
+            }
+            if (s->post_expr != NULL && check_expr(tu, s->post_expr, *vars, *var_count, for_depth, diag) != 0) {
                 return -1;
             }
+            if (check_stmt(tu, s->then_branch, vars, var_count, for_depth, fn_ret_type, loop_depth + 1, switch_depth,
+                           saw_return, diag) != 0) {
+                return -1;
+            }
+            for (i = saved; i < *var_count; ++i) {
+                free((*vars)[i].name);
+            }
+            *var_count = saved;
+            return 0;
         }
-        if (s->post_expr != NULL && check_expr(tu, s->post_expr, *vars, *var_count, depth, diag) != 0) {
-            return -1;
-        }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth + 1, switch_depth,
-                          saw_return, diag);
 
     case CC_STMT_SWITCH:
         if (s->expr == NULL || s->then_branch == NULL) {
@@ -404,7 +468,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
-        if (s->expr->value_type != CC_TYPE_INT) {
+        if (!is_integral_type(s->expr->value_type)) {
             set_diag(diag, "switch expression must be integer");
             return -1;
         }

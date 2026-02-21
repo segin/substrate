@@ -16,8 +16,23 @@ typedef enum {
     TOK_EOF = 0,
     TOK_IDENT,
     TOK_NUM,
+    TOK_KW_AUTO,
+    TOK_KW_BOOL,
+    TOK_KW_CHAR,
+    TOK_KW_CONST,
     TOK_KW_INT,
+    TOK_KW_EXTERN,
+    TOK_KW_FLOAT,
+    TOK_KW_INLINE,
+    TOK_KW_LONG,
+    TOK_KW_REGISTER,
+    TOK_KW_RESTRICT,
+    TOK_KW_SHORT,
+    TOK_KW_SIGNED,
+    TOK_KW_STATIC,
+    TOK_KW_UNSIGNED,
     TOK_KW_DOUBLE,
+    TOK_KW_VOLATILE,
     TOK_KW_VOID,
     TOK_KW_RETURN,
     TOK_KW_IF,
@@ -39,6 +54,16 @@ typedef enum {
     TOK_COLON,
     TOK_SEMI,
     TOK_ASSIGN,
+    TOK_PLUS_EQ,
+    TOK_MINUS_EQ,
+    TOK_STAR_EQ,
+    TOK_SLASH_EQ,
+    TOK_PERCENT_EQ,
+    TOK_PLUS_PLUS,
+    TOK_MINUS_MINUS,
+    TOK_AND_AND,
+    TOK_OR_OR,
+    TOK_BANG,
     TOK_EQ,
     TOK_NE,
     TOK_LT,
@@ -48,7 +73,8 @@ typedef enum {
     TOK_PLUS,
     TOK_MINUS,
     TOK_STAR,
-    TOK_SLASH
+    TOK_SLASH,
+    TOK_PERCENT
 } cc_tok_kind_t;
 
 typedef struct {
@@ -106,18 +132,144 @@ static int expect(parser_t *p, cc_tok_kind_t k, const char *what) {
     return next_tok(p);
 }
 
-static int parse_type_tok(parser_t *p, cc_type_t *out_type, const char *what) {
-    if (p->tok.kind == TOK_KW_INT) {
-        *out_type = CC_TYPE_INT;
-    } else if (p->tok.kind == TOK_KW_DOUBLE) {
-        *out_type = CC_TYPE_DOUBLE;
-    } else if (p->tok.kind == TOK_KW_VOID) {
-        *out_type = CC_TYPE_VOID;
-    } else {
+static int is_declspec_tok(cc_tok_kind_t k) {
+    switch (k) {
+    case TOK_KW_AUTO:
+    case TOK_KW_BOOL:
+    case TOK_KW_CHAR:
+    case TOK_KW_CONST:
+    case TOK_KW_INT:
+    case TOK_KW_EXTERN:
+    case TOK_KW_FLOAT:
+    case TOK_KW_INLINE:
+    case TOK_KW_LONG:
+    case TOK_KW_REGISTER:
+    case TOK_KW_RESTRICT:
+    case TOK_KW_SHORT:
+    case TOK_KW_SIGNED:
+    case TOK_KW_STATIC:
+    case TOK_KW_UNSIGNED:
+    case TOK_KW_DOUBLE:
+    case TOK_KW_VOLATILE:
+    case TOK_KW_VOID:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, const char *what) {
+    int seen = 0;
+    int seen_type = 0;
+    int seen_void = 0;
+    int seen_bool = 0;
+    int seen_char = 0;
+    int seen_int = 0;
+    int seen_float = 0;
+    int seen_double = 0;
+    int seen_long = 0;
+    int seen_short = 0;
+    int seen_sign = 0;
+
+    while (is_declspec_tok(p->tok.kind)) {
+        seen = 1;
+        switch (p->tok.kind) {
+        case TOK_KW_VOID:
+            seen_void = 1;
+            seen_type = 1;
+            break;
+        case TOK_KW_BOOL:
+            seen_bool = 1;
+            seen_type = 1;
+            break;
+        case TOK_KW_CHAR:
+            seen_char = 1;
+            seen_type = 1;
+            break;
+        case TOK_KW_INT:
+            seen_int = 1;
+            seen_type = 1;
+            break;
+        case TOK_KW_FLOAT:
+            seen_float = 1;
+            seen_type = 1;
+            break;
+        case TOK_KW_DOUBLE:
+            seen_double = 1;
+            seen_type = 1;
+            break;
+        case TOK_KW_LONG:
+            seen_long++;
+            seen_type = 1;
+            break;
+        case TOK_KW_SHORT:
+            seen_short = 1;
+            seen_type = 1;
+            break;
+        case TOK_KW_SIGNED:
+        case TOK_KW_UNSIGNED:
+            seen_sign = 1;
+            seen_type = 1;
+            break;
+        default:
+            break;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+
+    if (!seen) {
         set_diag(p->diag, p->tok.line, p->tok.col, what);
         return -1;
     }
-    return next_tok(p);
+    if (!seen_type) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected type specifier in declaration");
+        return -1;
+    }
+
+    if (seen_void) {
+        if (!allow_void || seen_bool || seen_char || seen_int || seen_float || seen_double || seen_long || seen_short) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "invalid use of void in declaration specifiers");
+            return -1;
+        }
+        *out_type = CC_TYPE_VOID;
+        return 0;
+    }
+
+    if (seen_double) {
+        *out_type = CC_TYPE_DOUBLE;
+        return 0;
+    }
+    if (seen_float) {
+        *out_type = CC_TYPE_FLOAT;
+        return 0;
+    }
+    if (seen_bool) {
+        *out_type = CC_TYPE_BOOL;
+        return 0;
+    }
+    if (seen_char) {
+        *out_type = CC_TYPE_CHAR;
+        return 0;
+    }
+    if (seen_long > 0) {
+        *out_type = CC_TYPE_LONG_LONG;
+        return 0;
+    }
+    if (seen_short || seen_int) {
+        *out_type = CC_TYPE_INT;
+        return 0;
+    }
+
+    /* e.g. signed/unsigned without explicit base type => int */
+    if (seen_sign) {
+        *out_type = CC_TYPE_INT;
+        return 0;
+    }
+
+    *out_type = CC_TYPE_INT;
+    return 0;
 }
 
 static cc_expr_t *new_expr(cc_expr_kind_t kind) {
@@ -151,6 +303,10 @@ static void free_stmt(cc_stmt_t *s) {
     }
     free(s->decl_name);
     free_expr(s->expr);
+    if (s->init_stmt != NULL) {
+        free_stmt(s->init_stmt);
+        free(s->init_stmt);
+    }
     free_expr(s->init_expr);
     free_expr(s->post_expr);
     if (s->then_branch != NULL) {
@@ -354,12 +510,100 @@ static cc_expr_t *parse_primary(parser_t *p) {
     return NULL;
 }
 
+static cc_expr_t *new_int_expr(long v) {
+    cc_expr_t *e = new_expr(CC_EXPR_INT);
+    if (e != NULL) {
+        e->int_val = v;
+        e->value_type = CC_TYPE_INT;
+    }
+    return e;
+}
+
+static cc_expr_t *new_ident_expr(const char *name) {
+    cc_expr_t *e = new_expr(CC_EXPR_IDENT);
+    if (e == NULL) {
+        return NULL;
+    }
+    e->ident = xstrdup_n(name, strlen(name));
+    if (e->ident == NULL) {
+        free(e);
+        return NULL;
+    }
+    return e;
+}
+
+static cc_expr_t *new_bin_expr(cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs) {
+    cc_expr_t *e = new_expr(CC_EXPR_BIN);
+    if (e == NULL) {
+        free_expr(lhs);
+        free_expr(rhs);
+        return NULL;
+    }
+    e->op = op;
+    e->lhs = lhs;
+    e->rhs = rhs;
+    return e;
+}
+
+static cc_expr_t *new_assign_expr(const char *name, cc_expr_t *rhs) {
+    cc_expr_t *e = new_expr(CC_EXPR_ASSIGN);
+    if (e == NULL) {
+        free_expr(rhs);
+        return NULL;
+    }
+    e->ident = xstrdup_n(name, strlen(name));
+    if (e->ident == NULL) {
+        free_expr(rhs);
+        free(e);
+        return NULL;
+    }
+    e->rhs = rhs;
+    return e;
+}
+
+static cc_expr_t *new_update_expr(const char *name, cc_binop_t op) {
+    cc_expr_t *lhs = new_ident_expr(name);
+    cc_expr_t *one = new_int_expr(1);
+    cc_expr_t *rhs;
+    if (lhs == NULL || one == NULL) {
+        free_expr(lhs);
+        free_expr(one);
+        return NULL;
+    }
+    rhs = new_bin_expr(op, lhs, one);
+    if (rhs == NULL) {
+        return NULL;
+    }
+    return new_assign_expr(name, rhs);
+}
+
+static cc_expr_t *parse_postfix(parser_t *p) {
+    cc_expr_t *e = parse_primary(p);
+    while (e != NULL && (p->tok.kind == TOK_PLUS_PLUS || p->tok.kind == TOK_MINUS_MINUS)) {
+        cc_expr_t *upd;
+        if (e->kind != CC_EXPR_IDENT || e->ident == NULL) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "++/-- requires an identifier lvalue");
+            free_expr(e);
+            return NULL;
+        }
+        upd = new_update_expr(e->ident, p->tok.kind == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB);
+        free_expr(e);
+        if (upd == NULL) {
+            return NULL;
+        }
+        e = upd;
+        if (next_tok(p) != 0) {
+            free_expr(e);
+            return NULL;
+        }
+    }
+    return e;
+}
+
 static cc_expr_t *parse_unary(parser_t *p) {
     if (p->tok.kind == TOK_MINUS) {
         cc_expr_t *z;
         cc_expr_t *rhs;
-        cc_expr_t *e;
-
         if (next_tok(p) != 0) {
             return NULL;
         }
@@ -367,30 +611,65 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (rhs == NULL) {
             return NULL;
         }
-
-        z = new_expr(CC_EXPR_INT);
-        e = new_expr(CC_EXPR_BIN);
-        if (z == NULL || e == NULL) {
-            free_expr(z);
+        z = new_int_expr(0);
+        if (z == NULL) {
             free_expr(rhs);
-            free_expr(e);
             return NULL;
         }
-        z->int_val = 0;
-        e->op = CC_BIN_SUB;
-        e->lhs = z;
-        e->rhs = rhs;
-        return e;
+        return new_bin_expr(CC_BIN_SUB, z, rhs);
     }
-    return parse_primary(p);
+    if (p->tok.kind == TOK_PLUS) {
+        if (next_tok(p) != 0) {
+            return NULL;
+        }
+        return parse_unary(p);
+    }
+    if (p->tok.kind == TOK_BANG) {
+        cc_expr_t *rhs;
+        cc_expr_t *z;
+        if (next_tok(p) != 0) {
+            return NULL;
+        }
+        rhs = parse_unary(p);
+        if (rhs == NULL) {
+            return NULL;
+        }
+        z = new_int_expr(0);
+        if (z == NULL) {
+            free_expr(rhs);
+            return NULL;
+        }
+        return new_bin_expr(CC_BIN_EQ, rhs, z);
+    }
+    if (p->tok.kind == TOK_PLUS_PLUS || p->tok.kind == TOK_MINUS_MINUS) {
+        cc_tok_kind_t op = p->tok.kind;
+        cc_expr_t *rhs;
+        cc_expr_t *upd;
+        if (next_tok(p) != 0) {
+            return NULL;
+        }
+        rhs = parse_unary(p);
+        if (rhs == NULL) {
+            return NULL;
+        }
+        if (rhs->kind != CC_EXPR_IDENT || rhs->ident == NULL) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "++/-- requires an identifier lvalue");
+            free_expr(rhs);
+            return NULL;
+        }
+        upd = new_update_expr(rhs->ident, op == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB);
+        free_expr(rhs);
+        return upd;
+    }
+    return parse_postfix(p);
 }
 
 static cc_expr_t *parse_mul(parser_t *p) {
     cc_expr_t *lhs = parse_unary(p);
-    while (lhs != NULL && (p->tok.kind == TOK_STAR || p->tok.kind == TOK_SLASH)) {
+    while (lhs != NULL &&
+           (p->tok.kind == TOK_STAR || p->tok.kind == TOK_SLASH || p->tok.kind == TOK_PERCENT)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
-        cc_expr_t *e;
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -400,16 +679,16 @@ static cc_expr_t *parse_mul(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        e = new_expr(CC_EXPR_BIN);
-        if (e == NULL) {
-            free_expr(lhs);
-            free_expr(rhs);
+        if (op == TOK_STAR) {
+            lhs = new_bin_expr(CC_BIN_MUL, lhs, rhs);
+        } else if (op == TOK_SLASH) {
+            lhs = new_bin_expr(CC_BIN_DIV, lhs, rhs);
+        } else {
+            lhs = new_bin_expr(CC_BIN_MOD, lhs, rhs);
+        }
+        if (lhs == NULL) {
             return NULL;
         }
-        e->op = op == TOK_STAR ? CC_BIN_MUL : CC_BIN_DIV;
-        e->lhs = lhs;
-        e->rhs = rhs;
-        lhs = e;
     }
     return lhs;
 }
@@ -419,7 +698,6 @@ static cc_expr_t *parse_add(parser_t *p) {
     while (lhs != NULL && (p->tok.kind == TOK_PLUS || p->tok.kind == TOK_MINUS)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
-        cc_expr_t *e;
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -429,16 +707,10 @@ static cc_expr_t *parse_add(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        e = new_expr(CC_EXPR_BIN);
-        if (e == NULL) {
-            free_expr(lhs);
-            free_expr(rhs);
+        lhs = new_bin_expr(op == TOK_PLUS ? CC_BIN_ADD : CC_BIN_SUB, lhs, rhs);
+        if (lhs == NULL) {
             return NULL;
         }
-        e->op = op == TOK_PLUS ? CC_BIN_ADD : CC_BIN_SUB;
-        e->lhs = lhs;
-        e->rhs = rhs;
-        lhs = e;
     }
     return lhs;
 }
@@ -449,7 +721,7 @@ static cc_expr_t *parse_rel(parser_t *p) {
            (p->tok.kind == TOK_LT || p->tok.kind == TOK_LE || p->tok.kind == TOK_GT || p->tok.kind == TOK_GE)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
-        cc_expr_t *e;
+        cc_binop_t bop;
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -459,24 +731,19 @@ static cc_expr_t *parse_rel(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        e = new_expr(CC_EXPR_BIN);
-        if (e == NULL) {
-            free_expr(lhs);
-            free_expr(rhs);
+        if (op == TOK_LT) {
+            bop = CC_BIN_LT;
+        } else if (op == TOK_LE) {
+            bop = CC_BIN_LE;
+        } else if (op == TOK_GT) {
+            bop = CC_BIN_GT;
+        } else {
+            bop = CC_BIN_GE;
+        }
+        lhs = new_bin_expr(bop, lhs, rhs);
+        if (lhs == NULL) {
             return NULL;
         }
-        if (op == TOK_LT) {
-            e->op = CC_BIN_LT;
-        } else if (op == TOK_LE) {
-            e->op = CC_BIN_LE;
-        } else if (op == TOK_GT) {
-            e->op = CC_BIN_GT;
-        } else {
-            e->op = CC_BIN_GE;
-        }
-        e->lhs = lhs;
-        e->rhs = rhs;
-        lhs = e;
     }
     return lhs;
 }
@@ -486,7 +753,6 @@ static cc_expr_t *parse_eq(parser_t *p) {
     while (lhs != NULL && (p->tok.kind == TOK_EQ || p->tok.kind == TOK_NE)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
-        cc_expr_t *e;
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -496,29 +762,68 @@ static cc_expr_t *parse_eq(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        e = new_expr(CC_EXPR_BIN);
-        if (e == NULL) {
-            free_expr(lhs);
-            free_expr(rhs);
+        lhs = new_bin_expr(op == TOK_EQ ? CC_BIN_EQ : CC_BIN_NE, lhs, rhs);
+        if (lhs == NULL) {
             return NULL;
         }
-        e->op = op == TOK_EQ ? CC_BIN_EQ : CC_BIN_NE;
-        e->lhs = lhs;
-        e->rhs = rhs;
-        lhs = e;
+    }
+    return lhs;
+}
+
+static cc_expr_t *parse_land(parser_t *p) {
+    cc_expr_t *lhs = parse_eq(p);
+    while (lhs != NULL && p->tok.kind == TOK_AND_AND) {
+        cc_expr_t *rhs;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_eq(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        lhs = new_bin_expr(CC_BIN_LAND, lhs, rhs);
+        if (lhs == NULL) {
+            return NULL;
+        }
+    }
+    return lhs;
+}
+
+static cc_expr_t *parse_lor(parser_t *p) {
+    cc_expr_t *lhs = parse_land(p);
+    while (lhs != NULL && p->tok.kind == TOK_OR_OR) {
+        cc_expr_t *rhs;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_land(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        lhs = new_bin_expr(CC_BIN_LOR, lhs, rhs);
+        if (lhs == NULL) {
+            return NULL;
+        }
     }
     return lhs;
 }
 
 static cc_expr_t *parse_assign(parser_t *p) {
-    cc_expr_t *lhs = parse_eq(p);
+    cc_expr_t *lhs = parse_lor(p);
 
-    if (lhs != NULL && p->tok.kind == TOK_ASSIGN) {
+    if (lhs != NULL && (p->tok.kind == TOK_ASSIGN || p->tok.kind == TOK_PLUS_EQ || p->tok.kind == TOK_MINUS_EQ ||
+                        p->tok.kind == TOK_STAR_EQ || p->tok.kind == TOK_SLASH_EQ ||
+                        p->tok.kind == TOK_PERCENT_EQ)) {
+        cc_tok_kind_t aop = p->tok.kind;
         cc_expr_t *rhs;
         cc_expr_t *e;
         char *name;
 
-        if (lhs->kind != CC_EXPR_IDENT) {
+        if (lhs->kind != CC_EXPR_IDENT || lhs->ident == NULL) {
             set_diag(p->diag, p->tok.line, p->tok.col, "left-hand side of assignment must be an identifier");
             free_expr(lhs);
             return NULL;
@@ -538,6 +843,32 @@ static cc_expr_t *parse_assign(parser_t *p) {
             return NULL;
         }
 
+        if (aop != TOK_ASSIGN) {
+            cc_expr_t *lhs_read = new_ident_expr(name);
+            cc_binop_t bop;
+            if (lhs_read == NULL) {
+                free(name);
+                free_expr(rhs);
+                return NULL;
+            }
+            if (aop == TOK_PLUS_EQ) {
+                bop = CC_BIN_ADD;
+            } else if (aop == TOK_MINUS_EQ) {
+                bop = CC_BIN_SUB;
+            } else if (aop == TOK_STAR_EQ) {
+                bop = CC_BIN_MUL;
+            } else if (aop == TOK_SLASH_EQ) {
+                bop = CC_BIN_DIV;
+            } else {
+                bop = CC_BIN_MOD;
+            }
+            rhs = new_bin_expr(bop, lhs_read, rhs);
+            if (rhs == NULL) {
+                free(name);
+                return NULL;
+            }
+        }
+
         e = new_expr(CC_EXPR_ASSIGN);
         if (e == NULL) {
             free(name);
@@ -554,6 +885,38 @@ static cc_expr_t *parse_assign(parser_t *p) {
 
 static cc_expr_t *parse_expr(parser_t *p) {
     return parse_assign(p);
+}
+
+static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
+    memset(s, 0, sizeof(*s));
+    s->kind = CC_STMT_DECL;
+    if (parse_declspec(p, &s->type, 0, "expected declaration type") != 0) {
+        return -1;
+    }
+    if (p->tok.kind != TOK_IDENT) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier after declaration type");
+        return -1;
+    }
+    s->decl_name = xstrdup_n(p->tok.start, p->tok.len);
+    if (s->decl_name == NULL) {
+        return -1;
+    }
+    if (next_tok(p) != 0) {
+        return -1;
+    }
+    if (p->tok.kind == TOK_ASSIGN) {
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        s->expr = parse_expr(p);
+        if (s->expr == NULL) {
+            return -1;
+        }
+    }
+    if (need_semi) {
+        return expect(p, TOK_SEMI, "expected ';' after declaration");
+    }
+    return 0;
 }
 
 static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
@@ -686,12 +1049,24 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
             return -1;
         }
         if (p->tok.kind != TOK_SEMI) {
-            s->init_expr = parse_expr(p);
-            if (s->init_expr == NULL) {
-                return -1;
+            if (is_declspec_tok(p->tok.kind)) {
+                s->init_stmt = (cc_stmt_t *)calloc(1, sizeof(*s->init_stmt));
+                if (s->init_stmt == NULL) {
+                    return -1;
+                }
+                if (parse_decl_stmt(p, s->init_stmt, 1) != 0) {
+                    return -1;
+                }
+            } else {
+                s->init_expr = parse_expr(p);
+                if (s->init_expr == NULL) {
+                    return -1;
+                }
+                if (expect(p, TOK_SEMI, "expected ';' after for-init") != 0) {
+                    return -1;
+                }
             }
-        }
-        if (expect(p, TOK_SEMI, "expected ';' after for-init") != 0) {
+        } else if (expect(p, TOK_SEMI, "expected ';' after for-init") != 0) {
             return -1;
         }
         if (p->tok.kind != TOK_SEMI) {
@@ -783,32 +1158,8 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         return expect(p, TOK_SEMI, "expected ';' after continue");
     }
 
-    if (p->tok.kind == TOK_KW_INT || p->tok.kind == TOK_KW_DOUBLE) {
-        s->kind = CC_STMT_DECL;
-        if (parse_type_tok(p, &s->type, "expected declaration type") != 0) {
-            return -1;
-        }
-        if (p->tok.kind != TOK_IDENT) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier after declaration type");
-            return -1;
-        }
-        s->decl_name = xstrdup_n(p->tok.start, p->tok.len);
-        if (s->decl_name == NULL) {
-            return -1;
-        }
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-        if (p->tok.kind == TOK_ASSIGN) {
-            if (next_tok(p) != 0) {
-                return -1;
-            }
-            s->expr = parse_expr(p);
-            if (s->expr == NULL) {
-                return -1;
-            }
-        }
-        return expect(p, TOK_SEMI, "expected ';' after declaration");
+    if (is_declspec_tok(p->tok.kind)) {
+        return parse_decl_stmt(p, s, 1);
     }
 
     if (p->tok.kind == TOK_KW_RETURN) {
@@ -864,7 +1215,11 @@ static int parse_params(parser_t *p, cc_function_t *f) {
         if (next_tok(p) != 0) {
             return -1;
         }
-        return 0;
+        if (p->tok.kind == TOK_RPAREN) {
+            return 0;
+        }
+        set_diag(p->diag, p->tok.line, p->tok.col, "void must be the sole token in an empty parameter list");
+        return -1;
     }
 
     while (p->tok.kind != TOK_RPAREN) {
@@ -878,7 +1233,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
             break;
         }
 
-        if (parse_type_tok(p, &ptype, "expected parameter type") != 0) {
+        if (parse_declspec(p, &ptype, 1, "expected parameter type") != 0) {
             return -1;
         }
         if (ptype == CC_TYPE_VOID) {
@@ -916,7 +1271,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
 static int parse_function(parser_t *p, cc_function_t *f) {
     memset(f, 0, sizeof(*f));
 
-    if (parse_type_tok(p, &f->ret_type, "expected function return type") != 0) {
+    if (parse_declspec(p, &f->ret_type, 1, "expected function return type") != 0) {
         return -1;
     }
     if (p->tok.kind != TOK_IDENT) {

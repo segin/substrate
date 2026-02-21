@@ -14,8 +14,23 @@ typedef enum {
     TOK_EOF = 0,
     TOK_IDENT,
     TOK_NUM,
+    TOK_KW_AUTO,
+    TOK_KW_BOOL,
+    TOK_KW_CHAR,
+    TOK_KW_CONST,
     TOK_KW_INT,
+    TOK_KW_EXTERN,
+    TOK_KW_FLOAT,
+    TOK_KW_INLINE,
+    TOK_KW_LONG,
+    TOK_KW_REGISTER,
+    TOK_KW_RESTRICT,
+    TOK_KW_SHORT,
+    TOK_KW_SIGNED,
+    TOK_KW_STATIC,
+    TOK_KW_UNSIGNED,
     TOK_KW_DOUBLE,
+    TOK_KW_VOLATILE,
     TOK_KW_VOID,
     TOK_KW_RETURN,
     TOK_KW_IF,
@@ -37,6 +52,16 @@ typedef enum {
     TOK_COLON,
     TOK_SEMI,
     TOK_ASSIGN,
+    TOK_PLUS_EQ,
+    TOK_MINUS_EQ,
+    TOK_STAR_EQ,
+    TOK_SLASH_EQ,
+    TOK_PERCENT_EQ,
+    TOK_PLUS_PLUS,
+    TOK_MINUS_MINUS,
+    TOK_AND_AND,
+    TOK_OR_OR,
+    TOK_BANG,
     TOK_EQ,
     TOK_NE,
     TOK_LT,
@@ -46,7 +71,8 @@ typedef enum {
     TOK_PLUS,
     TOK_MINUS,
     TOK_STAR,
-    TOK_SLASH
+    TOK_SLASH,
+    TOK_PERCENT
 } cc_tok_kind_t;
 
 typedef struct {
@@ -173,12 +199,65 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         out->line = line;
         out->col = col;
 
-        if (out->len == 3 && out->start[0] == 'i' && out->start[1] == 'n' && out->start[2] == 't') {
+        if (out->len == 4 && out->start[0] == 'a' && out->start[1] == 'u' &&
+            out->start[2] == 't' && out->start[3] == 'o') {
+            out->kind = TOK_KW_AUTO;
+        } else if (out->len == 5 && out->start[0] == '_' && out->start[1] == 'B' &&
+                   out->start[2] == 'o' && out->start[3] == 'o' && out->start[4] == 'l') {
+            out->kind = TOK_KW_BOOL;
+        } else if (out->len == 4 && out->start[0] == 'c' && out->start[1] == 'h' &&
+                   out->start[2] == 'a' && out->start[3] == 'r') {
+            out->kind = TOK_KW_CHAR;
+        } else if (out->len == 5 && out->start[0] == 'c' && out->start[1] == 'o' &&
+                   out->start[2] == 'n' && out->start[3] == 's' && out->start[4] == 't') {
+            out->kind = TOK_KW_CONST;
+        } else if (out->len == 3 && out->start[0] == 'i' && out->start[1] == 'n' && out->start[2] == 't') {
             out->kind = TOK_KW_INT;
+        } else if (out->len == 6 && out->start[0] == 'e' && out->start[1] == 'x' &&
+                   out->start[2] == 't' && out->start[3] == 'e' && out->start[4] == 'r' &&
+                   out->start[5] == 'n') {
+            out->kind = TOK_KW_EXTERN;
+        } else if (out->len == 5 && out->start[0] == 'f' && out->start[1] == 'l' &&
+                   out->start[2] == 'o' && out->start[3] == 'a' && out->start[4] == 't') {
+            out->kind = TOK_KW_FLOAT;
+        } else if (out->len == 6 && out->start[0] == 'i' && out->start[1] == 'n' &&
+                   out->start[2] == 'l' && out->start[3] == 'i' && out->start[4] == 'n' &&
+                   out->start[5] == 'e') {
+            out->kind = TOK_KW_INLINE;
+        } else if (out->len == 4 && out->start[0] == 'l' && out->start[1] == 'o' &&
+                   out->start[2] == 'n' && out->start[3] == 'g') {
+            out->kind = TOK_KW_LONG;
+        } else if (out->len == 8 && out->start[0] == 'r' && out->start[1] == 'e' &&
+                   out->start[2] == 'g' && out->start[3] == 'i' && out->start[4] == 's' &&
+                   out->start[5] == 't' && out->start[6] == 'e' && out->start[7] == 'r') {
+            out->kind = TOK_KW_REGISTER;
+        } else if (out->len == 8 && out->start[0] == 'r' && out->start[1] == 'e' &&
+                   out->start[2] == 's' && out->start[3] == 't' && out->start[4] == 'r' &&
+                   out->start[5] == 'i' && out->start[6] == 'c' && out->start[7] == 't') {
+            out->kind = TOK_KW_RESTRICT;
+        } else if (out->len == 5 && out->start[0] == 's' && out->start[1] == 'h' &&
+                   out->start[2] == 'o' && out->start[3] == 'r' && out->start[4] == 't') {
+            out->kind = TOK_KW_SHORT;
+        } else if (out->len == 6 && out->start[0] == 's' && out->start[1] == 'i' &&
+                   out->start[2] == 'g' && out->start[3] == 'n' && out->start[4] == 'e' &&
+                   out->start[5] == 'd') {
+            out->kind = TOK_KW_SIGNED;
+        } else if (out->len == 6 && out->start[0] == 's' && out->start[1] == 't' &&
+                   out->start[2] == 'a' && out->start[3] == 't' && out->start[4] == 'i' &&
+                   out->start[5] == 'c') {
+            out->kind = TOK_KW_STATIC;
+        } else if (out->len == 8 && out->start[0] == 'u' && out->start[1] == 'n' &&
+                   out->start[2] == 's' && out->start[3] == 'i' && out->start[4] == 'g' &&
+                   out->start[5] == 'n' && out->start[6] == 'e' && out->start[7] == 'd') {
+            out->kind = TOK_KW_UNSIGNED;
         } else if (out->len == 6 && out->start[0] == 'd' && out->start[1] == 'o' &&
                    out->start[2] == 'u' && out->start[3] == 'b' && out->start[4] == 'l' &&
                    out->start[5] == 'e') {
             out->kind = TOK_KW_DOUBLE;
+        } else if (out->len == 8 && out->start[0] == 'v' && out->start[1] == 'o' &&
+                   out->start[2] == 'l' && out->start[3] == 'a' && out->start[4] == 't' &&
+                   out->start[5] == 'i' && out->start[6] == 'l' && out->start[7] == 'e') {
+            out->kind = TOK_KW_VOLATILE;
         } else if (out->len == 4 && out->start[0] == 'v' && out->start[1] == 'o' &&
                    out->start[2] == 'i' && out->start[3] == 'd') {
             out->kind = TOK_KW_VOID;
@@ -338,6 +417,96 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         lx_adv(lx);
         return 0;
     }
+    if (c == '&' && lx_peekn(lx, 1) == '&') {
+        out->kind = TOK_AND_AND;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '|' && lx_peekn(lx, 1) == '|') {
+        out->kind = TOK_OR_OR;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '+' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_PLUS_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '-' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_MINUS_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '*' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_STAR_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '/' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_SLASH_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '%' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_PERCENT_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '+' && lx_peekn(lx, 1) == '+') {
+        out->kind = TOK_PLUS_PLUS;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '-' && lx_peekn(lx, 1) == '-') {
+        out->kind = TOK_MINUS_MINUS;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
 
     lx_adv(lx);
     out->line = line;
@@ -367,6 +536,9 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     case '=':
         out->kind = TOK_ASSIGN;
         return 0;
+    case '!':
+        out->kind = TOK_BANG;
+        return 0;
     case '<':
         out->kind = TOK_LT;
         return 0;
@@ -384,6 +556,9 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     case '/':
         out->kind = TOK_SLASH;
+        return 0;
+    case '%':
+        out->kind = TOK_PERCENT;
         return 0;
     default:
         out->kind = TOK_EOF;
