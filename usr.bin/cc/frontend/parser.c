@@ -16,12 +16,14 @@ typedef enum {
     TOK_EOF = 0,
     TOK_IDENT,
     TOK_NUM,
+    TOK_STR,
     TOK_KW_AUTO,
     TOK_KW_BOOL,
     TOK_KW_CHAR,
     TOK_KW_CONST,
     TOK_KW_INT,
     TOK_KW_EXTERN,
+    TOK_KW_EXTENSION,
     TOK_KW_FLOAT,
     TOK_KW_INLINE,
     TOK_KW_LONG,
@@ -30,6 +32,9 @@ typedef enum {
     TOK_KW_SHORT,
     TOK_KW_SIGNED,
     TOK_KW_STATIC,
+    TOK_KW_STRUCT,
+    TOK_KW_UNION,
+    TOK_KW_ENUM,
     TOK_KW_TYPEDEF,
     TOK_KW_UNSIGNED,
     TOK_KW_DOUBLE,
@@ -259,6 +264,7 @@ static int is_declspec_tok(cc_tok_kind_t k) {
     case TOK_KW_CONST:
     case TOK_KW_INT:
     case TOK_KW_EXTERN:
+    case TOK_KW_EXTENSION:
     case TOK_KW_FLOAT:
     case TOK_KW_INLINE:
     case TOK_KW_LONG:
@@ -267,6 +273,9 @@ static int is_declspec_tok(cc_tok_kind_t k) {
     case TOK_KW_SHORT:
     case TOK_KW_SIGNED:
     case TOK_KW_STATIC:
+    case TOK_KW_STRUCT:
+    case TOK_KW_UNION:
+    case TOK_KW_ENUM:
     case TOK_KW_TYPEDEF:
     case TOK_KW_UNSIGNED:
     case TOK_KW_DOUBLE:
@@ -291,6 +300,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
     int seen_short = 0;
     int seen_signed = 0;
     int seen_unsigned = 0;
+    int seen_opaque_tag = 0;
     int seen_typedef = 0;
     int seen_alias = 0;
     cc_type_t alias_type = CC_TYPE_VOID;
@@ -307,6 +317,16 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
                 seen_type = 1;
                 seen_alias = 1;
                 alias_type = p->typedefs[tidx].type;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (seen_typedef && !seen_type) {
+                seen = 1;
+                seen_type = 1;
+                seen_alias = 1;
+                alias_type = CC_TYPE_VOID;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -361,6 +381,43 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
         case TOK_KW_TYPEDEF:
             seen_typedef = 1;
             break;
+        case TOK_KW_STRUCT:
+        case TOK_KW_UNION:
+        case TOK_KW_ENUM: {
+            int brace_depth = 0;
+            seen_type = 1;
+            seen_opaque_tag = 1;
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            if (p->tok.kind == TOK_IDENT) {
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+            }
+            if (p->tok.kind != TOK_LBRACE) {
+                continue;
+            }
+            brace_depth = 1;
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            while (brace_depth > 0) {
+                if (p->tok.kind == TOK_EOF) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "unterminated aggregate declaration");
+                    return -1;
+                }
+                if (p->tok.kind == TOK_LBRACE) {
+                    brace_depth++;
+                } else if (p->tok.kind == TOK_RBRACE) {
+                    brace_depth--;
+                }
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+            }
+            continue;
+        }
         default:
             break;
         }
@@ -379,6 +436,10 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
     }
 
     if (seen_alias) {
+        if (seen_opaque_tag) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "invalid typedef type combination");
+            return -1;
+        }
         if (seen_void || seen_bool || seen_char || seen_int || seen_float || seen_double || seen_long || seen_short ||
             seen_signed || seen_unsigned) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid typedef type combination");
@@ -425,6 +486,21 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
     if ((seen_signed || seen_unsigned) && (seen_float || seen_double || seen_bool || seen_void)) {
         set_diag(p->diag, p->tok.line, p->tok.col, "invalid signed/unsigned type combination");
         return -1;
+    }
+    if (seen_opaque_tag) {
+        if (seen_void || seen_bool || seen_char || seen_int || seen_float || seen_double || seen_long || seen_short ||
+            seen_signed || seen_unsigned) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "invalid aggregate declaration specifiers");
+            return -1;
+        }
+        *out_type = CC_TYPE_VOID;
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
+        return 0;
     }
 
     if (seen_double) {
@@ -657,6 +733,52 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     return next_tok(p);
 }
 
+static int tok_is_ident(parser_t *p, const char *s) {
+    size_t n = strlen(s);
+    return p->tok.kind == TOK_IDENT && p->tok.len == n && strncmp(p->tok.start, s, n) == 0;
+}
+
+static int skip_balanced_parens(parser_t *p) {
+    int depth = 0;
+    if (p->tok.kind != TOK_LPAREN) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected '('");
+        return -1;
+    }
+    depth = 1;
+    if (next_tok(p) != 0) {
+        return -1;
+    }
+    while (depth > 0) {
+        if (p->tok.kind == TOK_EOF) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "unterminated parenthesized attribute");
+            return -1;
+        }
+        if (p->tok.kind == TOK_LPAREN) {
+            depth++;
+        } else if (p->tok.kind == TOK_RPAREN) {
+            depth--;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int skip_decl_gnu_suffix(parser_t *p) {
+    while (tok_is_ident(p, "__attribute__") || tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (p->tok.kind == TOK_LPAREN) {
+            if (skip_balanced_parens(p) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int parse_type_name(parser_t *p, cc_type_t *out_type, int allow_void, const char *what) {
     cc_type_t ty;
     if (parse_declspec(p, &ty, allow_void, what, NULL) != 0) {
@@ -675,6 +797,114 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int allow_void, con
             if (next_tok(p) != 0) {
                 return -1;
             }
+        }
+    }
+    *out_type = ty;
+    return 0;
+}
+
+static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name) {
+    cc_type_t ty = base_type;
+    *out_name = NULL;
+    while (p->tok.kind == TOK_STAR) {
+        ty = ptr_of_type(ty);
+        if (ty == CC_TYPE_VOID) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        while (is_decl_qual_tok(p->tok.kind)) {
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+        }
+    }
+    if (p->tok.kind == TOK_LPAREN && peek_kind(p) == TOK_STAR) {
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        while (p->tok.kind == TOK_STAR) {
+            ty = ptr_of_type(ty);
+            if (ty == CC_TYPE_VOID) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                return -1;
+            }
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            while (is_decl_qual_tok(p->tok.kind)) {
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+            }
+        }
+        if (p->tok.kind == TOK_IDENT) {
+            *out_name = xstrdup_n(p->tok.start, p->tok.len);
+            if (*out_name == NULL) {
+                return -1;
+            }
+            if (next_tok(p) != 0) {
+                free(*out_name);
+                *out_name = NULL;
+                return -1;
+            }
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' in parameter declarator") != 0) {
+            free(*out_name);
+            *out_name = NULL;
+            return -1;
+        }
+        while (p->tok.kind == TOK_LPAREN) {
+            if (skip_balanced_parens(p) != 0) {
+                free(*out_name);
+                *out_name = NULL;
+                return -1;
+            }
+        }
+    }
+    if (p->tok.kind == TOK_IDENT) {
+        *out_name = xstrdup_n(p->tok.start, p->tok.len);
+        if (*out_name == NULL) {
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            free(*out_name);
+            *out_name = NULL;
+            return -1;
+        }
+    }
+    while (p->tok.kind == TOK_LBRACK) {
+        ty = ptr_of_type(ty);
+        if (ty == CC_TYPE_VOID) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+            free(*out_name);
+            *out_name = NULL;
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            free(*out_name);
+            *out_name = NULL;
+            return -1;
+        }
+        while (p->tok.kind != TOK_RBRACK) {
+            if (p->tok.kind == TOK_EOF) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "unterminated parameter array declarator");
+                free(*out_name);
+                *out_name = NULL;
+                return -1;
+            }
+            if (next_tok(p) != 0) {
+                free(*out_name);
+                *out_name = NULL;
+                return -1;
+            }
+        }
+        if (expect(p, TOK_RBRACK, "expected ']' after parameter array declarator") != 0) {
+            free(*out_name);
+            *out_name = NULL;
+            return -1;
         }
     }
     *out_type = ty;
@@ -1750,17 +1980,104 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     if (parse_declspec(p, &base_type, 1, "expected declaration type", &is_typedef) != 0) {
         return -1;
     }
+    if (p->tok.kind == TOK_SEMI) {
+        if (is_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier after declaration type");
+            return -1;
+        }
+        if (need_semi) {
+            return expect(p, TOK_SEMI, "expected ';' after declaration");
+        }
+        return 0;
+    }
 
     for (;;) {
         cc_stmt_t s;
+        int complex_fn_ptr_decl = 0;
         memset(&s, 0, sizeof(s));
         s.kind = CC_STMT_DECL;
         s.type = base_type;
 
-        if (parse_named_declarator(p, base_type, &s.type, &s.decl_name, "expected identifier after declaration type") !=
-            0) {
+        if (p->tok.kind == TOK_LPAREN && peek_kind(p) == TOK_STAR) {
+            if (next_tok(p) != 0) {
+                free_stmt(&s);
+                return -1;
+            }
+            while (p->tok.kind == TOK_STAR) {
+                s.type = ptr_of_type(s.type);
+                if (s.type == CC_TYPE_VOID) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                    free_stmt(&s);
+                    return -1;
+                }
+                if (next_tok(p) != 0) {
+                    free_stmt(&s);
+                    return -1;
+                }
+                while (is_decl_qual_tok(p->tok.kind)) {
+                    if (next_tok(p) != 0) {
+                        free_stmt(&s);
+                        return -1;
+                    }
+                }
+            }
+            if (p->tok.kind != TOK_IDENT) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier after declaration type");
+                free_stmt(&s);
+                return -1;
+            }
+            s.decl_name = xstrdup_n(p->tok.start, p->tok.len);
+            if (s.decl_name == NULL) {
+                free_stmt(&s);
+                return -1;
+            }
+            if (next_tok(p) != 0) {
+                free_stmt(&s);
+                return -1;
+            }
+            if (expect(p, TOK_RPAREN, "expected ')' in declarator") != 0) {
+                free_stmt(&s);
+                return -1;
+            }
+            while (p->tok.kind == TOK_LPAREN) {
+                if (skip_balanced_parens(p) != 0) {
+                    free_stmt(&s);
+                    return -1;
+                }
+            }
+            complex_fn_ptr_decl = 1;
+        } else if (parse_named_declarator(p, base_type, &s.type, &s.decl_name,
+                                           "expected identifier after declaration type") != 0) {
             free_stmt(&s);
             return -1;
+        }
+        if (skip_decl_gnu_suffix(p) != 0) {
+            free_stmt(&s);
+            return -1;
+        }
+        if (is_typedef && !complex_fn_ptr_decl && p->tok.kind == TOK_LPAREN) {
+            int depth = 1;
+            s.type = CC_TYPE_VOID;
+            if (next_tok(p) != 0) {
+                free_stmt(&s);
+                return -1;
+            }
+            while (depth > 0) {
+                if (p->tok.kind == TOK_EOF) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "unterminated typedef parameter list");
+                    free_stmt(&s);
+                    return -1;
+                }
+                if (p->tok.kind == TOK_LPAREN) {
+                    depth++;
+                } else if (p->tok.kind == TOK_RPAREN) {
+                    depth--;
+                }
+                if (next_tok(p) != 0) {
+                    free_stmt(&s);
+                    return -1;
+                }
+            }
         }
         if (p->tok.kind == TOK_ASSIGN) {
             if (next_tok(p) != 0) {
@@ -1793,13 +2110,18 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             free_stmt(&s);
         } else {
             if (arr == NULL || count == NULL) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "only typedef declarations are allowed at file scope");
+                if (s.expr != NULL) {
+                    set_diag(p->diag, p->tok.line, p->tok.col,
+                             "file-scope initialized object declarations are unsupported");
+                    free_stmt(&s);
+                    return -1;
+                }
                 free_stmt(&s);
-                return -1;
-            }
-            if (push_stmt_arr(arr, count, s) != 0) {
-                free_stmt(&s);
-                return -1;
+            } else {
+                if (push_stmt_arr(arr, count, s) != 0) {
+                    free_stmt(&s);
+                    return -1;
+                }
             }
         }
 
@@ -2187,7 +2509,9 @@ static int parse_params(parser_t *p, cc_function_t *f) {
 
     while (p->tok.kind != TOK_RPAREN) {
         cc_type_t ptype;
+        cc_type_t dty;
         char *pname = NULL;
+        char anon_buf[32];
 
         if (p->tok.kind == TOK_ELLIPSIS) {
             f->is_variadic = 1;
@@ -2200,19 +2524,21 @@ static int parse_params(parser_t *p, cc_function_t *f) {
         if (parse_declspec(p, &ptype, 1, "expected parameter type", NULL) != 0) {
             return -1;
         }
-        if (parse_named_declarator(p, ptype, &ptype, &pname, "expected parameter name") != 0) {
+        if (parse_param_declarator(p, ptype, &dty, &pname) != 0) {
             return -1;
         }
-        if (ptype == CC_TYPE_VOID) {
+        if (pname == NULL) {
+            snprintf(anon_buf, sizeof(anon_buf), "__anon_param_%zu", f->param_count);
+            if (push_param(f, dty, anon_buf, strlen(anon_buf)) != 0) {
+                return -1;
+            }
+        } else {
+            if (push_param(f, dty, pname, strlen(pname)) != 0) {
+                free(pname);
+                return -1;
+            }
             free(pname);
-            set_diag(p->diag, p->tok.line, p->tok.col, "void is not a valid named parameter type");
-            return -1;
         }
-        if (push_param(f, ptype, pname, strlen(pname)) != 0) {
-            free(pname);
-            return -1;
-        }
-        free(pname);
 
         if (p->tok.kind != TOK_COMMA) {
             break;
@@ -2265,6 +2591,27 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         f->has_body = 0;
         return 0;
     }
+    if (p->tok.kind != TOK_LBRACE) {
+        while (p->tok.kind != TOK_SEMI && p->tok.kind != TOK_EOF) {
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+        }
+        if (expect(p, TOK_SEMI, "expected ';' after function declaration") != 0) {
+            return -1;
+        }
+        f->has_body = 0;
+        return 0;
+    }
+    {
+        size_t i;
+        for (i = 0; i < f->param_count; ++i) {
+            if (f->params[i].type == CC_TYPE_VOID) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "void is not a valid named parameter type");
+                return -1;
+            }
+        }
+    }
     if (expect(p, TOK_LBRACE, "expected '{' before function body") != 0) {
         return -1;
     }
@@ -2299,6 +2646,28 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     typedef_pop_to_depth(p, saved_depth);
     p->scope_depth = saved_depth;
     return 0;
+}
+
+static int probe_is_function_head(parser_t *p) {
+    parser_t q = *p;
+    cc_type_t ty;
+    int is_typedef = 0;
+    char *name = NULL;
+    int rc = 0;
+
+    q.diag = NULL;
+    if (parse_declspec(&q, &ty, 1, "", &is_typedef) != 0) {
+        return 0;
+    }
+    if (is_typedef) {
+        return 0;
+    }
+    if (parse_named_declarator(&q, ty, &ty, &name, "") != 0) {
+        return 0;
+    }
+    rc = (q.tok.kind == TOK_LPAREN);
+    free(name);
+    return rc;
 }
 
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag) {
@@ -2360,7 +2729,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     }
 
     while (p.tok.kind != TOK_EOF) {
-        if (p.tok.kind == TOK_KW_TYPEDEF) {
+        if (is_declspec_start(&p) && !probe_is_function_head(&p)) {
             if (parse_decl_stmt_list(&p, NULL, NULL, 1) != 0) {
                 parser_free_typedefs(&p);
                 free(buf);

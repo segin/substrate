@@ -14,12 +14,14 @@ typedef enum {
     TOK_EOF = 0,
     TOK_IDENT,
     TOK_NUM,
+    TOK_STR,
     TOK_KW_AUTO,
     TOK_KW_BOOL,
     TOK_KW_CHAR,
     TOK_KW_CONST,
     TOK_KW_INT,
     TOK_KW_EXTERN,
+    TOK_KW_EXTENSION,
     TOK_KW_FLOAT,
     TOK_KW_INLINE,
     TOK_KW_LONG,
@@ -28,6 +30,9 @@ typedef enum {
     TOK_KW_SHORT,
     TOK_KW_SIGNED,
     TOK_KW_STATIC,
+    TOK_KW_STRUCT,
+    TOK_KW_UNION,
+    TOK_KW_ENUM,
     TOK_KW_TYPEDEF,
     TOK_KW_UNSIGNED,
     TOK_KW_DOUBLE,
@@ -233,8 +238,15 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         } else if (out->len == 4 && out->start[0] == 'c' && out->start[1] == 'h' &&
                    out->start[2] == 'a' && out->start[3] == 'r') {
             out->kind = TOK_KW_CHAR;
-        } else if (out->len == 5 && out->start[0] == 'c' && out->start[1] == 'o' &&
-                   out->start[2] == 'n' && out->start[3] == 's' && out->start[4] == 't') {
+        } else if ((out->len == 5 && out->start[0] == 'c' && out->start[1] == 'o' &&
+                    out->start[2] == 'n' && out->start[3] == 's' && out->start[4] == 't') ||
+                   (out->len == 7 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'c' && out->start[3] == 'o' && out->start[4] == 'n' &&
+                    out->start[5] == 's' && out->start[6] == 't') ||
+                   (out->len == 9 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'c' && out->start[3] == 'o' && out->start[4] == 'n' &&
+                    out->start[5] == 's' && out->start[6] == 't' && out->start[7] == '_' &&
+                    out->start[8] == '_')) {
             out->kind = TOK_KW_CONST;
         } else if (out->len == 3 && out->start[0] == 'i' && out->start[1] == 'n' && out->start[2] == 't') {
             out->kind = TOK_KW_INT;
@@ -242,12 +254,25 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                    out->start[2] == 't' && out->start[3] == 'e' && out->start[4] == 'r' &&
                    out->start[5] == 'n') {
             out->kind = TOK_KW_EXTERN;
+        } else if (out->len == 13 && out->start[0] == '_' && out->start[1] == '_' &&
+                   out->start[2] == 'e' && out->start[3] == 'x' && out->start[4] == 't' &&
+                   out->start[5] == 'e' && out->start[6] == 'n' && out->start[7] == 's' &&
+                   out->start[8] == 'i' && out->start[9] == 'o' && out->start[10] == 'n' &&
+                   out->start[11] == '_' && out->start[12] == '_') {
+            out->kind = TOK_KW_EXTENSION;
         } else if (out->len == 5 && out->start[0] == 'f' && out->start[1] == 'l' &&
                    out->start[2] == 'o' && out->start[3] == 'a' && out->start[4] == 't') {
             out->kind = TOK_KW_FLOAT;
-        } else if (out->len == 6 && out->start[0] == 'i' && out->start[1] == 'n' &&
-                   out->start[2] == 'l' && out->start[3] == 'i' && out->start[4] == 'n' &&
-                   out->start[5] == 'e') {
+        } else if ((out->len == 6 && out->start[0] == 'i' && out->start[1] == 'n' &&
+                    out->start[2] == 'l' && out->start[3] == 'i' && out->start[4] == 'n' &&
+                    out->start[5] == 'e') ||
+                   (out->len == 8 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'i' && out->start[3] == 'n' && out->start[4] == 'l' &&
+                    out->start[5] == 'i' && out->start[6] == 'n' && out->start[7] == 'e') ||
+                   (out->len == 10 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'i' && out->start[3] == 'n' && out->start[4] == 'l' &&
+                    out->start[5] == 'i' && out->start[6] == 'n' && out->start[7] == 'e' &&
+                    out->start[8] == '_' && out->start[9] == '_')) {
             out->kind = TOK_KW_INLINE;
         } else if (out->len == 4 && out->start[0] == 'l' && out->start[1] == 'o' &&
                    out->start[2] == 'n' && out->start[3] == 'g') {
@@ -256,9 +281,18 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                    out->start[2] == 'g' && out->start[3] == 'i' && out->start[4] == 's' &&
                    out->start[5] == 't' && out->start[6] == 'e' && out->start[7] == 'r') {
             out->kind = TOK_KW_REGISTER;
-        } else if (out->len == 8 && out->start[0] == 'r' && out->start[1] == 'e' &&
-                   out->start[2] == 's' && out->start[3] == 't' && out->start[4] == 'r' &&
-                   out->start[5] == 'i' && out->start[6] == 'c' && out->start[7] == 't') {
+        } else if ((out->len == 8 && out->start[0] == 'r' && out->start[1] == 'e' &&
+                    out->start[2] == 's' && out->start[3] == 't' && out->start[4] == 'r' &&
+                    out->start[5] == 'i' && out->start[6] == 'c' && out->start[7] == 't') ||
+                   (out->len == 10 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'r' && out->start[3] == 'e' && out->start[4] == 's' &&
+                    out->start[5] == 't' && out->start[6] == 'r' && out->start[7] == 'i' &&
+                    out->start[8] == 'c' && out->start[9] == 't') ||
+                   (out->len == 12 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'r' && out->start[3] == 'e' && out->start[4] == 's' &&
+                    out->start[5] == 't' && out->start[6] == 'r' && out->start[7] == 'i' &&
+                    out->start[8] == 'c' && out->start[9] == 't' && out->start[10] == '_' &&
+                    out->start[11] == '_')) {
             out->kind = TOK_KW_RESTRICT;
         } else if (out->len == 5 && out->start[0] == 's' && out->start[1] == 'h' &&
                    out->start[2] == 'o' && out->start[3] == 'r' && out->start[4] == 't') {
@@ -271,6 +305,16 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                    out->start[2] == 'a' && out->start[3] == 't' && out->start[4] == 'i' &&
                    out->start[5] == 'c') {
             out->kind = TOK_KW_STATIC;
+        } else if (out->len == 6 && out->start[0] == 's' && out->start[1] == 't' &&
+                   out->start[2] == 'r' && out->start[3] == 'u' && out->start[4] == 'c' &&
+                   out->start[5] == 't') {
+            out->kind = TOK_KW_STRUCT;
+        } else if (out->len == 5 && out->start[0] == 'u' && out->start[1] == 'n' &&
+                   out->start[2] == 'i' && out->start[3] == 'o' && out->start[4] == 'n') {
+            out->kind = TOK_KW_UNION;
+        } else if (out->len == 4 && out->start[0] == 'e' && out->start[1] == 'n' &&
+                   out->start[2] == 'u' && out->start[3] == 'm') {
+            out->kind = TOK_KW_ENUM;
         } else if (out->len == 7 && out->start[0] == 't' && out->start[1] == 'y' &&
                    out->start[2] == 'p' && out->start[3] == 'e' && out->start[4] == 'd' &&
                    out->start[5] == 'e' && out->start[6] == 'f') {
@@ -283,9 +327,18 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                    out->start[2] == 'u' && out->start[3] == 'b' && out->start[4] == 'l' &&
                    out->start[5] == 'e') {
             out->kind = TOK_KW_DOUBLE;
-        } else if (out->len == 8 && out->start[0] == 'v' && out->start[1] == 'o' &&
-                   out->start[2] == 'l' && out->start[3] == 'a' && out->start[4] == 't' &&
-                   out->start[5] == 'i' && out->start[6] == 'l' && out->start[7] == 'e') {
+        } else if ((out->len == 8 && out->start[0] == 'v' && out->start[1] == 'o' &&
+                    out->start[2] == 'l' && out->start[3] == 'a' && out->start[4] == 't' &&
+                    out->start[5] == 'i' && out->start[6] == 'l' && out->start[7] == 'e') ||
+                   (out->len == 10 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'v' && out->start[3] == 'o' && out->start[4] == 'l' &&
+                    out->start[5] == 'a' && out->start[6] == 't' && out->start[7] == 'i' &&
+                    out->start[8] == 'l' && out->start[9] == 'e') ||
+                   (out->len == 12 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'v' && out->start[3] == 'o' && out->start[4] == 'l' &&
+                    out->start[5] == 'a' && out->start[6] == 't' && out->start[7] == 'i' &&
+                    out->start[8] == 'l' && out->start[9] == 'e' && out->start[10] == '_' &&
+                    out->start[11] == '_')) {
             out->kind = TOK_KW_VOLATILE;
         } else if (out->len == 4 && out->start[0] == 'v' && out->start[1] == 'o' &&
                    out->start[2] == 'i' && out->start[3] == 'd') {
@@ -393,6 +446,30 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         out->is_float = 0;
         out->int_is_unsigned = 0;
         out->int_is_longlong = 0;
+        out->line = line;
+        out->col = col;
+        return 0;
+    }
+
+    if (c == '"') {
+        start = lx->pos;
+        lx_adv(lx); /* opening quote */
+        while ((c = lx_peek(lx)) >= 0) {
+            if (c == '\\') {
+                lx_adv(lx);
+                if (lx_peek(lx) >= 0) {
+                    lx_adv(lx);
+                }
+                continue;
+            }
+            lx_adv(lx);
+            if (c == '"') {
+                break;
+            }
+        }
+        out->kind = TOK_STR;
+        out->start = lx->src + start;
+        out->len = lx->pos - start;
         out->line = line;
         out->col = col;
         return 0;

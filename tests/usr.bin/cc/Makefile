@@ -64,6 +64,12 @@ test:
 	/tmp/cc_native_c99_types
 	$(TOP)/usr.bin/cc/cc native_c99_typedef.c -o /tmp/cc_native_c99_typedef
 	/tmp/cc_native_c99_typedef
+	$(TOP)/usr.bin/cc/cc native_c99_typedef_attr.c -o /tmp/cc_native_c99_typedef_attr
+	/tmp/cc_native_c99_typedef_attr
+	$(TOP)/usr.bin/cc/cc native_c99_typedef_fnptr.c -o /tmp/cc_native_c99_typedef_fnptr
+	/tmp/cc_native_c99_typedef_fnptr
+	$(TOP)/usr.bin/cc/cc native_c99_gnu_declspec_aliases.c -o /tmp/cc_native_c99_gnu_declspec_aliases
+	/tmp/cc_native_c99_gnu_declspec_aliases
 	$(TOP)/usr.bin/cc/cc native_c99_multi_decl.c -o /tmp/cc_native_c99_multi_decl
 	/tmp/cc_native_c99_multi_decl
 	$(TOP)/usr.bin/cc/cc native_c99_char_hex.c -o /tmp/cc_native_c99_char_hex
