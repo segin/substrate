@@ -1729,7 +1729,9 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
                 if (s->init_stmt == NULL) {
                     return -1;
                 }
-                if (parse_decl_stmt(p, s->init_stmt, 1) != 0) {
+                memset(s->init_stmt, 0, sizeof(*s->init_stmt));
+                s->init_stmt->kind = CC_STMT_BLOCK;
+                if (parse_decl_stmt_list(p, &s->init_stmt->block_stmts, &s->init_stmt->block_count, 1) != 0) {
                     return -1;
                 }
             } else {

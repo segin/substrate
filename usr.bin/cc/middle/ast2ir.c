@@ -1715,9 +1715,19 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         int for_depth = depth;
 
         if (s->init_stmt != NULL) {
-            if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, break_label, continue_label, s->init_stmt, saw_ret,
-                           diag) != 0) {
-                return -1;
+            if (s->init_stmt->kind == CC_STMT_BLOCK) {
+                size_t i3;
+                for (i3 = 0; i3 < s->init_stmt->block_count; ++i3) {
+                    if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, break_label, continue_label,
+                                   &s->init_stmt->block_stmts[i3], saw_ret, diag) != 0) {
+                        return -1;
+                    }
+                }
+            } else {
+                if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, break_label, continue_label, s->init_stmt,
+                               saw_ret, diag) != 0) {
+                    return -1;
+                }
             }
             for_depth = depth + 1;
         } else if (s->init_expr != NULL && lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->init_expr, diag) < 0) {

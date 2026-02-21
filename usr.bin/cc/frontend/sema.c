@@ -1236,9 +1236,18 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             int for_depth = depth;
 
             if (s->init_stmt != NULL) {
-                if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, loop_depth, switch_depth,
-                               saw_return, diag) != 0) {
-                    return -1;
+                if (s->init_stmt->kind == CC_STMT_BLOCK) {
+                    for (i = 0; i < s->init_stmt->block_count; ++i) {
+                        if (check_stmt(tu, &s->init_stmt->block_stmts[i], vars, var_count, depth + 1, fn_ret_type,
+                                       loop_depth, switch_depth, saw_return, diag) != 0) {
+                            return -1;
+                        }
+                    }
+                } else {
+                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, loop_depth,
+                                   switch_depth, saw_return, diag) != 0) {
+                        return -1;
+                    }
                 }
                 for_depth = depth + 1;
             } else if (s->init_expr != NULL && check_expr(tu, s->init_expr, *vars, *var_count, depth, diag) != 0) {
