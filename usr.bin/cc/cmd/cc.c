@@ -808,7 +808,7 @@ int cc_main(int argc, char **argv) {
                     }
                     fprintf(stderr,
                             "cc: note: current native pipeline supports a strict subset "
-                            "(int/bool/char/unsigned-char/short/unsigned-short/unsigned-int/long-long/unsigned-long-long/float/double scalar + one-level pointer functions/prototypes, declarations (including C99 for-init declarations), assignments/calls, unary address-of/dereference pointer ops, pointer arithmetic (`ptr +/- int`, `int + ptr`, and compatible `ptr - ptr` for non-void pointers), compound assignments, ++/--, if/else, while/do/for, switch/case/default, goto/labels, break/continue, C95 digraph/trigraph lexical forms, arithmetic/logical/bitwise/shift/comma operators (including &&/|| short-circuit), ternary `?:`, scalar casts, pointer/integer casts, `sizeof` on supported scalar types, numeric comparisons, and returns)\n");
+                            "(int/bool/char/unsigned-char/short/unsigned-short/unsigned-int/long-long/unsigned-long-long/float/double scalar + one/two-level pointer functions/prototypes, declarations (including C99 for-init declarations), assignments/calls, unary address-of/dereference pointer ops, pointer arithmetic (`ptr +/- int`, `int + ptr`, and compatible `ptr - ptr` for non-void pointers), compound assignments, ++/--, if/else, while/do/for, switch/case/default, goto/labels, break/continue, C95 digraph/trigraph lexical forms, arithmetic/logical/bitwise/shift/comma operators (including &&/|| short-circuit), ternary `?:`, scalar casts, pointer/integer casts, `sizeof` on supported scalar types, numeric comparisons, and returns)\n");
                     goto out;
                 }
             }
