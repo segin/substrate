@@ -21,6 +21,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`, `long long`, `float`, qualifiers/storage-class keywords)
   - C99 `for`-init declarations with loop-local scope
   - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and `++/--`
+  - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), and `sizeof` for supported scalar types
   - control-flow extensions: C labels + `goto`
 - existing SSA utilities remain available:
   - `ir-verifier`
@@ -32,7 +33,7 @@ Native C support is intentionally limited for now:
 - statement subset: local declarations, assignments, expression statements, `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
-- expressions: numeric literals, identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), comparisons (`== != < <= > >=`), logical operators (`! && ||`), comma operator, parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
+- expressions: numeric literals, identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
 - function declarations/definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
 - i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling

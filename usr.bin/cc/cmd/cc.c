@@ -808,7 +808,7 @@ int cc_main(int argc, char **argv) {
                     }
                     fprintf(stderr,
                             "cc: note: current native pipeline supports a strict subset "
-                            "(int/bool/char/long long/float/double scalar functions, declarations (including C99 for-init declarations), assignments/calls, compound assignments, ++/--, if/else, while/do/for, switch/case/default, goto/labels, break/continue, C95 digraph/trigraph lexical forms, arithmetic/logical/bitwise/shift/comma operators (including &&/|| short-circuit), integer comparisons, and returns)\n");
+                            "(int/bool/char/long long/float/double scalar functions, declarations (including C99 for-init declarations), assignments/calls, compound assignments, ++/--, if/else, while/do/for, switch/case/default, goto/labels, break/continue, C95 digraph/trigraph lexical forms, arithmetic/logical/bitwise/shift/comma operators (including &&/|| short-circuit), ternary `?:`, scalar casts, `sizeof` on supported scalar types, numeric comparisons, and returns)\n");
                     goto out;
                 }
             }

@@ -46,12 +46,14 @@ typedef enum {
     TOK_KW_BREAK,
     TOK_KW_CONTINUE,
     TOK_KW_GOTO,
+    TOK_KW_SIZEOF,
     TOK_ELLIPSIS,
     TOK_LPAREN,
     TOK_RPAREN,
     TOK_LBRACE,
     TOK_RBRACE,
     TOK_COMMA,
+    TOK_QUESTION,
     TOK_COLON,
     TOK_SEMI,
     TOK_ASSIGN,
@@ -310,6 +312,7 @@ static void free_expr(cc_expr_t *e) {
     free(e->ident);
     free_expr(e->lhs);
     free_expr(e->rhs);
+    free_expr(e->third);
     for (i = 0; i < e->arg_count; ++i) {
         free_expr(e->args[i]);
     }
@@ -624,6 +627,64 @@ static cc_expr_t *parse_postfix(parser_t *p) {
 }
 
 static cc_expr_t *parse_unary(parser_t *p) {
+    if (p->tok.kind == TOK_KW_SIZEOF) {
+        cc_expr_t *e;
+        if (next_tok(p) != 0) {
+            return NULL;
+        }
+        e = new_expr(CC_EXPR_SIZEOF);
+        if (e == NULL) {
+            return NULL;
+        }
+        if (p->tok.kind == TOK_LPAREN && is_declspec_tok(peek_kind(p))) {
+            if (next_tok(p) != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            if (parse_declspec(p, &e->aux_type, 1, "expected type name in sizeof") != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            if (expect(p, TOK_RPAREN, "expected ')' after sizeof type") != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            return e;
+        }
+        e->lhs = parse_unary(p);
+        if (e->lhs == NULL) {
+            free_expr(e);
+            return NULL;
+        }
+        e->aux_type = CC_TYPE_VOID;
+        return e;
+    }
+
+    if (p->tok.kind == TOK_LPAREN && is_declspec_tok(peek_kind(p))) {
+        cc_expr_t *e = new_expr(CC_EXPR_CAST);
+        if (e == NULL) {
+            return NULL;
+        }
+        if (next_tok(p) != 0) {
+            free_expr(e);
+            return NULL;
+        }
+        if (parse_declspec(p, &e->aux_type, 1, "expected cast type") != 0) {
+            free_expr(e);
+            return NULL;
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
+            free_expr(e);
+            return NULL;
+        }
+        e->lhs = parse_unary(p);
+        if (e->lhs == NULL) {
+            free_expr(e);
+            return NULL;
+        }
+        return e;
+    }
+
     if (p->tok.kind == TOK_MINUS) {
         cc_expr_t *z;
         cc_expr_t *rhs;
@@ -903,7 +964,7 @@ static cc_expr_t *parse_land(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        rhs = parse_eq(p);
+        rhs = parse_bor(p);
         if (rhs == NULL) {
             free_expr(lhs);
             return NULL;
@@ -937,8 +998,44 @@ static cc_expr_t *parse_lor(parser_t *p) {
     return lhs;
 }
 
+static cc_expr_t *parse_cond(parser_t *p) {
+    cc_expr_t *cond = parse_lor(p);
+    if (cond == NULL) {
+        return NULL;
+    }
+    if (p->tok.kind == TOK_QUESTION) {
+        cc_expr_t *e;
+        if (next_tok(p) != 0) {
+            free_expr(cond);
+            return NULL;
+        }
+        e = new_expr(CC_EXPR_TERNARY);
+        if (e == NULL) {
+            free_expr(cond);
+            return NULL;
+        }
+        e->lhs = cond;
+        e->rhs = parse_expr(p);
+        if (e->rhs == NULL) {
+            free_expr(e);
+            return NULL;
+        }
+        if (expect(p, TOK_COLON, "expected ':' in conditional expression") != 0) {
+            free_expr(e);
+            return NULL;
+        }
+        e->third = parse_cond(p);
+        if (e->third == NULL) {
+            free_expr(e);
+            return NULL;
+        }
+        return e;
+    }
+    return cond;
+}
+
 static cc_expr_t *parse_assign(parser_t *p) {
-    cc_expr_t *lhs = parse_lor(p);
+    cc_expr_t *lhs = parse_cond(p);
 
     if (lhs != NULL && (p->tok.kind == TOK_ASSIGN || p->tok.kind == TOK_PLUS_EQ || p->tok.kind == TOK_MINUS_EQ ||
                         p->tok.kind == TOK_STAR_EQ || p->tok.kind == TOK_SLASH_EQ || p->tok.kind == TOK_PERCENT_EQ ||

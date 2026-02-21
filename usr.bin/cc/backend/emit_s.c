@@ -48,7 +48,7 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     snprintf(d->message, sizeof(d->message), "%s", msg);
 }
 
-static const char *setcc_mnemonic(cc_cmp_kind_t k) {
+static const char *setcc_int_mnemonic(cc_cmp_kind_t k) {
     switch (k) {
     case CC_CMP_EQ:
         return "sete";
@@ -64,6 +64,42 @@ static const char *setcc_mnemonic(cc_cmp_kind_t k) {
         return "setge";
     }
     return "sete";
+}
+
+static void emit_float_setcc(FILE *fp, cc_cmp_kind_t k, int is_64bit) {
+    switch (k) {
+    case CC_CMP_EQ:
+        fprintf(fp, "\tsetnp %%dl\n");
+        fprintf(fp, "\tsete %%al\n");
+        fprintf(fp, "\tandb %%dl, %%al\n");
+        break;
+    case CC_CMP_NE:
+        fprintf(fp, "\tsetne %%al\n");
+        fprintf(fp, "\tsetp %%dl\n");
+        fprintf(fp, "\torb %%dl, %%al\n");
+        break;
+    case CC_CMP_LT:
+        fprintf(fp, "\tsetnp %%dl\n");
+        fprintf(fp, "\tsetb %%al\n");
+        fprintf(fp, "\tandb %%dl, %%al\n");
+        break;
+    case CC_CMP_LE:
+        fprintf(fp, "\tsetnp %%dl\n");
+        fprintf(fp, "\tsetbe %%al\n");
+        fprintf(fp, "\tandb %%dl, %%al\n");
+        break;
+    case CC_CMP_GT:
+        fprintf(fp, "\tseta %%al\n");
+        break;
+    case CC_CMP_GE:
+        fprintf(fp, "\tsetae %%al\n");
+        break;
+    }
+    if (is_64bit) {
+        fprintf(fp, "\tmovzbq %%al, %%rax\n");
+    } else {
+        fprintf(fp, "\tmovzbl %%al, %%eax\n");
+    }
 }
 
 static void emit_local_label(FILE *fp, const char *fn, int label) {
@@ -458,11 +494,17 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_CMP: {
-                const char *m = setcc_mnemonic(in->cmp_kind);
-                fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
-                fprintf(fp, "\tcmpq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
-                fprintf(fp, "\t%s %%al\n", m);
-                fprintf(fp, "\tmovzbq %%al, %%rax\n");
+                if (f->value_types[in->lhs] == CC_VAL_F64 || f->value_types[in->rhs] == CC_VAL_F64) {
+                    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tucomisd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
+                    emit_float_setcc(fp, in->cmp_kind, 1);
+                } else {
+                    const char *m = setcc_int_mnemonic(in->cmp_kind);
+                    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tcmpq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
+                    fprintf(fp, "\t%s %%al\n", m);
+                    fprintf(fp, "\tmovzbq %%al, %%rax\n");
+                }
                 fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 break;
             }
@@ -749,11 +791,17 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_CMP: {
-                const char *m = setcc_mnemonic(in->cmp_kind);
-                fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
-                fprintf(fp, "\tcmpl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
-                fprintf(fp, "\t%s %%al\n", m);
-                fprintf(fp, "\tmovzbl %%al, %%eax\n");
+                if (f->value_types[in->lhs] == CC_VAL_F64 || f->value_types[in->rhs] == CC_VAL_F64) {
+                    fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tucomisd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
+                    emit_float_setcc(fp, in->cmp_kind, 0);
+                } else {
+                    const char *m = setcc_int_mnemonic(in->cmp_kind);
+                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                    fprintf(fp, "\tcmpl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
+                    fprintf(fp, "\t%s %%al\n", m);
+                    fprintf(fp, "\tmovzbl %%al, %%eax\n");
+                }
                 fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 break;
             }

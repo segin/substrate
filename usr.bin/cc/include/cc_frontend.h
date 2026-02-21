@@ -47,7 +47,10 @@ typedef enum {
     CC_EXPR_IDENT,
     CC_EXPR_BIN,
     CC_EXPR_CALL,
-    CC_EXPR_ASSIGN
+    CC_EXPR_ASSIGN,
+    CC_EXPR_CAST,
+    CC_EXPR_SIZEOF,
+    CC_EXPR_TERNARY
 } cc_expr_kind_t;
 
 typedef struct cc_expr cc_expr_t;
@@ -61,6 +64,8 @@ struct cc_expr {
     cc_binop_t op;
     cc_expr_t *lhs;
     cc_expr_t *rhs;
+    cc_expr_t *third;
+    cc_type_t aux_type;
     cc_expr_t **args;
     size_t arg_count;
 };

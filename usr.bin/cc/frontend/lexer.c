@@ -44,12 +44,14 @@ typedef enum {
     TOK_KW_BREAK,
     TOK_KW_CONTINUE,
     TOK_KW_GOTO,
+    TOK_KW_SIZEOF,
     TOK_ELLIPSIS,
     TOK_LPAREN,
     TOK_RPAREN,
     TOK_LBRACE,
     TOK_RBRACE,
     TOK_COMMA,
+    TOK_QUESTION,
     TOK_COLON,
     TOK_SEMI,
     TOK_ASSIGN,
@@ -310,6 +312,10 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         } else if (out->len == 4 && out->start[0] == 'g' && out->start[1] == 'o' &&
                    out->start[2] == 't' && out->start[3] == 'o') {
             out->kind = TOK_KW_GOTO;
+        } else if (out->len == 6 && out->start[0] == 's' && out->start[1] == 'i' &&
+                   out->start[2] == 'z' && out->start[3] == 'e' && out->start[4] == 'o' &&
+                   out->start[5] == 'f') {
+            out->kind = TOK_KW_SIZEOF;
         } else {
             out->kind = TOK_IDENT;
         }
@@ -613,6 +619,9 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     case ',':
         out->kind = TOK_COMMA;
+        return 0;
+    case '?':
+        out->kind = TOK_QUESTION;
         return 0;
     case ':':
         out->kind = TOK_COLON;

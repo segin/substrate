@@ -101,9 +101,14 @@
 - Additional C99 control/expression expansion:
   - added `goto` and labeled statements with function-scope label validation.
   - added bitwise/shift/comma operators and compound assignments (`&= |= ^= <<= >>=`) across parser/sema/SSA/backend.
+  - added ternary conditional (`?:`), scalar cast expressions, and `sizeof` for supported scalar types.
+  - comparison operators now accept floating operands; lowering/backend preserve C truthiness for floating conditions (`!= 0.0`, including `-0.0`) and ordered floating comparisons.
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
   - i386 assembly checks for the new expression forms.
   - positive compile/run tests for `goto` flow, comma operator sequencing, and bitwise/shift codegen.
   - negative tests for unknown goto target, duplicate labels, and bitwise-on-float type errors.
+  - positive compile/run tests for ternary/cast/sizeof behavior and i386 assembly checks for cast lowering.
+  - positive compile/run tests for floating comparison and floating-condition truthiness, plus i386 assembly checks for SSE compare lowering.
+  - negative test for unsupported `sizeof(void)` in current subset.

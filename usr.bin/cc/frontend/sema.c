@@ -239,6 +239,22 @@ static int is_bitwise_op(cc_binop_t op) {
     return op == CC_BIN_BAND || op == CC_BIN_BXOR || op == CC_BIN_BOR;
 }
 
+static long type_size_bytes(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_BOOL:
+    case CC_TYPE_CHAR:
+        return 1;
+    case CC_TYPE_INT:
+    case CC_TYPE_FLOAT:
+        return 4;
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_DOUBLE:
+        return 8;
+    default:
+        return -1;
+    }
+}
+
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
     size_t i;
@@ -313,8 +329,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return 0;
         }
         if (is_cmp_op(e->op)) {
-            if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
-                set_diag(diag, "comparison operators currently require integer operands");
+            if (!is_numeric_type(e->lhs->value_type) || !is_numeric_type(e->rhs->value_type)) {
+                set_diag(diag, "comparison operators require numeric operands");
                 return -1;
             }
             e->value_type = CC_TYPE_INT;
@@ -399,6 +415,68 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         e->value_type = vars[idx].type;
         return 0;
     }
+
+    case CC_EXPR_CAST:
+        if (e->lhs == NULL) {
+            set_diag(diag, "malformed cast expression");
+            return -1;
+        }
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->aux_type == CC_TYPE_VOID) {
+            e->value_type = CC_TYPE_VOID;
+            return 0;
+        }
+        if (!is_numeric_type(e->lhs->value_type) || !is_numeric_type(e->aux_type)) {
+            set_diag(diag, "cast currently supports numeric scalar types only");
+            return -1;
+        }
+        e->value_type = e->aux_type;
+        return 0;
+
+    case CC_EXPR_SIZEOF:
+        if (e->lhs != NULL) {
+            if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (type_size_bytes(e->lhs->value_type) < 0) {
+                set_diag(diag, "sizeof unsupported for this operand type");
+                return -1;
+            }
+        } else {
+            if (type_size_bytes(e->aux_type) < 0) {
+                set_diag(diag, "sizeof unsupported for this type");
+                return -1;
+            }
+        }
+        e->value_type = CC_TYPE_INT;
+        return 0;
+
+    case CC_EXPR_TERNARY:
+        if (e->lhs == NULL || e->rhs == NULL || e->third == NULL) {
+            set_diag(diag, "malformed conditional expression");
+            return -1;
+        }
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->third, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->lhs->value_type == CC_TYPE_VOID) {
+            set_diag(diag, "conditional expression condition cannot be void");
+            return -1;
+        }
+        if (e->rhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
+            set_diag(diag, "conditional expression arms cannot be void");
+            return -1;
+        }
+        e->value_type = common_arith_type(e->rhs->value_type, e->third->value_type);
+        if (e->value_type == CC_TYPE_VOID) {
+            set_diag(diag, "incompatible types in conditional expression");
+            return -1;
+        }
+        return 0;
 
     default:
         set_diag(diag, "unsupported expression kind");
