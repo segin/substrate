@@ -118,7 +118,11 @@ static int fold_function(cc_ssa_function_t *f) {
                     } else if (in->op == CC_SSA_MUL) {
                         out = a * b;
                     } else if (in->op == CC_SSA_DIV) {
-                        out = a / b;
+                        if (in->is_unsigned) {
+                            out = (long)((unsigned long)a / (unsigned long)b);
+                        } else {
+                            out = a / b;
+                        }
                     } else if (in->op == CC_SSA_AND) {
                         out = a & b;
                     } else if (in->op == CC_SSA_OR) {
@@ -128,7 +132,11 @@ static int fold_function(cc_ssa_function_t *f) {
                     } else if (in->op == CC_SSA_SHL) {
                         out = a << (b & 63);
                     } else {
-                        out = a >> (b & 63);
+                        if (in->is_unsigned) {
+                            out = (long)((unsigned long)a >> (b & 63));
+                        } else {
+                            out = a >> (b & 63);
+                        }
                     }
                     in->op = CC_SSA_CONST;
                     in->lhs = -1;
@@ -179,13 +187,29 @@ static int fold_function(cc_ssa_function_t *f) {
                 } else if (in->cmp_kind == CC_CMP_NE) {
                     out = (a != b);
                 } else if (in->cmp_kind == CC_CMP_LT) {
-                    out = (a < b);
+                    if (in->is_unsigned) {
+                        out = ((unsigned long)a < (unsigned long)b);
+                    } else {
+                        out = (a < b);
+                    }
                 } else if (in->cmp_kind == CC_CMP_LE) {
-                    out = (a <= b);
+                    if (in->is_unsigned) {
+                        out = ((unsigned long)a <= (unsigned long)b);
+                    } else {
+                        out = (a <= b);
+                    }
                 } else if (in->cmp_kind == CC_CMP_GT) {
-                    out = (a > b);
+                    if (in->is_unsigned) {
+                        out = ((unsigned long)a > (unsigned long)b);
+                    } else {
+                        out = (a > b);
+                    }
                 } else {
-                    out = (a >= b);
+                    if (in->is_unsigned) {
+                        out = ((unsigned long)a >= (unsigned long)b);
+                    } else {
+                        out = (a >= b);
+                    }
                 }
                 in->op = CC_SSA_CONST;
                 in->lhs = -1;

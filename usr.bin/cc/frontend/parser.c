@@ -192,7 +192,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
     int seen_double = 0;
     int seen_long = 0;
     int seen_short = 0;
-    int seen_sign = 0;
+    int seen_signed = 0;
+    int seen_unsigned = 0;
 
     while (is_declspec_tok(p->tok.kind)) {
         seen = 1;
@@ -230,8 +231,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
             seen_type = 1;
             break;
         case TOK_KW_SIGNED:
+            seen_signed = 1;
+            seen_type = 1;
+            break;
         case TOK_KW_UNSIGNED:
-            seen_sign = 1;
+            seen_unsigned = 1;
             seen_type = 1;
             break;
         default:
@@ -260,6 +264,16 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
         return 0;
     }
 
+    if (seen_signed && seen_unsigned) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "conflicting signed/unsigned in declaration specifiers");
+        return -1;
+    }
+
+    if ((seen_signed || seen_unsigned) && (seen_float || seen_double || seen_bool || seen_void)) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "invalid signed/unsigned type combination");
+        return -1;
+    }
+
     if (seen_double) {
         *out_type = CC_TYPE_DOUBLE;
         return 0;
@@ -273,21 +287,21 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
         return 0;
     }
     if (seen_char) {
-        *out_type = CC_TYPE_CHAR;
+        *out_type = seen_unsigned ? CC_TYPE_UCHAR : CC_TYPE_CHAR;
         return 0;
     }
     if (seen_long > 0) {
-        *out_type = CC_TYPE_LONG_LONG;
+        *out_type = seen_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
         return 0;
     }
     if (seen_short || seen_int) {
-        *out_type = CC_TYPE_INT;
+        *out_type = seen_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
         return 0;
     }
 
     /* e.g. signed/unsigned without explicit base type => int */
-    if (seen_sign) {
-        *out_type = CC_TYPE_INT;
+    if (seen_signed || seen_unsigned) {
+        *out_type = seen_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
         return 0;
     }
 

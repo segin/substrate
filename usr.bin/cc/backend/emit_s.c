@@ -48,20 +48,20 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     snprintf(d->message, sizeof(d->message), "%s", msg);
 }
 
-static const char *setcc_int_mnemonic(cc_cmp_kind_t k) {
+static const char *setcc_int_mnemonic(cc_cmp_kind_t k, int is_unsigned) {
     switch (k) {
     case CC_CMP_EQ:
         return "sete";
     case CC_CMP_NE:
         return "setne";
     case CC_CMP_LT:
-        return "setl";
+        return is_unsigned ? "setb" : "setl";
     case CC_CMP_LE:
-        return "setle";
+        return is_unsigned ? "setbe" : "setle";
     case CC_CMP_GT:
-        return "setg";
+        return is_unsigned ? "seta" : "setg";
     case CC_CMP_GE:
-        return "setge";
+        return is_unsigned ? "setae" : "setge";
     }
     return "sete";
 }
@@ -472,8 +472,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     } else if (in->op == CC_SSA_MUL) {
                         fprintf(fp, "\timulq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_DIV) {
-                        fprintf(fp, "\tcqto\n");
-                        fprintf(fp, "\tidivq %d(%%rbp)\n", slot_off(&lay, in->rhs));
+                        if (in->is_unsigned) {
+                            fprintf(fp, "\txorq %%rdx, %%rdx\n");
+                            fprintf(fp, "\tdivq %d(%%rbp)\n", slot_off(&lay, in->rhs));
+                        } else {
+                            fprintf(fp, "\tcqto\n");
+                            fprintf(fp, "\tidivq %d(%%rbp)\n", slot_off(&lay, in->rhs));
+                        }
                     } else if (in->op == CC_SSA_AND) {
                         fprintf(fp, "\tandq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_OR) {
@@ -487,7 +492,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     } else {
                         fprintf(fp, "\tmovq %d(%%rbp), %%rcx\n", slot_off(&lay, in->rhs));
                         fprintf(fp, "\tandq $63, %%rcx\n");
-                        fprintf(fp, "\tsarq %%cl, %%rax\n");
+                        fprintf(fp, "\t%s %%cl, %%rax\n", in->is_unsigned ? "shrq" : "sarq");
                     }
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 }
@@ -499,7 +504,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tucomisd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
                     emit_float_setcc(fp, in->cmp_kind, 1);
                 } else {
-                    const char *m = setcc_int_mnemonic(in->cmp_kind);
+                    const char *m = setcc_int_mnemonic(in->cmp_kind, in->is_unsigned);
                     fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                     fprintf(fp, "\tcmpq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
                     fprintf(fp, "\t%s %%al\n", m);
@@ -769,8 +774,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     } else if (in->op == CC_SSA_MUL) {
                         fprintf(fp, "\timull %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_DIV) {
-                        fprintf(fp, "\tcltd\n");
-                        fprintf(fp, "\tidivl %d(%%ebp)\n", slot_off(&lay, in->rhs));
+                        if (in->is_unsigned) {
+                            fprintf(fp, "\txorl %%edx, %%edx\n");
+                            fprintf(fp, "\tdivl %d(%%ebp)\n", slot_off(&lay, in->rhs));
+                        } else {
+                            fprintf(fp, "\tcltd\n");
+                            fprintf(fp, "\tidivl %d(%%ebp)\n", slot_off(&lay, in->rhs));
+                        }
                     } else if (in->op == CC_SSA_AND) {
                         fprintf(fp, "\tandl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_OR) {
@@ -784,7 +794,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     } else {
                         fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", slot_off(&lay, in->rhs));
                         fprintf(fp, "\tandl $31, %%ecx\n");
-                        fprintf(fp, "\tsarl %%cl, %%eax\n");
+                        fprintf(fp, "\t%s %%cl, %%eax\n", in->is_unsigned ? "shrl" : "sarl");
                     }
                     fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 }
@@ -796,7 +806,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     fprintf(fp, "\tucomisd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
                     emit_float_setcc(fp, in->cmp_kind, 0);
                 } else {
-                    const char *m = setcc_int_mnemonic(in->cmp_kind);
+                    const char *m = setcc_int_mnemonic(in->cmp_kind, in->is_unsigned);
                     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                     fprintf(fp, "\tcmpl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
                     fprintf(fp, "\t%s %%al\n", m);

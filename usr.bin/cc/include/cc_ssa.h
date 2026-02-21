@@ -53,6 +53,7 @@ typedef struct {
     int false_label;
     int param_index;
     cc_cmp_kind_t cmp_kind;
+    int is_unsigned;
     int call_is_variadic;
     char *sym;
     int *args;

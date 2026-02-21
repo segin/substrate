@@ -198,8 +198,13 @@ static int is_float_type(cc_type_t t) {
     return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE;
 }
 
+static int is_unsigned_integral_type(cc_type_t t) {
+    return t == CC_TYPE_UCHAR || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
+}
+
 static int is_integral_type(cc_type_t t) {
-    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_INT || t == CC_TYPE_LONG_LONG;
+    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_INT || t == CC_TYPE_UINT ||
+           t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG;
 }
 
 static int is_numeric_type(cc_type_t t) {
@@ -216,7 +221,17 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
     return 0;
 }
 
+static cc_type_t integral_promo_type(cc_type_t t) {
+    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR) {
+        return CC_TYPE_INT;
+    }
+    return t;
+}
+
 static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
+    cc_type_t ap;
+    cc_type_t bp;
+
     if (a == CC_TYPE_VOID || b == CC_TYPE_VOID) {
         return CC_TYPE_VOID;
     }
@@ -226,11 +241,21 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     if (a == CC_TYPE_FLOAT || b == CC_TYPE_FLOAT) {
         return CC_TYPE_FLOAT;
     }
-    if (a == CC_TYPE_LONG_LONG || b == CC_TYPE_LONG_LONG) {
+
+    ap = integral_promo_type(a);
+    bp = integral_promo_type(b);
+
+    if (ap == CC_TYPE_ULONG_LONG || bp == CC_TYPE_ULONG_LONG) {
+        return CC_TYPE_ULONG_LONG;
+    }
+    if (ap == CC_TYPE_LONG_LONG || bp == CC_TYPE_LONG_LONG) {
+        if (is_unsigned_integral_type(ap) || is_unsigned_integral_type(bp)) {
+            return CC_TYPE_ULONG_LONG;
+        }
         return CC_TYPE_LONG_LONG;
     }
-    if (a == CC_TYPE_CHAR || b == CC_TYPE_CHAR || a == CC_TYPE_BOOL || b == CC_TYPE_BOOL) {
-        return CC_TYPE_INT;
+    if (ap == CC_TYPE_UINT || bp == CC_TYPE_UINT) {
+        return CC_TYPE_UINT;
     }
     return CC_TYPE_INT;
 }
@@ -256,11 +281,14 @@ static long type_size_bytes(cc_type_t t) {
     switch (t) {
     case CC_TYPE_BOOL:
     case CC_TYPE_CHAR:
+    case CC_TYPE_UCHAR:
         return 1;
     case CC_TYPE_INT:
+    case CC_TYPE_UINT:
     case CC_TYPE_FLOAT:
         return 4;
     case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
     case CC_TYPE_DOUBLE:
         return 8;
     default:

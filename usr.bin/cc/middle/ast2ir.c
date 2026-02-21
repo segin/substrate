@@ -49,15 +49,48 @@ static cc_value_type_t type_to_val(cc_type_t t) {
     return (t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE) ? CC_VAL_F64 : CC_VAL_I64;
 }
 
+static int is_unsigned_integral_type(cc_type_t t) {
+    return t == CC_TYPE_UCHAR || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
+}
+
+static cc_type_t integral_promo_type(cc_type_t t) {
+    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR) {
+        return CC_TYPE_INT;
+    }
+    return t;
+}
+
+static cc_type_t common_integral_type(cc_type_t a, cc_type_t b) {
+    cc_type_t ap = integral_promo_type(a);
+    cc_type_t bp = integral_promo_type(b);
+
+    if (ap == CC_TYPE_ULONG_LONG || bp == CC_TYPE_ULONG_LONG) {
+        return CC_TYPE_ULONG_LONG;
+    }
+    if (ap == CC_TYPE_LONG_LONG || bp == CC_TYPE_LONG_LONG) {
+        if (is_unsigned_integral_type(ap) || is_unsigned_integral_type(bp)) {
+            return CC_TYPE_ULONG_LONG;
+        }
+        return CC_TYPE_LONG_LONG;
+    }
+    if (ap == CC_TYPE_UINT || bp == CC_TYPE_UINT) {
+        return CC_TYPE_UINT;
+    }
+    return CC_TYPE_INT;
+}
+
 static long type_size_bytes(cc_type_t t) {
     switch (t) {
     case CC_TYPE_BOOL:
     case CC_TYPE_CHAR:
+    case CC_TYPE_UCHAR:
         return 1;
     case CC_TYPE_INT:
+    case CC_TYPE_UINT:
     case CC_TYPE_FLOAT:
         return 4;
     case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
     case CC_TYPE_DOUBLE:
         return 8;
     default:
@@ -459,13 +492,18 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             cc_value_type_t cmp_vt = (value_type(sf, lhs) == CC_VAL_F64 || value_type(sf, rhs) == CC_VAL_F64)
                                          ? CC_VAL_F64
                                          : CC_VAL_I64;
+            cc_type_t cmp_it = CC_TYPE_INT;
             lhs = cast_value(sf, lhs, cmp_vt, diag);
             rhs = cast_value(sf, rhs, cmp_vt, diag);
             if (lhs < 0 || rhs < 0) {
                 return -1;
             }
+            if (cmp_vt == CC_VAL_I64) {
+                cmp_it = common_integral_type(e->lhs->value_type, e->rhs->value_type);
+            }
             in.op = CC_SSA_CMP;
             in.cmp_kind = bin_to_cmp(e->op);
+            in.is_unsigned = (cmp_vt == CC_VAL_I64 && is_unsigned_integral_type(cmp_it)) ? 1 : 0;
             in.dst = new_value(sf, CC_VAL_I64);
             in.lhs = lhs;
             in.rhs = rhs;
@@ -494,6 +532,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             break;
         case CC_BIN_DIV:
             in.op = CC_SSA_DIV;
+            in.is_unsigned = is_unsigned_integral_type(e->value_type) ? 1 : 0;
             break;
         case CC_BIN_BAND:
             lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
@@ -538,6 +577,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             in.op = CC_SSA_SHR;
+            in.is_unsigned = is_unsigned_integral_type(e->value_type) ? 1 : 0;
             vt = CC_VAL_I64;
             break;
         case CC_BIN_MOD: {
@@ -551,6 +591,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             memset(&q, 0, sizeof(q));
             q.op = CC_SSA_DIV;
+            q.is_unsigned = is_unsigned_integral_type(e->value_type) ? 1 : 0;
             q.dst = new_value(sf, CC_VAL_I64);
             q.lhs = lhs_i;
             q.rhs = rhs_i;

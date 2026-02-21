@@ -13,8 +13,11 @@ typedef enum {
     CC_TYPE_VOID = 0,
     CC_TYPE_BOOL,
     CC_TYPE_CHAR,
+    CC_TYPE_UCHAR,
     CC_TYPE_INT,
+    CC_TYPE_UINT,
     CC_TYPE_LONG_LONG,
+    CC_TYPE_ULONG_LONG,
     CC_TYPE_FLOAT,
     CC_TYPE_DOUBLE
 } cc_type_t;
