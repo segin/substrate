@@ -23,7 +23,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - C99 `for`-init declarations with loop-local scope
   - one-level typed pointers (`T*`) in declarations, parameters, and return types
   - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and prefix/postfix `++/--` with C expression-value semantics
-  - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), and `sizeof` for supported scalar types
+  - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), pointer/integer casts (`(void *)p`, `(unsigned long long)p`, `(int *)n`), and `sizeof` for supported scalar types
   - integer literal suffix typing for unsigned/long-long forms (`u`, `ul`, `ull`, etc.) in semantic/lowering paths
   - control-flow extensions: C labels + `goto`
 - existing SSA utilities remain available:
@@ -37,7 +37,7 @@ Native C support is intentionally limited for now:
 - statement subset: local declarations, assignments, expression statements, `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
-- expressions: numeric/character literals (decimal/octal/hex integers, simple character escapes), identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
+- expressions: numeric/character literals (decimal/octal/hex integers, simple character escapes), identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, pointer/integer casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
 - pointer expressions: unary address-of (`&`) for identifier lvalues, unary dereference (`*`) for pointers, pointer/null equality comparisons, ordered comparisons for compatible pointers, pointer argument/return lowering, indirect assignment through pointers (`*p = expr`), dereference compound assignments (`*lvalue += ...`, etc.), pointer arithmetic (`ptr +/- int`, `int + ptr`) for non-`void*` pointers, compatible pointer subtraction (`ptr - ptr`) with element-size scaling, identifier-based pointer `++/--` updates with element-size stepping, and prefix/postfix `++/--` on dereference lvalues (`++*p`, `--*p`, `(*p)++`, `(*p)--`)
 - unsigned integer semantics are modeled for comparisons/division/modulo/right-shift in native lowering/codegen (`seta/setb`, `div`, logical right-shift)
 - function declarations/prototypes and definitions with fixed params or `...` variadics

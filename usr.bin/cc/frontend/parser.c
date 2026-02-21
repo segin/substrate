@@ -384,6 +384,30 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     return next_tok(p);
 }
 
+static int parse_type_name(parser_t *p, cc_type_t *out_type, int allow_void, const char *what) {
+    cc_type_t ty;
+    if (parse_declspec(p, &ty, allow_void, what) != 0) {
+        return -1;
+    }
+    while (p->tok.kind == TOK_STAR) {
+        ty = ptr_of_type(ty);
+        if (ty == CC_TYPE_VOID) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 1 is not yet supported");
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        while (is_decl_qual_tok(p->tok.kind)) {
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+        }
+    }
+    *out_type = ty;
+    return 0;
+}
+
 static cc_expr_t *new_expr(cc_expr_kind_t kind) {
     cc_expr_t *e = (cc_expr_t *)calloc(1, sizeof(*e));
     if (e != NULL) {
@@ -802,7 +826,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_declspec(p, &e->aux_type, 1, "expected type name in sizeof") != 0) {
+            if (parse_type_name(p, &e->aux_type, 1, "expected type name in sizeof") != 0) {
                 free_expr(e);
                 return NULL;
             }
@@ -830,7 +854,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(e);
             return NULL;
         }
-        if (parse_declspec(p, &e->aux_type, 1, "expected cast type") != 0) {
+        if (parse_type_name(p, &e->aux_type, 1, "expected cast type") != 0) {
             free_expr(e);
             return NULL;
         }

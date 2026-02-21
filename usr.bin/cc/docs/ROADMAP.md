@@ -101,7 +101,7 @@
 - Additional C99 control/expression expansion:
   - added `goto` and labeled statements with function-scope label validation.
   - added bitwise/shift/comma operators and compound assignments (`&= |= ^= <<= >>=`) across parser/sema/SSA/backend.
-  - added ternary conditional (`?:`), scalar cast expressions, and `sizeof` for supported scalar types.
+  - added ternary conditional (`?:`), scalar cast expressions, pointer/integer casts, and `sizeof` for supported scalar types.
   - comparison operators now accept floating operands; lowering/backend preserve C truthiness for floating conditions (`!= 0.0`, including `-0.0`) and ordered floating comparisons.
   - function declarations/prototypes are accepted alongside definitions; sema enforces signature compatibility and rejects duplicate/conflicting definitions.
   - lexer numeric literal coverage now includes octal/hex integer forms and common integer suffix spellings; character literals with common escape sequences are accepted.
@@ -116,6 +116,7 @@
   - dereference compound assignments (`*p op= rhs`) are accepted for dereference lvalues in the current subset.
   - prefix/postfix updates on dereference lvalues (`++*p`, `--*p`, `(*p)++`, `(*p)--`) are accepted and lower through direct load/compute/store update nodes.
   - pointer arithmetic lowering now supports scaled `ptr +/- int`, `int + ptr`, and compatible `ptr - ptr` difference expressions for non-`void*` pointers in the current subset.
+  - explicit casts now accept pointer<->pointer and pointer<->integer conversions (while still rejecting pointer<->floating casts).
   - prefix/postfix `++/--` now support identifier pointer lvalues with element-size stepping semantics.
   - ordered pointer comparisons (`< <= > >=`) are accepted for compatible pointer types and lower as unsigned address compares.
 - Regression coverage expanded:
@@ -125,6 +126,7 @@
   - positive compile/run tests for `goto` flow, comma operator sequencing, and bitwise/shift codegen.
   - negative tests for unknown goto target, duplicate labels, and bitwise-on-float type errors.
   - positive compile/run tests for ternary/cast/sizeof behavior and i386 assembly checks for cast lowering.
+  - positive compile/run test for pointer/integer cast round-trips plus i386 cast emission sanity check.
   - positive compile/run tests for floating comparison and floating-condition truthiness, plus i386 assembly checks for SSE compare lowering.
   - positive tests for declaration-before-definition and extern-declared call emission; negative test for conflicting declarations.
   - positive compile/run tests for character literals and octal/hex integer literals.
@@ -147,6 +149,7 @@
   - negative tests for dereferencing non-pointer expressions and invalid address-of non-lvalue expressions.
   - negative tests for unsupported pointer-plus-pointer arithmetic and pointer-plus-float arithmetic.
   - negative test for incompatible pointer subtraction across mismatched pointer base types.
+  - negative test for unsupported pointer<->floating cast conversion.
   - negative test for incompatible ordered pointer comparison across mismatched pointer base types.
   - negative test for invalid compound-assignment lvalue forms (non-assignable expressions).
   - negative test for unsupported `void*` arithmetic.

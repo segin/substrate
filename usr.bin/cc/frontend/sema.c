@@ -869,12 +869,21 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->value_type = CC_TYPE_VOID;
             return 0;
         }
-        if (!is_numeric_type(e->lhs->value_type) || !is_numeric_type(e->aux_type)) {
-            set_diag(diag, "cast currently supports numeric scalar types only");
-            return -1;
+        if (is_numeric_type(e->lhs->value_type) && is_numeric_type(e->aux_type)) {
+            e->value_type = e->aux_type;
+            return 0;
         }
-        e->value_type = e->aux_type;
-        return 0;
+        if (is_pointer_type(e->aux_type) &&
+            (is_pointer_type(e->lhs->value_type) || is_integral_type(e->lhs->value_type))) {
+            e->value_type = e->aux_type;
+            return 0;
+        }
+        if (is_integral_type(e->aux_type) && is_pointer_type(e->lhs->value_type)) {
+            e->value_type = e->aux_type;
+            return 0;
+        }
+        set_diag(diag, "cast currently supports numeric and pointer/integer conversions only");
+        return -1;
 
     case CC_EXPR_SIZEOF:
         if (e->lhs != NULL) {
