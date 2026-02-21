@@ -1504,11 +1504,59 @@ static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
         if (next_tok(p) != 0) {
             return -1;
         }
-        s->expr = parse_expr(p);
+        s->expr = parse_assign(p);
         if (s->expr == NULL) {
             return -1;
         }
     }
+    if (need_semi) {
+        return expect(p, TOK_SEMI, "expected ';' after declaration");
+    }
+    return 0;
+}
+
+static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int need_semi) {
+    cc_type_t base_type;
+
+    if (parse_declspec(p, &base_type, 1, "expected declaration type") != 0) {
+        return -1;
+    }
+
+    for (;;) {
+        cc_stmt_t s;
+        memset(&s, 0, sizeof(s));
+        s.kind = CC_STMT_DECL;
+        s.type = base_type;
+
+        if (parse_named_declarator(p, base_type, &s.type, &s.decl_name, "expected identifier after declaration type") !=
+            0) {
+            free_stmt(&s);
+            return -1;
+        }
+        if (p->tok.kind == TOK_ASSIGN) {
+            if (next_tok(p) != 0) {
+                free_stmt(&s);
+                return -1;
+            }
+            s.expr = parse_assign(p);
+            if (s.expr == NULL) {
+                free_stmt(&s);
+                return -1;
+            }
+        }
+        if (push_stmt_arr(arr, count, s) != 0) {
+            free_stmt(&s);
+            return -1;
+        }
+
+        if (p->tok.kind != TOK_COMMA) {
+            break;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+
     if (need_semi) {
         return expect(p, TOK_SEMI, "expected ';' after declaration");
     }
@@ -1526,6 +1574,12 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
         if (p->tok.kind == TOK_EOF) {
             set_diag(p->diag, p->tok.line, p->tok.col, "unexpected end of file in block");
             return -1;
+        }
+        if (is_declspec_tok(p->tok.kind)) {
+            if (parse_decl_stmt_list(p, &s->block_stmts, &s->block_count, 1) != 0) {
+                return -1;
+            }
+            continue;
         }
         if (parse_stmt(p, &child) != 0) {
             free_stmt(&child);
@@ -1942,6 +1996,12 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         if (p->tok.kind == TOK_EOF) {
             set_diag(p->diag, p->tok.line, p->tok.col, "unexpected end of file in function body");
             return -1;
+        }
+        if (is_declspec_tok(p->tok.kind)) {
+            if (parse_decl_stmt_list(p, &f->stmts, &f->stmt_count, 1) != 0) {
+                return -1;
+            }
+            continue;
         }
         if (parse_stmt(p, &s) != 0) {
             free_stmt(&s);

@@ -34,7 +34,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
 Native C support is intentionally limited for now:
 - scalar types: `_Bool`, `char`, `unsigned char`, `short`, `unsigned short`, `int`, `unsigned int`, `long long`, `unsigned long long`, `float`, `double`, `void`
 - pointer types: one/two/three-level typed pointers to supported scalar/void types (e.g., `int *`, `int **`, `int ***`, `double *`, `void *`)
-- statement subset: local declarations, assignments, expression statements (including empty `;`), `return`
+- statement subset: local declarations (including comma-separated declarators), assignments, expression statements (including empty `;`), `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
 - expressions: numeric/character literals (decimal/octal/hex integers, simple character escapes), identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, pointer/integer casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
