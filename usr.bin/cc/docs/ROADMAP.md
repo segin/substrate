@@ -115,6 +115,7 @@
   - indirect pointer stores (`*p = expr`) now lower through explicit SSA store operations for supported scalar pointee types.
   - pointer arithmetic lowering now supports scaled `ptr +/- int` and `int + ptr` for non-`void*` pointers in the current subset.
   - prefix/postfix `++/--` now support identifier pointer lvalues with element-size stepping semantics.
+  - ordered pointer comparisons (`< <= > >=`) are accepted for compatible pointer types and lower as unsigned address compares.
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
@@ -137,8 +138,10 @@
   - positive compile/run test for pointer arithmetic semantics with heap-backed pointer indexing plus x86_64/i386 emission checks for scaled index arithmetic.
   - positive compile/run test for pointer prefix/postfix `++/--` semantics over pointer lvalues.
   - positive compile/run test for `void*` declaration/assignment/conversion flow in the current subset.
+  - positive compile/run test for ordered pointer comparisons over compatible pointers.
   - negative tests for dereferencing non-pointer expressions and invalid address-of non-lvalue expressions.
   - negative tests for unsupported pointer-plus-pointer arithmetic and pointer-plus-float arithmetic.
+  - negative test for incompatible ordered pointer comparison across mismatched pointer base types.
   - negative test for unsupported `void*` arithmetic.
   - negative test for unsupported compound assignment on indirect lvalues (`*p += ...`) in current subset.
   - negative test for unsupported `sizeof(void)` in current subset.

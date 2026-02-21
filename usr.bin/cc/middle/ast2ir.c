@@ -617,7 +617,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             in.op = CC_SSA_CMP;
             in.cmp_kind = bin_to_cmp(e->op);
-            in.is_unsigned = (cmp_vt == CC_VAL_I64 && is_unsigned_integral_type(cmp_it)) ? 1 : 0;
+            in.is_unsigned =
+                (cmp_vt == CC_VAL_I64 &&
+                 (is_unsigned_integral_type(cmp_it) || is_pointer_type(e->lhs->value_type) ||
+                  is_pointer_type(e->rhs->value_type)))
+                    ? 1
+                    : 0;
             in.dst = new_value(sf, CC_VAL_I64);
             in.lhs = lhs;
             in.rhs = rhs;

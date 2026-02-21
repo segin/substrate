@@ -623,12 +623,21 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "comparison operators require compatible scalar operands");
                 return -1;
             }
-            if (!is_numeric_type(e->lhs->value_type) || !is_numeric_type(e->rhs->value_type)) {
-                set_diag(diag, "ordered comparison operators require numeric operands");
+            if (is_numeric_type(e->lhs->value_type) && is_numeric_type(e->rhs->value_type)) {
+                e->value_type = CC_TYPE_INT;
+                return 0;
+            }
+            if (is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
+                if (can_convert(e->lhs->value_type, e->rhs->value_type) ||
+                    can_convert(e->rhs->value_type, e->lhs->value_type)) {
+                    e->value_type = CC_TYPE_INT;
+                    return 0;
+                }
+                set_diag(diag, "incompatible pointer types in comparison");
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            return 0;
+            set_diag(diag, "ordered comparison operators require numeric or compatible pointer operands");
+            return -1;
         }
         if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
             if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type)) {
