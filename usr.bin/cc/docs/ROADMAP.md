@@ -111,6 +111,7 @@
   - integer literal suffixes now carry unsigned/long-long typing (`u`, `ul`, `ull` families) into sema/lowering so unsigned behavior applies to literal-only expressions.
   - `short` / `unsigned short` declaration-specifiers now map to explicit 16-bit-sized scalar types (`sizeof == 2`) in sema/lowering type metadata.
   - one-level typed pointer declarations/params/returns (`T*`) plus unary address/dereference expressions now lower through explicit SSA addr/load operations; sema supports pointer/null equality comparisons.
+  - parser now accepts `void*` declarators for locals/params while preserving `void`-only empty parameter list semantics.
   - indirect pointer stores (`*p = expr`) now lower through explicit SSA store operations for supported scalar pointee types.
   - pointer arithmetic lowering now supports scaled `ptr +/- int` and `int + ptr` for non-`void*` pointers in the current subset.
   - prefix/postfix `++/--` now support identifier pointer lvalues with element-size stepping semantics.
@@ -135,7 +136,9 @@
   - positive compile/run tests for pointer indirect stores (local + parameter path); i386 emission check for indirect store codegen.
   - positive compile/run test for pointer arithmetic semantics with heap-backed pointer indexing plus x86_64/i386 emission checks for scaled index arithmetic.
   - positive compile/run test for pointer prefix/postfix `++/--` semantics over pointer lvalues.
+  - positive compile/run test for `void*` declaration/assignment/conversion flow in the current subset.
   - negative tests for dereferencing non-pointer expressions and invalid address-of non-lvalue expressions.
   - negative tests for unsupported pointer-plus-pointer arithmetic and pointer-plus-float arithmetic.
+  - negative test for unsupported `void*` arithmetic.
   - negative test for unsupported compound assignment on indirect lvalues (`*p += ...`) in current subset.
   - negative test for unsupported `sizeof(void)` in current subset.

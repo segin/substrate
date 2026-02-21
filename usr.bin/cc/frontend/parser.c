@@ -1276,7 +1276,7 @@ static cc_expr_t *parse_expr(parser_t *p) {
 static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
     memset(s, 0, sizeof(*s));
     s->kind = CC_STMT_DECL;
-    if (parse_declspec(p, &s->type, 0, "expected declaration type") != 0) {
+    if (parse_declspec(p, &s->type, 1, "expected declaration type") != 0) {
         return -1;
     }
     if (parse_named_declarator(p, s->type, &s->type, &s->decl_name, "expected identifier after declaration type") !=
@@ -1628,15 +1628,11 @@ void cc_tu_free(cc_translation_unit_t *tu) {
 }
 
 static int parse_params(parser_t *p, cc_function_t *f) {
-    if (p->tok.kind == TOK_KW_VOID) {
+    if (p->tok.kind == TOK_KW_VOID && peek_kind(p) == TOK_RPAREN) {
         if (next_tok(p) != 0) {
             return -1;
         }
-        if (p->tok.kind == TOK_RPAREN) {
-            return 0;
-        }
-        set_diag(p->diag, p->tok.line, p->tok.col, "void must be the sole token in an empty parameter list");
-        return -1;
+        return 0;
     }
 
     while (p->tok.kind != TOK_RPAREN) {
