@@ -47,3 +47,13 @@
 - Regression coverage expanded:
   - `-m32` `double` assembly/object generation checks.
   - slot-pressure frame-size regression check for stack-slot reuse.
+
+## Phase 5
+- Control-flow subset enabled:
+  - frontend/parser/sema support `if/else` statements and nested block statements.
+  - expression grammar includes integer comparisons (`== != < <= > >=`).
+  - SSA/backend support labels and conditional/unconditional branches.
+- Cross-target support:
+  - branch-capable emission works on both x86_64 and i386 paths.
+- Current limitation:
+  - assignments inside conditional blocks are rejected to avoid incorrect merge semantics before phi/memory-SSA support lands.

@@ -18,6 +18,8 @@ typedef enum {
     TOK_KW_DOUBLE,
     TOK_KW_VOID,
     TOK_KW_RETURN,
+    TOK_KW_IF,
+    TOK_KW_ELSE,
     TOK_ELLIPSIS,
     TOK_LPAREN,
     TOK_RPAREN,
@@ -26,6 +28,12 @@ typedef enum {
     TOK_COMMA,
     TOK_SEMI,
     TOK_ASSIGN,
+    TOK_EQ,
+    TOK_NE,
+    TOK_LT,
+    TOK_LE,
+    TOK_GT,
+    TOK_GE,
     TOK_PLUS,
     TOK_MINUS,
     TOK_STAR,
@@ -169,6 +177,11 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                    out->start[2] == 't' && out->start[3] == 'u' && out->start[4] == 'r' &&
                    out->start[5] == 'n') {
             out->kind = TOK_KW_RETURN;
+        } else if (out->len == 2 && out->start[0] == 'i' && out->start[1] == 'f') {
+            out->kind = TOK_KW_IF;
+        } else if (out->len == 4 && out->start[0] == 'e' && out->start[1] == 'l' &&
+                   out->start[2] == 's' && out->start[3] == 'e') {
+            out->kind = TOK_KW_ELSE;
         } else {
             out->kind = TOK_IDENT;
         }
@@ -197,10 +210,11 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         if (saw_dot) {
             char tmp[128];
             size_t n = out->len;
+            size_t i;
             if (n >= sizeof(tmp)) {
                 n = sizeof(tmp) - 1;
             }
-            for (size_t i = 0; i < n; ++i) {
+            for (i = 0; i < n; ++i) {
                 tmp[i] = out->start[i];
             }
             tmp[n] = '\0';
@@ -208,7 +222,8 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
             out->fnum = strtod(tmp, NULL);
         } else {
             long v = 0;
-            for (size_t i = 0; i < out->len; ++i) {
+            size_t i;
+            for (i = 0; i < out->len; ++i) {
                 v = v * 10 + (out->start[i] - '0');
             }
             out->num = v;
@@ -223,6 +238,47 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         out->line = line;
         out->col = col;
         lx_adv(lx);
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+
+    if (c == '=' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_EQ;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '!' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_NE;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '<' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_LE;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '>' && lx_peekn(lx, 1) == '=') {
+        out->kind = TOK_GE;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
         lx_adv(lx);
         lx_adv(lx);
         return 0;
@@ -252,6 +308,12 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     case '=':
         out->kind = TOK_ASSIGN;
+        return 0;
+    case '<':
+        out->kind = TOK_LT;
+        return 0;
+    case '>':
+        out->kind = TOK_GT;
         return 0;
     case '+':
         out->kind = TOK_PLUS;

@@ -38,6 +38,10 @@ test:
 	/tmp/cc_native_abi_stack_fp
 	$(TOP)/usr.bin/cc/cc native_abi_mix.c -o /tmp/cc_native_abi_mix
 	/tmp/cc_native_abi_mix
+	$(TOP)/usr.bin/cc/cc native_if_else.c -o /tmp/cc_native_if_else
+	/tmp/cc_native_if_else
+	$(TOP)/usr.bin/cc/cc native_if_abs.c -o /tmp/cc_native_if_abs
+	/tmp/cc_native_if_abs
 	$(TOP)/usr.bin/cc/cc native_variadic_call.c -o /tmp/cc_native_variadic_call
 	/tmp/cc_native_variadic_call
 	$(TOP)/usr.bin/cc/cc -O2 native_opt_fold.c -o /tmp/cc_native_opt_fold
@@ -51,6 +55,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_arith.c -o /tmp/cc_native_arith_32.s
 	grep -q "\\.code32" /tmp/cc_native_arith_32.s
 	grep -q "movl" /tmp/cc_native_arith_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_if_else.c -o /tmp/cc_native_if_else_32.s
+	grep -q "jne" /tmp/cc_native_if_else_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -c native_arith.c -o /tmp/cc_native_arith_32.o
 	file /tmp/cc_native_arith_32.o | grep -q "ELF 32-bit"
 	$(TOP)/usr.bin/cc/cc -m32 -S native_double.c -o /tmp/cc_native_double_32.s
@@ -65,6 +71,7 @@ test:
 	grep -q "mulsd" /tmp/cc_native_double_dbg.s
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
+	! $(TOP)/usr.bin/cc/cc -c native_bad_if_assign.c -o /tmp/cc_native_bad_if_assign.o
 	$(TOP)/usr.bin/cc/cc -c driver_hello.s -o /tmp/cc_driver_hello.o
 	$(TOP)/usr.bin/cc/cc -nostdlib /tmp/cc_driver_hello.o -o /tmp/cc_driver_hello
 	/tmp/cc_driver_hello | grep -q "cc-driver-asm-ok"
@@ -74,9 +81,9 @@ clean:
 	      /tmp/cc_driver_bootstrap.o /tmp/cc_driver_hello.o /tmp/cc_driver_hello \
 	      /tmp/cc_native_arith.s /tmp/cc_native_main /tmp/cc_native_bad.o \
 	      /tmp/cc_native_phase1 /tmp/cc_native_call_stmt /tmp/cc_native_bad_assign.o \
-	      /tmp/cc_native_double /tmp/cc_native_void /tmp/cc_native_variadic \
+	      /tmp/cc_native_bad_if_assign.o /tmp/cc_native_double /tmp/cc_native_void /tmp/cc_native_variadic \
 	      /tmp/cc_native_abi_stack_int /tmp/cc_native_abi_stack_fp /tmp/cc_native_abi_mix \
-	      /tmp/cc_native_variadic_call /tmp/cc_native_variadic_call.s \
+	      /tmp/cc_native_if_else /tmp/cc_native_if_abs /tmp/cc_native_variadic_call /tmp/cc_native_variadic_call.s \
 	      /tmp/cc_native_opt_fold /tmp/cc_native_opt_fold.s /tmp/cc_native_slot_pressure.s \
-	      /tmp/cc_native_arith_32.s /tmp/cc_native_arith_32.o /tmp/cc_native_double_32.s /tmp/cc_native_double_32.o \
+	      /tmp/cc_native_arith_32.s /tmp/cc_native_if_else_32.s /tmp/cc_native_arith_32.o /tmp/cc_native_double_32.s /tmp/cc_native_double_32.o \
 	      /tmp/cc_native_double_dbg.s

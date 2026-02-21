@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* lexer interface */
 typedef struct {
     const char *src;
     size_t len;
@@ -21,6 +20,8 @@ typedef enum {
     TOK_KW_DOUBLE,
     TOK_KW_VOID,
     TOK_KW_RETURN,
+    TOK_KW_IF,
+    TOK_KW_ELSE,
     TOK_ELLIPSIS,
     TOK_LPAREN,
     TOK_RPAREN,
@@ -29,6 +30,12 @@ typedef enum {
     TOK_COMMA,
     TOK_SEMI,
     TOK_ASSIGN,
+    TOK_EQ,
+    TOK_NE,
+    TOK_LT,
+    TOK_LE,
+    TOK_GT,
+    TOK_GE,
     TOK_PLUS,
     TOK_MINUS,
     TOK_STAR,
@@ -129,17 +136,28 @@ static void free_expr(cc_expr_t *e) {
 }
 
 static void free_stmt(cc_stmt_t *s) {
+    size_t i;
     if (s == NULL) {
         return;
     }
     free(s->decl_name);
     free_expr(s->expr);
+    if (s->then_branch != NULL) {
+        free_stmt(s->then_branch);
+        free(s->then_branch);
+    }
+    if (s->else_branch != NULL) {
+        free_stmt(s->else_branch);
+        free(s->else_branch);
+    }
+    for (i = 0; i < s->block_count; ++i) {
+        free_stmt(&s->block_stmts[i]);
+    }
+    free(s->block_stmts);
 }
 
 static int push_arg(cc_expr_t *call, cc_expr_t *arg) {
-    cc_expr_t **next;
-
-    next = (cc_expr_t **)realloc(call->args, (call->arg_count + 1) * sizeof(*next));
+    cc_expr_t **next = (cc_expr_t **)realloc(call->args, (call->arg_count + 1) * sizeof(*next));
     if (next == NULL) {
         return -1;
     }
@@ -149,9 +167,7 @@ static int push_arg(cc_expr_t *call, cc_expr_t *arg) {
 }
 
 static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t n) {
-    cc_param_t *next;
-
-    next = (cc_param_t *)realloc(f->params, (f->param_count + 1) * sizeof(*next));
+    cc_param_t *next = (cc_param_t *)realloc(f->params, (f->param_count + 1) * sizeof(*next));
     if (next == NULL) {
         return -1;
     }
@@ -165,19 +181,22 @@ static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t
     return 0;
 }
 
-static int push_stmt(cc_function_t *f, cc_stmt_t s) {
-    cc_stmt_t *next;
-
-    next = (cc_stmt_t *)realloc(f->stmts, (f->stmt_count + 1) * sizeof(*next));
+static int push_stmt_arr(cc_stmt_t **arr, size_t *count, cc_stmt_t s) {
+    cc_stmt_t *next = (cc_stmt_t *)realloc(*arr, (*count + 1) * sizeof(*next));
     if (next == NULL) {
         return -1;
     }
-    f->stmts = next;
-    f->stmts[f->stmt_count++] = s;
+    *arr = next;
+    (*arr)[(*count)++] = s;
     return 0;
 }
 
+static int push_stmt_func(cc_function_t *f, cc_stmt_t s) {
+    return push_stmt_arr(&f->stmts, &f->stmt_count, s);
+}
+
 static cc_expr_t *parse_expr(parser_t *p);
+static int parse_stmt(parser_t *p, cc_stmt_t *s);
 
 static cc_expr_t *parse_primary(parser_t *p) {
     cc_expr_t *e;
@@ -210,7 +229,6 @@ static cc_expr_t *parse_primary(parser_t *p) {
         if (name == NULL) {
             return NULL;
         }
-
         if (next_tok(p) != 0) {
             free(name);
             return NULL;
@@ -223,7 +241,6 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             e->ident = name;
-
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -306,24 +323,20 @@ static cc_expr_t *parse_unary(parser_t *p) {
             return NULL;
         }
         z->int_val = 0;
-        z->value_type = CC_TYPE_INT;
         e->op = CC_BIN_SUB;
         e->lhs = z;
         e->rhs = rhs;
         return e;
     }
-
     return parse_primary(p);
 }
 
 static cc_expr_t *parse_mul(parser_t *p) {
     cc_expr_t *lhs = parse_unary(p);
-
     while (lhs != NULL && (p->tok.kind == TOK_STAR || p->tok.kind == TOK_SLASH)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
         cc_expr_t *e;
-
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -333,30 +346,26 @@ static cc_expr_t *parse_mul(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-
         e = new_expr(CC_EXPR_BIN);
         if (e == NULL) {
             free_expr(lhs);
             free_expr(rhs);
             return NULL;
         }
-        e->op = (op == TOK_STAR) ? CC_BIN_MUL : CC_BIN_DIV;
+        e->op = op == TOK_STAR ? CC_BIN_MUL : CC_BIN_DIV;
         e->lhs = lhs;
         e->rhs = rhs;
         lhs = e;
     }
-
     return lhs;
 }
 
 static cc_expr_t *parse_add(parser_t *p) {
     cc_expr_t *lhs = parse_mul(p);
-
     while (lhs != NULL && (p->tok.kind == TOK_PLUS || p->tok.kind == TOK_MINUS)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
         cc_expr_t *e;
-
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -366,24 +375,89 @@ static cc_expr_t *parse_add(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-
         e = new_expr(CC_EXPR_BIN);
         if (e == NULL) {
             free_expr(lhs);
             free_expr(rhs);
             return NULL;
         }
-        e->op = (op == TOK_PLUS) ? CC_BIN_ADD : CC_BIN_SUB;
+        e->op = op == TOK_PLUS ? CC_BIN_ADD : CC_BIN_SUB;
         e->lhs = lhs;
         e->rhs = rhs;
         lhs = e;
     }
+    return lhs;
+}
 
+static cc_expr_t *parse_rel(parser_t *p) {
+    cc_expr_t *lhs = parse_add(p);
+    while (lhs != NULL &&
+           (p->tok.kind == TOK_LT || p->tok.kind == TOK_LE || p->tok.kind == TOK_GT || p->tok.kind == TOK_GE)) {
+        cc_tok_kind_t op = p->tok.kind;
+        cc_expr_t *rhs;
+        cc_expr_t *e;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_add(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        e = new_expr(CC_EXPR_BIN);
+        if (e == NULL) {
+            free_expr(lhs);
+            free_expr(rhs);
+            return NULL;
+        }
+        if (op == TOK_LT) {
+            e->op = CC_BIN_LT;
+        } else if (op == TOK_LE) {
+            e->op = CC_BIN_LE;
+        } else if (op == TOK_GT) {
+            e->op = CC_BIN_GT;
+        } else {
+            e->op = CC_BIN_GE;
+        }
+        e->lhs = lhs;
+        e->rhs = rhs;
+        lhs = e;
+    }
+    return lhs;
+}
+
+static cc_expr_t *parse_eq(parser_t *p) {
+    cc_expr_t *lhs = parse_rel(p);
+    while (lhs != NULL && (p->tok.kind == TOK_EQ || p->tok.kind == TOK_NE)) {
+        cc_tok_kind_t op = p->tok.kind;
+        cc_expr_t *rhs;
+        cc_expr_t *e;
+        if (next_tok(p) != 0) {
+            free_expr(lhs);
+            return NULL;
+        }
+        rhs = parse_rel(p);
+        if (rhs == NULL) {
+            free_expr(lhs);
+            return NULL;
+        }
+        e = new_expr(CC_EXPR_BIN);
+        if (e == NULL) {
+            free_expr(lhs);
+            free_expr(rhs);
+            return NULL;
+        }
+        e->op = op == TOK_EQ ? CC_BIN_EQ : CC_BIN_NE;
+        e->lhs = lhs;
+        e->rhs = rhs;
+        lhs = e;
+    }
     return lhs;
 }
 
 static cc_expr_t *parse_assign(parser_t *p) {
-    cc_expr_t *lhs = parse_add(p);
+    cc_expr_t *lhs = parse_eq(p);
 
     if (lhs != NULL && p->tok.kind == TOK_ASSIGN) {
         cc_expr_t *rhs;
@@ -428,8 +502,73 @@ static cc_expr_t *parse_expr(parser_t *p) {
     return parse_assign(p);
 }
 
+static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
+    memset(s, 0, sizeof(*s));
+    s->kind = CC_STMT_BLOCK;
+    if (expect(p, TOK_LBRACE, "expected '{'") != 0) {
+        return -1;
+    }
+    while (p->tok.kind != TOK_RBRACE) {
+        cc_stmt_t child;
+        if (p->tok.kind == TOK_EOF) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "unexpected end of file in block");
+            return -1;
+        }
+        if (parse_stmt(p, &child) != 0) {
+            free_stmt(&child);
+            return -1;
+        }
+        if (push_stmt_arr(&s->block_stmts, &s->block_count, child) != 0) {
+            free_stmt(&child);
+            return -1;
+        }
+    }
+    return expect(p, TOK_RBRACE, "expected '}' after block");
+}
+
 static int parse_stmt(parser_t *p, cc_stmt_t *s) {
     memset(s, 0, sizeof(*s));
+
+    if (p->tok.kind == TOK_LBRACE) {
+        return parse_block_stmt(p, s);
+    }
+
+    if (p->tok.kind == TOK_KW_IF) {
+        s->kind = CC_STMT_IF;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (expect(p, TOK_LPAREN, "expected '(' after if") != 0) {
+            return -1;
+        }
+        s->expr = parse_expr(p);
+        if (s->expr == NULL) {
+            return -1;
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' after if condition") != 0) {
+            return -1;
+        }
+        s->then_branch = (cc_stmt_t *)calloc(1, sizeof(*s->then_branch));
+        if (s->then_branch == NULL) {
+            return -1;
+        }
+        if (parse_stmt(p, s->then_branch) != 0) {
+            return -1;
+        }
+        if (p->tok.kind == TOK_KW_ELSE) {
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            s->else_branch = (cc_stmt_t *)calloc(1, sizeof(*s->else_branch));
+            if (s->else_branch == NULL) {
+                return -1;
+            }
+            if (parse_stmt(p, s->else_branch) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
 
     if (p->tok.kind == TOK_KW_INT || p->tok.kind == TOK_KW_DOUBLE) {
         s->kind = CC_STMT_DECL;
@@ -582,13 +721,11 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     if (expect(p, TOK_LPAREN, "expected '(' after function name") != 0) {
         return -1;
     }
-
     if (p->tok.kind != TOK_RPAREN) {
         if (parse_params(p, f) != 0) {
             return -1;
         }
     }
-
     if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
         return -1;
     }
@@ -606,7 +743,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             free_stmt(&s);
             return -1;
         }
-        if (push_stmt(f, s) != 0) {
+        if (push_stmt_func(f, s) != 0) {
             free_stmt(&s);
             return -1;
         }
@@ -615,7 +752,6 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     if (expect(p, TOK_RBRACE, "expected '}' after function body") != 0) {
         return -1;
     }
-
     return 0;
 }
 

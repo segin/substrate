@@ -4,7 +4,7 @@
 
 ## Status
 
-Phase-4 (code quality + parity slice) is implemented:
+Phase-5 (control-flow subset slice) is implemented:
 
 - `cc` driver skeleton (`cmd/cc.c`) with Unix-style stage control.
 - preprocessing stage (`-E`) via system `cpp`.
@@ -15,6 +15,7 @@ Phase-4 (code quality + parity slice) is implemented:
   - SSA middle-end optimization passes (`-O1+`): constant folding + dead temp elimination
   - GAS emitter for x86-64 and x86-32
   - backend stack-slot compaction (linear-scan style slot reuse) to reduce frame size
+  - branch-capable lowering/emission for `if`/`else` control flow
 - existing SSA utilities remain available:
   - `ir-verifier`
   - `ir-normalize`
@@ -23,12 +24,14 @@ Phase-4 (code quality + parity slice) is implemented:
 Native C support is intentionally limited for now:
 - scalar types: `int`, `double`, `void`
 - statement subset: local declarations, assignments, expression statements, `return`
-- expressions: numeric literals, identifiers, `+ - * /`, parentheses, function calls, assignment expressions
+- statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
+- expressions: numeric literals, identifiers, `+ - * /`, comparisons (`== != < <= > >=`), parentheses, function calls, assignment expressions
 - function declarations/definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
 - i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)
-- no control-flow statements (`if`, `for`, `while`, `switch`) yet
+- temporary control-flow safety rule: assignments inside conditional blocks are rejected in this phase
+- loop/switch control flow (`for`, `while`, `switch`) not implemented yet
 - no pointers/structs/arrays yet
 
 For non-supported C sources, use `--bootstrap-gcc` as a temporary fallback.

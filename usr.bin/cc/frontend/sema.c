@@ -7,6 +7,7 @@
 typedef struct {
     char *name;
     cc_type_t type;
+    int depth;
 } var_entry_t;
 
 static void set_diag(cc_diag_t *d, const char *msg) {
@@ -28,17 +29,28 @@ static int names_find(char **names, size_t count, const char *name) {
     return -1;
 }
 
-static int vars_find(var_entry_t *vars, size_t count, const char *name) {
-    size_t i;
-    for (i = 0; i < count; ++i) {
-        if (strcmp(vars[i].name, name) == 0) {
+static int vars_find_visible(var_entry_t *vars, size_t count, const char *name, int depth) {
+    size_t i = count;
+    while (i > 0) {
+        i--;
+        if (vars[i].depth <= depth && strcmp(vars[i].name, name) == 0) {
             return (int)i;
         }
     }
     return -1;
 }
 
-static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type) {
+static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, int depth) {
+    size_t i;
+    for (i = 0; i < count; ++i) {
+        if (vars[i].depth == depth && strcmp(vars[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int depth) {
     var_entry_t *next;
     char *dup;
 
@@ -55,6 +67,7 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     strcpy(dup, name);
     (*vars)[*count].name = dup;
     (*vars)[*count].type = type;
+    (*vars)[*count].depth = depth;
     (*count)++;
     return 0;
 }
@@ -73,8 +86,7 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
     if (dst == src) {
         return 1;
     }
-    if ((dst == CC_TYPE_INT || dst == CC_TYPE_DOUBLE) &&
-        (src == CC_TYPE_INT || src == CC_TYPE_DOUBLE)) {
+    if ((dst == CC_TYPE_INT || dst == CC_TYPE_DOUBLE) && (src == CC_TYPE_INT || src == CC_TYPE_DOUBLE)) {
         return 1;
     }
     return 0;
@@ -90,8 +102,32 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     return CC_TYPE_INT;
 }
 
-static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e,
-                      var_entry_t *vars, size_t var_count, cc_diag_t *diag) {
+static int expr_has_assign(const cc_expr_t *e) {
+    size_t i;
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_ASSIGN) {
+        return 1;
+    }
+    if (expr_has_assign(e->lhs) || expr_has_assign(e->rhs)) {
+        return 1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (expr_has_assign(e->args[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int is_cmp_op(cc_binop_t op) {
+    return op == CC_BIN_EQ || op == CC_BIN_NE || op == CC_BIN_LT || op == CC_BIN_LE || op == CC_BIN_GT ||
+           op == CC_BIN_GE;
+}
+
+static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
+                      cc_diag_t *diag) {
     size_t i;
 
     if (e == NULL) {
@@ -109,7 +145,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e,
         return 0;
 
     case CC_EXPR_IDENT: {
-        int idx = vars_find(vars, var_count, e->ident);
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
         if (idx < 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "unknown identifier: %s", e->ident);
@@ -121,11 +157,19 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e,
     }
 
     case CC_EXPR_BIN:
-        if (check_expr(tu, e->lhs, vars, var_count, diag) != 0) {
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
-        if (check_expr(tu, e->rhs, vars, var_count, diag) != 0) {
+        if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
+        }
+        if (is_cmp_op(e->op)) {
+            if (e->lhs->value_type != CC_TYPE_INT || e->rhs->value_type != CC_TYPE_INT) {
+                set_diag(diag, "comparison operators currently require integer operands");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
+            return 0;
         }
         e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
         if (e->value_type == CC_TYPE_VOID) {
@@ -144,27 +188,27 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e,
         }
         if (!callee->is_variadic && e->arg_count != callee->param_count) {
             if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message),
-                         "call to %s has %zu args but %zu required", e->ident, e->arg_count, callee->param_count);
+                snprintf(diag->message, sizeof(diag->message), "call to %s has %zu args but %zu required", e->ident,
+                         e->arg_count, callee->param_count);
             }
             return -1;
         }
         if (callee->is_variadic && e->arg_count < callee->param_count) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),
-                         "variadic call to %s has %zu args but needs at least %zu", e->ident,
-                         e->arg_count, callee->param_count);
+                         "variadic call to %s has %zu args but needs at least %zu", e->ident, e->arg_count,
+                         callee->param_count);
             }
             return -1;
         }
         for (i = 0; i < e->arg_count; ++i) {
-            if (check_expr(tu, e->args[i], vars, var_count, diag) != 0) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             if (i < callee->param_count && !can_convert(callee->params[i].type, e->args[i]->value_type)) {
                 if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message),
-                             "cannot convert arg %zu in call to %s", i, e->ident);
+                    snprintf(diag->message, sizeof(diag->message), "cannot convert arg %zu in call to %s", i,
+                             e->ident);
                 }
                 return -1;
             }
@@ -174,21 +218,20 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e,
     }
 
     case CC_EXPR_ASSIGN: {
-        int idx = vars_find(vars, var_count, e->ident);
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
         if (idx < 0) {
             if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message),
-                         "assignment to undeclared identifier: %s", e->ident ? e->ident : "<null>");
+                snprintf(diag->message, sizeof(diag->message), "assignment to undeclared identifier: %s",
+                         e->ident ? e->ident : "<null>");
             }
             return -1;
         }
-        if (check_expr(tu, e->rhs, vars, var_count, diag) != 0) {
+        if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (!can_convert(vars[idx].type, e->rhs->value_type)) {
             if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message),
-                         "cannot assign expression to %s", e->ident);
+                snprintf(diag->message, sizeof(diag->message), "cannot assign expression to %s", e->ident);
             }
             return -1;
         }
@@ -198,6 +241,131 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e,
 
     default:
         set_diag(diag, "unsupported expression kind");
+        return -1;
+    }
+}
+
+static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
+                      cc_type_t fn_ret_type, int in_conditional, int *saw_return, cc_diag_t *diag) {
+    size_t i;
+
+    switch (s->kind) {
+    case CC_STMT_DECL:
+        if (s->type == CC_TYPE_VOID) {
+            set_diag(diag, "void variable declarations are not supported");
+            return -1;
+        }
+        if (vars_find_depth(*vars, *var_count, s->decl_name, depth) >= 0) {
+            set_diag(diag, "duplicate local/parameter name");
+            return -1;
+        }
+        if (s->expr != NULL) {
+            if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (in_conditional && expr_has_assign(s->expr)) {
+                set_diag(diag, "assignments in conditional blocks are not yet supported");
+                return -1;
+            }
+            if (!can_convert(s->type, s->expr->value_type)) {
+                set_diag(diag, "cannot initialize variable with incompatible type");
+                return -1;
+            }
+        }
+        if (vars_push(vars, var_count, s->decl_name, s->type, depth) != 0) {
+            set_diag(diag, "out of memory adding local variable");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_EXPR:
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (in_conditional && expr_has_assign(s->expr)) {
+            set_diag(diag, "assignments in conditional blocks are not yet supported");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_RETURN:
+        if (fn_ret_type == CC_TYPE_VOID) {
+            if (s->expr != NULL) {
+                set_diag(diag, "void function cannot return a value");
+                return -1;
+            }
+        } else {
+            if (s->expr == NULL) {
+                set_diag(diag, "non-void function must return a value");
+                return -1;
+            }
+            if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (in_conditional && expr_has_assign(s->expr)) {
+                set_diag(diag, "assignments in conditional blocks are not yet supported");
+                return -1;
+            }
+            if (!can_convert(fn_ret_type, s->expr->value_type)) {
+                set_diag(diag, "return type mismatch");
+                return -1;
+            }
+        }
+        *saw_return = 1;
+        return 0;
+
+    case CC_STMT_IF:
+        if (s->expr == NULL || s->then_branch == NULL) {
+            set_diag(diag, "malformed if statement");
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (s->expr->value_type == CC_TYPE_VOID) {
+            set_diag(diag, "if condition cannot be void");
+            return -1;
+        }
+        {
+            size_t saved = *var_count;
+            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, 1, saw_return, diag) != 0) {
+                return -1;
+            }
+            for (i = saved; i < *var_count; ++i) {
+                free((*vars)[i].name);
+            }
+            *var_count = saved;
+        }
+        if (s->else_branch != NULL) {
+            size_t saved = *var_count;
+            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret_type, 1, saw_return, diag) != 0) {
+                return -1;
+            }
+            for (i = saved; i < *var_count; ++i) {
+                free((*vars)[i].name);
+            }
+            *var_count = saved;
+        }
+        return 0;
+
+    case CC_STMT_BLOCK:
+        {
+            size_t saved = *var_count;
+            for (i = 0; i < s->block_count; ++i) {
+                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, depth + 1, fn_ret_type, in_conditional,
+                               saw_return, diag) != 0) {
+                    return -1;
+                }
+            }
+            for (i = saved; i < *var_count; ++i) {
+                free((*vars)[i].name);
+            }
+            *var_count = saved;
+            return 0;
+        }
+
+    default:
+        set_diag(diag, "unsupported statement kind");
         return -1;
     }
 }
@@ -226,7 +394,6 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             set_diag(diag, "function with missing name");
             goto fail_global;
         }
-
         if (names_find(fn_names, fn_name_count, f->name) >= 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "duplicate function definition: %s", f->name);
@@ -263,11 +430,11 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 set_diag(diag, "void is not valid for named parameter type");
                 goto fail_func;
             }
-            if (vars_find(vars, var_count, f->params[j].name) >= 0) {
+            if (vars_find_depth(vars, var_count, f->params[j].name, 0) >= 0) {
                 set_diag(diag, "duplicate parameter name");
                 goto fail_func;
             }
-            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type) != 0) {
+            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, 0) != 0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }
@@ -279,74 +446,13 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         }
 
         for (j = 0; j < f->stmt_count; ++j) {
-            cc_stmt_t *s = &f->stmts[j];
-
-            if (saw_return) {
-                set_diag(diag, "statements after return are not supported");
-                goto fail_func;
-            }
-
-            switch (s->kind) {
-            case CC_STMT_DECL:
-                if (s->type == CC_TYPE_VOID) {
-                    set_diag(diag, "void variable declarations are not supported");
-                    goto fail_func;
-                }
-                if (vars_find(vars, var_count, s->decl_name) >= 0) {
-                    set_diag(diag, "duplicate local/parameter name");
-                    goto fail_func;
-                }
-                if (vars_push(&vars, &var_count, s->decl_name, s->type) != 0) {
-                    set_diag(diag, "out of memory adding local variable");
-                    goto fail_func;
-                }
-                if (s->expr != NULL) {
-                    if (check_expr(tu, s->expr, vars, var_count, diag) != 0) {
-                        goto fail_func;
-                    }
-                    if (!can_convert(s->type, s->expr->value_type)) {
-                        set_diag(diag, "cannot initialize variable with incompatible type");
-                        goto fail_func;
-                    }
-                }
-                break;
-
-            case CC_STMT_EXPR:
-                if (check_expr(tu, s->expr, vars, var_count, diag) != 0) {
-                    goto fail_func;
-                }
-                break;
-
-            case CC_STMT_RETURN:
-                if (f->ret_type == CC_TYPE_VOID) {
-                    if (s->expr != NULL) {
-                        set_diag(diag, "void function cannot return a value");
-                        goto fail_func;
-                    }
-                } else {
-                    if (s->expr == NULL) {
-                        set_diag(diag, "non-void function must return a value");
-                        goto fail_func;
-                    }
-                    if (check_expr(tu, s->expr, vars, var_count, diag) != 0) {
-                        goto fail_func;
-                    }
-                    if (!can_convert(f->ret_type, s->expr->value_type)) {
-                        set_diag(diag, "return type mismatch");
-                        goto fail_func;
-                    }
-                }
-                saw_return = 1;
-                break;
-
-            default:
-                set_diag(diag, "unsupported statement kind");
+            if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_type, 0, &saw_return, diag) != 0) {
                 goto fail_func;
             }
         }
 
         if (!saw_return && f->ret_type != CC_TYPE_VOID) {
-            set_diag(diag, "function must end with return statement");
+            set_diag(diag, "non-void function requires at least one return statement");
             goto fail_func;
         }
 

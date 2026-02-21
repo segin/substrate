@@ -19,7 +19,13 @@ typedef enum {
     CC_BIN_ADD = 0,
     CC_BIN_SUB,
     CC_BIN_MUL,
-    CC_BIN_DIV
+    CC_BIN_DIV,
+    CC_BIN_EQ,
+    CC_BIN_NE,
+    CC_BIN_LT,
+    CC_BIN_LE,
+    CC_BIN_GT,
+    CC_BIN_GE
 } cc_binop_t;
 
 typedef enum {
@@ -49,15 +55,23 @@ struct cc_expr {
 typedef enum {
     CC_STMT_DECL = 0,
     CC_STMT_EXPR,
-    CC_STMT_RETURN
+    CC_STMT_RETURN,
+    CC_STMT_IF,
+    CC_STMT_BLOCK
 } cc_stmt_kind_t;
 
-typedef struct {
+typedef struct cc_stmt cc_stmt_t;
+
+struct cc_stmt {
     cc_type_t type;
     cc_stmt_kind_t kind;
     char *decl_name;
     cc_expr_t *expr;
-} cc_stmt_t;
+    cc_stmt_t *then_branch;
+    cc_stmt_t *else_branch;
+    cc_stmt_t *block_stmts;
+    size_t block_count;
+};
 
 typedef struct {
     char *name;

@@ -10,14 +10,27 @@ typedef enum {
 } cc_value_type_t;
 
 typedef enum {
+    CC_CMP_EQ = 0,
+    CC_CMP_NE,
+    CC_CMP_LT,
+    CC_CMP_LE,
+    CC_CMP_GT,
+    CC_CMP_GE
+} cc_cmp_kind_t;
+
+typedef enum {
     CC_SSA_PARAM = 0,
     CC_SSA_CONST,
     CC_SSA_ADD,
     CC_SSA_SUB,
     CC_SSA_MUL,
     CC_SSA_DIV,
+    CC_SSA_CMP,
     CC_SSA_I2F,
     CC_SSA_F2I,
+    CC_SSA_LABEL,
+    CC_SSA_BR,
+    CC_SSA_BR_COND,
     CC_SSA_CALL,
     CC_SSA_RET
 } cc_ssa_opcode_t;
@@ -29,7 +42,11 @@ typedef struct {
     int rhs;
     long imm;
     double fimm;
+    int label;
+    int true_label;
+    int false_label;
     int param_index;
+    cc_cmp_kind_t cmp_kind;
     int call_is_variadic;
     char *sym;
     int *args;
@@ -52,6 +69,7 @@ typedef struct {
     cc_value_type_t *value_types;
     size_t value_cap;
     int value_count;
+    int label_count;
 } cc_ssa_function_t;
 
 typedef struct {

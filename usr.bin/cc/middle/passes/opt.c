@@ -135,6 +135,38 @@ static int fold_function(cc_ssa_function_t *f) {
             }
             break;
 
+        case CC_SSA_CMP:
+            if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 && st[in->lhs].known && st[in->rhs].known &&
+                st[in->lhs].type == CC_VAL_I64 && st[in->rhs].type == CC_VAL_I64) {
+                long a = st[in->lhs].i;
+                long b = st[in->rhs].i;
+                long out = 0;
+                if (in->cmp_kind == CC_CMP_EQ) {
+                    out = (a == b);
+                } else if (in->cmp_kind == CC_CMP_NE) {
+                    out = (a != b);
+                } else if (in->cmp_kind == CC_CMP_LT) {
+                    out = (a < b);
+                } else if (in->cmp_kind == CC_CMP_LE) {
+                    out = (a <= b);
+                } else if (in->cmp_kind == CC_CMP_GT) {
+                    out = (a > b);
+                } else {
+                    out = (a >= b);
+                }
+                in->op = CC_SSA_CONST;
+                in->lhs = -1;
+                in->rhs = -1;
+                in->imm = out;
+                st[dst].known = 1;
+                st[dst].type = CC_VAL_I64;
+                st[dst].i = out;
+                changed = 1;
+            } else if (dst >= 0) {
+                st[dst].known = 0;
+            }
+            break;
+
         case CC_SSA_PARAM:
         case CC_SSA_CALL:
             if (dst >= 0) {
@@ -142,6 +174,9 @@ static int fold_function(cc_ssa_function_t *f) {
             }
             break;
 
+        case CC_SSA_LABEL:
+        case CC_SSA_BR:
+        case CC_SSA_BR_COND:
         case CC_SSA_RET:
             break;
         }
@@ -174,9 +209,13 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_SUB:
     case CC_SSA_MUL:
     case CC_SSA_DIV:
+    case CC_SSA_CMP:
     case CC_SSA_I2F:
     case CC_SSA_F2I:
         return 1;
+    case CC_SSA_LABEL:
+    case CC_SSA_BR:
+    case CC_SSA_BR_COND:
     case CC_SSA_CALL:
     case CC_SSA_RET:
         return 0;

@@ -48,6 +48,28 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     snprintf(d->message, sizeof(d->message), "%s", msg);
 }
 
+static const char *setcc_mnemonic(cc_cmp_kind_t k) {
+    switch (k) {
+    case CC_CMP_EQ:
+        return "sete";
+    case CC_CMP_NE:
+        return "setne";
+    case CC_CMP_LT:
+        return "setl";
+    case CC_CMP_LE:
+        return "setle";
+    case CC_CMP_GT:
+        return "setg";
+    case CC_CMP_GE:
+        return "setge";
+    }
+    return "sete";
+}
+
+static void emit_local_label(FILE *fp, const char *fn, int label) {
+    fprintf(fp, ".L%s_%d", fn, label);
+}
+
 static int slot_off(const slot_layout_t *lay, int v) {
     return -lay->slot_size * (lay->slot_of[v] + 1);
 }
@@ -373,6 +395,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 }
                 break;
 
+            case CC_SSA_CMP: {
+                const char *m = setcc_mnemonic(in->cmp_kind);
+                fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tcmpq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
+                fprintf(fp, "\t%s %%al\n", m);
+                fprintf(fp, "\tmovzbq %%al, %%rax\n");
+                fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+            }
+
             case CC_SSA_I2F:
                 fprintf(fp, "\tcvtsi2sdq %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
                 fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
@@ -381,6 +413,28 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_F2I:
                 fprintf(fp, "\tcvttsd2siq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                 fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_LABEL:
+                emit_local_label(fp, f->name, in->label);
+                fprintf(fp, ":\n");
+                break;
+
+            case CC_SSA_BR:
+                fprintf(fp, "\tjmp ");
+                emit_local_label(fp, f->name, in->label);
+                fprintf(fp, "\n");
+                break;
+
+            case CC_SSA_BR_COND:
+                fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tcmpq $0, %%rax\n");
+                fprintf(fp, "\tjne ");
+                emit_local_label(fp, f->name, in->true_label);
+                fprintf(fp, "\n");
+                fprintf(fp, "\tjmp ");
+                emit_local_label(fp, f->name, in->false_label);
+                fprintf(fp, "\n");
                 break;
 
             case CC_SSA_CALL: {
@@ -597,6 +651,16 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 }
                 break;
 
+            case CC_SSA_CMP: {
+                const char *m = setcc_mnemonic(in->cmp_kind);
+                fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tcmpl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
+                fprintf(fp, "\t%s %%al\n", m);
+                fprintf(fp, "\tmovzbl %%al, %%eax\n");
+                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+            }
+
             case CC_SSA_I2F:
                 fprintf(fp, "\tcvtsi2sdl %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
                 fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
@@ -605,6 +669,28 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_F2I:
                 fprintf(fp, "\tcvttsd2sil %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                 fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_LABEL:
+                emit_local_label(fp, f->name, in->label);
+                fprintf(fp, ":\n");
+                break;
+
+            case CC_SSA_BR:
+                fprintf(fp, "\tjmp ");
+                emit_local_label(fp, f->name, in->label);
+                fprintf(fp, "\n");
+                break;
+
+            case CC_SSA_BR_COND:
+                fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tcmpl $0, %%eax\n");
+                fprintf(fp, "\tjne ");
+                emit_local_label(fp, f->name, in->true_label);
+                fprintf(fp, "\n");
+                fprintf(fp, "\tjmp ");
+                emit_local_label(fp, f->name, in->false_label);
+                fprintf(fp, "\n");
                 break;
 
             case CC_SSA_CALL: {
