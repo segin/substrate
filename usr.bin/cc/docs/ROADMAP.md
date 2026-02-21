@@ -116,6 +116,7 @@
   - dereference compound assignments (`*p op= rhs`) are accepted for dereference lvalues in the current subset.
   - prefix/postfix updates on dereference lvalues (`++*p`, `--*p`, `(*p)++`, `(*p)--`) are accepted and lower through direct load/compute/store update nodes.
   - pointer arithmetic lowering now supports scaled `ptr +/- int`, `int + ptr`, and compatible `ptr - ptr` difference expressions for non-`void*` pointers in the current subset.
+  - postfix index expressions (`ptr[idx]` and `idx[ptr]`) now parse/lower as dereference of scaled pointer arithmetic (`*(ptr + idx)`).
   - explicit casts now accept pointer<->pointer and pointer<->integer conversions (while still rejecting pointer<->floating casts).
   - pointer depth support now includes up to three levels (`T***`); deeper chains (`T****+`) are explicitly rejected for now.
   - `sizeof(pointer)` and pointer-element scaling now track target ABI pointer width (`-m32` => 4 bytes, `-m64` => 8 bytes).
@@ -144,6 +145,7 @@
   - positive compile/run tests for local pointer dereference and pointer-parameter calls; i386 emission checks for addr/load codegen.
   - positive compile/run tests for pointer indirect stores (local + parameter path); i386 emission check for indirect store codegen.
   - positive compile/run test for pointer arithmetic semantics with heap-backed pointer indexing plus x86_64/i386 emission checks for scaled index arithmetic.
+  - positive compile/run test for postfix pointer indexing (`ptr[idx]` and `idx[ptr]`) plus i386 scaled-index emission check.
   - positive compile/run test for compatible pointer subtraction semantics with i386 emission check for element-size division.
   - positive compile/run test for pointer prefix/postfix `++/--` semantics over pointer lvalues.
   - positive compile/run test for `void*` declaration/assignment/conversion flow in the current subset.
@@ -152,6 +154,7 @@
   - positive compile/run test for prefix update over dereference lvalues (including pointer-expression dereference forms).
   - negative tests for dereferencing non-pointer expressions and invalid address-of non-lvalue expressions.
   - negative tests for unsupported pointer-plus-pointer arithmetic and pointer-plus-float arithmetic.
+  - negative test for index expressions over non-pointer bases.
   - negative test for incompatible pointer subtraction across mismatched pointer base types.
   - negative test for unsupported pointer<->floating cast conversion.
   - negative test for unsupported pointer depth beyond three levels (`T****+`).

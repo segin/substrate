@@ -52,6 +52,8 @@ typedef enum {
     TOK_RPAREN,
     TOK_LBRACE,
     TOK_RBRACE,
+    TOK_LBRACK,
+    TOK_RBRACK,
     TOK_COMMA,
     TOK_QUESTION,
     TOK_COLON,
@@ -834,27 +836,64 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
 
 static cc_expr_t *parse_postfix(parser_t *p) {
     cc_expr_t *e = parse_primary(p);
-    while (e != NULL && (p->tok.kind == TOK_PLUS_PLUS || p->tok.kind == TOK_MINUS_MINUS)) {
-        cc_expr_t *upd;
-        if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
-            upd = new_update_ident_expr(e->ident, p->tok.kind == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 1);
-            free_expr(e);
-        } else if (e->kind == CC_EXPR_DEREF && e->lhs != NULL) {
-            upd = new_update_lvalue_expr(e, p->tok.kind == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 1);
-            e = NULL;
-        } else {
-            set_diag(p->diag, p->tok.line, p->tok.col, "++/-- requires an identifier or dereference lvalue");
-            free_expr(e);
-            return NULL;
+    while (e != NULL) {
+        if (p->tok.kind == TOK_LBRACK) {
+            cc_expr_t *idx;
+            cc_expr_t *add;
+            cc_expr_t *deref;
+            if (next_tok(p) != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            idx = parse_expr(p);
+            if (idx == NULL) {
+                free_expr(e);
+                return NULL;
+            }
+            if (expect(p, TOK_RBRACK, "expected ']' after index expression") != 0) {
+                free_expr(idx);
+                free_expr(e);
+                return NULL;
+            }
+            add = new_bin_expr(CC_BIN_ADD, e, idx);
+            if (add == NULL) {
+                return NULL;
+            }
+            deref = new_expr(CC_EXPR_DEREF);
+            if (deref == NULL) {
+                free_expr(add);
+                return NULL;
+            }
+            deref->lhs = add;
+            e = deref;
+            continue;
         }
-        if (upd == NULL) {
-            return NULL;
+
+        if (p->tok.kind == TOK_PLUS_PLUS || p->tok.kind == TOK_MINUS_MINUS) {
+            cc_expr_t *upd;
+            if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
+                upd = new_update_ident_expr(e->ident, p->tok.kind == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 1);
+                free_expr(e);
+            } else if (e->kind == CC_EXPR_DEREF && e->lhs != NULL) {
+                upd = new_update_lvalue_expr(e, p->tok.kind == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 1);
+                e = NULL;
+            } else {
+                set_diag(p->diag, p->tok.line, p->tok.col, "++/-- requires an identifier or dereference lvalue");
+                free_expr(e);
+                return NULL;
+            }
+            if (upd == NULL) {
+                return NULL;
+            }
+            e = upd;
+            if (next_tok(p) != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            continue;
         }
-        e = upd;
-        if (next_tok(p) != 0) {
-            free_expr(e);
-            return NULL;
-        }
+
+        break;
     }
     return e;
 }

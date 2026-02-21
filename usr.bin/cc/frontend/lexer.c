@@ -50,6 +50,8 @@ typedef enum {
     TOK_RPAREN,
     TOK_LBRACE,
     TOK_RBRACE,
+    TOK_LBRACK,
+    TOK_RBRACK,
     TOK_COMMA,
     TOK_QUESTION,
     TOK_COLON,
@@ -721,6 +723,12 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     case '}':
         out->kind = TOK_RBRACE;
+        return 0;
+    case '[':
+        out->kind = TOK_LBRACK;
+        return 0;
+    case ']':
+        out->kind = TOK_RBRACK;
         return 0;
     case ',':
         out->kind = TOK_COMMA;
