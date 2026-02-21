@@ -895,11 +895,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     // Cleanup kernel arguments
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
-<<<<<<< HEAD
-    if (arg_buffer) kfree(arg_buffer, total_size);
-=======
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
->>>>>>> main
 
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
@@ -912,11 +908,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
 cleanup:
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
-<<<<<<< HEAD
-    if (arg_buffer) kfree(arg_buffer, total_size);
-=======
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
->>>>>>> main
     return error_code;
 }
 
