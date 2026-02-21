@@ -17,7 +17,6 @@
 *.dll
 
 # Binaries and executables
-*.bin
 *.exe
 *.com
 *.out
@@ -56,6 +55,14 @@ sbin/*/
 !usr.bin/*/*.c
 !usr.bin/*/*.h
 !usr.bin/*/*.S
+!usr.bin/
+!usr.bin/**/
+!usr.bin/**/*.md
+
+!tests/usr.bin/
+!tests/usr.bin/**/
+!tests/usr.bin/**/Makefile
+!tests/usr.bin/**/*.ir
 
 # Ignore the compiled output in bin subdirs that matches the dir name
 # (This is tricky with gitignore patterns, relying on extensions is safer)
@@ -63,7 +70,6 @@ sbin/*/
 # Build artifacts
 kernel.map
 *.o
-*.bin
 *.elf
 busybox-i486
 root.img
@@ -71,6 +77,8 @@ sys/kernel.efi
 sys/kernel.freebsd
 sys/kernel.multiboot
 sys/kernel.zimage
+sys/arch/i386/zimage_header.bin
+sys/isodir/boot/kernel.bin
 sys/screen.png
 last_boot.txt
 .gitignore
@@ -113,3 +121,17 @@ stat_verify
 host_test_*
 tests/sys/host_test_*
 *.img
+
+# Keep source trees under usr.bin/tests tracked even with *.bin rules.
+!usr.bin/
+!usr.bin/**/
+!usr.bin/*/Makefile
+!usr.bin/*/*.c
+!usr.bin/*/*.h
+!usr.bin/*/*.S
+!usr.bin/**/*.md
+
+!tests/usr.bin/
+!tests/usr.bin/**/
+!tests/usr.bin/**/Makefile
+!tests/usr.bin/**/*.ir
