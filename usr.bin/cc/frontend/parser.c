@@ -679,6 +679,75 @@ static cc_expr_t *new_update_expr(const char *name, cc_binop_t op, int postfix) 
     return e;
 }
 
+static cc_expr_t *clone_expr(const cc_expr_t *src) {
+    cc_expr_t *dst;
+    size_t i;
+
+    if (src == NULL) {
+        return NULL;
+    }
+
+    dst = new_expr(src->kind);
+    if (dst == NULL) {
+        return NULL;
+    }
+
+    dst->value_type = src->value_type;
+    dst->int_val = src->int_val;
+    dst->float_val = src->float_val;
+    dst->op = src->op;
+    dst->update_postfix = src->update_postfix;
+    dst->aux_type = src->aux_type;
+
+    if (src->ident != NULL) {
+        dst->ident = xstrdup_n(src->ident, strlen(src->ident));
+        if (dst->ident == NULL) {
+            free_expr(dst);
+            return NULL;
+        }
+    }
+
+    if (src->lhs != NULL) {
+        dst->lhs = clone_expr(src->lhs);
+        if (dst->lhs == NULL) {
+            free_expr(dst);
+            return NULL;
+        }
+    }
+    if (src->rhs != NULL) {
+        dst->rhs = clone_expr(src->rhs);
+        if (dst->rhs == NULL) {
+            free_expr(dst);
+            return NULL;
+        }
+    }
+    if (src->third != NULL) {
+        dst->third = clone_expr(src->third);
+        if (dst->third == NULL) {
+            free_expr(dst);
+            return NULL;
+        }
+    }
+
+    if (src->arg_count > 0) {
+        dst->args = (cc_expr_t **)calloc(src->arg_count, sizeof(*dst->args));
+        if (dst->args == NULL) {
+            free_expr(dst);
+            return NULL;
+        }
+        dst->arg_count = src->arg_count;
+        for (i = 0; i < src->arg_count; ++i) {
+            dst->args[i] = clone_expr(src->args[i]);
+            if (dst->args[i] == NULL) {
+                free_expr(dst);
+                return NULL;
+            }
+        }
+    }
+
+    return dst;
+}
+
 static cc_expr_t *parse_postfix(parser_t *p) {
     cc_expr_t *e = parse_primary(p);
     while (e != NULL && (p->tok.kind == TOK_PLUS_PLUS || p->tok.kind == TOK_MINUS_MINUS)) {
@@ -1222,30 +1291,20 @@ static cc_expr_t *parse_assign(parser_t *p) {
                 }
             } else {
                 cc_expr_t *lhs_read;
-                cc_expr_t *ptr_ident;
-
-                if (lhs->lhs == NULL || lhs->lhs->kind != CC_EXPR_IDENT || lhs->lhs->ident == NULL) {
-                    set_diag(p->diag, p->tok.line, p->tok.col,
-                             "compound assignment through dereference currently requires *identifier lvalue");
-                    free_expr(lhs);
-                    free_expr(rhs);
-                    return NULL;
-                }
-
-                ptr_ident = new_ident_expr(lhs->lhs->ident);
-                if (ptr_ident == NULL) {
+                cc_expr_t *ptr_expr = clone_expr(lhs->lhs);
+                if (ptr_expr == NULL) {
                     free_expr(lhs);
                     free_expr(rhs);
                     return NULL;
                 }
                 lhs_read = new_expr(CC_EXPR_DEREF);
                 if (lhs_read == NULL) {
-                    free_expr(ptr_ident);
+                    free_expr(ptr_expr);
                     free_expr(lhs);
                     free_expr(rhs);
                     return NULL;
                 }
-                lhs_read->lhs = ptr_ident;
+                lhs_read->lhs = ptr_expr;
                 rhs = new_bin_expr(bop, lhs_read, rhs);
                 if (rhs == NULL) {
                     free_expr(lhs);

@@ -113,7 +113,7 @@
   - one-level typed pointer declarations/params/returns (`T*`) plus unary address/dereference expressions now lower through explicit SSA addr/load operations; sema supports pointer/null equality comparisons.
   - parser now accepts `void*` declarators for locals/params while preserving `void`-only empty parameter list semantics.
   - indirect pointer stores (`*p = expr`) now lower through explicit SSA store operations for supported scalar pointee types.
-  - dereference compound assignments (`*p op= rhs`) are accepted when the dereference base is an identifier lvalue (`*identifier`).
+  - dereference compound assignments (`*p op= rhs`) are accepted for dereference lvalues in the current subset.
   - pointer arithmetic lowering now supports scaled `ptr +/- int` and `int + ptr` for non-`void*` pointers in the current subset.
   - prefix/postfix `++/--` now support identifier pointer lvalues with element-size stepping semantics.
   - ordered pointer comparisons (`< <= > >=`) are accepted for compatible pointer types and lower as unsigned address compares.
@@ -140,11 +140,11 @@
   - positive compile/run test for pointer prefix/postfix `++/--` semantics over pointer lvalues.
   - positive compile/run test for `void*` declaration/assignment/conversion flow in the current subset.
   - positive compile/run test for ordered pointer comparisons over compatible pointers.
-  - positive compile/run test for dereference compound assignment operations via `*identifier` lvalues.
+  - positive compile/run test for dereference compound assignment operations including pointer-expression dereference lvalues.
   - negative tests for dereferencing non-pointer expressions and invalid address-of non-lvalue expressions.
   - negative tests for unsupported pointer-plus-pointer arithmetic and pointer-plus-float arithmetic.
   - negative test for incompatible ordered pointer comparison across mismatched pointer base types.
-  - negative test for dereference compound assignment where the dereference base is not a plain identifier.
+  - negative test for invalid compound-assignment lvalue forms (non-assignable expressions).
   - negative test for unsupported `void*` arithmetic.
   - negative test for unsupported compound assignment on indirect lvalues (`*p += ...`) in current subset.
   - negative test for unsupported `sizeof(void)` in current subset.

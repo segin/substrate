@@ -6,12 +6,16 @@ int main(void) {
     if (x != 12) {
         return 1;
     }
+    *(p + 0) += 1;
+    if (x != 13) {
+        return 11;
+    }
     *p -= 2;
-    if (x != 10) {
+    if (x != 11) {
         return 2;
     }
     *p *= 3;
-    if (x != 30) {
+    if (x != 33) {
         return 3;
     }
     *p /= 5;

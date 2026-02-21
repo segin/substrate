@@ -38,7 +38,7 @@ Native C support is intentionally limited for now:
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
 - expressions: numeric/character literals (decimal/octal/hex integers, simple character escapes), identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
-- pointer expressions: unary address-of (`&`) for identifier lvalues, unary dereference (`*`) for pointers, pointer/null equality comparisons, ordered comparisons for compatible pointers, pointer argument/return lowering, indirect assignment through pointers (`*p = expr`), dereference compound assignments for `*identifier` lvalues (`*p += ...`, etc.), pointer arithmetic (`ptr +/- int`, `int + ptr`) for non-`void*` pointers, and identifier-based pointer `++/--` updates with element-size stepping
+- pointer expressions: unary address-of (`&`) for identifier lvalues, unary dereference (`*`) for pointers, pointer/null equality comparisons, ordered comparisons for compatible pointers, pointer argument/return lowering, indirect assignment through pointers (`*p = expr`), dereference compound assignments (`*lvalue += ...`, etc.), pointer arithmetic (`ptr +/- int`, `int + ptr`) for non-`void*` pointers, and identifier-based pointer `++/--` updates with element-size stepping
 - unsigned integer semantics are modeled for comparisons/division/modulo/right-shift in native lowering/codegen (`seta/setb`, `div`, logical right-shift)
 - function declarations/prototypes and definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
@@ -46,7 +46,7 @@ Native C support is intentionally limited for now:
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)
 - assignments inside conditional/loop blocks are supported via explicit SSA `mov` variable updates
 - C95 lexing support includes digraph/trigraph forms for punctuation
-- no structs/arrays yet (pointer-pointer arithmetic and non-identifier dereference compound assignments are still limited)
+- no structs/arrays yet (pointer-pointer arithmetic is still limited)
 
 For non-supported C sources, use `--bootstrap-gcc` as a temporary fallback.
 
