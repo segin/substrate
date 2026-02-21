@@ -4,7 +4,7 @@
 
 ## Status
 
-Phase-3 (cross-target + optimizer slice) is implemented:
+Phase-4 (code quality + parity slice) is implemented:
 
 - `cc` driver skeleton (`cmd/cc.c`) with Unix-style stage control.
 - preprocessing stage (`-E`) via system `cpp`.
@@ -14,6 +14,7 @@ Phase-3 (cross-target + optimizer slice) is implemented:
   - AST to SSA-like lowering
   - SSA middle-end optimization passes (`-O1+`): constant folding + dead temp elimination
   - GAS emitter for x86-64 and x86-32
+  - backend stack-slot compaction (linear-scan style slot reuse) to reduce frame size
 - existing SSA utilities remain available:
   - `ir-verifier`
   - `ir-normalize`
@@ -25,9 +26,8 @@ Native C support is intentionally limited for now:
 - expressions: numeric literals, identifiers, `+ - * /`, parentheses, function calls, assignment expressions
 - function declarations/definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
-- i386 ABI lowering for integer subset with cdecl stack args/params
+- i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)
-- i386 floating-point codegen is not implemented yet (x86-64 `double` path remains supported)
 - no control-flow statements (`if`, `for`, `while`, `switch`) yet
 - no pointers/structs/arrays yet
 

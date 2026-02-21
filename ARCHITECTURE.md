@@ -227,9 +227,10 @@ These components are essential for booting and basic system operation.
   - `middle/passes/opt.c` provides phase-3 optimization passes (constant folding + dead temporary elimination) at `-O1+`
   - `backend/emit_s.c` emits:
     - SysV AMD64 GAS assembly with stack-frame/value-slot lowering, integer/SSE2 scalar ops, variadic call `%al` metadata, and register+stack argument ABI mapping
-    - i386 cdecl integer ABI lowering (`.code32`, stack argument passing) for `-m32`
+    - i386 cdecl ABI lowering (`.code32`) for integer and double subset
+  - phase-4 backend tuning adds stack-slot reuse (live-range based slot recycling) to reduce per-function frame footprint for both x86_64 and i386 emission.
 - **Verifier Coverage:** Existing SSA verifier enforces block terminators, phi placement/arity, unique defs, use-before-def, and dominance checks.
-- **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases, variadic calls, optimization behavior, and `-m32` ELF32 object generation), staged assembly/linking, and bootstrap fallback behavior.
+- **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases, variadic calls, optimization behavior, `-m32` ELF32 object generation including `double`, and stack-slot pressure/frame-size regressions), staged assembly/linking, and bootstrap fallback behavior.
 - **Integration Path:** Expand native subset toward full C99 while preserving current driver UX and `-emit-ssa` observability; keep bootstrap mode only as temporary compatibility path.
 
 ## `usr.lib/elf`

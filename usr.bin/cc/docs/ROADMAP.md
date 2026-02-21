@@ -37,5 +37,13 @@
 - Middle-end pass pipeline is active at `-O1+`:
   - SSA constant folding
   - dead temporary elimination for pure SSA instructions
-- Current limitation:
-  - i386 floating-point codegen is intentionally rejected with diagnostics (not yet lowered to x87/SSE ABI rules).
+
+## Phase 4
+- Backend quality tuning:
+  - stack-slot reuse allocator added in emitter (reuses dead SSA value slots, reducing frame size and memory traffic).
+- x86 parity improvement:
+  - i386 backend now supports `double` constants/arithmetic/conversions/calls/returns for current subset.
+  - i386/x86_64 share the same typed SSA lowering path; backend selects ABI-specific emission.
+- Regression coverage expanded:
+  - `-m32` `double` assembly/object generation checks.
+  - slot-pressure frame-size regression check for stack-slot reuse.

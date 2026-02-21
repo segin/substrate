@@ -16,6 +16,12 @@ typedef struct {
     size_t index;
 } abi_loc_t;
 
+typedef struct {
+    int *slot_of;
+    int slot_count;
+    int slot_size;
+} slot_layout_t;
+
 static const char *arg_reg64_gpr(size_t idx) {
     static const char *regs[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
     if (idx >= sizeof(regs) / sizeof(regs[0])) {
@@ -33,10 +39,6 @@ static const char *arg_reg64_xmm(size_t idx) {
     return regs[idx];
 }
 
-static int val_off(int v, int slot_size) {
-    return -slot_size * (v + 1);
-}
-
 static void set_diag(cc_diag_t *d, const char *msg) {
     if (d == NULL || d->message[0] != '\0') {
         return;
@@ -44,6 +46,136 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     d->line = 0;
     d->col = 0;
     snprintf(d->message, sizeof(d->message), "%s", msg);
+}
+
+static int slot_off(const slot_layout_t *lay, int v) {
+    return -lay->slot_size * (lay->slot_of[v] + 1);
+}
+
+static void slot_layout_free(slot_layout_t *lay) {
+    if (lay == NULL) {
+        return;
+    }
+    free(lay->slot_of);
+    lay->slot_of = NULL;
+    lay->slot_count = 0;
+    lay->slot_size = 0;
+}
+
+static int allocate_slot(int *free_slots, int *free_count, int *next_slot) {
+    int i;
+    int best_i = -1;
+    int best_slot = 0;
+
+    if (*free_count == 0) {
+        return (*next_slot)++;
+    }
+
+    for (i = 0; i < *free_count; ++i) {
+        if (best_i < 0 || free_slots[i] < best_slot) {
+            best_i = i;
+            best_slot = free_slots[i];
+        }
+    }
+    free_slots[best_i] = free_slots[*free_count - 1];
+    (*free_count)--;
+    return best_slot;
+}
+
+static void mark_use(int *last_use, int nvals, int v, int at) {
+    if (v < 0 || v >= nvals) {
+        return;
+    }
+    if (at > last_use[v]) {
+        last_use[v] = at;
+    }
+}
+
+static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *out, cc_diag_t *diag) {
+    int nvals;
+    int ninstr;
+    int *def_at;
+    int *last_use;
+    int *active_vals;
+    int active_count = 0;
+    int *free_slots;
+    int free_count = 0;
+    int next_slot = 0;
+    int i;
+    int j;
+
+    memset(out, 0, sizeof(*out));
+    out->slot_size = slot_size;
+
+    if (f->value_count <= 0) {
+        return 0;
+    }
+
+    nvals = f->value_count;
+    ninstr = (int)f->instr_count;
+
+    out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
+    def_at = (int *)malloc((size_t)nvals * sizeof(*def_at));
+    last_use = (int *)malloc((size_t)nvals * sizeof(*last_use));
+    active_vals = (int *)malloc((size_t)nvals * sizeof(*active_vals));
+    free_slots = (int *)malloc((size_t)nvals * sizeof(*free_slots));
+    if (out->slot_of == NULL || def_at == NULL || last_use == NULL || active_vals == NULL || free_slots == NULL) {
+        free(def_at);
+        free(last_use);
+        free(active_vals);
+        free(free_slots);
+        slot_layout_free(out);
+        set_diag(diag, "out of memory building stack slot layout");
+        return -1;
+    }
+
+    for (i = 0; i < nvals; ++i) {
+        out->slot_of[i] = -1;
+        def_at[i] = ninstr;
+        last_use[i] = -1;
+    }
+
+    for (i = 0; i < ninstr; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t a;
+        if (in->dst >= 0 && in->dst < nvals && i < def_at[in->dst]) {
+            def_at[in->dst] = i;
+        }
+        mark_use(last_use, nvals, in->lhs, i);
+        mark_use(last_use, nvals, in->rhs, i);
+        for (a = 0; a < in->arg_count; ++a) {
+            mark_use(last_use, nvals, in->args[a], i);
+        }
+    }
+
+    for (i = 0; i < nvals; ++i) {
+        int def_i = def_at[i];
+        if (def_i == ninstr) {
+            def_i = 0;
+        }
+
+        for (j = 0; j < active_count;) {
+            int av = active_vals[j];
+            if (last_use[av] < def_i) {
+                free_slots[free_count++] = out->slot_of[av];
+                active_vals[j] = active_vals[active_count - 1];
+                active_count--;
+                continue;
+            }
+            j++;
+        }
+
+        out->slot_of[i] = allocate_slot(free_slots, &free_count, &next_slot);
+        active_vals[active_count++] = i;
+    }
+
+    out->slot_count = next_slot;
+
+    free(def_at);
+    free(last_use);
+    free(active_vals);
+    free(free_slots);
+    return 0;
 }
 
 static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index) {
@@ -127,8 +259,14 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *f = &m->funcs[i];
+        slot_layout_t lay;
         size_t j;
-        int frame = (f->value_count * 8 + 15) & ~15;
+        int frame;
+
+        if (build_slot_layout(f, 8, &lay, diag) != 0) {
+            return -1;
+        }
+        frame = (lay.slot_count * 8 + 15) & ~15;
 
         fprintf(fp, "\n.globl %s\n", f->name);
         fprintf(fp, ".type %s, @function\n", f->name);
@@ -162,25 +300,27 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 if (loc.kind == ABI_LOC_XMM) {
                     const char *reg = arg_reg64_xmm(loc.index);
                     if (reg == NULL) {
+                        slot_layout_free(&lay);
                         set_diag(diag, "unsupported floating parameter register index");
                         return -1;
                     }
-                    fprintf(fp, "\tmovsd %s, %d(%%rbp)\n", reg, val_off(in->dst, 8));
+                    fprintf(fp, "\tmovsd %s, %d(%%rbp)\n", reg, slot_off(&lay, in->dst));
                 } else if (loc.kind == ABI_LOC_GPR) {
                     const char *reg = arg_reg64_gpr(loc.index);
                     if (reg == NULL) {
+                        slot_layout_free(&lay);
                         set_diag(diag, "unsupported integer parameter register index");
                         return -1;
                     }
-                    fprintf(fp, "\tmovq %s, %d(%%rbp)\n", reg, val_off(in->dst, 8));
+                    fprintf(fp, "\tmovq %s, %d(%%rbp)\n", reg, slot_off(&lay, in->dst));
                 } else {
                     int poff = 16 + (int)(loc.index * 8);
                     if (vt == CC_VAL_F64) {
                         fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", poff);
-                        fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", val_off(in->dst, 8));
+                        fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                     } else {
                         fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", poff);
-                        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", val_off(in->dst, 8));
+                        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                     }
                 }
                 break;
@@ -194,10 +334,10 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     } cvt;
                     cvt.d = in->fimm;
                     fprintf(fp, "\tmovabsq $0x%llx, %%rax\n", (unsigned long long)cvt.u);
-                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", val_off(in->dst, 8));
+                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
                     fprintf(fp, "\tmovq $%ld, %%rax\n", in->imm);
-                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", val_off(in->dst, 8));
+                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 }
                 break;
 
@@ -206,41 +346,41 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_MUL:
             case CC_SSA_DIV:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", val_off(in->lhs, 8));
+                    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
                     if (in->op == CC_SSA_ADD) {
-                        fprintf(fp, "\taddsd %d(%%rbp), %%xmm0\n", val_off(in->rhs, 8));
+                        fprintf(fp, "\taddsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_SUB) {
-                        fprintf(fp, "\tsubsd %d(%%rbp), %%xmm0\n", val_off(in->rhs, 8));
+                        fprintf(fp, "\tsubsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_MUL) {
-                        fprintf(fp, "\tmulsd %d(%%rbp), %%xmm0\n", val_off(in->rhs, 8));
+                        fprintf(fp, "\tmulsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
                     } else {
-                        fprintf(fp, "\tdivsd %d(%%rbp), %%xmm0\n", val_off(in->rhs, 8));
+                        fprintf(fp, "\tdivsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
                     }
-                    fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", val_off(in->dst, 8));
+                    fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
-                    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", val_off(in->lhs, 8));
+                    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                     if (in->op == CC_SSA_ADD) {
-                        fprintf(fp, "\taddq %d(%%rbp), %%rax\n", val_off(in->rhs, 8));
+                        fprintf(fp, "\taddq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_SUB) {
-                        fprintf(fp, "\tsubq %d(%%rbp), %%rax\n", val_off(in->rhs, 8));
+                        fprintf(fp, "\tsubq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
                     } else if (in->op == CC_SSA_MUL) {
-                        fprintf(fp, "\timulq %d(%%rbp), %%rax\n", val_off(in->rhs, 8));
+                        fprintf(fp, "\timulq %d(%%rbp), %%rax\n", slot_off(&lay, in->rhs));
                     } else {
                         fprintf(fp, "\tcqto\n");
-                        fprintf(fp, "\tidivq %d(%%rbp)\n", val_off(in->rhs, 8));
+                        fprintf(fp, "\tidivq %d(%%rbp)\n", slot_off(&lay, in->rhs));
                     }
-                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", val_off(in->dst, 8));
+                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 }
                 break;
 
             case CC_SSA_I2F:
-                fprintf(fp, "\tcvtsi2sdq %d(%%rbp), %%xmm0\n", val_off(in->lhs, 8));
-                fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", val_off(in->dst, 8));
+                fprintf(fp, "\tcvtsi2sdq %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 break;
 
             case CC_SSA_F2I:
-                fprintf(fp, "\tcvttsd2siq %d(%%rbp), %%rax\n", val_off(in->lhs, 8));
-                fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", val_off(in->dst, 8));
+                fprintf(fp, "\tcvttsd2siq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 break;
 
             case CC_SSA_CALL: {
@@ -255,6 +395,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 if (in->arg_count > 0) {
                     locs = (abi_loc_t *)calloc(in->arg_count, sizeof(*locs));
                     if (locs == NULL) {
+                        slot_layout_free(&lay);
                         set_diag(diag, "out of memory classifying call arguments");
                         return -1;
                     }
@@ -269,27 +410,27 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tsubq $%zu, %%rsp\n", stack_total);
                 }
                 for (a = 0; a < in->arg_count; ++a) {
-                    cc_value_type_t vt = f->value_types[in->args[a]];
                     if (locs[a].kind == ABI_LOC_XMM) {
                         const char *reg = arg_reg64_xmm(locs[a].index);
                         if (reg == NULL) {
                             free(locs);
+                            slot_layout_free(&lay);
                             set_diag(diag, "call with unsupported floating argument index");
                             return -1;
                         }
-                        fprintf(fp, "\tmovsd %d(%%rbp), %s\n", val_off(in->args[a], 8), reg);
+                        fprintf(fp, "\tmovsd %d(%%rbp), %s\n", slot_off(&lay, in->args[a]), reg);
                     } else if (locs[a].kind == ABI_LOC_GPR) {
                         const char *reg = arg_reg64_gpr(locs[a].index);
                         if (reg == NULL) {
                             free(locs);
+                            slot_layout_free(&lay);
                             set_diag(diag, "call with unsupported integer argument index");
                             return -1;
                         }
-                        fprintf(fp, "\tmovq %d(%%rbp), %s\n", val_off(in->args[a], 8), reg);
+                        fprintf(fp, "\tmovq %d(%%rbp), %s\n", slot_off(&lay, in->args[a]), reg);
                     } else {
                         size_t off = locs[a].index * 8;
-                        (void)vt;
-                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", val_off(in->args[a], 8));
+                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->args[a]));
                         fprintf(fp, "\tmovq %%rax, %zu(%%rsp)\n", off);
                     }
                 }
@@ -303,9 +444,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 free(locs);
                 if (in->dst >= 0) {
                     if (f->value_types[in->dst] == CC_VAL_F64) {
-                        fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", val_off(in->dst, 8));
+                        fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                     } else {
-                        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", val_off(in->dst, 8));
+                        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                     }
                 }
                 break;
@@ -314,9 +455,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_RET:
                 if (in->lhs >= 0) {
                     if (f->ret_type == CC_VAL_F64) {
-                        fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", val_off(in->lhs, 8));
+                        fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
                     } else {
-                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", val_off(in->lhs, 8));
+                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                     }
                 }
                 fprintf(fp, "\tleave\n");
@@ -332,6 +473,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             fprintf(fp, "\t.cfi_endproc\n");
         }
         fprintf(fp, ".size %s, .-%s\n", f->name, f->name);
+        slot_layout_free(&lay);
     }
 
     return 0;
@@ -355,15 +497,14 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *f = &m->funcs[i];
+        slot_layout_t lay;
         size_t j;
-        int frame = (f->value_count * 4 + 15) & ~15;
+        int frame;
 
-        for (j = 0; j < f->param_count; ++j) {
-            if (f->param_types[j] == CC_VAL_F64) {
-                set_diag(diag, "i386 backend does not yet support double parameters");
-                return -1;
-            }
+        if (build_slot_layout(f, 8, &lay, diag) != 0) {
+            return -1;
         }
+        frame = (lay.slot_count * 8 + 15) & ~15;
 
         fprintf(fp, "\n.globl %s\n", f->name);
         fprintf(fp, ".type %s, @function\n", f->name);
@@ -393,18 +534,35 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             switch (in->op) {
             case CC_SSA_PARAM: {
                 int poff = i386_param_offset(f, in->param_index);
-                fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", poff);
-                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", val_off(in->dst, 4));
+                if (f->value_types[in->dst] == CC_VAL_F64) {
+                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", poff);
+                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", poff + 4);
+                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst) + 4);
+                } else {
+                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", poff);
+                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                }
                 break;
             }
 
             case CC_SSA_CONST:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    set_diag(diag, "i386 backend does not yet support double constants");
-                    return -1;
+                    union {
+                        double d;
+                        uint64_t u;
+                    } cvt;
+                    uint32_t lo;
+                    uint32_t hi;
+                    cvt.d = in->fimm;
+                    lo = (uint32_t)(cvt.u & 0xffffffffu);
+                    hi = (uint32_t)(cvt.u >> 32);
+                    fprintf(fp, "\tmovl $0x%x, %d(%%ebp)\n", lo, slot_off(&lay, in->dst));
+                    fprintf(fp, "\tmovl $0x%x, %d(%%ebp)\n", hi, slot_off(&lay, in->dst) + 4);
+                } else {
+                    fprintf(fp, "\tmovl $%ld, %%eax\n", in->imm);
+                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 }
-                fprintf(fp, "\tmovl $%ld, %%eax\n", in->imm);
-                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", val_off(in->dst, 4));
                 break;
 
             case CC_SSA_ADD:
@@ -412,38 +570,58 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_MUL:
             case CC_SSA_DIV:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    set_diag(diag, "i386 backend does not yet support double arithmetic");
-                    return -1;
-                }
-                fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", val_off(in->lhs, 4));
-                if (in->op == CC_SSA_ADD) {
-                    fprintf(fp, "\taddl %d(%%ebp), %%eax\n", val_off(in->rhs, 4));
-                } else if (in->op == CC_SSA_SUB) {
-                    fprintf(fp, "\tsubl %d(%%ebp), %%eax\n", val_off(in->rhs, 4));
-                } else if (in->op == CC_SSA_MUL) {
-                    fprintf(fp, "\timull %d(%%ebp), %%eax\n", val_off(in->rhs, 4));
+                    fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
+                    if (in->op == CC_SSA_ADD) {
+                        fprintf(fp, "\taddsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_SUB) {
+                        fprintf(fp, "\tsubsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_MUL) {
+                        fprintf(fp, "\tmulsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
+                    } else {
+                        fprintf(fp, "\tdivsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
+                    }
+                    fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 } else {
-                    fprintf(fp, "\tcltd\n");
-                    fprintf(fp, "\tidivl %d(%%ebp)\n", val_off(in->rhs, 4));
+                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                    if (in->op == CC_SSA_ADD) {
+                        fprintf(fp, "\taddl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_SUB) {
+                        fprintf(fp, "\tsubl %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
+                    } else if (in->op == CC_SSA_MUL) {
+                        fprintf(fp, "\timull %d(%%ebp), %%eax\n", slot_off(&lay, in->rhs));
+                    } else {
+                        fprintf(fp, "\tcltd\n");
+                        fprintf(fp, "\tidivl %d(%%ebp)\n", slot_off(&lay, in->rhs));
+                    }
+                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 }
-                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", val_off(in->dst, 4));
                 break;
 
             case CC_SSA_I2F:
+                fprintf(fp, "\tcvtsi2sdl %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+
             case CC_SSA_F2I:
-                set_diag(diag, "i386 backend does not yet support floating conversions");
-                return -1;
+                fprintf(fp, "\tcvttsd2sil %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
 
             case CC_SSA_CALL: {
                 long stack_bytes = 0;
                 long a;
                 for (a = (long)in->arg_count - 1; a >= 0; --a) {
                     if (f->value_types[in->args[a]] == CC_VAL_F64) {
-                        set_diag(diag, "i386 backend does not yet support double call arguments");
-                        return -1;
+                        fprintf(fp, "\tsubl $8, %%esp\n");
+                        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->args[a]));
+                        fprintf(fp, "\tmovl %%eax, 0(%%esp)\n");
+                        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->args[a]) + 4);
+                        fprintf(fp, "\tmovl %%eax, 4(%%esp)\n");
+                        stack_bytes += 8;
+                    } else {
+                        fprintf(fp, "\tpushl %d(%%ebp)\n", slot_off(&lay, in->args[a]));
+                        stack_bytes += 4;
                     }
-                    fprintf(fp, "\tpushl %d(%%ebp)\n", val_off(in->args[a], 4));
-                    stack_bytes += 4;
                 }
                 fprintf(fp, "\tcall %s\n", in->sym);
                 if (stack_bytes > 0) {
@@ -451,10 +629,10 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 }
                 if (in->dst >= 0) {
                     if (f->value_types[in->dst] == CC_VAL_F64) {
-                        set_diag(diag, "i386 backend does not yet support double returns");
-                        return -1;
+                        fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(&lay, in->dst));
+                    } else {
+                        fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                     }
-                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", val_off(in->dst, 4));
                 }
                 break;
             }
@@ -462,10 +640,10 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_RET:
                 if (in->lhs >= 0) {
                     if (f->ret_type == CC_VAL_F64) {
-                        set_diag(diag, "i386 backend does not yet support double return values");
-                        return -1;
+                        fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(&lay, in->lhs));
+                    } else {
+                        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                     }
-                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", val_off(in->lhs, 4));
                 }
                 fprintf(fp, "\tleave\n");
                 if (emit_debug) {
@@ -480,6 +658,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             fprintf(fp, "\t.cfi_endproc\n");
         }
         fprintf(fp, ".size %s, .-%s\n", f->name, f->name);
+        slot_layout_free(&lay);
     }
 
     return 0;
