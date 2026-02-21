@@ -23,6 +23,10 @@ int main(void) {
         free(p);
         return 3;
     }
+    if ((unsigned long long)sizeof(int *) != (unsigned long long)sizeof(void *)) {
+        free(p);
+        return 4;
+    }
 
     free(p);
     return 0;
