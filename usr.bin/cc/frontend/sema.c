@@ -630,6 +630,31 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->value_type = CC_TYPE_INT;
             return 0;
         }
+        if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
+            if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type)) {
+                if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID) {
+                    set_diag(diag, "pointer arithmetic on void pointer is unsupported");
+                    return -1;
+                }
+                e->value_type = e->lhs->value_type;
+                return 0;
+            }
+            if (e->op == CC_BIN_ADD && is_integral_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
+                if (ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
+                    set_diag(diag, "pointer arithmetic on void pointer is unsupported");
+                    return -1;
+                }
+                e->value_type = e->rhs->value_type;
+                return 0;
+            }
+            if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
+                set_diag(diag, "unsupported pointer arithmetic form");
+                return -1;
+            }
+        } else if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
+            set_diag(diag, "arithmetic operators require numeric operands");
+            return -1;
+        }
         if (e->op == CC_BIN_MOD) {
             if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
                 set_diag(diag, "modulo operator requires integer operands");

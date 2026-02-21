@@ -447,7 +447,28 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tmovsd (%%rax), %%xmm0\n");
                     fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
-                    fprintf(fp, "\tmovq (%%rax), %%rax\n");
+                    long mem_size = in->imm > 0 ? in->imm : 8;
+                    if (mem_size == 1) {
+                        if (in->is_unsigned) {
+                            fprintf(fp, "\tmovzbl (%%rax), %%eax\n");
+                        } else {
+                            fprintf(fp, "\tmovsbq (%%rax), %%rax\n");
+                        }
+                    } else if (mem_size == 2) {
+                        if (in->is_unsigned) {
+                            fprintf(fp, "\tmovzwl (%%rax), %%eax\n");
+                        } else {
+                            fprintf(fp, "\tmovswq (%%rax), %%rax\n");
+                        }
+                    } else if (mem_size == 4) {
+                        if (in->is_unsigned) {
+                            fprintf(fp, "\tmovl (%%rax), %%eax\n");
+                        } else {
+                            fprintf(fp, "\tmovslq (%%rax), %%rax\n");
+                        }
+                    } else {
+                        fprintf(fp, "\tmovq (%%rax), %%rax\n");
+                    }
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 }
                 break;
@@ -458,8 +479,17 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
                     fprintf(fp, "\tmovsd %%xmm0, (%%rax)\n");
                 } else {
+                    long mem_size = in->imm > 0 ? in->imm : 8;
                     fprintf(fp, "\tmovq %d(%%rbp), %%rdx\n", slot_off(&lay, in->rhs));
-                    fprintf(fp, "\tmovq %%rdx, (%%rax)\n");
+                    if (mem_size == 1) {
+                        fprintf(fp, "\tmovb %%dl, (%%rax)\n");
+                    } else if (mem_size == 2) {
+                        fprintf(fp, "\tmovw %%dx, (%%rax)\n");
+                    } else if (mem_size == 4) {
+                        fprintf(fp, "\tmovl %%edx, (%%rax)\n");
+                    } else {
+                        fprintf(fp, "\tmovq %%rdx, (%%rax)\n");
+                    }
                 }
                 break;
 
@@ -776,7 +806,14 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     fprintf(fp, "\tmovsd (%%eax), %%xmm0\n");
                     fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 } else {
-                    fprintf(fp, "\tmovl (%%eax), %%eax\n");
+                    long mem_size = in->imm > 0 ? in->imm : 4;
+                    if (mem_size == 1) {
+                        fprintf(fp, "\t%s (%%eax), %%eax\n", in->is_unsigned ? "movzbl" : "movsbl");
+                    } else if (mem_size == 2) {
+                        fprintf(fp, "\t%s (%%eax), %%eax\n", in->is_unsigned ? "movzwl" : "movswl");
+                    } else {
+                        fprintf(fp, "\tmovl (%%eax), %%eax\n");
+                    }
                     fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 }
                 break;
@@ -787,8 +824,15 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
                     fprintf(fp, "\tmovsd %%xmm0, (%%eax)\n");
                 } else {
+                    long mem_size = in->imm > 0 ? in->imm : 4;
                     fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", slot_off(&lay, in->rhs));
-                    fprintf(fp, "\tmovl %%edx, (%%eax)\n");
+                    if (mem_size == 1) {
+                        fprintf(fp, "\tmovb %%dl, (%%eax)\n");
+                    } else if (mem_size == 2) {
+                        fprintf(fp, "\tmovw %%dx, (%%eax)\n");
+                    } else {
+                        fprintf(fp, "\tmovl %%edx, (%%eax)\n");
+                    }
                 }
                 break;
 

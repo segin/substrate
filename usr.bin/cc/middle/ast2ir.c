@@ -49,8 +49,47 @@ static cc_value_type_t type_to_val(cc_type_t t) {
     return (t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE) ? CC_VAL_F64 : CC_VAL_I64;
 }
 
+static int is_pointer_type(cc_type_t t) {
+    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_DOUBLE;
+}
+
 static int is_unsigned_integral_type(cc_type_t t) {
     return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
+}
+
+static int is_unsigned_load_type(cc_type_t t) {
+    return t == CC_TYPE_BOOL || is_unsigned_integral_type(t) || is_pointer_type(t);
+}
+
+static cc_type_t ptr_base_type(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_PTR_VOID:
+        return CC_TYPE_VOID;
+    case CC_TYPE_PTR_BOOL:
+        return CC_TYPE_BOOL;
+    case CC_TYPE_PTR_CHAR:
+        return CC_TYPE_CHAR;
+    case CC_TYPE_PTR_UCHAR:
+        return CC_TYPE_UCHAR;
+    case CC_TYPE_PTR_SHORT:
+        return CC_TYPE_SHORT;
+    case CC_TYPE_PTR_USHORT:
+        return CC_TYPE_USHORT;
+    case CC_TYPE_PTR_INT:
+        return CC_TYPE_INT;
+    case CC_TYPE_PTR_UINT:
+        return CC_TYPE_UINT;
+    case CC_TYPE_PTR_LONG_LONG:
+        return CC_TYPE_LONG_LONG;
+    case CC_TYPE_PTR_ULONG_LONG:
+        return CC_TYPE_ULONG_LONG;
+    case CC_TYPE_PTR_FLOAT:
+        return CC_TYPE_FLOAT;
+    case CC_TYPE_PTR_DOUBLE:
+        return CC_TYPE_DOUBLE;
+    default:
+        return CC_TYPE_VOID;
+    }
 }
 
 static cc_type_t integral_promo_type(cc_type_t t) {
@@ -427,6 +466,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     }
 
     case CC_EXPR_DEREF:
+    {
+        long mem_size = type_size_bytes(e->value_type);
+        if (mem_size <= 0) {
+            set_diag(diag, "unsupported dereference type size in lowering");
+            return -1;
+        }
         lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
         if (lhs < 0) {
             return -1;
@@ -439,10 +484,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.dst = new_value(sf, type_to_val(e->value_type));
         in.lhs = lhs;
         in.rhs = -1;
+        in.imm = mem_size;
+        in.is_unsigned = is_unsigned_load_type(e->value_type) ? 1 : 0;
         if (in.dst < 0 || push_instr(sf, in) != 0) {
             return -1;
         }
         return in.dst;
+    }
 
     case CC_EXPR_BIN: {
         cc_value_type_t vt;
@@ -573,6 +621,61 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.dst = new_value(sf, CC_VAL_I64);
             in.lhs = lhs;
             in.rhs = rhs;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                return -1;
+            }
+            return in.dst;
+        }
+
+        if ((e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && is_pointer_type(e->value_type)) {
+            int ptrv = -1;
+            int idxv = -1;
+            long elem_size;
+            cc_ssa_instr_t mul;
+
+            if (is_pointer_type(e->lhs->value_type)) {
+                ptrv = lhs;
+                idxv = rhs;
+            } else if (e->op == CC_BIN_ADD && is_pointer_type(e->rhs->value_type)) {
+                ptrv = rhs;
+                idxv = lhs;
+            } else {
+                set_diag(diag, "unsupported pointer arithmetic form in lowering");
+                return -1;
+            }
+
+            ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
+            idxv = cast_value(sf, idxv, CC_VAL_I64, diag);
+            if (ptrv < 0 || idxv < 0) {
+                return -1;
+            }
+
+            elem_size = type_size_bytes(ptr_base_type(e->value_type));
+            if (elem_size <= 0) {
+                set_diag(diag, "unsupported pointer base type in lowering");
+                return -1;
+            }
+            if (elem_size != 1) {
+                int csz = emit_const_i64_instr(sf, elem_size);
+                if (csz < 0) {
+                    return -1;
+                }
+                memset(&mul, 0, sizeof(mul));
+                mul.op = CC_SSA_MUL;
+                mul.dst = new_value(sf, CC_VAL_I64);
+                mul.lhs = idxv;
+                mul.rhs = csz;
+                if (mul.dst < 0 || push_instr(sf, mul) != 0) {
+                    return -1;
+                }
+                idxv = mul.dst;
+            }
+
+            memset(&in, 0, sizeof(in));
+            in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
+            in.dst = new_value(sf, CC_VAL_I64);
+            in.lhs = ptrv;
+            in.rhs = idxv;
             if (in.dst < 0 || push_instr(sf, in) != 0) {
                 return -1;
             }
@@ -785,7 +888,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
 
         if (e->lhs != NULL && e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
+            long mem_size = type_size_bytes(e->lhs->value_type);
             int ptrv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs->lhs, diag);
+            if (mem_size <= 0) {
+                set_diag(diag, "unsupported pointer store type size in lowering");
+                return -1;
+            }
             if (ptrv < 0) {
                 return -1;
             }
@@ -798,6 +906,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.dst = -1;
             in.lhs = ptrv;
             in.rhs = rhs;
+            in.imm = mem_size;
             if (push_instr(sf, in) != 0) {
                 set_diag(diag, "out of memory appending pointer store");
                 return -1;
