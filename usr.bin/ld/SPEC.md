@@ -1,7 +1,7 @@
-# ld.x86 Specification
+# ld Specification
 
 ## Scope
-`ld.x86` is a linker driver for i386 and x86_64.
+`ld` is a linker driver for i386 and x86_64.
 It delegates actual link work to host `ld` with explicit emulation mode and then
 verifies output ABI metadata via `libelfobj`.
 
@@ -17,7 +17,7 @@ verifies output ABI metadata via `libelfobj`.
 - Output ELF class/machine/type mismatch is fatal.
 
 ## ABI/Compatibility Notes
-- `ld.x86` supports complete practical linker semantics available from host `ld`
+- `ld` supports complete practical linker semantics available from host `ld`
   because it forwards options/inputs directly.
 - `libelfobj` is used as a verification layer for resulting ELF ABI shape rather
   than for relocation/layout synthesis in this driver.

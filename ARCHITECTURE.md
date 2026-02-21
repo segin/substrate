@@ -140,7 +140,7 @@ The system follows a monolithic kernel architecture with a strict separation bet
 ### Core Userland (`bin/`, `lib/`)
 These components are essential for booting and basic system operation.
 - **`bin/`**: Fundamental Unix utilities (`sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, `kill`, `sync`, etc.).
-- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as.x86`, `ld.x86`).
+- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`).
 - **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:
     - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.
@@ -163,10 +163,10 @@ These components are essential for booting and basic system operation.
 - `sbin/`: System binaries (Currently empty/stubbed as we rely on external rootfs/busybox for init).
 
 ### Toolchain Utilities (`usr.bin/as`, `usr.bin/ld`)
-- **`as.x86`**: x86 assembler driver for i386/x86_64.
+- **`as`**: x86 assembler driver for i386/x86_64.
   - For complete ISA coverage, it forwards assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).
-- **`ld.x86`**: linker prototype built on `libelfobj`.
+- **`ld`**: linker prototype built on `libelfobj`.
   - Merges objects/archives and emits ET_REL/ET_EXEC/ET_DYN outputs.
   - Current limitation: `libelfobj` validator can reject some compiler-style relocation layouts; full relocation+layout validation is pending.
 
