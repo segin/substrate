@@ -3,6 +3,7 @@ include ../../Makefile.inc
 PROG = as.x86
 SRCS = as.c
 LDADD += ../../usr.lib/elf/libelfobj.a
+USER_CFLAGS += -iquote ../../include
 
 include ../../Makefile.bin.inc
 
