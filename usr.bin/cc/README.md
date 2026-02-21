@@ -21,7 +21,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - C95 lexical forms: digraph braces (`<%`/`%>`) and trigraph normalization
   - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`, `long long`, `float`, qualifiers/storage-class keywords)
   - C99 `for`-init declarations with loop-local scope
-  - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and `++/--`
+  - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and prefix/postfix `++/--` with C expression-value semantics
   - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), and `sizeof` for supported scalar types
   - control-flow extensions: C labels + `goto`
 - existing SSA utilities remain available:

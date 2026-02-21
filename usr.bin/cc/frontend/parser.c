@@ -571,36 +571,19 @@ static cc_expr_t *new_bin_expr(cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs) {
     return e;
 }
 
-static cc_expr_t *new_assign_expr(const char *name, cc_expr_t *rhs) {
-    cc_expr_t *e = new_expr(CC_EXPR_ASSIGN);
+static cc_expr_t *new_update_expr(const char *name, cc_binop_t op, int postfix) {
+    cc_expr_t *e = new_expr(CC_EXPR_UPDATE);
     if (e == NULL) {
-        free_expr(rhs);
         return NULL;
     }
     e->ident = xstrdup_n(name, strlen(name));
     if (e->ident == NULL) {
-        free_expr(rhs);
-        free(e);
+        free_expr(e);
         return NULL;
     }
-    e->rhs = rhs;
+    e->op = op;
+    e->update_postfix = postfix;
     return e;
-}
-
-static cc_expr_t *new_update_expr(const char *name, cc_binop_t op) {
-    cc_expr_t *lhs = new_ident_expr(name);
-    cc_expr_t *one = new_int_expr(1);
-    cc_expr_t *rhs;
-    if (lhs == NULL || one == NULL) {
-        free_expr(lhs);
-        free_expr(one);
-        return NULL;
-    }
-    rhs = new_bin_expr(op, lhs, one);
-    if (rhs == NULL) {
-        return NULL;
-    }
-    return new_assign_expr(name, rhs);
 }
 
 static cc_expr_t *parse_postfix(parser_t *p) {
@@ -612,7 +595,7 @@ static cc_expr_t *parse_postfix(parser_t *p) {
             free_expr(e);
             return NULL;
         }
-        upd = new_update_expr(e->ident, p->tok.kind == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB);
+        upd = new_update_expr(e->ident, p->tok.kind == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 1);
         free_expr(e);
         if (upd == NULL) {
             return NULL;
@@ -758,7 +741,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(rhs);
             return NULL;
         }
-        upd = new_update_expr(rhs->ident, op == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB);
+        upd = new_update_expr(rhs->ident, op == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 0);
         free_expr(rhs);
         return upd;
     }

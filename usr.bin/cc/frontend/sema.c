@@ -429,6 +429,23 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         return 0;
     }
 
+    case CC_EXPR_UPDATE: {
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
+        if (idx < 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "update of undeclared identifier: %s",
+                         e->ident ? e->ident : "<null>");
+            }
+            return -1;
+        }
+        if (!is_numeric_type(vars[idx].type)) {
+            set_diag(diag, "++/-- currently require numeric scalar operands");
+            return -1;
+        }
+        e->value_type = vars[idx].type;
+        return 0;
+    }
+
     case CC_EXPR_CAST:
         if (e->lhs == NULL) {
             set_diag(diag, "malformed cast expression");

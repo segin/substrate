@@ -676,6 +676,63 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         return vars[idx].value;
     }
 
+    case CC_EXPR_UPDATE: {
+        int idx = var_find_visible(vars, var_count, e->ident, depth);
+        cc_value_type_t want;
+        int one;
+        int cur;
+        int nextv;
+
+        if (idx < 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "update of unknown identifier during AST->SSA lowering: %s", e->ident);
+            }
+            return -1;
+        }
+
+        want = type_to_val(vars[idx].type);
+        cur = cast_value(sf, vars[idx].value, want, diag);
+        if (cur < 0) {
+            return -1;
+        }
+
+        one = emit_const_i64_instr(sf, 1);
+        if (one < 0) {
+            return -1;
+        }
+        one = cast_value(sf, one, want, diag);
+        if (one < 0) {
+            return -1;
+        }
+
+        memset(&in, 0, sizeof(in));
+        in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
+        in.dst = new_value(sf, want);
+        in.lhs = cur;
+        in.rhs = one;
+        if (in.dst < 0 || push_instr(sf, in) != 0) {
+            return -1;
+        }
+        nextv = in.dst;
+
+        if (e->update_postfix) {
+            int retv = new_value(sf, want);
+            if (retv < 0 || emit_mov_instr(sf, retv, vars[idx].value) != 0) {
+                return -1;
+            }
+            if (emit_mov_instr(sf, vars[idx].value, nextv) != 0) {
+                return -1;
+            }
+            return retv;
+        }
+
+        if (emit_mov_instr(sf, vars[idx].value, nextv) != 0) {
+            return -1;
+        }
+        return vars[idx].value;
+    }
+
     case CC_EXPR_CAST: {
         int v;
         if (e->lhs == NULL) {

@@ -48,6 +48,7 @@ typedef enum {
     CC_EXPR_BIN,
     CC_EXPR_CALL,
     CC_EXPR_ASSIGN,
+    CC_EXPR_UPDATE,
     CC_EXPR_CAST,
     CC_EXPR_SIZEOF,
     CC_EXPR_TERNARY
@@ -65,6 +66,7 @@ struct cc_expr {
     cc_expr_t *lhs;
     cc_expr_t *rhs;
     cc_expr_t *third;
+    int update_postfix;
     cc_type_t aux_type;
     cc_expr_t **args;
     size_t arg_count;
