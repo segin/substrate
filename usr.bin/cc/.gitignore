@@ -1,0 +1,5 @@
+cc
+ir-verifier
+ir-normalize
+ir-diff
+*.o

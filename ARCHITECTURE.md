@@ -206,16 +206,27 @@ These components are essential for booting and basic system operation.
 
 
 ## `usr.bin/cc`
-- **Goals:** Provide a deterministic textual SSA IR foundation for `usr.bin/cc` passes (parse, verify, normalize, compare) before full AST/MIR integration.
-- **Components:** `usr.bin/cc/` now includes:
-  - IR model/lifetime (`ir.h`, `ir.c`)
-  - textual parser (`parser.c`)
-  - SSA/CFG verifier (`verifier.c`)
-  - canonical serializer (`serialize.c`)
-  - tools (`ir-verifier`, `ir-normalize`, `ir-diff`)
-- **Verifier Coverage:** Enforces core SSA invariants (terminators, phi placement/arity, unique defs, use-before-def, dominance for non-phi uses, reachable CFG).
-- **Testing Strategy:** Host-executable regression tests under `tests/usr.bin/cc/` validate positive and negative IR cases plus normalization-equivalence checks.
-- **Integration Path:** Compiler stages can emit textual IR (`-emit-ssa`) to this verifier/normalizer and gate optimization/codegen on successful verification.
+- **Goals:** Build a C99 compiler pipeline under `usr.bin/cc` with SSA-centered middle-end and Unix-like `cc` driver behavior.
+- **Layout:** `usr.bin/cc/` now follows staged directories:
+  - `cmd/` (`cc.c`, optional wrapper stubs)
+  - `frontend/` (lexer/parser/sema active for phase-1 subset, plus preproc/builtin staging)
+  - `middle/` (AST->SSA lowering active for subset, SSA namespace, pass staging, legalize staging)
+  - `backend/` (GAS emitter active for subset; selection/regalloc/frame staged for expansion)
+  - `include/` (internal driver headers)
+  - retained SSA utilities (`ir-verifier`, `ir-normalize`, `ir-diff`)
+- **Phase-0+ Driver:** `cc` supports stage orchestration and options plumbing:
+  - `-E` preprocessing via system `cpp`
+  - `.s/.o` assembly/link path via system `as` and `ld`
+  - `-emit-ssa` routed to IR verification utility for textual IR workflows
+  - explicit temporary `--bootstrap-gcc` path for C->assembly fallback
+- **Native C Subset Pipeline:** In-tree compile path now exists for a strict subset:
+  - `frontend/lexer.c` + `frontend/parser.c` parse scalar `int`/`double`/`void` functions with declarations, assignments, calls, and returns
+  - `frontend/sema.c` resolves parameters/locals and validates subset constraints
+  - `middle/ast2ir.c` lowers AST to SSA-like instructions (`param`, `const`, arithmetic, typed casts, `call`, `ret`)
+  - `backend/emit_s.c` emits SysV AMD64 GAS assembly with stack-frame/value-slot lowering, integer/SSE2 scalar ops, variadic call `%al` metadata, and register+stack argument ABI mapping
+- **Verifier Coverage:** Existing SSA verifier enforces block terminators, phi placement/arity, unique defs, use-before-def, and dominance checks.
+- **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases and variadic calls), staged assembly/linking, and bootstrap fallback behavior.
+- **Integration Path:** Expand native subset toward full C99 while preserving current driver UX and `-emit-ssa` observability; keep bootstrap mode only as temporary compatibility path.
 
 ## `usr.lib/elf`
 - **Goals:** Provide a stable C API (`include/elfobj.h`) for reading, writing, validating, and linker-oriented manipulation of ELF objects without depending on ad-hoc parsers.
