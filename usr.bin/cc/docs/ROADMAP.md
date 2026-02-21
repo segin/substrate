@@ -68,3 +68,24 @@
   - x86_64 and i386 emitters both support `mov` SSA updates for integer and double values.
 - Optimizer safety:
   - constant-propagation state is cleared at label boundaries to avoid incorrect cross-branch folding in linearized CFG streams.
+
+## Phase 7
+- C90 control-flow coverage expansion for current scalar subset:
+  - frontend/parser/sema now support `do ... while (...)`.
+  - frontend/parser/sema now support `switch (...) { case ...: ... default: ... }`.
+  - `break` is now valid in both loops and switches.
+  - `case`/`default` labels outside switch now produce semantic errors.
+- Middle-end lowering expansion:
+  - `do-while` lowering emits body-first loop shape with condition backedge.
+  - `switch` lowering emits compare/branch dispatch chains to case/default labels.
+- Regression coverage expanded:
+  - positive tests for do-while and switch/fallthrough/default behavior.
+  - negative tests for invalid case/default placement.
+
+## Phase 8
+- C95 lexical compatibility slice:
+  - digraph braces `<%` and `%>` are accepted as `{` and `}` in native lexer.
+  - trigraph sequences are normalized during source load (`??<`, `??>`, and related mappings).
+- Regression coverage expanded:
+  - positive tests compiling/running digraph and trigraph source forms.
+  - i386 emission checks for C95 lexical forms.

@@ -227,7 +227,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 }
 
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int loop_depth, int *saw_return, cc_diag_t *diag) {
+                      cc_type_t fn_ret_type, int loop_depth, int switch_depth, int *saw_return, cc_diag_t *diag) {
     size_t i;
 
     switch (s->kind) {
@@ -297,7 +297,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         {
             size_t saved = *var_count;
-            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth, saw_return, diag) != 0) {
+            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth, switch_depth,
+                           saw_return, diag) != 0) {
                 return -1;
             }
             for (i = saved; i < *var_count; ++i) {
@@ -307,7 +308,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         if (s->else_branch != NULL) {
             size_t saved = *var_count;
-            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret_type, loop_depth, saw_return, diag) != 0) {
+            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret_type, loop_depth, switch_depth,
+                           saw_return, diag) != 0) {
                 return -1;
             }
             for (i = saved; i < *var_count; ++i) {
@@ -322,6 +324,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             size_t saved = *var_count;
             for (i = 0; i < s->block_count; ++i) {
                 if (check_stmt(tu, &s->block_stmts[i], vars, var_count, depth + 1, fn_ret_type, loop_depth,
+                               switch_depth,
                                saw_return, diag) != 0) {
                     return -1;
                 }
@@ -345,7 +348,26 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "while condition cannot be void");
             return -1;
         }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth + 1, saw_return, diag);
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth + 1, switch_depth,
+                          saw_return, diag);
+
+    case CC_STMT_DO:
+        if (s->expr == NULL || s->then_branch == NULL) {
+            set_diag(diag, "malformed do-while statement");
+            return -1;
+        }
+        if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth + 1, switch_depth,
+                       saw_return, diag) != 0) {
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (s->expr->value_type == CC_TYPE_VOID) {
+            set_diag(diag, "do-while condition cannot be void");
+            return -1;
+        }
+        return 0;
 
     case CC_STMT_FOR:
         if (s->then_branch == NULL) {
@@ -367,11 +389,56 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (s->post_expr != NULL && check_expr(tu, s->post_expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth + 1, saw_return, diag);
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth + 1, switch_depth,
+                          saw_return, diag);
+
+    case CC_STMT_SWITCH:
+        if (s->expr == NULL || s->then_branch == NULL) {
+            set_diag(diag, "malformed switch statement");
+            return -1;
+        }
+        if (s->then_branch->kind != CC_STMT_BLOCK) {
+            set_diag(diag, "switch body must be a block statement");
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (s->expr->value_type != CC_TYPE_INT) {
+            set_diag(diag, "switch expression must be integer");
+            return -1;
+        }
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth, switch_depth + 1,
+                          saw_return, diag);
+
+    case CC_STMT_CASE:
+        if (switch_depth <= 0) {
+            set_diag(diag, "case label used outside switch");
+            return -1;
+        }
+        if (s->expr == NULL) {
+            set_diag(diag, "malformed case label");
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (s->expr->kind != CC_EXPR_INT) {
+            set_diag(diag, "case label must be an integer constant");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_DEFAULT:
+        if (switch_depth <= 0) {
+            set_diag(diag, "default label used outside switch");
+            return -1;
+        }
+        return 0;
 
     case CC_STMT_BREAK:
-        if (loop_depth <= 0) {
-            set_diag(diag, "break used outside loop");
+        if (loop_depth <= 0 && switch_depth <= 0) {
+            set_diag(diag, "break used outside loop/switch");
             return -1;
         }
         return 0;
@@ -465,9 +532,9 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         }
 
         for (j = 0; j < f->stmt_count; ++j) {
-            if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_type, 0, &saw_return, diag) != 0) {
-                goto fail_func;
-            }
+                if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_type, 0, 0, &saw_return, diag) != 0) {
+                    goto fail_func;
+                }
         }
 
         if (!saw_return && f->ret_type != CC_TYPE_VOID) {

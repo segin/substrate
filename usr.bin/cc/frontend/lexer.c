@@ -21,7 +21,11 @@ typedef enum {
     TOK_KW_IF,
     TOK_KW_ELSE,
     TOK_KW_WHILE,
+    TOK_KW_DO,
     TOK_KW_FOR,
+    TOK_KW_SWITCH,
+    TOK_KW_CASE,
+    TOK_KW_DEFAULT,
     TOK_KW_BREAK,
     TOK_KW_CONTINUE,
     TOK_ELLIPSIS,
@@ -30,6 +34,7 @@ typedef enum {
     TOK_LBRACE,
     TOK_RBRACE,
     TOK_COMMA,
+    TOK_COLON,
     TOK_SEMI,
     TOK_ASSIGN,
     TOK_EQ,
@@ -189,8 +194,21 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         } else if (out->len == 5 && out->start[0] == 'w' && out->start[1] == 'h' &&
                    out->start[2] == 'i' && out->start[3] == 'l' && out->start[4] == 'e') {
             out->kind = TOK_KW_WHILE;
+        } else if (out->len == 2 && out->start[0] == 'd' && out->start[1] == 'o') {
+            out->kind = TOK_KW_DO;
         } else if (out->len == 3 && out->start[0] == 'f' && out->start[1] == 'o' && out->start[2] == 'r') {
             out->kind = TOK_KW_FOR;
+        } else if (out->len == 6 && out->start[0] == 's' && out->start[1] == 'w' &&
+                   out->start[2] == 'i' && out->start[3] == 't' && out->start[4] == 'c' &&
+                   out->start[5] == 'h') {
+            out->kind = TOK_KW_SWITCH;
+        } else if (out->len == 4 && out->start[0] == 'c' && out->start[1] == 'a' &&
+                   out->start[2] == 's' && out->start[3] == 'e') {
+            out->kind = TOK_KW_CASE;
+        } else if (out->len == 7 && out->start[0] == 'd' && out->start[1] == 'e' &&
+                   out->start[2] == 'f' && out->start[3] == 'a' && out->start[4] == 'u' &&
+                   out->start[5] == 'l' && out->start[6] == 't') {
+            out->kind = TOK_KW_DEFAULT;
         } else if (out->len == 5 && out->start[0] == 'b' && out->start[1] == 'r' &&
                    out->start[2] == 'e' && out->start[3] == 'a' && out->start[4] == 'k') {
             out->kind = TOK_KW_BREAK;
@@ -259,6 +277,27 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     }
 
+    if (c == '<' && lx_peekn(lx, 1) == '%') {
+        out->kind = TOK_LBRACE;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+    if (c == '%' && lx_peekn(lx, 1) == '>') {
+        out->kind = TOK_RBRACE;
+        out->start = lx->src + lx->pos;
+        out->len = 2;
+        out->line = line;
+        out->col = col;
+        lx_adv(lx);
+        lx_adv(lx);
+        return 0;
+    }
+
     if (c == '=' && lx_peekn(lx, 1) == '=') {
         out->kind = TOK_EQ;
         out->start = lx->src + lx->pos;
@@ -318,6 +357,9 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     case ',':
         out->kind = TOK_COMMA;
+        return 0;
+    case ':':
+        out->kind = TOK_COLON;
         return 0;
     case ';':
         out->kind = TOK_SEMI;

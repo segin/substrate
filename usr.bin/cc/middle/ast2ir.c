@@ -434,6 +434,99 @@ static int emit_mov_instr(cc_ssa_function_t *sf, int dst, int src) {
     return push_instr(sf, in);
 }
 
+static int emit_const_i64_instr(cc_ssa_function_t *sf, long v) {
+    cc_ssa_instr_t in;
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_CONST;
+    in.dst = new_value(sf, CC_VAL_I64);
+    in.lhs = -1;
+    in.rhs = -1;
+    in.imm = v;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        return -1;
+    }
+    return in.dst;
+}
+
+typedef struct {
+    size_t stmt_index;
+    long value;
+    int label;
+    int is_default;
+} switch_case_site_t;
+
+static int collect_switch_case_sites(cc_ssa_function_t *sf, const cc_stmt_t *body, switch_case_site_t **out_sites,
+                                     size_t *out_count, int *out_default_label, cc_diag_t *diag) {
+    size_t i;
+    switch_case_site_t *sites = NULL;
+    size_t count = 0;
+    int default_label = -1;
+
+    if (body == NULL || body->kind != CC_STMT_BLOCK) {
+        set_diag(diag, "switch lowering requires block body");
+        return -1;
+    }
+
+    for (i = 0; i < body->block_count; ++i) {
+        const cc_stmt_t *st = &body->block_stmts[i];
+        switch_case_site_t *next;
+        switch_case_site_t site;
+
+        if (st->kind != CC_STMT_CASE && st->kind != CC_STMT_DEFAULT) {
+            continue;
+        }
+        if (st->kind == CC_STMT_CASE && st->expr == NULL) {
+            set_diag(diag, "malformed case label during lowering");
+            free(sites);
+            return -1;
+        }
+        if (st->kind == CC_STMT_DEFAULT && default_label >= 0) {
+            set_diag(diag, "duplicate default labels in switch");
+            free(sites);
+            return -1;
+        }
+
+        memset(&site, 0, sizeof(site));
+        site.stmt_index = i;
+        site.value = st->kind == CC_STMT_CASE ? st->expr->int_val : 0;
+        site.label = new_label(sf);
+        site.is_default = (st->kind == CC_STMT_DEFAULT);
+        if (site.label < 0) {
+            set_diag(diag, "out of memory assigning switch label");
+            free(sites);
+            return -1;
+        }
+
+        next = (switch_case_site_t *)realloc(sites, (count + 1) * sizeof(*next));
+        if (next == NULL) {
+            set_diag(diag, "out of memory collecting switch labels");
+            free(sites);
+            return -1;
+        }
+        sites = next;
+        sites[count++] = site;
+
+        if (site.is_default) {
+            default_label = site.label;
+        }
+    }
+
+    *out_sites = sites;
+    *out_count = count;
+    *out_default_label = default_label;
+    return 0;
+}
+
+static int find_switch_label_for_stmt(const switch_case_site_t *sites, size_t count, size_t stmt_index) {
+    size_t i;
+    for (i = 0; i < count; ++i) {
+        if (sites[i].stmt_index == stmt_index) {
+            return sites[i].label;
+        }
+    }
+    return -1;
+}
+
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
                       int depth, int break_label, int continue_label, const cc_stmt_t *s, int *saw_ret,
                       cc_diag_t *diag) {
@@ -626,6 +719,45 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         return 0;
     }
 
+    if (s->kind == CC_STMT_DO) {
+        int l_body = new_label(sf);
+        int l_cond = new_label(sf);
+        int l_end = new_label(sf);
+        int cond;
+
+        if (emit_label_instr(sf, l_body) != 0) {
+            return -1;
+        }
+        {
+            size_t saved = *var_count;
+            if (lower_stmt(tu, sf, vars, var_count, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
+                return -1;
+            }
+            while (*var_count > saved) {
+                (*var_count)--;
+                free((*vars)[*var_count].name);
+            }
+        }
+        if (emit_label_instr(sf, l_cond) != 0) {
+            return -1;
+        }
+        cond = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+        if (cond < 0) {
+            return -1;
+        }
+        cond = cast_value(sf, cond, CC_VAL_I64, diag);
+        if (cond < 0) {
+            return -1;
+        }
+        if (emit_br_cond_instr(sf, cond, l_body, l_end) != 0) {
+            return -1;
+        }
+        if (emit_label_instr(sf, l_end) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
     if (s->kind == CC_STMT_FOR) {
         int l_cond = new_label(sf);
         int l_body = new_label(sf);
@@ -686,9 +818,176 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         return 0;
     }
 
+    if (s->kind == CC_STMT_SWITCH) {
+        switch_case_site_t *sites = NULL;
+        size_t site_count = 0;
+        int default_label = -1;
+        int l_end = new_label(sf);
+        size_t case_count = 0;
+        size_t case_i = 0;
+        size_t j2;
+        int *cmp_labels = NULL;
+        int *case_labels = NULL;
+        long *case_values = NULL;
+        int cond;
+
+        if (l_end < 0) {
+            set_diag(diag, "out of memory assigning switch end label");
+            return -1;
+        }
+        if (s->then_branch == NULL || s->then_branch->kind != CC_STMT_BLOCK) {
+            set_diag(diag, "switch lowering requires block body");
+            return -1;
+        }
+
+        cond = lower_expr(tu, sf, *vars, *var_count, depth, s->expr, diag);
+        if (cond < 0) {
+            return -1;
+        }
+        cond = cast_value(sf, cond, CC_VAL_I64, diag);
+        if (cond < 0) {
+            return -1;
+        }
+
+        if (collect_switch_case_sites(sf, s->then_branch, &sites, &site_count, &default_label, diag) != 0) {
+            return -1;
+        }
+
+        for (j2 = 0; j2 < site_count; ++j2) {
+            if (!sites[j2].is_default) {
+                case_count++;
+            }
+        }
+
+        if (case_count == 0) {
+            if (emit_br_instr(sf, default_label >= 0 ? default_label : l_end) != 0) {
+                free(sites);
+                return -1;
+            }
+        } else {
+            cmp_labels = (int *)calloc(case_count, sizeof(*cmp_labels));
+            case_labels = (int *)calloc(case_count, sizeof(*case_labels));
+            case_values = (long *)calloc(case_count, sizeof(*case_values));
+            if (cmp_labels == NULL || case_labels == NULL || case_values == NULL) {
+                free(sites);
+                free(cmp_labels);
+                free(case_labels);
+                free(case_values);
+                set_diag(diag, "out of memory lowering switch dispatch");
+                return -1;
+            }
+
+            for (j2 = 0; j2 < site_count; ++j2) {
+                if (!sites[j2].is_default) {
+                    case_labels[case_i] = sites[j2].label;
+                    case_values[case_i] = sites[j2].value;
+                    cmp_labels[case_i] = new_label(sf);
+                    if (cmp_labels[case_i] < 0) {
+                        free(sites);
+                        free(cmp_labels);
+                        free(case_labels);
+                        free(case_values);
+                        set_diag(diag, "out of memory assigning switch compare labels");
+                        return -1;
+                    }
+                    case_i++;
+                }
+            }
+
+            if (emit_label_instr(sf, cmp_labels[0]) != 0) {
+                free(sites);
+                free(cmp_labels);
+                free(case_labels);
+                free(case_values);
+                return -1;
+            }
+            for (case_i = 0; case_i < case_count; ++case_i) {
+                int cv = emit_const_i64_instr(sf, case_values[case_i]);
+                int cmpv;
+                int false_label;
+                cc_ssa_instr_t in;
+
+                if (cv < 0) {
+                    free(sites);
+                    free(cmp_labels);
+                    free(case_labels);
+                    free(case_values);
+                    set_diag(diag, "out of memory appending switch case constant");
+                    return -1;
+                }
+
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_CMP;
+                in.cmp_kind = CC_CMP_EQ;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = cond;
+                in.rhs = cv;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    free(sites);
+                    free(cmp_labels);
+                    free(case_labels);
+                    free(case_values);
+                    set_diag(diag, "out of memory appending switch compare");
+                    return -1;
+                }
+                cmpv = in.dst;
+                false_label = (case_i + 1 < case_count) ? cmp_labels[case_i + 1]
+                                                        : (default_label >= 0 ? default_label : l_end);
+                if (emit_br_cond_instr(sf, cmpv, case_labels[case_i], false_label) != 0) {
+                    free(sites);
+                    free(cmp_labels);
+                    free(case_labels);
+                    free(case_values);
+                    return -1;
+                }
+                if (case_i + 1 < case_count && emit_label_instr(sf, cmp_labels[case_i + 1]) != 0) {
+                    free(sites);
+                    free(cmp_labels);
+                    free(case_labels);
+                    free(case_values);
+                    return -1;
+                }
+            }
+        }
+
+        for (j2 = 0; j2 < s->then_branch->block_count; ++j2) {
+            const cc_stmt_t *bst = &s->then_branch->block_stmts[j2];
+            int case_label = find_switch_label_for_stmt(sites, site_count, j2);
+            if (case_label >= 0) {
+                if (emit_label_instr(sf, case_label) != 0) {
+                    free(sites);
+                    free(cmp_labels);
+                    free(case_labels);
+                    free(case_values);
+                    return -1;
+                }
+                continue;
+            }
+            if (lower_stmt(tu, sf, vars, var_count, depth + 1, l_end, continue_label, bst, saw_ret, diag) != 0) {
+                free(sites);
+                free(cmp_labels);
+                free(case_labels);
+                free(case_values);
+                return -1;
+            }
+        }
+        if (emit_label_instr(sf, l_end) != 0) {
+            free(sites);
+            free(cmp_labels);
+            free(case_labels);
+            free(case_values);
+            return -1;
+        }
+        free(sites);
+        free(cmp_labels);
+        free(case_labels);
+        free(case_values);
+        return 0;
+    }
+
     if (s->kind == CC_STMT_BREAK) {
         if (break_label < 0) {
-            set_diag(diag, "break used outside loop in lowering");
+            set_diag(diag, "break used outside loop/switch in lowering");
             return -1;
         }
         return emit_br_instr(sf, break_label);
@@ -715,6 +1014,11 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             free((*vars)[*var_count].name);
         }
         return 0;
+    }
+
+    if (s->kind == CC_STMT_CASE || s->kind == CC_STMT_DEFAULT) {
+        set_diag(diag, "case/default label used outside switch lowering context");
+        return -1;
     }
 
     set_diag(diag, "unsupported statement kind during AST->SSA lowering");

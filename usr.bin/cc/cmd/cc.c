@@ -304,7 +304,7 @@ static void usage(const char *prog) {
             "  -c                 compile/assemble only\n"
             "  -o <file>          output file\n"
             "  -I/-D/-U           preprocessor options\n"
-            "  -std=c99           language mode\n"
+            "  -std=c90/c95/c99   language mode\n"
             "  -O0..-O3           optimization level\n"
             "  -m32/-m64          target ABI (i386 or x86_64)\n"
             "  -g                 debug info\n"
@@ -522,7 +522,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
 
 static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
     char stdflag[64];
-    size_t argc = 9 + o->cpp_flags.count;
+    int want_trigraphs = 1;
+    size_t argc = 10 + o->cpp_flags.count;
     char **argv;
     size_t i;
     size_t at = 0;
@@ -535,6 +536,9 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
     argv[at++] = "cpp";
     snprintf(stdflag, sizeof(stdflag), "-std=%s", o->std != NULL ? o->std : "gnu99");
     argv[at++] = stdflag;
+    if (want_trigraphs) {
+        argv[at++] = "-trigraphs";
+    }
     argv[at++] = "-x";
     argv[at++] = "c";
     argv[at++] = "-P";
@@ -553,7 +557,8 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
 
 static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const char *out_s) {
     char stdflag[64];
-    size_t argc = 10 + o->c_flags.count;
+    int want_trigraphs = 1;
+    size_t argc = 11 + o->c_flags.count;
     char **argv;
     size_t i;
     size_t at = 0;
@@ -568,6 +573,9 @@ static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const ch
     argv[at++] = (char *)target_gcc_flag(o->target);
     snprintf(stdflag, sizeof(stdflag), "-std=%s", o->std != NULL ? o->std : "gnu99");
     argv[at++] = stdflag;
+    if (want_trigraphs) {
+        argv[at++] = "-trigraphs";
+    }
     if (!o->pic && !o->shared) {
         argv[at++] = "-fno-pie";
         argv[at++] = "-no-pie";
@@ -800,7 +808,7 @@ int cc_main(int argc, char **argv) {
                     }
                     fprintf(stderr,
                             "cc: note: current native pipeline supports a strict subset "
-                            "(int/double functions, declarations, assignments/calls, if/else, while/for, break/continue, integer comparisons, and returns)\n");
+                            "(int/double functions, declarations, assignments/calls, if/else, while/do/for, switch/case/default, break/continue, C95 digraph/trigraph lexical forms, integer comparisons, and returns)\n");
                     goto out;
                 }
             }

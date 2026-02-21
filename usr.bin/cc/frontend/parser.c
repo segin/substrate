@@ -23,7 +23,11 @@ typedef enum {
     TOK_KW_IF,
     TOK_KW_ELSE,
     TOK_KW_WHILE,
+    TOK_KW_DO,
     TOK_KW_FOR,
+    TOK_KW_SWITCH,
+    TOK_KW_CASE,
+    TOK_KW_DEFAULT,
     TOK_KW_BREAK,
     TOK_KW_CONTINUE,
     TOK_ELLIPSIS,
@@ -32,6 +36,7 @@ typedef enum {
     TOK_LBRACE,
     TOK_RBRACE,
     TOK_COMMA,
+    TOK_COLON,
     TOK_SEMI,
     TOK_ASSIGN,
     TOK_EQ,
@@ -199,6 +204,49 @@ static int push_stmt_arr(cc_stmt_t **arr, size_t *count, cc_stmt_t s) {
 
 static int push_stmt_func(cc_function_t *f, cc_stmt_t s) {
     return push_stmt_arr(&f->stmts, &f->stmt_count, s);
+}
+
+static int trigraph_replacement(int c) {
+    switch (c) {
+    case '=':
+        return '#';
+    case '/':
+        return '\\';
+    case '\'':
+        return '^';
+    case '(':
+        return '[';
+    case ')':
+        return ']';
+    case '!':
+        return '|';
+    case '<':
+        return '{';
+    case '>':
+        return '}';
+    case '-':
+        return '~';
+    default:
+        return -1;
+    }
+}
+
+static size_t normalize_c95_trigraphs(char *buf, size_t len) {
+    size_t r = 0;
+    size_t w = 0;
+
+    while (r < len) {
+        if (r + 2 < len && buf[r] == '?' && buf[r + 1] == '?') {
+            int repl = trigraph_replacement((unsigned char)buf[r + 2]);
+            if (repl >= 0) {
+                buf[w++] = (char)repl;
+                r += 3;
+                continue;
+            }
+        }
+        buf[w++] = buf[r++];
+    }
+    return w;
 }
 
 static cc_expr_t *parse_expr(parser_t *p);
@@ -601,6 +649,34 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         return 0;
     }
 
+    if (p->tok.kind == TOK_KW_DO) {
+        s->kind = CC_STMT_DO;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        s->then_branch = (cc_stmt_t *)calloc(1, sizeof(*s->then_branch));
+        if (s->then_branch == NULL) {
+            return -1;
+        }
+        if (parse_stmt(p, s->then_branch) != 0) {
+            return -1;
+        }
+        if (expect(p, TOK_KW_WHILE, "expected 'while' after do statement body") != 0) {
+            return -1;
+        }
+        if (expect(p, TOK_LPAREN, "expected '(' after while") != 0) {
+            return -1;
+        }
+        s->expr = parse_expr(p);
+        if (s->expr == NULL) {
+            return -1;
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' after do-while condition") != 0) {
+            return -1;
+        }
+        return expect(p, TOK_SEMI, "expected ';' after do-while");
+    }
+
     if (p->tok.kind == TOK_KW_FOR) {
         s->kind = CC_STMT_FOR;
         if (next_tok(p) != 0) {
@@ -644,6 +720,51 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
             return -1;
         }
         return 0;
+    }
+
+    if (p->tok.kind == TOK_KW_SWITCH) {
+        s->kind = CC_STMT_SWITCH;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (expect(p, TOK_LPAREN, "expected '(' after switch") != 0) {
+            return -1;
+        }
+        s->expr = parse_expr(p);
+        if (s->expr == NULL) {
+            return -1;
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' after switch expression") != 0) {
+            return -1;
+        }
+        s->then_branch = (cc_stmt_t *)calloc(1, sizeof(*s->then_branch));
+        if (s->then_branch == NULL) {
+            return -1;
+        }
+        if (parse_stmt(p, s->then_branch) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (p->tok.kind == TOK_KW_CASE) {
+        s->kind = CC_STMT_CASE;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        s->expr = parse_expr(p);
+        if (s->expr == NULL) {
+            return -1;
+        }
+        return expect(p, TOK_COLON, "expected ':' after case expression");
+    }
+
+    if (p->tok.kind == TOK_KW_DEFAULT) {
+        s->kind = CC_STMT_DEFAULT;
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        return expect(p, TOK_COLON, "expected ':' after default");
     }
 
     if (p->tok.kind == TOK_KW_BREAK) {
@@ -891,6 +1012,8 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     }
     buf[sz] = '\0';
     fclose(fp);
+    sz = (long)normalize_c95_trigraphs(buf, (size_t)sz);
+    buf[sz] = '\0';
 
     memset(&p, 0, sizeof(p));
     p.diag = diag;

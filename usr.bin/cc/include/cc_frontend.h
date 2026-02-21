@@ -59,7 +59,11 @@ typedef enum {
     CC_STMT_IF,
     CC_STMT_BLOCK,
     CC_STMT_WHILE,
+    CC_STMT_DO,
     CC_STMT_FOR,
+    CC_STMT_SWITCH,
+    CC_STMT_CASE,
+    CC_STMT_DEFAULT,
     CC_STMT_BREAK,
     CC_STMT_CONTINUE
 } cc_stmt_kind_t;
