@@ -1,0 +1,336 @@
+.Dd February 19, 2026
+.Dt ELFOBJ_ARCHITECTURE 7
+.Os Substrate
+.Sh NAME
+.Nm libelfobj architecture
+.Nd design and architecture of the ELF object handling library
+.Sh DESCRIPTION
+This document describes the internal architecture and design principles
+of the
+.Nm libelfobj
+library, a lightweight ELF object handling library designed for use in
+toolchain components, debuggers, and the dynamic linker.
+.Ss Design Goals
+The library was designed with the following goals:
+.Bl -tag -width "Embeddability"
+.It Sy Simplicity
+A clean, minimal API that covers common ELF manipulation tasks without
+exposing unnecessary complexity.
+.It Sy Safety
+Robust handling of malformed input, suitable for processing untrusted
+ELF files.
+.It Sy Portability
+No dependencies on system-specific ELF headers or libraries.
+.It Sy Embeddability
+Suitable for inclusion in other projects with minimal build requirements.
+.It Sy Extensibility
+Plugin-based architecture for supporting new target architectures.
+.El
+.Ss Object Model
+The library's object model mirrors the ELF format structure:
+.Bd -literal
+elfobj_t (ELF Object)
+    |
+    +-- elf_section_t[] (Sections)
+    |       |
+    |       +-- Section data (bytes)
+    |       +-- elf_reloc_t[] (Relocations)
+    |
+    +-- elf_symbol_t[] (Symbols)
+    |
+    +-- elf_reloc_t[] (Global relocation list)
+.Ed
+.Bl -tag -width "elf_reloc_t"
+.It Vt elfobj_t
+Represents an entire ELF file.
+Contains the ELF header, section table, symbol table, and relocation
+information.
+.It Vt elf_section_t
+Represents an ELF section.
+Contains section header information and optional data.
+.It Vt elf_symbol_t
+Represents an ELF symbol.
+Contains symbol name, value, size, binding, type, and other attributes.
+.It Vt elf_reloc_t
+Represents an ELF relocation.
+Contains the target section, offset, symbol reference, type, and addend.
+.El
+.Ss Internal Structure
+The library is organized into the following modules:
+.Bl -tag -width "elf_write.c"
+.It Pa elf_read.c
+ELF parsing and object construction from files or memory.
+.It Pa elf_write.c
+ELF serialization and file writing.
+.It Pa elf_sections.c
+Section management (add, find, set data).
+.It Pa elf_symbols.c
+Symbol management (add, find, query).
+.It Pa elf_reloc.c
+Relocation management and backend registration.
+.It Pa elf_link.c
+Object linking and merging.
+.It Pa elf_validate.c
+Structural validation and diagnostics.
+.It Pa elf_hash.c
+SYSV and GNU hash function implementations.
+.It Pa elf_util.c
+Utility functions (memory allocation, bounds checking, I/O).
+.It Pa elf_layout.c
+Section layout and offset computation.
+.It Pa elf_strtab.c
+String table construction and management.
+.El
+.Ss Memory Management
+The library uses a consistent memory ownership model:
+.Bl -tag -width "Caller-Owned"
+.It Sy Library-Owned
+Memory allocated by the library for internal use.
+Freed automatically when the parent object is closed.
+Examples: section data, symbol names, relocation entries.
+.It Sy Caller-Owned
+Memory allocated by the library for the caller.
+Must be freed by the caller using
+.Xr free 3 .
+Examples: diagnostic strings from
+.Fn elf_validate .
+.It Sy Caller-Provided
+Memory provided by the caller to the library.
+The library makes copies; caller retains ownership.
+Examples: section data passed to
+.Fn elf_section_set_data .
+.El
+.Pp
+All library allocations use internal wrappers around
+.Xr malloc 3
+and
+.Xr free 3
+to ensure consistent behavior and enable future memory tracking.
+.Ss Error Handling
+The library uses a two-level error reporting system:
+.Bl -enum
+.It
+Function return codes
+.Pq Vt elf_err_t
+indicate success or failure.
+.It
+Object-specific error state stores detailed error messages.
+.El
+.Pp
+Error codes are defined in the
+.Vt elf_err_t
+enumeration:
+.Bl -column "ELF_ERR_UNSUPPORTED" "Description"
+.It Sy Code Ta Sy Description
+.It Dv ELF_OK Ta Success
+.It Dv ELF_ERR_IO Ta Input/output error
+.It Dv ELF_ERR_FORMAT Ta Invalid ELF format
+.It Dv ELF_ERR_RELOC Ta Relocation error
+.It Dv ELF_ERR_OOM Ta Out of memory
+.It Dv ELF_ERR_BOUNDS Ta Bounds check failure
+.It Dv ELF_ERR_UNSUPPORTED Ta Feature not supported
+.It Dv ELF_ERR_STATE Ta Invalid object state
+.It Dv ELF_ERR_NOTFOUND Ta Entity not found
+.El
+.Pp
+Use
+.Fn elf_errstr
+to convert error codes to human-readable strings.
+.Ss Backend Plugin Architecture
+Relocation processing is delegated to architecture-specific backends:
+.Bd -literal
+Application
+    |
+    v
+libelfobj Core
+    |
+    +-- Backend: i386
+    +-- Backend: x86-64
+    +-- Backend: ARM
+    +-- Backend: Custom (user-registered)
+.Ed
+.Pp
+Each backend implements:
+.Bl -bullet
+.It
+.Fn apply_reloc :
+Compute relocation values.
+.It
+.Fn reloc_size :
+Query relocation target size.
+.It
+.Fn is_pc_relative :
+Determine if relocation is PC-relative.
+.El
+.Pp
+Backends are registered globally and persist for the process lifetime.
+See
+.Xr elf_backend 3
+for details.
+.Ss Thread Safety Model
+The library provides the following thread-safety guarantees:
+.Bl -tag -width "Object Operations"
+.It Sy Global Operations
+.Fn elf_errstr
+and
+.Fn elf_register_reloc_backend
+are thread-safe.
+.It Sy Object Operations
+All functions operating on the same
+.Vt elfobj_t
+handle are NOT thread-safe.
+Callers must synchronize concurrent access.
+.It Sy Independent Objects
+Different
+.Vt elfobj_t
+handles may be used concurrently without synchronization.
+.El
+.Pp
+This model allows:
+.Bl -bullet
+.It
+Parallel processing of multiple ELF files.
+.It
+Thread-safe error message lookup.
+.It
+Simple integration without complex locking.
+.El
+.Ss Validation and Security
+The validation subsystem provides:
+.Bl -tag -width "Diagnostic Output"
+.It Sy Bounds Checking
+All offsets and sizes are validated before use.
+.It Sy Overflow Detection
+Arithmetic operations are checked for overflow.
+.It Sy Format Validation
+ELF structures are checked for consistency.
+.It Sy Diagnostic Output
+Detailed error messages for debugging.
+.El
+.Pp
+These features make the library suitable for processing untrusted input.
+See
+.Xr elf_validate 3
+for security considerations.
+.Ss Linking Pipeline
+The linking process follows these phases:
+.Bd -literal
+Input Objects
+    |
+    v
++-------------------+
+| Compatibility     |  Check architecture, class, endianness
++-------------------+
+    |
+    v
++-------------------+
+| Section Merge     |  Concatenate same-named sections
++-------------------+
+    |
+    v
++-------------------+
+| Symbol Resolution |  Merge symbol tables, resolve references
++-------------------+
+    |
+    v
++-------------------+
+| Relocation Fixup  |  Adjust offsets and symbol indices
++-------------------+
+    |
+    v
+Output Object
+.Ed
+.Pp
+See
+.Xr elf_link 3
+for limitations and future enhancements.
+.Ss ABI Stability
+The library maintains a stable ABI for:
+.Bl -bullet
+.It
+All public function signatures.
+.It
+Enumeration values and layouts.
+.It
+Backend structure layout.
+.El
+.Pp
+The following are NOT part of the stable ABI:
+.Bl -bullet
+.It
+Opaque type layouts
+.Pq Vt elfobj_t , Vt elf_section_t , etc.
+.It
+Private functions and macros.
+.It
+Internal data structures.
+.El
+.Pp
+Programs using only the public API will remain compatible with
+future library versions.
+.Ss Future Directions
+Planned enhancements include:
+.Bl -tag -width "Program Headers"
+.It Sy Program Headers
+Support for executable and shared library creation.
+.It Sy Dynamic Linking
+Generation of dynamic symbol tables, hash tables, and relocation tables.
+.It Sy Archive Support
+Direct reading and extraction from
+.Pa .a
+archive files.
+.It Sy Relaxation
+Linker relaxation optimization for code size reduction.
+.It Sy Section GC
+Garbage collection of unreferenced sections.
+.It Sy LTO Support
+Link-time optimization metadata handling.
+.El
+.Sh FILES
+.Bl -tag -width "include/elfobj.h"
+.It Pa include/elfobj.h
+Public API header.
+.It Pa usr.lib/elf/src/*.c
+Implementation source files.
+.It Pa usr.lib/elf/src/elf_private.h
+Internal data structures and functions.
+.El
+.Sh SEE ALSO
+.Xr elfobj 3 ,
+.Xr elf_section 3 ,
+.Xr elf_symbol 3 ,
+.Xr elf_reloc 3 ,
+.Xr elf_link 3 ,
+.Xr elf_validate 3 ,
+.Xr elf_backend 3 ,
+.Xr elf 5
+.Sh HISTORY
+The
+.Nm libelfobj
+library was created for the Substrate operating system to provide
+a lightweight, embeddable ELF handling library.
+It was designed to avoid the complexity and dependencies of existing
+libraries like
+.Nm libelf
+and
+.Nm libdwarf ,
+while providing sufficient functionality for toolchain utilities,
+debuggers, and the dynamic linker.
+.Sh AUTHORS
+.An -nosplit
+The
+.Nm libelfobj
+library was written by the Substrate project team.
+.Sh BUGS
+.Bl -bullet
+.It
+Program header support is incomplete.
+.It
+Dynamic linking structures are not generated.
+.It
+Archive file handling is not supported.
+.It
+Section garbage collection is not implemented.
+.It
+Symbol versioning support is incomplete.
+.El

@@ -1,0 +1,531 @@
+.Dd February 19, 2026
+.Dt ELF_BACKEND 3
+.Os Substrate
+.Sh NAME
+.Nm elf_register_reloc_backend ,
+.Nm struct elf_reloc_backend ,
+.Nm elfobj_reloc_ctx_t
+.Nd ELF relocation backend plugin interface
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fo elf_register_reloc_backend
+.Fa "const struct elf_reloc_backend *backend"
+.Fc
+.Sh DESCRIPTION
+The
+.Nm libelfobj
+library uses a plugin-based architecture for architecture-specific
+relocation processing.
+This allows the library to support multiple target architectures
+without embedding architecture-specific code in the core library.
+.Pp
+Each backend provides functions to:
+.Bl -bullet
+.It
+Apply relocations (compute final values).
+.It
+Query relocation sizes.
+.It
+Determine if relocations are PC-relative.
+.El
+.Ss Backend Structure
+The
+.Vt struct elf_reloc_backend
+structure defines a relocation backend:
+.Bd -literal
+struct elf_reloc_backend {
+    uint32_t machine;           /* Architecture identifier (EM_*) */
+    int (*apply_reloc)(const elfobj_reloc_ctx_t *ctx,
+                       uint32_t type,
+                       uint64_t place,
+                       uint64_t sym_value,
+                       int64_t addend,
+                       uint64_t *out_value);
+    int (*reloc_size)(uint32_t type);
+    int (*is_pc_relative)(uint32_t type);
+};
+.Ed
+.Bl -tag -width "apply_reloc"
+.It Va machine
+The ELF machine type for this backend.
+Standard values include:
+.Bl -tag -width "EM_X86_64" -compact
+.It Dv EM_386
+Intel 80386 (i386).
+.It Dv EM_X86_64
+AMD x86-64.
+.It Dv EM_ARM
+ARM.
+.It Dv EM_AARCH64
+ARM 64-bit.
+.It Dv EM_MIPS
+MIPS.
+.It Dv EM_PPC
+PowerPC.
+.It Dv EM_PPC64
+PowerPC 64-bit.
+.It Dv EM_SPARC
+SPARC.
+.It Dv EM_SPARCV9
+SPARC V9 64-bit.
+.El
+.It Va apply_reloc
+Callback to compute the final relocation value.
+Returns 0 on success, negative on error.
+.It Va reloc_size
+Callback to return the size in bytes of the relocation target.
+Returns the size, or -1 for unknown relocation types.
+.It Va is_pc_relative
+Callback to determine if a relocation is PC-relative.
+Returns non-zero if PC-relative, 0 otherwise.
+.El
+.Ss Relocation Context
+The
+.Vt elfobj_reloc_ctx_t
+structure provides context for relocation processing:
+.Bd -literal
+typedef struct {
+    uint32_t machine;           /* Target architecture */
+    uint8_t use_rela;           /* Non-zero if using RELA format */
+    uint8_t reserved[3];        /* Reserved for future use */
+} elfobj_reloc_ctx_t;
+.Ed
+.Bl -tag -width "use_rela"
+.It Va machine
+The target architecture for relocation.
+.It Va use_rela
+Non-zero if the relocation uses the RELA format (with explicit addend).
+Zero if using REL format (implicit addend).
+.El
+.Ss Backend Registration
+Backends are registered globally using
+.Fn elf_register_reloc_backend .
+The registration process:
+.Bl -enum
+.It
+Validates the backend structure (non-NULL pointer, required callbacks).
+.It
+Checks if a backend for the same architecture already exists.
+.It
+Replaces the existing backend if found, or adds the new backend.
+.El
+.Pp
+Backends persist for the lifetime of the process.
+There is no function to unregister a backend.
+.Ss Backend Callbacks
+.Bl -tag -width "is_pc_relative"
+.It Sy apply_reloc
+The
+.Fn apply_reloc
+callback computes the final value to store at the relocation site:
+.Bd -literal
+int apply_reloc(const elfobj_reloc_ctx_t *ctx,
+                uint32_t type,
+                uint64_t place,
+                uint64_t sym_value,
+                int64_t addend,
+                uint64_t *out_value);
+.Ed
+.Bl -tag -width "out_value" -compact
+.It Fa ctx
+Relocation context (architecture, format).
+.It Fa type
+Architecture-specific relocation type.
+.It Fa place
+The address of the relocation site (P in ELF formulas).
+.It Fa sym_value
+The symbol value (S in ELF formulas).
+.It Fa addend
+The relocation addend (A in ELF formulas).
+.It Fa out_value
+Output parameter for the computed value.
+.El
+.Pp
+The callback should:
+.Bl -bullet
+.It
+Compute the final value according to the relocation type.
+.It
+Check for overflow and return an error if the value cannot be represented.
+.It
+Store the result in
+.Fa *out_value .
+.El
+.Pp
+Return 0 on success, negative on error.
+.It Sy reloc_size
+The
+.Fn reloc_size
+callback returns the size of the relocation target:
+.Bd -literal
+int reloc_size(uint32_t type);
+.Ed
+.Pp
+Common sizes:
+.Bl -bullet
+.It
+1 byte (8-bit relocations).
+.It
+2 bytes (16-bit relocations).
+.It
+4 bytes (32-bit relocations).
+.It
+8 bytes (64-bit relocations).
+.El
+.Pp
+Return -1 for unknown relocation types.
+.It Sy is_pc_relative
+The
+.Fn is_pc_relative
+callback determines if a relocation is PC-relative:
+.Bd -literal
+int is_pc_relative(uint32_t type);
+.Ed
+.Pp
+PC-relative relocations compute values relative to the relocation site.
+This information is used for:
+.Bl -bullet
+.It
+Relaxation optimization.
+.It
+Position-independent code handling.
+.It
+Linker diagnostics.
+.El
+.Pp
+Return non-zero if PC-relative, 0 otherwise.
+.El
+.Ss Standard Backends
+The library may include built-in backends for common architectures:
+.Bl -tag -width "x86-64"
+.It Sy i386
+Supports
+.Dv R_386_NONE ,
+.Dv R_386_32 ,
+.Dv R_386_PC32 ,
+and other i386 relocation types.
+.It Sy x86-64
+Supports
+.Dv R_X86_64_64 ,
+.Dv R_X86_64_PC32 ,
+.Dv R_X86_64_PLT32 ,
+.Dv R_X86_64_GOTPCREL ,
+and other x86-64 relocation types.
+.El
+.Pp
+Applications can override built-in backends by registering a new
+backend for the same architecture.
+.Ss Thread Safety
+Backend registration is thread-safe for concurrent registration of
+different architectures.
+However, concurrent registration of the same architecture from multiple
+threads results in undefined behavior.
+.Pp
+Backend callbacks may be called concurrently from multiple threads
+when processing different objects.
+Callbacks must be thread-safe.
+.Sh RETURN VALUES
+.Fn elf_register_reloc_backend
+returns
+.Dv ELF_OK
+on success.
+.Pp
+On failure, returns:
+.Bl -tag -width "ELF_ERR_OOM"
+.It Dv ELF_ERR_STATE
+.Fa backend
+is NULL or
+.Fa backend->apply_reloc
+is NULL.
+.It Dv ELF_ERR_OOM
+The maximum number of backends (16) has been reached.
+.El
+.Sh EXAMPLES
+.Ss Implementing a Minimal Backend
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+/* Minimal backend for a hypothetical 32-bit RISC architecture */
+#define EM_MYRISC 0x9999
+
+#define R_MYRISC_NONE   0
+#define R_MYRISC_32     1  /* Absolute 32-bit */
+#define R_MYRISC_PC32   2  /* PC-relative 32-bit */
+#define R_MYRISC_HI16   3  /* High 16 bits */
+#define R_MYRISC_LO16   4  /* Low 16 bits */
+
+static int myrisc_apply_reloc(const elfobj_reloc_ctx_t *ctx,
+                              uint32_t type,
+                              uint64_t place,
+                              uint64_t sym_value,
+                              int64_t addend,
+                              uint64_t *out_value) {
+    int64_t result;
+
+    switch (type) {
+    case R_MYRISC_NONE:
+        *out_value = 0;
+        return 0;
+
+    case R_MYRISC_32:
+        result = (int64_t)sym_value + addend;
+        if (result < 0 || result > 0xFFFFFFFFLL) {
+            return -1;  /* Overflow */
+        }
+        *out_value = (uint64_t)result;
+        return 0;
+
+    case R_MYRISC_PC32:
+        result = (int64_t)sym_value + addend - (int64_t)place;
+        if (result < -0x80000000LL || result > 0x7FFFFFFFLL) {
+            return -1;  /* Overflow */
+        }
+        *out_value = (uint64_t)result;
+        return 0;
+
+    case R_MYRISC_HI16:
+        result = (int64_t)sym_value + addend;
+        *out_value = ((uint64_t)result >> 16) & 0xFFFF;
+        return 0;
+
+    case R_MYRISC_LO16:
+        result = (int64_t)sym_value + addend;
+        *out_value = (uint64_t)result & 0xFFFF;
+        return 0;
+
+    default:
+        return -1;  /* Unknown relocation */
+    }
+}
+
+static int myrisc_reloc_size(uint32_t type) {
+    switch (type) {
+    case R_MYRISC_32:
+    case R_MYRISC_PC32:
+        return 4;
+    case R_MYRISC_HI16:
+    case R_MYRISC_LO16:
+        return 2;
+    default:
+        return -1;
+    }
+}
+
+static int myrisc_is_pc_relative(uint32_t type) {
+    return type == R_MYRISC_PC32;
+}
+
+int main(void) {
+    struct elf_reloc_backend backend = {
+        .machine = EM_MYRISC,
+        .apply_reloc = myrisc_apply_reloc,
+        .reloc_size = myrisc_reloc_size,
+        .is_pc_relative = myrisc_is_pc_relative,
+    };
+
+    elf_err_t err = elf_register_reloc_backend(&backend);
+    if (err != ELF_OK) {
+        fprintf(stderr, "Failed to register backend: %s\\n",
+                elf_errstr(err));
+        return 1;
+    }
+
+    printf("MYRISC backend registered successfully\\n");
+    return 0;
+}
+.Ed
+.Ss Implementing an x86-64 Backend
+.Bd -literal
+#include <elfobj.h>
+
+/* Extended x86-64 backend with additional relocation types */
+#define R_X86_64_64         1
+#define R_X86_64_PC32       2
+#define R_X86_64_GOT32      3
+#define R_X86_64_PLT32      4
+#define R_X86_64_GOTPCREL   9
+#define R_X86_64_32        10
+#define R_X86_64_32S       11
+
+static int x86_64_apply_reloc(const elfobj_reloc_ctx_t *ctx,
+                              uint32_t type,
+                              uint64_t place,
+                              uint64_t sym_value,
+                              int64_t addend,
+                              uint64_t *out_value) {
+    int64_t result;
+
+    switch (type) {
+    case R_X86_64_64:
+        *out_value = sym_value + addend;
+        return 0;
+
+    case R_X86_64_PC32:
+    case R_X86_64_PLT32:
+        result = sym_value + addend - place;
+        if (result < -0x80000000LL || result > 0x7FFFFFFFLL) {
+            return -1;
+        }
+        *out_value = (uint64_t)(int32_t)result;
+        return 0;
+
+    case R_X86_64_32:
+        result = sym_value + addend;
+        if (result < 0 || result > 0xFFFFFFFFLL) {
+            return -1;
+        }
+        *out_value = (uint64_t)result;
+        return 0;
+
+    case R_X86_64_32S:
+        result = sym_value + addend;
+        if (result < -0x80000000LL || result > 0x7FFFFFFFLL) {
+            return -1;
+        }
+        *out_value = (uint64_t)(int32_t)result;
+        return 0;
+
+    default:
+        return -1;
+    }
+}
+
+static int x86_64_reloc_size(uint32_t type) {
+    switch (type) {
+    case R_X86_64_64:
+        return 8;
+    case R_X86_64_PC32:
+    case R_X86_64_PLT32:
+    case R_X86_64_32:
+    case R_X86_64_32S:
+        return 4;
+    default:
+        return -1;
+    }
+}
+
+static int x86_64_is_pc_relative(uint32_t type) {
+    switch (type) {
+    case R_X86_64_PC32:
+    case R_X86_64_PLT32:
+    case R_X86_64_GOTPCREL:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+int register_x86_64_backend(void) {
+    static const struct elf_reloc_backend backend = {
+        .machine = EM_X86_64,
+        .apply_reloc = x86_64_apply_reloc,
+        .reloc_size = x86_64_reloc_size,
+        .is_pc_relative = x86_64_is_pc_relative,
+    };
+
+    return elf_register_reloc_backend(&backend) == ELF_OK ? 0 : -1;
+}
+.Ed
+.Ss Using Backends for Relocation Processing
+.Bd -literal
+#include <elfobj.h>
+#include <stdio.h>
+
+/*
+ * Example: Manually apply a relocation using the backend API.
+ * This is for demonstration; normally the library handles this.
+ */
+void demonstrate_relocation(void) {
+    elfobj_reloc_ctx_t ctx = {
+        .machine = EM_386,
+        .use_rela = 1,
+    };
+
+    /* Simulate applying R_386_PC32 relocation */
+    uint64_t place = 0x1000;      /* Address of relocation site */
+    uint64_t sym_value = 0x2000;  /* Symbol address */
+    int64_t addend = -4;          /* Addend */
+    uint64_t result;
+
+    /* The backend would compute: sym_value + addend - place */
+    /* = 0x2000 + (-4) - 0x1000 = 0xFFC */
+    result = sym_value + addend - place;
+
+    printf("R_386_PC32: S=0x%llx A=%lld P=0x%llx -> 0x%llx\\n",
+           (unsigned long long)sym_value,
+           (long long)addend,
+           (unsigned long long)place,
+           (unsigned long long)result);
+}
+.Ed
+.Ss Backend with Overflow Detection
+.Bd -literal
+#include <elfobj.h>
+#include <stdint.h>
+
+/*
+ * Helper function for signed overflow detection.
+ * Returns 1 if value fits in n-bit signed integer.
+ */
+static int fits_signed(int64_t value, int bits) {
+    int64_t min = -(1LL << (bits - 1));
+    int64_t max = (1LL << (bits - 1)) - 1;
+    return value >= min && value <= max;
+}
+
+/*
+ * Helper function for unsigned overflow detection.
+ * Returns 1 if value fits in n-bit unsigned integer.
+ */
+static int fits_unsigned(uint64_t value, int bits) {
+    uint64_t max = (bits >= 64) ? UINT64_MAX : ((1ULL << bits) - 1);
+    return value <= max;
+}
+
+static int safe_apply_32bit(uint64_t sym, int64_t addend,
+                            uint64_t place, int is_pc_rel,
+                            uint64_t *out) {
+    int64_t result;
+
+    if (is_pc_rel) {
+        result = (int64_t)sym + addend - (int64_t)place;
+    } else {
+        result = (int64_t)sym + addend;
+    }
+
+    if (!fits_signed(result, 32)) {
+        return -1;  /* Overflow */
+    }
+
+    *out = (uint64_t)(int32_t)result;
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elf_reloc 3 ,
+.Xr elfobj 3 ,
+.Xr elf 5
+.Sh STANDARDS
+Relocation types and semantics follow the architecture-specific ELF
+supplements.
+See
+.Xr elf_reloc 3
+for references.
+.Sh HISTORY
+The backend plugin interface was added to
+.Nm libelfobj
+to support multiple target architectures without requiring modifications
+to the core library for each new architecture.
+.Sh BUGS
+.Bl -bullet
+.It
+There is no way to enumerate registered backends.
+.It
+There is no way to unregister a backend.
+.It
+The maximum number of backends (16) is fixed at compile time.
+.It
+Backend callbacks cannot return detailed error information.
+.El
