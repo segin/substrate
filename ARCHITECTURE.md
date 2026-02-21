@@ -221,7 +221,7 @@ These components are essential for booting and basic system operation.
   - `-m32` / `-m64` target ABI selection across frontend/backend/assembler/linker stages
   - explicit temporary `--bootstrap-gcc` path for C->assembly fallback
 - **Native C Subset Pipeline:** In-tree compile path now exists for a strict subset:
-  - `frontend/lexer.c` + `frontend/parser.c` parse scalar `_Bool`/`char`/`int`/`long long`/`float`/`double`/`void` functions with declarations, assignments, calls, and returns
+  - `frontend/lexer.c` + `frontend/parser.c` parse scalar `_Bool`/`char`/`int`/`long long`/`float`/`double`/`void` functions with declarations, assignments, calls, and returns; lexer accepts decimal/octal/hex integer literals and character literals with common escapes
   - phase-9 parser/sema extension: C99 declaration-specifier combinations for supported scalar types, `for`-init declarations with loop-local scope, labels/`goto`, function declaration/prototype support with signature compatibility checks, and expression extensions (`%`, unary `+`/`!`/`~`, bitwise/shift/comma operators, compound assignment operators, prefix/postfix `++/--`, `&&`/`||`, ternary `?:`, scalar casts, and `sizeof` on supported scalar types)
   - phase-8 parser/sema extension: `if/else`, block statements, `while`, `do-while`, `for`, `switch/case/default`, `break`, `continue`, numeric comparison operators, and C95 lexical compatibility (digraph/trigraph forms)
   - `frontend/sema.c` resolves parameters/locals, validates loop/switch context rules (`break`, `continue`, `case`, `default`), and validates subset constraints

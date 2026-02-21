@@ -108,6 +108,10 @@ static int is_ident_part(int c) {
     return isalnum(c) || c == '_';
 }
 
+static int is_int_suffix_char(int c) {
+    return c == 'u' || c == 'U' || c == 'l' || c == 'L';
+}
+
 static void lx_adv(cc_lexer_t *lx) {
     if (lx->pos < lx->len) {
         if (lx->src[lx->pos] == '\n') {
@@ -322,16 +326,97 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     }
 
-    if (isdigit(c)) {
-        int saw_dot = 0;
-        start = lx->pos;
-        while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+    if (c == '\'') {
+        long v = 0;
+        lx_adv(lx); /* opening quote */
+        c = lx_peek(lx);
+        if (c == '\\') {
+            lx_adv(lx);
+            c = lx_peek(lx);
+            if (c == 'n') {
+                v = '\n';
+            } else if (c == 't') {
+                v = '\t';
+            } else if (c == 'r') {
+                v = '\r';
+            } else if (c == '0') {
+                v = '\0';
+            } else if (c == '\\') {
+                v = '\\';
+            } else if (c == '\'') {
+                v = '\'';
+            } else if (c == '\"') {
+                v = '\"';
+            } else if (c == 'x') {
+                int d;
+                long hv = 0;
+                int seen = 0;
+                lx_adv(lx);
+                while ((d = lx_peek(lx)) >= 0 && isxdigit(d)) {
+                    seen = 1;
+                    hv <<= 4;
+                    if (d >= '0' && d <= '9') {
+                        hv |= d - '0';
+                    } else if (d >= 'a' && d <= 'f') {
+                        hv |= 10 + (d - 'a');
+                    } else {
+                        hv |= 10 + (d - 'A');
+                    }
+                    lx_adv(lx);
+                }
+                v = seen ? hv : 0;
+            } else {
+                v = c;
+            }
+        } else if (c >= 0) {
+            v = c;
+        }
+        if (c >= 0) {
             lx_adv(lx);
         }
-        if (lx_peek(lx) == '.') {
-            saw_dot = 1;
+        if (lx_peek(lx) == '\'') {
             lx_adv(lx);
+        }
+        out->kind = TOK_NUM;
+        out->num = v;
+        out->is_float = 0;
+        out->line = line;
+        out->col = col;
+        return 0;
+    }
+
+    if (isdigit(c)) {
+        int saw_dot = 0;
+        int base = 10;
+        start = lx->pos;
+        if (c == '0' && (lx_peekn(lx, 1) == 'x' || lx_peekn(lx, 1) == 'X')) {
+            base = 16;
+            lx_adv(lx);
+            lx_adv(lx);
+            while ((c = lx_peek(lx)) >= 0 && isxdigit(c)) {
+                lx_adv(lx);
+            }
+        } else {
             while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                lx_adv(lx);
+            }
+            if (lx_peek(lx) == '.') {
+                saw_dot = 1;
+                lx_adv(lx);
+                while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                    lx_adv(lx);
+                }
+            } else if (lx->src[start] == '0') {
+                base = 8;
+            }
+        }
+
+        if (saw_dot) {
+            if (lx_peek(lx) == 'f' || lx_peek(lx) == 'F' || lx_peek(lx) == 'l' || lx_peek(lx) == 'L') {
+                lx_adv(lx);
+            }
+        } else {
+            while ((c = lx_peek(lx)) >= 0 && is_int_suffix_char(c)) {
                 lx_adv(lx);
             }
         }
@@ -355,12 +440,17 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
             out->is_float = 1;
             out->fnum = strtod(tmp, NULL);
         } else {
-            long v = 0;
+            char tmp[128];
+            size_t n = out->len;
             size_t i;
-            for (i = 0; i < out->len; ++i) {
-                v = v * 10 + (out->start[i] - '0');
+            if (n >= sizeof(tmp)) {
+                n = sizeof(tmp) - 1;
             }
-            out->num = v;
+            for (i = 0; i < n; ++i) {
+                tmp[i] = out->start[i];
+            }
+            tmp[n] = '\0';
+            out->num = strtol(tmp, NULL, base == 10 ? 0 : base);
         }
         return 0;
     }

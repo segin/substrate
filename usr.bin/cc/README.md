@@ -34,7 +34,7 @@ Native C support is intentionally limited for now:
 - statement subset: local declarations, assignments, expression statements, `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
-- expressions: numeric literals, identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
+- expressions: numeric/character literals (decimal/octal/hex integers, simple character escapes), identifiers, `+ - * / %`, shifts (`<< >>`), bitwise (`& | ^ ~`), numeric comparisons (`== != < <= > >=`, including floating comparisons), logical operators (`! && ||`) with C truthiness for scalars (including floating `!= 0.0`), comma operator, ternary `?:`, scalar casts, `sizeof` (supported scalars), parentheses, function calls, assignment/compound-assignment expressions, prefix/postfix `++/--`
 - function declarations/prototypes and definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
 - i386 ABI lowering with cdecl stack args/params, including `double` arithmetic/casts/call/return handling

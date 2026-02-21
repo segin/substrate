@@ -104,6 +104,7 @@
   - added ternary conditional (`?:`), scalar cast expressions, and `sizeof` for supported scalar types.
   - comparison operators now accept floating operands; lowering/backend preserve C truthiness for floating conditions (`!= 0.0`, including `-0.0`) and ordered floating comparisons.
   - function declarations/prototypes are accepted alongside definitions; sema enforces signature compatibility and rejects duplicate/conflicting definitions.
+  - lexer numeric literal coverage now includes octal/hex integer forms and common integer suffix spellings; character literals with common escape sequences are accepted.
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
@@ -113,4 +114,5 @@
   - positive compile/run tests for ternary/cast/sizeof behavior and i386 assembly checks for cast lowering.
   - positive compile/run tests for floating comparison and floating-condition truthiness, plus i386 assembly checks for SSE compare lowering.
   - positive tests for declaration-before-definition and extern-declared call emission; negative test for conflicting declarations.
+  - positive compile/run tests for character literals and octal/hex integer literals.
   - negative test for unsupported `sizeof(void)` in current subset.
