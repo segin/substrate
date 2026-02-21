@@ -17,8 +17,8 @@
 
 // Missing definitions for host test
 #define AC_COMM_LEN 16
-#define BITNESS_32 32
-#define BITNESS_64 64
+#define ELF_TEST_BITNESS_32 32
+#define ELF_TEST_BITNESS_64 64
 
 // Mock functions
 void kprint(const char *str) {

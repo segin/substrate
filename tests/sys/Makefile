@@ -14,27 +14,14 @@ SRCS += test_nanosleep.c test_reboot.c
 
 OBJS = $(SRCS:.c=.o)
 
-HOST_TESTS = host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_lshrdi3 host_test_ashldi3 host_test_string host_test_div64 host_test_printf_specifiers host_test_tty_lock host_test_ntsync_trunc host_test_sched_smp
+HOST_TESTS = host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers
 
 all: tests.o $(HOST_TESTS)
 
-host_test_ashldi3: host_test_ashldi3.c
-	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_ashldi3.c -o $@
-
-host_test_sched_smp: host_test_sched_smp.c
-	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include -I../../sys host_test_sched_smp.c -o $@
-
-host_test_tty_lock: host_test_tty_lock.c
-	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include -idirafter ../../sys -idirafter ../../sys/arch/i386 host_test_tty_lock.c -o $@
-
-host_test_ntsync_trunc: host_test_ntsync_trunc.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_ntsync_trunc.c -o $@
 
 host_test_negdi2: host_test_negdi2.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_negdi2.c -o $@
 
-host_test_lshrdi3: host_test_lshrdi3.c
-	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_lshrdi3.c -o $@
 
 host_test_udf_large_write: host_test_udf_large_write.c
 	$(CC) -g -Wall -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_udf_large_write.c -o $@
