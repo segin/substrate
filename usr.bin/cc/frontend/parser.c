@@ -270,6 +270,10 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
         set_diag(p->diag, p->tok.line, p->tok.col, "conflicting signed/unsigned in declaration specifiers");
         return -1;
     }
+    if (seen_short && seen_long > 0) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "invalid short/long combination in declaration specifiers");
+        return -1;
+    }
 
     if ((seen_signed || seen_unsigned) && (seen_float || seen_double || seen_bool || seen_void)) {
         set_diag(p->diag, p->tok.line, p->tok.col, "invalid signed/unsigned type combination");
@@ -296,7 +300,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int allow_void, cons
         *out_type = seen_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
         return 0;
     }
-    if (seen_short || seen_int) {
+    if (seen_short) {
+        *out_type = seen_unsigned ? CC_TYPE_USHORT : CC_TYPE_SHORT;
+        return 0;
+    }
+    if (seen_int) {
         *out_type = seen_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
         return 0;
     }

@@ -19,7 +19,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - branch-capable lowering/emission for `if`/`else`, `while`, `do-while`, `for`, and `switch`/`case`/`default` control flow
   - loop flow statements: `break` and `continue`
   - C95 lexical forms: digraph braces (`<%`/`%>`) and trigraph normalization
-  - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`/`unsigned char`, `int`/`unsigned int`, `long long`/`unsigned long long`, `float`, qualifiers/storage-class keywords)
+  - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`/`unsigned char`, `short`/`unsigned short`, `int`/`unsigned int`, `long long`/`unsigned long long`, `float`, qualifiers/storage-class keywords)
   - C99 `for`-init declarations with loop-local scope
   - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and prefix/postfix `++/--` with C expression-value semantics
   - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), and `sizeof` for supported scalar types
@@ -31,7 +31,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - `ir-diff`
 
 Native C support is intentionally limited for now:
-- scalar types: `_Bool`, `char`, `unsigned char`, `int`, `unsigned int`, `long long`, `unsigned long long`, `float`, `double`, `void`
+- scalar types: `_Bool`, `char`, `unsigned char`, `short`, `unsigned short`, `int`, `unsigned int`, `long long`, `unsigned long long`, `float`, `double`, `void`
 - statement subset: local declarations, assignments, expression statements, `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`

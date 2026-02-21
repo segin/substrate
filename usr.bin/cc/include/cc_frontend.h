@@ -14,6 +14,8 @@ typedef enum {
     CC_TYPE_BOOL,
     CC_TYPE_CHAR,
     CC_TYPE_UCHAR,
+    CC_TYPE_SHORT,
+    CC_TYPE_USHORT,
     CC_TYPE_INT,
     CC_TYPE_UINT,
     CC_TYPE_LONG_LONG,

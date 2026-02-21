@@ -109,6 +109,7 @@
   - `switch` case labels now accept integer constant expressions (not just raw literals), with semantic duplicate detection for `case` values and `default` labels.
   - unsigned scalar declaration-specifiers now map to explicit unsigned types (`unsigned char/int/long long`) and lowering/codegen preserve unsigned compare/div/mod/right-shift semantics.
   - integer literal suffixes now carry unsigned/long-long typing (`u`, `ul`, `ull` families) into sema/lowering so unsigned behavior applies to literal-only expressions.
+  - `short` / `unsigned short` declaration-specifiers now map to explicit 16-bit-sized scalar types (`sizeof == 2`) in sema/lowering type metadata.
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
@@ -125,4 +126,5 @@
   - positive compile/run test for unsigned integer semantics and i386 emission checks for `divl`/`shrl`/unsigned `setcc`.
   - positive compile/run test for unsigned literal-suffix semantics and i386 emission checks for unsigned compare codegen from literal expressions.
   - negative parser test for conflicting `signed`+`unsigned` declaration specifiers.
+  - positive compile/run test for `short`/`unsigned short` scalar behavior and `sizeof`; negative parser test for invalid `short long` specifier combinations.
   - negative test for unsupported `sizeof(void)` in current subset.

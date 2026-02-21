@@ -199,12 +199,13 @@ static int is_float_type(cc_type_t t) {
 }
 
 static int is_unsigned_integral_type(cc_type_t t) {
-    return t == CC_TYPE_UCHAR || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
+    return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
 }
 
 static int is_integral_type(cc_type_t t) {
-    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_INT || t == CC_TYPE_UINT ||
-           t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG;
+    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
+           t == CC_TYPE_USHORT || t == CC_TYPE_INT || t == CC_TYPE_UINT || t == CC_TYPE_LONG_LONG ||
+           t == CC_TYPE_ULONG_LONG;
 }
 
 static int is_numeric_type(cc_type_t t) {
@@ -222,7 +223,8 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
 }
 
 static cc_type_t integral_promo_type(cc_type_t t) {
-    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR) {
+    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
+        t == CC_TYPE_USHORT) {
         return CC_TYPE_INT;
     }
     return t;
@@ -283,6 +285,9 @@ static long type_size_bytes(cc_type_t t) {
     case CC_TYPE_CHAR:
     case CC_TYPE_UCHAR:
         return 1;
+    case CC_TYPE_SHORT:
+    case CC_TYPE_USHORT:
+        return 2;
     case CC_TYPE_INT:
     case CC_TYPE_UINT:
     case CC_TYPE_FLOAT:
