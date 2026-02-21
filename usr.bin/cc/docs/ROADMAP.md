@@ -106,6 +106,7 @@
   - function declarations/prototypes are accepted alongside definitions; sema enforces signature compatibility and rejects duplicate/conflicting definitions.
   - lexer numeric literal coverage now includes octal/hex integer forms and common integer suffix spellings; character literals with common escape sequences are accepted.
   - `++/--` lowering now preserves C expression semantics for prefix vs postfix updates (postfix returns the prior value).
+  - `switch` case labels now accept integer constant expressions (not just raw literals), with semantic duplicate detection for `case` values and `default` labels.
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
@@ -117,4 +118,6 @@
   - positive tests for declaration-before-definition and extern-declared call emission; negative test for conflicting declarations.
   - positive compile/run tests for character literals and octal/hex integer literals.
   - positive compile/run tests for prefix/postfix increment expression values.
+  - positive compile/run tests for switch case constant-expression labels.
+  - negative tests for duplicate `switch` case values and duplicate `default` labels.
   - negative test for unsupported `sizeof(void)` in current subset.

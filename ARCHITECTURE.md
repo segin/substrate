@@ -232,7 +232,7 @@ These components are essential for booting and basic system operation.
     - i386 cdecl ABI lowering (`.code32`) for integer and double subset
   - phase-4 backend tuning adds stack-slot reuse (live-range based slot recycling) to reduce per-function frame footprint for both x86_64 and i386 emission.
   - phase-6 assignment modeling updates mutable locals through explicit `mov` writes to variable value slots, enabling assignments inside branches/loops without phi nodes.
-  - phase-7 adds structured do-while and switch/case/default lowering without introducing SSA phi nodes yet.
+  - phase-7 adds structured do-while and switch/case/default lowering without introducing SSA phi nodes yet; sema now accepts integer constant-expression case labels and detects duplicate case/default labels.
   - phase-8 adds C95 digraph braces and trigraph normalization in frontend lexical path.
   - phase-9 adds operator lowering for `%` plus bitwise/shift/comma, compound/update operators (including correct prefix/postfix `++/--` expression-value behavior), short-circuit logical expressions, ternary/cast/sizeof support, numeric comparison expansion to floating operands, floating-condition truthiness (`!= 0.0`) handling, and label/goto flow without introducing full phi-form SSA yet.
 - **Verifier Coverage:** Existing SSA verifier enforces block terminators, phi placement/arity, unique defs, use-before-def, and dominance checks.

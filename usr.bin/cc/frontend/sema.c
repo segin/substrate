@@ -268,6 +268,119 @@ static long type_size_bytes(cc_type_t t) {
     }
 }
 
+static int eval_const_int_expr(const cc_expr_t *e, long *out) {
+    long a;
+    long b;
+
+    if (e == NULL || out == NULL) {
+        return -1;
+    }
+
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        *out = e->int_val;
+        return 0;
+
+    case CC_EXPR_BIN:
+        if (eval_const_int_expr(e->lhs, &a) != 0 || eval_const_int_expr(e->rhs, &b) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case CC_BIN_ADD:
+            *out = a + b;
+            return 0;
+        case CC_BIN_SUB:
+            *out = a - b;
+            return 0;
+        case CC_BIN_MUL:
+            *out = a * b;
+            return 0;
+        case CC_BIN_DIV:
+            if (b == 0) {
+                return -1;
+            }
+            *out = a / b;
+            return 0;
+        case CC_BIN_MOD:
+            if (b == 0) {
+                return -1;
+            }
+            *out = a % b;
+            return 0;
+        case CC_BIN_SHL:
+            *out = a << (b & 63);
+            return 0;
+        case CC_BIN_SHR:
+            *out = a >> (b & 63);
+            return 0;
+        case CC_BIN_BAND:
+            *out = a & b;
+            return 0;
+        case CC_BIN_BOR:
+            *out = a | b;
+            return 0;
+        case CC_BIN_BXOR:
+            *out = a ^ b;
+            return 0;
+        case CC_BIN_EQ:
+            *out = (a == b) ? 1 : 0;
+            return 0;
+        case CC_BIN_NE:
+            *out = (a != b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LT:
+            *out = (a < b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LE:
+            *out = (a <= b) ? 1 : 0;
+            return 0;
+        case CC_BIN_GT:
+            *out = (a > b) ? 1 : 0;
+            return 0;
+        case CC_BIN_GE:
+            *out = (a >= b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LAND:
+            *out = (a != 0 && b != 0) ? 1 : 0;
+            return 0;
+        case CC_BIN_LOR:
+            *out = (a != 0 || b != 0) ? 1 : 0;
+            return 0;
+        case CC_BIN_COMMA:
+            *out = b;
+            return 0;
+        default:
+            return -1;
+        }
+
+    case CC_EXPR_CAST:
+        if (e->aux_type == CC_TYPE_VOID) {
+            return -1;
+        }
+        return eval_const_int_expr(e->lhs, out);
+
+    case CC_EXPR_SIZEOF:
+        if (e->lhs != NULL) {
+            *out = type_size_bytes(e->lhs->value_type);
+        } else {
+            *out = type_size_bytes(e->aux_type);
+        }
+        return *out < 0 ? -1 : 0;
+
+    case CC_EXPR_TERNARY:
+        if (eval_const_int_expr(e->lhs, &a) != 0) {
+            return -1;
+        }
+        if (a != 0) {
+            return eval_const_int_expr(e->rhs, out);
+        }
+        return eval_const_int_expr(e->third, out);
+
+    default:
+        return -1;
+    }
+}
+
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
     size_t i;
@@ -715,6 +828,43 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "switch expression must be integer");
             return -1;
         }
+        {
+            size_t i1;
+            int seen_default = 0;
+            for (i1 = 0; i1 < s->then_branch->block_count; ++i1) {
+                const cc_stmt_t *ci = &s->then_branch->block_stmts[i1];
+                long vi = 0;
+                if (ci->kind == CC_STMT_DEFAULT) {
+                    if (seen_default) {
+                        set_diag(diag, "duplicate default label in switch");
+                        return -1;
+                    }
+                    seen_default = 1;
+                    continue;
+                }
+                if (ci->kind != CC_STMT_CASE) {
+                    continue;
+                }
+                if (eval_const_int_expr(ci->expr, &vi) != 0) {
+                    set_diag(diag, "case label must be an integer constant expression");
+                    return -1;
+                }
+                {
+                    size_t i2;
+                    for (i2 = i1 + 1; i2 < s->then_branch->block_count; ++i2) {
+                        const cc_stmt_t *cj = &s->then_branch->block_stmts[i2];
+                        long vj = 0;
+                        if (cj->kind != CC_STMT_CASE) {
+                            continue;
+                        }
+                        if (eval_const_int_expr(cj->expr, &vj) == 0 && vj == vi) {
+                            set_diag(diag, "duplicate case value in switch");
+                            return -1;
+                        }
+                    }
+                }
+            }
+        }
         return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, loop_depth, switch_depth + 1,
                           saw_return, diag);
 
@@ -730,8 +880,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
-        if (s->expr->kind != CC_EXPR_INT) {
-            set_diag(diag, "case label must be an integer constant");
+        if (eval_const_int_expr(s->expr, &s->expr->int_val) != 0) {
+            set_diag(diag, "case label must be an integer constant expression");
             return -1;
         }
         return 0;
