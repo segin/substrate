@@ -110,7 +110,7 @@
   - unsigned scalar declaration-specifiers now map to explicit unsigned types (`unsigned char/int/long long`) and lowering/codegen preserve unsigned compare/div/mod/right-shift semantics.
   - integer literal suffixes now carry unsigned/long-long typing (`u`, `ul`, `ull` families) into sema/lowering so unsigned behavior applies to literal-only expressions.
   - `short` / `unsigned short` declaration-specifiers now map to explicit 16-bit-sized scalar types (`sizeof == 2`) in sema/lowering type metadata.
-  - one/two/three-level typed pointer declarations/params/returns (`T*`, `T**`, `T***`) plus unary address/dereference expressions now lower through explicit SSA addr/load operations; sema supports pointer/null equality comparisons.
+  - one/two/three/four-level typed pointer declarations/params/returns (`T*`, `T**`, `T***`, `T****`) plus unary address/dereference expressions now lower through explicit SSA addr/load operations; sema supports pointer/null equality comparisons.
   - parser now accepts `void*` declarators for locals/params while preserving `void`-only empty parameter list semantics.
   - indirect pointer stores (`*p = expr`) now lower through explicit SSA store operations for supported scalar pointee types.
   - dereference compound assignments (`*p op= rhs`) are accepted for dereference lvalues in the current subset.
@@ -118,7 +118,7 @@
   - pointer arithmetic lowering now supports scaled `ptr +/- int`, `int + ptr`, and compatible `ptr - ptr` difference expressions for non-`void*` pointers in the current subset.
   - postfix index expressions (`ptr[idx]` and `idx[ptr]`) now parse/lower as dereference of scaled pointer arithmetic (`*(ptr + idx)`).
   - explicit casts now accept pointer<->pointer and pointer<->integer conversions (while still rejecting pointer<->floating casts).
-  - pointer depth support now includes up to three levels (`T***`); deeper chains (`T****+`) are explicitly rejected for now.
+  - pointer depth support now includes up to four levels (`T****`); deeper chains (`T*****+`) are explicitly rejected for now.
   - `sizeof(pointer)` and pointer-element scaling now track target ABI pointer width (`-m32` => 4 bytes, `-m64` => 8 bytes).
   - prefix/postfix `++/--` now support identifier pointer lvalues with element-size stepping semantics.
   - ordered pointer comparisons (`< <= > >=`) are accepted for compatible pointer types and lower as unsigned address compares.
@@ -163,7 +163,7 @@
   - negative test for index expressions over non-pointer bases.
   - negative test for incompatible pointer subtraction across mismatched pointer base types.
   - negative test for unsupported pointer<->floating cast conversion.
-  - negative test for unsupported pointer depth beyond three levels (`T****+`).
+  - negative test for unsupported pointer depth beyond four levels (`T*****+`).
   - negative test for incompatible ordered pointer comparison across mismatched pointer base types.
   - negative test for invalid compound-assignment lvalue forms (non-assignable expressions).
   - negative test for unsupported `void*` arithmetic.

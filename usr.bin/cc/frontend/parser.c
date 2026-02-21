@@ -399,6 +399,30 @@ static cc_type_t ptr_of_type(cc_type_t t) {
         return CC_TYPE_PTR_PTR_PTR_FLOAT;
     case CC_TYPE_PTR_PTR_DOUBLE:
         return CC_TYPE_PTR_PTR_PTR_DOUBLE;
+    case CC_TYPE_PTR_PTR_PTR_VOID:
+        return CC_TYPE_PTR_PTR_PTR_PTR_VOID;
+    case CC_TYPE_PTR_PTR_PTR_BOOL:
+        return CC_TYPE_PTR_PTR_PTR_PTR_BOOL;
+    case CC_TYPE_PTR_PTR_PTR_CHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_CHAR;
+    case CC_TYPE_PTR_PTR_PTR_UCHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_UCHAR;
+    case CC_TYPE_PTR_PTR_PTR_SHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_SHORT;
+    case CC_TYPE_PTR_PTR_PTR_USHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_USHORT;
+    case CC_TYPE_PTR_PTR_PTR_INT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_INT;
+    case CC_TYPE_PTR_PTR_PTR_UINT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_UINT;
+    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_FLOAT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
+    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
+        return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
     default:
         return CC_TYPE_VOID;
     }
@@ -410,7 +434,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     while (p->tok.kind == TOK_STAR) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 3 is not yet supported");
+            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
             return -1;
         }
         if (next_tok(p) != 0) {
@@ -442,7 +466,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int allow_void, con
     while (p->tok.kind == TOK_STAR) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 3 is not yet supported");
+            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
             return -1;
         }
         if (next_tok(p) != 0) {

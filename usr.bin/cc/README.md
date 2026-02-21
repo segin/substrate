@@ -21,7 +21,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - C95 lexical forms: digraph braces (`<%`/`%>`) and trigraph normalization
   - C99 declaration-specifier combinations for current scalar subset (`_Bool`, `char`/`unsigned char`, `short`/`unsigned short`, `int`/`unsigned int`, `long long`/`unsigned long long`, `float`, qualifiers/storage-class keywords)
   - C99 `for`-init declarations with loop-local scope
-  - one/two/three-level typed pointers (`T*`, `T**`, `T***`) in declarations, parameters, and return types
+  - one/two/three/four-level typed pointers (`T*`, `T**`, `T***`, `T****`) in declarations, parameters, and return types
   - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and prefix/postfix `++/--` with C expression-value semantics
   - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), pointer/integer casts (`(void *)p`, `(unsigned long long)p`, `(int *)n`), and `sizeof` for supported scalar types
   - integer literal suffix typing for unsigned/long-long forms (`u`, `ul`, `ull`, etc.) in semantic/lowering paths
@@ -33,7 +33,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
 
 Native C support is intentionally limited for now:
 - scalar types: `_Bool`, `char`, `unsigned char`, `short`, `unsigned short`, `int`, `unsigned int`, `long long`, `unsigned long long`, `float`, `double`, `void`
-- pointer types: one/two/three-level typed pointers to supported scalar/void types (e.g., `int *`, `int **`, `int ***`, `double *`, `void *`)
+- pointer types: one/two/three/four-level typed pointers to supported scalar/void types (e.g., `int *`, `int **`, `int ***`, `int ****`, `double *`, `void *`)
 - statement subset: local declarations (including comma-separated declarators), assignments, expression statements (including empty `;`), `return`
 - statement subset extension: `if (...) stmt [else stmt]` and block statements `{ ... }`
 - statement subset extension: `while (...)`, `do ... while (...)`, `for (...; ...; ...)`, `switch/case/default`, labels/`goto`, `break;`, `continue;`
@@ -48,7 +48,7 @@ Native C support is intentionally limited for now:
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)
 - assignments inside conditional/loop blocks are supported via explicit SSA `mov` variable updates
 - C95 lexing support includes digraph/trigraph forms for punctuation
-- no structs/arrays yet (pointer depth is currently limited to `T***`; deeper pointer chains are not yet supported)
+- no structs/arrays yet (pointer depth is currently limited to `T****`; deeper pointer chains are not yet supported)
 
 For non-supported C sources, use `--bootstrap-gcc` as a temporary fallback.
 
