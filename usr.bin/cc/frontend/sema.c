@@ -828,11 +828,6 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
         }
 
-        if (f->stmt_count == 0) {
-            set_diag(diag, "function has empty body");
-            goto fail_func;
-        }
-
         for (j = 0; j < f->stmt_count; ++j) {
             if (collect_labels_gotos_stmt(&f->stmts[j], &labels, &gotos, diag) != 0) {
                 goto fail_func;

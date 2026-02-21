@@ -30,6 +30,8 @@ test:
 	/tmp/cc_native_double
 	$(TOP)/usr.bin/cc/cc native_void.c -o /tmp/cc_native_void
 	/tmp/cc_native_void
+	$(TOP)/usr.bin/cc/cc native_c99_empty_void.c -o /tmp/cc_native_c99_empty_void
+	/tmp/cc_native_c99_empty_void
 	$(TOP)/usr.bin/cc/cc native_variadic_decl.c -o /tmp/cc_native_variadic
 	/tmp/cc_native_variadic
 	$(TOP)/usr.bin/cc/cc native_abi_stack_int.c -o /tmp/cc_native_abi_stack_int
@@ -167,7 +169,7 @@ clean:
 	      /tmp/cc_driver_bootstrap.o /tmp/cc_driver_hello.o /tmp/cc_driver_hello \
 	      /tmp/cc_native_arith.s /tmp/cc_native_main /tmp/cc_native_bad.o \
 	      /tmp/cc_native_phase1 /tmp/cc_native_call_stmt /tmp/cc_native_bad_assign.o \
-	      /tmp/cc_native_bad_break.o /tmp/cc_native_bad_continue.o /tmp/cc_native_double /tmp/cc_native_void /tmp/cc_native_variadic \
+	      /tmp/cc_native_bad_break.o /tmp/cc_native_bad_continue.o /tmp/cc_native_double /tmp/cc_native_void /tmp/cc_native_c99_empty_void /tmp/cc_native_variadic \
 	      /tmp/cc_native_bad_case.o /tmp/cc_native_bad_default.o /tmp/cc_native_bad_for_scope.o \
 	      /tmp/cc_native_abi_stack_int /tmp/cc_native_abi_stack_fp /tmp/cc_native_abi_mix \
 	      /tmp/cc_native_if_else /tmp/cc_native_if_abs /tmp/cc_native_c95_digraph /tmp/cc_native_c95_trigraph /tmp/cc_native_do_while /tmp/cc_native_switch /tmp/cc_native_c99_for_decl /tmp/cc_native_c99_types /tmp/cc_native_c99_char_hex /tmp/cc_native_c99_logic /tmp/cc_native_c99_update /tmp/cc_native_c99_bitwise /tmp/cc_native_c99_comma /tmp/cc_native_c99_goto /tmp/cc_native_c99_goto_loop /tmp/cc_native_c99_ternary /tmp/cc_native_c99_cast_sizeof /tmp/cc_native_c99_float_cmp /tmp/cc_native_c99_proto_call /tmp/cc_native_c99_proto_extern.s /tmp/cc_native_loops /tmp/cc_native_if_assign /tmp/cc_native_variadic_call /tmp/cc_native_variadic_call.s \
