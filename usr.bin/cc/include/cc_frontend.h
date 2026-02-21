@@ -45,7 +45,19 @@ typedef enum {
     CC_TYPE_PTR_PTR_LONG_LONG,
     CC_TYPE_PTR_PTR_ULONG_LONG,
     CC_TYPE_PTR_PTR_FLOAT,
-    CC_TYPE_PTR_PTR_DOUBLE
+    CC_TYPE_PTR_PTR_DOUBLE,
+    CC_TYPE_PTR_PTR_PTR_VOID,
+    CC_TYPE_PTR_PTR_PTR_BOOL,
+    CC_TYPE_PTR_PTR_PTR_CHAR,
+    CC_TYPE_PTR_PTR_PTR_UCHAR,
+    CC_TYPE_PTR_PTR_PTR_SHORT,
+    CC_TYPE_PTR_PTR_PTR_USHORT,
+    CC_TYPE_PTR_PTR_PTR_INT,
+    CC_TYPE_PTR_PTR_PTR_UINT,
+    CC_TYPE_PTR_PTR_PTR_LONG_LONG,
+    CC_TYPE_PTR_PTR_PTR_ULONG_LONG,
+    CC_TYPE_PTR_PTR_PTR_FLOAT,
+    CC_TYPE_PTR_PTR_PTR_DOUBLE
 } cc_type_t;
 
 typedef enum {
@@ -162,5 +174,6 @@ typedef struct {
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag);
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
+void cc_frontend_set_pointer_size(int bytes);
 
 #endif

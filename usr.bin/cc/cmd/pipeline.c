@@ -9,12 +9,16 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     cc_translation_unit_t tu;
     cc_ssa_module_t ssa;
     int rc = -1;
+    int pointer_size = target == CC_TARGET_I386 ? 4 : 8;
 
     if (diag != NULL) {
         diag->line = 0;
         diag->col = 0;
         diag->message[0] = '\0';
     }
+
+    cc_frontend_set_pointer_size(pointer_size);
+    cc_ssa_set_pointer_size(pointer_size);
 
     if (cc_parse_file(in_c, &tu, diag) != 0) {
         return -1;

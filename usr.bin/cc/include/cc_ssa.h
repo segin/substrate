@@ -90,5 +90,6 @@ typedef struct {
 void cc_ssa_module_init(cc_ssa_module_t *m);
 void cc_ssa_module_free(cc_ssa_module_t *m);
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag);
+void cc_ssa_set_pointer_size(int bytes);
 
 #endif

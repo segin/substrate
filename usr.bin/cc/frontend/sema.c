@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int g_pointer_size_bytes = 8;
+
 typedef struct {
     char *name;
     cc_type_t type;
@@ -199,7 +201,7 @@ static int is_float_type(cc_type_t t) {
 }
 
 static int is_pointer_type(cc_type_t t) {
-    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_DOUBLE;
+    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_DOUBLE;
 }
 
 static int is_unsigned_integral_type(cc_type_t t) {
@@ -270,6 +272,30 @@ static cc_type_t ptr_of_type(cc_type_t t) {
         return CC_TYPE_PTR_PTR_FLOAT;
     case CC_TYPE_PTR_DOUBLE:
         return CC_TYPE_PTR_PTR_DOUBLE;
+    case CC_TYPE_PTR_PTR_VOID:
+        return CC_TYPE_PTR_PTR_PTR_VOID;
+    case CC_TYPE_PTR_PTR_BOOL:
+        return CC_TYPE_PTR_PTR_PTR_BOOL;
+    case CC_TYPE_PTR_PTR_CHAR:
+        return CC_TYPE_PTR_PTR_PTR_CHAR;
+    case CC_TYPE_PTR_PTR_UCHAR:
+        return CC_TYPE_PTR_PTR_PTR_UCHAR;
+    case CC_TYPE_PTR_PTR_SHORT:
+        return CC_TYPE_PTR_PTR_PTR_SHORT;
+    case CC_TYPE_PTR_PTR_USHORT:
+        return CC_TYPE_PTR_PTR_PTR_USHORT;
+    case CC_TYPE_PTR_PTR_INT:
+        return CC_TYPE_PTR_PTR_PTR_INT;
+    case CC_TYPE_PTR_PTR_UINT:
+        return CC_TYPE_PTR_PTR_PTR_UINT;
+    case CC_TYPE_PTR_PTR_LONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_LONG_LONG;
+    case CC_TYPE_PTR_PTR_ULONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_ULONG_LONG;
+    case CC_TYPE_PTR_PTR_FLOAT:
+        return CC_TYPE_PTR_PTR_PTR_FLOAT;
+    case CC_TYPE_PTR_PTR_DOUBLE:
+        return CC_TYPE_PTR_PTR_PTR_DOUBLE;
     default:
         return CC_TYPE_VOID;
     }
@@ -325,6 +351,30 @@ static cc_type_t ptr_base_type(cc_type_t t) {
         return CC_TYPE_PTR_FLOAT;
     case CC_TYPE_PTR_PTR_DOUBLE:
         return CC_TYPE_PTR_DOUBLE;
+    case CC_TYPE_PTR_PTR_PTR_VOID:
+        return CC_TYPE_PTR_PTR_VOID;
+    case CC_TYPE_PTR_PTR_PTR_BOOL:
+        return CC_TYPE_PTR_PTR_BOOL;
+    case CC_TYPE_PTR_PTR_PTR_CHAR:
+        return CC_TYPE_PTR_PTR_CHAR;
+    case CC_TYPE_PTR_PTR_PTR_UCHAR:
+        return CC_TYPE_PTR_PTR_UCHAR;
+    case CC_TYPE_PTR_PTR_PTR_SHORT:
+        return CC_TYPE_PTR_PTR_SHORT;
+    case CC_TYPE_PTR_PTR_PTR_USHORT:
+        return CC_TYPE_PTR_PTR_USHORT;
+    case CC_TYPE_PTR_PTR_PTR_INT:
+        return CC_TYPE_PTR_PTR_INT;
+    case CC_TYPE_PTR_PTR_PTR_UINT:
+        return CC_TYPE_PTR_PTR_UINT;
+    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
+        return CC_TYPE_PTR_PTR_LONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
+        return CC_TYPE_PTR_PTR_ULONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_FLOAT:
+        return CC_TYPE_PTR_PTR_FLOAT;
+    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
+        return CC_TYPE_PTR_PTR_DOUBLE;
     default:
         return CC_TYPE_VOID;
     }
@@ -461,7 +511,19 @@ static long type_size_bytes(cc_type_t t) {
     case CC_TYPE_PTR_PTR_ULONG_LONG:
     case CC_TYPE_PTR_PTR_FLOAT:
     case CC_TYPE_PTR_PTR_DOUBLE:
-        return 8;
+    case CC_TYPE_PTR_PTR_PTR_VOID:
+    case CC_TYPE_PTR_PTR_PTR_BOOL:
+    case CC_TYPE_PTR_PTR_PTR_CHAR:
+    case CC_TYPE_PTR_PTR_PTR_UCHAR:
+    case CC_TYPE_PTR_PTR_PTR_SHORT:
+    case CC_TYPE_PTR_PTR_PTR_USHORT:
+    case CC_TYPE_PTR_PTR_PTR_INT:
+    case CC_TYPE_PTR_PTR_PTR_UINT:
+    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
+    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
+    case CC_TYPE_PTR_PTR_PTR_FLOAT:
+    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
+        return g_pointer_size_bytes;
     default:
         return -1;
     }
@@ -1433,4 +1495,10 @@ fail_func:
 
 fail_global:
     return -1;
+}
+
+void cc_frontend_set_pointer_size(int bytes) {
+    if (bytes == 4 || bytes == 8) {
+        g_pointer_size_bytes = bytes;
+    }
 }
