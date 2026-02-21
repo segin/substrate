@@ -1154,29 +1154,41 @@ static cc_expr_t *parse_assign(parser_t *p) {
         cc_tok_kind_t aop = p->tok.kind;
         cc_expr_t *rhs;
         cc_expr_t *e;
-        char *name;
+        char *name = NULL;
+        int lhs_is_ident = 0;
+        int lhs_is_deref = 0;
 
-        if (lhs->kind != CC_EXPR_IDENT || lhs->ident == NULL) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "left-hand side of assignment must be an identifier");
+        if (lhs->kind == CC_EXPR_IDENT && lhs->ident != NULL) {
+            lhs_is_ident = 1;
+        } else if (lhs->kind == CC_EXPR_DEREF) {
+            lhs_is_deref = 1;
+        } else {
+            set_diag(p->diag, p->tok.line, p->tok.col,
+                     "left-hand side of assignment must be an identifier or dereference");
             free_expr(lhs);
             return NULL;
         }
 
-        name = lhs->ident;
-        lhs->ident = NULL;
-        free_expr(lhs);
-
         if (next_tok(p) != 0) {
-            free(name);
+            free_expr(lhs);
             return NULL;
         }
         rhs = parse_assign(p);
         if (rhs == NULL) {
-            free(name);
+            free_expr(lhs);
             return NULL;
         }
 
         if (aop != TOK_ASSIGN) {
+            if (!lhs_is_ident) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "compound assignment currently requires identifier lvalue");
+                free_expr(lhs);
+                free_expr(rhs);
+                return NULL;
+            }
+            name = lhs->ident;
+            lhs->ident = NULL;
+            free_expr(lhs);
             cc_expr_t *lhs_read = new_ident_expr(name);
             cc_binop_t bop;
             if (lhs_read == NULL) {
@@ -1210,15 +1222,25 @@ static cc_expr_t *parse_assign(parser_t *p) {
                 free(name);
                 return NULL;
             }
+            lhs = NULL;
+        } else if (lhs_is_ident) {
+            name = lhs->ident;
+            lhs->ident = NULL;
+            free_expr(lhs);
+            lhs = NULL;
         }
 
         e = new_expr(CC_EXPR_ASSIGN);
         if (e == NULL) {
             free(name);
+            free_expr(lhs);
             free_expr(rhs);
             return NULL;
         }
         e->ident = name;
+        if (lhs_is_deref) {
+            e->lhs = lhs;
+        }
         e->rhs = rhs;
         return e;
     }

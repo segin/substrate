@@ -753,34 +753,60 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     }
 
     case CC_EXPR_ASSIGN: {
-        int idx = var_find_visible(vars, var_count, e->ident, depth);
-        cc_value_type_t want;
-        if (idx < 0) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message),
-                         "assignment to unknown identifier during AST->SSA lowering: %s", e->ident);
-            }
-            return -1;
-        }
+        cc_value_type_t want = type_to_val(e->value_type);
         rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
         if (rhs < 0) {
             return -1;
         }
-        want = type_to_val(vars[idx].type);
         rhs = cast_value(sf, rhs, want, diag);
         if (rhs < 0) {
             return -1;
         }
-        memset(&in, 0, sizeof(in));
-        in.op = CC_SSA_MOV;
-        in.dst = vars[idx].value;
-        in.lhs = rhs;
-        in.rhs = -1;
-        if (push_instr(sf, in) != 0) {
-            set_diag(diag, "out of memory appending assignment move");
-            return -1;
+
+        if (e->ident != NULL) {
+            int idx = var_find_visible(vars, var_count, e->ident, depth);
+            if (idx < 0) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "assignment to unknown identifier during AST->SSA lowering: %s", e->ident);
+                }
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_MOV;
+            in.dst = vars[idx].value;
+            in.lhs = rhs;
+            in.rhs = -1;
+            if (push_instr(sf, in) != 0) {
+                set_diag(diag, "out of memory appending assignment move");
+                return -1;
+            }
+            return vars[idx].value;
         }
-        return vars[idx].value;
+
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
+            int ptrv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs->lhs, diag);
+            if (ptrv < 0) {
+                return -1;
+            }
+            ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
+            if (ptrv < 0) {
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_STORE;
+            in.dst = -1;
+            in.lhs = ptrv;
+            in.rhs = rhs;
+            if (push_instr(sf, in) != 0) {
+                set_diag(diag, "out of memory appending pointer store");
+                return -1;
+            }
+            return rhs;
+        }
+
+        set_diag(diag, "unsupported assignment target in lowering");
+        return -1;
     }
 
     case CC_EXPR_UPDATE: {

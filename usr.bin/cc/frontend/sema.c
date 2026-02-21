@@ -691,26 +691,41 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     }
 
     case CC_EXPR_ASSIGN: {
-        int idx = vars_find_visible(vars, var_count, e->ident, depth);
-        if (idx < 0) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "assignment to undeclared identifier: %s",
-                         e->ident ? e->ident : "<null>");
+        cc_type_t dst_type;
+        if (e->ident != NULL) {
+            int idx = vars_find_visible(vars, var_count, e->ident, depth);
+            if (idx < 0) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "assignment to undeclared identifier: %s",
+                             e->ident);
+                }
+                return -1;
             }
+            dst_type = vars[idx].type;
+        } else if (e->lhs != NULL && e->lhs->kind == CC_EXPR_DEREF) {
+            if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            dst_type = e->lhs->value_type;
+        } else {
+            set_diag(diag, "assignment target must be identifier or dereference");
             return -1;
         }
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
-        if (!can_convert(vars[idx].type, e->rhs->value_type) &&
-            !(is_pointer_type(vars[idx].type) && is_integral_type(e->rhs->value_type) &&
-              is_null_ptr_constant(e->rhs))) {
+        if (!can_convert(dst_type, e->rhs->value_type) &&
+            !(is_pointer_type(dst_type) && is_integral_type(e->rhs->value_type) && is_null_ptr_constant(e->rhs))) {
             if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "cannot assign expression to %s", e->ident);
+                if (e->ident != NULL) {
+                    snprintf(diag->message, sizeof(diag->message), "cannot assign expression to %s", e->ident);
+                } else {
+                    snprintf(diag->message, sizeof(diag->message), "%s", "cannot assign expression through pointer");
+                }
             }
             return -1;
         }
-        e->value_type = vars[idx].type;
+        e->value_type = dst_type;
         return 0;
     }
 

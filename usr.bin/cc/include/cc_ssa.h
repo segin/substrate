@@ -32,6 +32,7 @@ typedef enum {
     CC_SSA_SHR,
     CC_SSA_ADDR,
     CC_SSA_LOAD,
+    CC_SSA_STORE,
     CC_SSA_MOV,
     CC_SSA_CMP,
     CC_SSA_I2F,

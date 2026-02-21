@@ -111,6 +111,7 @@
   - integer literal suffixes now carry unsigned/long-long typing (`u`, `ul`, `ull` families) into sema/lowering so unsigned behavior applies to literal-only expressions.
   - `short` / `unsigned short` declaration-specifiers now map to explicit 16-bit-sized scalar types (`sizeof == 2`) in sema/lowering type metadata.
   - one-level typed pointer declarations/params/returns (`T*`) plus unary address/dereference expressions now lower through explicit SSA addr/load operations; sema supports pointer/null equality comparisons.
+  - indirect pointer stores (`*p = expr`) now lower through explicit SSA store operations for supported scalar pointee types.
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
@@ -129,5 +130,7 @@
   - negative parser test for conflicting `signed`+`unsigned` declaration specifiers.
   - positive compile/run test for `short`/`unsigned short` scalar behavior and `sizeof`; negative parser test for invalid `short long` specifier combinations.
   - positive compile/run tests for local pointer dereference and pointer-parameter calls; i386 emission checks for addr/load codegen.
+  - positive compile/run tests for pointer indirect stores (local + parameter path); i386 emission check for indirect store codegen.
   - negative tests for dereferencing non-pointer expressions and invalid address-of non-lvalue expressions.
+  - negative test for unsupported compound assignment on indirect lvalues (`*p += ...`) in current subset.
   - negative test for unsupported `sizeof(void)` in current subset.

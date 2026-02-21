@@ -66,6 +66,9 @@ static int fold_function(cc_ssa_function_t *f) {
             }
             break;
 
+        case CC_SSA_STORE:
+            break;
+
         case CC_SSA_I2F:
             if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_I64) {
                 long src = st[in->lhs].i;
@@ -297,6 +300,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_LABEL:
     case CC_SSA_BR:
     case CC_SSA_BR_COND:
+    case CC_SSA_STORE:
     case CC_SSA_CALL:
     case CC_SSA_RET:
         return 0;
