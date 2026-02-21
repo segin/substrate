@@ -28,3 +28,14 @@
 - Remaining:
   - full C99 frontend coverage (control flow, pointers/aggregates)
   - richer DWARF variable/location emission beyond assembly-level directives
+
+## Phase 3
+- Driver now supports explicit target ABI selection with `-m32` and `-m64`.
+- Backend now emits:
+  - x86_64 SysV path (existing int/double subset)
+  - i386 cdecl path for integer subset (stack args/params, `eax` returns)
+- Middle-end pass pipeline is active at `-O1+`:
+  - SSA constant folding
+  - dead temporary elimination for pure SSA instructions
+- Current limitation:
+  - i386 floating-point codegen is intentionally rejected with diagnostics (not yet lowered to x87/SSE ABI rules).

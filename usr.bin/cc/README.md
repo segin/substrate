@@ -4,7 +4,7 @@
 
 ## Status
 
-Phase-2 (initial ABI/fp/debug slice) is implemented:
+Phase-3 (cross-target + optimizer slice) is implemented:
 
 - `cc` driver skeleton (`cmd/cc.c`) with Unix-style stage control.
 - preprocessing stage (`-E`) via system `cpp`.
@@ -12,7 +12,8 @@ Phase-2 (initial ABI/fp/debug slice) is implemented:
 - native C subset pipeline:
   - lexer/parser/sema for a strict C subset
   - AST to SSA-like lowering
-  - x86-64 GAS emitter
+  - SSA middle-end optimization passes (`-O1+`): constant folding + dead temp elimination
+  - GAS emitter for x86-64 and x86-32
 - existing SSA utilities remain available:
   - `ir-verifier`
   - `ir-normalize`
@@ -24,7 +25,9 @@ Native C support is intentionally limited for now:
 - expressions: numeric literals, identifiers, `+ - * /`, parentheses, function calls, assignment expressions
 - function declarations/definitions with fixed params or `...` variadics
 - SysV AMD64 ABI lowering for mixed integer/SSE arguments including stack overflow arguments
+- i386 ABI lowering for integer subset with cdecl stack args/params
 - debug assembly directives with `-g` (`.file`, `.loc`, `.cfi_*`)
+- i386 floating-point codegen is not implemented yet (x86-64 `double` path remains supported)
 - no control-flow statements (`if`, `for`, `while`, `switch`) yet
 - no pointers/structs/arrays yet
 
@@ -35,6 +38,7 @@ For non-supported C sources, use `--bootstrap-gcc` as a temporary fallback.
 - `-E`, `-S`, `-c`, `-o`
 - `-std=c99`
 - `-O0`..`-O3`
+- `-m32`, `-m64`
 - `-g`
 - `-Wall`, `-Werror`
 - `-fPIC`, `-shared`, `-pthread`

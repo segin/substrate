@@ -40,8 +40,18 @@ test:
 	/tmp/cc_native_abi_mix
 	$(TOP)/usr.bin/cc/cc native_variadic_call.c -o /tmp/cc_native_variadic_call
 	/tmp/cc_native_variadic_call
+	$(TOP)/usr.bin/cc/cc -O2 native_opt_fold.c -o /tmp/cc_native_opt_fold
+	/tmp/cc_native_opt_fold
+	$(TOP)/usr.bin/cc/cc -O2 -S native_opt_fold.c -o /tmp/cc_native_opt_fold.s
+	! grep -q "imulq" /tmp/cc_native_opt_fold.s
 	$(TOP)/usr.bin/cc/cc -S native_variadic_call.c -o /tmp/cc_native_variadic_call.s
 	grep -Fq 'movb $$2, %al' /tmp/cc_native_variadic_call.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_arith.c -o /tmp/cc_native_arith_32.s
+	grep -q "\\.code32" /tmp/cc_native_arith_32.s
+	grep -q "movl" /tmp/cc_native_arith_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -c native_arith.c -o /tmp/cc_native_arith_32.o
+	file /tmp/cc_native_arith_32.o | grep -q "ELF 32-bit"
+	! $(TOP)/usr.bin/cc/cc -m32 -c native_double.c -o /tmp/cc_native_double_32.o
 	$(TOP)/usr.bin/cc/cc -g -S native_double.c -o /tmp/cc_native_double_dbg.s
 	grep -q "\\.cfi_startproc" /tmp/cc_native_double_dbg.s
 	grep -q "\\.file" /tmp/cc_native_double_dbg.s
@@ -61,4 +71,6 @@ clean:
 	      /tmp/cc_native_double /tmp/cc_native_void /tmp/cc_native_variadic \
 	      /tmp/cc_native_abi_stack_int /tmp/cc_native_abi_stack_fp /tmp/cc_native_abi_mix \
 	      /tmp/cc_native_variadic_call /tmp/cc_native_variadic_call.s \
+	      /tmp/cc_native_opt_fold /tmp/cc_native_opt_fold.s \
+	      /tmp/cc_native_arith_32.s /tmp/cc_native_arith_32.o /tmp/cc_native_double_32.o \
 	      /tmp/cc_native_double_dbg.s

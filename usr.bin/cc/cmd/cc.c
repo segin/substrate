@@ -35,6 +35,7 @@ typedef struct {
     int bootstrap_gcc;
     int nostdlib;
     int nodefaultlibs;
+    cc_target_t target;
 
     const char *std;
     const char *opt_level;
@@ -47,6 +48,20 @@ typedef struct {
     strvec_t inputs;
     strvec_t temp_files;
 } cc_opts_t;
+
+static const char *target_gcc_flag(cc_target_t target) {
+    return target == CC_TARGET_I386 ? "-m32" : "-m64";
+}
+
+static int opt_level_num(const cc_opts_t *o) {
+    if (o->opt_level == NULL || o->opt_level[0] == '\0') {
+        return 0;
+    }
+    if (o->opt_level[0] < '0' || o->opt_level[0] > '3') {
+        return 0;
+    }
+    return o->opt_level[0] - '0';
+}
 
 static char *xstrdup(const char *s) {
     size_t n;
@@ -192,16 +207,17 @@ static int capture_cmd_output(char *const argv[], char *out, size_t outsz) {
     return 0;
 }
 
-static int gcc_print_file_name(const char *name, char out[PATH_MAX]) {
+static int gcc_print_file_name(const char *name, cc_target_t target, char out[PATH_MAX]) {
     char opt[PATH_MAX];
-    char *argv[3];
+    char *argv[4];
 
     if (snprintf(opt, sizeof(opt), "-print-file-name=%s", name) >= (int)sizeof(opt)) {
         return -1;
     }
     argv[0] = "gcc";
-    argv[1] = opt;
-    argv[2] = NULL;
+    argv[1] = (char *)target_gcc_flag(target);
+    argv[2] = opt;
+    argv[3] = NULL;
     if (capture_cmd_output(argv, out, PATH_MAX) != 0) {
         return -1;
     }
@@ -211,12 +227,13 @@ static int gcc_print_file_name(const char *name, char out[PATH_MAX]) {
     return 0;
 }
 
-static int gcc_print_libgcc(char out[PATH_MAX]) {
-    char *argv[3];
+static int gcc_print_libgcc(cc_target_t target, char out[PATH_MAX]) {
+    char *argv[4];
 
     argv[0] = "gcc";
-    argv[1] = "-print-libgcc-file-name";
-    argv[2] = NULL;
+    argv[1] = (char *)target_gcc_flag(target);
+    argv[2] = "-print-libgcc-file-name";
+    argv[3] = NULL;
     if (capture_cmd_output(argv, out, PATH_MAX) != 0) {
         return -1;
     }
@@ -289,6 +306,7 @@ static void usage(const char *prog) {
             "  -I/-D/-U           preprocessor options\n"
             "  -std=c99           language mode\n"
             "  -O0..-O3           optimization level\n"
+            "  -m32/-m64          target ABI (i386 or x86_64)\n"
             "  -g                 debug info\n"
             "  -Wall -Werror      warnings\n"
             "  -fPIC              position-independent code\n"
@@ -395,6 +413,16 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         }
         if (strncmp(a, "-O", 2) == 0) {
             o->opt_level = a + 2;
+            strvec_push(&o->c_flags, a);
+            continue;
+        }
+        if (strcmp(a, "-m32") == 0) {
+            o->target = CC_TARGET_I386;
+            strvec_push(&o->c_flags, a);
+            continue;
+        }
+        if (strcmp(a, "-m64") == 0) {
+            o->target = CC_TARGET_X86_64;
             strvec_push(&o->c_flags, a);
             continue;
         }
@@ -537,6 +565,7 @@ static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const ch
 
     argv[at++] = "gcc";
     argv[at++] = "-S";
+    argv[at++] = (char *)target_gcc_flag(o->target);
     snprintf(stdflag, sizeof(stdflag), "-std=%s", o->std != NULL ? o->std : "gnu99");
     argv[at++] = stdflag;
     if (!o->pic && !o->shared) {
@@ -557,7 +586,7 @@ static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const ch
 }
 
 static int run_as(const cc_opts_t *o, const char *in_s, const char *out_o) {
-    size_t argc = 4 + o->as_flags.count;
+    size_t argc = 5 + o->as_flags.count;
     char **argv;
     size_t i;
     size_t at = 0;
@@ -568,6 +597,7 @@ static int run_as(const cc_opts_t *o, const char *in_s, const char *out_o) {
     }
 
     argv[at++] = "as";
+    argv[at++] = o->target == CC_TARGET_I386 ? "--32" : "--64";
     for (i = 0; i < o->as_flags.count; ++i) {
         argv[at++] = o->as_flags.items[i];
     }
@@ -601,20 +631,23 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
 
     argv[at++] = "ld";
     argv[at++] = "-m";
-    argv[at++] = "elf_x86_64";
+    argv[at++] = o->target == CC_TARGET_I386 ? "elf_i386" : "elf_x86_64";
     if (o->shared) {
         argv[at++] = "-shared";
     }
     if (want_default_runtime) {
-        if (gcc_print_file_name("crt1.o", crt1) != 0 || gcc_print_file_name("crti.o", crti) != 0 ||
-            gcc_print_file_name("crtbegin.o", crtbegin) != 0 || gcc_print_file_name("crtend.o", crtend) != 0 ||
-            gcc_print_file_name("crtn.o", crtn) != 0 || gcc_print_libgcc(libgcc) != 0) {
+        if (gcc_print_file_name("crt1.o", o->target, crt1) != 0 ||
+            gcc_print_file_name("crti.o", o->target, crti) != 0 ||
+            gcc_print_file_name("crtbegin.o", o->target, crtbegin) != 0 ||
+            gcc_print_file_name("crtend.o", o->target, crtend) != 0 ||
+            gcc_print_file_name("crtn.o", o->target, crtn) != 0 ||
+            gcc_print_libgcc(o->target, libgcc) != 0) {
             fprintf(stderr, "cc: failed to discover runtime crt/libgcc paths via gcc\n");
             free(argv);
             return -1;
         }
         argv[at++] = "-dynamic-linker";
-        argv[at++] = "/lib64/ld-linux-x86-64.so.2";
+        argv[at++] = o->target == CC_TARGET_I386 ? "/lib/ld-linux.so.2" : "/lib64/ld-linux-x86-64.so.2";
         argv[at++] = crt1;
         argv[at++] = crti;
         argv[at++] = crtbegin;
@@ -693,6 +726,7 @@ int cc_main(int argc, char **argv) {
 
     memset(&o, 0, sizeof(o));
     memset(&obj_files, 0, sizeof(obj_files));
+    o.target = CC_TARGET_X86_64;
 
     if (parse_args(argc, argv, &o) != 0) {
         usage(argv[0]);
@@ -756,7 +790,7 @@ int cc_main(int argc, char **argv) {
             } else {
                 cc_diag_t diag;
                 memset(&diag, 0, sizeof(diag));
-                if (cc_compile_c_to_s(out_pp, in, out_s, o.debug, &diag) != 0) {
+                if (cc_compile_c_to_s(out_pp, in, out_s, o.debug, o.target, opt_level_num(&o), &diag) != 0) {
                     if (diag.line != 0) {
                         fprintf(stderr, "cc:%zu:%zu: %s\n", diag.line, diag.col, diag.message);
                     } else if (diag.message[0] != '\0') {

@@ -5,6 +5,7 @@ COMMON_SRCS = ir.c parser.c verifier.c serialize.c
 CC_SRCS = cmd/cc.c cmd/pipeline.c \
 	  frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c \
 	  middle/ast2ir.c middle/legalize.c \
+	  middle/passes/opt.c \
 	  middle/ssa/module.c middle/ssa/func.c middle/ssa/bblock.c middle/ssa/instr_set.c \
 	  backend/select.c backend/regalloc.c backend/frame.c backend/emit_s.c
 
@@ -16,7 +17,7 @@ endif
 
 all: $(PROGS)
 
-cc: $(CC_SRCS) include/cc_driver.h include/cc_frontend.h include/cc_ssa.h include/cc_backend.h include/cc_pipeline.h
+cc: $(CC_SRCS) include/cc_driver.h include/cc_frontend.h include/cc_ssa.h include/cc_backend.h include/cc_pipeline.h include/cc_middle.h include/cc_target.h
 	$(CC) $(TOOL_CFLAGS) -Iinclude -o $@ $(CC_SRCS)
 
 ir-verifier: ir-verifier.c $(COMMON_SRCS) ir.h
