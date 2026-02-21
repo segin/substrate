@@ -420,7 +420,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 
     switch (e->kind) {
     case CC_EXPR_INT:
-        e->value_type = CC_TYPE_INT;
+        if (!is_integral_type(e->value_type)) {
+            e->value_type = CC_TYPE_INT;
+        }
         return 0;
 
     case CC_EXPR_FLOAT:

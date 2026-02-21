@@ -23,6 +23,7 @@ Phase-9 (expanded C99 expression/declaration/control slice) is implemented:
   - C99 `for`-init declarations with loop-local scope
   - expression extensions: `%`, unary `+`/`!`/`~`, short-circuit `&&`/`||`, bitwise/shift ops (`& | ^ << >>`), comma operator, compound assignments (`+= -= *= /= %= &= |= ^= <<= >>=`), and prefix/postfix `++/--` with C expression-value semantics
   - expression extensions: ternary conditional (`?:`), scalar casts (`(int)`, `(double)`, etc.), and `sizeof` for supported scalar types
+  - integer literal suffix typing for unsigned/long-long forms (`u`, `ul`, `ull`, etc.) in semantic/lowering paths
   - control-flow extensions: C labels + `goto`
 - existing SSA utilities remain available:
   - `ir-verifier`

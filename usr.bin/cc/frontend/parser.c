@@ -98,6 +98,8 @@ typedef struct {
     long num;
     double fnum;
     int is_float;
+    int int_is_unsigned;
+    int int_is_longlong;
     size_t line;
     size_t col;
 } cc_token_t;
@@ -465,7 +467,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             e->int_val = p->tok.num;
-            e->value_type = CC_TYPE_INT;
+            if (p->tok.int_is_longlong) {
+                e->value_type = p->tok.int_is_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
+            } else {
+                e->value_type = p->tok.int_is_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
+            }
         }
         if (next_tok(p) != 0) {
             free_expr(e);

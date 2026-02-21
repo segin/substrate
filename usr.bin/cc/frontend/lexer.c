@@ -96,6 +96,8 @@ typedef struct {
     long num;
     double fnum;
     int is_float;
+    int int_is_unsigned;
+    int int_is_longlong;
     size_t line;
     size_t col;
 } cc_token_t;
@@ -194,6 +196,8 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->num = 0;
     out->fnum = 0.0;
     out->is_float = 0;
+    out->int_is_unsigned = 0;
+    out->int_is_longlong = 0;
     out->line = lx->line;
     out->col = lx->col;
 
@@ -380,6 +384,8 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         out->kind = TOK_NUM;
         out->num = v;
         out->is_float = 0;
+        out->int_is_unsigned = 0;
+        out->int_is_longlong = 0;
         out->line = line;
         out->col = col;
         return 0;
@@ -387,6 +393,8 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
 
     if (isdigit(c)) {
         int saw_dot = 0;
+        int seen_u = 0;
+        int seen_l = 0;
         int base = 10;
         start = lx->pos;
         if (c == '0' && (lx_peekn(lx, 1) == 'x' || lx_peekn(lx, 1) == 'X')) {
@@ -417,6 +425,11 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
             }
         } else {
             while ((c = lx_peek(lx)) >= 0 && is_int_suffix_char(c)) {
+                if (c == 'u' || c == 'U') {
+                    seen_u = 1;
+                } else if (c == 'l' || c == 'L') {
+                    seen_l++;
+                }
                 lx_adv(lx);
             }
         }
@@ -451,6 +464,8 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
             }
             tmp[n] = '\0';
             out->num = strtol(tmp, NULL, base == 10 ? 0 : base);
+            out->int_is_unsigned = seen_u;
+            out->int_is_longlong = (seen_l >= 2);
         }
         return 0;
     }
