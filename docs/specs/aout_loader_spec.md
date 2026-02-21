@@ -120,24 +120,24 @@ enum aout_flavor classify_aout(int fd) {
 
 ```
            execve()
-               |
+|  |
         +------v-------+
-        | Format Probe |
+| Format Probe |
         +------+-------+
-               |
+|  |
         +------v-------+
-        | a.out Loader | maps sections, applies relocs
+| a.out Loader | maps sections, applies relocs |
         +------+-------+
-               |
+|  |
       +--------+---------+
-      | Personality Select|
+| Personality Select |
       +---+---------+----+
-          |         |
+|  |
    +------v--+  +---v-----+
-   | FreeBSD |  | NetBSD  |
-   | Persona |  | Persona |
+| FreeBSD |  | NetBSD  |
+| Persona | - | Persona |
    +----+----+  +----+----+
-        |            |
+|  |
    syscall tbl   syscall tbl
 ```
 

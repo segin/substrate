@@ -34,7 +34,7 @@ Return Address (Ignored) <--- ESP
 ### Syscall Table
 
 | Number | Name          | Description                                 |
-| :---   | :---          | :---                                        |
+| :----- | :------------ | :------------------------------------------ |
 | 1      | `exit`        | Terminate process                           |
 | 2      | `fork`        | Create new process                          |
 | 3      | `read`        | Read from file descriptor                   |
@@ -89,7 +89,7 @@ Return Address (Ignored) <--- ESP
 Defined in `<sys/stat.h>`. **Size: 92 bytes.**
 
 | Offset | Field           | Type       | Size | Description                         |
-| :---   | :---            | :---       | :--- | :---                                |
+| :----- | :-------------- | :--------- | :--- | :---------------------------------- |
 | 0      | `st_dev`        | `uint32_t` | 4    | Device ID of device containing file |
 | 4      | `st_ino`        | `uint32_t` | 4    | Inode number                        |
 | 8      | `st_mode`       | `uint16_t` | 2    | File type and mode                  |
@@ -114,27 +114,27 @@ Defined in `<sys/stat.h>`. **Size: 92 bytes.**
 ### System Info (`struct utsname`)
 Defined in `<sys/utsname.h>`.
 
-| Field        | Type        | Size (bytes) | Description                         |
-| :---         | :---        | :---         | :---                                |
-| `sysname`    | `char[]`    | 256          | Operating System Name ("substrate") |
-| `nodename`   | `char[]`    | 256          | Network Node Name                   |
-| `release`    | `char[]`    | 256          | Release Level                       |
-| `version`    | `char[]`    | 256          | Version Level                       |
-| `machine`    | `char[]`    | 256          | Hardware Type                       |
-| `domainname` | `char[]`    | 256          | NIS Domain Name                     |
+| Field        | Type     | Size (bytes) | Description                         |
+| :----------- | :------- | :----------- | :---------------------------------- |
+| `sysname`    | `char[]` | 256          | Operating System Name ("substrate") |
+| `nodename`   | `char[]` | 256          | Network Node Name                   |
+| `release`    | `char[]` | 256          | Release Level                       |
+| `version`    | `char[]` | 256          | Version Level                       |
+| `machine`    | `char[]` | 256          | Hardware Type                       |
+| `domainname` | `char[]` | 256          | NIS Domain Name                     |
 
 ### Time Structures
 Defined in `<sys/time.h>`. `time_t` is a 64-bit signed integer.
 
 **`struct timespec`**
 | Field     | Type     | Size | Description |
-| :---      | :---     | :--- | :---        |
+| :-------- | :------- | :--- | :---------- |
 | `tv_sec`  | `time_t` | 8    | Seconds     |
 | `tv_nsec` | `long`   | 4    | Nanoseconds |
 
 **`struct timeval`**
 | Field     | Type          | Size | Description  |
-| :---      | :---          | :--- | :---         |
+| :-------- | :------------ | :--- | :----------- |
 | `tv_sec`  | `time_t`      | 8    | Seconds      |
 | `tv_usec` | `suseconds_t` | 4    | Microseconds |
 
@@ -142,7 +142,7 @@ Defined in `<sys/time.h>`. `time_t` is a 64-bit signed integer.
 Defined in `<sys/poll.h>`.
 
 | Field     | Type    | Size | Description      |
-| :---      | :---    | :--- | :---             |
+| :-------- | :------ | :--- | :--------------- |
 | `fd`      | `int`   | 4    | File Descriptor  |
 | `events`  | `short` | 2    | Requested Events |
 | `revents` | `short` | 2    | Returned Events  |
@@ -150,33 +150,33 @@ Defined in `<sys/poll.h>`.
 ### Directory Entry (`struct dirent`)
 Used by `getdents`. Variable length structure.
 
-| Field      | Type             | Size | Description                                  |
-| :---       | :---             | :--- | :---                                         |
-| `d_ino`    | `uint64_t`       | 8    | Inode number                                 |
-| `d_off`    | `uint64_t`       | 8    | Offset to next entry                         |
-| `d_reclen` | `unsigned short` | 2    | Length of this record                        |
-| `d_name`   | `char[]`         | Var  | Filename (null-terminated)                   |
+| Field      | Type             | Size | Description                |
+| :--------- | :--------------- | :--- | :------------------------- |
+| `d_ino`    | `uint64_t`       | 8    | Inode number               |
+| `d_off`    | `uint64_t`       | 8    | Offset to next entry       |
+| `d_reclen` | `unsigned short` | 2    | Length of this record      |
+| `d_name`   | `char[]`         | Var  | Filename (null-terminated) |
 
 ### Thread Creation (`struct thr_param`)
 Used by `thr_new`.
 
-| Field        | Type        | Size | Description                      |
-| :---         | :---        | :--- | :---                             |
-| `start_func` | `ptr`       | 4    | Entry point function             |
-| `arg`        | `ptr`       | 4    | Argument for entry point         |
-| `stack_base` | `ptr`       | 4    | Stack base address               |
-| `stack_size` | `size_t`    | 4    | Stack size in bytes              |
-| `tls_base`   | `ptr`       | 4    | TLS segment base address         |
-| `tls_size`   | `size_t`    | 4    | TLS segment size                 |
-| `child_tid`  | `long*`     | 4    | Address to write Child TID       |
-| `parent_tid` | `long*`     | 4    | Address to write Parent TID      |
-| `flags`      | `int`       | 4    | Creation flags                   |
+| Field        | Type     | Size | Description                 |
+| :----------- | :------- | :--- | :-------------------------- |
+| `start_func` | `ptr`    | 4    | Entry point function        |
+| `arg`        | `ptr`    | 4    | Argument for entry point    |
+| `stack_base` | `ptr`    | 4    | Stack base address          |
+| `stack_size` | `size_t` | 4    | Stack size in bytes         |
+| `tls_base`   | `ptr`    | 4    | TLS segment base address    |
+| `tls_size`   | `size_t` | 4    | TLS segment size            |
+| `child_tid`  | `long*`  | 4    | Address to write Child TID  |
+| `parent_tid` | `long*`  | 4    | Address to write Parent TID |
+| `flags`      | `int`    | 4    | Creation flags              |
 
 ### Signal Stack (`stack_t`)
 Used by `sigaltstack`.
 
 | Field      | Type     | Size | Description                 |
-| :---       | :---     | :--- | :---                        |
+| :--------- | :------- | :--- | :-------------------------- |
 | `ss_sp`    | `void*`  | 4    | Stack base/pointer          |
 | `ss_flags` | `int`    | 4    | Flags (`__SS_DISABLE__`...) |
 | `ss_size`  | `size_t` | 4    | Stack size                  |
@@ -191,16 +191,16 @@ When a new process is started `EIP` points to the entry point, `ESP` points to a
 
 The stack grows downwards.
 
-| Content             | Description                                                                           |
-| :---                | :---                                                                                  |
-| Strings             | String data for Envp, Argv, Platform, etc.                                            |
-| `AT_NULL`           | `{0, 0}` Auxv Terminator                                                              |
-| Auxv Entries        | Elf Auxiliary Vector entries (Page size, PHDR, Entry, UID/GID, Random, Platform, etc.)|
-| `AT_RANDOM` data    | 16 bytes of random data for the canary                                                |
-| `Envp[]`            | Array of pointers to environment strings, suffixed with `NULL`                        |
-| `Argv[]`            | Array of pointers to argument strings, suffixed with `NULL`                           |
-| `Argc`              | Integer argument count                                                                |
-| **Stack Pointer**   | `ESP` points here at entry                                                            |
+| Content           | Description                                                                            |
+| :---------------- | :------------------------------------------------------------------------------------- |
+| Strings           | String data for Envp, Argv, Platform, etc.                                             |
+| `AT_NULL`         | `{0, 0}` Auxv Terminator                                                               |
+| Auxv Entries      | Elf Auxiliary Vector entries (Page size, PHDR, Entry, UID/GID, Random, Platform, etc.) |
+| `AT_RANDOM` data  | 16 bytes of random data for the canary                                                 |
+| `Envp[]`          | Array of pointers to environment strings, suffixed with `NULL`                         |
+| `Argv[]`          | Array of pointers to argument strings, suffixed with `NULL`                            |
+| `Argc`            | Integer argument count                                                                 |
+| **Stack Pointer** | `ESP` points here at entry                                                             |
 
 ## 4. Signal Handling
 
