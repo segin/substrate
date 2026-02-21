@@ -20,15 +20,13 @@
 #include <sys/ntsync.h>
 #include <sys/proc.h>
 #include <sys/time.h>
-#include <kern/time.h>
+#include <vm/vm_kmem.h>
 #include <string.h>
 #include <errno.h>
 
 /* Forward declarations */
 static int ntsync_ioctl(fs_node_t *node, uint32_t request, void *arg);
 static int ntsync_obj_ioctl(fs_node_t *node, uint32_t request, void *arg);
-extern void *kmalloc(size_t size);
-extern void kfree(void *ptr);
 
 /*
  * ============================================================
@@ -146,7 +144,7 @@ static void ntsync_object_ref(ntsync_object_t *obj) {
 static void ntsync_object_unref(ntsync_object_t *obj) {
     if (__sync_sub_and_fetch(&obj->refcount, 1) == 0) {
         /* Free the object */
-        kfree(obj);
+        kfree(obj, sizeof(ntsync_object_t));
     }
 }
 
@@ -573,7 +571,7 @@ static int ntsync_obj_ioctl(fs_node_t *node, uint32_t request, void *arg) {
  * Allocate and initialize an object, returning its FD
  */
 static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
-                                void *args) {
+                                 void *args) {
     ntsync_object_t *obj = kmalloc(sizeof(ntsync_object_t));
     if (!obj) return -ENOMEM;
     
@@ -587,11 +585,11 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
     case NTSYNC_OBJ_SEM: {
         struct ntsync_sem_args sargs;
         if (copyin(args, &sargs, sizeof(sargs)) != 0) {
-            kfree(obj);
+            kfree(obj, sizeof(ntsync_object_t));
             return -EFAULT;
         }
         if (sargs.count > sargs.max) {
-            kfree(obj);
+            kfree(obj, sizeof(ntsync_object_t));
             return -EINVAL;
         }
         obj->sem.count = sargs.count;
@@ -602,13 +600,13 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
     case NTSYNC_OBJ_MUTEX: {
         struct ntsync_mutex_args margs;
         if (copyin(args, &margs, sizeof(margs)) != 0) {
-            kfree(obj);
+            kfree(obj, sizeof(ntsync_object_t));
             return -EFAULT;
         }
         /* owner==0 && count>0 or owner!=0 && count==0 is invalid */
         if ((margs.owner == 0 && margs.count != 0) ||
             (margs.owner != 0 && margs.count == 0)) {
-            kfree(obj);
+            kfree(obj, sizeof(ntsync_object_t));
             return -EINVAL;
         }
         obj->mutex.owner = margs.owner;
@@ -620,7 +618,7 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
     case NTSYNC_OBJ_EVENT: {
         struct ntsync_event_args eargs;
         if (copyin(args, &eargs, sizeof(eargs)) != 0) {
-            kfree(obj);
+            kfree(obj, sizeof(ntsync_object_t));
             return -EFAULT;
         }
         obj->event.signaled = eargs.signaled ? 1 : 0;
@@ -629,7 +627,7 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
     }
     
     default:
-        kfree(obj);
+        kfree(obj, sizeof(ntsync_object_t));
         return -EINVAL;
     }
     
@@ -650,28 +648,28 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
         } else {
             if (inst->object_capacity > INT32_MAX / 2) {
                 ntsync_spinlock_release(&inst->lock);
-                kfree(obj);
+                kfree(obj, sizeof(ntsync_object_t));
                 return -ENOMEM;
             }
             new_cap = inst->object_capacity * 2;
         }
 
-        if (new_cap > SIZE_MAX / sizeof(ntsync_object_t *)) {
+        if ((size_t)new_cap > SIZE_MAX / sizeof(ntsync_object_t *)) {
             ntsync_spinlock_release(&inst->lock);
-            kfree(obj);
+            kfree(obj, sizeof(ntsync_object_t));
             return -ENOMEM;
         }
 
         ntsync_object_t **new_objs = kmalloc(new_cap * sizeof(ntsync_object_t *));
         if (!new_objs) {
             ntsync_spinlock_release(&inst->lock);
-            kfree(obj);
+            kfree(obj, sizeof(ntsync_object_t));
             return -ENOMEM;
         }
         if (inst->objects) {
             memcpy(new_objs, inst->objects, 
                    inst->object_count * sizeof(ntsync_object_t *));
-            kfree(inst->objects);
+            kfree(inst->objects, inst->object_capacity * sizeof(ntsync_object_t *));
         }
         inst->objects = new_objs;
         inst->object_capacity = new_cap;
@@ -710,7 +708,7 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     if (!obj_fds) return -ENOMEM;
     
     if (copyin((void *)(uintptr_t)kargs.objs, obj_fds, kargs.count * sizeof(int)) != 0) {
-        kfree(obj_fds);
+        kfree(obj_fds, kargs.count * sizeof(int));
         return -EFAULT;
     }
 
@@ -725,7 +723,7 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         int fd = obj_fds[i];
         if (fd < 0 || fd >= inst->object_count) {
             ntsync_spinlock_release(&inst->lock);
-            kfree(obj_fds);
+            kfree(obj_fds, kargs.count * sizeof(int));
             for (uint32_t j = 0; j < i; j++) ntsync_object_unref(captured_objs[j]);
             return -EINVAL;
         }
@@ -754,8 +752,7 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
             int ret = ntsync_acquire(obj, kargs.owner);
             kargs.index = i;
             ntsync_spinlock_release(&obj->lock);
-            kfree(objs);
-            kfree(obj_fds);
+            kfree(obj_fds, kargs.count * sizeof(int));
             if (copyout(&kargs, args, sizeof(kargs)) != 0) ret_val = -EFAULT;
             else ret_val = ret ? ret : 0;
             goto cleanup_refs;
@@ -765,34 +762,16 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
     
     /* Check alert event if specified */
-<<<<<<< HEAD
-    if (has_alert) {
-        ntsync_object_t *alert_obj = captured_objs[kargs.count];
-        spinlock_acquire(&alert_obj->lock);
-=======
+    ntsync_object_t *alert_obj = has_alert ? captured_objs[kargs.count] : NULL;
     if (alert_obj) {
         ntsync_spinlock_acquire(&alert_obj->lock);
->>>>>>> main
         if (alert_obj->type == NTSYNC_OBJ_EVENT && alert_obj->event.signaled) {
             kargs.index = kargs.count;  /* Alert signaled */
             if (!alert_obj->event.manual) {
                 alert_obj->event.signaled = 0;
             }
-<<<<<<< HEAD
-            spinlock_release(&alert_obj->lock);
-            kfree(obj_fds);
-            if (copyout(&kargs, args, sizeof(kargs)) != 0) ret_val = -EFAULT;
-            else ret_val = 0;
-            goto cleanup_refs;
-        }
-        spinlock_release(&alert_obj->lock);
-    }
-    
-    /* None signaled - need to sleep */
-=======
             ntsync_spinlock_release(&alert_obj->lock);
-            kfree(objs);
-            kfree(obj_fds);
+            kfree(obj_fds, kargs.count * sizeof(int));
             if (copyout(&kargs, args, sizeof(kargs)) != 0) return -EFAULT;
             return 0;
         }
@@ -800,13 +779,10 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
     
     /* None signaled - need to sleep */
-    int has_alert = (alert_obj != NULL);
->>>>>>> main
     uint32_t total_waiters = kargs.count + (has_alert ? 1 : 0);
     ntsync_waiter_t *waiters = kmalloc(total_waiters * sizeof(ntsync_waiter_t));
     if (!waiters) {
-        kfree(objs);
-        kfree(obj_fds);
+        kfree(obj_fds, kargs.count * sizeof(int));
         ret_val = -ENOMEM;
         goto cleanup_refs;
     }
@@ -819,13 +795,8 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         waiters[i].priority = current_thread ? current_thread->priority : 0;
         waiters[i].next = NULL;
 
-<<<<<<< HEAD
         ntsync_object_t *obj = captured_objs[i];
-        spinlock_acquire(&obj->lock);
-=======
-        ntsync_object_t *obj = objs[i];
         ntsync_spinlock_acquire(&obj->lock);
->>>>>>> main
         waiter_enqueue(obj, &waiters[i]);
         ntsync_spinlock_release(&obj->lock);
     }
@@ -838,12 +809,7 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         w->priority = current_thread ? current_thread->priority : 0;
         w->next = NULL;
 
-<<<<<<< HEAD
-        ntsync_object_t *alert_obj = captured_objs[kargs.count];
-        spinlock_acquire(&alert_obj->lock);
-=======
         ntsync_spinlock_acquire(&alert_obj->lock);
->>>>>>> main
         waiter_enqueue(alert_obj, w);
         ntsync_spinlock_release(&alert_obj->lock);
     }
@@ -867,7 +833,6 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
 
     int timed_out = 0;
-    int interrupted = 0;
 
     while (1) {
         int any_woken = 0;
@@ -903,53 +868,36 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     
     /* Remove waiters */
     for (uint32_t i = 0; i < kargs.count; i++) {
-<<<<<<< HEAD
         ntsync_object_t *obj = captured_objs[i];
-        spinlock_acquire(&obj->lock);
-=======
-        ntsync_object_t *obj = objs[i];
         ntsync_spinlock_acquire(&obj->lock);
->>>>>>> main
         waiter_dequeue(obj, &waiters[i]);
         ntsync_spinlock_release(&obj->lock);
     }
     
     if (has_alert) {
-<<<<<<< HEAD
-        ntsync_object_t *alert_obj = captured_objs[kargs.count];
-        spinlock_acquire(&alert_obj->lock);
-=======
         ntsync_spinlock_acquire(&alert_obj->lock);
->>>>>>> main
         waiter_dequeue(alert_obj, &waiters[kargs.count]);
         ntsync_spinlock_release(&alert_obj->lock);
     }
     
-    kfree(waiters);
+    kfree(waiters, total_waiters * sizeof(ntsync_waiter_t));
 
     if (timed_out) {
-        kfree(objs);
-        kfree(obj_fds);
+        kfree(obj_fds, kargs.count * sizeof(int));
         ret_val = -ETIMEDOUT;
         goto cleanup_refs;
     }
 
     /* Find which object signaled us */
     for (uint32_t i = 0; i < kargs.count; i++) {
-<<<<<<< HEAD
         ntsync_object_t *obj = captured_objs[i];
-        spinlock_acquire(&obj->lock);
-=======
-        ntsync_object_t *obj = objs[i];
         ntsync_spinlock_acquire(&obj->lock);
->>>>>>> main
         
         if (ntsync_is_signaled(obj, kargs.owner)) {
             int ret = ntsync_acquire(obj, kargs.owner);
             kargs.index = i;
             ntsync_spinlock_release(&obj->lock);
-            kfree(objs);
-            kfree(obj_fds);
+            kfree(obj_fds, kargs.count * sizeof(int));
             if (copyout(&kargs, args, sizeof(kargs)) != 0) ret_val = -EFAULT;
             else ret_val = ret ? ret : 0;
             goto cleanup_refs;
@@ -961,17 +909,14 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     /* Check if alert triggered */
     if (has_alert) {
         kargs.index = kargs.count;
-        kfree(objs);
-        kfree(obj_fds);
+        kfree(obj_fds, kargs.count * sizeof(int));
         if (copyout(&kargs, args, sizeof(kargs)) != 0) ret_val = -EFAULT;
         else ret_val = 0;
         goto cleanup_refs;
     }
 
-    kfree(objs);
-    kfree(obj_fds);
-    if (timed_out) ret_val = -ETIMEDOUT; // Redundant but safe
-    else ret_val = -EINTR;
+    kfree(obj_fds, kargs.count * sizeof(int));
+    ret_val = -EINTR;
 
 cleanup_refs:
     for (uint32_t i = 0; i < kargs.count + (has_alert ? 1 : 0); i++) {
@@ -995,65 +940,39 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     if (!obj_fds) return -ENOMEM;
 
     if (copyin((void *)(uintptr_t)kargs.objs, obj_fds, kargs.count * sizeof(int)) != 0) {
-        kfree(obj_fds);
+        kfree(obj_fds, kargs.count * sizeof(int));
         return -EFAULT;
     }
 
-    /* Capture objects under instance lock */
-    ntsync_object_t **objs = kmalloc(kargs.count * sizeof(ntsync_object_t *));
-    if (!objs) {
-        kfree(obj_fds);
-        return -ENOMEM;
-    }
-
-    ntsync_object_t *alert_obj = NULL;
-
-    ntsync_spinlock_acquire(&inst->lock);
-    
     /* Capture objects locally to avoid race conditions */
     ntsync_object_t *captured_objs[NTSYNC_MAX_WAIT_COUNT + 1];
     memset(captured_objs, 0, sizeof(captured_objs));
     int has_alert = 0;
+    ntsync_object_t *alert_obj = NULL;
 
-    spinlock_acquire(&inst->lock);
+    ntsync_spinlock_acquire(&inst->lock);
 
     /* Check for duplicates (not allowed in wait_all) and validity */
     for (uint32_t i = 0; i < kargs.count; i++) {
         int fd = obj_fds[i];
         if (fd < 0 || fd >= inst->object_count) {
-<<<<<<< HEAD
-            spinlock_release(&inst->lock);
-=======
             ntsync_spinlock_release(&inst->lock);
-            kfree(objs);
->>>>>>> main
-            kfree(obj_fds);
+            kfree(obj_fds, kargs.count * sizeof(int));
             for (uint32_t j = 0; j < i; j++) ntsync_object_unref(captured_objs[j]);
             return -EINVAL;
         }
-        objs[i] = inst->objects[fd];
 
         for (uint32_t j = i + 1; j < kargs.count; j++) {
             if (fd == obj_fds[j]) {
-<<<<<<< HEAD
-                spinlock_release(&inst->lock);
-=======
                 ntsync_spinlock_release(&inst->lock);
-                kfree(objs);
->>>>>>> main
-                kfree(obj_fds);
+                kfree(obj_fds, kargs.count * sizeof(int));
                 for (uint32_t k = 0; k < i; k++) ntsync_object_unref(captured_objs[k]);
                 return -EINVAL;
             }
         }
         if (kargs.alert != 0 && fd == (int)kargs.alert) {
-<<<<<<< HEAD
-            spinlock_release(&inst->lock);
-=======
             ntsync_spinlock_release(&inst->lock);
-            kfree(objs);
->>>>>>> main
-            kfree(obj_fds);
+            kfree(obj_fds, kargs.count * sizeof(int));
             for (uint32_t k = 0; k < i; k++) ntsync_object_unref(captured_objs[k]);
             return -EINVAL;
         }
@@ -1063,34 +982,22 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     }
 
     if (kargs.alert != 0) {
-<<<<<<< HEAD
         if (kargs.alert < (uint32_t)inst->object_count) {
             has_alert = 1;
-            captured_objs[kargs.count] = inst->objects[kargs.alert];
+            alert_obj = inst->objects[kargs.alert];
+            captured_objs[kargs.count] = alert_obj;
             ntsync_object_ref(captured_objs[kargs.count]);
         }
     }
 
-    spinlock_release(&inst->lock);
+    ntsync_spinlock_release(&inst->lock);
     
     int ret_code = 0;
 
-=======
-        uint32_t alert_fd = kargs.alert;
-        if (alert_fd < (uint32_t)inst->object_count) {
-            alert_obj = inst->objects[alert_fd];
-        }
-    }
-    
-    ntsync_spinlock_release(&inst->lock);
-
-    int has_alert = (alert_obj != NULL);
->>>>>>> main
     uint32_t total_waiters = kargs.count + (has_alert ? 1 : 0);
     ntsync_waiter_t *waiters = kmalloc(total_waiters * sizeof(ntsync_waiter_t));
     if (!waiters) {
-        kfree(objs);
-        kfree(obj_fds);
+        kfree(obj_fds, kargs.count * sizeof(int));
         ret_code = -ENOMEM;
         goto cleanup_refs;
     }
@@ -1103,13 +1010,8 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         waiters[i].priority = current_thread ? current_thread->priority : 0;
         waiters[i].next = NULL;
 
-<<<<<<< HEAD
         ntsync_object_t *obj = captured_objs[i];
-        spinlock_acquire(&obj->lock);
-=======
-        ntsync_object_t *obj = objs[i];
         ntsync_spinlock_acquire(&obj->lock);
->>>>>>> main
         waiter_enqueue(obj, &waiters[i]);
         ntsync_spinlock_release(&obj->lock);
     }
@@ -1122,12 +1024,7 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         w->priority = current_thread ? current_thread->priority : 0;
         w->next = NULL;
 
-<<<<<<< HEAD
-        ntsync_object_t *alert_obj = captured_objs[kargs.count];
-        spinlock_acquire(&alert_obj->lock);
-=======
         ntsync_spinlock_acquire(&alert_obj->lock);
->>>>>>> main
         waiter_enqueue(alert_obj, w);
         ntsync_spinlock_release(&alert_obj->lock);
     }
@@ -1161,21 +1058,12 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         
         /* Lock all objects */
         for (uint32_t i = 0; i < kargs.count; i++) {
-<<<<<<< HEAD
-            spinlock_acquire(&captured_objs[i]->lock);
-=======
-            /* Already checked validity above */
-            ntsync_spinlock_acquire(&objs[i]->lock);
->>>>>>> main
+            ntsync_spinlock_acquire(&captured_objs[i]->lock);
         }
         
         /* Check if all are signaled */
         for (uint32_t i = 0; i < kargs.count; i++) {
-<<<<<<< HEAD
             ntsync_object_t *obj = captured_objs[i];
-=======
-            ntsync_object_t *obj = objs[i];
->>>>>>> main
             if (!ntsync_is_signaled(obj, kargs.owner)) {
                 all_signaled = 0;
                 break;
@@ -1186,22 +1074,14 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
             /* Acquire all */
             int ret = 0;
             for (uint32_t i = 0; i < kargs.count; i++) {
-<<<<<<< HEAD
                 ntsync_object_t *obj = captured_objs[i];
-=======
-                ntsync_object_t *obj = objs[i];
->>>>>>> main
                 int r = ntsync_acquire(obj, kargs.owner);
                 if (r == -EOWNERDEAD) ret = r;  /* Report if any mutex was abandoned */
             }
             
             /* Unlock all */
             for (uint32_t i = 0; i < kargs.count; i++) {
-<<<<<<< HEAD
-                spinlock_release(&captured_objs[i]->lock);
-=======
-                ntsync_spinlock_release(&objs[i]->lock);
->>>>>>> main
+                ntsync_spinlock_release(&captured_objs[i]->lock);
             }
             
             kargs.index = 0;
@@ -1211,21 +1091,12 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
         
         /* Unlock all */
         for (uint32_t i = 0; i < kargs.count; i++) {
-<<<<<<< HEAD
-            spinlock_release(&captured_objs[i]->lock);
-=======
-            ntsync_spinlock_release(&objs[i]->lock);
->>>>>>> main
+            ntsync_spinlock_release(&captured_objs[i]->lock);
         }
         
         /* Check alert */
         if (has_alert) {
-<<<<<<< HEAD
-            ntsync_object_t *alert_obj = captured_objs[kargs.count];
-            spinlock_acquire(&alert_obj->lock);
-=======
             ntsync_spinlock_acquire(&alert_obj->lock);
->>>>>>> main
             if (alert_obj->type == NTSYNC_OBJ_EVENT && alert_obj->event.signaled) {
                 if (!alert_obj->event.manual) {
                     alert_obj->event.signaled = 0;
@@ -1265,31 +1136,20 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
 cleanup:
     /* Remove waiters */
     for (uint32_t i = 0; i < kargs.count; i++) {
-<<<<<<< HEAD
         ntsync_object_t *obj = captured_objs[i];
-        spinlock_acquire(&obj->lock);
-=======
-        ntsync_object_t *obj = objs[i];
         ntsync_spinlock_acquire(&obj->lock);
->>>>>>> main
         waiter_dequeue(obj, &waiters[i]);
         ntsync_spinlock_release(&obj->lock);
     }
 
     if (has_alert) {
-<<<<<<< HEAD
-        ntsync_object_t *alert_obj = captured_objs[kargs.count];
-        spinlock_acquire(&alert_obj->lock);
-=======
         ntsync_spinlock_acquire(&alert_obj->lock);
->>>>>>> main
         waiter_dequeue(alert_obj, &waiters[kargs.count]);
         ntsync_spinlock_release(&alert_obj->lock);
     }
     
-    kfree(waiters);
-    kfree(objs);
-    kfree(obj_fds);
+    kfree(waiters, total_waiters * sizeof(ntsync_waiter_t));
+    kfree(obj_fds, kargs.count * sizeof(int));
 
     if (ret_code == 0) {
         if (copyout(&kargs, args, sizeof(kargs)) != 0) ret_code = -EFAULT;
@@ -1374,11 +1234,11 @@ static void ntsync_close(fs_node_t *node) {
         ntsync_object_unref(inst->objects[i]);
     }
     if (inst->objects) {
-        kfree(inst->objects);
+        kfree(inst->objects, inst->object_capacity * sizeof(ntsync_object_t *));
     }
     ntsync_spinlock_release(&inst->lock);
     
-    kfree(inst);
+    kfree(inst, sizeof(ntsync_instance_t));
     node->impl = 0;
 }
 

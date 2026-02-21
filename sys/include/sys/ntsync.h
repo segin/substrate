@@ -164,14 +164,97 @@ struct ntsync_wait_args {
 #define _IOWR(type, nr, argtype) _IOC(_IOC_READ | _IOC_WRITE, (type), (nr), sizeof(argtype))
 #endif /* _IOC */
 
+#ifdef _KERNEL
+#include <vfs/vfs.h>
+#include <kern/sched.h>
+
 /*
  * ============================================================
- * Object Types (internal use)
+ * Internal Data Structures
  * ============================================================
  */
 
-#define NTSYNC_TYPE_SEM     1
-#define NTSYNC_TYPE_MUTEX   2
-#define NTSYNC_TYPE_EVENT   3
+/*
+ * Object types
+ */
+typedef enum {
+    NTSYNC_OBJ_SEM = 1,
+    NTSYNC_OBJ_MUTEX,
+    NTSYNC_OBJ_EVENT
+} ntsync_obj_type_t;
+
+/*
+ * Wait queue entry
+ */
+typedef struct ntsync_waiter {
+    struct ntsync_waiter *next;
+    thread_t *thread;
+    int signaled;       /* Set when object signals this waiter */
+    int all_wait;       /* Part of wait-all operation */
+    int priority;       /* For priority ordering */
+} ntsync_waiter_t;
+
+struct ntsync_instance;
+
+/*
+ * Base object structure (common to all object types)
+ */
+typedef struct ntsync_object {
+    ntsync_obj_type_t type;
+    uint32_t refcount;
+    
+    /* Wait queue for threads waiting on this object */
+    ntsync_waiter_t *waiters;
+    int waiter_count;
+    
+    /* Spinlock for thread safety */
+    volatile int lock;
+    
+    /* Type-specific data follows */
+    union {
+        /* Semaphore */
+        struct {
+            uint32_t count;
+            uint32_t max;
+        } sem;
+        
+        /* Mutex */
+        struct {
+            uint32_t owner;
+            uint32_t count;
+            int abandoned;
+        } mutex;
+        
+        /* Event */
+        struct {
+            uint32_t signaled;
+            uint32_t manual;    /* 1 = manual-reset, 0 = auto-reset */
+        } event;
+    };
+    
+    /* Back-pointer to owning instance (for validation) */
+    struct ntsync_instance *instance;
+    
+    /* fs_node for this object */
+    fs_node_t node;
+} ntsync_object_t;
+
+/*
+ * Instance structure (one per open of /dev/ntsync)
+ */
+typedef struct ntsync_instance {
+    /* Object list for cleanup on close */
+    ntsync_object_t **objects;
+    int object_count;
+    int object_capacity;
+    
+    /* Lock for instance state */
+    volatile int lock;
+    
+    /* fs_node for this instance */
+    fs_node_t node;
+} ntsync_instance_t;
+
+#endif /* _KERNEL */
 
 #endif /* _SYS_NTSYNC_H */
