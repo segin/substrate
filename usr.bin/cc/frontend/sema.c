@@ -1110,6 +1110,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         return 0;
 
     case CC_STMT_EXPR:
+        if (s->expr == NULL) {
+            return 0;
+        }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }

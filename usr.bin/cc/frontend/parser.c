@@ -1542,6 +1542,12 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
 static int parse_stmt(parser_t *p, cc_stmt_t *s) {
     memset(s, 0, sizeof(*s));
 
+    if (p->tok.kind == TOK_SEMI) {
+        s->kind = CC_STMT_EXPR;
+        s->expr = NULL;
+        return next_tok(p);
+    }
+
     if (p->tok.kind == TOK_LBRACE) {
         return parse_block_stmt(p, s);
     }

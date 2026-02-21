@@ -122,6 +122,7 @@
   - `sizeof(pointer)` and pointer-element scaling now track target ABI pointer width (`-m32` => 4 bytes, `-m64` => 8 bytes).
   - prefix/postfix `++/--` now support identifier pointer lvalues with element-size stepping semantics.
   - ordered pointer comparisons (`< <= > >=`) are accepted for compatible pointer types and lower as unsigned address compares.
+  - empty statements (`;`) are accepted in statement position and compose with control-flow forms (`if/for/while/do`).
 - Regression coverage expanded:
   - positive compile/run tests for logical short-circuit semantics and update/compound operators.
   - negative parser test for invalid `++/--` lvalues.
@@ -146,6 +147,7 @@
   - positive compile/run tests for pointer indirect stores (local + parameter path); i386 emission check for indirect store codegen.
   - positive compile/run test for pointer arithmetic semantics with heap-backed pointer indexing plus x86_64/i386 emission checks for scaled index arithmetic.
   - positive compile/run test for postfix pointer indexing (`ptr[idx]` and `idx[ptr]`) plus i386 scaled-index emission check.
+  - positive compile/run test for empty-statement control-flow forms plus i386 emission check.
   - positive compile/run test for compatible pointer subtraction semantics with i386 emission check for element-size division.
   - positive compile/run test for pointer prefix/postfix `++/--` semantics over pointer lvalues.
   - positive compile/run test for `void*` declaration/assignment/conversion flow in the current subset.
