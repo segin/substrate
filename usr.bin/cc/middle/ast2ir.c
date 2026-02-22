@@ -3895,6 +3895,69 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     }
 
     if (s->kind == CC_STMT_GOTO) {
+        if (s->expr != NULL) {
+            cc_ssa_instr_t in;
+            int target;
+            int l_bad;
+            size_t i;
+
+            if (ctx == NULL || ctx->label_count == 0) {
+                set_diag(diag, "computed goto requires at least one local label");
+                return -1;
+            }
+            target = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
+            if (target < 0) {
+                return -1;
+            }
+            target = cast_value(sf, target, CC_VAL_I64, diag);
+            if (target < 0) {
+                return -1;
+            }
+            l_bad = new_label(sf);
+            if (l_bad < 0) {
+                return -1;
+            }
+            for (i = 0; i < ctx->label_count; ++i) {
+                int addrv;
+                int cmpv;
+                int l_next = (i + 1 < ctx->label_count) ? new_label(sf) : l_bad;
+
+                if (l_next < 0) {
+                    return -1;
+                }
+
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_LADDR;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.label = ctx->labels[i].label;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    return -1;
+                }
+                addrv = in.dst;
+
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_CMP;
+                in.cmp_kind = CC_CMP_EQ;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = target;
+                in.rhs = addrv;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    return -1;
+                }
+                cmpv = in.dst;
+
+                if (emit_br_cond_instr(sf, cmpv, ctx->labels[i].label, l_next) != 0) {
+                    return -1;
+                }
+                if (l_next != l_bad && emit_label_instr(sf, l_next) != 0) {
+                    return -1;
+                }
+            }
+            if (emit_label_instr(sf, l_bad) != 0) {
+                return -1;
+            }
+            return emit_br_instr(sf, l_bad);
+        }
         int l = lower_find_label(ctx, s->label_name);
         if (l < 0) {
             if (diag != NULL && diag->message[0] == '\0') {

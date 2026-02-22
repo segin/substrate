@@ -161,6 +161,9 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
         return collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag);
 
     case CC_STMT_GOTO:
+        if (s->expr != NULL) {
+            return 0;
+        }
         if (s->label_name == NULL || s->label_name[0] == '\0') {
             set_diag(diag, "malformed goto statement");
             return -1;
@@ -2329,6 +2332,15 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         return 0;
 
     case CC_STMT_GOTO:
+        if (s->expr != NULL) {
+            if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_scalar_type(s->expr->value_type)) {
+                set_diag(diag, "computed goto requires scalar target expression");
+                return -1;
+            }
+        }
         return 0;
 
     case CC_STMT_LABEL:
