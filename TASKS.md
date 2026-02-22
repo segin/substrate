@@ -1116,7 +1116,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] `struct fb_info` device abstraction.
                 - [ ] Framebuffer registration/deregistration API.
                 - [ ] Memory mapping (physical to kernel virtual).
-                - [ ] `/dev/fb[0-N]` device node creation.
+                - [ ] `/dev/fb/[0-N]` device node creation.
             - [ ] **Drivers:**
                 - [ ] **VESA VBE (Linear Framebuffer):**
                     - [ ] VBE 2.0+ detection and capability query.
