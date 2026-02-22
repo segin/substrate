@@ -2336,8 +2336,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_scalar_type(s->expr->value_type)) {
-                set_diag(diag, "computed goto requires scalar target expression");
+            if (!is_pointer_type(s->expr->value_type) && !is_integral_type(s->expr->value_type)) {
+                set_diag(diag, "computed goto requires pointer or integer target expression");
                 return -1;
             }
         }
