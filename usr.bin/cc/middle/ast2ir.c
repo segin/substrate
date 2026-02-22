@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <limits.h>
 
 static int g_pointer_size_bytes = 8;
 
@@ -12,6 +13,7 @@ typedef struct {
     char *name;
     cc_type_t type;
     int struct_id;
+    long array_len;
     int value;
     int depth;
 } var_entry_t;
@@ -571,7 +573,7 @@ static int var_find_visible(var_entry_t *vars, size_t var_count, const char *nam
 }
 
 static int var_define(var_entry_t **vars, size_t *var_count, const char *name, cc_type_t type, int struct_id,
-                      int value, int depth) {
+                      long array_len, int value, int depth) {
     var_entry_t *next;
     char *dup;
 
@@ -588,6 +590,7 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     (*vars)[*var_count].name = dup;
     (*vars)[*var_count].type = type;
     (*vars)[*var_count].struct_id = struct_id;
+    (*vars)[*var_count].array_len = array_len;
     (*vars)[*var_count].value = value;
     (*vars)[*var_count].depth = depth;
     (*var_count)++;
@@ -638,6 +641,123 @@ static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t 
         }
     }
     return NULL;
+}
+
+static int is_synthetic_struct_array_member(const cc_translation_unit_t *tu, const cc_expr_t *e);
+
+static int is_hex_digit_char(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static long string_literal_size_bytes(const char *lit) {
+    size_t i;
+    long out_len = 0;
+    if (lit == NULL) {
+        return 1;
+    }
+    i = 0;
+    while (lit[i] != '\0' && lit[i] != '"') {
+        i++;
+    }
+    if (lit[i] != '"') {
+        size_t n = strlen(lit);
+        if (n >= (size_t)LONG_MAX) {
+            return -1;
+        }
+        return (long)(n + 1);
+    }
+    i++;
+    while (lit[i] != '\0') {
+        if (lit[i] == '"') {
+            return out_len + 1;
+        }
+        if (lit[i] == '\\') {
+            i++;
+            if (lit[i] == '\0') {
+                return -1;
+            }
+            if (lit[i] == 'x') {
+                i++;
+                if (!is_hex_digit_char(lit[i])) {
+                    return -1;
+                }
+                while (is_hex_digit_char(lit[i])) {
+                    i++;
+                }
+                out_len++;
+                continue;
+            }
+            if (lit[i] >= '0' && lit[i] <= '7') {
+                int oct = 1;
+                while (oct < 3 && lit[i + 1] >= '0' && lit[i + 1] <= '7') {
+                    i++;
+                    oct++;
+                }
+                i++;
+                out_len++;
+                continue;
+            }
+            i++;
+            out_len++;
+            continue;
+        }
+        i++;
+        out_len++;
+    }
+    return -1;
+}
+
+static long array_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id, long array_len) {
+    cc_type_t elem_type;
+    long elem_size;
+    long elem_count;
+    if (!is_pointer_type(array_type) || array_len < 0) {
+        return -1;
+    }
+    elem_type = ptr_base_type(array_type);
+    elem_size = type_size_bytes_with_struct(tu, elem_type, struct_id);
+    if (elem_size <= 0) {
+        return -1;
+    }
+    elem_count = array_len > 0 ? array_len : 1;
+    if (elem_count <= 0 || elem_size > LONG_MAX / elem_count) {
+        return -1;
+    }
+    return elem_size * elem_count;
+}
+
+static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                              const cc_expr_t *e) {
+    if (e == NULL) {
+        return -1;
+    }
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
+        int idx = var_find_visible(vars, var_count, e->ident, depth);
+        if (idx >= 0) {
+            long n = array_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_len);
+            if (n > 0) {
+                return n;
+            }
+        } else {
+            const cc_global_t *g = find_global(tu, e->ident);
+            if (g != NULL) {
+                long n = array_size_bytes(tu, g->type, g->type_struct_id, g->array_len);
+                if (n > 0) {
+                    return n;
+                }
+            }
+        }
+    }
+    if (e->kind == CC_EXPR_MEMBER && is_synthetic_struct_array_member(tu, e)) {
+        const cc_struct_member_t *m = find_struct_member(tu, member_base_struct_id(e), e->ident);
+        if (m != NULL && m->size > 0) {
+            return m->size;
+        }
+    }
+    if (e->kind == CC_EXPR_STR) {
+        return string_literal_size_bytes(e->ident);
+    }
+    return type_size_bytes_struct(tu, e->value_type, e->struct_id);
 }
 
 /*
@@ -2632,7 +2752,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     case CC_EXPR_SIZEOF: {
         long n;
         if (e->lhs != NULL) {
-            n = type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+            n = sizeof_expr_bytes(tu, vars, var_count, depth, e->lhs);
         } else {
             n = type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id);
         }
@@ -3255,7 +3375,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     }
                 }
             }
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, varv, depth) != 0) {
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, varv, depth) != 0) {
                 set_diag(diag, "out of memory defining local struct variable");
                 return -1;
             }
@@ -3400,7 +3520,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
 
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, varv, depth) != 0) {
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, varv, depth) !=
+                0) {
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
             }
@@ -3443,7 +3564,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
         }
-        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, varv, depth) != 0) {
+        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, varv, depth) != 0) {
             set_diag(diag, "out of memory defining local variable");
             return -1;
         }
@@ -4122,7 +4243,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
     case CC_EXPR_SIZEOF: {
         long n;
         if (e->lhs != NULL) {
-            n = type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+            n = sizeof_expr_bytes(tu, NULL, 0, 0, e->lhs);
         } else {
             n = type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id);
         }
@@ -5125,7 +5246,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
             v = in.dst;
             if (var_define(&vars, &var_count, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
-                           v, 0) != 0) {
+                           -1, v, 0) != 0) {
                 set_diag(diag, "out of memory defining parameter variable");
                 cc_ssa_module_free(out);
                 return -1;

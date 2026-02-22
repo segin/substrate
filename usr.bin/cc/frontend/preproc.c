@@ -108,6 +108,29 @@ static int strvec_push(pp_strvec_t *v, const char *s) {
     return 0;
 }
 
+static int strvec_contains(const pp_strvec_t *v, const char *s) {
+    size_t i;
+    if (v == NULL || s == NULL || s[0] == '\0') {
+        return 0;
+    }
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->items[i], s) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int strvec_push_unique(pp_strvec_t *v, const char *s) {
+    if (s == NULL || s[0] == '\0') {
+        return 0;
+    }
+    if (strvec_contains(v, s)) {
+        return 0;
+    }
+    return strvec_push(v, s);
+}
+
 static void strvec_free(pp_strvec_t *v) {
     size_t i;
     for (i = 0; i < v->count; ++i) {
@@ -341,15 +364,58 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
 }
 
 static int add_default_include_paths(pp_state_t *st) {
+    FILE *fp;
+    char line[PATH_MAX * 2];
+    int in_search = 0;
     if (st->no_default_includes) {
         return 0;
     }
-    if (strvec_push(&st->system_include_paths, "/usr/local/include") != 0) {
+    if (strvec_push_unique(&st->system_include_paths, "/usr/local/include") != 0) {
         return -1;
     }
-    if (strvec_push(&st->system_include_paths, "/usr/include") != 0) {
+    if (strvec_push_unique(&st->system_include_paths, "/usr/include") != 0) {
         return -1;
     }
+
+    fp = popen("cc -E -Wp,-v -xc /dev/null -o /dev/null 2>&1", "r");
+    if (fp == NULL) {
+        return 0;
+    }
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        char *p;
+        char *end;
+        char *fw;
+        if (!in_search) {
+            if (strstr(line, "#include <...> search starts here:") != NULL) {
+                in_search = 1;
+            }
+            continue;
+        }
+        if (strstr(line, "End of search list.") != NULL) {
+            break;
+        }
+        p = line;
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        end = p + strlen(p);
+        while (end > p && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t')) {
+            end--;
+        }
+        *end = '\0';
+        fw = strstr(p, " (framework");
+        if (fw != NULL) {
+            *fw = '\0';
+        }
+        if (*p == '\0' || *p == '(') {
+            continue;
+        }
+        if (strvec_push_unique(&st->system_include_paths, p) != 0) {
+            pclose(fp);
+            return -1;
+        }
+    }
+    pclose(fp);
     return 0;
 }
 
