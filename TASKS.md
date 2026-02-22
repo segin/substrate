@@ -1098,7 +1098,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Hook keyboard driver to TTY input queue.
                 - [x] Convert scancodes to ASCII via keymap.
                 - [x] Handle modifier keys (Shift, Ctrl, Alt, AltGr).
-                - [ ] Generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A).
+                - [x] Generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A). <!-- sys/drivers/input/keyboard.c -->
             - [ ] **Special Keys:**
                 - [ ] Function keys (F1-F12) to escape sequences.
                 - [ ] Arrow keys to ANSI escape sequences.
@@ -1663,7 +1663,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (block device, char device, FIFO, socket)
                     - Docs: `vop_mknod.9`
                     - Acceptance: Device node with correct rdev
-                - [ ] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
+                - [x] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
                     - Files: `sys/vfs/vfs.c`, `sys/fs/udf/udf.c`
                     - API: Create directory
                     - Tests: unit (mkdir success, nested mkdir)
