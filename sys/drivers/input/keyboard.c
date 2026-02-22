@@ -159,6 +159,13 @@ process_key:
             }
 
             char c = kbd_shift ? kbd_us_shifted[scancode] : kbd_us[scancode];
+
+            if (kbd_ctrl && c >= 'a' && c <= 'z') {
+                c = (char)(c - 'a' + 1); /* Ctrl+A..Ctrl+Z => 0x01..0x1A */
+            } else if (kbd_ctrl && c >= 'A' && c <= 'Z') {
+                c = (char)(c - 'A' + 1); /* Ctrl+A..Ctrl+Z => 0x01..0x1A */
+            }
+
             if (c) {
                 // DEBUG: Confirm interrupt (gated)
                 extern int syscall_trace_enabled;
