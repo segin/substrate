@@ -56,6 +56,8 @@ test:
 	/tmp/cc_native_switch
 	$(TOP)/usr.bin/cc/cc native_c99_switch_constexpr.c -o /tmp/cc_native_c99_switch_constexpr
 	/tmp/cc_native_c99_switch_constexpr
+	$(TOP)/usr.bin/cc/cc native_c99_enum_constexpr.c -o /tmp/cc_native_c99_enum_constexpr
+	/tmp/cc_native_c99_enum_constexpr
 	$(TOP)/usr.bin/cc/cc native_c99_for_decl.c -o /tmp/cc_native_c99_for_decl
 	/tmp/cc_native_c99_for_decl
 	$(TOP)/usr.bin/cc/cc native_c99_for_multi_decl.c -o /tmp/cc_native_c99_for_multi_decl

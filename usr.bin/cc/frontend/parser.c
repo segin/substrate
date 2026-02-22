@@ -182,6 +182,7 @@ static int skip_cxx_attribute_seq(parser_t *p);
 static int skip_balanced_parens(parser_t *p);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
 static cc_expr_t *parse_expr(parser_t *p);
+static cc_expr_t *parse_cond(parser_t *p);
 static void free_expr(cc_expr_t *e);
 static int eval_const_array_bound_expr(const cc_expr_t *e, long *out);
 static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n);
@@ -1152,78 +1153,23 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                     return -1;
                 }
                 if (p->tok.kind == TOK_ASSIGN) {
+                    cc_expr_t *enum_expr;
                     long v = 0;
-                    int have_v = 0;
-                    int op = +1;
                     if (next_tok(p) != 0) {
                         return -1;
                     }
-                    while (p->tok.kind != TOK_COMMA && p->tok.kind != TOK_RBRACE && p->tok.kind != TOK_EOF) {
-                        long term = 0;
-                        int sign = +1;
-                        int cidx = -1;
-                        if (p->tok.kind == TOK_PLUS) {
-                            if (next_tok(p) != 0) {
-                                return -1;
-                            }
-                        } else if (p->tok.kind == TOK_MINUS) {
-                            sign = -1;
-                            if (next_tok(p) != 0) {
-                                return -1;
-                            }
-                        }
-                        if (p->tok.kind == TOK_NUM) {
-                            term = p->tok.num;
-                            if (next_tok(p) != 0) {
-                                return -1;
-                            }
-                        } else if (p->tok.kind == TOK_IDENT) {
-                            cidx = enum_const_find_visible_n(p, p->tok.start, p->tok.len);
-                            if (cidx >= 0) {
-                                term = p->enum_consts[cidx].value;
-                                if (next_tok(p) != 0) {
-                                    return -1;
-                                }
-                            } else {
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                        term *= sign;
-                        if (!have_v) {
-                            v = term;
-                            have_v = 1;
-                        } else if (op > 0) {
-                            v += term;
-                        } else {
-                            v -= term;
-                        }
-                        if (p->tok.kind == TOK_PLUS) {
-                            op = +1;
-                            if (next_tok(p) != 0) {
-                                return -1;
-                            }
-                            continue;
-                        }
-                        if (p->tok.kind == TOK_MINUS) {
-                            op = -1;
-                            if (next_tok(p) != 0) {
-                                return -1;
-                            }
-                            continue;
-                        }
-                        break;
+                    enum_expr = parse_cond(p);
+                    if (enum_expr == NULL) {
+                        return -1;
                     }
-                    if (!have_v) {
-                        while (p->tok.kind != TOK_COMMA && p->tok.kind != TOK_RBRACE && p->tok.kind != TOK_EOF) {
-                            if (next_tok(p) != 0) {
-                                return -1;
-                            }
-                        }
-                    } else {
-                        enum_next = v;
+                    if (eval_const_array_bound_expr(enum_expr, &v) != 0) {
+                        free_expr(enum_expr);
+                        set_diag(p->diag, p->tok.line, p->tok.col,
+                                 "enum value must be an integer constant expression");
+                        return -1;
                     }
+                    free_expr(enum_expr);
+                    enum_next = v;
                     p->enum_consts[p->enum_const_count - 1].value = enum_next;
                 }
                 enum_next++;
@@ -1632,9 +1578,25 @@ static int eval_const_array_bound_expr(const cc_expr_t *e, long *out) {
         case CC_BIN_BAND: *out = a & b; return 0;
         case CC_BIN_BOR: *out = a | b; return 0;
         case CC_BIN_BXOR: *out = a ^ b; return 0;
+        case CC_BIN_EQ: *out = (a == b) ? 1 : 0; return 0;
+        case CC_BIN_NE: *out = (a != b) ? 1 : 0; return 0;
+        case CC_BIN_LT: *out = (a < b) ? 1 : 0; return 0;
+        case CC_BIN_LE: *out = (a <= b) ? 1 : 0; return 0;
+        case CC_BIN_GT: *out = (a > b) ? 1 : 0; return 0;
+        case CC_BIN_GE: *out = (a >= b) ? 1 : 0; return 0;
+        case CC_BIN_LAND: *out = (a != 0 && b != 0) ? 1 : 0; return 0;
+        case CC_BIN_LOR: *out = (a != 0 || b != 0) ? 1 : 0; return 0;
         default:
             return -1;
         }
+    case CC_EXPR_TERNARY:
+        if (eval_const_array_bound_expr(e->lhs, &a) != 0) {
+            return -1;
+        }
+        if (a != 0) {
+            return eval_const_array_bound_expr(e->rhs, out);
+        }
+        return eval_const_array_bound_expr(e->third, out);
     default:
         return -1;
     }
