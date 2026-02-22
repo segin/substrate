@@ -28,7 +28,7 @@ static void early_print_hex(uint32_t val) {
 }
 
 /* Current exception number - set by stubs */
-volatile int early_exception_num = -1;
+volatile int early_exception_num = 0;
 
 /* Early exception handler - prints via UART and halts */
 void early_exception_handler(void) {
@@ -48,15 +48,17 @@ void early_exception_handler(void) {
 }
 
 /* Macro to generate exception stubs */
-#define EARLY_ISR(n) \
-    __attribute__((naked)) void early_isr##n(void) { \
+#define EARLY_ISR(idx) \
+    __attribute__((naked)) void early_isr##idx(void) { \
         __asm__ volatile( \
             "pusha\n" \
-            "movl $" #n ", %0\n" \
+            "movl %1, %0\n" \
             "call early_exception_handler\n" \
             "popa\n" \
             "iret\n" \
             : "=m"(early_exception_num) \
+            : "i"(idx) \
+            : "memory" \
         ); \
     }
 
@@ -69,17 +71,43 @@ EARLY_ISR(20) EARLY_ISR(21) EARLY_ISR(22) EARLY_ISR(23)
 EARLY_ISR(24) EARLY_ISR(25) EARLY_ISR(26) EARLY_ISR(27)
 EARLY_ISR(28) EARLY_ISR(29) EARLY_ISR(30) EARLY_ISR(31)
 
-/* Array of handler pointers */
-static void (*early_isr_table[32])(void) = {
-    early_isr0,  early_isr1,  early_isr2,  early_isr3,
-    early_isr4,  early_isr5,  early_isr6,  early_isr7,
-    early_isr8,  early_isr9,  early_isr10, early_isr11,
-    early_isr12, early_isr13, early_isr14, early_isr15,
-    early_isr16, early_isr17, early_isr18, early_isr19,
-    early_isr20, early_isr21, early_isr22, early_isr23,
-    early_isr24, early_isr25, early_isr26, early_isr27,
-    early_isr28, early_isr29, early_isr30, early_isr31
-};
+static uint32_t early_isr_addr(int n) {
+    switch(n) {
+    case 0: return (uint32_t)(uintptr_t)early_isr0;
+    case 1: return (uint32_t)(uintptr_t)early_isr1;
+    case 2: return (uint32_t)(uintptr_t)early_isr2;
+    case 3: return (uint32_t)(uintptr_t)early_isr3;
+    case 4: return (uint32_t)(uintptr_t)early_isr4;
+    case 5: return (uint32_t)(uintptr_t)early_isr5;
+    case 6: return (uint32_t)(uintptr_t)early_isr6;
+    case 7: return (uint32_t)(uintptr_t)early_isr7;
+    case 8: return (uint32_t)(uintptr_t)early_isr8;
+    case 9: return (uint32_t)(uintptr_t)early_isr9;
+    case 10: return (uint32_t)(uintptr_t)early_isr10;
+    case 11: return (uint32_t)(uintptr_t)early_isr11;
+    case 12: return (uint32_t)(uintptr_t)early_isr12;
+    case 13: return (uint32_t)(uintptr_t)early_isr13;
+    case 14: return (uint32_t)(uintptr_t)early_isr14;
+    case 15: return (uint32_t)(uintptr_t)early_isr15;
+    case 16: return (uint32_t)(uintptr_t)early_isr16;
+    case 17: return (uint32_t)(uintptr_t)early_isr17;
+    case 18: return (uint32_t)(uintptr_t)early_isr18;
+    case 19: return (uint32_t)(uintptr_t)early_isr19;
+    case 20: return (uint32_t)(uintptr_t)early_isr20;
+    case 21: return (uint32_t)(uintptr_t)early_isr21;
+    case 22: return (uint32_t)(uintptr_t)early_isr22;
+    case 23: return (uint32_t)(uintptr_t)early_isr23;
+    case 24: return (uint32_t)(uintptr_t)early_isr24;
+    case 25: return (uint32_t)(uintptr_t)early_isr25;
+    case 26: return (uint32_t)(uintptr_t)early_isr26;
+    case 27: return (uint32_t)(uintptr_t)early_isr27;
+    case 28: return (uint32_t)(uintptr_t)early_isr28;
+    case 29: return (uint32_t)(uintptr_t)early_isr29;
+    case 30: return (uint32_t)(uintptr_t)early_isr30;
+    case 31: return (uint32_t)(uintptr_t)early_isr31;
+    }
+    return (uint32_t)(uintptr_t)early_isr0;
+}
 
 /* Early GDT for early exceptions */
 struct early_gdt_entry {
@@ -173,7 +201,7 @@ void early_idt_init(void) {
     
     /* Set all 32 exception vectors to our early handlers */
     for (int i = 0; i < 32; i++) {
-        early_idt_set_gate(i, (uint32_t)early_isr_table[i]);
+        early_idt_set_gate(i, early_isr_addr(i));
     }
     
     /* Load the IDT */

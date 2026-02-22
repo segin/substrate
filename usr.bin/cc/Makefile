@@ -3,7 +3,7 @@ include ../../Makefile.inc
 PROGS = cc ir-verifier ir-normalize ir-diff
 COMMON_SRCS = ir.c parser.c verifier.c serialize.c
 CC_SRCS = cmd/cc.c cmd/pipeline.c \
-	  frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c \
+	  frontend/preproc.c frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c \
 	  middle/ast2ir.c middle/legalize.c \
 	  middle/passes/opt.c \
 	  middle/ssa/module.c middle/ssa/func.c middle/ssa/bblock.c middle/ssa/instr_set.c \

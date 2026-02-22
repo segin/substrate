@@ -46,6 +46,9 @@
 #define LINUX_SYS_lstat          84
 #define LINUX_SYS_readlink       85
 #define LINUX_SYS_mmap           90
+#define LINUX_SYS_munmap         91
+#define LINUX_SYS_truncate       92
+#define LINUX_SYS_ftruncate      93
 #define LINUX_SYS_stat_new       106
 #define LINUX_SYS_lstat_new      107
 #define LINUX_SYS_fstat_new      108

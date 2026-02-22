@@ -13,6 +13,13 @@ typedef struct {
 #define CC_STORAGE_EXTERN  (1 << 1)
 #define CC_STORAGE_INLINE  (1 << 2)
 
+#define CC_ATTR_PACKED     (1 << 0)
+#define CC_ATTR_ALIGNED    (1 << 1)
+#define CC_ATTR_NORETURN   (1 << 2)
+#define CC_ATTR_UNUSED     (1 << 3)
+#define CC_ATTR_USED       (1 << 4)
+#define CC_ATTR_SECTION    (1 << 5)
+
 typedef enum {
     CC_TYPE_VOID = 0,
     CC_TYPE_BOOL,
@@ -109,6 +116,7 @@ typedef enum {
     CC_EXPR_ASSIGN,
     CC_EXPR_UPDATE,
     CC_EXPR_ADDR,
+    CC_EXPR_LABEL_ADDR,
     CC_EXPR_DEREF,
     CC_EXPR_CAST,
     CC_EXPR_SIZEOF,
@@ -163,6 +171,9 @@ struct cc_stmt {
     int type_struct_id;
     long array_len;
     int storage;
+    int attr_flags;
+    long attr_align;
+    char *attr_section;
     cc_stmt_kind_t kind;
     char *decl_name;
     char *label_name;
@@ -196,6 +207,8 @@ typedef struct {
     size_t member_count;
     long size;
     long align;
+    int attr_flags;
+    long attr_align;
     int complete;
 } cc_struct_def_t;
 
@@ -204,6 +217,9 @@ typedef struct {
     cc_type_t ret_type;
     int ret_struct_id;
     int storage;
+    int attr_flags;
+    long attr_align;
+    char *attr_section;
     int has_body;
     int is_variadic;
     cc_param_t *params;
@@ -218,6 +234,9 @@ typedef struct {
     int type_struct_id;
     long array_len;
     int storage;
+    int attr_flags;
+    long attr_align;
+    char *attr_section;
     cc_expr_t *init;
 } cc_global_t;
 
@@ -234,5 +253,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 void cc_frontend_set_pointer_size(int bytes);
+int cc_preprocess_file(const char *in_path, const char *out_path, const char *std_mode,
+                       const char *const *flags, size_t flag_count, cc_diag_t *diag);
 
 #endif

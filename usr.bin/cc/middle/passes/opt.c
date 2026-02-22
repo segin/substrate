@@ -62,6 +62,7 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_ADDR:
         case CC_SSA_STR:
         case CC_SSA_GADDR:
+        case CC_SSA_LADDR:
         case CC_SSA_LOAD:
             if (dst >= 0) {
                 st[dst].known = 0;
@@ -289,6 +290,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_ADDR:
     case CC_SSA_STR:
     case CC_SSA_GADDR:
+    case CC_SSA_LADDR:
     case CC_SSA_LOAD:
     case CC_SSA_ADD:
     case CC_SSA_SUB:

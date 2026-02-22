@@ -23,6 +23,7 @@ typedef enum {
     CC_SSA_CONST,
     CC_SSA_STR,
     CC_SSA_GADDR,
+    CC_SSA_LADDR,
     CC_SSA_ADD,
     CC_SSA_SUB,
     CC_SSA_MUL,
@@ -69,11 +70,15 @@ typedef struct {
 } cc_ssa_instr_t;
 
 typedef struct {
+    long init_size;
     long init_i;
     double init_f;
+    int init_is_zero_fill;
     int init_is_float;
     int init_is_string;
+    int init_is_symbol;
     char *init_str;
+    char *init_sym;
 } cc_ssa_global_init_item_t;
 
 typedef struct {
@@ -82,12 +87,17 @@ typedef struct {
     int type_struct_id;
     long array_len;
     int storage;
+    int attr_flags;
+    long attr_align;
+    char *attr_section;
     int has_init;
     long init_i;
     double init_f;
     int init_is_float;
     int init_is_string;
+    int init_is_symbol;
     char *init_str;
+    char *init_sym;
     cc_ssa_global_init_item_t *init_items;
     size_t init_item_count;
 } cc_ssa_global_t;
@@ -96,6 +106,9 @@ typedef struct {
     char *name;
     cc_value_type_t ret_type;
     int storage;
+    int attr_flags;
+    long attr_align;
+    char *attr_section;
     int is_variadic;
 
     size_t param_count;

@@ -91,41 +91,63 @@ typedef struct {
     builtin_handler_t handler;
 } builtin_entry_t;
 
-static const builtin_entry_t builtins[] = {
-    { "exit", builtin_exit },
-    { "cd", builtin_cd },
-    { "export", builtin_export },
-    { "unset", builtin_unset },
-    { "shift", builtin_shift },
-    { "set", builtin_set },
-    { "exec", builtin_exec },
-    { "eval", builtin_eval },
-    { "wait", builtin_wait },
-    { "kill", builtin_kill },
-    { "jobs", builtin_jobs },
-    { "fg", builtin_fg },
-    { "bg", builtin_bg },
-    { "return", handle_return },
-    { "local", builtin_local },
-    { "echo", builtin_echo },
-    { "test", builtin_test },
-    { "[", builtin_test },
-    { ":", builtin_true },
-    { ".", builtin_source },
-    { "source", builtin_source },
-    { "break", builtin_break },
-    { "continue", builtin_continue },
-    { "times", builtin_times },
-    { "umask", builtin_umask },
-    { "command", builtin_command },
-    { "trap", builtin_trap },
-    { "read", builtin_read },
-    { "readonly", builtin_readonly },
-    { "getopts", builtin_getopts },
-    { NULL, NULL }
-};
+#define EXEC_SIG_MAX 32
+#define BUILTIN_TABLE_SIZE 31
+
+static builtin_entry_t *builtins = NULL;
+static char **trap_commands = NULL;
+static volatile sig_atomic_t *pending_traps = NULL;
+static volatile sig_atomic_t trap_pending_any = 0;
+static int runtime_tables_ready = 0;
+
+static void ensure_runtime_tables(void) {
+    if (runtime_tables_ready) {
+        return;
+    }
+    builtins = calloc(BUILTIN_TABLE_SIZE, sizeof(*builtins));
+    trap_commands = calloc(EXEC_SIG_MAX, sizeof(*trap_commands));
+    pending_traps = calloc(EXEC_SIG_MAX, sizeof(*pending_traps));
+    if (!builtins || !trap_commands || !pending_traps) {
+        fprintf(stderr, "sh: failed to initialize runtime tables\n");
+        exit(1);
+    }
+    builtins[0].name = "exit";      builtins[0].handler = builtin_exit;
+    builtins[1].name = "cd";        builtins[1].handler = builtin_cd;
+    builtins[2].name = "export";    builtins[2].handler = builtin_export;
+    builtins[3].name = "unset";     builtins[3].handler = builtin_unset;
+    builtins[4].name = "shift";     builtins[4].handler = builtin_shift;
+    builtins[5].name = "set";       builtins[5].handler = builtin_set;
+    builtins[6].name = "exec";      builtins[6].handler = builtin_exec;
+    builtins[7].name = "eval";      builtins[7].handler = builtin_eval;
+    builtins[8].name = "wait";      builtins[8].handler = builtin_wait;
+    builtins[9].name = "kill";      builtins[9].handler = builtin_kill;
+    builtins[10].name = "jobs";     builtins[10].handler = builtin_jobs;
+    builtins[11].name = "fg";       builtins[11].handler = builtin_fg;
+    builtins[12].name = "bg";       builtins[12].handler = builtin_bg;
+    builtins[13].name = "return";   builtins[13].handler = handle_return;
+    builtins[14].name = "local";    builtins[14].handler = builtin_local;
+    builtins[15].name = "echo";     builtins[15].handler = builtin_echo;
+    builtins[16].name = "test";     builtins[16].handler = builtin_test;
+    builtins[17].name = "[";        builtins[17].handler = builtin_test;
+    builtins[18].name = ":";        builtins[18].handler = builtin_true;
+    builtins[19].name = ".";        builtins[19].handler = builtin_source;
+    builtins[20].name = "source";   builtins[20].handler = builtin_source;
+    builtins[21].name = "break";    builtins[21].handler = builtin_break;
+    builtins[22].name = "continue"; builtins[22].handler = builtin_continue;
+    builtins[23].name = "times";    builtins[23].handler = builtin_times;
+    builtins[24].name = "umask";    builtins[24].handler = builtin_umask;
+    builtins[25].name = "command";  builtins[25].handler = builtin_command;
+    builtins[26].name = "trap";     builtins[26].handler = builtin_trap;
+    builtins[27].name = "read";     builtins[27].handler = builtin_read;
+    builtins[28].name = "readonly"; builtins[28].handler = builtin_readonly;
+    builtins[29].name = "getopts";  builtins[29].handler = builtin_getopts;
+    builtins[30].name = NULL;
+    builtins[30].handler = NULL;
+    runtime_tables_ready = 1;
+}
 
 static int is_builtin(const char *name) {
+    ensure_runtime_tables();
     for (int i = 0; builtins[i].name; i++) {
         if (strcmp(builtins[i].name, name) == 0) return 1;
     }
@@ -133,12 +155,8 @@ static int is_builtin(const char *name) {
 }
 
 /* Signal Traps */
-#define EXEC_SIG_MAX 32
-static char *trap_commands[EXEC_SIG_MAX] = { NULL };
-static volatile sig_atomic_t pending_traps[EXEC_SIG_MAX] = { 0 };
-static volatile sig_atomic_t trap_pending_any = 0;
-
 static void trap_handler(int sig) {
+    if (!pending_traps) return;
     if (sig > 0 && sig < EXEC_SIG_MAX) {
         pending_traps[sig] = 1;
         trap_pending_any = 1;
@@ -179,6 +197,7 @@ static int parse_signal(const char *str) {
 }
 
 void run_exit_trap(void) {
+    ensure_runtime_tables();
     if (trap_commands[0]) {
         execute_line(trap_commands[0]);
         free(trap_commands[0]);
@@ -187,6 +206,7 @@ void run_exit_trap(void) {
 }
 
 void check_traps(void) {
+    ensure_runtime_tables();
     if (!trap_pending_any) return;
     trap_pending_any = 0;
     for (int i = 1; i < EXEC_SIG_MAX; i++) {
@@ -200,6 +220,7 @@ void check_traps(void) {
 }
 
 void reset_traps(void) {
+    ensure_runtime_tables();
     for (int i = 0; i < EXEC_SIG_MAX; i++) {
         if (trap_commands[i]) {
             free(trap_commands[i]);
@@ -311,6 +332,7 @@ static void restore_redirections(fd_save_t *save) {
 }
 
 int execute_ast(ast_node_t *node) {
+    ensure_runtime_tables();
     if (!node) return 0;
 
     int status = 0;

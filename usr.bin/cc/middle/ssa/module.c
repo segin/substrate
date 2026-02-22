@@ -17,9 +17,12 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
     for (i = 0; i < m->global_count; ++i) {
         size_t j;
         free(m->globals[i].name);
+        free(m->globals[i].attr_section);
         free(m->globals[i].init_str);
+        free(m->globals[i].init_sym);
         for (j = 0; j < m->globals[i].init_item_count; ++j) {
             free(m->globals[i].init_items[j].init_str);
+            free(m->globals[i].init_items[j].init_sym);
         }
         free(m->globals[i].init_items);
     }
@@ -28,6 +31,7 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
     for (i = 0; i < m->func_count; ++i) {
         size_t j;
         free(m->funcs[i].name);
+        free(m->funcs[i].attr_section);
         free(m->funcs[i].param_values);
         free(m->funcs[i].param_types);
         free(m->funcs[i].value_types);

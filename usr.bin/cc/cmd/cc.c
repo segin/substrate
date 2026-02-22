@@ -1,4 +1,5 @@
 #include "cc_driver.h"
+#include "cc_frontend.h"
 #include "cc_pipeline.h"
 
 #include <errno.h>
@@ -252,6 +253,19 @@ static int has_ext(const char *path, const char *ext) {
     return strcmp(path + pn - en, ext) == 0;
 }
 
+static int strvec_has_flag(const strvec_t *v, const char *flag) {
+    size_t i;
+    if (v == NULL || flag == NULL) {
+        return 0;
+    }
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->items[i], flag) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int make_temp_path(cc_opts_t *o, const char *prefix, const char *suffix, char out[PATH_MAX]) {
     char templ[PATH_MAX];
     int fd;
@@ -392,6 +406,12 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             strvec_push(&o->c_flags, a);
             continue;
         }
+        if (strcmp(a, "-nostdinc") == 0) {
+            if (strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->c_flags, a) != 0) {
+                return -1;
+            }
+            continue;
+        }
         if (strcmp(a, "-nodefaultlibs") == 0) {
             o->nodefaultlibs = 1;
             strvec_push(&o->c_flags, a);
@@ -418,12 +438,16 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         }
         if (strcmp(a, "-m32") == 0) {
             o->target = CC_TARGET_I386;
-            strvec_push(&o->c_flags, a);
+            if (strvec_push(&o->c_flags, a) != 0 || strvec_push(&o->cpp_flags, a) != 0) {
+                return -1;
+            }
             continue;
         }
         if (strcmp(a, "-m64") == 0) {
             o->target = CC_TARGET_X86_64;
-            strvec_push(&o->c_flags, a);
+            if (strvec_push(&o->c_flags, a) != 0 || strvec_push(&o->cpp_flags, a) != 0) {
+                return -1;
+            }
             continue;
         }
 
@@ -499,7 +523,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         }
 
         if (a[0] == '-') {
-            if (strvec_push(&o->ld_flags, a) != 0 || strvec_push(&o->c_flags, a) != 0) {
+            if (strvec_push(&o->c_flags, a) != 0) {
                 return -1;
             }
             continue;
@@ -523,38 +547,20 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
 }
 
 static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
-    char stdflag[64];
-    int want_trigraphs = 1;
-    size_t argc = 10 + o->cpp_flags.count;
-    char **argv;
-    size_t i;
-    size_t at = 0;
-
-    argv = (char **)calloc(argc + 1, sizeof(*argv));
-    if (argv == NULL) {
+    cc_diag_t diag;
+    const char *std_mode = o->std != NULL ? o->std : "c99";
+    memset(&diag, 0, sizeof(diag));
+    if (cc_preprocess_file(in, out, std_mode, (const char *const *)o->cpp_flags.items, o->cpp_flags.count, &diag) != 0) {
+        if (diag.line != 0) {
+            fprintf(stderr, "cpp:%zu:%zu: %s\n", diag.line, diag.col, diag.message);
+        } else if (diag.message[0] != '\0') {
+            fprintf(stderr, "cpp: %s\n", diag.message);
+        } else {
+            fprintf(stderr, "cpp: preprocess failed\n");
+        }
         return -1;
     }
-
-    argv[at++] = "cpp";
-    snprintf(stdflag, sizeof(stdflag), "-std=%s", o->std != NULL ? o->std : "gnu99");
-    argv[at++] = stdflag;
-    if (want_trigraphs) {
-        argv[at++] = "-trigraphs";
-    }
-    argv[at++] = "-x";
-    argv[at++] = "c";
-    argv[at++] = "-P";
-    for (i = 0; i < o->cpp_flags.count; ++i) {
-        argv[at++] = o->cpp_flags.items[i];
-    }
-    argv[at++] = (char *)in;
-    argv[at++] = "-o";
-    argv[at++] = (char *)out;
-    argv[at] = NULL;
-
-    i = run_cmd(o, argv);
-    free(argv);
-    return (int)i;
+    return 0;
 }
 
 static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const char *out_s) {
@@ -758,6 +764,63 @@ int cc_main(int argc, char **argv) {
     for (i = 0; i < o.inputs.count; ++i) {
         const char *in = o.inputs.items[i];
 
+        if (has_ext(in, ".S")) {
+            char out_s[PATH_MAX];
+            char out_o[PATH_MAX];
+            char tmp_s[PATH_MAX];
+
+            if (o.mode_E) {
+                const char *pp_out = o.output != NULL ? o.output : "/dev/stdout";
+                if (run_preprocess(&o, in, pp_out) != 0) {
+                    goto out;
+                }
+                continue;
+            }
+
+            if (o.mode_S) {
+                if (o.output != NULL) {
+                    snprintf(out_s, sizeof(out_s), "%s", o.output);
+                } else if (derive_out(in, ".s", out_s) != 0) {
+                    fprintf(stderr, "cc: failed to derive .s output name\n");
+                    goto out;
+                }
+                if (run_preprocess(&o, in, out_s) != 0) {
+                    goto out;
+                }
+                continue;
+            }
+
+            if (make_temp_path(&o, "ccspp_", ".s", tmp_s) != 0) {
+                fprintf(stderr, "cc: failed to create temporary preprocessed assembly file\n");
+                goto out;
+            }
+            if (run_preprocess(&o, in, tmp_s) != 0) {
+                goto out;
+            }
+
+            if (o.mode_c) {
+                if (o.output != NULL) {
+                    snprintf(out_o, sizeof(out_o), "%s", o.output);
+                } else if (derive_out(in, ".o", out_o) != 0) {
+                    fprintf(stderr, "cc: failed to derive .o output name\n");
+                    goto out;
+                }
+            } else {
+                if (make_temp_path(&o, "cco_", ".o", out_o) != 0) {
+                    fprintf(stderr, "cc: failed to create temporary object file\n");
+                    goto out;
+                }
+            }
+
+            if (run_as(&o, tmp_s, out_o) != 0) {
+                goto out;
+            }
+            if (strvec_push(&obj_files, out_o) != 0) {
+                goto out;
+            }
+            continue;
+        }
+
         if (has_ext(in, ".c")) {
             char out_pp[PATH_MAX];
             char out_s[PATH_MAX];
@@ -800,6 +863,12 @@ int cc_main(int argc, char **argv) {
             } else {
                 cc_diag_t diag;
                 memset(&diag, 0, sizeof(diag));
+                if (o.nostdlib || strvec_has_flag(&o.c_flags, "-ffreestanding") ||
+                    strvec_has_flag(&o.c_flags, "-nostdinc")) {
+                    setenv("CC_FREESTANDING", "1", 1);
+                } else {
+                    unsetenv("CC_FREESTANDING");
+                }
                 if (cc_compile_c_to_s(out_pp, in, out_s, o.debug, o.target, opt_level_num(&o), &diag) != 0) {
                     if (diag.line != 0) {
                         fprintf(stderr, "cc:%zu:%zu: %s\n", diag.line, diag.col, diag.message);

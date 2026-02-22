@@ -22,9 +22,15 @@ DESTDIR ?= $(TOP)/dist
 COMMON_FLAGS = -m32 -Wall -Wextra -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx
 USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
-GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include)
-CFLAGS += $(COMMON_FLAGS) -std=c2x -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys -I$(GCC_INCLUDE)
-CXXFLAGS += $(COMMON_FLAGS) -std=c++2b -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys -I$(GCC_INCLUDE)
+GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include 2>/dev/null)
+CFLAGS += $(COMMON_FLAGS) -std=c2x -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys
+CXXFLAGS += $(COMMON_FLAGS) -std=c++2b -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys
+ifneq ($(strip $(GCC_INCLUDE)),)
+ifneq ($(wildcard $(GCC_INCLUDE)),)
+CFLAGS += -I$(GCC_INCLUDE)
+CXXFLAGS += -I$(GCC_INCLUDE)
+endif
+endif
 
 # Freestanding flags (for kernel and standalone utils)
 FREESTANDING_CFLAGS = $(CFLAGS) -ffreestanding -nostdlib -fno-builtin -fno-pie

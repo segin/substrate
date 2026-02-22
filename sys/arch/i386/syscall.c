@@ -136,7 +136,8 @@ void syscall_handler(registers_t *regs) {
         current_thread->syscall_orig_eax = regs->eax;
     }
 
-    uint32_t args[6];
+    uint32_t args[8];
+    memset(args, 0, sizeof(args));
 
 
     // Detect ABI (FreeBSD/Native i386 uses stack passing)
@@ -149,6 +150,8 @@ void syscall_handler(registers_t *regs) {
         args[3] = user_stack[4];
         args[4] = user_stack[5];
         args[5] = user_stack[6];
+        args[6] = user_stack[7];
+        args[7] = user_stack[8];
     } else {
         // Default / Linux ABI (Registers)
         args[0] = regs->ebx;
@@ -233,11 +236,11 @@ void syscall_handler(registers_t *regs) {
         return;
     }
     
-    typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+    typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
     
     // Dispatch
-    int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5]);
+    int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
     regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
     regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
 

@@ -144,6 +144,23 @@ int linux_sys_stat64(const char *path, struct linux_stat64 *buf);
 int linux_sys_lstat64(const char *path, struct linux_stat64 *buf);
 int linux_sys_fstat64(int fd, struct linux_stat64 *buf);
 
+/* Linux Syscall Wrappers */
+struct linux_mmap_arg_struct {
+    uint32_t addr;
+    uint32_t len;
+    uint32_t prot;
+    uint32_t flags;
+    uint32_t fd;
+    uint32_t offset;
+};
+
+void *linux_sys_mmap(struct linux_mmap_arg_struct *args);
+void *linux_sys_mmap2(void *addr, size_t len, int prot, int flags, int fd, uint32_t pgoffset);
+int   linux_sys_lseek(int fd, int32_t offset, int whence);
+int   linux_sys__llseek(int fd, uint32_t offset_hi, uint32_t offset_lo, int64_t *result, int whence);
+int   linux_sys_truncate(const char *path, int32_t length);
+int   linux_sys_ftruncate(int fd, int32_t length);
+
 /* Linux i386 sigcontext */
 struct linux_sigcontext {
     uint16_t gs, __gsh;

@@ -51,8 +51,10 @@ extern int sys_ioctl(int, uint32_t, void*);
 extern int sys_readlink(const char*, char*, size_t);
 extern int sys_lchown(const char*, int, int);
 
-/* lseek - NATIVE uses 64-bit offset split into hi/lo */
+/* lseek/truncate - NATIVE uses 64-bit offset split into hi/lo */
 extern int64_t sys_lseek(int, uint32_t, uint32_t, int);
+extern int sys_truncate(const char*, uint32_t, uint32_t);
+extern int sys_ftruncate(int, uint32_t, uint32_t);
 
 /* stat family - NATIVE uses 64-bit struct stat */
 extern int sys_stat(const char*, void*);

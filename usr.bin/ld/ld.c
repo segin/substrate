@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -20,6 +21,7 @@ typedef struct {
     int mode; /* 32 or 64 */
     uint16_t expect_type;
     const char *out_path;
+    const char *self_path;
     strvec_t pass;
     strvec_t inputs;
 } ld_ctx_t;
@@ -80,6 +82,99 @@ static void strvec_free(strvec_t *v) {
     v->cap = 0;
 }
 
+static int same_file(const char *a, const char *b) {
+    struct stat sa;
+    struct stat sb;
+
+    if (a == NULL || b == NULL) {
+        return 0;
+    }
+    if (stat(a, &sa) != 0 || stat(b, &sb) != 0) {
+        return 0;
+    }
+    return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+}
+
+static char *path_join(const char *dir, const char *leaf) {
+    size_t dlen;
+    size_t llen;
+    size_t need_slash;
+    char *out;
+
+    if (dir == NULL || leaf == NULL) {
+        return NULL;
+    }
+    dlen = strlen(dir);
+    llen = strlen(leaf);
+    need_slash = dlen > 0 && dir[dlen - 1] != '/';
+    out = (char *)malloc(dlen + need_slash + llen + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, dir, dlen);
+    if (need_slash) {
+        out[dlen++] = '/';
+    }
+    memcpy(out + dlen, leaf, llen);
+    out[dlen + llen] = '\0';
+    return out;
+}
+
+static char *find_backend_ld(const ld_ctx_t *ctx) {
+    const char *override = getenv("LD_BACKEND");
+    const char *path_env;
+    char *dup;
+    char *tok;
+    char *saveptr;
+
+    if (override != NULL && override[0] != '\0') {
+        if (strchr(override, '/') != NULL && same_file(override, ctx->self_path)) {
+            fprintf(stderr, "ld.x86: LD_BACKEND resolves to this wrapper (%s)\n", override);
+            return NULL;
+        }
+        return xstrdup(override);
+    }
+
+    path_env = getenv("PATH");
+    if (path_env != NULL && path_env[0] != '\0') {
+        dup = xstrdup(path_env);
+        if (dup == NULL) {
+            return NULL;
+        }
+        for (tok = strtok_r(dup, ":", &saveptr); tok != NULL; tok = strtok_r(NULL, ":", &saveptr)) {
+            char *cand;
+
+            if (tok[0] == '\0') {
+                continue;
+            }
+            cand = path_join(tok, "ld");
+            if (cand == NULL) {
+                free(dup);
+                return NULL;
+            }
+            if (access(cand, X_OK) == 0) {
+                if (!same_file(cand, ctx->self_path)) {
+                    free(dup);
+                    return cand;
+                }
+            }
+            free(cand);
+        }
+        free(dup);
+    }
+
+    if (access("/usr/bin/ld", X_OK) == 0 && !same_file("/usr/bin/ld", ctx->self_path)) {
+        return xstrdup("/usr/bin/ld");
+    }
+    if (access("/bin/ld", X_OK) == 0 && !same_file("/bin/ld", ctx->self_path)) {
+        return xstrdup("/bin/ld");
+    }
+
+    fprintf(stderr,
+            "ld.x86: no backend linker found (set LD_BACKEND or adjust PATH)\n");
+    return NULL;
+}
+
 static int infer_mode_from_inputs(ld_ctx_t *ctx) {
     size_t i;
 
@@ -109,15 +204,22 @@ static int run_ld_backend(const ld_ctx_t *ctx) {
     const char *emu = ctx->mode == 64 ? "elf_x86_64" : "elf_i386";
     size_t argc = 4 + ctx->pass.count;
     char **argv = (char **)calloc(argc + 1, sizeof(*argv));
+    char *backend;
     pid_t pid;
     int status;
     size_t i;
 
-    if (argv == NULL) {
+    backend = find_backend_ld(ctx);
+    if (backend == NULL) {
         return -1;
     }
 
-    argv[0] = "ld";
+    if (argv == NULL) {
+        free(backend);
+        return -1;
+    }
+
+    argv[0] = backend;
     argv[1] = "-m";
     argv[2] = (char *)emu;
 
@@ -128,19 +230,26 @@ static int run_ld_backend(const ld_ctx_t *ctx) {
 
     pid = fork();
     if (pid < 0) {
+        free(backend);
         free(argv);
         return -1;
     }
     if (pid == 0) {
-        execvp(argv[0], argv);
+        if (strchr(argv[0], '/') != NULL) {
+            execv(argv[0], argv);
+        } else {
+            execvp(argv[0], argv);
+        }
         _exit(127);
     }
 
     if (waitpid(pid, &status, 0) < 0) {
+        free(backend);
         free(argv);
         return -1;
     }
 
+    free(backend);
     free(argv);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         return -1;
@@ -186,6 +295,7 @@ int main(int argc, char **argv) {
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.out_path = "a.out";
+    ctx.self_path = argv[0];
 
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-m32") == 0) {

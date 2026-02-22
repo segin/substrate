@@ -183,9 +183,22 @@ int kern_write(int fd, const char *buf, int len) {
         if (use_static) mutex_unlock(&io_buffers[cpu].lock);
         else kfree(kbuf, IO_CHUNK_SIZE);
         return total_written;
+    } else
+        return 0;
+}
+
+int truncate_fs(fs_node_t *node, off_t length) {
+    if (node->truncate != 0) {
+        return node->truncate(node, length);
     }
     
-    return 0;
+    // Default: just update length if file is regular
+    if ((node->flags & 0x7) == FS_FILE) {
+        node->length = length;
+        return 0;
+    }
+    
+    return -1;
 }
 
 int sys_write(int fd, const char *buf, int len) {
@@ -382,6 +395,29 @@ int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int w) {
     else if (w == 2) f->f_offset = ((fs_node_t*)f->f_data)->length + off; // SEEK_END
     
     return f->f_offset;
+}
+
+int sys_truncate(const char *path, uint32_t lo, uint32_t hi) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
+    
+    fs_node_t *node = vfs_lookup(current_process->root_node ? current_process->root_node : fs_root, kpath);
+    if (!node) return -2; // ENOENT
+    
+    off_t length = ((off_t)hi << 32) | lo;
+    return truncate_fs(node, length);
+}
+
+int sys_ftruncate(int fd, uint32_t lo, uint32_t hi) {
+    if (fd < 0 || fd >= MAX_FD) return -9; // EBADF
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -9; // EBADF
+    
+    // Check if open for writing?
+    if (!(f->f_flag & FWRITE)) return -22; // EINVAL (should be EBADF or something else depending on OS)
+    
+    off_t length = ((off_t)hi << 32) | lo;
+    return truncate_fs((fs_node_t*)f->f_data, length);
 }
 
 

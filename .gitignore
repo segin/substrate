@@ -64,6 +64,15 @@ sbin/*/
 !tests/usr.bin/**/Makefile
 !tests/usr.bin/**/*.ir
 
+# In-tree host tool binaries (generated, never source-controlled)
+/usr.bin/ar/ar
+/usr.bin/as/as
+/usr.bin/as/as.x86
+/usr.bin/as/as.x64
+/usr.bin/ld/ld
+/usr.bin/ld/ld.x86
+/usr.bin/ld/ld.x64
+
 # Ignore the compiled output in bin subdirs that matches the dir name
 # (This is tricky with gitignore patterns, relying on extensions is safer)
 

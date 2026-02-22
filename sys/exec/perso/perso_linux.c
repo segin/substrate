@@ -209,6 +209,36 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
     return sys_ioctl(fd, request, arg);
 }
 
+void *linux_sys_mmap(struct linux_mmap_arg_struct *args) {
+    if (!args) return (void *)-1;
+    return sys_mmap((void*)args->addr, args->len, args->prot, args->flags, args->fd, (uint64_t)args->offset);
+}
+
+void *linux_sys_mmap2(void *addr, size_t len, int prot, int flags, int fd, uint32_t pgoffset) {
+    return sys_mmap(addr, len, prot, flags, fd, (uint64_t)pgoffset << 12);
+}
+
+int linux_sys_lseek(int fd, int32_t offset, int whence) {
+    return (int)sys_lseek(fd, (uint32_t)offset, (offset < 0) ? 0xFFFFFFFF : 0, whence);
+}
+
+int linux_sys__llseek(int fd, uint32_t offset_hi, uint32_t offset_lo, int64_t *result, int whence) {
+    int64_t res = sys_lseek(fd, offset_lo, offset_hi, whence);
+    if (res < 0) return (int)res;
+    if (result) {
+        if (copyout(&res, result, sizeof(int64_t)) != 0) return -14; // EFAULT
+    }
+    return 0;
+}
+
+int linux_sys_truncate(const char *path, int32_t length) {
+    return sys_truncate(path, (uint32_t)length, 0);
+}
+
+int linux_sys_ftruncate(int fd, int32_t length) {
+    return sys_ftruncate(fd, (uint32_t)length, 0);
+}
+
 /* Linux Block Device ioctl handler - 0x1200 range (stub) */
 static int linux_ioctl_blk(int fd, uint32_t request, void *arg) {
     (void)fd; (void)request; (void)arg;
@@ -247,7 +277,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_time]           = &sys_time,
     [LINUX_SYS_mknod]          = &sys_mknod,
     [LINUX_SYS_stat]           = (void*)linux_sys_stat,
-    [LINUX_SYS_lseek]          = &sys_lseek,
+    [LINUX_SYS_lseek]          = &linux_sys_lseek,
     [LINUX_SYS_getpid]         = &sys_getpid,
     [LINUX_SYS_mount]          = &sys_mount,
     [LINUX_SYS_umount]         = &sys_umount,
@@ -276,7 +306,10 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_setsid]         = &sys_setsid,
     [LINUX_SYS_lstat]          = (void*)linux_sys_lstat,
     [LINUX_SYS_readlink]       = &sys_readlink,
-    [LINUX_SYS_mmap]           = &sys_mmap,
+    [LINUX_SYS_mmap]           = &linux_sys_mmap,
+    [LINUX_SYS_munmap]         = &sys_munmap,
+    [LINUX_SYS_truncate]       = &linux_sys_truncate,
+    [LINUX_SYS_ftruncate]      = &linux_sys_ftruncate,
     [LINUX_SYS_stat_new]       = (void*)linux_sys_stat,
     [LINUX_SYS_lstat_new]      = (void*)linux_sys_lstat,
     [LINUX_SYS_fstat_new]      = (void*)linux_sys_fstat,
@@ -291,7 +324,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_rt_sigprocmask] = &sys_sigprocmask,
     [LINUX_SYS_getcwd]         = &sys_getcwd,
     [LINUX_SYS_vfork]          = &sys_vfork,
-    [LINUX_SYS_mmap2]          = &sys_mmap,
+    [LINUX_SYS_mmap2]          = &linux_sys_mmap2,
     [LINUX_SYS_stat64]         = (void*)linux_sys_stat64,
     [LINUX_SYS_lstat64]        = (void*)linux_sys_lstat64,
     [LINUX_SYS_fstat64]        = (void*)linux_sys_fstat64,
@@ -428,7 +461,10 @@ static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {
     [LINUX_SYS_setsid]         = { 0, { 0 } }, // setsid
     [LINUX_SYS_lstat]          = { 2, { ARG_STR, ARG_PTR } }, // lstat
     [LINUX_SYS_readlink]       = { 3, { ARG_STR, ARG_PTR, ARG_INT } }, // readlink
-    [LINUX_SYS_mmap]           = { 6, { ARG_PTR, ARG_INT, ARG_HEX, ARG_HEX, ARG_INT, ARG_HEX } }, // mmap
+    [LINUX_SYS_mmap]           = { 1, { ARG_PTR } }, // mmap (old)
+    [LINUX_SYS_munmap]         = { 2, { ARG_PTR, ARG_INT } }, // munmap
+    [LINUX_SYS_truncate]       = { 2, { ARG_STR, ARG_INT } }, // truncate
+    [LINUX_SYS_ftruncate]      = { 2, { ARG_INT, ARG_INT } }, // ftruncate
     [LINUX_SYS_stat_new]       = { 2, { ARG_STR, ARG_PTR } }, // stat
     [LINUX_SYS_lstat_new]      = { 2, { ARG_STR, ARG_PTR } }, // lstat
     [LINUX_SYS_fstat_new]      = { 2, { ARG_INT, ARG_PTR } }, // fstat

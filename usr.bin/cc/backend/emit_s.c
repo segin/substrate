@@ -106,11 +106,12 @@ static void emit_local_label(FILE *fp, const char *fn, int label) {
     fprintf(fp, ".L%s_%d", fn, label);
 }
 
-static void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_index, const char *literal) {
+static void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_index, const char *literal,
+                                      const char *restore_sec) {
     fprintf(fp, "\t.section .rodata\n");
     fprintf(fp, ".L__cc_str_%zu_%zu:\n", fn_index, instr_index);
     fprintf(fp, "\t.asciz %s\n", literal != NULL ? literal : "\"\"");
-    fprintf(fp, "\t.text\n");
+    fprintf(fp, "\t.section %s\n", (restore_sec != NULL && restore_sec[0] != '\0') ? restore_sec : ".text");
 }
 
 static int is_pointer_type(cc_type_t t) {
@@ -239,13 +240,36 @@ static void emit_integer_data(FILE *fp, long size, long value) {
     }
 }
 
+static long default_object_align(long sz) {
+    if (sz >= 8) {
+        return 8;
+    }
+    if (sz >= 4) {
+        return 4;
+    }
+    if (sz >= 2) {
+        return 2;
+    }
+    return 1;
+}
+
 static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc_diag_t *diag) {
     size_t i;
     for (i = 0; i < m->global_count; ++i) {
         const cc_ssa_global_t *g = &m->globals[i];
         long sz = global_object_size_bytes(g, pointer_size);
+        long align = default_object_align(sz);
         int is_static = (g->storage & CC_STORAGE_STATIC) != 0;
         int is_extern = (g->storage & CC_STORAGE_EXTERN) != 0;
+        const char *data_sec = g->attr_section != NULL && g->attr_section[0] != '\0' ? g->attr_section : ".data";
+        const char *bss_sec = g->attr_section != NULL && g->attr_section[0] != '\0' ? g->attr_section : ".bss";
+
+        if ((g->attr_flags & CC_ATTR_PACKED) != 0) {
+            align = 1;
+        }
+        if (g->attr_align > align) {
+            align = g->attr_align;
+        }
 
         if (is_extern) {
             continue;
@@ -255,34 +279,109 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             return -1;
         }
         if (!g->has_init) {
-            fprintf(fp, ".bss\n");
+            if (g->attr_section != NULL && g->attr_section[0] != '\0') {
+                fprintf(fp, ".section %s\n", bss_sec);
+            } else {
+                fprintf(fp, ".bss\n");
+            }
             if (!is_static) {
                 fprintf(fp, ".globl %s\n", g->name);
             }
-            if (sz >= 8) {
-                fprintf(fp, ".align 8\n");
-            } else if (sz >= 4) {
-                fprintf(fp, ".align 4\n");
-            } else if (sz >= 2) {
-                fprintf(fp, ".align 2\n");
+            if (align > 1) {
+                fprintf(fp, ".align %ld\n", align);
             }
             fprintf(fp, "%s:\n", g->name);
             fprintf(fp, "\t.zero %ld\n", sz);
             continue;
         }
-        fprintf(fp, ".data\n");
+        if (g->attr_section != NULL && g->attr_section[0] != '\0') {
+            fprintf(fp, ".section %s\n", data_sec);
+        } else {
+            fprintf(fp, ".data\n");
+        }
         if (!is_static) {
             fprintf(fp, ".globl %s\n", g->name);
         }
-        if (sz >= 8) {
-            fprintf(fp, ".align 8\n");
-        } else if (sz >= 4) {
-            fprintf(fp, ".align 4\n");
-        } else if (sz >= 2) {
-            fprintf(fp, ".align 2\n");
+        if (align > 1) {
+            fprintf(fp, ".align %ld\n", align);
         }
         fprintf(fp, "%s:\n", g->name);
         if (g->init_item_count > 0) {
+            if (g->init_items[0].init_size > 0 || g->init_items[0].init_is_zero_fill) {
+                size_t j;
+                long emitted = 0;
+
+                for (j = 0; j < g->init_item_count; ++j) {
+                    const cc_ssa_global_init_item_t *it = &g->init_items[j];
+                    if (it->init_is_string) {
+                        fprintf(fp, "\t.section .rodata\n");
+                        fprintf(fp, ".L__cc_gstream_%zu_%zu:\n", i, j);
+                        fprintf(fp, "\t.asciz %s\n", it->init_str != NULL ? it->init_str : "\"\"");
+                        if (g->attr_section != NULL && g->attr_section[0] != '\0') {
+                            fprintf(fp, "\t.section %s\n", data_sec);
+                        } else {
+                            fprintf(fp, "\t.data\n");
+                        }
+                    }
+                }
+
+                for (j = 0; j < g->init_item_count; ++j) {
+                    const cc_ssa_global_init_item_t *it = &g->init_items[j];
+                    long item_size = it->init_size > 0 ? it->init_size : 1;
+                    if (it->init_is_zero_fill) {
+                        fprintf(fp, "\t.zero %ld\n", item_size);
+                        emitted += item_size;
+                        continue;
+                    }
+                    if (it->init_is_string) {
+                        if (item_size == 4) {
+                            fprintf(fp, "\t.long .L__cc_gstream_%zu_%zu\n", i, j);
+                        } else if (item_size == 8) {
+                            fprintf(fp, "\t.quad .L__cc_gstream_%zu_%zu\n", i, j);
+                        } else {
+                            set_diag(diag, "string initializer pointer size must be 4 or 8 bytes");
+                            return -1;
+                        }
+                        emitted += item_size;
+                        continue;
+                    }
+                    if (it->init_is_symbol) {
+                        if (item_size == 4) {
+                            fprintf(fp, "\t.long %s\n", it->init_sym != NULL ? it->init_sym : "0");
+                        } else if (item_size == 8) {
+                            fprintf(fp, "\t.quad %s\n", it->init_sym != NULL ? it->init_sym : "0");
+                        } else {
+                            set_diag(diag, "symbol initializer size must be 4 or 8 bytes");
+                            return -1;
+                        }
+                        emitted += item_size;
+                        continue;
+                    }
+                    if (it->init_is_float && (item_size == 4 || item_size == 8)) {
+                        if (item_size == 4) {
+                            fprintf(fp, "\t.float %f\n", (float)it->init_f);
+                        } else {
+                            fprintf(fp, "\t.double %f\n", it->init_f);
+                        }
+                        emitted += item_size;
+                        continue;
+                    }
+                    if (item_size != 1 && item_size != 2 && item_size != 4 && item_size != 8) {
+                        set_diag(diag, "unsupported generic global initializer item size");
+                        return -1;
+                    }
+                    emit_integer_data(fp, item_size, it->init_i);
+                    emitted += item_size;
+                }
+                if (emitted < sz) {
+                    fprintf(fp, "\t.zero %ld\n", sz - emitted);
+                } else if (emitted > sz) {
+                    set_diag(diag, "generic global initializer stream exceeds object size");
+                    return -1;
+                }
+                continue;
+            }
+
             size_t j;
             cc_type_t elem_type;
             long elem_size;
@@ -310,7 +409,11 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_garr_%zu_%zu:\n", i, j);
                 fprintf(fp, "\t.asciz %s\n", it->init_str != NULL ? it->init_str : "\"\"");
-                fprintf(fp, "\t.data\n");
+                if (g->attr_section != NULL && g->attr_section[0] != '\0') {
+                    fprintf(fp, "\t.section %s\n", data_sec);
+                } else {
+                    fprintf(fp, "\t.data\n");
+                }
             }
             for (j = 0; j < g->init_item_count; ++j) {
                 const cc_ssa_global_init_item_t *it = &g->init_items[j];
@@ -319,6 +422,16 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                         fprintf(fp, "\t.long .L__cc_garr_%zu_%zu\n", i, j);
                     } else {
                         fprintf(fp, "\t.quad .L__cc_garr_%zu_%zu\n", i, j);
+                    }
+                } else if (it->init_is_symbol) {
+                    if (!is_pointer_type(elem_type)) {
+                        set_diag(diag, "symbol element in initializer list requires pointer element type");
+                        return -1;
+                    }
+                    if (pointer_size == 4) {
+                        fprintf(fp, "\t.long %s\n", it->init_sym != NULL ? it->init_sym : "0");
+                    } else {
+                        fprintf(fp, "\t.quad %s\n", it->init_sym != NULL ? it->init_sym : "0");
                     }
                 } else if (it->init_is_float && (elem_type == CC_TYPE_FLOAT || elem_type == CC_TYPE_DOUBLE)) {
                     if (elem_type == CC_TYPE_FLOAT) {
@@ -346,7 +459,11 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_gstr_%zu:\n", i);
                 fprintf(fp, "\t.asciz %s\n", g->init_str != NULL ? g->init_str : "\"\"");
-                fprintf(fp, "\t.data\n");
+                if (g->attr_section != NULL && g->attr_section[0] != '\0') {
+                    fprintf(fp, "\t.section %s\n", data_sec);
+                } else {
+                    fprintf(fp, "\t.data\n");
+                }
                 if (!is_static) {
                     fprintf(fp, ".globl %s\n", g->name);
                 }
@@ -359,6 +476,18 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             } else {
                 set_diag(diag, "string initializer requires array or pointer global");
                 return -1;
+            }
+            continue;
+        }
+        if (g->init_is_symbol) {
+            if (!is_pointer_type(g->type)) {
+                set_diag(diag, "symbol initializer requires pointer global");
+                return -1;
+            }
+            if (pointer_size == 4) {
+                fprintf(fp, "\t.long %s\n", g->init_sym != NULL ? g->init_sym : "0");
+            } else {
+                fprintf(fp, "\t.quad %s\n", g->init_sym != NULL ? g->init_sym : "0");
             }
             continue;
         }
@@ -614,6 +743,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *f = &m->funcs[i];
+        const char *func_sec = (f->attr_section != NULL && f->attr_section[0] != '\0') ? f->attr_section : ".text";
         slot_layout_t lay;
         size_t j;
         int frame;
@@ -630,10 +760,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         }
         frame = (raw_frame + 15) & ~15;
 
-        if ((f->storage & CC_STORAGE_STATIC) == 0) {
-            fprintf(fp, "\n.globl %s\n", f->name);
+        if (f->attr_section != NULL && f->attr_section[0] != '\0') {
+            fprintf(fp, "\n.section %s\n", f->attr_section);
         } else {
-            fprintf(fp, "\n");
+            fprintf(fp, "\n.text\n");
+        }
+        if ((f->storage & CC_STORAGE_STATIC) == 0) {
+            fprintf(fp, ".globl %s\n", f->name);
+        }
+        if (f->attr_align > 1) {
+            fprintf(fp, ".align %ld\n", f->attr_align);
         }
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
@@ -711,7 +847,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_STR:
-                emit_string_literal_label(fp, i, j, in->sym);
+                emit_string_literal_label(fp, i, j, in->sym, func_sec);
                 fprintf(fp, "\tleaq .L__cc_str_%zu_%zu(%%rip), %%rax\n", i, j);
                 fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 break;
@@ -733,6 +869,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_GADDR:
                 fprintf(fp, "\tleaq %s(%%rip), %%rax\n", in->sym);
+                fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_LADDR:
+                fprintf(fp, "\tleaq ");
+                emit_local_label(fp, f->name, in->label);
+                fprintf(fp, "(%%rip), %%rax\n");
                 fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 break;
 
@@ -1079,6 +1222,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *f = &m->funcs[i];
+        const char *func_sec = (f->attr_section != NULL && f->attr_section[0] != '\0') ? f->attr_section : ".text";
         slot_layout_t lay;
         size_t j;
         int frame;
@@ -1088,10 +1232,16 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         }
         frame = (lay.slot_count * 8 + 15) & ~15;
 
-        if ((f->storage & CC_STORAGE_STATIC) == 0) {
-            fprintf(fp, "\n.globl %s\n", f->name);
+        if (f->attr_section != NULL && f->attr_section[0] != '\0') {
+            fprintf(fp, "\n.section %s\n", f->attr_section);
         } else {
-            fprintf(fp, "\n");
+            fprintf(fp, "\n.text\n");
+        }
+        if ((f->storage & CC_STORAGE_STATIC) == 0) {
+            fprintf(fp, ".globl %s\n", f->name);
+        }
+        if (f->attr_align > 1) {
+            fprintf(fp, ".align %ld\n", f->attr_align);
         }
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
@@ -1152,7 +1302,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_STR:
-                emit_string_literal_label(fp, i, j, in->sym);
+                emit_string_literal_label(fp, i, j, in->sym, func_sec);
                 fprintf(fp, "\tmovl $.L__cc_str_%zu_%zu, %%eax\n", i, j);
                 fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 break;
@@ -1174,6 +1324,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
             case CC_SSA_GADDR:
                 fprintf(fp, "\tmovl $%s, %%eax\n", in->sym);
+                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_LADDR:
+                fprintf(fp, "\tmovl $");
+                emit_local_label(fp, f->name, in->label);
+                fprintf(fp, ", %%eax\n");
                 fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 break;
 

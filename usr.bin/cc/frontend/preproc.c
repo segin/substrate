@@ -1,2 +1,2093 @@
-/* Phase-0 placeholder: preprocessing is currently delegated by cmd/cc.c. */
-int cc_frontend_preproc_placeholder(void) { return 0; }
+#include "cc_frontend.h"
+
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
+#define PP_MAX_INCLUDE_DEPTH 128
+#define PP_MAX_EXPAND_DEPTH 32
+#define PP_MAX_EXPAND_PASSES 16
+
+typedef struct {
+    char *name;
+    int is_function;
+    char **params;
+    size_t param_count;
+    char *body;
+} pp_macro_t;
+
+typedef struct {
+    pp_macro_t *items;
+    size_t count;
+    size_t cap;
+} pp_macro_table_t;
+
+typedef struct {
+    char **items;
+    size_t count;
+    size_t cap;
+} pp_strvec_t;
+
+typedef struct {
+    int parent_active;
+    int this_active;
+    int any_taken;
+    int saw_else;
+} pp_cond_frame_t;
+
+typedef struct {
+    pp_macro_table_t macros;
+    pp_strvec_t quote_paths;
+    pp_strvec_t user_include_paths;
+    pp_strvec_t system_include_paths;
+    pp_strvec_t include_once;
+    int no_default_includes;
+    int target_bits;
+} pp_state_t;
+
+typedef struct {
+    char *buf;
+    size_t len;
+    size_t cap;
+} sb_t;
+
+typedef struct {
+    const char *s;
+    size_t pos;
+} expr_parser_t;
+
+static void set_diag(cc_diag_t *diag, size_t line, size_t col, const char *msg) {
+    if (diag == NULL || diag->message[0] != '\0') {
+        return;
+    }
+    diag->line = line;
+    diag->col = col;
+    snprintf(diag->message, sizeof(diag->message), "%s", msg);
+}
+
+static char *xstrdup_n(const char *s, size_t n) {
+    char *p = (char *)malloc(n + 1);
+    if (p == NULL) {
+        return NULL;
+    }
+    memcpy(p, s, n);
+    p[n] = '\0';
+    return p;
+}
+
+static char *xstrdup(const char *s) {
+    if (s == NULL) {
+        return NULL;
+    }
+    return xstrdup_n(s, strlen(s));
+}
+
+static int strvec_push(pp_strvec_t *v, const char *s) {
+    char **next;
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
+        next = (char **)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    v->items[v->count] = xstrdup(s);
+    if (v->items[v->count] == NULL) {
+        return -1;
+    }
+    v->count++;
+    return 0;
+}
+
+static void strvec_free(pp_strvec_t *v) {
+    size_t i;
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i]);
+    }
+    free(v->items);
+    v->items = NULL;
+    v->count = 0;
+    v->cap = 0;
+}
+
+static int sb_reserve(sb_t *sb, size_t extra) {
+    char *next;
+    size_t need = sb->len + extra + 1;
+    size_t ncap = sb->cap == 0 ? 128 : sb->cap;
+    while (ncap < need) {
+        ncap *= 2;
+    }
+    if (ncap == sb->cap) {
+        return 0;
+    }
+    next = (char *)realloc(sb->buf, ncap);
+    if (next == NULL) {
+        return -1;
+    }
+    sb->buf = next;
+    sb->cap = ncap;
+    return 0;
+}
+
+static int sb_append_n(sb_t *sb, const char *s, size_t n) {
+    if (sb_reserve(sb, n) != 0) {
+        return -1;
+    }
+    memcpy(sb->buf + sb->len, s, n);
+    sb->len += n;
+    sb->buf[sb->len] = '\0';
+    return 0;
+}
+
+static int sb_append_c(sb_t *sb, char c) {
+    if (sb_reserve(sb, 1) != 0) {
+        return -1;
+    }
+    sb->buf[sb->len++] = c;
+    sb->buf[sb->len] = '\0';
+    return 0;
+}
+
+static int sb_append(sb_t *sb, const char *s) {
+    return sb_append_n(sb, s, strlen(s));
+}
+
+static void sb_free(sb_t *sb) {
+    free(sb->buf);
+    sb->buf = NULL;
+    sb->len = 0;
+    sb->cap = 0;
+}
+
+static int is_ident_start(int c) {
+    return c == '_' || isalpha((unsigned char)c);
+}
+
+static int is_ident_char(int c) {
+    return c == '_' || isalnum((unsigned char)c);
+}
+
+static pp_macro_t *macro_find(pp_macro_table_t *t, const char *name) {
+    size_t i;
+    for (i = 0; i < t->count; ++i) {
+        if (strcmp(t->items[i].name, name) == 0) {
+            return &t->items[i];
+        }
+    }
+    return NULL;
+}
+
+static void macro_free_item(pp_macro_t *m) {
+    size_t i;
+    free(m->name);
+    for (i = 0; i < m->param_count; ++i) {
+        free(m->params[i]);
+    }
+    free(m->params);
+    free(m->body);
+    memset(m, 0, sizeof(*m));
+}
+
+static int macro_set(pp_macro_table_t *t, const char *name, int is_function, char **params, size_t param_count,
+                     const char *body) {
+    pp_macro_t *m = macro_find(t, name);
+    if (m == NULL) {
+        pp_macro_t *next;
+        if (t->count == t->cap) {
+            size_t ncap = t->cap == 0 ? 64 : t->cap * 2;
+            next = (pp_macro_t *)realloc(t->items, ncap * sizeof(*next));
+            if (next == NULL) {
+                return -1;
+            }
+            t->items = next;
+            t->cap = ncap;
+        }
+        m = &t->items[t->count++];
+        memset(m, 0, sizeof(*m));
+    } else {
+        macro_free_item(m);
+    }
+    m->name = xstrdup(name);
+    m->is_function = is_function;
+    m->params = params;
+    m->param_count = param_count;
+    m->body = xstrdup(body != NULL ? body : "");
+    if (m->name == NULL || m->body == NULL) {
+        macro_free_item(m);
+        return -1;
+    }
+    return 0;
+}
+
+static void macro_unset(pp_macro_table_t *t, const char *name) {
+    size_t i;
+    for (i = 0; i < t->count; ++i) {
+        if (strcmp(t->items[i].name, name) == 0) {
+            macro_free_item(&t->items[i]);
+            if (i + 1 < t->count) {
+                memmove(&t->items[i], &t->items[i + 1], (t->count - i - 1) * sizeof(t->items[0]));
+            }
+            t->count--;
+            return;
+        }
+    }
+}
+
+static void macro_table_free(pp_macro_table_t *t) {
+    size_t i;
+    for (i = 0; i < t->count; ++i) {
+        macro_free_item(&t->items[i]);
+    }
+    free(t->items);
+    t->items = NULL;
+    t->count = 0;
+    t->cap = 0;
+}
+
+static const char *skip_ws(const char *s) {
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') {
+        s++;
+    }
+    return s;
+}
+
+static char *trim_dup(const char *s) {
+    const char *a = skip_ws(s);
+    const char *b = a + strlen(a);
+    while (b > a && (b[-1] == ' ' || b[-1] == '\t' || b[-1] == '\r' || b[-1] == '\n')) {
+        b--;
+    }
+    return xstrdup_n(a, (size_t)(b - a));
+}
+
+static int add_builtin_macros(pp_state_t *st) {
+    const char *size_type = st->target_bits == 32 ? "unsigned int" : "unsigned long";
+    const char *ptrdiff_type = st->target_bits == 32 ? "int" : "long int";
+    const char *wchar_type = "int";
+    const char *ptr_size = st->target_bits == 32 ? "4" : "8";
+    if (macro_set(&st->macros, "__STDC__", 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__STDC_VERSION__", 0, NULL, 0, "199901L") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZE_TYPE__", 0, NULL, 0, size_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__PTRDIFF_TYPE__", 0, NULL, 0, ptrdiff_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__WCHAR_TYPE__", 0, NULL, 0, wchar_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_POINTER__", 0, NULL, 0, ptr_size) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__ATOMIC_RELAXED", 0, NULL, 0, "0") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__ATOMIC_CONSUME", 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__ATOMIC_ACQUIRE", 0, NULL, 0, "2") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__ATOMIC_RELEASE", 0, NULL, 0, "3") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__ATOMIC_ACQ_REL", 0, NULL, 0, "4") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__ATOMIC_SEQ_CST", 0, NULL, 0, "5") != 0) {
+        return -1;
+    }
+    if (st->target_bits == 32) {
+        if (macro_set(&st->macros, "__i386__", 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+    } else {
+        if (macro_set(&st->macros, "__x86_64__", 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+        if (macro_set(&st->macros, "__LP64__", 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+        if (macro_set(&st->macros, "_LP64", 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t flag_count) {
+    size_t i;
+    for (i = 0; i < flag_count; ++i) {
+        const char *f = flags[i];
+        if (strcmp(f, "-m32") == 0) {
+            st->target_bits = 32;
+        } else if (strcmp(f, "-m64") == 0) {
+            st->target_bits = 64;
+        }
+    }
+}
+
+static int add_default_include_paths(pp_state_t *st) {
+    if (st->no_default_includes) {
+        return 0;
+    }
+    if (strvec_push(&st->system_include_paths, "/usr/local/include") != 0) {
+        return -1;
+    }
+    if (strvec_push(&st->system_include_paths, "/usr/include") != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int parse_cmd_define(pp_state_t *st, const char *arg) {
+    const char *eq = strchr(arg, '=');
+    char *name = NULL;
+    char *body = NULL;
+    int rc = -1;
+    if (eq == NULL) {
+        name = xstrdup(arg);
+        body = xstrdup("1");
+    } else {
+        name = xstrdup_n(arg, (size_t)(eq - arg));
+        body = xstrdup(eq + 1);
+    }
+    if (name == NULL || body == NULL) {
+        goto out;
+    }
+    rc = macro_set(&st->macros, name, 0, NULL, 0, body);
+out:
+    free(name);
+    free(body);
+    return rc;
+}
+
+static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_count) {
+    size_t i;
+    for (i = 0; i < flag_count; ++i) {
+        const char *f = flags[i];
+        if (strcmp(f, "-I") == 0 || strcmp(f, "-isystem") == 0 || strcmp(f, "-iquote") == 0) {
+            if (i + 1 >= flag_count) {
+                return -1;
+            }
+            if (strcmp(f, "-I") == 0) {
+                if (strvec_push(&st->user_include_paths, flags[++i]) != 0)
+                    return -1;
+            } else if (strcmp(f, "-isystem") == 0) {
+                if (strvec_push(&st->system_include_paths, flags[++i]) != 0)
+                    return -1;
+            } else {
+                if (strvec_push(&st->quote_paths, flags[++i]) != 0)
+                    return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-I", 2) == 0 && strlen(f) > 2) {
+            if (strvec_push(&st->user_include_paths, f + 2) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-isystem", 8) == 0 && strlen(f) > 8) {
+            if (strvec_push(&st->system_include_paths, f + 8) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-iquote", 7) == 0 && strlen(f) > 7) {
+            if (strvec_push(&st->quote_paths, f + 7) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strcmp(f, "-nostdinc") == 0) {
+            st->no_default_includes = 1;
+            continue;
+        }
+        if (strcmp(f, "-D") == 0) {
+            if (i + 1 >= flag_count) {
+                return -1;
+            }
+            if (parse_cmd_define(st, flags[++i]) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-D", 2) == 0 && strlen(f) > 2) {
+            if (parse_cmd_define(st, f + 2) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strcmp(f, "-U") == 0) {
+            if (i + 1 >= flag_count) {
+                return -1;
+            }
+            macro_unset(&st->macros, flags[++i]);
+            continue;
+        }
+        if (strncmp(f, "-U", 2) == 0 && strlen(f) > 2) {
+            macro_unset(&st->macros, f + 2);
+            continue;
+        }
+    }
+    return 0;
+}
+
+static char *dirname_dup(const char *path) {
+    const char *slash = strrchr(path, '/');
+    if (slash == NULL) {
+        return xstrdup(".");
+    }
+    if (slash == path) {
+        return xstrdup("/");
+    }
+    return xstrdup_n(path, (size_t)(slash - path));
+}
+
+static int path_exists(const char *path) {
+    FILE *fp = fopen(path, "r");
+    if (fp == NULL) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
+
+static int resolve_include(pp_state_t *st, const char *cur_file, const char *spec, int quoted, char out[PATH_MAX]) {
+    size_t i;
+    char cand[PATH_MAX];
+    if (quoted) {
+        char *dir = dirname_dup(cur_file);
+        if (dir == NULL) {
+            return -1;
+        }
+        if (snprintf(cand, sizeof(cand), "%s/%s", dir, spec) < (int)sizeof(cand) && path_exists(cand)) {
+            snprintf(out, PATH_MAX, "%s", cand);
+            free(dir);
+            return 0;
+        }
+        free(dir);
+    }
+    if (quoted) {
+        for (i = 0; i < st->quote_paths.count; ++i) {
+            if (snprintf(cand, sizeof(cand), "%s/%s", st->quote_paths.items[i], spec) >= (int)sizeof(cand))
+                continue;
+            if (path_exists(cand)) {
+                snprintf(out, PATH_MAX, "%s", cand);
+                return 0;
+            }
+        }
+    }
+    for (i = 0; i < st->user_include_paths.count; ++i) {
+        if (snprintf(cand, sizeof(cand), "%s/%s", st->user_include_paths.items[i], spec) >= (int)sizeof(cand)) {
+            continue;
+        }
+        if (path_exists(cand)) {
+            snprintf(out, PATH_MAX, "%s", cand);
+            return 0;
+        }
+    }
+    for (i = 0; i < st->system_include_paths.count; ++i) {
+        if (snprintf(cand, sizeof(cand), "%s/%s", st->system_include_paths.items[i], spec) >= (int)sizeof(cand))
+            continue;
+        if (path_exists(cand)) {
+            snprintf(out, PATH_MAX, "%s", cand);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int once_contains(pp_state_t *st, const char *path) {
+    size_t i;
+    for (i = 0; i < st->include_once.count; ++i) {
+        if (strcmp(st->include_once.items[i], path) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int once_add(pp_state_t *st, const char *path) {
+    char real_buf[PATH_MAX];
+    const char *norm = path;
+    if (realpath(path, real_buf) != NULL) {
+        norm = real_buf;
+    }
+    if (once_contains(st, norm)) {
+        return 0;
+    }
+    return strvec_push(&st->include_once, norm);
+}
+
+static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_counter) {
+    int c;
+    int got_any = 0;
+    int continue_line = 0;
+
+    out->len = 0;
+    if (out->buf != NULL) {
+        out->buf[0] = '\0';
+    }
+
+    do {
+        continue_line = 0;
+        while ((c = fgetc(fp)) != EOF) {
+            got_any = 1;
+            if (c == '\n') {
+                (*line_counter)++;
+                if (out->len > 0 && out->buf[out->len - 1] == '\\') {
+                    out->len--;
+                    out->buf[out->len] = '\0';
+                    continue_line = 1;
+                }
+                break;
+            }
+            if (sb_append_c(out, (char)c) != 0) {
+                return -1;
+            }
+        }
+        if (c == EOF) {
+            break;
+        }
+    } while (continue_line);
+
+    *out_had_line = got_any;
+    return 0;
+}
+
+static int strip_comments_line(const char *in, int *in_block_comment, sb_t *out) {
+    size_t i = 0;
+    out->len = 0;
+    if (out->buf != NULL) {
+        out->buf[0] = '\0';
+    }
+    while (in[i] != '\0') {
+        if (*in_block_comment) {
+            if (in[i] == '*' && in[i + 1] == '/') {
+                *in_block_comment = 0;
+                i += 2;
+            } else {
+                i++;
+            }
+            continue;
+        }
+        if (in[i] == '"' || in[i] == '\'') {
+            char q = in[i];
+            if (sb_append_c(out, in[i]) != 0) {
+                return -1;
+            }
+            i++;
+            while (in[i] != '\0') {
+                if (sb_append_c(out, in[i]) != 0) {
+                    return -1;
+                }
+                if (in[i] == '\\' && in[i + 1] != '\0') {
+                    i++;
+                    if (sb_append_c(out, in[i]) != 0) {
+                        return -1;
+                    }
+                } else if (in[i] == q) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (in[i] == '/' && in[i + 1] == '*') {
+            *in_block_comment = 1;
+            if (sb_append_c(out, ' ') != 0) {
+                return -1;
+            }
+            i += 2;
+            continue;
+        }
+        if (in[i] == '/' && in[i + 1] == '/') {
+            break;
+        }
+        if (sb_append_c(out, in[i]) != 0) {
+            return -1;
+        }
+        i++;
+    }
+    return 0;
+}
+
+static int parse_int_literal(const char *s, long long *out) {
+    char *end;
+    long long v;
+    if (s == NULL || *s == '\0') {
+        return -1;
+    }
+    errno = 0;
+    v = strtoll(s, &end, 0);
+    if (end == s || errno != 0) {
+        return -1;
+    }
+    while (*end == 'u' || *end == 'U' || *end == 'l' || *end == 'L') {
+        end++;
+    }
+    if (*end != '\0') {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static void expr_skip_ws(expr_parser_t *p) {
+    while (p->s[p->pos] == ' ' || p->s[p->pos] == '\t' || p->s[p->pos] == '\r' || p->s[p->pos] == '\n') {
+        p->pos++;
+    }
+}
+
+static int expr_match(expr_parser_t *p, const char *tok) {
+    size_t n = strlen(tok);
+    expr_skip_ws(p);
+    if (strncmp(p->s + p->pos, tok, n) == 0) {
+        if (n == 1 && tok[0] == '&' && p->s[p->pos + 1] == '&') {
+            return 0;
+        }
+        if (n == 1 && tok[0] == '|' && p->s[p->pos + 1] == '|') {
+            return 0;
+        }
+        p->pos += n;
+        return 1;
+    }
+    return 0;
+}
+
+static long long parse_expr_or(expr_parser_t *p, int *ok);
+static long long parse_expr_cond(expr_parser_t *p, int *ok);
+
+static long long parse_expr_primary(expr_parser_t *p, int *ok) {
+    long long v;
+    size_t start;
+    char *tmp;
+    expr_skip_ws(p);
+    if (expr_match(p, "(")) {
+        v = parse_expr_cond(p, ok);
+        if (!expr_match(p, ")")) {
+            *ok = 0;
+            return 0;
+        }
+        return v;
+    }
+    if (is_ident_start((unsigned char)p->s[p->pos])) {
+        while (is_ident_char((unsigned char)p->s[p->pos])) {
+            p->pos++;
+        }
+        return 0;
+    }
+    start = p->pos;
+    if (p->s[p->pos] == '+' || p->s[p->pos] == '-') {
+        p->pos++;
+    }
+    if (p->s[p->pos] == '0' && (p->s[p->pos + 1] == 'x' || p->s[p->pos + 1] == 'X')) {
+        p->pos += 2;
+        while (isxdigit((unsigned char)p->s[p->pos])) {
+            p->pos++;
+        }
+    } else {
+        while (isdigit((unsigned char)p->s[p->pos])) {
+            p->pos++;
+        }
+    }
+    while (p->s[p->pos] == 'u' || p->s[p->pos] == 'U' || p->s[p->pos] == 'l' || p->s[p->pos] == 'L') {
+        p->pos++;
+    }
+    if (p->pos == start) {
+        *ok = 0;
+        return 0;
+    }
+    tmp = xstrdup_n(p->s + start, p->pos - start);
+    if (tmp == NULL) {
+        *ok = 0;
+        return 0;
+    }
+    if (parse_int_literal(tmp, &v) != 0) {
+        free(tmp);
+        *ok = 0;
+        return 0;
+    }
+    free(tmp);
+    return v;
+}
+
+static long long parse_expr_unary(expr_parser_t *p, int *ok) {
+    expr_skip_ws(p);
+    if (expr_match(p, "!")) {
+        return !parse_expr_unary(p, ok);
+    }
+    if (expr_match(p, "-")) {
+        return -parse_expr_unary(p, ok);
+    }
+    if (expr_match(p, "+")) {
+        return parse_expr_unary(p, ok);
+    }
+    return parse_expr_primary(p, ok);
+}
+
+static long long parse_expr_mul(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_unary(p, ok);
+    while (*ok) {
+        if (expr_match(p, "*")) {
+            lhs *= parse_expr_unary(p, ok);
+        } else if (expr_match(p, "/")) {
+            long long rhs = parse_expr_unary(p, ok);
+            if (rhs == 0) {
+                *ok = 0;
+                return 0;
+            }
+            lhs /= rhs;
+        } else if (expr_match(p, "%")) {
+            long long rhs = parse_expr_unary(p, ok);
+            if (rhs == 0) {
+                *ok = 0;
+                return 0;
+            }
+            lhs %= rhs;
+        } else {
+            break;
+        }
+    }
+    return lhs;
+}
+
+static long long parse_expr_add(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_mul(p, ok);
+    while (*ok) {
+        if (expr_match(p, "+")) {
+            lhs += parse_expr_mul(p, ok);
+        } else if (expr_match(p, "-")) {
+            lhs -= parse_expr_mul(p, ok);
+        } else {
+            break;
+        }
+    }
+    return lhs;
+}
+
+static long long parse_expr_shift(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_add(p, ok);
+    while (*ok) {
+        if (expr_match(p, "<<")) {
+            lhs <<= parse_expr_add(p, ok);
+        } else if (expr_match(p, ">>")) {
+            lhs >>= parse_expr_add(p, ok);
+        } else {
+            break;
+        }
+    }
+    return lhs;
+}
+
+static long long parse_expr_rel(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_shift(p, ok);
+    while (*ok) {
+        if (expr_match(p, "<=")) {
+            lhs = lhs <= parse_expr_shift(p, ok);
+        } else if (expr_match(p, ">=")) {
+            lhs = lhs >= parse_expr_shift(p, ok);
+        } else if (expr_match(p, "<")) {
+            lhs = lhs < parse_expr_shift(p, ok);
+        } else if (expr_match(p, ">")) {
+            lhs = lhs > parse_expr_shift(p, ok);
+        } else {
+            break;
+        }
+    }
+    return lhs;
+}
+
+static long long parse_expr_eq(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_rel(p, ok);
+    while (*ok) {
+        if (expr_match(p, "==")) {
+            lhs = lhs == parse_expr_rel(p, ok);
+        } else if (expr_match(p, "!=")) {
+            lhs = lhs != parse_expr_rel(p, ok);
+        } else {
+            break;
+        }
+    }
+    return lhs;
+}
+
+static long long parse_expr_band(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_eq(p, ok);
+    while (*ok && expr_match(p, "&")) {
+        lhs &= parse_expr_eq(p, ok);
+    }
+    return lhs;
+}
+
+static long long parse_expr_bxor(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_band(p, ok);
+    while (*ok && expr_match(p, "^")) {
+        lhs ^= parse_expr_band(p, ok);
+    }
+    return lhs;
+}
+
+static long long parse_expr_bor(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_bxor(p, ok);
+    while (*ok && expr_match(p, "|")) {
+        lhs |= parse_expr_bxor(p, ok);
+    }
+    return lhs;
+}
+
+static long long parse_expr_land(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_bor(p, ok);
+    while (*ok && expr_match(p, "&&")) {
+        long long rhs = parse_expr_bor(p, ok);
+        lhs = (lhs != 0 && rhs != 0) ? 1 : 0;
+    }
+    return lhs;
+}
+
+static long long parse_expr_or(expr_parser_t *p, int *ok) {
+    long long lhs = parse_expr_land(p, ok);
+    while (*ok && expr_match(p, "||")) {
+        long long rhs = parse_expr_land(p, ok);
+        lhs = (lhs != 0 || rhs != 0) ? 1 : 0;
+    }
+    return lhs;
+}
+
+static long long parse_expr_cond(expr_parser_t *p, int *ok) {
+    long long cond = parse_expr_or(p, ok);
+    if (!*ok) {
+        return 0;
+    }
+    if (expr_match(p, "?")) {
+        long long lhs;
+        long long rhs;
+        lhs = parse_expr_cond(p, ok);
+        if (!*ok) {
+            return 0;
+        }
+        if (!expr_match(p, ":")) {
+            *ok = 0;
+            return 0;
+        }
+        rhs = parse_expr_cond(p, ok);
+        if (!*ok) {
+            return 0;
+        }
+        return cond != 0 ? lhs : rhs;
+    }
+    return cond;
+}
+
+static char *expand_text(pp_state_t *st, const char *src, const char *file, int line, int depth, cc_diag_t *diag);
+
+static char *stringify_macro_arg(const char *arg) {
+    sb_t out;
+    size_t i = 0;
+    memset(&out, 0, sizeof(out));
+    if (sb_append_c(&out, '"') != 0) {
+        return NULL;
+    }
+    while (arg != NULL && arg[i] != '\0') {
+        unsigned char c = (unsigned char)arg[i];
+        if (c == '\\' || c == '"') {
+            if (sb_append_c(&out, '\\') != 0 || sb_append_c(&out, (char)c) != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+        } else if (c == '\n') {
+            if (sb_append(&out, "\\n") != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+        } else if (c == '\r') {
+            if (sb_append(&out, "\\r") != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+        } else if (c == '\t') {
+            if (sb_append(&out, "\\t") != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+        } else {
+            if (sb_append_c(&out, (char)c) != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+        }
+        i++;
+    }
+    if (sb_append_c(&out, '"') != 0) {
+        sb_free(&out);
+        return NULL;
+    }
+    if (out.buf == NULL) {
+        return xstrdup("\"\"");
+    }
+    return out.buf;
+}
+
+static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count) {
+    sb_t out;
+    sb_t pasted;
+    size_t i = 0;
+    memset(&out, 0, sizeof(out));
+    memset(&pasted, 0, sizeof(pasted));
+    while (m->body[i] != '\0') {
+        if (m->body[i] == '"' || m->body[i] == '\'') {
+            char q = m->body[i];
+            if (sb_append_c(&out, q) != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+            i++;
+            while (m->body[i] != '\0') {
+                if (sb_append_c(&out, m->body[i]) != 0) {
+                    sb_free(&out);
+                    return NULL;
+                }
+                if (m->body[i] == '\\' && m->body[i + 1] != '\0') {
+                    i++;
+                    if (sb_append_c(&out, m->body[i]) != 0) {
+                        sb_free(&out);
+                        return NULL;
+                    }
+                } else if (m->body[i] == q) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (m->body[i] == '#' && m->body[i + 1] != '#' && (i == 0 || m->body[i - 1] != '#')) {
+            size_t ident_start = i + 1;
+            size_t ident_end;
+            size_t pidx;
+            while (m->body[ident_start] == ' ' || m->body[ident_start] == '\t') {
+                ident_start++;
+            }
+            if (is_ident_start((unsigned char)m->body[ident_start])) {
+                for (ident_end = ident_start + 1; is_ident_char((unsigned char)m->body[ident_end]); ++ident_end) {
+                }
+                for (pidx = 0; pidx < m->param_count; ++pidx) {
+                    if (strlen(m->params[pidx]) == (ident_end - ident_start) &&
+                        strncmp(m->body + ident_start, m->params[pidx], ident_end - ident_start) == 0) {
+                        char *quoted = stringify_macro_arg(pidx < arg_count && args[pidx] != NULL ? args[pidx] : "");
+                        if (quoted == NULL || sb_append(&out, quoted) != 0) {
+                            free(quoted);
+                            sb_free(&out);
+                            return NULL;
+                        }
+                        free(quoted);
+                        i = ident_end;
+                        goto next_iter;
+                    }
+                }
+            }
+        }
+        if (is_ident_start((unsigned char)m->body[i])) {
+            size_t j = i + 1;
+            size_t k;
+            while (is_ident_char((unsigned char)m->body[j])) {
+                j++;
+            }
+            for (k = 0; k < m->param_count; ++k) {
+                if (strlen(m->params[k]) == (j - i) && strncmp(m->body + i, m->params[k], j - i) == 0) {
+                    if (k < arg_count && sb_append(&out, args[k] != NULL ? args[k] : "") != 0) {
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    break;
+                }
+            }
+            if (k == m->param_count) {
+                if (sb_append_n(&out, m->body + i, j - i) != 0) {
+                    sb_free(&out);
+                    return NULL;
+                }
+            }
+            i = j;
+            continue;
+        }
+        if (sb_append_c(&out, m->body[i]) != 0) {
+            sb_free(&out);
+            return NULL;
+        }
+        i++;
+next_iter:
+        ;
+    }
+    if (out.buf == NULL) {
+        return xstrdup("");
+    }
+
+    i = 0;
+    while (out.buf[i] != '\0') {
+        if (out.buf[i] == '#' && out.buf[i + 1] == '#') {
+            while (pasted.len > 0 && (pasted.buf[pasted.len - 1] == ' ' || pasted.buf[pasted.len - 1] == '\t')) {
+                pasted.len--;
+                pasted.buf[pasted.len] = '\0';
+            }
+            i += 2;
+            while (out.buf[i] == ' ' || out.buf[i] == '\t') {
+                i++;
+            }
+            continue;
+        }
+        if (sb_append_c(&pasted, out.buf[i]) != 0) {
+            sb_free(&out);
+            sb_free(&pasted);
+            return NULL;
+        }
+        i++;
+    }
+    sb_free(&out);
+    if (pasted.buf == NULL) {
+        return xstrdup("");
+    }
+    return pasted.buf;
+}
+
+static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, char ***out_args, size_t *out_count) {
+    size_t i = open_pos + 1;
+    int level = 1;
+    sb_t cur;
+    pp_strvec_t args;
+    memset(&cur, 0, sizeof(cur));
+    memset(&args, 0, sizeof(args));
+    while (src[i] != '\0') {
+        char c = src[i];
+        if (c == '"' || c == '\'') {
+            char q = c;
+            if (sb_append_c(&cur, c) != 0) {
+                goto fail;
+            }
+            i++;
+            while (src[i] != '\0') {
+                if (sb_append_c(&cur, src[i]) != 0) {
+                    goto fail;
+                }
+                if (src[i] == '\\' && src[i + 1] != '\0') {
+                    i++;
+                    if (sb_append_c(&cur, src[i]) != 0) {
+                        goto fail;
+                    }
+                } else if (src[i] == q) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (c == '(') {
+            level++;
+            if (sb_append_c(&cur, c) != 0) {
+                goto fail;
+            }
+            i++;
+            continue;
+        }
+        if (c == ')') {
+            level--;
+            if (level == 0) {
+                char *arg = trim_dup(cur.buf != NULL ? cur.buf : "");
+                if (arg == NULL) {
+                    goto fail;
+                }
+                if (strvec_push(&args, arg) != 0) {
+                    free(arg);
+                    goto fail;
+                }
+                free(arg);
+                *end_pos = i + 1;
+                *out_args = args.items;
+                *out_count = args.count;
+                sb_free(&cur);
+                return 0;
+            }
+            if (sb_append_c(&cur, c) != 0) {
+                goto fail;
+            }
+            i++;
+            continue;
+        }
+        if (c == ',' && level == 1) {
+            char *arg = trim_dup(cur.buf != NULL ? cur.buf : "");
+            if (arg == NULL) {
+                goto fail;
+            }
+            if (strvec_push(&args, arg) != 0) {
+                free(arg);
+                goto fail;
+            }
+            free(arg);
+            cur.len = 0;
+            if (cur.buf != NULL) {
+                cur.buf[0] = '\0';
+            }
+            i++;
+            continue;
+        }
+        if (sb_append_c(&cur, c) != 0) {
+            goto fail;
+        }
+        i++;
+    }
+fail:
+    sb_free(&cur);
+    strvec_free(&args);
+    return -1;
+}
+
+static char *expand_once(pp_state_t *st, const char *src, const char *file, int line, int depth, cc_diag_t *diag) {
+    size_t i = 0;
+    sb_t out;
+    memset(&out, 0, sizeof(out));
+    while (src[i] != '\0') {
+        if (src[i] == '"' || src[i] == '\'') {
+            char q = src[i];
+            if (sb_append_c(&out, src[i]) != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+            i++;
+            while (src[i] != '\0') {
+                if (sb_append_c(&out, src[i]) != 0) {
+                    sb_free(&out);
+                    return NULL;
+                }
+                if (src[i] == '\\' && src[i + 1] != '\0') {
+                    i++;
+                    if (sb_append_c(&out, src[i]) != 0) {
+                        sb_free(&out);
+                        return NULL;
+                    }
+                } else if (src[i] == q) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (is_ident_start((unsigned char)src[i])) {
+            size_t j = i + 1;
+            char *name;
+            while (is_ident_char((unsigned char)src[j])) {
+                j++;
+            }
+            name = xstrdup_n(src + i, j - i);
+            if (name == NULL) {
+                sb_free(&out);
+                return NULL;
+            }
+            if (strcmp(name, "__LINE__") == 0) {
+                char tmp[32];
+                snprintf(tmp, sizeof(tmp), "%d", line);
+                if (sb_append(&out, tmp) != 0) {
+                    free(name);
+                    sb_free(&out);
+                    return NULL;
+                }
+                free(name);
+                i = j;
+                continue;
+            }
+            if (strcmp(name, "__FILE__") == 0) {
+                sb_t lit;
+                memset(&lit, 0, sizeof(lit));
+                if (sb_append_c(&lit, '"') != 0 || sb_append(&lit, file) != 0 || sb_append_c(&lit, '"') != 0 ||
+                    sb_append(&out, lit.buf != NULL ? lit.buf : "\"\"") != 0) {
+                    sb_free(&lit);
+                    free(name);
+                    sb_free(&out);
+                    return NULL;
+                }
+                sb_free(&lit);
+                free(name);
+                i = j;
+                continue;
+            }
+            if (strcmp(name, "__DATE__") == 0) {
+                if (sb_append(&out, "\"Jan 01 1970\"") != 0) {
+                    free(name);
+                    sb_free(&out);
+                    return NULL;
+                }
+                free(name);
+                i = j;
+                continue;
+            }
+            if (strcmp(name, "__TIME__") == 0) {
+                if (sb_append(&out, "\"00:00:00\"") != 0) {
+                    free(name);
+                    sb_free(&out);
+                    return NULL;
+                }
+                free(name);
+                i = j;
+                continue;
+            }
+            {
+                pp_macro_t *m = macro_find(&st->macros, name);
+                if (m == NULL) {
+                    if (sb_append_n(&out, src + i, j - i) != 0) {
+                        free(name);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    free(name);
+                    i = j;
+                    continue;
+                }
+                if (!m->is_function) {
+                    if (strcmp(m->name, m->body) == 0) {
+                        if (sb_append_n(&out, src + i, j - i) != 0) {
+                            free(name);
+                            sb_free(&out);
+                            return NULL;
+                        }
+                    } else {
+                        if (sb_append(&out, m->body) != 0) {
+                            free(name);
+                            sb_free(&out);
+                            return NULL;
+                        }
+                    }
+                    free(name);
+                    i = j;
+                    continue;
+                } else {
+                    size_t k = j;
+                    size_t call_end = 0;
+                    char **args = NULL;
+                    size_t arg_count = 0;
+                    char **exp_args = NULL;
+                    size_t ai;
+                    char *subst = NULL;
+                    char *exp_subst = NULL;
+                    while (src[k] == ' ' || src[k] == '\t') {
+                        k++;
+                    }
+                    if (src[k] != '(') {
+                        if (sb_append_n(&out, src + i, j - i) != 0) {
+                            free(name);
+                            sb_free(&out);
+                            return NULL;
+                        }
+                        free(name);
+                        i = j;
+                        continue;
+                    }
+                    if (parse_call_args(src, k, &call_end, &args, &arg_count) != 0) {
+                        set_diag(diag, (size_t)line, k + 1, "malformed function-like macro invocation");
+                        free(name);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    exp_args = (char **)calloc(arg_count > 0 ? arg_count : 1, sizeof(*exp_args));
+                    if (exp_args == NULL) {
+                        free(name);
+                        for (ai = 0; ai < arg_count; ++ai) {
+                            free(args[ai]);
+                        }
+                        free(args);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    for (ai = 0; ai < arg_count; ++ai) {
+                        exp_args[ai] = expand_text(st, args[ai], file, line, depth + 1, diag);
+                        if (exp_args[ai] == NULL) {
+                            free(name);
+                            for (; ai < arg_count; ++ai) {
+                                free(args[ai]);
+                            }
+                            free(args);
+                            for (ai = 0; ai < arg_count; ++ai) {
+                                free(exp_args[ai]);
+                            }
+                            free(exp_args);
+                            sb_free(&out);
+                            return NULL;
+                        }
+                    }
+                    subst = replace_params(m, exp_args, arg_count);
+                    if (subst == NULL) {
+                        free(name);
+                        for (ai = 0; ai < arg_count; ++ai) {
+                            free(args[ai]);
+                            free(exp_args[ai]);
+                        }
+                        free(args);
+                        free(exp_args);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    exp_subst = expand_text(st, subst, file, line, depth + 1, diag);
+                    if (exp_subst == NULL) {
+                        free(subst);
+                        free(name);
+                        for (ai = 0; ai < arg_count; ++ai) {
+                            free(args[ai]);
+                            free(exp_args[ai]);
+                        }
+                        free(args);
+                        free(exp_args);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    if (sb_append(&out, exp_subst) != 0) {
+                        free(exp_subst);
+                        free(subst);
+                        free(name);
+                        for (ai = 0; ai < arg_count; ++ai) {
+                            free(args[ai]);
+                            free(exp_args[ai]);
+                        }
+                        free(args);
+                        free(exp_args);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    free(exp_subst);
+                    free(subst);
+                    for (ai = 0; ai < arg_count; ++ai) {
+                        free(args[ai]);
+                        free(exp_args[ai]);
+                    }
+                    free(args);
+                    free(exp_args);
+                    free(name);
+                    i = call_end;
+                    continue;
+                }
+            }
+        }
+        if (sb_append_c(&out, src[i]) != 0) {
+            sb_free(&out);
+            return NULL;
+        }
+        i++;
+    }
+    if (out.buf == NULL) {
+        return xstrdup("");
+    }
+    return out.buf;
+}
+
+static char *expand_text(pp_state_t *st, const char *src, const char *file, int line, int depth, cc_diag_t *diag) {
+    char *cur;
+    int pass;
+    if (depth > PP_MAX_EXPAND_DEPTH) {
+        set_diag(diag, (size_t)line, 1, "macro expansion depth exceeded");
+        return NULL;
+    }
+    cur = xstrdup(src);
+    if (cur == NULL) {
+        return NULL;
+    }
+    for (pass = 0; pass < PP_MAX_EXPAND_PASSES; ++pass) {
+        char *next = expand_once(st, cur, file, line, depth, diag);
+        if (next == NULL) {
+            free(cur);
+            return NULL;
+        }
+        if (strcmp(next, cur) == 0) {
+            free(cur);
+            return next;
+        }
+        free(cur);
+        cur = next;
+    }
+    return cur;
+}
+
+static int eval_condition(pp_state_t *st, const char *expr, const char *file, int line, int *out_true, cc_diag_t *diag) {
+    char *rewritten = NULL;
+    char *expanded;
+    expr_parser_t p;
+    int ok = 1;
+    long long v;
+    {
+        sb_t out;
+        size_t i = 0;
+        memset(&out, 0, sizeof(out));
+        while (expr[i] != '\0') {
+            if (is_ident_start((unsigned char)expr[i])) {
+                size_t j = i + 1;
+                while (is_ident_char((unsigned char)expr[j])) {
+                    j++;
+                }
+                if ((j - i) == 7 && strncmp(expr + i, "defined", 7) == 0) {
+                    size_t k = j;
+                    const char *name_a = NULL;
+                    const char *name_b = NULL;
+                    char *name = NULL;
+                    int is_def = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] == '(') {
+                        k++;
+                        while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                            k++;
+                        }
+                        if (!is_ident_start((unsigned char)expr[k])) {
+                            sb_free(&out);
+                            set_diag(diag, (size_t)line, k + 1, "malformed defined() operand");
+                            return -1;
+                        }
+                        name_a = expr + k;
+                        k++;
+                        while (is_ident_char((unsigned char)expr[k])) {
+                            k++;
+                        }
+                        name_b = expr + k;
+                        while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                            k++;
+                        }
+                        if (expr[k] != ')') {
+                            sb_free(&out);
+                            set_diag(diag, (size_t)line, k + 1, "unterminated defined() expression");
+                            return -1;
+                        }
+                        k++;
+                    } else {
+                        if (!is_ident_start((unsigned char)expr[k])) {
+                            sb_free(&out);
+                            set_diag(diag, (size_t)line, k + 1, "malformed defined operand");
+                            return -1;
+                        }
+                        name_a = expr + k;
+                        k++;
+                        while (is_ident_char((unsigned char)expr[k])) {
+                            k++;
+                        }
+                        name_b = expr + k;
+                    }
+                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    if (name == NULL) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    is_def = macro_find(&st->macros, name) != NULL;
+                    free(name);
+                    if (sb_append(&out, is_def ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
+            }
+            if (sb_append_c(&out, expr[i]) != 0) {
+                sb_free(&out);
+                return -1;
+            }
+            i++;
+        }
+        rewritten = out.buf != NULL ? out.buf : xstrdup("");
+        if (rewritten == NULL) {
+            sb_free(&out);
+            return -1;
+        }
+    }
+    expanded = expand_text(st, rewritten, file, line, 0, diag);
+    free(rewritten);
+    if (expanded == NULL) {
+        return -1;
+    }
+    p.s = expanded;
+    p.pos = 0;
+    v = parse_expr_cond(&p, &ok);
+    expr_skip_ws(&p);
+    if (!ok || p.s[p.pos] != '\0') {
+        if (diag != NULL && diag->message[0] == '\0') {
+            diag->line = (size_t)line;
+            diag->col = p.pos + 1;
+            snprintf(diag->message, sizeof(diag->message), "unsupported #if expression near: %.220s", expanded);
+        }
+        free(expanded);
+        return -1;
+    }
+    *out_true = (v != 0);
+    free(expanded);
+    return 0;
+}
+
+static int parse_define_directive(pp_state_t *st, const char *rest) {
+    const char *p = skip_ws(rest);
+    const char *name_start;
+    const char *name_end;
+    int is_function = 0;
+    char **params = NULL;
+    size_t param_count = 0;
+    char *name = NULL;
+    char *body = NULL;
+    size_t i;
+
+    if (!is_ident_start((unsigned char)*p)) {
+        return -1;
+    }
+    name_start = p;
+    p++;
+    while (is_ident_char((unsigned char)*p)) {
+        p++;
+    }
+    name_end = p;
+    if (*p == '(') {
+        pp_strvec_t parsed_params;
+        memset(&parsed_params, 0, sizeof(parsed_params));
+        is_function = 1;
+        p++;
+        p = skip_ws(p);
+        if (*p != ')') {
+            for (;;) {
+                const char *a = p;
+                char *param = NULL;
+                if (!is_ident_start((unsigned char)*p)) {
+                    strvec_free(&parsed_params);
+                    return -1;
+                }
+                p++;
+                while (is_ident_char((unsigned char)*p)) {
+                    p++;
+                }
+                param = xstrdup_n(a, (size_t)(p - a));
+                if (param == NULL) {
+                    strvec_free(&parsed_params);
+                    return -1;
+                }
+                if (strvec_push(&parsed_params, param) != 0) {
+                    free(param);
+                    strvec_free(&parsed_params);
+                    return -1;
+                }
+                free(param);
+                p = skip_ws(p);
+                if (*p == ')') {
+                    break;
+                }
+                if (*p != ',') {
+                    strvec_free(&parsed_params);
+                    return -1;
+                }
+                p++;
+                p = skip_ws(p);
+            }
+        }
+        if (*p != ')') {
+            strvec_free(&parsed_params);
+            return -1;
+        }
+        p++;
+        params = parsed_params.items;
+        param_count = parsed_params.count;
+    }
+    p = skip_ws(p);
+    name = xstrdup_n(name_start, (size_t)(name_end - name_start));
+    body = xstrdup(p);
+    if (name == NULL || body == NULL) {
+        free(name);
+        free(body);
+        for (i = 0; i < param_count; ++i) {
+            free(params[i]);
+        }
+        free(params);
+        return -1;
+    }
+    if (macro_set(&st->macros, name, is_function, params, param_count, body) != 0) {
+        free(name);
+        free(body);
+        for (i = 0; i < param_count; ++i) {
+            free(params[i]);
+        }
+        free(params);
+        return -1;
+    }
+    free(name);
+    free(body);
+    return 0;
+}
+
+static int current_active(pp_cond_frame_t *stack, size_t count) {
+    if (count == 0) {
+        return 1;
+    }
+    return stack[count - 1].this_active;
+}
+
+static int push_cond(pp_cond_frame_t **stack, size_t *count, size_t *cap, pp_cond_frame_t frame) {
+    pp_cond_frame_t *next;
+    if (*count == *cap) {
+        size_t ncap = *cap == 0 ? 16 : (*cap * 2);
+        next = (pp_cond_frame_t *)realloc(*stack, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        *stack = next;
+        *cap = ncap;
+    }
+    (*stack)[(*count)++] = frame;
+    return 0;
+}
+
+static void update_paren_depth_line(const char *s, int *depth) {
+    size_t i = 0;
+    char in_quote = '\0';
+    int esc = 0;
+    int d;
+
+    if (s == NULL || depth == NULL) {
+        return;
+    }
+    d = *depth;
+    while (s[i] != '\0') {
+        char c = s[i++];
+        if (in_quote != '\0') {
+            if (esc) {
+                esc = 0;
+                continue;
+            }
+            if (c == '\\') {
+                esc = 1;
+                continue;
+            }
+            if (c == in_quote) {
+                in_quote = '\0';
+            }
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            in_quote = c;
+            continue;
+        }
+        if (c == '(') {
+            d++;
+            continue;
+        }
+        if (c == ')' && d > 0) {
+            d--;
+        }
+    }
+    *depth = d;
+}
+
+static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int depth, cc_diag_t *diag) {
+    FILE *fp;
+    sb_t line;
+    sb_t stripped;
+    int line_no = 1;
+    int had_line = 0;
+    int in_block_comment = 0;
+    int code_paren_depth = 0;
+    int code_start_line = 0;
+    pp_cond_frame_t *cond_stack = NULL;
+    size_t cond_count = 0;
+    size_t cond_cap = 0;
+    int saw_pragma_once = 0;
+    sb_t code_accum;
+
+    if (depth > PP_MAX_INCLUDE_DEPTH) {
+        set_diag(diag, 0, 0, "include depth exceeded");
+        return -1;
+    }
+
+    if (once_contains(st, path)) {
+        return 0;
+    }
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        set_diag(diag, 0, 0, "failed to open include file");
+        return -1;
+    }
+
+    memset(&line, 0, sizeof(line));
+    memset(&stripped, 0, sizeof(stripped));
+    memset(&code_accum, 0, sizeof(code_accum));
+    while (read_logical_line(fp, &line, &had_line, &line_no) == 0 && had_line) {
+        const char *raw = line.buf != NULL ? line.buf : "";
+        const char *proc;
+        const char *p = skip_ws(raw);
+        int active = current_active(cond_stack, cond_count);
+        if (strip_comments_line(raw, &in_block_comment, &stripped) != 0) {
+            goto fail;
+        }
+        proc = stripped.buf != NULL ? stripped.buf : "";
+        p = skip_ws(proc);
+        if (*p == '#') {
+            if (code_accum.len > 0) {
+                char *expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path, code_start_line,
+                                             0, diag);
+                if (expanded == NULL) {
+                    goto fail;
+                }
+                if (fputs(expanded, out) < 0) {
+                    free(expanded);
+                    goto fail;
+                }
+                free(expanded);
+                code_accum.len = 0;
+                if (code_accum.buf != NULL) {
+                    code_accum.buf[0] = '\0';
+                }
+                code_paren_depth = 0;
+                code_start_line = 0;
+            }
+            const char *kw;
+            p++;
+            p = skip_ws(p);
+            kw = p;
+            while (is_ident_char((unsigned char)*p)) {
+                p++;
+            }
+            if (strncmp(kw, "include", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 7) {
+                if (active) {
+                    char inc_spec[PATH_MAX];
+                    char inc_path[PATH_MAX];
+                    int quoted = 0;
+                    size_t n = 0;
+                    p = skip_ws(p);
+                    if (*p == '"' || *p == '<') {
+                        char endc = *p == '"' ? '"' : '>';
+                        quoted = (*p == '"');
+                        p++;
+                        while (*p != '\0' && *p != endc && n + 1 < sizeof(inc_spec)) {
+                            inc_spec[n++] = *p++;
+                        }
+                        inc_spec[n] = '\0';
+                        if (*p != endc) {
+                            set_diag(diag, (size_t)line_no, 1, "malformed #include");
+                            goto fail;
+                        }
+                        if (resolve_include(st, path, inc_spec, quoted, inc_path) != 0) {
+                            set_diag(diag, (size_t)line_no, 1, "include file not found");
+                            goto fail;
+                        }
+                        if (preprocess_file(st, inc_path, out, depth + 1, diag) != 0) {
+                            goto fail;
+                        }
+                    }
+                }
+                continue;
+            }
+            if (strncmp(kw, "define", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 6) {
+                if (active) {
+                    if (parse_define_directive(st, p) != 0) {
+                        set_diag(diag, (size_t)line_no, 1, "malformed #define");
+                        goto fail;
+                    }
+                }
+                continue;
+            }
+            if (strncmp(kw, "undef", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 5) {
+                if (active) {
+                    p = skip_ws(p);
+                    if (!is_ident_start((unsigned char)*p)) {
+                        set_diag(diag, (size_t)line_no, 1, "malformed #undef");
+                        goto fail;
+                    }
+                    {
+                        const char *a = p;
+                        while (is_ident_char((unsigned char)*p)) {
+                            p++;
+                        }
+                        {
+                            char *name = xstrdup_n(a, (size_t)(p - a));
+                            if (name == NULL) {
+                                goto fail;
+                            }
+                            macro_unset(&st->macros, name);
+                            free(name);
+                        }
+                    }
+                }
+                continue;
+            }
+            if (strncmp(kw, "ifdef", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 5) {
+                pp_cond_frame_t fr;
+                int cond = 0;
+                p = skip_ws(p);
+                if (is_ident_start((unsigned char)*p)) {
+                    const char *a = p;
+                    char *name;
+                    while (is_ident_char((unsigned char)*p)) {
+                        p++;
+                    }
+                    name = xstrdup_n(a, (size_t)(p - a));
+                    if (name == NULL) {
+                        goto fail;
+                    }
+                    cond = (macro_find(&st->macros, name) != NULL);
+                    free(name);
+                }
+                fr.parent_active = active;
+                fr.this_active = active && cond;
+                fr.any_taken = fr.this_active;
+                fr.saw_else = 0;
+                if (push_cond(&cond_stack, &cond_count, &cond_cap, fr) != 0) {
+                    goto fail;
+                }
+                continue;
+            }
+            if (strncmp(kw, "ifndef", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 6) {
+                pp_cond_frame_t fr;
+                int cond = 1;
+                p = skip_ws(p);
+                if (is_ident_start((unsigned char)*p)) {
+                    const char *a = p;
+                    char *name;
+                    while (is_ident_char((unsigned char)*p)) {
+                        p++;
+                    }
+                    name = xstrdup_n(a, (size_t)(p - a));
+                    if (name == NULL) {
+                        goto fail;
+                    }
+                    cond = (macro_find(&st->macros, name) == NULL);
+                    free(name);
+                }
+                fr.parent_active = active;
+                fr.this_active = active && cond;
+                fr.any_taken = fr.this_active;
+                fr.saw_else = 0;
+                if (push_cond(&cond_stack, &cond_count, &cond_cap, fr) != 0) {
+                    goto fail;
+                }
+                continue;
+            }
+            if (strncmp(kw, "if", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 2) {
+                pp_cond_frame_t fr;
+                int cond = 0;
+                if (active) {
+                    if (eval_condition(st, p, path, line_no, &cond, diag) != 0) {
+                        goto fail;
+                    }
+                }
+                fr.parent_active = active;
+                fr.this_active = active && cond;
+                fr.any_taken = fr.this_active;
+                fr.saw_else = 0;
+                if (push_cond(&cond_stack, &cond_count, &cond_cap, fr) != 0) {
+                    goto fail;
+                }
+                continue;
+            }
+            if (strncmp(kw, "elif", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 4) {
+                int cond = 0;
+                if (cond_count == 0) {
+                    set_diag(diag, (size_t)line_no, 1, "unexpected #elif");
+                    goto fail;
+                }
+                if (cond_stack[cond_count - 1].saw_else) {
+                    set_diag(diag, (size_t)line_no, 1, "unexpected #elif after #else");
+                    goto fail;
+                }
+                if (!cond_stack[cond_count - 1].parent_active) {
+                    cond_stack[cond_count - 1].this_active = 0;
+                } else if (cond_stack[cond_count - 1].any_taken) {
+                    cond_stack[cond_count - 1].this_active = 0;
+                } else {
+                    if (eval_condition(st, p, path, line_no, &cond, diag) != 0) {
+                        goto fail;
+                    }
+                    cond_stack[cond_count - 1].this_active = cond;
+                    if (cond) {
+                        cond_stack[cond_count - 1].any_taken = 1;
+                    }
+                }
+                continue;
+            }
+            if (strncmp(kw, "else", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 4) {
+                if (cond_count == 0) {
+                    set_diag(diag, (size_t)line_no, 1, "unexpected #else");
+                    goto fail;
+                }
+                if (cond_stack[cond_count - 1].saw_else) {
+                    set_diag(diag, (size_t)line_no, 1, "duplicate #else");
+                    goto fail;
+                }
+                cond_stack[cond_count - 1].saw_else = 1;
+                if (!cond_stack[cond_count - 1].parent_active || cond_stack[cond_count - 1].any_taken) {
+                    cond_stack[cond_count - 1].this_active = 0;
+                } else {
+                    cond_stack[cond_count - 1].this_active = 1;
+                    cond_stack[cond_count - 1].any_taken = 1;
+                }
+                continue;
+            }
+            if (strncmp(kw, "endif", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 5) {
+                if (cond_count == 0) {
+                    set_diag(diag, (size_t)line_no, 1, "unexpected #endif");
+                    goto fail;
+                }
+                cond_count--;
+                continue;
+            }
+            if (strncmp(kw, "pragma", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 6) {
+                if (active) {
+                    const char *r = skip_ws(p);
+                    if (strncmp(r, "once", 4) == 0) {
+                        saw_pragma_once = 1;
+                    }
+                }
+                continue;
+            }
+            if (strncmp(kw, "error", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 5) {
+                if (active) {
+                    set_diag(diag, (size_t)line_no, 1, "preprocessor #error");
+                    goto fail;
+                }
+                continue;
+            }
+            continue;
+        }
+
+        if (active) {
+            if (code_accum.len == 0) {
+                code_start_line = line_no;
+            }
+            if (sb_append(&code_accum, proc) != 0 || sb_append_c(&code_accum, '\n') != 0) {
+                goto fail;
+            }
+            update_paren_depth_line(proc, &code_paren_depth);
+            if (code_paren_depth > 0) {
+                continue;
+            }
+            {
+                char *expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path, code_start_line,
+                                             0, diag);
+                if (expanded == NULL) {
+                    goto fail;
+                }
+                if (fputs(expanded, out) < 0) {
+                    free(expanded);
+                    goto fail;
+                }
+                free(expanded);
+                code_accum.len = 0;
+                if (code_accum.buf != NULL) {
+                    code_accum.buf[0] = '\0';
+                }
+                code_paren_depth = 0;
+                code_start_line = 0;
+            }
+        }
+    }
+
+    if (code_accum.len > 0) {
+        char *expanded;
+        if (code_paren_depth != 0) {
+            set_diag(diag, (size_t)code_start_line, 1, "unterminated parenthesized expression");
+            goto fail;
+        }
+        expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path, code_start_line, 0, diag);
+        if (expanded == NULL) {
+            goto fail;
+        }
+        if (fputs(expanded, out) < 0) {
+            free(expanded);
+            goto fail;
+        }
+        free(expanded);
+        code_accum.len = 0;
+        if (code_accum.buf != NULL) {
+            code_accum.buf[0] = '\0';
+        }
+    }
+
+    if (cond_count != 0) {
+        set_diag(diag, (size_t)line_no, 1, "unterminated conditional preprocessor block");
+        goto fail;
+    }
+
+    if (saw_pragma_once && once_add(st, path) != 0) {
+        goto fail;
+    }
+
+    free(cond_stack);
+    sb_free(&line);
+    sb_free(&stripped);
+    sb_free(&code_accum);
+    fclose(fp);
+    return 0;
+
+fail:
+    free(cond_stack);
+    sb_free(&line);
+    sb_free(&stripped);
+    sb_free(&code_accum);
+    fclose(fp);
+    return -1;
+}
+
+int cc_preprocess_file(const char *in_path, const char *out_path, const char *std_mode,
+                       const char *const *flags, size_t flag_count, cc_diag_t *diag) {
+    pp_state_t st;
+    FILE *out = NULL;
+    int rc = -1;
+
+    (void)std_mode;
+
+    memset(&st, 0, sizeof(st));
+    st.target_bits = 64;
+    if (diag != NULL) {
+        diag->line = 0;
+        diag->col = 0;
+        diag->message[0] = '\0';
+    }
+
+    scan_target_flags(&st, flags, flag_count);
+    if (add_builtin_macros(&st) != 0) {
+        set_diag(diag, 0, 0, "failed to initialize preprocessor builtins");
+        goto out;
+    }
+    if (apply_flags(&st, flags, flag_count) != 0) {
+        set_diag(diag, 0, 0, "invalid preprocessor options");
+        goto out;
+    }
+    if (add_default_include_paths(&st) != 0) {
+        set_diag(diag, 0, 0, "failed to initialize include paths");
+        goto out;
+    }
+    out = fopen(out_path, "w");
+    if (out == NULL) {
+        set_diag(diag, 0, 0, "failed to open preprocess output");
+        goto out;
+    }
+    if (preprocess_file(&st, in_path, out, 0, diag) != 0) {
+        goto out;
+    }
+    rc = 0;
+
+out:
+    if (out != NULL) {
+        fclose(out);
+    }
+    macro_table_free(&st.macros);
+    strvec_free(&st.quote_paths);
+    strvec_free(&st.user_include_paths);
+    strvec_free(&st.system_include_paths);
+    strvec_free(&st.include_once);
+    return rc;
+}

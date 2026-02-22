@@ -562,6 +562,23 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
             } else if (lx->src[start] == '0') {
                 base = 8;
             }
+            if (base == 10) {
+                int e0 = lx_peek(lx);
+                int e1 = lx_peekn(lx, 1);
+                int e2 = lx_peekn(lx, 2);
+                if (e0 == 'e' || e0 == 'E') {
+                    if (isdigit(e1) || ((e1 == '+' || e1 == '-') && isdigit(e2))) {
+                        saw_dot = 1;
+                        lx_adv(lx);
+                        if (lx_peek(lx) == '+' || lx_peek(lx) == '-') {
+                            lx_adv(lx);
+                        }
+                        while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                            lx_adv(lx);
+                        }
+                    }
+                }
+            }
         }
 
         if (saw_dot) {
