@@ -1663,7 +1663,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - Tests: unit (block device, char device, FIFO, socket)
                     - Docs: `vop_mknod.9`
                     - Acceptance: Device node with correct rdev
-                - [ ] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
+                - [x] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
                     - Files: `sys/vfs/vfs.c`, `sys/fs/udf/udf.c`
                     - API: Create directory
                     - Tests: unit (mkdir success, nested mkdir)

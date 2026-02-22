@@ -155,6 +155,18 @@ void run_vnode_ops_tests(void) {
         kprint("FAIL: vop_mkdir failed\n");
     }
 
+    if (vop_mkdir(&mock_file, NULL, &cnp, &vap) == ENOTDIR) {
+        kprint("PASS: vop_mkdir checks ENOTDIR\n");
+    } else {
+        kprint("FAIL: vop_mkdir allowed non-dir\n");
+    }
+
+    if (vop_mkdir(&mock_noops, NULL, &cnp, &vap) == EOPNOTSUPP) {
+        kprint("PASS: vop_mkdir returns EOPNOTSUPP when op missing\n");
+    } else {
+        kprint("FAIL: vop_mkdir did not return EOPNOTSUPP\n");
+    }
+
     // Test vop_remove
     if (vop_remove(&mock_dir, &mock_file, &cnp) == 0) {
         kprint("PASS: vop_remove delegates correctly\n");
