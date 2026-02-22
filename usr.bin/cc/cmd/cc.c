@@ -863,8 +863,7 @@ int cc_main(int argc, char **argv) {
             } else {
                 cc_diag_t diag;
                 memset(&diag, 0, sizeof(diag));
-                if (o.nostdlib || strvec_has_flag(&o.c_flags, "-ffreestanding") ||
-                    strvec_has_flag(&o.c_flags, "-nostdinc")) {
+                if (strvec_has_flag(&o.c_flags, "-ffreestanding")) {
                     setenv("CC_FREESTANDING", "1", 1);
                 } else {
                     unsetenv("CC_FREESTANDING");
