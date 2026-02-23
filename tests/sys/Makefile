@@ -18,7 +18,6 @@ HOST_TESTS = host_test_udf_large_write host_test_udf_truncate_expand host_test_m
 
 all: tests.o $(HOST_TESTS)
 
-
 host_test_negdi2: host_test_negdi2.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_negdi2.c -o $@
 
