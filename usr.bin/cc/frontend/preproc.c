@@ -50,6 +50,7 @@ typedef struct {
     pp_strvec_t include_once;
     int no_default_includes;
     int target_bits;
+    int enable_trigraphs;
 } pp_state_t;
 
 typedef struct {
@@ -197,6 +198,59 @@ static int is_ident_start(int c) {
 
 static int is_ident_char(int c) {
     return c == '_' || isalnum((unsigned char)c);
+}
+
+static int trigraph_replacement(int c) {
+    switch (c) {
+    case '=':
+        return '#';
+    case '/':
+        return '\\';
+    case '\'':
+        return '^';
+    case '(':
+        return '[';
+    case ')':
+        return ']';
+    case '!':
+        return '|';
+    case '<':
+        return '{';
+    case '>':
+        return '}';
+    case '-':
+        return '~';
+    default:
+        return -1;
+    }
+}
+
+static size_t normalize_trigraphs(char *buf, size_t len) {
+    size_t r = 0;
+    size_t w = 0;
+    while (r < len) {
+        if (r + 2 < len && buf[r] == '?' && buf[r + 1] == '?') {
+            int repl = trigraph_replacement((unsigned char)buf[r + 2]);
+            if (repl >= 0) {
+                buf[w++] = (char)repl;
+                r += 3;
+                continue;
+            }
+        }
+        buf[w++] = buf[r++];
+    }
+    return w;
+}
+
+static int std_mode_enable_trigraphs(const char *std_mode) {
+    if (std_mode == NULL || std_mode[0] == '\0') {
+        return 1;
+    }
+    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
+        strcmp(std_mode, "gnu2x") == 0) {
+        return 0;
+    }
+    return 1;
 }
 
 static pp_macro_t *macro_find(pp_macro_table_t *t, const char *name) {
@@ -600,7 +654,7 @@ static int once_add(pp_state_t *st, const char *path) {
     return strvec_push(&st->include_once, norm);
 }
 
-static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_counter) {
+static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_counter, int enable_trigraphs) {
     int c;
     int got_any = 0;
     int continue_line = 0;
@@ -616,6 +670,10 @@ static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_c
             got_any = 1;
             if (c == '\n') {
                 (*line_counter)++;
+                if (enable_trigraphs) {
+                    out->len = normalize_trigraphs(out->buf, out->len);
+                    out->buf[out->len] = '\0';
+                }
                 if (out->len > 0 && out->buf[out->len - 1] == '\\') {
                     out->len--;
                     out->buf[out->len] = '\0';
@@ -631,6 +689,11 @@ static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_c
             break;
         }
     } while (continue_line);
+
+    if (enable_trigraphs && out->len > 0) {
+        out->len = normalize_trigraphs(out->buf, out->len);
+        out->buf[out->len] = '\0';
+    }
 
     *out_had_line = got_any;
     return 0;
@@ -1791,7 +1854,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     memset(&line, 0, sizeof(line));
     memset(&stripped, 0, sizeof(stripped));
     memset(&code_accum, 0, sizeof(code_accum));
-    while (read_logical_line(fp, &line, &had_line, &line_no) == 0 && had_line) {
+    while (read_logical_line(fp, &line, &had_line, &line_no, st->enable_trigraphs) == 0 && had_line) {
         const char *raw = line.buf != NULL ? line.buf : "";
         const char *proc;
         const char *p = skip_ws(raw);
@@ -2113,10 +2176,9 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
     FILE *out = NULL;
     int rc = -1;
 
-    (void)std_mode;
-
     memset(&st, 0, sizeof(st));
     st.target_bits = 64;
+    st.enable_trigraphs = std_mode_enable_trigraphs(std_mode);
     if (diag != NULL) {
         diag->line = 0;
         diag->col = 0;

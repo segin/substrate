@@ -4,7 +4,7 @@
 #include "cc_pipeline.h"
 #include "cc_ssa.h"
 
-int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out_s,
+int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out_s, const char *std_mode,
                       int emit_debug, cc_target_t target, int opt_level, cc_diag_t *diag) {
     cc_translation_unit_t tu;
     cc_ssa_module_t ssa;
@@ -18,6 +18,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     }
 
     cc_frontend_set_pointer_size(pointer_size);
+    cc_frontend_set_std_mode(std_mode);
     cc_ssa_set_pointer_size(pointer_size);
 
     if (cc_parse_file(in_c, &tu, diag) != 0) {

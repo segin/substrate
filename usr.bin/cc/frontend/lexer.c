@@ -112,16 +112,50 @@ typedef struct {
     size_t col;
 } cc_token_t;
 
-static int is_ident_start(int c) {
+static int is_ident_start_ascii(int c) {
     return isalpha(c) || c == '_';
 }
 
-static int is_ident_part(int c) {
+static int is_ident_part_ascii(int c) {
     return isalnum(c) || c == '_';
 }
 
 static int is_int_suffix_char(int c) {
     return c == 'u' || c == 'U' || c == 'l' || c == 'L';
+}
+
+static int is_hex_digit(int c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static size_t lx_ucn_len_at(const cc_lexer_t *lx, size_t pos) {
+    size_t i;
+    int count;
+    if (pos >= lx->len || lx->src[pos] != '\\') {
+        return 0;
+    }
+    if (pos + 1 >= lx->len || (lx->src[pos + 1] != 'u' && lx->src[pos + 1] != 'U')) {
+        return 0;
+    }
+    count = lx->src[pos + 1] == 'u' ? 4 : 8;
+    if (pos + 2 + (size_t)count > lx->len) {
+        return 0;
+    }
+    for (i = 0; i < (size_t)count; ++i) {
+        if (!is_hex_digit((unsigned char)lx->src[pos + 2 + i])) {
+            return 0;
+        }
+    }
+    return (size_t)count + 2;
+}
+
+static void lx_adv(cc_lexer_t *lx);
+
+static void lx_adv_n(cc_lexer_t *lx, size_t n) {
+    while (n > 0 && lx->pos < lx->len) {
+        lx_adv(lx);
+        n--;
+    }
 }
 
 static void lx_adv(cc_lexer_t *lx) {
@@ -245,11 +279,27 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     line = lx->line;
     col = lx->col;
 
-    if (is_ident_start(c)) {
+    if (is_ident_start_ascii(c) || lx_ucn_len_at(lx, lx->pos) > 0) {
+        size_t ucn_len;
         start = lx->pos;
-        lx_adv(lx);
-        while ((c = lx_peek(lx)) >= 0 && is_ident_part(c)) {
+        ucn_len = lx_ucn_len_at(lx, lx->pos);
+        if (ucn_len > 0) {
+            lx_adv_n(lx, ucn_len);
+        } else {
             lx_adv(lx);
+        }
+        while (lx->pos < lx->len) {
+            c = lx_peek(lx);
+            ucn_len = lx_ucn_len_at(lx, lx->pos);
+            if (is_ident_part_ascii(c)) {
+                lx_adv(lx);
+                continue;
+            }
+            if (ucn_len > 0) {
+                lx_adv_n(lx, ucn_len);
+                continue;
+            }
+            break;
         }
         out->start = lx->src + start;
         out->len = lx->pos - start;
@@ -536,13 +586,19 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     }
 
-    if (isdigit(c)) {
+    if (isdigit(c) || (c == '.' && isdigit(lx_peekn(lx, 1)))) {
         int saw_dot = 0;
         int seen_u = 0;
         int seen_l = 0;
         int base = 10;
         start = lx->pos;
-        if (c == '0' && (lx_peekn(lx, 1) == 'x' || lx_peekn(lx, 1) == 'X')) {
+        if (c == '.') {
+            saw_dot = 1;
+            lx_adv(lx);
+            while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                lx_adv(lx);
+            }
+        } else if (c == '0' && (lx_peekn(lx, 1) == 'x' || lx_peekn(lx, 1) == 'X')) {
             base = 16;
             lx_adv(lx);
             lx_adv(lx);

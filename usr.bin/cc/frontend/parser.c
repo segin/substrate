@@ -172,6 +172,7 @@ typedef struct {
 } decl_attrs_t;
 
 static int g_parser_pointer_size_bytes = 8;
+static int g_parser_enable_trigraphs = 1;
 static int is_decl_qual_tok(cc_tok_kind_t k);
 static cc_type_t ptr_of_type(cc_type_t t);
 static int tok_is_ident(parser_t *p, const char *s);
@@ -4743,8 +4744,10 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     }
     buf[sz] = '\0';
     fclose(fp);
-    sz = (long)normalize_c95_trigraphs(buf, (size_t)sz);
-    buf[sz] = '\0';
+    if (g_parser_enable_trigraphs) {
+        sz = (long)normalize_c95_trigraphs(buf, (size_t)sz);
+        buf[sz] = '\0';
+    }
 
     memset(&p, 0, sizeof(p));
     p.diag = diag;
@@ -4859,4 +4862,17 @@ void cc_parser_set_pointer_size(int bytes) {
     if (bytes == 4 || bytes == 8) {
         g_parser_pointer_size_bytes = bytes;
     }
+}
+
+void cc_parser_set_std_mode(const char *std_mode) {
+    if (std_mode == NULL || std_mode[0] == '\0') {
+        g_parser_enable_trigraphs = 1;
+        return;
+    }
+    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
+        strcmp(std_mode, "gnu2x") == 0) {
+        g_parser_enable_trigraphs = 0;
+        return;
+    }
+    g_parser_enable_trigraphs = 1;
 }

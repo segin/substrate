@@ -5,6 +5,7 @@
 #include <string.h>
 
 void cc_parser_set_pointer_size(int bytes);
+void cc_parser_set_std_mode(const char *std_mode);
 
 static int g_pointer_size_bytes = 8;
 
@@ -2594,4 +2595,8 @@ void cc_frontend_set_pointer_size(int bytes) {
         g_pointer_size_bytes = bytes;
         cc_parser_set_pointer_size(bytes);
     }
+}
+
+void cc_frontend_set_std_mode(const char *std_mode) {
+    cc_parser_set_std_mode(std_mode);
 }

@@ -19,10 +19,10 @@ Execution policy:
 ## 1) C Language Features: C99 Baseline (must finish first)
 
 ### 1.1 Lexical model and tokens
-- [ ] Phase-1/2 behavior: trigraphs (mode-gated), escaped-newline splicing.
-- [ ] Universal character names in identifiers.
-- [ ] C99 tokenization compatibility for pp-tokens and tokens.
-- [ ] `//` comments.
+- [x] Phase-1/2 behavior: trigraphs (mode-gated), escaped-newline splicing.
+- [x] Universal character names in identifiers.
+- [x] C99 tokenization compatibility for pp-tokens and tokens.
+- [x] `//` comments.
 - [ ] Integer literals: decimal/octal/hex forms and suffix typing rules.
 - [ ] Floating literals: decimal/hex float forms, suffix typing rules.
 - [ ] Character/string literal escapes, concatenation rules, wide/narrow handling in C99 mode.
@@ -387,4 +387,3 @@ Suggested per-item metadata (append beside checkbox when complete):
 - `tests:`  
 - `commit:`  
 - `notes:`  
-

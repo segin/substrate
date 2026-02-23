@@ -868,7 +868,7 @@ int cc_main(int argc, char **argv) {
                 } else {
                     unsetenv("CC_FREESTANDING");
                 }
-                if (cc_compile_c_to_s(out_pp, in, out_s, o.debug, o.target, opt_level_num(&o), &diag) != 0) {
+                if (cc_compile_c_to_s(out_pp, in, out_s, o.std, o.debug, o.target, opt_level_num(&o), &diag) != 0) {
                     if (diag.line != 0) {
                         fprintf(stderr, "cc:%zu:%zu: %s\n", diag.line, diag.col, diag.message);
                     } else if (diag.message[0] != '\0') {
