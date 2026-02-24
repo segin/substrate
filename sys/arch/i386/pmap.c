@@ -617,9 +617,11 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
         if (V_PD[pdi] & PTE_PS) {
             // Already a large page, just overwrite
         } else {
-            // It's a page table. We don't support converting PT -> Large Page yet (requires freeing PT)
-            // TODO: Implement PT freeing/eviction
-            return -1;
+            // It's a page table. Free the page table page itself.
+            // Note: We do NOT free the individual 4KB pages - pmap semantics leave that to the VM layer.
+            // (If we are promoting pages, they are the same physical memory anyway).
+            uint32_t pt_phys = V_PD[pdi] & PTE_FRAME;
+            pmm_free_block((void *)(uintptr_t)(pt_phys + 0xC0000000));
         }
     }
 

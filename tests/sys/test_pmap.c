@@ -197,6 +197,47 @@ void test_pge_global_flush(void) {
     kprint("  PASS\n");
 }
 
+// Test 10: Replace Page Table with Large Page
+void test_pmap_large_replace(void) {
+    kprint("Test: pmap_enter_large replace page table\n");
+
+    // Use a high address in kernel space that is likely free (e.g. 0xD0000000)
+    uint32_t va = 0xD0000000;
+
+    // 1. Map a 4KB page
+    void *page = pmm_alloc_block();
+    uint32_t pa = (uint32_t)(uintptr_t)page - 0xC0000000;
+
+    int ret = pmap_enter(pmap_kernel(), va, pa, VM_PROT_READ | VM_PROT_WRITE, 0);
+    TEST_ASSERT(ret == 0, "pmap_enter 4KB success");
+
+    // Verify 4KB mapping
+    uint32_t extracted_pa = pmap_extract(pmap_kernel(), va);
+    TEST_ASSERT(extracted_pa == pa, "pmap_extract matches");
+
+    // 2. Replace with Large Page (using dummy PA 0x20000000)
+    uint32_t large_pa = 0x20000000;
+    ret = pmap_enter_large(pmap_kernel(), va, large_pa, VM_PROT_READ | VM_PROT_WRITE, 0);
+
+    if (ret == 0) {
+        kprint("  pmap_enter_large succeeded\n");
+
+        // Verify it is now a large page
+        // pmap_extract should return the new PA
+        extracted_pa = pmap_extract(pmap_kernel(), va);
+        TEST_ASSERT(extracted_pa == large_pa, "pmap_extract matches large page");
+
+        // Cleanup
+        pmap_remove(pmap_kernel(), va);
+    } else {
+        kprint("  pmap_enter_large failed\n");
+        pmap_remove(pmap_kernel(), va);
+        TEST_ASSERT(0, "pmap_enter_large failed to replace PT");
+    }
+
+    kprint("  PASS\n");
+}
+
 static void itoa(int val, char *buf) {
     if (val == 0) {
         buf[0] = '0';
@@ -247,6 +288,7 @@ void run_pmap_tests(void) {
     test_pmap_dump();
     test_pge_detection();
     test_pge_global_flush();
+    test_pmap_large_replace();
     test_memory_leak();
     
     kprint("\nResults: ");
