@@ -243,10 +243,8 @@ typedef struct ntsync_object {
  * Instance structure (one per open of /dev/ntsync)
  */
 typedef struct ntsync_instance {
-    /* Object list for cleanup on close */
-    ntsync_object_t **objects;
-    int object_count;
-    int object_capacity;
+    /* Reference counting */
+    uint32_t refcount;
     
     /* Lock for instance state */
     volatile int lock;

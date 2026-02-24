@@ -14,6 +14,7 @@ typedef struct {
 
 void spinlock_init(spinlock_t *lock, const char *name);
 void spinlock_acquire(spinlock_t *lock);
+bool spinlock_try_acquire(spinlock_t *lock);
 void spinlock_release(spinlock_t *lock);
 bool spinlock_is_held(spinlock_t *lock);
 

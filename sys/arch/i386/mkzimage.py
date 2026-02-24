@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import sys
 import struct
-import os
 
 def main():
     if len(sys.argv) != 4:

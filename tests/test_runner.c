@@ -23,8 +23,10 @@ extern bool test_vm_fault_anonymous(void);
 extern bool test_vm_fault_protection_violation(void);
 extern bool test_mmap_logic(void);
 extern bool test_munmap_logic(void);
-extern bool test_swap_lifecycle(void);
-extern bool test_swap_full(void);
+extern bool test_swap_lifecycle(void); // Mock-based
+extern bool test_swap_full(void);      // Mock-based
+extern bool test_vm_swap_real_io(void);
+extern bool test_vm_swap_real_full(void);
 extern bool test_vm_fault_cow_trigger(void);
 
 // Arch Tests (Mocked)
@@ -89,6 +91,9 @@ extern bool test_vop_readlink_basic(void);
 extern bool test_vop_readlink_notlink(void);
 extern bool test_vop_readlink_notsupp(void);
 
+// FUSE Tests
+extern bool test_fuse_read(void);
+
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
 extern bool prop_realtime_preempts_timeshare(void);
@@ -126,6 +131,12 @@ extern bool test_libc_strtok(void);
 // Div64 Tests
 extern bool run_div64_tests(void);
 
+// Pipe Tests
+extern int test_pipe_race(void);
+bool run_pipe_race(void) {
+    return test_pipe_race() == 0;
+}
+
 typedef struct {
     const char *name;
     bool (*func)(void);
@@ -148,8 +159,10 @@ test_case_t tests[] = {
     {"fault_prot", test_vm_fault_protection_violation},
     {"mmap_logic", test_mmap_logic},
     {"munmap_logic", test_munmap_logic},
-    {"swap_life", test_swap_lifecycle},
-    {"swap_full", test_swap_full},
+    {"swap_mock_life", test_swap_lifecycle},
+    {"swap_mock_full", test_swap_full},
+    {"swap_real_io", test_vm_swap_real_io},
+    {"swap_real_full", test_vm_swap_real_full},
     {"cow_trigger", test_vm_fault_cow_trigger},
     {"smp_tramp", test_trampoline_preparation},
     {"lock_basic", test_spinlock_basic},
@@ -199,6 +212,7 @@ test_case_t tests[] = {
     { "vfs_readlink_basic", test_vop_readlink_basic },
     { "vfs_readlink_notlink", test_vop_readlink_notlink },
     { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
+    {"fuse_read", test_fuse_read},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
@@ -210,6 +224,7 @@ test_case_t tests[] = {
     {"libc_strcat", test_libc_strcat},
     {"libc_strtok", test_libc_strtok},
     {"div64", run_div64_tests},
+    {"pipe_race", run_pipe_race},
     {NULL, NULL}
 };
 

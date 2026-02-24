@@ -14,8 +14,6 @@ LIBNAME = libregex.a
 
 # Optional integrations
 # USE_PCRE2=1 enables PCRE2 adapter (requires pcre2 headers/libs on host)
-# USE_RE2=1 enables RE2 adapter (requires re2 headers/libs on host)
-# DEFAULT_ENGINE_RE2=1 uses RE2 when SAFE_ENGINE flag is not set
 # USE_ICU=1 enables ICU-based unicode casefolding in the safe engine
 
 ifeq ($(USE_PCRE2),1)
@@ -31,7 +29,6 @@ ifeq ($(DEFAULT_ENGINE_RE2),1)
 CFLAGS += -DREGEX_DEFAULT_ENGINE_RE2
 CXXFLAGS += -DREGEX_DEFAULT_ENGINE_RE2
 endif
-
 ifeq ($(USE_ICU),1)
 CFLAGS += -DREGEX_USE_ICU
 CXXFLAGS += -DREGEX_USE_ICU

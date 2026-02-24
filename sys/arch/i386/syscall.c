@@ -32,22 +32,6 @@ extern process_t *current_process;
 extern int syscall_trace_enabled;
 extern void signal_handle_pending(registers_t *regs);
 
-// Linux struct user_desc for set_thread_area
-struct user_desc {
-    unsigned int entry_number;
-    unsigned int base_addr;
-    unsigned int limit;
-    unsigned int seg_32bit:1;
-    unsigned int contents:2;
-    unsigned int read_exec_only:1;
-    unsigned int limit_in_pages:1;
-    unsigned int seg_not_present:1;
-    unsigned int useable:1;
-};
-
-// GDT TLS entries (Linux uses entries 6, 7, 8 for TLS)
-#define GDT_TLS_ENTRIES 3
-#define GDT_TLS_START 6
 
 extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
 

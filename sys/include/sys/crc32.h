@@ -9,14 +9,15 @@
 #include <stddef.h>
 
 /*
- * Calculate CRC32 checksum using IEEE 802.3 polynomial
- * Returns the inverted CRC32 value (standard usage)
+ * Calculate CRC32 checksum using IEEE 802.3 polynomial.
+ * Returns the inverted CRC32 value (standard usage).
+ * Automatically initializes the lookup table if needed.
  */
 uint32_t crc32(const void *data, size_t len);
 
 /*
  * Initialize the CRC32 lookup table.
- * Must be called before any calls to crc32().
+ * Called automatically by crc32(), but exposed for explicit initialization.
  * Safe to call multiple times (idempotent).
  */
 void crc32_init(void);
