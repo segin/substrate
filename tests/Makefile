@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir test_ntsync_fd
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -40,8 +40,12 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libc_ctype
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
+	./test_ntsync_fd
 
 # Duplicate rule removed
+
+test_ntsync_fd: sys/test_ntsync_fd.c
+	$(CC) $(CFLAGS_COMMON) -D_KERNEL -I../sys/include -I../sys $< -o $@
 
 test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_ctype.c -o $@
@@ -138,7 +142,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir test_ntsync_fd
 	$(MAKE) -C sys clean
 
 bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
