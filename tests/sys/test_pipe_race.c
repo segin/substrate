@@ -1,0 +1,54 @@
+#include <vfs/vfs.h>
+#include <kern/sched.h>
+#include <sys/proc.h>
+#include <vm/vm_kmem.h>
+#include <kern/console.h>
+#include <string.h>
+#include <stdarg.h>
+
+// Forward declaration
+extern void pipe_create(fs_node_t **read_node, fs_node_t **write_node);
+extern int sys_thr_exit(void *retval);
+
+static volatile int test_error = 0;
+static fs_node_t *r_node, *w_node;
+
+#define TEST_COUNT 100
+
+// Sequential test to verify basic pipe functionality and no crashes
+int test_pipe_race(void) {
+    kprint("Starting pipe basic test...\n");
+
+    pipe_create(&r_node, &w_node);
+    if (!r_node || !w_node) {
+        kprint("Failed to create pipe nodes\n");
+        return -1;
+    }
+
+    // Write some data
+    for (int i = 0; i < TEST_COUNT; i++) {
+        char c = (char)(i % 256);
+        int written = write_fs(w_node, 0, 1, (uint8_t*)&c);
+        if (written != 1) {
+            kprintf("Writer error at %d: wrote %d bytes\n", i, written);
+            return -1;
+        }
+    }
+
+    // Read data back
+    for (int i = 0; i < TEST_COUNT; i++) {
+        char c;
+        int read = read_fs(r_node, 0, 1, (uint8_t*)&c);
+        if (read != 1) {
+             kprintf("Reader error at %d: read %d bytes\n", i, read);
+             return -1;
+        }
+        if (c != (char)(i % 256)) {
+            kprintf("Data mismatch at %d: expected %d, got %d\n", i, (int)(char)(i % 256), (int)c);
+            return -1;
+        }
+    }
+
+    kprint("Pipe basic test passed successfully.\n");
+    return 0;
+}

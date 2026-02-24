@@ -131,6 +131,12 @@ extern bool test_libc_strtok(void);
 // Div64 Tests
 extern bool run_div64_tests(void);
 
+// Pipe Tests
+extern int test_pipe_race(void);
+bool run_pipe_race(void) {
+    return test_pipe_race() == 0;
+}
+
 typedef struct {
     const char *name;
     bool (*func)(void);
@@ -218,6 +224,7 @@ test_case_t tests[] = {
     {"libc_strcat", test_libc_strcat},
     {"libc_strtok", test_libc_strtok},
     {"div64", run_div64_tests},
+    {"pipe_race", run_pipe_race},
     {NULL, NULL}
 };
 

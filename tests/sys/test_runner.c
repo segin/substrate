@@ -38,6 +38,7 @@ extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
+extern void test_pipe_race(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -398,6 +399,10 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "vfs_cache") == 0) {
         extern void run_vfs_cache_tests(void);
         run_vfs_cache_tests();
+    }
+
+    if (all || strcmp(test_arg, "pipe_race") == 0) {
+        test_pipe_race();
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");

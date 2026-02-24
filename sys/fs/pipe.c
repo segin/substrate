@@ -5,6 +5,8 @@
 #include <vm/vm_kmem.h>
 #include <string.h>
 #include <stddef.h>
+#include <sys/lock.h>
+#include <kern/sleepq.h>
 
 #define PIPE_SIZE 4096
 
@@ -15,14 +17,24 @@ typedef struct {
     uint32_t count;
     void    *wait_read;
     void    *wait_write;
+    mutex_t lock;
 } pipe_t;
+
+static void pipe_wait(void *chan, mutex_t *m) {
+    sleepq_add(chan, current_thread);
+    mutex_unlock(m);
+    sched_yield();
+    mutex_lock(m);
+}
 
 static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     pipe_t *p = (pipe_t *)(uintptr_t)node->impl;
     (void)offset;
 
+    mutex_lock(&p->lock);
+
     while (p->count == 0) {
-        sched_sleep(p->wait_read);
+        pipe_wait(p->wait_read, &p->lock);
     }
 
     size_t i = 0;
@@ -32,7 +44,8 @@ static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         p->count--;
     }
 
-    sched_wakeup(p->wait_write);
+    sleepq_wake_all(p->wait_write);
+    mutex_unlock(&p->lock);
     return i;
 }
 
@@ -41,9 +54,11 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
     (void)offset;
     size_t written = 0;
 
+    mutex_lock(&p->lock);
+
     while (written < size) {
         while (p->count == PIPE_SIZE) {
-            sched_sleep(p->wait_write);
+            pipe_wait(p->wait_write, &p->lock);
         }
 
         while (written < size && p->count < PIPE_SIZE) {
@@ -52,9 +67,10 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
             p->count++;
         }
 
-        sched_wakeup(p->wait_read);
+        sleepq_wake_all(p->wait_read);
     }
 
+    mutex_unlock(&p->lock);
     return written;
 }
 
@@ -63,6 +79,7 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
     memset(p, 0, sizeof(pipe_t));
     p->wait_read = &p->head;
     p->wait_write = &p->tail;
+    mutex_init(&p->lock, "pipe_lock");
 
     fs_node_t *rn = (fs_node_t *)kmalloc(sizeof(fs_node_t));
     memset(rn, 0, sizeof(fs_node_t));
