@@ -8,6 +8,8 @@
 #include <arch/i386/pmap.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
+#include <arch/i386/pmm.h>
+#include <sys/lock.h>
 
 #ifndef MAP_FIXED
 #define MAP_FIXED 0x010
@@ -25,6 +27,9 @@ static int mem_secure_level = 0;
 
 /* Limits */
 #define MEM_DIRECT_MAP_LIMIT 0x40000000 // 1GB limit for direct access
+
+static mutex_t mem_window_lock;
+static uintptr_t mem_window_va;
 
 static void mem_open(fs_node_t *node) {
     (void)node;
@@ -88,24 +93,43 @@ static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buff
         return -EPERM;
     }
 
-    /* Bounds check for Direct Map implementation */
-    if (offset >= MEM_DIRECT_MAP_LIMIT) {
-        return -EIO; /* TODO: Implement HighMem access via pmap_kenter window */
+    if (offset < 0) return -EIO;
+    if ((uint64_t)offset > 0xFFFFFFFFULL) return -EIO;
+
+    size_t transferred = 0;
+
+    while (size > 0) {
+        if ((uint64_t)offset >= 0x100000000ULL) break;
+
+        uintptr_t pa = (uintptr_t)offset;
+        uintptr_t page_offset = pa & 0xFFF;
+        size_t chunk = 4096 - page_offset;
+        if (chunk > size) chunk = size;
+
+        if (pa < MEM_DIRECT_MAP_LIMIT) {
+            uintptr_t kernel_va = 0xC0000000 + pa;
+            if (copyout((void*)kernel_va, buffer + transferred, chunk) != 0) {
+                return -EFAULT;
+            }
+        } else {
+            if (!mem_window_va) return -EIO;
+
+            mutex_lock(&mem_window_lock);
+            pmap_kenter(mem_window_va, pa & ~0xFFF);
+
+            if (copyout((void*)(mem_window_va + page_offset), buffer + transferred, chunk) != 0) {
+                mutex_unlock(&mem_window_lock);
+                return -EFAULT;
+            }
+            mutex_unlock(&mem_window_lock);
+        }
+
+        size -= chunk;
+        offset += chunk;
+        transferred += chunk;
     }
 
-    if (offset + size > MEM_DIRECT_MAP_LIMIT) {
-        size = MEM_DIRECT_MAP_LIMIT - offset;
-    }
-
-    /* Access Physical Memory via Kernel Direct Map */
-    uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
-
-    /* Copy to user buffer safely */
-    if (copyout((void*)kernel_va, buffer, size) != 0) {
-        return -EFAULT;
-    }
-
-    return size;
+    return transferred;
 }
 
 static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
@@ -120,22 +144,43 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
         return -EPERM; /* Writes denied in secure mode */
     }
 
-    if (offset >= MEM_DIRECT_MAP_LIMIT) {
-        return -EIO;
+    if (offset < 0) return -EIO;
+    if ((uint64_t)offset > 0xFFFFFFFFULL) return -EIO;
+
+    size_t transferred = 0;
+
+    while (size > 0) {
+        if ((uint64_t)offset >= 0x100000000ULL) break;
+
+        uintptr_t pa = (uintptr_t)offset;
+        uintptr_t page_offset = pa & 0xFFF;
+        size_t chunk = 4096 - page_offset;
+        if (chunk > size) chunk = size;
+
+        if (pa < MEM_DIRECT_MAP_LIMIT) {
+            uintptr_t kernel_va = 0xC0000000 + pa;
+            if (copyin(buffer + transferred, (void*)kernel_va, chunk) != 0) {
+                return -EFAULT;
+            }
+        } else {
+            if (!mem_window_va) return -EIO;
+
+            mutex_lock(&mem_window_lock);
+            pmap_kenter(mem_window_va, pa & ~0xFFF);
+
+            if (copyin(buffer + transferred, (void*)(mem_window_va + page_offset), chunk) != 0) {
+                mutex_unlock(&mem_window_lock);
+                return -EFAULT;
+            }
+            mutex_unlock(&mem_window_lock);
+        }
+
+        size -= chunk;
+        offset += chunk;
+        transferred += chunk;
     }
 
-    if (offset + size > MEM_DIRECT_MAP_LIMIT) {
-        size = MEM_DIRECT_MAP_LIMIT - offset;
-    }
-
-    uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
-
-    /* Copy from user buffer safely */
-    if (copyin(buffer, (void*)kernel_va, size) != 0) {
-        return -EFAULT;
-    }
-
-    return size;
+    return transferred;
 }
 
 static void *mem_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
@@ -233,6 +278,10 @@ static int mem_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 static fs_node_t mem_node;
 
 void mem_init(void) {
+    mutex_init(&mem_window_lock, "mem_window");
+    void *w = pmm_alloc_block();
+    mem_window_va = (uintptr_t)w;
+
     memset(&mem_node, 0, sizeof(fs_node_t));
     strcpy(mem_node.name, "mem");
     mem_node.flags = FS_CHARDEVICE;
