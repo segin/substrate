@@ -198,51 +198,30 @@ int uma_zone_check_leaks(uma_zone_t *zone);
 /*
  * Debug support
  */
-#ifdef UMA_DEBUG
-void uma_debug_check_redzone(uma_zone_t *zone, void *item);
-void uma_debug_poison_free(uma_zone_t *zone, void *item);
-void uma_debug_poison_alloc(uma_zone_t *zone, void *item);
-#else
+void uma_debug_check_redzone_impl(uma_zone_t *zone, void *item);
+void uma_debug_poison_free_impl(uma_zone_t *zone, void *item);
+void uma_debug_poison_alloc_impl(uma_zone_t *zone, void *item);
 
 /*
  * Validates UMA redzone (0xFE pattern at end of object)
  */
 static inline void uma_debug_check_redzone(uma_zone_t *zone, void *item) {
-    if ((zone->uz_flags & UMA_ZONE_REDZONE) == 0) return;
-    
-    // Pattern should be at item + size
-    uint8_t *redzone = (uint8_t *)((uintptr_t)item + zone->uz_size);
-    for (int i = 0; i < UMA_REDZONE_SIZE; i++) {
-        if (redzone[i] != UMA_REDZONE_BYTE) {
-             extern void kprint(const char*);
-             extern void panic(const char*);
-             kprint("UMA: Redzone corruption detected!\n");
-             kprint("Zone: "); kprint(zone->uz_name); kprint("\n");
-             // kprint("Obj: "); kprint_hex(item); kprint("\n"); // Format hex TODO
-             panic("UMA Redzone Violation");
-        }
+    if (zone->uz_flags & UMA_ZONE_REDZONE) {
+        uma_debug_check_redzone_impl(zone, item);
     }
 }
 
 static inline void uma_debug_poison_free(uma_zone_t *zone, void *item) {
     if (zone->uz_flags & UMA_ZONE_TRASH) {
-        // Fill memory with 0xDEADBEEF
-        uint32_t *p = (uint32_t *)item;
-        int count = zone->uz_size / 4;
-        for (int i = 0; i < count; i++) p[i] = UMA_POISON_FREE;
+        uma_debug_poison_free_impl(zone, item);
     }
 }
 
 static inline void uma_debug_poison_alloc(uma_zone_t *zone, void *item) {
      if (zone->uz_flags & UMA_ZONE_TRASH) {
-        // Fill memory with 0xBAADF00D
-        uint32_t *p = (uint32_t *)item;
-        int count = zone->uz_size / 4;
-        for (int i = 0; i < count; i++) p[i] = UMA_POISON_ALLOC;
+        uma_debug_poison_alloc_impl(zone, item);
     }
 }
-
-#endif
 
 
 
