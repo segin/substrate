@@ -13,10 +13,13 @@
  *   - Objects are automatically destroyed when all FDs are closed
  */
 
+#define _KERNEL
+
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>
+#include <kern/file.h>
 #include <sys/ntsync.h>
 #include <sys/proc.h>
 #include <sys/time.h>
@@ -27,91 +30,7 @@
 /* Forward declarations */
 static int ntsync_ioctl(fs_node_t *node, uint32_t request, void *arg);
 static int ntsync_obj_ioctl(fs_node_t *node, uint32_t request, void *arg);
-
-/*
- * ============================================================
- * Data Structures
- * ============================================================
- */
-
-/*
- * Object types
- */
-typedef enum {
-    NTSYNC_OBJ_SEM = 1,
-    NTSYNC_OBJ_MUTEX,
-    NTSYNC_OBJ_EVENT
-} ntsync_obj_type_t;
-
-/*
- * Wait queue entry
- */
-typedef struct ntsync_waiter {
-    struct ntsync_waiter *next;
-    thread_t *thread;
-    int signaled;       /* Set when object signals this waiter */
-    int all_wait;       /* Part of wait-all operation */
-    int priority;       /* For priority ordering */
-} ntsync_waiter_t;
-
-/*
- * Base object structure (common to all object types)
- */
-typedef struct ntsync_object {
-    ntsync_obj_type_t type;
-    uint32_t refcount;
-    
-    /* Wait queue for threads waiting on this object */
-    ntsync_waiter_t *waiters;
-    int waiter_count;
-    
-    /* Spinlock for thread safety */
-    volatile int lock;
-    
-    /* Type-specific data follows */
-    union {
-        /* Semaphore */
-        struct {
-            uint32_t count;
-            uint32_t max;
-        } sem;
-        
-        /* Mutex */
-        struct {
-            uint32_t owner;
-            uint32_t count;
-            int abandoned;
-        } mutex;
-        
-        /* Event */
-        struct {
-            uint32_t signaled;
-            uint32_t manual;    /* 1 = manual-reset, 0 = auto-reset */
-        } event;
-    };
-    
-    /* Back-pointer to owning instance (for validation) */
-    struct ntsync_instance *instance;
-    
-    /* fs_node for this object */
-    fs_node_t node;
-} ntsync_object_t;
-
-/*
- * Instance structure (one per open of /dev/ntsync)
- */
-typedef struct ntsync_instance {
-    /* Object list for cleanup on close */
-    ntsync_object_t **objects;
-    int object_count;
-    int object_capacity;
-    
-    /* Lock for instance state */
-    volatile int lock;
-    
-    /* fs_node for this instance */
-    fs_node_t node;
-} ntsync_instance_t;
+static void ntsync_obj_close(fs_node_t *node);
 
 /*
  * ============================================================
@@ -145,6 +64,22 @@ static void ntsync_object_unref(ntsync_object_t *obj) {
     if (__sync_sub_and_fetch(&obj->refcount, 1) == 0) {
         /* Free the object */
         kfree(obj, sizeof(ntsync_object_t));
+    }
+}
+
+/*
+ * ============================================================
+ * Instance Reference Counting
+ * ============================================================
+ */
+
+static void ntsync_instance_ref(ntsync_instance_t *inst) {
+    __sync_fetch_and_add(&inst->refcount, 1);
+}
+
+static void ntsync_instance_unref(ntsync_instance_t *inst) {
+    if (__sync_sub_and_fetch(&inst->refcount, 1) == 0) {
+        kfree(inst, sizeof(ntsync_instance_t));
     }
 }
 
@@ -561,6 +496,16 @@ static int ntsync_obj_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     }
 }
 
+static void ntsync_obj_close(fs_node_t *node) {
+    ntsync_object_t *obj = (ntsync_object_t *)(uintptr_t)node->impl;
+    if (obj) {
+        if (obj->instance) {
+            ntsync_instance_unref(obj->instance);
+        }
+        ntsync_object_unref(obj);
+    }
+}
+
 /*
  * ============================================================
  * Object Creation
@@ -578,7 +523,6 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
     memset(obj, 0, sizeof(*obj));
     obj->type = type;
     obj->refcount = 1;
-    obj->instance = inst;
     
     /* Initialize type-specific fields */
     switch (type) {
@@ -631,60 +575,40 @@ static int ntsync_create_object(ntsync_instance_t *inst, ntsync_obj_type_t type,
         return -EINVAL;
     }
     
+    /* Allocate FD */
+    int fd = proc_alloc_fd(current_process);
+    if (fd < 0) {
+        kfree(obj, sizeof(ntsync_object_t));
+        return -EMFILE;
+    }
+
+    file_t *f = file_alloc();
+    if (!f) {
+        proc_clear_fd(current_process, fd);
+        kfree(obj, sizeof(ntsync_object_t));
+        return -ENFILE;
+    }
+
     /* Setup fs_node for this object */
     memset(&obj->node, 0, sizeof(fs_node_t));
     obj->node.flags = FS_CHARDEVICE;
     obj->node.impl = (uintptr_t)obj;
     obj->node.ioctl = ntsync_obj_ioctl;
+    obj->node.close = ntsync_obj_close;
     
-    /* Add to instance's object list */
-    ntsync_spinlock_acquire(&inst->lock);
-    
-    if (inst->object_count >= inst->object_capacity) {
-        int new_cap;
+    /* Attach instance */
+    ntsync_instance_ref(inst);
+    obj->instance = inst;
 
-        if (inst->object_capacity == 0) {
-            new_cap = 16;
-        } else {
-            if (inst->object_capacity > INT32_MAX / 2) {
-                ntsync_spinlock_release(&inst->lock);
-                kfree(obj, sizeof(ntsync_object_t));
-                return -ENOMEM;
-            }
-            new_cap = inst->object_capacity * 2;
-        }
+    /* Attach file */
+    f->f_data = &obj->node;
+    f->f_ops = NULL;
+    f->f_flag = FREAD | FWRITE;
+    f->f_count = 1;
 
-        if ((size_t)new_cap > SIZE_MAX / sizeof(ntsync_object_t *)) {
-            ntsync_spinlock_release(&inst->lock);
-            kfree(obj, sizeof(ntsync_object_t));
-            return -ENOMEM;
-        }
-
-        ntsync_object_t **new_objs = kmalloc(new_cap * sizeof(ntsync_object_t *));
-        if (!new_objs) {
-            ntsync_spinlock_release(&inst->lock);
-            kfree(obj, sizeof(ntsync_object_t));
-            return -ENOMEM;
-        }
-        if (inst->objects) {
-            memcpy(new_objs, inst->objects, 
-                   inst->object_count * sizeof(ntsync_object_t *));
-            kfree(inst->objects, inst->object_capacity * sizeof(ntsync_object_t *));
-        }
-        inst->objects = new_objs;
-        inst->object_capacity = new_cap;
-    }
+    proc_set_fd(current_process, fd, f);
     
-    inst->objects[inst->object_count++] = obj;
-    ntsync_object_ref(obj);  /* Instance holds a reference */
-    
-    ntsync_spinlock_release(&inst->lock);
-    
-    /* Return an FD for this object
-     * TODO: Proper FD allocation - for now return object index as pseudo-FD
-     * In real implementation, this would allocate a real file descriptor
-     */
-    return inst->object_count - 1;
+    return fd;
 }
 
 /*
@@ -717,29 +641,56 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     memset(captured_objs, 0, sizeof(captured_objs));
     int has_alert = 0;
 
-    ntsync_spinlock_acquire(&inst->lock);
-
     for (uint32_t i = 0; i < kargs.count; i++) {
         int fd = obj_fds[i];
-        if (fd < 0 || fd >= inst->object_count) {
-            ntsync_spinlock_release(&inst->lock);
+        if (fd < 0 || fd >= MAX_FD) {
             kfree(obj_fds, kargs.count * sizeof(int));
             for (uint32_t j = 0; j < i; j++) ntsync_object_unref(captured_objs[j]);
             return -EINVAL;
         }
-        captured_objs[i] = inst->objects[fd];
+
+        file_t *f = current_process->fds[fd];
+        if (!f || !f->f_data) {
+            kfree(obj_fds, kargs.count * sizeof(int));
+            for (uint32_t j = 0; j < i; j++) ntsync_object_unref(captured_objs[j]);
+            return -EINVAL;
+        }
+
+        fs_node_t *node = (fs_node_t*)f->f_data;
+        if (node->ioctl != ntsync_obj_ioctl) {
+            kfree(obj_fds, kargs.count * sizeof(int));
+            for (uint32_t j = 0; j < i; j++) ntsync_object_unref(captured_objs[j]);
+            return -EINVAL;
+        }
+
+        ntsync_object_t *obj = (ntsync_object_t*)(uintptr_t)node->impl;
+        if (obj->instance != inst) {
+            kfree(obj_fds, kargs.count * sizeof(int));
+            for (uint32_t j = 0; j < i; j++) ntsync_object_unref(captured_objs[j]);
+            return -EINVAL;
+        }
+
+        captured_objs[i] = obj;
         ntsync_object_ref(captured_objs[i]);
     }
 
     if (kargs.alert != 0) {
-        if (kargs.alert < (uint32_t)inst->object_count) {
-            has_alert = 1;
-            captured_objs[kargs.count] = inst->objects[kargs.alert];
-            ntsync_object_ref(captured_objs[kargs.count]);
+        int fd = (int)kargs.alert;
+        if (fd >= 0 && fd < MAX_FD) {
+            file_t *f = current_process->fds[fd];
+            if (f && f->f_data) {
+                fs_node_t *node = (fs_node_t*)f->f_data;
+                if (node->ioctl == ntsync_obj_ioctl) {
+                    ntsync_object_t *obj = (ntsync_object_t*)(uintptr_t)node->impl;
+                    if (obj->instance == inst && obj->type == NTSYNC_OBJ_EVENT) {
+                        has_alert = 1;
+                        captured_objs[kargs.count] = obj;
+                        ntsync_object_ref(obj);
+                    }
+                }
+            }
         }
     }
-
-    ntsync_spinlock_release(&inst->lock);
 
     int ret_val = 0;
 
@@ -950,48 +901,77 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
     int has_alert = 0;
     ntsync_object_t *alert_obj = NULL;
 
-    ntsync_spinlock_acquire(&inst->lock);
-
     /* Check for duplicates (not allowed in wait_all) and validity */
     for (uint32_t i = 0; i < kargs.count; i++) {
         int fd = obj_fds[i];
-        if (fd < 0 || fd >= inst->object_count) {
-            ntsync_spinlock_release(&inst->lock);
+        if (fd < 0 || fd >= MAX_FD) {
             kfree(obj_fds, kargs.count * sizeof(int));
             for (uint32_t j = 0; j < i; j++) ntsync_object_unref(captured_objs[j]);
             return -EINVAL;
         }
 
-        for (uint32_t j = i + 1; j < kargs.count; j++) {
-            if (fd == obj_fds[j]) {
-                ntsync_spinlock_release(&inst->lock);
-                kfree(obj_fds, kargs.count * sizeof(int));
-                for (uint32_t k = 0; k < i; k++) ntsync_object_unref(captured_objs[k]);
-                return -EINVAL;
-            }
-        }
-        if (kargs.alert != 0 && fd == (int)kargs.alert) {
-            ntsync_spinlock_release(&inst->lock);
+        file_t *f = current_process->fds[fd];
+        if (!f || !f->f_data) {
             kfree(obj_fds, kargs.count * sizeof(int));
             for (uint32_t k = 0; k < i; k++) ntsync_object_unref(captured_objs[k]);
             return -EINVAL;
         }
 
-        captured_objs[i] = inst->objects[fd];
+        fs_node_t *node = (fs_node_t*)f->f_data;
+        if (node->ioctl != ntsync_obj_ioctl) {
+            kfree(obj_fds, kargs.count * sizeof(int));
+            for (uint32_t k = 0; k < i; k++) ntsync_object_unref(captured_objs[k]);
+            return -EINVAL;
+        }
+
+        ntsync_object_t *obj = (ntsync_object_t*)(uintptr_t)node->impl;
+        if (obj->instance != inst) {
+            kfree(obj_fds, kargs.count * sizeof(int));
+            for (uint32_t k = 0; k < i; k++) ntsync_object_unref(captured_objs[k]);
+            return -EINVAL;
+        }
+
+        /* Check for duplicates (by object pointer) */
+        for (uint32_t k = 0; k < i; k++) {
+            if (captured_objs[k] == obj) {
+                kfree(obj_fds, kargs.count * sizeof(int));
+                for (uint32_t j = 0; j < i; j++) ntsync_object_unref(captured_objs[j]);
+                return -EINVAL;
+            }
+        }
+
+        captured_objs[i] = obj;
         ntsync_object_ref(captured_objs[i]);
     }
 
     if (kargs.alert != 0) {
-        if (kargs.alert < (uint32_t)inst->object_count) {
-            has_alert = 1;
-            alert_obj = inst->objects[kargs.alert];
-            captured_objs[kargs.count] = alert_obj;
-            ntsync_object_ref(captured_objs[kargs.count]);
+        int fd = (int)kargs.alert;
+        if (fd >= 0 && fd < MAX_FD) {
+            file_t *f = current_process->fds[fd];
+            if (f && f->f_data) {
+                fs_node_t *node = (fs_node_t*)f->f_data;
+                if (node->ioctl == ntsync_obj_ioctl) {
+                    ntsync_object_t *obj = (ntsync_object_t*)(uintptr_t)node->impl;
+                    if (obj->instance == inst && obj->type == NTSYNC_OBJ_EVENT) {
+                        /* Check for duplicate object (alert vs wait array) */
+                        for (uint32_t k = 0; k < kargs.count; k++) {
+                            if (captured_objs[k] == obj) {
+                                kfree(obj_fds, kargs.count * sizeof(int));
+                                for (uint32_t j = 0; j < kargs.count; j++) ntsync_object_unref(captured_objs[j]);
+                                return -EINVAL;
+                            }
+                        }
+
+                        has_alert = 1;
+                        alert_obj = obj;
+                        captured_objs[kargs.count] = alert_obj;
+                        ntsync_object_ref(captured_objs[kargs.count]);
+                    }
+                }
+            }
         }
     }
 
-    ntsync_spinlock_release(&inst->lock);
-    
     int ret_code = 0;
 
     uint32_t total_waiters = kargs.count + (has_alert ? 1 : 0);
@@ -1212,6 +1192,7 @@ static void ntsync_open_callback(fs_node_t *node) {
     }
     
     memset(inst, 0, sizeof(*inst));
+    inst->refcount = 1;
     
     /* Setup fs_node for this instance */
     memset(&inst->node, 0, sizeof(fs_node_t));
@@ -1228,17 +1209,7 @@ static void ntsync_close(fs_node_t *node) {
     ntsync_instance_t *inst = (ntsync_instance_t *)(uintptr_t)node->impl;
     if (!inst) return;
     
-    /* Clean up all objects */
-    ntsync_spinlock_acquire(&inst->lock);
-    for (int i = 0; i < inst->object_count; i++) {
-        ntsync_object_unref(inst->objects[i]);
-    }
-    if (inst->objects) {
-        kfree(inst->objects, inst->object_capacity * sizeof(ntsync_object_t *));
-    }
-    ntsync_spinlock_release(&inst->lock);
-    
-    kfree(inst, sizeof(ntsync_instance_t));
+    ntsync_instance_unref(inst);
     node->impl = 0;
 }
 
