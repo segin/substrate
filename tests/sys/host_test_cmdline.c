@@ -36,6 +36,45 @@ void test_cmdline_parsing() {
     // Test 5: Not found
     cmdline_init("key=value");
     assert(cmdline_get("missing", buf, 32) == -1);
+
+    printf("Cmdline basic tests passed.\n");
+}
+
+void test_cmdline_edge_cases() {
+    char buf[32];
+
+    // Test 1: Partial match prefix
+    // Searching for "foo" in "foobar=1"
+    cmdline_init("foobar=1");
+    assert(cmdline_get("foo", buf, 32) == -1);
+
+    // Test 2: Partial match suffix
+    // Searching for "bar" in "foobar=1"
+    cmdline_init("foobar=1");
+    assert(cmdline_get("bar", buf, 32) == -1);
+
+    // Test 3: Exact match
+    cmdline_init("foo=1");
+    assert(cmdline_get("foo", buf, 32) == 0);
+    assert(strcmp(buf, "1") == 0);
+
+    // Test 4: Key without value (boolean flag style)
+    // cmdline_get expects "key=value", so "foo" should return -1
+    cmdline_init("foo");
+    assert(cmdline_get("foo", buf, 32) == -1);
+    assert(cmdline_has("foo") == 1); // cmdline_has handles flags
+
+    // Test 5: Empty value
+    cmdline_init("foo=");
+    assert(cmdline_get("foo", buf, 32) == 0);
+    assert(strcmp(buf, "") == 0);
+
+    // Test 6: Key at end of string
+    cmdline_init("test=1 foo");
+    assert(cmdline_get("foo", buf, 32) == -1);
+    assert(cmdline_has("foo") == 1);
+
+    printf("Cmdline edge case tests passed.\n");
 }
 
 void property_test_random_strings() {
@@ -68,6 +107,7 @@ void property_test_random_strings() {
 
 int main() {
     test_cmdline_parsing();
+    test_cmdline_edge_cases();
     property_test_random_strings();
     return 0;
 }
