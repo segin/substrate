@@ -13,6 +13,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <sys/smp.h>
 
 /* GDT Entry (8 bytes for normal, 16 bytes for system descriptors in LM) */
 struct gdt_entry {
@@ -81,13 +82,8 @@ struct tss64 {
 #define GDT_LONG_MODE   0x20    /* L bit: Long Mode code segment */
 #define GDT_GRAN_4K     0x80    /* 4KB granularity */
 
-/* GDT with enough entries: null, kcode, kdata, udata, ucode, tss (2 slots) */
-static struct gdt_entry gdt[7] __attribute__((aligned(16)));
-static struct tss64 tss __attribute__((aligned(16)));
-static struct gdt_ptr gdt_pointer;
-
-/* Per-CPU TSS (for SMP, index 0 is BSP) */
-#define MAX_CPUS 64
+/* Per-CPU GDT and TSS (for SMP, index 0 is BSP) */
+static struct gdt_entry per_cpu_gdt[MAX_CPUS][7] __attribute__((aligned(16)));
 static struct tss64 per_cpu_tss[MAX_CPUS] __attribute__((aligned(16)));
 
 /* Interrupt stacks for IST */
@@ -96,23 +92,23 @@ static char ist_stack_df[8192]  __attribute__((aligned(16)));
 static char ist_stack_mc[8192]  __attribute__((aligned(16)));
 
 /*
- * Set a regular GDT entry (8 bytes)
+ * Fill a regular GDT entry (8 bytes)
  */
-static void gdt_set_entry(int index, uint32_t base, uint32_t limit,
-                          uint8_t access, uint8_t granularity) {
-    gdt[index].limit_low = limit & 0xFFFF;
-    gdt[index].base_low = base & 0xFFFF;
-    gdt[index].base_mid = (base >> 16) & 0xFF;
-    gdt[index].access = access;
-    gdt[index].granularity = ((limit >> 16) & 0x0F) | (granularity & 0xF0);
-    gdt[index].base_high = (base >> 24) & 0xFF;
+static void gdt_fill_entry(struct gdt_entry *entry, uint32_t base, uint32_t limit,
+                           uint8_t access, uint8_t granularity) {
+    entry->limit_low = limit & 0xFFFF;
+    entry->base_low = base & 0xFFFF;
+    entry->base_mid = (base >> 16) & 0xFF;
+    entry->access = access;
+    entry->granularity = ((limit >> 16) & 0x0F) | (granularity & 0xF0);
+    entry->base_high = (base >> 24) & 0xFF;
 }
 
 /*
- * Set a TSS entry (16 bytes - spans 2 GDT slots)
+ * Fill a TSS entry (16 bytes - spans 2 GDT slots)
  */
-static void gdt_set_tss(int index, uint64_t base, uint32_t limit) {
-    struct tss_entry *te = (struct tss_entry *)&gdt[index];
+static void gdt_fill_tss(struct gdt_entry *entry, uint64_t base, uint32_t limit) {
+    struct tss_entry *te = (struct tss_entry *)entry;
     
     te->limit_low = limit & 0xFFFF;
     te->base_0_15 = base & 0xFFFF;
@@ -123,6 +119,30 @@ static void gdt_set_tss(int index, uint64_t base, uint32_t limit) {
     te->base_32_63 = (base >> 32) & 0xFFFFFFFF;
     te->reserved = 0;
 }
+
+/*
+ * Load GDT and reload segments
+ */
+static void gdt_load(struct gdt_entry *gdt_base) {
+    struct gdt_ptr gp;
+    gp.limit = sizeof(struct gdt_entry) * 7 - 1;
+    gp.base = (uint64_t)gdt_base;
+
+    __asm__ volatile(
+        "lgdt %0\n\t"
+        "movw $0x10, %%ax\n\t"
+        "movw %%ax, %%ds\n\t"
+        "movw %%ax, %%es\n\t"
+        "movw %%ax, %%ss\n\t"
+        "xorw %%ax, %%ax\n\t"
+        "movw %%ax, %%fs\n\t"
+        "movw %%ax, %%gs\n\t"
+        :
+        : "m"(gp)
+        : "rax", "memory"
+    );
+}
+
 
 /*
  * Initialize the TSS
@@ -148,57 +168,43 @@ static void tss_init(struct tss64 *tss_ptr, uint64_t rsp0) {
 }
 
 /*
- * Initialize GDT and TSS for Long Mode
+ * Initialize GDT and TSS for Long Mode (BSP only)
  */
 void gdt_init(void) {
+    struct gdt_entry *gdt_table = per_cpu_gdt[0];
+
     /* Null descriptor */
-    gdt_set_entry(0, 0, 0, 0, 0);
+    gdt_fill_entry(&gdt_table[0], 0, 0, 0, 0);
     
     /* Kernel code segment (selector 0x08)
      * Long Mode: base and limit ignored, but L bit must be set */
-    gdt_set_entry(1, 0, 0xFFFFF,
+    gdt_fill_entry(&gdt_table[1], 0, 0xFFFFF,
                   GDT_PRESENT | GDT_DPL0 | GDT_TYPE_CODE,
                   GDT_LONG_MODE | GDT_GRAN_4K);
     
     /* Kernel data segment (selector 0x10) */
-    gdt_set_entry(2, 0, 0xFFFFF,
+    gdt_fill_entry(&gdt_table[2], 0, 0xFFFFF,
                   GDT_PRESENT | GDT_DPL0 | GDT_TYPE_DATA,
                   GDT_GRAN_4K);
     
     /* User data segment (selector 0x18)
      * Must come before user code for SYSRET to work correctly */
-    gdt_set_entry(3, 0, 0xFFFFF,
+    gdt_fill_entry(&gdt_table[3], 0, 0xFFFFF,
                   GDT_PRESENT | GDT_DPL3 | GDT_TYPE_DATA,
                   GDT_GRAN_4K);
     
     /* User code segment (selector 0x20) */
-    gdt_set_entry(4, 0, 0xFFFFF,
+    gdt_fill_entry(&gdt_table[4], 0, 0xFFFFF,
                   GDT_PRESENT | GDT_DPL3 | GDT_TYPE_CODE,
                   GDT_LONG_MODE | GDT_GRAN_4K);
     
     /* TSS (selector 0x28, spans slots 5-6) */
     extern char stack_top[];  /* From boot.S */
-    tss_init(&tss, (uint64_t)stack_top);
-    gdt_set_tss(5, (uint64_t)&tss, sizeof(struct tss64) - 1);
+    tss_init(&per_cpu_tss[0], (uint64_t)stack_top);
+    gdt_fill_tss(&gdt_table[5], (uint64_t)&per_cpu_tss[0], sizeof(struct tss64) - 1);
     
-    /* Load GDT */
-    gdt_pointer.limit = sizeof(gdt) - 1;
-    gdt_pointer.base = (uint64_t)&gdt;
-    
-    __asm__ volatile(
-        "lgdt %0\n\t"
-        /* Reload segment registers */
-        "movw $0x10, %%ax\n\t"
-        "movw %%ax, %%ds\n\t"
-        "movw %%ax, %%es\n\t"
-        "movw %%ax, %%ss\n\t"
-        "xorw %%ax, %%ax\n\t"    /* Clear FS/GS for now (TLS sets later) */
-        "movw %%ax, %%fs\n\t"
-        "movw %%ax, %%gs\n\t"
-        :
-        : "m"(gdt_pointer)
-        : "rax", "memory"
-    );
+    /* Load GDT and reload segments */
+    gdt_load(gdt_table);
     
     /* Load TSS */
     __asm__ volatile(
@@ -212,14 +218,21 @@ void gdt_init(void) {
  * Set kernel stack pointer in TSS (for syscall/interrupt)
  */
 void tss_set_rsp0(uint64_t rsp0) {
-    tss.rsp0 = rsp0;
+    int cpu = smp_get_cpu_id();
+    if (cpu < MAX_CPUS) {
+        per_cpu_tss[cpu].rsp0 = rsp0;
+    }
 }
 
 /*
  * Get pointer to TSS (for per-CPU access)
  */
 struct tss64 *tss_get(void) {
-    return &tss;
+    int cpu = smp_get_cpu_id();
+    if (cpu < MAX_CPUS) {
+        return &per_cpu_tss[cpu];
+    }
+    return &per_cpu_tss[0];
 }
 
 /*
@@ -228,11 +241,27 @@ struct tss64 *tss_get(void) {
 void gdt_init_percpu(int cpu_id, uint64_t rsp0) {
     if (cpu_id >= MAX_CPUS) return;
     
+    struct gdt_entry *gdt_table = per_cpu_gdt[cpu_id];
+
+    /* Initialize this CPU's TSS */
     tss_init(&per_cpu_tss[cpu_id], rsp0);
     
-    /* Each CPU needs its own TSS entry in GDT
-     * For now, just update the global TSS pointer */
-    /* TODO: Implement full per-CPU GDT for SMP */
+    /* Copy GDT entries from BSP (cpu 0) */
+    /* Entries 0-4 are constant across CPUs (null, kcode, kdata, udata, ucode) */
+    memcpy(gdt_table, per_cpu_gdt[0], 5 * sizeof(struct gdt_entry));
+
+    /* Setup TSS entry for this CPU */
+    gdt_fill_tss(&gdt_table[5], (uint64_t)&per_cpu_tss[cpu_id], sizeof(struct tss64) - 1);
+
+    /* Load GDT and reload segments */
+    gdt_load(gdt_table);
+
+    /* Load TSS */
+    __asm__ volatile(
+        "ltr %w0"
+        :
+        : "r"((uint16_t)GDT_TSS)
+    );
 }
 
 /*
