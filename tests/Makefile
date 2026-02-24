@@ -147,5 +147,11 @@ bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
 bench_vm_map.o: bench_vm_map.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 
+bench_vm_map_alloc: bench_vm_map_alloc.o mocks_vm.o vm_map.o
+	$(CC) $(CFLAGS_KERN) $^ -o $@
+
+bench_vm_map_alloc.o: bench_vm_map_alloc.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
 mocks_vm.o: mocks_vm.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
