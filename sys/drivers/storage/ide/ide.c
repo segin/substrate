@@ -21,6 +21,7 @@
 #include <drivers/storage/ide/ide.h>
 #include <arch/x86-common/include/io.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 
 /*
  * ============================================================
@@ -114,8 +115,20 @@ static inline void ide_bm_write32(uint8_t channel, uint8_t reg, uint32_t data) {
 
 /* Wait for BSY to clear */
 static void ide_wait_bsy(uint8_t channel) {
+    uint64_t start_ms = get_uptime_ms();
     while (ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_BSY) {
-        __asm__ volatile("pause");
+        if (get_uptime_ms() - start_ms > 1000) {
+            kprint("IDE: BSY timeout\n");
+            break;
+        }
+
+        for (int i = 0; i < 1000; i++) {
+            if (!(ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_BSY)) {
+                return;
+            }
+            __asm__ volatile("pause");
+        }
+        sched_yield();
     }
 }
 
