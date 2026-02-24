@@ -43,5 +43,6 @@ extern int errno;
 #define EOWNERDEAD  130 /* Owner died */
 #define ENOTRECOVERABLE 131 /* State not recoverable */
 #define ETIMEDOUT   110 /* Connection timed out */
+#define EOVERFLOW   75  /* Value too large for defined data type */
 
 #endif

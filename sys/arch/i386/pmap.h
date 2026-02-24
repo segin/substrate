@@ -92,6 +92,7 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
 int pmap_enter_pse(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t flags); // Deprecated name match
 int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
 void pmap_remove(pmap_t pmap, uintptr_t va);
+void pmap_remove_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
 uintptr_t pmap_extract(pmap_t pmap, uintptr_t va); // Get PA from VA
 
 // Protection flags for pmap_enter

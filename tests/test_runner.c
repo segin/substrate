@@ -26,6 +26,7 @@ extern bool test_munmap_logic(void);
 extern bool test_swap_lifecycle(void);
 extern bool test_swap_full(void);
 extern bool test_vm_fault_cow_trigger(void);
+extern bool run_mmap_cleanup_test(void);
 
 // Arch Tests (Mocked)
 extern bool test_trampoline_preparation(void);
@@ -151,6 +152,7 @@ test_case_t tests[] = {
     {"swap_life", test_swap_lifecycle},
     {"swap_full", test_swap_full},
     {"cow_trigger", test_vm_fault_cow_trigger},
+    {"mmap_cleanup", run_mmap_cleanup_test},
     {"smp_tramp", test_trampoline_preparation},
     {"lock_basic", test_spinlock_basic},
     {"lock_init", test_spinlock_initial_state},

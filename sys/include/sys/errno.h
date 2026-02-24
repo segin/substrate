@@ -45,5 +45,6 @@
 #define ELOOP        62 /* Too many symbolic links encountered */
 #define EOPNOTSUPP   95 /* Operation not supported on transport endpoint */
 #define ENOTSUP      EOPNOTSUPP
+#define EOVERFLOW    75 /* Value too large for defined data type */
 
 #endif

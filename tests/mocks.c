@@ -59,7 +59,13 @@ struct personality personality_freebsd = { .name = "FreeBSD", .id = PERS_FREEBSD
 struct personality personality_linux = { .name = "Linux", .id = PERS_LINUX };
 
 // Paging Mocks
-void pmap_invalidate_page(uintptr_t v) { (void)v; }
+int pmap_invalidate_count = 0;
+int pmap_flush_all_count = 0;
+int pmap_remove_count = 0;
+int pmap_remove_range_count = 0;
+
+void pmap_invalidate_page(uintptr_t v) { (void)v; pmap_invalidate_count++; }
+void pmap_invalidate_all(void) { pmap_flush_all_count++; }
 
 int pmap_enter(pmap_t p, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
     (void)p; (void)va; (void)pa; (void)prot; (void)flags;
@@ -85,7 +91,8 @@ void *pmm_alloc_block() {
     return NULL;
 }
 
-void pmm_free_block(void *p) { (void)p; }
+int pmm_free_block_count = 0;
+void pmm_free_block(void *p) { (void)p; pmm_free_block_count++; }
 void *pmm_alloc_contiguous(size_t c) {
     if (next_mock_page + c < 1024) {
         void *p = &mock_phys_memory[next_mock_page * 4096];
@@ -248,7 +255,8 @@ int pmap_test_and_clear_modify(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va
 
 void pmap_copy_page(uintptr_t src, uintptr_t dst) { (void)src; (void)dst; }
 void pmap_zero_page(uintptr_t pa) { (void)pa; }
-void pmap_remove(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; }
+void pmap_remove(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; pmap_remove_count++; }
+void pmap_remove_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)pmap; (void)sva; (void)eva; pmap_remove_range_count++; }
 
 struct pgrp *pgrp_find(pid_t pgid) { (void)pgid; return NULL; }
 int pgrp_signal(struct pgrp *pgrp, int sig, int check_session) { (void)pgrp; (void)sig; (void)check_session; return 0; }

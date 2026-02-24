@@ -88,9 +88,9 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
                 if (pa) {
                     void *cleanup_kvirt = (void *)(pa + 0xC0000000);
                     pmm_free_block(cleanup_kvirt);
-                    pmap_remove(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
                 }
             }
+            pmap_remove_range(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), v_addr, va);
             // Remove the vm_map entry
             vm_map_remove(map, v_addr, v_addr + length);
 
