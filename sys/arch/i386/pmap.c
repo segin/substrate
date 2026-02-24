@@ -739,6 +739,56 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
 // Threshold for switching to full TLB flush vs individual INVLPG
 #define TLB_BATCH_THRESHOLD 32
 
+void pmap_remove_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) {
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) {
+        panic("pmap_remove_range: pmap not active");
+    }
+
+    // Align range to page boundaries
+    sva &= ~0xFFF;
+    eva = (eva + 0xFFF) & ~0xFFF;
+
+    uint32_t count = (eva - sva) / 0x1000;
+    int batch_flush = (count > TLB_BATCH_THRESHOLD);
+
+    for (uintptr_t va = sva; va < eva; va += 0x1000) {
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+
+        if (!(V_PD[pdi] & PTE_P)) {
+            // Skip entire 4MB if PD not present
+            va = (va & 0xFFC00000) + 0x400000 - 0x1000;
+            continue;
+        }
+
+        // Check for Large Page
+        if (V_PD[pdi] & PTE_PS) {
+            // Remove the entire 4MB mapping
+            V_PD[pdi] = 0;
+            if (!batch_flush) {
+                 pmap_invalidate_page(va);
+            }
+            // Skip to end of 4MB region
+            va = (va & 0xFFC00000) + 0x400000 - 0x1000;
+            continue;
+        }
+
+        uint32_t *pt = V_PT(pdi);
+        if (pt[pti] != 0) {
+            pt[pti] = 0;
+            if (!batch_flush) {
+                pmap_invalidate_page(va);
+            }
+        }
+    }
+
+    if (batch_flush) {
+        pmap_invalidate_all();
+    }
+}
+
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error
 int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {

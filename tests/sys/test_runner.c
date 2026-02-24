@@ -38,6 +38,7 @@ extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
+extern void run_mmap_perf_test(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -255,6 +256,10 @@ void run_kernel_tests(void) {
     if (strcmp(test_arg, "benchmark") == 0) {
          extern void run_vm_map_benchmark(void);
          run_vm_map_benchmark();
+    }
+
+    if (strcmp(test_arg, "mmap_perf") == 0) {
+         run_mmap_perf_test();
     }
     if (all || strcmp(test_arg, "uma") == 0) {
         run_uma_tests();
