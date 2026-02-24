@@ -43,7 +43,6 @@
 #include <sys/smp.h>
 
 #include <sys/tests.h>
-#include <sys/smp.h>
 
 extern void ntsync_init(void);
 
