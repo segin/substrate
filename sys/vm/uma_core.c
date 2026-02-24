@@ -370,23 +370,11 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     // UNLESS we resize slab_zone.
     
     if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
-        // Safe fallback / Hack:
-        // For offpage, just assume sequential free behavior without explicit list?
-        // No, `uma_slab_alloc_item` relies on `us_freelist`.
-        
-        // Real fix: Allocate slab header + freelist size.
-        // Since `uma_zalloc` takes a zone, we can't request variable size 
-        // unless we have multiple slab zones.
-        // But `uma_slab_zone` was created with `sizeof(uma_slab)`.
-        
-        // Workaround: For offpage, we only support 1 item per page so no freelist needed? 
-        // us_firstfree=0. us_freelist[0] = 0xFF.
-        // This requires 1 byte.
-        // Let's check `uma_startup`: created with sizeof(uma_slab).
-        // Let's change `uma_startup` creation to `sizeof(uma_slab) + 16` to be safe for small counts?
-        
-        // I will update the `uma_startup` chunk to `sizeof(uma_slab) + 32` to suffice for common cases.
-        // And make sure `slab->us_freelist` points to valid memory.
+        /*
+         * For off-page slabs, the slab header and free list are allocated
+         * contiguously using kzalloc (variable size based on ipers).
+         * Set the freelist pointer to immediately follow the slab structure.
+         */
         slab->us_freelist = (uint8_t *)(slab + 1);
     }
     
@@ -437,7 +425,7 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
             pmm_free_block(slab->us_data);
         }
 
-        uma_zfree(uma_slab_zone, slab);
+        kfree(slab, sizeof(uma_slab_t) + zone->uz_ipers);
     } else {
         pmm_free_block(slab->us_data);
     }
