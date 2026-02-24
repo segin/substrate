@@ -137,6 +137,12 @@ bool run_pipe_race(void) {
     return test_pipe_race() == 0;
 }
 
+// Sysctl Tests
+extern int test_sysctl_copy_logic(void);
+bool run_sysctl_copy(void) {
+    return test_sysctl_copy_logic();
+}
+
 typedef struct {
     const char *name;
     bool (*func)(void);
@@ -225,6 +231,7 @@ test_case_t tests[] = {
     {"libc_strtok", test_libc_strtok},
     {"div64", run_div64_tests},
     {"pipe_race", run_pipe_race},
+    {"sysctl_copy", run_sysctl_copy},
     {NULL, NULL}
 };
 

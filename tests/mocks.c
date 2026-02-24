@@ -66,6 +66,11 @@ int pmap_enter(pmap_t p, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t fla
     return 0;
 }
 
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
+    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
+    return 0;
+}
+
 uintptr_t pmap_extract(pmap_t p, uintptr_t va) {
     (void)p;
     return va;
@@ -146,12 +151,16 @@ void kprintf(const char *fmt, ...) {
 }
 
 // Copy functions mocks
+void *mock_fault_addr = NULL;
+
 int copyin(const void *src, void *dst, size_t size) {
+    if (src == mock_fault_addr) return 14; // EFAULT
     memcpy(dst, src, size);
     return 0;
 }
 
 int copyout(const void *src, void *dst, size_t size) {
+    if (dst == mock_fault_addr) return 14; // EFAULT
     memcpy(dst, src, size);
     return 0;
 }
@@ -222,7 +231,6 @@ void pmap_bootstrap(void) {}
 void pmap_map_trampoline(void) {}
 void random_init(void) {}
 void crc32_init(void) {}
-void sysctl_init(void) {}
 void virtio_init(void) {}
 void ntsync_init(void) {}
 void run_kernel_tests(void) {}
