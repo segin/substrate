@@ -154,6 +154,30 @@ int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length) {
         }
         start = cur->end;
         cur = cur->next;
+        if (cur == header) break;
+
+        if (cur->start >= start && cur->start - start >= length) {
+            *addr = start;
+            return 0;
+        }
+        start = cur->end;
+        cur = cur->next;
+        if (cur == header) break;
+
+        if (cur->start >= start && cur->start - start >= length) {
+            *addr = start;
+            return 0;
+        }
+        start = cur->end;
+        cur = cur->next;
+        if (cur == header) break;
+
+        if (cur->start >= start && cur->start - start >= length) {
+            *addr = start;
+            return 0;
+        }
+        start = cur->end;
+        cur = cur->next;
     }
 
     // Check tail gap (gap between last entry and max_offset)
