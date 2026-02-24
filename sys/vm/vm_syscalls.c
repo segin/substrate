@@ -138,8 +138,10 @@ int sys_munmap(void *addr, size_t length) {
 #include <string.h>
 
 extern int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
+extern int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags);
 extern pmap_t pmap_kernel(void);
 extern void *pmm_alloc_block(void);
+extern void pmm_free_block(void *p);
 
 void *sys_brk(void *addr) {
     if (!current_process) return NULL;
@@ -173,32 +175,49 @@ void *sys_brk(void *addr) {
 
 
     if (new_page_end > old_page_end) {
-        // Allocate and map new pages
-        for (uintptr_t va = old_page_end; va < new_page_end; va += 0x1000) {
-            void *pa_virt = pmm_alloc_block();
-            if (!pa_virt) {
-                extern int syscall_trace_enabled;
-                if (syscall_trace_enabled) {
-                    extern void kprint(const char*);
-                    kprint("BRK: pmm_alloc failed!\n");
+        // Allocate and map new pages in batches
+        #define BRK_BATCH_SIZE 256
+        uintptr_t pa_batch[BRK_BATCH_SIZE];
+        uintptr_t va = old_page_end;
+
+        while (va < new_page_end) {
+            int batch_count = 0;
+            uintptr_t batch_va_start = va;
+
+            // Fill batch
+            while (batch_count < BRK_BATCH_SIZE && va < new_page_end) {
+                void *pa_virt = pmm_alloc_block();
+                if (!pa_virt) {
+                     // Cleanup current batch (not mapped yet)
+                     for (int k = 0; k < batch_count; k++) {
+                         pmm_free_block((void*)(pa_batch[k] + 0xC0000000));
+                     }
+                     extern int syscall_trace_enabled;
+                     if (syscall_trace_enabled) {
+                         extern void kprint(const char*);
+                         kprint("BRK: pmm_alloc failed!\n");
+                     }
+                     return (void *)(uintptr_t)old_brk; // Out of memory
                 }
-                return (void *)(uintptr_t)old_brk; // Out of memory
+                pa_batch[batch_count++] = (uintptr_t)pa_virt - 0xC0000000;
+
+                // Zero page immediately (warm cache)
+                memset(pa_virt, 0, 0x1000);
+
+                va += 0x1000;
             }
             
-            // Convert virtual to physical for pmap_enter
-            uintptr_t pa_phys = (uintptr_t)pa_virt - 0xC0000000;
-            
-            // Map page with Read/Write permissions (USER handled by pmap for user addresses)
-            if (pmap_enter(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(), va, pa_phys, VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
+            // Map batch
+            if (pmap_enter_batch(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(),
+                                 batch_va_start, batch_count, pa_batch,
+                                 VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
                  extern int syscall_trace_enabled;
                  if (syscall_trace_enabled) {
                      extern void kprint(const char*);
-                     kprint("BRK: pmap_enter failed!\n");
+                     kprint("BRK: pmap_enter_batch failed!\n");
                  }
                  return (void *)(uintptr_t)old_brk;
             }
-            // Zero the page - pa_virt is already virtual, use directly
-            memset(pa_virt, 0, 0x1000);
         }
     }
     // If shrinking, we leak pages for now (lazy unmap). 
