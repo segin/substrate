@@ -11,6 +11,7 @@ SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_exp
 SRCS += test_minix_readdir.c
 SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vfs_busy.c
 SRCS += test_nanosleep.c test_reboot.c
+SRCS += test_chacha20.c
 
 OBJS = $(SRCS:.c=.o)
 

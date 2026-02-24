@@ -201,6 +201,10 @@ void run_kernel_tests(void) {
          run_rng_tests();
     }
 
+    if (all || strcmp(test_arg, "chacha20") == 0) {
+         run_chacha20_tests();
+    }
+
     if (all || strcmp(test_arg, "ps2") == 0) {
          extern void run_ps2_tests(void);
          run_ps2_tests();
