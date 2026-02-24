@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir host_test_pmap_large
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -40,8 +40,12 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libc_ctype
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
+	./host_test_pmap_large
 
 # Duplicate rule removed
+
+host_test_pmap_large: sys/host_test_pmap_large.c
+	$(CC) -g -Wall -DHOST_TEST -I../sys -I../sys/include -I../include -I../sys/arch/x86-common/include sys/host_test_pmap_large.c -o $@
 
 test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_ctype.c -o $@
