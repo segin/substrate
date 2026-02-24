@@ -7,9 +7,6 @@
 
 extern int fb_active;
 
-// Forward decl
-void vga_text_set_color(uint8_t fg, uint8_t bg);
-
 void panic(const char *msg) {
     /* Disable interrupts immediately */
     __asm__ volatile("cli");
