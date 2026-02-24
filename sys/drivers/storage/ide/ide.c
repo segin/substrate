@@ -21,6 +21,7 @@
 #include <drivers/storage/ide/ide.h>
 #include <arch/x86-common/include/io.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 
 /*
  * ============================================================
@@ -115,14 +116,14 @@ static inline void ide_bm_write32(uint8_t channel, uint8_t reg, uint32_t data) {
 /* Wait for BSY to clear */
 static void ide_wait_bsy(uint8_t channel) {
     while (ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_BSY) {
-        __asm__ volatile("pause");
+        cpu_relax();
     }
 }
 
 /* Wait for DRQ to set */
 static void ide_wait_drq(uint8_t channel) {
     while (!(ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_DRQ)) {
-        __asm__ volatile("pause");
+        cpu_relax();
     }
 }
 
@@ -143,7 +144,7 @@ static int ide_wait_ready(uint8_t channel, int timeout_ms) {
                 return -1;
             }
         }
-        __asm__ volatile("pause");
+        cpu_relax();
     }
     
     /* Check for errors */
@@ -354,7 +355,11 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     
     /* Wait for completion (interrupt-driven) */
     while (!ide_irq_complete[channel]) {
-        __asm__ volatile("hlt");
+        intr_disable();
+        if (!ide_irq_complete[channel]) {
+            sched_sleep((void *)&ide_irq_complete[channel]);
+        }
+        intr_enable();
     }
     
     uint8_t bm_status = ide_bm_status(channel);
@@ -427,7 +432,11 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     
     /* Wait for completion */
     while (!ide_irq_complete[channel]) {
-        __asm__ volatile("hlt");
+        intr_disable();
+        if (!ide_irq_complete[channel]) {
+            sched_sleep((void *)&ide_irq_complete[channel]);
+        }
+        intr_enable();
     }
     
     uint8_t bm_status = ide_bm_status(channel);
@@ -912,6 +921,7 @@ void ide_irq_handler(int irq) {
     
     /* Signal completion */
     ide_irq_complete[channel] = 1;
+    sched_wakeup((void *)&ide_irq_complete[channel]);
 }
 
 /*

@@ -55,4 +55,20 @@ static inline void io_wait(void) {
     outb(0x80, 0);
 }
 
+static inline void intr_disable(void) {
+    __asm__ volatile("cli");
+}
+
+static inline void intr_enable(void) {
+    __asm__ volatile("sti");
+}
+
+static inline void intr_wait(void) {
+    __asm__ volatile("hlt");
+}
+
+static inline void cpu_relax(void) {
+    __asm__ volatile("pause");
+}
+
 #endif
