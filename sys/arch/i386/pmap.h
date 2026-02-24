@@ -148,4 +148,20 @@ void pmap_map_trampoline(void);
 
 int pmap_fault(uint32_t err_code, uint32_t cr2);
 
+// Recursive Paging Helpers
+#define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
+#define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
+#define PTE_FRAME       0xFFFFF000 // Frame address mask
+
+// Kernel Address Space Translations (Higher Half)
+#define V2P(x) ((uint32_t)(x) - 0xC0000000)
+#define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
+
+// Threshold for switching to full TLB flush vs individual INVLPG
+#define TLB_BATCH_THRESHOLD 32
+
+// Access to PD and PTs via recursive mapping
+#define V_PD  ((uint32_t *)0xFFFFF000)
+#define V_PT(i) ((uint32_t *)(0xFFC00000 + ((i) << 12)))
+
 #endif

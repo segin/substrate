@@ -17,14 +17,7 @@ static uint32_t kernel_page_directory[1024];
 __attribute__((aligned(4096)))
 static uint32_t kernel_page_tables[33][1024];
 
-// Recursive Paging Helpers
-#define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
-#define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
-#define PTE_FRAME       0xFFFFF000 // Frame address mask
 
-// Kernel Address Space Translations (Higher Half)
-#define V2P(x) ((uint32_t)(x) - 0xC0000000)
-#define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
 
 #include <sys/proc.h> // For current_process
 
@@ -45,8 +38,7 @@ static struct pmap_stats global_pmap_stats = {0};
 // Feature flags
 static int pmap_has_pcid = 0;
 
-// Threshold for switching to full TLB flush vs individual INVLPG
-#define TLB_BATCH_THRESHOLD 32
+
 
 // Helper to increment stats (global + pmap)
 static void pmap_stat_inc(pmap_t pmap, int field_offset) {
@@ -524,9 +516,7 @@ void pmap_activate(pmap_t pmap) {
     }
 }
 
-// Access to PD and PTs via recursive mapping
-#define V_PD  ((uint32_t *)0xFFFFF000)
-#define V_PT(i) ((uint32_t *)(0xFFC00000 + ((i) << 12)))
+
 
 int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;

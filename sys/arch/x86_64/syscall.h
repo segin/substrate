@@ -2,7 +2,11 @@
 #define _ARCH_SYSCALL_H
 
 #include <stdint.h>
-#include <exec/perso/personality.h>
+// Syscall MSRs
+#define MSR_STAR      0xC0000081
+#define MSR_LSTAR     0xC0000082
+#define MSR_FMASK     0xC0000084
+#define MSR_KERNEL_GS_BASE 0xC0000102
 
 // x86_64 Syscall Entry (Assembly)
 extern void syscall_entry(void);

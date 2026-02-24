@@ -38,12 +38,6 @@
 #include <string.h>
 
 
-/*
- * Signal trampoline address - mapped by kernel at a fixed location.
- * Contains code to invoke sys_sigreturn after signal handler returns.
- */
-#define SIG_TRAMPOLINE_ADDR     0xFFFF1000
-#define RT_SIG_TRAMPOLINE_ADDR  0xFFFF1010  /* For SA_SIGINFO handlers -> rt_sigreturn */
 
 /*
  * populate_siginfo - Fill in siginfo_t structure

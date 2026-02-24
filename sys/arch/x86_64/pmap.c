@@ -2,23 +2,7 @@
 #include <arch/x86_64/msr.h>
 #include <vm/vm_kmem.h>
 
-// MSR definitions for NX bit
-#ifndef MSR_EFER
-#define MSR_EFER    0xC0000080
-#endif
-#ifndef EFER_NXE
-#define EFER_NXE    (1UL << 11)
-#endif
-
-
-
 extern uint64_t boot_pml4[]; // From boot.S
-
-// KERNEL_BASE for x86_64 is typically -2GB
-#ifndef KERNEL_BASE
-#define KERNEL_BASE     0xFFFFFFFF80000000UL
-#endif
-#define RECURSIVE_SLOT  510UL
 
 // Helper to convert kernel virtual to physical
 static inline uint64_t pmap_kvtop(void *va) {
