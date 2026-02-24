@@ -78,7 +78,7 @@ static void set_fatal_error(void) { g_status = 2; }
 static void usage(FILE *out) {
     fprintf(out,
         "usage: cpio -o [-v] [-H format] [-F archive] [-R user:group]\\n"
-        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--safe-extract] [--no-absolute-paths]\\n"
+        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--unsafe] [--no-absolute-paths]\\n"
         "       cpio -p [-v] [-dmu] directory\\n");
 }
 
@@ -729,9 +729,11 @@ int main(int argc, char **argv) {
     int c;
     memset(&opt, 0, sizeof(opt));
     opt.fmt = (fmt_t)-1;
+    opt.safe_extract = true;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--safe-extract") == 0) opt.safe_extract = true;
+        else if (strcmp(argv[i], "--unsafe") == 0) opt.safe_extract = false;
         else if (strcmp(argv[i], "--no-absolute-paths") == 0) opt.no_absolute_paths = true;
         else if (strcmp(argv[i], "--no-overwrite") == 0) opt.no_overwrite = true;
         else if (strcmp(argv[i], "--numeric-owner") == 0) opt.numeric_owner = true;
