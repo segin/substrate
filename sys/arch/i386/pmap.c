@@ -40,6 +40,9 @@ static struct pmap_stats global_pmap_stats = {0};
 // Feature flags
 static int pmap_has_pcid = 0;
 
+// Threshold for switching to full TLB flush vs individual INVLPG
+#define TLB_BATCH_THRESHOLD 32
+
 // Helper to increment stats (global + pmap)
 static void pmap_stat_inc(pmap_t pmap, int field_offset) {
     // Increment per-pmap stat
@@ -564,6 +567,66 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
     return 0;
 }
 
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
+    (void)flags;
+    // Must be active address space to use recursive mapping
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return -1;
+
+    uint32_t last_pdi = (uint32_t)-1;
+    uint32_t *pt = NULL;
+
+    for (int i = 0; i < count; i++) {
+        uintptr_t va = va_start + i * 0x1000;
+        uintptr_t pa = pa_list[i];
+
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+
+        // Check if we switched to a new Page Table (or first iteration)
+        if (pdi != last_pdi) {
+            // Allocate page table on demand if not present
+            if (!(V_PD[pdi] & PTE_P)) {
+                void *pt_virt = pmm_alloc_block();
+                if (!pt_virt) return -1;
+                // Convert virtual to physical for PDE (pmm_alloc_block returns virtual)
+                uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
+                // PDE always gets W and U so PT can control actual permissions
+                V_PD[pdi] = pt_phys | PTE_P | PTE_W | PTE_U;
+                pmap_invalidate_page((uint32_t)V_PT(pdi));
+                // Zero the page table using virtual address
+                uint32_t *new_pt = (uint32_t *)pt_virt;
+                for (int j = 0; j < 1024; j++) new_pt[j] = 0;
+            }
+            last_pdi = pdi;
+            pt = V_PT(pdi);
+        }
+
+        // Build PTE flags from prot parameter
+        uint32_t pte_flags = PTE_P;
+        if (prot & VM_PROT_WRITE) {
+            pte_flags |= PTE_W;
+        }
+        if ((va < 0xC0000000) || (prot & VM_PROT_USER)) {
+            pte_flags |= PTE_U;  // User accessible if in user space or requested
+        }
+
+        pt[pti] = (pa & 0xFFFFF000) | pte_flags;
+    }
+
+    // Batch TLB invalidation
+    if (count > TLB_BATCH_THRESHOLD) {
+        pmap_invalidate_all();
+    } else {
+        for (int i = 0; i < count; i++) {
+            pmap_invalidate_page(va_start + i * 0x1000);
+        }
+    }
+
+    return 0;
+}
+
 // Trampoline Support
 extern unsigned char sig_trampoline_code[];
 extern unsigned int sig_trampoline_size;
@@ -735,9 +798,6 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
     if (!(pt[pti] & PTE_P)) return 0;
     return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);
 }
-
-// Threshold for switching to full TLB flush vs individual INVLPG
-#define TLB_BATCH_THRESHOLD 32
 
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error
