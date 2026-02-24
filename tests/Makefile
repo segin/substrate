@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir test_vm_map_leak
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -40,6 +40,7 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libc_ctype
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
+	./test_vm_map_leak
 
 # Duplicate rule removed
 
@@ -138,11 +139,14 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir test_vm_map_leak
 	$(MAKE) -C sys clean
 
 bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
 	$(CC) $(CFLAGS_KERN) $^ -o $@
+
+test_vm_map_leak: sys/test_vm_map_leak.c
+	$(CC) $(CFLAGS_KERN) -DHOST_TEST $< -o $@
 
 bench_vm_map.o: bench_vm_map.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
