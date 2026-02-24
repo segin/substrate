@@ -128,3 +128,12 @@ string_prefixed.o: ../lib/c/src/string.c
 clean:
 	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf
 	$(MAKE) -C sys clean
+
+bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
+	$(CC) $(CFLAGS_KERN) $^ -o $@
+
+bench_vm_map.o: bench_vm_map.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+mocks_vm.o: mocks_vm.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@

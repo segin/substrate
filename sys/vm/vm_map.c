@@ -30,6 +30,7 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     
     map->header = sentinel;
     map->hint = sentinel;
+    map->root = NULL;
 }
 
 vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
@@ -45,43 +46,71 @@ vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
     return map;
 }
 
+static void vm_map_splay(vm_map_t *map, uintptr_t va) {
+    vm_map_entry_t *root = map->root;
+    if (!root) return;
+
+    struct vm_map_entry N, *l, *r, *y;
+    N.left = N.right = NULL;
+    l = r = &N;
+
+    for (;;) {
+        if (va < root->start) {
+            if (!root->left) break;
+            if (va < root->left->start) {
+                y = root->left;
+                root->left = y->right;
+                y->right = root;
+                root = y;
+                if (!root->left) break;
+            }
+            r->left = root;
+            r = root;
+            root = root->left;
+        } else if (va >= root->end) {
+            if (!root->right) break;
+            if (va >= root->right->end) {
+                y = root->right;
+                root->right = y->left;
+                y->left = root;
+                root = y;
+                if (!root->right) break;
+            }
+            l->right = root;
+            l = root;
+            root = root->right;
+        } else {
+            break;
+        }
+    }
+    l->right = root->left;
+    r->left = root->right;
+    root->left = N.right;
+    root->right = N.left;
+    map->root = root;
+}
+
 // Internal helper: find the entry containing VA, or the entry immediately preceding it.
 static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **entry) {
-    vm_map_entry_t *cur;
-    vm_map_entry_t *header = map->header;
+    vm_map_splay(map, va);
+    vm_map_entry_t *root = map->root;
 
-    // Check hint first
-    if (map->hint && map->hint != header) {
-        cur = map->hint;
-        if (va >= cur->start && va < cur->end) {
-            *entry = cur;
-            return true;
-        }
-        // Use hint as start point if possible
-        if (va > cur->start) {
-             // Continue from hint
-             cur = cur->next;
-        } else {
-             // Restart from beginning
-             cur = header->next;
-        }
+    if (!root) {
+        *entry = map->header; // Effectively header->prev since header is empty/sentinel
+        return false;
+    }
+
+    if (va >= root->start && va < root->end) {
+        *entry = root;
+        map->hint = root;
+        return true;
+    }
+
+    if (va < root->start) {
+        *entry = root->prev;
     } else {
-        cur = header->next;
+        *entry = root;
     }
-
-    for (; cur != header; cur = cur->next) {
-        if (va >= cur->start && va < cur->end) {
-            *entry = cur;
-            map->hint = cur; // Update hint
-            return true;
-        }
-        if (va < cur->start) {
-            *entry = cur->prev;
-            return false;
-        }
-    }
-    
-    *entry = header->prev;
     return false;
 }
 
@@ -120,6 +149,25 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     prev_entry->next = new_entry;
     
     map->hint = new_entry;
+
+    // Insert into splay tree
+    if (!map->root) {
+        map->root = new_entry;
+        new_entry->left = new_entry->right = NULL;
+    } else {
+        vm_map_splay(map, start);
+        if (start < map->root->start) {
+            new_entry->left = map->root->left;
+            new_entry->right = map->root;
+            map->root->left = NULL;
+            map->root = new_entry;
+        } else {
+            new_entry->right = map->root->right;
+            new_entry->left = map->root;
+            map->root->right = NULL;
+            map->root = new_entry;
+        }
+    }
 
     map->nentries++;
     map->size += (end - start);
@@ -192,6 +240,21 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             if (map->hint == cur) map->hint = cur->prev;
             cur->prev->next = cur->next;
             cur->next->prev = cur->prev;
+
+            // Remove from splay tree
+            vm_map_splay(map, cur->start);
+            if (map->root == cur) {
+                vm_map_entry_t *left = cur->left;
+                vm_map_entry_t *right = cur->right;
+                if (!left) {
+                    map->root = right;
+                } else {
+                    map->root = left;
+                    vm_map_splay(map, cur->start); // Splay max of left to root
+                    map->root->right = right;
+                }
+            }
+
             map->nentries--;
             map->size -= (cur->end - cur->start);
             free_entry(cur);
@@ -223,6 +286,25 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             new_entry->next = cur->next;
             cur->next->prev = new_entry;
             cur->next = new_entry;
+
+            // Insert into splay tree
+            vm_map_splay(map, new_entry->start);
+            if (!map->root) { // Should not happen as cur is in tree
+                map->root = new_entry;
+                new_entry->left = new_entry->right = NULL;
+            } else {
+                if (new_entry->start < map->root->start) {
+                    new_entry->left = map->root->left;
+                    new_entry->right = map->root;
+                    map->root->left = NULL;
+                    map->root = new_entry;
+                } else {
+                    new_entry->right = map->root->right;
+                    new_entry->left = map->root;
+                    map->root->right = NULL;
+                    map->root = new_entry;
+                }
+            }
 
             // Adjust original entry (left part)
             cur->end = start;
