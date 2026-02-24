@@ -24,7 +24,7 @@ UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
              sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c \
-             sys/test_div64.c ../tests/sys/test_pipe_race.c
+             sys/test_div64.c ../tests/sys/test_pipe_race.c sys/test_mmap_batch.c
 
 UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
