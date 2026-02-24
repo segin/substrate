@@ -133,7 +133,7 @@ void create_output_file(void) {
     name = (char *)malloc(len);
     if (name == NULL) no_space();
     
-    sprintf(name, "%s.tab.c", file_prefix);
+    snprintf(name, len, "%s.tab.c", file_prefix);
     output_file = fopen(name, "w");
     if (output_file == NULL) {
         perror(name);
@@ -141,7 +141,7 @@ void create_output_file(void) {
     }
     
     if (dflag) {
-        sprintf(name, "%s.tab.h", file_prefix);
+        snprintf(name, len, "%s.tab.h", file_prefix);
         defines_file = fopen(name, "w");
         if (defines_file == NULL) {
             perror(name);
@@ -150,7 +150,7 @@ void create_output_file(void) {
     }
     
     if (vflag) {
-        sprintf(name, "%s.output", file_prefix);
+        snprintf(name, len, "%s.output", file_prefix);
         verbose_file = fopen(name, "w");
         if (verbose_file == NULL) {
             perror(name);
