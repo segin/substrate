@@ -21,6 +21,7 @@
 #include <drivers/storage/ide/ide.h>
 #include <arch/x86-common/include/io.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 
 /*
  * ============================================================
@@ -114,21 +115,42 @@ static inline void ide_bm_write32(uint8_t channel, uint8_t reg, uint32_t data) {
 
 /* Wait for BSY to clear */
 static void ide_wait_bsy(uint8_t channel) {
+    uint64_t start = get_uptime_ms();
+    int spins = 0;
     while (ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_BSY) {
-        __asm__ volatile("pause");
+        if (get_uptime_ms() - start > 1000) {
+            kprint("ide: timeout waiting for BSY\n");
+            break;
+        }
+        if (spins++ > 1000) {
+            sched_yield();
+        } else {
+            __asm__ volatile("pause");
+        }
     }
 }
 
 /* Wait for DRQ to set */
 static void ide_wait_drq(uint8_t channel) {
+    uint64_t start = get_uptime_ms();
+    int spins = 0;
     while (!(ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_DRQ)) {
-        __asm__ volatile("pause");
+        if (get_uptime_ms() - start > 1000) {
+            kprint("ide: timeout waiting for DRQ\n");
+            break;
+        }
+        if (spins++ > 1000) {
+            sched_yield();
+        } else {
+            __asm__ volatile("pause");
+        }
     }
 }
 
 /* Wait with timeout (returns 0 on success, -1 on timeout/error) */
 static int ide_wait_ready(uint8_t channel, int timeout_ms) {
     uint64_t start_ms = get_uptime_ms();
+    int spins = 0;
     
     /* 400ns delay (read alternate status 4 times) */
     for (int i = 0; i < 4; i++) {
@@ -143,7 +165,12 @@ static int ide_wait_ready(uint8_t channel, int timeout_ms) {
                 return -1;
             }
         }
-        __asm__ volatile("pause");
+
+        if (spins++ > 1000) {
+            sched_yield();
+        } else {
+            __asm__ volatile("pause");
+        }
     }
     
     /* Check for errors */
