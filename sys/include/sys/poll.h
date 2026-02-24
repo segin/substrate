@@ -25,4 +25,9 @@ typedef unsigned int nfds_t;
 
 int poll(struct pollfd *fds, nfds_t nfds, int timeout);
 
+/* Kernel Interface */
+struct fs_node;
+struct wait_queue_head;
+void poll_wait(struct fs_node *node, struct wait_queue_head *wq, void *waiter);
+
 #endif

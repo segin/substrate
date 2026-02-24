@@ -42,6 +42,7 @@
 #include <sys/utsname.h>
 #include <sys/time.h>
 #include <kern/time.h>
+#include <sys/wait_queue.h>
 
 extern thread_t *current_thread; 
 extern process_t *current_process;
@@ -788,11 +789,95 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
     return ret;
 }
 
+// Poll table entry (flat array)
+typedef struct poll_table_entry {
+    struct wait_queue_head *head;
+    struct wait_queue_entry entry;
+} poll_table_entry_t;
+
+// Poll waiter structure (passed to drivers)
+typedef struct poll_wqueues {
+    thread_t *thread;
+    poll_table_entry_t *entries;
+    unsigned int max_entries;
+    unsigned int used_entries;
+} poll_wqueues_t;
+
+// Wakeup callback for poll
+static int poll_wake(wait_queue_entry_t *wait, void *key) {
+    (void)key;
+    poll_wqueues_t *pwq = (poll_wqueues_t *)wait->private;
+    if (pwq && pwq->thread) {
+        sched_wakeup(pwq->thread);
+        return 1;
+    }
+    return 0;
+}
+
+void poll_wait(struct fs_node *node, struct wait_queue_head *wq, void *waiter) {
+    if (!node || !wq || !waiter) return;
+
+    poll_wqueues_t *pwq = (poll_wqueues_t *)waiter;
+
+    if (pwq->used_entries < pwq->max_entries) {
+        poll_table_entry_t *entry = &pwq->entries[pwq->used_entries++];
+        entry->head = wq;
+        entry->entry.private = pwq;
+        entry->entry.func = poll_wake;
+        add_wait_queue(wq, &entry->entry);
+    }
+}
+
+// Helper to free wait queues
+static void poll_freewait(poll_wqueues_t *pwq) {
+    for (unsigned int i = 0; i < pwq->used_entries; i++) {
+        poll_table_entry_t *entry = &pwq->entries[i];
+        if (entry->head) {
+            remove_wait_queue(entry->head, &entry->entry);
+        }
+    }
+    if (pwq->entries) {
+        kfree(pwq->entries, pwq->max_entries * sizeof(poll_table_entry_t));
+    }
+}
+
 int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
+    poll_wqueues_t table;
+    table.thread = current_thread;
+    table.entries = NULL;
+    table.max_entries = nfds;
+    table.used_entries = 0;
+
+    // Allocate entries upfront if we might sleep
+    if (timeout != 0 && nfds > 0) {
+        table.entries = kmalloc(nfds * sizeof(poll_table_entry_t));
+        if (!table.entries) return -12; // ENOMEM
+    }
+
     int ready = 0;
-    void *waiter = NULL; 
+    void *waiter = (timeout != 0) ? &table : NULL;
     
+    // Timeout calculation
+    uint64_t deadline = UINT64_MAX;
+    if (timeout == 0) {
+        deadline = 0; // Immediate
+    } else if (timeout > 0) {
+        uint64_t ticks = (uint64_t)timeout * get_hz() / 1000;
+        if (ticks == 0) ticks = 1;
+        deadline = get_ticks() + ticks;
+    }
+
+    int interrupted = 0;
+
     while (1) {
+        // Set state to INTERRUPTIBLE before scanning to avoid lost wakeup
+        // We act as if we are already blocked, but we are running.
+        if (timeout != 0) {
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            current_thread->state = THREAD_BLOCKED;
+            current_thread->wait_chan = current_thread; // Wait on ourselves
+        }
+
         ready = 0;
         for (unsigned int i = 0; i < nfds; i++) {
             if (kfds[i].fd < 0) {
@@ -814,19 +899,68 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             if (kfds[i].revents) ready++;
         }
         
-        if (ready > 0) break;
-        if (timeout == 0) break;
-        
-        // Timeout handling (simplified)
-        if (timeout > 0 && timeout != -1) {
-             timeout -= 10; 
-             if (timeout <= 0) return 0;
+        // Only register waiters once
+        waiter = NULL;
+
+        if (ready > 0 || timeout == 0) {
+            // Restore state if we broke out
+            if (timeout != 0) {
+                current_thread->state = THREAD_RUNNING;
+                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+                current_thread->sleep_expiry = 0;
+            }
+            break;
+        }
+
+        if (deadline != UINT64_MAX) {
+            uint64_t now = get_ticks();
+            if (now >= deadline) {
+                if (timeout != 0) {
+                    current_thread->state = THREAD_RUNNING;
+                    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+                    current_thread->sleep_expiry = 0;
+                }
+                break;
+            }
+            current_thread->sleep_expiry = deadline;
         }
         
+        // Fallback: If no wait queues were registered
+        if (table.used_entries == 0) {
+            // Must restore state to RUNNING to use sched_yield effectively
+            current_thread->state = THREAD_RUNNING;
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            current_thread->sleep_expiry = 0;
+
+            sched_yield();
+            if (current_thread->sig_pending) {
+                interrupted = 1;
+                break;
+            }
+            continue;
+        }
+        
+        // Sleep
+        // We are already set to BLOCKED. sched_yield will switch context.
+        // If wakeup happened during scan (ISR), state is READY. sched_yield will reschedule us immediately.
         sched_yield();
+
+        // Woken up
+        current_thread->state = THREAD_RUNNING; // Ensure we are running
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        current_thread->sleep_expiry = 0;
+
+        if (current_thread->sig_pending) {
+             interrupted = 1;
+             break;
+        }
     }
  
-    return ready;
+    poll_freewait(&table);
+
+    if (ready > 0) return ready;
+    if (interrupted) return -EINTR;
+    return 0; // Timeout
 }
 
 int sys_fstat(int fd, struct stat *buf) {
