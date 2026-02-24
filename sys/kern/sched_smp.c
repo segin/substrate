@@ -203,22 +203,27 @@ thread_t *sched_steal_thread(int target_cpu) {
         if (q->count == 0) continue;
         
         // Get a thread (from tail to minimize cache impact)
-        thread_t *t = q->tail;
-        if (!t) continue;
-        
-        // Check CPU affinity - can we run this thread?
+        // Iterate slightly backwards to find a stealable thread (affinity)
         extern int percpu_get_cpu_id(void);
         int my_cpu = percpu_get_cpu_id();
-        if (t->cpu_affinity != 0 && !(t->cpu_affinity & (1U << my_cpu))) {
-            continue;  // Thread can't run on our CPU
-        }
         
-        // Steal this thread
-        runqueue_remove(rq, t);
-        t->on_runqueue = 0;
-        stolen = t;
-        break;
+        thread_t *t = q->tail;
+        int checks = 0;
+        while (t && checks < 4) {
+            // Check CPU affinity - can we run this thread?
+            if (t->cpu_affinity == 0 || (t->cpu_affinity & (1U << my_cpu))) {
+                // Steal this thread
+                runqueue_remove(rq, t);
+                t->on_runqueue = 0;
+                stolen = t;
+                goto found;
+            }
+
+            t = t->rq_prev;
+            checks++;
+        }
     }
+found:
     
     spinlock_release(&rq->lock);
     return stolen;
