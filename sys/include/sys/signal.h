@@ -109,9 +109,6 @@ void pgsignal(int pgrp, int sig);
 void trapsignal(struct process *p, int sig, int code);
 void sigexit(struct process *p, int sig);
 
-/* Data copy functions (user space <-> kernel space) */
-int copyin(const void *src, void *dst, size_t size);
-int copyout(const void *src, void *dst, size_t size);
-int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len);
+#include <sys/copy.h>
 
 #endif

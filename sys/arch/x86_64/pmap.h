@@ -25,6 +25,9 @@
 #define VM_PROT_USER    0x08
 #define VM_PROT_ALL     (VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXEC|VM_PROT_USER)
 
+// KERNEL_BASE for x86_64 is typically -2GB
+#define KERNEL_BASE     0xFFFFFFFF80000000UL
+
 // Number of entries in each level
 #define NPTE_LEVEL      512
 

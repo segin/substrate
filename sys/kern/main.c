@@ -29,6 +29,7 @@
 #include <arch/i386/fpu/fpu_emu.h>
 #include <arch/x86-common/include/rtc.h>
 #include <arch/x86-common/include/multiboot.h>
+#include <sys/freebsd_boot.h>
 
 #include <pm/pm.h>
 #include <sys/crc32.h>
@@ -42,7 +43,6 @@
 #include <sys/smp.h>
 
 #include <sys/tests.h>
-#include <sys/smp.h>
 
 extern void ntsync_init(void);
 
@@ -270,7 +270,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     static multiboot_info_t fake_mbi;
     char *cmdline = NULL;
 
-    if (magic == 0xF8EEB5D0) {
+    if (magic == FREEBSD_LOADER_MAGIC) {
         memset(&fake_mbi, 0, sizeof(fake_mbi));
         mboot_info = &fake_mbi;
          kprint("Booted via FreeBSD loader.\n");
@@ -351,8 +351,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     kprint("Scheduler Initialized.\n");
 
     // Initialize Sysctl Subsystem
-    extern void sysctl_init(void);
-    sysctl_init();
     extern void sysctl_init(void);
     sysctl_init();
     

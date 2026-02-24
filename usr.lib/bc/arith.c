@@ -366,17 +366,13 @@ bc_num *bc_pow(bc_num *a, bc_num *b) {
         bc_free(one);
         
         if (cmp == 0) {
-             // 1^-n = 1, (-1)^-n = 1 or -1
-             // simple way: 1/a^n.
-             // But we can just use the sign logic.
-             // If a=1: 1. If a=-1: 1 if n even, -1 if n odd.
-             // Let's just return 0 for non-unit base.
              if (a->sign > 0) return bc_from_long(1);
              else {
-                 // Check if b is odd/even?
-                 // That requires bignum modulo.
-                 // Let's simplify and return 0 for now as per v0.1 compat.
-                 return bc_new();
+                 // a == -1. Result is 1 if exponent is even, -1 if odd.
+                 // Base 100 digits. b is even if b->digits[0] is even.
+                 int is_odd = b->digits[0] % 2;
+                 if (is_odd) return bc_from_long(-1);
+                 else return bc_from_long(1);
              }
         }
         return bc_new(); 

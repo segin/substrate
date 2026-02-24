@@ -151,6 +151,9 @@ void run_ext2_perf_test_host(void) {
     bgd_table[0] = *bgd_disk;
     fs.bgd = bgd_table;
 
+    // Initialize allocator cache (fix for missing init in host test)
+    ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
+
     // --- Benchmark Loop ---
     uint64_t start_tsc, end_tsc;
     uint32_t allocated_count = 0;

@@ -134,55 +134,19 @@ int kern_write(int fd, const char *buf, int len) {
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
     
-    // Check for console node if write_fs isn't fully generic yet
+    // Check for node write support
     if (f->f_data && ((fs_node_t*)f->f_data)->write) {
-        // Use per-CPU buffer if available, otherwise fallback to kmalloc
-        ensure_io_buffers_init();
-        int cpu = smp_get_cpu_id();
-        if (cpu < 0 || cpu >= MAX_CPUS) cpu = 0;
+        /*
+         * buf is already a kernel pointer here when called from sys_write or internal code.
+         * We pass it directly to write_fs to avoid redundant double buffering.
+         */
+        int bytes = (int)write_fs((fs_node_t*)f->f_data, f->f_offset, len, (const uint8_t*)buf);
 
-        char *kbuf = NULL;
-        bool use_static = mutex_trylock(&io_buffers[cpu].lock);
-
-        if (use_static) {
-            kbuf = io_buffers[cpu].buf;
-        } else {
-            kbuf = kmalloc(IO_CHUNK_SIZE);
-            if (!kbuf) return -12; // ENOMEM
+        if (bytes > 0) {
+            f->f_offset += bytes;
         }
 
-        int total_written = 0;
-        while (total_written < len) {
-            int chunk = len - total_written;
-            if (chunk > IO_CHUNK_SIZE) chunk = IO_CHUNK_SIZE;
-
-            /* buf is already a kernel pointer here when called from sys_write or internal code */
-            memcpy(kbuf, (const char *)buf + total_written, chunk);
-
-            // Cast result to int to check for negative error codes
-            int bytes = (int)write_fs((fs_node_t*)f->f_data, f->f_offset + total_written, chunk, (uint8_t*)kbuf);
-
-            if (bytes < 0) {
-                // Error occurred
-                if (total_written > 0) {
-                    // We already wrote some data, return that count
-                    break;
-                }
-                if (use_static) mutex_unlock(&io_buffers[cpu].lock);
-                else kfree(kbuf, IO_CHUNK_SIZE);
-                return bytes; // Return the error code
-            }
-
-            if (bytes == 0) break; // Should not happen for blocking write usually, unless error or EOF
-
-            total_written += bytes;
-            if (bytes < chunk) break; // Short write
-        }
-
-        f->f_offset += total_written;
-        if (use_static) mutex_unlock(&io_buffers[cpu].lock);
-        else kfree(kbuf, IO_CHUNK_SIZE);
-        return total_written;
+        return bytes;
     } else
         return 0;
 }
@@ -242,35 +206,17 @@ int kern_read(int fd, char *buf, int len) {
     file_t *f = current_process->fds[fd];
     if (!f) return -1;
     
-    char *kbuf = kmalloc(IO_CHUNK_SIZE);
-    if (!kbuf) return -12; // ENOMEM
+    /*
+     * buf is already a kernel pointer here when called from sys_read or internal code.
+     * We pass it directly to read_fs to avoid redundant double buffering.
+     */
+    int bytes = (int)read_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
 
-    int total_read = 0;
-    while (total_read < len) {
-        int chunk = len - total_read;
-        if (chunk > IO_CHUNK_SIZE) chunk = IO_CHUNK_SIZE;
-
-        // Cast result to int to check for negative error codes
-        int bytes = (int)read_fs((fs_node_t*)f->f_data, f->f_offset + total_read, chunk, (uint8_t*)kbuf);
-
-        if (bytes < 0) {
-            if (total_read > 0) break;
-            kfree(kbuf, IO_CHUNK_SIZE);
-            return bytes;
-        }
-
-        if (bytes == 0) break; // EOF
-
-        /* copyout will be done by sys_read */
-        memcpy((char *)buf + total_read, kbuf, bytes);
-
-        total_read += bytes;
-        if (bytes < chunk) break; // Short read
+    if (bytes > 0) {
+        f->f_offset += bytes;
     }
 
-    f->f_offset += total_read;
-    kfree(kbuf, IO_CHUNK_SIZE);
-    return total_read;
+    return bytes;
 }
 
 int sys_read(int fd, char *buf, int len) {
