@@ -10,6 +10,11 @@
 #include <string.h>
 #include <kern/console.h>
 
+/* Internal kernel functions */
+extern int do_sysinfo(struct sysinfo *info);
+extern int sys_sysinfo(struct sysinfo *info);
+extern int sys_vm_stats(sys_vmstat_t *stats);
+
 int test_sysinfo(void) {
     struct sysinfo info;
     int ret;
@@ -19,7 +24,6 @@ int test_sysinfo(void) {
     /* 1. Basic Call */
     memset(&info, 0, sizeof(info));
     // Call kernel implementation directly
-    extern int do_sysinfo(struct sysinfo *info);
     ret = do_sysinfo(&info);
     if (ret != 0) {
         kprint("FAIL: sysinfo returned error (1)\n");
@@ -67,7 +71,6 @@ int test_sysinfo(void) {
 
     /* 4. Check user pointer validation in sys_sysinfo */
     /* Passing a kernel pointer (stack address) should fail */
-    extern int sys_sysinfo(struct sysinfo *info);
     ret = sys_sysinfo(&info);
     if (ret != -EFAULT) {
          kprintf("FAIL: sys_sysinfo(&kernel_var) returned %d, expected %d\n", ret, -EFAULT);
@@ -78,6 +81,20 @@ int test_sysinfo(void) {
     ret = sys_sysinfo(NULL);
     if (ret != -EFAULT) {
          kprintf("FAIL: sys_sysinfo(NULL) returned %d, expected %d\n", ret, -EFAULT);
+         return -1;
+    }
+
+    /* 6. Test sys_vm_stats (pointer validation) */
+    sys_vmstat_t vmstats;
+    ret = sys_vm_stats(&vmstats);
+    if (ret != -EFAULT) {
+         kprintf("FAIL: sys_vm_stats(&kernel_var) returned %d, expected %d\n", ret, -EFAULT);
+         return -1;
+    }
+
+    ret = sys_vm_stats(NULL);
+    if (ret != -EFAULT) {
+         kprintf("FAIL: sys_vm_stats(NULL) returned %d, expected %d\n", ret, -EFAULT);
          return -1;
     }
     
