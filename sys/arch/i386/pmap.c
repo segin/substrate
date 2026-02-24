@@ -2,6 +2,7 @@
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/include/lapic.h>
 #include <vm/vm_page.h>
+#include <vm/phys_mem.h>
 #include <kern/panic.h>
 #include <kern/console.h>
 #include <string.h>
@@ -20,6 +21,10 @@ static uint32_t kernel_page_tables[33][1024];
 #define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
 #define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
 #define PTE_FRAME       0xFFFFF000 // Frame address mask
+
+// Kernel Address Space Translations (Higher Half)
+#define V2P(x) ((uint32_t)(x) - 0xC0000000)
+#define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
 
 #include <sys/proc.h> // For current_process
 
@@ -104,10 +109,6 @@ void pmap_bootstrap(void) {
     for (int i = 0; i < 1024; i++) {
         kernel_page_directory[i] = 0; // Not present
     }
-
-    // Since we are Higher Half, we need to convert virtual addresses to physical for CR3/PDEs
-    #define V2P(x) ((uint32_t)(x) - 0xC0000000)
-    #define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
 
     // Check for PGE (Global Pages) support via CPUID
     uint32_t eax, ebx, ecx, edx;
@@ -617,9 +618,32 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
         if (V_PD[pdi] & PTE_PS) {
             // Already a large page, just overwrite
         } else {
-            // It's a page table. We don't support converting PT -> Large Page yet (requires freeing PT)
-            // TODO: Implement PT freeing/eviction
-            return -1;
+            // It's a page table. Replace it with a large page.
+            // 1. Get physical address of the page table
+            uint32_t pt_phys = V_PD[pdi] & PTE_FRAME;
+
+            // 2. Access the page table via recursive mapping
+            uint32_t *pt = V_PT(pdi);
+
+            // 3. Free all mapped pages in this page table
+            for (int i = 0; i < 1024; i++) {
+                if (pt[i] & PTE_P) {
+                    uint32_t page_phys = pt[i] & PTE_FRAME;
+
+                    // Validate page address before freeing
+                    // Use vm_phys_free_page via pmm_get_page to handle HighMem and refcounts safely
+                    vm_page_t *page = pmm_get_page(page_phys);
+                    if (page) {
+                        vm_phys_free_page(page);
+                    }
+                }
+            }
+
+            // 4. Free the page table page itself
+            vm_page_t *pt_page = pmm_get_page(pt_phys);
+            if (pt_page) {
+                vm_phys_free_page(pt_page);
+            }
         }
     }
 

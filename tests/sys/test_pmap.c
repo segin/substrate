@@ -36,6 +36,55 @@ void test_pmap_lifecycle(void) {
     kprint("  PASS\n");
 }
 
+// Test 10: Replace Page Table with Large Page
+void test_pmap_large_replace(void) {
+    kprint("Test: Replace PT with Large Page\n");
+
+    // 1. Create a pmap
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    // 2. Activate it (must be active for pmap_enter_large check)
+    // Save current CR3 implicitly by switching back to kernel pmap later
+    pmap_activate(pmap);
+
+    // 3. Map a 4KB page at 0x400000 (4MB)
+    // This will allocate a Page Table at PDE index 1.
+    uint32_t va = 0x400000;
+
+    // Allocate a page from PMM to be safe (avoid kernel text)
+    void *page_v = pmm_alloc_block();
+    TEST_ASSERT(page_v != 0, "pmm_alloc_block succeeded");
+    uint32_t pa_small = (uint32_t)(uintptr_t)page_v - 0xC0000000;
+
+    // Map it
+    int ret = pmap_enter(pmap, va, pa_small, VM_PROT_READ | VM_PROT_WRITE, 0);
+    TEST_ASSERT(ret == 0, "pmap_enter 4KB success");
+
+    // 4. Attempt to replace with Large Page at 0x400000
+    // This requires freeing the underlying Page Table
+    uint32_t pa_large = 0x400000; // Align to 4MB
+    ret = pmap_enter_large(pmap, va, pa_large, VM_PROT_READ | VM_PROT_WRITE, 0);
+
+    TEST_ASSERT(ret == 0, "pmap_enter_large should succeed (replace PT)");
+
+    // 5. Verify mapping is correct
+    uint32_t extracted = pmap_extract(pmap, va);
+    TEST_ASSERT(extracted == pa_large, "Virtual address maps to new Large Page PA");
+
+    // Verify offset
+    extracted = pmap_extract(pmap, va + 0x1000);
+    TEST_ASSERT(extracted == pa_large + 0x1000, "Offset mapping correct");
+
+    // 6. Restore kernel pmap
+    pmap_activate(pmap_kernel());
+
+    // 7. Destroy pmap
+    pmap_destroy(pmap);
+
+    kprint("  PASS\n");
+}
+
 // Test 2: Multiple pmaps can coexist
 void test_multiple_pmaps(void) {
     kprint("Test: multiple pmaps\n");
@@ -247,6 +296,7 @@ void run_pmap_tests(void) {
     test_pmap_dump();
     test_pge_detection();
     test_pge_global_flush();
+    test_pmap_large_replace();
     test_memory_leak();
     
     kprint("\nResults: ");
