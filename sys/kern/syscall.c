@@ -48,12 +48,6 @@ extern process_t *current_process;
 extern process_t processes[64];
 extern thread_t threads[MAX_THREADS];
 
-// Simple file structure allocator
-#define MAX_SYSTEM_FILES 128
-static file_t system_files[MAX_SYSTEM_FILES];
-static file_t *file_free_list = NULL;
-static bool file_system_initialized = false;
-
 #define IO_CHUNK_SIZE 4096
 
 static struct {
@@ -79,51 +73,6 @@ static void ensure_io_buffers_init(void) {
     }
 
     __sync_lock_release(&init_lock);
-}
-
-static void file_init_list(void) {
-    for (int i = 0; i < MAX_SYSTEM_FILES - 1; i++) {
-        system_files[i].f_next = &system_files[i + 1];
-    }
-    system_files[MAX_SYSTEM_FILES - 1].f_next = NULL;
-    file_free_list = &system_files[0];
-    file_system_initialized = true;
-}
-
-/*
- * file_alloc - Allocate a file structure from the free list.
- * Note: Assumes external locking or uniprocessor environment.
- */
-file_t *file_alloc(void) {
-    if (!file_system_initialized) {
-        file_init_list();
-    }
-
-    if (file_free_list) {
-        file_t *f = file_free_list;
-        file_free_list = f->f_next;
-        f->f_next = NULL;
-        f->f_count = 1;
-        return f;
-    }
-    return NULL;
-}
-
-void file_free(file_t *f) {
-    if (!f) return;
-
-    // Safety check: ensure pointer is within the static array
-    if (f < system_files || f >= system_files + MAX_SYSTEM_FILES) {
-        return;
-    }
-
-    // Prevent double-free
-    if (f->f_count == 0) return;
-    
-    f->f_count = 0;
-    f->f_data = NULL;
-    f->f_next = file_free_list;
-    file_free_list = f;
 }
 
 int kern_write(int fd, const char *buf, int len) {
@@ -354,15 +303,6 @@ int kern_open(const char *path, int flags, int mode) {
     return fd;
 }
 
-// Helper for internal use (and userspace via sys_close)
-void file_close_ptr(file_t *f) {
-    if (!f) return;
-    f->f_count--;
-    if (f->f_count <= 0) {
-        close_fs((fs_node_t*)f->f_data);
-        file_free(f);
-    }
-}
 
 int kern_close(int fd) {
     if (fd < 0 || fd >= MAX_FD) return -1;
