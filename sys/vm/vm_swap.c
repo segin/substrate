@@ -8,6 +8,7 @@
 #include <sys/lock.h>
 #include <vm/vm_swap.h>
 #include <stddef.h>
+#include <string.h>
 
 // Simple bitmap-based swap allocator
 #define MAX_SWAP_PAGES 1024
@@ -209,6 +210,9 @@ int vm_swapon(void *node) {
     if (swap_num_pages > MAX_SWAP_PAGES) {
         swap_num_pages = MAX_SWAP_PAGES;
     }
+
+    // Initialize bitmap
+    memset(swap_bitmap, 0, sizeof(swap_bitmap));
 
     spinlock_release(&swap_lock);
     

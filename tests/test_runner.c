@@ -23,8 +23,10 @@ extern bool test_vm_fault_anonymous(void);
 extern bool test_vm_fault_protection_violation(void);
 extern bool test_mmap_logic(void);
 extern bool test_munmap_logic(void);
-extern bool test_swap_lifecycle(void);
-extern bool test_swap_full(void);
+extern bool test_swap_lifecycle(void); // Mock-based
+extern bool test_swap_full(void);      // Mock-based
+extern bool test_vm_swap_real_io(void);
+extern bool test_vm_swap_real_full(void);
 extern bool test_vm_fault_cow_trigger(void);
 
 // Arch Tests (Mocked)
@@ -148,8 +150,10 @@ test_case_t tests[] = {
     {"fault_prot", test_vm_fault_protection_violation},
     {"mmap_logic", test_mmap_logic},
     {"munmap_logic", test_munmap_logic},
-    {"swap_life", test_swap_lifecycle},
-    {"swap_full", test_swap_full},
+    {"swap_mock_life", test_swap_lifecycle},
+    {"swap_mock_full", test_swap_full},
+    {"swap_real_io", test_vm_swap_real_io},
+    {"swap_real_full", test_vm_swap_real_full},
     {"cow_trigger", test_vm_fault_cow_trigger},
     {"smp_tramp", test_trampoline_preparation},
     {"lock_basic", test_spinlock_basic},
