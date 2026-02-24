@@ -46,8 +46,6 @@ static void optimized_memcpy(void *dst, const void *src, size_t n) {
 }
 
 /* External framebuffer info (from fb.c) */
-extern fb_info_t fb;
-extern int fb_active;
 
 /* Access to current driver for set_viewport via video_set_viewport() in fb.c */
 
