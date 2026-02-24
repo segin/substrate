@@ -66,14 +66,26 @@ static int decode_file(FILE *fp, const char *input_name) {
                 out_path = simple_basename(out_path);
             } else {
                 /* Check for absolute path or .. traversal */
-                /* Requirement: "Optionally refuse absolute paths or .. components" */
-                /* I'll interpret this as: if -s is NOT set, we allow it (POSIX),
-                   but strictly speaking, users might want protection.
-                   Let's add a check: if path is absolute or has .., warn?
-                   Or maybe -s should be default?
-                   The prompt says "Optionally refuse...".
-                   So default is accept. -s refuses/strips.
-                   I'll stick to -s strips. */
+                int unsafe = 0;
+                if (out_path[0] == '/') {
+                    unsafe = 1;
+                } else if (strstr(out_path, "../") != NULL) {
+                    /* "../" anywhere is suspicious */
+                    unsafe = 1;
+                } else if (strcmp(out_path, "..") == 0) {
+                    unsafe = 1;
+                } else {
+                    /* Check for "/.." at the end */
+                    size_t len = strlen(out_path);
+                    if (len >= 3 && strcmp(out_path + len - 3, "/..") == 0) {
+                        unsafe = 1;
+                    }
+                }
+
+                if (unsafe) {
+                    fprintf(stderr, "uudecode: warning: unsafe path '%s' stripped to '%s'\n", out_path, simple_basename(out_path));
+                    out_path = simple_basename(out_path);
+                }
             }
         }
 
