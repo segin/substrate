@@ -365,18 +365,21 @@ void random_harvest(const void *data, size_t len, unsigned int bits,
 }
 
 void random_harvest_fast(const void *data, size_t len) {
-    /* ISR-safe: just mix without lock (data races are acceptable for entropy) */
+    /* ISR-safe: try to acquire lock, if contended drop entropy to avoid waiting */
     if (!data || len == 0) return;
     
-    const uint8_t *src = data;
-    uint32_t ptr = rng_state.input_pool.mix_ptr;
-    
-    for (size_t i = 0; i < len; i++) {
-        rng_state.input_pool.pool[ptr] ^= src[i];
-        ptr = (ptr + 1) % ENTROPY_POOL_SIZE;
+    if (spinlock_try_acquire(&entropy_lock)) {
+        const uint8_t *src = data;
+        uint32_t ptr = rng_state.input_pool.mix_ptr;
+
+        for (size_t i = 0; i < len; i++) {
+            rng_state.input_pool.pool[ptr] ^= src[i];
+            ptr = (ptr + 1) % ENTROPY_POOL_SIZE;
+        }
+
+        rng_state.input_pool.mix_ptr = ptr;
+        spinlock_release(&entropy_lock);
     }
-    
-    rng_state.input_pool.mix_ptr = ptr;
 }
 
 void random_harvest_direct(const void *data, size_t len, unsigned int bits) {
@@ -404,9 +407,6 @@ static void random_reseed(void) {
     chacha20_init(&rng_state.csprng, seed, seed + CHACHA20_KEY_SIZE);
     rng_state.csprng.bytes_generated = 0;
     rng_state.reseed_count++;
-    rng_state.seeded = 1;
-    spinlock_release(&output_lock);
-    
     rng_state.seeded = 1;
     spinlock_release(&output_lock);
     
