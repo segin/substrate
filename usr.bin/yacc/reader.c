@@ -15,6 +15,13 @@ static char *cptr;
 static int peekc = -1;
 static char token_buffer[MAXTOKEN];
 
+/* Temporary symbol mapping for ritem fixup */
+static bucket *temp_sym_map[MAXSYM];
+static int temp_sym_count = 0;
+
+/* Mid-rule action generation */
+static int gen_sym_count = 0;
+
 /* Forward declarations */
 static void get_line(void);
 static int nextc(void);
@@ -22,84 +29,145 @@ static void ungetc_char(int c);
 static int keyword(void);
 static void skip_comment(void);
 static void create_symbol_table(void);
-static void copy_action(void);
+static char *scan_action(void);
+static void write_action(int rule, char *body, int offset);
+static void fixup_grammar(void);
+static int get_token(void);
+static bucket *make_dummy(void);
 
 /* ... */
 
 /* Track current rule's RHS length for $N translation */
 static int action_rule_len;
 
-static void copy_action(void) {
+static bucket *make_dummy(void) {
+    char name[32];
+    snprintf(name, sizeof(name), "$@%d", ++gen_sym_count);
+    bucket *bp = make_bucket(name);
+    bp->class = CLASS_NONTERM;
+    
+    /* Assign temp index */
+    if (temp_sym_count >= MAXSYM - 1) no_space();
+    bp->index = ++temp_sym_count;
+    temp_sym_map[temp_sym_count] = bp;
+    
+    return bp;
+}
+
+static char *scan_action(void) {
     int c;
     int depth = 1;
-    
-    /* Calculate rule length from current item position */
-    /* For now, track during RHS parsing */
-    
-    fprintf(action_file, "case %d:\n", nrules);
-    fprintf(action_file, "{");
+    int len = 0;
+    int size = 1024;
+    char *buf = malloc(size);
+    if (!buf) no_space();
     
     while (depth > 0) {
         c = nextc();
         if (c == EOF) {
-            fprintf(stderr, "EOF in semantic action at line %d, depth=%d\n", lineno, depth);
+            fprintf(stderr, "EOF in semantic action at line %d\n", lineno);
             done(1);
         }
+
         if (c == '{') depth++;
         if (c == '}') depth--;
         
         if (depth == 0) {
-            fprintf(action_file, "}\nbreak;\n"); 
-            return;
+            break;
         }
         
-        /* Translate $$ and $N references */
+        if (len + 2 >= size) {
+            size *= 2;
+            buf = realloc(buf, size);
+            if (!buf) no_space();
+        }
+        buf[len++] = c;
+    }
+
+    buf[len] = '\0';
+    return buf;
+}
+
+static void write_action(int rule, char *body, int offset) {
+    char *p = body;
+    int c;
+
+    fprintf(action_file, "case %d:\n", rule);
+    fprintf(action_file, "{");
+
+    while ((c = *p++) != '\0') {
         if (c == '$') {
-            c = nextc();
-            if (c == '$') {
-                /* $$ -> yyval */
+            c = *p++;
+            if (c == '<') {
+                 /* Typed access $<type>... */
+                 char tag[MAXTOKEN];
+                 int i = 0;
+
+                 /* Read tag until > */
+                 while ((c = *p++) != '>' && c != '\0') {
+                     if (i < MAXTOKEN - 1) tag[i++] = c;
+                 }
+                 tag[i] = '\0';
+
+                 if (c == '\0') {
+                     /* Unterminated tag, should not happen if scan_action correct */
+                     break;
+                 }
+
+                 c = *p++;
+                 if (c == '$') {
+                     /* $<tag>$ -> yyval.tag */
+                     fprintf(action_file, "yyval.%s", tag);
+                 } else if (c == '-' || isdigit(c)) {
+                     /* $<tag>N -> yyvsp[...].tag */
+                     int neg = 0;
+                     int n = 0;
+                     if (c == '-') {
+                         neg = 1;
+                         c = *p++;
+                     }
+                     while (isdigit(c)) {
+                         n = n * 10 + (c - '0');
+                         c = *p++;
+                     }
+                     p--;
+                     if (neg) n = -n;
+                     fprintf(action_file, "yyvsp[%d].%s", n - offset, tag);
+                 } else {
+                     /* Unknown $<tag>... construct, pass through */
+                     putc('$', action_file);
+                     putc('<', action_file);
+                     fputs(tag, action_file);
+                     putc('>', action_file);
+                     putc(c, action_file);
+                 }
+            } else if (c == '$') {
                 fprintf(action_file, "yyval");
             } else if (c == '-' || isdigit(c)) {
-                /* $N or $-N -> yyvsp[offset] */
                 int neg = 0;
                 int n = 0;
                 if (c == '-') {
                     neg = 1;
-                    c = nextc();
+                    c = *p++;
                 }
                 while (isdigit(c)) {
                     n = n * 10 + (c - '0');
-                    c = nextc();
+                    c = *p++;
                 }
-                ungetc_char(c);
+                p--;
                 if (neg) n = -n;
-                /* yyvsp[1-rule_len+n] - adjusted for action position */
-                fprintf(action_file, "yyvsp[%d]", n);
-            } else if (c == '<') {
-                /* $<type>N - typed access, skip type for now */
-                while (c != '>' && c != EOF) c = nextc();
-                c = nextc();
-                /* Parse N */
-                int n = 0;
-                while (isdigit(c)) {
-                    n = n * 10 + (c - '0');
-                    c = nextc();
-                }
-                ungetc_char(c);
-                fprintf(action_file, "yyvsp[%d]", n);
+                fprintf(action_file, "yyvsp[%d]", n - offset);
             } else {
-                /* Not a special $ reference */
                 putc('$', action_file);
-                putc(c, action_file);
+                if (c) putc(c, action_file);
             }
         } else {
             putc(c, action_file);
         }
     }
+
+    fprintf(action_file, "}\nbreak;\n");
 }
-
-/* ... */
-
 
 /* Lexer Implementation */
 
@@ -169,7 +237,9 @@ static int get_token(void) {
 
     for (;;) {
         c = nextc();
-        if (c == EOF) return 0;
+        if (c == EOF) {
+            return 0;
+        }
         if (c == '/') {
             int next = nextc();
             if (next == '*') {
@@ -206,7 +276,8 @@ static int get_token(void) {
         }
         /* Keyword after % */
         ungetc_char(c);
-        return keyword();
+        int kw = keyword();
+        return kw;
     }
     
     if (isalpha(c) || c == '_' || c == '.' || c == '$') {
@@ -243,8 +314,8 @@ static int get_token(void) {
         return IDENTIFIER;  /* Treat as identifier for symbol lookup */
     }
     
-    if (c == '{') return LCURLY;
-    if (c == '}') return RCURLY;
+    if (c == '{') { return LCURLY; }
+    if (c == '}') { return RCURLY; }
     
     return c; /* Single char token like ':' or '|' */
 }
@@ -295,8 +366,9 @@ static void parse_declarations(void) {
     int t;
     bucket *bp;
 
+    t = get_token();
+
     for (;;) {
-        t = get_token();
         if (t == MARK) return; /* %% section separator */
         if (t == 0) return;    /* EOF */
         
@@ -362,7 +434,8 @@ static void parse_declarations(void) {
                 if (t == IDENTIFIER) {
                      goal_symbol = lookup(token_buffer);
                 }
-                break;
+                t = get_token();
+                continue;
             
             case UNION:
                 /* %union { body } - copy body to union_file */
@@ -431,15 +504,22 @@ static void parse_declarations(void) {
                     
                     union_defined = 1;
                 }
-                break;
+                t = get_token();
+                continue;
                 
-            /* ... other cases ... */
+            default:
+                /* Unknown or unexpected token */
+                /* Could be type decl or just syntax error */
+                fprintf(stderr, "syntax error in declarations, t=%d\n", t);
+                done(1);
         }
     }
 }
 
 static void parse_rules(void) {
     int t;
+    int deferred_rules[256]; /* Should be enough for one rule */
+    int n_deferred = 0;
     /* bucket *lhs = NULL; */
     
     /* Initialize counters */
@@ -464,6 +544,13 @@ static void parse_rules(void) {
             }
             lhs->class = CLASS_NONTERM;
             
+            /* Assign temp index if needed */
+            if (lhs->index == 0) {
+                if (temp_sym_count >= MAXSYM - 1) no_space();
+                lhs->index = ++temp_sym_count;
+                temp_sym_map[temp_sym_count] = lhs;
+            }
+
             if (goal_symbol == NULL) goal_symbol = lhs;
             
             t = get_token();
@@ -472,6 +559,9 @@ static void parse_rules(void) {
                  done(1);
             }
             
+            /* Reset deferred rules for new LHS? No, per RHS. */
+            n_deferred = 0;
+
             /* Parse RHS alternatives */
             for (;;) {
                 if (t == ':') { 
@@ -484,44 +574,104 @@ static void parse_rules(void) {
                     /* Note: defs.h has plhs, rlhs. Usually plhs is sufficient. rlhs might be per-item? */
                     /* Let's stick to: plhs[rule] = lhs_symbol_index. ritem[item_index] = symbol_index. */
                     /* We need to track where a rule starts in ritem. 'rrhs[rule]' can point to start in ritem. */
+                    n_deferred = 0; /* New rule */
                 } else if (t == '|') {
                      /* End current production, start new one with same LHS */
                      if (nitems >= MAXPROD * 4) no_space();
                      ritem[nitems++] = -nrules; /* End of rule marker? Or 0? Classic yacc uses negated rule number or similar */
-                     /* For now, let's use standard yacc convention: */
-                     /* ritem contains symbol indices. Terminated by null or negative rule number? */
-                     /* mkpar.c usually expects negative rule number at the end of the item list for that rule? */
-                     /* Actually, openbsd yacc uses negative rule number in ritem. */
-                     ritem[nitems++] = -nrules;
                      nrules++;
                      
+                     /* Flush deferred rules for the COMPLETED rule */
+                     int i;
+                     for (i = 0; i < n_deferred; i++) {
+                         int idx = deferred_rules[i];
+                         rrhs[idx] = nitems;
+                         ritem[nitems++] = -idx; /* Epsilon rule */
+                     }
+                     n_deferred = 0;
+
                      if (nrules >= MAXPROD) no_space();
                      plhs[nrules] = lhs->index;
                      rrhs[nrules] = nitems;
+                     rlhs[nrules] = lhs->index;
                 } else if (t == ';') {
                      /* End of rule block */
                      if (nitems >= MAXPROD * 4) no_space();
                      ritem[nitems++] = -nrules;
                      nrules++;
+
+                     /* Flush deferred rules */
+                     int i;
+                     for (i = 0; i < n_deferred; i++) {
+                         int idx = deferred_rules[i];
+                         rrhs[idx] = nitems;
+                         ritem[nitems++] = -idx;
+                     }
+                     n_deferred = 0;
                      break;
                 } else if (t == IDENTIFIER) {
                     /* Symbol in RHS */
                     bucket *bp = lookup(token_buffer);
                     if (nitems >= MAXPROD * 4) no_space();
+
+                    /* Assign temp index if needed */
+                    if (bp->index == 0) {
+                         if (temp_sym_count >= MAXSYM - 1) no_space();
+                         bp->index = ++temp_sym_count;
+                         temp_sym_map[temp_sym_count] = bp;
+                    }
+
                     ritem[nitems++] = bp->index;
                 } else if (t == LCURLY) {
-                    /* Semantic action - copy action body FIRST, then check what follows */
-                    copy_action();
+                    /* Semantic action */
+                    char *body = scan_action();
                     
                     /* Now peek at next token to see if this was mid-rule */
                     int next_t = get_token();
                     if (next_t == '|' || next_t == ';' || next_t == MARK || next_t == 0) {
                         /* End-of-rule action - no special handling needed */
+                        write_action(nrules, body, 0);
+                        free(body);
                     } else {
                         /* Mid-rule action - need to create anonymous symbol */
-                        /* For now, just treat as regular action (simplified) */
-                        /* TODO: Full mid-rule action support requires creating */
-                        /* an anonymous nonterminal and epsilon rule */
+                        /* Create dummy symbol */
+                        bucket *dummy = make_dummy();
+
+                        /* Add dummy to current rule */
+                        if (nitems >= MAXPROD * 4) no_space();
+                        ritem[nitems++] = dummy->index;
+
+                        /* Steal current rule index */
+                        int mid_rule_idx = nrules;
+                        nrules++;
+                        if (nrules >= MAXPROD) no_space();
+
+                        /* Move current rule info to new slot */
+                        plhs[nrules] = plhs[mid_rule_idx];
+                        rrhs[nrules] = rrhs[mid_rule_idx];
+                        rlhs[nrules] = rlhs[mid_rule_idx];
+
+                        /* Setup mid-rule info */
+                        plhs[mid_rule_idx] = dummy->index;
+                        rlhs[mid_rule_idx] = dummy->index;
+                        /* rrhs[mid_rule_idx] deferred */
+
+                        /* Calculate offset: symbols before dummy */
+                        /* rrhs[nrules] points to start of current rule (which is at new nrules) */
+                        /* nitems points after dummy */
+                        /* So items count = (nitems - 1) - rrhs[nrules] */
+                        int offset = (nitems - 1) - rrhs[nrules];
+
+                        write_action(mid_rule_idx, body, offset);
+                        free(body);
+
+                        /* Defer rule definition */
+                        if (n_deferred < 256) {
+                            deferred_rules[n_deferred++] = mid_rule_idx;
+                        } else {
+                            fprintf(stderr, "Too many mid-rule actions\n");
+                            done(1);
+                        }
                     }
                     t = next_t;
                     continue; /* already got next token */
@@ -529,6 +679,15 @@ static void parse_rules(void) {
                      /* unexpected end of rules? */
                      ritem[nitems++] = -nrules;
                      nrules++;
+
+                     /* Flush deferred */
+                     int i;
+                     for (i = 0; i < n_deferred; i++) {
+                         int idx = deferred_rules[i];
+                         rrhs[idx] = nitems;
+                         ritem[nitems++] = -idx;
+                     }
+
                      break; 
                 } else {
                      /* prec? */
@@ -582,6 +741,30 @@ static void pack_symbols(void) {
     nsyms = ntokens + nvars;
 }
 
+static void fixup_grammar(void) {
+    int i;
+    /* Fixup ritem */
+    for (i = 0; i < nitems; i++) {
+        if (ritem[i] > 0) {
+            bucket *bp = temp_sym_map[ritem[i]];
+            ritem[i] = bp->index;
+        }
+    }
+
+    /* Fixup plhs and rlhs */
+    for (i = 0; i < nrules; i++) {
+         if (plhs[i] > 0) {
+             bucket *bp = temp_sym_map[plhs[i]];
+             plhs[i] = bp->index;
+         }
+         /* rlhs seems redundant but let's fix it too if used */
+         if (rlhs[i] > 0) {
+             bucket *bp = temp_sym_map[rlhs[i]];
+             rlhs[i] = bp->index;
+         }
+    }
+}
+
 void reader(void) {
     int c;
     create_symbol_table();
@@ -589,6 +772,7 @@ void reader(void) {
     parse_declarations();
     parse_rules();
     pack_symbols();
+    fixup_grammar();
     
     /* Copy epilogue (C code after second %%) to epilogue_file */
     if (epilogue_file) {
