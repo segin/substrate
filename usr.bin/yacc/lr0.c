@@ -15,7 +15,7 @@ unsigned *rules_used;
 /* State storage */
 int nstates;
 static core **state_set;        /* Hash table for states */
-static core *first_state;       /* Linked list of all states */
+core *first_state;              /* Linked list of all states */
 static core *last_state;
 static int current_nshifts;     /* Number of shifts for current state */
 static short *shift_symbol;     /* Symbols we shift on */
