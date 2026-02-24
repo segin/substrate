@@ -21,6 +21,11 @@
 #include <drivers/storage/ide/ide.h>
 #include <arch/x86-common/include/io.h>
 #include <kern/time.h>
+#include <sys/proc.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <sys/lock.h>
+#include <intr.h>
 
 /*
  * ============================================================
@@ -41,6 +46,7 @@
 
 /* Channel state */
 static ide_channel_t ide_channels[MAX_IDE_CHANNELS];
+static spinlock_t ide_channel_lock[MAX_IDE_CHANNELS];
 
 /* Device state */
 static ide_device_t ide_devices[MAX_IDE_DEVICES];
@@ -353,10 +359,19 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     ide_bm_start(channel, 0);  /* 0 = read from disk */
     
     /* Wait for completion (interrupt-driven) */
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&ide_channel_lock[channel]);
+
     while (!ide_irq_complete[channel]) {
-        __asm__ volatile("hlt");
+        sleepq_add((void *)&ide_irq_complete[channel], current_thread);
+        spinlock_release(&ide_channel_lock[channel]);
+        sched_yield();
+        spinlock_acquire(&ide_channel_lock[channel]);
     }
     
+    spinlock_release(&ide_channel_lock[channel]);
+    intr_restore(flags);
+
     uint8_t bm_status = ide_bm_status(channel);
     uint8_t ide_status = ide_read_reg(channel, ATA_REG_STATUS);
 
@@ -426,10 +441,19 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     ide_bm_start(channel, 1);  /* 1 = write to disk */
     
     /* Wait for completion */
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&ide_channel_lock[channel]);
+
     while (!ide_irq_complete[channel]) {
-        __asm__ volatile("hlt");
+        sleepq_add((void *)&ide_irq_complete[channel], current_thread);
+        spinlock_release(&ide_channel_lock[channel]);
+        sched_yield();
+        spinlock_acquire(&ide_channel_lock[channel]);
     }
     
+    spinlock_release(&ide_channel_lock[channel]);
+    intr_restore(flags);
+
     uint8_t bm_status = ide_bm_status(channel);
     uint8_t ide_status = ide_read_reg(channel, ATA_REG_STATUS);
 
@@ -911,7 +935,10 @@ void ide_irq_handler(int irq) {
     ide_bm_clear_interrupt(channel);
     
     /* Signal completion */
+    spinlock_acquire(&ide_channel_lock[channel]);
     ide_irq_complete[channel] = 1;
+    sleepq_wake_all((void *)&ide_irq_complete[channel]);
+    spinlock_release(&ide_channel_lock[channel]);
 }
 
 /*
@@ -936,6 +963,9 @@ void ide_init(void) {
     ide_channels[1].bm_base = 0;
     ide_channels[1].dma_capable = 0;
     
+    spinlock_init(&ide_channel_lock[0], "ide_primary");
+    spinlock_init(&ide_channel_lock[1], "ide_secondary");
+
     /* Disable interrupts during probe */
     ide_write_ctrl(0, ATA_CTRL_NIEN);
     ide_write_ctrl(1, ATA_CTRL_NIEN);
