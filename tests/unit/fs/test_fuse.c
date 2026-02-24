@@ -130,10 +130,92 @@ bool test_fuse_read_buffer_too_small(void) {
     return true;
 }
 
+bool test_fuse_read_wrapping(void) {
+    printf("Testing fuse_dev_read wrapping behavior...\n");
+    // Setup wrapping condition: tail at end, head at 0
+    fuse_q_tail = FUSE_QUEUE_SIZE - 1;
+    fuse_q_head = 0;
+    sched_sleep_count = 0;
+
+    // Put a request at the tail (index 15)
+    struct fuse_in_header *req = &request_queue[fuse_q_tail];
+    req->len = sizeof(struct fuse_in_header);
+    req->opcode = FUSE_READ;
+    req->unique = 99999;
+
+    struct fuse_in_header buffer;
+    memset(&buffer, 0, sizeof(buffer));
+
+    size_t bytes_read = fuse_dev_read(NULL, 0, sizeof(buffer), (uint8_t*)&buffer);
+
+    if (bytes_read != sizeof(struct fuse_in_header)) {
+        printf("FAIL: Expected %zu bytes, got %zu\n", sizeof(struct fuse_in_header), bytes_read);
+        return false;
+    }
+
+    if (buffer.unique != 99999) {
+        printf("FAIL: Incorrect data read\n");
+        return false;
+    }
+
+    if (fuse_q_tail != 0) {
+        printf("FAIL: Tail did not wrap to 0. Got %d\n", fuse_q_tail);
+        return false;
+    }
+
+    return true;
+}
+
+bool test_fuse_read_large_buffer(void) {
+    printf("Testing fuse_dev_read large buffer...\n");
+
+    fuse_q_head = 0;
+    fuse_q_tail = 0;
+    sched_sleep_count = 0;
+
+    // Inject request
+    struct fuse_in_header *req = &request_queue[fuse_q_head];
+    req->opcode = FUSE_WRITE;
+    fuse_q_head = (fuse_q_head + 1) % FUSE_QUEUE_SIZE;
+
+    uint8_t large_buffer[1024];
+    memset(large_buffer, 0, sizeof(large_buffer));
+
+    size_t bytes_read = fuse_dev_read(NULL, 0, sizeof(large_buffer), large_buffer);
+
+    if (bytes_read != sizeof(struct fuse_in_header)) {
+        printf("FAIL: Expected %zu bytes (struct size), got %zu\n", sizeof(struct fuse_in_header), bytes_read);
+        return false;
+    }
+
+    struct fuse_in_header *out_hdr = (struct fuse_in_header *)large_buffer;
+    if (out_hdr->opcode != FUSE_WRITE) {
+        printf("FAIL: Incorrect data read\n");
+        return false;
+    }
+
+    return true;
+}
+
+bool test_fuse_write_basic(void) {
+    printf("Testing fuse_dev_write stub...\n");
+    uint8_t buffer[10];
+    memset(buffer, 0, sizeof(buffer));
+    size_t written = fuse_dev_write(NULL, 0, sizeof(buffer), buffer);
+    if (written != sizeof(buffer)) {
+        printf("FAIL: Expected %zu bytes written, got %zu\n", sizeof(buffer), written);
+        return false;
+    }
+    return true;
+}
+
 bool test_fuse_read(void) {
     bool pass = true;
     pass &= test_fuse_read_blocking();
     pass &= test_fuse_read_nonblocking();
     pass &= test_fuse_read_buffer_too_small();
+    pass &= test_fuse_read_wrapping();
+    pass &= test_fuse_read_large_buffer();
+    pass &= test_fuse_write_basic();
     return pass;
 }
