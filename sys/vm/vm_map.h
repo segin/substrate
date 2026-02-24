@@ -26,6 +26,9 @@ typedef struct vm_map_entry {
     struct vm_map_entry *prev;
     struct vm_map_entry *next;
     
+    struct vm_map_entry *left;
+    struct vm_map_entry *right;
+
     uintptr_t start;
     uintptr_t end;
     
@@ -45,6 +48,7 @@ typedef struct vm_map {
     pmap_t pmap;            // Machine-dependent part
     vm_map_entry_t *header; // Sentinel node for the entry list
     vm_map_entry_t *hint;   // Hint for finding free space (optimization)
+    vm_map_entry_t *root;   // Root of the splay tree
     uint32_t nentries;      // Number of entries
     size_t size;            // Total virtual size
     uintptr_t min_offset;   // Lower bound of map
