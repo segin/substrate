@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <stdarg.h>
 
 // Define HOST_TEST to enable any conditional logic in kernel headers
 #ifndef HOST_TEST
@@ -17,6 +18,14 @@
 // Mock Kernel Functions
 void kprint(const char *msg) {
     printf("[KERNEL] %s", msg);
+}
+
+int kprintf(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int ret = vprintf(fmt, args);
+    va_end(args);
+    return ret;
 }
 
 void *kmalloc(size_t size) {
@@ -33,6 +42,7 @@ void kfree(void *ptr, size_t size) {
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
 void mutex_unlock(mutex_t *m) { (void)m; }
+bool mutex_trylock(mutex_t *m) { (void)m; return true; }
 
 // Mock VFS functions
 void vfs_register_filesystem(filesystem_t *fs) {
@@ -49,7 +59,7 @@ int64_t get_time(void) {
 
 uma_zone_t *uma_zcreate(const char *name, size_t size, uma_ctor ctor, uma_dtor dtor, uma_init init, uma_fini fini, int align, uint32_t flags) {
     (void)ctor; (void)dtor; (void)init; (void)fini; (void)align; (void)flags;
-    uma_zone_t *zone = (uma_zone_t *)calloc(1, sizeof(uma_zone_t)); // use calloc to avoid uninit
+    uma_zone_t *zone = (uma_zone_t *)calloc(1, sizeof(uma_zone_t));
     if (zone) {
         zone->uz_name = name;
         zone->uz_size = size;
@@ -71,12 +81,10 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
-
 // Rename colliding kernel function
 #define vasprintf kernel_vasprintf
 
 // Include the source under test
-// This is relative to tests/unit/fs/
 #include <fs/ext2/ext2.c>
 
 // ------------------------------------------------------------------
@@ -106,8 +114,8 @@ uint64_t rdtsc_host() {
     return ((uint64_t)hi << 32) | lo;
 }
 
-void run_ext2_perf_test_host(void) {
-    printf("TEST: Benchmarking Ext2 Block Allocation (Host)...\n");
+void run_ext2_readdir_bench(void) {
+    printf("TEST: Benchmarking Ext2 Readdir Sequential Access (Host)...\n");
 
     // Initialize mock disk with zeros
     memset(mock_disk, 0, sizeof(mock_disk));
@@ -118,19 +126,24 @@ void run_ext2_perf_test_host(void) {
     sb->s_blocks_count = BLOCKS_COUNT;
     sb->s_log_block_size = 0; // 1024 bytes
     sb->s_blocks_per_group = BLOCKS_COUNT; // All in one group
-    sb->s_inodes_per_group = 1024;
+    sb->s_inodes_per_group = 2048; // Enough inodes
     sb->s_first_data_block = 1;
     sb->s_rev_level = 1;
     sb->s_free_blocks_count = BLOCKS_COUNT - 200;
+    sb->s_free_inodes_count = 2000;
 
     ext2_group_desc_t *bgd_disk = (ext2_group_desc_t *)(mock_disk + 2048);
     bgd_disk->bg_block_bitmap = 3;
     bgd_disk->bg_inode_bitmap = 4;
     bgd_disk->bg_inode_table = 5;
     bgd_disk->bg_free_blocks_count = BLOCKS_COUNT - 200;
+    bgd_disk->bg_free_inodes_count = 2000;
 
-    uint8_t *bitmap = mock_disk + 3072;
-    memset(bitmap, 0xFF, 25); // 25 bytes = 200 bits
+    uint8_t *bitmap = mock_disk + 3072; // Block bitmap
+    memset(bitmap, 0xFF, 25); // Mark metadata blocks used
+
+    uint8_t *ibitmap = mock_disk + 4096; // Inode bitmap (block 4)
+    memset(ibitmap, 0, 1024); // All free initially
 
     // --- Setup In-Memory FS Structure ---
     ext2_fs_t fs;
@@ -146,52 +159,62 @@ void run_ext2_perf_test_host(void) {
     fs.block_size = 1024;
     fs.group_count = 1;
     fs.blocks_per_group = BLOCKS_COUNT;
+    fs.inodes_per_group = 2048;
+    fs.inode_size = 128; // Default
 
     ext2_group_desc_t bgd_table[1];
     bgd_table[0] = *bgd_disk;
     fs.bgd = bgd_table;
 
-    // Initialize allocator cache (fix for missing init in host test)
+    // Initialize allocator cache
     ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
+
+    // Create a directory inode
+    uint32_t dir_inode = ext2_alloc_inode(&fs, 1);
+    ext2_inode_t inode_struct;
+    memset(&inode_struct, 0, sizeof(inode_struct));
+    inode_struct.i_mode = EXT2_S_IFDIR | 0755;
+    inode_struct.i_links_count = 2;
+    ext2_write_inode(&fs, dir_inode, &inode_struct);
+
+    fs_node_t *dir = ext2_alloc_node(&fs, dir_inode, &inode_struct);
+
+    // Populate directory with 2000 entries
+    int entry_count = 2000;
+    char name[32];
+    for (int i = 0; i < entry_count; i++) {
+        sprintf(name, "file_%d", i);
+        // We use dummy inode 100+i for entries
+        ext2_add_entry(dir, name, 100 + i);
+    }
+
+    printf("Created %d entries in directory.\n", entry_count);
 
     // --- Benchmark Loop ---
     uint64_t start_tsc, end_tsc;
-    uint32_t allocated_count = 0;
-    uint32_t blocks_to_alloc = 5000;
-    static uint32_t allocated_blocks[8192];
-    memset(allocated_blocks, 0, sizeof(allocated_blocks));
 
     start_tsc = rdtsc_host();
 
-    for (uint32_t i = 0; i < blocks_to_alloc; i++) {
-        uint32_t block = ext2_alloc_block(&fs);
-        if (block != 0) {
-            allocated_count++;
-            // Check for duplicates
-            if (block < 8192) {
-                if (allocated_blocks[block]) {
-                    printf("ERROR: Duplicate block allocated: %d\n", block);
-                }
-                allocated_blocks[block] = 1;
-            }
-        } else {
-            printf("Failed to allocate block at iteration %d\n", i);
+    // Iterate sequentially mimicking find_name_by_inode behavior
+    // It calls readdir(dir, 0), readdir(dir, 1), ...
+    for (int i = 0; i < entry_count; i++) {
+        struct dirent *d = ext2_readdir(dir, i);
+        if (!d) {
+            printf("Error: failed to read entry %d\n", i);
             break;
         }
+        // Verify (optional)
+        // printf("Entry %d: %s\n", i, d->d_name);
     }
 
     end_tsc = rdtsc_host();
 
-    if (allocated_count > 0) {
-        uint64_t total_cycles = end_tsc - start_tsc;
-        printf("EXT2 Alloc Perf: %u blocks in %lu cycles (approx)\n", allocated_count, total_cycles);
-        printf("Average cycles per block: %lu\n", total_cycles / allocated_count);
-    } else {
-        printf("EXT2 Alloc Perf: No blocks allocated.\n");
-    }
+    uint64_t total_cycles = end_tsc - start_tsc;
+    printf("EXT2 Readdir Perf (N=%d): %lu cycles\n", entry_count, total_cycles);
+    printf("Average cycles per entry: %lu\n", total_cycles / entry_count);
 }
 
 int main() {
-    run_ext2_perf_test_host();
+    run_ext2_readdir_bench();
     return 0;
 }

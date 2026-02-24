@@ -474,6 +474,10 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     // Initialize lock for scratch buffers
     mutex_init(&ctx->lock, "ext2_node");
 
+    // Initialize readdir cache (use -1 to indicate uninitialized)
+    ctx->last_readdir_idx = (uint64_t)-1;
+    ctx->last_readdir_pos = 0;
+
     // If this cache slot was previously used, it might have allocated buffers.
     // We should free them to avoid leaks when reusing the slot for a new inode.
     // In a more sophisticated cache, we might reuse them, but here we prioritize correctness.
@@ -570,6 +574,12 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
     
     mutex_lock(&ctx->lock);
 
+    // Check cache for sequential access optimization
+    if (index > 0 && index == ctx->last_readdir_idx + 1) {
+        pos = ctx->last_readdir_pos;
+        cur_idx = ctx->last_readdir_idx + 1;
+    }
+
     // Lazy allocate
     uint32_t block_size = fs->block_size;
     if (!ctx->block_buf) ctx->block_buf = kmalloc(block_size);
@@ -614,6 +624,11 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
                     memcpy(ctx->current_dirent.d_name, de->name, len);
                     ctx->current_dirent.d_name[len] = '\0';
                     result = &ctx->current_dirent;
+
+                    // Update cache
+                    ctx->last_readdir_idx = index;
+                    ctx->last_readdir_pos = pos + de->rec_len;
+
                     goto cleanup;
                 }
                 cur_idx++;
@@ -1144,6 +1159,10 @@ int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) {
     ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
     result = 0;
     
+    // Invalidate readdir cache
+    ctx->last_readdir_idx = (uint64_t)-1;
+    ctx->last_readdir_pos = 0;
+
 cleanup:
     mutex_unlock(&ctx->lock);
     return result;
@@ -1216,6 +1235,11 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
                 ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
                 
                 result = 0;
+
+                // Invalidate readdir cache
+                ctx->last_readdir_idx = (uint64_t)-1;
+                ctx->last_readdir_pos = 0;
+
                 goto cleanup;
             }
             

@@ -10,30 +10,6 @@
 #include <stdint.h>
 #include <string.h>
 
-/* IDT entry (16 bytes in Long Mode) */
-struct idt_entry {
-    uint16_t offset_low;      /* Target RIP bits 0-15 */
-    uint16_t selector;        /* Code segment selector */
-    uint8_t  ist;             /* IST index (bits 0-2), reserved (bits 3-7) */
-    uint8_t  type_attr;       /* Type and attributes */
-    uint16_t offset_mid;      /* Target RIP bits 16-31 */
-    uint32_t offset_high;     /* Target RIP bits 32-63 */
-    uint32_t reserved;        /* Must be zero */
-} __attribute__((packed));
-
-/* IDT pointer */
-struct idt_ptr {
-    uint16_t limit;
-    uint64_t base;
-} __attribute__((packed));
-
-/* Gate types */
-#define IDT_INTERRUPT_GATE  0x8E    /* DPL=0, P=1, Type=1110 (interrupt) */
-#define IDT_TRAP_GATE       0x8F    /* DPL=0, P=1, Type=1111 (trap) */
-#define IDT_USER_INT_GATE   0xEE    /* DPL=3, P=1, Type=1110 (user callable) */
-
-/* Maximum IDT entries */
-#define IDT_ENTRIES 256
 
 static struct idt_entry idt[IDT_ENTRIES] __attribute__((aligned(16)));
 static struct idt_ptr idt_pointer;

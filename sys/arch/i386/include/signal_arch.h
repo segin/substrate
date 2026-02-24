@@ -9,6 +9,13 @@
 #include <sys/signal.h>  /* For stack_t, siginfo_t */
 
 /*
+ * Signal trampoline address - mapped by kernel at a fixed location.
+ * Contains code to invoke sys_sigreturn after signal handler returns.
+ */
+#define SIG_TRAMPOLINE_ADDR     0xFFFF1000
+#define RT_SIG_TRAMPOLINE_ADDR  0xFFFF1010  /* For SA_SIGINFO handlers -> rt_sigreturn */
+
+/*
  * Signal Context (sigcontext)
  * 
  * This structure is pushed onto the user stack during signal delivery.

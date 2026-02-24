@@ -78,7 +78,7 @@ static void set_fatal_error(void) { g_status = 2; }
 static void usage(FILE *out) {
     fprintf(out,
         "usage: cpio -o [-v] [-H format] [-F archive] [-R user:group]\\n"
-        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--safe-extract] [--no-absolute-paths]\\n"
+        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--safe-extract] [--absolute-paths]\\n"
         "       cpio -p [-v] [-dmu] directory\\n");
 }
 
@@ -376,6 +376,8 @@ static int parse_newc_header(int fd, entry_t *e) {
         return -1;
     }
 
+    if (namesz > PATH_MAX) return -1;
+
     name = malloc(namesz + 1);
     if (!name) return -1;
     if (read_all(fd, name, namesz) < 0) { free(name); return -1; }
@@ -411,6 +413,9 @@ static int parse_odc_header(int fd, entry_t *e) {
                    &dev_ignored, &ino_ignored, &mode, &uid, &gid, &nlink, &rdev, &namesz, &filesize) != 9)
             return -1;
     }
+
+    if (namesz > PATH_MAX) return -1;
+
     e->name = malloc(namesz + 1);
     if (!e->name) return -1;
     if (read_all(fd, e->name, namesz) < 0) { free(e->name); return -1; }
@@ -431,6 +436,9 @@ static int parse_bin_header(int fd, entry_t *e) {
     if (read_all(fd, hdr, 26) < 0) return -1;
     if (be16(hdr) != 070707) return -1;
     namesz = be16(hdr + 20);
+
+    if (namesz > PATH_MAX) return -1;
+
     e->name = malloc((size_t)namesz + 1);
     if (!e->name) return -1;
     if (read_all(fd, e->name, namesz) < 0) { free(e->name); return -1; }
@@ -727,12 +735,20 @@ static int mode_pass(options_t *opt) {
 int main(int argc, char **argv) {
     options_t opt;
     int c;
+    char **new_argv = malloc((argc + 1) * sizeof(char *));
+    int new_argc = 0;
+
+    if (!new_argv) return 2;
+
     memset(&opt, 0, sizeof(opt));
+    opt.no_absolute_paths = true;
     opt.fmt = (fmt_t)-1;
 
+    new_argv[new_argc++] = argv[0];
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--safe-extract") == 0) opt.safe_extract = true;
         else if (strcmp(argv[i], "--no-absolute-paths") == 0) opt.no_absolute_paths = true;
+        else if (strcmp(argv[i], "--absolute-paths") == 0) opt.no_absolute_paths = false;
         else if (strcmp(argv[i], "--no-overwrite") == 0) opt.no_overwrite = true;
         else if (strcmp(argv[i], "--numeric-owner") == 0) opt.numeric_owner = true;
         else if (strncmp(argv[i], "--format=", 9) == 0) {
@@ -740,12 +756,15 @@ int main(int argc, char **argv) {
             if (strcmp(f, "newc") == 0) opt.fmt = FMT_NEWC;
             else if (strcmp(f, "odc") == 0) opt.fmt = FMT_ODC;
             else if (strcmp(f, "bin") == 0) opt.fmt = FMT_BIN;
-            else { fprintf(stderr, "unknown format: %s\n", f); return 2; }
+            else { fprintf(stderr, "unknown format: %s\n", f); free(new_argv); return 2; }
+        } else {
+            new_argv[new_argc++] = argv[i];
         }
     }
+    new_argv[new_argc] = NULL;
 
     opterr = 0;
-    while ((c = getopt(argc, argv, "oipF:tvH:C:R:dmu")) != -1) {
+    while ((c = getopt(new_argc, new_argv, "oipF:tvH:C:R:dmu")) != -1) {
         switch (c) {
         case 'o': opt.mode = MODE_OUT; break;
         case 'i': opt.mode = MODE_IN; break;
@@ -777,19 +796,31 @@ int main(int argc, char **argv) {
 
     if (opt.mode == MODE_NONE) {
         usage(stderr);
+        free(new_argv);
         return 2;
     }
     if (opt.mode == MODE_PASS) {
-        if (optind >= argc) {
+        if (optind >= new_argc) {
             fprintf(stderr, "cpio: -p requires target directory\n");
+            free(new_argv);
             return 2;
         }
-        opt.pass_dir = argv[optind];
+        opt.pass_dir = new_argv[optind];
     }
 
     if (opt.fmt == (fmt_t)-1 && opt.mode == MODE_OUT) opt.fmt = FMT_NEWC;
 
-    if (opt.mode == MODE_OUT) return mode_out(&opt);
-    if (opt.mode == MODE_IN) return mode_in(&opt);
-    return mode_pass(&opt);
+    if (opt.mode == MODE_OUT) {
+        int ret = mode_out(&opt);
+        free(new_argv);
+        return ret;
+    }
+    if (opt.mode == MODE_IN) {
+        int ret = mode_in(&opt);
+        free(new_argv);
+        return ret;
+    }
+    int ret = mode_pass(&opt);
+    free(new_argv);
+    return ret;
 }

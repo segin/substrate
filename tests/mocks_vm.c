@@ -29,7 +29,7 @@ void full_init() {}
 void fuse_init() {}
 void fuse_fs_init() {}
 void p9_init() {}
-void devfs_init() {}
+void devfs_init(void) {}
 void vfs_init_mock_root(void);
 // nchinit and fs_root removed (linked from vfs)
 
@@ -53,6 +53,9 @@ void panic(const char *msg) {
 // Globals Mocks
 #include <sys/proc.h>
 #include "../sys/exec/perso/personality.h"
+
+thread_t *current_thread = NULL;
+struct fs_node *fs_root = NULL;
 
 struct personality personality_native = { .name = "Native", .id = PERS_NATIVE };
 struct personality personality_freebsd = { .name = "FreeBSD", .id = PERS_FREEBSD };
@@ -111,7 +114,7 @@ void sched_smp_init() {}
 
 // kmem mocks for host
 void *kmalloc(size_t size) {
-    if (size > 65536) return NULL;
+    if (size > 4096) return NULL;
     // Host tests use standard malloc for kmalloc
     return malloc(size);
 }
@@ -186,11 +189,11 @@ void vfs_init_mock_root() {
     strcpy(mock_root.name, "/");
     mock_root.flags = FS_DIRECTORY;
     mock_root.finddir = mock_finddir;
-    
+
     memset(&mock_init_node, 0, sizeof(mock_init_node));
     strcpy(mock_init_node.name, "init");
     mock_init_node.flags = FS_FILE;
-    
+
     fs_root = &mock_root;
 }
 
@@ -258,9 +261,12 @@ int sched_interactivity_boost(thread_t *t) { (void)t; return 0; }
 struct personality *perso_lookup(int id) { (void)id; return &personality_native; }
 void sendsig(void *sf, struct process *p, int sig) { (void)sf; (void)p; (void)sig; }
 
-const uint8_t sigprop[NSIG] = {0}; 
+const uint8_t sigprop[NSIG] = {0};
 
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) { (void)path; (void)argv; (void)envp; return 0; }
+
+// Pipe creation
+void pipe_create() {}
 
 struct fs_node *devfs_root_node_ptr;
 struct nameidata;
@@ -268,13 +274,11 @@ int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; retu
 int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 struct vnode;
 
-// vm_map_lookup stub
-vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
-    (void)map; (void)va;
-    return NULL;
-}
 
-// vm_pager stubs removed (linked from vm_pager.o)
+// vm_pager stubs
+int vm_pager_has_page(void *obj, uint32_t offset) { (void)obj; (void)offset; return 0; }
+int vm_pager_get_pages(void *obj, void **m, int count, int *reqpage) { (void)obj; (void)m; (void)count; (void)reqpage; return 0; }
+void vm_pager_put_pages(void *obj, void **m, int count, bool sync) { (void)obj; (void)m; (void)count; (void)sync; }
 
 // vm_phys stubs
 void vm_phys_get_free(uint64_t *free) { *free = 0; }
@@ -321,3 +325,14 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
+
+// vm_object mocks
+void vm_object_reference(struct vm_object *obj) { (void)obj; }
+void vm_object_deallocate(struct vm_object *obj) { (void)obj; }
+
+// pmap mocks for vm_map
+int pmap_protect(pmap_t pmap, uintptr_t start, uintptr_t end, uint32_t prot) {
+    (void)pmap; (void)start; (void)end; (void)prot;
+    return 0;
+}
+void pmap_destroy(pmap_t pmap) { (void)pmap; }

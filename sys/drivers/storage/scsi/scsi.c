@@ -79,10 +79,10 @@ void scsi_init(void) {
     
     kprint("SCSI: Mid-layer initialized (");
     char buf[32];
-    sprintf(buf, "%d", SCSI_REQUEST_POOL_SIZE);
+    snprintf(buf, sizeof(buf), "%d", SCSI_REQUEST_POOL_SIZE);
     kprint(buf);
     kprint(" request slots, ");
-    sprintf(buf, "%d", SCSI_DEVICE_POOL_SIZE);
+    snprintf(buf, sizeof(buf), "%d", SCSI_DEVICE_POOL_SIZE);
     kprint(buf);
     kprint(" device slots)\n");
 }
@@ -166,7 +166,7 @@ int scsi_device_register(scsi_device_t *dev) {
     if (existing) {
         kprint("SCSI: Device already registered at ");
         char buf[32];
-        sprintf(buf, "%d:%d:%d\n", dev->bus, dev->target, dev->lun);
+        snprintf(buf, sizeof(buf), "%d:%d:%d\n", dev->bus, dev->target, dev->lun);
         kprint(buf);
         return -1;
     }
@@ -178,7 +178,7 @@ int scsi_device_register(scsi_device_t *dev) {
     
     /* Log registration */
     char buf[128];
-    sprintf(buf, "SCSI: Registered device %d:%d:%d type=0x%02x '%s %s'\n",
+    snprintf(buf, sizeof(buf), "SCSI: Registered device %d:%d:%d type=0x%02x '%s %s'\n",
             dev->bus, dev->target, dev->lun, dev->type,
             dev->vendor, dev->product);
     kprint(buf);
@@ -890,7 +890,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
     }
     
     char buf[64];
-    sprintf(buf, "SCSI: Scanning bus %d via '%s'\n", bus, link->name ? link->name : "unknown");
+    snprintf(buf, sizeof(buf), "SCSI: Scanning bus %d via '%s'\n", bus, link->name ? link->name : "unknown");
     kprint(buf);
     
     int devices_found = 0;
@@ -951,7 +951,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
         }
     }
     
-    sprintf(buf, "SCSI: Bus %d scan complete, %d device(s) found\n", bus, devices_found);
+    snprintf(buf, sizeof(buf), "SCSI: Bus %d scan complete, %d device(s) found\n", bus, devices_found);
     kprint(buf);
     
     return devices_found;

@@ -289,25 +289,37 @@ static int process_file(const char *name) {
                 return 1;
             }
 
-            /* Check output existence */
-            if (!force && stat(out_name, &sb) == 0) {
-                /* Check if same file */
-                if (sb.st_dev == in_sb.st_dev && sb.st_ino == in_sb.st_ino) {
-                     fprintf(stderr, "%s: input and output are the same file\n", in_name);
-                     fclose(in);
-                     return 1;
-                }
+            int fd;
+            int flags = O_WRONLY | O_CREAT;
 
-                fprintf(stderr, "%s: already exists\n", out_name);
-                /* Ask for overwrite? standard uncompress does.
-                   For now, we just skip. */
+            if (!force) {
+                flags |= O_EXCL;
+            } else {
+                flags |= O_TRUNC;
+            }
+
+            fd = open(out_name, flags, 0666);
+            if (fd < 0) {
+                if (errno == EEXIST) {
+                    /* Check if same file */
+                    if (stat(out_name, &sb) == 0 &&
+                        sb.st_dev == in_sb.st_dev && sb.st_ino == in_sb.st_ino) {
+                         fprintf(stderr, "%s: input and output are the same file\n", in_name);
+                    } else {
+                         fprintf(stderr, "%s: already exists\n", out_name);
+                    }
+                    fclose(in);
+                    return 1;
+                }
+                perror(out_name);
                 fclose(in);
                 return 1;
             }
 
-            out = fopen(out_name, "wb");
+            out = fdopen(fd, "wb");
             if (!out) {
                 perror(out_name);
+                close(fd);
                 fclose(in);
                 return 1;
             }

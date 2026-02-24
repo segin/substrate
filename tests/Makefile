@@ -4,7 +4,7 @@ CFLAGS_KERN = $(CFLAGS_COMMON) -I../sys -I../sys/arch/i386 -I../sys/drivers/vide
 CFLAGS_TEST = $(CFLAGS_COMMON) -I../sys/include -I../sys -I. -DNO_MAIN
 
 # Core kernel objects for testing
-CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_swap.o vm_zone.o \
+CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_pager.o vm_swap.o vm_zone.o \
             spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
             string.o printf.o div64.o compat.o acct.o sysinfo.o \
             vfs.o vfs_cache.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o wait.o sched_decay.o libc_wrappers.o \
@@ -13,13 +13,14 @@ CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_swap
 # Unit tests
 UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_object.c unit/vm/test_page.c unit/vm/test_fault.c \
-             unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_cow.c \
+             unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_swap_real.c unit/vm/test_cow.c \
              unit/arch/test_trampoline.c \
              unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c unit/kern/test_sched_decay.c \
              unit/kern/test_sync.c unit/kern/test_sleepq.c unit/kern/test_signal.c unit/kern/test_pthread_exit.c \
              unit/kern/test_reboot.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
              unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
+             unit/fs/test_fuse.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
              sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c \
@@ -29,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -38,6 +39,7 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libc_stdlib
 	./test_libc_ctype
 	./test_ext2_remove_perf
+	./bench_ext2_readdir
 
 # Duplicate rule removed
 
@@ -45,6 +47,9 @@ test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_ctype.c -o $@
 
 test_ext2_perf: unit/fs/test_ext2_perf_host.c
+	$(CC) $(CFLAGS_KERN) $< -o $@
+
+bench_ext2_readdir: unit/fs/bench_ext2_readdir_host.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 test_ext2_remove_perf: unit/fs/test_ext2_remove_perf.c
@@ -98,6 +103,8 @@ vm_map_host.o: vm_map_host.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/vfs/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/fs/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/perso/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: fuzz/%.c
@@ -131,5 +138,14 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
 	$(MAKE) -C sys clean
+
+bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
+	$(CC) $(CFLAGS_KERN) $^ -o $@
+
+bench_vm_map.o: bench_vm_map.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+mocks_vm.o: mocks_vm.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@

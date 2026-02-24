@@ -18,6 +18,9 @@ typedef struct {
     void (*scroll)(int y_offset);
 } fb_info_t;
 
+extern fb_info_t fb;
+extern int fb_active;
+
 /* Core framebuffer operations */
 void fb_init(multiboot_info_t *mbi);
 void fb_putpixel(int x, int y, uint32_t color);

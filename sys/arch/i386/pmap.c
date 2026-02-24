@@ -2,6 +2,7 @@
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/include/lapic.h>
 #include <vm/vm_page.h>
+#include <vm/phys_mem.h>
 #include <kern/panic.h>
 #include <kern/console.h>
 #include <string.h>
@@ -16,10 +17,7 @@ static uint32_t kernel_page_directory[1024];
 __attribute__((aligned(4096)))
 static uint32_t kernel_page_tables[33][1024];
 
-// Recursive Paging Helpers
-#define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
-#define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
-#define PTE_FRAME       0xFFFFF000 // Frame address mask
+
 
 #include <sys/proc.h> // For current_process
 
@@ -39,6 +37,8 @@ static struct pmap_stats global_pmap_stats = {0};
 
 // Feature flags
 static int pmap_has_pcid = 0;
+
+
 
 // Helper to increment stats (global + pmap)
 static void pmap_stat_inc(pmap_t pmap, int field_offset) {
@@ -104,10 +104,6 @@ void pmap_bootstrap(void) {
     for (int i = 0; i < 1024; i++) {
         kernel_page_directory[i] = 0; // Not present
     }
-
-    // Since we are Higher Half, we need to convert virtual addresses to physical for CR3/PDEs
-    #define V2P(x) ((uint32_t)(x) - 0xC0000000)
-    #define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
 
     // Check for PGE (Global Pages) support via CPUID
     uint32_t eax, ebx, ecx, edx;
@@ -520,9 +516,7 @@ void pmap_activate(pmap_t pmap) {
     }
 }
 
-// Access to PD and PTs via recursive mapping
-#define V_PD  ((uint32_t *)0xFFFFF000)
-#define V_PT(i) ((uint32_t *)(0xFFC00000 + ((i) << 12)))
+
 
 int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
@@ -561,6 +555,66 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
     uint32_t *pt = V_PT(pdi);
     pt[pti] = (pa & 0xFFFFF000) | pte_flags;
     pmap_invalidate_page(va);
+    return 0;
+}
+
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
+    (void)flags;
+    // Must be active address space to use recursive mapping
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return -1;
+
+    uint32_t last_pdi = (uint32_t)-1;
+    uint32_t *pt = NULL;
+
+    for (int i = 0; i < count; i++) {
+        uintptr_t va = va_start + i * 0x1000;
+        uintptr_t pa = pa_list[i];
+
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+
+        // Check if we switched to a new Page Table (or first iteration)
+        if (pdi != last_pdi) {
+            // Allocate page table on demand if not present
+            if (!(V_PD[pdi] & PTE_P)) {
+                void *pt_virt = pmm_alloc_block();
+                if (!pt_virt) return -1;
+                // Convert virtual to physical for PDE (pmm_alloc_block returns virtual)
+                uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
+                // PDE always gets W and U so PT can control actual permissions
+                V_PD[pdi] = pt_phys | PTE_P | PTE_W | PTE_U;
+                pmap_invalidate_page((uint32_t)V_PT(pdi));
+                // Zero the page table using virtual address
+                uint32_t *new_pt = (uint32_t *)pt_virt;
+                for (int j = 0; j < 1024; j++) new_pt[j] = 0;
+            }
+            last_pdi = pdi;
+            pt = V_PT(pdi);
+        }
+
+        // Build PTE flags from prot parameter
+        uint32_t pte_flags = PTE_P;
+        if (prot & VM_PROT_WRITE) {
+            pte_flags |= PTE_W;
+        }
+        if ((va < 0xC0000000) || (prot & VM_PROT_USER)) {
+            pte_flags |= PTE_U;  // User accessible if in user space or requested
+        }
+
+        pt[pti] = (pa & 0xFFFFF000) | pte_flags;
+    }
+
+    // Batch TLB invalidation
+    if (count > TLB_BATCH_THRESHOLD) {
+        pmap_invalidate_all();
+    } else {
+        for (int i = 0; i < count; i++) {
+            pmap_invalidate_page(va_start + i * 0x1000);
+        }
+    }
+
     return 0;
 }
 
@@ -617,9 +671,32 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
         if (V_PD[pdi] & PTE_PS) {
             // Already a large page, just overwrite
         } else {
-            // It's a page table. We don't support converting PT -> Large Page yet (requires freeing PT)
-            // TODO: Implement PT freeing/eviction
-            return -1;
+            // It's a page table. Replace it with a large page.
+            // 1. Get physical address of the page table
+            uint32_t pt_phys = V_PD[pdi] & PTE_FRAME;
+
+            // 2. Access the page table via recursive mapping
+            uint32_t *pt = V_PT(pdi);
+
+            // 3. Free all mapped pages in this page table
+            for (int i = 0; i < 1024; i++) {
+                if (pt[i] & PTE_P) {
+                    uint32_t page_phys = pt[i] & PTE_FRAME;
+
+                    // Validate page address before freeing
+                    // Use vm_phys_free_page via pmm_get_page to handle HighMem and refcounts safely
+                    vm_page_t *page = pmm_get_page(page_phys);
+                    if (page) {
+                        vm_phys_free_page(page);
+                    }
+                }
+            }
+
+            // 4. Free the page table page itself
+            vm_page_t *pt_page = pmm_get_page(pt_phys);
+            if (pt_page) {
+                vm_phys_free_page(pt_page);
+            }
         }
     }
 
@@ -735,9 +812,6 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
     if (!(pt[pti] & PTE_P)) return 0;
     return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);
 }
-
-// Threshold for switching to full TLB flush vs individual INVLPG
-#define TLB_BATCH_THRESHOLD 32
 
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error

@@ -52,23 +52,26 @@ static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
 static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     pipe_t *p = (pipe_t *)(uintptr_t)node->impl;
     (void)offset;
+    size_t written = 0;
 
     mutex_lock(&p->lock);
 
-    while (p->count + size > PIPE_SIZE) {
-        pipe_wait(p->wait_write, &p->lock);
+    while (written < size) {
+        while (p->count == PIPE_SIZE) {
+            pipe_wait(p->wait_write, &p->lock);
+        }
+
+        while (written < size && p->count < PIPE_SIZE) {
+            p->buffer[p->head] = buffer[written++];
+            p->head = (p->head + 1) % PIPE_SIZE;
+            p->count++;
+        }
+
+        sleepq_wake_all(p->wait_read);
     }
 
-    size_t i = 0;
-    while (i < size) {
-        p->buffer[p->head] = buffer[i++];
-        p->head = (p->head + 1) % PIPE_SIZE;
-        p->count++;
-    }
-
-    sleepq_wake_all(p->wait_read);
     mutex_unlock(&p->lock);
-    return i;
+    return written;
 }
 
 void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
