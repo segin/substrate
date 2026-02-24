@@ -2,10 +2,9 @@
 #include <kern/stacktrace.h>
 #include <drivers/video/vga.h>
 #include <drivers/video/hw_text.h>
+#include <drivers/video/fb.h>
 #include <kern/console.h>
 #include <string.h>
-
-extern int fb_active;
 
 // Forward decl
 void vga_text_set_color(uint8_t fg, uint8_t bg);
