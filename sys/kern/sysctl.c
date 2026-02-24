@@ -5,6 +5,7 @@
  */
 
 #include <sys/sysctl.h>
+#include <sys/copy.h>
 #include <sys/types.h>
 #include <sys/errno.h>
 #include <sys/proc.h>
@@ -102,30 +103,6 @@ void sysctl_init(void) {
     sysctl_initialized = 1;
 }
 
-/*
- * Safe copy helpers (Temporary)
- * TODO: Move centralized copyin/copyout to sys/kern/subr_copy.c
- */
-static int sysctl_check_user_addr(const void *addr, size_t size) {
-    uintptr_t start = (uintptr_t)addr;
-    uintptr_t end = start + size;
-    
-    if (end < start) return EFAULT;
-    if (start >= 0xC0000000) return EFAULT; // User space < 3GB
-    return 0;
-}
-
-static int sysctl_copyin(const void *uaddr, void *kaddr, size_t len) {
-    if (sysctl_check_user_addr(uaddr, len) != 0) return EFAULT;
-    memcpy(kaddr, uaddr, len);
-    return 0;
-}
-
-static int sysctl_copyout(const void *kaddr, void *uaddr, size_t len) {
-    if (sysctl_check_user_addr(uaddr, len) != 0) return EFAULT;
-    memcpy(uaddr, kaddr, len);
-    return 0;
-}
 
 /*
  * Implementation of sys_sysctl System Call
@@ -140,7 +117,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     if (namelen > CTL_MAXNAME || namelen < 2) {
         return EINVAL;
     }
-    error = sysctl_copyin(name, name_buf, namelen * sizeof(int));
+    error = copyin(name, name_buf, namelen * sizeof(int));
     if (error) return error;
 
     /* 2. Setup request */
@@ -156,7 +133,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     /* 3. Copy in old length if provided */
     if (oldlenp) {
         size_t oldlen;
-        error = sysctl_copyin(oldlenp, &oldlen, sizeof(oldlen));
+        error = copyin(oldlenp, &oldlen, sizeof(oldlen));
         if (error) return error;
         req.oldlen = oldlen;
     } else {
@@ -196,7 +173,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         // req.oldidx is updated by handler to indicate how much was written
         // or how much would have been written
         size_t used = req.oldidx;
-        sysctl_copyout(&used, oldlenp, sizeof( used ));
+        copyout(&used, oldlenp, sizeof( used ));
     }
 
     return error;
@@ -297,7 +274,7 @@ int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysc
     if (req->oldptr) {
         size_t len = sizeof(int);
         if (req->oldlen < len) return ENOMEM;
-        error = sysctl_copyout(&val, req->oldptr, len);
+        error = copyout(&val, req->oldptr, len);
         if (error) return error;
         req->oldidx = len;
     }
@@ -306,7 +283,7 @@ int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysc
         int newval;
         size_t len = sizeof(int);
         if (req->newlen < len) return EINVAL;
-        error = sysctl_copyin(req->newptr, &newval, len);
+        error = copyin(req->newptr, &newval, len);
         if (error) return error;
         
         if (arg1) *(int *)arg1 = newval;
@@ -325,7 +302,7 @@ int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
 
     if (req->oldptr) {
         if (req->oldlen < len) return ENOMEM;
-        error = sysctl_copyout(str, req->oldptr, len);
+        error = copyout(str, req->oldptr, len);
         if (error) return error;
         req->oldidx = len;
     }
@@ -334,7 +311,7 @@ int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
         size_t newlen = req->newlen;
         if (newlen > (size_t)arg2) return ENAMETOOLONG; // arg2 is max len for string
         // Copy in new string
-        error = sysctl_copyin(req->newptr, str, newlen);
+        error = copyin(req->newptr, str, newlen);
         if (error) return error;
         str[newlen-1] = '\0'; // Ensure termination
     }
@@ -349,7 +326,7 @@ int sysctl_handle_opaque(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
 
     if (req->oldptr) {
         if (req->oldlen < len) return ENOMEM;
-        error = sysctl_copyout(data, req->oldptr, len);
+        error = copyout(data, req->oldptr, len);
         if (error) return error;
         req->oldidx = len;
     }

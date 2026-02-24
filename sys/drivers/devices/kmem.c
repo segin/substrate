@@ -22,9 +22,7 @@
 /* Global securelevel (defined in sys/kern/sysctl.c) */
 extern int securelevel;
 
-/* External Copy Helpers (sys/arch/i386/signal.c) */
-extern int copyin(const void *src, void *dst, size_t size);
-extern int copyout(const void *src, void *dst, size_t size);
+#include <sys/copy.h>
 
 /* Policy configuration */
 static int kmem_allow_read = 1;   /* Allow reading by default (if privileged) */
