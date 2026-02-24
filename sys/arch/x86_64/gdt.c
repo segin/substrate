@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/smp.h>
+#include "gdt.h"
 
 /* GDT Entry (8 bytes for normal, 16 bytes for system descriptors in LM) */
 struct gdt_entry {
@@ -42,33 +43,6 @@ struct gdt_ptr {
     uint16_t limit;
     uint64_t base;
 } __attribute__((packed));
-
-/* 64-bit Task State Segment */
-struct tss64 {
-    uint32_t reserved0;
-    uint64_t rsp0;          /* Ring 0 stack pointer */
-    uint64_t rsp1;          /* Ring 1 stack pointer */
-    uint64_t rsp2;          /* Ring 2 stack pointer */
-    uint64_t reserved1;
-    uint64_t ist1;          /* Interrupt Stack Table 1 */
-    uint64_t ist2;
-    uint64_t ist3;
-    uint64_t ist4;
-    uint64_t ist5;
-    uint64_t ist6;
-    uint64_t ist7;
-    uint64_t reserved2;
-    uint16_t reserved3;
-    uint16_t iopb_offset;   /* I/O Permission Bitmap offset */
-} __attribute__((packed));
-
-/* GDT Selectors */
-#define GDT_NULL        0x00
-#define GDT_KERNEL_CODE 0x08
-#define GDT_KERNEL_DATA 0x10
-#define GDT_USER_DATA   0x18    /* Note: User data before code for SYSRET */
-#define GDT_USER_CODE   0x20
-#define GDT_TSS         0x28    /* TSS is 16 bytes (2 GDT slots) */
 
 /* Access byte flags */
 #define GDT_PRESENT     0x80
@@ -186,6 +160,7 @@ void gdt_init_percpu(int cpu_id, uint64_t rsp0) {
     gp.limit = sizeof(per_cpu_gdt[cpu_id]) - 1;
     gp.base = (uint64_t)gdt;
     
+#ifndef HOST_TEST
     __asm__ volatile(
         "lgdt %0\n\t"
         /* Reload segment registers */
@@ -205,8 +180,9 @@ void gdt_init_percpu(int cpu_id, uint64_t rsp0) {
     __asm__ volatile(
         "ltr %w0"
         :
-        : "r"((uint16_t)GDT_TSS)
+        : "r"((uint16_t)SEL_TSS)
     );
+#endif
 }
 
 /*
@@ -244,34 +220,40 @@ struct tss64 *tss_get(void) {
  * Set FS base (used for TLS in userspace)
  */
 void set_fs_base(uint64_t base) {
+#ifndef HOST_TEST
     /* FS.base is set via MSR 0xC0000100 (IA32_FS_BASE) */
     __asm__ volatile(
         "wrmsr"
         :
         : "c"(0xC0000100), "a"((uint32_t)base), "d"((uint32_t)(base >> 32))
     );
+#endif
 }
 
 /*
  * Set GS base (used for per-CPU data in kernel)
  */
 void set_gs_base(uint64_t base) {
+#ifndef HOST_TEST
     /* GS.base is set via MSR 0xC0000101 (IA32_GS_BASE) */
     __asm__ volatile(
         "wrmsr"
         :
         : "c"(0xC0000101), "a"((uint32_t)base), "d"((uint32_t)(base >> 32))
     );
+#endif
 }
 
 /*
  * Set kernel GS base (swapped on SWAPGS instruction)
  */
 void set_kernel_gs_base(uint64_t base) {
+#ifndef HOST_TEST
     /* KernelGSbase is set via MSR 0xC0000102 (IA32_KERNEL_GS_BASE) */
     __asm__ volatile(
         "wrmsr"
         :
         : "c"(0xC0000102), "a"((uint32_t)base), "d"((uint32_t)(base >> 32))
     );
+#endif
 }
