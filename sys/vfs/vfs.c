@@ -3,6 +3,7 @@
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
+#include <sys/kern_syscalls.h>
 
 #include <string.h>
 #include <kern/console.h>
@@ -57,6 +58,7 @@ void vfs_init(void) {
     
     kprint("VFS: Ready.\n");
     nchinit();
+    kern_dcache_init();
     TAILQ_INIT(&mountlist);
 }
 
@@ -656,6 +658,7 @@ int vfs_unmount_legacy(const char *path) {
     
     // Remove from mount list and free
     if (target_mp) {
+        kern_dcache_invalidate_mount(target_mp);
         TAILQ_REMOVE(&mountlist, target_mp, mnt_list);
         kfree(target_mp, sizeof(struct mount));
     }

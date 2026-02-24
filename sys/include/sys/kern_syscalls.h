@@ -15,6 +15,7 @@ struct timespec;
 struct timeval;
 struct timezone;
 struct tms;
+struct mount;
 
 /* Internal kernel versions of syscalls that take kernel pointers */
 struct sigaction;
@@ -75,5 +76,9 @@ int kern_sigpending(uint32_t *set);
 int kern_sigsuspend(const uint32_t *mask);
 int kern_sigwait(const uint32_t *set, int *sig);
 int kern_sigtimedwait(const uint32_t *set, siginfo_t *info, const struct timespec *timeout);
+
+/* Cache management */
+void kern_dcache_invalidate_mount(struct mount *mp);
+void kern_dcache_init(void);
 
 #endif

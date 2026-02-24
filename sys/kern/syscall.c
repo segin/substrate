@@ -30,6 +30,7 @@
 #include <sys/smp.h>
 #include <sys/lock.h>
 #include <sys/types.h>
+#include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/reboot.h>
@@ -871,6 +872,143 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
 /* sys_setsid is now implemented in pm/pgrp.c */
 extern int sys_setsid(void);
 
+// -----------------------------------------------------------------------------
+// Directory Entry Cache (dcache)
+// -----------------------------------------------------------------------------
+struct dcache_entry {
+    LIST_ENTRY(dcache_entry) hash_link;
+    TAILQ_ENTRY(dcache_entry) lru_link;
+    uint64_t parent_inode;
+    uint64_t child_inode;
+    struct mount *mp;
+    char *name;
+};
+
+#define DCACHE_HASH_SIZE 1024
+#define DCACHE_LIMIT 4096
+
+static LIST_HEAD(dcache_hash_head, dcache_entry) dcache_hash[DCACHE_HASH_SIZE];
+static TAILQ_HEAD(dcache_lru_head, dcache_entry) dcache_lru;
+static mutex_t dcache_lock;
+static int dcache_count = 0;
+
+void kern_dcache_init(void) {
+    for (int i = 0; i < DCACHE_HASH_SIZE; i++) {
+        LIST_INIT(&dcache_hash[i]);
+    }
+    TAILQ_INIT(&dcache_lru);
+    mutex_init(&dcache_lock, "dcache");
+}
+
+static uint32_t dcache_hash_func(struct mount *mp, uint64_t parent, uint64_t child) {
+    uintptr_t mp_val = (uintptr_t)mp;
+    return (mp_val + parent + child) % DCACHE_HASH_SIZE;
+}
+
+// Invalidate entry for (parent, child)
+static void dcache_invalidate(struct mount *mp, uint64_t parent, uint64_t child) {
+    mutex_lock(&dcache_lock);
+    uint32_t h = dcache_hash_func(mp, parent, child);
+    struct dcache_entry *entry;
+
+    LIST_FOREACH(entry, &dcache_hash[h], hash_link) {
+        if (entry->mp == mp && entry->parent_inode == parent && entry->child_inode == child) {
+            TAILQ_REMOVE(&dcache_lru, entry, lru_link);
+            LIST_REMOVE(entry, hash_link);
+            kfree(entry->name, strlen(entry->name) + 1);
+            kfree(entry, sizeof(struct dcache_entry));
+            dcache_count--;
+            break;
+        }
+    }
+    mutex_unlock(&dcache_lock);
+}
+
+// Invalidate all entries for a mount point
+void kern_dcache_invalidate_mount(struct mount *mp) {
+    mutex_lock(&dcache_lock);
+    // Iterate LRU list to find entries for this mount
+    // Removing from list while iterating is tricky with TAILQ_FOREACH_SAFE
+    struct dcache_entry *entry, *tmp;
+    TAILQ_FOREACH_SAFE(entry, &dcache_lru, lru_link, tmp) {
+        if (entry->mp == mp) {
+            TAILQ_REMOVE(&dcache_lru, entry, lru_link);
+            LIST_REMOVE(entry, hash_link);
+            kfree(entry->name, strlen(entry->name) + 1);
+            kfree(entry, sizeof(struct dcache_entry));
+            dcache_count--;
+        }
+    }
+    mutex_unlock(&dcache_lock);
+}
+
+static char *dcache_lookup(struct mount *mp, uint64_t parent, uint64_t child) {
+    mutex_lock(&dcache_lock);
+    uint32_t h = dcache_hash_func(mp, parent, child);
+    struct dcache_entry *entry;
+
+    LIST_FOREACH(entry, &dcache_hash[h], hash_link) {
+        if (entry->mp == mp && entry->parent_inode == parent && entry->child_inode == child) {
+            // Hit
+            TAILQ_REMOVE(&dcache_lru, entry, lru_link);
+            TAILQ_INSERT_TAIL(&dcache_lru, entry, lru_link);
+
+            // Return copy
+            int len = strlen(entry->name);
+            char *name = kmalloc(len + 1);
+            if (name) {
+                memcpy(name, entry->name, len + 1);
+            }
+            mutex_unlock(&dcache_lock);
+            return name;
+        }
+    }
+    mutex_unlock(&dcache_lock);
+    return NULL;
+}
+
+static void dcache_add(struct mount *mp, uint64_t parent, uint64_t child, const char *name) {
+    mutex_lock(&dcache_lock);
+
+    // Check limit
+    if (dcache_count >= DCACHE_LIMIT) {
+        struct dcache_entry *lru = TAILQ_FIRST(&dcache_lru);
+        if (lru) {
+            TAILQ_REMOVE(&dcache_lru, lru, lru_link);
+            LIST_REMOVE(lru, hash_link);
+            kfree(lru->name, strlen(lru->name) + 1);
+            kfree(lru, sizeof(struct dcache_entry));
+            dcache_count--;
+        }
+    }
+
+    struct dcache_entry *entry = kmalloc(sizeof(struct dcache_entry));
+    if (!entry) {
+        mutex_unlock(&dcache_lock);
+        return;
+    }
+
+    entry->mp = mp;
+    entry->parent_inode = parent;
+    entry->child_inode = child;
+
+    int len = strlen(name);
+    entry->name = kmalloc(len + 1);
+    if (!entry->name) {
+        kfree(entry, sizeof(struct dcache_entry));
+        mutex_unlock(&dcache_lock);
+        return;
+    }
+    memcpy(entry->name, name, len + 1);
+
+    uint32_t h = dcache_hash_func(mp, parent, child);
+    LIST_INSERT_HEAD(&dcache_hash[h], entry, hash_link);
+    TAILQ_INSERT_TAIL(&dcache_lru, entry, lru_link);
+    dcache_count++;
+
+    mutex_unlock(&dcache_lock);
+}
+
 
 int sys_unlink(const char *path) {
     char kpath[256];
@@ -918,6 +1056,14 @@ int kern_unlink(const char *path) {
     
     if (!parent || !file[0]) return -1;
     
+    // Invalidate dcache entry for this file
+    if (parent->finddir) {
+        fs_node_t *child = parent->finddir(parent, file);
+        if (child) {
+            dcache_invalidate(parent->mp, parent->inode, child->inode);
+        }
+    }
+
     return unlink_fs(parent, file);
 }
 
@@ -1385,6 +1531,10 @@ int sys_fchdir(int fd) {
 static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
     if (!dir || !dir->readdir) return NULL;
 
+    // Check cache
+    char *cached = dcache_lookup(dir->mp, dir->inode, inode);
+    if (cached) return cached;
+
     // We have to iterate linearly.
     // Assuming standard "readdir" semantics: index 0, 1, 2...
     // We check every entry.
@@ -1409,6 +1559,10 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
             if (!name) return NULL;
             memcpy(name, d->d_name, len);
             name[len] = '\0';
+
+            // Add to cache
+            dcache_add(dir->mp, dir->inode, inode, name);
+
             return name;
         }
         index++;
