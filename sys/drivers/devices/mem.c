@@ -6,6 +6,8 @@
 #include <sys/memio.h>
 #include <vfs/vfs.h>
 #include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <sys/lock.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 
@@ -25,6 +27,10 @@ static int mem_secure_level = 0;
 
 /* Limits */
 #define MEM_DIRECT_MAP_LIMIT 0x40000000 // 1GB limit for direct access
+
+/* HighMem Sliding Window */
+static mutex_t mem_high_lock;
+static void *mem_high_window = NULL;
 
 static void mem_open(fs_node_t *node) {
     (void)node;
@@ -82,34 +88,56 @@ static void mem_open(fs_node_t *node) {
 
 static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
+    size_t total_read = 0;
 
     /* Policy Checks */
     if (!mem_allow && current_process->euid != 0) {
         return -EPERM;
     }
 
-    /* Bounds check for Direct Map implementation */
-    if (offset >= MEM_DIRECT_MAP_LIMIT) {
-        return -EIO; /* TODO: Implement HighMem access via pmap_kenter window */
+    while (size > 0) {
+        size_t chunk;
+        if (offset < MEM_DIRECT_MAP_LIMIT) {
+            chunk = MEM_DIRECT_MAP_LIMIT - (uintptr_t)offset;
+            if (chunk > size) chunk = size;
+
+            uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
+            if (copyout((void*)kernel_va, buffer, chunk) != 0) {
+                return total_read ? total_read : (size_t)-EFAULT;
+            }
+        } else {
+            /* HighMem access via pmap_kenter window */
+            if (!mem_high_window) return total_read ? total_read : (size_t)-EIO;
+
+            mutex_lock(&mem_high_lock);
+
+            uintptr_t pa = (uintptr_t)offset & ~(PMM_BLOCK_SIZE - 1);
+            uintptr_t pg_off = (uintptr_t)offset & (PMM_BLOCK_SIZE - 1);
+            chunk = PMM_BLOCK_SIZE - pg_off;
+            if (chunk > size) chunk = size;
+
+            pmap_kenter((uintptr_t)mem_high_window, pa);
+
+            if (copyout((char*)mem_high_window + pg_off, buffer, chunk) != 0) {
+                mutex_unlock(&mem_high_lock);
+                return total_read ? total_read : (size_t)-EFAULT;
+            }
+
+            mutex_unlock(&mem_high_lock);
+        }
+
+        buffer += chunk;
+        offset += chunk;
+        size -= chunk;
+        total_read += chunk;
     }
 
-    if (offset + size > MEM_DIRECT_MAP_LIMIT) {
-        size = MEM_DIRECT_MAP_LIMIT - offset;
-    }
-
-    /* Access Physical Memory via Kernel Direct Map */
-    uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
-
-    /* Copy to user buffer safely */
-    if (copyout((void*)kernel_va, buffer, size) != 0) {
-        return -EFAULT;
-    }
-
-    return size;
+    return total_read;
 }
 
 static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
+    size_t total_written = 0;
 
     /* Policy Checks */
     if (!mem_allow && current_process->euid != 0) {
@@ -120,22 +148,44 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
         return -EPERM; /* Writes denied in secure mode */
     }
 
-    if (offset >= MEM_DIRECT_MAP_LIMIT) {
-        return -EIO;
+    while (size > 0) {
+        size_t chunk;
+        if (offset < MEM_DIRECT_MAP_LIMIT) {
+            chunk = MEM_DIRECT_MAP_LIMIT - (uintptr_t)offset;
+            if (chunk > size) chunk = size;
+
+            uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
+            if (copyin(buffer, (void*)kernel_va, chunk) != 0) {
+                return total_written ? total_written : (size_t)-EFAULT;
+            }
+        } else {
+            /* HighMem access via pmap_kenter window */
+            if (!mem_high_window) return total_written ? total_written : (size_t)-EIO;
+
+            mutex_lock(&mem_high_lock);
+
+            uintptr_t pa = (uintptr_t)offset & ~(PMM_BLOCK_SIZE - 1);
+            uintptr_t pg_off = (uintptr_t)offset & (PMM_BLOCK_SIZE - 1);
+            chunk = PMM_BLOCK_SIZE - pg_off;
+            if (chunk > size) chunk = size;
+
+            pmap_kenter((uintptr_t)mem_high_window, pa);
+
+            if (copyin(buffer, (char*)mem_high_window + pg_off, chunk) != 0) {
+                mutex_unlock(&mem_high_lock);
+                return total_written ? total_written : (size_t)-EFAULT;
+            }
+
+            mutex_unlock(&mem_high_lock);
+        }
+
+        buffer += chunk;
+        offset += chunk;
+        size -= chunk;
+        total_written += chunk;
     }
 
-    if (offset + size > MEM_DIRECT_MAP_LIMIT) {
-        size = MEM_DIRECT_MAP_LIMIT - offset;
-    }
-
-    uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
-
-    /* Copy from user buffer safely */
-    if (copyin(buffer, (void*)kernel_va, size) != 0) {
-        return -EFAULT;
-    }
-
-    return size;
+    return total_written;
 }
 
 static void *mem_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
@@ -148,7 +198,7 @@ static void *mem_mmap(fs_node_t *node, void *addr, size_t length, int prot, int 
 
     /* Basic alignment */
     if (length == 0) return (void*)-1;
-    if (offset & 0xFFF) return (void*)-1; /* Must be page aligned */
+    if (offset & (PMM_BLOCK_SIZE - 1)) return (void*)-1; /* Must be page aligned */
 
     vm_map_t *map = p->vm_map;
     uintptr_t v_addr = (uintptr_t)addr;
@@ -179,7 +229,7 @@ static void *mem_mmap(fs_node_t *node, void *addr, size_t length, int prot, int 
 
     /* Map pages */
     uintptr_t pa = (uintptr_t)offset;
-    for (uintptr_t va = v_addr; va < v_addr + length; va += 0x1000, pa += 0x1000) {
+    for (uintptr_t va = v_addr; va < v_addr + length; va += PMM_BLOCK_SIZE, pa += PMM_BLOCK_SIZE) {
         /*
          * Note: pmap_enter expects physical address.
          * We verify 'pa' is valid if necessary, or rely on hardware to fault if it's MMIO/invalid.
@@ -233,6 +283,14 @@ static int mem_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 static fs_node_t mem_node;
 
 void mem_init(void) {
+    /* Initialize HighMem sliding window */
+    mutex_init(&mem_high_lock, "mem_high");
+    /* Note: pmm_alloc_block returns a kernel virtual address (direct mapping) */
+    mem_high_window = pmm_alloc_block();
+    if (!mem_high_window) {
+        kprint("mem: Failed to allocate HighMem window\n");
+    }
+
     memset(&mem_node, 0, sizeof(fs_node_t));
     strcpy(mem_node.name, "mem");
     mem_node.flags = FS_CHARDEVICE;
