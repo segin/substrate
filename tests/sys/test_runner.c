@@ -75,6 +75,11 @@ void run_kernel_tests(void) {
         run_pmap_tests();
     }
 
+    if (strcmp(test_arg, "benchmark") == 0) {
+        extern void run_pmap_benchmark(void);
+        run_pmap_benchmark();
+    }
+
     if (all || strcmp(test_arg, "pmap_protect") == 0) {
         run_pmap_protect_property_tests();
     }
