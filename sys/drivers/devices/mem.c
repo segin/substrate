@@ -4,6 +4,7 @@
 #include <sys/sysctl.h>
 #include <sys/stat.h>
 #include <sys/memio.h>
+#include <sys/lock.h>
 #include <vfs/vfs.h>
 #include <arch/i386/pmap.h>
 #include <vm/vm_map.h>
@@ -25,6 +26,16 @@ static int mem_secure_level = 0;
 
 /* Limits */
 #define MEM_DIRECT_MAP_LIMIT 0x40000000 // 1GB limit for direct access
+
+/* HighMem Window */
+#ifdef HOST_TEST
+uintptr_t mem_window_addr_mock = 0;
+#define MEM_WINDOW_ADDR mem_window_addr_mock
+#else
+#define MEM_WINDOW_ADDR 0xFFBFF000
+#endif
+
+static mutex_t mem_window_lock;
 
 static void mem_open(fs_node_t *node) {
     (void)node;
@@ -88,24 +99,57 @@ static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buff
         return -EPERM;
     }
 
-    /* Bounds check for Direct Map implementation */
-    if (offset >= MEM_DIRECT_MAP_LIMIT) {
-        return -EIO; /* TODO: Implement HighMem access via pmap_kenter window */
+    size_t transferred = 0;
+
+    while (size > 0) {
+        size_t chunk_size;
+
+        if (offset >= MEM_DIRECT_MAP_LIMIT) {
+            /* HighMem Access via Window */
+            mutex_lock(&mem_window_lock);
+
+            uintptr_t pa = (uintptr_t)offset;
+            uintptr_t pa_aligned = pa & ~0xFFF;
+            size_t page_offset = pa & 0xFFF;
+
+            chunk_size = 4096 - page_offset;
+            if (chunk_size > size) chunk_size = size;
+
+            /* Map physical page to window */
+            pmap_kenter(MEM_WINDOW_ADDR, pa_aligned);
+
+            /* Copy to user buffer */
+            void *window_ptr = (void*)(MEM_WINDOW_ADDR + page_offset);
+            if (copyout(window_ptr, buffer, chunk_size) != 0) {
+                pmap_kremove(MEM_WINDOW_ADDR);
+                mutex_unlock(&mem_window_lock);
+                return -EFAULT;
+            }
+
+            /* Unmap window */
+            pmap_kremove(MEM_WINDOW_ADDR);
+
+            mutex_unlock(&mem_window_lock);
+        } else {
+            /* Direct Map Access */
+            chunk_size = size;
+            if (offset + chunk_size > MEM_DIRECT_MAP_LIMIT) {
+                chunk_size = MEM_DIRECT_MAP_LIMIT - offset;
+            }
+
+            uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
+            if (copyout((void*)kernel_va, buffer, chunk_size) != 0) {
+                return -EFAULT;
+            }
+        }
+
+        size -= chunk_size;
+        offset += chunk_size;
+        buffer += chunk_size;
+        transferred += chunk_size;
     }
 
-    if (offset + size > MEM_DIRECT_MAP_LIMIT) {
-        size = MEM_DIRECT_MAP_LIMIT - offset;
-    }
-
-    /* Access Physical Memory via Kernel Direct Map */
-    uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
-
-    /* Copy to user buffer safely */
-    if (copyout((void*)kernel_va, buffer, size) != 0) {
-        return -EFAULT;
-    }
-
-    return size;
+    return transferred;
 }
 
 static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
@@ -120,22 +164,57 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
         return -EPERM; /* Writes denied in secure mode */
     }
 
-    if (offset >= MEM_DIRECT_MAP_LIMIT) {
-        return -EIO;
+    size_t transferred = 0;
+
+    while (size > 0) {
+        size_t chunk_size;
+
+        if (offset >= MEM_DIRECT_MAP_LIMIT) {
+            /* HighMem Access via Window */
+            mutex_lock(&mem_window_lock);
+
+            uintptr_t pa = (uintptr_t)offset;
+            uintptr_t pa_aligned = pa & ~0xFFF;
+            size_t page_offset = pa & 0xFFF;
+
+            chunk_size = 4096 - page_offset;
+            if (chunk_size > size) chunk_size = size;
+
+            /* Map physical page to window */
+            pmap_kenter(MEM_WINDOW_ADDR, pa_aligned);
+
+            /* Copy from user buffer */
+            void *window_ptr = (void*)(MEM_WINDOW_ADDR + page_offset);
+            if (copyin(buffer, window_ptr, chunk_size) != 0) {
+                pmap_kremove(MEM_WINDOW_ADDR);
+                mutex_unlock(&mem_window_lock);
+                return -EFAULT;
+            }
+
+            /* Unmap window */
+            pmap_kremove(MEM_WINDOW_ADDR);
+
+            mutex_unlock(&mem_window_lock);
+        } else {
+            /* Direct Map Access */
+            chunk_size = size;
+            if (offset + chunk_size > MEM_DIRECT_MAP_LIMIT) {
+                chunk_size = MEM_DIRECT_MAP_LIMIT - offset;
+            }
+
+            uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
+            if (copyin(buffer, (void*)kernel_va, chunk_size) != 0) {
+                return -EFAULT;
+            }
+        }
+
+        size -= chunk_size;
+        offset += chunk_size;
+        buffer += chunk_size;
+        transferred += chunk_size;
     }
 
-    if (offset + size > MEM_DIRECT_MAP_LIMIT) {
-        size = MEM_DIRECT_MAP_LIMIT - offset;
-    }
-
-    uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
-
-    /* Copy from user buffer safely */
-    if (copyin(buffer, (void*)kernel_va, size) != 0) {
-        return -EFAULT;
-    }
-
-    return size;
+    return transferred;
 }
 
 static void *mem_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
@@ -245,6 +324,8 @@ void mem_init(void) {
     mem_node.uid = 0;
     mem_node.gid = 0;
     mem_node.mask = 0600; /* Read/Write for root only */
+
+    mutex_init(&mem_window_lock, "mem_window");
 
     devfs_register_device(&mem_node);
 
