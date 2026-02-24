@@ -42,7 +42,6 @@
 #include <sys/smp.h>
 
 #include <sys/tests.h>
-#include <sys/smp.h>
 
 extern void ntsync_init(void);
 
@@ -351,8 +350,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     kprint("Scheduler Initialized.\n");
 
     // Initialize Sysctl Subsystem
-    extern void sysctl_init(void);
-    sysctl_init();
     extern void sysctl_init(void);
     sysctl_init();
     
