@@ -111,7 +111,7 @@ void sched_smp_init() {}
 
 // kmem mocks for host
 void *kmalloc(size_t size) {
-    if (size > 4096) return NULL;
+    if (size > 65536) return NULL;
     // Host tests use standard malloc for kmalloc
     return malloc(size);
 }
@@ -261,9 +261,6 @@ void sendsig(void *sf, struct process *p, int sig) { (void)sf; (void)p; (void)si
 const uint8_t sigprop[NSIG] = {0}; 
 
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) { (void)path; (void)argv; (void)envp; return 0; }
-
-// Pipe creation
-void pipe_create() {}
 
 struct fs_node *devfs_root_node_ptr;
 struct nameidata;

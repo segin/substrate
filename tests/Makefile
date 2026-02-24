@@ -7,7 +7,8 @@ CFLAGS_TEST = $(CFLAGS_COMMON) -I../sys/include -I../sys -I. -DNO_MAIN
 CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_swap.o vm_zone.o \
             spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
             string.o printf.o div64.o compat.o acct.o sysinfo.o \
-            vfs.o vfs_cache.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o wait.o sched_decay.o libc_wrappers.o
+            vfs.o vfs_cache.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o wait.o sched_decay.o libc_wrappers.o \
+            pipe.o
 
 # Unit tests
 UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
@@ -22,7 +23,7 @@ UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
              sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c \
-             sys/test_div64.c
+             sys/test_div64.c ../tests/sys/test_pipe_race.c
 
 UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
@@ -74,6 +75,8 @@ test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 %.o: ../sys/vfs/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
+%.o: ../sys/fs/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
 %.o: ../sys/pm/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 
@@ -100,6 +103,8 @@ vm_map_host.o: vm_map_host.c
 %.o: fuzz/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: sys/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+test_pipe_race.o: ../tests/sys/test_pipe_race.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 test_libc_string_unit.o: lib/c/test_libc_string_unit.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
