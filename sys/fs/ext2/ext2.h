@@ -137,6 +137,10 @@ typedef struct {
     ext2_inode_t inode;
     struct dirent current_dirent; // For readdir
 
+    // Readdir cache for sequential access optimization
+    uint64_t last_readdir_idx;
+    uint32_t last_readdir_pos;
+
     // Scratch buffers for I/O operations (protected by lock)
     mutex_t lock;
     uint8_t *block_buf;
