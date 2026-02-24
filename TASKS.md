@@ -255,7 +255,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] **4MB PSE Pages (i386):**
                     - [x] Detect PSE via CPUID (CR4.PSE).
                     - [x] Use PDE with PS=1 for 4MB mappings.
-                    - [x] `pmap_enter_pse(pmap, va, pa, prot)`: Create 4MB mapping.
+                    - [x] `pmap_enter_large(pmap, va, pa, prot, flags)`: Create 4MB mapping (supports eviction).
                     - [x] Align VA and PA to 4MB boundary.
                     - [x] Use for kernel text/data to reduce TLB pressure.
                 - [ ] **2MB/1GB Pages (x86_64):**
