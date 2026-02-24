@@ -10,6 +10,7 @@
 #include <sys/proc.h>
 #include <sys/lock.h>
 #include <sys/smp.h>
+#include <sys/kern_syscalls.h>
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -103,31 +104,6 @@ void sysctl_init(void) {
 }
 
 /*
- * Safe copy helpers (Temporary)
- * TODO: Move centralized copyin/copyout to sys/kern/subr_copy.c
- */
-static int sysctl_check_user_addr(const void *addr, size_t size) {
-    uintptr_t start = (uintptr_t)addr;
-    uintptr_t end = start + size;
-    
-    if (end < start) return EFAULT;
-    if (start >= 0xC0000000) return EFAULT; // User space < 3GB
-    return 0;
-}
-
-static int sysctl_copyin(const void *uaddr, void *kaddr, size_t len) {
-    if (sysctl_check_user_addr(uaddr, len) != 0) return EFAULT;
-    memcpy(kaddr, uaddr, len);
-    return 0;
-}
-
-static int sysctl_copyout(const void *kaddr, void *uaddr, size_t len) {
-    if (sysctl_check_user_addr(uaddr, len) != 0) return EFAULT;
-    memcpy(uaddr, kaddr, len);
-    return 0;
-}
-
-/*
  * Implementation of sys_sysctl System Call
  */
 int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
@@ -140,8 +116,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     if (namelen > CTL_MAXNAME || namelen < 2) {
         return EINVAL;
     }
-    error = sysctl_copyin(name, name_buf, namelen * sizeof(int));
-    if (error) return error;
+    if (copyin(name, name_buf, namelen * sizeof(int)) != 0) return EFAULT;
 
     /* 2. Setup request */
     memset(&req, 0, sizeof(req));
@@ -156,8 +131,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     /* 3. Copy in old length if provided */
     if (oldlenp) {
         size_t oldlen;
-        error = sysctl_copyin(oldlenp, &oldlen, sizeof(oldlen));
-        if (error) return error;
+        if (copyin(oldlenp, &oldlen, sizeof(oldlen)) != 0) return EFAULT;
         req.oldlen = oldlen;
     } else {
         req.oldlen = 0;
@@ -196,7 +170,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         // req.oldidx is updated by handler to indicate how much was written
         // or how much would have been written
         size_t used = req.oldidx;
-        sysctl_copyout(&used, oldlenp, sizeof( used ));
+        if (copyout(&used, oldlenp, sizeof( used )) != 0) return EFAULT;
     }
 
     return error;
@@ -288,7 +262,6 @@ struct sysctl_oid *sysctl_find_oid(int *name, unsigned int namelen, struct sysct
 /* helper to copy out data */
 int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
     (void)oidp;
-    int error = 0;
     int val;
 
     if (arg1) val = *(int *)arg1;
@@ -297,8 +270,7 @@ int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysc
     if (req->oldptr) {
         size_t len = sizeof(int);
         if (req->oldlen < len) return ENOMEM;
-        error = sysctl_copyout(&val, req->oldptr, len);
-        if (error) return error;
+        if (copyout(&val, req->oldptr, len) != 0) return EFAULT;
         req->oldidx = len;
     }
 
@@ -306,8 +278,7 @@ int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysc
         int newval;
         size_t len = sizeof(int);
         if (req->newlen < len) return EINVAL;
-        error = sysctl_copyin(req->newptr, &newval, len);
-        if (error) return error;
+        if (copyin(req->newptr, &newval, len) != 0) return EFAULT;
         
         if (arg1) *(int *)arg1 = newval;
         // else read-only effectively if no pointer
@@ -317,7 +288,6 @@ int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysc
 
 int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
     (void)oidp;
-    int error = 0;
     char *str = (char *)arg1;
     size_t len = 0;
 
@@ -325,8 +295,7 @@ int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
 
     if (req->oldptr) {
         if (req->oldlen < len) return ENOMEM;
-        error = sysctl_copyout(str, req->oldptr, len);
-        if (error) return error;
+        if (copyout(str, req->oldptr, len) != 0) return EFAULT;
         req->oldidx = len;
     }
 
@@ -334,8 +303,7 @@ int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
         size_t newlen = req->newlen;
         if (newlen > (size_t)arg2) return ENAMETOOLONG; // arg2 is max len for string
         // Copy in new string
-        error = sysctl_copyin(req->newptr, str, newlen);
-        if (error) return error;
+        if (copyin(req->newptr, str, newlen) != 0) return EFAULT;
         str[newlen-1] = '\0'; // Ensure termination
     }
     return 0;
@@ -343,14 +311,12 @@ int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
 
 int sysctl_handle_opaque(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
     (void)oidp;
-    int error = 0;
     void *data = arg1;
     size_t len = arg2; // Fixed size passed in arg2
 
     if (req->oldptr) {
         if (req->oldlen < len) return ENOMEM;
-        error = sysctl_copyout(data, req->oldptr, len);
-        if (error) return error;
+        if (copyout(data, req->oldptr, len) != 0) return EFAULT;
         req->oldidx = len;
     }
     

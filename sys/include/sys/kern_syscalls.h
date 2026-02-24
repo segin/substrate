@@ -20,6 +20,7 @@ struct tms;
 struct sigaction;
 
 /* Safe user space copying */
+int validate_user_addr(const void *addr, size_t size);
 int copyin(const void *src, void *dst, size_t size);
 int copyout(const void *src, void *dst, size_t size);
 int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len);
