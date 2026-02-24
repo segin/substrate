@@ -89,6 +89,9 @@ extern bool test_vop_readlink_basic(void);
 extern bool test_vop_readlink_notlink(void);
 extern bool test_vop_readlink_notsupp(void);
 
+// FUSE Tests
+extern bool test_fuse_read(void);
+
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
 extern bool prop_realtime_preempts_timeshare(void);
@@ -199,6 +202,7 @@ test_case_t tests[] = {
     { "vfs_readlink_basic", test_vop_readlink_basic },
     { "vfs_readlink_notlink", test_vop_readlink_notlink },
     { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
+    {"fuse_read", test_fuse_read},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
