@@ -197,6 +197,44 @@ void test_pge_global_flush(void) {
     kprint("  PASS\n");
 }
 
+// Test: Replace a Page Table with a Large Page
+void test_pmap_large_replace(void) {
+    kprint("Test: Replace Page Table with Large Page\n");
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    // Activate pmap to be able to map things
+    pmap_activate(pmap);
+
+    // 1. Map a small page at 0x800000 (8MB)
+    // This will allocate a Page Table at PD index 2
+    uint32_t va = 0x800000;
+    uint32_t pa_small = 0x100000;
+    int ret = pmap_enter(pmap, va, pa_small, VM_PROT_READ | VM_PROT_WRITE, 0);
+    TEST_ASSERT(ret == 0, "pmap_enter small page");
+
+    // Verify small page mapping
+    uint32_t extracted_pa = pmap_extract(pmap, va);
+    TEST_ASSERT(extracted_pa == pa_small, "small page mapped correctly");
+
+    // 2. Try to map a Large Page (4MB) at the same location (covers 0x800000 - 0xC00000)
+    // This requires evicting the Page Table we just created.
+    uint32_t pa_large = 0x2000000; // 32MB
+    ret = pmap_enter_large(pmap, va, pa_large, VM_PROT_READ | VM_PROT_WRITE, 0);
+
+    // EXPECT SUCCESS AFTER FIX
+    TEST_ASSERT(ret == 0, "pmap_enter_large replaced page table");
+
+    // Verify large page mapping
+    extracted_pa = pmap_extract(pmap, va);
+    TEST_ASSERT(extracted_pa == pa_large, "large page mapped correctly");
+
+    // Switch back to kernel pmap before destroying
+    pmap_activate(pmap_kernel());
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
 static void itoa(int val, char *buf) {
     if (val == 0) {
         buf[0] = '0';
@@ -248,6 +286,7 @@ void run_pmap_tests(void) {
     test_pge_detection();
     test_pge_global_flush();
     test_memory_leak();
+    test_pmap_large_replace();
     
     kprint("\nResults: ");
     kprint("Passed: ");

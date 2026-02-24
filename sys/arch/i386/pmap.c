@@ -617,9 +617,30 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
         if (V_PD[pdi] & PTE_PS) {
             // Already a large page, just overwrite
         } else {
-            // It's a page table. We don't support converting PT -> Large Page yet (requires freeing PT)
-            // TODO: Implement PT freeing/eviction
-            return -1;
+            // It's a page table. Free it and its pages to allow Large Page mapping.
+
+            // 1. Get pointer to the page table (via recursive mapping)
+            uint32_t *pt = V_PT(pdi);
+
+            // 2. Iterate and free pages
+            for (int i = 0; i < 1024; i++) {
+                if (pt[i] & PTE_P) {
+                    uint32_t page_phys = pt[i] & PTE_FRAME;
+
+                    // Don't free kernel pages (>= 0x40000000 physical)
+                    // Consistent with pmap_destroy check
+                    if (page_phys < 0x40000000) {
+                        pmm_free_block((void *)(uintptr_t)(page_phys + 0xC0000000));
+                    }
+                }
+            }
+
+            // 3. Free the page table itself
+            uint32_t pt_phys = V_PD[pdi] & PTE_FRAME;
+            pmm_free_block((void *)(uintptr_t)(pt_phys + 0xC0000000));
+
+            // 4. Clear the PDE
+            V_PD[pdi] = 0;
         }
     }
 
