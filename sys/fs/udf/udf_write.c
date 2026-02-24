@@ -850,6 +850,74 @@ int udf_remove_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
 }
 
 /*
+ * Recursively free an AED chain and its referenced blocks
+ */
+static void udf_free_aed_chain(fs_node_t *dev, uint32_t block, int is_short) {
+    uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!buf) return;
+
+    while (block != 0) {
+        off_t offset = (off_t)(udf_ctx.partition_start + block) * UDF_SECTOR_SIZE;
+        if (dev->read(dev, offset, UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE) {
+            kprint("UDF: Error reading AED for free\n");
+            break;
+        }
+
+        struct udf_aed *aed = (struct udf_aed *)buf;
+        if (aed->tag.tag_id != UDF_TAG_AED) {
+            kprint("UDF: Invalid AED tag during free\n");
+            break;
+        }
+
+        uint32_t len = aed->alloc_desc_length;
+        uint32_t next_block = 0;
+
+        if (is_short) {
+            struct udf_short_ad *ads = (struct udf_short_ad *)(buf + sizeof(struct udf_aed));
+            uint32_t num_ads = len / sizeof(struct udf_short_ad);
+
+            for (uint32_t i = 0; i < num_ads; i++) {
+                uint32_t type = (ads[i].length >> 30) & 0x3;
+                uint32_t ad_len = ads[i].length & 0x3FFFFFFF;
+                uint32_t pos = ads[i].position;
+
+                if (type == 3) {
+                    next_block = pos;
+                } else if (type != 2) {
+                    uint32_t blocks = (ad_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+                    for (uint32_t b = 0; b < blocks; b++) {
+                        udf_free_block(pos + b);
+                    }
+                }
+            }
+        } else {
+            struct udf_long_ad *ads = (struct udf_long_ad *)(buf + sizeof(struct udf_aed));
+            uint32_t num_ads = len / sizeof(struct udf_long_ad);
+
+            for (uint32_t i = 0; i < num_ads; i++) {
+                uint32_t type = (ads[i].length >> 30) & 0x3;
+                uint32_t ad_len = ads[i].length & 0x3FFFFFFF;
+                uint32_t pos = ads[i].block;
+
+                if (type == 3) {
+                    next_block = pos;
+                } else if (type != 2) {
+                    uint32_t blocks = (ad_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+                    for (uint32_t b = 0; b < blocks; b++) {
+                        udf_free_block(pos + b);
+                    }
+                }
+            }
+        }
+
+        udf_free_block(block);
+        block = next_block;
+    }
+
+    kfree(buf, UDF_SECTOR_SIZE);
+}
+
+/*
  * Truncate or extend a file
  */
 int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
@@ -1011,66 +1079,110 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
 
         uint64_t current_offset = 0;
         uint32_t new_num_ads = 0;
+        uint8_t *cur_buf = NULL;
+        uint32_t cur_block = fe_block;
 
-        for (uint32_t i = 0; i < num_ads; i++) {
-            uint32_t len = ads[i].length & 0x3FFFFFFF;
-            uint32_t type = (ads[i].length >> 30) & 0x3;
-            uint32_t block = ads[i].position;
+        while (1) {
+            for (uint32_t i = 0; i < num_ads; i++) {
+                uint32_t len = ads[i].length & 0x3FFFFFFF;
+                uint32_t type = (ads[i].length >> 30) & 0x3;
+                uint32_t block = ads[i].position;
 
-            if (current_offset >= new_size) {
-                /* This extent is fully beyond new_size, remove it and free blocks */
-                uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-                /* Free blocks if allocated (type 0 or 1, not 2) */
-                if (type != 2) {
-                    for (uint32_t b = 0; b < blocks; b++) {
-                        udf_free_block(block + b);
+                if (current_offset >= new_size) {
+                    if (type == 3) {
+                        udf_free_aed_chain(dev, block, 1);
+                    } else if (type != 2) {
+                        uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+                        for (uint32_t b = 0; b < blocks; b++) {
+                            udf_free_block(block + b);
+                        }
                     }
+                    continue;
                 }
-                /* Don't increment new_num_ads */
-                continue;
+
+                if (type == 3) {
+                    /* AED link - traverse into it */
+                    /* Keep the link in parent */
+                    if (new_num_ads != i) {
+                        ads[new_num_ads] = ads[i];
+                    }
+                    new_num_ads++;
+
+                    /* Write back current container */
+                    if (cur_buf) {
+                        struct udf_aed *aed = (struct udf_aed *)cur_buf;
+                        aed->alloc_desc_length = new_num_ads * sizeof(struct udf_short_ad);
+                        udf_ext_write_aed(dev, cur_block, cur_buf, aed->alloc_desc_length);
+                        kfree(cur_buf, UDF_SECTOR_SIZE);
+                    } else {
+                        disk_fe->alloc_desc_length = new_num_ads * sizeof(struct udf_short_ad);
+                    }
+
+                    /* Load next AED */
+                    cur_buf = kmalloc(UDF_SECTOR_SIZE);
+                    if (!cur_buf) return -1;
+
+                    off_t offset = (off_t)(udf_ctx.partition_start + block) * UDF_SECTOR_SIZE;
+                    if (dev->read(dev, offset, UDF_SECTOR_SIZE, cur_buf) != UDF_SECTOR_SIZE) {
+                         kfree(cur_buf, UDF_SECTOR_SIZE);
+                         return -1;
+                    }
+
+                    cur_block = block;
+                    struct udf_aed *aed = (struct udf_aed *)cur_buf;
+                    if (aed->tag.tag_id != UDF_TAG_AED) {
+                         kprint("UDF: Invalid AED tag during truncate\n");
+                         kfree(cur_buf, UDF_SECTOR_SIZE);
+                         return -1;
+                    }
+
+                    ads = (struct udf_short_ad *)(cur_buf + sizeof(struct udf_aed));
+                    num_ads = aed->alloc_desc_length / sizeof(struct udf_short_ad);
+                    new_num_ads = 0;
+
+                    goto next_short_container;
+                } else if (current_offset + len > new_size) {
+                    uint32_t new_len = (uint32_t)(new_size - current_offset);
+                    uint32_t old_blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+                    uint32_t new_blocks = (new_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+
+                    if (type != 2 && old_blocks > new_blocks) {
+                        for (uint32_t b = new_blocks; b < old_blocks; b++) {
+                            udf_free_block(block + b);
+                        }
+                    }
+
+                    ads[new_num_ads].length = new_len | (type << 30);
+                    ads[new_num_ads].position = block;
+                    new_num_ads++;
+                } else {
+                    if (new_num_ads != i) {
+                        ads[new_num_ads] = ads[i];
+                    }
+                    new_num_ads++;
+                }
+
+                if (type != 3) {
+                    current_offset += len;
+                }
             }
 
-            if (type == 3) {
-                /* AED link - keep it if we haven't reached new_size, but don't increment offset */
-                /* TODO: Recurse into AED to truncate properly */
-                if (new_num_ads != i) {
-                    ads[new_num_ads] = ads[i];
-                }
-                new_num_ads++;
-            } else if (current_offset + len > new_size) {
-                /* Partial extent - truncate it */
-                uint32_t new_len = (uint32_t)(new_size - current_offset);
-
-                /* Calculate blocks to keep */
-                uint32_t old_blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-                uint32_t new_blocks = (new_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-
-                /* Free excess blocks */
-                if (type != 2 && old_blocks > new_blocks) {
-                    for (uint32_t b = new_blocks; b < old_blocks; b++) {
-                        udf_free_block(block + b);
-                    }
-                }
-
-                /* Update AD in place (or copy to new position if needed, but we shrink so it fits) */
-                ads[new_num_ads].length = new_len | (type << 30);
-                ads[new_num_ads].position = block;
-                new_num_ads++;
+            /* Finished current container */
+            if (cur_buf) {
+                struct udf_aed *aed = (struct udf_aed *)cur_buf;
+                aed->alloc_desc_length = new_num_ads * sizeof(struct udf_short_ad);
+                udf_ext_write_aed(dev, cur_block, cur_buf, aed->alloc_desc_length);
+                kfree(cur_buf, UDF_SECTOR_SIZE);
+                cur_buf = NULL;
             } else {
-                /* Keep full extent */
-                if (new_num_ads != i) {
-                    ads[new_num_ads] = ads[i];
-                }
-                new_num_ads++;
+                disk_fe->alloc_desc_length = new_num_ads * sizeof(struct udf_short_ad);
             }
+            break;
 
-            if (type != 3) {
-                current_offset += len;
-            }
+            next_short_container:;
         }
 
         disk_fe->info_length = new_size;
-        disk_fe->alloc_desc_length = new_num_ads * sizeof(struct udf_short_ad);
 
         /* Recalculate checksum */
         uint8_t *p = (uint8_t *)&disk_fe->tag;
@@ -1202,49 +1314,107 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         uint32_t num_ads = disk_fe->alloc_desc_length / sizeof(struct udf_long_ad);
         uint64_t current_offset = 0;
         uint32_t new_num_ads = 0;
+        uint8_t *cur_buf = NULL;
+        uint32_t cur_block = fe_block;
 
-        for (uint32_t i = 0; i < num_ads; i++) {
-            uint32_t len = ads[i].length & 0x3FFFFFFF;
-            uint32_t type = (ads[i].length >> 30) & 0x3;
-            uint32_t block = ads[i].block;
+        while (1) {
+            for (uint32_t i = 0; i < num_ads; i++) {
+                uint32_t len = ads[i].length & 0x3FFFFFFF;
+                uint32_t type = (ads[i].length >> 30) & 0x3;
+                uint32_t block = ads[i].block;
 
-            if (current_offset >= new_size) {
-                uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-                if (type != 2) {
-                    for (uint32_t b = 0; b < blocks; b++) {
-                        udf_free_block(block + b);
+                if (current_offset >= new_size) {
+                    if (type == 3) {
+                         udf_free_aed_chain(dev, block, 0);
+                    } else if (type != 2) {
+                        uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+                        for (uint32_t b = 0; b < blocks; b++) {
+                            udf_free_block(block + b);
+                        }
                     }
+                    continue;
                 }
-                continue;
+
+                if (type == 3) {
+                    if (new_num_ads != i) {
+                        ads[new_num_ads] = ads[i];
+                    }
+                    new_num_ads++;
+
+                    if (cur_buf) {
+                        struct udf_aed *aed = (struct udf_aed *)cur_buf;
+                        aed->alloc_desc_length = new_num_ads * sizeof(struct udf_long_ad);
+                        udf_ext_write_aed(dev, cur_block, cur_buf, aed->alloc_desc_length);
+                        kfree(cur_buf, UDF_SECTOR_SIZE);
+                    } else {
+                        disk_fe->alloc_desc_length = new_num_ads * sizeof(struct udf_long_ad);
+                    }
+
+                    cur_buf = kmalloc(UDF_SECTOR_SIZE);
+                    if (!cur_buf) return -1;
+
+                    off_t offset = (off_t)(udf_ctx.partition_start + block) * UDF_SECTOR_SIZE;
+                    if (dev->read(dev, offset, UDF_SECTOR_SIZE, cur_buf) != UDF_SECTOR_SIZE) {
+                         kfree(cur_buf, UDF_SECTOR_SIZE);
+                         return -1;
+                    }
+
+                    cur_block = block;
+                    struct udf_aed *aed = (struct udf_aed *)cur_buf;
+                    if (aed->tag.tag_id != UDF_TAG_AED) {
+                         kprint("UDF: Invalid AED tag during truncate\n");
+                         kfree(cur_buf, UDF_SECTOR_SIZE);
+                         return -1;
+                    }
+
+                    ads = (struct udf_long_ad *)(cur_buf + sizeof(struct udf_aed));
+                    num_ads = aed->alloc_desc_length / sizeof(struct udf_long_ad);
+                    new_num_ads = 0;
+
+                    goto next_long_container;
+                } else if (current_offset + len > new_size) {
+                    uint32_t new_len = (uint32_t)(new_size - current_offset);
+                    uint32_t old_blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+                    uint32_t new_blocks = (new_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+
+                    if (type != 2 && old_blocks > new_blocks) {
+                        for (uint32_t b = new_blocks; b < old_blocks; b++) {
+                            udf_free_block(block + b);
+                        }
+                    }
+
+                    ads[new_num_ads].length = new_len | (type << 30);
+                    ads[new_num_ads].block = block;
+                    ads[new_num_ads].partition = ads[i].partition;
+                    memcpy(ads[new_num_ads].impl_use, ads[i].impl_use, 6);
+                    new_num_ads++;
+                } else {
+                    if (new_num_ads != i) {
+                        ads[new_num_ads] = ads[i];
+                    }
+                    new_num_ads++;
+                }
+
+                if (type != 3) {
+                    current_offset += len;
+                }
             }
 
-            if (current_offset + len > new_size) {
-                uint32_t new_len = (uint32_t)(new_size - current_offset);
-                uint32_t old_blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-                uint32_t new_blocks = (new_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-
-                if (type != 2 && old_blocks > new_blocks) {
-                    for (uint32_t b = new_blocks; b < old_blocks; b++) {
-                        udf_free_block(block + b);
-                    }
-                }
-
-                ads[new_num_ads].length = new_len | (type << 30);
-                ads[new_num_ads].block = block;
-                ads[new_num_ads].partition = ads[i].partition;
-                memcpy(ads[new_num_ads].impl_use, ads[i].impl_use, 6);
-                new_num_ads++;
+            if (cur_buf) {
+                struct udf_aed *aed = (struct udf_aed *)cur_buf;
+                aed->alloc_desc_length = new_num_ads * sizeof(struct udf_long_ad);
+                udf_ext_write_aed(dev, cur_block, cur_buf, aed->alloc_desc_length);
+                kfree(cur_buf, UDF_SECTOR_SIZE);
+                cur_buf = NULL;
             } else {
-                if (new_num_ads != i) {
-                    ads[new_num_ads] = ads[i];
-                }
-                new_num_ads++;
+                disk_fe->alloc_desc_length = new_num_ads * sizeof(struct udf_long_ad);
             }
-            current_offset += len;
+            break;
+
+            next_long_container:;
         }
 
         disk_fe->info_length = new_size;
-        disk_fe->alloc_desc_length = new_num_ads * sizeof(struct udf_long_ad);
 
         /* Checksum and Write */
         uint8_t *p = (uint8_t *)&disk_fe->tag;
