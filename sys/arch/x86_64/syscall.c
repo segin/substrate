@@ -2,11 +2,6 @@
 #include <drivers/video/vga.h>
 #include <kern/sched.h>
 
-// MSRs
-#define MSR_STAR      0xC0000081
-#define MSR_LSTAR     0xC0000082
-#define MSR_FMASK     0xC0000084
-#define MSR_KERNEL_GS_BASE 0xC0000102
 
 static inline void wrmsr(uint32_t msr, uint64_t val) {
     uint32_t lo = val & 0xFFFFFFFF;

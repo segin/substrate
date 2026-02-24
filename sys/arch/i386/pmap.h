@@ -89,6 +89,7 @@ pmap_t pmap_fork(pmap_t src_pmap); // Fork with COW
 // Mapping Operations
 // Returns 0 on success, < 0 on error
 int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags);
 int pmap_enter_pse(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t flags); // Deprecated name match
 int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
 void pmap_remove(pmap_t pmap, uintptr_t va);
@@ -146,5 +147,21 @@ void pmap_null_allow(int enable); // Re-map page 0 for VM86/legacy mode
 void pmap_map_trampoline(void);
 
 int pmap_fault(uint32_t err_code, uint32_t cr2);
+
+// Recursive Paging Helpers
+#define PD_INDEX(va)    (((uint32_t)(va)) >> 22)
+#define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
+#define PTE_FRAME       0xFFFFF000 // Frame address mask
+
+// Kernel Address Space Translations (Higher Half)
+#define V2P(x) ((uint32_t)(x) - 0xC0000000)
+#define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
+
+// Threshold for switching to full TLB flush vs individual INVLPG
+#define TLB_BATCH_THRESHOLD 32
+
+// Access to PD and PTs via recursive mapping
+#define V_PD  ((uint32_t *)0xFFFFF000)
+#define V_PT(i) ((uint32_t *)(0xFFC00000 + ((i) << 12)))
 
 #endif

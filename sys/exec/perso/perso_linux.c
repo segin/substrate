@@ -120,7 +120,16 @@ static int linux_to_native_sigtbl[LINUX_SIGTBLSZ + 1] = {
 int linux_to_native_signal(int sig) {
     if (sig > 0 && sig <= LINUX_SIGTBLSZ)
         return linux_to_native_sigtbl[sig];
-    return 0; // Invalid or RT signal (TODO: RT)
+
+    /*
+     * Linux Real-Time Signals (32-64).
+     * Currently unsupported as the native kernel only supports 32 signals (NSIG).
+     * Explicitly return 0 (invalid) for now.
+     */
+    if (sig >= LINUX_SIGRTMIN && sig <= LINUX_SIGRTMAX)
+        return 0;
+
+    return 0; // Invalid signal
 }
 
 int native_to_linux_signal(int sig) {

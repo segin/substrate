@@ -30,6 +30,22 @@ void spinlock_acquire(spinlock_t *lock) {
     lock->cpu_id = id;
 }
 
+bool spinlock_try_acquire(spinlock_t *lock) {
+    uint32_t id = lapic_get_id();
+
+    if (spinlock_is_held(lock)) {
+        return false;
+    }
+
+    /* Try once to acquire the lock */
+    if (__atomic_exchange_n(&lock->locked, 1, __ATOMIC_ACQUIRE) == 0) {
+        lock->cpu_id = id;
+        return true;
+    }
+
+    return false;
+}
+
 void spinlock_release(spinlock_t *lock) {
     if (!spinlock_is_held(lock)) {
         panic("Error: Releasing spinlock not held by current CPU");

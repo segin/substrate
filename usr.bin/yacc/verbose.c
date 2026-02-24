@@ -11,11 +11,7 @@ extern int SRtotal, RRtotal;
 static void log_unused_symbols(void);
 static void log_conflicts(void);
 static void print_core(int state);
-static void print_nulls(int state);
 static void print_actions(int stateno);
-static void print_shifts(shifts *sp);
-static void print_reductions(action *alist, int defred);
-static void print_gotos(int stateno);
 
 void verbose(void) {
     int i;
@@ -46,7 +42,6 @@ void verbose(void) {
     /* Rules listing */
     fprintf(verbose_file, "Rules:\n");
     for (i = 2; i < nrules; i++) {
-        int j;
         fprintf(verbose_file, "  %3d  ", i);
         /* Print LHS */
         /* Print -> */
@@ -73,30 +68,9 @@ static void print_core(int state) {
     fprintf(verbose_file, "  (kernel items)\n");
 }
 
-static void print_nulls(int state) {
-    /* Print nullable completions */
-}
-
 static void print_actions(int stateno) {
     /* Print shift, reduce, and goto actions for state */
     fprintf(verbose_file, "  (actions)\n");
-}
-
-static void print_shifts(shifts *sp) {
-    int i;
-    if (sp == NULL) return;
-    
-    for (i = 0; i < sp->nshifts; i++) {
-        /* Print shift action */
-    }
-}
-
-static void print_reductions(action *alist, int defred) {
-    /* Print reduce actions */
-}
-
-static void print_gotos(int stateno) {
-    /* Print goto transitions on nonterminals */
 }
 
 static void log_unused_symbols(void) {
@@ -133,7 +107,7 @@ void create_output_file(void) {
     name = (char *)malloc(len);
     if (name == NULL) no_space();
     
-    sprintf(name, "%s.tab.c", file_prefix);
+    snprintf(name, len, "%s.tab.c", file_prefix);
     output_file = fopen(name, "w");
     if (output_file == NULL) {
         perror(name);
@@ -141,7 +115,7 @@ void create_output_file(void) {
     }
     
     if (dflag) {
-        sprintf(name, "%s.tab.h", file_prefix);
+        snprintf(name, len, "%s.tab.h", file_prefix);
         defines_file = fopen(name, "w");
         if (defines_file == NULL) {
             perror(name);
@@ -150,7 +124,7 @@ void create_output_file(void) {
     }
     
     if (vflag) {
-        sprintf(name, "%s.output", file_prefix);
+        snprintf(name, len, "%s.output", file_prefix);
         verbose_file = fopen(name, "w");
         if (verbose_file == NULL) {
             perror(name);

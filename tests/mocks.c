@@ -111,7 +111,7 @@ void sched_smp_init() {}
 
 // kmem mocks for host
 void *kmalloc(size_t size) {
-    if (size > 4096) return NULL;
+    if (size > 65536) return NULL;
     // Host tests use standard malloc for kmalloc
     return malloc(size);
 }
@@ -262,9 +262,6 @@ const uint8_t sigprop[NSIG] = {0};
 
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) { (void)path; (void)argv; (void)envp; return 0; }
 
-// Pipe creation
-void pipe_create() {}
-
 struct fs_node *devfs_root_node_ptr;
 struct nameidata;
 int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
@@ -277,10 +274,7 @@ vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
     return NULL;
 }
 
-// vm_pager stubs
-int vm_pager_has_page(void *obj, uint32_t offset) { (void)obj; (void)offset; return 0; }
-int vm_pager_get_pages(void *obj, void **m, int count, int *reqpage) { (void)obj; (void)m; (void)count; (void)reqpage; return 0; }
-void vm_pager_put_pages(void *obj, void **m, int count, bool sync) { (void)obj; (void)m; (void)count; (void)sync; }
+// vm_pager stubs removed (linked from vm_pager.o)
 
 // vm_phys stubs
 void vm_phys_get_free(uint64_t *free) { *free = 0; }

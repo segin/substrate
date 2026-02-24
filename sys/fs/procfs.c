@@ -195,19 +195,15 @@ static fs_node_t procfs_static_nodes[PROCFS_STATIC_COUNT];
  * Node Cache for dynamic entries (PIDs, etc.)
  * Used to avoid static return variables which are not thread-safe.
  */
-#define PROCFS_NODE_CACHE_SIZE 128
-static fs_node_t procfs_node_cache[PROCFS_NODE_CACHE_SIZE];
-static spinlock_t procfs_lock;
-static uint32_t procfs_cache_idx = 0;
+static void procfs_free_node(fs_node_t *node) {
+    if (node) kfree(node, sizeof(fs_node_t));
+}
 
 static fs_node_t *procfs_get_node(void) {
-    spinlock_acquire(&procfs_lock);
-    uint32_t idx = procfs_cache_idx;
-    procfs_cache_idx = (procfs_cache_idx + 1) % PROCFS_NODE_CACHE_SIZE;
-    spinlock_release(&procfs_lock);
-
-    fs_node_t *node = &procfs_node_cache[idx];
+    fs_node_t *node = kmalloc(sizeof(fs_node_t));
+    if (!node) return NULL;
     memset(node, 0, sizeof(fs_node_t));
+    node->close = &procfs_free_node;
     return node;
 }
 
@@ -451,8 +447,6 @@ static filesystem_t procfs_fs = {
 };
 
 void procfs_init(void) {
-    spinlock_init(&procfs_lock, "procfs_cache");
-
     // Initialize static nodes for race-free access
     for (size_t i = 0; i < PROCFS_STATIC_COUNT; i++) {
         memset(&procfs_static_nodes[i], 0, sizeof(fs_node_t));

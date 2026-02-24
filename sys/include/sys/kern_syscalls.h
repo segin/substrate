@@ -19,10 +19,6 @@ struct tms;
 /* Internal kernel versions of syscalls that take kernel pointers */
 struct sigaction;
 
-/* Safe user space copying */
-int copyin(const void *src, void *dst, size_t size);
-int copyout(const void *src, void *dst, size_t size);
-int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len);
 
 /* Internal kernel versions of syscalls that take kernel pointers */
 int kern_acct(const char *path);
