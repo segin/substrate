@@ -194,6 +194,8 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             cur->next->prev = cur->prev;
             map->nentries--;
             map->size -= (cur->end - cur->start);
+            if (cur->object)
+                vm_object_deallocate(cur->object);
             free_entry(cur);
         } else if (cur->start < start && cur->end > end) {
             // Split entry
