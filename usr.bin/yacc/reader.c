@@ -22,22 +22,50 @@ static void ungetc_char(int c);
 static int keyword(void);
 static void skip_comment(void);
 static void create_symbol_table(void);
-static void copy_action(void);
 
 /* ... */
 
-/* Track current rule's RHS length for $N translation */
-static int action_rule_len;
+/* Temporary symbol mapping for ritem fixup */
+static bucket *temp_sym_map[MAXSYM];
+static int temp_sym_count = 0;
 
-static void copy_action(void) {
+/* Deferred rules for mid-rule actions */
+static int deferred_rules[MAXPROD];
+static int ndeferred = 0;
+
+/* Counter for anonymous non-terminals */
+static int gen_sym_count = 0;
+
+static void flush_deferred(void) {
+    int i;
+    for (i = 0; i < ndeferred; i++) {
+        int rule_idx = deferred_rules[i];
+        if (nitems >= MAXPROD * 4) no_space();
+        rrhs[rule_idx] = nitems;
+        ritem[nitems++] = -rule_idx;
+    }
+    ndeferred = 0;
+}
+
+static void fixup_ritem(void) {
+    int i;
+    for (i = 0; i < nitems; i++) {
+        if (ritem[i] > 0) {
+            bucket *bp = temp_sym_map[ritem[i]];
+            if (bp) {
+                ritem[i] = bp->index;
+            }
+        }
+    }
+}
+
+static char *scan_action(void) {
     int c;
     int depth = 1;
-    
-    /* Calculate rule length from current item position */
-    /* For now, track during RHS parsing */
-    
-    fprintf(action_file, "case %d:\n", nrules);
-    fprintf(action_file, "{");
+    size_t size = 128;
+    size_t len = 0;
+    char *buf = malloc(size);
+    if (!buf) no_space();
     
     while (depth > 0) {
         c = nextc();
@@ -49,46 +77,63 @@ static void copy_action(void) {
         if (c == '}') depth--;
         
         if (depth == 0) {
-            fprintf(action_file, "}\nbreak;\n"); 
-            return;
+            buf[len] = '\0';
+            return buf;
         }
         
-        /* Translate $$ and $N references */
+        if (len + 2 >= size) {
+            size *= 2;
+            buf = realloc(buf, size);
+            if (!buf) no_space();
+        }
+        buf[len++] = c;
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+static void write_action(int rule, char *body, int offset) {
+    char *p = body;
+    int c;
+
+    fprintf(action_file, "case %d:\n", rule);
+    fprintf(action_file, "{");
+
+    while ((c = *p++) != '\0') {
         if (c == '$') {
-            c = nextc();
+            c = *p++;
             if (c == '$') {
                 /* $$ -> yyval */
                 fprintf(action_file, "yyval");
             } else if (c == '-' || isdigit(c)) {
-                /* $N or $-N -> yyvsp[offset] */
+                /* $N or $-N -> yyvsp[N - offset] */
                 int neg = 0;
                 int n = 0;
                 if (c == '-') {
                     neg = 1;
-                    c = nextc();
+                    c = *p++;
                 }
                 while (isdigit(c)) {
                     n = n * 10 + (c - '0');
-                    c = nextc();
+                    c = *p++;
                 }
-                ungetc_char(c);
+                p--; /* Unget char */
                 if (neg) n = -n;
-                /* yyvsp[1-rule_len+n] - adjusted for action position */
-                fprintf(action_file, "yyvsp[%d]", n);
+
+                fprintf(action_file, "yyvsp[%d]", n - offset);
             } else if (c == '<') {
-                /* $<type>N - typed access, skip type for now */
-                while (c != '>' && c != EOF) c = nextc();
-                c = nextc();
+                /* $<type>N */
+                while (c != '>' && c != '\0') c = *p++;
+                c = *p++;
                 /* Parse N */
                 int n = 0;
                 while (isdigit(c)) {
                     n = n * 10 + (c - '0');
-                    c = nextc();
+                    c = *p++;
                 }
-                ungetc_char(c);
-                fprintf(action_file, "yyvsp[%d]", n);
+                p--;
+                fprintf(action_file, "yyvsp[%d]", n - offset);
             } else {
-                /* Not a special $ reference */
                 putc('$', action_file);
                 putc(c, action_file);
             }
@@ -96,6 +141,8 @@ static void copy_action(void) {
             putc(c, action_file);
         }
     }
+
+    fprintf(action_file, "}\nbreak;\n");
 }
 
 /* ... */
@@ -354,6 +401,7 @@ static void parse_declarations(void) {
                         }
                     }
                     current_tag = NULL;
+                    if (t == MARK) return;
                 }
                 continue; 
                 
@@ -454,6 +502,10 @@ static void parse_rules(void) {
     /* Check for %% if not handled by declarations loop? Declarations loop handles first %%. */
     /* So we are at start of rules. */
 
+    /* Skip optional %start or other things if handled in declarations, but here we expect rules */
+    /* Check for %% if not handled by declarations loop? Declarations loop handles first %%. */
+    /* So we are at start of rules. */
+
     for (;;) {
         if (t == IDENTIFIER) {
             /* Start of a new rule */
@@ -487,12 +539,10 @@ static void parse_rules(void) {
                 } else if (t == '|') {
                      /* End current production, start new one with same LHS */
                      if (nitems >= MAXPROD * 4) no_space();
-                     ritem[nitems++] = -nrules; /* End of rule marker? Or 0? Classic yacc uses negated rule number or similar */
-                     /* For now, let's use standard yacc convention: */
-                     /* ritem contains symbol indices. Terminated by null or negative rule number? */
-                     /* mkpar.c usually expects negative rule number at the end of the item list for that rule? */
-                     /* Actually, openbsd yacc uses negative rule number in ritem. */
                      ritem[nitems++] = -nrules;
+
+                     flush_deferred();
+
                      nrules++;
                      
                      if (nrules >= MAXPROD) no_space();
@@ -502,6 +552,9 @@ static void parse_rules(void) {
                      /* End of rule block */
                      if (nitems >= MAXPROD * 4) no_space();
                      ritem[nitems++] = -nrules;
+
+                     flush_deferred();
+
                      nrules++;
                      break;
                 } else if (t == IDENTIFIER) {
@@ -510,19 +563,65 @@ static void parse_rules(void) {
                     if (nitems >= MAXPROD * 4) no_space();
                     ritem[nitems++] = bp->index;
                 } else if (t == LCURLY) {
-                    /* Semantic action - copy action body FIRST, then check what follows */
-                    copy_action();
+                    /* Semantic action */
+                    char *action_body = scan_action();
                     
                     /* Now peek at next token to see if this was mid-rule */
                     int next_t = get_token();
                     if (next_t == '|' || next_t == ';' || next_t == MARK || next_t == 0) {
-                        /* End-of-rule action - no special handling needed */
+                        /* End-of-rule action */
+                        write_action(nrules, action_body, 0);
                     } else {
-                        /* Mid-rule action - need to create anonymous symbol */
-                        /* For now, just treat as regular action (simplified) */
-                        /* TODO: Full mid-rule action support requires creating */
-                        /* an anonymous nonterminal and epsilon rule */
+                        /* Mid-rule action */
+                        /* 1. Create anonymous nonterminal */
+                        char name[32];
+                        bucket *sym;
+                        int mid_rule_idx;
+                        int offset;
+
+                        snprintf(name, sizeof(name), "$@%d", ++gen_sym_count);
+                        sym = lookup(name);
+                        sym->class = CLASS_NONTERM;
+
+                        /* Assign temporary index */
+                        if (sym->index == 0) {
+                            if (temp_sym_count >= MAXSYM - 1) no_space();
+                            sym->index = ++temp_sym_count;
+                            temp_sym_map[temp_sym_count] = sym;
+                        }
+
+                        /* 2. Add to current rule RHS */
+                        if (nitems >= MAXPROD * 4) no_space();
+                        ritem[nitems++] = sym->index;
+
+                        /* 3. Create epsilon rule for it */
+                        /* Steal nrules */
+                        mid_rule_idx = nrules;
+                        nrules++;
+                        if (nrules >= MAXPROD) no_space();
+
+                        /* Move current rule metadata to nrules */
+                        plhs[nrules] = plhs[mid_rule_idx];
+                        rrhs[nrules] = rrhs[mid_rule_idx];
+                        /* rlhs[nrules] = rlhs[mid_rule_idx]; -- rlhs unused? */
+
+                        /* Set up mid-rule metadata */
+                        plhs[mid_rule_idx] = sym->index;
+                        /* rrhs[mid_rule_idx] will be set in flush_deferred */
+
+                        /* Calculate offset: items on stack (excluding $$n) */
+                        /* nitems points after $$n. rrhs[nrules] points to start. */
+                        offset = nitems - 1 - rrhs[nrules];
+
+                        /* Write action for epsilon rule */
+                        write_action(mid_rule_idx, action_body, offset);
+
+                        /* Queue epsilon rule for deferred addition to ritem */
+                        if (ndeferred >= MAXPROD) no_space();
+                        deferred_rules[ndeferred++] = mid_rule_idx;
                     }
+                    free(action_body);
+
                     t = next_t;
                     continue; /* already got next token */
                 } else if (t == MARK || t == 0) {
@@ -583,12 +682,12 @@ static void pack_symbols(void) {
 }
 
 void reader(void) {
-    int c;
     create_symbol_table();
     get_line(); /* Prime the pump */
     parse_declarations();
     parse_rules();
     pack_symbols();
+    fixup_ritem();
     
     /* Copy epilogue (C code after second %%) to epilogue_file */
     if (epilogue_file) {
