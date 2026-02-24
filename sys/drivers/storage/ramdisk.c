@@ -15,13 +15,11 @@ static int ramdisk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *bu
     void *addr = dev->priv;
     if (!addr) return -1;
     
+    if (sector >= dev->total_sectors) return -1;
+    if (count > dev->total_sectors - sector) return -1;
+
     uint64_t offset = sector * 512;
     uint64_t size = count * 512;
-    
-    // Bounds check
-    if (offset + size > dev->total_sectors * 512) {
-        return -1;
-    }
     
     memcpy(buffer, (uint8_t *)addr + offset, size);
     return 0;
@@ -32,12 +30,11 @@ static int ramdisk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const v
     void *addr = dev->priv;
     if (!addr) return -1;
     
+    if (sector >= dev->total_sectors) return -1;
+    if (count > dev->total_sectors - sector) return -1;
+
     uint64_t offset = sector * 512;
     uint64_t size = count * 512;
-    
-    if (offset + size > dev->total_sectors * 512) {
-        return -1;
-    }
     
     memcpy((uint8_t *)addr + offset, buffer, size);
     return 0;
