@@ -19,6 +19,7 @@ UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/kern/test_reboot.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
              unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
+             unit/fs/test_fuse.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
              sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c \
@@ -98,6 +99,8 @@ vm_map_host.o: vm_map_host.c
 %.o: unit/kern/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/vfs/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/fs/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/perso/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
