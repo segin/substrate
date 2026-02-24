@@ -7,6 +7,9 @@
 #include <string.h>
 #include <stdio.h>
 
+// Threshold for switching to full TLB flush vs individual INVLPG
+#define TLB_BATCH_THRESHOLD 32
+
 // Kernel Page Directory (Static for bootstrap)
 // We need it 4KB aligned.
 __attribute__((aligned(4096)))
@@ -672,6 +675,47 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
     pmap_invalidate_page(va);
 }
 
+void pmap_remove_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) {
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return;
+
+    sva &= ~0xFFF;
+    eva = (eva + 0xFFF) & ~0xFFF;
+
+    uint32_t count = (eva - sva) / 0x1000;
+    int batch_flush = (count > TLB_BATCH_THRESHOLD);
+
+    for (uintptr_t va = sva; va < eva; va += 0x1000) {
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+
+        if (!(V_PD[pdi] & PTE_P)) {
+            // Skip entire 4MB if PD not present
+            va = (va & 0xFFC00000) + 0x400000 - 0x1000;
+            continue;
+        }
+
+        if (V_PD[pdi] & PTE_PS) {
+             V_PD[pdi] = 0;
+             if (!batch_flush) pmap_invalidate_page(va); // Invalidates 4MB
+             // We just removed 4MB.
+             va = (va & 0xFFC00000) + 0x400000 - 0x1000;
+             continue;
+        }
+
+        uint32_t *pt = V_PT(pdi);
+        if (pt[pti] != 0) {
+            pt[pti] = 0;
+            if (!batch_flush) pmap_invalidate_page(va);
+        }
+    }
+
+    if (batch_flush) {
+        pmap_invalidate_all();
+    }
+}
+
 // Kernel-only fast path: no pmap/locking overhead
 // Assumes kernel is always active and va is in kernel space
 void pmap_kenter(uint32_t va, uint32_t pa) {
@@ -735,9 +779,6 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
     if (!(pt[pti] & PTE_P)) return 0;
     return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);
 }
-
-// Threshold for switching to full TLB flush vs individual INVLPG
-#define TLB_BATCH_THRESHOLD 32
 
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error

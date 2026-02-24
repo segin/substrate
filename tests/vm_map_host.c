@@ -33,6 +33,18 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     map->header = sentinel;
 }
 
+vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
+    vm_map_t *map = malloc(sizeof(vm_map_t));
+    if (map) {
+        vm_map_init(map, pmap, min, max);
+    }
+    return map;
+}
+
+void vm_map_destroy(vm_map_t *map) {
+    if (map) free(map);
+}
+
 static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **entry) {
     vm_map_entry_t *cur;
     vm_map_entry_t *header = map->header;

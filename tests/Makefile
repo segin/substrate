@@ -13,6 +13,7 @@ CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_swap
 UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_object.c unit/vm/test_page.c unit/vm/test_fault.c \
              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_cow.c \
+             unit/vm/test_mmap_cleanup.c \
              unit/arch/test_trampoline.c \
              unit/kern/test_spinlock.c unit/kern/test_kthread.c unit/kern/test_sched.c unit/kern/test_sched_decay.c \
              unit/kern/test_sync.c unit/kern/test_sleepq.c unit/kern/test_signal.c unit/kern/test_pthread_exit.c \
