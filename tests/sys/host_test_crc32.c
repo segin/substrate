@@ -54,6 +54,29 @@ void test_initialization(void) {
     printf("PASS\n");
 }
 
+void test_auto_initialization(void) {
+    printf("Testing auto-initialization...\n");
+
+    // Manually reset initialization flag to force auto-init path
+    // Since we include the .c file, we have access to static variables.
+    crc32_initialized = 0;
+
+    // Also clear the table to ensure it really gets re-initialized
+    memset(crc32_table, 0, sizeof(crc32_table));
+
+    // Use a known vector: "123456789" -> 0xCBF43926
+    const char *digits = "123456789";
+    uint32_t crc_digits = crc32(digits, 9);
+
+    // Verify correct calculation (implies table was initialized)
+    TEST_ASSERT_EQ_HEX(crc_digits, 0xCBF43926, "Auto-init CRC32 result");
+
+    // Verify initialization flag was set
+    TEST_ASSERT(crc32_initialized == 1, "Auto-init flag set");
+
+    printf("PASS\n");
+}
+
 void test_vectors(void) {
     printf("Testing standard vectors...\n");
 
@@ -106,6 +129,7 @@ int main(void) {
     printf("=== CRC32 Host Test Suite ===\n");
 
     test_initialization();
+    test_auto_initialization();
     test_vectors();
     test_large_buffer();
 
