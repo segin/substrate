@@ -353,8 +353,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize Sysctl Subsystem
     extern void sysctl_init(void);
     sysctl_init();
-    extern void sysctl_init(void);
-    sysctl_init();
     
     keyboard_init();
     
