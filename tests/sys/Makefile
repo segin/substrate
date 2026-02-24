@@ -14,7 +14,7 @@ SRCS += test_nanosleep.c test_reboot.c
 
 OBJS = $(SRCS:.c=.o)
 
-HOST_TESTS = host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers
+HOST_TESTS = host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_keyboard
 
 all: tests.o $(HOST_TESTS)
 
@@ -45,6 +45,9 @@ host_test_div64: host_test_div64.c
 
 host_test_printf_specifiers: host_test_printf_specifiers.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_printf_specifiers.c -o $@
+
+host_test_keyboard: host_test_keyboard.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_keyboard.c -o $@
 
 tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
