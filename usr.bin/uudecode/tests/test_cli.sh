@@ -66,14 +66,18 @@ begin 644 unsafe_dir/unsafe.txt
 end
 EOF
 
-# Without -s, it writes to unsafe_dir/unsafe.txt
-echo "   Testing default behavior (no strip)..."
+# Default behavior should now strip paths (secure default)
+echo "   Testing default behavior (secure/strip)..."
 $UUDECODE test_unsafe.uu
-if [ ! -f unsafe_dir/unsafe.txt ]; then
-    echo "Failed: unsafe_dir/unsafe.txt not created (default behavior)"
+if [ ! -f unsafe.txt ]; then
+    echo "Failed: unsafe.txt not created in CWD (default behavior)"
     exit 1
 fi
-rm unsafe_dir/unsafe.txt
+if [ -f unsafe_dir/unsafe.txt ]; then
+    echo "Failed: wrote to unsafe_dir/unsafe.txt (security failure)"
+    exit 1
+fi
+rm unsafe.txt
 
 # With -s, it writes to unsafe.txt in CWD
 echo "   Testing -s behavior (strip)..."
