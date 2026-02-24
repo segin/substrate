@@ -376,6 +376,8 @@ static int parse_newc_header(int fd, entry_t *e) {
         return -1;
     }
 
+    if (namesz > PATH_MAX) return -1;
+
     name = malloc(namesz + 1);
     if (!name) return -1;
     if (read_all(fd, name, namesz) < 0) { free(name); return -1; }
@@ -411,6 +413,9 @@ static int parse_odc_header(int fd, entry_t *e) {
                    &dev_ignored, &ino_ignored, &mode, &uid, &gid, &nlink, &rdev, &namesz, &filesize) != 9)
             return -1;
     }
+
+    if (namesz > PATH_MAX) return -1;
+
     e->name = malloc(namesz + 1);
     if (!e->name) return -1;
     if (read_all(fd, e->name, namesz) < 0) { free(e->name); return -1; }
@@ -431,6 +436,9 @@ static int parse_bin_header(int fd, entry_t *e) {
     if (read_all(fd, hdr, 26) < 0) return -1;
     if (be16(hdr) != 070707) return -1;
     namesz = be16(hdr + 20);
+
+    if (namesz > PATH_MAX) return -1;
+
     e->name = malloc((size_t)namesz + 1);
     if (!e->name) return -1;
     if (read_all(fd, e->name, namesz) < 0) { free(e->name); return -1; }
