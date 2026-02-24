@@ -185,6 +185,25 @@ struct udf_long_ad {
 } __attribute__((packed));
 
 /*
+ * Logical Block Address (ECMA-167 4/7.1)
+ */
+struct udf_lb_addr {
+    uint32_t logical_block_number;
+    uint16_t partition_reference_number;
+} __attribute__((packed));
+
+/*
+ * Extended Allocation Descriptor (ECMA-167 4/14.14.3)
+ */
+struct udf_ext_ad {
+    uint32_t extent_length;         /* Extent length + flags in upper 2 bits */
+    uint32_t recorded_length;
+    uint32_t information_length;
+    struct udf_lb_addr extent_location;
+    uint8_t  impl_use[2];
+} __attribute__((packed));
+
+/*
  * Logical Volume Descriptor (ECMA-167 3/10.6)
  */
 struct udf_lvd {
