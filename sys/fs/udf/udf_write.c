@@ -850,6 +850,131 @@ int udf_remove_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
 }
 
 /*
+ * Recursively truncate an Allocation Extended Descriptor (AED)
+ * Returns 0 if AED was kept (possibly modified), 1 if AED was freed/empty.
+ */
+static int udf_truncate_aed_short(fs_node_t *dev, uint32_t aed_block,
+                            uint64_t *current_offset, uint64_t new_size, int depth) {
+    if (depth > 50) {
+        kprint("UDF: AED recursion depth limit exceeded\n");
+        return 0;
+    }
+
+    uint8_t *aed_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!aed_buf) return 0;
+
+    off_t disk_off = (off_t)(udf_ctx.partition_start + aed_block) * UDF_SECTOR_SIZE;
+    if (dev->read(dev, disk_off, UDF_SECTOR_SIZE, aed_buf) != UDF_SECTOR_SIZE) {
+        kfree(aed_buf, UDF_SECTOR_SIZE);
+        return 0;
+    }
+
+    struct udf_aed *aed = (struct udf_aed *)aed_buf;
+    if (aed->tag.tag_id != UDF_TAG_AED) {
+        kprint("UDF: Expected AED tag in truncate recursion\n");
+        kfree(aed_buf, UDF_SECTOR_SIZE);
+        return 0;
+    }
+
+    if (sizeof(struct udf_aed) + aed->alloc_desc_length > UDF_SECTOR_SIZE) {
+        kprint("UDF: AED length overflow\n");
+        kfree(aed_buf, UDF_SECTOR_SIZE);
+        return 0;
+    }
+
+    struct udf_short_ad *ads = (struct udf_short_ad *)(aed_buf + sizeof(struct udf_aed));
+    uint32_t num_ads = aed->alloc_desc_length / sizeof(struct udf_short_ad);
+
+    uint32_t new_num_ads = 0;
+    int modified = 0;
+
+    for (uint32_t i = 0; i < num_ads; i++) {
+        uint32_t len = ads[i].length & 0x3FFFFFFF;
+        uint32_t type = (ads[i].length >> 30) & 0x3;
+        uint32_t block = ads[i].position;
+
+        if (*current_offset >= new_size) {
+            /* Fully beyond new_size */
+            uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+
+            if (type == 3) {
+                 /* Recurse to free chain */
+                 udf_truncate_aed_short(dev, block, current_offset, new_size, depth + 1);
+            } else if (type != 2) {
+                for (uint32_t b = 0; b < blocks; b++) {
+                    udf_free_block(block + b);
+                }
+            }
+            modified = 1;
+            continue;
+        }
+
+        if (type == 3) {
+             /* Recursion */
+             int ret = udf_truncate_aed_short(dev, block, current_offset, new_size, depth + 1);
+             if (ret == 1) {
+                 /* AED is empty/freed, so drop this link */
+                 modified = 1;
+             } else {
+                 /* Keep link */
+                 if (new_num_ads != i) {
+                     ads[new_num_ads] = ads[i];
+                     modified = 1;
+                 }
+                 new_num_ads++;
+             }
+        } else if (*current_offset + len > new_size) {
+             /* Partial overlap */
+             uint32_t new_len = (uint32_t)(new_size - *current_offset);
+             uint32_t old_blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+             uint32_t new_blocks = (new_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+
+             if (type != 2 && old_blocks > new_blocks) {
+                 for (uint32_t b = new_blocks; b < old_blocks; b++) {
+                     udf_free_block(block + b);
+                 }
+             }
+
+             ads[new_num_ads].length = new_len | (type << 30);
+             ads[new_num_ads].position = block;
+             new_num_ads++;
+             modified = 1;
+             *current_offset += new_len;
+        } else {
+             /* Keep fully */
+             if (new_num_ads != i) {
+                 ads[new_num_ads] = ads[i];
+                 modified = 1;
+             }
+             new_num_ads++;
+             *current_offset += len;
+        }
+    }
+
+    if (new_num_ads == 0) {
+        /* This AED is empty, free it */
+        udf_free_block(aed_block);
+        kfree(aed_buf, UDF_SECTOR_SIZE);
+        return 1;
+    }
+
+    if (modified) {
+        aed->alloc_desc_length = new_num_ads * sizeof(struct udf_short_ad);
+
+        /* Recalculate CRC */
+        aed->tag.desc_crc_len = sizeof(struct udf_aed) + aed->alloc_desc_length - sizeof(struct udf_tag);
+        uint8_t *data = (uint8_t *)aed + sizeof(struct udf_tag);
+        aed->tag.desc_crc = udf_crc(data, aed->tag.desc_crc_len);
+        aed->tag.tag_checksum = udf_tag_checksum(&aed->tag);
+
+        dev->write(dev, disk_off, UDF_SECTOR_SIZE, aed_buf);
+    }
+
+    kfree(aed_buf, UDF_SECTOR_SIZE);
+    return 0;
+}
+
+/*
  * Truncate or extend a file
  */
 int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
@@ -1020,8 +1145,12 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
             if (current_offset >= new_size) {
                 /* This extent is fully beyond new_size, remove it and free blocks */
                 uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-                /* Free blocks if allocated (type 0 or 1, not 2) */
-                if (type != 2) {
+
+                if (type == 3) {
+                    /* Recurse to free chain properly */
+                    udf_truncate_aed_short(dev, block, &current_offset, new_size, 0);
+                } else if (type != 2) {
+                    /* Free blocks if allocated (type 0 or 1, not 2) */
                     for (uint32_t b = 0; b < blocks; b++) {
                         udf_free_block(block + b);
                     }
@@ -1031,12 +1160,16 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
             }
 
             if (type == 3) {
-                /* AED link - keep it if we haven't reached new_size, but don't increment offset */
-                /* TODO: Recurse into AED to truncate properly */
-                if (new_num_ads != i) {
-                    ads[new_num_ads] = ads[i];
+                /* AED link - recurse into AED */
+                int ret = udf_truncate_aed_short(dev, block, &current_offset, new_size, 0);
+                if (ret == 0) {
+                    /* Keep link */
+                    if (new_num_ads != i) {
+                        ads[new_num_ads] = ads[i];
+                    }
+                    new_num_ads++;
                 }
-                new_num_ads++;
+                /* If ret == 1, AED was freed, drop link */
             } else if (current_offset + len > new_size) {
                 /* Partial extent - truncate it */
                 uint32_t new_len = (uint32_t)(new_size - current_offset);
