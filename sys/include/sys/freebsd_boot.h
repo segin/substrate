@@ -70,5 +70,6 @@ struct bootinfo {
 
 #define BOOTINFO_VERSION	1
 #define BOOTINFO_MAGIC		0x12345678
+#define FREEBSD_LOADER_MAGIC    0xF8EEB5D0
 
 #endif
