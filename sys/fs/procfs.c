@@ -348,6 +348,7 @@ static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
 static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
     if (strcmp(name, "status") == 0) {
         fs_node_t *pid_file = procfs_get_node();
+        if (!pid_file) return NULL;
         pid_file->inode = node->inode;
         pid_file->flags = FS_FILE;
         strcpy(pid_file->name, "status");
@@ -356,6 +357,7 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
     }
     if (strcmp(name, "cmdline") == 0) {
         fs_node_t *pid_file = procfs_get_node();
+        if (!pid_file) return NULL;
         pid_file->inode = node->inode;
         pid_file->flags = FS_FILE;
         strcpy(pid_file->name, "cmdline");
@@ -420,6 +422,7 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
         for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid == pid) {
                 fs_node_t *pid_dir = procfs_get_node();
+                if (!pid_dir) return NULL;
                 snprintf(pid_dir->name, sizeof(pid_dir->name), "%d", pid);
                 pid_dir->flags = FS_DIRECTORY;
                 pid_dir->inode = pid;
