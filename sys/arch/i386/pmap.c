@@ -564,6 +564,73 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
     return 0;
 }
 
+// Threshold for switching to full TLB flush vs individual INVLPG
+#define TLB_BATCH_THRESHOLD 32
+
+int pmap_enter_range(pmap_t pmap, uintptr_t va_start, uintptr_t *pa_list, size_t count, uint32_t prot, uint32_t flags) {
+    (void)flags;
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) return -1;
+
+    uint32_t pages_modified = 0;
+    uint32_t first_va = va_start;
+    uint32_t last_va = va_start + (count - 1) * 0x1000;
+
+    // Optimization: Cache current PDE/PT
+    uint32_t last_pdi = -1;
+    uint32_t *current_pt = NULL;
+
+    for (size_t i = 0; i < count; i++) {
+        uintptr_t va = va_start + i * 0x1000;
+        uintptr_t pa = pa_list[i];
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pti = PT_INDEX(va);
+
+        if (pdi != last_pdi) {
+             // Switch PD entry
+             if (!(V_PD[pdi] & PTE_P)) {
+                 void *pt_virt = pmm_alloc_block();
+                 if (!pt_virt) return -1;
+                 uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
+                 // PDE always gets W and U so PT can control actual permissions
+                 V_PD[pdi] = pt_phys | PTE_P | PTE_W | PTE_U;
+                 pmap_invalidate_page((uint32_t)V_PT(pdi));
+                 // Zero the page table using virtual address
+                 uint32_t *pt = (uint32_t *)pt_virt;
+                 for (int k = 0; k < 1024; k++) pt[k] = 0;
+             }
+             current_pt = V_PT(pdi);
+             last_pdi = pdi;
+        }
+
+        uint32_t pte_flags = PTE_P;
+        if (prot & VM_PROT_WRITE) {
+            pte_flags |= PTE_W;
+        }
+        if ((va < 0xC0000000) || (prot & VM_PROT_USER)) {
+            pte_flags |= PTE_U;  // User accessible if in user space or requested
+        }
+        // Note: i386 doesn't have NX bit in standard mode
+
+        current_pt[pti] = (pa & 0xFFFFF000) | pte_flags;
+        pages_modified++;
+    }
+
+    // Batched invalidation
+    if (pages_modified > TLB_BATCH_THRESHOLD) {
+        // Full TLB flush via CR3 reload
+        __asm__ volatile("mov %0, %%cr3" :: "r"(cr3));
+        __sync_fetch_and_add(&global_pmap_stats.tlb_full_flush_count, 1);
+    } else {
+        // Individual INVLPG for small ranges
+        for (uintptr_t va = first_va; va <= last_va; va += 0x1000) {
+             pmap_invalidate_page(va);
+        }
+    }
+    return 0;
+}
+
 // Trampoline Support
 extern unsigned char sig_trampoline_code[];
 extern unsigned int sig_trampoline_size;
@@ -735,9 +802,6 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
     if (!(pt[pti] & PTE_P)) return 0;
     return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);
 }
-
-// Threshold for switching to full TLB flush vs individual INVLPG
-#define TLB_BATCH_THRESHOLD 32
 
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error

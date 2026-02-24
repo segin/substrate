@@ -77,18 +77,32 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     // Allocate and map pages
     // NOTE: pmm_alloc_block() returns virtual address (kernel direct mapping)
     uint64_t file_offset = offset;
+    pmap_t target_pmap = p->pmap ? (pmap_t)p->pmap : pmap_kernel();
+
+    // Batch processing for pmap_enter_range
+    #define MMAP_BATCH_SIZE 64
+    uintptr_t pa_batch[MMAP_BATCH_SIZE];
+    int batch_count = 0;
+    uintptr_t batch_start_va = v_addr;
 
     for (uintptr_t va = v_addr; va < v_addr + length; va += 0x1000) {
         void *pa_virt = pmm_alloc_block();  // Returns virtual address
         if (!pa_virt) {
             // Partial failure - pages before this are mapped
             // Cleanup partial mapping
-            for (uintptr_t cleanup_va = v_addr; cleanup_va < va; cleanup_va += 0x1000) {
-                uint32_t pa = pmap_extract(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
+
+            // First, free any pending unmapped pages in the batch
+            for (int k = 0; k < batch_count; k++) {
+                void *p_mem = (void*)(pa_batch[k] + 0xC0000000);
+                pmm_free_block(p_mem);
+            }
+
+            for (uintptr_t cleanup_va = v_addr; cleanup_va < batch_start_va; cleanup_va += 0x1000) {
+                uint32_t pa = pmap_extract(target_pmap, cleanup_va);
                 if (pa) {
                     void *cleanup_kvirt = (void *)(pa + 0xC0000000);
                     pmm_free_block(cleanup_kvirt);
-                    pmap_remove(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
+                    pmap_remove(target_pmap, cleanup_va);
                 }
             }
             // Remove the vm_map entry
@@ -113,7 +127,57 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
 
         // Convert virtual to physical for pmap_enter
         uint32_t pa_phys = (uint32_t)(uintptr_t)pa_virt - 0xC0000000;
-        pmap_enter(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), va, pa_phys, vm_prot, 0);
+
+        pa_batch[batch_count++] = pa_phys;
+
+        if (batch_count == MMAP_BATCH_SIZE) {
+            if (pmap_enter_range(target_pmap, batch_start_va, pa_batch, batch_count, vm_prot, 0) < 0) {
+                // Free pending pages in batch
+                for (int k = 0; k < batch_count; k++) {
+                    void *p_mem = (void*)(pa_batch[k] + 0xC0000000);
+                    pmm_free_block(p_mem);
+                    pmap_remove(target_pmap, batch_start_va + k * 0x1000);
+                }
+
+                // Cleanup previously mapped pages
+                for (uintptr_t cleanup_va = v_addr; cleanup_va < batch_start_va; cleanup_va += 0x1000) {
+                    uint32_t pa = pmap_extract(target_pmap, cleanup_va);
+                    if (pa) {
+                        void *cleanup_kvirt = (void *)(pa + 0xC0000000);
+                        pmm_free_block(cleanup_kvirt);
+                        pmap_remove(target_pmap, cleanup_va);
+                    }
+                }
+                vm_map_remove(map, v_addr, v_addr + length);
+                return (void *)-1;
+            }
+            batch_count = 0;
+            batch_start_va = va + 0x1000;
+        }
+    }
+
+    // Flush remaining batch
+    if (batch_count > 0) {
+        if (pmap_enter_range(target_pmap, batch_start_va, pa_batch, batch_count, vm_prot, 0) < 0) {
+            // Free pending pages in batch
+            for (int k = 0; k < batch_count; k++) {
+                void *p_mem = (void*)(pa_batch[k] + 0xC0000000);
+                pmm_free_block(p_mem);
+                pmap_remove(target_pmap, batch_start_va + k * 0x1000);
+            }
+
+            // Cleanup previously mapped pages
+            for (uintptr_t cleanup_va = v_addr; cleanup_va < batch_start_va; cleanup_va += 0x1000) {
+                uint32_t pa = pmap_extract(target_pmap, cleanup_va);
+                if (pa) {
+                    void *cleanup_kvirt = (void *)(pa + 0xC0000000);
+                    pmm_free_block(cleanup_kvirt);
+                    pmap_remove(target_pmap, cleanup_va);
+                }
+            }
+            vm_map_remove(map, v_addr, v_addr + length);
+            return (void *)-1;
+        }
     }
 
     return (void *)v_addr;
