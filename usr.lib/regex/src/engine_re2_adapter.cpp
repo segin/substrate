@@ -430,7 +430,6 @@ const regex_engine_vtable *regex_engine_re2_vtable(void) {
 #else
 
 // Fallback if not enabled
-#include <stddef.h>
 
 extern "C" {
 // Must include internal header to see declaration, but since it's C++ without extern C guard in header,
