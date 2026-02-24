@@ -198,30 +198,9 @@ int uma_zone_check_leaks(uma_zone_t *zone);
 /*
  * Debug support
  */
-void uma_debug_check_redzone_impl(uma_zone_t *zone, void *item);
-void uma_debug_poison_free_impl(uma_zone_t *zone, void *item);
-void uma_debug_poison_alloc_impl(uma_zone_t *zone, void *item);
-
-/*
- * Validates UMA redzone (0xFE pattern at end of object)
- */
-static inline void uma_debug_check_redzone(uma_zone_t *zone, void *item) {
-    if (zone->uz_flags & UMA_ZONE_REDZONE) {
-        uma_debug_check_redzone_impl(zone, item);
-    }
-}
-
-static inline void uma_debug_poison_free(uma_zone_t *zone, void *item) {
-    if (zone->uz_flags & UMA_ZONE_TRASH) {
-        uma_debug_poison_free_impl(zone, item);
-    }
-}
-
-static inline void uma_debug_poison_alloc(uma_zone_t *zone, void *item) {
-     if (zone->uz_flags & UMA_ZONE_TRASH) {
-        uma_debug_poison_alloc_impl(zone, item);
-    }
-}
+void uma_debug_check_redzone(uma_zone_t *zone, void *item);
+void uma_debug_poison_free(uma_zone_t *zone, void *item);
+void uma_debug_poison_alloc(uma_zone_t *zone, void *item);
 
 
 
