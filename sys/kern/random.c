@@ -407,9 +407,6 @@ static void random_reseed(void) {
     rng_state.seeded = 1;
     spinlock_release(&output_lock);
     
-    rng_state.seeded = 1;
-    spinlock_release(&output_lock);
-    
     /* Wake up any blocked readers */
     sched_wakeup(&random_wait_channel);
 
