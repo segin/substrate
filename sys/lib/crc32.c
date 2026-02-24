@@ -27,6 +27,10 @@ void crc32_init(void) {
 }
 
 uint32_t crc32(const void *data, size_t len) {
+    if (!crc32_initialized) {
+        crc32_init();
+    }
+
     const uint8_t *buf = data;
     uint32_t crc = 0xFFFFFFFF;
     
