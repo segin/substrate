@@ -51,6 +51,7 @@ const regex_engine_vtable *regex_engine_posix_vtable(void);
 const regex_engine_vtable *regex_engine_safe_vtable(void);
 
 const regex_engine_vtable *regex_engine_pcre2_vtable(void);
+const regex_engine_vtable *regex_engine_re2_vtable(void);
 
 /* util */
 int regex_utf8_decode(const char *s, size_t len, size_t *index, uint32_t *out_cp);
