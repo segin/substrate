@@ -25,6 +25,7 @@ typedef struct {
     char *name;
     cc_type_t type;
     int struct_id;
+    long array_len;
     int depth;
 } var_entry_t;
 
@@ -115,7 +116,8 @@ static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, in
     return -1;
 }
 
-static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, int depth) {
+static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, long array_len,
+                     int depth) {
     var_entry_t *next;
     char *dup;
 
@@ -133,6 +135,7 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     (*vars)[*count].name = dup;
     (*vars)[*count].type = type;
     (*vars)[*count].struct_id = struct_id;
+    (*vars)[*count].array_len = array_len;
     (*vars)[*count].depth = depth;
     (*count)++;
     return 0;
@@ -334,6 +337,10 @@ static int is_numeric_type(cc_type_t t) {
 
 static int is_scalar_type(cc_type_t t) {
     return is_numeric_type(t) || is_pointer_type(t);
+}
+
+static int is_array_object_type(cc_type_t t, long array_len) {
+    return is_pointer_type(t) && array_len >= 0;
 }
 
 static cc_type_t ptr_of_type(cc_type_t t) {
@@ -1058,8 +1065,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
+        e->struct_id = -1;
         if (e->op == CC_BIN_COMMA) {
             e->value_type = e->rhs->value_type;
+            e->struct_id = e->rhs->struct_id;
             return 0;
         }
         if (is_logical_op(e->op)) {
@@ -1075,7 +1084,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "shift operators require integer operands");
                 return -1;
             }
-            e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
+            e->value_type = integral_promo_type(e->lhs->value_type);
             if (e->value_type == CC_TYPE_VOID) {
                 set_diag(diag, "void expression used in arithmetic operation");
                 return -1;
@@ -1536,6 +1545,27 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->value_type = callee->ret_type;
             e->struct_id = callee->ret_struct_id;
         } else if (e->ident != NULL) {
+            int idx = vars_find_visible(vars, var_count, e->ident, depth);
+            if (idx >= 0) {
+                if (!is_pointer_type(vars[idx].type)) {
+                    set_diag(diag, "call target must be a function pointer");
+                    return -1;
+                }
+                e->value_type = ptr_base_type(vars[idx].type);
+                e->struct_id = vars[idx].struct_id;
+                return 0;
+            } else {
+                const cc_global_t *g = find_global(tu, e->ident);
+                if (g != NULL) {
+                    if (!is_pointer_type(g->type)) {
+                        set_diag(diag, "call target must be a function pointer");
+                        return -1;
+                    }
+                    e->value_type = ptr_base_type(g->type);
+                    e->struct_id = g->type_struct_id;
+                    return 0;
+                }
+            }
             if (!g_allow_implicit_funcdecl) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message),
@@ -1559,12 +1589,14 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     case CC_EXPR_ASSIGN: {
         cc_type_t dst_type;
         int dst_struct_id = -1;
+        int dst_is_array_object = 0;
         int assign_ok;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
                 dst_type = vars[idx].type;
                 dst_struct_id = vars[idx].struct_id;
+                dst_is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
                 if (g == NULL) {
@@ -1576,6 +1608,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 dst_type = g->type;
                 dst_struct_id = g->type_struct_id;
+                dst_is_array_object = is_array_object_type(g->type, g->array_len);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -1585,6 +1618,17 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             dst_struct_id = e->lhs->struct_id;
         } else {
             set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
+            return -1;
+        }
+        if (dst_is_array_object) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                if (e->ident != NULL) {
+                    snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue: %s",
+                             e->ident);
+                } else {
+                    snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue");
+                }
+            }
             return -1;
         }
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
@@ -1693,10 +1737,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 
     case CC_EXPR_UPDATE: {
         cc_type_t t;
+        int is_array_object = 0;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
                 t = vars[idx].type;
+                is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
                 if (g == NULL) {
@@ -1707,6 +1753,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
                 t = g->type;
+                is_array_object = is_array_object_type(g->type, g->array_len);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -1715,6 +1762,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             t = e->lhs->value_type;
         } else {
             set_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
+            return -1;
+        }
+        if (is_array_object) {
+            set_diag(diag, "array object is not a modifiable lvalue for ++/--");
             return -1;
         }
         if (is_pointer_type(t)) {
@@ -2144,7 +2195,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "duplicate local/parameter name");
                 return -1;
             }
-            if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, depth) != 0) {
+            if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, depth) != 0) {
                 set_diag(diag, "out of memory adding local variable");
                 return -1;
             }
@@ -2160,6 +2211,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         }
                         if (s->array_len == 0 && inferred_len > 0) {
                             s->array_len = inferred_len;
+                            (*vars)[*var_count - 1].array_len = inferred_len;
                         }
                     } else if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
                         if (check_struct_initializer(tu, s->decl_name, s->type_struct_id, s->expr, *vars, *var_count,
@@ -2726,7 +2778,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 set_diag(diag, "duplicate parameter name");
                 goto fail_func;
             }
-            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, 0) !=
+            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, -1, 0) !=
                 0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
