@@ -2842,37 +2842,6 @@ static cc_expr_t *new_int_expr(long v);
 static cc_expr_t *parse_initializer_expr(parser_t *p);
 static cc_expr_t *parse_initializer_item(parser_t *p);
 
-static int is_fallthrough_stmt_start(parser_t *p) {
-    cc_lexer_t lx;
-    cc_token_t t;
-    const char *name = "fallthrough";
-    size_t i;
-
-    if (p->tok.kind != TOK_LBRACK || peek_kind(p) != TOK_LBRACK) {
-        return 0;
-    }
-
-    lx = p->lx;
-    for (i = 0; i < 2; ++i) {
-        if (cc_lexer_next(&lx, &t) != 0 || t.kind != TOK_LBRACK) {
-            return 0;
-        }
-    }
-    if (cc_lexer_next(&lx, &t) != 0 || t.kind != TOK_IDENT || t.len != strlen(name) ||
-        strncmp(t.start, name, t.len) != 0) {
-        return 0;
-    }
-    for (i = 0; i < 2; ++i) {
-        if (cc_lexer_next(&lx, &t) != 0 || t.kind != TOK_RBRACK) {
-            return 0;
-        }
-    }
-    if (cc_lexer_next(&lx, &t) != 0 || t.kind != TOK_SEMI) {
-        return 0;
-    }
-    return 1;
-}
-
 static cc_expr_t *parse_initializer_item(parser_t *p) {
     if (p->tok.kind == TOK_DOT) {
         cc_expr_t *item;
@@ -4962,7 +4931,22 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
             p->scope_depth = saved_depth;
             return -1;
         }
-        if (is_declspec_start(p) && !is_fallthrough_stmt_start(p)) {
+        if (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) {
+            if (parse_stmt(p, &child) != 0) {
+                free_stmt(&child);
+                typedef_pop_to_depth(p, saved_depth);
+                p->scope_depth = saved_depth;
+                return -1;
+            }
+            if (push_stmt_arr(&s->block_stmts, &s->block_count, child) != 0) {
+                free_stmt(&child);
+                typedef_pop_to_depth(p, saved_depth);
+                p->scope_depth = saved_depth;
+                return -1;
+            }
+            continue;
+        }
+        if (is_declspec_start(p)) {
             if (parse_decl_stmt_list(p, &s->block_stmts, &s->block_count, 1) != 0) {
                 typedef_pop_to_depth(p, saved_depth);
                 p->scope_depth = saved_depth;
@@ -5317,6 +5301,26 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
     }
 
     if (is_declspec_start(p)) {
+        if (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) {
+            cc_stmt_t *decls = NULL;
+            size_t decl_count = 0;
+            if (parse_decl_stmt_list(p, &decls, &decl_count, 1) != 0) {
+                free(decls);
+                return -1;
+            }
+            if (decl_count == 1) {
+                *s = decls[0];
+                free(decls);
+                return 0;
+            }
+            memset(s, 0, sizeof(*s));
+            s->line = p->tok.line;
+            s->col = p->tok.col;
+            s->kind = CC_STMT_BLOCK;
+            s->block_stmts = decls;
+            s->block_count = decl_count;
+            return 0;
+        }
         return parse_decl_stmt(p, s, 1);
     }
 

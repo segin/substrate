@@ -158,9 +158,9 @@ Execution policy:
 - [x] `__has_c_attribute(...)`.
 
 ### 2.5 Post-C99 validation
-- [ ] Conformance tests by standard mode (`c11`, `c17`, `c23`).
-- [ ] Differential tests vs GCC/Clang in `-std=c11/c17/c23`.
-- [ ] ABI regression checks for x86-64/i386 in each mode.
+- [x] Conformance tests by standard mode (`c11`, `c17`, `c23`).
+- [x] Differential tests vs GCC/Clang in `-std=c11/c17/c23`.
+- [x] ABI regression checks for x86-64/i386 in each mode.
 
 ---
 
