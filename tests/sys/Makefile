@@ -14,7 +14,7 @@ SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
 
 OBJS = $(SRCS:.c=.o)
 
-HOST_TESTS = host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_vm_swap host_test_wait_bench host_test_acct_compress
+HOST_TESTS = host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_vm_swap host_test_wait_bench host_test_acct_compress host_test_procfs
 
 all: tests.o $(HOST_TESTS)
 
@@ -54,6 +54,9 @@ host_test_div64: host_test_div64.c
 
 host_test_printf_specifiers: host_test_printf_specifiers.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_printf_specifiers.c -o $@
+
+host_test_procfs: host_test_procfs.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_procfs.c -o $@
 
 tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
