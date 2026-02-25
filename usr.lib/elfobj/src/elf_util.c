@@ -1,5 +1,6 @@
 #include "elf_private.h"
 #include <errno.h>
+#include <sys/mman.h>
 
 static int mul_overflow(size_t a, size_t b, size_t *out) {
     if (a == 0 || b == 0) {
@@ -351,7 +352,9 @@ void elf_close(elfobj_t *obj) {
     if (obj == NULL) {
         return;
     }
-    if (obj->owns_image) {
+    if (obj->mmapped_image && obj->image != NULL) {
+        (void)munmap(obj->image, obj->image_size);
+    } else if (obj->owns_image) {
         free(obj->image);
     }
     elf_free_sections(obj);
@@ -438,11 +441,19 @@ size_t elf_section_count(const elfobj_t *obj) {
 }
 
 size_t elf_symbol_count(const elfobj_t *obj) {
-    return obj == NULL ? 0 : obj->symbol_count;
+    if (obj == NULL) {
+        return 0;
+    }
+    (void)elf__ensure_symbols_relocs((elfobj_t *)obj);
+    return obj->symbol_count;
 }
 
 size_t elf_reloc_count(const elfobj_t *obj) {
-    return obj == NULL ? 0 : obj->reloc_count;
+    if (obj == NULL) {
+        return 0;
+    }
+    (void)elf__ensure_symbols_relocs((elfobj_t *)obj);
+    return obj->reloc_count;
 }
 
 uint16_t elf_program_header_count(const elfobj_t *obj) {
@@ -486,6 +497,14 @@ uint64_t elf_symbol_value(const elf_symbol_t *symbol) {
 
 uint64_t elf_symbol_size(const elf_symbol_t *symbol) {
     return symbol == NULL ? 0 : symbol->size;
+}
+
+int elf_uses_mmap(const elfobj_t *obj) {
+    return obj == NULL ? 0 : (obj->mmapped_image != 0);
+}
+
+int elf_is_lazy_parse_enabled(const elfobj_t *obj) {
+    return obj == NULL ? 0 : (obj->lazy_parse != 0);
 }
 
 elf_err_t elf_last_error(const elfobj_t *obj) {

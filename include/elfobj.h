@@ -82,6 +82,10 @@ typedef enum {
 #define SHF_COMPRESSED 0x800
 #endif
 
+#define ELFOBJ_OPEN_NOCOPY 0x1u
+#define ELFOBJ_OPEN_USE_MMAP 0x2u
+#define ELFOBJ_OPEN_LAZY_PARSE 0x4u
+
 #ifndef PT_NULL
 #define PT_NULL 0
 #define PT_LOAD 1
@@ -222,8 +226,14 @@ typedef struct {
 
 elf_err_t elf_open(const char *path, elfobj_t **out);
 elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out);
+elf_err_t elf_open_with_options(const char *path, uint32_t flags, elfobj_t **out);
+elf_err_t elf_open_memory_with_options(const void *buf, size_t size, uint32_t flags,
+                                       elfobj_t **out);
+elf_err_t elf_open_memory_nocopy(const void *buf, size_t size, elfobj_t **out);
 elf_err_t elf_write_file(elfobj_t *obj, const char *path);
 void elf_close(elfobj_t *obj);
+int elf_uses_mmap(const elfobj_t *obj);
+int elf_is_lazy_parse_enabled(const elfobj_t *obj);
 
 elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, uint64_t flags);
 elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t size);

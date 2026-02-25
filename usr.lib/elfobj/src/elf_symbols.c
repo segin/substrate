@@ -102,6 +102,7 @@ elf_symbol_t *elf_find_symbol(elfobj_t *obj, const char *name) {
     if (obj == NULL || name == NULL) {
         return NULL;
     }
+    (void)elf__ensure_symbols_relocs(obj);
 
     for (i = 0; i < obj->symbol_count; ++i) {
         struct elf_symbol *sym = obj->symbols[i];
@@ -130,7 +131,11 @@ elf_err_t elf_symbol_define(elf_symbol_t *symbol, elf_section_t *section, uint64
 }
 
 elf_symbol_t *elf_symbol_at(elfobj_t *obj, size_t index) {
-    if (obj == NULL || index >= obj->symbol_count) {
+    if (obj == NULL) {
+        return NULL;
+    }
+    (void)elf__ensure_symbols_relocs(obj);
+    if (index >= obj->symbol_count) {
         return NULL;
     }
     return obj->symbols[index];
@@ -302,9 +307,17 @@ static elf_symbol_t *lookup_hash(elfobj_t *obj, const char *name, uint32_t (*has
 }
 
 elf_symbol_t *elf_symbol_lookup_sysv(elfobj_t *obj, const char *name) {
+    if (obj == NULL) {
+        return NULL;
+    }
+    (void)elf__ensure_symbols_relocs(obj);
     return lookup_hash(obj, name, elf_hash_sysv);
 }
 
 elf_symbol_t *elf_symbol_lookup_gnu(elfobj_t *obj, const char *name) {
+    if (obj == NULL) {
+        return NULL;
+    }
+    (void)elf__ensure_symbols_relocs(obj);
     return lookup_hash(obj, name, elf_hash_gnu);
 }

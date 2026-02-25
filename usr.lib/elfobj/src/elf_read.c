@@ -1,4 +1,8 @@
 #include "elf_private.h"
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 typedef struct {
     size_t sec_index;
@@ -491,6 +495,36 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
     return ELF_OK;
 }
 
+static elf_err_t materialize_symbols_relocs(elfobj_t *obj) {
+    symtab_index_t *maps = NULL;
+    size_t map_count = 0;
+    size_t i;
+    elf_err_t err;
+
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->symrel_loaded) {
+        return ELF_OK;
+    }
+
+    err = parse_symbols(obj, &maps, &map_count);
+    if (err != ELF_OK) {
+        return err;
+    }
+    err = parse_relocations(obj, maps, map_count);
+    for (i = 0; i < map_count; ++i) {
+        free(maps[i].symbols);
+    }
+    free(maps);
+    if (err != ELF_OK) {
+        return err;
+    }
+
+    obj->symrel_loaded = 1;
+    return ELF_OK;
+}
+
 static elf_err_t parse_object(elfobj_t *obj) {
     const uint8_t *b = obj->image;
     uint64_t phoff;
@@ -499,9 +533,6 @@ static elf_err_t parse_object(elfobj_t *obj) {
     uint16_t phnum;
     uint16_t shentsize;
     uint16_t shnum;
-    symtab_index_t *maps = NULL;
-    size_t map_count = 0;
-    size_t i;
     elf_err_t err;
 
     if (!is_elf_magic(b, obj->image_size)) {
@@ -569,18 +600,12 @@ static elf_err_t parse_object(elfobj_t *obj) {
         }
     }
 
-    err = parse_symbols(obj, &maps, &map_count);
-    if (err != ELF_OK) {
-        return err;
-    }
-
-    err = parse_relocations(obj, maps, map_count);
-    for (i = 0; i < map_count; ++i) {
-        free(maps[i].symbols);
-    }
-    free(maps);
-    if (err != ELF_OK) {
-        return err;
+    obj->symrel_loaded = 0;
+    if (!obj->lazy_parse) {
+        err = materialize_symbols_relocs(obj);
+        if (err != ELF_OK) {
+            return err;
+        }
     }
 
     detect_special_sections(obj);
@@ -589,9 +614,60 @@ static elf_err_t parse_object(elfobj_t *obj) {
     return ELF_OK;
 }
 
-elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out) {
+static int env_enabled(const char *name) {
+    const char *v = getenv(name);
+    const char *p;
+    const char *q;
+    static const char false_s[] = "false";
+    static const char no_s[] = "no";
+    if (v == NULL || *v == '\0') {
+        return 0;
+    }
+    if (strcmp(v, "0") == 0) {
+        return 0;
+    }
+    p = v;
+    q = false_s;
+    while (*p != '\0' && *q != '\0') {
+        char a = *p >= 'A' && *p <= 'Z' ? (char)(*p - 'A' + 'a') : *p;
+        char b = *q;
+        if (a != b) {
+            break;
+        }
+        ++p;
+        ++q;
+    }
+    if (*p == '\0' && *q == '\0') {
+        return 0;
+    }
+    p = v;
+    q = no_s;
+    while (*p != '\0' && *q != '\0') {
+        char a = *p >= 'A' && *p <= 'Z' ? (char)(*p - 'A' + 'a') : *p;
+        char b = *q;
+        if (a != b) {
+            break;
+        }
+        ++p;
+        ++q;
+    }
+    if (*p == '\0' && *q == '\0') {
+        return 0;
+    }
+    return 1;
+}
+
+elf_err_t elf__ensure_symbols_relocs(elfobj_t *obj) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    return materialize_symbols_relocs(obj);
+}
+
+static elf_err_t open_memory_common(const void *buf, size_t size, uint32_t flags, elfobj_t **out) {
     elfobj_t *obj;
     elf_err_t err;
+    int copy = (flags & ELFOBJ_OPEN_NOCOPY) == 0;
 
     if (buf == NULL || out == NULL) {
         return ELF_ERR_STATE;
@@ -602,14 +678,21 @@ elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out) {
         return ELF_ERR_OOM;
     }
 
-    obj->image = (uint8_t *)malloc(size);
-    if (obj->image == NULL) {
-        elf_close(obj);
-        return ELF_ERR_OOM;
+    obj->lazy_parse = (flags & ELFOBJ_OPEN_LAZY_PARSE) != 0;
+
+    if (copy) {
+        obj->image = (uint8_t *)malloc(size);
+        if (obj->image == NULL && size != 0) {
+            elf_close(obj);
+            return ELF_ERR_OOM;
+        }
+        memcpy(obj->image, buf, size);
+        obj->owns_image = 1;
+    } else {
+        obj->image = (uint8_t *)(uintptr_t)buf;
+        obj->owns_image = 0;
     }
-    memcpy(obj->image, buf, size);
     obj->image_size = size;
-    obj->owns_image = 1;
 
     err = parse_object(obj);
     if (err != ELF_OK) {
@@ -622,15 +705,67 @@ elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out) {
     return ELF_OK;
 }
 
-elf_err_t elf_open(const char *path, elfobj_t **out) {
+elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out) {
+    uint32_t flags = env_enabled("ELFOBJ_LAZY_PARSE") ? ELFOBJ_OPEN_LAZY_PARSE : 0;
+    return open_memory_common(buf, size, flags, out);
+}
+
+elf_err_t elf_open_memory_nocopy(const void *buf, size_t size, elfobj_t **out) {
+    uint32_t flags = ELFOBJ_OPEN_NOCOPY;
+    if (env_enabled("ELFOBJ_LAZY_PARSE")) {
+        flags |= ELFOBJ_OPEN_LAZY_PARSE;
+    }
+    return open_memory_common(buf, size, flags, out);
+}
+
+elf_err_t elf_open_memory_with_options(const void *buf, size_t size, uint32_t flags,
+                                       elfobj_t **out) {
+    return open_memory_common(buf, size, flags, out);
+}
+
+elf_err_t elf_open_with_options(const char *path, uint32_t flags, elfobj_t **out) {
     FILE *fp;
     uint8_t *buf;
     long end;
     size_t got;
+    int fd;
+    struct stat st;
+    void *map = MAP_FAILED;
     elf_err_t err;
 
     if (path == NULL || out == NULL) {
         return ELF_ERR_STATE;
+    }
+
+    if ((flags & ELFOBJ_OPEN_USE_MMAP) != 0) {
+        fd = open(path, O_RDONLY);
+        if (fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0) {
+            map = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+            if (map != MAP_FAILED) {
+                elfobj_t *obj = elf__alloc_obj();
+                if (obj == NULL) {
+                    (void)munmap(map, (size_t)st.st_size);
+                    close(fd);
+                    return ELF_ERR_OOM;
+                }
+                obj->image = (uint8_t *)map;
+                obj->image_size = (size_t)st.st_size;
+                obj->mmapped_image = 1;
+                obj->lazy_parse = (flags & ELFOBJ_OPEN_LAZY_PARSE) != 0;
+                err = parse_object(obj);
+                close(fd);
+                if (err != ELF_OK) {
+                    elf__set_err(obj, err, "failed to parse ELF object");
+                    elf_close(obj);
+                    return err;
+                }
+                *out = obj;
+                return ELF_OK;
+            }
+        }
+        if (fd >= 0) {
+            close(fd);
+        }
     }
 
     fp = fopen(path, "rb");
@@ -664,7 +799,18 @@ elf_err_t elf_open(const char *path, elfobj_t **out) {
         return ELF_ERR_IO;
     }
 
-    err = elf_open_memory(buf, (size_t)end, out);
+    err = open_memory_common(buf, (size_t)end, flags, out);
     free(buf);
     return err;
+}
+
+elf_err_t elf_open(const char *path, elfobj_t **out) {
+    uint32_t flags = 0;
+    if (env_enabled("ELFOBJ_USE_MMAP")) {
+        flags |= ELFOBJ_OPEN_USE_MMAP;
+    }
+    if (env_enabled("ELFOBJ_LAZY_PARSE")) {
+        flags |= ELFOBJ_OPEN_LAZY_PARSE;
+    }
+    return elf_open_with_options(path, flags, out);
 }

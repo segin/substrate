@@ -383,18 +383,34 @@ elf_err_t elf_register_reloc_backend(const struct elf_reloc_backend *backend) {
 }
 
 size_t elf_section_reloc_count(const elf_section_t *section) {
-    return section == NULL ? 0 : section->reloc_count;
+    if (section == NULL) {
+        return 0;
+    }
+    if (section->obj != NULL) {
+        (void)elf__ensure_symbols_relocs(section->obj);
+    }
+    return section->reloc_count;
 }
 
 elf_reloc_t *elf_section_reloc_at(elf_section_t *section, size_t index) {
-    if (section == NULL || index >= section->reloc_count) {
+    if (section == NULL) {
+        return NULL;
+    }
+    if (section->obj != NULL) {
+        (void)elf__ensure_symbols_relocs(section->obj);
+    }
+    if (index >= section->reloc_count) {
         return NULL;
     }
     return section->relocs[index];
 }
 
 elf_reloc_t *elf_reloc_at(elfobj_t *obj, size_t index) {
-    if (obj == NULL || index >= obj->reloc_count) {
+    if (obj == NULL) {
+        return NULL;
+    }
+    (void)elf__ensure_symbols_relocs(obj);
+    if (index >= obj->reloc_count) {
         return NULL;
     }
     return obj->relocs[index];

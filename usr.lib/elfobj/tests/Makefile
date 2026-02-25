@@ -4,7 +4,7 @@ CFLAGS := $(CFLAGS) -I../../../include -I../../../sys -I../src
 
 TESTS = test_roundtrip test_invalid test_link test_reader_writer test_roundtrip_identity \
 	test_section_segment test_symbols_hash test_reloc_backend test_link_services \
-	test_debug_unwind test_validate_hardening
+	test_debug_unwind test_validate_hardening test_perf_io
 
 .PHONY: all clean
 
@@ -20,6 +20,8 @@ all: $(TESTS)
 	./test_link_services
 	./test_debug_unwind
 	./test_validate_hardening
+	./test_perf_io
+	@if [ "${ELFOBJ_RUN_PERF_GATE:-0}" = "1" ]; then ./test_perf_gate.sh; fi
 	./test_abi_surface.sh
 
 %: %.c ../libelfobj.a

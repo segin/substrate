@@ -4,9 +4,14 @@
 .Sh NAME
 .Nm elf_open ,
 .Nm elf_open_memory ,
+.Nm elf_open_with_options ,
+.Nm elf_open_memory_with_options ,
+.Nm elf_open_memory_nocopy ,
 .Nm elf_create ,
 .Nm elf_write_file ,
 .Nm elf_close ,
+.Nm elf_uses_mmap ,
+.Nm elf_is_lazy_parse_enabled ,
 .Nm elf_finalize ,
 .Nm elf_errstr ,
 .Nm elf_last_error ,
@@ -22,6 +27,25 @@
 .Fc
 .Ft elf_err_t
 .Fo elf_open_memory
+.Fa "const void *buf"
+.Fa "size_t size"
+.Fa "elfobj_t **out"
+.Fc
+.Ft elf_err_t
+.Fo elf_open_with_options
+.Fa "const char *path"
+.Fa "uint32_t flags"
+.Fa "elfobj_t **out"
+.Fc
+.Ft elf_err_t
+.Fo elf_open_memory_with_options
+.Fa "const void *buf"
+.Fa "size_t size"
+.Fa "uint32_t flags"
+.Fa "elfobj_t **out"
+.Fc
+.Ft elf_err_t
+.Fo elf_open_memory_nocopy
 .Fa "const void *buf"
 .Fa "size_t size"
 .Fa "elfobj_t **out"
@@ -56,6 +80,14 @@
 .Fc
 .Ft const char *
 .Fo elf_last_diagnostics
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft int
+.Fo elf_uses_mmap
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft int
+.Fo elf_is_lazy_parse_enabled
 .Fa "const elfobj_t *obj"
 .Fc
 .Ft uint16_t

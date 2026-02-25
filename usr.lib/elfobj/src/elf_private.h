@@ -147,9 +147,12 @@ struct elfobj {
     uint8_t *image;
     size_t image_size;
     uint8_t owns_image;
+    uint8_t mmapped_image;
     uint8_t readonly;
     uint8_t finalized;
     uint8_t dirty;
+    uint8_t lazy_parse;
+    uint8_t symrel_loaded;
 
     elfobj_class_t cls;
     elfobj_endian_t endian;
@@ -263,5 +266,6 @@ uint32_t elf__strtab_add(elf_strtab_t *tab, const char *s);
 
 elf_err_t elf__layout(elfobj_t *obj);
 elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz);
+elf_err_t elf__ensure_symbols_relocs(elfobj_t *obj);
 
 #endif

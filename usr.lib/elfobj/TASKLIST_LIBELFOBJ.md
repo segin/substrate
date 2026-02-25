@@ -123,16 +123,16 @@ Execution policy:
 - [x] Security regression suite and crash-free guarantees.
 
 ## 10) Performance and Memory Model
-- [ ] Zero-copy reads where safe and practical.
-- [ ] Optional `mmap` I/O path.
-- [ ] Lazy parse/decode of heavy sections.
-- [ ] Memory ownership/lifetime model audit.
-- [ ] Large-file scalability benchmarks.
-- [ ] 10k-symbol object write benchmark target.
-- [ ] Kernel image read benchmark target.
-- [ ] Link-large-archive benchmark target.
-- [ ] Hot-path profiling and optimization backlog.
-- [ ] Performance regression gate in CI.
+- [x] Zero-copy reads where safe and practical.
+- [x] Optional `mmap` I/O path.
+- [x] Lazy parse/decode of heavy sections.
+- [x] Memory ownership/lifetime model audit.
+- [x] Large-file scalability benchmarks.
+- [x] 10k-symbol object write benchmark target.
+- [x] Kernel image read benchmark target.
+- [x] Link-large-archive benchmark target.
+- [x] Hot-path profiling and optimization backlog.
+- [x] Performance regression gate in CI.
 
 ## 11) Cross-Target and Format Coverage
 - [ ] ELF32 little-endian coverage.

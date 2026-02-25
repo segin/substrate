@@ -104,6 +104,7 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
     size_t j;
     int has_layout;
     validate_ctx_t ctx;
+    elf_err_t ensure_err;
     elf_validate_mode_t mode = obj != NULL ? obj->validate_mode : ELF_VALIDATE_STRICT;
     size_t max_errors = obj != NULL ? obj->validate_max_errors : 0;
 
@@ -125,6 +126,13 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
     ctx.mode = mode;
     ctx.max_errors = max_errors;
     has_layout = (obj->image != NULL) || obj->finalized;
+
+    ensure_err = elf__ensure_symbols_relocs(obj);
+    if (ensure_err != ELF_OK) {
+        (void)report_diag(&ctx, ELF_DIAG_ERROR, ensure_err, UINT64_MAX,
+                          "failed to materialize symbols/relocations");
+        goto done;
+    }
 
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *s = obj->sections[i];

@@ -36,6 +36,26 @@ Thread-safety and reentrancy:
 - A single `elfobj_t` requires external synchronization for concurrent mutation.
 - Relocation backend registration is serialized internally.
 
+## Memory and I/O Model
+- `elf_open_memory()` copies input bytes into internal storage.
+- `elf_open_memory_nocopy()` uses caller-provided bytes as a zero-copy read-only view.
+- `elf_open_with_options()` and `elf_open_memory_with_options()` accept:
+  - `ELFOBJ_OPEN_NOCOPY`
+  - `ELFOBJ_OPEN_USE_MMAP`
+  - `ELFOBJ_OPEN_LAZY_PARSE`
+- `elf_open()` can still use environment toggles (`ELFOBJ_USE_MMAP`, `ELFOBJ_LAZY_PARSE`).
+- Parser section payloads are referenced directly from backing image buffers (no section payload copy on read path).
+- Optional lazy symbol/relocation parse can be enabled with `ELFOBJ_LAZY_PARSE=1`; data is materialized on first symbol/relocation query.
+
+## Performance
+- Benchmark harness: `make -C usr.lib/elfobj/bench`.
+- Included benchmarks:
+  - 10k-symbol object write (`write_10k_symbols_ms`)
+  - Large archive/link simulation (`link_large_archive_ms`)
+  - Kernel image read benchmark (`read_kernel_image_ms`, when `ELFOBJ_BENCH_IMAGE` is provided)
+- Optional regression gate: `ELFOBJ_RUN_PERF_GATE=1 make -C usr.lib/elfobj/tests`.
+- Profiling backlog and optimization priorities: `usr.lib/elfobj/bench/PERF_BACKLOG.md`.
+
 ## Stability
 `libelfobj` uses opaque handles and an error-code based ABI intended for long-term stability.
 See `usr.lib/elfobj/ABI_POLICY.md` and `usr.lib/elfobj/libelfobj.map`.

@@ -26,6 +26,7 @@ elf_find_symbol
 elf_get_validation_mode
 elf_hash_gnu
 elf_hash_sysv
+elf_is_lazy_parse_enabled
 elf_last_diagnostics
 elf_last_error
 elf_link
@@ -53,6 +54,9 @@ elf_link_unload_objects
 elf_machine
 elf_open
 elf_open_memory
+elf_open_memory_nocopy
+elf_open_memory_with_options
+elf_open_with_options
 elf_program_header_count
 elf_register_reloc_backend
 elf_reloc_addend
@@ -115,6 +119,7 @@ elf_symbol_value
 elf_symbol_version
 elf_symbols_sort_deterministic
 elf_type
+elf_uses_mmap
 elf_validate
 elf_validate_ex
 elf_write_file
