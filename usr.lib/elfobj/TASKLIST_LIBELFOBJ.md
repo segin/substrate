@@ -99,16 +99,16 @@ Execution policy:
 - [x] Link map/introspection helper APIs.
 
 ## 8) Debug and Unwind Sections
-- [ ] Preserve `.debug_*` sections in round-trip mode.
-- [ ] Read/write `.eh_frame` structures at container level.
-- [ ] Symbol/debug cross-reference consistency checks.
-- [ ] CFI-related section retention helpers.
-- [ ] Optional compressed debug section support hooks.
-- [ ] Minimal DWARF section structural validator.
-- [ ] Split DWARF section passthrough behavior.
-- [ ] Debug section relocation support.
-- [ ] Deterministic ordering of debug sections.
-- [ ] Debug-info compatibility tests with system tools.
+- [x] Preserve `.debug_*` sections in round-trip mode.
+- [x] Read/write `.eh_frame` structures at container level.
+- [x] Symbol/debug cross-reference consistency checks.
+- [x] CFI-related section retention helpers.
+- [x] Optional compressed debug section support hooks.
+- [x] Minimal DWARF section structural validator.
+- [x] Split DWARF section passthrough behavior.
+- [x] Debug section relocation support.
+- [x] Deterministic ordering of debug sections.
+- [x] Debug-info compatibility tests with system tools.
 
 ## 9) Validation and Hardening
 - [ ] Central validation API with structured diagnostics.

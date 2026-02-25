@@ -102,6 +102,10 @@ struct elf_section {
     uint8_t *data;
     size_t data_size;
     uint8_t owns_data;
+    uint8_t has_compression_hint;
+    uint32_t compression_type;
+    uint64_t compression_size;
+    uint64_t compression_addralign;
     size_t index;
     struct elf_reloc **relocs;
     size_t reloc_count;

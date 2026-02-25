@@ -75,6 +75,7 @@ typedef enum {
 #define SHF_EXECINSTR 0x4
 #define SHF_MERGE 0x10
 #define SHF_STRINGS 0x20
+#define SHF_COMPRESSED 0x800
 #define SHF_GROUP 0x200
 #define SHF_TLS 0x400
 #endif
@@ -324,6 +325,19 @@ int elf_segment_contains_section(const elf_segment_t *segment, const elf_section
 
 uint32_t elf_hash_sysv(const char *name);
 uint32_t elf_hash_gnu(const char *name);
+
+int elf_section_is_debug(const elf_section_t *section);
+int elf_section_is_cfi(const elf_section_t *section);
+int elf_section_is_split_dwarf(const elf_section_t *section);
+int elf_section_is_compressed_debug(const elf_section_t *section);
+elf_err_t elf_debug_set_compression_hint(elf_section_t *section, uint32_t ch_type,
+                                         uint64_t uncompressed_size, uint64_t addralign);
+int elf_debug_get_compression_hint(const elf_section_t *section, uint32_t *ch_type_out,
+                                   uint64_t *uncompressed_size_out, uint64_t *addralign_out);
+elf_err_t elf_eh_frame_stats(const elf_section_t *section, size_t *cie_count_out,
+                             size_t *fde_count_out);
+elf_err_t elf_debug_validate(elfobj_t *obj, char **diagnostics);
+elf_err_t elf_debug_sort_sections(elfobj_t *obj);
 
 #ifdef __cplusplus
 }
