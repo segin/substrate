@@ -56,6 +56,17 @@ typedef struct {
     size_t cap;
 } elf_diag_t;
 
+struct elf_phdr {
+    uint32_t type;
+    uint32_t flags;
+    uint64_t offset;
+    uint64_t vaddr;
+    uint64_t paddr;
+    uint64_t filesz;
+    uint64_t memsz;
+    uint64_t align;
+};
+
 typedef struct {
     char *data;
     size_t size;
@@ -112,6 +123,7 @@ struct elfobj {
     uint8_t owns_image;
     uint8_t readonly;
     uint8_t finalized;
+    uint8_t dirty;
 
     elfobj_class_t cls;
     elfobj_endian_t endian;
@@ -134,6 +146,12 @@ struct elfobj {
 
     uint16_t shstrndx;
     uint16_t phnum;
+    struct elf_phdr *phdrs;
+    size_t phdr_count;
+    size_t phdr_cap;
+    uint8_t has_notes;
+    uint8_t has_dynamic;
+    uint8_t has_versioning;
 
     elf_err_t last_err;
     elf_diag_t diag;
@@ -147,6 +165,8 @@ void *elf__calloc(size_t n, size_t sz);
 void *elf__reallocarray(void *ptr, size_t n, size_t sz);
 char *elf__strdup(const char *s);
 int elf__bounds_ok(size_t off, size_t len, size_t total);
+int elf__u64_add(uint64_t a, uint64_t b, uint64_t *out);
+int elf__u64_mul(uint64_t a, uint64_t b, uint64_t *out);
 uint16_t elf__rd16(const uint8_t *p, elfobj_endian_t e);
 uint32_t elf__rd32(const uint8_t *p, elfobj_endian_t e);
 uint64_t elf__rd64(const uint8_t *p, elfobj_endian_t e);
@@ -157,6 +177,7 @@ void elf__wr64(uint8_t *p, elfobj_endian_t e, uint64_t v);
 elf_err_t elf__push_section(elfobj_t *obj, struct elf_section *sec);
 elf_err_t elf__push_symbol(elfobj_t *obj, struct elf_symbol *sym);
 elf_err_t elf__push_reloc(elfobj_t *obj, struct elf_reloc *rel);
+elf_err_t elf__push_phdr(elfobj_t *obj, const struct elf_phdr *phdr);
 
 elf_err_t elf__strtab_init(elf_strtab_t *tab);
 void elf__strtab_free(elf_strtab_t *tab);

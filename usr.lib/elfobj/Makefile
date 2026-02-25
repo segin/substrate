@@ -45,3 +45,4 @@ install: $(LIBNAME)
 	cp $(LIBNAME) $(DESTDIR)/usr/lib/
 	cp ../../include/elfobj.h $(DESTDIR)/usr/include/
 	cp elfobj.pc $(DESTDIR)/usr/lib/pkgconfig/
+	cp libelfobj.map $(DESTDIR)/usr/lib/

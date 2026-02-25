@@ -81,6 +81,7 @@ elf_symbol_t *elf_add_symbol(elfobj_t *obj, const char *name, uint64_t value,
         elf__set_err(obj, ELF_ERR_OOM, "append symbol failed");
         return NULL;
     }
+    obj->dirty = 1;
 
     return sym;
 }
@@ -115,5 +116,6 @@ elf_err_t elf_symbol_define(elf_symbol_t *symbol, elf_section_t *section, uint64
 
     symbol->value = value;
     symbol->shndx = (uint16_t)(section->index + 1);
+    symbol->obj->dirty = 1;
     return ELF_OK;
 }

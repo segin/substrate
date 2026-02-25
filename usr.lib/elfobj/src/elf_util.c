@@ -67,6 +67,32 @@ int elf__bounds_ok(size_t off, size_t len, size_t total) {
     return 1;
 }
 
+int elf__u64_add(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL) {
+        return 0;
+    }
+    if (a > UINT64_MAX - b) {
+        return 0;
+    }
+    *out = a + b;
+    return 1;
+}
+
+int elf__u64_mul(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL) {
+        return 0;
+    }
+    if (a == 0 || b == 0) {
+        *out = 0;
+        return 1;
+    }
+    if (a > UINT64_MAX / b) {
+        return 0;
+    }
+    *out = a * b;
+    return 1;
+}
+
 uint16_t elf__rd16(const uint8_t *p, elfobj_endian_t e) {
     if (e == ELFOBJ_ENDIAN_BE) {
         return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
@@ -236,6 +262,13 @@ static void elf_free_relocs(elfobj_t *obj) {
     free(obj->relocs);
 }
 
+static void elf_free_phdrs(elfobj_t *obj) {
+    if (obj == NULL) {
+        return;
+    }
+    free(obj->phdrs);
+}
+
 const char *elf_errstr(elf_err_t err) {
     switch (err) {
         case ELF_OK: return "ok";
@@ -261,6 +294,7 @@ void elf_close(elfobj_t *obj) {
     elf_free_sections(obj);
     elf_free_symbols(obj);
     elf_free_relocs(obj);
+    elf_free_phdrs(obj);
     free(obj->diag.buf);
     free(obj);
 }
@@ -278,10 +312,25 @@ elfobj_t *elf_create(uint16_t type, uint16_t machine, elfobj_class_t cls, elfobj
 }
 
 elf_err_t elf_finalize(elfobj_t *obj) {
+    elf_err_t err;
+
     if (obj == NULL) {
         return ELF_ERR_STATE;
     }
+    if (obj->finalized) {
+        return ELF_OK;
+    }
+    if (obj->readonly && obj->image != NULL && obj->dirty == 0) {
+        obj->finalized = 1;
+        return ELF_OK;
+    }
+    err = elf__layout(obj);
+    if (err != ELF_OK) {
+        elf__set_err(obj, err, "layout failed during finalize");
+        return err;
+    }
     obj->finalized = 1;
+    obj->readonly = 1;
     return ELF_OK;
 }
 
@@ -293,6 +342,7 @@ elf_err_t elf_set_type(elfobj_t *obj, uint16_t type) {
         return ELF_ERR_STATE;
     }
     obj->type = type;
+    obj->dirty = 1;
     return ELF_OK;
 }
 
@@ -322,6 +372,10 @@ size_t elf_symbol_count(const elfobj_t *obj) {
 
 size_t elf_reloc_count(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->reloc_count;
+}
+
+uint16_t elf_program_header_count(const elfobj_t *obj) {
+    return obj == NULL ? 0 : (uint16_t)obj->phdr_count;
 }
 
 const char *elf_section_name(const elf_section_t *section) {
@@ -357,4 +411,35 @@ uint64_t elf_symbol_value(const elf_symbol_t *symbol) {
 
 uint64_t elf_symbol_size(const elf_symbol_t *symbol) {
     return symbol == NULL ? 0 : symbol->size;
+}
+
+elf_err_t elf_last_error(const elfobj_t *obj) {
+    return obj == NULL ? ELF_ERR_STATE : obj->last_err;
+}
+
+const char *elf_last_diagnostics(const elfobj_t *obj) {
+    if (obj == NULL || obj->diag.buf == NULL) {
+        return "";
+    }
+    return obj->diag.buf;
+}
+
+elf_err_t elf__push_phdr(elfobj_t *obj, const struct elf_phdr *phdr) {
+    void *next;
+
+    if (obj == NULL || phdr == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->phdr_count == obj->phdr_cap) {
+        size_t new_cap = obj->phdr_cap == 0 ? 8 : obj->phdr_cap * 2;
+        next = elf__reallocarray(obj->phdrs, new_cap, sizeof(obj->phdrs[0]));
+        if (next == NULL) {
+            return ELF_ERR_OOM;
+        }
+        obj->phdrs = (struct elf_phdr *)next;
+        obj->phdr_cap = new_cap;
+    }
+    obj->phdrs[obj->phdr_count++] = *phdr;
+    obj->phnum = (uint16_t)obj->phdr_count;
+    return ELF_OK;
 }

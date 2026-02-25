@@ -51,6 +51,7 @@ elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, u
         elf__set_err(obj, ELF_ERR_OOM, "append section failed");
         return NULL;
     }
+    obj->dirty = 1;
 
     return sec;
 }
@@ -69,6 +70,7 @@ elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t 
     if (section->type == SHT_NOBITS) {
         section->data_size = 0;
         section->size = size;
+        section->obj->dirty = 1;
         return ELF_OK;
     }
 
@@ -80,6 +82,7 @@ elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t 
         section->owns_data = 0;
         section->size = 0;
         section->data_size = 0;
+        section->obj->dirty = 1;
         return ELF_OK;
     }
 
@@ -97,6 +100,7 @@ elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t 
     section->owns_data = 1;
     section->data_size = size;
     section->size = size;
+    section->obj->dirty = 1;
     return ELF_OK;
 }
 
@@ -127,5 +131,6 @@ elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align) {
         align = 1;
     }
     section->addralign = align;
+    section->obj->dirty = 1;
     return ELF_OK;
 }

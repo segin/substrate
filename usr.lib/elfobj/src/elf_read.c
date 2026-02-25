@@ -26,6 +26,19 @@ static const char *safe_str(const uint8_t *base, size_t len, uint32_t off) {
     return NULL;
 }
 
+static int ranges_overlap_u64(uint64_t a_off, uint64_t a_sz, uint64_t b_off, uint64_t b_sz) {
+    uint64_t a_end;
+    uint64_t b_end;
+
+    if (a_sz == 0 || b_sz == 0) {
+        return 0;
+    }
+    if (!elf__u64_add(a_off, a_sz, &a_end) || !elf__u64_add(b_off, b_sz, &b_end)) {
+        return 1;
+    }
+    return a_off < b_end && b_off < a_end;
+}
+
 static struct elf_section *parse_shdr32(elfobj_t *obj, const uint8_t *p) {
     struct elf_section *sec = (struct elf_section *)elf__calloc(1, sizeof(*sec));
     if (sec == NULL) {
@@ -70,10 +83,17 @@ static struct elf_section *parse_shdr64(elfobj_t *obj, const uint8_t *p) {
 
 static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize, uint16_t shnum) {
     size_t i;
+    uint64_t table_size;
     if (shnum == 0) {
         return ELF_OK;
     }
-    if (!elf__bounds_ok((size_t)shoff, (size_t)entsize * shnum, obj->image_size)) {
+    if (!elf__u64_mul((uint64_t)entsize, (uint64_t)shnum, &table_size)) {
+        return ELF_ERR_BOUNDS;
+    }
+    if (shoff > SIZE_MAX || table_size > SIZE_MAX) {
+        return ELF_ERR_BOUNDS;
+    }
+    if (!elf__bounds_ok((size_t)shoff, (size_t)table_size, obj->image_size)) {
         return ELF_ERR_BOUNDS;
     }
 
@@ -98,10 +118,22 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
         }
 
         if (sec->type != SHT_NOBITS && sec->size > 0) {
+            size_t j;
             if (!elf__bounds_ok((size_t)sec->offset, (size_t)sec->size, obj->image_size)) {
                 free(sec->name);
                 free(sec);
                 return ELF_ERR_BOUNDS;
+            }
+            for (j = 0; j < obj->section_count; ++j) {
+                struct elf_section *prev = obj->sections[j];
+                if (prev == NULL || prev->type == SHT_NOBITS || prev->size == 0) {
+                    continue;
+                }
+                if (ranges_overlap_u64(prev->offset, prev->size, sec->offset, sec->size)) {
+                    free(sec->name);
+                    free(sec);
+                    return ELF_ERR_FORMAT;
+                }
             }
             sec->data = obj->image + sec->offset;
             sec->data_size = (size_t)sec->size;
@@ -116,6 +148,89 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
     }
 
     return ELF_OK;
+}
+
+static elf_err_t parse_program_headers(elfobj_t *obj, uint64_t phoff, uint16_t entsize, uint16_t phnum) {
+    size_t i;
+    uint64_t table_size;
+
+    if (phnum == 0) {
+        return ELF_OK;
+    }
+    if (entsize == 0) {
+        return ELF_ERR_FORMAT;
+    }
+    if (!elf__u64_mul((uint64_t)entsize, (uint64_t)phnum, &table_size)) {
+        return ELF_ERR_BOUNDS;
+    }
+    if (phoff > SIZE_MAX || table_size > SIZE_MAX) {
+        return ELF_ERR_BOUNDS;
+    }
+    if (!elf__bounds_ok((size_t)phoff, (size_t)table_size, obj->image_size)) {
+        return ELF_ERR_BOUNDS;
+    }
+
+    for (i = 0; i < phnum; ++i) {
+        const uint8_t *p = obj->image + phoff + ((size_t)entsize * i);
+        struct elf_phdr phdr;
+        memset(&phdr, 0, sizeof(phdr));
+
+        if (obj->cls == ELFOBJ_CLASS_32) {
+            if (entsize < sizeof(Elf32_Phdr)) {
+                return ELF_ERR_FORMAT;
+            }
+            phdr.type = elf__rd32(p + 0, obj->endian);
+            phdr.offset = elf__rd32(p + 4, obj->endian);
+            phdr.vaddr = elf__rd32(p + 8, obj->endian);
+            phdr.paddr = elf__rd32(p + 12, obj->endian);
+            phdr.filesz = elf__rd32(p + 16, obj->endian);
+            phdr.memsz = elf__rd32(p + 20, obj->endian);
+            phdr.flags = elf__rd32(p + 24, obj->endian);
+            phdr.align = elf__rd32(p + 28, obj->endian);
+        } else {
+            if (entsize < sizeof(Elf64_Phdr)) {
+                return ELF_ERR_FORMAT;
+            }
+            phdr.type = elf__rd32(p + 0, obj->endian);
+            phdr.flags = elf__rd32(p + 4, obj->endian);
+            phdr.offset = elf__rd64(p + 8, obj->endian);
+            phdr.vaddr = elf__rd64(p + 16, obj->endian);
+            phdr.paddr = elf__rd64(p + 24, obj->endian);
+            phdr.filesz = elf__rd64(p + 32, obj->endian);
+            phdr.memsz = elf__rd64(p + 40, obj->endian);
+            phdr.align = elf__rd64(p + 48, obj->endian);
+        }
+
+        if ((phdr.offset > SIZE_MAX || phdr.filesz > SIZE_MAX) &&
+            phdr.filesz > 0) {
+            return ELF_ERR_BOUNDS;
+        }
+        if (phdr.filesz > 0 && !elf__bounds_ok((size_t)phdr.offset, (size_t)phdr.filesz, obj->image_size)) {
+            return ELF_ERR_BOUNDS;
+        }
+        if (elf__push_phdr(obj, &phdr) != ELF_OK) {
+            return ELF_ERR_OOM;
+        }
+    }
+
+    return ELF_OK;
+}
+
+static void detect_special_sections(elfobj_t *obj) {
+    size_t i;
+    for (i = 0; i < obj->section_count; ++i) {
+        const struct elf_section *s = obj->sections[i];
+        if (s == NULL) {
+            continue;
+        }
+        if (s->type == SHT_NOTE) {
+            obj->has_notes = 1;
+        } else if (s->type == SHT_DYNAMIC) {
+            obj->has_dynamic = 1;
+        } else if (s->type == 0x6ffffffd || s->type == 0x6ffffffe || s->type == 0x6fffffff) {
+            obj->has_versioning = 1;
+        }
+    }
 }
 
 static elf_err_t resolve_section_names(elfobj_t *obj) {
@@ -373,7 +488,10 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
 
 static elf_err_t parse_object(elfobj_t *obj) {
     const uint8_t *b = obj->image;
+    uint64_t phoff;
     uint64_t shoff;
+    uint16_t phentsize;
+    uint16_t phnum;
     uint16_t shentsize;
     uint16_t shnum;
     symtab_index_t *maps = NULL;
@@ -404,8 +522,11 @@ static elf_err_t parse_object(elfobj_t *obj) {
         obj->type = elf__rd16(b + 16, obj->endian);
         obj->machine = elf__rd16(b + 18, obj->endian);
         obj->entry = elf__rd32(b + 24, obj->endian);
+        phoff = elf__rd32(b + 28, obj->endian);
         shoff = elf__rd32(b + 32, obj->endian);
         obj->flags = elf__rd32(b + 36, obj->endian);
+        phentsize = elf__rd16(b + 42, obj->endian);
+        phnum = elf__rd16(b + 44, obj->endian);
         shentsize = elf__rd16(b + 46, obj->endian);
         shnum = elf__rd16(b + 48, obj->endian);
         obj->shstrndx = elf__rd16(b + 50, obj->endian);
@@ -416,11 +537,19 @@ static elf_err_t parse_object(elfobj_t *obj) {
         obj->type = elf__rd16(b + 16, obj->endian);
         obj->machine = elf__rd16(b + 18, obj->endian);
         obj->entry = elf__rd64(b + 24, obj->endian);
+        phoff = elf__rd64(b + 32, obj->endian);
         shoff = elf__rd64(b + 40, obj->endian);
         obj->flags = elf__rd32(b + 48, obj->endian);
+        phentsize = elf__rd16(b + 54, obj->endian);
+        phnum = elf__rd16(b + 56, obj->endian);
         shentsize = elf__rd16(b + 58, obj->endian);
         shnum = elf__rd16(b + 60, obj->endian);
         obj->shstrndx = elf__rd16(b + 62, obj->endian);
+    }
+
+    err = parse_program_headers(obj, phoff, phentsize, phnum);
+    if (err != ELF_OK) {
+        return err;
     }
 
     err = parse_sections(obj, shoff, shentsize, shnum);
@@ -449,7 +578,9 @@ static elf_err_t parse_object(elfobj_t *obj) {
         return err;
     }
 
+    detect_special_sections(obj);
     obj->readonly = 1;
+    obj->dirty = 0;
     return ELF_OK;
 }
 

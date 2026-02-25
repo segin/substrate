@@ -15,40 +15,40 @@ Execution policy:
 ---
 
 ## 1) Public API and ABI Governance
-- [ ] Finalize opaque-handle public API shape in `include/elfobj.h`.
-- [ ] Versioned ABI policy and symbol version script.
-- [ ] Stable error code taxonomy and structured diagnostics.
-- [ ] API lifecycle rules (create/open/close/finalize).
-- [ ] Thread-safety contract documentation and enforcement.
-- [ ] Reentrancy guarantees for independent objects.
-- [ ] Backward-compatible extension pattern for future APIs.
-- [ ] `pkg-config` metadata correctness (`elfobj.pc`).
-- [ ] Man pages for all public APIs.
-- [ ] ABI compliance tests across releases.
+- [x] Finalize opaque-handle public API shape in `include/elfobj.h`.
+- [x] Versioned ABI policy and symbol version script.
+- [x] Stable error code taxonomy and structured diagnostics.
+- [x] API lifecycle rules (create/open/close/finalize).
+- [x] Thread-safety contract documentation and enforcement.
+- [x] Reentrancy guarantees for independent objects.
+- [x] Backward-compatible extension pattern for future APIs.
+- [x] `pkg-config` metadata correctness (`elfobj.pc`).
+- [x] Man pages for all public APIs.
+- [x] ABI compliance tests across releases.
 
 ## 2) ELF Reader Core
-- [ ] Parse ELF header safely with full bounds checks.
-- [ ] Detect class (`ELFCLASS32/64`) and endianness.
-- [ ] Parse program headers with truncation detection.
-- [ ] Parse section headers with truncation/overlap detection.
-- [ ] Lazy section payload loading.
-- [ ] Memory-backed and file-backed reader entrypoints.
-- [ ] Parse notes, dynamic section, and versioning sections.
-- [ ] Parse symbol tables (`.symtab`/`.dynsym`).
-- [ ] Parse relocation sections (`REL`/`RELA`).
-- [ ] Parse and retain unknown sections/extensions safely.
+- [x] Parse ELF header safely with full bounds checks.
+- [x] Detect class (`ELFCLASS32/64`) and endianness.
+- [x] Parse program headers with truncation detection.
+- [x] Parse section headers with truncation/overlap detection.
+- [x] Lazy section payload loading.
+- [x] Memory-backed and file-backed reader entrypoints.
+- [x] Parse notes, dynamic section, and versioning sections.
+- [x] Parse symbol tables (`.symtab`/`.dynsym`).
+- [x] Parse relocation sections (`REL`/`RELA`).
+- [x] Parse and retain unknown sections/extensions safely.
 
 ## 3) ELF Writer Core
-- [ ] Create new ELF objects for ET_REL/ET_EXEC/ET_DYN.
-- [ ] Deterministic section and segment layout planning.
-- [ ] Controlled alignment and padding behavior.
-- [ ] String table construction (`.strtab`, `.shstrtab`, `.dynstr`).
-- [ ] Symbol table construction and index stability.
-- [ ] Relocation section emission (`.rel*`/`.rela*`).
-- [ ] Program header emission for loadable outputs.
-- [ ] Final serialization with overflow checks.
-- [ ] Round-trip preservation for untouched sections.
-- [ ] Deterministic byte-for-byte output under identical inputs.
+- [x] Create new ELF objects for ET_REL/ET_EXEC/ET_DYN.
+- [x] Deterministic section and segment layout planning.
+- [x] Controlled alignment and padding behavior.
+- [x] String table construction (`.strtab`, `.shstrtab`, `.dynstr`).
+- [x] Symbol table construction and index stability.
+- [x] Relocation section emission (`.rel*`/`.rela*`).
+- [x] Program header emission for loadable outputs.
+- [x] Final serialization with overflow checks.
+- [x] Round-trip preservation for untouched sections.
+- [x] Deterministic byte-for-byte output under identical inputs.
 
 ## 4) Section and Segment APIs
 - [ ] Add/find/remove/reorder sections by API.
@@ -157,4 +157,3 @@ Execution policy:
 - [ ] Integration tests with `readelf`, `objdump`, `nm`, `strip`.
 - [ ] Migration checklist from ad-hoc ELF code paths.
 - [ ] Release checklist and support policy documented.
-

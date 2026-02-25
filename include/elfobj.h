@@ -13,6 +13,8 @@ typedef struct elf_section elf_section_t;
 typedef struct elf_symbol elf_symbol_t;
 typedef struct elf_reloc elf_reloc_t;
 
+#define ELFOBJ_API_VERSION 1
+
 typedef enum {
     ELF_OK = 0,
     ELF_ERR_IO,
@@ -133,6 +135,8 @@ elf_err_t elf_link(elfobj_t **inputs, size_t count, elfobj_t **output);
 elf_err_t elf_validate(elfobj_t *obj, char **diagnostics);
 
 const char *elf_errstr(elf_err_t err);
+elf_err_t elf_last_error(const elfobj_t *obj);
+const char *elf_last_diagnostics(const elfobj_t *obj);
 elf_err_t elf_register_reloc_backend(const struct elf_reloc_backend *backend);
 
 elfobj_t *elf_create(uint16_t type, uint16_t machine, elfobj_class_t cls, elfobj_endian_t endian);
@@ -146,6 +150,7 @@ elfobj_endian_t elf_endian(const elfobj_t *obj);
 size_t elf_section_count(const elfobj_t *obj);
 size_t elf_symbol_count(const elfobj_t *obj);
 size_t elf_reloc_count(const elfobj_t *obj);
+uint16_t elf_program_header_count(const elfobj_t *obj);
 
 const char *elf_section_name(const elf_section_t *section);
 uint32_t elf_section_type(const elf_section_t *section);

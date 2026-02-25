@@ -4,6 +4,16 @@
 
 static struct elf_reloc_backend g_backends[ELFOBJ_MAX_RELOC_BACKENDS];
 static size_t g_backend_count;
+static volatile int g_backend_lock;
+
+static void backend_lock(void) {
+    while (!__sync_bool_compare_and_swap(&g_backend_lock, 0, 1)) {
+    }
+}
+
+static void backend_unlock(void) {
+    __sync_lock_release(&g_backend_lock);
+}
 
 elf_err_t elf__push_reloc(elfobj_t *obj, struct elf_reloc *rel) {
     void *next;
@@ -64,7 +74,7 @@ elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol
     rel->symbol = symbol;
     rel->type = type;
     rel->addend = addend;
-    rel->has_addend = 1;
+    rel->has_addend = section->obj->cls == ELFOBJ_CLASS_64 ? 1 : 0;
 
     err = sec_push_reloc(section, rel);
     if (err != ELF_OK) {
@@ -77,6 +87,7 @@ elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol
         free(rel);
         return err;
     }
+    section->obj->dirty = 1;
     return ELF_OK;
 }
 
@@ -87,16 +98,20 @@ elf_err_t elf_register_reloc_backend(const struct elf_reloc_backend *backend) {
         return ELF_ERR_STATE;
     }
 
+    backend_lock();
     for (i = 0; i < g_backend_count; ++i) {
         if (g_backends[i].machine == backend->machine) {
             g_backends[i] = *backend;
+            backend_unlock();
             return ELF_OK;
         }
     }
 
     if (g_backend_count >= ELFOBJ_MAX_RELOC_BACKENDS) {
+        backend_unlock();
         return ELF_ERR_OOM;
     }
     g_backends[g_backend_count++] = *backend;
+    backend_unlock();
     return ELF_OK;
 }
