@@ -376,6 +376,20 @@ test:
 	grep -Eq "^\\.set alias_obj, target_obj$$" /tmp/cc_native_gnu_attr_alias.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_attr_label_enum_stmt.c -o /tmp/cc_native_gnu_attr_label_enum_stmt
 	/tmp/cc_native_gnu_attr_label_enum_stmt
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_blocks_decl.c -o /tmp/cc_native_clang_blocks_decl
+	/tmp/cc_native_clang_blocks_decl
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_clang_blocks_decl.c -o /tmp/cc_native_clang_blocks_decl_32.s
+	grep -q "\\.code32" /tmp/cc_native_clang_blocks_decl_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_ext_vector_attr.c -o /tmp/cc_native_clang_ext_vector_attr
+	/tmp/cc_native_clang_ext_vector_attr
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_builtin_aliases.c -o /tmp/cc_native_clang_builtin_aliases
+	/tmp/cc_native_clang_builtin_aliases
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_attr_placement.c -o /tmp/cc_native_clang_attr_placement
+	/tmp/cc_native_clang_attr_placement
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_asm_goto_quirks.c -o /tmp/cc_native_clang_asm_goto_quirks
+	/tmp/cc_native_clang_asm_goto_quirks
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_clang_asm_goto_quirks.c -o /tmp/cc_native_clang_asm_goto_quirks.s
+	grep -Eq "jz \\.L[a-zA-Z0-9_]+_[0-9]+" /tmp/cc_native_clang_asm_goto_quirks.s
 	$(TOP)/usr.bin/cc/cc -O2 native_opt_fold.c -o /tmp/cc_native_opt_fold
 	/tmp/cc_native_opt_fold
 	$(TOP)/usr.bin/cc/cc -O2 -S native_opt_fold.c -o /tmp/cc_native_opt_fold.s
@@ -575,6 +589,7 @@ test:
 	sh run_pp_fuzz_smoke.sh
 	sh run_pp_gnu_ext.sh
 	sh run_pp_clang_feature_probe.sh
+	sh run_pp_clang_pragma.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_break.c -o /tmp/cc_native_bad_break.o
@@ -664,7 +679,10 @@ clean:
 	      /tmp/cc_native_gnu89_inline.s /tmp/cc_native_gnu_attr_fn_codegen /tmp/cc_native_gnu_attr_fn_codegen.s \
 	      /tmp/cc_native_gnu_attr_var_codegen /tmp/cc_native_gnu_attr_var_codegen.s \
 	      /tmp/cc_native_gnu_attr_type_parse /tmp/cc_native_gnu_attr_alias /tmp/cc_native_gnu_attr_alias.s \
-	      /tmp/cc_native_gnu_attr_label_enum_stmt /tmp/cc_native_bad_gnu_nested_capture.o \
+	      /tmp/cc_native_gnu_attr_label_enum_stmt /tmp/cc_native_clang_blocks_decl /tmp/cc_native_clang_blocks_decl_32.s \
+	      /tmp/cc_native_clang_ext_vector_attr /tmp/cc_native_clang_builtin_aliases \
+	      /tmp/cc_native_clang_attr_placement /tmp/cc_native_clang_asm_goto_quirks /tmp/cc_native_clang_asm_goto_quirks.s \
+	      /tmp/cc_native_bad_gnu_nested_capture.o \
 	      /tmp/cc_native_gnu_asm_basic /tmp/cc_native_gnu_asm_basic.s /tmp/cc_native_gnu_asm_ext \
 	      /tmp/cc_native_gnu_asm_ext.s /tmp/cc_native_gnu_asm_ext_32.s \
 	      /tmp/cc_native_gnu_asm_goto /tmp/cc_native_gnu_asm_goto.s /tmp/cc_native_gnu_asm_goto_32.s \
@@ -711,7 +729,7 @@ clean:
 	      /tmp/cc_postc99_host_clang_c23
 	rm -f /tmp/cc_pp_s3.i /tmp/cc_pp_s3_p.i /tmp/cc_pp_s3_dM.i /tmp/cc_pp_s3_m.d /tmp/cc_pp_s3_mm.d /tmp/cc_pp_s3_md.d \
 	      /tmp/cc_pp_s3_md.i /tmp/cc_pp_s3_v.i /tmp/cc_pp_s3_v.log /tmp/cc_pp_s3_depth.i /tmp/cc_pp_s3_macro.i \
-	      /tmp/cc_pp_s6_probe_gnu11.i /tmp/cc_pp_s6_probe_c99.i \
+	      /tmp/cc_pp_s6_probe_gnu11.i /tmp/cc_pp_s6_probe_c99.i /tmp/cc_pp_s63_clang_pragma.i /tmp/cc_pp_s63_bad_clang_pragma.i \
 	      /tmp/cc_pp_cpp_mode.i /tmp/cc_pp_cpp_mode_h.i /tmp/cc_pp_cpp_mode_input.h /tmp/cpp /tmp/cc_pp_fuzz_out.i /tmp/cc_pp_fuzz_seed.c /tmp/cc_pp_fuzz_seed.i \
 	      /tmp/cc_pp_fuzz_0.c /tmp/cc_pp_fuzz_1.c /tmp/cc_pp_fuzz_2.c /tmp/cc_pp_fuzz_3.c /tmp/cc_pp_fuzz_4.c \
 	      /tmp/cc_pp_fuzz_5.c /tmp/cc_pp_fuzz_6.c /tmp/cc_pp_fuzz_7.c /tmp/cc_pp_fuzz_8.c /tmp/cc_pp_fuzz_9.c \

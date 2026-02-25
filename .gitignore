@@ -69,9 +69,21 @@ sbin/*/
 /usr.bin/as/as
 /usr.bin/as/as.x86
 /usr.bin/as/as.x64
+/usr.bin/brandelf/brandelf
+/usr.bin/cc/cc
+/usr.bin/cc/cpp
+/usr.bin/cc/ir-verifier
+/usr.bin/cc/ir-normalize
+/usr.bin/cc/ir-diff
+/usr.bin/compress/uncompress
+/usr.bin/cpio/cpio
 /usr.bin/ld/ld
 /usr.bin/ld/ld.x86
 /usr.bin/ld/ld.x64
+/usr.bin/pax/pax
+/usr.bin/pr/pr
+/usr.bin/uudecode/uudecode
+/usr.bin/yacc/yacc
 
 # Ignore the compiled output in bin subdirs that matches the dir name
 # (This is tricky with gitignore patterns, relying on extensions is safer)
@@ -101,6 +113,8 @@ sys/symbols_start.txt
 # Distribution root filesystem
 dist/
 host_dist/
+/.agents/
+pr_list.txt
 klog
 klog.notrace
 qemu.out

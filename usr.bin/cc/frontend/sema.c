@@ -1129,6 +1129,9 @@ typedef enum {
     BUILTIN_CONSTANT_P,
     BUILTIN_TRAP,
     BUILTIN_UNREACHABLE,
+    BUILTIN_ASSUME,
+    BUILTIN_ASSUME_ALIGNED,
+    BUILTIN_UNPREDICTABLE,
     BUILTIN_CTZ,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
@@ -1178,6 +1181,15 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_unreachable") == 0) {
         return BUILTIN_UNREACHABLE;
+    }
+    if (strcmp(name, "__builtin_assume") == 0) {
+        return BUILTIN_ASSUME;
+    }
+    if (strcmp(name, "__builtin_assume_aligned") == 0) {
+        return BUILTIN_ASSUME_ALIGNED;
+    }
+    if (strcmp(name, "__builtin_unpredictable") == 0) {
+        return BUILTIN_UNPREDICTABLE;
     }
     if (strcmp(name, "__builtin_ctz") == 0) {
         return BUILTIN_CTZ;
@@ -1849,6 +1861,61 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             e->value_type = CC_TYPE_VOID;
             e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ASSUME) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "__builtin_assume expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_scalar_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_assume argument must be scalar");
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ASSUME_ALIGNED) {
+            if (e->arg_count < 2 || e->arg_count > 3) {
+                set_diag(diag, "__builtin_assume_aligned expects 2 or 3 arguments");
+                return -1;
+            }
+            for (i = 0; i < e->arg_count; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!is_pointer_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
+                return -1;
+            }
+            if (!is_integral_type(e->args[1]->value_type) ||
+                (e->arg_count == 3 && !is_integral_type(e->args[2]->value_type))) {
+                set_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
+                return -1;
+            }
+            e->value_type = e->args[0]->value_type;
+            e->struct_id = e->args[0]->struct_id;
+            return 0;
+        }
+        if (bk == BUILTIN_UNPREDICTABLE) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "__builtin_unpredictable expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_scalar_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_unpredictable argument must be scalar");
+                return -1;
+            }
+            e->value_type = e->args[0]->value_type;
+            e->struct_id = e->args[0]->struct_id;
             return 0;
         }
         if (bk == BUILTIN_CTZ) {

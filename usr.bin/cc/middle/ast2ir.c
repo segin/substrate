@@ -987,6 +987,9 @@ typedef enum {
     BUILTIN_CONSTANT_P,
     BUILTIN_TRAP,
     BUILTIN_UNREACHABLE,
+    BUILTIN_ASSUME,
+    BUILTIN_ASSUME_ALIGNED,
+    BUILTIN_UNPREDICTABLE,
     BUILTIN_CTZ,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
@@ -1036,6 +1039,15 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_unreachable") == 0) {
         return BUILTIN_UNREACHABLE;
+    }
+    if (strcmp(name, "__builtin_assume") == 0) {
+        return BUILTIN_ASSUME;
+    }
+    if (strcmp(name, "__builtin_assume_aligned") == 0) {
+        return BUILTIN_ASSUME_ALIGNED;
+    }
+    if (strcmp(name, "__builtin_unpredictable") == 0) {
+        return BUILTIN_UNPREDICTABLE;
     }
     if (strcmp(name, "__builtin_ctz") == 0) {
         return BUILTIN_CTZ;
@@ -2065,6 +2077,41 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             return emit_const_i64_instr(sf, 0);
+        }
+        if (bk == BUILTIN_ASSUME) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "__builtin_assume lowering expects 1 argument");
+                return -1;
+            }
+            if (lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag) < 0) {
+                return -1;
+            }
+            return emit_const_i64_instr(sf, 0);
+        }
+        if (bk == BUILTIN_ASSUME_ALIGNED) {
+            size_t ai;
+            int p0;
+            if (e->arg_count < 2 || e->arg_count > 3) {
+                set_diag(diag, "__builtin_assume_aligned lowering expects 2 or 3 arguments");
+                return -1;
+            }
+            p0 = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+            if (p0 < 0) {
+                return -1;
+            }
+            for (ai = 1; ai < e->arg_count; ++ai) {
+                if (lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[ai], diag) < 0) {
+                    return -1;
+                }
+            }
+            return p0;
+        }
+        if (bk == BUILTIN_UNPREDICTABLE) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "__builtin_unpredictable lowering expects 1 argument");
+                return -1;
+            }
+            return lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
         }
         if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
             int av;

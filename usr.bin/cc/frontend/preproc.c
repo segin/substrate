@@ -550,6 +550,7 @@ static int has_gnu_attribute_name(const char *name) {
         strcmp(name, "flatten") == 0 || strcmp(name, "target") == 0 || strcmp(name, "tls_model") == 0 ||
         strcmp(name, "cleanup") == 0 || strcmp(name, "visibility") == 0 ||
         strcmp(name, "transparent_union") == 0 || strcmp(name, "vector_size") == 0 ||
+        strcmp(name, "ext_vector_type") == 0 ||
         strcmp(name, "may_alias") == 0) {
         return 1;
     }
@@ -580,7 +581,9 @@ static int has_builtin_name(const char *name) {
         strcmp(name, "__builtin___memset_chk") == 0 || strcmp(name, "__builtin_va_start") == 0 ||
         strcmp(name, "__builtin_va_end") == 0 || strcmp(name, "__builtin_va_copy") == 0 ||
         strcmp(name, "__builtin_va_arg") == 0 || strcmp(name, "__builtin_trap") == 0 ||
-        strcmp(name, "__builtin_unreachable") == 0 || strcmp(name, "__builtin_choose_expr") == 0 ||
+        strcmp(name, "__builtin_unreachable") == 0 || strcmp(name, "__builtin_assume") == 0 ||
+        strcmp(name, "__builtin_assume_aligned") == 0 || strcmp(name, "__builtin_unpredictable") == 0 ||
+        strcmp(name, "__builtin_choose_expr") == 0 ||
         strcmp(name, "__builtin_types_compatible_p") == 0 || strcmp(name, "__builtin_offsetof") == 0) {
         return 1;
     }
@@ -604,6 +607,10 @@ static int has_feature_name(const char *name, const pp_state_t *st) {
     }
     if (strcmp(name, "gnu_statement_expression") == 0 || strcmp(name, "gnu_labels_as_values") == 0 ||
         strcmp(name, "gnu_case_range") == 0) {
+        return st->std_is_gnu;
+    }
+    if (strcmp(name, "blocks") == 0 || strcmp(name, "block_literals") == 0 ||
+        strcmp(name, "attribute_ext_vector_type") == 0) {
         return st->std_is_gnu;
     }
     return 0;
@@ -676,6 +683,43 @@ static int validate_stdc_pragma(const char *rest, cc_diag_t *diag, size_t line_n
         return -1;
     }
     return 1;
+}
+
+static int validate_clang_pragma(const char *rest, cc_diag_t *diag, size_t line_no) {
+    const char *p = rest;
+    char scope[32];
+    char name[64];
+
+    if (parse_ident_token(&p, scope, sizeof(scope)) != 0 || strcmp(scope, "clang") != 0) {
+        return 0;
+    }
+    if (parse_ident_token(&p, name, sizeof(name)) != 0) {
+        set_diag(diag, line_no, 1, "malformed #pragma clang");
+        return -1;
+    }
+    p = skip_ws(p);
+
+    if (strcmp(name, "diagnostic") == 0) {
+        char action[32];
+        if (parse_ident_token(&p, action, sizeof(action)) != 0) {
+            set_diag(diag, line_no, 1, "malformed #pragma clang diagnostic");
+            return -1;
+        }
+        if (strcmp(action, "push") != 0 && strcmp(action, "pop") != 0 &&
+            strcmp(action, "ignored") != 0 && strcmp(action, "warning") != 0 &&
+            strcmp(action, "error") != 0) {
+            set_diag(diag, line_no, 1, "unsupported #pragma clang diagnostic action");
+            return -1;
+        }
+        return 1;
+    }
+    if (strcmp(name, "attribute") == 0 || strcmp(name, "loop") == 0 ||
+        strcmp(name, "section") == 0 || strcmp(name, "fp") == 0) {
+        return 1;
+    }
+
+    set_diag(diag, line_no, 1, "unsupported #pragma clang directive");
+    return -1;
 }
 
 static char *trim_dup(const char *s) {
@@ -764,6 +808,11 @@ static int add_builtin_macros(pp_state_t *st) {
             return -1;
         }
         if (macro_set(&st->macros, "_LP64", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+    }
+    if (st->std_is_gnu) {
+        if (macro_set(&st->macros, "__BLOCKS__", 0, 0, NULL, 0, "1") != 0) {
             return -1;
         }
     }
@@ -4171,7 +4220,12 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 if (active) {
                     const char *r = skip_ws(p);
                     int stdc_rc = validate_stdc_pragma(r, diag, (size_t)line_no);
+                    int clang_rc;
                     if (stdc_rc < 0) {
+                        goto fail;
+                    }
+                    clang_rc = validate_clang_pragma(r, diag, (size_t)line_no);
+                    if (clang_rc < 0) {
                         goto fail;
                     }
                     if (strncmp(r, "once", 4) == 0) {

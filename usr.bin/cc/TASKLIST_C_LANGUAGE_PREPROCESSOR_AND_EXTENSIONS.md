@@ -319,18 +319,18 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [x] `__is_identifier`.
 
 ### 6.2 Clang language features used in real code
-- [ ] Blocks extension.
-- [ ] Clang vector/ext-vector compatibility.
-- [ ] `asm goto` compatibility quirks.
-- [ ] Clang statement/attribute placement compatibility.
-- [ ] Clang-specific builtin aliases accepted in GNU mode.
+- [x] Blocks extension.
+- [x] Clang vector/ext-vector compatibility.
+- [x] `asm goto` compatibility quirks.
+- [x] Clang statement/attribute placement compatibility.
+- [x] Clang-specific builtin aliases accepted in GNU mode.
 
 ### 6.3 Clang pragmas/attributes compatibility
-- [ ] `#pragma clang diagnostic`.
-- [ ] `#pragma clang attribute`.
-- [ ] `#pragma clang loop` (parse and preserve/act as needed).
-- [ ] `#pragma clang section`.
-- [ ] `#pragma clang fp`.
+- [x] `#pragma clang diagnostic`.
+- [x] `#pragma clang attribute`.
+- [x] `#pragma clang loop` (parse and preserve/act as needed).
+- [x] `#pragma clang section`.
+- [x] `#pragma clang fp`.
 
 ---
 
