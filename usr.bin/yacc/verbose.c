@@ -100,14 +100,16 @@ static void log_conflicts(void) {
 
 void create_output_file(void) {
     char *name;
-    int len;
+    size_t len;
+    int ret;
     
     /* Create y.tab.c or file_prefix.tab.c */
     len = strlen(file_prefix) + 10;
     name = (char *)malloc(len);
     if (name == NULL) no_space();
     
-    snprintf(name, len, "%s.tab.c", file_prefix);
+    ret = snprintf(name, len, "%s.tab.c", file_prefix);
+    if (ret < 0 || (size_t)ret >= len) no_space();
     output_file = fopen(name, "w");
     if (output_file == NULL) {
         perror(name);
@@ -115,7 +117,8 @@ void create_output_file(void) {
     }
     
     if (dflag) {
-        snprintf(name, len, "%s.tab.h", file_prefix);
+        ret = snprintf(name, len, "%s.tab.h", file_prefix);
+        if (ret < 0 || (size_t)ret >= len) no_space();
         defines_file = fopen(name, "w");
         if (defines_file == NULL) {
             perror(name);
@@ -124,7 +127,8 @@ void create_output_file(void) {
     }
     
     if (vflag) {
-        snprintf(name, len, "%s.output", file_prefix);
+        ret = snprintf(name, len, "%s.output", file_prefix);
+        if (ret < 0 || (size_t)ret >= len) no_space();
         verbose_file = fopen(name, "w");
         if (verbose_file == NULL) {
             perror(name);
