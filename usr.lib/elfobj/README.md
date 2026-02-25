@@ -10,11 +10,11 @@
 - Provide linker-facing object merge API and validation diagnostics.
 
 ## Build
-- `make -C usr.lib/elf`
-- `make -C usr.lib/elf test NATIVE_BUILD=1`
+- `make -C usr.lib/elfobj`
+- `make -C usr.lib/elfobj test NATIVE_BUILD=1`
 
 ## Install
-- `make -C usr.lib/elf install DESTDIR=...`
+- `make -C usr.lib/elfobj install DESTDIR=...`
 
 ## API
 Public API is defined in `include/elfobj.h`.

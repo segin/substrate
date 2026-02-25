@@ -246,9 +246,9 @@ These components are essential for booting and basic system operation.
 - **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases, variadic calls, declaration/prototype compatibility, typedef alias declarations/uses, GNU declaration compatibility forms (`__extension__`, qualifier aliases, attribute-suffixed typedefs, typedef function-pointer declarators), extern call emission, pointer addr/deref/store + pointer-parameter flow plus pointer arithmetic scaling checks, `if/else`/loop/switch branching, `goto`/label flow, `break`/`continue`/`case`/`default` validation, C95 digraph/trigraph lexical forms, C99 `for`-declaration scope checks, short-circuit logical behavior, bitwise/shift/comma/compound/update operators, ternary/cast/sizeof behavior, floating comparison + floating-condition truthiness behavior, unsigned integer semantics including literal suffix cases, optimization behavior, `-m32` ELF32 object generation including `double`, and stack-slot pressure/frame-size regressions), staged assembly/linking, warning/pedantic diagnostics (`-Wall`/`-Werror`/`-pedantic`/`-pedantic-errors`), a C99 conformance pass/xfail harness (`tests/usr.bin/cc/conformance_c99`), differential compile-outcome checks versus host GCC/Clang in `-std=c99`, and bootstrap fallback behavior.
 - **Integration Path:** Expand native subset toward full C99 while preserving current driver UX and `-emit-ssa` observability; keep bootstrap mode only as temporary compatibility path.
 
-## `usr.lib/elf`
+## `usr.lib/elfobj`
 - **Goals:** Provide a stable C API (`include/elfobj.h`) for reading, writing, validating, and linker-oriented manipulation of ELF objects without depending on ad-hoc parsers.
-- **Design Overview:** Layered implementation in `usr.lib/elf/src/`:
+- **Design Overview:** Layered implementation in `usr.lib/elfobj/src/`:
   - parser (`elf_read.c`)
   - object model and mutators (`elf_sections.c`, `elf_symbols.c`, `elf_reloc.c`)
   - writer/layout (`elf_write.c`, `elf_layout.c`, `elf_strtab.c`)
@@ -257,8 +257,8 @@ These components are essential for booting and basic system operation.
 - **Object Model:** Opaque `elfobj_t`, `elf_section_t`, `elf_symbol_t`, `elf_reloc_t` with explicit lifetime (`elf_open*` / `elf_close`) and error-code returns (`elf_err_t`).
 - **Relocation Backend Architecture:** Optional backend registry via `elf_register_reloc_backend()` with per-machine callbacks (`apply_reloc`, `reloc_size`, `is_pc_relative`) for architecture-specific relocation handling.
 - **Assembler/Linker Integration:** Assembler-facing creation path uses `elf_create` + section/symbol/reloc APIs and emits `.o` via `elf_write_file`; linker-facing merge path uses `elf_link` and validation hooks.
-- **ABI Stability:** Public ABI is constrained to `include/elfobj.h`; internal structs and parser/writer internals remain private in `usr.lib/elf/src/elf_private.h`.
-- **Testing/Fuzzing Strategy:** Unit/round-trip/link tests in `usr.lib/elf/tests/`, parser fuzz entrypoint in `usr.lib/elf/fuzz/`, and micro-benchmark coverage in `usr.lib/elf/bench/`.
+- **ABI Stability:** Public ABI is constrained to `include/elfobj.h`; internal structs and parser/writer internals remain private in `usr.lib/elfobj/src/elf_private.h`.
+- **Testing/Fuzzing Strategy:** Unit/round-trip/link tests in `usr.lib/elfobj/tests/`, parser fuzz entrypoint in `usr.lib/elfobj/fuzz/`, and micro-benchmark coverage in `usr.lib/elfobj/bench/`.
 - **Migration Plan:** Replace per-tool manual ELF parsing/relocation paths incrementally with `libelfobj` API calls; keep old paths as fallback until functional parity and artifact validation with `readelf/objdump` are complete.
 
 ```text

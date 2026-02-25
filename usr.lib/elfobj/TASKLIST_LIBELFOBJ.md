@@ -1,4 +1,4 @@
-# `usr.lib/elf` (`libelfobj`) Comprehensive Tasklist
+# `usr.lib/elfobj` (`libelfobj`) Comprehensive Tasklist
 
 Purpose: long-term actionable checklist for a production-quality ELF object handling library used by assembler, linker, loader tools, and analyzers.
 
@@ -152,7 +152,7 @@ Execution policy:
 - [ ] Fuzz harnesses maintained and continuously run.
 - [ ] Bench harnesses maintained.
 - [ ] `README.md` and architecture docs synchronized.
-- [ ] `ARCHITECTURE.md` section for `usr.lib/elf` kept current.
+- [ ] `ARCHITECTURE.md` section for `usr.lib/elfobj` kept current.
 - [ ] Integration tests with `usr.bin/as` and `usr.bin/ld`.
 - [ ] Integration tests with `readelf`, `objdump`, `nm`, `strip`.
 - [ ] Migration checklist from ad-hoc ELF code paths.
