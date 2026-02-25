@@ -28,6 +28,8 @@ typedef struct {
     int dry_run;
     int wall;
     int werror;
+    int pedantic;
+    int pedantic_errors;
     int debug;
     int shared;
     int pic;
@@ -323,6 +325,8 @@ static void usage(const char *prog) {
             "  -m32/-m64          target ABI (i386 or x86_64)\n"
             "  -g                 debug info\n"
             "  -Wall -Werror      warnings\n"
+            "  -pedantic          warn on non-C99 extensions\n"
+            "  -pedantic-errors   reject non-C99 extensions\n"
             "  -fPIC              position-independent code\n"
             "  -shared            create shared object (link)\n"
             "  -pthread           enable thread options\n"
@@ -366,6 +370,17 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         }
         if (strcmp(a, "-Werror") == 0) {
             o->werror = 1;
+            strvec_push(&o->c_flags, a);
+            continue;
+        }
+        if (strcmp(a, "-pedantic") == 0) {
+            o->pedantic = 1;
+            strvec_push(&o->c_flags, a);
+            continue;
+        }
+        if (strcmp(a, "-pedantic-errors") == 0) {
+            o->pedantic = 1;
+            o->pedantic_errors = 1;
             strvec_push(&o->c_flags, a);
             continue;
         }
@@ -868,7 +883,8 @@ int cc_main(int argc, char **argv) {
                 } else {
                     unsetenv("CC_FREESTANDING");
                 }
-                if (cc_compile_c_to_s(out_pp, in, out_s, o.std, o.debug, o.target, opt_level_num(&o), &diag) != 0) {
+                if (cc_compile_c_to_s(out_pp, in, out_s, o.std, o.debug, o.target, opt_level_num(&o), o.wall,
+                                      o.werror, o.pedantic, o.pedantic_errors, &diag) != 0) {
                     if (diag.line != 0) {
                         fprintf(stderr, "cc:%zu:%zu: %s\n", diag.line, diag.col, diag.message);
                     } else if (diag.message[0] != '\0') {

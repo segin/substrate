@@ -9,6 +9,12 @@ void cc_parser_set_std_mode(const char *std_mode);
 
 static int g_pointer_size_bytes = 8;
 static int g_allow_implicit_funcdecl = 0;
+static int g_warn_all = 0;
+static int g_warn_error = 0;
+static int g_pedantic = 0;
+static int g_pedantic_errors = 0;
+static size_t g_diag_ctx_line = 0;
+static size_t g_diag_ctx_col = 0;
 
 static int std_mode_allows_implicit_function_decls(const char *std_mode) {
     if (std_mode == NULL || std_mode[0] == '\0') {
@@ -38,9 +44,64 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     if (d == NULL || d->message[0] != '\0') {
         return;
     }
-    d->line = 0;
-    d->col = 0;
+    if (d->line == 0 && d->col == 0) {
+        d->line = g_diag_ctx_line;
+        d->col = g_diag_ctx_col;
+    }
     snprintf(d->message, sizeof(d->message), "%s", msg);
+}
+
+static void set_diag_context(size_t line, size_t col) {
+    if (line == 0 && col == 0) {
+        return;
+    }
+    g_diag_ctx_line = line;
+    g_diag_ctx_col = col;
+}
+
+static int emit_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg, int pedantic_only) {
+    int as_error = g_warn_error || (pedantic_only && g_pedantic_errors);
+
+    if (pedantic_only) {
+        if (!g_pedantic) {
+            return 0;
+        }
+    } else if (!g_warn_all) {
+        return 0;
+    }
+
+    if (line == 0 && col == 0) {
+        line = g_diag_ctx_line;
+        col = g_diag_ctx_col;
+    }
+
+    if (line != 0) {
+        fprintf(stderr, "cc:%zu:%zu: warning: %s\n", line, col, msg);
+    } else {
+        fprintf(stderr, "cc: warning: %s\n", msg);
+    }
+
+    if (!as_error) {
+        return 0;
+    }
+
+    if (diag != NULL && diag->message[0] == '\0') {
+        diag->line = line;
+        diag->col = col;
+        snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    }
+    return -1;
+}
+
+static int maybe_warn_assignment_condition(const cc_expr_t *cond, const char *where, cc_diag_t *diag) {
+    char buf[160];
+
+    if (cond == NULL || cond->kind != CC_EXPR_ASSIGN) {
+        return 0;
+    }
+
+    snprintf(buf, sizeof(buf), "assignment used as condition in %s", where);
+    return emit_warning(diag, cond->line, cond->col, buf, 0);
 }
 
 static int is_power_of_two_long(long v) {
@@ -972,6 +1033,19 @@ static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *dia
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
     size_t i;
+
+    if (e != NULL) {
+        set_diag_context(e->line, e->col);
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        if (e != NULL && (e->line != 0 || e->col != 0)) {
+            diag->line = e->line;
+            diag->col = e->col;
+        } else if (g_diag_ctx_line != 0 || g_diag_ctx_col != 0) {
+            diag->line = g_diag_ctx_line;
+            diag->col = g_diag_ctx_col;
+        }
+    }
 
     if (e == NULL) {
         set_diag(diag, "null expression in semantic analysis");
@@ -2174,6 +2248,19 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                       cc_diag_t *diag) {
     size_t i;
 
+    if (s != NULL) {
+        set_diag_context(s->line, s->col);
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        if (s != NULL && (s->line != 0 || s->col != 0)) {
+            diag->line = s->line;
+            diag->col = s->col;
+        } else if (g_diag_ctx_line != 0 || g_diag_ctx_col != 0) {
+            diag->line = g_diag_ctx_line;
+            diag->col = g_diag_ctx_col;
+        }
+    }
+
     switch (s->kind) {
     case CC_STMT_DECL:
         {
@@ -2313,6 +2400,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "malformed if statement");
             return -1;
         }
+        if (maybe_warn_assignment_condition(s->expr, "if", diag) != 0) {
+            return -1;
+        }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
@@ -2369,6 +2459,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "malformed while statement");
             return -1;
         }
+        if (maybe_warn_assignment_condition(s->expr, "while", diag) != 0) {
+            return -1;
+        }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
@@ -2391,6 +2484,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             return -1;
         }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (maybe_warn_assignment_condition(s->expr, "do-while", diag) != 0) {
             return -1;
         }
         if (s->expr->value_type == CC_TYPE_VOID) {
@@ -2428,6 +2524,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
 
             if (s->expr != NULL) {
+                if (maybe_warn_assignment_condition(s->expr, "for", diag) != 0) {
+                    return -1;
+                }
                 if (check_expr(tu, s->expr, *vars, *var_count, for_depth, diag) != 0) {
                     return -1;
                 }
@@ -2549,6 +2648,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_GOTO:
         if (s->expr != NULL) {
+            if (emit_warning(diag, s->line, s->col, "computed goto is a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
@@ -2592,6 +2694,11 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         const cc_global_t *g = &tu->globals[i];
         int sc_count = storage_class_count(g->storage);
         size_t j;
+        set_diag_context(g->line, g->col);
+        if (diag != NULL && diag->message[0] == '\0' && (g->line != 0 || g->col != 0)) {
+            diag->line = g->line;
+            diag->col = g->col;
+        }
         if (g->name == NULL || g->name[0] == '\0') {
             set_diag(diag, "file-scope declaration with missing name");
             goto fail_global;
@@ -2705,6 +2812,11 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         const cc_function_t *f = &tu->funcs[i];
         int f_sc_count = storage_class_count(f->storage);
         size_t j;
+        set_diag_context(f->line, f->col);
+        if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
+            diag->line = f->line;
+            diag->col = f->col;
+        }
 
         if (f->name == NULL || f->name[0] == '\0') {
             set_diag(diag, "function with missing name");
@@ -2780,6 +2892,12 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
 
         if (!f->has_body) {
             continue;
+        }
+
+        set_diag_context(f->line, f->col);
+        if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
+            diag->line = f->line;
+            diag->col = f->col;
         }
 
         for (k = 0; k < tu->func_count; ++k) {
@@ -2861,4 +2979,11 @@ void cc_frontend_set_pointer_size(int bytes) {
 void cc_frontend_set_std_mode(const char *std_mode) {
     g_allow_implicit_funcdecl = std_mode_allows_implicit_function_decls(std_mode);
     cc_parser_set_std_mode(std_mode);
+}
+
+void cc_frontend_set_diag_flags(int wall, int werror, int pedantic, int pedantic_errors) {
+    g_warn_all = wall ? 1 : 0;
+    g_warn_error = werror ? 1 : 0;
+    g_pedantic = pedantic ? 1 : 0;
+    g_pedantic_errors = pedantic_errors ? 1 : 0;
 }

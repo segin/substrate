@@ -2243,6 +2243,8 @@ static cc_expr_t *new_expr(cc_expr_kind_t kind) {
     cc_expr_t *e = (cc_expr_t *)calloc(1, sizeof(*e));
     if (e != NULL) {
         e->kind = kind;
+        e->line = 0;
+        e->col = 0;
         e->value_type = CC_TYPE_INT;
         e->struct_id = -1;
         e->member_is_arrow = 0;
@@ -3855,6 +3857,8 @@ static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
     decl_attrs_t suffix_attrs;
     decl_attrs_t merged_attrs;
     memset(s, 0, sizeof(*s));
+    s->line = p->tok.line;
+    s->col = p->tok.col;
     s->type_struct_id = -1;
     s->kind = CC_STMT_DECL;
     decl_attrs_reset(&decl_attrs);
@@ -3968,6 +3972,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         decl_attrs_t suffix_attrs;
         decl_attrs_t merged_attrs;
         memset(&s, 0, sizeof(s));
+        s.line = p->tok.line;
+        s.col = p->tok.col;
         s.kind = CC_STMT_DECL;
         s.type = base_type;
         s.type_struct_id = base_struct_id;
@@ -4204,6 +4210,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
 static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
     int saved_depth = p->scope_depth;
     memset(s, 0, sizeof(*s));
+    s->line = p->tok.line;
+    s->col = p->tok.col;
     s->kind = CC_STMT_BLOCK;
     if (expect(p, TOK_LBRACE, "expected '{'") != 0) {
         return -1;
@@ -4250,6 +4258,8 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
 
 static int parse_stmt(parser_t *p, cc_stmt_t *s) {
     memset(s, 0, sizeof(*s));
+    s->line = p->tok.line;
+    s->col = p->tok.col;
 
     while (p->tok.kind == TOK_KW_EXTENSION) {
         if (next_tok(p) != 0) {
@@ -4391,6 +4401,8 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
                     return -1;
                 }
                 memset(s->init_stmt, 0, sizeof(*s->init_stmt));
+                s->init_stmt->line = p->tok.line;
+                s->init_stmt->col = p->tok.col;
                 s->init_stmt->kind = CC_STMT_BLOCK;
                 if (parse_decl_stmt_list(p, &s->init_stmt->block_stmts, &s->init_stmt->block_count, 1) != 0) {
                     return -1;
@@ -4724,6 +4736,8 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     decl_attrs_t suffix_attrs;
     decl_attrs_t merged_attrs;
     memset(f, 0, sizeof(*f));
+    f->line = p->tok.line;
+    f->col = p->tok.col;
     f->has_body = 0;
     f->has_prototype = 0;
     decl_attrs_reset(&spec_attrs);
@@ -5000,6 +5014,8 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 }
                 g.name = decls[di].decl_name;
                 decls[di].decl_name = NULL;
+                g.line = decls[di].line;
+                g.col = decls[di].col;
                 g.type = decls[di].type;
                 g.type_struct_id = decls[di].type_struct_id;
                 g.array_len = decls[di].array_len;

@@ -100,11 +100,11 @@ Execution policy:
 - [x] C99 pragma handling: `STDC CX_LIMITED_RANGE`.
 
 ### 1.8 C99 diagnostics and conformance
-- [ ] Constraint diagnostics with line/column.
-- [ ] Warning families for suspicious but valid constructs.
-- [ ] Pedantic mode behavior for strict C99.
-- [ ] C99 conformance suite integration and expected-fail tracking.
-- [ ] Differential tests vs GCC/Clang in `-std=c99`.
+- [x] Constraint diagnostics with line/column.
+- [x] Warning families for suspicious but valid constructs.
+- [x] Pedantic mode behavior for strict C99.
+- [x] C99 conformance suite integration and expected-fail tracking.
+- [x] Differential tests vs GCC/Clang in `-std=c99`.
 
 ---
 

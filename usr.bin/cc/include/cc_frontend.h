@@ -130,6 +130,8 @@ typedef struct cc_expr cc_expr_t;
 
 struct cc_expr {
     cc_expr_kind_t kind;
+    size_t line;
+    size_t col;
     cc_type_t value_type;
     int struct_id;
     long int_val;
@@ -169,6 +171,8 @@ typedef enum {
 typedef struct cc_stmt cc_stmt_t;
 
 struct cc_stmt {
+    size_t line;
+    size_t col;
     cc_type_t type;
     int type_struct_id;
     long array_len;
@@ -218,6 +222,8 @@ typedef struct {
 
 typedef struct {
     char *name;
+    size_t line;
+    size_t col;
     cc_type_t ret_type;
     int ret_struct_id;
     int storage;
@@ -235,6 +241,8 @@ typedef struct {
 
 typedef struct {
     char *name;
+    size_t line;
+    size_t col;
     cc_type_t type;
     int type_struct_id;
     long array_len;
@@ -259,6 +267,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 void cc_frontend_set_pointer_size(int bytes);
 void cc_frontend_set_std_mode(const char *std_mode);
+void cc_frontend_set_diag_flags(int wall, int werror, int pedantic, int pedantic_errors);
 int cc_preprocess_file(const char *in_path, const char *out_path, const char *std_mode,
                        const char *const *flags, size_t flag_count, cc_diag_t *diag);
 

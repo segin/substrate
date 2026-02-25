@@ -421,6 +421,16 @@ test:
 	grep -q "\\.file" /tmp/cc_native_double_dbg.s
 	grep -q "addsd" /tmp/cc_native_double_dbg.s
 	grep -q "mulsd" /tmp/cc_native_double_dbg.s
+	$(TOP)/usr.bin/cc/cc -Wall -c native_warn_assign_cond.c -o /tmp/cc_native_warn_assign_cond.o 2>/tmp/cc_native_warn_assign_cond.log
+	grep -q "warning: assignment used as condition in if" /tmp/cc_native_warn_assign_cond.log
+	! $(TOP)/usr.bin/cc/cc -Wall -Werror -c native_warn_assign_cond.c -o /tmp/cc_native_warn_assign_cond_werror.o
+	$(TOP)/usr.bin/cc/cc -std=c99 -pedantic -c native_c99_computed_goto.c -o /tmp/cc_native_c99_computed_goto_pedantic.o 2>/tmp/cc_native_c99_computed_goto_pedantic.log
+	grep -q "warning: computed goto is a GNU extension (non-C99)" /tmp/cc_native_c99_computed_goto_pedantic.log
+	! $(TOP)/usr.bin/cc/cc -std=c99 -pedantic-errors -c native_c99_computed_goto.c -o /tmp/cc_native_c99_computed_goto_pedantic_errors.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_ptr_add_ptr.c -o /tmp/cc_native_bad_ptr_add_ptr_loc.o 2>/tmp/cc_native_bad_ptr_add_ptr_loc.log
+	grep -Eq '^cc:[0-9]+:[0-9]+: ' /tmp/cc_native_bad_ptr_add_ptr_loc.log
+	sh run_conformance_c99.sh
+	sh run_diff_c99.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_break.c -o /tmp/cc_native_bad_break.o
@@ -489,3 +499,7 @@ clean:
 	      /tmp/cc_native_c99_integer_literals_32.s /tmp/cc_native_c99_hex_float_suffix_32.s /tmp/cc_native_c99_wide_literals_32.s \
 	      /tmp/cc_native_c99_complex_decl_32.s /tmp/cc_native_c99_imaginary_decl_32.s /tmp/cc_native_c99_param_array_qual_32.s /tmp/cc_native_c99_vla_decl_32.s /tmp/cc_native_c90_oldstyle_32.s /tmp/cc_native_c90_unproto_call_promotions_32.s \
 	      /tmp/cc_native_bad_c99_implicit_function.o /tmp/cc_native_bad_no_implicit_int.o /tmp/cc_native_bad_c99_file_scope_auto.o /tmp/cc_native_bad_c99_extern_local_init.o /tmp/cc_native_bad_c99_flexible_array_init.o /tmp/cc_native_bad_c99_union_init.o /tmp/cc_native_bad_c99_array_assign.o /tmp/cc_native_bad_c99_array_update.o /tmp/cc_native_bad_c99_return_void_value.o /tmp/cc_native_bad_c99_return_missing_value.o /tmp/cc_native_bad_c99_variadic_too_few.o /tmp/cc_native_bad_c99_pragma_stdc_bad.o /tmp/cc_native_c90_oldstyle_c99_bad.o
+	rm -f /tmp/cc_native_warn_assign_cond.o /tmp/cc_native_warn_assign_cond.log /tmp/cc_native_warn_assign_cond_werror.o \
+	      /tmp/cc_native_c99_computed_goto_pedantic.o /tmp/cc_native_c99_computed_goto_pedantic.log /tmp/cc_native_c99_computed_goto_pedantic_errors.o \
+	      /tmp/cc_native_bad_ptr_add_ptr_loc.o /tmp/cc_native_bad_ptr_add_ptr_loc.log \
+	      /tmp/cc_conformance_pass.log /tmp/cc_conformance_xfail.log /tmp/cc_diff_host.log /tmp/cc_diff_ours.log
