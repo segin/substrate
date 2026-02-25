@@ -51,6 +51,10 @@ typedef struct {
     int no_default_includes;
     int target_bits;
     int enable_trigraphs;
+    int std_version;
+    int std_is_c11;
+    int std_is_c17;
+    int std_is_c23;
 } pp_state_t;
 
 typedef struct {
@@ -253,6 +257,79 @@ static int std_mode_enable_trigraphs(const char *std_mode) {
     return 1;
 }
 
+static int std_mode_version(const char *std_mode, int *out_is_c11, int *out_is_c17, int *out_is_c23) {
+    int is_c11 = 0;
+    int is_c17 = 0;
+    int is_c23 = 0;
+
+    if (std_mode == NULL || std_mode[0] == '\0') {
+        if (out_is_c11 != NULL) {
+            *out_is_c11 = is_c11;
+        }
+        if (out_is_c17 != NULL) {
+            *out_is_c17 = is_c17;
+        }
+        if (out_is_c23 != NULL) {
+            *out_is_c23 = is_c23;
+        }
+        return 199901;
+    }
+    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
+        strcmp(std_mode, "gnu2x") == 0) {
+        is_c11 = 1;
+        is_c17 = 1;
+        is_c23 = 1;
+        if (out_is_c11 != NULL) {
+            *out_is_c11 = is_c11;
+        }
+        if (out_is_c17 != NULL) {
+            *out_is_c17 = is_c17;
+        }
+        if (out_is_c23 != NULL) {
+            *out_is_c23 = is_c23;
+        }
+        return 202311;
+    }
+    if (strcmp(std_mode, "c17") == 0 || strcmp(std_mode, "gnu17") == 0 || strcmp(std_mode, "c18") == 0 ||
+        strcmp(std_mode, "gnu18") == 0) {
+        is_c11 = 1;
+        is_c17 = 1;
+        if (out_is_c11 != NULL) {
+            *out_is_c11 = is_c11;
+        }
+        if (out_is_c17 != NULL) {
+            *out_is_c17 = is_c17;
+        }
+        if (out_is_c23 != NULL) {
+            *out_is_c23 = is_c23;
+        }
+        return 201710;
+    }
+    if (strcmp(std_mode, "c11") == 0 || strcmp(std_mode, "gnu11") == 0) {
+        is_c11 = 1;
+        if (out_is_c11 != NULL) {
+            *out_is_c11 = is_c11;
+        }
+        if (out_is_c17 != NULL) {
+            *out_is_c17 = is_c17;
+        }
+        if (out_is_c23 != NULL) {
+            *out_is_c23 = is_c23;
+        }
+        return 201112;
+    }
+    if (out_is_c11 != NULL) {
+        *out_is_c11 = is_c11;
+    }
+    if (out_is_c17 != NULL) {
+        *out_is_c17 = is_c17;
+    }
+    if (out_is_c23 != NULL) {
+        *out_is_c23 = is_c23;
+    }
+    return 199901;
+}
+
 static pp_macro_t *macro_find(pp_macro_table_t *t, const char *name) {
     size_t i;
     for (i = 0; i < t->count; ++i) {
@@ -356,6 +433,18 @@ static int parse_ident_token(const char **sp, char *out, size_t out_sz) {
     return 0;
 }
 
+static int has_c_attribute_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "deprecated") == 0 || strcmp(name, "fallthrough") == 0 || strcmp(name, "maybe_unused") == 0 ||
+        strcmp(name, "nodiscard") == 0 || strcmp(name, "noreturn") == 0 ||
+        strcmp(name, "reproducible") == 0 || strcmp(name, "unsequenced") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
 static int validate_stdc_pragma(const char *rest, cc_diag_t *diag, size_t line_no) {
     const char *p = rest;
     char scope[32];
@@ -401,10 +490,12 @@ static int add_builtin_macros(pp_state_t *st) {
     const char *ptrdiff_type = st->target_bits == 32 ? "int" : "long int";
     const char *wchar_type = "int";
     const char *ptr_size = st->target_bits == 32 ? "4" : "8";
+    char stdc_ver[32];
     if (macro_set(&st->macros, "__STDC__", 0, NULL, 0, "1") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__STDC_VERSION__", 0, NULL, 0, "199901L") != 0) {
+    snprintf(stdc_ver, sizeof(stdc_ver), "%dL", st->std_version);
+    if (macro_set(&st->macros, "__STDC_VERSION__", 0, NULL, 0, stdc_ver) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__SIZE_TYPE__", 0, NULL, 0, size_type) != 0) {
@@ -436,6 +527,11 @@ static int add_builtin_macros(pp_state_t *st) {
     }
     if (macro_set(&st->macros, "__ATOMIC_SEQ_CST", 0, NULL, 0, "5") != 0) {
         return -1;
+    }
+    if (st->std_is_c11 || st->std_is_c17 || st->std_is_c23) {
+        if (macro_set(&st->macros, "__STDC_NO_THREADS__", 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
     }
     if (st->target_bits == 32) {
         if (macro_set(&st->macros, "__i386__", 0, NULL, 0, "1") != 0) {
@@ -1677,6 +1773,66 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
+                if ((j - i) == strlen("__has_c_attribute") &&
+                    strncmp(expr + i, "__has_c_attribute", strlen("__has_c_attribute")) == 0) {
+                    size_t k = j;
+                    const char *name_a = NULL;
+                    const char *name_b = NULL;
+                    char *name = NULL;
+                    char *base = NULL;
+                    int has_attr = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != '(') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_c_attribute operand");
+                        return -1;
+                    }
+                    k++;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (!is_ident_start((unsigned char)expr[k])) {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_c_attribute operand");
+                        return -1;
+                    }
+                    name_a = expr + k;
+                    k++;
+                    while (is_ident_char((unsigned char)expr[k]) || expr[k] == ':') {
+                        k++;
+                    }
+                    name_b = expr + k;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != ')') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "unterminated __has_c_attribute expression");
+                        return -1;
+                    }
+                    k++;
+                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    if (name == NULL) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    base = strrchr(name, ':');
+                    if (base != NULL && base[1] != '\0') {
+                        base++;
+                    } else {
+                        base = name;
+                    }
+                    has_attr = has_c_attribute_name(base);
+                    free(name);
+                    if (sb_append(&out, has_attr ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
             }
             if (sb_append_c(&out, expr[i]) != 0) {
                 sb_free(&out);
@@ -2233,6 +2389,7 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
     memset(&st, 0, sizeof(st));
     st.target_bits = 64;
     st.enable_trigraphs = std_mode_enable_trigraphs(std_mode);
+    st.std_version = std_mode_version(std_mode, &st.std_is_c11, &st.std_is_c17, &st.std_is_c23);
     if (diag != NULL) {
         diag->line = 0;
         diag->col = 0;

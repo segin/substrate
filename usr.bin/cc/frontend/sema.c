@@ -2286,6 +2286,11 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "inline is only valid on function declarations");
                 return -1;
             }
+            if ((s->storage & CC_STORAGE_THREAD_LOCAL) != 0 &&
+                (s->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0) {
+                set_diag(diag, "thread_local local declaration requires static or extern storage");
+                return -1;
+            }
             if ((s->storage & CC_STORAGE_EXTERN) != 0 && s->expr != NULL) {
                 set_diag(diag, "extern local declaration cannot have an initializer");
                 return -1;
@@ -2840,6 +2845,13 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),
                          "function declaration cannot use auto/register storage: %s", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->storage & CC_STORAGE_THREAD_LOCAL) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function declaration cannot use thread_local storage: %s", f->name);
             }
             goto fail_global;
         }

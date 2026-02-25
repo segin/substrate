@@ -111,23 +111,23 @@ Execution policy:
 ## 2) C Language Features Added After C99 (C11/C17/C23)
 
 ### 2.1 C11 features
-- [ ] `_Atomic` and atomics type qualifier model.
-- [ ] `<stdatomic.h>` builtins+lowering mapping.
-- [ ] Memory-order semantics (`relaxed`, `consume`, `acquire`, `release`, `acq_rel`, `seq_cst`).
-- [ ] `_Thread_local`.
-- [ ] `_Alignas`.
-- [ ] `_Alignof`.
-- [ ] `_Static_assert`.
-- [ ] `_Generic`.
-- [ ] `_Noreturn`.
-- [ ] Anonymous struct/union members (standard form).
-- [ ] UTF and unicode character/string literals per C11 additions.
-- [ ] Optional feature macros (`__STDC_NO_*`) behavior.
+- [x] `_Atomic` and atomics type qualifier model.
+- [x] `<stdatomic.h>` builtins+lowering mapping.
+- [x] Memory-order semantics (`relaxed`, `consume`, `acquire`, `release`, `acq_rel`, `seq_cst`).
+- [x] `_Thread_local`.
+- [x] `_Alignas`.
+- [x] `_Alignof`.
+- [x] `_Static_assert`.
+- [x] `_Generic`.
+- [x] `_Noreturn`.
+- [x] Anonymous struct/union members (standard form).
+- [x] UTF and unicode character/string literals per C11 additions.
+- [x] Optional feature macros (`__STDC_NO_*`) behavior.
 
 ### 2.2 C17/C18 consolidation
-- [ ] DR-based behavior changes from C11 -> C17.
-- [ ] `__STDC_VERSION__ == 201710L`.
-- [ ] C17 deprecations behavior (compatibility diagnostics).
+- [x] DR-based behavior changes from C11 -> C17.
+- [x] `__STDC_VERSION__ == 201710L`.
+- [x] C17 deprecations behavior (compatibility diagnostics).
 
 ### 2.3 C23 core language
 - [ ] `__STDC_VERSION__ == 202311L`.

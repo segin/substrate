@@ -320,7 +320,7 @@ static void usage(const char *prog) {
             "  -c                 compile/assemble only\n"
             "  -o <file>          output file\n"
             "  -I/-D/-U           preprocessor options\n"
-            "  -std=c90/c95/c99   language mode\n"
+            "  -std=c90/c95/c99/c11/c17/c23   language mode\n"
             "  -O0..-O3           optimization level\n"
             "  -m32/-m64          target ABI (i386 or x86_64)\n"
             "  -g                 debug info\n"

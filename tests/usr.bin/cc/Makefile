@@ -431,6 +431,7 @@ test:
 	grep -Eq '^cc:[0-9]+:[0-9]+: ' /tmp/cc_native_bad_ptr_add_ptr_loc.log
 	sh run_conformance_c99.sh
 	sh run_diff_c99.sh
+	sh run_postc99_c11_c17.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_break.c -o /tmp/cc_native_bad_break.o
@@ -503,3 +504,7 @@ clean:
 	      /tmp/cc_native_c99_computed_goto_pedantic.o /tmp/cc_native_c99_computed_goto_pedantic.log /tmp/cc_native_c99_computed_goto_pedantic_errors.o \
 	      /tmp/cc_native_bad_ptr_add_ptr_loc.o /tmp/cc_native_bad_ptr_add_ptr_loc.log \
 	      /tmp/cc_conformance_pass.log /tmp/cc_conformance_xfail.log /tmp/cc_diff_host.log /tmp/cc_diff_ours.log
+	rm -f /tmp/cc_native_c11_static_assert /tmp/cc_native_c11_generic /tmp/cc_native_c11_align_thread_noreturn \
+	      /tmp/cc_native_c11_atomic /tmp/cc_native_c11_unicode_literals /tmp/cc_native_bad_c11_static_assert_fail.o \
+	      /tmp/cc_native_bad_c11_thread_local_local.o /tmp/cc_native_c17_register /tmp/cc_native_c11_pp_version.i \
+	      /tmp/cc_native_c17_pp_version.i
