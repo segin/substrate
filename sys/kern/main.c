@@ -40,7 +40,6 @@
 #include <fs/pseudofs.h>
 #include <fs/fuse.h>
 #include <fs/9p.h>
-#include <sys/smp.h>
 
 #include <sys/tests.h>
 
