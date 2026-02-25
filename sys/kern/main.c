@@ -41,6 +41,7 @@
 #include <fs/fuse.h>
 #include <fs/9p.h>
 #include <sys/smp.h>
+#include <sys/sysctl.h>
 
 #include <sys/tests.h>
 
@@ -351,7 +352,6 @@ void kmain(unsigned long magic, unsigned long addr) {
     kprint("Scheduler Initialized.\n");
 
     // Initialize Sysctl Subsystem
-    extern void sysctl_init(void);
     sysctl_init();
     
     keyboard_init();
