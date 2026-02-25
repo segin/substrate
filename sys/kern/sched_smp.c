@@ -198,28 +198,36 @@ thread_t *sched_steal_thread(int target_cpu) {
     
     // Steal from lowest priority (idle) queues first to minimize impact
     // Work backwards from idle queue
+    extern int percpu_get_cpu_id(void);
+    int my_cpu = percpu_get_cpu_id();
+
     for (int level = RQ_TOTAL_LEVELS - 1; level >= RQ_TIMESHARE_BASE; level--) {
         runqueue_level_t *q = &rq->queues[level];
         if (q->count == 0) continue;
         
         // Get a thread (from tail to minimize cache impact)
+        // Iterate backwards up to 4 threads to find a stealable candidate
         thread_t *t = q->tail;
-        if (!t) continue;
+        int limit = 4;
         
-        // Check CPU affinity - can we run this thread?
-        extern int percpu_get_cpu_id(void);
-        int my_cpu = percpu_get_cpu_id();
-        if (t->cpu_affinity != 0 && !(t->cpu_affinity & (1U << my_cpu))) {
-            continue;  // Thread can't run on our CPU
+        while (t && limit > 0) {
+            // Check CPU affinity - can we run this thread?
+            if (t->cpu_affinity != 0 && !(t->cpu_affinity & (1U << my_cpu))) {
+                // Thread can't run on our CPU, check next
+                t = t->rq_prev;
+                limit--;
+                continue;
+            }
+
+            // Steal this thread
+            runqueue_remove(rq, t);
+            t->on_runqueue = 0;
+            stolen = t;
+            goto out;
         }
-        
-        // Steal this thread
-        runqueue_remove(rq, t);
-        t->on_runqueue = 0;
-        stolen = t;
-        break;
     }
     
+out:
     spinlock_release(&rq->lock);
     return stolen;
 }
