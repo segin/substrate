@@ -100,6 +100,12 @@ typedef enum {
 #define STT_TLS 6
 #endif
 
+#ifndef SHN_UNDEF
+#define SHN_UNDEF 0
+#define SHN_ABS 0xfff1
+#define SHN_COMMON 0xfff2
+#endif
+
 #ifndef R_386_NONE
 #define R_386_NONE 0
 #define R_386_32 1
@@ -146,6 +152,17 @@ elf_symbol_t *elf_add_symbol(elfobj_t *obj, const char *name, uint64_t value,
                               uint64_t size, uint8_t bind, uint8_t type);
 elf_err_t elf_symbol_define(elf_symbol_t *symbol, elf_section_t *section, uint64_t value);
 elf_symbol_t *elf_find_symbol(elfobj_t *obj, const char *name);
+elf_symbol_t *elf_symbol_at(elfobj_t *obj, size_t index);
+elf_err_t elf_symbol_set_binding(elf_symbol_t *symbol, uint8_t bind);
+elf_err_t elf_symbol_set_type(elf_symbol_t *symbol, uint8_t type);
+elf_err_t elf_symbol_set_visibility(elf_symbol_t *symbol, uint8_t visibility);
+elf_err_t elf_symbol_set_version(elf_symbol_t *symbol, uint16_t version_index);
+uint16_t elf_symbol_version(const elf_symbol_t *symbol);
+elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint16_t shndx);
+int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_t bind);
+elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out);
+elf_symbol_t *elf_symbol_lookup_sysv(elfobj_t *obj, const char *name);
+elf_symbol_t *elf_symbol_lookup_gnu(elfobj_t *obj, const char *name);
 
 elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol_t *symbol,
                              uint32_t type, int64_t addend);

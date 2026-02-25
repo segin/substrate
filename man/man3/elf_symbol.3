@@ -4,6 +4,18 @@
 .Sh NAME
 .Nm elf_add_symbol ,
 .Nm elf_find_symbol ,
+.Nm elf_symbol_at ,
+.Nm elf_symbol_define ,
+.Nm elf_symbol_set_binding ,
+.Nm elf_symbol_set_type ,
+.Nm elf_symbol_set_visibility ,
+.Nm elf_symbol_set_version ,
+.Nm elf_symbol_version ,
+.Nm elf_symbol_set_shndx ,
+.Nm elf_symbol_is_duplicate_global ,
+.Nm elf_symbols_sort_deterministic ,
+.Nm elf_symbol_lookup_sysv ,
+.Nm elf_symbol_lookup_gnu ,
 .Nm elf_symbol_count ,
 .Nm elf_symbol_name ,
 .Nm elf_symbol_value ,
@@ -24,6 +36,67 @@
 .Fc
 .Ft elf_symbol_t *
 .Fo elf_find_symbol
+.Fa "elfobj_t *obj"
+.Fa "const char *name"
+.Fc
+.Ft elf_symbol_t *
+.Fo elf_symbol_at
+.Fa "elfobj_t *obj"
+.Fa "size_t index"
+.Fc
+.Ft elf_err_t
+.Fo elf_symbol_define
+.Fa "elf_symbol_t *symbol"
+.Fa "elf_section_t *section"
+.Fa "uint64_t value"
+.Fc
+.Ft elf_err_t
+.Fo elf_symbol_set_binding
+.Fa "elf_symbol_t *symbol"
+.Fa "uint8_t bind"
+.Fc
+.Ft elf_err_t
+.Fo elf_symbol_set_type
+.Fa "elf_symbol_t *symbol"
+.Fa "uint8_t type"
+.Fc
+.Ft elf_err_t
+.Fo elf_symbol_set_visibility
+.Fa "elf_symbol_t *symbol"
+.Fa "uint8_t visibility"
+.Fc
+.Ft elf_err_t
+.Fo elf_symbol_set_version
+.Fa "elf_symbol_t *symbol"
+.Fa "uint16_t version_index"
+.Fc
+.Ft uint16_t
+.Fo elf_symbol_version
+.Fa "const elf_symbol_t *symbol"
+.Fc
+.Ft elf_err_t
+.Fo elf_symbol_set_shndx
+.Fa "elf_symbol_t *symbol"
+.Fa "uint16_t shndx"
+.Fc
+.Ft int
+.Fo elf_symbol_is_duplicate_global
+.Fa "const elfobj_t *obj"
+.Fa "const char *name"
+.Fa "uint8_t bind"
+.Fc
+.Ft elf_err_t
+.Fo elf_symbols_sort_deterministic
+.Fa "elfobj_t *obj"
+.Fa "size_t *first_global_out"
+.Fc
+.Ft elf_symbol_t *
+.Fo elf_symbol_lookup_sysv
+.Fa "elfobj_t *obj"
+.Fa "const char *name"
+.Fc
+.Ft elf_symbol_t *
+.Fo elf_symbol_lookup_gnu
 .Fa "elfobj_t *obj"
 .Fa "const char *name"
 .Fc
@@ -121,16 +194,9 @@ a pointer.
 .It Dv STV_PROTECTED
 Symbol is exported but cannot be interposed.
 .El
-.Pp
-To set visibility after creating a symbol:
-.Bd -literal
-elf_symbol_t *sym = elf_add_symbol(obj, "internal_func", 0, 0,
-                                   STB_GLOBAL, STT_FUNC);
-if (sym) {
-    /* Access internal field via private header */
-    /* ((struct elf_symbol *)sym)->other = STV_HIDDEN; */
-}
-.Ed
+Use
+.Fn elf_symbol_set_visibility
+to set visibility.
 .Ss Functions
 .Bl -tag -width Ds
 .It Fn elf_add_symbol "obj" "name" "value" "size" "bind" "type"
@@ -152,6 +218,34 @@ given name exists.
 .Pp
 If multiple symbols have the same name (which can happen with local
 symbols), the first match is returned.
+.It Fn elf_symbol_at "obj" "index"
+Returns the symbol at a specific index, or NULL if out of range.
+.It Fn elf_symbol_define "symbol" "section" "value"
+Marks a symbol as defined in a section at the given value.
+.It Fn elf_symbol_set_binding "symbol" "bind"
+Updates a symbol binding (local/global/weak).
+.It Fn elf_symbol_set_type "symbol" "type"
+Updates a symbol type.
+.It Fn elf_symbol_set_visibility "symbol" "visibility"
+Updates symbol visibility (st_other).
+.It Fn elf_symbol_set_version "symbol" "version_index"
+Assigns version metadata index for versioned symbols.
+.It Fn elf_symbol_version "symbol"
+Returns the version metadata index.
+.It Fn elf_symbol_set_shndx "symbol" "shndx"
+Sets section index, including
+.Dv SHN_UNDEF ,
+.Dv SHN_ABS ,
+and
+.Dv SHN_COMMON .
+.It Fn elf_symbol_is_duplicate_global "obj" "name" "bind"
+Checks if adding the given symbol would create a global/weak conflict.
+.It Fn elf_symbols_sort_deterministic "obj" "first_global_out"
+Applies deterministic symbol ordering with all local symbols first.
+.It Fn elf_symbol_lookup_sysv "obj" "name"
+Looks up symbol by name using SYSV hash-assisted matching.
+.It Fn elf_symbol_lookup_gnu "obj" "name"
+Looks up symbol by name using GNU hash-assisted matching.
 .It Fn elf_symbol_count "obj"
 Returns the number of symbols in the object's symbol table.
 .It Fn elf_symbol_name "symbol"

@@ -105,6 +105,57 @@ elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
         }
     }
 
+    for (i = 0; i < obj->symbol_count; ++i) {
+        struct elf_symbol *s = obj->symbols[i];
+        if (s == NULL) {
+            has_error = 1;
+            (void)elf__append_diag_fmt(obj, "NULL symbol entry index=", i);
+            continue;
+        }
+        if (s->name == NULL) {
+            has_error = 1;
+            (void)elf__append_diag_fmt(obj, "symbol missing name index=", i);
+        }
+        if (s->shndx != SHN_UNDEF && s->shndx != SHN_ABS && s->shndx != SHN_COMMON &&
+            s->shndx > obj->section_count) {
+            has_error = 1;
+            (void)elf__append_diag_fmt(obj, "symbol shndx out of range index=", i);
+        }
+        if (s->bind != STB_LOCAL) {
+            break;
+        }
+    }
+    for (; i < obj->symbol_count; ++i) {
+        struct elf_symbol *s = obj->symbols[i];
+        if (s != NULL && s->bind == STB_LOCAL) {
+            has_error = 1;
+            (void)elf__append_diag_fmt(obj, "local symbol appears after globals index=", i);
+        }
+    }
+    for (i = 0; i < obj->symbol_count; ++i) {
+        struct elf_symbol *a = obj->symbols[i];
+        if (a == NULL || a->name == NULL || a->name[0] == '\0') {
+            continue;
+        }
+        if (a->bind == STB_LOCAL) {
+            continue;
+        }
+        for (j = i + 1; j < obj->symbol_count; ++j) {
+            struct elf_symbol *b = obj->symbols[j];
+            if (b == NULL || b->name == NULL || b->name[0] == '\0') {
+                continue;
+            }
+            if (b->bind == STB_LOCAL) {
+                continue;
+            }
+            if (strcmp(a->name, b->name) == 0) {
+                has_error = 1;
+                (void)elf__append_diag_fmt(obj, "duplicate global symbol index=", i);
+                (void)elf__append_diag_fmt(obj, "duplicate global peer=", j);
+            }
+        }
+    }
+
     for (i = 0; i < obj->segment_count; ++i) {
         struct elf_segment *seg = obj->segments[i];
         if (seg == NULL) {

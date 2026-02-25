@@ -10,6 +10,7 @@
 - Provide linker-facing object merge API and validation diagnostics.
 - Parse and validate program headers, notes, dynamic, and versioning sections.
 - Provide section mutation/reorder APIs and explicit segment mapping helpers.
+- Provide symbol versioning metadata, deterministic symbol ordering, and hash lookups.
 
 ## Build
 - `make -C usr.lib/elfobj`

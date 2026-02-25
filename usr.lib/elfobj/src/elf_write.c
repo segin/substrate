@@ -378,7 +378,16 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     secs[shstr_index].size = shstr.size;
 
     secs[symtab_index].link = (uint32_t)strtab_index;
-    secs[symtab_index].info = 1;
+    {
+        size_t first_global = obj->symbol_count + 1;
+        for (i = 0; i < obj->symbol_count; ++i) {
+            if (obj->symbols[i]->bind != STB_LOCAL) {
+                first_global = i + 1;
+                break;
+            }
+        }
+        secs[symtab_index].info = (uint32_t)first_global;
+    }
 
     for (i = 1; i < sec_count; ++i) {
         if (secs[i].type == SHT_RELA || secs[i].type == SHT_REL) {

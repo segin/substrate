@@ -63,16 +63,16 @@ Execution policy:
 - [x] Section-to-segment mapping introspection APIs.
 
 ## 5) Symbol and Hash Handling
-- [ ] Symbol add/find by name/index.
-- [ ] Binding/type/visibility mutation APIs.
-- [ ] Duplicate and conflict detection helpers.
-- [ ] Symbol version metadata read/write support.
-- [ ] Local/global symbol partitioning rules.
-- [ ] Undefined/absolute/common symbol handling.
-- [ ] SYSV hash generation/lookup.
-- [ ] GNU hash generation/lookup.
-- [ ] Stable symbol ordering for deterministic builds.
-- [ ] Symbol-table validation checks.
+- [x] Symbol add/find by name/index.
+- [x] Binding/type/visibility mutation APIs.
+- [x] Duplicate and conflict detection helpers.
+- [x] Symbol version metadata read/write support.
+- [x] Local/global symbol partitioning rules.
+- [x] Undefined/absolute/common symbol handling.
+- [x] SYSV hash generation/lookup.
+- [x] GNU hash generation/lookup.
+- [x] Stable symbol ordering for deterministic builds.
+- [x] Symbol-table validation checks.
 
 ## 6) Relocation Framework and Backends
 - [ ] Generic relocation object model for REL and RELA.

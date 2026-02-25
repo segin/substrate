@@ -332,6 +332,7 @@ elfobj_t *elf_create(uint16_t type, uint16_t machine, elfobj_class_t cls, elfobj
 
 elf_err_t elf_finalize(elfobj_t *obj) {
     elf_err_t err;
+    size_t first_global;
 
     if (obj == NULL) {
         return ELF_ERR_STATE;
@@ -348,6 +349,12 @@ elf_err_t elf_finalize(elfobj_t *obj) {
         elf__set_err(obj, err, "layout failed during finalize");
         return err;
     }
+    err = elf_symbols_sort_deterministic(obj, &first_global);
+    if (err != ELF_OK) {
+        elf__set_err(obj, err, "symbol ordering failed during finalize");
+        return err;
+    }
+    (void)first_global;
     obj->finalized = 1;
     obj->readonly = 1;
     return ELF_OK;
