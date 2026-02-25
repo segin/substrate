@@ -611,6 +611,23 @@ static int add_builtin_macros(pp_state_t *st) {
         if (macro_set(&st->macros, "__STDC_NO_THREADS__", 0, 0, NULL, 0, "1") != 0) {
             return -1;
         }
+        if (macro_set(&st->macros, "__STDC_UTF_16__", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+        if (macro_set(&st->macros, "__STDC_UTF_32__", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+    }
+    if (st->std_is_c23) {
+        if (macro_set(&st->macros, "__STDC_EMBED_NOT_FOUND__", 0, 0, NULL, 0, "0") != 0) {
+            return -1;
+        }
+        if (macro_set(&st->macros, "__STDC_EMBED_FOUND__", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+        if (macro_set(&st->macros, "__STDC_EMBED_EMPTY__", 0, 0, NULL, 0, "2") != 0) {
+            return -1;
+        }
     }
     if (st->target_bits == 32) {
         if (macro_set(&st->macros, "__i386__", 0, 0, NULL, 0, "1") != 0) {
@@ -1140,6 +1157,13 @@ static int resolve_include(pp_state_t *st, const char *cur_file, const char *spe
                            int *out_is_system) {
     size_t i;
     char cand[PATH_MAX];
+    if (spec[0] == '/' && path_exists(spec)) {
+        snprintf(out, PATH_MAX, "%s", spec);
+        if (out_is_system != NULL) {
+            *out_is_system = 0;
+        }
+        return 0;
+    }
     if (quoted) {
         char *dir = dirname_dup(cur_file);
         if (dir == NULL) {
@@ -1790,7 +1814,7 @@ static char *replace_va_args_in_text(const char *text, const char *va_args) {
     return out.buf;
 }
 
-static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count) {
+static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, int allow_va_opt) {
     sb_t out;
     sb_t pasted;
     size_t i = 0;
@@ -1805,6 +1829,12 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count) 
     has_va_args = va_args[0] != '\0';
     while (m->body[i] != '\0') {
         if (m->is_variadic && strncmp(m->body + i, "__VA_OPT__", 10) == 0) {
+            if (!allow_va_opt) {
+                free(va_args);
+                sb_free(&out);
+                sb_free(&pasted);
+                return NULL;
+            }
             size_t k = i + 10;
             size_t end_pos = 0;
             char *va_opt_text = NULL;
@@ -2301,7 +2331,20 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                             return NULL;
                         }
                     }
-                    subst = replace_params(m, exp_args, arg_count);
+                    if (!(st->std_is_c23 || st->std_is_gnu) && strstr(m->body, "__VA_OPT__") != NULL) {
+                        set_diag(diag, (size_t)line, k + 1, "__VA_OPT__ requires c23/gnu mode");
+                        emit_macro_trace(file, line, name);
+                        free(name);
+                        for (ai = 0; ai < arg_count; ++ai) {
+                            free(args[ai]);
+                            free(exp_args[ai]);
+                        }
+                        free(args);
+                        free(exp_args);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    subst = replace_params(m, exp_args, arg_count, st->std_is_c23 || st->std_is_gnu);
                     if (subst == NULL) {
                         emit_macro_trace(file, line, name);
                         free(name);
@@ -2525,6 +2568,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     size_t n = 0;
                     int quoted = 0;
                     int is_system = 0;
+                    int enabled = st->std_is_c23 || st->std_is_gnu;
                     while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
                         k++;
                     }
@@ -2566,7 +2610,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    if (resolve_include(st, file, inc_spec, quoted, inc_path, &is_system) == 0) {
+                    if (enabled && resolve_include(st, file, inc_spec, quoted, inc_path, &is_system) == 0) {
                         if (sb_append(&out, "1") != 0) {
                             sb_free(&out);
                             return -1;
@@ -2589,6 +2633,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     int quoted = 0;
                     int is_system = 0;
                     int found = 0;
+                    int enabled = st->std_is_c23 || st->std_is_gnu;
                     while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
                         k++;
                     }
@@ -2630,7 +2675,8 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    if (resolve_include(st, file, inc_spec, quoted, inc_path, &is_system) == 0 && path_exists(inc_path)) {
+                    if (enabled && resolve_include(st, file, inc_spec, quoted, inc_path, &is_system) == 0 &&
+                        path_exists(inc_path)) {
                         found = 1;
                     }
                     if (sb_append(&out, found ? "1" : "0") != 0) {
@@ -2928,6 +2974,43 @@ static int pp_emit_line_marker(pp_state_t *st, FILE *out, int line_no, const cha
     return pp_emit_text(st, out, buf);
 }
 
+static int pp_emit_embed_file(pp_state_t *st, FILE *out, const char *path) {
+    FILE *fp;
+    int c;
+    int first = 1;
+    char tok[16];
+    fp = fopen(path, "rb");
+    if (fp == NULL) {
+        return -1;
+    }
+    while ((c = fgetc(fp)) != EOF) {
+        if (!first && pp_emit_text(st, out, ", ") != 0) {
+            fclose(fp);
+            return -1;
+        }
+        snprintf(tok, sizeof(tok), "0x%02X", (unsigned)(c & 0xff));
+        if (pp_emit_text(st, out, tok) != 0) {
+            fclose(fp);
+            return -1;
+        }
+        first = 0;
+    }
+    if (ferror(fp)) {
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+    if (first) {
+        if (pp_emit_text(st, out, "0") != 0) {
+            return -1;
+        }
+    }
+    if (pp_emit_text(st, out, "\n") != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int depth, int macros_only, cc_diag_t *diag) {
     FILE *fp;
     sb_t line;
@@ -3041,6 +3124,49 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 }
                 continue;
             }
+            if (strncmp(kw, "embed", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 5) {
+                if (active) {
+                    char inc_spec[PATH_MAX];
+                    char inc_path[PATH_MAX];
+                    int quoted = 0;
+                    int is_system = 0;
+                    size_t n = 0;
+                    if (!(st->std_is_c23 || st->std_is_gnu)) {
+                        set_diag(diag, (size_t)line_no, 1, "#embed requires c23/gnu mode");
+                        goto fail;
+                    }
+                    p = skip_ws(p);
+                    if (*p != '"' && *p != '<') {
+                        set_diag(diag, (size_t)line_no, 1, "malformed #embed");
+                        goto fail;
+                    }
+                    {
+                        char endc = *p == '"' ? '"' : '>';
+                        quoted = (*p == '"');
+                        p++;
+                        while (*p != '\0' && *p != endc && n + 1 < sizeof(inc_spec)) {
+                            inc_spec[n++] = *p++;
+                        }
+                        inc_spec[n] = '\0';
+                        if (*p != endc) {
+                            set_diag(diag, (size_t)line_no, 1, "malformed #embed");
+                            goto fail;
+                        }
+                    }
+                    if (resolve_include(st, path, inc_spec, quoted, inc_path, &is_system) != 0) {
+                        set_diag(diag, (size_t)line_no, 1, "embed file not found");
+                        goto fail;
+                    }
+                    if (dep_add_path(st, inc_path, is_system, 0) != 0) {
+                        goto fail;
+                    }
+                    if (!macros_only && pp_emit_embed_file(st, out, inc_path) != 0) {
+                        set_diag(diag, (size_t)line_no, 1, "failed to emit #embed data");
+                        goto fail;
+                    }
+                }
+                continue;
+            }
             if (strncmp(kw, "define", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 6) {
                 if (active) {
                     if (parse_define_directive(st, p) != 0) {
@@ -3140,6 +3266,82 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 fr.saw_else = 0;
                 if (push_cond(&cond_stack, &cond_count, &cond_cap, fr) != 0) {
                     goto fail;
+                }
+                continue;
+            }
+            if (strncmp(kw, "elifdef", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 7) {
+                int cond = 0;
+                if (!(st->std_is_c23 || st->std_is_gnu)) {
+                    set_diag(diag, (size_t)line_no, 1, "#elifdef requires c23/gnu mode");
+                    goto fail;
+                }
+                if (cond_count == 0) {
+                    set_diag(diag, (size_t)line_no, 1, "unexpected #elifdef");
+                    goto fail;
+                }
+                if (cond_stack[cond_count - 1].saw_else) {
+                    set_diag(diag, (size_t)line_no, 1, "unexpected #elifdef after #else");
+                    goto fail;
+                }
+                p = skip_ws(p);
+                if (is_ident_start((unsigned char)*p)) {
+                    const char *a = p;
+                    char *name;
+                    while (is_ident_char((unsigned char)*p)) {
+                        p++;
+                    }
+                    name = xstrdup_n(a, (size_t)(p - a));
+                    if (name == NULL) {
+                        goto fail;
+                    }
+                    cond = (macro_find(&st->macros, name) != NULL);
+                    free(name);
+                }
+                if (!cond_stack[cond_count - 1].parent_active || cond_stack[cond_count - 1].any_taken) {
+                    cond_stack[cond_count - 1].this_active = 0;
+                } else {
+                    cond_stack[cond_count - 1].this_active = cond;
+                    if (cond) {
+                        cond_stack[cond_count - 1].any_taken = 1;
+                    }
+                }
+                continue;
+            }
+            if (strncmp(kw, "elifndef", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 8) {
+                int cond = 1;
+                if (!(st->std_is_c23 || st->std_is_gnu)) {
+                    set_diag(diag, (size_t)line_no, 1, "#elifndef requires c23/gnu mode");
+                    goto fail;
+                }
+                if (cond_count == 0) {
+                    set_diag(diag, (size_t)line_no, 1, "unexpected #elifndef");
+                    goto fail;
+                }
+                if (cond_stack[cond_count - 1].saw_else) {
+                    set_diag(diag, (size_t)line_no, 1, "unexpected #elifndef after #else");
+                    goto fail;
+                }
+                p = skip_ws(p);
+                if (is_ident_start((unsigned char)*p)) {
+                    const char *a = p;
+                    char *name;
+                    while (is_ident_char((unsigned char)*p)) {
+                        p++;
+                    }
+                    name = xstrdup_n(a, (size_t)(p - a));
+                    if (name == NULL) {
+                        goto fail;
+                    }
+                    cond = (macro_find(&st->macros, name) == NULL);
+                    free(name);
+                }
+                if (!cond_stack[cond_count - 1].parent_active || cond_stack[cond_count - 1].any_taken) {
+                    cond_stack[cond_count - 1].this_active = 0;
+                } else {
+                    cond_stack[cond_count - 1].this_active = cond;
+                    if (cond) {
+                        cond_stack[cond_count - 1].any_taken = 1;
+                    }
                 }
                 continue;
             }
@@ -3245,9 +3447,15 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 continue;
             }
             if (strncmp(kw, "warning", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 7) {
-                if (active && (st->std_is_c23 || st->std_is_gnu)) {
-                    const char *msg = skip_ws(p);
-                    fprintf(stderr, "%s:%d:1: warning: %s\n", path, line_no, msg);
+                if (active) {
+                    if (!(st->std_is_c23 || st->std_is_gnu)) {
+                        set_diag(diag, (size_t)line_no, 1, "#warning requires c23/gnu mode");
+                        goto fail;
+                    }
+                    {
+                        const char *msg = skip_ws(p);
+                        fprintf(stderr, "%s:%d:1: warning: %s\n", path, line_no, msg);
+                    }
                 }
                 continue;
             }

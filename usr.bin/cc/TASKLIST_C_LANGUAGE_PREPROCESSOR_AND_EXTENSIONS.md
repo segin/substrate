@@ -234,22 +234,22 @@ Execution policy:
 ## 4) Preprocessor Features Added After C99 (C11/C17/C23)
 
 ### 4.1 C11/C17 alignment
-- [ ] Standard macro updates by language version.
-- [ ] Behavior adjustments required by DRs and later standards.
+- [x] Standard macro updates by language version.
+- [x] Behavior adjustments required by DRs and later standards.
 
 ### 4.2 C23 preprocessor
-- [ ] `#elifdef`.
-- [ ] `#elifndef`.
-- [ ] `#warning` (standardized).
-- [ ] `#embed`.
-- [ ] `__has_include`.
-- [ ] `__has_embed`.
-- [ ] `__VA_OPT__`.
-- [ ] Version-gated semantics by `-std=` mode.
+- [x] `#elifdef`.
+- [x] `#elifndef`.
+- [x] `#warning` (standardized).
+- [x] `#embed`.
+- [x] `__has_include`.
+- [x] `__has_embed`.
+- [x] `__VA_OPT__`.
+- [x] Version-gated semantics by `-std=` mode.
 
 ### 4.3 Post-C99 preprocessor validation
-- [ ] Mode matrix tests (`c99`, `c11`, `c17`, `c23`, GNU dialects).
-- [ ] Differential output tests vs GCC/Clang for known-sensitive inputs.
+- [x] Mode matrix tests (`c99`, `c11`, `c17`, `c23`, GNU dialects).
+- [x] Differential output tests vs GCC/Clang for known-sensitive inputs.
 
 ---
 

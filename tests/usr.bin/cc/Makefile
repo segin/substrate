@@ -543,7 +543,9 @@ clean:
 	      /tmp/cc_pp_fuzz_5.c /tmp/cc_pp_fuzz_6.c /tmp/cc_pp_fuzz_7.c /tmp/cc_pp_fuzz_8.c /tmp/cc_pp_fuzz_9.c \
 	      /tmp/cc_pp_fuzz_10.c /tmp/cc_pp_fuzz_11.c /tmp/cc_pp_fuzz_12.c /tmp/cc_pp_fuzz_13.c /tmp/cc_pp_fuzz_14.c \
 	      /tmp/cc_pp_fuzz_15.c /tmp/cc_pp_s4_elif_c23.i /tmp/cc_pp_s4_elif_c11.i /tmp/cc_pp_s4_warning_c23.i \
-	      /tmp/cc_pp_s4_warning_c23.log /tmp/cc_pp_s4_has_c23.i /tmp/cc_pp_s4_has_c11.i /tmp/cc_pp_s4_vaopt_c23.i \
-	      /tmp/cc_pp_s4_vaopt_c11.i /tmp/cc_pp_s4_embed.bin /tmp/cc_pp_s4_embed.c /tmp/cc_pp_s4_embed.i \
+	      /tmp/cc_pp_s4_warning_c23.log /tmp/cc_pp_s4_warning_c11.i /tmp/cc_pp_s4_has_c23.i /tmp/cc_pp_s4_has_c11.i /tmp/cc_pp_s4_vaopt_c23.i \
+	      /tmp/cc_pp_s4_vaopt_c11.i /tmp/cc_pp_s4_stdver_c99.i /tmp/cc_pp_s4_stdver_c11.i /tmp/cc_pp_s4_stdver_c17.i \
+	      /tmp/cc_pp_s4_stdver_c23.i /tmp/cc_pp_s4_stdver_gnu11.i /tmp/cc_pp_s4_stdver_gnu17.i /tmp/cc_pp_s4_stdver_gnu23.i \
+	      /tmp/cc_pp_s4_trigraph_c11.i /tmp/cc_pp_s4_trigraph_c23.i /tmp/cc_pp_s4_embed.bin /tmp/cc_pp_s4_embed.c /tmp/cc_pp_s4_embed.i /tmp/cc_pp_s4_embed_c11.i \
 	      /tmp/cc_pp_s4_host_gcc.i /tmp/cc_pp_s4_host_clang.i /tmp/cc_pp_s4_host_gcc.ab /tmp/cc_pp_s4_host_clang.ab \
 	      /tmp/cc_pp_s4_ours.ab
