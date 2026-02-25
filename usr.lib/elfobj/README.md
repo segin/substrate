@@ -59,3 +59,4 @@ Thread-safety and reentrancy:
 ## Stability
 `libelfobj` uses opaque handles and an error-code based ABI intended for long-term stability.
 See `usr.lib/elfobj/ABI_POLICY.md` and `usr.lib/elfobj/libelfobj.map`.
+Cross-target coverage is tracked in `usr.lib/elfobj/COMPATIBILITY_MATRIX.md`.

@@ -135,16 +135,16 @@ Execution policy:
 - [x] Performance regression gate in CI.
 
 ## 11) Cross-Target and Format Coverage
-- [ ] ELF32 little-endian coverage.
-- [ ] ELF32 big-endian coverage.
-- [ ] ELF64 little-endian coverage.
-- [ ] ELF64 big-endian coverage.
-- [ ] ET_REL full R/W support.
-- [ ] ET_EXEC full R/W support.
-- [ ] ET_DYN full R/W support.
-- [ ] ET_CORE read-only support.
-- [ ] ABI supplement conformance checks (i386/x86_64).
-- [ ] Compatibility matrix documentation per target/mode.
+- [x] ELF32 little-endian coverage.
+- [x] ELF32 big-endian coverage.
+- [x] ELF64 little-endian coverage.
+- [x] ELF64 big-endian coverage.
+- [x] ET_REL full R/W support.
+- [x] ET_EXEC full R/W support.
+- [x] ET_DYN full R/W support.
+- [x] ET_CORE read-only support.
+- [x] ABI supplement conformance checks (i386/x86_64).
+- [x] Compatibility matrix documentation per target/mode.
 
 ## 12) Tooling, Docs, and Integration
 - [ ] Build targets and install path verification.
