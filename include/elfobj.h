@@ -75,9 +75,11 @@ typedef enum {
 #define SHF_EXECINSTR 0x4
 #define SHF_MERGE 0x10
 #define SHF_STRINGS 0x20
-#define SHF_COMPRESSED 0x800
 #define SHF_GROUP 0x200
 #define SHF_TLS 0x400
+#endif
+#ifndef SHF_COMPRESSED
+#define SHF_COMPRESSED 0x800
 #endif
 
 #ifndef PT_NULL
@@ -195,6 +197,29 @@ typedef struct {
     size_t input_index;
 } elf_link_map_entry_t;
 
+typedef enum {
+    ELF_VALIDATE_PERMISSIVE = 0,
+    ELF_VALIDATE_STRICT = 1
+} elf_validate_mode_t;
+
+typedef enum {
+    ELF_DIAG_INFO = 0,
+    ELF_DIAG_WARNING = 1,
+    ELF_DIAG_ERROR = 2
+} elf_diag_level_t;
+
+typedef struct {
+    elf_diag_level_t level;
+    elf_err_t code;
+    uint64_t index;
+    const char *message;
+} elf_diag_entry_t;
+
+typedef struct {
+    elf_validate_mode_t mode;
+    size_t max_errors;
+} elf_validate_options_t;
+
 elf_err_t elf_open(const char *path, elfobj_t **out);
 elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out);
 elf_err_t elf_write_file(elfobj_t *obj, const char *path);
@@ -280,7 +305,12 @@ elf_symbol_t *elf_link_resolve_symbol(elfobj_t **inputs, size_t count, const cha
 elf_section_t *elf_link_add_got_section(elfobj_t *obj, size_t entries);
 elf_section_t *elf_link_add_plt_section(elfobj_t *obj, size_t entries);
 elf_err_t elf_link_add_dynamic_entry(elfobj_t *obj, int64_t tag, uint64_t value);
+elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, char **diagnostics);
 elf_err_t elf_validate(elfobj_t *obj, char **diagnostics);
+elf_err_t elf_set_validation_mode(elfobj_t *obj, elf_validate_mode_t mode);
+elf_validate_mode_t elf_get_validation_mode(const elfobj_t *obj);
+size_t elf_diag_count(const elfobj_t *obj);
+int elf_diag_entry(const elfobj_t *obj, size_t index, elf_diag_entry_t *out);
 
 const char *elf_errstr(elf_err_t err);
 elf_err_t elf_last_error(const elfobj_t *obj);

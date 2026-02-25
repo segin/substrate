@@ -56,6 +56,13 @@ typedef struct {
     size_t cap;
 } elf_diag_t;
 
+typedef struct {
+    elf_diag_level_t level;
+    elf_err_t code;
+    uint64_t index;
+    char *message;
+} elf_diag_item_t;
+
 struct elf_phdr {
     uint32_t type;
     uint32_t flags;
@@ -179,8 +186,14 @@ struct elfobj {
     elf_reloc_hooks_t reloc_hooks;
     void *reloc_hook_user;
 
+    elf_validate_mode_t validate_mode;
+    size_t validate_max_errors;
+
     elf_err_t last_err;
     elf_diag_t diag;
+    elf_diag_item_t *diag_items;
+    size_t diag_item_count;
+    size_t diag_item_cap;
 };
 
 struct elf_link_input {
@@ -218,6 +231,9 @@ struct elf_link_plan {
 };
 
 elfobj_t *elf__alloc_obj(void);
+void elf__diag_clear(elfobj_t *obj);
+elf_err_t elf__diag_append(elfobj_t *obj, elf_diag_level_t level, elf_err_t code,
+                           uint64_t index, const char *msg);
 elf_err_t elf__append_diag(elfobj_t *obj, const char *msg);
 elf_err_t elf__append_diag_fmt(elfobj_t *obj, const char *prefix, uint64_t value);
 void elf__set_err(elfobj_t *obj, elf_err_t err, const char *msg);

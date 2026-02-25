@@ -1,10 +1,23 @@
 #include "elf_private.h"
 
+typedef struct {
+    elfobj_t *obj;
+    elf_validate_mode_t mode;
+    size_t max_errors;
+    size_t error_count;
+    int has_error;
+} validate_ctx_t;
+
 static int ranges_overlap(uint64_t a_off, uint64_t a_sz, uint64_t b_off, uint64_t b_sz) {
+    uint64_t a_end;
+    uint64_t b_end;
     if (a_sz == 0 || b_sz == 0) {
         return 0;
     }
-    return (a_off < b_off + b_sz) && (b_off < a_off + a_sz);
+    if (!elf__u64_add(a_off, a_sz, &a_end) || !elf__u64_add(b_off, b_sz, &b_end)) {
+        return 1;
+    }
+    return a_off < b_end && b_off < a_end;
 }
 
 static int segment_range(const struct elf_segment *seg, const elfobj_t *obj, uint64_t *out_lo, uint64_t *out_hi) {
@@ -24,7 +37,9 @@ static int segment_range(const struct elf_segment *seg, const elfobj_t *obj, uin
         if (s == NULL || s->type == SHT_NOBITS || s->size == 0) {
             continue;
         }
-        end = s->offset + s->size;
+        if (!elf__u64_add(s->offset, s->size, &end)) {
+            return 0;
+        }
         if (s->offset < lo) {
             lo = s->offset;
         }
@@ -41,34 +56,99 @@ static int segment_range(const struct elf_segment *seg, const elfobj_t *obj, uin
     return 1;
 }
 
-elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
+static int report_diag(validate_ctx_t *ctx, elf_diag_level_t level, elf_err_t code,
+                       uint64_t index, const char *msg) {
+    if (ctx == NULL || ctx->obj == NULL || msg == NULL) {
+        return 1;
+    }
+    (void)elf__diag_append(ctx->obj, level, code, index, msg);
+    if (level == ELF_DIAG_ERROR) {
+        ctx->has_error = 1;
+        ctx->error_count++;
+        if (ctx->max_errors != 0 && ctx->error_count >= ctx->max_errors) {
+            (void)elf__diag_append(ctx->obj, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "validation truncated at error limit");
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int report_diag_fmt(validate_ctx_t *ctx, elf_diag_level_t level, elf_err_t code,
+                           uint64_t index, const char *prefix, uint64_t value) {
+    char buf[160];
+    if (prefix == NULL) {
+        return report_diag(ctx, level, code, index, "validation issue");
+    }
+    (void)snprintf(buf, sizeof(buf), "%s%llu",
+                   prefix, (unsigned long long)value);
+    return report_diag(ctx, level, code, index, buf);
+}
+
+static elf_diag_level_t strictness_level(const validate_ctx_t *ctx) {
+    if (ctx->mode == ELF_VALIDATE_STRICT) {
+        return ELF_DIAG_ERROR;
+    }
+    return ELF_DIAG_WARNING;
+}
+
+static int section_is_allocated(const struct elf_section *s) {
+    if (s == NULL) {
+        return 0;
+    }
+    return (s->flags & SHF_ALLOC) != 0 && s->type != SHT_NOBITS && s->size != 0;
+}
+
+elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, char **diagnostics) {
     size_t i;
     size_t j;
-    int has_error = 0;
-    int has_layout = 0;
+    int has_layout;
+    validate_ctx_t ctx;
+    elf_validate_mode_t mode = obj != NULL ? obj->validate_mode : ELF_VALIDATE_STRICT;
+    size_t max_errors = obj != NULL ? obj->validate_max_errors : 0;
 
     if (obj == NULL) {
         return ELF_ERR_STATE;
     }
+    if (options != NULL) {
+        mode = options->mode;
+        max_errors = options->max_errors;
+    }
+    if (mode != ELF_VALIDATE_PERMISSIVE && mode != ELF_VALIDATE_STRICT) {
+        return ELF_ERR_STATE;
+    }
 
-    free(obj->diag.buf);
-    obj->diag.buf = NULL;
-    obj->diag.len = 0;
-    obj->diag.cap = 0;
+    elf__diag_clear(obj);
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.obj = obj;
+    ctx.mode = mode;
+    ctx.max_errors = max_errors;
     has_layout = (obj->image != NULL) || obj->finalized;
 
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *s = obj->sections[i];
         if (s == NULL) {
-            has_error = 1;
-            (void)elf__append_diag(obj, "NULL section entry");
+            if (report_diag(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i, "NULL section entry")) goto done;
             continue;
         }
         if (s->type != SHT_NOBITS && obj->image != NULL && s->size > 0) {
             if (!elf__bounds_ok((size_t)s->offset, (size_t)s->size, obj->image_size)) {
-                has_error = 1;
-                (void)elf__append_diag_fmt(obj, "section out of file bounds index=", i);
+                if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_BOUNDS, i,
+                                    "section out of file bounds index=", i)) goto done;
             }
+        }
+        if (s->type == SHT_NOBITS && s->data_size != 0) {
+            if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                "SHT_NOBITS has payload index=", i)) goto done;
+        }
+        if ((s->type == SHT_REL || s->type == SHT_RELA) && s->entsize == 0) {
+            if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                "relocation section entsize missing index=", i)) goto done;
+        }
+        if (s->type == SHT_STRTAB && (s->flags & SHF_EXECINSTR) != 0) {
+            if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                "string table has executable flag index=", i)) goto done;
         }
     }
 
@@ -84,9 +164,10 @@ elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
                     continue;
                 }
                 if (ranges_overlap(a->offset, a->size, b->offset, b->size)) {
-                    has_error = 1;
-                    (void)elf__append_diag_fmt(obj, "section overlap index=", i);
-                    (void)elf__append_diag_fmt(obj, "section overlap peer=", j);
+                    if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                        "section overlap index=", i)) goto done;
+                    if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, j,
+                                        "section overlap peer=", j)) goto done;
                 }
             }
         }
@@ -94,32 +175,47 @@ elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
 
     for (i = 0; i < obj->reloc_count; ++i) {
         struct elf_reloc *r = obj->relocs[i];
+        int relsz;
         if (r == NULL || r->section == NULL) {
-            has_error = 1;
-            (void)elf__append_diag(obj, "relocation has NULL section");
+            if (report_diag(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i, "relocation has NULL section")) goto done;
             continue;
         }
+        if (r->symbol == NULL) {
+            if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                "relocation missing symbol index=", i)) goto done;
+        } else if (r->symbol->obj != obj) {
+            if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                "relocation symbol from different object index=", i)) goto done;
+        }
         if (r->offset >= r->section->size && r->section->type != SHT_NOBITS) {
-            has_error = 1;
-            (void)elf__append_diag_fmt(obj, "relocation offset out of range idx=", i);
+            if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                "relocation offset out of range idx=", i)) goto done;
+        }
+        relsz = elf_reloc_size_for_machine(obj->machine, r->type);
+        if (relsz > 0 && r->section->type != SHT_NOBITS) {
+            uint64_t end;
+            if (!elf__u64_add(r->offset, (uint64_t)relsz, &end) || end > r->section->size) {
+                if (report_diag_fmt(&ctx, ELF_DIAG_WARNING, ELF_ERR_RELOC, i,
+                                    "relocation width out of range idx=", i)) goto done;
+            }
         }
     }
 
     for (i = 0; i < obj->symbol_count; ++i) {
         struct elf_symbol *s = obj->symbols[i];
         if (s == NULL) {
-            has_error = 1;
-            (void)elf__append_diag_fmt(obj, "NULL symbol entry index=", i);
+            if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                "NULL symbol entry index=", i)) goto done;
             continue;
         }
         if (s->name == NULL) {
-            has_error = 1;
-            (void)elf__append_diag_fmt(obj, "symbol missing name index=", i);
+            if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                "symbol missing name index=", i)) goto done;
         }
         if (s->shndx != SHN_UNDEF && s->shndx != SHN_ABS && s->shndx != SHN_COMMON &&
             s->shndx > obj->section_count) {
-            has_error = 1;
-            (void)elf__append_diag_fmt(obj, "symbol shndx out of range index=", i);
+            if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                "symbol shndx out of range index=", i)) goto done;
         }
         if (s->bind != STB_LOCAL) {
             break;
@@ -128,8 +224,8 @@ elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
     for (; i < obj->symbol_count; ++i) {
         struct elf_symbol *s = obj->symbols[i];
         if (s != NULL && s->bind == STB_LOCAL) {
-            has_error = 1;
-            (void)elf__append_diag_fmt(obj, "local symbol appears after globals index=", i);
+            if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                "local symbol appears after globals index=", i)) goto done;
         }
     }
     for (i = 0; i < obj->symbol_count; ++i) {
@@ -149,28 +245,34 @@ elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
                 continue;
             }
             if (strcmp(a->name, b->name) == 0) {
-                has_error = 1;
-                (void)elf__append_diag_fmt(obj, "duplicate global symbol index=", i);
-                (void)elf__append_diag_fmt(obj, "duplicate global peer=", j);
+                if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                    "duplicate global symbol index=", i)) goto done;
+                if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, j,
+                                    "duplicate global peer=", j)) goto done;
             }
         }
+    }
+
+    if (elf_find_section(obj, ".symtab") != NULL && elf_find_section(obj, ".strtab") == NULL) {
+        if (report_diag(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, UINT64_MAX,
+                        "symbol table exists without strtab")) goto done;
     }
 
     for (i = 0; i < obj->segment_count; ++i) {
         struct elf_segment *seg = obj->segments[i];
         if (seg == NULL) {
-            has_error = 1;
-            (void)elf__append_diag_fmt(obj, "NULL segment entry index=", i);
+            if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                "NULL segment entry index=", i)) goto done;
             continue;
         }
         if (seg->align == 0 || (seg->align & (seg->align - 1)) != 0) {
-            has_error = 1;
-            (void)elf__append_diag_fmt(obj, "segment align invalid index=", i);
+            if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                "segment align invalid index=", i)) goto done;
         }
         for (j = 0; j < seg->section_count; ++j) {
             if (seg->section_indices[j] >= obj->section_count) {
-                has_error = 1;
-                (void)elf__append_diag_fmt(obj, "segment section index out of range seg=", i);
+                if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                    "segment section index out of range seg=", i)) goto done;
             }
         }
     }
@@ -191,14 +293,56 @@ elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
                     continue;
                 }
                 if (ranges_overlap(a_lo, a_hi - a_lo, b_lo, b_hi - b_lo)) {
-                    has_error = 1;
-                    (void)elf__append_diag_fmt(obj, "segment overlap index=", i);
-                    (void)elf__append_diag_fmt(obj, "segment overlap peer=", j);
+                    if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                        "segment overlap index=", i)) goto done;
+                    if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, j,
+                                        "segment overlap peer=", j)) goto done;
                 }
             }
         }
     }
 
+    if (obj->phdr_count != 0) {
+        for (i = 0; i < obj->phdr_count; ++i) {
+            const struct elf_phdr *ph = &obj->phdrs[i];
+            if (obj->image != NULL && ph->filesz > 0 &&
+                !elf__bounds_ok((size_t)ph->offset, (size_t)ph->filesz, obj->image_size)) {
+                if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_BOUNDS, i,
+                                    "program header out of file bounds index=", i)) goto done;
+            }
+        }
+        if (has_layout) {
+            for (i = 0; i < obj->section_count; ++i) {
+                struct elf_section *s = obj->sections[i];
+                int covered = 0;
+                if (!section_is_allocated(s)) {
+                    continue;
+                }
+                for (j = 0; j < obj->phdr_count; ++j) {
+                    const struct elf_phdr *ph = &obj->phdrs[j];
+                    uint64_t ph_end;
+                    uint64_t s_end;
+                    if (ph->type != PT_LOAD && ph->type != PT_DYNAMIC && ph->type != PT_TLS) {
+                        continue;
+                    }
+                    if (!elf__u64_add(ph->offset, ph->filesz, &ph_end) ||
+                        !elf__u64_add(s->offset, s->size, &s_end)) {
+                        continue;
+                    }
+                    if (s->offset >= ph->offset && s_end <= ph_end) {
+                        covered = 1;
+                        break;
+                    }
+                }
+                if (!covered) {
+                    if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
+                                        "allocated section not covered by segment index=", i)) goto done;
+                }
+            }
+        }
+    }
+
+done:
     if (diagnostics != NULL) {
         if (obj->diag.buf != NULL) {
             *diagnostics = elf__strdup(obj->diag.buf);
@@ -209,6 +353,15 @@ elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
             return ELF_ERR_OOM;
         }
     }
+    return ctx.has_error ? ELF_ERR_FORMAT : ELF_OK;
+}
 
-    return has_error ? ELF_ERR_FORMAT : ELF_OK;
+elf_err_t elf_validate(elfobj_t *obj, char **diagnostics) {
+    elf_validate_options_t opts;
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    opts.mode = obj->validate_mode;
+    opts.max_errors = obj->validate_max_errors;
+    return elf_validate_ex(obj, &opts, diagnostics);
 }

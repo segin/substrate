@@ -15,12 +15,15 @@ elf_debug_get_compression_hint
 elf_debug_set_compression_hint
 elf_debug_sort_sections
 elf_debug_validate
+elf_diag_count
+elf_diag_entry
 elf_eh_frame_stats
 elf_endian
 elf_errstr
 elf_finalize
 elf_find_section
 elf_find_symbol
+elf_get_validation_mode
 elf_hash_gnu
 elf_hash_sysv
 elf_last_diagnostics
@@ -94,6 +97,7 @@ elf_segment_section_count
 elf_segment_type
 elf_set_reloc_hooks
 elf_set_type
+elf_set_validation_mode
 elf_symbol_at
 elf_symbol_count
 elf_symbol_define
@@ -112,4 +116,5 @@ elf_symbol_version
 elf_symbols_sort_deterministic
 elf_type
 elf_validate
+elf_validate_ex
 elf_write_file

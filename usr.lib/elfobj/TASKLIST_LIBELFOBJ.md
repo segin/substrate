@@ -111,16 +111,16 @@ Execution policy:
 - [x] Debug-info compatibility tests with system tools.
 
 ## 9) Validation and Hardening
-- [ ] Central validation API with structured diagnostics.
-- [ ] Invalid offset/size and truncation detection.
-- [ ] Overlap and out-of-range region detection.
-- [ ] Section-header/program-header coherence checks.
-- [ ] Relocation target/index validity checks.
-- [ ] Symbol table/string table coherence checks.
-- [ ] Flag/type consistency checks by section kind.
-- [ ] Defensive allocation and integer-overflow guards.
-- [ ] Configurable strict/permissive validation modes.
-- [ ] Security regression suite and crash-free guarantees.
+- [x] Central validation API with structured diagnostics.
+- [x] Invalid offset/size and truncation detection.
+- [x] Overlap and out-of-range region detection.
+- [x] Section-header/program-header coherence checks.
+- [x] Relocation target/index validity checks.
+- [x] Symbol table/string table coherence checks.
+- [x] Flag/type consistency checks by section kind.
+- [x] Defensive allocation and integer-overflow guards.
+- [x] Configurable strict/permissive validation modes.
+- [x] Security regression suite and crash-free guarantees.
 
 ## 10) Performance and Memory Model
 - [ ] Zero-copy reads where safe and practical.

@@ -22,7 +22,26 @@ elfobj_t *elf__alloc_obj(void) {
     obj->endian = ELFOBJ_ENDIAN_LE;
     obj->type = ET_REL;
     obj->machine = EM_386;
+    obj->validate_mode = ELF_VALIDATE_STRICT;
     return obj;
+}
+
+void elf__diag_clear(elfobj_t *obj) {
+    size_t i;
+    if (obj == NULL) {
+        return;
+    }
+    free(obj->diag.buf);
+    obj->diag.buf = NULL;
+    obj->diag.len = 0;
+    obj->diag.cap = 0;
+    for (i = 0; i < obj->diag_item_count; ++i) {
+        free(obj->diag_items[i].message);
+    }
+    free(obj->diag_items);
+    obj->diag_items = NULL;
+    obj->diag_item_count = 0;
+    obj->diag_item_cap = 0;
 }
 
 void *elf__calloc(size_t n, size_t sz) {
@@ -155,9 +174,12 @@ void elf__wr64(uint8_t *p, elfobj_endian_t e, uint64_t v) {
     elf__wr32(p + 4, e, (uint32_t)(v >> 32));
 }
 
-elf_err_t elf__append_diag(elfobj_t *obj, const char *msg) {
+elf_err_t elf__diag_append(elfobj_t *obj, elf_diag_level_t level, elf_err_t code,
+                           uint64_t index, const char *msg) {
     size_t need;
     char *next;
+    char *copy;
+    void *items_next;
 
     if (obj == NULL || msg == NULL) {
         return ELF_ERR_STATE;
@@ -184,7 +206,30 @@ elf_err_t elf__append_diag(elfobj_t *obj, const char *msg) {
     obj->diag.len += need - 1;
     obj->diag.buf[obj->diag.len++] = '\n';
     obj->diag.buf[obj->diag.len] = '\0';
+
+    if (obj->diag_item_count == obj->diag_item_cap) {
+        size_t new_cap = obj->diag_item_cap == 0 ? 16 : obj->diag_item_cap * 2;
+        items_next = elf__reallocarray(obj->diag_items, new_cap, sizeof(obj->diag_items[0]));
+        if (items_next == NULL) {
+            return ELF_ERR_OOM;
+        }
+        obj->diag_items = (elf_diag_item_t *)items_next;
+        obj->diag_item_cap = new_cap;
+    }
+    copy = elf__strdup(msg);
+    if (copy == NULL) {
+        return ELF_ERR_OOM;
+    }
+    obj->diag_items[obj->diag_item_count].level = level;
+    obj->diag_items[obj->diag_item_count].code = code;
+    obj->diag_items[obj->diag_item_count].index = index;
+    obj->diag_items[obj->diag_item_count].message = copy;
+    obj->diag_item_count++;
     return ELF_OK;
+}
+
+elf_err_t elf__append_diag(elfobj_t *obj, const char *msg) {
+    return elf__diag_append(obj, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX, msg);
 }
 
 elf_err_t elf__append_diag_fmt(elfobj_t *obj, const char *prefix, uint64_t value) {
@@ -203,14 +248,14 @@ elf_err_t elf__append_diag_fmt(elfobj_t *obj, const char *prefix, uint64_t value
     tmp[pfx_len] = '\0';
     (void)snprintf(tmp + pfx_len, sizeof(tmp) - pfx_len, "%llu",
                    (unsigned long long)value);
-    return elf__append_diag(obj, tmp);
+    return elf__diag_append(obj, ELF_DIAG_ERROR, ELF_ERR_FORMAT, value, tmp);
 }
 
 void elf__set_err(elfobj_t *obj, elf_err_t err, const char *msg) {
     if (obj != NULL) {
         obj->last_err = err;
         if (msg != NULL) {
-            (void)elf__append_diag(obj, msg);
+            (void)elf__diag_append(obj, ELF_DIAG_ERROR, err, UINT64_MAX, msg);
         }
     }
 }
@@ -314,7 +359,7 @@ void elf_close(elfobj_t *obj) {
     elf_free_relocs(obj);
     elf_free_phdrs(obj);
     elf_free_segments(obj);
-    free(obj->diag.buf);
+    elf__diag_clear(obj);
     free(obj);
 }
 
@@ -452,6 +497,44 @@ const char *elf_last_diagnostics(const elfobj_t *obj) {
         return "";
     }
     return obj->diag.buf;
+}
+
+elf_err_t elf_set_validation_mode(elfobj_t *obj, elf_validate_mode_t mode) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (mode != ELF_VALIDATE_PERMISSIVE && mode != ELF_VALIDATE_STRICT) {
+        return ELF_ERR_STATE;
+    }
+    obj->validate_mode = mode;
+    return ELF_OK;
+}
+
+elf_validate_mode_t elf_get_validation_mode(const elfobj_t *obj) {
+    if (obj == NULL) {
+        return ELF_VALIDATE_STRICT;
+    }
+    return obj->validate_mode;
+}
+
+size_t elf_diag_count(const elfobj_t *obj) {
+    if (obj == NULL) {
+        return 0;
+    }
+    return obj->diag_item_count;
+}
+
+int elf_diag_entry(const elfobj_t *obj, size_t index, elf_diag_entry_t *out) {
+    const elf_diag_item_t *in;
+    if (obj == NULL || out == NULL || index >= obj->diag_item_count) {
+        return 0;
+    }
+    in = &obj->diag_items[index];
+    out->level = in->level;
+    out->code = in->code;
+    out->index = in->index;
+    out->message = in->message;
+    return 1;
 }
 
 elf_err_t elf__push_phdr(elfobj_t *obj, const struct elf_phdr *phdr) {
