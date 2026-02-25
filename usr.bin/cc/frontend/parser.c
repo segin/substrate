@@ -202,6 +202,10 @@ static int parser_is_c11_or_newer(void) {
     return g_parser_std_c11 || g_parser_std_c17 || g_parser_std_c23;
 }
 
+static int parser_is_c23_or_newer(void) {
+    return g_parser_std_c23;
+}
+
 static int next_tok(parser_t *p) {
     if (cc_lexer_next(&p->lx, &p->tok) != 0) {
         set_diag(p->diag, p->tok.line, p->tok.col, "invalid token");
@@ -609,7 +613,13 @@ static int is_declspec_tok(cc_tok_kind_t k);
 
 static int is_declspec_ident(parser_t *p) {
     if (tok_is_ident(p, "_Atomic") || tok_is_ident(p, "_Thread_local") || tok_is_ident(p, "_Alignas") ||
-        tok_is_ident(p, "_Noreturn")) {
+        tok_is_ident(p, "_Noreturn") || tok_is_ident(p, "_BitInt") || tok_is_ident(p, "_Decimal32") ||
+        tok_is_ident(p, "_Decimal64") || tok_is_ident(p, "_Decimal128")) {
+        return 1;
+    }
+    if (parser_is_c23_or_newer() &&
+        (tok_is_ident(p, "bool") || tok_is_ident(p, "thread_local") || tok_is_ident(p, "alignas") ||
+         tok_is_ident(p, "constexpr") || tok_is_ident(p, "typeof") || tok_is_ident(p, "typeof_unqual"))) {
         return 1;
     }
     return 0;
@@ -624,8 +634,12 @@ static int is_declspec_start(parser_t *p) {
 
 static int is_type_name_start_after_lparen(parser_t *p) {
     cc_token_t t;
-    if (peek_tok(p, &t) != 0) {
-        return 0;
+    if (p->tok.kind == TOK_LPAREN) {
+        if (peek_tok(p, &t) != 0) {
+            return 0;
+        }
+    } else {
+        t = p->tok;
     }
     if (is_declspec_tok(t.kind)) {
         return 1;
@@ -634,7 +648,11 @@ static int is_type_name_start_after_lparen(parser_t *p) {
         if (typedef_find_visible_n(p, t.start, t.len) >= 0) {
             return 1;
         }
-        if (t.len == strlen("_Atomic") && strncmp(t.start, "_Atomic", t.len) == 0) {
+        if ((t.len == strlen("_Atomic") && strncmp(t.start, "_Atomic", t.len) == 0) ||
+            (t.len == strlen("_BitInt") && strncmp(t.start, "_BitInt", t.len) == 0) ||
+            (t.len == strlen("typeof") && strncmp(t.start, "typeof", t.len) == 0) ||
+            (t.len == strlen("typeof_unqual") && strncmp(t.start, "typeof_unqual", t.len) == 0) ||
+            (parser_is_c23_or_newer() && t.len == strlen("bool") && strncmp(t.start, "bool", t.len) == 0)) {
             return 1;
         }
     }
@@ -694,6 +712,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
     int seen_opaque_tag = 0;
     int seen_typedef = 0;
     int seen_alias = 0;
+    int seen_bitint = 0;
+    long bitint_width = 0;
     int alias_struct_id = -1;
     int seen_struct_id = -1;
     cc_type_t alias_type = CC_TYPE_VOID;
@@ -740,7 +760,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                 }
                 continue;
             }
-            if (tok_is_ident(p, "_Thread_local")) {
+            if (tok_is_ident(p, "_Thread_local") || (parser_is_c23_or_newer() && tok_is_ident(p, "thread_local"))) {
                 if (!parser_is_c11_or_newer()) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "_Thread_local requires C11 or newer");
                     return -1;
@@ -766,7 +786,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                 }
                 continue;
             }
-            if (tok_is_ident(p, "_Alignas")) {
+            if (tok_is_ident(p, "_Alignas") || (parser_is_c23_or_newer() && tok_is_ident(p, "alignas"))) {
                 cc_type_t aty = CC_TYPE_VOID;
                 int asid = -1;
                 long align = 0;
@@ -779,11 +799,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                 if (next_tok(p) != 0) {
                     return -1;
                 }
-                if (expect(p, TOK_LPAREN, "expected '(' after _Alignas") != 0) {
+                if (expect(p, TOK_LPAREN, "expected '(' after _Alignas/alignas") != 0) {
                     return -1;
                 }
                 if (is_declspec_start(p)) {
-                    if (parse_type_name(p, &aty, &asid, 1, "expected type name in _Alignas") != 0) {
+                    if (parse_type_name(p, &aty, &asid, 1, "expected type name in _Alignas/alignas") != 0) {
                         return -1;
                     }
                     align = parser_type_align_bytes(p, aty, asid);
@@ -802,7 +822,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                     }
                     free_expr(ae);
                 }
-                if (expect(p, TOK_RPAREN, "expected ')' after _Alignas") != 0) {
+                if (expect(p, TOK_RPAREN, "expected ')' after _Alignas/alignas") != 0) {
                     return -1;
                 }
                 if (out_attrs != NULL) {
@@ -846,6 +866,100 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                 if (next_tok(p) != 0) {
                     return -1;
                 }
+                continue;
+            }
+            if (parser_is_c23_or_newer() && tok_is_ident(p, "bool")) {
+                seen = 1;
+                seen_type = 1;
+                seen_bool = 1;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (parser_is_c23_or_newer() && tok_is_ident(p, "constexpr")) {
+                seen = 1;
+                storage_flags |= CC_STORAGE_STATIC;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (parser_is_c23_or_newer() &&
+                (tok_is_ident(p, "_Decimal32") || tok_is_ident(p, "_Decimal64") || tok_is_ident(p, "_Decimal128"))) {
+                seen = 1;
+                seen_type = 1;
+                seen_double = 1;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (tok_is_ident(p, "_BitInt")) {
+                cc_expr_t *we;
+                long w = 0;
+                if (!parser_is_c23_or_newer()) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt requires C23 or newer");
+                    return -1;
+                }
+                seen = 1;
+                seen_type = 1;
+                seen_bitint = 1;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                if (expect(p, TOK_LPAREN, "expected '(' after _BitInt") != 0) {
+                    return -1;
+                }
+                we = parse_cond(p);
+                if (we == NULL) {
+                    return -1;
+                }
+                if (eval_const_array_bound_expr(we, &w) != 0 || w <= 0) {
+                    free_expr(we);
+                    set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width must be a positive integer");
+                    return -1;
+                }
+                free_expr(we);
+                if (expect(p, TOK_RPAREN, "expected ')' after _BitInt width") != 0) {
+                    return -1;
+                }
+                bitint_width = w;
+                continue;
+            }
+            if (parser_is_c23_or_newer() && (tok_is_ident(p, "typeof") || tok_is_ident(p, "typeof_unqual"))) {
+                cc_type_t ty = CC_TYPE_VOID;
+                int sid = -1;
+                if (seen_type) {
+                    break;
+                }
+                seen = 1;
+                seen_type = 1;
+                seen_alias = 1;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                if (expect(p, TOK_LPAREN, "expected '(' after typeof/typeof_unqual") != 0) {
+                    return -1;
+                }
+                if (is_declspec_start(p)) {
+                    if (parse_type_name(p, &ty, &sid, 1, "expected type name in typeof") != 0) {
+                        return -1;
+                    }
+                } else {
+                    cc_expr_t *te = parse_cond(p);
+                    if (te == NULL) {
+                        return -1;
+                    }
+                    ty = te->value_type;
+                    sid = te->struct_id;
+                    free_expr(te);
+                }
+                if (expect(p, TOK_RPAREN, "expected ')' after typeof/typeof_unqual") != 0) {
+                    return -1;
+                }
+                alias_type = ty;
+                alias_struct_id = sid;
                 continue;
             }
             int tidx = typedef_find_visible_n(p, p->tok.start, p->tok.len);
@@ -927,7 +1041,15 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
             storage_flags |= CC_STORAGE_EXTERN;
             break;
         case TOK_KW_AUTO:
-            storage_flags |= CC_STORAGE_AUTO;
+            if (parser_is_c23_or_newer() && !seen_type) {
+                seen_type = 1;
+                seen_alias = 1;
+                alias_type = CC_TYPE_INT;
+                alias_struct_id = -1;
+                storage_flags |= CC_STORAGE_AUTO_TYPE;
+            } else {
+                storage_flags |= CC_STORAGE_AUTO;
+            }
             break;
         case TOK_KW_REGISTER:
             storage_flags |= CC_STORAGE_REGISTER;
@@ -1330,6 +1452,20 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                     return -1;
                 }
             }
+            if (parser_is_c23_or_newer() && p->tok.kind == TOK_COLON) {
+                cc_type_t uty = CC_TYPE_INT;
+                int usid = -1;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                if (parse_type_name(p, &uty, &usid, 1, "expected enum underlying type") != 0) {
+                    return -1;
+                }
+                if (usid >= 0) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "enum underlying type must be an integer type");
+                    return -1;
+                }
+            }
             if (p->tok.kind != TOK_LBRACE) {
                 continue;
             }
@@ -1423,6 +1559,25 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
         *out_type = alias_type;
         if (out_struct_id != NULL) {
             *out_struct_id = alias_struct_id;
+        }
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
+        RETURN_OK();
+    }
+
+    if (seen_bitint) {
+        if (bitint_width <= 0) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width must be positive");
+            return -1;
+        }
+        *out_type = bitint_width <= 32 ? (seen_unsigned ? CC_TYPE_UINT : CC_TYPE_INT)
+                                       : (seen_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG);
+        if (out_struct_id != NULL) {
+            *out_struct_id = -1;
         }
         if (out_typedef != NULL) {
             *out_typedef = seen_typedef;
@@ -2763,7 +2918,13 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
 }
 
 static int is_static_assert_tok(parser_t *p) {
-    return tok_is_ident(p, "_Static_assert");
+    if (tok_is_ident(p, "_Static_assert")) {
+        return 1;
+    }
+    if (parser_is_c23_or_newer() && tok_is_ident(p, "static_assert")) {
+        return 1;
+    }
+    return 0;
 }
 
 static int parse_static_assert_decl(parser_t *p, int require_semi) {
@@ -2798,7 +2959,7 @@ static int parse_static_assert_decl(parser_t *p, int require_semi) {
             free_expr(cond_expr);
             return -1;
         }
-    } else {
+    } else if (!parser_is_c23_or_newer()) {
         free_expr(cond_expr);
         set_diag(p->diag, p->tok.line, p->tok.col, "C11 static assertion requires a message string");
         return -1;
@@ -3071,6 +3232,45 @@ static cc_expr_t *parse_primary(parser_t *p) {
     }
 
     if (p->tok.kind == TOK_IDENT) {
+        if (parser_is_c23_or_newer() && tok_is_ident(p, "true")) {
+            e = new_expr(CC_EXPR_INT);
+            if (e == NULL) {
+                return NULL;
+            }
+            e->int_val = 1;
+            e->value_type = CC_TYPE_BOOL;
+            if (next_tok(p) != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            return e;
+        }
+        if (parser_is_c23_or_newer() && tok_is_ident(p, "false")) {
+            e = new_expr(CC_EXPR_INT);
+            if (e == NULL) {
+                return NULL;
+            }
+            e->int_val = 0;
+            e->value_type = CC_TYPE_BOOL;
+            if (next_tok(p) != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            return e;
+        }
+        if (parser_is_c23_or_newer() && tok_is_ident(p, "nullptr")) {
+            e = new_expr(CC_EXPR_INT);
+            if (e == NULL) {
+                return NULL;
+            }
+            e->int_val = 0;
+            e->value_type = CC_TYPE_INT;
+            if (next_tok(p) != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            return e;
+        }
         int eidx = enum_const_find_visible_n(p, p->tok.start, p->tok.len);
         if (eidx >= 0) {
             e = new_expr(CC_EXPR_INT);
@@ -3580,7 +3780,8 @@ static cc_expr_t *parse_unary(parser_t *p) {
         return e;
     }
 
-    if (p->tok.kind == TOK_IDENT && tok_is_ident(p, "_Alignof")) {
+    if (p->tok.kind == TOK_IDENT &&
+        (tok_is_ident(p, "_Alignof") || (parser_is_c23_or_newer() && tok_is_ident(p, "alignof")))) {
         cc_type_t aty = CC_TYPE_VOID;
         int asid = -1;
         long align;
@@ -3592,14 +3793,14 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (next_tok(p) != 0) {
             return NULL;
         }
-        if (expect(p, TOK_LPAREN, "expected '(' after _Alignof") != 0) {
+        if (expect(p, TOK_LPAREN, "expected '(' after _Alignof/alignof") != 0) {
             return NULL;
         }
         if (is_type_name_start_after_lparen(p)) {
-            if (parse_type_name(p, &aty, &asid, 1, "expected type name in _Alignof") != 0) {
+            if (parse_type_name(p, &aty, &asid, 1, "expected type name in _Alignof/alignof") != 0) {
                 return NULL;
             }
-            if (expect(p, TOK_RPAREN, "expected ')' after _Alignof type") != 0) {
+            if (expect(p, TOK_RPAREN, "expected ')' after _Alignof/alignof type") != 0) {
                 return NULL;
             }
             align = parser_type_align_bytes(p, aty, asid);
@@ -3608,7 +3809,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             if (ae == NULL) {
                 return NULL;
             }
-            if (expect(p, TOK_RPAREN, "expected ')' after _Alignof expression") != 0) {
+            if (expect(p, TOK_RPAREN, "expected ')' after _Alignof/alignof expression") != 0) {
                 free_expr(ae);
                 return NULL;
             }
@@ -4260,6 +4461,24 @@ static cc_expr_t *parse_expr(parser_t *p) {
     return parse_comma(p);
 }
 
+static int apply_auto_type_deduction(parser_t *p, cc_stmt_t *s) {
+    if ((s->storage & CC_STORAGE_AUTO_TYPE) == 0) {
+        return 0;
+    }
+    if (!parser_is_c23_or_newer()) {
+        set_diag(p->diag, s->line, s->col, "auto type deduction requires C23 or newer");
+        return -1;
+    }
+    if (s->expr == NULL) {
+        set_diag(p->diag, s->line, s->col, "auto type deduction requires an initializer");
+        return -1;
+    }
+    s->type = s->expr->value_type;
+    s->type_struct_id = s->expr->struct_id;
+    s->storage &= ~CC_STORAGE_AUTO_TYPE;
+    return 0;
+}
+
 static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
     int is_typedef = 0;
     int decl_storage = 0;
@@ -4329,6 +4548,9 @@ static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
             return -1;
         }
     }
+    if (apply_auto_type_deduction(p, s) != 0) {
+        return -1;
+    }
     if (need_semi) {
         return expect(p, TOK_SEMI, "expected ';' after declaration");
     }
@@ -4349,6 +4571,11 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     }
     decl_storage = p->last_storage;
     if (p->tok.kind == TOK_SEMI) {
+        if ((decl_storage & CC_STORAGE_AUTO_TYPE) != 0) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "auto type deduction requires an initializer");
+            decl_attrs_clear(&base_attrs);
+            return -1;
+        }
         if (base_struct_id >= 0 && (base_attrs.flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) != 0) {
             if (apply_struct_attrs(p, base_struct_id, &base_attrs) != 0) {
                 decl_attrs_clear(&base_attrs);
@@ -4552,6 +4779,10 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             }
+        }
+        if (apply_auto_type_deduction(p, &s) != 0) {
+            free_stmt(&s);
+            return -1;
         }
         if (is_typedef) {
             int trc;
@@ -5391,6 +5622,14 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     p.scope_depth = 0;
     cc_lexer_init(&p.lx, buf, (size_t)sz);
     if (next_tok(&p) != 0) {
+        parser_free_typedefs(&p);
+        parser_free_enum_consts(&p);
+        parser_free_structs(&p);
+        free(buf);
+        cc_tu_free(out);
+        return -1;
+    }
+    if (parser_is_c23_or_newer() && typedef_push(&p, "nullptr_t", CC_TYPE_PTR_VOID, -1) != 0) {
         parser_free_typedefs(&p);
         parser_free_enum_consts(&p);
         parser_free_structs(&p);

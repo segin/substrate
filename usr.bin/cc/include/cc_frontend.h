@@ -15,6 +15,7 @@ typedef struct {
 #define CC_STORAGE_AUTO    (1 << 3)
 #define CC_STORAGE_REGISTER (1 << 4)
 #define CC_STORAGE_THREAD_LOCAL (1 << 5)
+#define CC_STORAGE_AUTO_TYPE (1 << 6)
 
 #define CC_ATTR_PACKED     (1 << 0)
 #define CC_ATTR_ALIGNED    (1 << 1)

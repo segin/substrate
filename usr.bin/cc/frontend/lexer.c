@@ -133,6 +133,26 @@ static int is_hex_digit(int c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
+static int is_bin_digit(int c) {
+    return c == '0' || c == '1';
+}
+
+static size_t copy_numeric_compact(char *dst, size_t dst_cap, const char *src, size_t src_len) {
+    size_t i;
+    size_t w = 0;
+    if (dst_cap == 0) {
+        return 0;
+    }
+    for (i = 0; i < src_len && w + 1 < dst_cap; ++i) {
+        if (src[i] == '\'') {
+            continue;
+        }
+        dst[w++] = src[i];
+    }
+    dst[w] = '\0';
+    return w;
+}
+
 static size_t lx_ucn_len_at(const cc_lexer_t *lx, size_t pos) {
     size_t i;
     int count;
@@ -636,25 +656,26 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         int seen_u = 0;
         int seen_l = 0;
         int base = 10;
+        int had_binary_prefix = 0;
         unsigned long long val_u = 0;
         start = lx->pos;
         if (c == '.') {
             saw_dot = 1;
             lx_adv(lx);
-            while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+            while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
                 lx_adv(lx);
             }
         } else if (c == '0' && (lx_peekn(lx, 1) == 'x' || lx_peekn(lx, 1) == 'X')) {
             base = 16;
             lx_adv(lx);
             lx_adv(lx);
-            while ((c = lx_peek(lx)) >= 0 && isxdigit(c)) {
+            while ((c = lx_peek(lx)) >= 0 && (isxdigit(c) || c == '\'')) {
                 lx_adv(lx);
             }
             if (lx_peek(lx) == '.') {
                 saw_dot = 1;
                 lx_adv(lx);
-                while ((c = lx_peek(lx)) >= 0 && isxdigit(c)) {
+                while ((c = lx_peek(lx)) >= 0 && (isxdigit(c) || c == '\'')) {
                     lx_adv(lx);
                 }
             }
@@ -670,20 +691,28 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                         if (lx_peek(lx) == '+' || lx_peek(lx) == '-') {
                             lx_adv(lx);
                         }
-                        while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                        while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
                             lx_adv(lx);
                         }
                     }
                 }
             }
+        } else if (c == '0' && (lx_peekn(lx, 1) == 'b' || lx_peekn(lx, 1) == 'B')) {
+            base = 2;
+            had_binary_prefix = 1;
+            lx_adv(lx);
+            lx_adv(lx);
+            while ((c = lx_peek(lx)) >= 0 && (is_bin_digit(c) || c == '\'')) {
+                lx_adv(lx);
+            }
         } else {
-            while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+            while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
                 lx_adv(lx);
             }
             if (lx_peek(lx) == '.') {
                 saw_dot = 1;
                 lx_adv(lx);
-                while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
                     lx_adv(lx);
                 }
             } else if (lx->src[start] == '0') {
@@ -700,7 +729,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                         if (lx_peek(lx) == '+' || lx_peek(lx) == '-') {
                             lx_adv(lx);
                         }
-                        while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                        while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
                             lx_adv(lx);
                         }
                     }
@@ -736,29 +765,17 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         out->col = col;
         if (saw_dot) {
             char tmp[128];
-            size_t n = out->len;
-            size_t i;
-            if (n >= sizeof(tmp)) {
-                n = sizeof(tmp) - 1;
-            }
-            for (i = 0; i < n; ++i) {
-                tmp[i] = out->start[i];
-            }
-            tmp[n] = '\0';
+            copy_numeric_compact(tmp, sizeof(tmp), out->start, out->len);
             out->is_float = 1;
             out->fnum = strtod(tmp, NULL);
         } else {
             char tmp[128];
-            size_t n = out->len;
-            size_t i;
-            if (n >= sizeof(tmp)) {
-                n = sizeof(tmp) - 1;
+            char *parse_s = tmp;
+            copy_numeric_compact(tmp, sizeof(tmp), out->start, out->len);
+            if (had_binary_prefix && tmp[0] == '0' && (tmp[1] == 'b' || tmp[1] == 'B')) {
+                parse_s = tmp + 2;
             }
-            for (i = 0; i < n; ++i) {
-                tmp[i] = out->start[i];
-            }
-            tmp[n] = '\0';
-            val_u = strtoull(tmp, NULL, base == 10 ? 0 : base);
+            val_u = strtoull(parse_s, NULL, base == 10 ? 0 : base);
             out->num = (long)val_u;
             if (seen_u) {
                 out->int_is_unsigned = 1;

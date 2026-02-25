@@ -13,6 +13,7 @@ static int g_warn_all = 0;
 static int g_warn_error = 0;
 static int g_pedantic = 0;
 static int g_pedantic_errors = 0;
+static int g_std_c23 = 0;
 static size_t g_diag_ctx_line = 0;
 static size_t g_diag_ctx_col = 0;
 
@@ -22,6 +23,17 @@ static int std_mode_allows_implicit_function_decls(const char *std_mode) {
     }
     if (strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 || strcmp(std_mode, "c95") == 0 ||
         strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int std_mode_is_c23_or_newer(const char *std_mode) {
+    if (std_mode == NULL || std_mode[0] == '\0') {
+        return 0;
+    }
+    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
+        strcmp(std_mode, "gnu2x") == 0) {
         return 1;
     }
     return 0;
@@ -2050,6 +2062,13 @@ static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *dia
         return init;
     }
     if (init->arg_count == 0) {
+        if (g_std_c23) {
+            init->kind = CC_EXPR_INT;
+            init->int_val = 0;
+            init->value_type = CC_TYPE_INT;
+            init->struct_id = -1;
+            return init;
+        }
         set_diag(diag, "initializer list is empty");
         return NULL;
     }
@@ -2332,14 +2351,29 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             return -1;
                         }
                     } else {
-                        if (diag != NULL && diag->message[0] == '\0') {
-                            snprintf(diag->message, sizeof(diag->message),
-                                     "initializer list is unsupported for variable '%s'",
-                                     s->decl_name != NULL ? s->decl_name : "<anon>");
+                        cc_expr_t *scalar_init = unwrap_scalar_initializer_expr(s->expr, diag);
+                        if (scalar_init == NULL) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
                         }
-                        free((*vars)[*var_count - 1].name);
-                        (*var_count)--;
-                        return -1;
+                        if (check_expr(tu, scalar_init, *vars, *var_count, depth, diag) != 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        if (!can_convert(init_type, scalar_init->value_type) &&
+                            !(is_pointer_type(init_type) && is_integral_type(scalar_init->value_type) &&
+                              is_null_ptr_constant(scalar_init))) {
+                            if (diag != NULL && diag->message[0] == '\0') {
+                                snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
+                                         s->decl_name != NULL ? s->decl_name : "<anon>");
+                            }
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        s->expr = scalar_init;
                     }
                 } else {
                     if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
@@ -2790,11 +2824,22 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                         goto fail_global;
                     }
                 } else {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message),
-                                 "initializer list is unsupported for file-scope object %s", g->name);
+                    cc_expr_t *scalar_init = unwrap_scalar_initializer_expr(g->init, diag);
+                    if (scalar_init == NULL) {
+                        goto fail_global;
                     }
-                    goto fail_global;
+                    if (check_expr(tu, scalar_init, NULL, 0, 0, diag) != 0) {
+                        goto fail_global;
+                    }
+                    if (!can_convert(g->type, scalar_init->value_type) &&
+                        !(is_pointer_type(g->type) && is_integral_type(scalar_init->value_type) &&
+                          is_null_ptr_constant(scalar_init))) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
+                                     g->name);
+                        }
+                        goto fail_global;
+                    }
                 }
             } else {
                 if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0) {
@@ -2990,6 +3035,7 @@ void cc_frontend_set_pointer_size(int bytes) {
 
 void cc_frontend_set_std_mode(const char *std_mode) {
     g_allow_implicit_funcdecl = std_mode_allows_implicit_function_decls(std_mode);
+    g_std_c23 = std_mode_is_c23_or_newer(std_mode);
     cc_parser_set_std_mode(std_mode);
 }
 

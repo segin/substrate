@@ -130,22 +130,22 @@ Execution policy:
 - [x] C17 deprecations behavior (compatibility diagnostics).
 
 ### 2.3 C23 core language
-- [ ] `__STDC_VERSION__ == 202311L`.
-- [ ] New keywords aliases: `bool`, `true`, `false`.
-- [ ] `nullptr` and `nullptr_t`.
-- [ ] Keyword aliases: `alignas`, `alignof`, `static_assert`, `thread_local`.
-- [ ] `typeof` and `typeof_unqual` (standard C23 spellings).
-- [ ] `_BitInt(N)` type family and conversions.
-- [ ] Binary integer literals (`0b`/`0B`).
-- [ ] Digit separators in numeric constants.
-- [ ] Empty initializer `= {}` support.
-- [ ] Explicit enum underlying types.
-- [ ] Labels/declarations grammar relaxations from C23.
-- [ ] Single-argument `static_assert`.
-- [ ] `constexpr` support (C23 object semantics).
-- [ ] `auto` type deduction for objects (C23 semantics).
-- [ ] Decimal floating types `_Decimal32/_Decimal64/_Decimal128`.
-- [ ] C23 compatibility updates for qualifiers and array rules.
+- [x] `__STDC_VERSION__ == 202311L`.
+- [x] New keywords aliases: `bool`, `true`, `false`.
+- [x] `nullptr` and `nullptr_t`.
+- [x] Keyword aliases: `alignas`, `alignof`, `static_assert`, `thread_local`.
+- [x] `typeof` and `typeof_unqual` (standard C23 spellings).
+- [x] `_BitInt(N)` type family and conversions.
+- [x] Binary integer literals (`0b`/`0B`).
+- [x] Digit separators in numeric constants.
+- [x] Empty initializer `= {}` support.
+- [x] Explicit enum underlying types.
+- [x] Labels/declarations grammar relaxations from C23.
+- [x] Single-argument `static_assert`.
+- [x] `constexpr` support (C23 object semantics).
+- [x] `auto` type deduction for objects (C23 semantics).
+- [x] Decimal floating types `_Decimal32/_Decimal64/_Decimal128`.
+- [x] C23 compatibility updates for qualifiers and array rules.
 
 ### 2.4 C23 standard attributes
 - [ ] `[[deprecated]]`.
