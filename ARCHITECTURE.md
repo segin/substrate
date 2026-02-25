@@ -216,6 +216,8 @@ These components are essential for booting and basic system operation.
   - retained SSA utilities (`ir-verifier`, `ir-normalize`, `ir-diff`)
 - **Phase-0+ Driver:** `cc` supports stage orchestration and options plumbing:
   - `-E` preprocessing via in-tree preprocessor path (`frontend/preproc.c`)
+  - preprocessor compatibility options including `-include`, `-imacros`, `-dM`, `-P`, include-path dumps (`-v`), and dependency generation (`-M/-MM/-MD/-MMD/-MF/-MT/-MQ`)
+  - when invoked as `cpp`, `usr.bin/cc/cc` runs in standalone preprocessor mode by default
   - `.s/.o` assembly/link path via system `as` and `ld`
   - `-emit-ssa` routed to IR verification utility for textual IR workflows
   - `-m32` / `-m64` target ABI selection across frontend/backend/assembler/linker stages
@@ -244,6 +246,7 @@ These components are essential for booting and basic system operation.
   - declaration-semantic ordering now places a local name into scope before validating its initializer expression, allowing legal self-references in initializers such as `sizeof(*p)` in `T *p = ...`.
 - **Verifier Coverage:** Existing SSA verifier enforces block terminators, phi placement/arity, unique defs, use-before-def, and dominance checks.
 - **Testing Strategy:** `tests/usr.bin/cc/` covers IR verifier regressions plus driver smoke tests for preprocess, native subset codegen (including stack-argument ABI cases, variadic calls, declaration/prototype compatibility, typedef alias declarations/uses, GNU declaration compatibility forms (`__extension__`, qualifier aliases, attribute-suffixed typedefs, typedef function-pointer declarators), extern call emission, pointer addr/deref/store + pointer-parameter flow plus pointer arithmetic scaling checks, `if/else`/loop/switch branching, `goto`/label flow, `break`/`continue`/`case`/`default` validation, C95 digraph/trigraph lexical forms, C99 `for`-declaration scope checks, short-circuit logical behavior, bitwise/shift/comma/compound/update operators, ternary/cast/sizeof behavior, floating comparison + floating-condition truthiness behavior, unsigned integer semantics including literal suffix cases, optimization behavior, `-m32` ELF32 object generation including `double`, and stack-slot pressure/frame-size regressions), staged assembly/linking, warning/pedantic diagnostics (`-Wall`/`-Werror`/`-pedantic`/`-pedantic-errors`), a C99 conformance pass/xfail harness (`tests/usr.bin/cc/conformance_c99`), differential compile-outcome checks versus host GCC/Clang in `-std=c99`, and bootstrap fallback behavior.
+- **Preprocessor Coverage:** Dedicated preprocessor regression scripts validate directive handling (`#define/#undef/#include/#line/#error/#pragma`), variadic macro expansion (`__VA_ARGS__`/`__VA_OPT__`), include search resolution (`-I/-iquote/-isystem/-nostdinc`), dependency-file generation (`-M*`), standalone `cpp` invocation semantics, line-marker suppression (`-P`), and randomized parser/expander smoke inputs.
 - **Integration Path:** Expand native subset toward full C99 while preserving current driver UX and `-emit-ssa` observability; keep bootstrap mode only as temporary compatibility path.
 
 ## `usr.lib/elfobj`

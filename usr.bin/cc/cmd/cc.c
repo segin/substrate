@@ -21,6 +21,7 @@ typedef struct {
 } strvec_t;
 
 typedef struct {
+    int invoked_as_cpp;
     int mode_E;
     int mode_S;
     int mode_c;
@@ -255,6 +256,14 @@ static int has_ext(const char *path, const char *ext) {
     return strcmp(path + pn - en, ext) == 0;
 }
 
+static const char *prog_basename(const char *path) {
+    const char *slash = strrchr(path, '/');
+    if (slash == NULL || slash[1] == '\0') {
+        return path;
+    }
+    return slash + 1;
+}
+
 static int strvec_has_flag(const strvec_t *v, const char *flag) {
     size_t i;
     if (v == NULL || flag == NULL) {
@@ -320,6 +329,10 @@ static void usage(const char *prog) {
             "  -c                 compile/assemble only\n"
             "  -o <file>          output file\n"
             "  -I/-D/-U           preprocessor options\n"
+            "  -include/-imacros  forced preprocessor include inputs\n"
+            "  -P -dM             preprocess formatting/macro dump modes\n"
+            "  -M/-MM/-MD/-MMD    dependency generation modes\n"
+            "  -MF/-MT/-MQ        dependency output/target controls\n"
             "  -std=c90/c95/c99/c11/c17/c23   language mode\n"
             "  -O0..-O3           optimization level\n"
             "  -m32/-m64          target ABI (i386 or x86_64)\n"
@@ -357,6 +370,11 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         }
         if (strcmp(a, "-v") == 0 || strcmp(a, "--verbose") == 0) {
             o->verbose = 1;
+            if (strcmp(a, "-v") == 0) {
+                if (strvec_push(&o->cpp_flags, a) != 0) {
+                    return -1;
+                }
+            }
             continue;
         }
         if (strcmp(a, "-###") == 0) {
@@ -423,6 +441,42 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         }
         if (strcmp(a, "-nostdinc") == 0) {
             if (strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->c_flags, a) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strcmp(a, "-P") == 0 || strcmp(a, "-dM") == 0) {
+            if (strvec_push(&o->cpp_flags, a) != 0) {
+                return -1;
+            }
+            if (strcmp(a, "-dM") == 0) {
+                o->mode_E = 1;
+            }
+            continue;
+        }
+        if (strcmp(a, "-M") == 0 || strcmp(a, "-MM") == 0 || strcmp(a, "-MD") == 0 || strcmp(a, "-MMD") == 0) {
+            if (strvec_push(&o->cpp_flags, a) != 0) {
+                return -1;
+            }
+            if (strcmp(a, "-M") == 0 || strcmp(a, "-MM") == 0) {
+                o->mode_E = 1;
+            }
+            continue;
+        }
+        if (strcmp(a, "-MF") == 0 || strcmp(a, "-MT") == 0 || strcmp(a, "-MQ") == 0 || strcmp(a, "-include") == 0 ||
+            strcmp(a, "-imacros") == 0) {
+            if (i + 1 >= argc) {
+                return -1;
+            }
+            if (strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
+                return -1;
+            }
+            ++i;
+            continue;
+        }
+        if (strncmp(a, "-MF", 3) == 0 || strncmp(a, "-MT", 3) == 0 || strncmp(a, "-MQ", 3) == 0 ||
+            strncmp(a, "-include", 8) == 0 || strncmp(a, "-imacros", 8) == 0) {
+            if (strvec_push(&o->cpp_flags, a) != 0) {
                 return -1;
             }
             continue;
@@ -564,8 +618,28 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
 static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
     cc_diag_t diag;
     const char *std_mode = o->std != NULL ? o->std : "c99";
+    const char *const *pp_flags = (const char *const *)o->cpp_flags.items;
+    size_t pp_count = o->cpp_flags.count;
+    const char **tmp_flags = NULL;
+    size_t i;
+    int add_internal_p = !o->mode_E;
+
+    if (add_internal_p) {
+        tmp_flags = (const char **)calloc(pp_count + 1, sizeof(*tmp_flags));
+        if (tmp_flags == NULL) {
+            fprintf(stderr, "cpp: out of memory\n");
+            return -1;
+        }
+        for (i = 0; i < pp_count; ++i) {
+            tmp_flags[i] = o->cpp_flags.items[i];
+        }
+        tmp_flags[pp_count++] = "-P";
+        pp_flags = tmp_flags;
+    }
+
     memset(&diag, 0, sizeof(diag));
-    if (cc_preprocess_file(in, out, std_mode, (const char *const *)o->cpp_flags.items, o->cpp_flags.count, &diag) != 0) {
+    if (cc_preprocess_file(in, out, std_mode, pp_flags, pp_count, &diag) != 0) {
+        free(tmp_flags);
         if (diag.line != 0) {
             fprintf(stderr, "cpp:%zu:%zu: %s\n", diag.line, diag.col, diag.message);
         } else if (diag.message[0] != '\0') {
@@ -575,6 +649,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
         }
         return -1;
     }
+    free(tmp_flags);
     return 0;
 }
 
@@ -758,6 +833,10 @@ int cc_main(int argc, char **argv) {
     memset(&o, 0, sizeof(o));
     memset(&obj_files, 0, sizeof(obj_files));
     o.target = CC_TARGET_X86_64;
+    if (strcmp(prog_basename(argv[0]), "cpp") == 0) {
+        o.invoked_as_cpp = 1;
+        o.mode_E = 1;
+    }
 
     if (parse_args(argc, argv, &o) != 0) {
         usage(argv[0]);

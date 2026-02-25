@@ -167,67 +167,67 @@ Execution policy:
 ## 3) Preprocessor Features: C99 Baseline (must finish first)
 
 ### 3.1 Directive parsing and execution
-- [ ] `#define` object-like macros.
-- [ ] `#define` function-like macros.
-- [ ] Variadic macros (`__VA_ARGS__`) in C99 mode.
-- [ ] `#undef`.
-- [ ] `#include` with quoted and angle forms.
-- [ ] `#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`.
-- [ ] `#line`.
-- [ ] `#error`.
-- [ ] `#pragma` pass-through + recognized standard pragmas.
+- [x] `#define` object-like macros.
+- [x] `#define` function-like macros.
+- [x] Variadic macros (`__VA_ARGS__`) in C99 mode.
+- [x] `#undef`.
+- [x] `#include` with quoted and angle forms.
+- [x] `#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`.
+- [x] `#line`.
+- [x] `#error`.
+- [x] `#pragma` pass-through + recognized standard pragmas.
 
 ### 3.2 Macro expansion semantics
-- [ ] Correct argument prescan expansion ordering.
-- [ ] Disabled-macro recursion prevention.
-- [ ] `#` stringification.
-- [ ] `##` token pasting.
-- [ ] Empty argument handling and comma edge cases per standard.
-- [ ] Macro re-expansion suppression correctness.
-- [ ] `defined` operator handling in `#if` expressions.
+- [x] Correct argument prescan expansion ordering.
+- [x] Disabled-macro recursion prevention.
+- [x] `#` stringification.
+- [x] `##` token pasting.
+- [x] Empty argument handling and comma edge cases per standard.
+- [x] Macro re-expansion suppression correctness.
+- [x] `defined` operator handling in `#if` expressions.
 
 ### 3.3 Expression evaluator for conditionals
-- [ ] Integer expression grammar and precedence in preprocessor context.
-- [ ] Replacement of undefined identifiers with `0`.
-- [ ] Short-circuit behavior in `&&` and `||`.
-- [ ] Overflow-consistent integer evaluation model.
-- [ ] Diagnostics for malformed conditional expressions.
+- [x] Integer expression grammar and precedence in preprocessor context.
+- [x] Replacement of undefined identifiers with `0`.
+- [x] Short-circuit behavior in `&&` and `||`.
+- [x] Overflow-consistent integer evaluation model.
+- [x] Diagnostics for malformed conditional expressions.
 
 ### 3.4 Include resolution and line mapping
-- [ ] Search order for `""` vs `<>`.
-- [ ] `-I`, `-isystem`, `-iquote`.
-- [ ] Built-in include dirs for host bootstrap.
-- [ ] `-nostdinc`.
-- [ ] Include depth limits and diagnostics.
-- [ ] `#pragma once`.
-- [ ] Correct `#line` output emission for downstream parser mapping.
-- [ ] `-P` behavior (suppress output line markers while preserving internal mapping).
+- [x] Search order for `""` vs `<>`.
+- [x] `-I`, `-isystem`, `-iquote`.
+- [x] Built-in include dirs for host bootstrap.
+- [x] `-nostdinc`.
+- [x] Include depth limits and diagnostics.
+- [x] `#pragma once`.
+- [x] Correct `#line` output emission for downstream parser mapping.
+- [x] `-P` behavior (suppress output line markers while preserving internal mapping).
 
 ### 3.5 Driver integration and CLI behavior
-- [ ] `cc -E` delegates fully to internal preprocessor path.
-- [ ] `-DNAME`, `-DNAME=VALUE`, `-UNAME`.
-- [ ] `-include file`.
-- [ ] `-imacros file`.
-- [ ] `-dM` macro dump mode.
-- [ ] `-v` include path dump mode.
-- [ ] Deterministic output guarantees for same input/options.
+- [x] `cc -E` delegates fully to internal preprocessor path.
+- [x] `-DNAME`, `-DNAME=VALUE`, `-UNAME`.
+- [x] `-include file`.
+- [x] `-imacros file`.
+- [x] `-dM` macro dump mode.
+- [x] `-v` include path dump mode.
+- [x] Deterministic output guarantees for same input/options.
 
 ### 3.6 Dependency generation
-- [ ] `-M`.
-- [ ] `-MM`.
-- [ ] `-MD`.
-- [ ] `-MMD`.
-- [ ] `-MF`.
-- [ ] `-MT`.
-- [ ] `-MQ`.
-- [ ] Escaping/continuation formatting compatible with make.
+- [x] `-M`.
+- [x] `-MM`.
+- [x] `-MD`.
+- [x] `-MMD`.
+- [x] `-MF`.
+- [x] `-MT`.
+- [x] `-MQ`.
+- [x] Escaping/continuation formatting compatible with make.
 
 ### 3.7 C99 preprocessor diagnostics and hardening
-- [ ] File:line:col diagnostics.
-- [ ] Include stack traces.
-- [ ] Macro expansion trace output for diagnostics.
-- [ ] Limits: include depth, macro depth, token growth, output size.
-- [ ] Fuzzing coverage for parser/expander include graph logic.
+- [x] File:line:col diagnostics.
+- [x] Include stack traces.
+- [x] Macro expansion trace output for diagnostics.
+- [x] Limits: include depth, macro depth, token growth, output size.
+- [x] Fuzzing coverage for parser/expander include graph logic.
 
 ---
 
