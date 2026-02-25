@@ -75,28 +75,28 @@ Execution policy:
 - [x] Symbol-table validation checks.
 
 ## 6) Relocation Framework and Backends
-- [ ] Generic relocation object model for REL and RELA.
-- [ ] Architecture backend interface (`apply`, `size`, `pc-relative`).
-- [ ] i386 relocation backend.
-- [ ] x86_64 relocation backend.
-- [ ] TLS relocation handling in backend model.
-- [ ] Addend and sign-extension correctness.
-- [ ] Relocation overflow detection.
-- [ ] Unsupported relocation diagnostics with context.
-- [ ] Relaxation/incremental-link hooks.
-- [ ] Relocation fuzz tests with malformed inputs.
+- [x] Generic relocation object model for REL and RELA.
+- [x] Architecture backend interface (`apply`, `size`, `pc-relative`).
+- [x] i386 relocation backend.
+- [x] x86_64 relocation backend.
+- [x] TLS relocation handling in backend model.
+- [x] Addend and sign-extension correctness.
+- [x] Relocation overflow detection.
+- [x] Unsupported relocation diagnostics with context.
+- [x] Relaxation/incremental-link hooks.
+- [x] Relocation fuzz tests with malformed inputs.
 
 ## 7) Linker-Facing Services
-- [ ] Multi-object load/merge API for linkers.
-- [ ] Symbol resolution helper API across objects.
-- [ ] Section merge policy hooks.
-- [ ] Archive extraction helper hooks.
-- [ ] Dead-section GC integration hooks.
-- [ ] Incremental linking metadata hooks.
-- [ ] GOT/PLT synthesis helper APIs.
-- [ ] Dynamic section construction helpers.
-- [ ] Version script integration hooks.
-- [ ] Link map/introspection helper APIs.
+- [x] Multi-object load/merge API for linkers.
+- [x] Symbol resolution helper API across objects.
+- [x] Section merge policy hooks.
+- [x] Archive extraction helper hooks.
+- [x] Dead-section GC integration hooks.
+- [x] Incremental linking metadata hooks.
+- [x] GOT/PLT synthesis helper APIs.
+- [x] Dynamic section construction helpers.
+- [x] Version script integration hooks.
+- [x] Link map/introspection helper APIs.
 
 ## 8) Debug and Unwind Sections
 - [ ] Preserve `.debug_*` sections in round-trip mode.

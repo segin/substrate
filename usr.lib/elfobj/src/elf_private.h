@@ -172,8 +172,45 @@ struct elfobj {
     size_t segment_count;
     size_t segment_cap;
 
+    elf_reloc_hooks_t reloc_hooks;
+    void *reloc_hook_user;
+
     elf_err_t last_err;
     elf_diag_t diag;
+};
+
+struct elf_link_input {
+    elfobj_t *obj;
+    char *name;
+};
+
+struct elf_link_map_entry_rec {
+    char *symbol_name;
+    char *section_name;
+    char *input_name;
+    uint64_t value;
+    size_t input_index;
+};
+
+struct elf_link_plan {
+    struct elf_link_input *inputs;
+    size_t input_count;
+    size_t input_cap;
+
+    elf_link_section_merge_hook_t section_merge_hook;
+    void *section_merge_user;
+    elf_link_archive_hook_t archive_hook;
+    void *archive_user;
+    elf_link_gc_hook_t gc_hook;
+    void *gc_user;
+    elf_link_incremental_hook_t incremental_hook;
+    void *incremental_user;
+    elf_link_version_hook_t version_hook;
+    void *version_user;
+
+    struct elf_link_map_entry_rec *map_entries;
+    size_t map_count;
+    size_t map_cap;
 };
 
 elfobj_t *elf__alloc_obj(void);
@@ -196,6 +233,7 @@ void elf__wr64(uint8_t *p, elfobj_endian_t e, uint64_t v);
 elf_err_t elf__push_section(elfobj_t *obj, struct elf_section *sec);
 elf_err_t elf__push_symbol(elfobj_t *obj, struct elf_symbol *sym);
 elf_err_t elf__push_reloc(elfobj_t *obj, struct elf_reloc *rel);
+elf_err_t elf__section_push_reloc(struct elf_section *section, struct elf_reloc *rel);
 elf_err_t elf__push_phdr(elfobj_t *obj, const struct elf_phdr *phdr);
 elf_err_t elf__push_segment(elfobj_t *obj, struct elf_segment *seg);
 

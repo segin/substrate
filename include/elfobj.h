@@ -13,6 +13,7 @@ typedef struct elf_section elf_section_t;
 typedef struct elf_symbol elf_symbol_t;
 typedef struct elf_reloc elf_reloc_t;
 typedef struct elf_segment elf_segment_t;
+typedef struct elf_link_plan elf_link_plan_t;
 
 #define ELFOBJ_API_VERSION 1
 
@@ -51,6 +52,9 @@ typedef enum {
 #ifndef EM_386
 #define EM_386 3
 #endif
+#ifndef EM_X86_64
+#define EM_X86_64 62
+#endif
 
 #ifndef SHT_NULL
 #define SHT_NULL 0
@@ -85,6 +89,13 @@ typedef enum {
 #define PT_TLS 7
 #endif
 
+#ifndef DT_NULL
+#define DT_NULL 0
+#define DT_NEEDED 1
+#define DT_STRTAB 5
+#define DT_SYMTAB 6
+#endif
+
 #ifndef STB_LOCAL
 #define STB_LOCAL 0
 #define STB_GLOBAL 1
@@ -110,6 +121,32 @@ typedef enum {
 #define R_386_NONE 0
 #define R_386_32 1
 #define R_386_PC32 2
+#define R_386_GOT32 3
+#define R_386_PLT32 4
+#define R_386_RELATIVE 8
+#define R_386_GOTOFF 9
+#define R_386_GOTPC 10
+#define R_386_TLS_TPOFF 14
+#define R_386_TLS_IE 15
+#define R_386_TLS_GOTIE 16
+#define R_386_TLS_LE 17
+#define R_386_TLS_GD 18
+#define R_386_TLS_LDM 19
+#define R_386_TLS_LDO_32 32
+#endif
+
+#ifndef R_X86_64_NONE
+#define R_X86_64_NONE 0
+#define R_X86_64_64 1
+#define R_X86_64_PC32 2
+#define R_X86_64_GOT32 3
+#define R_X86_64_PLT32 4
+#define R_X86_64_GOTPCREL 9
+#define R_X86_64_32 10
+#define R_X86_64_32S 11
+#define R_X86_64_TLSGD 19
+#define R_X86_64_GOTTPOFF 22
+#define R_X86_64_TPOFF32 23
 #endif
 
 typedef struct {
@@ -129,6 +166,33 @@ struct elf_reloc_backend {
     int (*reloc_size)(uint32_t type);
     int (*is_pc_relative)(uint32_t type);
 };
+
+typedef struct {
+    int (*before_apply)(const elf_reloc_t *reloc, void *user);
+    void (*after_apply)(const elf_reloc_t *reloc, uint64_t relocated_value, void *user);
+    void (*incremental_note)(const char *key, uint64_t value, void *user);
+} elf_reloc_hooks_t;
+
+typedef enum {
+    ELF_LINK_MERGE_APPEND = 0,
+    ELF_LINK_MERGE_REPLACE = 1,
+    ELF_LINK_MERGE_SKIP = 2
+} elf_link_merge_action_t;
+
+typedef elf_link_merge_action_t (*elf_link_section_merge_hook_t)(
+    const char *section_name, const elf_section_t *existing, const elf_section_t *incoming, void *user);
+typedef int (*elf_link_archive_hook_t)(const char *archive_path, const char *member_name, void *user);
+typedef int (*elf_link_gc_hook_t)(const elf_section_t *section, void *user);
+typedef void (*elf_link_incremental_hook_t)(const char *key, const char *value, void *user);
+typedef int (*elf_link_version_hook_t)(const char *symbol_name, const char *version_name, void *user);
+
+typedef struct {
+    const char *symbol_name;
+    const char *section_name;
+    const char *input_name;
+    uint64_t value;
+    size_t input_index;
+} elf_link_map_entry_t;
 
 elf_err_t elf_open(const char *path, elfobj_t **out);
 elf_err_t elf_open_memory(const void *buf, size_t size, elfobj_t **out);
@@ -166,8 +230,55 @@ elf_symbol_t *elf_symbol_lookup_gnu(elfobj_t *obj, const char *name);
 
 elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol_t *symbol,
                              uint32_t type, int64_t addend);
+size_t elf_section_reloc_count(const elf_section_t *section);
+elf_reloc_t *elf_section_reloc_at(elf_section_t *section, size_t index);
+elf_reloc_t *elf_reloc_at(elfobj_t *obj, size_t index);
+uint64_t elf_reloc_offset(const elf_reloc_t *reloc);
+uint32_t elf_reloc_type(const elf_reloc_t *reloc);
+int64_t elf_reloc_addend(const elf_reloc_t *reloc);
+int elf_reloc_has_addend(const elf_reloc_t *reloc);
+elf_symbol_t *elf_reloc_symbol(const elf_reloc_t *reloc);
+elf_section_t *elf_reloc_section(const elf_reloc_t *reloc);
+elf_err_t elf_set_reloc_hooks(elfobj_t *obj, const elf_reloc_hooks_t *hooks, void *user);
+elf_err_t elf_apply_relocation(const elf_reloc_t *reloc, uint64_t place, uint64_t sym_value,
+                               uint64_t *out_value);
+elf_err_t elf_apply_relocation_value(const elfobj_t *obj, uint32_t type, uint64_t place,
+                                     uint64_t sym_value, int64_t addend, uint64_t *out_value);
+int elf_reloc_size_for_machine(uint16_t machine, uint32_t type);
+int elf_reloc_is_pc_relative_for_machine(uint16_t machine, uint32_t type);
+int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type);
 
 elf_err_t elf_link(elfobj_t **inputs, size_t count, elfobj_t **output);
+elf_link_plan_t *elf_link_plan_create(void);
+void elf_link_plan_destroy(elf_link_plan_t *plan);
+elf_err_t elf_link_plan_add_input(elf_link_plan_t *plan, elfobj_t *obj, const char *name);
+size_t elf_link_plan_input_count(const elf_link_plan_t *plan);
+elf_err_t elf_link_plan_set_section_merge_hook(elf_link_plan_t *plan,
+                                               elf_link_section_merge_hook_t hook,
+                                               void *user);
+elf_err_t elf_link_plan_set_archive_hook(elf_link_plan_t *plan, elf_link_archive_hook_t hook,
+                                         void *user);
+elf_err_t elf_link_plan_set_gc_hook(elf_link_plan_t *plan, elf_link_gc_hook_t hook, void *user);
+elf_err_t elf_link_plan_set_incremental_hook(elf_link_plan_t *plan,
+                                              elf_link_incremental_hook_t hook, void *user);
+elf_err_t elf_link_plan_set_version_hook(elf_link_plan_t *plan, elf_link_version_hook_t hook,
+                                         void *user);
+elf_err_t elf_link_plan_consider_archive_member(elf_link_plan_t *plan, const char *archive_path,
+                                                 const char *member_name, int *should_extract_out);
+elf_err_t elf_link_plan_note_incremental(elf_link_plan_t *plan, const char *key,
+                                         const char *value);
+elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output);
+size_t elf_link_plan_map_count(const elf_link_plan_t *plan);
+int elf_link_plan_map_entry(const elf_link_plan_t *plan, size_t index,
+                            elf_link_map_entry_t *out_entry);
+elf_err_t elf_link_load_objects(const char **paths, size_t count, elfobj_t ***out_objs,
+                                size_t *out_count);
+void elf_link_unload_objects(elfobj_t **objs, size_t count);
+elf_symbol_t *elf_link_resolve_symbol(elfobj_t **inputs, size_t count, const char *name,
+                                      size_t *input_index_out);
+elf_section_t *elf_link_add_got_section(elfobj_t *obj, size_t entries);
+elf_section_t *elf_link_add_plt_section(elfobj_t *obj, size_t entries);
+elf_err_t elf_link_add_dynamic_entry(elfobj_t *obj, int64_t tag, uint64_t value);
 elf_err_t elf_validate(elfobj_t *obj, char **diagnostics);
 
 const char *elf_errstr(elf_err_t err);

@@ -480,6 +480,11 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
                 free(rel);
                 return ELF_ERR_OOM;
             }
+            if (elf__section_push_reloc(target, rel) != ELF_OK) {
+                obj->reloc_count--;
+                free(rel);
+                return ELF_ERR_OOM;
+            }
         }
     }
 

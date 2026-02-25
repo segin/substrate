@@ -258,10 +258,10 @@ These components are essential for booting and basic system operation.
   - validation/link helpers (`elf_validate.c`, `elf_link.c`)
   - utility/hash/extension helpers (`elf_util.c`, `elf_hash.c`, `elf_gnu_ext.c`, `elf_dwarf.c`)
 - **Object Model:** Opaque `elfobj_t`, `elf_section_t`, `elf_symbol_t`, `elf_reloc_t` with explicit lifetime (`elf_open*` / `elf_close`) and error-code returns (`elf_err_t`).
-- **Relocation Backend Architecture:** Optional backend registry via `elf_register_reloc_backend()` with per-machine callbacks (`apply_reloc`, `reloc_size`, `is_pc_relative`) for architecture-specific relocation handling.
-- **Assembler/Linker Integration:** Assembler-facing creation path uses `elf_create` + section/symbol/reloc APIs and emits `.o` via `elf_write_file`; linker-facing merge path uses `elf_link` and validation hooks.
+- **Relocation Backend Architecture:** Built-in i386/x86_64 relocation backends are registered lazily and exposed through `elf_apply_relocation*`, `elf_reloc_size_for_machine`, `elf_reloc_is_pc_relative_for_machine`, and `elf_reloc_is_tls_for_machine`; external backends can still be registered via `elf_register_reloc_backend()`. Per-object relocation hooks (`elf_set_reloc_hooks`) provide relaxation/incremental callbacks around relocation application.
+- **Assembler/Linker Integration:** Assembler-facing creation path uses `elf_create` + section/symbol/reloc APIs and emits `.o` via `elf_write_file`; linker-facing services now include both `elf_link` and explicit link-plan APIs (`elf_link_plan_*`) with merge-policy/archive/GC/version/incremental hooks, multi-object load helpers, symbol-resolution helpers, GOT/PLT/dynamic-section helpers, and link-map introspection.
 - **ABI Stability:** Public ABI is constrained to `include/elfobj.h`; internal structs and parser/writer internals remain private in `usr.lib/elfobj/src/elf_private.h`.
-- **Testing/Fuzzing Strategy:** Unit/round-trip/link tests in `usr.lib/elfobj/tests/`, parser fuzz entrypoint in `usr.lib/elfobj/fuzz/`, and micro-benchmark coverage in `usr.lib/elfobj/bench/`.
+- **Testing/Fuzzing Strategy:** Unit/round-trip/link tests in `usr.lib/elfobj/tests/` (including relocation backend and linker-plan service coverage), parser+relocation fuzz entrypoints in `usr.lib/elfobj/fuzz/`, and micro-benchmark coverage in `usr.lib/elfobj/bench/`.
 - **Migration Plan:** Replace per-tool manual ELF parsing/relocation paths incrementally with `libelfobj` API calls; keep old paths as fallback until functional parity and artifact validation with `readelf/objdump` are complete.
 
 ```text
