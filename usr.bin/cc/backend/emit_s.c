@@ -111,7 +111,35 @@ static void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_in
     fprintf(fp, "\t.section .rodata\n");
     fprintf(fp, ".L__cc_str_%zu_%zu:\n", fn_index, instr_index);
     fprintf(fp, "\t.asciz %s\n", literal != NULL ? literal : "\"\"");
-    fprintf(fp, "\t.section %s\n", (restore_sec != NULL && restore_sec[0] != '\0') ? restore_sec : ".text");
+    if (restore_sec != NULL && restore_sec[0] != '\0') {
+        fprintf(fp, "\t.section %s,\"ax\",@progbits\n", restore_sec);
+    } else {
+        fprintf(fp, "\t.text\n");
+    }
+}
+
+static void emit_data_section(FILE *fp, const char *section_name) {
+    if (section_name != NULL && section_name[0] != '\0') {
+        fprintf(fp, "\t.section %s,\"aw\",@progbits\n", section_name);
+    } else {
+        fprintf(fp, "\t.data\n");
+    }
+}
+
+static void emit_bss_section(FILE *fp, const char *section_name) {
+    if (section_name != NULL && section_name[0] != '\0') {
+        fprintf(fp, "\t.section %s,\"aw\",@nobits\n", section_name);
+    } else {
+        fprintf(fp, "\t.bss\n");
+    }
+}
+
+static void emit_text_section(FILE *fp, const char *section_name) {
+    if (section_name != NULL && section_name[0] != '\0') {
+        fprintf(fp, "\t.section %s,\"ax\",@progbits\n", section_name);
+    } else {
+        fprintf(fp, "\t.text\n");
+    }
 }
 
 static int is_pointer_type(cc_type_t t) {
@@ -279,11 +307,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             return -1;
         }
         if (!g->has_init) {
-            if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-                fprintf(fp, ".section %s\n", bss_sec);
-            } else {
-                fprintf(fp, ".bss\n");
-            }
+            emit_bss_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? bss_sec : NULL);
             if (!is_static) {
                 fprintf(fp, ".globl %s\n", g->name);
             }
@@ -294,11 +318,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             fprintf(fp, "\t.zero %ld\n", sz);
             continue;
         }
-        if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-            fprintf(fp, ".section %s\n", data_sec);
-        } else {
-            fprintf(fp, ".data\n");
-        }
+        emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
         if (!is_static) {
             fprintf(fp, ".globl %s\n", g->name);
         }
@@ -317,11 +337,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                         fprintf(fp, "\t.section .rodata\n");
                         fprintf(fp, ".L__cc_gstream_%zu_%zu:\n", i, j);
                         fprintf(fp, "\t.asciz %s\n", it->init_str != NULL ? it->init_str : "\"\"");
-                        if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-                            fprintf(fp, "\t.section %s\n", data_sec);
-                        } else {
-                            fprintf(fp, "\t.data\n");
-                        }
+                        emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
                     }
                 }
 
@@ -409,11 +425,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_garr_%zu_%zu:\n", i, j);
                 fprintf(fp, "\t.asciz %s\n", it->init_str != NULL ? it->init_str : "\"\"");
-                if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-                    fprintf(fp, "\t.section %s\n", data_sec);
-                } else {
-                    fprintf(fp, "\t.data\n");
-                }
+                emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
             }
             for (j = 0; j < g->init_item_count; ++j) {
                 const cc_ssa_global_init_item_t *it = &g->init_items[j];
@@ -459,11 +471,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_gstr_%zu:\n", i);
                 fprintf(fp, "\t.asciz %s\n", g->init_str != NULL ? g->init_str : "\"\"");
-                if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-                    fprintf(fp, "\t.section %s\n", data_sec);
-                } else {
-                    fprintf(fp, "\t.data\n");
-                }
+                emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
                 if (!is_static) {
                     fprintf(fp, ".globl %s\n", g->name);
                 }
@@ -760,11 +768,8 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         }
         frame = (raw_frame + 15) & ~15;
 
-        if (f->attr_section != NULL && f->attr_section[0] != '\0') {
-            fprintf(fp, "\n.section %s\n", f->attr_section);
-        } else {
-            fprintf(fp, "\n.text\n");
-        }
+        fprintf(fp, "\n");
+        emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
         if ((f->storage & CC_STORAGE_STATIC) == 0) {
             fprintf(fp, ".globl %s\n", f->name);
         }
@@ -1232,11 +1237,8 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         }
         frame = (lay.slot_count * 8 + 15) & ~15;
 
-        if (f->attr_section != NULL && f->attr_section[0] != '\0') {
-            fprintf(fp, "\n.section %s\n", f->attr_section);
-        } else {
-            fprintf(fp, "\n.text\n");
-        }
+        fprintf(fp, "\n");
+        emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
         if ((f->storage & CC_STORAGE_STATIC) == 0) {
             fprintf(fp, ".globl %s\n", f->name);
         }

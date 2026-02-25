@@ -23,25 +23,25 @@ Execution policy:
 - [x] Universal character names in identifiers.
 - [x] C99 tokenization compatibility for pp-tokens and tokens.
 - [x] `//` comments.
-- [ ] Integer literals: decimal/octal/hex forms and suffix typing rules.
-- [ ] Floating literals: decimal/hex float forms, suffix typing rules.
-- [ ] Character/string literal escapes, concatenation rules, wide/narrow handling in C99 mode.
+- [x] Integer literals: decimal/octal/hex forms and suffix typing rules.
+- [x] Floating literals: decimal/hex float forms, suffix typing rules.
+- [x] Character/string literal escapes, concatenation rules, wide/narrow handling in C99 mode.
 
 ### 1.2 Declarations and type system
-- [ ] No implicit `int` (diagnose).
-- [ ] No implicit function declarations (diagnose).
+- [x] No implicit `int` (diagnose).
+- [x] No implicit function declarations (diagnose).
 - [ ] Full declaration-specifier grammar for C99.
-- [ ] `long long` / `unsigned long long`.
-- [ ] `_Bool`.
-- [ ] `_Complex`.
-- [ ] `_Imaginary`.
+- [x] `long long` / `unsigned long long`.
+- [x] `_Bool`.
+- [x] `_Complex`.
+- [x] `_Imaginary`.
 - [ ] `restrict` qualifiers and semantic constraints.
 - [ ] `inline` semantics per C99 linkage rules.
 - [ ] Typedef handling in all declarator positions.
 - [ ] Pointer declarators and deep pointer nesting.
-- [ ] Array declarators including VLA and variably-modified types.
-- [ ] Function declarators including prototypes and old-style forms accepted/rejected per mode.
-- [ ] Function parameter array qualifiers (`static`, qualifiers in brackets).
+- [x] Array declarators including VLA and variably-modified types.
+- [x] Function declarators including prototypes and old-style forms accepted/rejected per mode.
+- [x] Function parameter array qualifiers (`static`, qualifiers in brackets).
 - [ ] Qualifier propagation and compatibility checks.
 - [ ] Composite type formation rules.
 

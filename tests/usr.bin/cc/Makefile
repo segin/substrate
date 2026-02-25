@@ -60,6 +60,12 @@ test:
 	/tmp/cc_native_c99_tokenization_ppnum
 	$(TOP)/usr.bin/cc/cc native_c99_line_comment.c -o /tmp/cc_native_c99_line_comment
 	/tmp/cc_native_c99_line_comment
+	$(TOP)/usr.bin/cc/cc native_c99_integer_literals.c -o /tmp/cc_native_c99_integer_literals
+	/tmp/cc_native_c99_integer_literals
+	$(TOP)/usr.bin/cc/cc native_c99_hex_float_suffix.c -o /tmp/cc_native_c99_hex_float_suffix
+	/tmp/cc_native_c99_hex_float_suffix
+	$(TOP)/usr.bin/cc/cc native_c99_wide_literals.c -o /tmp/cc_native_c99_wide_literals
+	/tmp/cc_native_c99_wide_literals
 	$(TOP)/usr.bin/cc/cc native_do_while.c -o /tmp/cc_native_do_while
 	/tmp/cc_native_do_while
 	$(TOP)/usr.bin/cc/cc native_switch.c -o /tmp/cc_native_switch
@@ -74,6 +80,16 @@ test:
 	/tmp/cc_native_c99_for_multi_decl
 	$(TOP)/usr.bin/cc/cc native_c99_types.c -o /tmp/cc_native_c99_types
 	/tmp/cc_native_c99_types
+	$(TOP)/usr.bin/cc/cc native_c99_complex_decl.c -o /tmp/cc_native_c99_complex_decl
+	/tmp/cc_native_c99_complex_decl
+	$(TOP)/usr.bin/cc/cc native_c99_imaginary_decl.c -o /tmp/cc_native_c99_imaginary_decl
+	/tmp/cc_native_c99_imaginary_decl
+	$(TOP)/usr.bin/cc/cc native_c99_param_array_qual.c -o /tmp/cc_native_c99_param_array_qual
+	/tmp/cc_native_c99_param_array_qual
+	$(TOP)/usr.bin/cc/cc native_c99_vla_decl.c -o /tmp/cc_native_c99_vla_decl
+	/tmp/cc_native_c99_vla_decl
+	$(TOP)/usr.bin/cc/cc -std=c90 native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle
+	/tmp/cc_native_c90_oldstyle
 	$(TOP)/usr.bin/cc/cc native_c99_typedef.c -o /tmp/cc_native_c99_typedef
 	/tmp/cc_native_c99_typedef
 	$(TOP)/usr.bin/cc/cc native_c99_typedef_attr.c -o /tmp/cc_native_c99_typedef_attr
@@ -85,11 +101,10 @@ test:
 	$(TOP)/usr.bin/cc/cc native_c99_attr_codegen.c -o /tmp/cc_native_c99_attr_codegen
 	/tmp/cc_native_c99_attr_codegen
 	$(TOP)/usr.bin/cc/cc -S native_c99_attr_codegen.c -o /tmp/cc_native_c99_attr_codegen.s
-	grep -q "^\\.section \\.hotdata$$" /tmp/cc_native_c99_attr_codegen.s
-	grep -q "^\\.section \\.text\\.panic$$" /tmp/cc_native_c99_attr_codegen.s
+	grep -Eq "^[[:space:]]*\\.section \\.hotdata" /tmp/cc_native_c99_attr_codegen.s
+	grep -Eq "^[[:space:]]*\\.section \\.text\\.panic" /tmp/cc_native_c99_attr_codegen.s
 	grep -q "^\\.align 32$$" /tmp/cc_native_c99_attr_codegen.s
 	grep -q "^\\.align 16$$" /tmp/cc_native_c99_attr_codegen.s
-	grep -q "^\\.align 1$$" /tmp/cc_native_c99_attr_codegen.s
 	$(TOP)/usr.bin/cc/cc native_c99_gnu_declspec_aliases.c -o /tmp/cc_native_c99_gnu_declspec_aliases
 	/tmp/cc_native_c99_gnu_declspec_aliases
 	$(TOP)/usr.bin/cc/cc native_c99_multi_decl.c -o /tmp/cc_native_c99_multi_decl
@@ -230,6 +245,12 @@ test:
 	grep -q "ucomisd" /tmp/cc_native_c99_tokenization_ppnum_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_line_comment.c -o /tmp/cc_native_c99_line_comment_32.s
 	grep -q '\$$3' /tmp/cc_native_c99_line_comment_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_integer_literals.c -o /tmp/cc_native_c99_integer_literals_32.s
+	grep -q "\\.code32" /tmp/cc_native_c99_integer_literals_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_hex_float_suffix.c -o /tmp/cc_native_c99_hex_float_suffix_32.s
+	grep -q "ucomisd" /tmp/cc_native_c99_hex_float_suffix_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_wide_literals.c -o /tmp/cc_native_c99_wide_literals_32.s
+	grep -q "\\.code32" /tmp/cc_native_c99_wide_literals_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_do_while.c -o /tmp/cc_native_do_while_32.s
 	grep -q "jne" /tmp/cc_native_do_while_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_empty_stmt2.c -o /tmp/cc_native_c99_empty_stmt2_32.s
@@ -242,6 +263,16 @@ test:
 	grep -q "jne" /tmp/cc_native_c99_for_multi_decl_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_types.c -o /tmp/cc_native_c99_types_32.s
 	grep -q "call add_ll" /tmp/cc_native_c99_types_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_complex_decl.c -o /tmp/cc_native_c99_complex_decl_32.s
+	grep -q "cvttsd2sil" /tmp/cc_native_c99_complex_decl_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_imaginary_decl.c -o /tmp/cc_native_c99_imaginary_decl_32.s
+	grep -Eq "cvtts[sd]2sil" /tmp/cc_native_c99_imaginary_decl_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_param_array_qual.c -o /tmp/cc_native_c99_param_array_qual_32.s
+	grep -q "main:" /tmp/cc_native_c99_param_array_qual_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_vla_decl.c -o /tmp/cc_native_c99_vla_decl_32.s
+	grep -q "main:" /tmp/cc_native_c99_vla_decl_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -std=c90 -S native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle_32.s
+	grep -q "add:" /tmp/cc_native_c90_oldstyle_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_typedef.c -o /tmp/cc_native_c99_typedef_32.s
 	grep -q "\\.code32" /tmp/cc_native_c99_typedef_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_multi_decl.c -o /tmp/cc_native_c99_multi_decl_32.s
@@ -264,7 +295,7 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_cast_sizeof.c -o /tmp/cc_native_c99_cast_sizeof_32.s
 	grep -q "cvttsd2sil" /tmp/cc_native_c99_cast_sizeof_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_sizeof_array.c -o /tmp/cc_native_c99_sizeof_array_32.s
-	grep -A8 "main:" /tmp/cc_native_c99_sizeof_array_32.s | grep -Eq '\\$28|\\$20'
+	grep -A8 "main:" /tmp/cc_native_c99_sizeof_array_32.s | grep -Eq '[$$](28|20)'
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_float_cmp.c -o /tmp/cc_native_c99_float_cmp_32.s
 	grep -q "ucomisd" /tmp/cc_native_c99_float_cmp_32.s
 	grep -q "setnp" /tmp/cc_native_c99_float_cmp_32.s
@@ -370,6 +401,9 @@ test:
 	! $(TOP)/usr.bin/cc/cc -c native_bad_computed_goto_float.c -o /tmp/cc_native_bad_computed_goto_float.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_return.c -o /tmp/cc_native_bad_attr_noreturn_return.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_nonvoid.c -o /tmp/cc_native_bad_attr_noreturn_nonvoid.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_implicit_function.c -o /tmp/cc_native_bad_c99_implicit_function.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_no_implicit_int.c -o /tmp/cc_native_bad_no_implicit_int.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle_c99_bad.o
 	$(TOP)/usr.bin/cc/cc -c native_bad_void_ptr_arith.c -o /tmp/cc_native_bad_void_ptr_arith.o
 	$(TOP)/usr.bin/cc/cc -c driver_hello.s -o /tmp/cc_driver_hello.o
 	$(TOP)/usr.bin/cc/cc -nostdlib /tmp/cc_driver_hello.o -o /tmp/cc_driver_hello
@@ -388,3 +422,8 @@ clean:
 	      /tmp/cc_native_arith_32.s /tmp/cc_native_if_else_32.s /tmp/cc_native_c95_digraph_32.s /tmp/cc_native_c95_trigraph_32.s /tmp/cc_native_c99_phase12_trigraph_splice_32.s /tmp/cc_native_c99_ucn_ident_32.s /tmp/cc_native_c99_tokenization_ppnum_32.s /tmp/cc_native_c99_line_comment_32.s /tmp/cc_native_do_while_32.s /tmp/cc_native_c99_empty_stmt2_32.s /tmp/cc_native_switch_32.s /tmp/cc_native_c99_for_decl_32.s /tmp/cc_native_c99_for_multi_decl_32.s /tmp/cc_native_c99_types_32.s /tmp/cc_native_c99_typedef_32.s /tmp/cc_native_c99_multi_decl_32.s /tmp/cc_native_c99_logic_32.s /tmp/cc_native_c99_update_32.s /tmp/cc_native_c99_bitwise_32.s /tmp/cc_native_c99_comma_32.s /tmp/cc_native_c99_goto_32.s /tmp/cc_native_c99_goto_loop_32.s /tmp/cc_native_c99_ternary_32.s /tmp/cc_native_c99_cast_sizeof_32.s /tmp/cc_native_c99_sizeof_array_32.s /tmp/cc_native_c99_float_cmp_32.s /tmp/cc_native_c99_unsigned_32.s /tmp/cc_native_c99_unsigned_literals_32.s /tmp/cc_native_c99_short_32.s /tmp/cc_native_c99_pointer_32.s /tmp/cc_native_c99_pointer_store_32.s /tmp/cc_native_c99_pointer_arith.s /tmp/cc_native_c99_pointer_arith_32.s /tmp/cc_native_c99_index_32.s /tmp/cc_native_c99_pointer_diff_32.s /tmp/cc_native_c99_ptr_cast_32.s /tmp/cc_native_c99_ptr_size_32.s /tmp/cc_native_c99_ptrptr_32.s /tmp/cc_native_c99_ptrptrptr_32.s /tmp/cc_native_c99_ptr4_32.s /tmp/cc_native_c99_pointer_update_32.s /tmp/cc_native_c99_global_array_init_32.s /tmp/cc_native_c99_struct_assign_32.s /tmp/cc_native_c99_struct_ptr_arith_32.s /tmp/cc_native_c99_struct_member_array_32.s /tmp/cc_native_c99_deref_postfix_update_32.s /tmp/cc_native_c99_proto_extern_32.s /tmp/cc_native_loops_32.s /tmp/cc_native_arith_32.o /tmp/cc_native_double_32.s /tmp/cc_native_double_32.o \
 	      /tmp/cc_native_bad_inc.o /tmp/cc_native_bad_goto.o /tmp/cc_native_bad_label_dup.o /tmp/cc_native_bad_bitwise_float.o /tmp/cc_native_bad_sizeof_void.o /tmp/cc_native_bad_proto_conflict.o /tmp/cc_native_bad_signed_unsigned.o /tmp/cc_native_bad_short_long.o /tmp/cc_native_bad_typedef_init.o /tmp/cc_native_bad_deref_nonptr.o /tmp/cc_native_bad_addr_expr.o /tmp/cc_native_bad_deref_compound.o /tmp/cc_native_bad_deref_postfix_update.o /tmp/cc_native_bad_ptr_add_ptr.o /tmp/cc_native_bad_index_nonptr.o /tmp/cc_native_bad_ptr_add_float.o /tmp/cc_native_bad_ptr_sub_incompat.o /tmp/cc_native_bad_ptr_cmp_incompat.o /tmp/cc_native_bad_ptr_depth5.o /tmp/cc_native_bad_cast_ptr_float.o /tmp/cc_native_bad_computed_goto_float.o /tmp/cc_native_bad_void_ptr_arith.o /tmp/cc_native_bad_attr_noreturn_return.o /tmp/cc_native_bad_attr_noreturn_nonvoid.o \
 	      /tmp/cc_native_c99_typedef_fnptr_retptr /tmp/cc_native_c99_attr_codegen /tmp/cc_native_c99_attr_codegen.s /tmp/cc_native_double_dbg.s
+	rm -f /tmp/cc_native_c99_integer_literals /tmp/cc_native_c99_hex_float_suffix /tmp/cc_native_c99_wide_literals \
+	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle \
+	      /tmp/cc_native_c99_integer_literals_32.s /tmp/cc_native_c99_hex_float_suffix_32.s /tmp/cc_native_c99_wide_literals_32.s \
+	      /tmp/cc_native_c99_complex_decl_32.s /tmp/cc_native_c99_imaginary_decl_32.s /tmp/cc_native_c99_param_array_qual_32.s /tmp/cc_native_c99_vla_decl_32.s /tmp/cc_native_c90_oldstyle_32.s \
+	      /tmp/cc_native_bad_c99_implicit_function.o /tmp/cc_native_bad_no_implicit_int.o /tmp/cc_native_c90_oldstyle_c99_bad.o

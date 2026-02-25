@@ -8,6 +8,18 @@ void cc_parser_set_pointer_size(int bytes);
 void cc_parser_set_std_mode(const char *std_mode);
 
 static int g_pointer_size_bytes = 8;
+static int g_allow_implicit_funcdecl = 0;
+
+static int std_mode_allows_implicit_function_decls(const char *std_mode) {
+    if (std_mode == NULL || std_mode[0] == '\0') {
+        return 0;
+    }
+    if (strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 || strcmp(std_mode, "c95") == 0 ||
+        strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
+        return 1;
+    }
+    return 0;
+}
 
 typedef struct {
     char *name;
@@ -1502,6 +1514,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->value_type = callee->ret_type;
             e->struct_id = callee->ret_struct_id;
         } else if (e->ident != NULL) {
+            if (!g_allow_implicit_funcdecl) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "implicit function declaration is not allowed in this mode: %s", e->ident);
+                }
+                return -1;
+            }
             /* C89-style fallback for undeclared functions: assume extern int f(...). */
             e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
@@ -2598,5 +2617,6 @@ void cc_frontend_set_pointer_size(int bytes) {
 }
 
 void cc_frontend_set_std_mode(const char *std_mode) {
+    g_allow_implicit_funcdecl = std_mode_allows_implicit_function_decls(std_mode);
     cc_parser_set_std_mode(std_mode);
 }
