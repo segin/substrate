@@ -6,6 +6,7 @@
 
 void cc_parser_set_pointer_size(int bytes);
 void cc_parser_set_std_mode(const char *std_mode);
+void cc_parser_set_gnu89_inline(int enabled);
 
 static int g_pointer_size_bytes = 8;
 static int g_allow_implicit_funcdecl = 0;
@@ -14,6 +15,7 @@ static int g_warn_error = 0;
 static int g_pedantic = 0;
 static int g_pedantic_errors = 0;
 static int g_std_c23 = 0;
+static int g_gnu89_inline_override = -1;
 static size_t g_diag_ctx_line = 0;
 static size_t g_diag_ctx_col = 0;
 
@@ -757,6 +759,27 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
         return 1;
     }
     return 0;
+}
+
+static const cc_struct_member_t *find_union_cast_member(const cc_translation_unit_t *tu, int struct_id,
+                                                        const cc_expr_t *src_expr) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    if (tu == NULL || src_expr == NULL) {
+        return NULL;
+    }
+    sd = find_struct_def(tu, struct_id);
+    if (sd == NULL || !sd->complete || !sd->is_union) {
+        return NULL;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (can_convert(m->type, src_expr->value_type) ||
+            (is_pointer_type(m->type) && is_integral_type(src_expr->value_type) && is_null_ptr_constant(src_expr))) {
+            return m;
+        }
+    }
+    return NULL;
 }
 
 static cc_type_t integral_promo_type(cc_type_t t) {
@@ -2113,6 +2136,27 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return -1;
         }
         if (e->aux_type == CC_TYPE_VOID) {
+            if (e->aux_struct_id >= 0) {
+                const cc_struct_def_t *sd = find_struct_def(tu, e->aux_struct_id);
+                if (sd == NULL || !sd->complete) {
+                    set_diag(diag, "cast targets unknown aggregate type");
+                    return -1;
+                }
+                if (sd->is_union && e->lhs->kind != CC_EXPR_INIT_LIST) {
+                    const cc_struct_member_t *m = find_union_cast_member(tu, e->aux_struct_id, e->lhs);
+                    if (m == NULL) {
+                        set_diag(diag, "GNU union cast has no compatible destination member");
+                        return -1;
+                    }
+                    e->member_offset = m->offset;
+                    e->value_type = CC_TYPE_VOID;
+                    e->struct_id = e->aux_struct_id;
+                    return 0;
+                }
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = e->aux_struct_id;
+                return 0;
+            }
             e->value_type = CC_TYPE_VOID;
             e->struct_id = -1;
             return 0;
@@ -3362,6 +3406,18 @@ void cc_frontend_set_std_mode(const char *std_mode) {
     g_allow_implicit_funcdecl = std_mode_allows_implicit_function_decls(std_mode);
     g_std_c23 = std_mode_is_c23_or_newer(std_mode);
     cc_parser_set_std_mode(std_mode);
+    if (g_gnu89_inline_override >= 0) {
+        cc_parser_set_gnu89_inline(g_gnu89_inline_override);
+    }
+}
+
+void cc_frontend_set_gnu89_inline_mode(int enabled, int override_set) {
+    if (!override_set) {
+        g_gnu89_inline_override = -1;
+        return;
+    }
+    g_gnu89_inline_override = enabled ? 1 : 0;
+    cc_parser_set_gnu89_inline(g_gnu89_inline_override);
 }
 
 void cc_frontend_set_diag_flags(int wall, int werror, int pedantic, int pedantic_errors) {

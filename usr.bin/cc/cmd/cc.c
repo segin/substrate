@@ -39,6 +39,8 @@ typedef struct {
     int bootstrap_gcc;
     int nostdlib;
     int nodefaultlibs;
+    int gnu89_inline_mode;
+    int gnu89_inline_override;
     cc_target_t target;
 
     const char *std;
@@ -341,6 +343,8 @@ static void usage(const char *prog) {
             "  -pedantic          warn on non-C99 extensions\n"
             "  -pedantic-errors   reject non-C99 extensions\n"
             "  -fPIC              position-independent code\n"
+            "  -fgnu89-inline     GNU89 inline mode semantics\n"
+            "  -fno-gnu89-inline  disable GNU89 inline mode override\n"
             "  -shared            create shared object (link)\n"
             "  -pthread           enable thread options\n"
             "  -v                 verbose stages\n"
@@ -413,6 +417,22 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             o->pic = 1;
             strvec_push(&o->c_flags, a);
             strvec_push(&o->ld_flags, a);
+            continue;
+        }
+        if (strcmp(a, "-fgnu89-inline") == 0) {
+            o->gnu89_inline_mode = 1;
+            o->gnu89_inline_override = 1;
+            if (strvec_push(&o->c_flags, a) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strcmp(a, "-fno-gnu89-inline") == 0) {
+            o->gnu89_inline_mode = 0;
+            o->gnu89_inline_override = 1;
+            if (strvec_push(&o->c_flags, a) != 0) {
+                return -1;
+            }
             continue;
         }
         if (strcmp(a, "-shared") == 0) {
@@ -967,7 +987,8 @@ int cc_main(int argc, char **argv) {
                     unsetenv("CC_FREESTANDING");
                 }
                 if (cc_compile_c_to_s(out_pp, in, out_s, o.std, o.debug, o.target, opt_level_num(&o), o.wall,
-                                      o.werror, o.pedantic, o.pedantic_errors, &diag) != 0) {
+                                      o.werror, o.pedantic, o.pedantic_errors, o.gnu89_inline_mode,
+                                      o.gnu89_inline_override, &diag) != 0) {
                     if (diag.line != 0) {
                         fprintf(stderr, "cc:%zu:%zu: %s\n", diag.line, diag.col, diag.message);
                     } else if (diag.message[0] != '\0') {

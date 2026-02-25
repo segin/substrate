@@ -261,16 +261,16 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [x] Statement expressions `({ ... })`.
 - [x] Labels as values and computed goto.
 - [x] Locally declared labels (`__label__`).
-- [ ] Nested functions.
+- [x] Nested functions.
 - [x] `typeof` and GNU alternate spellings.
 - [x] Omitted middle operand ternary (`x ?: y`).
 - [x] Case ranges (`case a ... b`).
-- [ ] Cast-to-union extension.
-- [ ] Zero-length arrays.
-- [ ] Empty structs (GNU mode behavior).
+- [x] Cast-to-union extension.
+- [x] Zero-length arrays.
+- [x] Empty structs (GNU mode behavior).
 - [x] `void*` arithmetic extension.
-- [ ] Non-constant static initialization extensions.
-- [ ] GNU inline mode differences (`gnu89-inline` compatibility where selected).
+- [x] Non-constant static initialization extensions.
+- [x] GNU inline mode differences (`gnu89-inline` compatibility where selected).
 
 ### 5.2 GNU attributes (full behavior)
 - [ ] Function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, etc.).

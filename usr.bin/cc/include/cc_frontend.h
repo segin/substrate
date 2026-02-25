@@ -278,6 +278,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 void cc_frontend_set_pointer_size(int bytes);
 void cc_frontend_set_std_mode(const char *std_mode);
+void cc_frontend_set_gnu89_inline_mode(int enabled, int override_set);
 void cc_frontend_set_diag_flags(int wall, int werror, int pedantic, int pedantic_errors);
 int cc_preprocess_file(const char *in_path, const char *out_path, const char *std_mode,
                        const char *const *flags, size_t flag_count, cc_diag_t *diag);

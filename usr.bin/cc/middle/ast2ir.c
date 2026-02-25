@@ -15,6 +15,8 @@ typedef struct {
     int struct_id;
     long array_len;
     int value;
+    int is_static_storage;
+    char *static_sym;
     int depth;
 } var_entry_t;
 
@@ -27,12 +29,16 @@ typedef struct {
     label_entry_t *labels;
     size_t label_count;
     const cc_function_t *fn;
+    cc_ssa_module_t *mod;
 } lower_ctx_t;
 
 static int emit_trap_instr(cc_ssa_function_t *sf);
+static int emit_global_addr(cc_ssa_function_t *sf, const char *name, cc_diag_t *diag);
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
                       int *saw_ret, cc_diag_t *diag);
+static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_i, double *out_f,
+                                 int *out_is_float, char **out_sym);
 
 static char *xstrdup(const char *s) {
     size_t n;
@@ -159,8 +165,42 @@ static int is_unsigned_integral_type(cc_type_t t) {
     return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
 }
 
+static int is_integral_type(cc_type_t t) {
+    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT || t == CC_TYPE_USHORT ||
+           t == CC_TYPE_INT || t == CC_TYPE_UINT || t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG;
+}
+
+static int is_numeric_type(cc_type_t t) {
+    return is_integral_type(t) || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE;
+}
+
 static int is_unsigned_load_type(cc_type_t t) {
     return t == CC_TYPE_BOOL || is_unsigned_integral_type(t) || is_pointer_type(t);
+}
+
+static cc_type_t ptr_base_type(cc_type_t t);
+
+static int can_convert_type(cc_type_t dst, cc_type_t src) {
+    if (dst == src) {
+        return 1;
+    }
+    if (is_numeric_type(dst) && is_numeric_type(src)) {
+        return 1;
+    }
+    if (is_pointer_type(dst) && is_pointer_type(src)) {
+        cc_type_t dbase = ptr_base_type(dst);
+        cc_type_t sbase = ptr_base_type(src);
+        if (dbase == CC_TYPE_VOID || sbase == CC_TYPE_VOID || dbase == sbase) {
+            return 1;
+        }
+    }
+    if (is_pointer_type(dst) && is_integral_type(src)) {
+        return 1;
+    }
+    if (is_integral_type(dst) && is_pointer_type(src)) {
+        return 1;
+    }
+    return 0;
 }
 
 static cc_type_t ptr_base_type(cc_type_t t) {
@@ -559,6 +599,52 @@ static int new_label(cc_ssa_function_t *f) {
     return f->label_count++;
 }
 
+static int append_synth_global(cc_ssa_module_t *m, const cc_ssa_global_t *g) {
+    cc_ssa_global_t *next;
+    if (m == NULL || g == NULL) {
+        return -1;
+    }
+    next = (cc_ssa_global_t *)realloc(m->globals, (m->global_count + 1) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    m->globals = next;
+    m->globals[m->global_count++] = *g;
+    return 0;
+}
+
+static int make_local_static_symbol(char *out, size_t out_sz, const cc_function_t *fn, const char *name,
+                                    size_t unique, const char *suffix) {
+    const char *fn_name = (fn != NULL && fn->name != NULL) ? fn->name : "fn";
+    const char *var_name = (name != NULL && name[0] != '\0') ? name : "var";
+    if (suffix == NULL) {
+        suffix = "";
+    }
+    if (snprintf(out, out_sz, "__cc_static_%s_%s_%zu%s", fn_name, var_name, unique, suffix) >= (int)out_sz) {
+        return -1;
+    }
+    return 0;
+}
+
+static int emit_store_global_i64(cc_ssa_function_t *sf, const char *sym, int v, long size, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int addr = emit_global_addr(sf, sym, diag);
+    if (addr < 0) {
+        return -1;
+    }
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_STORE;
+    in.dst = -1;
+    in.lhs = addr;
+    in.rhs = v;
+    in.imm = size;
+    if (push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory appending static global store");
+        return -1;
+    }
+    return 0;
+}
+
 static cc_value_type_t value_type(const cc_ssa_function_t *f, int v) {
     if (v < 0 || (size_t)v >= (size_t)f->value_count) {
         return CC_VAL_I64;
@@ -578,9 +664,10 @@ static int var_find_visible(var_entry_t *vars, size_t var_count, const char *nam
 }
 
 static int var_define(var_entry_t **vars, size_t *var_count, const char *name, cc_type_t type, int struct_id,
-                      long array_len, int value, int depth) {
+                      long array_len, int value, int depth, int is_static_storage, const char *static_sym) {
     var_entry_t *next;
     char *dup;
+    char *sym_dup = NULL;
 
     next = (var_entry_t *)realloc(*vars, (*var_count + 1) * sizeof(*next));
     if (next == NULL) {
@@ -592,11 +679,20 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     if (dup == NULL) {
         return -1;
     }
+    if (is_static_storage && static_sym != NULL) {
+        sym_dup = xstrdup(static_sym);
+        if (sym_dup == NULL) {
+            free(dup);
+            return -1;
+        }
+    }
     (*vars)[*var_count].name = dup;
     (*vars)[*var_count].type = type;
     (*vars)[*var_count].struct_id = struct_id;
     (*vars)[*var_count].array_len = array_len;
     (*vars)[*var_count].value = value;
+    (*vars)[*var_count].is_static_storage = is_static_storage ? 1 : 0;
+    (*vars)[*var_count].static_sym = sym_dup;
     (*vars)[*var_count].depth = depth;
     (*var_count)++;
     return 0;
@@ -652,6 +748,25 @@ static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t 
     for (i = 0; i < tu->structs[sid].member_count; ++i) {
         if (strcmp(tu->structs[sid].members[i].name, name) == 0) {
             return &tu->structs[sid].members[i];
+        }
+    }
+    return NULL;
+}
+
+static const cc_struct_member_t *find_union_cast_member(const cc_translation_unit_t *tu, int sid, cc_type_t src_type) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    if (tu == NULL || sid < 0 || (size_t)sid >= tu->struct_count) {
+        return NULL;
+    }
+    sd = &tu->structs[sid];
+    if (!sd->complete || !sd->is_union) {
+        return NULL;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (can_convert_type(m->type, src_type)) {
+            return m;
         }
     }
     return NULL;
@@ -1205,6 +1320,39 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return emit_global_addr(sf, e->ident, diag);
         }
+        if (vars[idx].is_static_storage) {
+            int saddr;
+            long mem_size;
+            if (vars[idx].static_sym == NULL) {
+                set_diag(diag, "malformed static local symbol in lowering");
+                return -1;
+            }
+            if (vars[idx].array_len >= 0 && is_pointer_type(vars[idx].type)) {
+                return emit_global_addr(sf, vars[idx].static_sym, diag);
+            }
+            if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
+                return emit_global_addr(sf, vars[idx].static_sym, diag);
+            }
+            mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+            if (mem_size <= 0) {
+                set_diag(diag, "unsupported static local object type in lowering");
+                return -1;
+            }
+            saddr = emit_global_addr(sf, vars[idx].static_sym, diag);
+            if (saddr < 0) {
+                return -1;
+            }
+            in.op = CC_SSA_LOAD;
+            in.dst = new_value(sf, type_to_val(vars[idx].type));
+            in.lhs = saddr;
+            in.rhs = -1;
+            in.imm = mem_size;
+            in.is_unsigned = is_unsigned_load_type(vars[idx].type) ? 1 : 0;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                return -1;
+            }
+            return in.dst;
+        }
         return vars[idx].value;
     }
 
@@ -1235,6 +1383,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return emit_global_addr(sf, e->lhs->ident, diag);
             }
             return emit_global_addr(sf, g->name, diag);
+        }
+        if (vars[idx].is_static_storage) {
+            if (vars[idx].static_sym == NULL) {
+                set_diag(diag, "malformed static local symbol in lowering");
+                return -1;
+            }
+            return emit_global_addr(sf, vars[idx].static_sym, diag);
         }
         if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
             return cast_value(sf, vars[idx].value, CC_VAL_I64, diag);
@@ -2820,6 +2975,34 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->ident != NULL) {
             int idx = var_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
+                if (vars[idx].is_static_storage) {
+                    int saddr = emit_global_addr(sf, vars[idx].static_sym, diag);
+                    long mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+                    if (saddr < 0) {
+                        return -1;
+                    }
+                    if (mem_size <= 0) {
+                        set_diag(diag, "unsupported static local assignment type");
+                        return -1;
+                    }
+                    if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
+                        if (emit_memcpy_instr(sf, saddr, rhs, mem_size, diag) != 0) {
+                            return -1;
+                        }
+                    } else {
+                        memset(&in, 0, sizeof(in));
+                        in.op = CC_SSA_STORE;
+                        in.dst = -1;
+                        in.lhs = saddr;
+                        in.rhs = rhs;
+                        in.imm = mem_size;
+                        if (push_instr(sf, in) != 0) {
+                            set_diag(diag, "out of memory appending static local assignment store");
+                            return -1;
+                        }
+                    }
+                    return rhs;
+                }
                 if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
                     long mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
                     if (mem_size <= 0) {
@@ -2942,9 +3125,38 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->ident != NULL) {
             int idx = var_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
-                cur = cast_value(sf, vars[idx].value, want, diag);
-                if (cur < 0) {
-                    return -1;
+                if (vars[idx].is_static_storage) {
+                    int saddr;
+                    long mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+                    if (vars[idx].static_sym == NULL) {
+                        set_diag(diag, "malformed static local symbol in lowering");
+                        return -1;
+                    }
+                    if (mem_size <= 0) {
+                        set_diag(diag, "unsupported static local ++/-- type");
+                        return -1;
+                    }
+                    saddr = emit_global_addr(sf, vars[idx].static_sym, diag);
+                    if (saddr < 0) {
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_LOAD;
+                    in.dst = new_value(sf, want);
+                    in.lhs = saddr;
+                    in.rhs = -1;
+                    in.imm = mem_size;
+                    in.is_unsigned = is_unsigned_load_type(vars[idx].type) ? 1 : 0;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory loading static local for ++/--");
+                        return -1;
+                    }
+                    cur = in.dst;
+                } else {
+                    cur = cast_value(sf, vars[idx].value, want, diag);
+                    if (cur < 0) {
+                        return -1;
+                    }
                 }
 
                 if (is_pointer_type(vars[idx].type)) {
@@ -2987,7 +3199,23 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return retv;
                 }
 
-                if (emit_mov_instr(sf, vars[idx].value, nextv) != 0) {
+                if (vars[idx].is_static_storage) {
+                    int saddr = emit_global_addr(sf, vars[idx].static_sym, diag);
+                    long mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+                    if (saddr < 0) {
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_STORE;
+                    in.dst = -1;
+                    in.lhs = saddr;
+                    in.rhs = nextv;
+                    in.imm = mem_size;
+                    if (push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory storing static local ++/-- result");
+                        return -1;
+                    }
+                } else if (emit_mov_instr(sf, vars[idx].value, nextv) != 0) {
                     return -1;
                 }
                 return vars[idx].value;
@@ -3158,62 +3386,121 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     case CC_EXPR_CAST: {
         int v;
         const cc_expr_t *cast_src = e->lhs;
+        int aggregate_cast_target = (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0);
         if (e->lhs == NULL) {
             set_diag(diag, "malformed cast expression in lowering");
             return -1;
         }
-        if (cast_src->kind == CC_EXPR_INIT_LIST) {
-            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
-                cc_ssa_instr_t call_in;
-                int onev = -1;
-                int sizev;
-                long sz = type_size_bytes_with_struct(tu, e->aux_type, e->aux_struct_id);
-                const char *alloc_sym = local_array_allocator_symbol();
-                if (sz <= 0) {
-                    set_diag(diag, "unsupported compound literal aggregate size");
+        if (aggregate_cast_target) {
+            cc_ssa_instr_t call_in;
+            int onev = -1;
+            int sizev;
+            int dst_ptr;
+            int storesrc;
+            long store_size;
+            long sz = type_size_bytes_with_struct(tu, e->aux_type, e->aux_struct_id);
+            const char *alloc_sym = local_array_allocator_symbol();
+            if (sz <= 0) {
+                sz = 1;
+            }
+            sizev = emit_const_i64_instr(sf, sz);
+            if (sizev < 0) {
+                return -1;
+            }
+            if (strcmp(alloc_sym, "calloc") == 0) {
+                onev = emit_const_i64_instr(sf, 1);
+                if (onev < 0) {
                     return -1;
                 }
-                sizev = emit_const_i64_instr(sf, sz);
-                if (sizev < 0) {
-                    return -1;
-                }
-                if (strcmp(alloc_sym, "calloc") == 0) {
-                    onev = emit_const_i64_instr(sf, 1);
-                    if (onev < 0) {
-                        return -1;
-                    }
-                }
-                memset(&call_in, 0, sizeof(call_in));
-                call_in.op = CC_SSA_CALL;
-                call_in.call_is_variadic = 0;
-                call_in.sym = xstrdup(alloc_sym);
-                call_in.arg_count = strcmp(alloc_sym, "calloc") == 0 ? 2 : 1;
-                call_in.args = (int *)calloc(call_in.arg_count, sizeof(*call_in.args));
-                call_in.dst = new_value(sf, CC_VAL_I64);
-                if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
-                    free(call_in.sym);
-                    free(call_in.args);
-                    set_diag(diag, "out of memory allocating compound literal storage");
-                    return -1;
-                }
-                if (call_in.arg_count == 2) {
-                    call_in.args[0] = onev;
-                    call_in.args[1] = sizev;
-                } else {
-                    call_in.args[0] = sizev;
-                }
-                if (push_instr(sf, call_in) != 0) {
-                    free(call_in.sym);
-                    free(call_in.args);
-                    set_diag(diag, "out of memory emitting compound literal allocation call");
-                    return -1;
-                }
-                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, call_in.dst, e->aux_struct_id, cast_src,
+            }
+            memset(&call_in, 0, sizeof(call_in));
+            call_in.op = CC_SSA_CALL;
+            call_in.call_is_variadic = 0;
+            call_in.sym = xstrdup(alloc_sym);
+            call_in.arg_count = strcmp(alloc_sym, "calloc") == 0 ? 2 : 1;
+            call_in.args = (int *)calloc(call_in.arg_count, sizeof(*call_in.args));
+            call_in.dst = new_value(sf, CC_VAL_I64);
+            if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
+                free(call_in.sym);
+                free(call_in.args);
+                set_diag(diag, "out of memory allocating aggregate cast storage");
+                return -1;
+            }
+            if (call_in.arg_count == 2) {
+                call_in.args[0] = onev;
+                call_in.args[1] = sizev;
+            } else {
+                call_in.args[0] = sizev;
+            }
+            if (push_instr(sf, call_in) != 0) {
+                free(call_in.sym);
+                free(call_in.args);
+                set_diag(diag, "out of memory emitting aggregate cast allocation");
+                return -1;
+            }
+            dst_ptr = call_in.dst;
+            if (cast_src->kind == CC_EXPR_INIT_LIST) {
+                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, dst_ptr, e->aux_struct_id, cast_src,
                                              diag) != 0) {
                     return -1;
                 }
-                return call_in.dst;
+                return dst_ptr;
             }
+            if ((size_t)e->aux_struct_id >= tu->struct_count || !tu->structs[e->aux_struct_id].is_union) {
+                set_diag(diag, "aggregate cast lowering only supports union targets");
+                return -1;
+            }
+            {
+                const cc_struct_member_t *m = find_union_cast_member(tu, e->aux_struct_id, cast_src->value_type);
+                cc_ssa_instr_t st;
+                if (m == NULL) {
+                    set_diag(diag, "union cast lowering found no compatible member");
+                    return -1;
+                }
+                storesrc = lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
+                if (storesrc < 0) {
+                    return -1;
+                }
+                storesrc = cast_value(sf, storesrc, type_to_val(m->type), diag);
+                if (storesrc < 0) {
+                    return -1;
+                }
+                store_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
+                if (store_size <= 0) {
+                    set_diag(diag, "unsupported union cast member size in lowering");
+                    return -1;
+                }
+                if (m->offset != 0) {
+                    int off = emit_const_i64_instr(sf, m->offset);
+                    cc_ssa_instr_t addi;
+                    if (off < 0) {
+                        return -1;
+                    }
+                    memset(&addi, 0, sizeof(addi));
+                    addi.op = CC_SSA_ADD;
+                    addi.dst = new_value(sf, CC_VAL_I64);
+                    addi.lhs = dst_ptr;
+                    addi.rhs = off;
+                    if (addi.dst < 0 || push_instr(sf, addi) != 0) {
+                        set_diag(diag, "out of memory computing union cast member address");
+                        return -1;
+                    }
+                    dst_ptr = addi.dst;
+                }
+                memset(&st, 0, sizeof(st));
+                st.op = CC_SSA_STORE;
+                st.dst = -1;
+                st.lhs = dst_ptr;
+                st.rhs = storesrc;
+                st.imm = store_size;
+                if (push_instr(sf, st) != 0) {
+                    set_diag(diag, "out of memory emitting union cast store");
+                    return -1;
+                }
+            }
+            return call_in.dst;
+        }
+        if (cast_src->kind == CC_EXPR_INIT_LIST) {
             cast_src = unwrap_scalar_initializer_expr(cast_src, diag);
             if (cast_src == NULL) {
                 return -1;
@@ -3278,10 +3565,25 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     size_t k;
                     for (k = 0; k < j; ++k) {
                         free(lvars[k].name);
+                        free(lvars[k].static_sym);
                     }
                     free(lvars);
                     set_diag(diag, "out of memory cloning scope for statement expression");
                     return -1;
+                }
+                if (vars[j].static_sym != NULL) {
+                    lvars[j].static_sym = xstrdup(vars[j].static_sym);
+                    if (lvars[j].static_sym == NULL) {
+                        size_t k;
+                        free(lvars[j].name);
+                        for (k = 0; k < j; ++k) {
+                            free(lvars[k].name);
+                            free(lvars[k].static_sym);
+                        }
+                        free(lvars);
+                        set_diag(diag, "out of memory cloning scope for statement expression");
+                        return -1;
+                    }
                 }
             }
         }
@@ -3294,6 +3596,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     while (lcount > 0) {
                         lcount--;
                         free(lvars[lcount].name);
+                        free(lvars[lcount].static_sym);
                     }
                     free(lvars);
                     return -1;
@@ -3305,6 +3608,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 while (lcount > 0) {
                     lcount--;
                     free(lvars[lcount].name);
+                    free(lvars[lcount].static_sym);
                 }
                 free(lvars);
                 return -1;
@@ -3316,6 +3620,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         while (lcount > 0) {
             lcount--;
             free(lvars[lcount].name);
+            free(lvars[lcount].static_sym);
         }
         free(lvars);
         if (outv < 0) {
@@ -3909,6 +4214,287 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     if (s->kind == CC_STMT_DECL) {
         int v;
         int varv;
+        if ((s->storage & CC_STORAGE_STATIC) != 0 && s->decl_name != NULL) {
+            cc_ssa_global_t g;
+            cc_ssa_instr_t in;
+            char sym[256];
+            int have_const_init = 0;
+            int needs_runtime_init = 0;
+            int is_array_obj = (s->array_len >= 0 && is_pointer_type(s->type));
+            int is_struct_obj = (s->type == CC_TYPE_VOID && s->type_struct_id >= 0);
+            cc_type_t elem_type = CC_TYPE_VOID;
+            long elem_size = 0;
+            long arr_elems = 1;
+            long init_i = 0;
+            double init_f = 0.0;
+            int init_is_float = 0;
+            char *init_sym = NULL;
+            long obj_size;
+            if (ctx == NULL || ctx->mod == NULL) {
+                set_diag(diag, "internal error: missing module context for static local");
+                return -1;
+            }
+            if (make_local_static_symbol(sym, sizeof(sym), ctx->fn, s->decl_name, ctx->mod->global_count, "") != 0) {
+                set_diag(diag, "failed to construct static local symbol");
+                return -1;
+            }
+            if (is_array_obj) {
+                elem_type = ptr_base_type(s->type);
+                elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
+                if (elem_size <= 0 && elem_type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+                    elem_size = 1;
+                }
+                if (elem_size <= 0) {
+                    set_diag(diag, "unsupported static local array element type");
+                    return -1;
+                }
+                if (s->array_len > 0) {
+                    arr_elems = s->array_len;
+                }
+                obj_size = elem_size * arr_elems;
+            } else {
+                obj_size = type_size_bytes_with_struct(tu, s->type, s->type_struct_id);
+                if (obj_size <= 0 && is_struct_obj) {
+                    obj_size = 1;
+                }
+            }
+            if (obj_size <= 0) {
+                set_diag(diag, "unsupported static local declaration type");
+                return -1;
+            }
+            if (!is_array_obj && !is_struct_obj) {
+                if (s->expr != NULL &&
+                    eval_global_init_expr(tu, s->expr, &init_i, &init_f, &init_is_float, &init_sym) == 0) {
+                    have_const_init = 1;
+                } else if (s->expr != NULL) {
+                    needs_runtime_init = 1;
+                }
+            } else if (s->expr != NULL && !is_zero_initializer_expr(s->expr)) {
+                needs_runtime_init = 1;
+            }
+
+            memset(&g, 0, sizeof(g));
+            g.name = xstrdup(sym);
+            g.type = s->type;
+            g.type_struct_id = s->type_struct_id;
+            g.array_len = is_array_obj ? s->array_len : -1;
+            g.storage = CC_STORAGE_STATIC;
+            g.attr_flags = s->attr_flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED | CC_ATTR_SECTION);
+            g.attr_align = s->attr_align;
+            if (s->attr_section != NULL) {
+                g.attr_section = xstrdup(s->attr_section);
+            }
+            g.has_init = have_const_init;
+            g.init_i = init_i;
+            g.init_f = init_f;
+            g.init_is_float = init_is_float;
+            g.init_is_symbol = init_sym != NULL;
+            g.init_sym = init_sym;
+            if (g.name == NULL || (s->attr_section != NULL && g.attr_section == NULL)) {
+                free(g.name);
+                free(g.attr_section);
+                free(g.init_sym);
+                set_diag(diag, "out of memory creating static local symbol");
+                return -1;
+            }
+            if (append_synth_global(ctx->mod, &g) != 0) {
+                free(g.name);
+                free(g.attr_section);
+                free(g.init_sym);
+                set_diag(diag, "out of memory appending static local global");
+                return -1;
+            }
+
+            if (needs_runtime_init) {
+                cc_ssa_global_t guard;
+                char guard_sym[256];
+                int dst_addr;
+                int guard_addr;
+                int guard_val;
+                int one;
+                int cond;
+                int l_init = new_label(sf);
+                int l_done = new_label(sf);
+                if (make_local_static_symbol(guard_sym, sizeof(guard_sym), ctx->fn, s->decl_name, ctx->mod->global_count,
+                                             "__guard") != 0) {
+                    set_diag(diag, "failed to construct static local guard symbol");
+                    return -1;
+                }
+                memset(&guard, 0, sizeof(guard));
+                guard.name = xstrdup(guard_sym);
+                guard.type = CC_TYPE_INT;
+                guard.type_struct_id = -1;
+                guard.array_len = -1;
+                guard.storage = CC_STORAGE_STATIC;
+                guard.has_init = 0;
+                if (guard.name == NULL || append_synth_global(ctx->mod, &guard) != 0) {
+                    free(guard.name);
+                    set_diag(diag, "out of memory appending static local guard");
+                    return -1;
+                }
+                guard_addr = emit_global_addr(sf, guard_sym, diag);
+                if (guard_addr < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_LOAD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = guard_addr;
+                in.rhs = -1;
+                in.imm = 4;
+                in.is_unsigned = 1;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory loading static local guard");
+                    return -1;
+                }
+                guard_val = in.dst;
+                cond = lower_truthy_value(sf, guard_val, diag);
+                if (cond < 0) {
+                    return -1;
+                }
+                if (emit_br_cond_instr(sf, cond, l_done, l_init) != 0) {
+                    return -1;
+                }
+                if (emit_label_instr(sf, l_init) != 0) {
+                    return -1;
+                }
+                dst_addr = emit_global_addr(sf, sym, diag);
+                if (dst_addr < 0) {
+                    return -1;
+                }
+                if (is_struct_obj) {
+                    if (s->expr != NULL && s->expr->kind == CC_EXPR_INIT_LIST) {
+                        if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, dst_addr,
+                                                     s->type_struct_id, s->expr, diag) != 0) {
+                            return -1;
+                        }
+                    } else {
+                        v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
+                        if (v < 0) {
+                            return -1;
+                        }
+                        if (emit_memcpy_instr(sf, dst_addr, v, obj_size, diag) != 0) {
+                            return -1;
+                        }
+                    }
+                } else if (is_array_obj) {
+                    if (s->expr != NULL && s->expr->kind == CC_EXPR_INIT_LIST) {
+                        size_t ii;
+                        if (s->expr->arg_count > (size_t)arr_elems) {
+                            set_diag(diag, "too many initializers for static local array");
+                            return -1;
+                        }
+                        for (ii = 0; ii < s->expr->arg_count; ++ii) {
+                            int item_ptr = dst_addr;
+                            cc_ssa_instr_t st_in;
+                            if (ii > 0) {
+                                int offv = emit_const_i64_instr(sf, (long)ii * elem_size);
+                                if (offv < 0) {
+                                    return -1;
+                                }
+                                memset(&st_in, 0, sizeof(st_in));
+                                st_in.op = CC_SSA_ADD;
+                                st_in.dst = new_value(sf, CC_VAL_I64);
+                                st_in.lhs = dst_addr;
+                                st_in.rhs = offv;
+                                if (st_in.dst < 0 || push_instr(sf, st_in) != 0) {
+                                    set_diag(diag, "out of memory computing static local array initializer address");
+                                    return -1;
+                                }
+                                item_ptr = st_in.dst;
+                            }
+                            if (elem_type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+                                if (s->expr->args[ii]->kind != CC_EXPR_INIT_LIST) {
+                                    if (is_zero_initializer_expr(s->expr->args[ii])) {
+                                        continue;
+                                    }
+                                    set_diag(diag, "struct array initializer element requires braces");
+                                    return -1;
+                                }
+                                if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, item_ptr,
+                                                             s->type_struct_id, s->expr->args[ii], diag) != 0) {
+                                    return -1;
+                                }
+                            } else {
+                                const cc_expr_t *item_expr = unwrap_scalar_initializer_expr(s->expr->args[ii], diag);
+                                if (item_expr == NULL) {
+                                    return -1;
+                                }
+                                v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, item_expr, diag);
+                                if (v < 0) {
+                                    return -1;
+                                }
+                                v = cast_value(sf, v, type_to_val(elem_type), diag);
+                                if (v < 0) {
+                                    return -1;
+                                }
+                                memset(&st_in, 0, sizeof(st_in));
+                                st_in.op = CC_SSA_STORE;
+                                st_in.dst = -1;
+                                st_in.lhs = item_ptr;
+                                st_in.rhs = v;
+                                st_in.imm = elem_size;
+                                if (push_instr(sf, st_in) != 0) {
+                                    set_diag(diag, "out of memory storing static local array initializer element");
+                                    return -1;
+                                }
+                            }
+                        }
+                    } else {
+                        v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
+                        if (v < 0) {
+                            return -1;
+                        }
+                        v = cast_value(sf, v, type_to_val(elem_type), diag);
+                        if (v < 0) {
+                            return -1;
+                        }
+                        memset(&in, 0, sizeof(in));
+                        in.op = CC_SSA_STORE;
+                        in.dst = -1;
+                        in.lhs = dst_addr;
+                        in.rhs = v;
+                        in.imm = elem_size;
+                        if (push_instr(sf, in) != 0) {
+                            set_diag(diag, "out of memory storing static local array initializer");
+                            return -1;
+                        }
+                    }
+                } else {
+                    v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
+                    if (v < 0) {
+                        return -1;
+                    }
+                    v = cast_value(sf, v, type_to_val(s->type), diag);
+                    if (v < 0) {
+                        return -1;
+                    }
+                    if (emit_store_global_i64(sf, sym, v, obj_size, diag) != 0) {
+                        return -1;
+                    }
+                }
+                one = emit_const_i64_instr(sf, 1);
+                if (one < 0) {
+                    return -1;
+                }
+                if (emit_store_global_i64(sf, guard_sym, one, 4, diag) != 0) {
+                    return -1;
+                }
+                if (emit_br_instr(sf, l_done) != 0) {
+                    return -1;
+                }
+                if (emit_label_instr(sf, l_done) != 0) {
+                    return -1;
+                }
+            }
+
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id,
+                           is_array_obj ? s->array_len : -1, -1, depth, 1, sym) != 0) {
+                set_diag(diag, "out of memory defining static local variable");
+                return -1;
+            }
+            return 0;
+        }
         if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
             cc_ssa_instr_t call_in;
             int onev;
@@ -3916,8 +4502,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             const char *alloc_sym = local_array_allocator_symbol();
             long sz = type_size_bytes_with_struct(tu, s->type, s->type_struct_id);
             if (sz <= 0) {
-                set_diag(diag, "unsupported local struct declaration in lowering");
-                return -1;
+                /* GNU empty-struct extension: materialize as 1-byte storage object. */
+                sz = 1;
             }
             sizev = emit_const_i64_instr(sf, sz);
             if (sizev < 0) {
@@ -3972,7 +4558,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     }
                 }
             }
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, varv, depth) != 0) {
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, varv, depth, 0, NULL) != 0) {
                 set_diag(diag, "out of memory defining local struct variable");
                 return -1;
             }
@@ -4117,8 +4703,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
 
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, varv, depth) !=
-                0) {
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, varv, depth, 0,
+                           NULL) != 0) {
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
             }
@@ -4161,7 +4747,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
         }
-        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, varv, depth) != 0) {
+        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, varv, depth, 0, NULL) != 0) {
             set_diag(diag, "out of memory defining local variable");
             return -1;
         }
@@ -5887,6 +6473,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
         memset(&lctx, 0, sizeof(lctx));
         lctx.fn = af;
+        lctx.mod = out;
 
         eff_attr_flags = af->attr_flags;
         eff_attr_align = af->attr_align;
@@ -5960,7 +6547,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
             v = in.dst;
             if (var_define(&vars, &var_count, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
-                           -1, v, 0) != 0) {
+                           -1, v, 0, 0, NULL) != 0) {
                 set_diag(diag, "out of memory defining parameter variable");
                 cc_ssa_module_free(out);
                 return -1;
@@ -5999,6 +6586,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
         for (j = 0; j < var_count; ++j) {
             free(vars[j].name);
+            free(vars[j].static_sym);
         }
         free(vars);
         for (j = 0; j < lctx.label_count; ++j) {

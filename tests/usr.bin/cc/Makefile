@@ -311,6 +311,20 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_trap_unreachable.c -o /tmp/cc_native_gnu_trap_unreachable_32.s
 	grep -q "\\.code32" /tmp/cc_native_gnu_trap_unreachable_32.s
 	grep -q "ud2" /tmp/cc_native_gnu_trap_unreachable_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_nested_func.c -o /tmp/cc_native_gnu_nested_func
+	/tmp/cc_native_gnu_nested_func
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_union_cast.c -o /tmp/cc_native_gnu_union_cast
+	/tmp/cc_native_gnu_union_cast
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_zerolen_array.c -o /tmp/cc_native_gnu_zerolen_array
+	/tmp/cc_native_gnu_zerolen_array
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_empty_struct.c -o /tmp/cc_native_gnu_empty_struct
+	/tmp/cc_native_gnu_empty_struct
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_static_nonconst_init.c -o /tmp/cc_native_gnu_static_nonconst_init
+	/tmp/cc_native_gnu_static_nonconst_init
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -fgnu89-inline native_gnu89_inline.c -o /tmp/cc_native_gnu89_inline
+	/tmp/cc_native_gnu89_inline
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -fgnu89-inline -S native_gnu89_inline.c -o /tmp/cc_native_gnu89_inline.s
+	grep -q "^\\.globl add_inline" /tmp/cc_native_gnu89_inline.s
 	$(TOP)/usr.bin/cc/cc -O2 native_opt_fold.c -o /tmp/cc_native_opt_fold
 	/tmp/cc_native_opt_fold
 	$(TOP)/usr.bin/cc/cc -O2 -S native_opt_fold.c -o /tmp/cc_native_opt_fold.s
@@ -539,6 +553,7 @@ test:
 	! $(TOP)/usr.bin/cc/cc -c native_bad_ptr_depth5.c -o /tmp/cc_native_bad_ptr_depth5.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_cast_ptr_float.c -o /tmp/cc_native_bad_cast_ptr_float.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_computed_goto_float.c -o /tmp/cc_native_bad_computed_goto_float.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_nested_capture.c -o /tmp/cc_native_bad_gnu_nested_capture.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_return.c -o /tmp/cc_native_bad_attr_noreturn_return.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_nonvoid.c -o /tmp/cc_native_bad_attr_noreturn_nonvoid.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_implicit_function.c -o /tmp/cc_native_bad_c99_implicit_function.o
@@ -578,7 +593,10 @@ clean:
 	      /tmp/cc_native_gnu_elvis.s /tmp/cc_native_gnu_elvis_32.s /tmp/cc_native_gnu_case_range.s /tmp/cc_native_gnu_case_range_32.s \
 	      /tmp/cc_native_gnu_types_choose.s /tmp/cc_native_gnu_overflow.s /tmp/cc_native_gnu_overflow_32.s \
 	      /tmp/cc_native_gnu_object_size_chk /tmp/cc_native_gnu_object_size_chk.s /tmp/cc_native_gnu_object_size_chk_32.s \
-	      /tmp/cc_native_gnu_trap_unreachable /tmp/cc_native_gnu_trap_unreachable.s /tmp/cc_native_gnu_trap_unreachable_32.s
+	      /tmp/cc_native_gnu_trap_unreachable /tmp/cc_native_gnu_trap_unreachable.s /tmp/cc_native_gnu_trap_unreachable_32.s \
+	      /tmp/cc_native_gnu_nested_func /tmp/cc_native_gnu_union_cast /tmp/cc_native_gnu_zerolen_array \
+	      /tmp/cc_native_gnu_empty_struct /tmp/cc_native_gnu_static_nonconst_init /tmp/cc_native_gnu89_inline \
+	      /tmp/cc_native_gnu89_inline.s /tmp/cc_native_bad_gnu_nested_capture.o
 	rm -f /tmp/cc_native_c99_integer_literals /tmp/cc_native_c99_hex_float_suffix /tmp/cc_native_c99_wide_literals \
 	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle /tmp/cc_native_c90_unproto_call_promotions /tmp/cc_native_c90_unproto_call_promotions.s \
 	      /tmp/cc_native_c99_integer_literals_32.s /tmp/cc_native_c99_hex_float_suffix_32.s /tmp/cc_native_c99_wide_literals_32.s \

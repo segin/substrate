@@ -165,6 +165,9 @@ typedef struct {
     enum_const_entry_t *enum_consts;
     size_t enum_const_count;
     size_t enum_const_cap;
+    cc_function_t *hoisted_funcs;
+    size_t hoisted_func_count;
+    size_t hoisted_func_cap;
     int scope_depth;
     int last_storage;
 } parser_t;
@@ -182,6 +185,7 @@ static int g_parser_std_c11 = 0;
 static int g_parser_std_c17 = 0;
 static int g_parser_std_c23 = 0;
 static int g_parser_std_gnu = 0;
+static int g_parser_gnu89_inline = 0;
 static int is_decl_qual_tok(cc_tok_kind_t k);
 static int is_decl_qual_at_token(parser_t *p);
 static cc_type_t ptr_of_type(cc_type_t t);
@@ -200,6 +204,55 @@ static void free_expr(cc_expr_t *e);
 static void free_stmt(cc_stmt_t *s);
 static int eval_const_array_bound_expr(const cc_expr_t *e, long *out);
 static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n);
+static int parse_function(parser_t *p, cc_function_t *f);
+static int probe_is_function_head(parser_t *p);
+static void free_func(cc_function_t *f);
+
+static int parser_push_hoisted_func(parser_t *p, const cc_function_t *f) {
+    cc_function_t *next;
+    if (p == NULL || f == NULL) {
+        return -1;
+    }
+    if (p->hoisted_func_count == p->hoisted_func_cap) {
+        size_t ncap = p->hoisted_func_cap == 0 ? 8 : p->hoisted_func_cap * 2;
+        next = (cc_function_t *)realloc(p->hoisted_funcs, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        p->hoisted_funcs = next;
+        p->hoisted_func_cap = ncap;
+    }
+    p->hoisted_funcs[p->hoisted_func_count++] = *f;
+    return 0;
+}
+
+static void parser_free_hoisted_funcs(parser_t *p) {
+    size_t i;
+    if (p == NULL) {
+        return;
+    }
+    for (i = 0; i < p->hoisted_func_count; ++i) {
+        free_func(&p->hoisted_funcs[i]);
+    }
+    free(p->hoisted_funcs);
+    p->hoisted_funcs = NULL;
+    p->hoisted_func_count = 0;
+    p->hoisted_func_cap = 0;
+}
+
+static int tu_push_function(cc_translation_unit_t *tu, const cc_function_t *f) {
+    cc_function_t *next;
+    if (tu == NULL || f == NULL) {
+        return -1;
+    }
+    next = (cc_function_t *)realloc(tu->funcs, (tu->func_count + 1) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    tu->funcs = next;
+    tu->funcs[tu->func_count++] = *f;
+    return 0;
+}
 
 static int parser_is_c11_or_newer(void) {
     return g_parser_std_c11 || g_parser_std_c17 || g_parser_std_c23;
@@ -1311,7 +1364,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                             if (empty_extent) {
                                 arr_unsized = 1;
                             }
-                            if (const_extent && n > 0 && arr_count > 0) {
+                            if (const_extent && arr_count >= 0) {
                                 arr_count *= n;
                             }
                         }
@@ -1387,6 +1440,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                             p->structs[sid].has_flexible_array = 1;
                         } else if (arr_count > 0) {
                             msize *= arr_count;
+                        } else if (arr_count == 0) {
+                            msize = 0;
                         }
                     }
                     moff = is_union ? 0 : align_up_long(off, malign);
@@ -5854,8 +5909,8 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     }
     f->ret_struct_id = ftype_sid;
     f->storage = fn_storage;
-    if (f->storage & CC_STORAGE_INLINE) {
-        /* Avoid duplicate external inline bodies across translation units. */
+    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_EXTERN) == 0 && !g_parser_gnu89_inline) {
+        /* C99-style fallback: emit an internal body unless explicitly extern. */
         f->storage |= CC_STORAGE_STATIC;
     }
 
@@ -5953,6 +6008,19 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         if (p->tok.kind == TOK_EOF) {
             set_diag(p->diag, p->tok.line, p->tok.col, "unexpected end of file in function body");
             return -1;
+        }
+        if (parser_is_gnu_mode() && is_declspec_start(p) && probe_is_function_head(p)) {
+            cc_function_t nested;
+            if (parse_function(p, &nested) != 0) {
+                return -1;
+            }
+            nested.storage |= CC_STORAGE_STATIC;
+            if (parser_push_hoisted_func(p, &nested) != 0) {
+                free_func(&nested);
+                set_diag(p->diag, p->tok.line, p->tok.col, "out of memory adding nested function");
+                return -1;
+            }
+            continue;
         }
         if (is_declspec_start(p)) {
             if (parse_decl_stmt_list(p, &f->stmts, &f->stmt_count, 1) != 0) {
@@ -6069,6 +6137,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     p.scope_depth = 0;
     cc_lexer_init(&p.lx, buf, (size_t)sz);
     if (next_tok(&p) != 0) {
+        parser_free_hoisted_funcs(&p);
         parser_free_typedefs(&p);
         parser_free_enum_consts(&p);
         parser_free_structs(&p);
@@ -6077,6 +6146,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         return -1;
     }
     if (parser_is_c23_or_newer() && typedef_push(&p, "nullptr_t", CC_TYPE_PTR_VOID, -1) != 0) {
+        parser_free_hoisted_funcs(&p);
         parser_free_typedefs(&p);
         parser_free_enum_consts(&p);
         parser_free_structs(&p);
@@ -6087,6 +6157,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     while (p.tok.kind != TOK_EOF) {
         if (is_static_assert_tok(&p)) {
             if (parse_static_assert_decl(&p, 1) != 0) {
+                parser_free_hoisted_funcs(&p);
                 parser_free_typedefs(&p);
                 parser_free_enum_consts(&p);
                 parser_free_structs(&p);
@@ -6101,6 +6172,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
             size_t decl_count = 0;
             size_t di;
             if (parse_decl_stmt_list(&p, &decls, &decl_count, 1) != 0) {
+                parser_free_hoisted_funcs(&p);
                 parser_free_typedefs(&p);
                 parser_free_enum_consts(&p);
                 parser_free_structs(&p);
@@ -6118,6 +6190,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                         di++;
                     }
                     free(decls);
+                    parser_free_hoisted_funcs(&p);
                     parser_free_typedefs(&p);
                     parser_free_enum_consts(&p);
                     parser_free_structs(&p);
@@ -6145,6 +6218,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                         di++;
                     }
                     free(decls);
+                    parser_free_hoisted_funcs(&p);
                     parser_free_typedefs(&p);
                     parser_free_enum_consts(&p);
                     parser_free_structs(&p);
@@ -6159,8 +6233,18 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
             continue;
         }
         cc_function_t f;
-        cc_function_t *next = (cc_function_t *)realloc(out->funcs, (out->func_count + 1) * sizeof(*next));
-        if (next == NULL) {
+        if (parse_function(&p, &f) != 0) {
+            parser_free_hoisted_funcs(&p);
+            parser_free_typedefs(&p);
+            parser_free_enum_consts(&p);
+            parser_free_structs(&p);
+            free(buf);
+            cc_tu_free(out);
+            return -1;
+        }
+        if (tu_push_function(out, &f) != 0) {
+            free_func(&f);
+            parser_free_hoisted_funcs(&p);
             parser_free_typedefs(&p);
             parser_free_enum_consts(&p);
             parser_free_structs(&p);
@@ -6169,19 +6253,28 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
             set_diag(diag, 0, 0, "out of memory");
             return -1;
         }
-        out->funcs = next;
-
-        if (parse_function(&p, &f) != 0) {
-            parser_free_typedefs(&p);
-            parser_free_enum_consts(&p);
-            parser_free_structs(&p);
-            free(buf);
-            cc_tu_free(out);
-            return -1;
+        while (p.hoisted_func_count > 0) {
+            cc_function_t nested = p.hoisted_funcs[0];
+            size_t hi;
+            for (hi = 1; hi < p.hoisted_func_count; ++hi) {
+                p.hoisted_funcs[hi - 1] = p.hoisted_funcs[hi];
+            }
+            p.hoisted_func_count--;
+            if (tu_push_function(out, &nested) != 0) {
+                free_func(&nested);
+                parser_free_hoisted_funcs(&p);
+                parser_free_typedefs(&p);
+                parser_free_enum_consts(&p);
+                parser_free_structs(&p);
+                free(buf);
+                cc_tu_free(out);
+                set_diag(diag, 0, 0, "out of memory");
+                return -1;
+            }
         }
-        out->funcs[out->func_count++] = f;
     }
 
+    parser_free_hoisted_funcs(&p);
     parser_free_typedefs(&p);
     parser_free_enum_consts(&p);
     out->structs = p.structs;
@@ -6237,4 +6330,13 @@ void cc_parser_set_std_mode(const char *std_mode) {
     } else {
         g_parser_allow_oldstyle_funcdecl = 0;
     }
+    if (strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
+        g_parser_gnu89_inline = 1;
+    } else {
+        g_parser_gnu89_inline = 0;
+    }
+}
+
+void cc_parser_set_gnu89_inline(int enabled) {
+    g_parser_gnu89_inline = enabled ? 1 : 0;
 }
