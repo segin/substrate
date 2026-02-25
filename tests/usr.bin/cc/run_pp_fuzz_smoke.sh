@@ -2,6 +2,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+BASE=$(cd "$(dirname "$0")" && pwd)
 CC_BIN="$ROOT/usr.bin/cc/cc"
 
 i=0
@@ -19,5 +20,5 @@ cat > /tmp/cc_pp_fuzz_seed.c <<'EOF'
 int x = A(1, 2);
 #endif
 EOF
-"$CC_BIN" -E -I. /tmp/cc_pp_fuzz_seed.c -o /tmp/cc_pp_fuzz_seed.i
+"$CC_BIN" -E -std=c23 -I"$BASE" /tmp/cc_pp_fuzz_seed.c -o /tmp/cc_pp_fuzz_seed.i
 grep -q "int x = 1 + (2);" /tmp/cc_pp_fuzz_seed.i

@@ -181,6 +181,7 @@ static int g_parser_allow_oldstyle_funcdecl = 0;
 static int g_parser_std_c11 = 0;
 static int g_parser_std_c17 = 0;
 static int g_parser_std_c23 = 0;
+static int g_parser_std_gnu = 0;
 static int is_decl_qual_tok(cc_tok_kind_t k);
 static int is_decl_qual_at_token(parser_t *p);
 static cc_type_t ptr_of_type(cc_type_t t);
@@ -205,6 +206,15 @@ static int parser_is_c11_or_newer(void) {
 
 static int parser_is_c23_or_newer(void) {
     return g_parser_std_c23;
+}
+
+static int parser_is_gnu_mode(void) {
+    return g_parser_std_gnu;
+}
+
+static int tok_is_typeof_spelling(parser_t *p) {
+    return tok_is_ident(p, "typeof") || tok_is_ident(p, "typeof_unqual") || tok_is_ident(p, "__typeof__") ||
+           tok_is_ident(p, "__typeof_unqual__");
 }
 
 static int next_tok(parser_t *p) {
@@ -623,6 +633,9 @@ static int is_declspec_ident(parser_t *p) {
          tok_is_ident(p, "constexpr") || tok_is_ident(p, "typeof") || tok_is_ident(p, "typeof_unqual"))) {
         return 1;
     }
+    if (parser_is_gnu_mode() && (tok_is_ident(p, "__typeof__") || tok_is_ident(p, "__typeof_unqual__"))) {
+        return 1;
+    }
     return 0;
 }
 
@@ -653,6 +666,8 @@ static int is_type_name_start_after_lparen(parser_t *p) {
             (t.len == strlen("_BitInt") && strncmp(t.start, "_BitInt", t.len) == 0) ||
             (t.len == strlen("typeof") && strncmp(t.start, "typeof", t.len) == 0) ||
             (t.len == strlen("typeof_unqual") && strncmp(t.start, "typeof_unqual", t.len) == 0) ||
+            (t.len == strlen("__typeof__") && strncmp(t.start, "__typeof__", t.len) == 0) ||
+            (t.len == strlen("__typeof_unqual__") && strncmp(t.start, "__typeof_unqual__", t.len) == 0) ||
             (parser_is_c23_or_newer() && t.len == strlen("bool") && strncmp(t.start, "bool", t.len) == 0)) {
             return 1;
         }
@@ -928,7 +943,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                 bitint_width = w;
                 continue;
             }
-            if (parser_is_c23_or_newer() && (tok_is_ident(p, "typeof") || tok_is_ident(p, "typeof_unqual"))) {
+            if ((parser_is_c23_or_newer() || parser_is_gnu_mode()) && tok_is_typeof_spelling(p)) {
                 cc_type_t ty = CC_TYPE_VOID;
                 int sid = -1;
                 if (seen_type) {
@@ -5871,11 +5886,15 @@ void cc_parser_set_std_mode(const char *std_mode) {
     g_parser_std_c11 = 0;
     g_parser_std_c17 = 0;
     g_parser_std_c23 = 0;
+    g_parser_std_gnu = 0;
 
     if (std_mode == NULL || std_mode[0] == '\0') {
         g_parser_enable_trigraphs = 1;
         g_parser_allow_oldstyle_funcdecl = 0;
         return;
+    }
+    if (strncmp(std_mode, "gnu", 3) == 0) {
+        g_parser_std_gnu = 1;
     }
     if (strcmp(std_mode, "c11") == 0 || strcmp(std_mode, "gnu11") == 0) {
         g_parser_std_c11 = 1;

@@ -259,16 +259,16 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 
 ### 5.1 GNU C syntax/semantics extensions
 - [ ] Statement expressions `({ ... })`.
-- [ ] Labels as values and computed goto.
+- [x] Labels as values and computed goto.
 - [ ] Locally declared labels (`__label__`).
 - [ ] Nested functions.
-- [ ] `typeof` and GNU alternate spellings.
+- [x] `typeof` and GNU alternate spellings.
 - [ ] Omitted middle operand ternary (`x ?: y`).
 - [ ] Case ranges (`case a ... b`).
 - [ ] Cast-to-union extension.
 - [ ] Zero-length arrays.
 - [ ] Empty structs (GNU mode behavior).
-- [ ] `void*` arithmetic extension.
+- [x] `void*` arithmetic extension.
 - [ ] Non-constant static initialization extensions.
 - [ ] GNU inline mode differences (`gnu89-inline` compatibility where selected).
 
@@ -281,27 +281,27 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [ ] Codegen impact validation for each non-noop attribute.
 
 ### 5.3 GNU builtins
-- [ ] `__builtin_expect`, `__builtin_constant_p`.
-- [ ] Byte-swap/bit ops (`clz/ctz/popcount/parity/ffs` families).
+- [x] `__builtin_expect`, `__builtin_constant_p`.
+- [x] Byte-swap/bit ops (`clz/ctz/popcount/parity/ffs` families).
 - [ ] Overflow builtins.
 - [ ] Object size/check builtins.
 - [ ] `__builtin_types_compatible_p`.
 - [ ] `__builtin_choose_expr`.
-- [ ] `__builtin_offsetof`.
-- [ ] Varargs builtins and ABI-correct lowering.
+- [x] `__builtin_offsetof`.
+- [x] Varargs builtins and ABI-correct lowering.
 - [ ] Trap/unreachable builtins.
 
 ### 5.4 GNU atomics
-- [ ] Legacy `__sync_*` family.
-- [ ] `__atomic_*` family.
-- [ ] Memory model mapping and codegen fences.
+- [x] Legacy `__sync_*` family.
+- [x] `__atomic_*` family.
+- [x] Memory model mapping and codegen fences.
 
 ### 5.5 GNU preprocessor extensions
-- [ ] `#include_next`.
-- [ ] `,##__VA_ARGS__`.
-- [ ] Named varargs macros (`args...`) where in GNU mode.
-- [ ] `__COUNTER__`, `__BASE_FILE__`, `__FILE_NAME__`, `__INCLUDE_LEVEL__`, `__TIMESTAMP__`.
-- [ ] `#pragma GCC` forms used by kernel/userland.
+- [x] `#include_next`.
+- [x] `,##__VA_ARGS__`.
+- [x] Named varargs macros (`args...`) where in GNU mode.
+- [x] `__COUNTER__`, `__BASE_FILE__`, `__FILE_NAME__`, `__INCLUDE_LEVEL__`, `__TIMESTAMP__`.
+- [x] `#pragma GCC` forms used by kernel/userland.
 
 ---
 
