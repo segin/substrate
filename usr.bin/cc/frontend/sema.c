@@ -1003,10 +1003,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 e->struct_id = -1;
                 return 0;
             }
-            /* Fallback for unresolved extern symbols inside function scope. */
-            e->value_type = CC_TYPE_PTR_VOID;
-            e->struct_id = -1;
-            return 0;
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "use of undeclared identifier: %s",
+                         e->ident != NULL ? e->ident : "<null>");
+            }
+            return -1;
         }
     }
 
@@ -2398,8 +2399,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         }
                     }
                 } else {
-                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, loop_depth,
-                                   fn_attr_flags, switch_depth, saw_return, diag) != 0) {
+                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, fn_attr_flags,
+                                   loop_depth, switch_depth, saw_return, diag) != 0) {
                         return -1;
                     }
                 }

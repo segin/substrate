@@ -75,16 +75,16 @@ Execution policy:
 - [x] Effective type / aliasing baseline behavior.
 
 ### 1.5 Statements and control flow
-- [ ] Block scope, nested scopes, and shadowing rules.
-- [ ] Mixed declarations and statements.
-- [ ] `if`/`else`.
-- [ ] `switch` with `case`/`default`, duplicate diagnostics.
-- [ ] `while`, `do`, `for`.
-- [ ] `for` with declaration init.
-- [ ] `break`, `continue`.
-- [ ] Labels and `goto`.
-- [ ] Null statement and label+statement forms.
-- [ ] `return` constraints and conversions.
+- [x] Block scope, nested scopes, and shadowing rules.
+- [x] Mixed declarations and statements.
+- [x] `if`/`else`.
+- [x] `switch` with `case`/`default`, duplicate diagnostics.
+- [x] `while`, `do`, `for`.
+- [x] `for` with declaration init.
+- [x] `break`, `continue`.
+- [x] Labels and `goto`.
+- [x] Null statement and label+statement forms.
+- [x] `return` constraints and conversions.
 
 ### 1.6 Function calls and ABI-facing semantics
 - [ ] Default argument promotions for unprototyped calls where permitted.
