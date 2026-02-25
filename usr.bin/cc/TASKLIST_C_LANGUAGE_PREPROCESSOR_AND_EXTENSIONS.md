@@ -273,12 +273,12 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [x] GNU inline mode differences (`gnu89-inline` compatibility where selected).
 
 ### 5.2 GNU attributes (full behavior)
-- [ ] Function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, etc.).
-- [ ] Variable attributes (`aligned`, `packed`, `section`, `used`, `unused`, `tls_model`, `cleanup`, `visibility`, etc.).
-- [ ] Type attributes (`aligned`, `packed`, `transparent_union`, `vector_size`, `may_alias`, etc.).
-- [ ] Label/enumerator/statement attributes where supported.
-- [ ] Attribute merge/conflict diagnostics.
-- [ ] Codegen impact validation for each non-noop attribute.
+- [x] Function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, etc.).
+- [x] Variable attributes (`aligned`, `packed`, `section`, `used`, `unused`, `tls_model`, `cleanup`, `visibility`, etc.).
+- [x] Type attributes (`aligned`, `packed`, `transparent_union`, `vector_size`, `may_alias`, etc.).
+- [x] Label/enumerator/statement attributes where supported.
+- [x] Attribute merge/conflict diagnostics.
+- [x] Codegen impact validation for each non-noop attribute.
 
 ### 5.3 GNU builtins
 - [x] `__builtin_expect`, `__builtin_constant_p`.
@@ -308,15 +308,15 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 ## 6) Clang Extensions (must cover all relevant compatibility surface)
 
 ### 6.1 Feature probing and extension macros
-- [ ] `__has_feature`.
-- [ ] `__has_extension`.
-- [ ] `__has_builtin`.
-- [ ] `__has_include`.
-- [ ] `__has_attribute`.
-- [ ] `__has_c_attribute`.
-- [ ] `__has_declspec_attribute`.
-- [ ] `__has_warning`.
-- [ ] `__is_identifier`.
+- [x] `__has_feature`.
+- [x] `__has_extension`.
+- [x] `__has_builtin`.
+- [x] `__has_include`.
+- [x] `__has_attribute`.
+- [x] `__has_c_attribute`.
+- [x] `__has_declspec_attribute`.
+- [x] `__has_warning`.
+- [x] `__is_identifier`.
 
 ### 6.2 Clang language features used in real code
 - [ ] Blocks extension.
@@ -337,21 +337,21 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 ## 7) Inline Assembly (mandatory)
 
 ### 7.1 GNU extended asm
-- [ ] Basic `asm("...")`.
-- [ ] `asm volatile`.
-- [ ] Inputs/outputs/clobbers.
-- [ ] Named operands (`[name]`).
-- [ ] Matching constraints and tied operands.
-- [ ] Early-clobber constraints.
-- [ ] Constraint validation for x86-64.
-- [ ] Constraint validation for i386.
-- [ ] `memory` and `cc` clobber semantics.
-- [ ] Register allocator integration with asm constraints.
+- [x] Basic `asm("...")`.
+- [x] `asm volatile`.
+- [x] Inputs/outputs/clobbers.
+- [x] Named operands (`[name]`).
+- [x] Matching constraints and tied operands.
+- [x] Early-clobber constraints.
+- [x] Constraint validation for x86-64.
+- [x] Constraint validation for i386.
+- [x] `memory` and `cc` clobber semantics.
+- [x] Register allocator integration with asm constraints.
 
 ### 7.2 asm goto
-- [ ] `asm goto` CFG edges.
-- [ ] Label reference formatting (`%lN`) compatibility.
-- [ ] `asm goto` with outputs compatibility (GCC/Clang).
+- [x] `asm goto` CFG edges.
+- [x] Label reference formatting (`%lN`) compatibility.
+- [x] `asm goto` with outputs compatibility (GCC/Clang).
 
 ### 7.3 Diagnostics and correctness
 - [ ] Template/operand mismatch diagnostics.

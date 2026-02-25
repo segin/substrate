@@ -28,6 +28,26 @@ typedef struct {
 #define CC_ATTR_REPRODUCIBLE (1 << 8)
 #define CC_ATTR_UNSEQUENCED (1 << 9)
 #define CC_ATTR_FALLTHROUGH (1 << 10)
+#define CC_ATTR_ALWAYS_INLINE (1 << 11)
+#define CC_ATTR_NOINLINE (1 << 12)
+#define CC_ATTR_HOT (1 << 13)
+#define CC_ATTR_COLD (1 << 14)
+#define CC_ATTR_FORMAT (1 << 15)
+#define CC_ATTR_NONNULL (1 << 16)
+#define CC_ATTR_MALLOC_FN (1 << 17)
+#define CC_ATTR_WEAK (1 << 18)
+#define CC_ATTR_ALIAS (1 << 19)
+#define CC_ATTR_FLATTEN (1 << 20)
+#define CC_ATTR_TARGET (1 << 21)
+#define CC_ATTR_TLS_MODEL (1 << 22)
+#define CC_ATTR_CLEANUP (1 << 23)
+#define CC_ATTR_VIS_DEFAULT (1 << 24)
+#define CC_ATTR_VIS_HIDDEN (1 << 25)
+#define CC_ATTR_VIS_PROTECTED (1 << 26)
+#define CC_ATTR_VIS_INTERNAL (1 << 27)
+#define CC_ATTR_TRANSPARENT_UNION (1 << 28)
+#define CC_ATTR_VECTOR_SIZE (1 << 29)
+#define CC_ATTR_MAY_ALIAS (1 << 30)
 
 typedef enum {
     CC_TYPE_VOID = 0,
@@ -136,6 +156,7 @@ typedef enum {
 
 typedef struct cc_expr cc_expr_t;
 typedef struct cc_stmt cc_stmt_t;
+typedef struct cc_asm_operand cc_asm_operand_t;
 
 struct cc_expr {
     cc_expr_kind_t kind;
@@ -164,6 +185,7 @@ struct cc_expr {
 typedef enum {
     CC_STMT_DECL = 0,
     CC_STMT_EXPR,
+    CC_STMT_ASM,
     CC_STMT_RETURN,
     CC_STMT_IF,
     CC_STMT_BLOCK,
@@ -179,6 +201,12 @@ typedef enum {
     CC_STMT_LABEL
 } cc_stmt_kind_t;
 
+struct cc_asm_operand {
+    char *name;
+    char *constraint;
+    cc_expr_t *expr;
+};
+
 struct cc_stmt {
     size_t line;
     size_t col;
@@ -189,6 +217,7 @@ struct cc_stmt {
     int attr_flags;
     long attr_align;
     char *attr_section;
+    char *attr_alias;
     cc_stmt_kind_t kind;
     char *decl_name;
     char *label_name;
@@ -202,6 +231,17 @@ struct cc_stmt {
     size_t block_count;
     long case_hi;
     int case_has_range;
+    int asm_is_volatile;
+    int asm_is_goto;
+    char *asm_template;
+    cc_asm_operand_t *asm_outputs;
+    size_t asm_output_count;
+    cc_asm_operand_t *asm_inputs;
+    size_t asm_input_count;
+    char **asm_clobbers;
+    size_t asm_clobber_count;
+    char **asm_goto_labels;
+    size_t asm_goto_label_count;
 };
 
 typedef struct {
@@ -226,6 +266,7 @@ typedef struct {
     long align;
     int attr_flags;
     long attr_align;
+    char *attr_alias;
     int is_union;
     int has_flexible_array;
     int complete;
@@ -241,6 +282,7 @@ typedef struct {
     int attr_flags;
     long attr_align;
     char *attr_section;
+    char *attr_alias;
     int has_body;
     int has_prototype;
     int is_variadic;
@@ -261,6 +303,7 @@ typedef struct {
     int attr_flags;
     long attr_align;
     char *attr_section;
+    char *attr_alias;
     cc_expr_t *init;
 } cc_global_t;
 

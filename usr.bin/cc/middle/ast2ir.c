@@ -40,6 +40,54 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
 static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym);
 
+static void free_asm_instr_fields(cc_ssa_instr_t *in) {
+    size_t i;
+    if (in == NULL) {
+        return;
+    }
+    free(in->sym);
+    free(in->asm_out_values);
+    free(in->asm_in_values);
+    if (in->asm_out_constraints != NULL) {
+        for (i = 0; i < in->asm_out_count; ++i) {
+            free(in->asm_out_constraints[i]);
+        }
+    }
+    free(in->asm_out_constraints);
+    if (in->asm_out_names != NULL) {
+        for (i = 0; i < in->asm_out_count; ++i) {
+            free(in->asm_out_names[i]);
+        }
+    }
+    free(in->asm_out_names);
+    if (in->asm_in_constraints != NULL) {
+        for (i = 0; i < in->asm_in_count; ++i) {
+            free(in->asm_in_constraints[i]);
+        }
+    }
+    free(in->asm_in_constraints);
+    if (in->asm_in_names != NULL) {
+        for (i = 0; i < in->asm_in_count; ++i) {
+            free(in->asm_in_names[i]);
+        }
+    }
+    free(in->asm_in_names);
+    if (in->asm_clobbers != NULL) {
+        for (i = 0; i < in->asm_clobber_count; ++i) {
+            free(in->asm_clobbers[i]);
+        }
+    }
+    free(in->asm_clobbers);
+    free(in->asm_goto_labels);
+    if (in->asm_goto_names != NULL) {
+        for (i = 0; i < in->asm_goto_count; ++i) {
+            free(in->asm_goto_names[i]);
+        }
+    }
+    free(in->asm_goto_names);
+    memset(in, 0, sizeof(*in));
+}
+
 static char *xstrdup(const char *s) {
     size_t n;
     char *p;
@@ -4761,6 +4809,145 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         return 0;
     }
 
+    if (s->kind == CC_STMT_ASM) {
+        cc_ssa_instr_t in;
+        size_t i4;
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_ASM;
+        in.dst = -1;
+        in.lhs = -1;
+        in.rhs = -1;
+        in.asm_volatile = s->asm_is_volatile ? 1 : 0;
+        in.asm_is_goto = s->asm_is_goto ? 1 : 0;
+        in.sym = xstrdup(s->asm_template != NULL ? s->asm_template : "");
+        in.asm_out_count = s->asm_output_count;
+        in.asm_in_count = s->asm_input_count;
+        in.asm_clobber_count = s->asm_clobber_count;
+        in.asm_goto_count = s->asm_goto_label_count;
+        if (in.sym == NULL) {
+            set_diag(diag, "out of memory storing asm template");
+            return -1;
+        }
+        if (in.asm_out_count > 0) {
+            in.asm_out_values = (int *)calloc(in.asm_out_count, sizeof(*in.asm_out_values));
+            in.asm_out_constraints = (char **)calloc(in.asm_out_count, sizeof(*in.asm_out_constraints));
+            in.asm_out_names = (char **)calloc(in.asm_out_count, sizeof(*in.asm_out_names));
+            if (in.asm_out_values == NULL || in.asm_out_constraints == NULL || in.asm_out_names == NULL) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "out of memory storing asm outputs");
+                return -1;
+            }
+        }
+        if (in.asm_in_count > 0) {
+            in.asm_in_values = (int *)calloc(in.asm_in_count, sizeof(*in.asm_in_values));
+            in.asm_in_constraints = (char **)calloc(in.asm_in_count, sizeof(*in.asm_in_constraints));
+            in.asm_in_names = (char **)calloc(in.asm_in_count, sizeof(*in.asm_in_names));
+            if (in.asm_in_values == NULL || in.asm_in_constraints == NULL || in.asm_in_names == NULL) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "out of memory storing asm inputs");
+                return -1;
+            }
+        }
+        if (in.asm_clobber_count > 0) {
+            in.asm_clobbers = (char **)calloc(in.asm_clobber_count, sizeof(*in.asm_clobbers));
+            if (in.asm_clobbers == NULL) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "out of memory storing asm clobbers");
+                return -1;
+            }
+        }
+        if (in.asm_goto_count > 0) {
+            in.asm_goto_labels = (int *)calloc(in.asm_goto_count, sizeof(*in.asm_goto_labels));
+            in.asm_goto_names = (char **)calloc(in.asm_goto_count, sizeof(*in.asm_goto_names));
+            if (in.asm_goto_labels == NULL || in.asm_goto_names == NULL) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "out of memory storing asm goto labels");
+                return -1;
+            }
+        }
+        for (i4 = 0; i4 < in.asm_out_count; ++i4) {
+            int vidx;
+            const cc_asm_operand_t *op = &s->asm_outputs[i4];
+            if (op->expr == NULL || op->expr->kind != CC_EXPR_IDENT || op->expr->ident == NULL) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "unsupported asm output target (requires local identifier)");
+                return -1;
+            }
+            vidx = var_find_visible(*vars, *var_count, op->expr->ident, depth);
+            if (vidx < 0) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "asm output target must reference a local variable");
+                return -1;
+            }
+            in.asm_out_values[i4] = (*vars)[vidx].value;
+            in.asm_out_constraints[i4] = xstrdup(op->constraint != NULL ? op->constraint : "");
+            if (op->name != NULL) {
+                in.asm_out_names[i4] = xstrdup(op->name);
+            }
+            if (in.asm_out_constraints[i4] == NULL || (op->name != NULL && in.asm_out_names[i4] == NULL)) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "out of memory storing asm output operand");
+                return -1;
+            }
+        }
+        for (i4 = 0; i4 < in.asm_in_count; ++i4) {
+            const cc_asm_operand_t *op = &s->asm_inputs[i4];
+            int av = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
+            if (av < 0) {
+                free_asm_instr_fields(&in);
+                return -1;
+            }
+            in.asm_in_values[i4] = av;
+            in.asm_in_constraints[i4] = xstrdup(op->constraint != NULL ? op->constraint : "");
+            if (op->name != NULL) {
+                in.asm_in_names[i4] = xstrdup(op->name);
+            }
+            if (in.asm_in_constraints[i4] == NULL || (op->name != NULL && in.asm_in_names[i4] == NULL)) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "out of memory storing asm input operand");
+                return -1;
+            }
+        }
+        for (i4 = 0; i4 < in.asm_clobber_count; ++i4) {
+            in.asm_clobbers[i4] = xstrdup(s->asm_clobbers[i4] != NULL ? s->asm_clobbers[i4] : "");
+            if (in.asm_clobbers[i4] == NULL) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "out of memory storing asm clobber");
+                return -1;
+            }
+        }
+        for (i4 = 0; i4 < in.asm_goto_count; ++i4) {
+            int l;
+            const char *lname = s->asm_goto_labels[i4];
+            if (ctx == NULL || lname == NULL || lname[0] == '\0') {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "asm goto label is malformed");
+                return -1;
+            }
+            l = lower_find_label(ctx, lname);
+            if (l < 0) {
+                free_asm_instr_fields(&in);
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "asm goto references unknown label: %s", lname);
+                }
+                return -1;
+            }
+            in.asm_goto_labels[i4] = l;
+            in.asm_goto_names[i4] = xstrdup(lname);
+            if (in.asm_goto_names[i4] == NULL) {
+                free_asm_instr_fields(&in);
+                set_diag(diag, "out of memory storing asm goto label name");
+                return -1;
+            }
+        }
+        if (push_instr(sf, in) != 0) {
+            free_asm_instr_fields(&in);
+            set_diag(diag, "out of memory appending SSA asm instruction");
+            return -1;
+        }
+        return 0;
+    }
+
     if (s->kind == CC_STMT_RETURN) {
         cc_ssa_instr_t ret_in;
         int rv = -1;
@@ -6163,6 +6350,14 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     return -1;
                 }
             }
+            if (tu->globals[i].attr_alias != NULL) {
+                out->globals[i].attr_alias = xstrdup(tu->globals[i].attr_alias);
+                if (out->globals[i].attr_alias == NULL) {
+                    set_diag(diag, "out of memory duplicating global alias attribute");
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
+            }
             if (out->globals[i].name == NULL) {
                 set_diag(diag, "out of memory duplicating global name");
                 cc_ssa_module_free(out);
@@ -6436,6 +6631,44 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
     }
 
     for (i = 0; i < tu->func_count; ++i) {
+        const cc_function_t *fdecl = &tu->funcs[i];
+        cc_ssa_global_t gdecl;
+        if (fdecl->has_body || (fdecl->attr_flags & CC_ATTR_ALIAS) == 0 || fdecl->attr_alias == NULL ||
+            fdecl->attr_alias[0] == '\0') {
+            continue;
+        }
+        memset(&gdecl, 0, sizeof(gdecl));
+        gdecl.name = xstrdup(fdecl->name);
+        gdecl.type = CC_TYPE_PTR_VOID;
+        gdecl.type_struct_id = -1;
+        gdecl.array_len = -1;
+        gdecl.storage = fdecl->storage | CC_STORAGE_EXTERN;
+        gdecl.attr_flags = fdecl->attr_flags;
+        gdecl.attr_align = fdecl->attr_align;
+        if (fdecl->attr_section != NULL) {
+            gdecl.attr_section = xstrdup(fdecl->attr_section);
+        }
+        gdecl.attr_alias = xstrdup(fdecl->attr_alias);
+        if (gdecl.name == NULL || gdecl.attr_alias == NULL ||
+            (fdecl->attr_section != NULL && gdecl.attr_section == NULL)) {
+            free(gdecl.name);
+            free(gdecl.attr_section);
+            free(gdecl.attr_alias);
+            set_diag(diag, "out of memory lowering function alias declaration");
+            cc_ssa_module_free(out);
+            return -1;
+        }
+        if (append_synth_global(out, &gdecl) != 0) {
+            free(gdecl.name);
+            free(gdecl.attr_section);
+            free(gdecl.attr_alias);
+            set_diag(diag, "out of memory appending function alias declaration");
+            cc_ssa_module_free(out);
+            return -1;
+        }
+    }
+
+    for (i = 0; i < tu->func_count; ++i) {
         if (tu->funcs[i].has_body) {
             def_count++;
         }
@@ -6465,6 +6698,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         int eff_attr_flags;
         long eff_attr_align;
         const char *eff_attr_section;
+        const char *eff_attr_alias = NULL;
 
         if (!af->has_body) {
             continue;
@@ -6478,6 +6712,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         eff_attr_flags = af->attr_flags;
         eff_attr_align = af->attr_align;
         eff_attr_section = af->attr_section;
+        eff_attr_alias = af->attr_alias;
         for (k = 0; k < tu->func_count; ++k) {
             const cc_function_t *cand = &tu->funcs[k];
             if (strcmp(cand->name, af->name) != 0) {
@@ -6491,6 +6726,16 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 cand->attr_section[0] != '\0') {
                 eff_attr_section = cand->attr_section;
             }
+            if ((eff_attr_alias == NULL || eff_attr_alias[0] == '\0') && cand->attr_alias != NULL &&
+                cand->attr_alias[0] != '\0') {
+                eff_attr_alias = cand->attr_alias;
+            }
+        }
+        if ((eff_attr_section == NULL || eff_attr_section[0] == '\0') && (eff_attr_flags & CC_ATTR_HOT) != 0) {
+            eff_attr_section = ".text.hot";
+        } else if ((eff_attr_section == NULL || eff_attr_section[0] == '\0') &&
+                   (eff_attr_flags & CC_ATTR_COLD) != 0) {
+            eff_attr_section = ".text.unlikely";
         }
 
         sf->name = xstrdup(af->name);
@@ -6507,6 +6752,14 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             sf->attr_section = xstrdup(eff_attr_section);
             if (sf->attr_section == NULL) {
                 set_diag(diag, "out of memory duplicating function section attribute");
+                cc_ssa_module_free(out);
+                return -1;
+            }
+        }
+        if (eff_attr_alias != NULL) {
+            sf->attr_alias = xstrdup(eff_attr_alias);
+            if (sf->attr_alias == NULL) {
+                set_diag(diag, "out of memory duplicating function alias attribute");
                 cc_ssa_module_free(out);
                 return -1;
             }

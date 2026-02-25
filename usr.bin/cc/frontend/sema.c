@@ -163,6 +163,28 @@ static int validate_attr_section(const char *section, cc_diag_t *diag, const cha
     return -1;
 }
 
+static int attr_visibility_mask(void) {
+    return CC_ATTR_VIS_DEFAULT | CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
+}
+
+static int has_multiple_visibility_attrs(int flags) {
+    int v = flags & attr_visibility_mask();
+    int n = 0;
+    if ((v & CC_ATTR_VIS_DEFAULT) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_HIDDEN) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_PROTECTED) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_INTERNAL) != 0) {
+        n++;
+    }
+    return n > 1;
+}
+
 static int storage_class_count(int storage) {
     int mask = storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN | CC_STORAGE_AUTO | CC_STORAGE_REGISTER);
     int n = 0;
@@ -234,6 +256,234 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     (*vars)[*count].array_len = array_len;
     (*vars)[*count].depth = depth;
     (*count)++;
+    return 0;
+}
+
+static int asm_operand_is_lvalue(const cc_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_IDENT) {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_valid_constraint_char(int ch) {
+    if (ch >= '0' && ch <= '9') {
+        return 1;
+    }
+    if (ch == '=' || ch == '+' || ch == '&' || ch == '%' || ch == '!' || ch == '*') {
+        return 1;
+    }
+    if (ch == 'r' || ch == 'm' || ch == 'i' || ch == 'g' || ch == 'q' || ch == 'a' || ch == 'b' || ch == 'c' ||
+        ch == 'd' || ch == 'S' || ch == 'D' || ch == 'f' || ch == 'x' || ch == 'X') {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_constraint_allows_memory(const char *c) {
+    return c != NULL && strchr(c, 'm') != NULL;
+}
+
+static int asm_constraint_allows_register(const char *c) {
+    if (c == NULL) {
+        return 0;
+    }
+    return strchr(c, 'r') != NULL || strchr(c, 'q') != NULL || strchr(c, 'a') != NULL || strchr(c, 'b') != NULL ||
+           strchr(c, 'c') != NULL || strchr(c, 'd') != NULL || strchr(c, 'S') != NULL || strchr(c, 'D') != NULL;
+}
+
+static int asm_constraint_is_imm(const char *c) {
+    if (c == NULL) {
+        return 0;
+    }
+    return strchr(c, 'i') != NULL;
+}
+
+static int asm_validate_constraint(const char *c, int is_output, size_t out_count, int pointer_size, cc_diag_t *diag) {
+    size_t i;
+    int has_class = 0;
+    if (c == NULL || c[0] == '\0') {
+        set_diag(diag, "asm operand constraint cannot be empty");
+        return -1;
+    }
+    if (!is_output && c[0] >= '0' && c[0] <= '9') {
+        long n = 0;
+        for (i = 0; c[i] >= '0' && c[i] <= '9'; ++i) {
+            n = n * 10 + (long)(c[i] - '0');
+        }
+        if (n < 0 || (size_t)n >= out_count) {
+            set_diag(diag, "asm matching constraint references invalid output index");
+            return -1;
+        }
+        if (c[i] != '\0') {
+            set_diag(diag, "asm matching constraint must be a pure numeric index");
+            return -1;
+        }
+        return 0;
+    }
+    if (is_output && strchr(c, '=') == NULL && strchr(c, '+') == NULL) {
+        set_diag(diag, "asm output constraint must contain '=' or '+'");
+        return -1;
+    }
+    for (i = 0; c[i] != '\0'; ++i) {
+        int ch = (unsigned char)c[i];
+        if (!asm_valid_constraint_char(ch)) {
+            set_diag(diag, "asm operand constraint contains unsupported character");
+            return -1;
+        }
+    }
+    if (strchr(c, 'q') != NULL && pointer_size != 4 && pointer_size != 8) {
+        set_diag(diag, "asm 'q' constraint requires x86 target");
+        return -1;
+    }
+    has_class = asm_constraint_allows_memory(c) || asm_constraint_allows_register(c) || asm_constraint_is_imm(c);
+    if (!has_class) {
+        set_diag(diag, "asm operand constraint missing operand class");
+        return -1;
+    }
+    return 0;
+}
+
+static int asm_find_named_operand(const cc_stmt_t *s, const char *name) {
+    size_t i;
+    for (i = 0; i < s->asm_output_count; ++i) {
+        if (s->asm_outputs[i].name != NULL && strcmp(s->asm_outputs[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    for (i = 0; i < s->asm_input_count; ++i) {
+        if (s->asm_inputs[i].name != NULL && strcmp(s->asm_inputs[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int asm_find_goto_label(const cc_stmt_t *s, const char *name) {
+    size_t i;
+    for (i = 0; i < s->asm_goto_label_count; ++i) {
+        if (s->asm_goto_labels[i] != NULL && strcmp(s->asm_goto_labels[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
+    size_t i = 0;
+    size_t total = s->asm_output_count + s->asm_input_count;
+    const char *t = s->asm_template;
+    if (t == NULL) {
+        set_diag(diag, "asm statement missing template");
+        return -1;
+    }
+    while (t[i] != '\0') {
+        if (t[i] != '%') {
+            i++;
+            continue;
+        }
+        i++;
+        if (t[i] == '%') {
+            i++;
+            continue;
+        }
+        if (t[i] >= '0' && t[i] <= '9') {
+            long n = 0;
+            while (t[i] >= '0' && t[i] <= '9') {
+                n = n * 10 + (long)(t[i] - '0');
+                i++;
+            }
+            if (n < 0 || (size_t)n >= total) {
+                set_diag(diag, "asm template operand index is out of range");
+                return -1;
+            }
+            continue;
+        }
+        if (t[i] == 'l') {
+            i++;
+            if (t[i] >= '0' && t[i] <= '9') {
+                long n = 0;
+                while (t[i] >= '0' && t[i] <= '9') {
+                    n = n * 10 + (long)(t[i] - '0');
+                    i++;
+                }
+                if (n < 0 || (size_t)n >= s->asm_goto_label_count) {
+                    set_diag(diag, "asm template goto-label index is out of range");
+                    return -1;
+                }
+                continue;
+            }
+            if (t[i] == '[') {
+                size_t b = ++i;
+                while (t[i] != '\0' && t[i] != ']') {
+                    i++;
+                }
+                if (t[i] != ']') {
+                    set_diag(diag, "asm template has unterminated goto label");
+                    return -1;
+                }
+                if (i == b) {
+                    set_diag(diag, "asm template has empty goto label");
+                    return -1;
+                }
+                {
+                    char *nm = (char *)malloc(i - b + 1);
+                    if (nm == NULL) {
+                        set_diag(diag, "out of memory validating asm template");
+                        return -1;
+                    }
+                    memcpy(nm, t + b, i - b);
+                    nm[i - b] = '\0';
+                    if (!asm_find_goto_label(s, nm)) {
+                        free(nm);
+                        set_diag(diag, "asm template references unknown goto label");
+                        return -1;
+                    }
+                    free(nm);
+                }
+                i++;
+                continue;
+            }
+            set_diag(diag, "asm template has malformed %l label reference");
+            return -1;
+        }
+        if (t[i] == '[') {
+            size_t b = ++i;
+            while (t[i] != '\0' && t[i] != ']') {
+                i++;
+            }
+            if (t[i] != ']') {
+                set_diag(diag, "asm template has unterminated named operand");
+                return -1;
+            }
+            if (i == b) {
+                set_diag(diag, "asm template has empty named operand");
+                return -1;
+            }
+            {
+                char *nm = (char *)malloc(i - b + 1);
+                if (nm == NULL) {
+                    set_diag(diag, "out of memory validating asm template");
+                    return -1;
+                }
+                memcpy(nm, t + b, i - b);
+                nm[i - b] = '\0';
+                if (!asm_find_named_operand(s, nm)) {
+                    free(nm);
+                    set_diag(diag, "asm template references unknown named operand");
+                    return -1;
+                }
+                free(nm);
+            }
+            i++;
+            continue;
+        }
+        set_diag(diag, "asm template has unsupported '%' reference");
+        return -1;
+    }
     return 0;
 }
 
@@ -344,6 +594,20 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
         if (names_find(gotos->items, gotos->count, s->label_name) < 0 && name_list_push(gotos, s->label_name) != 0) {
             set_diag(diag, "out of memory collecting goto targets");
             return -1;
+        }
+        return 0;
+
+    case CC_STMT_ASM:
+        for (i = 0; i < s->asm_goto_label_count; ++i) {
+            const char *name = s->asm_goto_labels[i];
+            if (name == NULL || name[0] == '\0') {
+                set_diag(diag, "malformed asm goto label");
+                return -1;
+            }
+            if (names_find(gotos->items, gotos->count, name) < 0 && name_list_push(gotos, name) != 0) {
+                set_diag(diag, "out of memory collecting asm goto targets");
+                return -1;
+            }
         }
         return 0;
 
@@ -1867,6 +2131,20 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         }
+        if (callee != NULL && callee->has_prototype && (callee->attr_flags & CC_ATTR_NONNULL) != 0) {
+            for (i = 0; i < e->arg_count && i < callee->param_count; ++i) {
+                if (!is_pointer_type(callee->params[i].type)) {
+                    continue;
+                }
+                if (is_null_ptr_constant(e->args[i])) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "nonnull argument %zu in call to %s is null",
+                                 i + 1, e->ident != NULL ? e->ident : "<indirect>");
+                    }
+                    return -1;
+                }
+            }
+        }
         if (callee != NULL) {
             e->value_type = callee->ret_type;
             e->struct_id = callee->ret_struct_id;
@@ -2606,12 +2884,43 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         {
             cc_type_t init_type = s->type;
             int sc_count = storage_class_count(s->storage);
+            int fn_only_attrs = CC_ATTR_ALWAYS_INLINE | CC_ATTR_NOINLINE | CC_ATTR_HOT | CC_ATTR_COLD |
+                                CC_ATTR_FORMAT | CC_ATTR_NONNULL | CC_ATTR_MALLOC_FN | CC_ATTR_ALIAS |
+                                CC_ATTR_FLATTEN | CC_ATTR_TARGET;
             if ((s->attr_flags & CC_ATTR_NORETURN) != 0) {
                 set_diag(diag, "noreturn attribute is only valid on functions");
                 return -1;
             }
+            if ((s->attr_flags & fn_only_attrs) != 0) {
+                set_diag(diag, "function-only attribute used on local declaration");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_WEAK) != 0) {
+                set_diag(diag, "weak attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
+            if ((s->attr_flags & attr_visibility_mask()) != 0) {
+                set_diag(diag, "visibility attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_ALIAS) != 0) {
+                set_diag(diag, "alias attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
             if ((s->attr_flags & CC_ATTR_SECTION) != 0) {
                 set_diag(diag, "section attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
+            if (has_multiple_visibility_attrs(s->attr_flags)) {
+                set_diag(diag, "conflicting visibility attributes on local declaration");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 && (s->attr_flags & CC_ATTR_NOINLINE) != 0) {
+                set_diag(diag, "conflicting always_inline/noinline attributes");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_HOT) != 0 && (s->attr_flags & CC_ATTR_COLD) != 0) {
+                set_diag(diag, "conflicting hot/cold attributes");
                 return -1;
             }
             if ((s->attr_flags & CC_ATTR_ALIGNED) != 0 &&
@@ -2753,6 +3062,78 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
         }
         return 0;
+
+    case CC_STMT_ASM: {
+        size_t i2;
+        if (s->asm_template == NULL || s->asm_template[0] == '\0') {
+            set_diag(diag, "asm statement requires a non-empty template");
+            return -1;
+        }
+        if (s->asm_is_goto && s->asm_goto_label_count == 0) {
+            set_diag(diag, "asm goto requires at least one destination label");
+            return -1;
+        }
+        if (!s->asm_is_goto && s->asm_goto_label_count > 0) {
+            set_diag(diag, "asm goto label list requires 'asm goto'");
+            return -1;
+        }
+        if (asm_validate_template_refs(s, diag) != 0) {
+            return -1;
+        }
+        for (i2 = 0; i2 < s->asm_output_count; ++i2) {
+            if (s->asm_outputs[i2].expr == NULL || !asm_operand_is_lvalue(s->asm_outputs[i2].expr)) {
+                set_diag(diag, "asm output operand must be an lvalue");
+                return -1;
+            }
+            if (check_expr(tu, s->asm_outputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (s->asm_outputs[i2].expr->value_type == CC_TYPE_FLOAT ||
+                s->asm_outputs[i2].expr->value_type == CC_TYPE_DOUBLE) {
+                set_diag(diag, "floating asm outputs are not supported yet");
+                return -1;
+            }
+            if (asm_validate_constraint(s->asm_outputs[i2].constraint, 1, s->asm_output_count, g_pointer_size_bytes,
+                                        diag) != 0) {
+                return -1;
+            }
+        }
+        for (i2 = 0; i2 < s->asm_input_count; ++i2) {
+            if (s->asm_inputs[i2].expr == NULL) {
+                set_diag(diag, "asm input operand requires an expression");
+                return -1;
+            }
+            if (check_expr(tu, s->asm_inputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (s->asm_inputs[i2].expr->value_type == CC_TYPE_FLOAT ||
+                s->asm_inputs[i2].expr->value_type == CC_TYPE_DOUBLE) {
+                set_diag(diag, "floating asm inputs are not supported yet");
+                return -1;
+            }
+            if (asm_validate_constraint(s->asm_inputs[i2].constraint, 0, s->asm_output_count, g_pointer_size_bytes,
+                                        diag) != 0) {
+                return -1;
+            }
+        }
+        for (i2 = 0; i2 < s->asm_clobber_count; ++i2) {
+            if (s->asm_clobbers[i2] == NULL || s->asm_clobbers[i2][0] == '\0') {
+                set_diag(diag, "asm clobber name cannot be empty");
+                return -1;
+            }
+            if (strchr(s->asm_clobbers[i2], '\n') != NULL || strchr(s->asm_clobbers[i2], '\r') != NULL) {
+                set_diag(diag, "asm clobber contains invalid characters");
+                return -1;
+            }
+        }
+        for (i2 = 0; i2 < s->asm_goto_label_count; ++i2) {
+            if (s->asm_goto_labels[i2] == NULL || s->asm_goto_labels[i2][0] == '\0') {
+                set_diag(diag, "asm goto label cannot be empty");
+                return -1;
+            }
+        }
+        return 0;
+    }
 
     case CC_STMT_RETURN:
         if ((fn_attr_flags & CC_ATTR_NORETURN) != 0) {
@@ -3145,6 +3526,24 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
             goto fail_global;
         }
+        if ((g->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 || (g->attr_flags & CC_ATTR_NOINLINE) != 0 ||
+            (g->attr_flags & CC_ATTR_HOT) != 0 || (g->attr_flags & CC_ATTR_COLD) != 0 ||
+            (g->attr_flags & CC_ATTR_FORMAT) != 0 || (g->attr_flags & CC_ATTR_NONNULL) != 0 ||
+            (g->attr_flags & CC_ATTR_MALLOC_FN) != 0 || (g->attr_flags & CC_ATTR_FLATTEN) != 0 ||
+            (g->attr_flags & CC_ATTR_TARGET) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "function-only attribute is invalid for object '%s'",
+                         g->name);
+            }
+            goto fail_global;
+        }
+        if (has_multiple_visibility_attrs(g->attr_flags)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "conflicting visibility attributes for object '%s'",
+                         g->name);
+            }
+            goto fail_global;
+        }
         if ((g->attr_flags & CC_ATTR_ALIGNED) != 0 &&
             validate_attr_align(g->attr_align, diag, "aligned attribute on file-scope object") != 0) {
             goto fail_global;
@@ -3152,6 +3551,22 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         if ((g->attr_flags & CC_ATTR_SECTION) != 0 &&
             validate_attr_section(g->attr_section, diag, "section attribute on file-scope object") != 0) {
             goto fail_global;
+        }
+        if ((g->attr_flags & CC_ATTR_ALIAS) != 0) {
+            if (g->attr_alias == NULL || g->attr_alias[0] == '\0') {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "alias attribute on object '%s' requires a target",
+                             g->name);
+                }
+                goto fail_global;
+            }
+            if (g->init != NULL) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "alias object '%s' cannot have an initializer", g->name);
+                }
+                goto fail_global;
+            }
         }
         for (j = 0; j < i; ++j) {
             if (strcmp(tu->globals[j].name, g->name) == 0) {
@@ -3171,6 +3586,17 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                                  g->name);
                     }
                     goto fail_global;
+                }
+                if ((prev->attr_flags & CC_ATTR_ALIAS) != 0 || (g->attr_flags & CC_ATTR_ALIAS) != 0) {
+                    if ((prev->attr_flags & CC_ATTR_ALIAS) == 0 || (g->attr_flags & CC_ATTR_ALIAS) == 0 ||
+                        prev->attr_alias == NULL || g->attr_alias == NULL ||
+                        strcmp(prev->attr_alias, g->attr_alias) != 0) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message),
+                                     "conflicting alias targets for file-scope object: %s", g->name);
+                        }
+                        goto fail_global;
+                    }
                 }
                 if (prev->init != NULL && g->init != NULL) {
                     if (diag != NULL && diag->message[0] == '\0') {
@@ -3248,6 +3674,27 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
             goto fail_global;
         }
+        if (has_multiple_visibility_attrs(f->attr_flags)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "conflicting visibility attributes for function '%s'",
+                         f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 && (f->attr_flags & CC_ATTR_NOINLINE) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function '%s' has conflicting always_inline/noinline attributes", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_HOT) != 0 && (f->attr_flags & CC_ATTR_COLD) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function '%s' has conflicting hot/cold attributes", f->name);
+            }
+            goto fail_global;
+        }
         if (f_sc_count > 1) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),
@@ -3284,6 +3731,41 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             validate_attr_section(f->attr_section, diag, "section attribute on function") != 0) {
             goto fail_global;
         }
+        if ((f->attr_flags & CC_ATTR_MALLOC_FN) != 0 && !is_pointer_type(f->ret_type)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "malloc function '%s' must return a pointer type",
+                         f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_FORMAT) != 0 && !f->is_variadic) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "format function '%s' must be variadic", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_NONNULL) != 0 && (!f->has_prototype || f->param_count == 0)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "nonnull function '%s' requires at least one prototype parameter", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_ALIAS) != 0) {
+            if (f->has_body) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "alias function '%s' cannot have a definition body", f->name);
+                }
+                goto fail_global;
+            }
+            if (f->attr_alias == NULL || f->attr_alias[0] == '\0') {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "alias function '%s' requires a target", f->name);
+                }
+                goto fail_global;
+            }
+        }
         for (j = 0; j < i; ++j) {
             const cc_function_t *prev = &tu->funcs[j];
             if (strcmp(prev->name, f->name) != 0) {
@@ -3301,6 +3783,17 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     snprintf(diag->message, sizeof(diag->message), "duplicate function definition: %s", f->name);
                 }
                 goto fail_global;
+            }
+            if ((prev->attr_flags & CC_ATTR_ALIAS) != 0 || (f->attr_flags & CC_ATTR_ALIAS) != 0) {
+                if ((prev->attr_flags & CC_ATTR_ALIAS) == 0 || (f->attr_flags & CC_ATTR_ALIAS) == 0 ||
+                    prev->attr_alias == NULL || f->attr_alias == NULL ||
+                    strcmp(prev->attr_alias, f->attr_alias) != 0) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "conflicting alias targets for function: %s", f->name);
+                    }
+                    goto fail_global;
+                }
             }
         }
     }

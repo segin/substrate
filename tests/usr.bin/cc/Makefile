@@ -325,6 +325,51 @@ test:
 	/tmp/cc_native_gnu89_inline
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -fgnu89-inline -S native_gnu89_inline.c -o /tmp/cc_native_gnu89_inline.s
 	grep -q "^\\.globl add_inline" /tmp/cc_native_gnu89_inline.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_basic.c -o /tmp/cc_native_gnu_asm_basic
+	/tmp/cc_native_gnu_asm_basic
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_asm_basic.c -o /tmp/cc_native_gnu_asm_basic.s
+	grep -q "nop" /tmp/cc_native_gnu_asm_basic.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_ext.c -o /tmp/cc_native_gnu_asm_ext
+	/tmp/cc_native_gnu_asm_ext
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_asm_ext.c -o /tmp/cc_native_gnu_asm_ext.s
+	grep -Eq 'add .*[$$]5' /tmp/cc_native_gnu_asm_ext.s
+	grep -Eq "add .*%rax|add .*%r[0-9]+" /tmp/cc_native_gnu_asm_ext.s
+	grep -q "mov" /tmp/cc_native_gnu_asm_ext.s
+	grep -q "# asm clobber memory" /tmp/cc_native_gnu_asm_ext.s
+	grep -q "# asm clobber cc" /tmp/cc_native_gnu_asm_ext.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_asm_ext.c -o /tmp/cc_native_gnu_asm_ext_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_asm_ext_32.s
+	grep -q "add" /tmp/cc_native_gnu_asm_ext_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_goto.c -o /tmp/cc_native_gnu_asm_goto
+	/tmp/cc_native_gnu_asm_goto
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_asm_goto.c -o /tmp/cc_native_gnu_asm_goto.s
+	grep -Eq "jz \\.L[a-zA-Z0-9_]+_[0-9]+" /tmp/cc_native_gnu_asm_goto.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_asm_goto.c -o /tmp/cc_native_gnu_asm_goto_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_asm_goto_32.s
+	grep -Eq "jz \\.L[a-zA-Z0-9_]+_[0-9]+" /tmp/cc_native_gnu_asm_goto_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_attr_fn_codegen.c -o /tmp/cc_native_gnu_attr_fn_codegen
+	/tmp/cc_native_gnu_attr_fn_codegen
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_attr_fn_codegen.c -o /tmp/cc_native_gnu_attr_fn_codegen.s
+	grep -Eq "^\\.weak hot_fn$$" /tmp/cc_native_gnu_attr_fn_codegen.s
+	grep -Eq "^\\.weak cold_fn$$" /tmp/cc_native_gnu_attr_fn_codegen.s
+	grep -Eq "^[[:space:]]*\\.section \\.text\\.hot" /tmp/cc_native_gnu_attr_fn_codegen.s
+	grep -Eq "^[[:space:]]*\\.section \\.text\\.unlikely" /tmp/cc_native_gnu_attr_fn_codegen.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_attr_var_codegen.c -o /tmp/cc_native_gnu_attr_var_codegen
+	/tmp/cc_native_gnu_attr_var_codegen
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_attr_var_codegen.c -o /tmp/cc_native_gnu_attr_var_codegen.s
+	grep -Eq "^[[:space:]]*\\.section \\.attr\\.data" /tmp/cc_native_gnu_attr_var_codegen.s
+	grep -q "^\\.align 32$$" /tmp/cc_native_gnu_attr_var_codegen.s
+	grep -Eq "^\\.weak vis_obj$$" /tmp/cc_native_gnu_attr_var_codegen.s
+	grep -Eq "^\\.hidden vis_obj$$" /tmp/cc_native_gnu_attr_var_codegen.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_attr_type_parse.c -o /tmp/cc_native_gnu_attr_type_parse
+	/tmp/cc_native_gnu_attr_type_parse
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_attr_alias.c -o /tmp/cc_native_gnu_attr_alias
+	/tmp/cc_native_gnu_attr_alias
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_attr_alias.c -o /tmp/cc_native_gnu_attr_alias.s
+	grep -Eq "^\\.set alias_fn, target_fn$$" /tmp/cc_native_gnu_attr_alias.s
+	grep -Eq "^\\.set alias_obj, target_obj$$" /tmp/cc_native_gnu_attr_alias.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_attr_label_enum_stmt.c -o /tmp/cc_native_gnu_attr_label_enum_stmt
+	/tmp/cc_native_gnu_attr_label_enum_stmt
 	$(TOP)/usr.bin/cc/cc -O2 native_opt_fold.c -o /tmp/cc_native_opt_fold
 	/tmp/cc_native_opt_fold
 	$(TOP)/usr.bin/cc/cc -O2 -S native_opt_fold.c -o /tmp/cc_native_opt_fold.s
@@ -523,6 +568,7 @@ test:
 	sh run_pp_c99_baseline.sh
 	sh run_pp_fuzz_smoke.sh
 	sh run_pp_gnu_ext.sh
+	sh run_pp_clang_feature_probe.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_break.c -o /tmp/cc_native_bad_break.o
@@ -554,8 +600,17 @@ test:
 	! $(TOP)/usr.bin/cc/cc -c native_bad_cast_ptr_float.c -o /tmp/cc_native_bad_cast_ptr_float.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_computed_goto_float.c -o /tmp/cc_native_bad_computed_goto_float.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_nested_capture.c -o /tmp/cc_native_bad_gnu_nested_capture.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_constraint.c -o /tmp/cc_native_bad_gnu_asm_constraint.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_match_idx.c -o /tmp/cc_native_bad_gnu_asm_match_idx.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_return.c -o /tmp/cc_native_bad_attr_noreturn_return.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_nonvoid.c -o /tmp/cc_native_bad_attr_noreturn_nonvoid.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_inline_conflict.c -o /tmp/cc_native_bad_attr_inline_conflict.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_hot_cold_conflict.c -o /tmp/cc_native_bad_attr_hot_cold_conflict.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_alias_init.c -o /tmp/cc_native_bad_attr_alias_init.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_malloc_nonptr.c -o /tmp/cc_native_bad_attr_malloc_nonptr.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_format_nonvariadic.c -o /tmp/cc_native_bad_attr_format_nonvariadic.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_empty.c -o /tmp/cc_native_bad_attr_nonnull_empty.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_call.c -o /tmp/cc_native_bad_attr_nonnull_call.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_implicit_function.c -o /tmp/cc_native_bad_c99_implicit_function.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_no_implicit_int.c -o /tmp/cc_native_bad_no_implicit_int.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_file_scope_auto.c -o /tmp/cc_native_bad_c99_file_scope_auto.o
@@ -596,7 +651,18 @@ clean:
 	      /tmp/cc_native_gnu_trap_unreachable /tmp/cc_native_gnu_trap_unreachable.s /tmp/cc_native_gnu_trap_unreachable_32.s \
 	      /tmp/cc_native_gnu_nested_func /tmp/cc_native_gnu_union_cast /tmp/cc_native_gnu_zerolen_array \
 	      /tmp/cc_native_gnu_empty_struct /tmp/cc_native_gnu_static_nonconst_init /tmp/cc_native_gnu89_inline \
-	      /tmp/cc_native_gnu89_inline.s /tmp/cc_native_bad_gnu_nested_capture.o
+	      /tmp/cc_native_gnu89_inline.s /tmp/cc_native_gnu_attr_fn_codegen /tmp/cc_native_gnu_attr_fn_codegen.s \
+	      /tmp/cc_native_gnu_attr_var_codegen /tmp/cc_native_gnu_attr_var_codegen.s \
+	      /tmp/cc_native_gnu_attr_type_parse /tmp/cc_native_gnu_attr_alias /tmp/cc_native_gnu_attr_alias.s \
+	      /tmp/cc_native_gnu_attr_label_enum_stmt /tmp/cc_native_bad_gnu_nested_capture.o \
+	      /tmp/cc_native_gnu_asm_basic /tmp/cc_native_gnu_asm_basic.s /tmp/cc_native_gnu_asm_ext \
+	      /tmp/cc_native_gnu_asm_ext.s /tmp/cc_native_gnu_asm_ext_32.s \
+	      /tmp/cc_native_gnu_asm_goto /tmp/cc_native_gnu_asm_goto.s /tmp/cc_native_gnu_asm_goto_32.s \
+	      /tmp/cc_native_bad_gnu_asm_constraint.o /tmp/cc_native_bad_gnu_asm_match_idx.o \
+	      /tmp/cc_native_bad_attr_inline_conflict.o /tmp/cc_native_bad_attr_hot_cold_conflict.o \
+	      /tmp/cc_native_bad_attr_alias_init.o /tmp/cc_native_bad_attr_malloc_nonptr.o \
+	      /tmp/cc_native_bad_attr_format_nonvariadic.o /tmp/cc_native_bad_attr_nonnull_empty.o \
+	      /tmp/cc_native_bad_attr_nonnull_call.o
 	rm -f /tmp/cc_native_c99_integer_literals /tmp/cc_native_c99_hex_float_suffix /tmp/cc_native_c99_wide_literals \
 	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle /tmp/cc_native_c90_unproto_call_promotions /tmp/cc_native_c90_unproto_call_promotions.s \
 	      /tmp/cc_native_c99_integer_literals_32.s /tmp/cc_native_c99_hex_float_suffix_32.s /tmp/cc_native_c99_wide_literals_32.s \
@@ -632,6 +698,7 @@ clean:
 	      /tmp/cc_postc99_host_clang_c23
 	rm -f /tmp/cc_pp_s3.i /tmp/cc_pp_s3_p.i /tmp/cc_pp_s3_dM.i /tmp/cc_pp_s3_m.d /tmp/cc_pp_s3_mm.d /tmp/cc_pp_s3_md.d \
 	      /tmp/cc_pp_s3_md.i /tmp/cc_pp_s3_v.i /tmp/cc_pp_s3_v.log /tmp/cc_pp_s3_depth.i /tmp/cc_pp_s3_macro.i \
+	      /tmp/cc_pp_s6_probe_gnu11.i /tmp/cc_pp_s6_probe_c99.i \
 	      /tmp/cc_pp_cpp_mode.i /tmp/cc_pp_cpp_mode_h.i /tmp/cc_pp_cpp_mode_input.h /tmp/cpp /tmp/cc_pp_fuzz_out.i /tmp/cc_pp_fuzz_seed.c /tmp/cc_pp_fuzz_seed.i \
 	      /tmp/cc_pp_fuzz_0.c /tmp/cc_pp_fuzz_1.c /tmp/cc_pp_fuzz_2.c /tmp/cc_pp_fuzz_3.c /tmp/cc_pp_fuzz_4.c \
 	      /tmp/cc_pp_fuzz_5.c /tmp/cc_pp_fuzz_6.c /tmp/cc_pp_fuzz_7.c /tmp/cc_pp_fuzz_8.c /tmp/cc_pp_fuzz_9.c \

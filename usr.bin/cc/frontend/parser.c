@@ -176,6 +176,7 @@ typedef struct {
     int flags;
     long align;
     char *section;
+    char *alias;
 } decl_attrs_t;
 
 static int g_parser_pointer_size_bytes = 8;
@@ -197,6 +198,7 @@ static int parse_c23_attribute_seq(parser_t *p, decl_attrs_t *out_attrs, int *ou
 static int skip_balanced_parens(parser_t *p);
 static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, char **out_str);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
+static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
 static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, int allow_void, const char *what);
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_cond(parser_t *p);
@@ -804,6 +806,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
         out_attrs->flags = 0;
         out_attrs->align = 0;
         out_attrs->section = NULL;
+        out_attrs->alias = NULL;
     }
 
     while (1) {
@@ -1559,6 +1562,15 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                 if (next_tok(p) != 0) {
                     return -1;
                 }
+                {
+                    decl_attrs_t enum_attrs;
+                    decl_attrs_reset(&enum_attrs);
+                    if (skip_decl_gnu_suffix(p, &enum_attrs) != 0) {
+                        decl_attrs_clear(&enum_attrs);
+                        return -1;
+                    }
+                    decl_attrs_clear(&enum_attrs);
+                }
                 if (p->tok.kind == TOK_ASSIGN) {
                     cc_expr_t *enum_expr;
                     long v = 0;
@@ -1578,6 +1590,15 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                     free_expr(enum_expr);
                     enum_next = v;
                     p->enum_consts[p->enum_const_count - 1].value = enum_next;
+                }
+                {
+                    decl_attrs_t enum_attrs;
+                    decl_attrs_reset(&enum_attrs);
+                    if (skip_decl_gnu_suffix(p, &enum_attrs) != 0) {
+                        decl_attrs_clear(&enum_attrs);
+                        return -1;
+                    }
+                    decl_attrs_clear(&enum_attrs);
                 }
                 enum_next++;
                 if (p->tok.kind == TOK_COMMA) {
@@ -2159,6 +2180,7 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     a->flags = 0;
     a->align = 0;
     a->section = NULL;
+    a->alias = NULL;
 }
 
 static void decl_attrs_clear(decl_attrs_t *a) {
@@ -2167,18 +2189,28 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     }
     free(a->section);
     a->section = NULL;
+    free(a->alias);
+    a->alias = NULL;
     a->flags = 0;
     a->align = 0;
 }
 
 static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
     char *sec_dup = NULL;
+    char *alias_dup = NULL;
     if (dst == NULL || src == NULL) {
         return 0;
     }
     if ((src->flags & CC_ATTR_SECTION) != 0 && src->section != NULL) {
         sec_dup = xstrdup_n(src->section, strlen(src->section));
         if (sec_dup == NULL) {
+            return -1;
+        }
+    }
+    if ((src->flags & CC_ATTR_ALIAS) != 0 && src->alias != NULL) {
+        alias_dup = xstrdup_n(src->alias, strlen(src->alias));
+        if (alias_dup == NULL) {
+            free(sec_dup);
             return -1;
         }
     }
@@ -2189,6 +2221,10 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
     if (sec_dup != NULL) {
         free(dst->section);
         dst->section = sec_dup;
+    }
+    if (alias_dup != NULL) {
+        free(dst->alias);
+        dst->alias = alias_dup;
     }
     return 0;
 }
@@ -2209,6 +2245,291 @@ static char *dup_string_token(const cc_token_t *tok) {
         return xstrdup_n("", 0);
     }
     return xstrdup_n(tok->start + begin, end - begin);
+}
+
+static int append_string_piece(char **dst, const char *piece) {
+    size_t a;
+    size_t b;
+    char *next;
+    if (dst == NULL || piece == NULL) {
+        return -1;
+    }
+    if (*dst == NULL) {
+        *dst = xstrdup_n(piece, strlen(piece));
+        return *dst == NULL ? -1 : 0;
+    }
+    a = strlen(*dst);
+    b = strlen(piece);
+    next = (char *)realloc(*dst, a + b + 1);
+    if (next == NULL) {
+        return -1;
+    }
+    memcpy(next + a, piece, b + 1);
+    *dst = next;
+    return 0;
+}
+
+static char *parse_string_concat_literal(parser_t *p) {
+    char *out = NULL;
+    while (p->tok.kind == TOK_STR) {
+        char *part = dup_string_token(&p->tok);
+        if (part == NULL) {
+            free(out);
+            return NULL;
+        }
+        if (append_string_piece(&out, part) != 0) {
+            free(part);
+            free(out);
+            return NULL;
+        }
+        free(part);
+        if (next_tok(p) != 0) {
+            free(out);
+            return NULL;
+        }
+    }
+    if (out == NULL) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected string literal");
+        return NULL;
+    }
+    return out;
+}
+
+static void free_asm_operand(cc_asm_operand_t *op) {
+    if (op == NULL) {
+        return;
+    }
+    free(op->name);
+    free(op->constraint);
+    free_expr(op->expr);
+    memset(op, 0, sizeof(*op));
+}
+
+static int push_asm_operand(cc_asm_operand_t **items, size_t *count, cc_asm_operand_t *item) {
+    cc_asm_operand_t *next;
+    if (items == NULL || count == NULL || item == NULL) {
+        return -1;
+    }
+    next = (cc_asm_operand_t *)realloc(*items, (*count + 1) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    *items = next;
+    (*items)[*count] = *item;
+    (*count)++;
+    memset(item, 0, sizeof(*item));
+    return 0;
+}
+
+static int push_string_item(char ***items, size_t *count, char *value) {
+    char **next;
+    if (items == NULL || count == NULL || value == NULL) {
+        return -1;
+    }
+    next = (char **)realloc(*items, (*count + 1) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    *items = next;
+    (*items)[*count] = value;
+    (*count)++;
+    return 0;
+}
+
+static int parse_asm_operand_list(parser_t *p, cc_asm_operand_t **items, size_t *count) {
+    for (;;) {
+        cc_asm_operand_t op;
+        memset(&op, 0, sizeof(op));
+        if (p->tok.kind == TOK_LBRACK) {
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            if (p->tok.kind != TOK_IDENT) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "expected asm operand name");
+                return -1;
+            }
+            op.name = xstrdup_n(p->tok.start, p->tok.len);
+            if (op.name == NULL) {
+                return -1;
+            }
+            if (next_tok(p) != 0) {
+                free_asm_operand(&op);
+                return -1;
+            }
+            if (expect(p, TOK_RBRACK, "expected ']' after asm operand name") != 0) {
+                free_asm_operand(&op);
+                return -1;
+            }
+        }
+        if (p->tok.kind != TOK_STR) {
+            free_asm_operand(&op);
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected asm operand constraint string");
+            return -1;
+        }
+        op.constraint = parse_string_concat_literal(p);
+        if (op.constraint == NULL) {
+            free_asm_operand(&op);
+            return -1;
+        }
+        if (expect(p, TOK_LPAREN, "expected '(' after asm operand constraint") != 0) {
+            free_asm_operand(&op);
+            return -1;
+        }
+        op.expr = parse_expr(p);
+        if (op.expr == NULL) {
+            free_asm_operand(&op);
+            return -1;
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' after asm operand expression") != 0) {
+            free_asm_operand(&op);
+            return -1;
+        }
+        if (push_asm_operand(items, count, &op) != 0) {
+            free_asm_operand(&op);
+            return -1;
+        }
+        if (p->tok.kind != TOK_COMMA) {
+            break;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int parse_asm_clobber_list(parser_t *p, char ***items, size_t *count) {
+    for (;;) {
+        char *name;
+        if (p->tok.kind != TOK_STR) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected asm clobber string");
+            return -1;
+        }
+        name = parse_string_concat_literal(p);
+        if (name == NULL) {
+            return -1;
+        }
+        if (push_string_item(items, count, name) != 0) {
+            free(name);
+            return -1;
+        }
+        if (p->tok.kind != TOK_COMMA) {
+            break;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int parse_asm_label_list(parser_t *p, char ***items, size_t *count) {
+    for (;;) {
+        char *name;
+        if (p->tok.kind != TOK_IDENT) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected asm goto label");
+            return -1;
+        }
+        name = xstrdup_n(p->tok.start, p->tok.len);
+        if (name == NULL) {
+            return -1;
+        }
+        if (push_string_item(items, count, name) != 0) {
+            free(name);
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_COMMA) {
+            break;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int parse_asm_stmt(parser_t *p, cc_stmt_t *s) {
+    if (!parser_is_gnu_mode()) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "inline asm requires GNU mode");
+        return -1;
+    }
+    s->kind = CC_STMT_ASM;
+    if (next_tok(p) != 0) {
+        return -1;
+    }
+    while (tok_is_ident(p, "__volatile__") || tok_is_ident(p, "volatile") || p->tok.kind == TOK_KW_VOLATILE ||
+           tok_is_ident(p, "__goto__") || tok_is_ident(p, "goto") || p->tok.kind == TOK_KW_GOTO) {
+        if (tok_is_ident(p, "__goto__") || tok_is_ident(p, "goto") || p->tok.kind == TOK_KW_GOTO) {
+            s->asm_is_goto = 1;
+        } else {
+            s->asm_is_volatile = 1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+    if (expect(p, TOK_LPAREN, "expected '(' after asm") != 0) {
+        return -1;
+    }
+    if (p->tok.kind != TOK_STR) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected asm template string");
+        return -1;
+    }
+    s->asm_template = parse_string_concat_literal(p);
+    if (s->asm_template == NULL) {
+        return -1;
+    }
+    if (p->tok.kind == TOK_COLON) {
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_COLON && p->tok.kind != TOK_RPAREN) {
+            if (parse_asm_operand_list(p, &s->asm_outputs, &s->asm_output_count) != 0) {
+                return -1;
+            }
+        }
+        if (p->tok.kind == TOK_COLON) {
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            if (p->tok.kind != TOK_COLON && p->tok.kind != TOK_RPAREN) {
+                if (parse_asm_operand_list(p, &s->asm_inputs, &s->asm_input_count) != 0) {
+                    return -1;
+                }
+            }
+            if (p->tok.kind == TOK_COLON) {
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                if (p->tok.kind != TOK_RPAREN) {
+                    if (parse_asm_clobber_list(p, &s->asm_clobbers, &s->asm_clobber_count) != 0) {
+                        return -1;
+                    }
+                }
+                if (p->tok.kind == TOK_COLON) {
+                    if (next_tok(p) != 0) {
+                        return -1;
+                    }
+                    if (p->tok.kind != TOK_RPAREN) {
+                        if (parse_asm_label_list(p, &s->asm_goto_labels, &s->asm_goto_label_count) != 0) {
+                            return -1;
+                        }
+                        s->asm_is_goto = 1;
+                    }
+                }
+            }
+        }
+    }
+    if (expect(p, TOK_RPAREN, "expected ')' after asm statement") != 0) {
+        return -1;
+    }
+    if (expect(p, TOK_SEMI, "expected ';' after asm statement") != 0) {
+        return -1;
+    }
+    return 0;
 }
 
 static int parse_one_c23_attribute(parser_t *p, decl_attrs_t *out_attrs, int *out_stmt_flags) {
@@ -2400,12 +2721,31 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_aligned;
     int is_section;
     int is_packed;
+    int is_deprecated;
     int is_noreturn;
     int is_unused;
     int is_used;
+    int is_always_inline;
+    int is_noinline;
+    int is_hot;
+    int is_cold;
+    int is_format;
+    int is_nonnull;
+    int is_malloc_fn;
+    int is_alias;
+    int is_weak;
+    int is_flatten;
+    int is_target;
+    int is_visibility;
+    int is_tls_model;
+    int is_cleanup;
+    int is_transparent_union;
+    int is_vector_size;
+    int is_may_alias;
     int has_num = 0;
     long num = 0;
     char *sec = NULL;
+    int any_known;
 
     if (p->tok.kind != TOK_IDENT) {
         return 0;
@@ -2413,9 +2753,32 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_aligned = tok_is_ident(p, "aligned");
     is_section = tok_is_ident(p, "section");
     is_packed = tok_is_ident(p, "packed");
+    is_deprecated = tok_is_ident(p, "deprecated");
     is_noreturn = tok_is_ident(p, "noreturn");
     is_unused = tok_is_ident(p, "unused");
     is_used = tok_is_ident(p, "used");
+    is_always_inline = tok_is_ident(p, "always_inline");
+    is_noinline = tok_is_ident(p, "noinline");
+    is_hot = tok_is_ident(p, "hot");
+    is_cold = tok_is_ident(p, "cold");
+    is_format = tok_is_ident(p, "format");
+    is_nonnull = tok_is_ident(p, "nonnull");
+    is_malloc_fn = tok_is_ident(p, "malloc");
+    is_alias = tok_is_ident(p, "alias");
+    is_weak = tok_is_ident(p, "weak");
+    is_flatten = tok_is_ident(p, "flatten");
+    is_target = tok_is_ident(p, "target");
+    is_visibility = tok_is_ident(p, "visibility");
+    is_tls_model = tok_is_ident(p, "tls_model");
+    is_cleanup = tok_is_ident(p, "cleanup");
+    is_transparent_union = tok_is_ident(p, "transparent_union");
+    is_vector_size = tok_is_ident(p, "vector_size");
+    is_may_alias = tok_is_ident(p, "may_alias");
+    any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
+                is_always_inline ||
+                is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
+                is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_transparent_union ||
+                is_vector_size || is_may_alias;
 
     if (next_tok(p) != 0) {
         return -1;
@@ -2431,6 +2794,9 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         if (is_packed) {
             out_attrs->flags |= CC_ATTR_PACKED;
         }
+        if (is_deprecated) {
+            out_attrs->flags |= CC_ATTR_DEPRECATED;
+        }
         if (is_noreturn) {
             out_attrs->flags |= CC_ATTR_NORETURN;
         }
@@ -2440,11 +2806,61 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         if (is_used) {
             out_attrs->flags |= CC_ATTR_USED;
         }
+        if (is_always_inline) {
+            out_attrs->flags |= CC_ATTR_ALWAYS_INLINE;
+        }
+        if (is_noinline) {
+            out_attrs->flags |= CC_ATTR_NOINLINE;
+        }
+        if (is_hot) {
+            out_attrs->flags |= CC_ATTR_HOT;
+        }
+        if (is_cold) {
+            out_attrs->flags |= CC_ATTR_COLD;
+        }
+        if (is_format) {
+            out_attrs->flags |= CC_ATTR_FORMAT;
+        }
+        if (is_nonnull) {
+            out_attrs->flags |= CC_ATTR_NONNULL;
+        }
+        if (is_malloc_fn) {
+            out_attrs->flags |= CC_ATTR_MALLOC_FN;
+        }
+        if (is_weak) {
+            out_attrs->flags |= CC_ATTR_WEAK;
+        }
+        if (is_flatten) {
+            out_attrs->flags |= CC_ATTR_FLATTEN;
+        }
+        if (is_target) {
+            out_attrs->flags |= CC_ATTR_TARGET;
+        }
+        if (is_tls_model) {
+            out_attrs->flags |= CC_ATTR_TLS_MODEL;
+        }
+        if (is_cleanup) {
+            out_attrs->flags |= CC_ATTR_CLEANUP;
+        }
+        if (is_transparent_union) {
+            out_attrs->flags |= CC_ATTR_TRANSPARENT_UNION;
+        }
+        if (is_may_alias) {
+            out_attrs->flags |= CC_ATTR_MAY_ALIAS;
+        }
         if (is_aligned) {
             long align = (has_num && num > 0) ? num : g_parser_pointer_size_bytes;
             out_attrs->flags |= CC_ATTR_ALIGNED;
             if (align > out_attrs->align) {
                 out_attrs->align = align;
+            }
+        }
+        if (is_vector_size) {
+            if (has_num && num > 0) {
+                out_attrs->flags |= CC_ATTR_VECTOR_SIZE;
+                if (num > out_attrs->align) {
+                    out_attrs->align = num;
+                }
             }
         }
         if (is_section && sec != NULL) {
@@ -2453,6 +2869,31 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
             out_attrs->section = sec;
             sec = NULL;
         }
+        if (is_alias && sec != NULL) {
+            out_attrs->flags |= CC_ATTR_ALIAS;
+            free(out_attrs->alias);
+            out_attrs->alias = sec;
+            sec = NULL;
+        }
+        if (is_visibility) {
+            out_attrs->flags &= ~(CC_ATTR_VIS_DEFAULT | CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL);
+            if (sec != NULL) {
+                if (strcmp(sec, "default") == 0) {
+                    out_attrs->flags |= CC_ATTR_VIS_DEFAULT;
+                } else if (strcmp(sec, "hidden") == 0) {
+                    out_attrs->flags |= CC_ATTR_VIS_HIDDEN;
+                } else if (strcmp(sec, "protected") == 0) {
+                    out_attrs->flags |= CC_ATTR_VIS_PROTECTED;
+                } else if (strcmp(sec, "internal") == 0) {
+                    out_attrs->flags |= CC_ATTR_VIS_INTERNAL;
+                }
+            }
+        }
+    }
+    if (!any_known && parser_is_gnu_mode() && p->diag != NULL && p->diag->message[0] == '\0') {
+        set_diag(p->diag, p->tok.line, p->tok.col, "unsupported GNU attribute");
+        free(sec);
+        return -1;
     }
     free(sec);
     return 0;
@@ -2736,7 +3177,25 @@ static void free_stmt(cc_stmt_t *s) {
     free(s->decl_name);
     free(s->label_name);
     free(s->attr_section);
+    free(s->attr_alias);
     free_expr(s->expr);
+    free(s->asm_template);
+    for (i = 0; i < s->asm_output_count; ++i) {
+        free_asm_operand(&s->asm_outputs[i]);
+    }
+    free(s->asm_outputs);
+    for (i = 0; i < s->asm_input_count; ++i) {
+        free_asm_operand(&s->asm_inputs[i]);
+    }
+    free(s->asm_inputs);
+    for (i = 0; i < s->asm_clobber_count; ++i) {
+        free(s->asm_clobbers[i]);
+    }
+    free(s->asm_clobbers);
+    for (i = 0; i < s->asm_goto_label_count; ++i) {
+        free(s->asm_goto_labels[i]);
+    }
+    free(s->asm_goto_labels);
     if (s->init_stmt != NULL) {
         free_stmt(s->init_stmt);
         free(s->init_stmt);
@@ -2805,6 +3264,8 @@ static void free_global_decl(cc_global_t *g) {
     g->name = NULL;
     free(g->attr_section);
     g->attr_section = NULL;
+    free(g->attr_alias);
+    g->attr_alias = NULL;
     free_expr(g->init);
     g->init = NULL;
 }
@@ -2850,15 +3311,17 @@ static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
         } else {
             cur->storage |= (g.storage & (CC_STORAGE_INLINE | CC_STORAGE_AUTO | CC_STORAGE_REGISTER));
         }
-        if (cur->attr_flags == 0 && g.attr_flags != 0) {
-            cur->attr_flags = g.attr_flags;
-        }
-        if (cur->attr_align == 0 && g.attr_align > 0) {
+        cur->attr_flags |= g.attr_flags;
+        if (g.attr_align > cur->attr_align) {
             cur->attr_align = g.attr_align;
         }
         if (cur->attr_section == NULL && g.attr_section != NULL) {
             cur->attr_section = g.attr_section;
             g.attr_section = NULL;
+        }
+        if (cur->attr_alias == NULL && g.attr_alias != NULL) {
+            cur->attr_alias = g.attr_alias;
+            g.attr_alias = NULL;
         }
         free_global_decl(&g);
         return 0;
@@ -3807,6 +4270,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src);
 
 static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     size_t i;
+    size_t j;
     memset(dst, 0, sizeof(*dst));
     if (src == NULL) {
         return 0;
@@ -3815,6 +4279,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     dst->decl_name = NULL;
     dst->label_name = NULL;
     dst->attr_section = NULL;
+    dst->attr_alias = NULL;
     dst->expr = NULL;
     dst->init_stmt = NULL;
     dst->init_expr = NULL;
@@ -3823,6 +4288,15 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     dst->else_branch = NULL;
     dst->block_stmts = NULL;
     dst->block_count = 0;
+    dst->asm_template = NULL;
+    dst->asm_outputs = NULL;
+    dst->asm_output_count = 0;
+    dst->asm_inputs = NULL;
+    dst->asm_input_count = 0;
+    dst->asm_clobbers = NULL;
+    dst->asm_clobber_count = 0;
+    dst->asm_goto_labels = NULL;
+    dst->asm_goto_label_count = 0;
 
     if (src->decl_name != NULL) {
         dst->decl_name = xstrdup_n(src->decl_name, strlen(src->decl_name));
@@ -3844,11 +4318,119 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
             return -1;
         }
     }
+    if (src->attr_alias != NULL) {
+        dst->attr_alias = xstrdup_n(src->attr_alias, strlen(src->attr_alias));
+        if (dst->attr_alias == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
     if (src->expr != NULL) {
         dst->expr = clone_expr(src->expr);
         if (dst->expr == NULL) {
             free_stmt(dst);
             return -1;
+        }
+    }
+    if (src->asm_template != NULL) {
+        dst->asm_template = xstrdup_n(src->asm_template, strlen(src->asm_template));
+        if (dst->asm_template == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->asm_output_count > 0) {
+        dst->asm_outputs = (cc_asm_operand_t *)calloc(src->asm_output_count, sizeof(*dst->asm_outputs));
+        if (dst->asm_outputs == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+        dst->asm_output_count = src->asm_output_count;
+        for (j = 0; j < src->asm_output_count; ++j) {
+            if (src->asm_outputs[j].name != NULL) {
+                dst->asm_outputs[j].name = xstrdup_n(src->asm_outputs[j].name, strlen(src->asm_outputs[j].name));
+                if (dst->asm_outputs[j].name == NULL) {
+                    free_stmt(dst);
+                    return -1;
+                }
+            }
+            if (src->asm_outputs[j].constraint != NULL) {
+                dst->asm_outputs[j].constraint =
+                    xstrdup_n(src->asm_outputs[j].constraint, strlen(src->asm_outputs[j].constraint));
+                if (dst->asm_outputs[j].constraint == NULL) {
+                    free_stmt(dst);
+                    return -1;
+                }
+            }
+            if (src->asm_outputs[j].expr != NULL) {
+                dst->asm_outputs[j].expr = clone_expr(src->asm_outputs[j].expr);
+                if (dst->asm_outputs[j].expr == NULL) {
+                    free_stmt(dst);
+                    return -1;
+                }
+            }
+        }
+    }
+    if (src->asm_input_count > 0) {
+        dst->asm_inputs = (cc_asm_operand_t *)calloc(src->asm_input_count, sizeof(*dst->asm_inputs));
+        if (dst->asm_inputs == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+        dst->asm_input_count = src->asm_input_count;
+        for (j = 0; j < src->asm_input_count; ++j) {
+            if (src->asm_inputs[j].name != NULL) {
+                dst->asm_inputs[j].name = xstrdup_n(src->asm_inputs[j].name, strlen(src->asm_inputs[j].name));
+                if (dst->asm_inputs[j].name == NULL) {
+                    free_stmt(dst);
+                    return -1;
+                }
+            }
+            if (src->asm_inputs[j].constraint != NULL) {
+                dst->asm_inputs[j].constraint =
+                    xstrdup_n(src->asm_inputs[j].constraint, strlen(src->asm_inputs[j].constraint));
+                if (dst->asm_inputs[j].constraint == NULL) {
+                    free_stmt(dst);
+                    return -1;
+                }
+            }
+            if (src->asm_inputs[j].expr != NULL) {
+                dst->asm_inputs[j].expr = clone_expr(src->asm_inputs[j].expr);
+                if (dst->asm_inputs[j].expr == NULL) {
+                    free_stmt(dst);
+                    return -1;
+                }
+            }
+        }
+    }
+    if (src->asm_clobber_count > 0) {
+        dst->asm_clobbers = (char **)calloc(src->asm_clobber_count, sizeof(*dst->asm_clobbers));
+        if (dst->asm_clobbers == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+        dst->asm_clobber_count = src->asm_clobber_count;
+        for (j = 0; j < src->asm_clobber_count; ++j) {
+            dst->asm_clobbers[j] = xstrdup_n(src->asm_clobbers[j], strlen(src->asm_clobbers[j]));
+            if (dst->asm_clobbers[j] == NULL) {
+                free_stmt(dst);
+                return -1;
+            }
+        }
+    }
+    if (src->asm_goto_label_count > 0) {
+        dst->asm_goto_labels = (char **)calloc(src->asm_goto_label_count, sizeof(*dst->asm_goto_labels));
+        if (dst->asm_goto_labels == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+        dst->asm_goto_label_count = src->asm_goto_label_count;
+        for (j = 0; j < src->asm_goto_label_count; ++j) {
+            dst->asm_goto_labels[j] = xstrdup_n(src->asm_goto_labels[j], strlen(src->asm_goto_labels[j]));
+            if (dst->asm_goto_labels[j] == NULL) {
+                free_stmt(dst);
+                return -1;
+            }
         }
     }
     if (src->init_expr != NULL) {
@@ -4932,6 +5514,15 @@ static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
             return -1;
         }
     }
+    if (merged_attrs.alias != NULL) {
+        s->attr_alias = xstrdup_n(merged_attrs.alias, strlen(merged_attrs.alias));
+        if (s->attr_alias == NULL) {
+            decl_attrs_clear(&decl_attrs);
+            decl_attrs_clear(&suffix_attrs);
+            decl_attrs_clear(&merged_attrs);
+            return -1;
+        }
+    }
     decl_attrs_clear(&decl_attrs);
     decl_attrs_clear(&suffix_attrs);
     decl_attrs_clear(&merged_attrs);
@@ -5125,6 +5716,13 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         if (merged_attrs.section != NULL) {
             s.attr_section = xstrdup_n(merged_attrs.section, strlen(merged_attrs.section));
             if (s.attr_section == NULL) {
+                free_stmt(&s);
+                return -1;
+            }
+        }
+        if (merged_attrs.alias != NULL) {
+            s.attr_alias = xstrdup_n(merged_attrs.alias, strlen(merged_attrs.alias));
+            if (s.attr_alias == NULL) {
                 free_stmt(&s);
                 return -1;
             }
@@ -5336,6 +5934,25 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         *p = saved;
     }
 
+    if (tok_is_ident(p, "__attribute__")) {
+        decl_attrs_t stmt_attrs;
+        int rc;
+        decl_attrs_reset(&stmt_attrs);
+        rc = parse_gnu_attribute_spec(p, &stmt_attrs);
+        if (rc != 0) {
+            decl_attrs_clear(&stmt_attrs);
+            return -1;
+        }
+        rc = parse_stmt(p, s);
+        if (rc != 0) {
+            decl_attrs_clear(&stmt_attrs);
+            return -1;
+        }
+        s->attr_flags |= stmt_attrs.flags;
+        decl_attrs_clear(&stmt_attrs);
+        return 0;
+    }
+
     if (is_static_assert_tok(p)) {
         s->kind = CC_STMT_EXPR;
         s->expr = NULL;
@@ -5385,6 +6002,7 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
     }
 
     if (p->tok.kind == TOK_IDENT && peek_kind(p) == TOK_COLON) {
+        decl_attrs_t label_attrs;
         s->kind = CC_STMT_LABEL;
         s->label_name = xstrdup_n(p->tok.start, p->tok.len);
         if (s->label_name == NULL) {
@@ -5396,6 +6014,13 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         if (expect(p, TOK_COLON, "expected ':' after label") != 0) {
             return -1;
         }
+        decl_attrs_reset(&label_attrs);
+        if (skip_decl_gnu_suffix(p, &label_attrs) != 0) {
+            decl_attrs_clear(&label_attrs);
+            return -1;
+        }
+        s->attr_flags |= label_attrs.flags;
+        decl_attrs_clear(&label_attrs);
         s->then_branch = (cc_stmt_t *)calloc(1, sizeof(*s->then_branch));
         if (s->then_branch == NULL) {
             return -1;
@@ -5667,24 +6292,8 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         return expect(p, TOK_SEMI, "expected ';' after goto");
     }
 
-    if (tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
-        s->kind = CC_STMT_EXPR;
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-        while (p->tok.kind != TOK_LPAREN) {
-            if (p->tok.kind == TOK_SEMI || p->tok.kind == TOK_EOF) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "expected '(' after __asm__");
-                return -1;
-            }
-            if (next_tok(p) != 0) {
-                return -1;
-            }
-        }
-        if (skip_balanced_parens(p) != 0) {
-            return -1;
-        }
-        return expect(p, TOK_SEMI, "expected ';' after __asm__ statement");
+    if (tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
+        return parse_asm_stmt(p, s);
     }
 
     if (is_declspec_start(p)) {
@@ -5737,6 +6346,7 @@ static void free_func(cc_function_t *f) {
     size_t i;
     free(f->name);
     free(f->attr_section);
+    free(f->attr_alias);
     for (i = 0; i < f->param_count; ++i) {
         free(f->params[i].name);
     }
@@ -5761,6 +6371,7 @@ void cc_tu_free(cc_translation_unit_t *tu) {
     for (i = 0; i < tu->global_count; ++i) {
         free(tu->globals[i].name);
         free(tu->globals[i].attr_section);
+        free(tu->globals[i].attr_alias);
         free_expr(tu->globals[i].init);
     }
     free(tu->globals);
@@ -5944,6 +6555,15 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     if (merged_attrs.section != NULL) {
         f->attr_section = xstrdup_n(merged_attrs.section, strlen(merged_attrs.section));
         if (f->attr_section == NULL) {
+            decl_attrs_clear(&spec_attrs);
+            decl_attrs_clear(&suffix_attrs);
+            decl_attrs_clear(&merged_attrs);
+            return -1;
+        }
+    }
+    if (merged_attrs.alias != NULL) {
+        f->attr_alias = xstrdup_n(merged_attrs.alias, strlen(merged_attrs.alias));
+        if (f->attr_alias == NULL) {
             decl_attrs_clear(&spec_attrs);
             decl_attrs_clear(&suffix_attrs);
             decl_attrs_clear(&merged_attrs);
@@ -6210,6 +6830,8 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 g.attr_align = decls[di].attr_align;
                 g.attr_section = decls[di].attr_section;
                 decls[di].attr_section = NULL;
+                g.attr_alias = decls[di].attr_alias;
+                decls[di].attr_alias = NULL;
                 g.init = decls[di].expr;
                 decls[di].expr = NULL;
                 if (push_global(out, g) != 0) {

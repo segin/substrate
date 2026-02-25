@@ -72,6 +72,18 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_STORE:
             break;
 
+        case CC_SSA_ASM:
+            {
+                size_t a;
+                for (a = 0; a < in->asm_out_count; ++a) {
+                    int ov = in->asm_out_values[a];
+                    if (ov >= 0 && ov < f->value_count) {
+                        st[ov].known = 0;
+                    }
+                }
+            }
+            break;
+
         case CC_SSA_I2F:
             if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_I64) {
                 long src = st[in->lhs].i;
@@ -281,6 +293,16 @@ static void mark_uses(const cc_ssa_instr_t *in, int *uses) {
             uses[in->args[i]]++;
         }
     }
+    for (i = 0; i < in->asm_out_count; ++i) {
+        if (in->asm_out_values[i] >= 0) {
+            uses[in->asm_out_values[i]]++;
+        }
+    }
+    for (i = 0; i < in->asm_in_count; ++i) {
+        if (in->asm_in_values[i] >= 0) {
+            uses[in->asm_in_values[i]]++;
+        }
+    }
 }
 
 static int is_pure(const cc_ssa_instr_t *in) {
@@ -313,6 +335,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_STORE:
     case CC_SSA_CALL:
     case CC_SSA_CALLI:
+    case CC_SSA_ASM:
     case CC_SSA_TRAP:
     case CC_SSA_RET:
         return 0;

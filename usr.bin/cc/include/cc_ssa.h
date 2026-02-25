@@ -46,6 +46,7 @@ typedef enum {
     CC_SSA_VA_START,
     CC_SSA_CALL,
     CC_SSA_CALLI,
+    CC_SSA_ASM,
     CC_SSA_TRAP,
     CC_SSA_RET
 } cc_ssa_opcode_t;
@@ -68,6 +69,21 @@ typedef struct {
     char *sym;
     int *args;
     size_t arg_count;
+    int asm_volatile;
+    int asm_is_goto;
+    int *asm_out_values;
+    char **asm_out_constraints;
+    char **asm_out_names;
+    size_t asm_out_count;
+    int *asm_in_values;
+    char **asm_in_constraints;
+    char **asm_in_names;
+    size_t asm_in_count;
+    char **asm_clobbers;
+    size_t asm_clobber_count;
+    int *asm_goto_labels;
+    char **asm_goto_names;
+    size_t asm_goto_count;
 } cc_ssa_instr_t;
 
 typedef struct {
@@ -91,6 +107,7 @@ typedef struct {
     int attr_flags;
     long attr_align;
     char *attr_section;
+    char *attr_alias;
     int has_init;
     long init_i;
     double init_f;
@@ -110,6 +127,7 @@ typedef struct {
     int attr_flags;
     long attr_align;
     char *attr_section;
+    char *attr_alias;
     int is_variadic;
 
     size_t param_count;

@@ -537,6 +537,116 @@ static int has_c_attribute_name(const char *name) {
     return 0;
 }
 
+static int has_gnu_attribute_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "aligned") == 0 || strcmp(name, "packed") == 0 || strcmp(name, "section") == 0 ||
+        strcmp(name, "deprecated") == 0 || strcmp(name, "noreturn") == 0 || strcmp(name, "unused") == 0 ||
+        strcmp(name, "used") == 0 ||
+        strcmp(name, "always_inline") == 0 || strcmp(name, "noinline") == 0 || strcmp(name, "hot") == 0 ||
+        strcmp(name, "cold") == 0 || strcmp(name, "format") == 0 || strcmp(name, "nonnull") == 0 ||
+        strcmp(name, "malloc") == 0 || strcmp(name, "alias") == 0 || strcmp(name, "weak") == 0 ||
+        strcmp(name, "flatten") == 0 || strcmp(name, "target") == 0 || strcmp(name, "tls_model") == 0 ||
+        strcmp(name, "cleanup") == 0 || strcmp(name, "visibility") == 0 ||
+        strcmp(name, "transparent_union") == 0 || strcmp(name, "vector_size") == 0 ||
+        strcmp(name, "may_alias") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int has_declspec_attribute_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "deprecated") == 0 || strcmp(name, "noreturn") == 0 || strcmp(name, "noinline") == 0 ||
+        strcmp(name, "dllexport") == 0 || strcmp(name, "dllimport") == 0 || strcmp(name, "align") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int has_builtin_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "__builtin_expect") == 0 || strcmp(name, "__builtin_constant_p") == 0 ||
+        strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_bswap16") == 0 ||
+        strcmp(name, "__builtin_bswap32") == 0 || strcmp(name, "__builtin_bswap64") == 0 ||
+        strcmp(name, "__builtin_add_overflow") == 0 || strcmp(name, "__builtin_sub_overflow") == 0 ||
+        strcmp(name, "__builtin_mul_overflow") == 0 || strcmp(name, "__builtin_object_size") == 0 ||
+        strcmp(name, "__builtin___memcpy_chk") == 0 || strcmp(name, "__builtin___memmove_chk") == 0 ||
+        strcmp(name, "__builtin___memset_chk") == 0 || strcmp(name, "__builtin_va_start") == 0 ||
+        strcmp(name, "__builtin_va_end") == 0 || strcmp(name, "__builtin_va_copy") == 0 ||
+        strcmp(name, "__builtin_va_arg") == 0 || strcmp(name, "__builtin_trap") == 0 ||
+        strcmp(name, "__builtin_unreachable") == 0 || strcmp(name, "__builtin_choose_expr") == 0 ||
+        strcmp(name, "__builtin_types_compatible_p") == 0 || strcmp(name, "__builtin_offsetof") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int has_feature_name(const char *name, const pp_state_t *st) {
+    if (name == NULL || st == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "c_thread_local") == 0 || strcmp(name, "c_alignas") == 0 || strcmp(name, "c_alignof") == 0 ||
+        strcmp(name, "c_static_assert") == 0 || strcmp(name, "c_generic_selections") == 0 ||
+        strcmp(name, "c_noreturn") == 0) {
+        return st->std_is_c11 || st->std_is_c17 || st->std_is_c23;
+    }
+    if (strcmp(name, "c_variadic_macros") == 0 || strcmp(name, "c_restrict") == 0 || strcmp(name, "c99") == 0) {
+        return st->std_version >= 199901;
+    }
+    if (strcmp(name, "c23") == 0 || strcmp(name, "c2x") == 0) {
+        return st->std_is_c23;
+    }
+    if (strcmp(name, "gnu_statement_expression") == 0 || strcmp(name, "gnu_labels_as_values") == 0 ||
+        strcmp(name, "gnu_case_range") == 0) {
+        return st->std_is_gnu;
+    }
+    return 0;
+}
+
+static int is_reserved_identifier_name(const char *name, const pp_state_t *st) {
+    if (name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    if (strcmp(name, "auto") == 0 || strcmp(name, "break") == 0 || strcmp(name, "case") == 0 ||
+        strcmp(name, "char") == 0 || strcmp(name, "const") == 0 || strcmp(name, "continue") == 0 ||
+        strcmp(name, "default") == 0 || strcmp(name, "do") == 0 || strcmp(name, "double") == 0 ||
+        strcmp(name, "else") == 0 || strcmp(name, "enum") == 0 || strcmp(name, "extern") == 0 ||
+        strcmp(name, "float") == 0 || strcmp(name, "for") == 0 || strcmp(name, "goto") == 0 ||
+        strcmp(name, "if") == 0 || strcmp(name, "inline") == 0 || strcmp(name, "int") == 0 ||
+        strcmp(name, "long") == 0 || strcmp(name, "register") == 0 || strcmp(name, "restrict") == 0 ||
+        strcmp(name, "return") == 0 || strcmp(name, "short") == 0 || strcmp(name, "signed") == 0 ||
+        strcmp(name, "sizeof") == 0 || strcmp(name, "static") == 0 || strcmp(name, "struct") == 0 ||
+        strcmp(name, "switch") == 0 || strcmp(name, "typedef") == 0 || strcmp(name, "union") == 0 ||
+        strcmp(name, "unsigned") == 0 || strcmp(name, "void") == 0 || strcmp(name, "volatile") == 0 ||
+        strcmp(name, "while") == 0 || strcmp(name, "_Bool") == 0 || strcmp(name, "_Complex") == 0 ||
+        strcmp(name, "_Imaginary") == 0 || strcmp(name, "__typeof__") == 0 || strcmp(name, "typeof") == 0 ||
+        strcmp(name, "__auto_type") == 0 || strcmp(name, "__extension__") == 0) {
+        return 1;
+    }
+    if (st != NULL && (st->std_is_c11 || st->std_is_c17 || st->std_is_c23)) {
+        if (strcmp(name, "_Alignas") == 0 || strcmp(name, "_Alignof") == 0 || strcmp(name, "_Atomic") == 0 ||
+            strcmp(name, "_Generic") == 0 || strcmp(name, "_Noreturn") == 0 || strcmp(name, "_Static_assert") == 0 ||
+            strcmp(name, "_Thread_local") == 0) {
+            return 1;
+        }
+    }
+    if (st != NULL && st->std_is_c23) {
+        if (strcmp(name, "bool") == 0 || strcmp(name, "true") == 0 || strcmp(name, "false") == 0 ||
+            strcmp(name, "nullptr") == 0 || strcmp(name, "thread_local") == 0 ||
+            strcmp(name, "alignas") == 0 || strcmp(name, "alignof") == 0 ||
+            strcmp(name, "static_assert") == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int validate_stdc_pragma(const char *rest, cc_diag_t *diag, size_t line_no) {
     const char *p = rest;
     char scope[32];
@@ -2946,6 +3056,376 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     has_attr = has_c_attribute_name(base);
                     free(name);
                     if (sb_append(&out, has_attr ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
+                if ((j - i) == strlen("__has_feature") && strncmp(expr + i, "__has_feature", strlen("__has_feature")) == 0) {
+                    size_t k = j;
+                    const char *name_a = NULL;
+                    const char *name_b = NULL;
+                    char *name = NULL;
+                    int has_v = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != '(') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_feature operand");
+                        return -1;
+                    }
+                    k++;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (!is_ident_start((unsigned char)expr[k])) {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_feature operand");
+                        return -1;
+                    }
+                    name_a = expr + k;
+                    k++;
+                    while (is_ident_char((unsigned char)expr[k])) {
+                        k++;
+                    }
+                    name_b = expr + k;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != ')') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "unterminated __has_feature expression");
+                        return -1;
+                    }
+                    k++;
+                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    if (name == NULL) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    has_v = has_feature_name(name, st);
+                    free(name);
+                    if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
+                if ((j - i) == strlen("__has_extension") &&
+                    strncmp(expr + i, "__has_extension", strlen("__has_extension")) == 0) {
+                    size_t k = j;
+                    const char *name_a = NULL;
+                    const char *name_b = NULL;
+                    char *name = NULL;
+                    int has_v = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != '(') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_extension operand");
+                        return -1;
+                    }
+                    k++;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (!is_ident_start((unsigned char)expr[k])) {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_extension operand");
+                        return -1;
+                    }
+                    name_a = expr + k;
+                    k++;
+                    while (is_ident_char((unsigned char)expr[k])) {
+                        k++;
+                    }
+                    name_b = expr + k;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != ')') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "unterminated __has_extension expression");
+                        return -1;
+                    }
+                    k++;
+                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    if (name == NULL) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    has_v = has_feature_name(name, st) || (st->std_is_gnu && has_gnu_attribute_name(name));
+                    free(name);
+                    if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
+                if ((j - i) == strlen("__has_builtin") && strncmp(expr + i, "__has_builtin", strlen("__has_builtin")) == 0) {
+                    size_t k = j;
+                    const char *name_a = NULL;
+                    const char *name_b = NULL;
+                    char *name = NULL;
+                    int has_v = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != '(') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_builtin operand");
+                        return -1;
+                    }
+                    k++;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (!is_ident_start((unsigned char)expr[k])) {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_builtin operand");
+                        return -1;
+                    }
+                    name_a = expr + k;
+                    k++;
+                    while (is_ident_char((unsigned char)expr[k])) {
+                        k++;
+                    }
+                    name_b = expr + k;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != ')') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "unterminated __has_builtin expression");
+                        return -1;
+                    }
+                    k++;
+                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    if (name == NULL) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    has_v = has_builtin_name(name);
+                    free(name);
+                    if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
+                if ((j - i) == strlen("__has_attribute") &&
+                    strncmp(expr + i, "__has_attribute", strlen("__has_attribute")) == 0) {
+                    size_t k = j;
+                    const char *name_a = NULL;
+                    const char *name_b = NULL;
+                    char *name = NULL;
+                    int has_v = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != '(') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_attribute operand");
+                        return -1;
+                    }
+                    k++;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (!is_ident_start((unsigned char)expr[k])) {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_attribute operand");
+                        return -1;
+                    }
+                    name_a = expr + k;
+                    k++;
+                    while (is_ident_char((unsigned char)expr[k])) {
+                        k++;
+                    }
+                    name_b = expr + k;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != ')') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "unterminated __has_attribute expression");
+                        return -1;
+                    }
+                    k++;
+                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    if (name == NULL) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    has_v = has_gnu_attribute_name(name);
+                    free(name);
+                    if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
+                if ((j - i) == strlen("__has_declspec_attribute") &&
+                    strncmp(expr + i, "__has_declspec_attribute", strlen("__has_declspec_attribute")) == 0) {
+                    size_t k = j;
+                    const char *name_a = NULL;
+                    const char *name_b = NULL;
+                    char *name = NULL;
+                    int has_v = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != '(') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_declspec_attribute operand");
+                        return -1;
+                    }
+                    k++;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (!is_ident_start((unsigned char)expr[k])) {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_declspec_attribute operand");
+                        return -1;
+                    }
+                    name_a = expr + k;
+                    k++;
+                    while (is_ident_char((unsigned char)expr[k])) {
+                        k++;
+                    }
+                    name_b = expr + k;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != ')') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "unterminated __has_declspec_attribute expression");
+                        return -1;
+                    }
+                    k++;
+                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    if (name == NULL) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    has_v = has_declspec_attribute_name(name);
+                    free(name);
+                    if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
+                if ((j - i) == strlen("__has_warning") && strncmp(expr + i, "__has_warning", strlen("__has_warning")) == 0) {
+                    size_t k = j;
+                    int has_v = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != '(') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_warning operand");
+                        return -1;
+                    }
+                    k++;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] == '"') {
+                        size_t b = ++k;
+                        while (expr[k] != '\0' && expr[k] != '"') {
+                            k++;
+                        }
+                        if (expr[k] != '"') {
+                            sb_free(&out);
+                            set_diag(diag, (size_t)line, k + 1, "unterminated __has_warning operand");
+                            return -1;
+                        }
+                        has_v = (k > b);
+                        k++;
+                    } else if (is_ident_start((unsigned char)expr[k])) {
+                        has_v = 1;
+                        k++;
+                        while (is_ident_char((unsigned char)expr[k])) {
+                            k++;
+                        }
+                    } else {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __has_warning operand");
+                        return -1;
+                    }
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != ')') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "unterminated __has_warning expression");
+                        return -1;
+                    }
+                    k++;
+                    if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    i = k;
+                    continue;
+                }
+                if ((j - i) == strlen("__is_identifier") &&
+                    strncmp(expr + i, "__is_identifier", strlen("__is_identifier")) == 0) {
+                    size_t k = j;
+                    const char *name_a = NULL;
+                    const char *name_b = NULL;
+                    char *name = NULL;
+                    int is_ident = 0;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != '(') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __is_identifier operand");
+                        return -1;
+                    }
+                    k++;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (!is_ident_start((unsigned char)expr[k])) {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "malformed __is_identifier operand");
+                        return -1;
+                    }
+                    name_a = expr + k;
+                    k++;
+                    while (is_ident_char((unsigned char)expr[k])) {
+                        k++;
+                    }
+                    name_b = expr + k;
+                    while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
+                        k++;
+                    }
+                    if (expr[k] != ')') {
+                        sb_free(&out);
+                        set_diag(diag, (size_t)line, k + 1, "unterminated __is_identifier expression");
+                        return -1;
+                    }
+                    k++;
+                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    if (name == NULL) {
+                        sb_free(&out);
+                        return -1;
+                    }
+                    is_ident = !is_reserved_identifier_name(name, st);
+                    free(name);
+                    if (sb_append(&out, is_ident ? "1" : "0") != 0) {
                         sb_free(&out);
                         return -1;
                     }
