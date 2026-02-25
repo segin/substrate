@@ -337,6 +337,56 @@ static const char *skip_ws(const char *s) {
     return s;
 }
 
+static int parse_ident_token(const char **sp, char *out, size_t out_sz) {
+    const char *p = skip_ws(*sp);
+    size_t n = 0;
+
+    if (!is_ident_start((unsigned char)*p)) {
+        return -1;
+    }
+    while (is_ident_char((unsigned char)p[n])) {
+        n++;
+    }
+    if (n == 0 || n + 1 > out_sz) {
+        return -1;
+    }
+    memcpy(out, p, n);
+    out[n] = '\0';
+    *sp = p + n;
+    return 0;
+}
+
+static int validate_stdc_pragma(const char *rest, cc_diag_t *diag, size_t line_no) {
+    const char *p = rest;
+    char scope[32];
+    char name[64];
+    char value[32];
+
+    if (parse_ident_token(&p, scope, sizeof(scope)) != 0 || strcmp(scope, "STDC") != 0) {
+        return 0;
+    }
+    if (parse_ident_token(&p, name, sizeof(name)) != 0 || parse_ident_token(&p, value, sizeof(value)) != 0) {
+        set_diag(diag, line_no, 1, "malformed #pragma STDC");
+        return -1;
+    }
+    p = skip_ws(p);
+    if (*p != '\0') {
+        set_diag(diag, line_no, 1, "malformed #pragma STDC");
+        return -1;
+    }
+
+    if (strcmp(name, "FP_CONTRACT") != 0 && strcmp(name, "FENV_ACCESS") != 0 &&
+        strcmp(name, "CX_LIMITED_RANGE") != 0) {
+        set_diag(diag, line_no, 1, "unsupported #pragma STDC directive");
+        return -1;
+    }
+    if (strcmp(value, "ON") != 0 && strcmp(value, "OFF") != 0 && strcmp(value, "DEFAULT") != 0) {
+        set_diag(diag, line_no, 1, "invalid #pragma STDC state");
+        return -1;
+    }
+    return 1;
+}
+
 static char *trim_dup(const char *s) {
     const char *a = skip_ws(s);
     const char *b = a + strlen(a);
@@ -2076,6 +2126,10 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             if (strncmp(kw, "pragma", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 6) {
                 if (active) {
                     const char *r = skip_ws(p);
+                    int stdc_rc = validate_stdc_pragma(r, diag, (size_t)line_no);
+                    if (stdc_rc < 0) {
+                        goto fail;
+                    }
                     if (strncmp(r, "once", 4) == 0) {
                         saw_pragma_once = 1;
                     }

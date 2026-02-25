@@ -240,12 +240,21 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
 
 static const cc_function_t *find_function(const cc_translation_unit_t *tu, const char *name) {
     size_t i;
+    const cc_function_t *best = NULL;
+    int best_score = -1;
     for (i = 0; i < tu->func_count; ++i) {
-        if (strcmp(tu->funcs[i].name, name) == 0) {
-            return &tu->funcs[i];
+        const cc_function_t *f = &tu->funcs[i];
+        int score;
+        if (strcmp(f->name, name) != 0) {
+            continue;
+        }
+        score = (f->has_prototype ? 2 : 0) + (f->has_body ? 1 : 0);
+        if (best == NULL || score > best_score) {
+            best = f;
+            best_score = score;
         }
     }
-    return NULL;
+    return best;
 }
 
 static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
@@ -301,8 +310,16 @@ static int find_struct_member_index(const cc_translation_unit_t *tu, int struct_
 
 static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) {
     size_t i;
-    if (a->ret_type != b->ret_type || a->ret_struct_id != b->ret_struct_id || a->is_variadic != b->is_variadic ||
-        a->param_count != b->param_count) {
+    if (a->ret_type != b->ret_type || a->ret_struct_id != b->ret_struct_id) {
+        return 0;
+    }
+    if (!a->has_prototype || !b->has_prototype) {
+        if (a->is_variadic || b->is_variadic) {
+            return 0;
+        }
+        return 1;
+    }
+    if (a->is_variadic != b->is_variadic || a->param_count != b->param_count) {
         return 0;
     }
     for (i = 0; i < a->param_count; ++i) {
@@ -1513,14 +1530,14 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         }
-        if (callee != NULL && !callee->is_variadic && e->arg_count != callee->param_count) {
+        if (callee != NULL && callee->has_prototype && !callee->is_variadic && e->arg_count != callee->param_count) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "call to %s has %zu args but %zu required", e->ident,
                          e->arg_count, callee->param_count);
             }
             return -1;
         }
-        if (callee != NULL && callee->is_variadic && e->arg_count < callee->param_count) {
+        if (callee != NULL && callee->has_prototype && callee->is_variadic && e->arg_count < callee->param_count) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),
                          "variadic call to %s has %zu args but needs at least %zu", e->ident, e->arg_count,
@@ -1532,7 +1549,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (callee != NULL && i < callee->param_count && !can_convert(callee->params[i].type, e->args[i]->value_type) &&
+            if (callee != NULL && callee->has_prototype && i < callee->param_count &&
+                !can_convert(callee->params[i].type, e->args[i]->value_type) &&
                 !(is_pointer_type(callee->params[i].type) && is_integral_type(e->args[i]->value_type) &&
                   is_null_ptr_constant(e->args[i]))) {
                 if (diag != NULL && diag->message[0] == '\0') {

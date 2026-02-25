@@ -4640,6 +4640,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
                     return -1;
                 }
             }
+            f->has_prototype = 0;
             return 0;
         }
     }
@@ -4648,6 +4649,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
         if (next_tok(p) != 0) {
             return -1;
         }
+        f->has_prototype = 1;
         return 0;
     }
 
@@ -4660,6 +4662,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
 
         if (p->tok.kind == TOK_ELLIPSIS) {
             f->is_variadic = 1;
+            f->has_prototype = 1;
             if (next_tok(p) != 0) {
                 return -1;
             }
@@ -4694,6 +4697,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
             }
             free(pname);
         }
+        f->has_prototype = 1;
 
         if (p->tok.kind != TOK_COMMA) {
             break;
@@ -4721,6 +4725,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     decl_attrs_t merged_attrs;
     memset(f, 0, sizeof(*f));
     f->has_body = 0;
+    f->has_prototype = 0;
     decl_attrs_reset(&spec_attrs);
     decl_attrs_reset(&suffix_attrs);
     decl_attrs_reset(&merged_attrs);

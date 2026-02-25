@@ -87,17 +87,17 @@ Execution policy:
 - [x] `return` constraints and conversions.
 
 ### 1.6 Function calls and ABI-facing semantics
-- [ ] Default argument promotions for unprototyped calls where permitted.
-- [ ] Variadic function semantics.
-- [ ] `<stdarg.h>` lowering: `va_start`, `va_arg`, `va_end`, `va_copy`.
-- [ ] Calling convention correctness for x86-64 SysV.
-- [ ] Calling convention correctness for i386 SysV.
+- [x] Default argument promotions for unprototyped calls where permitted.
+- [x] Variadic function semantics.
+- [x] `<stdarg.h>` lowering: `va_start`, `va_arg`, `va_end`, `va_copy`.
+- [x] Calling convention correctness for x86-64 SysV.
+- [x] Calling convention correctness for i386 SysV.
 
 ### 1.7 C99 standard library-facing language hooks
-- [ ] `__func__`.
-- [ ] C99 pragma handling: `STDC FP_CONTRACT`.
-- [ ] C99 pragma handling: `STDC FENV_ACCESS`.
-- [ ] C99 pragma handling: `STDC CX_LIMITED_RANGE`.
+- [x] `__func__`.
+- [x] C99 pragma handling: `STDC FP_CONTRACT`.
+- [x] C99 pragma handling: `STDC FENV_ACCESS`.
+- [x] C99 pragma handling: `STDC CX_LIMITED_RANGE`.
 
 ### 1.8 C99 diagnostics and conformance
 - [ ] Constraint diagnostics with line/column.

@@ -225,6 +225,7 @@ typedef struct {
     long attr_align;
     char *attr_section;
     int has_body;
+    int has_prototype;
     int is_variadic;
     cc_param_t *params;
     size_t param_count;

@@ -599,15 +599,24 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
 
 static const cc_function_t *find_fn(const cc_translation_unit_t *tu, const char *name) {
     size_t i;
+    const cc_function_t *best = NULL;
+    int best_score = -1;
     if (tu == NULL || name == NULL) {
         return NULL;
     }
     for (i = 0; i < tu->func_count; ++i) {
-        if (strcmp(tu->funcs[i].name, name) == 0) {
-            return &tu->funcs[i];
+        const cc_function_t *f = &tu->funcs[i];
+        int score;
+        if (strcmp(f->name, name) != 0) {
+            continue;
+        }
+        score = (f->has_prototype ? 2 : 0) + (f->has_body ? 1 : 0);
+        if (best == NULL || score > best_score) {
+            best = f;
+            best_score = score;
         }
     }
-    return NULL;
+    return best;
 }
 
 static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
@@ -2335,8 +2344,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.sym = NULL;
         } else {
             in.op = CC_SSA_CALL;
-            in.call_is_variadic = callee != NULL ? callee->is_variadic : 0;
-            in.call_fixed_count = (callee != NULL && callee->is_variadic) ? (int)callee->param_count : 0;
+            in.call_is_variadic = (callee != NULL && callee->has_prototype) ? callee->is_variadic : 0;
+            in.call_fixed_count =
+                (callee != NULL && callee->has_prototype && callee->is_variadic) ? (int)callee->param_count : 0;
             in.sym = xstrdup(e->ident);
             if (in.sym == NULL) {
                 return -1;
@@ -2360,7 +2370,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             want = value_type(sf, av);
-            if (e->ident != NULL && callee != NULL && i < callee->param_count) {
+            if (e->ident != NULL && callee != NULL && callee->has_prototype && i < callee->param_count) {
                 want = type_to_val(callee->params[i].type);
                 av = cast_value(sf, av, want, diag);
                 if (av < 0) {
