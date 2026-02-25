@@ -386,7 +386,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         }
     }
 
-    if (obj->type == ET_EXEC || obj->type == ET_DYN) {
+    if (obj->segment_count != 0) {
+        phnum = obj->segment_count;
+    } else if (obj->type == ET_EXEC || obj->type == ET_DYN) {
         int has_dynamic = 0;
         int has_tls = 0;
         int has_interp = 0;
@@ -509,96 +511,150 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     }
 
     if (phnum != 0) {
-        size_t phidx = 0;
-        uint64_t load_lo = UINT64_MAX;
-        uint64_t load_hi = 0;
-        uint32_t load_flags = 0;
-        int has_load = 0;
+        if (obj->segment_count != 0) {
+            size_t phidx;
+            for (phidx = 0; phidx < phnum; ++phidx) {
+                struct elf_segment *seg = obj->segments[phidx];
+                uint8_t *p = img + phoff + (phidx * phentsz);
+                uint64_t lo = UINT64_MAX;
+                uint64_t hi = 0;
+                size_t j;
 
-        for (i = 1; i < sec_count; ++i) {
-            uint64_t end;
-            if ((secs[i].flags & SHF_ALLOC) == 0 || secs[i].type == SHT_NOBITS) {
-                continue;
+                for (j = 0; j < seg->section_count; ++j) {
+                    size_t sidx = seg->section_indices[j] + 1;
+                    uint64_t end;
+                    if (sidx >= sec_count) {
+                        continue;
+                    }
+                    if (secs[sidx].type == SHT_NOBITS || secs[sidx].size == 0) {
+                        continue;
+                    }
+                    if (!u64_add_checked(secs[sidx].offset, secs[sidx].size, &end)) {
+                        err = ELF_ERR_BOUNDS;
+                        goto done;
+                    }
+                    if (secs[sidx].offset < lo) {
+                        lo = secs[sidx].offset;
+                    }
+                    if (end > hi) {
+                        hi = end;
+                    }
+                }
+                if (lo == UINT64_MAX) {
+                    lo = 0;
+                }
+                if (obj->cls == ELFOBJ_CLASS_32) {
+                    elf__wr32(p + 0, obj->endian, seg->type);
+                    elf__wr32(p + 4, obj->endian, (uint32_t)lo);
+                    elf__wr32(p + 8, obj->endian, 0);
+                    elf__wr32(p + 12, obj->endian, 0);
+                    elf__wr32(p + 16, obj->endian, (uint32_t)(hi - lo));
+                    elf__wr32(p + 20, obj->endian, (uint32_t)(hi - lo));
+                    elf__wr32(p + 24, obj->endian, seg->flags);
+                    elf__wr32(p + 28, obj->endian, (uint32_t)(seg->align ? seg->align : 1));
+                } else {
+                    elf__wr32(p + 0, obj->endian, seg->type);
+                    elf__wr32(p + 4, obj->endian, seg->flags);
+                    elf__wr64(p + 8, obj->endian, lo);
+                    elf__wr64(p + 16, obj->endian, 0);
+                    elf__wr64(p + 24, obj->endian, 0);
+                    elf__wr64(p + 32, obj->endian, hi - lo);
+                    elf__wr64(p + 40, obj->endian, hi - lo);
+                    elf__wr64(p + 48, obj->endian, seg->align ? seg->align : 1);
+                }
             }
-            if (!u64_add_checked(secs[i].offset, secs[i].size, &end)) {
-                err = ELF_ERR_BOUNDS;
-                goto done;
+        } else {
+            size_t phidx = 0;
+            uint64_t load_lo = UINT64_MAX;
+            uint64_t load_hi = 0;
+            uint32_t load_flags = 0;
+            int has_load = 0;
+
+            for (i = 1; i < sec_count; ++i) {
+                uint64_t end;
+                if ((secs[i].flags & SHF_ALLOC) == 0 || secs[i].type == SHT_NOBITS) {
+                    continue;
+                }
+                if (!u64_add_checked(secs[i].offset, secs[i].size, &end)) {
+                    err = ELF_ERR_BOUNDS;
+                    goto done;
+                }
+                if (secs[i].offset < load_lo) {
+                    load_lo = secs[i].offset;
+                }
+                if (end > load_hi) {
+                    load_hi = end;
+                }
+                if (secs[i].flags & SHF_EXECINSTR) {
+                    load_flags |= 0x1;
+                }
+                if (secs[i].flags & SHF_WRITE) {
+                    load_flags |= 0x2;
+                }
+                load_flags |= 0x4;
+                has_load = 1;
             }
-            if (secs[i].offset < load_lo) {
-                load_lo = secs[i].offset;
+            if (has_load && phidx < phnum) {
+                uint8_t *p = img + phoff + (phidx * phentsz);
+                uint64_t filesz = load_hi - load_lo;
+                if (obj->cls == ELFOBJ_CLASS_32) {
+                    elf__wr32(p + 0, obj->endian, PT_LOAD);
+                    elf__wr32(p + 4, obj->endian, (uint32_t)load_lo);
+                    elf__wr32(p + 8, obj->endian, 0);
+                    elf__wr32(p + 12, obj->endian, 0);
+                    elf__wr32(p + 16, obj->endian, (uint32_t)filesz);
+                    elf__wr32(p + 20, obj->endian, (uint32_t)filesz);
+                    elf__wr32(p + 24, obj->endian, load_flags);
+                    elf__wr32(p + 28, obj->endian, 0x1000);
+                } else {
+                    elf__wr32(p + 0, obj->endian, PT_LOAD);
+                    elf__wr32(p + 4, obj->endian, load_flags);
+                    elf__wr64(p + 8, obj->endian, load_lo);
+                    elf__wr64(p + 16, obj->endian, 0);
+                    elf__wr64(p + 24, obj->endian, 0);
+                    elf__wr64(p + 32, obj->endian, filesz);
+                    elf__wr64(p + 40, obj->endian, filesz);
+                    elf__wr64(p + 48, obj->endian, 0x1000);
+                }
+                phidx++;
             }
-            if (end > load_hi) {
-                load_hi = end;
+            for (i = 1; i < sec_count && phidx < phnum; ++i) {
+                uint32_t ptype = 0;
+                uint32_t pflags = 0x4;
+                uint8_t *p;
+                if (secs[i].type == SHT_DYNAMIC) {
+                    ptype = PT_DYNAMIC;
+                    pflags = 0x6;
+                } else if (strcmp(secs[i].name ? secs[i].name : "", ".interp") == 0) {
+                    ptype = PT_INTERP;
+                } else if (secs[i].flags & SHF_TLS) {
+                    ptype = PT_TLS;
+                }
+                if (ptype == 0) {
+                    continue;
+                }
+                p = img + phoff + (phidx * phentsz);
+                if (obj->cls == ELFOBJ_CLASS_32) {
+                    elf__wr32(p + 0, obj->endian, ptype);
+                    elf__wr32(p + 4, obj->endian, (uint32_t)secs[i].offset);
+                    elf__wr32(p + 8, obj->endian, 0);
+                    elf__wr32(p + 12, obj->endian, 0);
+                    elf__wr32(p + 16, obj->endian, (uint32_t)secs[i].size);
+                    elf__wr32(p + 20, obj->endian, (uint32_t)secs[i].size);
+                    elf__wr32(p + 24, obj->endian, pflags);
+                    elf__wr32(p + 28, obj->endian, (uint32_t)(secs[i].addralign ? secs[i].addralign : 1));
+                } else {
+                    elf__wr32(p + 0, obj->endian, ptype);
+                    elf__wr32(p + 4, obj->endian, pflags);
+                    elf__wr64(p + 8, obj->endian, secs[i].offset);
+                    elf__wr64(p + 16, obj->endian, 0);
+                    elf__wr64(p + 24, obj->endian, 0);
+                    elf__wr64(p + 32, obj->endian, secs[i].size);
+                    elf__wr64(p + 40, obj->endian, secs[i].size);
+                    elf__wr64(p + 48, obj->endian, secs[i].addralign ? secs[i].addralign : 1);
+                }
+                phidx++;
             }
-            if (secs[i].flags & SHF_EXECINSTR) {
-                load_flags |= 0x1;
-            }
-            if (secs[i].flags & SHF_WRITE) {
-                load_flags |= 0x2;
-            }
-            load_flags |= 0x4;
-            has_load = 1;
-        }
-        if (has_load && phidx < phnum) {
-            uint8_t *p = img + phoff + (phidx * phentsz);
-            uint64_t filesz = load_hi - load_lo;
-            if (obj->cls == ELFOBJ_CLASS_32) {
-                elf__wr32(p + 0, obj->endian, PT_LOAD);
-                elf__wr32(p + 4, obj->endian, (uint32_t)load_lo);
-                elf__wr32(p + 8, obj->endian, 0);
-                elf__wr32(p + 12, obj->endian, 0);
-                elf__wr32(p + 16, obj->endian, (uint32_t)filesz);
-                elf__wr32(p + 20, obj->endian, (uint32_t)filesz);
-                elf__wr32(p + 24, obj->endian, load_flags);
-                elf__wr32(p + 28, obj->endian, 0x1000);
-            } else {
-                elf__wr32(p + 0, obj->endian, PT_LOAD);
-                elf__wr32(p + 4, obj->endian, load_flags);
-                elf__wr64(p + 8, obj->endian, load_lo);
-                elf__wr64(p + 16, obj->endian, 0);
-                elf__wr64(p + 24, obj->endian, 0);
-                elf__wr64(p + 32, obj->endian, filesz);
-                elf__wr64(p + 40, obj->endian, filesz);
-                elf__wr64(p + 48, obj->endian, 0x1000);
-            }
-            phidx++;
-        }
-        for (i = 1; i < sec_count && phidx < phnum; ++i) {
-            uint32_t ptype = 0;
-            uint32_t pflags = 0x4;
-            uint8_t *p;
-            if (secs[i].type == SHT_DYNAMIC) {
-                ptype = PT_DYNAMIC;
-                pflags = 0x6;
-            } else if (strcmp(secs[i].name ? secs[i].name : "", ".interp") == 0) {
-                ptype = PT_INTERP;
-            } else if (secs[i].flags & SHF_TLS) {
-                ptype = PT_TLS;
-            }
-            if (ptype == 0) {
-                continue;
-            }
-            p = img + phoff + (phidx * phentsz);
-            if (obj->cls == ELFOBJ_CLASS_32) {
-                elf__wr32(p + 0, obj->endian, ptype);
-                elf__wr32(p + 4, obj->endian, (uint32_t)secs[i].offset);
-                elf__wr32(p + 8, obj->endian, 0);
-                elf__wr32(p + 12, obj->endian, 0);
-                elf__wr32(p + 16, obj->endian, (uint32_t)secs[i].size);
-                elf__wr32(p + 20, obj->endian, (uint32_t)secs[i].size);
-                elf__wr32(p + 24, obj->endian, pflags);
-                elf__wr32(p + 28, obj->endian, (uint32_t)(secs[i].addralign ? secs[i].addralign : 1));
-            } else {
-                elf__wr32(p + 0, obj->endian, ptype);
-                elf__wr32(p + 4, obj->endian, pflags);
-                elf__wr64(p + 8, obj->endian, secs[i].offset);
-                elf__wr64(p + 16, obj->endian, 0);
-                elf__wr64(p + 24, obj->endian, 0);
-                elf__wr64(p + 32, obj->endian, secs[i].size);
-                elf__wr64(p + 40, obj->endian, secs[i].size);
-                elf__wr64(p + 48, obj->endian, secs[i].addralign ? secs[i].addralign : 1);
-            }
-            phidx++;
         }
     }
 

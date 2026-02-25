@@ -226,6 +226,7 @@ static void elf_free_sections(elfobj_t *obj) {
             continue;
         }
         free(s->name);
+        free(s->note_name);
         if (s->owns_data) {
             free(s->data);
         }
@@ -269,6 +270,23 @@ static void elf_free_phdrs(elfobj_t *obj) {
     free(obj->phdrs);
 }
 
+static void elf_free_segments(elfobj_t *obj) {
+    size_t i;
+    if (obj == NULL) {
+        return;
+    }
+    for (i = 0; i < obj->segment_count; ++i) {
+        struct elf_segment *seg = obj->segments[i];
+        if (seg == NULL) {
+            continue;
+        }
+        free(seg->section_indices);
+        free(seg->interp_path);
+        free(seg);
+    }
+    free(obj->segments);
+}
+
 const char *elf_errstr(elf_err_t err) {
     switch (err) {
         case ELF_OK: return "ok";
@@ -295,6 +313,7 @@ void elf_close(elfobj_t *obj) {
     elf_free_symbols(obj);
     elf_free_relocs(obj);
     elf_free_phdrs(obj);
+    elf_free_segments(obj);
     free(obj->diag.buf);
     free(obj);
 }
@@ -378,6 +397,10 @@ uint16_t elf_program_header_count(const elfobj_t *obj) {
     return obj == NULL ? 0 : (uint16_t)obj->phdr_count;
 }
 
+size_t elf_segment_count(const elfobj_t *obj) {
+    return obj == NULL ? 0 : obj->segment_count;
+}
+
 const char *elf_section_name(const elf_section_t *section) {
     return section == NULL ? NULL : section->name;
 }
@@ -441,5 +464,24 @@ elf_err_t elf__push_phdr(elfobj_t *obj, const struct elf_phdr *phdr) {
     }
     obj->phdrs[obj->phdr_count++] = *phdr;
     obj->phnum = (uint16_t)obj->phdr_count;
+    return ELF_OK;
+}
+
+elf_err_t elf__push_segment(elfobj_t *obj, struct elf_segment *seg) {
+    void *next;
+
+    if (obj == NULL || seg == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->segment_count == obj->segment_cap) {
+        size_t new_cap = obj->segment_cap == 0 ? 4 : obj->segment_cap * 2;
+        next = elf__reallocarray(obj->segments, new_cap, sizeof(obj->segments[0]));
+        if (next == NULL) {
+            return ELF_ERR_OOM;
+        }
+        obj->segments = (struct elf_segment **)next;
+        obj->segment_cap = new_cap;
+    }
+    obj->segments[obj->segment_count++] = seg;
     return ELF_OK;
 }

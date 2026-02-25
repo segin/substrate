@@ -95,6 +95,10 @@ struct elf_section {
     uint32_t info;
     uint64_t addralign;
     uint64_t entsize;
+    uint32_t group_index;
+    uint8_t comdat;
+    uint32_t note_type;
+    char *note_name;
     uint8_t *data;
     size_t data_size;
     uint8_t owns_data;
@@ -102,6 +106,17 @@ struct elf_section {
     struct elf_reloc **relocs;
     size_t reloc_count;
     size_t reloc_cap;
+};
+
+struct elf_segment {
+    struct elfobj *obj;
+    uint32_t type;
+    uint32_t flags;
+    uint64_t align;
+    size_t *section_indices;
+    size_t section_count;
+    size_t section_cap;
+    char *interp_path;
 };
 
 struct elf_symbol {
@@ -153,6 +168,10 @@ struct elfobj {
     uint8_t has_dynamic;
     uint8_t has_versioning;
 
+    struct elf_segment **segments;
+    size_t segment_count;
+    size_t segment_cap;
+
     elf_err_t last_err;
     elf_diag_t diag;
 };
@@ -178,6 +197,7 @@ elf_err_t elf__push_section(elfobj_t *obj, struct elf_section *sec);
 elf_err_t elf__push_symbol(elfobj_t *obj, struct elf_symbol *sym);
 elf_err_t elf__push_reloc(elfobj_t *obj, struct elf_reloc *rel);
 elf_err_t elf__push_phdr(elfobj_t *obj, const struct elf_phdr *phdr);
+elf_err_t elf__push_segment(elfobj_t *obj, struct elf_segment *seg);
 
 elf_err_t elf__strtab_init(elf_strtab_t *tab);
 void elf__strtab_free(elf_strtab_t *tab);

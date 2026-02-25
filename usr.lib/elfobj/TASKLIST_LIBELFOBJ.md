@@ -51,16 +51,16 @@ Execution policy:
 - [x] Deterministic byte-for-byte output under identical inputs.
 
 ## 4) Section and Segment APIs
-- [ ] Add/find/remove/reorder sections by API.
-- [ ] Section type/flag mutation APIs with validation.
-- [ ] Section group/COMDAT support.
-- [ ] Mergeable section semantics (`SHF_MERGE`/`SHF_STRINGS`).
-- [ ] TLS section handling (`.tdata`/`.tbss`).
-- [ ] Note section helpers.
-- [ ] Program segment creation and assignment APIs.
-- [ ] PT_LOAD/PT_DYNAMIC/PT_INTERP/PT_TLS helpers.
-- [ ] Segment alignment and overlap validation.
-- [ ] Section-to-segment mapping introspection APIs.
+- [x] Add/find/remove/reorder sections by API.
+- [x] Section type/flag mutation APIs with validation.
+- [x] Section group/COMDAT support.
+- [x] Mergeable section semantics (`SHF_MERGE`/`SHF_STRINGS`).
+- [x] TLS section handling (`.tdata`/`.tbss`).
+- [x] Note section helpers.
+- [x] Program segment creation and assignment APIs.
+- [x] PT_LOAD/PT_DYNAMIC/PT_INTERP/PT_TLS helpers.
+- [x] Segment alignment and overlap validation.
+- [x] Section-to-segment mapping introspection APIs.
 
 ## 5) Symbol and Hash Handling
 - [ ] Symbol add/find by name/index.

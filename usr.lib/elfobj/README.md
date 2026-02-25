@@ -9,6 +9,7 @@
 - Emit valid ELF objects with generated string/symbol/relocation tables.
 - Provide linker-facing object merge API and validation diagnostics.
 - Parse and validate program headers, notes, dynamic, and versioning sections.
+- Provide section mutation/reorder APIs and explicit segment mapping helpers.
 
 ## Build
 - `make -C usr.lib/elfobj`

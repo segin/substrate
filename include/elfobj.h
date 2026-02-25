@@ -12,6 +12,7 @@ typedef struct elfobj elfobj_t;
 typedef struct elf_section elf_section_t;
 typedef struct elf_symbol elf_symbol_t;
 typedef struct elf_reloc elf_reloc_t;
+typedef struct elf_segment elf_segment_t;
 
 #define ELFOBJ_API_VERSION 1
 
@@ -74,6 +75,16 @@ typedef enum {
 #define SHF_TLS 0x400
 #endif
 
+#ifndef PT_NULL
+#define PT_NULL 0
+#define PT_LOAD 1
+#define PT_DYNAMIC 2
+#define PT_INTERP 3
+#define PT_NOTE 4
+#define PT_PHDR 6
+#define PT_TLS 7
+#endif
+
 #ifndef STB_LOCAL
 #define STB_LOCAL 0
 #define STB_GLOBAL 1
@@ -121,6 +132,14 @@ void elf_close(elfobj_t *obj);
 elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, uint64_t flags);
 elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t size);
 elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align);
+elf_err_t elf_section_set_type(elf_section_t *section, uint32_t type);
+elf_err_t elf_section_set_flags(elf_section_t *section, uint64_t flags);
+elf_err_t elf_section_set_group(elf_section_t *section, uint32_t group, int comdat);
+elf_err_t elf_section_set_merge(elf_section_t *section, uint64_t entsize, int strings);
+elf_err_t elf_section_set_tls(elf_section_t *section, int enable);
+elf_err_t elf_section_set_note_info(elf_section_t *section, uint32_t note_type, const char *note_name);
+elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section);
+elf_err_t elf_reorder_section(elfobj_t *obj, elf_section_t *section, size_t new_index);
 elf_section_t *elf_find_section(elfobj_t *obj, const char *name);
 
 elf_symbol_t *elf_add_symbol(elfobj_t *obj, const char *name, uint64_t value,
@@ -151,6 +170,7 @@ size_t elf_section_count(const elfobj_t *obj);
 size_t elf_symbol_count(const elfobj_t *obj);
 size_t elf_reloc_count(const elfobj_t *obj);
 uint16_t elf_program_header_count(const elfobj_t *obj);
+size_t elf_segment_count(const elfobj_t *obj);
 
 const char *elf_section_name(const elf_section_t *section);
 uint32_t elf_section_type(const elf_section_t *section);
@@ -161,6 +181,18 @@ const void *elf_section_data(const elf_section_t *section, size_t *size_out);
 const char *elf_symbol_name(const elf_symbol_t *symbol);
 uint64_t elf_symbol_value(const elf_symbol_t *symbol);
 uint64_t elf_symbol_size(const elf_symbol_t *symbol);
+
+elf_segment_t *elf_add_segment(elfobj_t *obj, uint32_t type, uint32_t flags, uint64_t align);
+elf_segment_t *elf_add_load_segment(elfobj_t *obj, uint32_t flags, uint64_t align);
+elf_segment_t *elf_add_dynamic_segment(elfobj_t *obj, uint64_t align);
+elf_segment_t *elf_add_tls_segment(elfobj_t *obj, uint64_t align);
+elf_segment_t *elf_add_interp_segment(elfobj_t *obj, const char *interp_path);
+elf_err_t elf_segment_add_section(elf_segment_t *segment, elf_section_t *section);
+uint32_t elf_segment_type(const elf_segment_t *segment);
+uint32_t elf_segment_flags(const elf_segment_t *segment);
+uint64_t elf_segment_align(const elf_segment_t *segment);
+size_t elf_segment_section_count(const elf_segment_t *segment);
+int elf_segment_contains_section(const elf_segment_t *segment, const elf_section_t *section);
 
 uint32_t elf_hash_sysv(const char *name);
 uint32_t elf_hash_gnu(const char *name);
