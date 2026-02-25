@@ -105,6 +105,27 @@ static int emit_warning(cc_diag_t *diag, size_t line, size_t col, const char *ms
     return -1;
 }
 
+static int emit_required_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg) {
+    if (line == 0 && col == 0) {
+        line = g_diag_ctx_line;
+        col = g_diag_ctx_col;
+    }
+    if (line != 0) {
+        fprintf(stderr, "cc:%zu:%zu: warning: %s\n", line, col, msg);
+    } else {
+        fprintf(stderr, "cc: warning: %s\n", msg);
+    }
+    if (!g_warn_error) {
+        return 0;
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        diag->line = line;
+        diag->col = col;
+        snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    }
+    return -1;
+}
+
 static int maybe_warn_assignment_condition(const cc_expr_t *cond, const char *where, cc_diag_t *diag) {
     char buf[160];
 
@@ -341,6 +362,23 @@ static const cc_global_t *find_global(const cc_translation_unit_t *tu, const cha
         }
     }
     return NULL;
+}
+
+static int maybe_warn_deprecated_symbol(const cc_translation_unit_t *tu, const char *name, size_t line, size_t col,
+                                        cc_diag_t *diag) {
+    char buf[192];
+    const cc_function_t *f = find_function(tu, name);
+    const cc_global_t *g = find_global(tu, name);
+
+    if (f != NULL && (f->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+        snprintf(buf, sizeof(buf), "deprecated function used: %s", name != NULL ? name : "<anon>");
+        return emit_required_warning(diag, line, col, buf);
+    }
+    if (g != NULL && (g->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+        snprintf(buf, sizeof(buf), "deprecated object used: %s", name != NULL ? name : "<anon>");
+        return emit_required_warning(diag, line, col, buf);
+    }
+    return 0;
 }
 
 static const cc_struct_def_t *find_struct_def(const cc_translation_unit_t *tu, int struct_id) {
@@ -1099,11 +1137,17 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (g != NULL) {
                 e->value_type = g->type;
                 e->struct_id = g->type_struct_id;
+                if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
+                    return -1;
+                }
                 return 0;
             }
             if (find_function(tu, e->ident) != NULL) {
                 e->value_type = CC_TYPE_PTR_VOID;
                 e->struct_id = -1;
+                if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
+                    return -1;
+                }
                 return 0;
             }
             if (diag != NULL && diag->message[0] == '\0') {
@@ -1649,6 +1693,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (callee != NULL) {
             e->value_type = callee->ret_type;
             e->struct_id = callee->ret_struct_id;
+            if ((callee->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+                char buf[192];
+                snprintf(buf, sizeof(buf), "deprecated function used: %s", callee->name != NULL ? callee->name : "<anon>");
+                if (emit_required_warning(diag, e->line, e->col, buf) != 0) {
+                    return -1;
+                }
+            }
         } else if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
@@ -2279,6 +2330,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             diag->col = g_diag_ctx_col;
         }
     }
+    if (s != NULL && (s->attr_flags & CC_ATTR_FALLTHROUGH) != 0 && s->kind != CC_STMT_EXPR) {
+        set_diag(diag, "fallthrough attribute requires an empty statement");
+        return -1;
+    }
 
     switch (s->kind) {
     case CC_STMT_DECL:
@@ -2400,11 +2455,36 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
 
     case CC_STMT_EXPR:
+        if ((s->attr_flags & CC_ATTR_FALLTHROUGH) != 0) {
+            if (s->expr != NULL) {
+                set_diag(diag, "fallthrough attribute requires an empty statement");
+                return -1;
+            }
+            if (switch_depth <= 0) {
+                set_diag(diag, "fallthrough attribute is only valid in switch statements");
+                return -1;
+            }
+            return 0;
+        }
         if (s->expr == NULL) {
             return 0;
         }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
+        }
+        if (!(s->expr->kind == CC_EXPR_CAST && s->expr->aux_type == CC_TYPE_VOID)) {
+            const cc_expr_t *ce = s->expr;
+            if (ce->kind == CC_EXPR_CALL && ce->ident != NULL) {
+                const cc_function_t *f = find_function(tu, ce->ident);
+                if (f != NULL && (f->attr_flags & CC_ATTR_NODISCARD) != 0) {
+                    char buf[192];
+                    snprintf(buf, sizeof(buf), "ignoring nodiscard return value from %s",
+                             f->name != NULL ? f->name : "<anon>");
+                    if (emit_required_warning(diag, ce->line, ce->col, buf) != 0) {
+                        return -1;
+                    }
+                }
+            }
         }
         return 0;
 

@@ -148,14 +148,14 @@ Execution policy:
 - [x] C23 compatibility updates for qualifiers and array rules.
 
 ### 2.4 C23 standard attributes
-- [ ] `[[deprecated]]`.
-- [ ] `[[fallthrough]]`.
-- [ ] `[[maybe_unused]]`.
-- [ ] `[[nodiscard]]`.
-- [ ] `[[noreturn]]`.
-- [ ] `[[reproducible]]`.
-- [ ] `[[unsequenced]]`.
-- [ ] `__has_c_attribute(...)`.
+- [x] `[[deprecated]]`.
+- [x] `[[fallthrough]]`.
+- [x] `[[maybe_unused]]`.
+- [x] `[[nodiscard]]`.
+- [x] `[[noreturn]]`.
+- [x] `[[reproducible]]`.
+- [x] `[[unsequenced]]`.
+- [x] `__has_c_attribute(...)`.
 
 ### 2.5 Post-C99 validation
 - [ ] Conformance tests by standard mode (`c11`, `c17`, `c23`).

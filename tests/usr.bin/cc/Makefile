@@ -433,6 +433,7 @@ test:
 	sh run_diff_c99.sh
 	sh run_postc99_c11_c17.sh
 	sh run_postc99_c23.sh
+	sh run_postc99_c23_attrs.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_break.c -o /tmp/cc_native_bad_break.o
@@ -513,4 +514,7 @@ clean:
 	      /tmp/cc_native_c23_bitint /tmp/cc_native_c23_binary_sep /tmp/cc_native_c23_empty_init \
 	      /tmp/cc_native_c23_enum_underlying /tmp/cc_native_c23_label_decl /tmp/cc_native_c23_constexpr_auto_decimal \
 	      /tmp/cc_native_bad_c23_auto_no_init.o /tmp/cc_native_bad_c23_bitint_zero.o \
-	      /tmp/cc_native_bad_c23_static_assert_single_fail.o /tmp/cc_native_c23_pp_version.i
+	      /tmp/cc_native_bad_c23_static_assert_single_fail.o /tmp/cc_native_c23_pp_version.i \
+	      /tmp/cc_native_c23_attr_std /tmp/cc_native_c23_attr_std.log /tmp/cc_native_c23_attr_std_werror \
+	      /tmp/cc_native_c23_attr_std_werror.log /tmp/cc_native_bad_c23_attr_fallthrough_outside.o \
+	      /tmp/cc_native_c23_attr_has.i

@@ -23,6 +23,11 @@ typedef struct {
 #define CC_ATTR_UNUSED     (1 << 3)
 #define CC_ATTR_USED       (1 << 4)
 #define CC_ATTR_SECTION    (1 << 5)
+#define CC_ATTR_DEPRECATED (1 << 6)
+#define CC_ATTR_NODISCARD  (1 << 7)
+#define CC_ATTR_REPRODUCIBLE (1 << 8)
+#define CC_ATTR_UNSEQUENCED (1 << 9)
+#define CC_ATTR_FALLTHROUGH (1 << 10)
 
 typedef enum {
     CC_TYPE_VOID = 0,

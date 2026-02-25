@@ -188,8 +188,9 @@ static int tok_is_ident(parser_t *p, const char *s);
 static void decl_attrs_reset(decl_attrs_t *a);
 static void decl_attrs_clear(decl_attrs_t *a);
 static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src);
-static int skip_cxx_attribute_seq(parser_t *p);
+static int parse_c23_attribute_seq(parser_t *p, decl_attrs_t *out_attrs, int *out_stmt_flags);
 static int skip_balanced_parens(parser_t *p);
+static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, char **out_str);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, int allow_void, const char *what);
 static cc_expr_t *parse_expr(parser_t *p);
@@ -2133,15 +2134,72 @@ static char *dup_string_token(const cc_token_t *tok) {
     return xstrdup_n(tok->start + begin, end - begin);
 }
 
-static int skip_cxx_attribute_seq(parser_t *p) {
-    int nested = 0;
-    if (p->tok.kind != TOK_LBRACK || peek_kind(p) != TOK_LBRACK) {
+static int parse_one_c23_attribute(parser_t *p, decl_attrs_t *out_attrs, int *out_stmt_flags) {
+    int is_deprecated;
+    int is_fallthrough;
+    int is_maybe_unused;
+    int is_nodiscard;
+    int is_noreturn;
+    int is_reproducible;
+    int is_unsequenced;
+    long ignored_num = 0;
+    int ignored_has_num = 0;
+    char *ignored_str = NULL;
+
+    if (p->tok.kind != TOK_IDENT) {
         return 0;
     }
+
+    is_deprecated = tok_is_ident(p, "deprecated");
+    is_fallthrough = tok_is_ident(p, "fallthrough");
+    is_maybe_unused = tok_is_ident(p, "maybe_unused");
+    is_nodiscard = tok_is_ident(p, "nodiscard");
+    is_noreturn = tok_is_ident(p, "noreturn");
+    is_reproducible = tok_is_ident(p, "reproducible");
+    is_unsequenced = tok_is_ident(p, "unsequenced");
+
     if (next_tok(p) != 0) {
         return -1;
     }
-    if (next_tok(p) != 0) {
+    if (p->tok.kind == TOK_LPAREN) {
+        if (parse_gnu_attr_arguments(p, &ignored_num, &ignored_has_num, &ignored_str) != 0) {
+            free(ignored_str);
+            return -1;
+        }
+    }
+    free(ignored_str);
+
+    if (out_attrs != NULL) {
+        if (is_deprecated) {
+            out_attrs->flags |= CC_ATTR_DEPRECATED;
+        }
+        if (is_maybe_unused) {
+            out_attrs->flags |= CC_ATTR_UNUSED;
+        }
+        if (is_nodiscard) {
+            out_attrs->flags |= CC_ATTR_NODISCARD;
+        }
+        if (is_noreturn) {
+            out_attrs->flags |= CC_ATTR_NORETURN;
+        }
+        if (is_reproducible) {
+            out_attrs->flags |= CC_ATTR_REPRODUCIBLE;
+        }
+        if (is_unsequenced) {
+            out_attrs->flags |= CC_ATTR_UNSEQUENCED;
+        }
+    }
+    if (out_stmt_flags != NULL && is_fallthrough) {
+        *out_stmt_flags |= CC_ATTR_FALLTHROUGH;
+    }
+    return 0;
+}
+
+static int parse_c23_attribute_seq(parser_t *p, decl_attrs_t *out_attrs, int *out_stmt_flags) {
+    if (p->tok.kind != TOK_LBRACK || peek_kind(p) != TOK_LBRACK) {
+        return 0;
+    }
+    if (next_tok(p) != 0 || next_tok(p) != 0) {
         return -1;
     }
     while (1) {
@@ -2149,34 +2207,40 @@ static int skip_cxx_attribute_seq(parser_t *p) {
             set_diag(p->diag, p->tok.line, p->tok.col, "unterminated attribute specifier");
             return -1;
         }
-        if (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) {
-            nested++;
-            if (next_tok(p) != 0) {
+        if (p->tok.kind == TOK_RBRACK && peek_kind(p) == TOK_RBRACK) {
+            if (next_tok(p) != 0 || next_tok(p) != 0) {
                 return -1;
             }
+            return 0;
+        }
+        if (p->tok.kind == TOK_COMMA) {
             if (next_tok(p) != 0) {
                 return -1;
             }
             continue;
         }
-        if (p->tok.kind == TOK_RBRACK && peek_kind(p) == TOK_RBRACK) {
-            if (next_tok(p) != 0) {
+        if (p->tok.kind == TOK_IDENT) {
+            if (parse_one_c23_attribute(p, out_attrs, out_stmt_flags) != 0) {
                 return -1;
             }
-            if (next_tok(p) != 0) {
+            continue;
+        }
+        if (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) {
+            if (parse_c23_attribute_seq(p, out_attrs, out_stmt_flags) != 0) {
                 return -1;
             }
-            if (nested == 0) {
-                break;
+            continue;
+        }
+        if (p->tok.kind == TOK_LPAREN) {
+            if (skip_balanced_parens(p) != 0) {
+                return -1;
             }
-            nested--;
             continue;
         }
         if (next_tok(p) != 0) {
             return -1;
         }
     }
-    return 0;
 }
 
 static int skip_balanced_parens(parser_t *p) {
@@ -2389,7 +2453,7 @@ static int parse_gnu_attribute_spec(parser_t *p, decl_attrs_t *out_attrs) {
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs) {
     while (1) {
         if (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) {
-            if (skip_cxx_attribute_seq(p) != 0) {
+            if (parse_c23_attribute_seq(p, out_attrs, NULL) != 0) {
                 return -1;
             }
             continue;
@@ -2777,6 +2841,37 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s);
 static cc_expr_t *new_int_expr(long v);
 static cc_expr_t *parse_initializer_expr(parser_t *p);
 static cc_expr_t *parse_initializer_item(parser_t *p);
+
+static int is_fallthrough_stmt_start(parser_t *p) {
+    cc_lexer_t lx;
+    cc_token_t t;
+    const char *name = "fallthrough";
+    size_t i;
+
+    if (p->tok.kind != TOK_LBRACK || peek_kind(p) != TOK_LBRACK) {
+        return 0;
+    }
+
+    lx = p->lx;
+    for (i = 0; i < 2; ++i) {
+        if (cc_lexer_next(&lx, &t) != 0 || t.kind != TOK_LBRACK) {
+            return 0;
+        }
+    }
+    if (cc_lexer_next(&lx, &t) != 0 || t.kind != TOK_IDENT || t.len != strlen(name) ||
+        strncmp(t.start, name, t.len) != 0) {
+        return 0;
+    }
+    for (i = 0; i < 2; ++i) {
+        if (cc_lexer_next(&lx, &t) != 0 || t.kind != TOK_RBRACK) {
+            return 0;
+        }
+    }
+    if (cc_lexer_next(&lx, &t) != 0 || t.kind != TOK_SEMI) {
+        return 0;
+    }
+    return 1;
+}
 
 static cc_expr_t *parse_initializer_item(parser_t *p) {
     if (p->tok.kind == TOK_DOT) {
@@ -4867,7 +4962,7 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
             p->scope_depth = saved_depth;
             return -1;
         }
-        if (is_declspec_start(p)) {
+        if (is_declspec_start(p) && !is_fallthrough_stmt_start(p)) {
             if (parse_decl_stmt_list(p, &s->block_stmts, &s->block_count, 1) != 0) {
                 typedef_pop_to_depth(p, saved_depth);
                 p->scope_depth = saved_depth;
@@ -4899,6 +4994,7 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
 }
 
 static int parse_stmt(parser_t *p, cc_stmt_t *s) {
+    parser_t saved;
     memset(s, 0, sizeof(*s));
     s->line = p->tok.line;
     s->col = p->tok.col;
@@ -4907,6 +5003,21 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         if (next_tok(p) != 0) {
             return -1;
         }
+    }
+
+    if (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) {
+        int stmt_flags = 0;
+        saved = *p;
+        if (parse_c23_attribute_seq(p, NULL, &stmt_flags) != 0) {
+            return -1;
+        }
+        if ((stmt_flags & CC_ATTR_FALLTHROUGH) != 0 && p->tok.kind == TOK_SEMI) {
+            s->attr_flags |= stmt_flags;
+            s->kind = CC_STMT_EXPR;
+            s->expr = NULL;
+            return next_tok(p);
+        }
+        *p = saved;
     }
 
     if (is_static_assert_tok(p)) {
