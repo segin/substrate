@@ -141,7 +141,7 @@ static int make_parent_dirs(const char *path) {
 
 static bool path_is_safe(const char *path, const options_t *opt) {
     if ((opt->safe_extract || opt->no_absolute_paths) && path[0] == '/') return false;
-    if (opt->safe_extract) {
+    if (opt->safe_extract || opt->no_absolute_paths) {
         const char *p = path;
         while (*p) {
             if ((p == path || p[-1] == '/') && p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0'))
