@@ -66,6 +66,24 @@ static int validate_attr_section(const char *section, cc_diag_t *diag, const cha
     return -1;
 }
 
+static int storage_class_count(int storage) {
+    int mask = storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN | CC_STORAGE_AUTO | CC_STORAGE_REGISTER);
+    int n = 0;
+    if ((mask & CC_STORAGE_STATIC) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_EXTERN) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_AUTO) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_REGISTER) != 0) {
+        n++;
+    }
+    return n;
+}
+
 static int names_find(char **names, size_t count, const char *name) {
     size_t i;
     for (i = 0; i < count; ++i) {
@@ -923,6 +941,10 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
     }
 }
 
+static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
+                                    var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag);
+static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
+
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
     size_t i;
@@ -1711,6 +1733,21 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "malformed cast expression");
             return -1;
         }
+        if (e->lhs->kind == CC_EXPR_INIT_LIST) {
+            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
+                if (check_struct_initializer(tu, "<compound-literal>", e->aux_struct_id, e->lhs, vars, var_count,
+                                             depth, diag) != 0) {
+                    return -1;
+                }
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = e->aux_struct_id;
+                return 0;
+            }
+            e->lhs = unwrap_scalar_initializer_expr(e->lhs, diag);
+            if (e->lhs == NULL) {
+                return -1;
+            }
+        }
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
@@ -1830,6 +1867,60 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     }
 }
 
+static int is_zero_initializer_expr(const cc_expr_t *e) {
+    size_t i;
+    if (e == NULL) {
+        return 1;
+    }
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        return e->int_val == 0;
+    case CC_EXPR_FLOAT:
+        return e->float_val == 0.0;
+    case CC_EXPR_CAST:
+        return is_zero_initializer_expr(e->lhs);
+    case CC_EXPR_MEMBER:
+        if (e->lhs == NULL && e->rhs != NULL) {
+            return is_zero_initializer_expr(e->rhs);
+        }
+        return 0;
+    case CC_EXPR_INIT_LIST:
+        for (i = 0; i < e->arg_count; ++i) {
+            if (!is_zero_initializer_expr(e->args[i])) {
+                return 0;
+            }
+        }
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag) {
+    cc_expr_t *item;
+    if (init == NULL) {
+        set_diag(diag, "initializer list is empty");
+        return NULL;
+    }
+    if (init->kind != CC_EXPR_INIT_LIST) {
+        return init;
+    }
+    if (init->arg_count == 0) {
+        set_diag(diag, "initializer list is empty");
+        return NULL;
+    }
+    if (init->arg_count > 1) {
+        set_diag(diag, "too many elements in scalar initializer");
+        return NULL;
+    }
+    item = init->args[0];
+    if (item != NULL && item->kind == CC_EXPR_MEMBER) {
+        set_diag(diag, "designated initializer is invalid for scalar type");
+        return NULL;
+    }
+    return item;
+}
+
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
                                     var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag) {
     size_t i;
@@ -1848,7 +1939,15 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         return -1;
     }
     sd = &tu->structs[struct_id];
-    if (init->arg_count > sd->member_count) {
+    if (sd->is_union) {
+        if (init->arg_count > 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "too many initializers for union %s",
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
+    } else if (init->arg_count > sd->member_count) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "too many initializers for struct %s",
                      name != NULL ? name : "<anon>");
@@ -1883,12 +1982,25 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         }
 
         m = &sd->members[member_idx];
-        next_member = member_idx + 1;
+        if (!sd->is_union) {
+            next_member = member_idx + 1;
+        }
+        if (sd->has_flexible_array && member_idx + 1 == sd->member_count && m->size == 0) {
+            if (!is_zero_initializer_expr(item)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "flexible array member cannot be initialized in struct %s",
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+            continue;
+        }
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
             if (item->kind != CC_EXPR_INIT_LIST) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message),
-                             "member initializer %zu for struct %s must use braces", i,
+                             "member initializer %zu for aggregate %s must use braces", i,
                              name != NULL ? name : "<anon>");
                 }
                 return -1;
@@ -1996,6 +2108,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
     case CC_STMT_DECL:
         {
             cc_type_t init_type = s->type;
+            int sc_count = storage_class_count(s->storage);
             if ((s->attr_flags & CC_ATTR_NORETURN) != 0) {
                 set_diag(diag, "noreturn attribute is only valid on functions");
                 return -1;
@@ -2006,6 +2119,18 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
             if ((s->attr_flags & CC_ATTR_ALIGNED) != 0 &&
                 validate_attr_align(s->attr_align, diag, "aligned attribute on local declaration") != 0) {
+                return -1;
+            }
+            if (sc_count > 1) {
+                set_diag(diag, "multiple storage-class specifiers in local declaration");
+                return -1;
+            }
+            if ((s->storage & CC_STORAGE_INLINE) != 0) {
+                set_diag(diag, "inline is only valid on function declarations");
+                return -1;
+            }
+            if ((s->storage & CC_STORAGE_EXTERN) != 0 && s->expr != NULL) {
+                set_diag(diag, "extern local declaration cannot have an initializer");
                 return -1;
             }
             if (s->array_len >= 0 && is_pointer_type(s->type)) {
@@ -2394,9 +2519,31 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
 
     for (i = 0; i < tu->global_count; ++i) {
         const cc_global_t *g = &tu->globals[i];
+        int sc_count = storage_class_count(g->storage);
         size_t j;
         if (g->name == NULL || g->name[0] == '\0') {
             set_diag(diag, "file-scope declaration with missing name");
+            goto fail_global;
+        }
+        if (sc_count > 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "multiple storage-class specifiers in file-scope declaration: %s", g->name);
+            }
+            goto fail_global;
+        }
+        if ((g->storage & (CC_STORAGE_AUTO | CC_STORAGE_REGISTER)) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "file-scope object cannot use auto/register storage: %s", g->name);
+            }
+            goto fail_global;
+        }
+        if ((g->storage & CC_STORAGE_INLINE) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "inline is only valid on function declarations: %s", g->name);
+            }
             goto fail_global;
         }
         if (g->type == CC_TYPE_VOID && g->type_struct_id < 0) {
@@ -2423,9 +2570,18 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         for (j = 0; j < i; ++j) {
             if (strcmp(tu->globals[j].name, g->name) == 0) {
                 const cc_global_t *prev = &tu->globals[j];
+                int prev_static = (prev->storage & CC_STORAGE_STATIC) != 0;
+                int cur_static = (g->storage & CC_STORAGE_STATIC) != 0;
                 if (prev->type != g->type || prev->type_struct_id != g->type_struct_id) {
                     if (diag != NULL && diag->message[0] == '\0') {
                         snprintf(diag->message, sizeof(diag->message), "conflicting file-scope object types: %s",
+                                 g->name);
+                    }
+                    goto fail_global;
+                }
+                if (prev_static != cur_static) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "conflicting linkage for file-scope object: %s",
                                  g->name);
                     }
                     goto fail_global;
@@ -2476,6 +2632,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
 
     for (i = 0; i < tu->func_count; ++i) {
         const cc_function_t *f = &tu->funcs[i];
+        int f_sc_count = storage_class_count(f->storage);
         size_t j;
 
         if (f->name == NULL || f->name[0] == '\0') {
@@ -2486,6 +2643,20 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "packed attribute is invalid for function '%s'",
                          f->name);
+            }
+            goto fail_global;
+        }
+        if (f_sc_count > 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "multiple storage-class specifiers in function declaration: %s", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->storage & (CC_STORAGE_AUTO | CC_STORAGE_REGISTER)) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function declaration cannot use auto/register storage: %s", f->name);
             }
             goto fail_global;
         }

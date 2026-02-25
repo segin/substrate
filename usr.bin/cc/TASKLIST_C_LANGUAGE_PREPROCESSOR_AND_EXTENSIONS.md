@@ -46,16 +46,16 @@ Execution policy:
 - [ ] Composite type formation rules.
 
 ### 1.3 Objects, initialization, and storage
-- [ ] Storage durations and linkage (auto/static/extern/register).
-- [ ] Tentative definitions.
-- [ ] Aggregate initialization order rules.
-- [ ] Designated initializers for arrays.
-- [ ] Designated initializers for structs/unions.
-- [ ] Nested designated initializers.
-- [ ] Compound literals.
-- [ ] Flexible array members.
-- [ ] Initialization constraints/diagnostics in all storage classes.
-- [ ] Zero-init semantics for static storage objects.
+- [x] Storage durations and linkage (auto/static/extern/register).
+- [x] Tentative definitions.
+- [x] Aggregate initialization order rules.
+- [x] Designated initializers for arrays.
+- [x] Designated initializers for structs/unions.
+- [x] Nested designated initializers.
+- [x] Compound literals.
+- [x] Flexible array members.
+- [x] Initialization constraints/diagnostics in all storage classes.
+- [x] Zero-init semantics for static storage objects.
 
 ### 1.4 Expressions and conversions
 - [ ] Integer promotions.

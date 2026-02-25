@@ -790,6 +790,12 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
         case TOK_KW_EXTERN:
             storage_flags |= CC_STORAGE_EXTERN;
             break;
+        case TOK_KW_AUTO:
+            storage_flags |= CC_STORAGE_AUTO;
+            break;
+        case TOK_KW_REGISTER:
+            storage_flags |= CC_STORAGE_REGISTER;
+            break;
         case TOK_KW_INLINE:
             storage_flags |= CC_STORAGE_INLINE;
             break;
@@ -848,6 +854,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
             p->structs[sid].member_count = 0;
             free(p->structs[sid].members);
             p->structs[sid].members = NULL;
+            p->structs[sid].is_union = is_union;
+            p->structs[sid].has_flexible_array = 0;
             if (next_tok(p) != 0) {
                 decl_attrs_clear(&struct_attrs);
                 return -1;
@@ -856,6 +864,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                 cc_type_t mbase;
                 int mbase_sid = -1;
                 int mtypedef = 0;
+                if (p->structs[sid].has_flexible_array) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "flexible array member must be the last member");
+                    decl_attrs_clear(&struct_attrs);
+                    return -1;
+                }
                 if (p->tok.kind == TOK_EOF) {
                     decl_attrs_clear(&struct_attrs);
                     set_diag(p->diag, p->tok.line, p->tok.col, "unterminated aggregate declaration");
@@ -900,6 +913,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                     char *mname = NULL;
                     long arr_count = 1;
                     int arr_saw = 0;
+                    int arr_unsized = 0;
                     long msize;
                     long malign;
                     long moff;
@@ -1013,11 +1027,15 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                         while (p->tok.kind == TOK_LBRACK) {
                             long n = 1;
                             int const_extent = 0;
+                            int empty_extent = (peek_kind(p) == TOK_RBRACK);
                             if (parse_array_extent(p, &n, &const_extent) != 0) {
                                 free(mname);
                                 return -1;
                             }
                             arr_saw = 1;
+                            if (empty_extent) {
+                                arr_unsized = 1;
+                            }
                             if (const_extent && n > 0 && arr_count > 0) {
                                 arr_count *= n;
                             }
@@ -1065,7 +1083,34 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                         } else {
                             mtype = CC_TYPE_PTR_VOID;
                         }
-                        if (arr_count > 0) {
+                        if (arr_unsized) {
+                            if (is_union) {
+                                set_diag(p->diag, p->tok.line, p->tok.col,
+                                         "flexible array member is not allowed in unions");
+                                decl_attrs_clear(&mdecl_attrs);
+                                return -1;
+                            }
+                            if (is_bitfield || mname == NULL) {
+                                set_diag(p->diag, p->tok.line, p->tok.col,
+                                         "flexible array member must be a named non-bitfield member");
+                                decl_attrs_clear(&mdecl_attrs);
+                                return -1;
+                            }
+                            if (p->tok.kind == TOK_COMMA) {
+                                set_diag(p->diag, p->tok.line, p->tok.col,
+                                         "flexible array member must terminate the declaration");
+                                decl_attrs_clear(&mdecl_attrs);
+                                return -1;
+                            }
+                            if (p->structs[sid].member_count == 0) {
+                                set_diag(p->diag, p->tok.line, p->tok.col,
+                                         "flexible array member requires at least one prior named member");
+                                decl_attrs_clear(&mdecl_attrs);
+                                return -1;
+                            }
+                            msize = 0;
+                            p->structs[sid].has_flexible_array = 1;
+                        } else if (arr_count > 0) {
                             msize *= arr_count;
                         }
                     }
@@ -1095,7 +1140,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id, 
                             if (msize > off) {
                                 off = msize;
                             }
-                        } else {
+                        } else if (msize > 0) {
                             off = moff + msize;
                         }
                         if (malign > max_align) {
@@ -2293,7 +2338,73 @@ static int push_stmt_func(cc_function_t *f, cc_stmt_t s) {
     return push_stmt_arr(&f->stmts, &f->stmt_count, s);
 }
 
+static void free_global_decl(cc_global_t *g) {
+    if (g == NULL) {
+        return;
+    }
+    free(g->name);
+    g->name = NULL;
+    free(g->attr_section);
+    g->attr_section = NULL;
+    free_expr(g->init);
+    g->init = NULL;
+}
+
 static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
+    size_t i;
+    for (i = 0; i < tu->global_count; ++i) {
+        cc_global_t *cur = &tu->globals[i];
+        int cur_static;
+        int new_static;
+        int cur_extern;
+        int new_extern;
+
+        if (strcmp(cur->name, g.name) != 0) {
+            continue;
+        }
+        if (cur->type != g.type || cur->type_struct_id != g.type_struct_id) {
+            break;
+        }
+
+        cur_static = (cur->storage & CC_STORAGE_STATIC) != 0;
+        new_static = (g.storage & CC_STORAGE_STATIC) != 0;
+        cur_extern = (cur->storage & CC_STORAGE_EXTERN) != 0;
+        new_extern = (g.storage & CC_STORAGE_EXTERN) != 0;
+        if (cur_static != new_static) {
+            break;
+        }
+        if (cur->init != NULL && g.init != NULL) {
+            break;
+        }
+
+        if (cur->init == NULL && g.init != NULL) {
+            cur->init = g.init;
+            g.init = NULL;
+        }
+        if (cur->array_len == 0 && g.array_len > 0) {
+            cur->array_len = g.array_len;
+        }
+        if (cur_extern && !new_extern) {
+            cur->storage &= ~CC_STORAGE_EXTERN;
+        } else if (!cur_extern && new_extern) {
+            /* Keep existing definition/tentative linkage. */
+        } else {
+            cur->storage |= (g.storage & (CC_STORAGE_INLINE | CC_STORAGE_AUTO | CC_STORAGE_REGISTER));
+        }
+        if (cur->attr_flags == 0 && g.attr_flags != 0) {
+            cur->attr_flags = g.attr_flags;
+        }
+        if (cur->attr_align == 0 && g.attr_align > 0) {
+            cur->attr_align = g.attr_align;
+        }
+        if (cur->attr_section == NULL && g.attr_section != NULL) {
+            cur->attr_section = g.attr_section;
+            g.attr_section = NULL;
+        }
+        free_global_decl(&g);
+        return 0;
+    }
+
     cc_global_t *next = (cc_global_t *)realloc(tu->globals, (tu->global_count + 1) * sizeof(*next));
     if (next == NULL) {
         return -1;
@@ -3148,6 +3259,14 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
             free_expr(e);
             return NULL;
+        }
+        if (p->tok.kind == TOK_LBRACE) {
+            e->lhs = parse_initializer_expr(p);
+            if (e->lhs == NULL) {
+                free_expr(e);
+                return NULL;
+            }
+            return e;
         }
         e->lhs = parse_unary(p);
         if (e->lhs == NULL) {

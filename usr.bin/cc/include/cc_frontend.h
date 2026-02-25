@@ -12,6 +12,8 @@ typedef struct {
 #define CC_STORAGE_STATIC  (1 << 0)
 #define CC_STORAGE_EXTERN  (1 << 1)
 #define CC_STORAGE_INLINE  (1 << 2)
+#define CC_STORAGE_AUTO    (1 << 3)
+#define CC_STORAGE_REGISTER (1 << 4)
 
 #define CC_ATTR_PACKED     (1 << 0)
 #define CC_ATTR_ALIGNED    (1 << 1)
@@ -209,6 +211,8 @@ typedef struct {
     long align;
     int attr_flags;
     long attr_align;
+    int is_union;
+    int has_flexible_array;
     int complete;
 } cc_struct_def_t;
 

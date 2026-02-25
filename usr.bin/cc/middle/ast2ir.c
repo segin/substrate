@@ -971,6 +971,11 @@ static int emit_global_addr(cc_ssa_function_t *sf, const char *name, cc_diag_t *
     return in.dst;
 }
 
+static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                    var_entry_t *vars, size_t var_count, int depth, int base_ptr, int struct_id,
+                                    const cc_expr_t *init, cc_diag_t *diag);
+static const cc_expr_t *unwrap_scalar_initializer_expr(const cc_expr_t *e, cc_diag_t *diag);
+
 static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                              var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     cc_ssa_instr_t in;
@@ -987,6 +992,8 @@ static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t 
         base_ptr = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
     } else if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
         base_ptr = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs->lhs, diag);
+    } else if (e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0) {
+        base_ptr = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
     } else if (e->lhs->kind == CC_EXPR_MEMBER) {
         base_ptr = lower_member_addr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
     } else if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
@@ -2735,11 +2742,69 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_CAST: {
         int v;
+        const cc_expr_t *cast_src = e->lhs;
         if (e->lhs == NULL) {
             set_diag(diag, "malformed cast expression in lowering");
             return -1;
         }
-        v = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+        if (cast_src->kind == CC_EXPR_INIT_LIST) {
+            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
+                cc_ssa_instr_t call_in;
+                int onev = -1;
+                int sizev;
+                long sz = type_size_bytes_with_struct(tu, e->aux_type, e->aux_struct_id);
+                const char *alloc_sym = local_array_allocator_symbol();
+                if (sz <= 0) {
+                    set_diag(diag, "unsupported compound literal aggregate size");
+                    return -1;
+                }
+                sizev = emit_const_i64_instr(sf, sz);
+                if (sizev < 0) {
+                    return -1;
+                }
+                if (strcmp(alloc_sym, "calloc") == 0) {
+                    onev = emit_const_i64_instr(sf, 1);
+                    if (onev < 0) {
+                        return -1;
+                    }
+                }
+                memset(&call_in, 0, sizeof(call_in));
+                call_in.op = CC_SSA_CALL;
+                call_in.call_is_variadic = 0;
+                call_in.sym = xstrdup(alloc_sym);
+                call_in.arg_count = strcmp(alloc_sym, "calloc") == 0 ? 2 : 1;
+                call_in.args = (int *)calloc(call_in.arg_count, sizeof(*call_in.args));
+                call_in.dst = new_value(sf, CC_VAL_I64);
+                if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
+                    free(call_in.sym);
+                    free(call_in.args);
+                    set_diag(diag, "out of memory allocating compound literal storage");
+                    return -1;
+                }
+                if (call_in.arg_count == 2) {
+                    call_in.args[0] = onev;
+                    call_in.args[1] = sizev;
+                } else {
+                    call_in.args[0] = sizev;
+                }
+                if (push_instr(sf, call_in) != 0) {
+                    free(call_in.sym);
+                    free(call_in.args);
+                    set_diag(diag, "out of memory emitting compound literal allocation call");
+                    return -1;
+                }
+                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, call_in.dst, e->aux_struct_id, cast_src,
+                                             diag) != 0) {
+                    return -1;
+                }
+                return call_in.dst;
+            }
+            cast_src = unwrap_scalar_initializer_expr(cast_src, diag);
+            if (cast_src == NULL) {
+                return -1;
+            }
+        }
+        v = lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
         if (v < 0) {
             return -1;
         }
@@ -3069,6 +3134,7 @@ static int find_switch_label_for_stmt(const switch_case_site_t *sites, size_t co
 static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                                     var_entry_t *vars, size_t var_count, int depth, int base_ptr, int struct_id,
                                     const cc_expr_t *init, cc_diag_t *diag);
+static int find_struct_member_index_by_name(const cc_struct_def_t *sd, const char *name);
 
 static const cc_expr_t *unwrap_scalar_initializer_expr(const cc_expr_t *e, cc_diag_t *diag) {
     if (e == NULL) {
@@ -3209,6 +3275,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                                     const cc_expr_t *init, cc_diag_t *diag) {
     const cc_struct_def_t *sd;
     size_t i;
+    size_t next_member = 0;
 
     if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
         set_diag(diag, "invalid struct type during initializer lowering");
@@ -3220,12 +3287,42 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
     }
 
     sd = &tu->structs[struct_id];
-    for (i = 0; i < init->arg_count && i < sd->member_count; ++i) {
-        const cc_struct_member_t *m = &sd->members[i];
-        const cc_expr_t *item = init->args[i];
+    if (sd->is_union && init->arg_count > 1) {
+        set_diag(diag, "too many initializers for union");
+        return -1;
+    }
+    for (i = 0; i < init->arg_count; ++i) {
+        const cc_expr_t *raw = init->args[i];
+        const cc_expr_t *item = raw;
+        size_t member_idx = next_member;
+        const cc_struct_member_t *m;
         int field_ptr = base_ptr;
         cc_ssa_instr_t in;
 
+        if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL) {
+            int didx = find_struct_member_index_by_name(sd, raw->ident);
+            if (didx < 0) {
+                set_diag(diag, "unknown designated struct member in local initializer");
+                return -1;
+            }
+            member_idx = (size_t)didx;
+            item = raw->rhs;
+        }
+        if (member_idx >= sd->member_count) {
+            set_diag(diag, "too many items in local struct initializer");
+            return -1;
+        }
+        m = &sd->members[member_idx];
+        if (!sd->is_union) {
+            next_member = member_idx + 1;
+        }
+        if (sd->has_flexible_array && member_idx + 1 == sd->member_count && m->size == 0) {
+            if (!is_zero_initializer_expr(item)) {
+                set_diag(diag, "flexible array member cannot be initialized");
+                return -1;
+            }
+            continue;
+        }
         if (m->offset != 0) {
             int offv = emit_const_i64_instr(sf, m->offset);
             if (offv < 0) {
@@ -4618,6 +4715,10 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
     }
 
     sd = &tu->structs[struct_id];
+    if (sd->is_union && init->arg_count > 1) {
+        set_diag(diag, "too many initializers for union global initializer");
+        return -1;
+    }
     for (i = 0; i < init->arg_count; ++i) {
         const cc_expr_t *raw = init->args[i];
         const cc_expr_t *item = raw;
@@ -4641,7 +4742,16 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
         }
 
         m = &sd->members[member_idx];
-        next_member = member_idx + 1;
+        if (!sd->is_union) {
+            next_member = member_idx + 1;
+        }
+        if (sd->has_flexible_array && member_idx + 1 == sd->member_count && m->size == 0) {
+            if (!is_zero_initializer_expr(item)) {
+                set_diag(diag, "flexible array member cannot be initialized");
+                return -1;
+            }
+            continue;
+        }
         field_off = base + m->offset;
         if (field_off < 0 || field_off + m->size > buf_size) {
             set_diag(diag, "struct member offset exceeds global initializer object");
