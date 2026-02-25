@@ -67,3 +67,10 @@ rm -f "$MACRO_DEPTH"
 ln -sf "$CC_BIN" /tmp/cpp
 /tmp/cpp -DTESTVAL=1 driver_pp_input.c -o /tmp/cc_pp_cpp_mode.i
 grep -q "int x = 1;" /tmp/cc_pp_cpp_mode.i
+
+cat > /tmp/cc_pp_cpp_mode_input.h <<'EOF'
+#define ANSWER2 TESTVAL + 2
+int y = ANSWER2;
+EOF
+/tmp/cpp -DTESTVAL=3 /tmp/cc_pp_cpp_mode_input.h -o /tmp/cc_pp_cpp_mode_h.i
+grep -q "int y = 3 + 2;" /tmp/cc_pp_cpp_mode_h.i

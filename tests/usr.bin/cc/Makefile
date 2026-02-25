@@ -437,6 +437,7 @@ test:
 	sh run_postc99_mode_matrix.sh
 	sh run_postc99_diff_modes.sh
 	sh run_postc99_abi_modes.sh
+	sh run_pp_postc99.sh
 	sh run_pp_c99_baseline.sh
 	sh run_pp_fuzz_smoke.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
@@ -537,8 +538,12 @@ clean:
 	      /tmp/cc_postc99_host_clang_c23
 	rm -f /tmp/cc_pp_s3.i /tmp/cc_pp_s3_p.i /tmp/cc_pp_s3_dM.i /tmp/cc_pp_s3_m.d /tmp/cc_pp_s3_mm.d /tmp/cc_pp_s3_md.d \
 	      /tmp/cc_pp_s3_md.i /tmp/cc_pp_s3_v.i /tmp/cc_pp_s3_v.log /tmp/cc_pp_s3_depth.i /tmp/cc_pp_s3_macro.i \
-	      /tmp/cc_pp_cpp_mode.i /tmp/cpp /tmp/cc_pp_fuzz_out.i /tmp/cc_pp_fuzz_seed.c /tmp/cc_pp_fuzz_seed.i \
+	      /tmp/cc_pp_cpp_mode.i /tmp/cc_pp_cpp_mode_h.i /tmp/cc_pp_cpp_mode_input.h /tmp/cpp /tmp/cc_pp_fuzz_out.i /tmp/cc_pp_fuzz_seed.c /tmp/cc_pp_fuzz_seed.i \
 	      /tmp/cc_pp_fuzz_0.c /tmp/cc_pp_fuzz_1.c /tmp/cc_pp_fuzz_2.c /tmp/cc_pp_fuzz_3.c /tmp/cc_pp_fuzz_4.c \
 	      /tmp/cc_pp_fuzz_5.c /tmp/cc_pp_fuzz_6.c /tmp/cc_pp_fuzz_7.c /tmp/cc_pp_fuzz_8.c /tmp/cc_pp_fuzz_9.c \
 	      /tmp/cc_pp_fuzz_10.c /tmp/cc_pp_fuzz_11.c /tmp/cc_pp_fuzz_12.c /tmp/cc_pp_fuzz_13.c /tmp/cc_pp_fuzz_14.c \
-	      /tmp/cc_pp_fuzz_15.c
+	      /tmp/cc_pp_fuzz_15.c /tmp/cc_pp_s4_elif_c23.i /tmp/cc_pp_s4_elif_c11.i /tmp/cc_pp_s4_warning_c23.i \
+	      /tmp/cc_pp_s4_warning_c23.log /tmp/cc_pp_s4_has_c23.i /tmp/cc_pp_s4_has_c11.i /tmp/cc_pp_s4_vaopt_c23.i \
+	      /tmp/cc_pp_s4_vaopt_c11.i /tmp/cc_pp_s4_embed.bin /tmp/cc_pp_s4_embed.c /tmp/cc_pp_s4_embed.i \
+	      /tmp/cc_pp_s4_host_gcc.i /tmp/cc_pp_s4_host_clang.i /tmp/cc_pp_s4_host_gcc.ab /tmp/cc_pp_s4_host_clang.ab \
+	      /tmp/cc_pp_s4_ours.ab

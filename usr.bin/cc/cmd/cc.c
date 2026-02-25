@@ -843,6 +843,11 @@ int cc_main(int argc, char **argv) {
         goto out;
     }
 
+    if (o.mode_E && o.output != NULL && o.inputs.count > 1) {
+        fprintf(stderr, "cc: -E with -o requires exactly one input\n");
+        goto out;
+    }
+
     if (o.emit_ssa) {
         if (o.inputs.count != 1 || !has_ext(o.inputs.items[0], ".ir")) {
             fprintf(stderr, "cc: -emit-ssa currently expects exactly one .ir input\n");
@@ -858,18 +863,25 @@ int cc_main(int argc, char **argv) {
     for (i = 0; i < o.inputs.count; ++i) {
         const char *in = o.inputs.items[i];
 
+        if (o.mode_E) {
+            const char *pp_out;
+
+            if (has_ext(in, ".o") || has_ext(in, ".a") || has_ext(in, ".so")) {
+                fprintf(stderr, "cc: -E is not valid for object/archive input %s\n", in);
+                goto out;
+            }
+
+            pp_out = o.output != NULL ? o.output : "/dev/stdout";
+            if (run_preprocess(&o, in, pp_out) != 0) {
+                goto out;
+            }
+            continue;
+        }
+
         if (has_ext(in, ".S")) {
             char out_s[PATH_MAX];
             char out_o[PATH_MAX];
             char tmp_s[PATH_MAX];
-
-            if (o.mode_E) {
-                const char *pp_out = o.output != NULL ? o.output : "/dev/stdout";
-                if (run_preprocess(&o, in, pp_out) != 0) {
-                    goto out;
-                }
-                continue;
-            }
 
             if (o.mode_S) {
                 if (o.output != NULL) {
@@ -919,14 +931,6 @@ int cc_main(int argc, char **argv) {
             char out_pp[PATH_MAX];
             char out_s[PATH_MAX];
             char out_o[PATH_MAX];
-
-            if (o.mode_E) {
-                const char *pp_out = o.output != NULL ? o.output : "/dev/stdout";
-                if (run_preprocess(&o, in, pp_out) != 0) {
-                    goto out;
-                }
-                continue;
-            }
 
             if (make_temp_path(&o, "ccpp_", ".i", out_pp) != 0) {
                 fprintf(stderr, "cc: failed to create temporary preprocessed file\n");
@@ -1007,11 +1011,6 @@ int cc_main(int argc, char **argv) {
 
         if (has_ext(in, ".s")) {
             char out_o[PATH_MAX];
-
-            if (o.mode_E) {
-                fprintf(stderr, "cc: -E is not valid for assembly input %s\n", in);
-                goto out;
-            }
 
             if (o.mode_S) {
                 if (o.output != NULL && strcmp(o.output, in) != 0) {
