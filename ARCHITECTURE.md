@@ -278,6 +278,7 @@ Running `make host_dist` builds and installs the core utilities into a local `ho
 - **`bin/`**: `sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, etc.
 - **`usr/bin/`**: `yacc`, `brandelf`.
 - **`sbin/`**: `mkfs`, `fsck`.
+- The host distribution path now explicitly builds and installs `usr.bin/cc` first, and validates that `host_dist/usr/bin/cc` exists before reporting success.
 
 These tools are compiled using the host's compiler (`cc`) and C library, but strictly adhering to the project's own Makefiles and source code, allowing verification of logic and behavior on a stable host.
 
