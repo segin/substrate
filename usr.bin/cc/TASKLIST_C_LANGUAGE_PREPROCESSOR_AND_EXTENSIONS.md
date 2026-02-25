@@ -258,13 +258,13 @@ Execution policy:
 Note: treat this as exhaustive tracking inventory for GCC extension surface. No checkbox may be marked done without tests.
 
 ### 5.1 GNU C syntax/semantics extensions
-- [ ] Statement expressions `({ ... })`.
+- [x] Statement expressions `({ ... })`.
 - [x] Labels as values and computed goto.
-- [ ] Locally declared labels (`__label__`).
+- [x] Locally declared labels (`__label__`).
 - [ ] Nested functions.
 - [x] `typeof` and GNU alternate spellings.
-- [ ] Omitted middle operand ternary (`x ?: y`).
-- [ ] Case ranges (`case a ... b`).
+- [x] Omitted middle operand ternary (`x ?: y`).
+- [x] Case ranges (`case a ... b`).
 - [ ] Cast-to-union extension.
 - [ ] Zero-length arrays.
 - [ ] Empty structs (GNU mode behavior).
@@ -283,13 +283,13 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 ### 5.3 GNU builtins
 - [x] `__builtin_expect`, `__builtin_constant_p`.
 - [x] Byte-swap/bit ops (`clz/ctz/popcount/parity/ffs` families).
-- [ ] Overflow builtins.
-- [ ] Object size/check builtins.
-- [ ] `__builtin_types_compatible_p`.
-- [ ] `__builtin_choose_expr`.
+- [x] Overflow builtins.
+- [x] Object size/check builtins.
+- [x] `__builtin_types_compatible_p`.
+- [x] `__builtin_choose_expr`.
 - [x] `__builtin_offsetof`.
 - [x] Varargs builtins and ABI-correct lowering.
-- [ ] Trap/unreachable builtins.
+- [x] Trap/unreachable builtins.
 
 ### 5.4 GNU atomics
 - [x] Legacy `__sync_*` family.

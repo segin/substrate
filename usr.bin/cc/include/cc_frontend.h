@@ -130,10 +130,12 @@ typedef enum {
     CC_EXPR_CAST,
     CC_EXPR_SIZEOF,
     CC_EXPR_INIT_LIST,
-    CC_EXPR_TERNARY
+    CC_EXPR_TERNARY,
+    CC_EXPR_STMT
 } cc_expr_kind_t;
 
 typedef struct cc_expr cc_expr_t;
+typedef struct cc_stmt cc_stmt_t;
 
 struct cc_expr {
     cc_expr_kind_t kind;
@@ -155,6 +157,8 @@ struct cc_expr {
     int aux_struct_id;
     cc_expr_t **args;
     size_t arg_count;
+    cc_stmt_t *stmt_expr_stmts;
+    size_t stmt_expr_count;
 };
 
 typedef enum {
@@ -174,8 +178,6 @@ typedef enum {
     CC_STMT_GOTO,
     CC_STMT_LABEL
 } cc_stmt_kind_t;
-
-typedef struct cc_stmt cc_stmt_t;
 
 struct cc_stmt {
     size_t line;
@@ -198,6 +200,8 @@ struct cc_stmt {
     cc_stmt_t *else_branch;
     cc_stmt_t *block_stmts;
     size_t block_count;
+    long case_hi;
+    int case_has_range;
 };
 
 typedef struct {

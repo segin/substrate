@@ -258,6 +258,7 @@ static int fold_function(cc_ssa_function_t *f) {
 
         case CC_SSA_BR:
         case CC_SSA_BR_COND:
+        case CC_SSA_TRAP:
         case CC_SSA_RET:
             break;
         }
@@ -312,6 +313,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_STORE:
     case CC_SSA_CALL:
     case CC_SSA_CALLI:
+    case CC_SSA_TRAP:
     case CC_SSA_RET:
         return 0;
     }

@@ -46,6 +46,7 @@ typedef enum {
     CC_SSA_VA_START,
     CC_SSA_CALL,
     CC_SSA_CALLI,
+    CC_SSA_TRAP,
     CC_SSA_RET
 } cc_ssa_opcode_t;
 

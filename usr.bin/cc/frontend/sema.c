@@ -235,6 +235,49 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     return 0;
 }
 
+static int vars_clone(var_entry_t **out, const var_entry_t *src, size_t count) {
+    size_t i;
+    var_entry_t *dst;
+
+    *out = NULL;
+    if (count == 0) {
+        return 0;
+    }
+    dst = (var_entry_t *)calloc(count, sizeof(*dst));
+    if (dst == NULL) {
+        return -1;
+    }
+    for (i = 0; i < count; ++i) {
+        dst[i] = src[i];
+        dst[i].name = NULL;
+        if (src[i].name != NULL) {
+            dst[i].name = (char *)malloc(strlen(src[i].name) + 1);
+            if (dst[i].name == NULL) {
+                size_t j;
+                for (j = 0; j < i; ++j) {
+                    free(dst[j].name);
+                }
+                free(dst);
+                return -1;
+            }
+            strcpy(dst[i].name, src[i].name);
+        }
+    }
+    *out = dst;
+    return 0;
+}
+
+static void vars_free(var_entry_t *vars, size_t count) {
+    size_t i;
+    if (vars == NULL) {
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        free(vars[i].name);
+    }
+    free(vars);
+}
+
 static void name_list_free(name_list_t *l) {
     size_t i;
     if (l == NULL) {
@@ -798,7 +841,15 @@ typedef enum {
     BUILTIN_EXPECT,
     BUILTIN_CONSTANT_P,
     BUILTIN_TRAP,
+    BUILTIN_UNREACHABLE,
     BUILTIN_CTZ,
+    BUILTIN_ADD_OVERFLOW,
+    BUILTIN_SUB_OVERFLOW,
+    BUILTIN_MUL_OVERFLOW,
+    BUILTIN_OBJECT_SIZE,
+    BUILTIN_MEMCPY_CHK,
+    BUILTIN_MEMMOVE_CHK,
+    BUILTIN_MEMSET_CHK,
     BUILTIN_SYNC_FETCH_ADD,
     BUILTIN_SYNC_FETCH_SUB,
     BUILTIN_SYNC_SUB_AND_FETCH,
@@ -838,8 +889,32 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_trap") == 0) {
         return BUILTIN_TRAP;
     }
+    if (strcmp(name, "__builtin_unreachable") == 0) {
+        return BUILTIN_UNREACHABLE;
+    }
     if (strcmp(name, "__builtin_ctz") == 0) {
         return BUILTIN_CTZ;
+    }
+    if (strcmp(name, "__builtin_add_overflow") == 0) {
+        return BUILTIN_ADD_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_sub_overflow") == 0) {
+        return BUILTIN_SUB_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_mul_overflow") == 0) {
+        return BUILTIN_MUL_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_object_size") == 0) {
+        return BUILTIN_OBJECT_SIZE;
+    }
+    if (strcmp(name, "__builtin___memcpy_chk") == 0) {
+        return BUILTIN_MEMCPY_CHK;
+    }
+    if (strcmp(name, "__builtin___memmove_chk") == 0) {
+        return BUILTIN_MEMMOVE_CHK;
+    }
+    if (strcmp(name, "__builtin___memset_chk") == 0) {
+        return BUILTIN_MEMSET_CHK;
     }
     if (strcmp(name, "__sync_fetch_and_add") == 0) {
         return BUILTIN_SYNC_FETCH_ADD;
@@ -1067,6 +1142,10 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
             return -1;
         }
         if (a != 0) {
+            if (e->rhs == NULL) {
+                *out = a;
+                return 0;
+            }
             return eval_const_int_expr(tu, e->rhs, out);
         }
         return eval_const_int_expr(tu, e->third, out);
@@ -1079,6 +1158,9 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
                                     var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag);
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
+static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
+                      cc_type_t fn_ret_type, int fn_attr_flags, int loop_depth, int switch_depth, int *saw_return,
+                      cc_diag_t *diag);
 
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
@@ -1473,6 +1555,15 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = -1;
             return 0;
         }
+        if (bk == BUILTIN_UNREACHABLE) {
+            if (e->arg_count != 0) {
+                set_diag(diag, "__builtin_unreachable expects exactly 0 arguments");
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
         if (bk == BUILTIN_CTZ) {
             if (e->arg_count != 1) {
                 set_diag(diag, "__builtin_ctz expects exactly 1 argument");
@@ -1487,6 +1578,69 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
+            cc_type_t out_elem;
+            if (e->arg_count != 3) {
+                set_diag(diag, "__builtin_*_overflow expects exactly 3 arguments");
+                return -1;
+            }
+            for (i = 0; i < 3; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!is_pointer_type(e->args[2]->value_type)) {
+                set_diag(diag, "overflow builtin third argument must be a pointer");
+                return -1;
+            }
+            out_elem = ptr_base_type(e->args[2]->value_type);
+            if (!is_integral_type(out_elem)) {
+                set_diag(diag, "overflow builtin destination must point to an integer type");
+                return -1;
+            }
+            if (!is_integral_type(e->args[0]->value_type) || !is_integral_type(e->args[1]->value_type)) {
+                set_diag(diag, "overflow builtin operands must be integers");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_OBJECT_SIZE) {
+            if (e->arg_count != 2) {
+                set_diag(diag, "__builtin_object_size expects exactly 2 arguments");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+                check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_integral_type(e->args[1]->value_type)) {
+                set_diag(diag, "__builtin_object_size second argument must be integral");
+                return -1;
+            }
+            e->value_type = CC_TYPE_ULONG_LONG;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_MEMCPY_CHK || bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
+            if (e->arg_count < 4) {
+                set_diag(diag, "__builtin___mem*_chk has wrong argument count");
+                return -1;
+            }
+            for (i = 0; i < e->arg_count; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!is_pointer_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin___mem*_chk first argument must be a pointer");
+                return -1;
+            }
+            e->value_type = e->args[0]->value_type;
+            e->struct_id = e->args[0]->struct_id;
             return 0;
         }
         if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
@@ -2016,19 +2170,87 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         return 0;
 
+    case CC_EXPR_STMT:
+        {
+            var_entry_t *lvars = NULL;
+            size_t lcount = var_count;
+            int saw_return = 0;
+            size_t j;
+            if (emit_warning(diag, e->line, e->col, "statement expression is a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
+            if (vars_clone(&lvars, vars, var_count) != 0) {
+                set_diag(diag, "out of memory cloning scope for statement expression");
+                return -1;
+            }
+            for (j = 0; j < e->stmt_expr_count; ++j) {
+                if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, CC_TYPE_INT, 0, 0, 0,
+                               &saw_return, diag) != 0) {
+                    vars_free(lvars, lcount);
+                    return -1;
+                }
+            }
+            if (e->stmt_expr_count > 0) {
+                const cc_stmt_t *last = &e->stmt_expr_stmts[e->stmt_expr_count - 1];
+                if (last->kind == CC_STMT_EXPR && last->expr != NULL) {
+                    e->value_type = last->expr->value_type;
+                    e->struct_id = last->expr->struct_id;
+                } else {
+                    e->value_type = CC_TYPE_VOID;
+                    e->struct_id = -1;
+                }
+            } else {
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = -1;
+            }
+            vars_free(lvars, lcount);
+            return 0;
+        }
+
     case CC_EXPR_TERNARY:
-        if (e->lhs == NULL || e->rhs == NULL || e->third == NULL) {
+        if (e->lhs == NULL || e->third == NULL) {
             set_diag(diag, "malformed conditional expression");
             return -1;
         }
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
-            check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0 ||
+            (e->rhs != NULL && check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) ||
             check_expr(tu, e->third, vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (e->lhs->value_type == CC_TYPE_VOID) {
             set_diag(diag, "conditional expression condition cannot be void");
             return -1;
+        }
+        if (e->rhs == NULL) {
+            if (emit_warning(diag, e->line, e->col, "omitted middle operand in ?: is a GNU extension (non-C99)", 1) !=
+                0) {
+                return -1;
+            }
+            if (e->lhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
+                set_diag(diag, "conditional expression arms cannot be void");
+                return -1;
+            }
+            if (is_pointer_type(e->lhs->value_type) && is_pointer_type(e->third->value_type)) {
+                if (can_convert(e->lhs->value_type, e->third->value_type)) {
+                    e->value_type = e->lhs->value_type;
+                    e->struct_id = e->lhs->struct_id;
+                    return 0;
+                }
+                if (can_convert(e->third->value_type, e->lhs->value_type)) {
+                    e->value_type = e->third->value_type;
+                    e->struct_id = e->third->struct_id;
+                    return 0;
+                }
+                set_diag(diag, "incompatible pointer types in conditional expression");
+                return -1;
+            }
+            e->value_type = common_arith_type(e->lhs->value_type, e->third->value_type);
+            if (e->value_type == CC_TYPE_VOID) {
+                set_diag(diag, "incompatible types in conditional expression");
+                return -1;
+            }
+            e->struct_id = -1;
+            return 0;
         }
         if (e->rhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
             set_diag(diag, "conditional expression arms cannot be void");
@@ -2691,6 +2913,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             for (i1 = 0; i1 < s->then_branch->block_count; ++i1) {
                 const cc_stmt_t *ci = &s->then_branch->block_stmts[i1];
                 long vi = 0;
+                long vhi = 0;
                 if (ci->kind == CC_STMT_DEFAULT) {
                     if (seen_default) {
                         set_diag(diag, "duplicate default label in switch");
@@ -2706,16 +2929,29 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     set_diag(diag, "case label must be an integer constant expression");
                     return -1;
                 }
+                vhi = ci->case_has_range ? ci->case_hi : vi;
+                if (ci->case_has_range && vhi < vi) {
+                    set_diag(diag, "case range upper bound must be >= lower bound");
+                    return -1;
+                }
                 {
                     size_t i2;
                     for (i2 = i1 + 1; i2 < s->then_branch->block_count; ++i2) {
                         const cc_stmt_t *cj = &s->then_branch->block_stmts[i2];
                         long vj = 0;
+                        long vjhi = 0;
                         if (cj->kind != CC_STMT_CASE) {
                             continue;
                         }
-                        if (eval_const_int_expr(tu, cj->expr, &vj) == 0 && vj == vi) {
-                            set_diag(diag, "duplicate case value in switch");
+                        if (eval_const_int_expr(tu, cj->expr, &vj) != 0) {
+                            continue;
+                        }
+                        vjhi = cj->case_has_range ? cj->case_hi : vj;
+                        if (vjhi < vj) {
+                            continue;
+                        }
+                        if (!(vhi < vj || vjhi < vi)) {
+                            set_diag(diag, "duplicate/overlapping case value in switch");
                             return -1;
                         }
                     }
@@ -2741,6 +2977,15 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (eval_const_int_expr(tu, s->expr, &s->expr->int_val) != 0) {
             set_diag(diag, "case label must be an integer constant expression");
             return -1;
+        }
+        if (s->case_has_range) {
+            if (s->case_hi < s->expr->int_val) {
+                set_diag(diag, "case range upper bound must be >= lower bound");
+                return -1;
+            }
+            if (emit_warning(diag, s->line, s->col, "case ranges are a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
         }
         return 0;
 

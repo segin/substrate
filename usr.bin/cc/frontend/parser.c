@@ -197,6 +197,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_cond(parser_t *p);
 static void free_expr(cc_expr_t *e);
+static void free_stmt(cc_stmt_t *s);
 static int eval_const_array_bound_expr(const cc_expr_t *e, long *out);
 static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n);
 
@@ -2009,6 +2010,10 @@ static int eval_const_array_bound_expr(const cc_expr_t *e, long *out) {
             return -1;
         }
         if (a != 0) {
+            if (e->rhs == NULL) {
+                *out = a;
+                return 0;
+            }
             return eval_const_array_bound_expr(e->rhs, out);
         }
         return eval_const_array_bound_expr(e->third, out);
@@ -2041,14 +2046,16 @@ static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n) {
     if (bound == NULL) {
         return -1;
     }
-    if (eval_const_array_bound_expr(bound, &n) == 0 && n > 0) {
-        is_const = 1;
+    if (eval_const_array_bound_expr(bound, &n) == 0) {
+        if (n > 0 || (parser_is_gnu_mode() && n == 0)) {
+            is_const = 1;
+        }
     }
     free_expr(bound);
     if (expect(p, TOK_RBRACK, "expected ']' after array declarator") != 0) {
         return -1;
     }
-    *out_n = n > 0 ? n : 1;
+    *out_n = is_const ? n : (n > 0 ? n : 1);
     *out_const_n = is_const;
     return 0;
 }
@@ -2659,6 +2666,10 @@ static void free_expr(cc_expr_t *e) {
         free_expr(e->args[i]);
     }
     free(e->args);
+    for (i = 0; i < e->stmt_expr_count; ++i) {
+        free_stmt(&e->stmt_expr_stmts[i]);
+    }
+    free(e->stmt_expr_stmts);
     free(e);
 }
 
@@ -3458,6 +3469,102 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 e->value_type = CC_TYPE_LONG_LONG;
                 return e;
             }
+            if (strcmp(e->ident, "__builtin_types_compatible_p") == 0) {
+                cc_type_t t1 = CC_TYPE_VOID;
+                cc_type_t t2 = CC_TYPE_VOID;
+                int s1 = -1;
+                int s2 = -1;
+                int same = 0;
+                if (parse_type_name(p, &t1, &s1, 1, "expected first type in __builtin_types_compatible_p") != 0) {
+                    free_expr(e);
+                    return NULL;
+                }
+                if (expect(p, TOK_COMMA, "expected ',' after first type in __builtin_types_compatible_p") != 0) {
+                    free_expr(e);
+                    return NULL;
+                }
+                if (parse_type_name(p, &t2, &s2, 1, "expected second type in __builtin_types_compatible_p") != 0) {
+                    free_expr(e);
+                    return NULL;
+                }
+                if (expect(p, TOK_RPAREN, "expected ')' after __builtin_types_compatible_p arguments") != 0) {
+                    free_expr(e);
+                    return NULL;
+                }
+                same = (t1 == t2 && s1 == s2) ? 1 : 0;
+                free_expr(e);
+                e = new_expr(CC_EXPR_INT);
+                if (e == NULL) {
+                    return NULL;
+                }
+                e->int_val = same;
+                e->value_type = CC_TYPE_INT;
+                return e;
+            }
+            if (strcmp(e->ident, "__builtin_choose_expr") == 0) {
+                cc_expr_t *ce;
+                cc_expr_t *te;
+                cc_expr_t *fe;
+                long cv = 0;
+                if (p->tok.kind == TOK_RPAREN) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "__builtin_choose_expr expects 3 arguments");
+                    free_expr(e);
+                    return NULL;
+                }
+                ce = parse_assign(p);
+                if (ce == NULL) {
+                    free_expr(e);
+                    return NULL;
+                }
+                if (expect(p, TOK_COMMA, "expected ',' after __builtin_choose_expr condition") != 0) {
+                    free_expr(ce);
+                    free_expr(e);
+                    return NULL;
+                }
+                te = parse_assign(p);
+                if (te == NULL) {
+                    free_expr(ce);
+                    free_expr(e);
+                    return NULL;
+                }
+                if (expect(p, TOK_COMMA, "expected ',' after true branch in __builtin_choose_expr") != 0) {
+                    free_expr(te);
+                    free_expr(ce);
+                    free_expr(e);
+                    return NULL;
+                }
+                fe = parse_assign(p);
+                if (fe == NULL) {
+                    free_expr(te);
+                    free_expr(ce);
+                    free_expr(e);
+                    return NULL;
+                }
+                if (expect(p, TOK_RPAREN, "expected ')' after __builtin_choose_expr arguments") != 0) {
+                    free_expr(fe);
+                    free_expr(te);
+                    free_expr(ce);
+                    free_expr(e);
+                    return NULL;
+                }
+                if (eval_const_array_bound_expr(ce, &cv) != 0) {
+                    set_diag(p->diag, p->tok.line, p->tok.col,
+                             "__builtin_choose_expr condition must be an integer constant expression");
+                    free_expr(fe);
+                    free_expr(te);
+                    free_expr(ce);
+                    free_expr(e);
+                    return NULL;
+                }
+                free_expr(e);
+                free_expr(ce);
+                if (cv != 0) {
+                    free_expr(fe);
+                    return te;
+                }
+                free_expr(te);
+                return fe;
+            }
             if (strcmp(e->ident, "__builtin_va_arg") == 0) {
                 cc_type_t aty = CC_TYPE_VOID;
                 int asid = -1;
@@ -3529,8 +3636,40 @@ static cc_expr_t *parse_primary(parser_t *p) {
     }
 
     if (p->tok.kind == TOK_LPAREN) {
+        cc_stmt_t st;
         if (next_tok(p) != 0) {
             return NULL;
+        }
+        if (p->tok.kind == TOK_LBRACE) {
+            if (!parser_is_gnu_mode()) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "statement expressions are a GNU extension");
+                return NULL;
+            }
+            memset(&st, 0, sizeof(st));
+            if (parse_stmt(p, &st) != 0) {
+                free_stmt(&st);
+                return NULL;
+            }
+            if (st.kind != CC_STMT_BLOCK) {
+                free_stmt(&st);
+                set_diag(p->diag, p->tok.line, p->tok.col, "expected block in statement expression");
+                return NULL;
+            }
+            if (expect(p, TOK_RPAREN, "expected ')' after statement expression") != 0) {
+                free_stmt(&st);
+                return NULL;
+            }
+            e = new_expr(CC_EXPR_STMT);
+            if (e == NULL) {
+                free_stmt(&st);
+                return NULL;
+            }
+            e->stmt_expr_stmts = st.block_stmts;
+            e->stmt_expr_count = st.block_count;
+            st.block_stmts = NULL;
+            st.block_count = 0;
+            free_stmt(&st);
+            return e;
         }
         e = parse_expr(p);
         if (e == NULL) {
@@ -3609,6 +3748,106 @@ static cc_expr_t *new_update_lvalue_expr(cc_expr_t *lhs, cc_binop_t op, int post
     return e;
 }
 
+static cc_expr_t *clone_expr(const cc_expr_t *src);
+
+static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
+    size_t i;
+    memset(dst, 0, sizeof(*dst));
+    if (src == NULL) {
+        return 0;
+    }
+    *dst = *src;
+    dst->decl_name = NULL;
+    dst->label_name = NULL;
+    dst->attr_section = NULL;
+    dst->expr = NULL;
+    dst->init_stmt = NULL;
+    dst->init_expr = NULL;
+    dst->post_expr = NULL;
+    dst->then_branch = NULL;
+    dst->else_branch = NULL;
+    dst->block_stmts = NULL;
+    dst->block_count = 0;
+
+    if (src->decl_name != NULL) {
+        dst->decl_name = xstrdup_n(src->decl_name, strlen(src->decl_name));
+        if (dst->decl_name == NULL) {
+            return -1;
+        }
+    }
+    if (src->label_name != NULL) {
+        dst->label_name = xstrdup_n(src->label_name, strlen(src->label_name));
+        if (dst->label_name == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->attr_section != NULL) {
+        dst->attr_section = xstrdup_n(src->attr_section, strlen(src->attr_section));
+        if (dst->attr_section == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->expr != NULL) {
+        dst->expr = clone_expr(src->expr);
+        if (dst->expr == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->init_expr != NULL) {
+        dst->init_expr = clone_expr(src->init_expr);
+        if (dst->init_expr == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->post_expr != NULL) {
+        dst->post_expr = clone_expr(src->post_expr);
+        if (dst->post_expr == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->init_stmt != NULL) {
+        dst->init_stmt = (cc_stmt_t *)calloc(1, sizeof(*dst->init_stmt));
+        if (dst->init_stmt == NULL || clone_stmt(src->init_stmt, dst->init_stmt) != 0) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->then_branch != NULL) {
+        dst->then_branch = (cc_stmt_t *)calloc(1, sizeof(*dst->then_branch));
+        if (dst->then_branch == NULL || clone_stmt(src->then_branch, dst->then_branch) != 0) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->else_branch != NULL) {
+        dst->else_branch = (cc_stmt_t *)calloc(1, sizeof(*dst->else_branch));
+        if (dst->else_branch == NULL || clone_stmt(src->else_branch, dst->else_branch) != 0) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->block_count > 0) {
+        dst->block_stmts = (cc_stmt_t *)calloc(src->block_count, sizeof(*dst->block_stmts));
+        if (dst->block_stmts == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+        dst->block_count = src->block_count;
+        for (i = 0; i < src->block_count; ++i) {
+            if (clone_stmt(&src->block_stmts[i], &dst->block_stmts[i]) != 0) {
+                free_stmt(dst);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static cc_expr_t *clone_expr(const cc_expr_t *src) {
     cc_expr_t *dst;
     size_t i;
@@ -3673,6 +3912,20 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
         for (i = 0; i < src->arg_count; ++i) {
             dst->args[i] = clone_expr(src->args[i]);
             if (dst->args[i] == NULL) {
+                free_expr(dst);
+                return NULL;
+            }
+        }
+    }
+    if (src->stmt_expr_count > 0) {
+        dst->stmt_expr_stmts = (cc_stmt_t *)calloc(src->stmt_expr_count, sizeof(*dst->stmt_expr_stmts));
+        if (dst->stmt_expr_stmts == NULL) {
+            free_expr(dst);
+            return NULL;
+        }
+        dst->stmt_expr_count = src->stmt_expr_count;
+        for (i = 0; i < src->stmt_expr_count; ++i) {
+            if (clone_stmt(&src->stmt_expr_stmts[i], &dst->stmt_expr_stmts[i]) != 0) {
                 free_expr(dst);
                 return NULL;
             }
@@ -4361,10 +4614,19 @@ static cc_expr_t *parse_cond(parser_t *p) {
             return NULL;
         }
         e->lhs = cond;
-        e->rhs = parse_expr(p);
-        if (e->rhs == NULL) {
-            free_expr(e);
-            return NULL;
+        if (p->tok.kind == TOK_COLON) {
+            if (!parser_is_gnu_mode()) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "omitted middle operand in ?: is a GNU extension");
+                free_expr(e);
+                return NULL;
+            }
+            e->rhs = NULL;
+        } else {
+            e->rhs = parse_expr(p);
+            if (e->rhs == NULL) {
+                free_expr(e);
+                return NULL;
+            }
         }
         if (expect(p, TOK_COLON, "expected ':' in conditional expression") != 0) {
             free_expr(e);
@@ -5025,6 +5287,38 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         return parse_static_assert_decl(p, 1);
     }
 
+    if (tok_is_ident(p, "__label__")) {
+        if (!parser_is_gnu_mode()) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "__label__ is a GNU extension");
+            return -1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_IDENT) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier after __label__");
+            return -1;
+        }
+        for (;;) {
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            if (p->tok.kind != TOK_COMMA) {
+                break;
+            }
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            if (p->tok.kind != TOK_IDENT) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier in __label__ declaration");
+                return -1;
+            }
+        }
+        s->kind = CC_STMT_EXPR;
+        s->expr = NULL;
+        return expect(p, TOK_SEMI, "expected ';' after __label__ declaration");
+    }
+
     if (p->tok.kind == TOK_SEMI) {
         s->kind = CC_STMT_EXPR;
         s->expr = NULL;
@@ -5231,6 +5525,8 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
     }
 
     if (p->tok.kind == TOK_KW_CASE) {
+        cc_expr_t *hi_expr;
+        long hi = 0;
         s->kind = CC_STMT_CASE;
         if (next_tok(p) != 0) {
             return -1;
@@ -5238,6 +5534,27 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         s->expr = parse_expr(p);
         if (s->expr == NULL) {
             return -1;
+        }
+        if (p->tok.kind == TOK_ELLIPSIS) {
+            if (!parser_is_gnu_mode()) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "case ranges are a GNU extension");
+                return -1;
+            }
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            hi_expr = parse_expr(p);
+            if (hi_expr == NULL) {
+                return -1;
+            }
+            if (eval_const_array_bound_expr(hi_expr, &hi) != 0) {
+                free_expr(hi_expr);
+                set_diag(p->diag, p->tok.line, p->tok.col, "case range upper bound must be an integer constant");
+                return -1;
+            }
+            free_expr(hi_expr);
+            s->case_has_range = 1;
+            s->case_hi = hi;
         }
         return expect(p, TOK_COLON, "expected ':' after case expression");
     }

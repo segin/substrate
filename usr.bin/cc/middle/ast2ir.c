@@ -29,6 +29,11 @@ typedef struct {
     const cc_function_t *fn;
 } lower_ctx_t;
 
+static int emit_trap_instr(cc_ssa_function_t *sf);
+static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
+                      const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
+                      int *saw_ret, cc_diag_t *diag);
+
 static char *xstrdup(const char *s) {
     size_t n;
     char *p;
@@ -818,7 +823,15 @@ typedef enum {
     BUILTIN_EXPECT,
     BUILTIN_CONSTANT_P,
     BUILTIN_TRAP,
+    BUILTIN_UNREACHABLE,
     BUILTIN_CTZ,
+    BUILTIN_ADD_OVERFLOW,
+    BUILTIN_SUB_OVERFLOW,
+    BUILTIN_MUL_OVERFLOW,
+    BUILTIN_OBJECT_SIZE,
+    BUILTIN_MEMCPY_CHK,
+    BUILTIN_MEMMOVE_CHK,
+    BUILTIN_MEMSET_CHK,
     BUILTIN_SYNC_FETCH_ADD,
     BUILTIN_SYNC_FETCH_SUB,
     BUILTIN_SYNC_SUB_AND_FETCH,
@@ -858,8 +871,32 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_trap") == 0) {
         return BUILTIN_TRAP;
     }
+    if (strcmp(name, "__builtin_unreachable") == 0) {
+        return BUILTIN_UNREACHABLE;
+    }
     if (strcmp(name, "__builtin_ctz") == 0) {
         return BUILTIN_CTZ;
+    }
+    if (strcmp(name, "__builtin_add_overflow") == 0) {
+        return BUILTIN_ADD_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_sub_overflow") == 0) {
+        return BUILTIN_SUB_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_mul_overflow") == 0) {
+        return BUILTIN_MUL_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_object_size") == 0) {
+        return BUILTIN_OBJECT_SIZE;
+    }
+    if (strcmp(name, "__builtin___memcpy_chk") == 0) {
+        return BUILTIN_MEMCPY_CHK;
+    }
+    if (strcmp(name, "__builtin___memmove_chk") == 0) {
+        return BUILTIN_MEMMOVE_CHK;
+    }
+    if (strcmp(name, "__builtin___memset_chk") == 0) {
+        return BUILTIN_MEMSET_CHK;
     }
     if (strcmp(name, "__sync_fetch_and_add") == 0) {
         return BUILTIN_SYNC_FETCH_ADD;
@@ -1813,12 +1850,380 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return emit_const_i64_instr(sf, is_const);
         }
         if (bk == BUILTIN_TRAP) {
-            int l = new_label(sf);
-            if (l < 0 || emit_label_instr(sf, l) != 0 || emit_br_instr(sf, l) != 0) {
+            if (emit_trap_instr(sf) != 0) {
                 set_diag(diag, "out of memory emitting __builtin_trap");
                 return -1;
             }
             return emit_const_i64_instr(sf, 0);
+        }
+        if (bk == BUILTIN_UNREACHABLE) {
+            if (emit_trap_instr(sf) != 0) {
+                set_diag(diag, "out of memory emitting __builtin_unreachable");
+                return -1;
+            }
+            return emit_const_i64_instr(sf, 0);
+        }
+        if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
+            int av;
+            int bv;
+            int pv;
+            int rv;
+            int ov = -1;
+            cc_type_t out_type;
+            long mem_size;
+            cc_ssa_instr_t bin;
+
+            if (e->arg_count != 3 || e->args[0] == NULL || e->args[1] == NULL || e->args[2] == NULL) {
+                set_diag(diag, "overflow builtin lowering expects 3 arguments");
+                return -1;
+            }
+            av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+            bv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag);
+            pv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag);
+            if (av < 0 || bv < 0 || pv < 0) {
+                return -1;
+            }
+            av = cast_value(sf, av, CC_VAL_I64, diag);
+            bv = cast_value(sf, bv, CC_VAL_I64, diag);
+            pv = cast_value(sf, pv, CC_VAL_I64, diag);
+            if (av < 0 || bv < 0 || pv < 0) {
+                return -1;
+            }
+
+            memset(&bin, 0, sizeof(bin));
+            bin.op = (bk == BUILTIN_ADD_OVERFLOW) ? CC_SSA_ADD : ((bk == BUILTIN_SUB_OVERFLOW) ? CC_SSA_SUB : CC_SSA_MUL);
+            bin.dst = new_value(sf, CC_VAL_I64);
+            bin.lhs = av;
+            bin.rhs = bv;
+            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                return -1;
+            }
+            rv = bin.dst;
+
+            out_type = ptr_base_type(e->args[2]->value_type);
+            if (out_type == CC_TYPE_VOID) {
+                out_type = CC_TYPE_INT;
+            }
+            mem_size = pointer_elem_size_bytes(tu, e->args[2]->value_type, e->args[2]->struct_id);
+            if (mem_size <= 0) {
+                mem_size = type_size_bytes_with_struct(tu, out_type, e->args[2]->struct_id);
+            }
+            if (mem_size <= 0) {
+                mem_size = g_pointer_size_bytes;
+            }
+
+            rv = cast_value(sf, rv, type_to_val(out_type), diag);
+            if (rv < 0) {
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_STORE;
+            in.lhs = pv;
+            in.rhs = rv;
+            in.imm = mem_size;
+            if (push_instr(sf, in) != 0) {
+                return -1;
+            }
+
+            if (is_unsigned_integral_type(out_type)) {
+                if (bk == BUILTIN_MUL_OVERFLOW) {
+                    int z = emit_const_i64_instr(sf, 0);
+                    int cmp_nz;
+                    int qv;
+                    int cmp_ne;
+                    if (z < 0) {
+                        return -1;
+                    }
+                    memset(&bin, 0, sizeof(bin));
+                    bin.op = CC_SSA_CMP;
+                    bin.cmp_kind = CC_CMP_NE;
+                    bin.is_unsigned = 1;
+                    bin.dst = new_value(sf, CC_VAL_I64);
+                    bin.lhs = bv;
+                    bin.rhs = z;
+                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                        return -1;
+                    }
+                    cmp_nz = bin.dst;
+                    memset(&bin, 0, sizeof(bin));
+                    bin.op = CC_SSA_DIV;
+                    bin.is_unsigned = 1;
+                    bin.dst = new_value(sf, CC_VAL_I64);
+                    bin.lhs = rv;
+                    bin.rhs = bv;
+                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                        return -1;
+                    }
+                    qv = bin.dst;
+                    memset(&bin, 0, sizeof(bin));
+                    bin.op = CC_SSA_CMP;
+                    bin.cmp_kind = CC_CMP_NE;
+                    bin.is_unsigned = 1;
+                    bin.dst = new_value(sf, CC_VAL_I64);
+                    bin.lhs = qv;
+                    bin.rhs = av;
+                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                        return -1;
+                    }
+                    cmp_ne = bin.dst;
+                    memset(&bin, 0, sizeof(bin));
+                    bin.op = CC_SSA_AND;
+                    bin.dst = new_value(sf, CC_VAL_I64);
+                    bin.lhs = cmp_nz;
+                    bin.rhs = cmp_ne;
+                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                        return -1;
+                    }
+                    ov = bin.dst;
+                } else {
+                    memset(&bin, 0, sizeof(bin));
+                    bin.op = CC_SSA_CMP;
+                    bin.cmp_kind = (bk == BUILTIN_SUB_OVERFLOW) ? CC_CMP_LT : CC_CMP_LT;
+                    bin.is_unsigned = 1;
+                    bin.dst = new_value(sf, CC_VAL_I64);
+                    bin.lhs = (bk == BUILTIN_SUB_OVERFLOW) ? av : rv;
+                    bin.rhs = (bk == BUILTIN_SUB_OVERFLOW) ? bv : av;
+                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                        return -1;
+                    }
+                    ov = bin.dst;
+                }
+            } else if (bk == BUILTIN_MUL_OVERFLOW) {
+                int z = emit_const_i64_instr(sf, 0);
+                int cmp_nz;
+                int qv;
+                int cmp_eq;
+                int not_eq;
+                if (z < 0) {
+                    return -1;
+                }
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = CC_CMP_NE;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = bv;
+                bin.rhs = z;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                cmp_nz = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_DIV;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = rv;
+                bin.rhs = bv;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                qv = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = CC_CMP_NE;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = qv;
+                bin.rhs = av;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                cmp_eq = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_AND;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = cmp_nz;
+                bin.rhs = cmp_eq;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                not_eq = bin.dst;
+                ov = not_eq;
+            } else {
+                int sign_r;
+                int sign_a;
+                int sign_b;
+                int sa_sb_eq;
+                int sa_sr_ne;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = CC_CMP_LT;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = rv;
+                bin.rhs = emit_const_i64_instr(sf, 0);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                sign_r = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = CC_CMP_LT;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = av;
+                bin.rhs = emit_const_i64_instr(sf, 0);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                sign_a = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = CC_CMP_LT;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = bv;
+                bin.rhs = emit_const_i64_instr(sf, 0);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                sign_b = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = (bk == BUILTIN_ADD_OVERFLOW) ? CC_CMP_EQ : CC_CMP_NE;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = sign_a;
+                bin.rhs = sign_b;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                sa_sb_eq = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = CC_CMP_NE;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = sign_a;
+                bin.rhs = sign_r;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                sa_sr_ne = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_AND;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = sa_sb_eq;
+                bin.rhs = sa_sr_ne;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                ov = bin.dst;
+            }
+            return ov;
+        }
+        if (bk == BUILTIN_OBJECT_SIZE) {
+            long n = -1;
+            long mode = 0;
+            if (e->arg_count != 2 || e->args[0] == NULL || e->args[1] == NULL) {
+                set_diag(diag, "__builtin_object_size lowering expects 2 arguments");
+                return -1;
+            }
+            if (e->args[1]->kind == CC_EXPR_INT) {
+                mode = e->args[1]->int_val;
+            } else {
+                int mode_v = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag);
+                if (mode_v < 0) {
+                    return -1;
+                }
+            }
+            n = sizeof_expr_bytes(tu, vars, var_count, depth, e->args[0]);
+            if (n < 0) {
+                n = (mode & 2L) ? 0 : -1;
+            }
+            return emit_const_i64_instr(sf, n);
+        }
+        if (bk == BUILTIN_MEMCPY_CHK || bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
+            int dstv;
+            int nbytes;
+            int objsz;
+            int cmp_ok;
+            int l_ok;
+            int l_bad;
+            size_t argc = 4;
+            cc_ssa_instr_t call_in;
+
+            if (e->arg_count < argc) {
+                set_diag(diag, "__builtin___mem*_chk lowering has wrong argument count");
+                return -1;
+            }
+            dstv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+            if (dstv < 0) {
+                return -1;
+            }
+            dstv = cast_value(sf, dstv, CC_VAL_I64, diag);
+            if (dstv < 0) {
+                return -1;
+            }
+            nbytes = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag);
+            if (nbytes < 0) {
+                return -1;
+            }
+            nbytes = cast_value(sf, nbytes, CC_VAL_I64, diag);
+            if (nbytes < 0) {
+                return -1;
+            }
+            objsz = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[argc - 1], diag);
+            if (objsz < 0) {
+                return -1;
+            }
+            objsz = cast_value(sf, objsz, CC_VAL_I64, diag);
+            if (objsz < 0) {
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_CMP;
+            in.cmp_kind = CC_CMP_LE;
+            in.is_unsigned = 1;
+            in.dst = new_value(sf, CC_VAL_I64);
+            in.lhs = nbytes;
+            in.rhs = objsz;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                return -1;
+            }
+            cmp_ok = in.dst;
+            l_ok = new_label(sf);
+            l_bad = new_label(sf);
+            if (l_ok < 0 || l_bad < 0) {
+                return -1;
+            }
+            if (emit_br_cond_instr(sf, cmp_ok, l_ok, l_bad) != 0 || emit_label_instr(sf, l_bad) != 0 ||
+                emit_trap_instr(sf) != 0 || emit_label_instr(sf, l_ok) != 0) {
+                return -1;
+            }
+
+            memset(&call_in, 0, sizeof(call_in));
+            call_in.op = CC_SSA_CALL;
+            call_in.call_is_variadic = 0;
+            call_in.dst = new_value(sf, CC_VAL_I64);
+            call_in.arg_count = (bk == BUILTIN_MEMSET_CHK) ? 3 : 3;
+            call_in.args = (int *)calloc(3, sizeof(*call_in.args));
+            if (call_in.dst < 0 || call_in.args == NULL) {
+                free(call_in.args);
+                return -1;
+            }
+            if (bk == BUILTIN_MEMCPY_CHK) {
+                call_in.sym = xstrdup("memcpy");
+                call_in.args[0] = dstv;
+                call_in.args[1] = cast_value(sf, lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag),
+                                             CC_VAL_I64, diag);
+                call_in.args[2] = nbytes;
+            } else if (bk == BUILTIN_MEMMOVE_CHK) {
+                call_in.sym = xstrdup("memmove");
+                call_in.args[0] = dstv;
+                call_in.args[1] = cast_value(sf, lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag),
+                                             CC_VAL_I64, diag);
+                call_in.args[2] = nbytes;
+            } else {
+                call_in.sym = xstrdup("memset");
+                call_in.args[0] = dstv;
+                call_in.args[1] = cast_value(sf, lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag),
+                                             CC_VAL_I64, diag);
+                call_in.args[2] = nbytes;
+            }
+            if (call_in.sym == NULL || call_in.args[1] < 0) {
+                free(call_in.sym);
+                free(call_in.args);
+                return -1;
+            }
+            if (push_instr(sf, call_in) != 0) {
+                free(call_in.sym);
+                free(call_in.args);
+                return -1;
+            }
+            return call_in.dst;
         }
         if (bk == BUILTIN_CTZ) {
             cc_ssa_instr_t bin;
@@ -2853,8 +3258,75 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         set_diag(diag, "initializer list cannot be used as runtime expression in lowering");
         return -1;
 
+    case CC_EXPR_STMT: {
+        var_entry_t *lvars = NULL;
+        size_t lcount = var_count;
+        size_t j;
+        int saw_ret_dummy = 0;
+        int outv = -1;
+
+        if (var_count > 0) {
+            lvars = (var_entry_t *)calloc(var_count, sizeof(*lvars));
+            if (lvars == NULL) {
+                set_diag(diag, "out of memory cloning scope for statement expression");
+                return -1;
+            }
+            for (j = 0; j < var_count; ++j) {
+                lvars[j] = vars[j];
+                lvars[j].name = xstrdup(vars[j].name);
+                if (lvars[j].name == NULL) {
+                    size_t k;
+                    for (k = 0; k < j; ++k) {
+                        free(lvars[k].name);
+                    }
+                    free(lvars);
+                    set_diag(diag, "out of memory cloning scope for statement expression");
+                    return -1;
+                }
+            }
+        }
+        for (j = 0; j < e->stmt_expr_count; ++j) {
+            const cc_stmt_t *cur = &e->stmt_expr_stmts[j];
+            int is_last = (j + 1 == e->stmt_expr_count);
+            if (is_last && cur->kind == CC_STMT_EXPR && cur->expr != NULL) {
+                outv = lower_expr(tu, sf, ctx, lvars, lcount, depth + 1, cur->expr, diag);
+                if (outv < 0) {
+                    while (lcount > 0) {
+                        lcount--;
+                        free(lvars[lcount].name);
+                    }
+                    free(lvars);
+                    return -1;
+                }
+                continue;
+            }
+            if (lower_stmt(tu, sf, &lvars, &lcount, ctx, depth + 1, -1, -1, cur, &saw_ret_dummy,
+                           diag) != 0) {
+                while (lcount > 0) {
+                    lcount--;
+                    free(lvars[lcount].name);
+                }
+                free(lvars);
+                return -1;
+            }
+        }
+        if (outv >= 0) {
+            outv = cast_value(sf, outv, type_to_val(e->value_type), diag);
+        }
+        while (lcount > 0) {
+            lcount--;
+            free(lvars[lcount].name);
+        }
+        free(lvars);
+        if (outv < 0) {
+            return emit_const_i64_instr(sf, 0);
+        }
+        return outv;
+    }
+
     case CC_EXPR_TERNARY: {
         int cond;
+        int cond_raw;
         int dst;
         int l_true = new_label(sf);
         int l_false = new_label(sf);
@@ -2863,16 +3335,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         int tv;
         int fv;
 
-        if (e->lhs == NULL || e->rhs == NULL || e->third == NULL) {
+        if (e->lhs == NULL || e->third == NULL) {
             set_diag(diag, "malformed conditional expression in lowering");
             return -1;
         }
 
-        cond = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
-        if (cond < 0) {
+        cond_raw = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+        if (cond_raw < 0) {
             return -1;
         }
-        cond = lower_truthy_value(sf, cond, diag);
+        cond = lower_truthy_value(sf, cond_raw, diag);
         if (cond < 0) {
             return -1;
         }
@@ -2890,9 +3362,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (emit_label_instr(sf, l_true) != 0) {
             return -1;
         }
-        tv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
-        if (tv < 0) {
-            return -1;
+        if (e->rhs == NULL) {
+            tv = cond_raw;
+        } else {
+            tv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
+            if (tv < 0) {
+                return -1;
+            }
         }
         tv = cast_value(sf, tv, want, diag);
         if (tv < 0 || emit_mov_instr(sf, dst, tv) != 0 || emit_br_instr(sf, l_end) != 0) {
@@ -2954,6 +3430,16 @@ static int emit_br_cond_instr(cc_ssa_function_t *sf, int cond, int label_true, i
     in.rhs = -1;
     in.true_label = label_true;
     in.false_label = label_false;
+    return push_instr(sf, in);
+}
+
+static int emit_trap_instr(cc_ssa_function_t *sf) {
+    cc_ssa_instr_t in;
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_TRAP;
+    in.dst = -1;
+    in.lhs = -1;
+    in.rhs = -1;
     return push_instr(sf, in);
 }
 
@@ -3065,6 +3551,8 @@ static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
 typedef struct {
     size_t stmt_index;
     long value;
+    long value_hi;
+    int has_range;
     int label;
     int is_default;
 } switch_case_site_t;
@@ -3103,6 +3591,8 @@ static int collect_switch_case_sites(cc_ssa_function_t *sf, const cc_stmt_t *bod
         memset(&site, 0, sizeof(site));
         site.stmt_index = i;
         site.value = st->kind == CC_STMT_CASE ? st->expr->int_val : 0;
+        site.value_hi = st->kind == CC_STMT_CASE ? (st->case_has_range ? st->case_hi : st->expr->int_val) : 0;
+        site.has_range = st->kind == CC_STMT_CASE ? st->case_has_range : 0;
         site.label = new_label(sf);
         site.is_default = (st->kind == CC_STMT_DEFAULT);
         if (site.label < 0) {
@@ -3950,6 +4440,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         int *cmp_labels = NULL;
         int *case_labels = NULL;
         long *case_values = NULL;
+        long *case_hi_values = NULL;
+        int *case_has_range = NULL;
         int cond;
 
         if (l_end < 0) {
@@ -3989,11 +4481,16 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             cmp_labels = (int *)calloc(case_count, sizeof(*cmp_labels));
             case_labels = (int *)calloc(case_count, sizeof(*case_labels));
             case_values = (long *)calloc(case_count, sizeof(*case_values));
-            if (cmp_labels == NULL || case_labels == NULL || case_values == NULL) {
+            case_hi_values = (long *)calloc(case_count, sizeof(*case_hi_values));
+            case_has_range = (int *)calloc(case_count, sizeof(*case_has_range));
+            if (cmp_labels == NULL || case_labels == NULL || case_values == NULL || case_hi_values == NULL ||
+                case_has_range == NULL) {
                 free(sites);
                 free(cmp_labels);
                 free(case_labels);
                 free(case_values);
+                free(case_hi_values);
+                free(case_has_range);
                 set_diag(diag, "out of memory lowering switch dispatch");
                 return -1;
             }
@@ -4002,12 +4499,16 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (!sites[j2].is_default) {
                     case_labels[case_i] = sites[j2].label;
                     case_values[case_i] = sites[j2].value;
+                    case_hi_values[case_i] = sites[j2].value_hi;
+                    case_has_range[case_i] = sites[j2].has_range;
                     cmp_labels[case_i] = new_label(sf);
                     if (cmp_labels[case_i] < 0) {
                         free(sites);
                         free(cmp_labels);
                         free(case_labels);
                         free(case_values);
+                        free(case_hi_values);
+                        free(case_has_range);
                         set_diag(diag, "out of memory assigning switch compare labels");
                         return -1;
                     }
@@ -4020,6 +4521,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(cmp_labels);
                 free(case_labels);
                 free(case_values);
+                free(case_hi_values);
+                free(case_has_range);
                 return -1;
             }
             for (case_i = 0; case_i < case_count; ++case_i) {
@@ -4033,25 +4536,95 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     free(cmp_labels);
                     free(case_labels);
                     free(case_values);
+                    free(case_hi_values);
+                    free(case_has_range);
                     set_diag(diag, "out of memory appending switch case constant");
                     return -1;
                 }
 
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_CMP;
-                in.cmp_kind = CC_CMP_EQ;
-                in.dst = new_value(sf, CC_VAL_I64);
-                in.lhs = cond;
-                in.rhs = cv;
-                if (in.dst < 0 || push_instr(sf, in) != 0) {
-                    free(sites);
-                    free(cmp_labels);
-                    free(case_labels);
-                    free(case_values);
-                    set_diag(diag, "out of memory appending switch compare");
-                    return -1;
+                if (case_has_range[case_i]) {
+                    int chv = emit_const_i64_instr(sf, case_hi_values[case_i]);
+                    int ge;
+                    int le;
+                    if (chv < 0) {
+                        free(sites);
+                        free(cmp_labels);
+                        free(case_labels);
+                        free(case_values);
+                        free(case_hi_values);
+                        free(case_has_range);
+                        set_diag(diag, "out of memory appending switch case-range constant");
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_CMP;
+                    in.cmp_kind = CC_CMP_GE;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = cond;
+                    in.rhs = cv;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        free(sites);
+                        free(cmp_labels);
+                        free(case_labels);
+                        free(case_values);
+                        free(case_hi_values);
+                        free(case_has_range);
+                        set_diag(diag, "out of memory appending switch range lower compare");
+                        return -1;
+                    }
+                    ge = in.dst;
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_CMP;
+                    in.cmp_kind = CC_CMP_LE;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = cond;
+                    in.rhs = chv;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        free(sites);
+                        free(cmp_labels);
+                        free(case_labels);
+                        free(case_values);
+                        free(case_hi_values);
+                        free(case_has_range);
+                        set_diag(diag, "out of memory appending switch range upper compare");
+                        return -1;
+                    }
+                    le = in.dst;
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_AND;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = ge;
+                    in.rhs = le;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        free(sites);
+                        free(cmp_labels);
+                        free(case_labels);
+                        free(case_values);
+                        free(case_hi_values);
+                        free(case_has_range);
+                        set_diag(diag, "out of memory appending switch range combine");
+                        return -1;
+                    }
+                    cmpv = in.dst;
+                } else {
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_CMP;
+                    in.cmp_kind = CC_CMP_EQ;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = cond;
+                    in.rhs = cv;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        free(sites);
+                        free(cmp_labels);
+                        free(case_labels);
+                        free(case_values);
+                        free(case_hi_values);
+                        free(case_has_range);
+                        set_diag(diag, "out of memory appending switch compare");
+                        return -1;
+                    }
+                    cmpv = in.dst;
                 }
-                cmpv = in.dst;
                 false_label = (case_i + 1 < case_count) ? cmp_labels[case_i + 1]
                                                         : (default_label >= 0 ? default_label : l_end);
                 if (emit_br_cond_instr(sf, cmpv, case_labels[case_i], false_label) != 0) {
@@ -4059,6 +4632,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     free(cmp_labels);
                     free(case_labels);
                     free(case_values);
+                    free(case_hi_values);
+                    free(case_has_range);
                     return -1;
                 }
                 if (case_i + 1 < case_count && emit_label_instr(sf, cmp_labels[case_i + 1]) != 0) {
@@ -4066,6 +4641,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     free(cmp_labels);
                     free(case_labels);
                     free(case_values);
+                    free(case_hi_values);
+                    free(case_has_range);
                     return -1;
                 }
             }
@@ -4080,6 +4657,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     free(cmp_labels);
                     free(case_labels);
                     free(case_values);
+                    free(case_hi_values);
+                    free(case_has_range);
                     return -1;
                 }
                 continue;
@@ -4089,6 +4668,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(cmp_labels);
                 free(case_labels);
                 free(case_values);
+                free(case_hi_values);
+                free(case_has_range);
                 return -1;
             }
         }
@@ -4097,12 +4678,16 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             free(cmp_labels);
             free(case_labels);
             free(case_values);
+            free(case_hi_values);
+            free(case_has_range);
             return -1;
         }
         free(sites);
         free(cmp_labels);
         free(case_labels);
         free(case_values);
+        free(case_hi_values);
+        free(case_has_range);
         return 0;
     }
 
@@ -4370,7 +4955,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         double cf = 0.0;
         int cisf = 0;
         char *csym = NULL;
-        if (e->lhs == NULL || e->rhs == NULL || e->third == NULL) {
+        if (e->lhs == NULL || e->third == NULL) {
             return -1;
         }
         if (eval_global_init_expr(tu, e->lhs, &cv, &cf, &cisf, &csym) != 0) {
@@ -4379,6 +4964,15 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         }
         free(csym);
         if ((cisf ? cf : (double)cv) != 0.0) {
+            if (e->rhs == NULL) {
+                *out_i = cv;
+                *out_f = cf;
+                *out_is_float = cisf;
+                if (out_sym != NULL) {
+                    *out_sym = NULL;
+                }
+                return 0;
+            }
             return eval_global_init_expr(tu, e->rhs, out_i, out_f, out_is_float, out_sym);
         }
         return eval_global_init_expr(tu, e->third, out_i, out_f, out_is_float, out_sym);

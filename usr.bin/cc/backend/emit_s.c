@@ -1163,6 +1163,10 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
             }
 
+            case CC_SSA_TRAP:
+                fprintf(fp, "\tud2\n");
+                break;
+
             case CC_SSA_RET:
                 if (in->lhs >= 0) {
                     if (f->ret_type == CC_VAL_F64) {
@@ -1533,6 +1537,10 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 }
                 break;
             }
+
+            case CC_SSA_TRAP:
+                fprintf(fp, "\tud2\n");
+                break;
 
             case CC_SSA_RET:
                 if (in->lhs >= 0) {

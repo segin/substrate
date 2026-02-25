@@ -247,6 +247,70 @@ test:
 	/tmp/cc_native_gnu_typeof_alt
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_builtins.c -o /tmp/cc_native_gnu_builtins
 	/tmp/cc_native_gnu_builtins
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_stmt_expr.c -o /tmp/cc_native_gnu_stmt_expr
+	/tmp/cc_native_gnu_stmt_expr
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_stmt_expr.c -o /tmp/cc_native_gnu_stmt_expr.s
+	grep -q "imulq" /tmp/cc_native_gnu_stmt_expr.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_stmt_expr.c -o /tmp/cc_native_gnu_stmt_expr_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_stmt_expr_32.s
+	grep -q "imull" /tmp/cc_native_gnu_stmt_expr_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_label_decl.c -o /tmp/cc_native_gnu_label_decl
+	/tmp/cc_native_gnu_label_decl
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_label_decl.c -o /tmp/cc_native_gnu_label_decl.s
+	grep -Eq "leaq \\.Lmain_[0-9]+\\(%rip\\)" /tmp/cc_native_gnu_label_decl.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_label_decl.c -o /tmp/cc_native_gnu_label_decl_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_label_decl_32.s
+	grep -Eq "movl \\$$\\.Lmain_[0-9]+, %eax" /tmp/cc_native_gnu_label_decl_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_elvis.c -o /tmp/cc_native_gnu_elvis
+	/tmp/cc_native_gnu_elvis
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_elvis.c -o /tmp/cc_native_gnu_elvis.s
+	test "$$(grep -c "cmpq" /tmp/cc_native_gnu_elvis.s)" -ge 2
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_elvis.c -o /tmp/cc_native_gnu_elvis_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_elvis_32.s
+	test "$$(grep -c "cmpl" /tmp/cc_native_gnu_elvis_32.s)" -ge 2
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_case_range.c -o /tmp/cc_native_gnu_case_range
+	/tmp/cc_native_gnu_case_range
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_case_range.c -o /tmp/cc_native_gnu_case_range.s
+	grep -q "setge" /tmp/cc_native_gnu_case_range.s
+	grep -q "setle" /tmp/cc_native_gnu_case_range.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_case_range.c -o /tmp/cc_native_gnu_case_range_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_case_range_32.s
+	grep -q "setge" /tmp/cc_native_gnu_case_range_32.s
+	grep -q "setle" /tmp/cc_native_gnu_case_range_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_types_choose.c -o /tmp/cc_native_gnu_types_choose
+	/tmp/cc_native_gnu_types_choose
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_types_choose.c -o /tmp/cc_native_gnu_types_choose.s
+	! grep -q "does_not_exist" /tmp/cc_native_gnu_types_choose.s
+	! grep -q "does_not_exist2" /tmp/cc_native_gnu_types_choose.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_overflow.c -o /tmp/cc_native_gnu_overflow
+	/tmp/cc_native_gnu_overflow
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_overflow.c -o /tmp/cc_native_gnu_overflow.s
+	grep -q "setb" /tmp/cc_native_gnu_overflow.s
+	grep -q "imulq" /tmp/cc_native_gnu_overflow.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_overflow.c -o /tmp/cc_native_gnu_overflow_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_overflow_32.s
+	grep -q "setb" /tmp/cc_native_gnu_overflow_32.s
+	grep -q "imull" /tmp/cc_native_gnu_overflow_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_object_size_chk.c -o /tmp/cc_native_gnu_object_size_chk
+	/tmp/cc_native_gnu_object_size_chk
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_object_size_chk.c -o /tmp/cc_native_gnu_object_size_chk.s
+	grep -q "ud2" /tmp/cc_native_gnu_object_size_chk.s
+	grep -q "call memcpy" /tmp/cc_native_gnu_object_size_chk.s
+	grep -q "call memmove" /tmp/cc_native_gnu_object_size_chk.s
+	grep -q "call memset" /tmp/cc_native_gnu_object_size_chk.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_object_size_chk.c -o /tmp/cc_native_gnu_object_size_chk_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_object_size_chk_32.s
+	grep -q "ud2" /tmp/cc_native_gnu_object_size_chk_32.s
+	grep -q "call memcpy" /tmp/cc_native_gnu_object_size_chk_32.s
+	grep -q "call memmove" /tmp/cc_native_gnu_object_size_chk_32.s
+	grep -q "call memset" /tmp/cc_native_gnu_object_size_chk_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_trap_unreachable.c -o /tmp/cc_native_gnu_trap_unreachable
+	/tmp/cc_native_gnu_trap_unreachable
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_trap_unreachable.c -o /tmp/cc_native_gnu_trap_unreachable.s
+	grep -q "ud2" /tmp/cc_native_gnu_trap_unreachable.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_trap_unreachable.c -o /tmp/cc_native_gnu_trap_unreachable_32.s
+	grep -q "\\.code32" /tmp/cc_native_gnu_trap_unreachable_32.s
+	grep -q "ud2" /tmp/cc_native_gnu_trap_unreachable_32.s
 	$(TOP)/usr.bin/cc/cc -O2 native_opt_fold.c -o /tmp/cc_native_opt_fold
 	/tmp/cc_native_opt_fold
 	$(TOP)/usr.bin/cc/cc -O2 -S native_opt_fold.c -o /tmp/cc_native_opt_fold.s
@@ -508,7 +572,13 @@ clean:
 	      /tmp/cc_native_arith_32.s /tmp/cc_native_if_else_32.s /tmp/cc_native_c95_digraph_32.s /tmp/cc_native_c95_trigraph_32.s /tmp/cc_native_c99_phase12_trigraph_splice_32.s /tmp/cc_native_c99_ucn_ident_32.s /tmp/cc_native_c99_tokenization_ppnum_32.s /tmp/cc_native_c99_line_comment_32.s /tmp/cc_native_do_while_32.s /tmp/cc_native_c99_empty_stmt2_32.s /tmp/cc_native_switch_32.s /tmp/cc_native_c99_for_decl_32.s /tmp/cc_native_c99_for_multi_decl_32.s /tmp/cc_native_c99_types_32.s /tmp/cc_native_c99_typedef_32.s /tmp/cc_native_c99_multi_decl_32.s /tmp/cc_native_c99_logic_32.s /tmp/cc_native_c99_update_32.s /tmp/cc_native_c99_bitwise_32.s /tmp/cc_native_c99_comma_32.s /tmp/cc_native_c99_goto_32.s /tmp/cc_native_c99_goto_loop_32.s /tmp/cc_native_c99_ternary_32.s /tmp/cc_native_c99_cast_sizeof_32.s /tmp/cc_native_c99_sizeof_array_32.s /tmp/cc_native_c99_float_cmp_32.s /tmp/cc_native_c99_unsigned_32.s /tmp/cc_native_c99_unsigned_literals_32.s /tmp/cc_native_c99_short_32.s /tmp/cc_native_c99_pointer_32.s /tmp/cc_native_c99_pointer_store_32.s /tmp/cc_native_c99_pointer_arith.s /tmp/cc_native_c99_pointer_arith_32.s /tmp/cc_native_c99_index_32.s /tmp/cc_native_c99_pointer_diff_32.s /tmp/cc_native_c99_ptr_cast_32.s /tmp/cc_native_c99_ptr_size_32.s /tmp/cc_native_c99_ptrptr_32.s /tmp/cc_native_c99_ptrptrptr_32.s /tmp/cc_native_c99_ptr4_32.s /tmp/cc_native_c99_pointer_update_32.s /tmp/cc_native_c99_global_array_init_32.s /tmp/cc_native_c99_storage_tentative_32.s /tmp/cc_native_c99_designated_init_32.s /tmp/cc_native_c99_compound_literal_32.s /tmp/cc_native_c99_flexible_array_32.s /tmp/cc_native_c99_struct_assign_32.s /tmp/cc_native_c99_struct_ptr_arith_32.s /tmp/cc_native_c99_struct_member_array_32.s /tmp/cc_native_c99_deref_postfix_update_32.s /tmp/cc_native_c99_proto_extern_32.s /tmp/cc_native_c99_block_scope_shadow_32.s /tmp/cc_native_c99_mixed_decl_stmt_32.s /tmp/cc_native_c99_return_conversion_32.s /tmp/cc_native_c99_stdc_pragma_32.s /tmp/cc_native_c99_unproto_decl_call_32.s /tmp/cc_native_c99_unproto_extern_call_32.s /tmp/cc_native_c90_unproto_call_promotions_32.s /tmp/cc_native_loops_32.s /tmp/cc_native_arith_32.o /tmp/cc_native_double_32.s /tmp/cc_native_double_32.o \
 	      /tmp/cc_native_bad_inc.o /tmp/cc_native_bad_goto.o /tmp/cc_native_bad_label_dup.o /tmp/cc_native_bad_bitwise_float.o /tmp/cc_native_bad_sizeof_void.o /tmp/cc_native_bad_proto_conflict.o /tmp/cc_native_bad_signed_unsigned.o /tmp/cc_native_bad_short_long.o /tmp/cc_native_bad_typedef_init.o /tmp/cc_native_bad_deref_nonptr.o /tmp/cc_native_bad_addr_expr.o /tmp/cc_native_bad_deref_compound.o /tmp/cc_native_bad_deref_postfix_update.o /tmp/cc_native_bad_ptr_add_ptr.o /tmp/cc_native_bad_index_nonptr.o /tmp/cc_native_bad_ptr_add_float.o /tmp/cc_native_bad_ptr_sub_incompat.o /tmp/cc_native_bad_ptr_cmp_incompat.o /tmp/cc_native_bad_ptr_depth5.o /tmp/cc_native_bad_cast_ptr_float.o /tmp/cc_native_bad_computed_goto_float.o /tmp/cc_native_bad_void_ptr_arith.o /tmp/cc_native_bad_attr_noreturn_return.o /tmp/cc_native_bad_attr_noreturn_nonvoid.o \
 	      /tmp/cc_native_c99_typedef_fnptr_retptr /tmp/cc_native_c99_attr_codegen /tmp/cc_native_c99_attr_codegen.s /tmp/cc_native_double_dbg.s \
-	      /tmp/cc_native_gnu_typeof_alt /tmp/cc_native_gnu_builtins
+	      /tmp/cc_native_gnu_typeof_alt /tmp/cc_native_gnu_builtins /tmp/cc_native_gnu_stmt_expr /tmp/cc_native_gnu_label_decl \
+	      /tmp/cc_native_gnu_elvis /tmp/cc_native_gnu_case_range /tmp/cc_native_gnu_types_choose /tmp/cc_native_gnu_overflow \
+	      /tmp/cc_native_gnu_stmt_expr.s /tmp/cc_native_gnu_stmt_expr_32.s /tmp/cc_native_gnu_label_decl.s /tmp/cc_native_gnu_label_decl_32.s \
+	      /tmp/cc_native_gnu_elvis.s /tmp/cc_native_gnu_elvis_32.s /tmp/cc_native_gnu_case_range.s /tmp/cc_native_gnu_case_range_32.s \
+	      /tmp/cc_native_gnu_types_choose.s /tmp/cc_native_gnu_overflow.s /tmp/cc_native_gnu_overflow_32.s \
+	      /tmp/cc_native_gnu_object_size_chk /tmp/cc_native_gnu_object_size_chk.s /tmp/cc_native_gnu_object_size_chk_32.s \
+	      /tmp/cc_native_gnu_trap_unreachable /tmp/cc_native_gnu_trap_unreachable.s /tmp/cc_native_gnu_trap_unreachable_32.s
 	rm -f /tmp/cc_native_c99_integer_literals /tmp/cc_native_c99_hex_float_suffix /tmp/cc_native_c99_wide_literals \
 	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle /tmp/cc_native_c90_unproto_call_promotions /tmp/cc_native_c90_unproto_call_promotions.s \
 	      /tmp/cc_native_c99_integer_literals_32.s /tmp/cc_native_c99_hex_float_suffix_32.s /tmp/cc_native_c99_wide_literals_32.s \
