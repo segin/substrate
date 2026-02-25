@@ -347,6 +347,12 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_asm_goto.c -o /tmp/cc_native_gnu_asm_goto_32.s
 	grep -q "\\.code32" /tmp/cc_native_gnu_asm_goto_32.s
 	grep -Eq "jz \\.L[a-zA-Z0-9_]+_[0-9]+" /tmp/cc_native_gnu_asm_goto_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -O2 native_gnu_asm_side_effect.c -o /tmp/cc_native_gnu_asm_side_effect
+	/tmp/cc_native_gnu_asm_side_effect
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -O2 -S native_gnu_asm_side_effect.c -o /tmp/cc_native_gnu_asm_side_effect.s
+	grep -Eq "add .*[$$]1" /tmp/cc_native_gnu_asm_side_effect.s
+	grep -q "# volatile asm" /tmp/cc_native_gnu_asm_side_effect.s
+	grep -q "# asm clobber memory" /tmp/cc_native_gnu_asm_side_effect.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_attr_fn_codegen.c -o /tmp/cc_native_gnu_attr_fn_codegen
 	/tmp/cc_native_gnu_attr_fn_codegen
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_attr_fn_codegen.c -o /tmp/cc_native_gnu_attr_fn_codegen.s
@@ -600,8 +606,12 @@ test:
 	! $(TOP)/usr.bin/cc/cc -c native_bad_cast_ptr_float.c -o /tmp/cc_native_bad_cast_ptr_float.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_computed_goto_float.c -o /tmp/cc_native_bad_computed_goto_float.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_nested_capture.c -o /tmp/cc_native_bad_gnu_nested_capture.o
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_constraint.c -o /tmp/cc_native_bad_gnu_asm_constraint.o
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_match_idx.c -o /tmp/cc_native_bad_gnu_asm_match_idx.o
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_constraint.c -o /tmp/cc_native_bad_gnu_asm_constraint.o 2>/tmp/cc_native_bad_gnu_asm_constraint.log
+	grep -q "asm operand constraint contains unsupported character" /tmp/cc_native_bad_gnu_asm_constraint.log
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_match_idx.c -o /tmp/cc_native_bad_gnu_asm_match_idx.o 2>/tmp/cc_native_bad_gnu_asm_match_idx.log
+	grep -q "asm matching constraint references invalid output index" /tmp/cc_native_bad_gnu_asm_match_idx.log
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_template_mismatch.c -o /tmp/cc_native_bad_gnu_asm_template_mismatch.o 2>/tmp/cc_native_bad_gnu_asm_template_mismatch.log
+	grep -q "asm template operand index is out of range" /tmp/cc_native_bad_gnu_asm_template_mismatch.log
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_return.c -o /tmp/cc_native_bad_attr_noreturn_return.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_nonvoid.c -o /tmp/cc_native_bad_attr_noreturn_nonvoid.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_inline_conflict.c -o /tmp/cc_native_bad_attr_inline_conflict.o
@@ -658,7 +668,10 @@ clean:
 	      /tmp/cc_native_gnu_asm_basic /tmp/cc_native_gnu_asm_basic.s /tmp/cc_native_gnu_asm_ext \
 	      /tmp/cc_native_gnu_asm_ext.s /tmp/cc_native_gnu_asm_ext_32.s \
 	      /tmp/cc_native_gnu_asm_goto /tmp/cc_native_gnu_asm_goto.s /tmp/cc_native_gnu_asm_goto_32.s \
-	      /tmp/cc_native_bad_gnu_asm_constraint.o /tmp/cc_native_bad_gnu_asm_match_idx.o \
+	      /tmp/cc_native_gnu_asm_side_effect /tmp/cc_native_gnu_asm_side_effect.s \
+	      /tmp/cc_native_bad_gnu_asm_constraint.o /tmp/cc_native_bad_gnu_asm_constraint.log \
+	      /tmp/cc_native_bad_gnu_asm_match_idx.o /tmp/cc_native_bad_gnu_asm_match_idx.log \
+	      /tmp/cc_native_bad_gnu_asm_template_mismatch.o /tmp/cc_native_bad_gnu_asm_template_mismatch.log \
 	      /tmp/cc_native_bad_attr_inline_conflict.o /tmp/cc_native_bad_attr_hot_cold_conflict.o \
 	      /tmp/cc_native_bad_attr_alias_init.o /tmp/cc_native_bad_attr_malloc_nonptr.o \
 	      /tmp/cc_native_bad_attr_format_nonvariadic.o /tmp/cc_native_bad_attr_nonnull_empty.o \

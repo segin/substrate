@@ -354,9 +354,9 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [x] `asm goto` with outputs compatibility (GCC/Clang).
 
 ### 7.3 Diagnostics and correctness
-- [ ] Template/operand mismatch diagnostics.
-- [ ] Invalid constraint diagnostics.
-- [ ] Side-effect and volatility correctness through optimization passes.
+- [x] Template/operand mismatch diagnostics.
+- [x] Invalid constraint diagnostics.
+- [x] Side-effect and volatility correctness through optimization passes.
 
 ---
 
