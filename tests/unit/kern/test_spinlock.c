@@ -28,3 +28,8 @@ bool test_spinlock_initial_state(void) {
     spinlock_init(&lock, "init-test");
     return (lock.locked == 0 && lock.cpu_id == 0xFFFFFFFF);
 }
+
+bool test_spinlock_static_init(void) {
+    static spinlock_t lock = SPINLOCK_INIT("static-test");
+    return (lock.locked == 0 && lock.cpu_id == 0xFFFFFFFF);
+}
