@@ -57,22 +57,21 @@ void test_initialization(void) {
 void test_auto_initialization(void) {
     printf("Testing auto-initialization...\n");
 
-    // Manually reset initialization flag to force auto-init path
-    // Since we include the .c file, we have access to static variables.
+    // Manually reset initialized state
     crc32_initialized = 0;
 
-    // Also clear the table to ensure it really gets re-initialized
+    // Clear table to ensure we are truly testing initialization logic
     memset(crc32_table, 0, sizeof(crc32_table));
 
-    // Use a known vector: "123456789" -> 0xCBF43926
     const char *digits = "123456789";
+    // This call should trigger auto-initialization
     uint32_t crc_digits = crc32(digits, 9);
 
-    // Verify correct calculation (implies table was initialized)
-    TEST_ASSERT_EQ_HEX(crc_digits, 0xCBF43926, "Auto-init CRC32 result");
+    // Check if it initialized
+    TEST_ASSERT(crc32_initialized == 1, "Auto-initialization flag not set");
 
-    // Verify initialization flag was set
-    TEST_ASSERT(crc32_initialized == 1, "Auto-init flag set");
+    // Check result
+    TEST_ASSERT_EQ_HEX(crc_digits, 0xCBF43926, "Auto-initialized CRC32 result");
 
     printf("PASS\n");
 }
