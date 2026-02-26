@@ -6,13 +6,48 @@
 
 void cc_parser_set_pointer_size(int bytes);
 void cc_parser_set_std_mode(const char *std_mode);
+void cc_parser_set_gnu89_inline(int enabled);
 
 static int g_pointer_size_bytes = 8;
+static int g_allow_implicit_funcdecl = 0;
+static int g_warn_all = 0;
+static int g_warn_error = 0;
+static int g_pedantic = 0;
+static int g_pedantic_errors = 0;
+static int g_std_c23 = 0;
+static int g_gnu89_inline_override = -1;
+static size_t g_diag_ctx_line = 0;
+static size_t g_diag_ctx_col = 0;
+
+static int std_mode_allows_implicit_function_decls(const char *std_mode) {
+    if (std_mode == NULL || std_mode[0] == '\0') {
+        return 0;
+    }
+    if (strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 || strcmp(std_mode, "c95") == 0 ||
+        strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int std_mode_is_c23_or_newer(const char *std_mode) {
+    if (std_mode == NULL || std_mode[0] == '\0') {
+        return 0;
+    }
+    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
+        strcmp(std_mode, "gnu2x") == 0) {
+        return 1;
+    }
+    return 0;
+}
 
 typedef struct {
     char *name;
     cc_type_t type;
     int struct_id;
+    long array_len;
+    int array_ndim;
+    long array_dims[CC_MAX_ARRAY_DIMS];
     int depth;
 } var_entry_t;
 
@@ -25,9 +60,85 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     if (d == NULL || d->message[0] != '\0') {
         return;
     }
-    d->line = 0;
-    d->col = 0;
+    if (d->line == 0 && d->col == 0) {
+        d->line = g_diag_ctx_line;
+        d->col = g_diag_ctx_col;
+    }
     snprintf(d->message, sizeof(d->message), "%s", msg);
+}
+
+static void set_diag_context(size_t line, size_t col) {
+    if (line == 0 && col == 0) {
+        return;
+    }
+    g_diag_ctx_line = line;
+    g_diag_ctx_col = col;
+}
+
+static int emit_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg, int pedantic_only) {
+    int as_error = g_warn_error || (pedantic_only && g_pedantic_errors);
+
+    if (pedantic_only) {
+        if (!g_pedantic) {
+            return 0;
+        }
+    } else if (!g_warn_all) {
+        return 0;
+    }
+
+    if (line == 0 && col == 0) {
+        line = g_diag_ctx_line;
+        col = g_diag_ctx_col;
+    }
+
+    if (line != 0) {
+        fprintf(stderr, "cc:%zu:%zu: warning: %s\n", line, col, msg);
+    } else {
+        fprintf(stderr, "cc: warning: %s\n", msg);
+    }
+
+    if (!as_error) {
+        return 0;
+    }
+
+    if (diag != NULL && diag->message[0] == '\0') {
+        diag->line = line;
+        diag->col = col;
+        snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    }
+    return -1;
+}
+
+static int emit_required_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg) {
+    if (line == 0 && col == 0) {
+        line = g_diag_ctx_line;
+        col = g_diag_ctx_col;
+    }
+    if (line != 0) {
+        fprintf(stderr, "cc:%zu:%zu: warning: %s\n", line, col, msg);
+    } else {
+        fprintf(stderr, "cc: warning: %s\n", msg);
+    }
+    if (!g_warn_error) {
+        return 0;
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        diag->line = line;
+        diag->col = col;
+        snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    }
+    return -1;
+}
+
+static int maybe_warn_assignment_condition(const cc_expr_t *cond, const char *where, cc_diag_t *diag) {
+    char buf[160];
+
+    if (cond == NULL || cond->kind != CC_EXPR_ASSIGN) {
+        return 0;
+    }
+
+    snprintf(buf, sizeof(buf), "assignment used as condition in %s", where);
+    return emit_warning(diag, cond->line, cond->col, buf, 0);
 }
 
 static int is_power_of_two_long(long v) {
@@ -52,6 +163,46 @@ static int validate_attr_section(const char *section, cc_diag_t *diag, const cha
         snprintf(diag->message, sizeof(diag->message), "%s requires a valid section name", what);
     }
     return -1;
+}
+
+static int attr_visibility_mask(void) {
+    return CC_ATTR_VIS_DEFAULT | CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
+}
+
+static int has_multiple_visibility_attrs(int flags) {
+    int v = flags & attr_visibility_mask();
+    int n = 0;
+    if ((v & CC_ATTR_VIS_DEFAULT) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_HIDDEN) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_PROTECTED) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_INTERNAL) != 0) {
+        n++;
+    }
+    return n > 1;
+}
+
+static int storage_class_count(int storage) {
+    int mask = storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN | CC_STORAGE_AUTO | CC_STORAGE_REGISTER);
+    int n = 0;
+    if ((mask & CC_STORAGE_STATIC) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_EXTERN) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_AUTO) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_REGISTER) != 0) {
+        n++;
+    }
+    return n;
 }
 
 static int names_find(char **names, size_t count, const char *name) {
@@ -85,7 +236,8 @@ static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, in
     return -1;
 }
 
-static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, int depth) {
+static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, long array_len,
+                     int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int depth) {
     var_entry_t *next;
     char *dup;
 
@@ -103,9 +255,287 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     (*vars)[*count].name = dup;
     (*vars)[*count].type = type;
     (*vars)[*count].struct_id = struct_id;
+    (*vars)[*count].array_len = array_len;
+    (*vars)[*count].array_ndim = array_ndim;
+    if (array_dims != NULL) {
+        memcpy((*vars)[*count].array_dims, array_dims, sizeof((*vars)[*count].array_dims));
+    } else {
+        memset((*vars)[*count].array_dims, 0, sizeof((*vars)[*count].array_dims));
+    }
     (*vars)[*count].depth = depth;
     (*count)++;
     return 0;
+}
+
+static int asm_operand_is_lvalue(const cc_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_IDENT) {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_valid_constraint_char(int ch) {
+    if (ch >= '0' && ch <= '9') {
+        return 1;
+    }
+    if (ch == '=' || ch == '+' || ch == '&' || ch == '%' || ch == '!' || ch == '*') {
+        return 1;
+    }
+    if (ch == 'r' || ch == 'm' || ch == 'i' || ch == 'g' || ch == 'q' || ch == 'a' || ch == 'b' || ch == 'c' ||
+        ch == 'd' || ch == 'S' || ch == 'D' || ch == 'f' || ch == 'x' || ch == 'X') {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_constraint_allows_memory(const char *c) {
+    return c != NULL && strchr(c, 'm') != NULL;
+}
+
+static int asm_constraint_allows_register(const char *c) {
+    if (c == NULL) {
+        return 0;
+    }
+    return strchr(c, 'r') != NULL || strchr(c, 'q') != NULL || strchr(c, 'a') != NULL || strchr(c, 'b') != NULL ||
+           strchr(c, 'c') != NULL || strchr(c, 'd') != NULL || strchr(c, 'S') != NULL || strchr(c, 'D') != NULL;
+}
+
+static int asm_constraint_is_imm(const char *c) {
+    if (c == NULL) {
+        return 0;
+    }
+    return strchr(c, 'i') != NULL;
+}
+
+static int asm_validate_constraint(const char *c, int is_output, size_t out_count, int pointer_size, cc_diag_t *diag) {
+    size_t i;
+    int has_class = 0;
+    if (c == NULL || c[0] == '\0') {
+        set_diag(diag, "asm operand constraint cannot be empty");
+        return -1;
+    }
+    if (!is_output && c[0] >= '0' && c[0] <= '9') {
+        long n = 0;
+        for (i = 0; c[i] >= '0' && c[i] <= '9'; ++i) {
+            n = n * 10 + (long)(c[i] - '0');
+        }
+        if (n < 0 || (size_t)n >= out_count) {
+            set_diag(diag, "asm matching constraint references invalid output index");
+            return -1;
+        }
+        if (c[i] != '\0') {
+            set_diag(diag, "asm matching constraint must be a pure numeric index");
+            return -1;
+        }
+        return 0;
+    }
+    if (is_output && strchr(c, '=') == NULL && strchr(c, '+') == NULL) {
+        set_diag(diag, "asm output constraint must contain '=' or '+'");
+        return -1;
+    }
+    for (i = 0; c[i] != '\0'; ++i) {
+        int ch = (unsigned char)c[i];
+        if (!asm_valid_constraint_char(ch)) {
+            set_diag(diag, "asm operand constraint contains unsupported character");
+            return -1;
+        }
+    }
+    if (strchr(c, 'q') != NULL && pointer_size != 4 && pointer_size != 8) {
+        set_diag(diag, "asm 'q' constraint requires x86 target");
+        return -1;
+    }
+    has_class = asm_constraint_allows_memory(c) || asm_constraint_allows_register(c) || asm_constraint_is_imm(c);
+    if (!has_class) {
+        set_diag(diag, "asm operand constraint missing operand class");
+        return -1;
+    }
+    return 0;
+}
+
+static int asm_find_named_operand(const cc_stmt_t *s, const char *name) {
+    size_t i;
+    for (i = 0; i < s->asm_output_count; ++i) {
+        if (s->asm_outputs[i].name != NULL && strcmp(s->asm_outputs[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    for (i = 0; i < s->asm_input_count; ++i) {
+        if (s->asm_inputs[i].name != NULL && strcmp(s->asm_inputs[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int asm_find_goto_label(const cc_stmt_t *s, const char *name) {
+    size_t i;
+    for (i = 0; i < s->asm_goto_label_count; ++i) {
+        if (s->asm_goto_labels[i] != NULL && strcmp(s->asm_goto_labels[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
+    size_t i = 0;
+    size_t total = s->asm_output_count + s->asm_input_count;
+    const char *t = s->asm_template;
+    if (t == NULL) {
+        set_diag(diag, "asm statement missing template");
+        return -1;
+    }
+    while (t[i] != '\0') {
+        if (t[i] != '%') {
+            i++;
+            continue;
+        }
+        i++;
+        if (t[i] == '%') {
+            i++;
+            continue;
+        }
+        if (t[i] >= '0' && t[i] <= '9') {
+            long n = 0;
+            while (t[i] >= '0' && t[i] <= '9') {
+                n = n * 10 + (long)(t[i] - '0');
+                i++;
+            }
+            if (n < 0 || (size_t)n >= total) {
+                set_diag(diag, "asm template operand index is out of range");
+                return -1;
+            }
+            continue;
+        }
+        if (t[i] == 'l') {
+            i++;
+            if (t[i] >= '0' && t[i] <= '9') {
+                long n = 0;
+                while (t[i] >= '0' && t[i] <= '9') {
+                    n = n * 10 + (long)(t[i] - '0');
+                    i++;
+                }
+                if (n < 0 || (size_t)n >= s->asm_goto_label_count) {
+                    set_diag(diag, "asm template goto-label index is out of range");
+                    return -1;
+                }
+                continue;
+            }
+            if (t[i] == '[') {
+                size_t b = ++i;
+                while (t[i] != '\0' && t[i] != ']') {
+                    i++;
+                }
+                if (t[i] != ']') {
+                    set_diag(diag, "asm template has unterminated goto label");
+                    return -1;
+                }
+                if (i == b) {
+                    set_diag(diag, "asm template has empty goto label");
+                    return -1;
+                }
+                {
+                    char *nm = (char *)malloc(i - b + 1);
+                    if (nm == NULL) {
+                        set_diag(diag, "out of memory validating asm template");
+                        return -1;
+                    }
+                    memcpy(nm, t + b, i - b);
+                    nm[i - b] = '\0';
+                    if (!asm_find_goto_label(s, nm)) {
+                        free(nm);
+                        set_diag(diag, "asm template references unknown goto label");
+                        return -1;
+                    }
+                    free(nm);
+                }
+                i++;
+                continue;
+            }
+            set_diag(diag, "asm template has malformed %l label reference");
+            return -1;
+        }
+        if (t[i] == '[') {
+            size_t b = ++i;
+            while (t[i] != '\0' && t[i] != ']') {
+                i++;
+            }
+            if (t[i] != ']') {
+                set_diag(diag, "asm template has unterminated named operand");
+                return -1;
+            }
+            if (i == b) {
+                set_diag(diag, "asm template has empty named operand");
+                return -1;
+            }
+            {
+                char *nm = (char *)malloc(i - b + 1);
+                if (nm == NULL) {
+                    set_diag(diag, "out of memory validating asm template");
+                    return -1;
+                }
+                memcpy(nm, t + b, i - b);
+                nm[i - b] = '\0';
+                if (!asm_find_named_operand(s, nm)) {
+                    free(nm);
+                    set_diag(diag, "asm template references unknown named operand");
+                    return -1;
+                }
+                free(nm);
+            }
+            i++;
+            continue;
+        }
+        set_diag(diag, "asm template has unsupported '%' reference");
+        return -1;
+    }
+    return 0;
+}
+
+static int vars_clone(var_entry_t **out, const var_entry_t *src, size_t count) {
+    size_t i;
+    var_entry_t *dst;
+
+    *out = NULL;
+    if (count == 0) {
+        return 0;
+    }
+    dst = (var_entry_t *)calloc(count, sizeof(*dst));
+    if (dst == NULL) {
+        return -1;
+    }
+    for (i = 0; i < count; ++i) {
+        dst[i] = src[i];
+        dst[i].name = NULL;
+        if (src[i].name != NULL) {
+            dst[i].name = (char *)malloc(strlen(src[i].name) + 1);
+            if (dst[i].name == NULL) {
+                size_t j;
+                for (j = 0; j < i; ++j) {
+                    free(dst[j].name);
+                }
+                free(dst);
+                return -1;
+            }
+            strcpy(dst[i].name, src[i].name);
+        }
+    }
+    *out = dst;
+    return 0;
+}
+
+static void vars_free(var_entry_t *vars, size_t count) {
+    size_t i;
+    if (vars == NULL) {
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        free(vars[i].name);
+    }
+    free(vars);
 }
 
 static void name_list_free(name_list_t *l) {
@@ -175,6 +605,20 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
         }
         return 0;
 
+    case CC_STMT_ASM:
+        for (i = 0; i < s->asm_goto_label_count; ++i) {
+            const char *name = s->asm_goto_labels[i];
+            if (name == NULL || name[0] == '\0') {
+                set_diag(diag, "malformed asm goto label");
+                return -1;
+            }
+            if (names_find(gotos->items, gotos->count, name) < 0 && name_list_push(gotos, name) != 0) {
+                set_diag(diag, "out of memory collecting asm goto targets");
+                return -1;
+            }
+        }
+        return 0;
+
     case CC_STMT_IF:
         if (collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag) != 0) {
             return -1;
@@ -207,12 +651,21 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
 
 static const cc_function_t *find_function(const cc_translation_unit_t *tu, const char *name) {
     size_t i;
+    const cc_function_t *best = NULL;
+    int best_score = -1;
     for (i = 0; i < tu->func_count; ++i) {
-        if (strcmp(tu->funcs[i].name, name) == 0) {
-            return &tu->funcs[i];
+        const cc_function_t *f = &tu->funcs[i];
+        int score;
+        if (strcmp(f->name, name) != 0) {
+            continue;
+        }
+        score = (f->has_prototype ? 2 : 0) + (f->has_body ? 1 : 0);
+        if (best == NULL || score > best_score) {
+            best = f;
+            best_score = score;
         }
     }
-    return NULL;
+    return best;
 }
 
 static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
@@ -226,6 +679,23 @@ static const cc_global_t *find_global(const cc_translation_unit_t *tu, const cha
         }
     }
     return NULL;
+}
+
+static int maybe_warn_deprecated_symbol(const cc_translation_unit_t *tu, const char *name, size_t line, size_t col,
+                                        cc_diag_t *diag) {
+    char buf[192];
+    const cc_function_t *f = find_function(tu, name);
+    const cc_global_t *g = find_global(tu, name);
+
+    if (f != NULL && (f->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+        snprintf(buf, sizeof(buf), "deprecated function used: %s", name != NULL ? name : "<anon>");
+        return emit_required_warning(diag, line, col, buf);
+    }
+    if (g != NULL && (g->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+        snprintf(buf, sizeof(buf), "deprecated object used: %s", name != NULL ? name : "<anon>");
+        return emit_required_warning(diag, line, col, buf);
+    }
+    return 0;
 }
 
 static const cc_struct_def_t *find_struct_def(const cc_translation_unit_t *tu, int struct_id) {
@@ -268,8 +738,16 @@ static int find_struct_member_index(const cc_translation_unit_t *tu, int struct_
 
 static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) {
     size_t i;
-    if (a->ret_type != b->ret_type || a->ret_struct_id != b->ret_struct_id || a->is_variadic != b->is_variadic ||
-        a->param_count != b->param_count) {
+    if (a->ret_type != b->ret_type || a->ret_struct_id != b->ret_struct_id) {
+        return 0;
+    }
+    if (!a->has_prototype || !b->has_prototype) {
+        if (a->is_variadic || b->is_variadic) {
+            return 0;
+        }
+        return 1;
+    }
+    if (a->is_variadic != b->is_variadic || a->param_count != b->param_count) {
         return 0;
     }
     for (i = 0; i < a->param_count; ++i) {
@@ -304,6 +782,52 @@ static int is_numeric_type(cc_type_t t) {
 
 static int is_scalar_type(cc_type_t t) {
     return is_numeric_type(t) || is_pointer_type(t);
+}
+
+static int is_array_object_type(cc_type_t t, long array_len) {
+    return is_pointer_type(t) && array_len >= 0;
+}
+
+static void expr_clear_array_meta(cc_expr_t *e) {
+    if (e == NULL) {
+        return;
+    }
+    e->array_ndim = 0;
+    memset(e->array_dims, 0, sizeof(e->array_dims));
+}
+
+static void expr_set_array_meta_decl(cc_expr_t *e, long array_len, int array_ndim,
+                                     const long array_dims[CC_MAX_ARRAY_DIMS]) {
+    int i;
+    expr_clear_array_meta(e);
+    if (e == NULL || array_ndim <= 0 || array_dims == NULL) {
+        return;
+    }
+    if (array_len >= 0) {
+        e->array_ndim = array_ndim;
+        memcpy(e->array_dims, array_dims, sizeof(e->array_dims));
+        return;
+    }
+    if (array_ndim + 1 > CC_MAX_ARRAY_DIMS) {
+        return;
+    }
+    e->array_ndim = array_ndim + 1;
+    e->array_dims[0] = 0;
+    for (i = 0; i < array_ndim; ++i) {
+        e->array_dims[i + 1] = array_dims[i];
+    }
+}
+
+static void expr_copy_array_meta(cc_expr_t *dst, const cc_expr_t *src) {
+    if (dst == NULL) {
+        return;
+    }
+    if (src == NULL) {
+        expr_clear_array_meta(dst);
+        return;
+    }
+    dst->array_ndim = src->array_ndim;
+    memcpy(dst->array_dims, src->array_dims, sizeof(dst->array_dims));
 }
 
 static cc_type_t ptr_of_type(cc_type_t t) {
@@ -551,6 +1075,27 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
     return 0;
 }
 
+static const cc_struct_member_t *find_union_cast_member(const cc_translation_unit_t *tu, int struct_id,
+                                                        const cc_expr_t *src_expr) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    if (tu == NULL || src_expr == NULL) {
+        return NULL;
+    }
+    sd = find_struct_def(tu, struct_id);
+    if (sd == NULL || !sd->complete || !sd->is_union) {
+        return NULL;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (can_convert(m->type, src_expr->value_type) ||
+            (is_pointer_type(m->type) && is_integral_type(src_expr->value_type) && is_null_ptr_constant(src_expr))) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
 static cc_type_t integral_promo_type(cc_type_t t) {
     if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
         t == CC_TYPE_USHORT) {
@@ -633,7 +1178,18 @@ typedef enum {
     BUILTIN_EXPECT,
     BUILTIN_CONSTANT_P,
     BUILTIN_TRAP,
+    BUILTIN_UNREACHABLE,
+    BUILTIN_ASSUME,
+    BUILTIN_ASSUME_ALIGNED,
+    BUILTIN_UNPREDICTABLE,
     BUILTIN_CTZ,
+    BUILTIN_ADD_OVERFLOW,
+    BUILTIN_SUB_OVERFLOW,
+    BUILTIN_MUL_OVERFLOW,
+    BUILTIN_OBJECT_SIZE,
+    BUILTIN_MEMCPY_CHK,
+    BUILTIN_MEMMOVE_CHK,
+    BUILTIN_MEMSET_CHK,
     BUILTIN_SYNC_FETCH_ADD,
     BUILTIN_SYNC_FETCH_SUB,
     BUILTIN_SYNC_SUB_AND_FETCH,
@@ -673,8 +1229,41 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_trap") == 0) {
         return BUILTIN_TRAP;
     }
+    if (strcmp(name, "__builtin_unreachable") == 0) {
+        return BUILTIN_UNREACHABLE;
+    }
+    if (strcmp(name, "__builtin_assume") == 0) {
+        return BUILTIN_ASSUME;
+    }
+    if (strcmp(name, "__builtin_assume_aligned") == 0) {
+        return BUILTIN_ASSUME_ALIGNED;
+    }
+    if (strcmp(name, "__builtin_unpredictable") == 0) {
+        return BUILTIN_UNPREDICTABLE;
+    }
     if (strcmp(name, "__builtin_ctz") == 0) {
         return BUILTIN_CTZ;
+    }
+    if (strcmp(name, "__builtin_add_overflow") == 0) {
+        return BUILTIN_ADD_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_sub_overflow") == 0) {
+        return BUILTIN_SUB_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_mul_overflow") == 0) {
+        return BUILTIN_MUL_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_object_size") == 0) {
+        return BUILTIN_OBJECT_SIZE;
+    }
+    if (strcmp(name, "__builtin___memcpy_chk") == 0) {
+        return BUILTIN_MEMCPY_CHK;
+    }
+    if (strcmp(name, "__builtin___memmove_chk") == 0) {
+        return BUILTIN_MEMMOVE_CHK;
+    }
+    if (strcmp(name, "__builtin___memset_chk") == 0) {
+        return BUILTIN_MEMSET_CHK;
     }
     if (strcmp(name, "__sync_fetch_and_add") == 0) {
         return BUILTIN_SYNC_FETCH_ADD;
@@ -902,6 +1491,10 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
             return -1;
         }
         if (a != 0) {
+            if (e->rhs == NULL) {
+                *out = a;
+                return 0;
+            }
             return eval_const_int_expr(tu, e->rhs, out);
         }
         return eval_const_int_expr(tu, e->third, out);
@@ -911,14 +1504,35 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
     }
 }
 
+static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
+                                    var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag);
+static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
+static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
+                      cc_type_t fn_ret_type, int fn_attr_flags, int loop_depth, int switch_depth, int *saw_return,
+                      cc_diag_t *diag);
+
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
     size_t i;
+
+    if (e != NULL) {
+        set_diag_context(e->line, e->col);
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        if (e != NULL && (e->line != 0 || e->col != 0)) {
+            diag->line = e->line;
+            diag->col = e->col;
+        } else if (g_diag_ctx_line != 0 || g_diag_ctx_col != 0) {
+            diag->line = g_diag_ctx_line;
+            diag->col = g_diag_ctx_col;
+        }
+    }
 
     if (e == NULL) {
         set_diag(diag, "null expression in semantic analysis");
         return -1;
     }
+    expr_clear_array_meta(e);
 
     switch (e->kind) {
     case CC_EXPR_INT:
@@ -943,6 +1557,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (idx >= 0) {
             e->value_type = vars[idx].type;
             e->struct_id = vars[idx].struct_id;
+            expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
             return 0;
         }
         if (e->ident != NULL && strcmp(e->ident, "__func__") == 0) {
@@ -955,17 +1570,25 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (g != NULL) {
                 e->value_type = g->type;
                 e->struct_id = g->type_struct_id;
+                expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
+                if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
+                    return -1;
+                }
                 return 0;
             }
             if (find_function(tu, e->ident) != NULL) {
                 e->value_type = CC_TYPE_PTR_VOID;
                 e->struct_id = -1;
+                if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
+                    return -1;
+                }
                 return 0;
             }
-            /* Fallback for unresolved extern symbols inside function scope. */
-            e->value_type = CC_TYPE_PTR_VOID;
-            e->struct_id = -1;
-            return 0;
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "use of undeclared identifier: %s",
+                         e->ident != NULL ? e->ident : "<null>");
+            }
+            return -1;
         }
     }
 
@@ -1014,6 +1637,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         e->value_type = m->type;
         e->struct_id = m->type_struct_id;
         e->member_offset = m->offset;
+        expr_set_array_meta_decl(e, m->array_len, m->array_ndim, m->array_dims);
         return 0;
     }
 
@@ -1024,8 +1648,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
+        e->struct_id = -1;
         if (e->op == CC_BIN_COMMA) {
             e->value_type = e->rhs->value_type;
+            e->struct_id = e->rhs->struct_id;
+            expr_copy_array_meta(e, e->rhs);
             return 0;
         }
         if (is_logical_op(e->op)) {
@@ -1041,7 +1668,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "shift operators require integer operands");
                 return -1;
             }
-            e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
+            e->value_type = integral_promo_type(e->lhs->value_type);
             if (e->value_type == CC_TYPE_VOID) {
                 set_diag(diag, "void expression used in arithmetic operation");
                 return -1;
@@ -1118,11 +1745,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type)) {
                 e->value_type = e->lhs->value_type;
                 e->struct_id = e->lhs->struct_id;
+                expr_copy_array_meta(e, e->lhs);
                 return 0;
             }
             if (e->op == CC_BIN_ADD && is_integral_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
                 e->value_type = e->rhs->value_type;
                 e->struct_id = e->rhs->struct_id;
+                expr_copy_array_meta(e, e->rhs);
                 return 0;
             }
             if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
@@ -1157,6 +1786,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         builtin_kind_t bk = builtin_kind(e->ident);
         int bswap_bits = builtin_bswap_bits(e->ident);
         cc_type_t elem_type;
+        cc_type_t indirect_callee_type = CC_TYPE_VOID;
+        int indirect_callee_struct_id = -1;
         if (e->ident != NULL) {
             callee = find_function(tu, e->ident);
         }
@@ -1282,6 +1913,70 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = -1;
             return 0;
         }
+        if (bk == BUILTIN_UNREACHABLE) {
+            if (e->arg_count != 0) {
+                set_diag(diag, "__builtin_unreachable expects exactly 0 arguments");
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ASSUME) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "__builtin_assume expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_scalar_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_assume argument must be scalar");
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ASSUME_ALIGNED) {
+            if (e->arg_count < 2 || e->arg_count > 3) {
+                set_diag(diag, "__builtin_assume_aligned expects 2 or 3 arguments");
+                return -1;
+            }
+            for (i = 0; i < e->arg_count; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!is_pointer_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
+                return -1;
+            }
+            if (!is_integral_type(e->args[1]->value_type) ||
+                (e->arg_count == 3 && !is_integral_type(e->args[2]->value_type))) {
+                set_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
+                return -1;
+            }
+            e->value_type = e->args[0]->value_type;
+            e->struct_id = e->args[0]->struct_id;
+            return 0;
+        }
+        if (bk == BUILTIN_UNPREDICTABLE) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "__builtin_unpredictable expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_scalar_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_unpredictable argument must be scalar");
+                return -1;
+            }
+            e->value_type = e->args[0]->value_type;
+            e->struct_id = e->args[0]->struct_id;
+            return 0;
+        }
         if (bk == BUILTIN_CTZ) {
             if (e->arg_count != 1) {
                 set_diag(diag, "__builtin_ctz expects exactly 1 argument");
@@ -1296,6 +1991,69 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
+            cc_type_t out_elem;
+            if (e->arg_count != 3) {
+                set_diag(diag, "__builtin_*_overflow expects exactly 3 arguments");
+                return -1;
+            }
+            for (i = 0; i < 3; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!is_pointer_type(e->args[2]->value_type)) {
+                set_diag(diag, "overflow builtin third argument must be a pointer");
+                return -1;
+            }
+            out_elem = ptr_base_type(e->args[2]->value_type);
+            if (!is_integral_type(out_elem)) {
+                set_diag(diag, "overflow builtin destination must point to an integer type");
+                return -1;
+            }
+            if (!is_integral_type(e->args[0]->value_type) || !is_integral_type(e->args[1]->value_type)) {
+                set_diag(diag, "overflow builtin operands must be integers");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_OBJECT_SIZE) {
+            if (e->arg_count != 2) {
+                set_diag(diag, "__builtin_object_size expects exactly 2 arguments");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+                check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_integral_type(e->args[1]->value_type)) {
+                set_diag(diag, "__builtin_object_size second argument must be integral");
+                return -1;
+            }
+            e->value_type = CC_TYPE_ULONG_LONG;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_MEMCPY_CHK || bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
+            if (e->arg_count < 4) {
+                set_diag(diag, "__builtin___mem*_chk has wrong argument count");
+                return -1;
+            }
+            for (i = 0; i < e->arg_count; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!is_pointer_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin___mem*_chk first argument must be a pointer");
+                return -1;
+            }
+            e->value_type = e->args[0]->value_type;
+            e->struct_id = e->args[0]->struct_id;
             return 0;
         }
         if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
@@ -1464,19 +2222,25 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->lhs->value_type)) {
+            if (is_pointer_type(e->lhs->value_type)) {
+                indirect_callee_type = e->lhs->value_type;
+                indirect_callee_struct_id = e->lhs->struct_id;
+            } else if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL && is_pointer_type(e->lhs->lhs->value_type)) {
+                indirect_callee_type = e->lhs->lhs->value_type;
+                indirect_callee_struct_id = e->lhs->lhs->struct_id;
+            } else {
                 set_diag(diag, "call target must be a function pointer");
                 return -1;
             }
         }
-        if (callee != NULL && !callee->is_variadic && e->arg_count != callee->param_count) {
+        if (callee != NULL && callee->has_prototype && !callee->is_variadic && e->arg_count != callee->param_count) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "call to %s has %zu args but %zu required", e->ident,
                          e->arg_count, callee->param_count);
             }
             return -1;
         }
-        if (callee != NULL && callee->is_variadic && e->arg_count < callee->param_count) {
+        if (callee != NULL && callee->has_prototype && callee->is_variadic && e->arg_count < callee->param_count) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),
                          "variadic call to %s has %zu args but needs at least %zu", e->ident, e->arg_count,
@@ -1488,7 +2252,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (callee != NULL && i < callee->param_count && !can_convert(callee->params[i].type, e->args[i]->value_type) &&
+            if (callee != NULL && callee->has_prototype && i < callee->param_count &&
+                !can_convert(callee->params[i].type, e->args[i]->value_type) &&
                 !(is_pointer_type(callee->params[i].type) && is_integral_type(e->args[i]->value_type) &&
                   is_null_ptr_constant(e->args[i]))) {
                 if (diag != NULL && diag->message[0] == '\0') {
@@ -1498,18 +2263,67 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         }
+        if (callee != NULL && callee->has_prototype && (callee->attr_flags & CC_ATTR_NONNULL) != 0) {
+            for (i = 0; i < e->arg_count && i < callee->param_count; ++i) {
+                if (!is_pointer_type(callee->params[i].type)) {
+                    continue;
+                }
+                if (is_null_ptr_constant(e->args[i])) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "nonnull argument %zu in call to %s is null",
+                                 i + 1, e->ident != NULL ? e->ident : "<indirect>");
+                    }
+                    return -1;
+                }
+            }
+        }
         if (callee != NULL) {
             e->value_type = callee->ret_type;
             e->struct_id = callee->ret_struct_id;
+            if ((callee->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+                char buf[192];
+                snprintf(buf, sizeof(buf), "deprecated function used: %s", callee->name != NULL ? callee->name : "<anon>");
+                if (emit_required_warning(diag, e->line, e->col, buf) != 0) {
+                    return -1;
+                }
+            }
         } else if (e->ident != NULL) {
+            int idx = vars_find_visible(vars, var_count, e->ident, depth);
+            if (idx >= 0) {
+                if (!is_pointer_type(vars[idx].type)) {
+                    set_diag(diag, "call target must be a function pointer");
+                    return -1;
+                }
+                e->value_type = ptr_base_type(vars[idx].type);
+                e->struct_id = vars[idx].struct_id;
+                return 0;
+            } else {
+                const cc_global_t *g = find_global(tu, e->ident);
+                if (g != NULL) {
+                    if (!is_pointer_type(g->type)) {
+                        set_diag(diag, "call target must be a function pointer");
+                        return -1;
+                    }
+                    e->value_type = ptr_base_type(g->type);
+                    e->struct_id = g->type_struct_id;
+                    return 0;
+                }
+            }
+            if (!g_allow_implicit_funcdecl) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "implicit function declaration is not allowed in this mode: %s", e->ident);
+                }
+                return -1;
+            }
             /* C89-style fallback for undeclared functions: assume extern int f(...). */
             e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
         } else {
-            e->value_type = ptr_base_type(e->lhs->value_type);
+            e->value_type = ptr_base_type(indirect_callee_type);
             e->struct_id = -1;
-            if (e->lhs->struct_id >= 0 && (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
-                e->struct_id = e->lhs->struct_id;
+            if (indirect_callee_struct_id >= 0 && (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
+                e->struct_id = indirect_callee_struct_id;
             }
         }
         return 0;
@@ -1518,12 +2332,14 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     case CC_EXPR_ASSIGN: {
         cc_type_t dst_type;
         int dst_struct_id = -1;
+        int dst_is_array_object = 0;
         int assign_ok;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
                 dst_type = vars[idx].type;
                 dst_struct_id = vars[idx].struct_id;
+                dst_is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
                 if (g == NULL) {
@@ -1535,6 +2351,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 dst_type = g->type;
                 dst_struct_id = g->type_struct_id;
+                dst_is_array_object = is_array_object_type(g->type, g->array_len);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -1544,6 +2361,17 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             dst_struct_id = e->lhs->struct_id;
         } else {
             set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
+            return -1;
+        }
+        if (dst_is_array_object) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                if (e->ident != NULL) {
+                    snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue: %s",
+                             e->ident);
+                } else {
+                    snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue");
+                }
+            }
             return -1;
         }
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
@@ -1573,6 +2401,19 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         e->value_type = dst_type;
         e->struct_id = dst_struct_id;
+        if (e->ident != NULL) {
+            int idx = vars_find_visible(vars, var_count, e->ident, depth);
+            if (idx >= 0) {
+                expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
+            } else {
+                const cc_global_t *g = find_global(tu, e->ident);
+                if (g != NULL) {
+                    expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
+                }
+            }
+        } else {
+            expr_copy_array_meta(e, e->lhs);
+        }
         return 0;
     }
 
@@ -1591,10 +2432,16 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             e->struct_id = e->lhs->lhs != NULL ? e->lhs->lhs->struct_id : -1;
+            expr_copy_array_meta(e, e->lhs->lhs);
             return 0;
         }
         if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL && find_function(tu, e->lhs->ident) != NULL) {
             e->value_type = e->lhs->value_type;
+            e->struct_id = e->lhs->struct_id;
+            return 0;
+        }
+        if (e->lhs->kind == CC_EXPR_CAST && e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0) {
+            e->value_type = CC_TYPE_PTR_VOID;
             e->struct_id = e->lhs->struct_id;
             return 0;
         }
@@ -1641,6 +2488,19 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (e->lhs->struct_id >= 0 && (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
             e->struct_id = e->lhs->struct_id;
         }
+        if (e->lhs->array_ndim > 0 && is_pointer_type(e->value_type)) {
+            int i;
+            e->array_ndim = e->lhs->array_ndim - 1;
+            if (e->array_ndim < 0) {
+                e->array_ndim = 0;
+            }
+            for (i = 0; i < e->array_ndim; ++i) {
+                e->array_dims[i] = e->lhs->array_dims[i + 1];
+            }
+            for (; i < CC_MAX_ARRAY_DIMS; ++i) {
+                e->array_dims[i] = 0;
+            }
+        }
         if (e->value_type == CC_TYPE_VOID) {
             if (e->struct_id >= 0) {
                 return 0;
@@ -1652,10 +2512,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 
     case CC_EXPR_UPDATE: {
         cc_type_t t;
+        int is_array_object = 0;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
                 t = vars[idx].type;
+                is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
                 if (g == NULL) {
@@ -1666,6 +2528,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
                 t = g->type;
+                is_array_object = is_array_object_type(g->type, g->array_len);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -1674,6 +2537,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             t = e->lhs->value_type;
         } else {
             set_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
+            return -1;
+        }
+        if (is_array_object) {
+            set_diag(diag, "array object is not a modifiable lvalue for ++/--");
             return -1;
         }
         if (is_pointer_type(t)) {
@@ -1692,10 +2559,46 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "malformed cast expression");
             return -1;
         }
+        if (e->lhs->kind == CC_EXPR_INIT_LIST) {
+            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
+                if (check_struct_initializer(tu, "<compound-literal>", e->aux_struct_id, e->lhs, vars, var_count,
+                                             depth, diag) != 0) {
+                    return -1;
+                }
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = e->aux_struct_id;
+                return 0;
+            }
+            e->lhs = unwrap_scalar_initializer_expr(e->lhs, diag);
+            if (e->lhs == NULL) {
+                return -1;
+            }
+        }
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (e->aux_type == CC_TYPE_VOID) {
+            if (e->aux_struct_id >= 0) {
+                const cc_struct_def_t *sd = find_struct_def(tu, e->aux_struct_id);
+                if (sd == NULL || !sd->complete) {
+                    set_diag(diag, "cast targets unknown aggregate type");
+                    return -1;
+                }
+                if (sd->is_union && e->lhs->kind != CC_EXPR_INIT_LIST) {
+                    const cc_struct_member_t *m = find_union_cast_member(tu, e->aux_struct_id, e->lhs);
+                    if (m == NULL) {
+                        set_diag(diag, "GNU union cast has no compatible destination member");
+                        return -1;
+                    }
+                    e->member_offset = m->offset;
+                    e->value_type = CC_TYPE_VOID;
+                    e->struct_id = e->aux_struct_id;
+                    return 0;
+                }
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = e->aux_struct_id;
+                return 0;
+            }
             e->value_type = CC_TYPE_VOID;
             e->struct_id = -1;
             return 0;
@@ -1709,6 +2612,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             (is_pointer_type(e->lhs->value_type) || is_integral_type(e->lhs->value_type))) {
             e->value_type = e->aux_type;
             e->struct_id = e->aux_struct_id;
+            if (is_pointer_type(e->lhs->value_type)) {
+                expr_copy_array_meta(e, e->lhs);
+            }
             return 0;
         }
         if (is_integral_type(e->aux_type) && is_pointer_type(e->lhs->value_type)) {
@@ -1753,13 +2659,50 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         return 0;
 
+    case CC_EXPR_STMT:
+        {
+            var_entry_t *lvars = NULL;
+            size_t lcount = var_count;
+            int saw_return = 0;
+            size_t j;
+            if (emit_warning(diag, e->line, e->col, "statement expression is a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
+            if (vars_clone(&lvars, vars, var_count) != 0) {
+                set_diag(diag, "out of memory cloning scope for statement expression");
+                return -1;
+            }
+            for (j = 0; j < e->stmt_expr_count; ++j) {
+                if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, CC_TYPE_INT, 0, 0, 0,
+                               &saw_return, diag) != 0) {
+                    vars_free(lvars, lcount);
+                    return -1;
+                }
+            }
+            if (e->stmt_expr_count > 0) {
+                const cc_stmt_t *last = &e->stmt_expr_stmts[e->stmt_expr_count - 1];
+                if (last->kind == CC_STMT_EXPR && last->expr != NULL) {
+                    e->value_type = last->expr->value_type;
+                    e->struct_id = last->expr->struct_id;
+                } else {
+                    e->value_type = CC_TYPE_VOID;
+                    e->struct_id = -1;
+                }
+            } else {
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = -1;
+            }
+            vars_free(lvars, lcount);
+            return 0;
+        }
+
     case CC_EXPR_TERNARY:
-        if (e->lhs == NULL || e->rhs == NULL || e->third == NULL) {
+        if (e->lhs == NULL || e->third == NULL) {
             set_diag(diag, "malformed conditional expression");
             return -1;
         }
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
-            check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0 ||
+            (e->rhs != NULL && check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) ||
             check_expr(tu, e->third, vars, var_count, depth, diag) != 0) {
             return -1;
         }
@@ -1767,9 +2710,70 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "conditional expression condition cannot be void");
             return -1;
         }
+        if (e->rhs == NULL) {
+            if (emit_warning(diag, e->line, e->col, "omitted middle operand in ?: is a GNU extension (non-C99)", 1) !=
+                0) {
+                return -1;
+            }
+            if (e->lhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
+                if (e->lhs->value_type == CC_TYPE_VOID && e->third->value_type == CC_TYPE_VOID) {
+                    e->value_type = CC_TYPE_VOID;
+                    e->struct_id = -1;
+                    return 0;
+                }
+                if (emit_warning(diag, e->line, e->col,
+                                 "conditional expression with one void arm is a GNU extension (non-C99)", 1) != 0) {
+                    return -1;
+                }
+                if (e->lhs->value_type == CC_TYPE_VOID) {
+                    e->value_type = e->third->value_type;
+                    e->struct_id = e->third->struct_id;
+                } else {
+                    e->value_type = e->lhs->value_type;
+                    e->struct_id = e->lhs->struct_id;
+                }
+                return 0;
+            }
+            if (is_pointer_type(e->lhs->value_type) && is_pointer_type(e->third->value_type)) {
+                if (can_convert(e->lhs->value_type, e->third->value_type)) {
+                    e->value_type = e->lhs->value_type;
+                    e->struct_id = e->lhs->struct_id;
+                    return 0;
+                }
+                if (can_convert(e->third->value_type, e->lhs->value_type)) {
+                    e->value_type = e->third->value_type;
+                    e->struct_id = e->third->struct_id;
+                    return 0;
+                }
+                set_diag(diag, "incompatible pointer types in conditional expression");
+                return -1;
+            }
+            e->value_type = common_arith_type(e->lhs->value_type, e->third->value_type);
+            if (e->value_type == CC_TYPE_VOID) {
+                set_diag(diag, "incompatible types in conditional expression");
+                return -1;
+            }
+            e->struct_id = -1;
+            return 0;
+        }
         if (e->rhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
-            set_diag(diag, "conditional expression arms cannot be void");
-            return -1;
+            if (e->rhs->value_type == CC_TYPE_VOID && e->third->value_type == CC_TYPE_VOID) {
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = -1;
+                return 0;
+            }
+            if (emit_warning(diag, e->line, e->col,
+                             "conditional expression with one void arm is a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
+            if (e->rhs->value_type == CC_TYPE_VOID) {
+                e->value_type = e->third->value_type;
+                e->struct_id = e->third->struct_id;
+            } else {
+                e->value_type = e->rhs->value_type;
+                e->struct_id = e->rhs->struct_id;
+            }
+            return 0;
         }
         if (is_pointer_type(e->rhs->value_type) && is_pointer_type(e->third->value_type)) {
             if (can_convert(e->rhs->value_type, e->third->value_type)) {
@@ -1811,6 +2815,80 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     }
 }
 
+static int is_zero_initializer_expr(const cc_expr_t *e) {
+    size_t i;
+    if (e == NULL) {
+        return 1;
+    }
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        return e->int_val == 0;
+    case CC_EXPR_FLOAT:
+        return e->float_val == 0.0;
+    case CC_EXPR_CAST:
+        return is_zero_initializer_expr(e->lhs);
+    case CC_EXPR_MEMBER:
+        if (e->lhs == NULL && e->rhs != NULL) {
+            return is_zero_initializer_expr(e->rhs);
+        }
+        return 0;
+    case CC_EXPR_INIT_LIST:
+        for (i = 0; i < e->arg_count; ++i) {
+            if (!is_zero_initializer_expr(e->args[i])) {
+                return 0;
+            }
+        }
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag) {
+    cc_expr_t *item;
+    if (init == NULL) {
+        set_diag(diag, "initializer list is empty");
+        return NULL;
+    }
+    if (init->kind != CC_EXPR_INIT_LIST) {
+        return init;
+    }
+    if (init->arg_count == 0) {
+        if (g_std_c23) {
+            init->kind = CC_EXPR_INT;
+            init->int_val = 0;
+            init->value_type = CC_TYPE_INT;
+            init->struct_id = -1;
+            return init;
+        }
+        set_diag(diag, "initializer list is empty");
+        return NULL;
+    }
+    if (init->arg_count > 1) {
+        set_diag(diag, "too many elements in scalar initializer");
+        return NULL;
+    }
+    item = init->args[0];
+    if (item != NULL && item->kind == CC_EXPR_MEMBER) {
+        set_diag(diag, "designated initializer is invalid for scalar type");
+        return NULL;
+    }
+    return item;
+}
+
+static size_t struct_next_init_member(const cc_struct_def_t *sd, size_t member_idx) {
+    size_t next = member_idx + 1;
+    long off;
+    if (sd == NULL || member_idx >= sd->member_count) {
+        return next;
+    }
+    off = sd->members[member_idx].offset;
+    while (next < sd->member_count && sd->members[next].offset == off) {
+        next++;
+    }
+    return next;
+}
+
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
                                     var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag) {
     size_t i;
@@ -1829,7 +2907,15 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         return -1;
     }
     sd = &tu->structs[struct_id];
-    if (init->arg_count > sd->member_count) {
+    if (sd->is_union) {
+        if (init->arg_count > 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "too many initializers for union %s",
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
+    } else if (init->arg_count > sd->member_count) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "too many initializers for struct %s",
                      name != NULL ? name : "<anon>");
@@ -1864,12 +2950,25 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         }
 
         m = &sd->members[member_idx];
-        next_member = member_idx + 1;
+        if (!sd->is_union) {
+            next_member = struct_next_init_member(sd, member_idx);
+        }
+        if (sd->has_flexible_array && member_idx + 1 == sd->member_count && m->size == 0) {
+            if (!is_zero_initializer_expr(item)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "flexible array member cannot be initialized in struct %s",
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+            continue;
+        }
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
             if (item->kind != CC_EXPR_INIT_LIST) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message),
-                             "member initializer %zu for struct %s must use braces", i,
+                             "member initializer %zu for aggregate %s must use braces", i,
                              name != NULL ? name : "<anon>");
                 }
                 return -1;
@@ -1973,20 +3072,86 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                       cc_diag_t *diag) {
     size_t i;
 
+    if (s != NULL) {
+        set_diag_context(s->line, s->col);
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        if (s != NULL && (s->line != 0 || s->col != 0)) {
+            diag->line = s->line;
+            diag->col = s->col;
+        } else if (g_diag_ctx_line != 0 || g_diag_ctx_col != 0) {
+            diag->line = g_diag_ctx_line;
+            diag->col = g_diag_ctx_col;
+        }
+    }
+    if (s != NULL && (s->attr_flags & CC_ATTR_FALLTHROUGH) != 0 && s->kind != CC_STMT_EXPR) {
+        set_diag(diag, "fallthrough attribute requires an empty statement");
+        return -1;
+    }
+
     switch (s->kind) {
     case CC_STMT_DECL:
         {
             cc_type_t init_type = s->type;
+            int sc_count = storage_class_count(s->storage);
+            int fn_only_attrs = CC_ATTR_ALWAYS_INLINE | CC_ATTR_NOINLINE | CC_ATTR_HOT | CC_ATTR_COLD |
+                                CC_ATTR_FORMAT | CC_ATTR_NONNULL | CC_ATTR_MALLOC_FN | CC_ATTR_ALIAS |
+                                CC_ATTR_FLATTEN | CC_ATTR_TARGET;
             if ((s->attr_flags & CC_ATTR_NORETURN) != 0) {
                 set_diag(diag, "noreturn attribute is only valid on functions");
+                return -1;
+            }
+            if ((s->attr_flags & fn_only_attrs) != 0) {
+                set_diag(diag, "function-only attribute used on local declaration");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_WEAK) != 0) {
+                set_diag(diag, "weak attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
+            if ((s->attr_flags & attr_visibility_mask()) != 0) {
+                set_diag(diag, "visibility attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_ALIAS) != 0) {
+                set_diag(diag, "alias attribute is only supported on file-scope objects/functions");
                 return -1;
             }
             if ((s->attr_flags & CC_ATTR_SECTION) != 0) {
                 set_diag(diag, "section attribute is only supported on file-scope objects/functions");
                 return -1;
             }
+            if (has_multiple_visibility_attrs(s->attr_flags)) {
+                set_diag(diag, "conflicting visibility attributes on local declaration");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 && (s->attr_flags & CC_ATTR_NOINLINE) != 0) {
+                set_diag(diag, "conflicting always_inline/noinline attributes");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_HOT) != 0 && (s->attr_flags & CC_ATTR_COLD) != 0) {
+                set_diag(diag, "conflicting hot/cold attributes");
+                return -1;
+            }
             if ((s->attr_flags & CC_ATTR_ALIGNED) != 0 &&
                 validate_attr_align(s->attr_align, diag, "aligned attribute on local declaration") != 0) {
+                return -1;
+            }
+            if (sc_count > 1) {
+                set_diag(diag, "multiple storage-class specifiers in local declaration");
+                return -1;
+            }
+            if ((s->storage & CC_STORAGE_INLINE) != 0) {
+                set_diag(diag, "inline is only valid on function declarations");
+                return -1;
+            }
+            if ((s->storage & CC_STORAGE_THREAD_LOCAL) != 0 &&
+                (s->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0) {
+                set_diag(diag, "thread_local local declaration requires static or extern storage");
+                return -1;
+            }
+            if ((s->storage & CC_STORAGE_EXTERN) != 0 && s->expr != NULL) {
+                set_diag(diag, "extern local declaration cannot have an initializer");
                 return -1;
             }
             if (s->array_len >= 0 && is_pointer_type(s->type)) {
@@ -2000,7 +3165,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "duplicate local/parameter name");
                 return -1;
             }
-            if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, depth) != 0) {
+            if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
+                          s->array_dims, depth) != 0) {
                 set_diag(diag, "out of memory adding local variable");
                 return -1;
             }
@@ -2016,6 +3182,11 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         }
                         if (s->array_len == 0 && inferred_len > 0) {
                             s->array_len = inferred_len;
+                            (*vars)[*var_count - 1].array_len = inferred_len;
+                            if (s->array_ndim > 0 && s->array_dims[0] == 0) {
+                                s->array_dims[0] = inferred_len;
+                                (*vars)[*var_count - 1].array_dims[0] = inferred_len;
+                            }
                         }
                     } else if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
                         if (check_struct_initializer(tu, s->decl_name, s->type_struct_id, s->expr, *vars, *var_count,
@@ -2025,14 +3196,29 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             return -1;
                         }
                     } else {
-                        if (diag != NULL && diag->message[0] == '\0') {
-                            snprintf(diag->message, sizeof(diag->message),
-                                     "initializer list is unsupported for variable '%s'",
-                                     s->decl_name != NULL ? s->decl_name : "<anon>");
+                        cc_expr_t *scalar_init = unwrap_scalar_initializer_expr(s->expr, diag);
+                        if (scalar_init == NULL) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
                         }
-                        free((*vars)[*var_count - 1].name);
-                        (*var_count)--;
-                        return -1;
+                        if (check_expr(tu, scalar_init, *vars, *var_count, depth, diag) != 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        if (!can_convert(init_type, scalar_init->value_type) &&
+                            !(is_pointer_type(init_type) && is_integral_type(scalar_init->value_type) &&
+                              is_null_ptr_constant(scalar_init))) {
+                            if (diag != NULL && diag->message[0] == '\0') {
+                                snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
+                                         s->decl_name != NULL ? s->decl_name : "<anon>");
+                            }
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        s->expr = scalar_init;
                     }
                 } else {
                     if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
@@ -2059,13 +3245,110 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
 
     case CC_STMT_EXPR:
+        if ((s->attr_flags & CC_ATTR_FALLTHROUGH) != 0) {
+            if (s->expr != NULL) {
+                set_diag(diag, "fallthrough attribute requires an empty statement");
+                return -1;
+            }
+            if (switch_depth <= 0) {
+                set_diag(diag, "fallthrough attribute is only valid in switch statements");
+                return -1;
+            }
+            return 0;
+        }
         if (s->expr == NULL) {
             return 0;
         }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
+        if (!(s->expr->kind == CC_EXPR_CAST && s->expr->aux_type == CC_TYPE_VOID)) {
+            const cc_expr_t *ce = s->expr;
+            if (ce->kind == CC_EXPR_CALL && ce->ident != NULL) {
+                const cc_function_t *f = find_function(tu, ce->ident);
+                if (f != NULL && (f->attr_flags & CC_ATTR_NODISCARD) != 0) {
+                    char buf[192];
+                    snprintf(buf, sizeof(buf), "ignoring nodiscard return value from %s",
+                             f->name != NULL ? f->name : "<anon>");
+                    if (emit_required_warning(diag, ce->line, ce->col, buf) != 0) {
+                        return -1;
+                    }
+                }
+            }
+        }
         return 0;
+
+    case CC_STMT_ASM: {
+        size_t i2;
+        if (s->asm_template == NULL || s->asm_template[0] == '\0') {
+            set_diag(diag, "asm statement requires a non-empty template");
+            return -1;
+        }
+        if (s->asm_is_goto && s->asm_goto_label_count == 0) {
+            set_diag(diag, "asm goto requires at least one destination label");
+            return -1;
+        }
+        if (!s->asm_is_goto && s->asm_goto_label_count > 0) {
+            set_diag(diag, "asm goto label list requires 'asm goto'");
+            return -1;
+        }
+        if (asm_validate_template_refs(s, diag) != 0) {
+            return -1;
+        }
+        for (i2 = 0; i2 < s->asm_output_count; ++i2) {
+            if (s->asm_outputs[i2].expr == NULL || !asm_operand_is_lvalue(s->asm_outputs[i2].expr)) {
+                set_diag(diag, "asm output operand must be an lvalue");
+                return -1;
+            }
+            if (check_expr(tu, s->asm_outputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (s->asm_outputs[i2].expr->value_type == CC_TYPE_FLOAT ||
+                s->asm_outputs[i2].expr->value_type == CC_TYPE_DOUBLE) {
+                set_diag(diag, "floating asm outputs are not supported yet");
+                return -1;
+            }
+            if (asm_validate_constraint(s->asm_outputs[i2].constraint, 1, s->asm_output_count, g_pointer_size_bytes,
+                                        diag) != 0) {
+                return -1;
+            }
+        }
+        for (i2 = 0; i2 < s->asm_input_count; ++i2) {
+            if (s->asm_inputs[i2].expr == NULL) {
+                set_diag(diag, "asm input operand requires an expression");
+                return -1;
+            }
+            if (check_expr(tu, s->asm_inputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (s->asm_inputs[i2].expr->value_type == CC_TYPE_FLOAT ||
+                s->asm_inputs[i2].expr->value_type == CC_TYPE_DOUBLE) {
+                set_diag(diag, "floating asm inputs are not supported yet");
+                return -1;
+            }
+            if (asm_validate_constraint(s->asm_inputs[i2].constraint, 0, s->asm_output_count, g_pointer_size_bytes,
+                                        diag) != 0) {
+                return -1;
+            }
+        }
+        for (i2 = 0; i2 < s->asm_clobber_count; ++i2) {
+            if (s->asm_clobbers[i2] == NULL || s->asm_clobbers[i2][0] == '\0') {
+                set_diag(diag, "asm clobber name cannot be empty");
+                return -1;
+            }
+            if (strchr(s->asm_clobbers[i2], '\n') != NULL || strchr(s->asm_clobbers[i2], '\r') != NULL) {
+                set_diag(diag, "asm clobber contains invalid characters");
+                return -1;
+            }
+        }
+        for (i2 = 0; i2 < s->asm_goto_label_count; ++i2) {
+            if (s->asm_goto_labels[i2] == NULL || s->asm_goto_labels[i2][0] == '\0') {
+                set_diag(diag, "asm goto label cannot be empty");
+                return -1;
+            }
+        }
+        return 0;
+    }
 
     case CC_STMT_RETURN:
         if ((fn_attr_flags & CC_ATTR_NORETURN) != 0) {
@@ -2096,6 +3379,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
     case CC_STMT_IF:
         if (s->expr == NULL || s->then_branch == NULL) {
             set_diag(diag, "malformed if statement");
+            return -1;
+        }
+        if (maybe_warn_assignment_condition(s->expr, "if", diag) != 0) {
             return -1;
         }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
@@ -2154,6 +3440,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "malformed while statement");
             return -1;
         }
+        if (maybe_warn_assignment_condition(s->expr, "while", diag) != 0) {
+            return -1;
+        }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
@@ -2176,6 +3465,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             return -1;
         }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (maybe_warn_assignment_condition(s->expr, "do-while", diag) != 0) {
             return -1;
         }
         if (s->expr->value_type == CC_TYPE_VOID) {
@@ -2202,8 +3494,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         }
                     }
                 } else {
-                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, loop_depth,
-                                   fn_attr_flags, switch_depth, saw_return, diag) != 0) {
+                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, fn_attr_flags,
+                                   loop_depth, switch_depth, saw_return, diag) != 0) {
                         return -1;
                     }
                 }
@@ -2213,6 +3505,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
 
             if (s->expr != NULL) {
+                if (maybe_warn_assignment_condition(s->expr, "for", diag) != 0) {
+                    return -1;
+                }
                 if (check_expr(tu, s->expr, *vars, *var_count, for_depth, diag) != 0) {
                     return -1;
                 }
@@ -2258,6 +3553,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             for (i1 = 0; i1 < s->then_branch->block_count; ++i1) {
                 const cc_stmt_t *ci = &s->then_branch->block_stmts[i1];
                 long vi = 0;
+                long vhi = 0;
                 if (ci->kind == CC_STMT_DEFAULT) {
                     if (seen_default) {
                         set_diag(diag, "duplicate default label in switch");
@@ -2273,16 +3569,29 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     set_diag(diag, "case label must be an integer constant expression");
                     return -1;
                 }
+                vhi = ci->case_has_range ? ci->case_hi : vi;
+                if (ci->case_has_range && vhi < vi) {
+                    set_diag(diag, "case range upper bound must be >= lower bound");
+                    return -1;
+                }
                 {
                     size_t i2;
                     for (i2 = i1 + 1; i2 < s->then_branch->block_count; ++i2) {
                         const cc_stmt_t *cj = &s->then_branch->block_stmts[i2];
                         long vj = 0;
+                        long vjhi = 0;
                         if (cj->kind != CC_STMT_CASE) {
                             continue;
                         }
-                        if (eval_const_int_expr(tu, cj->expr, &vj) == 0 && vj == vi) {
-                            set_diag(diag, "duplicate case value in switch");
+                        if (eval_const_int_expr(tu, cj->expr, &vj) != 0) {
+                            continue;
+                        }
+                        vjhi = cj->case_has_range ? cj->case_hi : vj;
+                        if (vjhi < vj) {
+                            continue;
+                        }
+                        if (!(vhi < vj || vjhi < vi)) {
+                            set_diag(diag, "duplicate/overlapping case value in switch");
                             return -1;
                         }
                     }
@@ -2309,6 +3618,15 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "case label must be an integer constant expression");
             return -1;
         }
+        if (s->case_has_range) {
+            if (s->case_hi < s->expr->int_val) {
+                set_diag(diag, "case range upper bound must be >= lower bound");
+                return -1;
+            }
+            if (emit_warning(diag, s->line, s->col, "case ranges are a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
+        }
         return 0;
 
     case CC_STMT_DEFAULT:
@@ -2334,6 +3652,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_GOTO:
         if (s->expr != NULL) {
+            if (emit_warning(diag, s->line, s->col, "computed goto is a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
@@ -2374,10 +3695,37 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
     }
 
     for (i = 0; i < tu->global_count; ++i) {
-        const cc_global_t *g = &tu->globals[i];
+        cc_global_t *g = &tu->globals[i];
+        int sc_count = storage_class_count(g->storage);
         size_t j;
+        set_diag_context(g->line, g->col);
+        if (diag != NULL && diag->message[0] == '\0' && (g->line != 0 || g->col != 0)) {
+            diag->line = g->line;
+            diag->col = g->col;
+        }
         if (g->name == NULL || g->name[0] == '\0') {
             set_diag(diag, "file-scope declaration with missing name");
+            goto fail_global;
+        }
+        if (sc_count > 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "multiple storage-class specifiers in file-scope declaration: %s", g->name);
+            }
+            goto fail_global;
+        }
+        if ((g->storage & (CC_STORAGE_AUTO | CC_STORAGE_REGISTER)) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "file-scope object cannot use auto/register storage: %s", g->name);
+            }
+            goto fail_global;
+        }
+        if ((g->storage & CC_STORAGE_INLINE) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "inline is only valid on function declarations: %s", g->name);
+            }
             goto fail_global;
         }
         if (g->type == CC_TYPE_VOID && g->type_struct_id < 0) {
@@ -2393,6 +3741,24 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
             goto fail_global;
         }
+        if ((g->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 || (g->attr_flags & CC_ATTR_NOINLINE) != 0 ||
+            (g->attr_flags & CC_ATTR_HOT) != 0 || (g->attr_flags & CC_ATTR_COLD) != 0 ||
+            (g->attr_flags & CC_ATTR_FORMAT) != 0 || (g->attr_flags & CC_ATTR_NONNULL) != 0 ||
+            (g->attr_flags & CC_ATTR_MALLOC_FN) != 0 || (g->attr_flags & CC_ATTR_FLATTEN) != 0 ||
+            (g->attr_flags & CC_ATTR_TARGET) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "function-only attribute is invalid for object '%s'",
+                         g->name);
+            }
+            goto fail_global;
+        }
+        if (has_multiple_visibility_attrs(g->attr_flags)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "conflicting visibility attributes for object '%s'",
+                         g->name);
+            }
+            goto fail_global;
+        }
         if ((g->attr_flags & CC_ATTR_ALIGNED) != 0 &&
             validate_attr_align(g->attr_align, diag, "aligned attribute on file-scope object") != 0) {
             goto fail_global;
@@ -2401,15 +3767,59 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             validate_attr_section(g->attr_section, diag, "section attribute on file-scope object") != 0) {
             goto fail_global;
         }
+        if ((g->attr_flags & CC_ATTR_ALIAS) != 0) {
+            if (g->attr_alias == NULL || g->attr_alias[0] == '\0') {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "alias attribute on object '%s' requires a target",
+                             g->name);
+                }
+                goto fail_global;
+            }
+            if (g->init != NULL) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "alias object '%s' cannot have an initializer", g->name);
+                }
+                goto fail_global;
+            }
+        }
         for (j = 0; j < i; ++j) {
             if (strcmp(tu->globals[j].name, g->name) == 0) {
                 const cc_global_t *prev = &tu->globals[j];
+                int prev_static = (prev->storage & CC_STORAGE_STATIC) != 0;
+                int cur_static = (g->storage & CC_STORAGE_STATIC) != 0;
                 if (prev->type != g->type || prev->type_struct_id != g->type_struct_id) {
                     if (diag != NULL && diag->message[0] == '\0') {
                         snprintf(diag->message, sizeof(diag->message), "conflicting file-scope object types: %s",
                                  g->name);
                     }
                     goto fail_global;
+                }
+                if (prev->array_ndim > 0 && g->array_ndim > 0 && prev->array_ndim == g->array_ndim &&
+                    memcmp(prev->array_dims, g->array_dims, sizeof(prev->array_dims)) != 0) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "conflicting file-scope array declarators: %s", g->name);
+                    }
+                    goto fail_global;
+                }
+                if (prev_static != cur_static) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "conflicting linkage for file-scope object: %s",
+                                 g->name);
+                    }
+                    goto fail_global;
+                }
+                if ((prev->attr_flags & CC_ATTR_ALIAS) != 0 || (g->attr_flags & CC_ATTR_ALIAS) != 0) {
+                    if ((prev->attr_flags & CC_ATTR_ALIAS) == 0 || (g->attr_flags & CC_ATTR_ALIAS) == 0 ||
+                        prev->attr_alias == NULL || g->attr_alias == NULL ||
+                        strcmp(prev->attr_alias, g->attr_alias) != 0) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message),
+                                     "conflicting alias targets for file-scope object: %s", g->name);
+                        }
+                        goto fail_global;
+                    }
                 }
                 if (prev->init != NULL && g->init != NULL) {
                     if (diag != NULL && diag->message[0] == '\0') {
@@ -2423,20 +3833,38 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         if (g->init != NULL) {
             if (g->init->kind == CC_EXPR_INIT_LIST) {
                 if (is_pointer_type(g->type) && g->array_len >= 0) {
+                    long inferred_len = -1;
                     if (check_array_initializer(tu, g->name, g->type, g->type_struct_id, g->array_len, g->init, NULL,
-                                                0, 0, NULL, diag) != 0) {
+                                                0, 0, &inferred_len, diag) != 0) {
                         goto fail_global;
+                    }
+                    if (g->array_len == 0 && inferred_len > 0) {
+                        g->array_len = inferred_len;
+                        if (g->array_ndim > 0 && g->array_dims[0] == 0) {
+                            g->array_dims[0] = inferred_len;
+                        }
                     }
                 } else if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
                     if (check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
                         goto fail_global;
                     }
                 } else {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message),
-                                 "initializer list is unsupported for file-scope object %s", g->name);
+                    cc_expr_t *scalar_init = unwrap_scalar_initializer_expr(g->init, diag);
+                    if (scalar_init == NULL) {
+                        goto fail_global;
                     }
-                    goto fail_global;
+                    if (check_expr(tu, scalar_init, NULL, 0, 0, diag) != 0) {
+                        goto fail_global;
+                    }
+                    if (!can_convert(g->type, scalar_init->value_type) &&
+                        !(is_pointer_type(g->type) && is_integral_type(scalar_init->value_type) &&
+                          is_null_ptr_constant(scalar_init))) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
+                                     g->name);
+                        }
+                        goto fail_global;
+                    }
                 }
             } else {
                 if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0) {
@@ -2457,7 +3885,13 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
 
     for (i = 0; i < tu->func_count; ++i) {
         const cc_function_t *f = &tu->funcs[i];
+        int f_sc_count = storage_class_count(f->storage);
         size_t j;
+        set_diag_context(f->line, f->col);
+        if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
+            diag->line = f->line;
+            diag->col = f->col;
+        }
 
         if (f->name == NULL || f->name[0] == '\0') {
             set_diag(diag, "function with missing name");
@@ -2467,6 +3901,48 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "packed attribute is invalid for function '%s'",
                          f->name);
+            }
+            goto fail_global;
+        }
+        if (has_multiple_visibility_attrs(f->attr_flags)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "conflicting visibility attributes for function '%s'",
+                         f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 && (f->attr_flags & CC_ATTR_NOINLINE) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function '%s' has conflicting always_inline/noinline attributes", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_HOT) != 0 && (f->attr_flags & CC_ATTR_COLD) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function '%s' has conflicting hot/cold attributes", f->name);
+            }
+            goto fail_global;
+        }
+        if (f_sc_count > 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "multiple storage-class specifiers in function declaration: %s", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->storage & (CC_STORAGE_AUTO | CC_STORAGE_REGISTER)) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function declaration cannot use auto/register storage: %s", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->storage & CC_STORAGE_THREAD_LOCAL) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function declaration cannot use thread_local storage: %s", f->name);
             }
             goto fail_global;
         }
@@ -2484,6 +3960,41 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         if ((f->attr_flags & CC_ATTR_SECTION) != 0 &&
             validate_attr_section(f->attr_section, diag, "section attribute on function") != 0) {
             goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_MALLOC_FN) != 0 && !is_pointer_type(f->ret_type)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "malloc function '%s' must return a pointer type",
+                         f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_FORMAT) != 0 && !f->is_variadic) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "format function '%s' must be variadic", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_NONNULL) != 0 && (!f->has_prototype || f->param_count == 0)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "nonnull function '%s' requires at least one prototype parameter", f->name);
+            }
+            goto fail_global;
+        }
+        if ((f->attr_flags & CC_ATTR_ALIAS) != 0) {
+            if (f->has_body) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "alias function '%s' cannot have a definition body", f->name);
+                }
+                goto fail_global;
+            }
+            if (f->attr_alias == NULL || f->attr_alias[0] == '\0') {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "alias function '%s' requires a target", f->name);
+                }
+                goto fail_global;
+            }
         }
         for (j = 0; j < i; ++j) {
             const cc_function_t *prev = &tu->funcs[j];
@@ -2503,6 +4014,17 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 }
                 goto fail_global;
             }
+            if ((prev->attr_flags & CC_ATTR_ALIAS) != 0 || (f->attr_flags & CC_ATTR_ALIAS) != 0) {
+                if ((prev->attr_flags & CC_ATTR_ALIAS) == 0 || (f->attr_flags & CC_ATTR_ALIAS) == 0 ||
+                    prev->attr_alias == NULL || f->attr_alias == NULL ||
+                    strcmp(prev->attr_alias, f->attr_alias) != 0) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "conflicting alias targets for function: %s", f->name);
+                    }
+                    goto fail_global;
+                }
+            }
         }
     }
 
@@ -2521,6 +4043,12 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             continue;
         }
 
+        set_diag_context(f->line, f->col);
+        if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
+            diag->line = f->line;
+            diag->col = f->col;
+        }
+
         for (k = 0; k < tu->func_count; ++k) {
             if (strcmp(tu->funcs[k].name, f->name) == 0) {
                 fn_attr_flags |= tu->funcs[k].attr_flags;
@@ -2536,8 +4064,8 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 set_diag(diag, "duplicate parameter name");
                 goto fail_func;
             }
-            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, 0) !=
-                0) {
+            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, -1, 0,
+                          NULL, 0) != 0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }
@@ -2598,5 +4126,26 @@ void cc_frontend_set_pointer_size(int bytes) {
 }
 
 void cc_frontend_set_std_mode(const char *std_mode) {
+    g_allow_implicit_funcdecl = std_mode_allows_implicit_function_decls(std_mode);
+    g_std_c23 = std_mode_is_c23_or_newer(std_mode);
     cc_parser_set_std_mode(std_mode);
+    if (g_gnu89_inline_override >= 0) {
+        cc_parser_set_gnu89_inline(g_gnu89_inline_override);
+    }
+}
+
+void cc_frontend_set_gnu89_inline_mode(int enabled, int override_set) {
+    if (!override_set) {
+        g_gnu89_inline_override = -1;
+        return;
+    }
+    g_gnu89_inline_override = enabled ? 1 : 0;
+    cc_parser_set_gnu89_inline(g_gnu89_inline_override);
+}
+
+void cc_frontend_set_diag_flags(int wall, int werror, int pedantic, int pedantic_errors) {
+    g_warn_all = wall ? 1 : 0;
+    g_warn_error = werror ? 1 : 0;
+    g_pedantic = pedantic ? 1 : 0;
+    g_pedantic_errors = pedantic_errors ? 1 : 0;
 }
