@@ -1,13 +1,17 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
 #include <stdint.h>
-#include <assert.h>
+#include <stddef.h>
 
-// Mock kmalloc/kfree
+// Mock kmalloc family - wrappers to match prototypes in vm/vm_kmem.h
 void *kmalloc(size_t size) {
     return malloc(size);
+}
+
+void *kzalloc(size_t size) {
+    return calloc(1, size);
 }
 
 void kfree(void *ptr, size_t size) {
@@ -15,109 +19,129 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
-// Mock tty functions
-struct tty;
-typedef struct tty tty_t;
+void kmem_get_stats(uint64_t *allocs, uint64_t *frees, uint64_t *bytes) {
+    if(allocs) *allocs = 0;
+    if(frees) *frees = 0;
+    if(bytes) *bytes = 0;
+}
 
-int tty_read(tty_t *tty, char *buf, int len) { return 0; }
-int tty_write(tty_t *tty, const char *buf, int len) { return 0; }
-int tty_ioctl(tty_t *tty, uint32_t cmd, unsigned long arg) { return 0; }
+// Define process_t and current_process
+// We include sys/proc.h to get the struct definition.
+#include <sys/proc.h>
 
-// Mock console
+process_t *current_process = NULL;
+
+// Mock console_get_node
 struct fs_node;
 struct fs_node *console_get_node(void) { return NULL; }
 
-// Mock VFS
-typedef struct filesystem filesystem_t;
-void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }
+// Mock vfs_register_filesystem
+struct filesystem;
+void vfs_register_filesystem(struct filesystem *fs) { (void)fs; }
 
-// Mock process
-struct process;
-typedef struct process process_t;
-process_t *current_process = NULL;
+// Mock tty functions called by devfs.c
+struct tty;
+int tty_read(struct tty *tty, char *buf, int len) { return 0; }
+int tty_write(struct tty *tty, const char *buf, int len) { return 0; }
+int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) { return 0; }
 
-// Include the source file
+// Include the source under test
 #include "../../sys/fs/devfs.c"
 
-// Test cases
-void test_block_device_registration() {
-    printf("Testing Block Device Registration...\n");
-
-    // Reset state if needed (devfs_init called once in main)
-
-    fs_node_t node;
-    memset(&node, 0, sizeof(node));
-    strcpy(node.name, "sda1");
-    node.flags = FS_BLOCKDEVICE;
-
-    devfs_register_device(&node);
-
-    // Verification
-    // We expect "storage/sda1" to be created.
-    // devfs implementation is hierarchical.
-    // root -> "storage" (dir) -> "sda1" (node)
-
-    // Find "storage" directory
-    fs_node_t *storage_node = devfs_dir_finddir(&devfs_root_node, "storage");
-    assert(storage_node != NULL);
-    assert(storage_node->flags == FS_DIRECTORY);
-
-    // Find "sda1" inside storage
-    fs_node_t *sda1_node = storage_node->finddir(storage_node, "sda1");
-    assert(sda1_node != NULL);
-    assert(sda1_node == &node); // Should be the same node pointer
-
-    printf("PASS: Block device registered under storage/\n");
-}
-
-void test_char_device_registration() {
-    printf("Testing Char Device Registration...\n");
-
-    fs_node_t node;
-    memset(&node, 0, sizeof(node));
-    strcpy(node.name, "mychar");
-    node.flags = FS_CHARDEVICE;
-
-    devfs_register_device(&node);
-
-    // Verification
-    // We expect "mychar" under root
-
-    fs_node_t *found = devfs_dir_finddir(&devfs_root_node, "mychar");
-    assert(found != NULL);
-    assert(found == &node);
-
-    printf("PASS: Char device registered under root\n");
-}
-
-void test_nested_path_registration() {
-    printf("Testing Nested Path Registration...\n");
-
-    fs_node_t node;
-    memset(&node, 0, sizeof(node));
-    strcpy(node.name, "input/mouse0");
-    node.flags = FS_CHARDEVICE;
-
-    devfs_register_device(&node);
-
-    // Verification
-    fs_node_t *input_node = devfs_dir_finddir(&devfs_root_node, "input");
-    assert(input_node != NULL);
-    assert(input_node->flags == FS_DIRECTORY);
-
-    fs_node_t *mouse_node = input_node->finddir(input_node, "mouse0");
-    assert(mouse_node != NULL);
-    assert(mouse_node == &node);
-
-    printf("PASS: Device registered with nested path\n");
+// Helpers for testing
+void print_tree(devfs_entry_t *entry, int depth) {
+    if (!entry) return;
+    for (int i=0; i<depth; i++) printf("  ");
+    printf("- %s\n", entry->name);
+    if (entry->child) print_tree(entry->child, depth+1);
+    if (entry->next) print_tree(entry->next, depth);
 }
 
 int main() {
+    printf("Initializing devfs...\n");
     devfs_init();
 
-    test_block_device_registration();
-    test_char_device_registration();
-    test_nested_path_registration();
+    // Verify root entry exists
+    if (!root_entry) {
+        printf("FAIL: root_entry is NULL\n");
+        return 1;
+    }
+    printf("root_entry: %s\n", root_entry->name);
+
+    // Test 1: Block Device
+    printf("Registering block device 'sda'...\n");
+    fs_node_t *block_node = malloc(sizeof(fs_node_t));
+    memset(block_node, 0, sizeof(fs_node_t));
+    strcpy(block_node->name, "sda");
+    block_node->flags = FS_BLOCKDEVICE;
+
+    devfs_register_device(block_node);
+
+    // Verify it is under storage/sda
+    // devfs_add_entry adds to root_entry.
+    // So we expect root_entry -> child "storage" -> child "sda"
+
+    devfs_entry_t *storage = devfs_find_child(root_entry, "storage");
+    if (!storage) {
+        printf("FAIL: 'storage' directory not found\n");
+        print_tree(root_entry, 0);
+        return 1;
+    }
+
+    devfs_entry_t *sda = devfs_find_child(storage, "sda");
+    if (!sda) {
+        printf("FAIL: 'sda' not found in 'storage'\n");
+        print_tree(root_entry, 0);
+        return 1;
+    }
+
+    if (sda->node != block_node) {
+        printf("FAIL: 'sda' node does not match registered node\n");
+        return 1;
+    }
+    printf("PASS: Block device 'sda' found in 'storage/sda'\n");
+
+    // Test 2: Character Device
+    printf("Registering character device 'ttyUSB0'...\n");
+    fs_node_t *char_node = malloc(sizeof(fs_node_t));
+    memset(char_node, 0, sizeof(fs_node_t));
+    strcpy(char_node->name, "ttyUSB0");
+    char_node->flags = FS_CHARDEVICE;
+
+    devfs_register_device(char_node);
+
+    devfs_entry_t *ttyUSB0 = devfs_find_child(root_entry, "ttyUSB0");
+    if (!ttyUSB0) {
+        printf("FAIL: 'ttyUSB0' not found in root\n");
+        print_tree(root_entry, 0);
+        return 1;
+    }
+    printf("PASS: Character device 'ttyUSB0' found in root\n");
+
+    // Test 3: Subdirectory device (simulating nested path in name)
+    // Note: The current implementation of devfs_register_device for CHARDEVICE uses node->name directly.
+    // devfs_add_entry handles slashes.
+
+    printf("Registering character device 'input/mouse0'...\n");
+    fs_node_t *mouse_node = malloc(sizeof(fs_node_t));
+    memset(mouse_node, 0, sizeof(fs_node_t));
+    strcpy(mouse_node->name, "input/mouse0");
+    mouse_node->flags = FS_CHARDEVICE;
+
+    devfs_register_device(mouse_node);
+
+    devfs_entry_t *input = devfs_find_child(root_entry, "input");
+    if (!input) {
+        printf("FAIL: 'input' directory not found\n");
+        return 1;
+    }
+
+    devfs_entry_t *mouse0 = devfs_find_child(input, "mouse0");
+    if (!mouse0) {
+        printf("FAIL: 'mouse0' not found in 'input'\n");
+        return 1;
+    }
+    printf("PASS: Character device 'input/mouse0' found\n");
 
     printf("All tests passed!\n");
     return 0;

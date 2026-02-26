@@ -653,6 +653,7 @@ void pmap_map_trampoline(void) {
 
 // Map a 4MB page (Single PDE, no Page Table)
 // Requires PSE to be enabled
+// Implements Page Table Eviction: If a PT exists at this PDE, it is freed.
 int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
     
@@ -697,6 +698,10 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
             if (pt_page) {
                 vm_phys_free_page(pt_page);
             }
+
+            // 5. Invalidate TLB: Replacing a page table requires flushing all TLB entries
+            // covered by it. Since iterating 1024 invlpg is slow, we do a full flush.
+            pmap_invalidate_all();
         }
     }
 
@@ -1562,42 +1567,6 @@ int sys_pmap_stats(struct pmap_stats *out) {
     return 0;
 }
 
-// Create a 4MB Page Size Extension (PSE) mapping
-// Maps a 4MB-aligned virtual address to a 4MB-aligned physical address
-int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags) {
-    if (!pmap) return -1;
-    
-    // Validate alignment (must be 4MB aligned)
-    if ((va & 0x3FFFFF) || (pa & 0x3FFFFF)) {
-        return -1; // Not 4MB aligned
-    }
-
-    uint32_t pd_index = va >> 22;
-    uint32_t *pd = (uint32_t *)pmap;
-
-    // Construct PDE with PS bit (bit 7)
-    // 4MB pages don't use page tables, the PDE points directly to physical memory
-    uint32_t pde = pa | PTE_P | PTE_PS | (flags & 0xFFF);
-    
-    // If user flag is set, ensure it's allowed (basic check, can be expanded)
-    if (flags & PTE_U) {
-        pde |= PTE_U;
-    }
-    
-    if (flags & PTE_W) {
-        pde |= PTE_W;
-    }
-    
-    // We might need to invalidate TLB if we are changing an existing mapping
-    // But for now, just overwrite
-    pd[pd_index] = pde;
-    
-    // Invalidate TLB for this address if it's the current pmap
-    // checking against current_pmap or just invlpg
-    __asm__ volatile("invlpg (%0)" :: "r" (va) : "memory");
-
-    return 0;
-}
 
 // Optimized page operations
 void pmap_copy_page(uintptr_t src_pa, uintptr_t dst_pa) {
