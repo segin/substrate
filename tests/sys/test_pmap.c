@@ -160,18 +160,24 @@ void test_pmap_pse(void) {
     pmap_t pmap = pmap_create();
     TEST_ASSERT(pmap != 0, "pmap created");
 
+    // Activate pmap (required for pmap_enter_large)
+    pmap_activate(pmap);
+
     // Try valid 4MB alignment
     uint32_t va = 0x800000; // 8MB
     uint32_t pa = 0x400000; // 4MB
-    int ret = pmap_enter_pse(pmap, va, pa, PTE_W | PTE_U);
-    TEST_ASSERT(ret == 0, "pmap_enter_pse valid alignment");
+    int ret = pmap_enter_large(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0);
+    TEST_ASSERT(ret == 0, "pmap_enter_large valid alignment");
 
     // Try invalid alignment
-    ret = pmap_enter_pse(pmap, va + 0x1000, pa, 0);
-    TEST_ASSERT(ret != 0, "pmap_enter_pse invalid VA alignment");
+    ret = pmap_enter_large(pmap, va + 0x1000, pa, 0, 0);
+    TEST_ASSERT(ret != 0, "pmap_enter_large invalid VA alignment");
     
-    ret = pmap_enter_pse(pmap, va, pa + 0x1000, 0);
-    TEST_ASSERT(ret != 0, "pmap_enter_pse invalid PA alignment");
+    ret = pmap_enter_large(pmap, va, pa + 0x1000, 0, 0);
+    TEST_ASSERT(ret != 0, "pmap_enter_large invalid PA alignment");
+
+    // Restore kernel pmap
+    pmap_activate(pmap_kernel());
 
     pmap_destroy(pmap);
     kprint("  PASS\n");

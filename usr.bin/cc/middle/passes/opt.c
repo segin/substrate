@@ -72,6 +72,18 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_STORE:
             break;
 
+        case CC_SSA_ASM:
+            {
+                size_t a;
+                for (a = 0; a < in->asm_out_count; ++a) {
+                    int ov = in->asm_out_values[a];
+                    if (ov >= 0 && ov < f->value_count) {
+                        st[ov].known = 0;
+                    }
+                }
+            }
+            break;
+
         case CC_SSA_I2F:
             if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_I64) {
                 long src = st[in->lhs].i;
@@ -98,6 +110,22 @@ static int fold_function(cc_ssa_function_t *f) {
                 st[dst].known = 1;
                 st[dst].type = CC_VAL_I64;
                 st[dst].i = in->imm;
+                changed = 1;
+            } else if (dst >= 0) {
+                st[dst].known = 0;
+            }
+            break;
+
+        case CC_SSA_FROUND32:
+            if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_F64) {
+                float srcf = (float)st[in->lhs].f;
+                in->op = CC_SSA_CONST;
+                in->lhs = -1;
+                in->rhs = -1;
+                in->fimm = (double)srcf;
+                st[dst].known = 1;
+                st[dst].type = CC_VAL_F64;
+                st[dst].f = in->fimm;
                 changed = 1;
             } else if (dst >= 0) {
                 st[dst].known = 0;
@@ -258,6 +286,7 @@ static int fold_function(cc_ssa_function_t *f) {
 
         case CC_SSA_BR:
         case CC_SSA_BR_COND:
+        case CC_SSA_TRAP:
         case CC_SSA_RET:
             break;
         }
@@ -278,6 +307,16 @@ static void mark_uses(const cc_ssa_instr_t *in, int *uses) {
     for (i = 0; i < in->arg_count; ++i) {
         if (in->args[i] >= 0) {
             uses[in->args[i]]++;
+        }
+    }
+    for (i = 0; i < in->asm_out_count; ++i) {
+        if (in->asm_out_values[i] >= 0) {
+            uses[in->asm_out_values[i]]++;
+        }
+    }
+    for (i = 0; i < in->asm_in_count; ++i) {
+        if (in->asm_in_values[i] >= 0) {
+            uses[in->asm_in_values[i]]++;
         }
     }
 }
@@ -304,6 +343,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_CMP:
     case CC_SSA_I2F:
     case CC_SSA_F2I:
+    case CC_SSA_FROUND32:
         return 1;
     case CC_SSA_LABEL:
     case CC_SSA_BR:
@@ -312,6 +352,8 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_STORE:
     case CC_SSA_CALL:
     case CC_SSA_CALLI:
+    case CC_SSA_ASM:
+    case CC_SSA_TRAP:
     case CC_SSA_RET:
         return 0;
     }

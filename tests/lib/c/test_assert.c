@@ -1,82 +1,92 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
 #include <setjmp.h>
 #include <string.h>
+#include <unistd.h>
 #include <assert.h>
 
-// Mock state
-static char stderr_buffer[1024];
+// Mock abort
 static jmp_buf abort_jmp;
 static int abort_called = 0;
 
-// Mock implementations
-int mock_fprintf(FILE *stream, const char *format, ...) {
-    if (stream != stderr) return 0; // Only capture stderr
-    va_list args;
-    va_start(args, format);
-    vsnprintf(stderr_buffer, sizeof(stderr_buffer), format, args);
-    va_end(args);
-    return 0;
-}
-
-void mock_abort(void) {
+void tested_abort(void) {
     abort_called = 1;
     longjmp(abort_jmp, 1);
 }
 
-// Rename functions to avoid conflicts and inject mocks
-#define fprintf mock_fprintf
-#define abort mock_abort
+// Rename standard functions to avoid conflict and mock abort
+#define abort tested_abort
+// Rename __assert_fail to test it directly
 #define __assert_fail tested_assert_fail
 
-// Include the source file
+// Include the source file directly
 #include "../../../lib/c/src/assert.c"
 
-// Helper macros
-#define ASSERT_STR_CONTAINS(haystack, needle) \
-    if (strstr(haystack, needle) == NULL) { \
-        printf("FAIL: Expected '%s' to contain '%s'\n", haystack, needle); \
-        return 1; \
+#undef __assert_fail
+#undef abort
+
+void test_assert_output(void) {
+    printf("Testing __assert_fail output and abort...\n");
+
+    // Create a pipe to capture stderr
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("pipe");
+        exit(1);
     }
 
-int main(void) {
-    printf("Running assert tests...\n");
+    int original_stderr = dup(STDERR_FILENO);
+    if (original_stderr == -1) {
+        perror("dup");
+        exit(1);
+    }
 
-    // Test case 1: verify message format
-    const char *expr = "x > 0";
-    const char *file = "test.c";
-    int line = 123;
-    const char *func = "main";
+    fflush(stderr);
+    if (dup2(pipefd[1], STDERR_FILENO) == -1) {
+        perror("dup2");
+        exit(1);
+    }
+    close(pipefd[1]);
 
     abort_called = 0;
-    memset(stderr_buffer, 0, sizeof(stderr_buffer));
-
     if (setjmp(abort_jmp) == 0) {
-        tested_assert_fail(expr, file, line, func);
-        // Should not reach here
-        printf("FAIL: abort() was not called\n");
-        return 1;
+        // Trigger assert fail
+        tested_assert_fail("x > 0", "test.c", 42, "test_func");
     }
+
+    // Restore stderr
+    fflush(stderr);
+    if (dup2(original_stderr, STDERR_FILENO) == -1) {
+        perror("dup2 restore");
+        exit(1);
+    }
+    close(original_stderr);
 
     if (!abort_called) {
-        printf("FAIL: abort() flag not set\n");
-        return 1;
+        fprintf(stderr, "FAIL: abort() was not called\n");
+        exit(1);
     }
 
-    // Check message content
-    // Expected: "Assertion failed: %s (%s: %s: %d)\n"
-    // "Assertion failed: x > 0 (test.c: main: 123)\n"
-    ASSERT_STR_CONTAINS(stderr_buffer, "Assertion failed");
-    ASSERT_STR_CONTAINS(stderr_buffer, expr);
-    ASSERT_STR_CONTAINS(stderr_buffer, file);
-    ASSERT_STR_CONTAINS(stderr_buffer, func);
+    // Read from pipe
+    char buffer[1024] = {0};
+    ssize_t count = read(pipefd[0], buffer, sizeof(buffer) - 1);
+    close(pipefd[0]);
 
-    // Check line number (converting to string)
-    char line_str[16];
-    sprintf(line_str, ": %d)", line);
-    ASSERT_STR_CONTAINS(stderr_buffer, line_str);
+    if (count < 0) {
+        perror("read");
+        exit(1);
+    }
 
-    printf("All assert tests passed!\n");
+    const char *expected = "Assertion failed: x > 0 (test.c: test_func: 42)\n";
+    if (strstr(buffer, expected) == NULL) {
+        fprintf(stderr, "FAIL: Message mismatch.\nExpected: '%s'\nActual: '%s'\n", expected, buffer);
+        exit(1);
+    }
+
+    printf("PASS: __assert_fail output correct and abort called.\n");
+}
+
+int main(void) {
+    test_assert_output();
     return 0;
 }
