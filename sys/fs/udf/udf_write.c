@@ -1170,7 +1170,7 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         return 0;
     }
     
-    /* TODO: Handle extent-based files */
+    /* Handle extent-based files with Short Allocation Descriptors */
     if ((disk_fe->icb_tag.flags & 0x7) == UDF_ICB_FLAG_AD_SHORT) {
         uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
         uint32_t max_ad_len = UDF_SECTOR_SIZE - sizeof(struct udf_fe) - disk_fe->ext_attr_length;
