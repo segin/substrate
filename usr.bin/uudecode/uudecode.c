@@ -15,10 +15,10 @@
 
 static int p_flag = 0;      /* -p: Write to stdout */
 static char *o_flag = NULL; /* -o: Output file override */
-static int s_flag = 0;      /* -s: Strip path components (secure mode) */
+static int s_flag = 1;      /* -s: Strip path components (secure mode). Default: On. */
 
 static void usage(void) {
-    fprintf(stderr, "usage: uudecode [-p] [-s] [-o output_file] [file ...]\n");
+    fprintf(stderr, "usage: uudecode [-p] [-r] [-s] [-o output_file] [file ...]\n");
     exit(1);
 }
 
@@ -165,6 +165,9 @@ int main(int argc, char *argv[]) {
                     break;
                 case 's':
                     s_flag = 1;
+                    break;
+                case 'r':
+                    s_flag = 0;
                     break;
                 case 'o':
                     /* Handle -o value */
