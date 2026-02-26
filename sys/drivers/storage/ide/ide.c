@@ -119,11 +119,11 @@ static void ide_wait_bsy(uint8_t channel) {
     uint64_t start = get_uptime_ms();
     int spins = 0;
     while (ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_BSY) {
-        if (get_uptime_ms() - start > 1000) {
-            kprint("ide: timeout waiting for BSY\n");
-            break;
-        }
         if (spins++ > 1000) {
+            if (get_uptime_ms() - start > 1000) {
+                kprint("ide: timeout waiting for BSY\n");
+                break;
+            }
             sched_yield();
         } else {
             __asm__ volatile("pause");
