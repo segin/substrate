@@ -8,10 +8,10 @@ CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_page
             spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
             string.o printf.o div64.o compat.o acct.o sysinfo.o \
             vfs.o vfs_cache.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o wait.o sched_decay.o libc_wrappers.o \
-            pipe.o
+            pipe.o ansi_handler.o
 
 # Unit tests
-UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
+UNIT_SRCS = unit/drivers/console/test_ansi.c unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_object.c unit/vm/test_page.c unit/vm/test_fault.c \
              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_swap_real.c unit/vm/test_cow.c \
              unit/arch/test_trampoline.c \
@@ -85,6 +85,9 @@ test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
 %.o: ../sys/pm/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 
+%.o: ../sys/drivers/console/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
 sched_i386.o: ../sys/arch/i386/sched.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 
@@ -102,6 +105,8 @@ vm_map_host.o: vm_map_host.c
 %.o: unit/kern/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/vfs/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/drivers/console/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/fs/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
