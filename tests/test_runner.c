@@ -140,6 +140,8 @@ bool run_pipe_race(void) {
     return test_pipe_race() == 0;
 }
 
+extern bool test_mmap_batch_run(void);
+
 typedef struct {
     const char *name;
     bool (*func)(void);
@@ -229,6 +231,7 @@ test_case_t tests[] = {
     {"libc_strtok", test_libc_strtok},
     {"div64", run_div64_tests},
     {"pipe_race", run_pipe_race},
+    {"mmap_batch", test_mmap_batch_run},
     {NULL, NULL}
 };
 
