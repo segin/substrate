@@ -106,12 +106,355 @@ static void emit_local_label(FILE *fp, const char *fn, int label) {
     fprintf(fp, ".L%s_%d", fn, label);
 }
 
+static int asm_constraint_has(const char *c, char ch) {
+    return c != NULL && strchr(c, ch) != NULL;
+}
+
+static int asm_constraint_is_immediate(const char *c) {
+    return asm_constraint_has(c, 'i');
+}
+
+static int asm_constraint_is_memory_only(const char *c) {
+    if (c == NULL) {
+        return 0;
+    }
+    if (asm_constraint_has(c, 'm') && !asm_constraint_has(c, 'r') && !asm_constraint_has(c, 'q') &&
+        !asm_constraint_has(c, 'a') && !asm_constraint_has(c, 'b') && !asm_constraint_has(c, 'c') &&
+        !asm_constraint_has(c, 'd') && !asm_constraint_has(c, 'S') && !asm_constraint_has(c, 'D')) {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_constraint_match_output(const char *c) {
+    long n = 0;
+    size_t i = 0;
+    if (c == NULL || c[0] < '0' || c[0] > '9') {
+        return -1;
+    }
+    while (c[i] >= '0' && c[i] <= '9') {
+        n = n * 10 + (long)(c[i] - '0');
+        i++;
+    }
+    if (c[i] != '\0') {
+        return -1;
+    }
+    if (n < 0 || n > INT32_MAX) {
+        return -1;
+    }
+    return (int)n;
+}
+
+static const char *asm_constraint_fixed_reg64(const char *c) {
+    if (c == NULL) {
+        return NULL;
+    }
+    if (asm_constraint_has(c, 'a')) {
+        return "%rax";
+    }
+    if (asm_constraint_has(c, 'b')) {
+        return "%rbx";
+    }
+    if (asm_constraint_has(c, 'c')) {
+        return "%rcx";
+    }
+    if (asm_constraint_has(c, 'd')) {
+        return "%rdx";
+    }
+    if (asm_constraint_has(c, 'S')) {
+        return "%rsi";
+    }
+    if (asm_constraint_has(c, 'D')) {
+        return "%rdi";
+    }
+    return NULL;
+}
+
+static const char *asm_constraint_fixed_reg32(const char *c) {
+    if (c == NULL) {
+        return NULL;
+    }
+    if (asm_constraint_has(c, 'a')) {
+        return "%eax";
+    }
+    if (asm_constraint_has(c, 'b')) {
+        return "%ebx";
+    }
+    if (asm_constraint_has(c, 'c')) {
+        return "%ecx";
+    }
+    if (asm_constraint_has(c, 'd')) {
+        return "%edx";
+    }
+    if (asm_constraint_has(c, 'S')) {
+        return "%esi";
+    }
+    if (asm_constraint_has(c, 'D')) {
+        return "%edi";
+    }
+    return NULL;
+}
+
+static int append_text(char **dst, size_t *len, size_t *cap, const char *text, size_t n) {
+    char *next;
+    if (*len + n + 1 > *cap) {
+        size_t ncap = *cap == 0 ? 64 : *cap;
+        while (*len + n + 1 > ncap) {
+            ncap *= 2;
+        }
+        next = (char *)realloc(*dst, ncap);
+        if (next == NULL) {
+            return -1;
+        }
+        *dst = next;
+        *cap = ncap;
+    }
+    memcpy(*dst + *len, text, n);
+    *len += n;
+    (*dst)[*len] = '\0';
+    return 0;
+}
+
+static int append_c(char **dst, size_t *len, size_t *cap, char ch) {
+    return append_text(dst, len, cap, &ch, 1);
+}
+
+static int find_named_operand_index(const char *name, char **names, size_t count) {
+    size_t i;
+    if (name == NULL) {
+        return -1;
+    }
+    for (i = 0; i < count; ++i) {
+        if (names[i] != NULL && strcmp(names[i], name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int find_named_goto_index(const char *name, char **names, size_t count) {
+    size_t i;
+    if (name == NULL) {
+        return -1;
+    }
+    for (i = 0; i < count; ++i) {
+        if (names[i] != NULL && strcmp(names[i], name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static char *render_inline_asm_template(const char *tmpl, char **operand_texts, char **operand_names, size_t op_count,
+                                        const int *goto_labels, char **goto_names, size_t goto_count,
+                                        const char *fn_name, cc_diag_t *diag) {
+    size_t i = 0;
+    size_t len = 0;
+    size_t cap = 0;
+    char *out = NULL;
+    if (tmpl == NULL) {
+        return NULL;
+    }
+    while (tmpl[i] != '\0') {
+        if (tmpl[i] != '%') {
+            if (append_c(&out, &len, &cap, tmpl[i]) != 0) {
+                free(out);
+                return NULL;
+            }
+            i++;
+            continue;
+        }
+        i++;
+        if (tmpl[i] == '%') {
+            if (append_c(&out, &len, &cap, '%') != 0) {
+                free(out);
+                return NULL;
+            }
+            i++;
+            continue;
+        }
+        if (tmpl[i] >= '0' && tmpl[i] <= '9') {
+            long n = 0;
+            while (tmpl[i] >= '0' && tmpl[i] <= '9') {
+                n = n * 10 + (long)(tmpl[i] - '0');
+                i++;
+            }
+            if (n < 0 || (size_t)n >= op_count || operand_texts[n] == NULL) {
+                set_diag(diag, "asm template operand index is out of range");
+                free(out);
+                return NULL;
+            }
+            if (append_text(&out, &len, &cap, operand_texts[n], strlen(operand_texts[n])) != 0) {
+                free(out);
+                return NULL;
+            }
+            continue;
+        }
+        if (tmpl[i] == 'l') {
+            int label_id = -1;
+            i++;
+            if (tmpl[i] >= '0' && tmpl[i] <= '9') {
+                long n = 0;
+                while (tmpl[i] >= '0' && tmpl[i] <= '9') {
+                    n = n * 10 + (long)(tmpl[i] - '0');
+                    i++;
+                }
+                if (n < 0 || (size_t)n >= goto_count || goto_labels == NULL) {
+                    set_diag(diag, "asm template goto-label index is out of range");
+                    free(out);
+                    return NULL;
+                }
+                label_id = goto_labels[n];
+            } else if (tmpl[i] == '[') {
+                size_t b = ++i;
+                int idx;
+                while (tmpl[i] != '\0' && tmpl[i] != ']') {
+                    i++;
+                }
+                if (tmpl[i] != ']') {
+                    set_diag(diag, "asm template has unterminated goto label");
+                    free(out);
+                    return NULL;
+                }
+                {
+                    char *nm = (char *)malloc(i - b + 1);
+                    if (nm == NULL) {
+                        free(out);
+                        return NULL;
+                    }
+                    memcpy(nm, tmpl + b, i - b);
+                    nm[i - b] = '\0';
+                    idx = find_named_goto_index(nm, goto_names, goto_count);
+                    free(nm);
+                }
+                if (idx < 0 || goto_labels == NULL || (size_t)idx >= goto_count) {
+                    set_diag(diag, "asm template references unknown goto label");
+                    free(out);
+                    return NULL;
+                }
+                label_id = goto_labels[idx];
+                i++;
+            } else {
+                set_diag(diag, "asm template has malformed %l label reference");
+                free(out);
+                return NULL;
+            }
+            {
+                char lbuf[160];
+                snprintf(lbuf, sizeof(lbuf), ".L%s_%d", fn_name != NULL ? fn_name : "__fn", label_id);
+                if (append_text(&out, &len, &cap, lbuf, strlen(lbuf)) != 0) {
+                    free(out);
+                    return NULL;
+                }
+            }
+            continue;
+        }
+        if (tmpl[i] == '[') {
+            size_t b = ++i;
+            int idx;
+            while (tmpl[i] != '\0' && tmpl[i] != ']') {
+                i++;
+            }
+            if (tmpl[i] != ']') {
+                set_diag(diag, "asm template has unterminated named operand");
+                free(out);
+                return NULL;
+            }
+            {
+                char *nm = (char *)malloc(i - b + 1);
+                if (nm == NULL) {
+                    free(out);
+                    return NULL;
+                }
+                memcpy(nm, tmpl + b, i - b);
+                nm[i - b] = '\0';
+                idx = find_named_operand_index(nm, operand_names, op_count);
+                free(nm);
+            }
+            if (idx < 0 || operand_texts[idx] == NULL) {
+                set_diag(diag, "asm template references unknown named operand");
+                free(out);
+                return NULL;
+            }
+            if (append_text(&out, &len, &cap, operand_texts[idx], strlen(operand_texts[idx])) != 0) {
+                free(out);
+                return NULL;
+            }
+            i++;
+            continue;
+        }
+        set_diag(diag, "asm template has unsupported '%' reference");
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+static int emit_asm_lines(FILE *fp, const char *text) {
+    const char *p = text;
+    const char *line = text;
+    if (text == NULL) {
+        return 0;
+    }
+    while (*p != '\0') {
+        if (*p == '\n') {
+            fprintf(fp, "\t%.*s\n", (int)(p - line), line);
+            line = p + 1;
+        }
+        p++;
+    }
+    if (p != line) {
+        fprintf(fp, "\t%s\n", line);
+    }
+    return 0;
+}
+
+static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, long *out_imm) {
+    size_t i;
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        if (in->dst == value && in->op == CC_SSA_CONST && f->value_types[value] == CC_VAL_I64) {
+            *out_imm = in->imm;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_index, const char *literal,
                                       const char *restore_sec) {
     fprintf(fp, "\t.section .rodata\n");
     fprintf(fp, ".L__cc_str_%zu_%zu:\n", fn_index, instr_index);
     fprintf(fp, "\t.asciz %s\n", literal != NULL ? literal : "\"\"");
-    fprintf(fp, "\t.section %s\n", (restore_sec != NULL && restore_sec[0] != '\0') ? restore_sec : ".text");
+    if (restore_sec != NULL && restore_sec[0] != '\0') {
+        fprintf(fp, "\t.section %s,\"ax\",@progbits\n", restore_sec);
+    } else {
+        fprintf(fp, "\t.text\n");
+    }
+}
+
+static void emit_data_section(FILE *fp, const char *section_name) {
+    if (section_name != NULL && section_name[0] != '\0') {
+        fprintf(fp, "\t.section %s,\"aw\",@progbits\n", section_name);
+    } else {
+        fprintf(fp, "\t.data\n");
+    }
+}
+
+static void emit_bss_section(FILE *fp, const char *section_name) {
+    if (section_name != NULL && section_name[0] != '\0') {
+        fprintf(fp, "\t.section %s,\"aw\",@nobits\n", section_name);
+    } else {
+        fprintf(fp, "\t.bss\n");
+    }
+}
+
+static void emit_text_section(FILE *fp, const char *section_name) {
+    if (section_name != NULL && section_name[0] != '\0') {
+        fprintf(fp, "\t.section %s,\"ax\",@progbits\n", section_name);
+    } else {
+        fprintf(fp, "\t.text\n");
+    }
 }
 
 static int is_pointer_type(cc_type_t t) {
@@ -132,6 +475,19 @@ static cc_type_t ptr_base_type(cc_type_t t) {
         return (cc_type_t)(CC_TYPE_PTR_PTR_PTR_VOID + (t - CC_TYPE_PTR_PTR_PTR_PTR_VOID));
     }
     return CC_TYPE_VOID;
+}
+
+static void emit_visibility_attr(FILE *fp, const char *name, int attr_flags) {
+    if (name == NULL || name[0] == '\0') {
+        return;
+    }
+    if ((attr_flags & CC_ATTR_VIS_HIDDEN) != 0) {
+        fprintf(fp, ".hidden %s\n", name);
+    } else if ((attr_flags & CC_ATTR_VIS_PROTECTED) != 0) {
+        fprintf(fp, ".protected %s\n", name);
+    } else if ((attr_flags & CC_ATTR_VIS_INTERNAL) != 0) {
+        fprintf(fp, ".internal %s\n", name);
+    }
 }
 
 static long global_type_size_bytes(cc_type_t t, int pointer_size) {
@@ -271,22 +627,35 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             align = g->attr_align;
         }
 
-        if (is_extern) {
-            continue;
-        }
         if (g->name == NULL || g->name[0] == '\0') {
             set_diag(diag, "malformed global symbol");
             return -1;
         }
-        if (!g->has_init) {
-            if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-                fprintf(fp, ".section %s\n", bss_sec);
-            } else {
-                fprintf(fp, ".bss\n");
-            }
+        if ((g->attr_flags & CC_ATTR_ALIAS) != 0 && g->attr_alias != NULL && g->attr_alias[0] != '\0') {
             if (!is_static) {
-                fprintf(fp, ".globl %s\n", g->name);
+                if ((g->attr_flags & CC_ATTR_WEAK) != 0) {
+                    fprintf(fp, ".weak %s\n", g->name);
+                } else {
+                    fprintf(fp, ".globl %s\n", g->name);
+                }
             }
+            emit_visibility_attr(fp, g->name, g->attr_flags);
+            fprintf(fp, ".set %s, %s\n", g->name, g->attr_alias);
+            continue;
+        }
+        if (is_extern) {
+            continue;
+        }
+        if (!g->has_init) {
+            emit_bss_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? bss_sec : NULL);
+            if (!is_static) {
+                if ((g->attr_flags & CC_ATTR_WEAK) != 0) {
+                    fprintf(fp, ".weak %s\n", g->name);
+                } else {
+                    fprintf(fp, ".globl %s\n", g->name);
+                }
+            }
+            emit_visibility_attr(fp, g->name, g->attr_flags);
             if (align > 1) {
                 fprintf(fp, ".align %ld\n", align);
             }
@@ -294,14 +663,15 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             fprintf(fp, "\t.zero %ld\n", sz);
             continue;
         }
-        if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-            fprintf(fp, ".section %s\n", data_sec);
-        } else {
-            fprintf(fp, ".data\n");
-        }
+        emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
         if (!is_static) {
-            fprintf(fp, ".globl %s\n", g->name);
+            if ((g->attr_flags & CC_ATTR_WEAK) != 0) {
+                fprintf(fp, ".weak %s\n", g->name);
+            } else {
+                fprintf(fp, ".globl %s\n", g->name);
+            }
         }
+        emit_visibility_attr(fp, g->name, g->attr_flags);
         if (align > 1) {
             fprintf(fp, ".align %ld\n", align);
         }
@@ -317,11 +687,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                         fprintf(fp, "\t.section .rodata\n");
                         fprintf(fp, ".L__cc_gstream_%zu_%zu:\n", i, j);
                         fprintf(fp, "\t.asciz %s\n", it->init_str != NULL ? it->init_str : "\"\"");
-                        if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-                            fprintf(fp, "\t.section %s\n", data_sec);
-                        } else {
-                            fprintf(fp, "\t.data\n");
-                        }
+                        emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
                     }
                 }
 
@@ -409,11 +775,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_garr_%zu_%zu:\n", i, j);
                 fprintf(fp, "\t.asciz %s\n", it->init_str != NULL ? it->init_str : "\"\"");
-                if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-                    fprintf(fp, "\t.section %s\n", data_sec);
-                } else {
-                    fprintf(fp, "\t.data\n");
-                }
+                emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
             }
             for (j = 0; j < g->init_item_count; ++j) {
                 const cc_ssa_global_init_item_t *it = &g->init_items[j];
@@ -459,11 +821,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_gstr_%zu:\n", i);
                 fprintf(fp, "\t.asciz %s\n", g->init_str != NULL ? g->init_str : "\"\"");
-                if (g->attr_section != NULL && g->attr_section[0] != '\0') {
-                    fprintf(fp, "\t.section %s\n", data_sec);
-                } else {
-                    fprintf(fp, "\t.data\n");
-                }
+                emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
                 if (!is_static) {
                     fprintf(fp, ".globl %s\n", g->name);
                 }
@@ -548,6 +906,212 @@ static void mark_use(int *last_use, int nvals, int v, int at) {
     }
 }
 
+static char *dup_printf(const char *fmt, long off, const char *bp) {
+    char tmp[64];
+    size_t n;
+    char *out;
+    snprintf(tmp, sizeof(tmp), fmt, off, bp);
+    n = strlen(tmp);
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, tmp, n + 1);
+    return out;
+}
+
+static const char *pick_generic_reg64(size_t idx) {
+    static const char *regs[] = {"%r10", "%r11", "%r8", "%r9", "%rcx", "%rdx"};
+    return regs[idx % (sizeof(regs) / sizeof(regs[0]))];
+}
+
+static const char *pick_generic_reg32(size_t idx) {
+    static const char *regs[] = {"%eax", "%ebx", "%ecx", "%edx", "%esi", "%edi"};
+    return regs[idx % (sizeof(regs) / sizeof(regs[0]))];
+}
+
+static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
+                           int is_64bit, cc_diag_t *diag) {
+    size_t out_n = in->asm_out_count;
+    size_t in_n = in->asm_in_count;
+    size_t total = out_n + in_n;
+    size_t i;
+    size_t reg_pick = 0;
+    char **op_text = NULL;
+    char **op_names = NULL;
+    const char **out_regs = NULL;
+    int *out_write_back = NULL;
+    int *out_tied_read = NULL;
+    char *rendered = NULL;
+
+    op_text = (char **)calloc(total, sizeof(*op_text));
+    op_names = (char **)calloc(total, sizeof(*op_names));
+    out_regs = (const char **)calloc(out_n, sizeof(*out_regs));
+    out_write_back = (int *)calloc(out_n, sizeof(*out_write_back));
+    out_tied_read = (int *)calloc(out_n, sizeof(*out_tied_read));
+    if ((total > 0 && (op_text == NULL || op_names == NULL)) ||
+        (out_n > 0 && (out_regs == NULL || out_write_back == NULL || out_tied_read == NULL))) {
+        free(op_text);
+        free(op_names);
+        free(out_regs);
+        free(out_write_back);
+        free(out_tied_read);
+        set_diag(diag, "out of memory preparing inline asm operands");
+        return -1;
+    }
+
+    for (i = 0; i < in_n; ++i) {
+        int tied = asm_constraint_match_output(in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL);
+        if (tied >= 0 && (size_t)tied < out_n) {
+            out_tied_read[tied] = 1;
+        }
+    }
+
+    for (i = 0; i < out_n; ++i) {
+        const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
+        int v = in->asm_out_values != NULL ? in->asm_out_values[i] : -1;
+        long off = slot_off(lay, v);
+        const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
+        if (in->asm_out_names != NULL && in->asm_out_names[i] != NULL) {
+            op_names[i] = in->asm_out_names[i];
+        }
+        if (asm_constraint_is_memory_only(c)) {
+            op_text[i] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
+            if (op_text[i] == NULL) {
+                goto oom;
+            }
+        } else {
+            const char *reg = fixed != NULL ? fixed : (is_64bit ? pick_generic_reg64(reg_pick++) : pick_generic_reg32(reg_pick++));
+            out_regs[i] = reg;
+            out_write_back[i] = 1;
+            op_text[i] = (char *)malloc(strlen(reg) + 1);
+            if (op_text[i] == NULL) {
+                goto oom;
+            }
+            strcpy(op_text[i], reg);
+            if ((c != NULL && strchr(c, '+') != NULL) || out_tied_read[i]) {
+                if (is_64bit) {
+                    fprintf(fp, "\tmovq %ld(%%rbp), %s\n", off, reg);
+                } else {
+                    fprintf(fp, "\tmovl %ld(%%ebp), %s\n", off, reg);
+                }
+            }
+        }
+    }
+
+    for (i = 0; i < in_n; ++i) {
+        const char *c = in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL;
+        int v = in->asm_in_values != NULL ? in->asm_in_values[i] : -1;
+        size_t slot = out_n + i;
+        int tied = asm_constraint_match_output(c);
+        if (in->asm_in_names != NULL && in->asm_in_names[i] != NULL) {
+            op_names[slot] = in->asm_in_names[i];
+        }
+        if (tied >= 0) {
+            if ((size_t)tied >= out_n || op_text[tied] == NULL) {
+                set_diag(diag, "asm matching constraint references invalid output operand");
+                goto fail;
+            }
+            op_text[slot] = (char *)malloc(strlen(op_text[tied]) + 1);
+            if (op_text[slot] == NULL) {
+                goto oom;
+            }
+            strcpy(op_text[slot], op_text[tied]);
+            continue;
+        }
+        if (asm_constraint_is_immediate(c)) {
+            long imm = 0;
+            char ibuf[64];
+            if (find_const_i64_for_value(f, v, &imm) != 0) {
+                set_diag(diag, "asm immediate constraint requires constant input");
+                goto fail;
+            }
+            snprintf(ibuf, sizeof(ibuf), "$%ld", imm);
+            op_text[slot] = (char *)malloc(strlen(ibuf) + 1);
+            if (op_text[slot] == NULL) {
+                goto oom;
+            }
+            strcpy(op_text[slot], ibuf);
+            continue;
+        }
+        if (asm_constraint_is_memory_only(c)) {
+            long off = slot_off(lay, v);
+            op_text[slot] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
+            if (op_text[slot] == NULL) {
+                goto oom;
+            }
+            continue;
+        }
+        {
+            const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
+            const char *reg = fixed != NULL ? fixed : (is_64bit ? pick_generic_reg64(reg_pick++) : pick_generic_reg32(reg_pick++));
+            long off = slot_off(lay, v);
+            op_text[slot] = (char *)malloc(strlen(reg) + 1);
+            if (op_text[slot] == NULL) {
+                goto oom;
+            }
+            strcpy(op_text[slot], reg);
+            if (is_64bit) {
+                fprintf(fp, "\tmovq %ld(%%rbp), %s\n", off, reg);
+            } else {
+                fprintf(fp, "\tmovl %ld(%%ebp), %s\n", off, reg);
+            }
+        }
+    }
+
+    rendered = render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total, in->asm_goto_labels,
+                                          in->asm_goto_names, in->asm_goto_count, f->name, diag);
+    if (rendered == NULL) {
+        goto fail;
+    }
+    if (in->asm_volatile) {
+        fprintf(fp, "\t# volatile asm\n");
+    }
+    for (i = 0; i < in->asm_clobber_count; ++i) {
+        if (in->asm_clobbers[i] != NULL &&
+            (strcmp(in->asm_clobbers[i], "memory") == 0 || strcmp(in->asm_clobbers[i], "cc") == 0)) {
+            fprintf(fp, "\t# asm clobber %s\n", in->asm_clobbers[i]);
+        }
+    }
+    emit_asm_lines(fp, rendered);
+
+    for (i = 0; i < out_n; ++i) {
+        if (out_write_back[i] && out_regs[i] != NULL && in->asm_out_values != NULL) {
+            long off = slot_off(lay, in->asm_out_values[i]);
+            if (is_64bit) {
+                fprintf(fp, "\tmovq %s, %ld(%%rbp)\n", out_regs[i], off);
+            } else {
+                fprintf(fp, "\tmovl %s, %ld(%%ebp)\n", out_regs[i], off);
+            }
+        }
+    }
+
+    free(rendered);
+    for (i = 0; i < total; ++i) {
+        free(op_text[i]);
+    }
+    free(op_text);
+    free(op_names);
+    free(out_regs);
+    free(out_write_back);
+    free(out_tied_read);
+    return 0;
+
+oom:
+    set_diag(diag, "out of memory preparing inline asm");
+fail:
+    free(rendered);
+    for (i = 0; i < total; ++i) {
+        free(op_text[i]);
+    }
+    free(op_text);
+    free(op_names);
+    free(out_regs);
+    free(out_write_back);
+    free(out_tied_read);
+    return -1;
+}
+
 static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *out, cc_diag_t *diag) {
     int nvals;
     int ninstr;
@@ -574,7 +1138,7 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
 
     for (i = 0; i < ninstr; ++i) {
         cc_ssa_opcode_t op = f->instrs[i].op;
-        if (op == CC_SSA_LABEL || op == CC_SSA_BR || op == CC_SSA_BR_COND) {
+        if (op == CC_SSA_LABEL || op == CC_SSA_BR || op == CC_SSA_BR_COND || op == CC_SSA_ADDR) {
             has_cfg = 1;
             break;
         }
@@ -629,6 +1193,12 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
         mark_use(last_use, nvals, in->rhs, i);
         for (a = 0; a < in->arg_count; ++a) {
             mark_use(last_use, nvals, in->args[a], i);
+        }
+        for (a = 0; a < in->asm_out_count; ++a) {
+            mark_use(last_use, nvals, in->asm_out_values[a], i);
+        }
+        for (a = 0; a < in->asm_in_count; ++a) {
+            mark_use(last_use, nvals, in->asm_in_values[a], i);
         }
     }
 
@@ -760,14 +1330,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         }
         frame = (raw_frame + 15) & ~15;
 
-        if (f->attr_section != NULL && f->attr_section[0] != '\0') {
-            fprintf(fp, "\n.section %s\n", f->attr_section);
-        } else {
-            fprintf(fp, "\n.text\n");
-        }
+        fprintf(fp, "\n");
+        emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
         if ((f->storage & CC_STORAGE_STATIC) == 0) {
-            fprintf(fp, ".globl %s\n", f->name);
+            if ((f->attr_flags & CC_ATTR_WEAK) != 0) {
+                fprintf(fp, ".weak %s\n", f->name);
+            } else {
+                fprintf(fp, ".globl %s\n", f->name);
+            }
         }
+        emit_visibility_attr(fp, f->name, f->attr_flags);
         if (f->attr_align > 1) {
             fprintf(fp, ".align %ld\n", f->attr_align);
         }
@@ -882,7 +1454,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_LOAD:
                 fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    fprintf(fp, "\tmovsd (%%rax), %%xmm0\n");
+                    long mem_size = in->imm > 0 ? in->imm : 8;
+                    if (mem_size == 4) {
+                        fprintf(fp, "\tmovss (%%rax), %%xmm0\n");
+                        fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                    } else {
+                        fprintf(fp, "\tmovsd (%%rax), %%xmm0\n");
+                    }
                     fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 8;
@@ -914,8 +1492,14 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_STORE:
                 fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                 if (f->value_types[in->rhs] == CC_VAL_F64) {
+                    long mem_size = in->imm > 0 ? in->imm : 8;
                     fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
-                    fprintf(fp, "\tmovsd %%xmm0, (%%rax)\n");
+                    if (mem_size == 4) {
+                        fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                        fprintf(fp, "\tmovss %%xmm0, (%%rax)\n");
+                    } else {
+                        fprintf(fp, "\tmovsd %%xmm0, (%%rax)\n");
+                    }
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 8;
                     if (mem_size > 8) {
@@ -1025,6 +1609,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_F2I:
                 fprintf(fp, "\tcvttsd2siq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                 fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_FROUND32:
+                fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 break;
 
             case CC_SSA_LABEL:
@@ -1152,11 +1743,42 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     if (f->value_types[in->dst] == CC_VAL_F64) {
                         fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                     } else {
+                        long ret_bytes = in->imm > 0 ? in->imm : 8;
+                        if (ret_bytes == 1) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovzbl %%al, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovsbq %%al, %%rax\n");
+                            }
+                        } else if (ret_bytes == 2) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovzwl %%ax, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovswq %%ax, %%rax\n");
+                            }
+                        } else if (ret_bytes == 4) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovl %%eax, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovslq %%eax, %%rax\n");
+                            }
+                        }
                         fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                     }
                 }
                 break;
             }
+
+            case CC_SSA_ASM:
+                if (emit_inline_asm(fp, f, &lay, in, 1, diag) != 0) {
+                    slot_layout_free(&lay);
+                    return -1;
+                }
+                break;
+
+            case CC_SSA_TRAP:
+                fprintf(fp, "\tud2\n");
+                break;
 
             case CC_SSA_RET:
                 if (in->lhs >= 0) {
@@ -1232,14 +1854,16 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         }
         frame = (lay.slot_count * 8 + 15) & ~15;
 
-        if (f->attr_section != NULL && f->attr_section[0] != '\0') {
-            fprintf(fp, "\n.section %s\n", f->attr_section);
-        } else {
-            fprintf(fp, "\n.text\n");
-        }
+        fprintf(fp, "\n");
+        emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
         if ((f->storage & CC_STORAGE_STATIC) == 0) {
-            fprintf(fp, ".globl %s\n", f->name);
+            if ((f->attr_flags & CC_ATTR_WEAK) != 0) {
+                fprintf(fp, ".weak %s\n", f->name);
+            } else {
+                fprintf(fp, ".globl %s\n", f->name);
+            }
         }
+        emit_visibility_attr(fp, f->name, f->attr_flags);
         if (f->attr_align > 1) {
             fprintf(fp, ".align %ld\n", f->attr_align);
         }
@@ -1337,7 +1961,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_LOAD:
                 fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    fprintf(fp, "\tmovsd (%%eax), %%xmm0\n");
+                    long mem_size = in->imm > 0 ? in->imm : 8;
+                    if (mem_size == 4) {
+                        fprintf(fp, "\tmovss (%%eax), %%xmm0\n");
+                        fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                    } else {
+                        fprintf(fp, "\tmovsd (%%eax), %%xmm0\n");
+                    }
                     fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 4;
@@ -1355,8 +1985,14 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_STORE:
                 fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                 if (f->value_types[in->rhs] == CC_VAL_F64) {
+                    long mem_size = in->imm > 0 ? in->imm : 8;
                     fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
-                    fprintf(fp, "\tmovsd %%xmm0, (%%eax)\n");
+                    if (mem_size == 4) {
+                        fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                        fprintf(fp, "\tmovss %%xmm0, (%%eax)\n");
+                    } else {
+                        fprintf(fp, "\tmovsd %%xmm0, (%%eax)\n");
+                    }
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 4;
                     if (mem_size > 4) {
@@ -1467,6 +2103,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 break;
 
+            case CC_SSA_FROUND32:
+                fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+
             case CC_SSA_LABEL:
                 emit_local_label(fp, f->name, in->label);
                 fprintf(fp, ":\n");
@@ -1526,11 +2169,36 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     if (f->value_types[in->dst] == CC_VAL_F64) {
                         fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(&lay, in->dst));
                     } else {
+                        long ret_bytes = in->imm > 0 ? in->imm : 4;
+                        if (ret_bytes == 1) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovzbl %%al, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovsbl %%al, %%eax\n");
+                            }
+                        } else if (ret_bytes == 2) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovzwl %%ax, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovswl %%ax, %%eax\n");
+                            }
+                        }
                         fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                     }
                 }
                 break;
             }
+
+            case CC_SSA_ASM:
+                if (emit_inline_asm(fp, f, &lay, in, 0, diag) != 0) {
+                    slot_layout_free(&lay);
+                    return -1;
+                }
+                break;
+
+            case CC_SSA_TRAP:
+                fprintf(fp, "\tud2\n");
+                break;
 
             case CC_SSA_RET:
                 if (in->lhs >= 0) {
