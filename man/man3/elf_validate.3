@@ -2,7 +2,12 @@
 .Dt ELF_VALIDATE 3
 .Os Substrate
 .Sh NAME
-.Nm elf_validate
+.Nm elf_validate ,
+.Nm elf_validate_ex ,
+.Nm elf_set_validation_mode ,
+.Nm elf_get_validation_mode ,
+.Nm elf_diag_count ,
+.Nm elf_diag_entry
 .Nd ELF object validation and diagnostics
 .Sh SYNOPSIS
 .In elfobj.h
@@ -11,11 +16,53 @@
 .Fa "elfobj_t *obj"
 .Fa "char **diagnostics"
 .Fc
+.Ft elf_err_t
+.Fo elf_validate_ex
+.Fa "elfobj_t *obj"
+.Fa "const elf_validate_options_t *options"
+.Fa "char **diagnostics"
+.Fc
+.Ft elf_err_t
+.Fo elf_set_validation_mode
+.Fa "elfobj_t *obj"
+.Fa "elf_validate_mode_t mode"
+.Fc
+.Ft elf_validate_mode_t
+.Fo elf_get_validation_mode
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft size_t
+.Fo elf_diag_count
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft int
+.Fo elf_diag_entry
+.Fa "const elfobj_t *obj"
+.Fa "size_t index"
+.Fa "elf_diag_entry_t *out"
+.Fc
 .Sh DESCRIPTION
 The
 .Fn elf_validate
-function performs structural validation of an ELF object, checking for
-format errors, inconsistencies, and potential security issues.
+and
+.Fn elf_validate_ex
+functions perform structural validation of an ELF object, checking for
+format errors, inconsistencies, and hardening policy issues.
+.Pp
+.Fn elf_validate_ex
+accepts
+.Vt elf_validate_options_t
+for strict/permissive mode and error-limit control.
+.Fn elf_set_validation_mode
+and
+.Fn elf_get_validation_mode
+set/query object-default validation policy.
+.Pp
+Structured diagnostics are exposed through
+.Fn elf_diag_count
+and
+.Fn elf_diag_entry
+after any validation call.
 .Pp
 Validation is essential when:
 .Bl -bullet
