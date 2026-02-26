@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdlib.h>
 
@@ -17,6 +18,7 @@ typedef enum {
     TOK_STR,
     TOK_KW_AUTO,
     TOK_KW_BOOL,
+    TOK_KW_COMPLEX,
     TOK_KW_CHAR,
     TOK_KW_CONST,
     TOK_KW_INT,
@@ -36,6 +38,7 @@ typedef enum {
     TOK_KW_TYPEDEF,
     TOK_KW_UNSIGNED,
     TOK_KW_DOUBLE,
+    TOK_KW_IMAGINARY,
     TOK_KW_VOLATILE,
     TOK_KW_VOID,
     TOK_KW_RETURN,
@@ -106,6 +109,8 @@ typedef struct {
     long num;
     double fnum;
     int is_float;
+    int float_is_single;
+    int float_is_long;
     int int_is_unsigned;
     int int_is_longlong;
     size_t line;
@@ -126,6 +131,26 @@ static int is_int_suffix_char(int c) {
 
 static int is_hex_digit(int c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static int is_bin_digit(int c) {
+    return c == '0' || c == '1';
+}
+
+static size_t copy_numeric_compact(char *dst, size_t dst_cap, const char *src, size_t src_len) {
+    size_t i;
+    size_t w = 0;
+    if (dst_cap == 0) {
+        return 0;
+    }
+    for (i = 0; i < src_len && w + 1 < dst_cap; ++i) {
+        if (src[i] == '\'') {
+            continue;
+        }
+        dst[w++] = src[i];
+    }
+    dst[w] = '\0';
+    return w;
 }
 
 static size_t lx_ucn_len_at(const cc_lexer_t *lx, size_t pos) {
@@ -265,6 +290,8 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->num = 0;
     out->fnum = 0.0;
     out->is_float = 0;
+    out->float_is_single = 0;
+    out->float_is_long = 0;
     out->int_is_unsigned = 0;
     out->int_is_longlong = 0;
     out->line = lx->line;
@@ -279,7 +306,10 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     line = lx->line;
     col = lx->col;
 
-    if (is_ident_start_ascii(c) || lx_ucn_len_at(lx, lx->pos) > 0) {
+    if ((is_ident_start_ascii(c) && !((c == 'L' || c == 'u' || c == 'U') && lx_peekn(lx, 1) == '\'') &&
+         !((c == 'L' || c == 'u' || c == 'U') && lx_peekn(lx, 1) == '"') &&
+         !(c == 'u' && lx_peekn(lx, 1) == '8' && lx_peekn(lx, 2) == '"')) ||
+        lx_ucn_len_at(lx, lx->pos) > 0) {
         size_t ucn_len;
         start = lx->pos;
         ucn_len = lx_ucn_len_at(lx, lx->pos);
@@ -312,6 +342,14 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         } else if (out->len == 5 && out->start[0] == '_' && out->start[1] == 'B' &&
                    out->start[2] == 'o' && out->start[3] == 'o' && out->start[4] == 'l') {
             out->kind = TOK_KW_BOOL;
+        } else if ((out->len == 8 && out->start[0] == '_' && out->start[1] == 'C' &&
+                    out->start[2] == 'o' && out->start[3] == 'm' && out->start[4] == 'p' &&
+                    out->start[5] == 'l' && out->start[6] == 'e' && out->start[7] == 'x') ||
+                   (out->len == 11 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'c' && out->start[3] == 'o' && out->start[4] == 'm' &&
+                    out->start[5] == 'p' && out->start[6] == 'l' && out->start[7] == 'e' &&
+                    out->start[8] == 'x' && out->start[9] == '_' && out->start[10] == '_')) {
+            out->kind = TOK_KW_COMPLEX;
         } else if (out->len == 4 && out->start[0] == 'c' && out->start[1] == 'h' &&
                    out->start[2] == 'a' && out->start[3] == 'r') {
             out->kind = TOK_KW_CHAR;
@@ -388,7 +426,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
             out->kind = TOK_KW_STRUCT;
         } else if (out->len == 5 && out->start[0] == 'u' && out->start[1] == 'n' &&
                    out->start[2] == 'i' && out->start[3] == 'o' && out->start[4] == 'n') {
-            out->kind = TOK_KW_STRUCT;
+            out->kind = TOK_KW_UNION;
         } else if (out->len == 4 && out->start[0] == 'e' && out->start[1] == 'n' &&
                    out->start[2] == 'u' && out->start[3] == 'm') {
             out->kind = TOK_KW_ENUM;
@@ -413,6 +451,19 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                     out->start[5] == 'a' && out->start[6] == 't' && out->start[7] == '1' &&
                     out->start[8] == '2' && out->start[9] == '8')) {
             out->kind = TOK_KW_DOUBLE;
+        } else if ((out->len == 10 && out->start[0] == '_' && out->start[1] == 'I' &&
+                    out->start[2] == 'm' && out->start[3] == 'a' && out->start[4] == 'g' &&
+                    out->start[5] == 'i' && out->start[6] == 'n' && out->start[7] == 'a' &&
+                    out->start[8] == 'r' && out->start[9] == 'y') ||
+                   (out->len == 13 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'i' && out->start[3] == 'm' && out->start[4] == 'a' &&
+                    out->start[5] == 'g' && out->start[6] == 'i' && out->start[7] == 'n' &&
+                    out->start[8] == 'a' && out->start[9] == 'r' && out->start[10] == 'y' &&
+                    out->start[11] == '_' && out->start[12] == '_') ||
+                   (out->len == 8 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 'i' && out->start[3] == 'm' && out->start[4] == 'a' &&
+                    out->start[5] == 'g' && out->start[6] == '_' && out->start[7] == '_')) {
+            out->kind = TOK_KW_IMAGINARY;
         } else if ((out->len == 8 && out->start[0] == 'v' && out->start[1] == 'o' &&
                     out->start[2] == 'l' && out->start[3] == 'a' && out->start[4] == 't' &&
                     out->start[5] == 'i' && out->start[6] == 'l' && out->start[7] == 'e') ||
@@ -476,8 +527,11 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     }
 
-    if (c == '\'') {
+    if (c == '\'' || ((c == 'L' || c == 'u' || c == 'U') && lx_peekn(lx, 1) == '\'')) {
         long v = 0;
+        if (c != '\'') {
+            lx_adv(lx);
+        }
         lx_adv(lx); /* opening quote */
         c = lx_peek(lx);
         if (c == '\\') {
@@ -562,8 +616,18 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         return 0;
     }
 
-    if (c == '"') {
-        start = lx->pos;
+    if (c == '"' || ((c == 'L' || c == 'u' || c == 'U') && lx_peekn(lx, 1) == '"') ||
+        (c == 'u' && lx_peekn(lx, 1) == '8' && lx_peekn(lx, 2) == '"')) {
+        if (c == '"') {
+            start = lx->pos;
+        } else if (c == 'u' && lx_peekn(lx, 1) == '8' && lx_peekn(lx, 2) == '"') {
+            lx_adv(lx);
+            lx_adv(lx);
+            start = lx->pos;
+        } else {
+            lx_adv(lx);
+            start = lx->pos;
+        }
         lx_adv(lx); /* opening quote */
         while ((c = lx_peek(lx)) >= 0) {
             if (c == '\\') {
@@ -588,31 +652,67 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
 
     if (isdigit(c) || (c == '.' && isdigit(lx_peekn(lx, 1)))) {
         int saw_dot = 0;
+        int saw_p_exp = 0;
         int seen_u = 0;
         int seen_l = 0;
         int base = 10;
+        int had_binary_prefix = 0;
+        unsigned long long val_u = 0;
         start = lx->pos;
         if (c == '.') {
             saw_dot = 1;
             lx_adv(lx);
-            while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+            while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
                 lx_adv(lx);
             }
         } else if (c == '0' && (lx_peekn(lx, 1) == 'x' || lx_peekn(lx, 1) == 'X')) {
             base = 16;
             lx_adv(lx);
             lx_adv(lx);
-            while ((c = lx_peek(lx)) >= 0 && isxdigit(c)) {
-                lx_adv(lx);
-            }
-        } else {
-            while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+            while ((c = lx_peek(lx)) >= 0 && (isxdigit(c) || c == '\'')) {
                 lx_adv(lx);
             }
             if (lx_peek(lx) == '.') {
                 saw_dot = 1;
                 lx_adv(lx);
-                while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                while ((c = lx_peek(lx)) >= 0 && (isxdigit(c) || c == '\'')) {
+                    lx_adv(lx);
+                }
+            }
+            {
+                int e0 = lx_peek(lx);
+                int e1 = lx_peekn(lx, 1);
+                int e2 = lx_peekn(lx, 2);
+                if (e0 == 'p' || e0 == 'P') {
+                    if (isdigit(e1) || ((e1 == '+' || e1 == '-') && isdigit(e2))) {
+                        saw_dot = 1;
+                        saw_p_exp = 1;
+                        lx_adv(lx);
+                        if (lx_peek(lx) == '+' || lx_peek(lx) == '-') {
+                            lx_adv(lx);
+                        }
+                        while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
+                            lx_adv(lx);
+                        }
+                    }
+                }
+            }
+        } else if (c == '0' && (lx_peekn(lx, 1) == 'b' || lx_peekn(lx, 1) == 'B')) {
+            base = 2;
+            had_binary_prefix = 1;
+            lx_adv(lx);
+            lx_adv(lx);
+            while ((c = lx_peek(lx)) >= 0 && (is_bin_digit(c) || c == '\'')) {
+                lx_adv(lx);
+            }
+        } else {
+            while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
+                lx_adv(lx);
+            }
+            if (lx_peek(lx) == '.') {
+                saw_dot = 1;
+                lx_adv(lx);
+                while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
                     lx_adv(lx);
                 }
             } else if (lx->src[start] == '0') {
@@ -629,7 +729,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
                         if (lx_peek(lx) == '+' || lx_peek(lx) == '-') {
                             lx_adv(lx);
                         }
-                        while ((c = lx_peek(lx)) >= 0 && isdigit(c)) {
+                        while ((c = lx_peek(lx)) >= 0 && (isdigit(c) || c == '\'')) {
                             lx_adv(lx);
                         }
                     }
@@ -639,6 +739,12 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
 
         if (saw_dot) {
             if (lx_peek(lx) == 'f' || lx_peek(lx) == 'F' || lx_peek(lx) == 'l' || lx_peek(lx) == 'L') {
+                if (lx_peek(lx) == 'f' || lx_peek(lx) == 'F') {
+                    out->float_is_single = 1;
+                }
+                if (lx_peek(lx) == 'l' || lx_peek(lx) == 'L') {
+                    out->float_is_long = 1;
+                }
                 lx_adv(lx);
             }
         } else {
@@ -659,31 +765,48 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         out->col = col;
         if (saw_dot) {
             char tmp[128];
-            size_t n = out->len;
-            size_t i;
-            if (n >= sizeof(tmp)) {
-                n = sizeof(tmp) - 1;
-            }
-            for (i = 0; i < n; ++i) {
-                tmp[i] = out->start[i];
-            }
-            tmp[n] = '\0';
+            copy_numeric_compact(tmp, sizeof(tmp), out->start, out->len);
             out->is_float = 1;
             out->fnum = strtod(tmp, NULL);
         } else {
             char tmp[128];
-            size_t n = out->len;
-            size_t i;
-            if (n >= sizeof(tmp)) {
-                n = sizeof(tmp) - 1;
+            char *parse_s = tmp;
+            copy_numeric_compact(tmp, sizeof(tmp), out->start, out->len);
+            if (had_binary_prefix && tmp[0] == '0' && (tmp[1] == 'b' || tmp[1] == 'B')) {
+                parse_s = tmp + 2;
             }
-            for (i = 0; i < n; ++i) {
-                tmp[i] = out->start[i];
+            val_u = strtoull(parse_s, NULL, base == 10 ? 0 : base);
+            out->num = (long)val_u;
+            if (seen_u) {
+                out->int_is_unsigned = 1;
+                out->int_is_longlong = (seen_l >= 1) || val_u > 0xffffffffULL;
+            } else if (seen_l >= 1) {
+                out->int_is_unsigned = 0;
+                out->int_is_longlong = 1;
+            } else if (base == 10) {
+                out->int_is_unsigned = 0;
+                out->int_is_longlong = val_u > 0x7fffffffULL;
+            } else {
+                if (val_u <= 0x7fffffffULL) {
+                    out->int_is_unsigned = 0;
+                    out->int_is_longlong = 0;
+                } else if (val_u <= 0xffffffffULL) {
+                    out->int_is_unsigned = 1;
+                    out->int_is_longlong = 0;
+                } else if (val_u <= (unsigned long long)LONG_MAX) {
+                    out->int_is_unsigned = 0;
+                    out->int_is_longlong = 1;
+                } else {
+                    out->int_is_unsigned = 1;
+                    out->int_is_longlong = 1;
+                }
             }
-            tmp[n] = '\0';
-            out->num = strtol(tmp, NULL, base == 10 ? 0 : base);
-            out->int_is_unsigned = seen_u;
-            out->int_is_longlong = (seen_l >= 2);
+            if (base == 16 && saw_p_exp) {
+                out->is_float = 1;
+                out->int_is_unsigned = 0;
+                out->int_is_longlong = 0;
+                out->fnum = strtod(tmp, NULL);
+            }
         }
         return 0;
     }

@@ -1,38 +1,40 @@
 #ifndef _VFS_H
 #define _VFS_H
+
 #include <stdint.h>
 #include <stddef.h>
 #include <sys/types.h>
 
-struct dirent;
+#define FS_FILE        0x01
+#define FS_DIRECTORY   0x02
+
 typedef struct fs_node {
     char name[128];
     uint32_t flags;
-    uint32_t inode;
-    uintptr_t impl; /* Changed from void* to match real kernel */
-    struct fs_node *parent;
-    size_t (*read)(struct fs_node *, off_t, size_t, uint8_t *);
-    struct dirent *(*readdir)(struct fs_node *, uint64_t);
-    struct fs_node *(*finddir)(struct fs_node *, char *);
-    void (*close)(struct fs_node *);
-    void (*open)(struct fs_node *);
-    void (*write)(struct fs_node *, off_t, size_t, uint8_t *);
+    uint64_t inode;
+    uintptr_t impl;
+    void *read;
+    void *write;
+    void *open;
+    void *close;
+    void *readdir;
+    void *finddir;
 } fs_node_t;
 
+struct dirent {
+    char d_name[256];
+    uint64_t d_ino;
+};
+
+typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
+
 typedef struct filesystem {
-    const char *name;
+    char name[32];
+    mount_type_t mount;
     struct filesystem *next;
-    fs_node_t *(*mount)(const char *, uint32_t, void *);
 } filesystem_t;
 
 void vfs_register_filesystem(filesystem_t *fs);
 filesystem_t *vfs_get_filesystems(void);
 
-struct dirent {
-    char d_name[256];
-    uint32_t d_ino;
-};
-
-#define FS_FILE 1
-#define FS_DIRECTORY 2
 #endif

@@ -1,4 +1,7 @@
 #ifndef _SYS_LOCK_H
 #define _SYS_LOCK_H
-typedef int mutex_t;
+
+// Mock lock types if needed
+typedef int spinlock_t;
+
 #endif

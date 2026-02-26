@@ -1,5 +1,8 @@
 #ifndef _PMAP_H
 #define _PMAP_H
+
+#include <stdint.h>
+
 struct pmap_stats {
     uint32_t faults;
     uint32_t cow_faults;
@@ -13,5 +16,7 @@ struct pmap_stats {
     uint32_t tlb_full_flush_count;
     uint32_t total_pmaps;
 };
-int sys_pmap_stats(struct pmap_stats *stats);
+
+int sys_pmap_stats(struct pmap_stats *out);
+
 #endif
