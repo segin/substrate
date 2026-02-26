@@ -102,8 +102,10 @@ void create_output_file(void) {
     char *name;
     int len;
     
-    /* Create y.tab.c or file_prefix.tab.c */
-    len = strlen(file_prefix) + 10;
+    /* Create output filenames (e.g. y.tab.c, y.tab.h, y.output) */
+    /* Allocate enough space for file_prefix + suffix (max 7 chars: ".output") + NUL */
+#define MAX_SUFFIX_LEN 16
+    len = strlen(file_prefix) + MAX_SUFFIX_LEN;
     name = (char *)malloc(len);
     if (name == NULL) no_space();
     

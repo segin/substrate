@@ -1,0 +1,90 @@
+.Dd February 25, 2026
+.Dt ELF_SEGMENT 3
+.Os Substrate
+.Sh NAME
+.Nm elf_add_segment ,
+.Nm elf_add_load_segment ,
+.Nm elf_add_dynamic_segment ,
+.Nm elf_add_interp_segment ,
+.Nm elf_add_tls_segment ,
+.Nm elf_segment_add_section ,
+.Nm elf_segment_count ,
+.Nm elf_segment_type ,
+.Nm elf_segment_flags ,
+.Nm elf_segment_align ,
+.Nm elf_segment_section_count ,
+.Nm elf_segment_contains_section
+.Nd ELF program segment API
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_segment_t *
+.Fo elf_add_segment
+.Fa "elfobj_t *obj"
+.Fa "uint32_t type"
+.Fa "uint32_t flags"
+.Fa "uint64_t align"
+.Fc
+.Ft elf_segment_t *
+.Fo elf_add_load_segment
+.Fa "elfobj_t *obj"
+.Fa "uint32_t flags"
+.Fa "uint64_t align"
+.Fc
+.Ft elf_segment_t *
+.Fo elf_add_dynamic_segment
+.Fa "elfobj_t *obj"
+.Fa "uint64_t align"
+.Fc
+.Ft elf_segment_t *
+.Fo elf_add_tls_segment
+.Fa "elfobj_t *obj"
+.Fa "uint64_t align"
+.Fc
+.Ft elf_segment_t *
+.Fo elf_add_interp_segment
+.Fa "elfobj_t *obj"
+.Fa "const char *interp_path"
+.Fc
+.Ft elf_err_t
+.Fo elf_segment_add_section
+.Fa "elf_segment_t *segment"
+.Fa "elf_section_t *section"
+.Fc
+.Ft size_t
+.Fo elf_segment_count
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft uint32_t
+.Fo elf_segment_type
+.Fa "const elf_segment_t *segment"
+.Fc
+.Ft uint32_t
+.Fo elf_segment_flags
+.Fa "const elf_segment_t *segment"
+.Fc
+.Ft uint64_t
+.Fo elf_segment_align
+.Fa "const elf_segment_t *segment"
+.Fc
+.Ft size_t
+.Fo elf_segment_section_count
+.Fa "const elf_segment_t *segment"
+.Fc
+.Ft int
+.Fo elf_segment_contains_section
+.Fa "const elf_segment_t *segment"
+.Fa "const elf_section_t *section"
+.Fc
+.Sh DESCRIPTION
+These APIs define explicit section-to-segment mappings for generated ELF files.
+Segments are attached to an
+.Vt elfobj_t
+and can then be used during ELF program-header emission.
+.Sh RETURN VALUES
+Creation functions return a segment handle on success or NULL on failure.
+Mutation functions return
+.Dv ELF_OK
+on success or an error code.
+.Sh SEE ALSO
+.Xr elfobj 3 ,
+.Xr elf_section 3
