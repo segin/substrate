@@ -2,17 +2,17 @@ include ../../Makefile.inc
 
 PROG = as
 SRCS = as.c
-LDADD += ../../usr.lib/elf/libelfobj.a
+LDADD += ../../usr.lib/elfobj/libelfobj.a
 USER_CFLAGS += -iquote ../../include
 
 include ../../Makefile.bin.inc
 
-BINDIR ?= $(DESTDIR)/usr/bin
+BINDIR := $(DESTDIR)/usr/bin
 
-$(PROG): ../../usr.lib/elf/libelfobj.a
+$(PROG): ../../usr.lib/elfobj/libelfobj.a
 
-../../usr.lib/elf/libelfobj.a:
-	$(MAKE) -C ../../usr.lib/elf $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
+../../usr.lib/elfobj/libelfobj.a:
+	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
 all: alias_links
 
@@ -23,5 +23,6 @@ alias_links: $(PROG)
 	ln -sf $(PROG) as.x64
 
 install_aliases: $(PROG)
+	mkdir -p $(BINDIR)
 	ln -sf as $(BINDIR)/as.x86
 	ln -sf as $(BINDIR)/as.x64
