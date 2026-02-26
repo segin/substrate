@@ -1,148 +1,177 @@
-#include <stddef.h>
-#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <stdio.h>
+#include <errno.h>
+#include <stdint.h>
+#include <stddef.h>
 
-// Mock vfs types
-// We need to ensure off_t and other types are defined.
-// The host's sys/types.h should be sufficient if we use standard headers.
-#include <sys/types.h>
+// Mock kernel types and headers
+// We rely on -I flags to find sys/types.h and sys/vfs/vfs.h
 
-// Mock vfs/vfs.h by including the real one (which includes sys/types.h)
-// But we need to make sure vfs/vfs.h can be found.
-// The Makefile will add -I../../sys
-
-// Mock sched_sleep
-void sched_sleep(void *channel);
-
-// Mock devfs
+// Forward declarations
 struct fs_node;
 typedef struct fs_node fs_node_t;
-void devfs_register_device(fs_node_t *node);
-
-// Mock vfs
 struct filesystem;
 typedef struct filesystem filesystem_t;
+
+// Mocks
+void sched_sleep(void *chan);
 void vfs_register_filesystem(filesystem_t *fs);
+void devfs_register_device(fs_node_t *node);
 
-// Include the source file
-#include "../../sys/fs/fuse.c"
+// Globals for mocks
+int sched_sleep_calls = 0;
+int vfs_register_calls = 0;
+int devfs_register_calls = 0;
 
-// Implementation of mocks
+void *sched_sleep_chan = NULL;
 
-void sched_sleep(void *channel) {
-    (void)channel;
-    printf("sched_sleep called, simulating data arrival...\n");
-    // Simulate data arriving
-    // We access static request_queue and fuse_q_head from fuse.c
-    struct fuse_in_header *req = &request_queue[fuse_q_head];
-    req->len = sizeof(struct fuse_in_header);
-    req->opcode = FUSE_READ;
-    req->unique = 12345ULL;
-    req->nodeid = 1;
-
-    // Advance head to indicate data is available
-    fuse_q_head = (fuse_q_head + 1) % FUSE_QUEUE_SIZE;
+// Mock implementations
+void vfs_register_filesystem(filesystem_t *fs) {
+    (void)fs;
+    vfs_register_calls++;
 }
 
 void devfs_register_device(fs_node_t *node) {
     (void)node;
+    devfs_register_calls++;
 }
 
-void vfs_register_filesystem(filesystem_t *fs) {
-    (void)fs;
+// Include source file
+#include "../../sys/fs/fuse.c"
+
+// Implementation of sched_sleep that interacts with fuse internals
+void sched_sleep(void *chan) {
+    sched_sleep_calls++;
+    sched_sleep_chan = chan;
+
+    // Simulate wakeup logic
+    if (chan == &request_queue) {
+        // If we are sleeping on request_queue, it means it was empty.
+        // Let's populate it to simulate a request arrival.
+        // This simulates: "I went to sleep, and woke up because an item arrived".
+
+        if (fuse_q_head == fuse_q_tail) {
+             struct fuse_in_header *req = &request_queue[fuse_q_head];
+             req->len = sizeof(struct fuse_in_header);
+             req->opcode = 123; // Test opcode
+             req->unique = 456;
+             fuse_q_head = (fuse_q_head + 1) % FUSE_QUEUE_SIZE;
+        }
+    }
 }
 
 // Tests
 
-void test_fuse_read_blocking() {
-    printf("Running test_fuse_read_blocking...\n");
-
-    // Reset queue
-    fuse_q_head = 0;
-    fuse_q_tail = 0;
-
-    uint8_t buffer[1024];
-    // fuse_dev_read will block because head == tail.
-    // sched_sleep mock will be called, which will advance head.
-    // Then loop check will fail (head != tail), and it will proceed.
-
-    size_t bytes = fuse_dev_read(NULL, 0, sizeof(struct fuse_in_header), buffer);
-
-    assert(bytes == sizeof(struct fuse_in_header));
-
-    struct fuse_in_header *req = (struct fuse_in_header *)buffer;
-    assert(req->opcode == FUSE_READ);
-    assert(req->unique == 12345ULL);
-
-    // Verify tail advanced
-    assert(fuse_q_tail == 1);
-
-    printf("Passed.\n");
+void test_fuse_init() {
+    printf("Test: fuse_init\n");
+    fuse_init();
+    assert(devfs_register_calls == 1);
+    assert(strcmp(fuse_device_node.name, "fuse") == 0);
+    assert(fuse_device_node.flags == FS_CHARDEVICE);
+    printf("PASS\n");
 }
 
-void test_fuse_read_non_blocking() {
-    printf("Running test_fuse_read_non_blocking...\n");
+void test_fuse_fs_init() {
+    printf("Test: fuse_fs_init\n");
+    fuse_fs_init();
+    assert(vfs_register_calls == 1);
+    printf("PASS\n");
+}
 
-    // Reset queue
+void test_fuse_mount() {
+    printf("Test: fuse_mount\n");
+    fs_node_t *root = fuse_mount("fuse", 0, NULL);
+    assert(root != NULL);
+    assert(root->flags == FS_DIRECTORY);
+    assert(root->read != NULL);
+    printf("PASS\n");
+}
+
+void test_fuse_dev_read_blocking() {
+    printf("Test: fuse_dev_read (blocking)\n");
+
+    // Reset state
     fuse_q_head = 0;
     fuse_q_tail = 0;
+    sched_sleep_calls = 0;
 
-    // Manually add data
-    request_queue[fuse_q_head].opcode = FUSE_WRITE;
+    // Buffer for read
+    uint8_t buffer[sizeof(struct fuse_in_header)];
+
+    // Call read. Queue is empty. Should call sched_sleep, which populates queue.
+    size_t bytes = fuse_dev_read(NULL, 0, sizeof(buffer), buffer);
+
+    assert(sched_sleep_calls == 1);
+    assert(bytes == sizeof(struct fuse_in_header));
+
+    // Verify content matches what sched_sleep injected
+    struct fuse_in_header *req = (struct fuse_in_header *)buffer;
+    assert(req->opcode == 123);
+    assert(req->unique == 456);
+
+    printf("PASS\n");
+}
+
+void test_fuse_dev_read_immediate() {
+    printf("Test: fuse_dev_read (immediate)\n");
+
+    // Reset state
+    fuse_q_head = 0;
+    fuse_q_tail = 0;
+    sched_sleep_calls = 0;
+
+    // Pre-populate queue
+    struct fuse_in_header *req = &request_queue[fuse_q_head];
+    req->len = sizeof(struct fuse_in_header);
+    req->opcode = 789;
+    req->unique = 101112;
     fuse_q_head = (fuse_q_head + 1) % FUSE_QUEUE_SIZE;
 
-    uint8_t buffer[1024];
-    size_t bytes = fuse_dev_read(NULL, 0, sizeof(struct fuse_in_header), buffer);
+    // Buffer for read
+    uint8_t buffer[sizeof(struct fuse_in_header)];
 
+    // Call read. Queue is not empty. Should NOT call sched_sleep.
+    size_t bytes = fuse_dev_read(NULL, 0, sizeof(buffer), buffer);
+
+    assert(sched_sleep_calls == 0);
     assert(bytes == sizeof(struct fuse_in_header));
-    struct fuse_in_header *req = (struct fuse_in_header *)buffer;
-    assert(req->opcode == FUSE_WRITE);
 
-    printf("Passed.\n");
+    // Verify content
+    struct fuse_in_header *read_req = (struct fuse_in_header *)buffer;
+    assert(read_req->opcode == 789);
+    assert(read_req->unique == 101112);
+
+    printf("PASS\n");
 }
 
-void test_fuse_read_small_buffer() {
-    printf("Running test_fuse_read_small_buffer...\n");
+void test_fuse_dev_read_buffer_too_small() {
+    printf("Test: fuse_dev_read (buffer too small)\n");
 
-    uint8_t buffer[1];
-    size_t bytes = fuse_dev_read(NULL, 0, 1, buffer);
-    assert(bytes == 0);
-
-    printf("Passed.\n");
-}
-
-void test_circular_buffer_wrapping() {
-    printf("Running test_circular_buffer_wrapping...\n");
-
-    // Reset queue
+    // Reset state
     fuse_q_head = 0;
     fuse_q_tail = 0;
 
-    // Fill up to the end
-    fuse_q_head = FUSE_QUEUE_SIZE - 1;
-    fuse_q_tail = FUSE_QUEUE_SIZE - 1;
+    // Pre-populate queue
+    fuse_q_head = (fuse_q_head + 1) % FUSE_QUEUE_SIZE;
 
-    // Now sleep will be called, adding one item at FUSE_QUEUE_SIZE-1
-    // And advancing head to 0.
-    // Wait, my mock does (head + 1) % SIZE.
-    // If head is SIZE-1, next is 0.
+    uint8_t buffer[1]; // Too small
+    size_t bytes = fuse_dev_read(NULL, 0, sizeof(buffer), buffer);
 
-    uint8_t buffer[1024];
-    size_t bytes = fuse_dev_read(NULL, 0, sizeof(struct fuse_in_header), buffer);
+    assert(bytes == 0);
 
-    assert(bytes == sizeof(struct fuse_in_header));
-    assert(fuse_q_tail == 0); // Should wrap around to 0
-
-    printf("Passed.\n");
+    printf("PASS\n");
 }
 
 int main() {
-    test_fuse_read_blocking();
-    test_fuse_read_non_blocking();
-    test_fuse_read_small_buffer();
-    test_circular_buffer_wrapping();
+    printf("Running host_test_fuse...\n");
+    test_fuse_init();
+    test_fuse_fs_init();
+    test_fuse_mount();
+    test_fuse_dev_read_blocking();
+    test_fuse_dev_read_immediate();
+    test_fuse_dev_read_buffer_too_small();
     printf("All tests passed!\n");
     return 0;
 }

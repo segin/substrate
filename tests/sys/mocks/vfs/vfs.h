@@ -1,25 +1,15 @@
-#ifndef _VFS_H
-#define _VFS_H
-
+#ifndef _VFS_VFS_H
+#define _VFS_VFS_H
+#include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
-
 typedef struct fs_node fs_node_t;
-typedef struct filesystem filesystem_t;
-
+typedef long off_t;
+#define FS_CHARDEVICE 0x0002
 struct fs_node {
-    uint32_t flags;
-    void *read;
-    void *write;
+    char name[32];
+    int flags;
+    size_t (*read)(struct fs_node *, off_t, size_t, uint8_t *);
+    size_t (*write)(struct fs_node *, off_t, size_t, const uint8_t *);
+    int rdev;
 };
-
-struct filesystem {
-    const char *name;
-    void *mount;
-};
-
-#define FS_DIRECTORY 1
-
-void vfs_register_filesystem(filesystem_t *fs);
-
 #endif
