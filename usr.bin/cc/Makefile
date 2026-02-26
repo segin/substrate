@@ -38,6 +38,7 @@ clean:
 install: $(PROGS)
 	install -D cc $(DESTDIR)/usr/bin/cc
 	ln -sf cc $(DESTDIR)/usr/bin/cpp
+	install -D scc $(DESTDIR)/usr/bin/scc
 	install -D ir-verifier $(DESTDIR)/usr/bin/ir-verifier
 	install -D ir-normalize $(DESTDIR)/usr/bin/ir-normalize
 	install -D ir-diff $(DESTDIR)/usr/bin/ir-diff
