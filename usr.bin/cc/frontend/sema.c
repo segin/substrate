@@ -1729,6 +1729,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         builtin_kind_t bk = builtin_kind(e->ident);
         int bswap_bits = builtin_bswap_bits(e->ident);
         cc_type_t elem_type;
+        cc_type_t indirect_callee_type = CC_TYPE_VOID;
+        int indirect_callee_struct_id = -1;
         if (e->ident != NULL) {
             callee = find_function(tu, e->ident);
         }
@@ -2163,7 +2165,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->lhs->value_type)) {
+            if (is_pointer_type(e->lhs->value_type)) {
+                indirect_callee_type = e->lhs->value_type;
+                indirect_callee_struct_id = e->lhs->struct_id;
+            } else if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL && is_pointer_type(e->lhs->lhs->value_type)) {
+                indirect_callee_type = e->lhs->lhs->value_type;
+                indirect_callee_struct_id = e->lhs->lhs->struct_id;
+            } else {
                 set_diag(diag, "call target must be a function pointer");
                 return -1;
             }
@@ -2255,10 +2263,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
         } else {
-            e->value_type = ptr_base_type(e->lhs->value_type);
+            e->value_type = ptr_base_type(indirect_callee_type);
             e->struct_id = -1;
-            if (e->lhs->struct_id >= 0 && (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
-                e->struct_id = e->lhs->struct_id;
+            if (indirect_callee_struct_id >= 0 && (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
+                e->struct_id = indirect_callee_struct_id;
             }
         }
         return 0;
@@ -2358,6 +2366,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL && find_function(tu, e->lhs->ident) != NULL) {
             e->value_type = e->lhs->value_type;
+            e->struct_id = e->lhs->struct_id;
+            return 0;
+        }
+        if (e->lhs->kind == CC_EXPR_CAST && e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0) {
+            e->value_type = CC_TYPE_PTR_VOID;
             e->struct_id = e->lhs->struct_id;
             return 0;
         }
@@ -2616,8 +2629,23 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             if (e->lhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
-                set_diag(diag, "conditional expression arms cannot be void");
-                return -1;
+                if (e->lhs->value_type == CC_TYPE_VOID && e->third->value_type == CC_TYPE_VOID) {
+                    e->value_type = CC_TYPE_VOID;
+                    e->struct_id = -1;
+                    return 0;
+                }
+                if (emit_warning(diag, e->line, e->col,
+                                 "conditional expression with one void arm is a GNU extension (non-C99)", 1) != 0) {
+                    return -1;
+                }
+                if (e->lhs->value_type == CC_TYPE_VOID) {
+                    e->value_type = e->third->value_type;
+                    e->struct_id = e->third->struct_id;
+                } else {
+                    e->value_type = e->lhs->value_type;
+                    e->struct_id = e->lhs->struct_id;
+                }
+                return 0;
             }
             if (is_pointer_type(e->lhs->value_type) && is_pointer_type(e->third->value_type)) {
                 if (can_convert(e->lhs->value_type, e->third->value_type)) {
@@ -2642,8 +2670,23 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return 0;
         }
         if (e->rhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
-            set_diag(diag, "conditional expression arms cannot be void");
-            return -1;
+            if (e->rhs->value_type == CC_TYPE_VOID && e->third->value_type == CC_TYPE_VOID) {
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = -1;
+                return 0;
+            }
+            if (emit_warning(diag, e->line, e->col,
+                             "conditional expression with one void arm is a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
+            if (e->rhs->value_type == CC_TYPE_VOID) {
+                e->value_type = e->third->value_type;
+                e->struct_id = e->third->struct_id;
+            } else {
+                e->value_type = e->rhs->value_type;
+                e->struct_id = e->rhs->struct_id;
+            }
+            return 0;
         }
         if (is_pointer_type(e->rhs->value_type) && is_pointer_type(e->third->value_type)) {
             if (can_convert(e->rhs->value_type, e->third->value_type)) {
@@ -2746,6 +2789,19 @@ static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *dia
     return item;
 }
 
+static size_t struct_next_init_member(const cc_struct_def_t *sd, size_t member_idx) {
+    size_t next = member_idx + 1;
+    long off;
+    if (sd == NULL || member_idx >= sd->member_count) {
+        return next;
+    }
+    off = sd->members[member_idx].offset;
+    while (next < sd->member_count && sd->members[next].offset == off) {
+        next++;
+    }
+    return next;
+}
+
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
                                     var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag) {
     size_t i;
@@ -2808,7 +2864,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
 
         m = &sd->members[member_idx];
         if (!sd->is_union) {
-            next_member = member_idx + 1;
+            next_member = struct_next_init_member(sd, member_idx);
         }
         if (sd->has_flexible_array && member_idx + 1 == sd->member_count && m->size == 0) {
             if (!is_zero_initializer_expr(item)) {
@@ -3547,7 +3603,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
     }
 
     for (i = 0; i < tu->global_count; ++i) {
-        const cc_global_t *g = &tu->globals[i];
+        cc_global_t *g = &tu->globals[i];
         int sc_count = storage_class_count(g->storage);
         size_t j;
         set_diag_context(g->line, g->col);
@@ -3677,9 +3733,13 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         if (g->init != NULL) {
             if (g->init->kind == CC_EXPR_INIT_LIST) {
                 if (is_pointer_type(g->type) && g->array_len >= 0) {
+                    long inferred_len = -1;
                     if (check_array_initializer(tu, g->name, g->type, g->type_struct_id, g->array_len, g->init, NULL,
-                                                0, 0, NULL, diag) != 0) {
+                                                0, 0, &inferred_len, diag) != 0) {
                         goto fail_global;
+                    }
+                    if (g->array_len == 0 && inferred_len > 0) {
+                        g->array_len = inferred_len;
                     }
                 } else if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
                     if (check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {

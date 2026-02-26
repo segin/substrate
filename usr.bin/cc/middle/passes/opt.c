@@ -116,6 +116,22 @@ static int fold_function(cc_ssa_function_t *f) {
             }
             break;
 
+        case CC_SSA_FROUND32:
+            if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_F64) {
+                float srcf = (float)st[in->lhs].f;
+                in->op = CC_SSA_CONST;
+                in->lhs = -1;
+                in->rhs = -1;
+                in->fimm = (double)srcf;
+                st[dst].known = 1;
+                st[dst].type = CC_VAL_F64;
+                st[dst].f = in->fimm;
+                changed = 1;
+            } else if (dst >= 0) {
+                st[dst].known = 0;
+            }
+            break;
+
         case CC_SSA_ADD:
         case CC_SSA_SUB:
         case CC_SSA_MUL:
@@ -327,6 +343,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_CMP:
     case CC_SSA_I2F:
     case CC_SSA_F2I:
+    case CC_SSA_FROUND32:
         return 1;
     case CC_SSA_LABEL:
     case CC_SSA_BR:

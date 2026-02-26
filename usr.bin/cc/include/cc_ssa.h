@@ -40,6 +40,7 @@ typedef enum {
     CC_SSA_CMP,
     CC_SSA_I2F,
     CC_SSA_F2I,
+    CC_SSA_FROUND32,
     CC_SSA_LABEL,
     CC_SSA_BR,
     CC_SSA_BR_COND,

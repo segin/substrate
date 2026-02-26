@@ -254,12 +254,14 @@ typedef struct {
     char *name;
     cc_type_t type;
     int type_struct_id;
+    long array_len;
     long offset;
     long size;
 } cc_struct_member_t;
 
 typedef struct {
     char *tag;
+    int depth;
     cc_struct_member_t *members;
     size_t member_count;
     long size;

@@ -745,7 +745,7 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
     char crtn[PATH_MAX];
     char libgcc[PATH_MAX];
     const int want_default_runtime = !o->shared && !o->nostdlib && !o->nodefaultlibs;
-    size_t argc = 24 + o->ld_flags.count + objs->count;
+    size_t argc = 25 + o->ld_flags.count + objs->count;
     char **argv;
     size_t i;
     size_t at = 0;
@@ -788,6 +788,7 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
     }
     if (want_default_runtime) {
         argv[at++] = "-lc";
+        argv[at++] = "-lm";
         argv[at++] = libgcc;
         argv[at++] = crtend;
         argv[at++] = crtn;

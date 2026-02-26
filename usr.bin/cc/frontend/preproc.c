@@ -18,6 +18,7 @@
 #define PP_MAX_EXPAND_PASSES 16
 #define PP_MAX_EXPANDED_TEXT (1024 * 1024)
 #define PP_MAX_OUTPUT_SIZE (64 * 1024 * 1024)
+#define PP_EMPTY_ARG_MARKER '\x1f'
 
 typedef struct {
     char *name;
@@ -163,6 +164,7 @@ static int strvec_push_unique(pp_strvec_t *v, const char *s) {
 static int sb_append_c(sb_t *sb, char c);
 static int sb_append(sb_t *sb, const char *s);
 static int dir_exists(const char *path);
+static int path_exists(const char *path);
 static const char *path_basename(const char *path);
 
 static void strvec_pop_free(pp_strvec_t *v) {
@@ -835,6 +837,7 @@ static int add_default_include_paths(pp_state_t *st) {
     DIR *d;
     struct dirent *ent;
     const char *tool_dirs[] = {"include", "include-fixed"};
+    const char *host_cc = NULL;
     size_t ti;
     if (st->no_default_includes) {
         return 0;
@@ -845,12 +848,25 @@ static int add_default_include_paths(pp_state_t *st) {
     if (strvec_push_unique(&st->system_include_paths, "/usr/include") != 0) {
         return -1;
     }
+    host_cc = getenv("CC_BOOTSTRAP");
+    if (host_cc == NULL || host_cc[0] == '\0') {
+        host_cc = getenv("HOSTCC");
+    }
+    if (host_cc == NULL || host_cc[0] == '\0') {
+        host_cc = "/usr/bin/cc";
+    }
+    if (!path_exists(host_cc)) {
+        host_cc = "cc";
+    }
     for (ti = 0; ti < sizeof(tool_dirs) / sizeof(tool_dirs[0]); ++ti) {
-        char cmd[128];
+        char cmd[PATH_MAX + 64];
         char buf[PATH_MAX];
         FILE *fp;
         size_t n;
-        if (snprintf(cmd, sizeof(cmd), "cc -print-file-name=%s", tool_dirs[ti]) >= (int)sizeof(cmd)) {
+        if (strchr(host_cc, ' ') != NULL || strchr(host_cc, '\t') != NULL) {
+            continue;
+        }
+        if (snprintf(cmd, sizeof(cmd), "%s -print-file-name=%s", host_cc, tool_dirs[ti]) >= (int)sizeof(cmd)) {
             continue;
         }
         fp = popen(cmd, "r");
@@ -1511,7 +1527,7 @@ static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_c
             got_any = 1;
             if (c == '\n') {
                 (*line_counter)++;
-                if (enable_trigraphs) {
+                if (enable_trigraphs && out->buf != NULL) {
                     out->len = normalize_trigraphs(out->buf, out->len);
                     out->buf[out->len] = '\0';
                 }
@@ -1531,7 +1547,7 @@ static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_c
         }
     } while (continue_line);
 
-    if (enable_trigraphs && out->len > 0) {
+    if (enable_trigraphs && out->buf != NULL && out->len > 0) {
         out->len = normalize_trigraphs(out->buf, out->len);
         out->buf[out->len] = '\0';
     }
@@ -1619,6 +1635,136 @@ static int parse_int_literal(const char *s, long long *out) {
     return 0;
 }
 
+static int hex_digit_value(int c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+
+static int parse_pp_char_escape(const char *s, size_t *pos, long long *out) {
+    int c;
+    long long v = 0;
+    int hv;
+    size_t i = *pos;
+    c = (unsigned char)s[i];
+    if (c >= '0' && c <= '7') {
+        int digits = 0;
+        while (digits < 3 && s[i] >= '0' && s[i] <= '7') {
+            v = (v << 3) + (s[i] - '0');
+            i++;
+            digits++;
+        }
+        *pos = i;
+        *out = v;
+        return 0;
+    }
+    if (c == 'x') {
+        i++;
+        while ((hv = hex_digit_value((unsigned char)s[i])) >= 0) {
+            v = (v << 4) | hv;
+            i++;
+        }
+        *pos = i;
+        *out = v;
+        return 0;
+    }
+    switch (c) {
+    case 'a':
+        v = '\a';
+        i++;
+        break;
+    case 'b':
+        v = '\b';
+        i++;
+        break;
+    case 'f':
+        v = '\f';
+        i++;
+        break;
+    case 'n':
+        v = '\n';
+        i++;
+        break;
+    case 'r':
+        v = '\r';
+        i++;
+        break;
+    case 't':
+        v = '\t';
+        i++;
+        break;
+    case 'v':
+        v = '\v';
+        i++;
+        break;
+    case '\\':
+        v = '\\';
+        i++;
+        break;
+    case '\'':
+        v = '\'';
+        i++;
+        break;
+    case '\"':
+        v = '\"';
+        i++;
+        break;
+    case '\0':
+        return -1;
+    default:
+        v = (unsigned char)c;
+        i++;
+        break;
+    }
+    *pos = i;
+    *out = v;
+    return 0;
+}
+
+static int parse_pp_char_literal(expr_parser_t *p, long long *out) {
+    size_t i = p->pos;
+    long long v = 0;
+    int saw = 0;
+    if (p->s[i] == 'L' || p->s[i] == 'u' || p->s[i] == 'U') {
+        i++;
+    }
+    if (p->s[i] != '\'') {
+        return 0;
+    }
+    i++;
+    while (p->s[i] != '\0' && p->s[i] != '\'') {
+        long long ch;
+        if (p->s[i] == '\\') {
+            i++;
+            if (parse_pp_char_escape(p->s, &i, &ch) != 0) {
+                return -1;
+            }
+        } else {
+            ch = (unsigned char)p->s[i];
+            i++;
+        }
+        v = (v << 8) | (ch & 0xff);
+        saw = 1;
+    }
+    if (p->s[i] != '\'') {
+        return -1;
+    }
+    if (!saw) {
+        return -1;
+    }
+    i++;
+    p->pos = i;
+    *out = v;
+    return 1;
+}
+
 static void expr_skip_ws(expr_parser_t *p) {
     while (p->s[p->pos] == ' ' || p->s[p->pos] == '\t' || p->s[p->pos] == '\r' || p->s[p->pos] == '\n') {
         p->pos++;
@@ -1646,6 +1792,7 @@ static long long parse_expr_cond(expr_parser_t *p, int *ok);
 
 static long long parse_expr_primary(expr_parser_t *p, int *ok) {
     long long v;
+    int chr;
     size_t start;
     char *tmp;
     expr_skip_ws(p);
@@ -1655,6 +1802,14 @@ static long long parse_expr_primary(expr_parser_t *p, int *ok) {
             *ok = 0;
             return 0;
         }
+        return v;
+    }
+    chr = parse_pp_char_literal(p, &v);
+    if (chr < 0) {
+        *ok = 0;
+        return 0;
+    }
+    if (chr > 0) {
         return v;
     }
     if (is_ident_start((unsigned char)p->s[p->pos])) {
@@ -1868,7 +2023,12 @@ static long long parse_expr_cond(expr_parser_t *p, int *ok) {
     if (expr_match(p, "?")) {
         long long lhs;
         long long rhs;
+        int prev_relaxed = p->relaxed_eval;
+        if (cond == 0) {
+            p->relaxed_eval = 1;
+        }
         lhs = parse_expr_cond(p, ok);
+        p->relaxed_eval = prev_relaxed;
         if (!*ok) {
             return 0;
         }
@@ -1876,7 +2036,11 @@ static long long parse_expr_cond(expr_parser_t *p, int *ok) {
             *ok = 0;
             return 0;
         }
+        if (cond != 0) {
+            p->relaxed_eval = 1;
+        }
         rhs = parse_expr_cond(p, ok);
+        p->relaxed_eval = prev_relaxed;
         if (!*ok) {
             return 0;
         }
@@ -2241,17 +2405,32 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
             }
             for (k = 0; k < m->param_count; ++k) {
                 if (strlen(m->params[k]) == (j - i) && strncmp(m->body + i, m->params[k], j - i) == 0) {
-                    if (k < arg_count && sb_append(&out, args[k] != NULL ? args[k] : "") != 0) {
-                        free(va_args);
-                        sb_free(&out);
-                        return NULL;
+                    if (k < arg_count) {
+                        const char *aval = args[k] != NULL ? args[k] : "";
+                        if (aval[0] == '\0') {
+                            if (sb_append_c(&out, PP_EMPTY_ARG_MARKER) != 0) {
+                                free(va_args);
+                                sb_free(&out);
+                                return NULL;
+                            }
+                        } else if (sb_append(&out, aval) != 0) {
+                            free(va_args);
+                            sb_free(&out);
+                            return NULL;
+                        }
                     }
                     break;
                 }
             }
             if (k == m->param_count && m->is_variadic && (j - i) == strlen("__VA_ARGS__") &&
                 is_va_args_token(m->body + i, j - i)) {
-                if (sb_append(&out, va_args) != 0) {
+                if (va_args[0] == '\0') {
+                    if (sb_append_c(&out, PP_EMPTY_ARG_MARKER) != 0) {
+                        free(va_args);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                } else if (sb_append(&out, va_args) != 0) {
                     free(va_args);
                     sb_free(&out);
                     return NULL;
@@ -2282,14 +2461,40 @@ next_iter:
 
     i = 0;
     while (out.buf[i] != '\0') {
+        if (out.buf[i] == PP_EMPTY_ARG_MARKER) {
+            i++;
+            continue;
+        }
         if (out.buf[i] == '#' && out.buf[i + 1] == '#') {
+            int left_empty = 0;
+            int right_empty = 0;
             while (pasted.len > 0 && (pasted.buf[pasted.len - 1] == ' ' || pasted.buf[pasted.len - 1] == '\t')) {
+                pasted.len--;
+                pasted.buf[pasted.len] = '\0';
+            }
+            if (pasted.len > 0 && pasted.buf[pasted.len - 1] == PP_EMPTY_ARG_MARKER) {
+                left_empty = 1;
                 pasted.len--;
                 pasted.buf[pasted.len] = '\0';
             }
             i += 2;
             while (out.buf[i] == ' ' || out.buf[i] == '\t') {
                 i++;
+            }
+            if (out.buf[i] == PP_EMPTY_ARG_MARKER) {
+                right_empty = 1;
+                i++;
+                while (out.buf[i] == ' ' || out.buf[i] == '\t') {
+                    i++;
+                }
+            }
+            if ((left_empty || right_empty) && pasted.len > 0 && out.buf[i] != '\0') {
+                if (sb_append_c(&pasted, ' ') != 0) {
+                    free(va_args);
+                    sb_free(&out);
+                    sb_free(&pasted);
+                    return NULL;
+                }
             }
             continue;
         }
@@ -2682,6 +2887,11 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     for (ai = 0; ai < arg_count; ++ai) {
                         exp_args[ai] = expand_text(st, args[ai], file, line, depth + 1, disabled, diag);
                         if (exp_args[ai] == NULL) {
+                            if (diag != NULL && diag->message[0] == '\0') {
+                                char msg[160];
+                                snprintf(msg, sizeof(msg), "failed to expand macro argument %zu for '%s'", ai + 1, name);
+                                set_diag(diag, (size_t)line, k + 1, msg);
+                            }
                             emit_macro_trace(file, line, name);
                             free(name);
                             for (; ai < arg_count; ++ai) {
@@ -2711,6 +2921,11 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     }
                     subst = replace_params(m, exp_args, arg_count, st->std_is_c23 || st->std_is_gnu, st->std_is_gnu);
                     if (subst == NULL) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            char msg[160];
+                            snprintf(msg, sizeof(msg), "failed to substitute macro parameters for '%s'", name);
+                            set_diag(diag, (size_t)line, k + 1, msg);
+                        }
                         emit_macro_trace(file, line, name);
                         free(name);
                         for (ai = 0; ai < arg_count; ++ai) {
@@ -4183,16 +4398,24 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 if (active) {
                     long v = 0;
                     char *end = NULL;
+                    char *line_expanded = NULL;
                     char line_file[PATH_MAX];
                     const char *line_target = path;
                     p = skip_ws(p);
+                    line_expanded = expand_text(st, p, path, line_no, 0, NULL, diag);
+                    if (line_expanded == NULL) {
+                        goto fail;
+                    }
+                    p = skip_ws(line_expanded);
                     if (*p == '\0') {
+                        free(line_expanded);
                         set_diag(diag, (size_t)line_no, 1, "malformed #line");
                         goto fail;
                     }
                     errno = 0;
                     v = strtol(p, &end, 10);
                     if (end == p || errno != 0 || v <= 0) {
+                        free(line_expanded);
                         set_diag(diag, (size_t)line_no, 1, "malformed #line");
                         goto fail;
                     }
@@ -4205,14 +4428,18 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         }
                         line_file[n] = '\0';
                         if (*p != '"') {
+                            free(line_expanded);
                             set_diag(diag, (size_t)line_no, 1, "malformed #line filename");
                             goto fail;
                         }
                         line_target = line_file;
                     }
                     if (pp_emit_line_marker(st, out, (int)v, line_target) != 0) {
+                        free(line_expanded);
                         goto fail;
                     }
+                    line_no = (int)v - 1;
+                    free(line_expanded);
                 }
                 continue;
             }

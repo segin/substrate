@@ -1138,7 +1138,7 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
 
     for (i = 0; i < ninstr; ++i) {
         cc_ssa_opcode_t op = f->instrs[i].op;
-        if (op == CC_SSA_LABEL || op == CC_SSA_BR || op == CC_SSA_BR_COND) {
+        if (op == CC_SSA_LABEL || op == CC_SSA_BR || op == CC_SSA_BR_COND || op == CC_SSA_ADDR) {
             has_cfg = 1;
             break;
         }
@@ -1454,7 +1454,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_LOAD:
                 fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    fprintf(fp, "\tmovsd (%%rax), %%xmm0\n");
+                    long mem_size = in->imm > 0 ? in->imm : 8;
+                    if (mem_size == 4) {
+                        fprintf(fp, "\tmovss (%%rax), %%xmm0\n");
+                        fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                    } else {
+                        fprintf(fp, "\tmovsd (%%rax), %%xmm0\n");
+                    }
                     fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 8;
@@ -1486,8 +1492,14 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_STORE:
                 fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                 if (f->value_types[in->rhs] == CC_VAL_F64) {
+                    long mem_size = in->imm > 0 ? in->imm : 8;
                     fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
-                    fprintf(fp, "\tmovsd %%xmm0, (%%rax)\n");
+                    if (mem_size == 4) {
+                        fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                        fprintf(fp, "\tmovss %%xmm0, (%%rax)\n");
+                    } else {
+                        fprintf(fp, "\tmovsd %%xmm0, (%%rax)\n");
+                    }
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 8;
                     if (mem_size > 8) {
@@ -1597,6 +1609,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_F2I:
                 fprintf(fp, "\tcvttsd2siq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                 fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                break;
+
+            case CC_SSA_FROUND32:
+                fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 break;
 
             case CC_SSA_LABEL:
@@ -1724,6 +1743,26 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     if (f->value_types[in->dst] == CC_VAL_F64) {
                         fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, in->dst));
                     } else {
+                        long ret_bytes = in->imm > 0 ? in->imm : 8;
+                        if (ret_bytes == 1) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovzbl %%al, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovsbq %%al, %%rax\n");
+                            }
+                        } else if (ret_bytes == 2) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovzwl %%ax, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovswq %%ax, %%rax\n");
+                            }
+                        } else if (ret_bytes == 4) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovl %%eax, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovslq %%eax, %%rax\n");
+                            }
+                        }
                         fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                     }
                 }
@@ -1922,7 +1961,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_LOAD:
                 fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    fprintf(fp, "\tmovsd (%%eax), %%xmm0\n");
+                    long mem_size = in->imm > 0 ? in->imm : 8;
+                    if (mem_size == 4) {
+                        fprintf(fp, "\tmovss (%%eax), %%xmm0\n");
+                        fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                    } else {
+                        fprintf(fp, "\tmovsd (%%eax), %%xmm0\n");
+                    }
                     fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 4;
@@ -1940,8 +1985,14 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_STORE:
                 fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                 if (f->value_types[in->rhs] == CC_VAL_F64) {
+                    long mem_size = in->imm > 0 ? in->imm : 8;
                     fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->rhs));
-                    fprintf(fp, "\tmovsd %%xmm0, (%%eax)\n");
+                    if (mem_size == 4) {
+                        fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                        fprintf(fp, "\tmovss %%xmm0, (%%eax)\n");
+                    } else {
+                        fprintf(fp, "\tmovsd %%xmm0, (%%eax)\n");
+                    }
                 } else {
                     long mem_size = in->imm > 0 ? in->imm : 4;
                     if (mem_size > 4) {
@@ -2052,6 +2103,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 break;
 
+            case CC_SSA_FROUND32:
+                fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                fprintf(fp, "\tmovsd %%xmm0, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                break;
+
             case CC_SSA_LABEL:
                 emit_local_label(fp, f->name, in->label);
                 fprintf(fp, ":\n");
@@ -2111,6 +2169,20 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     if (f->value_types[in->dst] == CC_VAL_F64) {
                         fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(&lay, in->dst));
                     } else {
+                        long ret_bytes = in->imm > 0 ? in->imm : 4;
+                        if (ret_bytes == 1) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovzbl %%al, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovsbl %%al, %%eax\n");
+                            }
+                        } else if (ret_bytes == 2) {
+                            if (in->is_unsigned) {
+                                fprintf(fp, "\tmovzwl %%ax, %%eax\n");
+                            } else {
+                                fprintf(fp, "\tmovswl %%ax, %%eax\n");
+                            }
+                        }
                         fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                     }
                 }
