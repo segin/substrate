@@ -84,6 +84,19 @@ void reset_swap_state() {
     // swap_lock is static and initialized
 }
 
+void test_spinlock_initialization() {
+    printf("Running test_spinlock_initialization...\n");
+    // Verify swap_lock is correctly initialized via SPINLOCK_INIT
+    assert(swap_lock.locked == 0);
+    assert(swap_lock.cpu_id == 0xFFFFFFFF);
+    // name might not be accessible if it's const char *
+    // but in test environment we can check if it matches "swap_lock"
+    if (swap_lock.name) {
+        assert(strcmp(swap_lock.name, "swap_lock") == 0);
+    }
+    printf("Passed.\n");
+}
+
 // Tests
 
 void test_alloc_free_swap_block() {
@@ -249,6 +262,7 @@ void test_stats() {
 }
 
 int main() {
+    test_spinlock_initialization();
     test_alloc_free_swap_block();
     test_vm_swapon();
     test_swap_pager();
