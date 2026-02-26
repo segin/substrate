@@ -31,6 +31,7 @@
 #include <arch/x86-common/include/multiboot.h>
 #include <sys/freebsd_boot.h>
 
+#include <sys/param.h>
 #include <pm/pm.h>
 #include <sys/crc32.h>
 #include <vfs/vfs.h>
@@ -69,19 +70,19 @@ static struct {
 static uint32_t mboot_orig_addr = 0;
 
 // 1. Address Translation Macros (since we are Higher Half)
-#define PHYSICAL_d(x) ((uint32_t)(x) - 0xC0000000)
-#define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + 0xC0000000))
+#define PHYSICAL_d(x) ((uint32_t)(x) - KERN_BASE)
+#define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + KERN_BASE))
 
 static void init_memory(multiboot_info_t *mboot_info) {
     uint32_t mmap_addr = 0;
     uint32_t mmap_length = 0;
 
     // Dump Memory Map Early
-    if (mboot_info && (mboot_info->flags & (1<<6))) {
+    if (mboot_info && (mboot_info->flags & MULTIBOOT_INFO_MEM_MAP)) {
         pmm_dump_mmap((uintptr_t)VIRTUAL_d(mboot_info->mmap_addr), mboot_info->mmap_length);
     }
 
-    if (mboot_info && (mboot_info->flags & (1<<6))) {
+    if (mboot_info && (mboot_info->flags & MULTIBOOT_INFO_MEM_MAP)) {
         mmap_addr = (uintptr_t)VIRTUAL_d(mboot_info->mmap_addr);
         mmap_length = mboot_info->mmap_length;
         
@@ -91,7 +92,7 @@ static void init_memory(multiboot_info_t *mboot_info) {
         memcpy(mboot_mmap_copy, (void*)(uintptr_t)mmap_addr, count * sizeof(multiboot_mmap_entry_t));
         mboot_copy.mmap_addr = PHYSICAL_d(mboot_mmap_copy);
         mboot_copy.mmap_length = count * sizeof(multiboot_mmap_entry_t);
-        mboot_copy.flags |= (1<<6);
+        mboot_copy.flags |= MULTIBOOT_INFO_MEM_MAP;
     }
 
     // Initialize PMM
@@ -121,7 +122,7 @@ static void init_memory(multiboot_info_t *mboot_info) {
     // Update mboot_info global copy if needed
     if (mboot_info) {
         memcpy(&mboot_copy, mboot_info, sizeof(multiboot_info_t));
-        if (mboot_info->flags & (1<<3)) {
+        if (mboot_info->flags & MULTIBOOT_INFO_MODS) {
              uint32_t mods_count = mboot_info->mods_count;
              if (mods_count > 8) mods_count = 8;
              uint32_t mods_addr_virt = (uintptr_t)VIRTUAL_d(mboot_info->mods_addr);
@@ -274,7 +275,7 @@ void kmain(unsigned long magic, unsigned long addr) {
         mboot_info = &fake_mbi;
          kprint("Booted via FreeBSD loader.\n");
     } else if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
-        if (mboot_info->flags & (1<<2)) {
+        if (mboot_info->flags & MULTIBOOT_INFO_CMDLINE) {
             // cmdline pointer is physical, convert to virtual
             cmdline = (char *)VIRTUAL_d(mboot_info->cmdline);
         }
@@ -410,7 +411,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     int has_mods = 0;
     
     if (mboot_orig_addr) {
-        if (orig_mbi->flags & (1<<3)) {
+        if (orig_mbi->flags & MULTIBOOT_INFO_MODS) {
             has_mods = 1;
             mods_addr = orig_mbi->mods_addr;
         }
