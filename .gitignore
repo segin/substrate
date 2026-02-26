@@ -5,15 +5,6 @@
 # Libraries
 *.a
 *.so
-*.lib
-!usr.lib/
-!usr.lib/**/Makefile
-!usr.lib/**/*.c
-!usr.lib/**/*.h
-!usr.lib/**/*.S
-!usr.lib/**/*.md
-!usr.lib/**/LICENSE
-!usr.lib/**/*.pc
 *.dll
 
 # Binaries and executables
@@ -91,7 +82,14 @@ sbin/*/
 # Build artifacts
 kernel.map
 *.o
+*.d
 *.elf
+*.gcno
+*.gcda
+*.profraw
+*.profdata
+*.su
+*.lst
 busybox-i486
 root.img
 sys/kernel.efi
@@ -102,7 +100,6 @@ sys/arch/i386/zimage_header.bin
 sys/isodir/boot/kernel.bin
 sys/screen.png
 last_boot.txt
-.gitignore
 uname_linux
 uname-freebsd
 uname-freebsd.S
@@ -122,6 +119,8 @@ qemu.pid
 boot_output.txt
 bin_dirs.txt
 debug_tls.gdb
+/pr_list_latest.txt
+/usr.bin/cc/ccdbg
 
 # Yacc test and generated files
 y.tab.c
