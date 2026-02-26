@@ -15,7 +15,7 @@ unsigned *rules_used;
 /* State storage */
 int nstates;
 static core **state_set;        /* Hash table for states */
-static core *first_state;       /* Linked list of all states */
+core *first_state;              /* Linked list of all states */
 static core *last_state;
 static int current_nshifts;     /* Number of shifts for current state */
 static short *shift_symbol;     /* Symbols we shift on */
@@ -128,7 +128,7 @@ static void initialize_states(void) {
     /* Actually, we need to create augmented grammar first */
     
     /* Initialize item_set with the initial kernel */
-    item_set[0] = rrhs[2];  /* First item of first rule */
+    item_set[0] = rrhs[1];  /* First item of first rule (augmented) */
     item_set_end = item_set + 1;
     
     /* Create state 0 */
@@ -142,7 +142,7 @@ static void initialize_states(void) {
     sp->nitems = 1;
     sp->items = (short *)malloc(sizeof(short));
     if (sp->items == NULL) no_space();
-    sp->items[0] = rrhs[2];
+    sp->items[0] = rrhs[1];
     
     first_state = sp;
     last_state = sp;
@@ -173,7 +173,7 @@ static void new_item_sets(void) {
         short item = *isp;
         symbol = ritem[item];
         
-        if (symbol > 0) {  /* Not end of rule (negative = end marker) */
+        if (symbol >= 0) {  /* Not end of rule (negative = end marker) */
             /* Add item+1 to kernel for symbol */
             if (kernel_base[symbol] < 0) {
                 /* First item for this symbol */
