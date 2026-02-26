@@ -5,15 +5,6 @@
 # Libraries
 *.a
 *.so
-*.lib
-!usr.lib/
-!usr.lib/**/Makefile
-!usr.lib/**/*.c
-!usr.lib/**/*.h
-!usr.lib/**/*.S
-!usr.lib/**/*.md
-!usr.lib/**/LICENSE
-!usr.lib/**/*.pc
 *.dll
 
 # Binaries and executables
@@ -69,9 +60,23 @@ sbin/*/
 /usr.bin/as/as
 /usr.bin/as/as.x86
 /usr.bin/as/as.x64
+/usr.bin/brandelf/brandelf
+/usr.bin/cc/cc
+/usr.bin/cc/cpp
+/usr.bin/cc/ir-verifier
+/usr.bin/cc/ir-normalize
+/usr.bin/cc/ir-diff
+/usr.bin/compress/uncompress
+/usr.bin/cpio/cpio
 /usr.bin/ld/ld
 /usr.bin/ld/ld.x86
 /usr.bin/ld/ld.x64
+/usr.bin/lex/lex
+/usr.bin/lex/out.txt
+/usr.bin/pax/pax
+/usr.bin/pr/pr
+/usr.bin/uudecode/uudecode
+/usr.bin/yacc/yacc
 
 # Ignore the compiled output in bin subdirs that matches the dir name
 # (This is tricky with gitignore patterns, relying on extensions is safer)
@@ -79,7 +84,14 @@ sbin/*/
 # Build artifacts
 kernel.map
 *.o
+*.d
 *.elf
+*.gcno
+*.gcda
+*.profraw
+*.profdata
+*.su
+*.lst
 busybox-i486
 root.img
 sys/kernel.efi
@@ -90,7 +102,6 @@ sys/arch/i386/zimage_header.bin
 sys/isodir/boot/kernel.bin
 sys/screen.png
 last_boot.txt
-.gitignore
 uname_linux
 uname-freebsd
 uname-freebsd.S
@@ -101,6 +112,8 @@ sys/symbols_start.txt
 # Distribution root filesystem
 dist/
 host_dist/
+/.agents/
+pr_list.txt
 klog
 klog.notrace
 qemu.out
@@ -108,6 +121,8 @@ qemu.pid
 boot_output.txt
 bin_dirs.txt
 debug_tls.gdb
+/pr_list_latest.txt
+/usr.bin/cc/ccdbg
 
 # Yacc test and generated files
 y.tab.c
@@ -125,6 +140,8 @@ test_libc_string
 test_libc_time
 test_libc_stdlib
 test_libc_ctype
+test_libc_assert
+bench_ext2_readdir
 udf_test
 stat_verify
 host_test_*
