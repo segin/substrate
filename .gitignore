@@ -29,14 +29,16 @@ sys/kernel.bin
 # Userland binaries (specific ignores based on directory structure)
 # It's better to ignore by path if possible or clean before commit, 
 # but here are common patterns for this project structure:
-bin/*/
+bin/*
+!bin/*/
 !bin/*/Makefile
 !bin/*/*.c
 !bin/*/*.h
 !bin/*/*.S
 !bin/*/src/
 
-sbin/*/
+sbin/*
+!sbin/*/
 !sbin/*/Makefile
 !sbin/*/*.c
 !sbin/*/*.h
