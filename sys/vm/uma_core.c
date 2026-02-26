@@ -356,34 +356,33 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     uma_hash_insert(slab);
     
     /* Initialize free list (sequential indices) */
-    // Ensure we don't overflow if using slab_zone and ipers > 0
-    // If OFFPAGE and slab comes from slab_zone (size=sizeof(uma_slab)), writing to slab+1 is overflow!
-    // UNLESS we resize slab_zone.
     
-    if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
-        /*
-         * Off-page slab headers are allocated via kzalloc to support variable sizes
-         * (header + freelist map). Freelist follows the slab structure.
-         */
-        slab->us_freelist = (uint8_t *)(slab + 1);
-    }
+    /*
+     * Freelist map follows the slab structure in memory.
+     * For OFF_PAGE: allocated via kzalloc(sizeof(uma_slab_t) + ipers)
+     * For ON_PAGE: placed at end of page, space included in slab_overhead
+     */
+    slab->us_freelist = (uint8_t *)(slab + 1);
     
     for (uint32_t i = 0; i < zone->uz_ipers; i++) {
         slab->us_freelist[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;
     }
     
-    /* Call init callback on each object */
-    if (zone->uz_init) {
+    /* Call init callback on each object and initialize redzones */
+    if (zone->uz_init || (zone->uz_flags & UMA_ZONE_REDZONE)) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
             void *obj = (void *)((uintptr_t)page + i * zone->uz_rsize);
-             
+            void *item = obj;
+
             /* Initialize redzone pattern */
             if (zone->uz_flags & UMA_ZONE_REDZONE) {
-               uint8_t *rz = (uint8_t *)((uintptr_t)obj + zone->uz_size);
-               for(int r=0; r<UMA_REDZONE_SIZE; r++) rz[r] = UMA_REDZONE_BYTE;
+                item = (void *)((uintptr_t)obj + UMA_REDZONE_SIZE);
+                uma_debug_fill_redzone(zone, item);
             }
             
-            zone->uz_init(obj, zone->uz_size, 0);
+            if (zone->uz_init) {
+                zone->uz_init(item, zone->uz_size, 0);
+            }
         }
     }
     

@@ -13,7 +13,6 @@
 #include <sys/random.h>
 #include <kern/random.h>
 #include <kern/console.h>
-#include <kern/console.h>
 #include <kern/sched.h>
 #include <vfs/vfs.h>
 #include <string.h>
