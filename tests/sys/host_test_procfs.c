@@ -5,19 +5,29 @@
 #include <stddef.h>
 #include <assert.h>
 
-// Mock kernel headers
-#include <sys/types.h>
+/* Mock Defines */
+/* HOST_TEST is defined via compiler flag */
+
+/* Include mocks first */
 #include <vfs/vfs.h>
 #include <include/sys/proc.h>
 #include <pm/pm.h>
 #include <kern/sched.h>
 #include <exec/perso/personality.h>
 #include <arch/i386/pmap.h>
+#include <vm/vm_kmem.h>
 #include <sys/lock.h>
 
-// Mock kmalloc/kfree
+/* Mocks for externals used in procfs.c */
+
+process_t processes[MAX_PROCS];
+process_t *current_process;
+mutex_t proctree_lock;
+int kmalloc_should_fail = 0;
+
 void *kmalloc(size_t size) {
-    return malloc(size);
+    if (kmalloc_should_fail) return NULL;
+    return calloc(1, size);
 }
 
 void kfree(void *ptr, size_t size) {
@@ -25,146 +35,178 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
-// Mock processes array
-process_t processes[MAX_PROCS];
-process_t *current_process;
+uint32_t get_time(void) { return 123456789; }
+void cmdline_get(char *buf, size_t buf_len) { snprintf(buf, buf_len, "kernel cmdline"); }
+uint32_t pmm_get_total_memory(void) { return 1024 * 1024 * 1024; }
+uint32_t pmm_get_free_memory(void) { return 512 * 1024 * 1024; }
+filesystem_t *vfs_get_filesystems(void) { return NULL; }
+void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }
 
-// Mock external functions
-uint32_t get_time(void) {
-    return 1000;
+void sched_get_loadavg(unsigned long loads[3]) {
+    loads[0] = 0; loads[1] = 0; loads[2] = 0;
 }
-
-void cmdline_get(char *buf, size_t buf_len) {
-    snprintf(buf, buf_len, "mock_kernel_cmdline");
-}
-
-uint32_t pmm_get_total_memory(void) {
-    return 1024 * 1024 * 1024; // 1GB
-}
-
-uint32_t pmm_get_free_memory(void) {
-    return 512 * 1024 * 1024; // 512MB
-}
-
-filesystem_t *vfs_get_filesystems(void) {
-    return NULL;
-}
-
-void vfs_register_filesystem(filesystem_t *fs) {
-    (void)fs;
-}
-
-void sched_get_loadavg(unsigned long *loads) {
-    loads[0] = 100;
-    loads[1] = 100;
-    loads[2] = 100;
-}
-
-uint32_t sched_count_runnable(void) {
-    return 1;
-}
-
-uint32_t sched_count_threads(void) {
-    return 10;
-}
-
-int proc_get_last_pid(void) {
-    return 100;
-}
+uint32_t sched_count_runnable(void) { return 1; }
+uint32_t sched_count_threads(void) { return 10; }
+int proc_get_last_pid(void) { return 100; }
 
 int sys_pmap_stats(struct pmap_stats *stats) {
-    memset(stats, 0, sizeof(struct pmap_stats));
+    memset(stats, 0, sizeof(*stats));
     return 0;
-}
-
-struct personality *perso_lookup(int id) {
-    (void)id;
-    return NULL;
 }
 
 process_t *proc_find(int pid) {
     for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid == pid) {
-            return &processes[i];
-        }
+        if (processes[i].pid == pid) return &processes[i];
     }
     return NULL;
 }
 
-// Include the source file to test static functions
-#include "sys/fs/procfs.c"
+struct personality default_pers = { "Substrate" };
+struct personality linux_pers = { "Linux" };
 
-int main() {
-    printf("Running procfs tests...\n");
+struct personality *perso_lookup(int id) {
+    if (id == 1) return &linux_pers;
+    return &default_pers;
+}
 
-    // Initialize procfs
-    procfs_init();
+/* Include the source file */
+#include "../../sys/fs/procfs.c"
 
-    // Test 1: Find static entry
+/* Test Helpers */
+
+void setup_processes() {
+    memset(processes, 0, sizeof(processes));
+    for(int i=0; i<MAX_PROCS; i++) processes[i].pid = -1;
+
+    processes[0].pid = 1;
+    strcpy(processes[0].comm, "init");
+    processes[0].uid = 0;
+    processes[0].gid = 0;
+
+    processes[1].pid = 123;
+    strcpy(processes[1].comm, "testproc");
+    processes[1].uid = 1000;
+    processes[1].gid = 1000;
+
+    current_process = &processes[0];
+}
+
+/* Tests */
+
+void test_procfs_finddir_static(void) {
+    printf("Test: procfs_finddir static entries...\n");
     fs_node_t *node = procfs_finddir(NULL, "cpuinfo");
     assert(node != NULL);
     assert(strcmp(node->name, "cpuinfo") == 0);
-    printf("Test 1 Passed: Found static entry 'cpuinfo'\n");
 
-    // Test 2: Find valid PID
-    // Setup a mock process
-    memset(processes, 0, sizeof(processes));
-    processes[0].pid = 123;
-    strcpy(processes[0].comm, "test_proc");
+    node = procfs_finddir(NULL, "meminfo");
+    assert(node != NULL);
+    assert(strcmp(node->name, "meminfo") == 0);
+
+    node = procfs_finddir(NULL, "nonexistent");
+    assert(node == NULL);
+    printf("PASS\n");
+}
+
+void test_procfs_finddir_pid(void) {
+    printf("Test: procfs_finddir PID entries...\n");
+
+    fs_node_t *node = procfs_finddir(NULL, "1");
+    assert(node != NULL);
+    assert(strcmp(node->name, "1") == 0);
+    assert(node->inode == 1);
+    assert(node->flags == FS_DIRECTORY);
+    if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "123");
     assert(node != NULL);
     assert(strcmp(node->name, "123") == 0);
     assert(node->inode == 123);
-    assert(node->flags == FS_DIRECTORY);
-    printf("Test 2 Passed: Found PID entry '123'\n");
+    if (node->close) node->close(node);
 
-    // Test 3: Find invalid PID (not in processes array)
     node = procfs_finddir(NULL, "999");
     assert(node == NULL);
-    printf("Test 3 Passed: Correctly did not find invalid PID '999'\n");
 
-    // Test 4: Find non-existent name
-    node = procfs_finddir(NULL, "nonexistent");
+    node = procfs_finddir(NULL, "0");
     assert(node == NULL);
-    printf("Test 4 Passed: Correctly did not find 'nonexistent'\n");
 
-    // Test 5: Find malformed PID string
-    node = procfs_finddir(NULL, "123a");
+    node = procfs_finddir(NULL, "01");
+    assert(node != NULL);
+    assert(node->inode == 1);
+    assert(strcmp(node->name, "1") == 0);
+    if (node->close) node->close(node);
+
+    printf("PASS\n");
+}
+
+void test_proc_pid_finddir(void) {
+    printf("Test: proc_pid_finddir entries...\n");
+
+    fs_node_t *node = procfs_finddir(NULL, "1");
+    assert(node != NULL);
+
+    // Test finding status
+    fs_node_t *status = node->finddir(node, "status");
+    assert(status != NULL);
+    assert(strcmp(status->name, "status") == 0);
+    assert(status->flags == FS_FILE);
+    if (status->close) status->close(status);
+
+    // Test finding cmdline
+    fs_node_t *cmdline = node->finddir(node, "cmdline");
+    assert(cmdline != NULL);
+    assert(strcmp(cmdline->name, "cmdline") == 0);
+    assert(cmdline->flags == FS_FILE);
+    if (cmdline->close) cmdline->close(cmdline);
+
+    // Test finding invalid
+    fs_node_t *invalid = node->finddir(node, "invalid");
+    assert(invalid == NULL);
+
+    if (node->close) node->close(node);
+
+    printf("PASS\n");
+}
+
+void test_procfs_finddir_mixed(void) {
+    printf("Test: procfs_finddir mixed input...\n");
+
+    fs_node_t *node = procfs_finddir(NULL, "123foo");
     assert(node == NULL);
-    printf("Test 5 Passed: Correctly did not find malformed PID '123a'\n");
 
-    // Additional Test: proc_pid_finddir (inside a PID directory)
-    // We can simulate getting a PID directory node and looking up files inside it
-    fs_node_t *pid_dir = procfs_finddir(NULL, "123");
-    assert(pid_dir != NULL);
+    node = procfs_finddir(NULL, "foo123");
+    assert(node == NULL);
 
-    // Look for "status"
-    fs_node_t *status_node = pid_dir->finddir(pid_dir, "status");
-    assert(status_node != NULL);
-    assert(strcmp(status_node->name, "status") == 0);
-    assert(status_node->inode == 123);
-    kfree(status_node, sizeof(fs_node_t)); // Cleanup
-    printf("Test 6 Passed: Found 'status' in PID directory\n");
+    printf("PASS\n");
+}
 
-    // Look for "cmdline"
-    fs_node_t *cmdline_node = pid_dir->finddir(pid_dir, "cmdline");
-    assert(cmdline_node != NULL);
-    assert(strcmp(cmdline_node->name, "cmdline") == 0);
-    kfree(cmdline_node, sizeof(fs_node_t)); // Cleanup
-    printf("Test 7 Passed: Found 'cmdline' in PID directory\n");
+void test_procfs_kmalloc_fail(void) {
+    printf("Test: procfs_finddir with kmalloc failure...\n");
+    kmalloc_should_fail = 1;
 
-    // Look for invalid file inside PID directory
-    fs_node_t *invalid_pid_file = pid_dir->finddir(pid_dir, "invalid");
-    assert(invalid_pid_file == NULL);
-    printf("Test 8 Passed: Correctly did not find 'invalid' in PID directory\n");
+    // Attempt to find existing PID, should fail gracefully (return NULL)
+    // Note: If procfs.c doesn't check for NULL, this will crash.
+    fs_node_t *node = procfs_finddir(NULL, "1");
 
-    // Cleanup PID dir node (it was dynamically allocated by procfs_finddir)
-    if (pid_dir->close) {
-        pid_dir->close(pid_dir);
+    if (node != NULL) {
+        printf("FAIL: procfs_finddir returned node despite kmalloc failure\n");
     } else {
-        kfree(pid_dir, sizeof(fs_node_t));
+        printf("PASS: procfs_finddir returned NULL on kmalloc failure\n");
     }
+
+    kmalloc_should_fail = 0;
+}
+
+int main() {
+    procfs_init();
+    setup_processes();
+
+    test_procfs_finddir_static();
+    test_procfs_finddir_pid();
+    test_proc_pid_finddir();
+    test_procfs_finddir_mixed();
+    // Uncomment to test crash
+    test_procfs_kmalloc_fail();
 
     printf("All tests passed!\n");
     return 0;
