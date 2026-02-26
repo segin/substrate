@@ -22,6 +22,7 @@
 #include <arch/x86-common/include/io.h>
 #include <kern/time.h>
 #include <kern/sched.h>
+#include <intr.h>
 
 /*
  * ============================================================
@@ -118,11 +119,11 @@ static void ide_wait_bsy(uint8_t channel) {
     uint64_t start = get_uptime_ms();
     int spins = 0;
     while (ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_BSY) {
-        if (get_uptime_ms() - start > 1000) {
-            kprint("ide: timeout waiting for BSY\n");
-            break;
-        }
         if (spins++ > 1000) {
+            if (get_uptime_ms() - start > 1000) {
+                kprint("ide: timeout waiting for BSY\n");
+                break;
+            }
             sched_yield();
         } else {
             __asm__ volatile("pause");
@@ -381,7 +382,11 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     
     /* Wait for completion (interrupt-driven) */
     while (!ide_irq_complete[channel]) {
-        __asm__ volatile("hlt");
+        uint32_t flags = intr_disable();
+        if (!ide_irq_complete[channel]) {
+            sched_sleep((void *)&ide_irq_complete[channel]);
+        }
+        intr_restore(flags);
     }
     
     uint8_t bm_status = ide_bm_status(channel);
@@ -454,7 +459,11 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     
     /* Wait for completion */
     while (!ide_irq_complete[channel]) {
-        __asm__ volatile("hlt");
+        uint32_t flags = intr_disable();
+        if (!ide_irq_complete[channel]) {
+            sched_sleep((void *)&ide_irq_complete[channel]);
+        }
+        intr_restore(flags);
     }
     
     uint8_t bm_status = ide_bm_status(channel);
@@ -939,6 +948,9 @@ void ide_irq_handler(int irq) {
     
     /* Signal completion */
     ide_irq_complete[channel] = 1;
+
+    /* Wake up waiting thread */
+    sched_wakeup((void *)&ide_irq_complete[channel]);
 }
 
 /*
