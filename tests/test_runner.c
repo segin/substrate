@@ -94,6 +94,9 @@ extern bool test_vop_readlink_notsupp(void);
 // FUSE Tests
 extern bool test_fuse_read(void);
 
+// Driver Tests
+extern bool test_ansi_parsing(void);
+
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
 extern bool prop_realtime_preempts_timeshare(void);
@@ -137,11 +140,7 @@ bool run_pipe_race(void) {
     return test_pipe_race() == 0;
 }
 
-// Sysctl Tests
-extern int test_sysctl_copy_logic(void);
-bool run_sysctl_copy(void) {
-    return test_sysctl_copy_logic();
-}
+extern bool test_mmap_batch_run(void);
 
 typedef struct {
     const char *name;
@@ -219,6 +218,7 @@ test_case_t tests[] = {
     { "vfs_readlink_notlink", test_vop_readlink_notlink },
     { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
     {"fuse_read", test_fuse_read},
+    {"ansi_parsing", test_ansi_parsing},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
@@ -231,7 +231,7 @@ test_case_t tests[] = {
     {"libc_strtok", test_libc_strtok},
     {"div64", run_div64_tests},
     {"pipe_race", run_pipe_race},
-    {"sysctl_copy", run_sysctl_copy},
+    {"mmap_batch", test_mmap_batch_run},
     {NULL, NULL}
 };
 

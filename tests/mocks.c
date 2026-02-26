@@ -61,8 +61,33 @@ struct personality personality_linux = { .name = "Linux", .id = PERS_LINUX };
 // Paging Mocks
 void pmap_invalidate_page(uintptr_t v) { (void)v; }
 
+int mock_pmap_enter_count = 0;
+int mock_pmap_enter_batch_count = 0;
+
 int pmap_enter(pmap_t p, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
     (void)p; (void)va; (void)pa; (void)prot; (void)flags;
+    mock_pmap_enter_count++;
+    return 0;
+}
+
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
+    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
+    mock_pmap_enter_batch_count++;
+    return 0;
+}
+
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
+    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
+    return 0;
+}
+
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
+    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
+    return 0;
+}
+
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
+    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
     return 0;
 }
 
@@ -328,4 +353,3 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 }
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
-

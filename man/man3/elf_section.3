@@ -5,6 +5,15 @@
 .Nm elf_add_section ,
 .Nm elf_find_section ,
 .Nm elf_section_set_data ,
+.Nm elf_section_set_align ,
+.Nm elf_section_set_type ,
+.Nm elf_section_set_flags ,
+.Nm elf_section_set_group ,
+.Nm elf_section_set_merge ,
+.Nm elf_section_set_tls ,
+.Nm elf_section_set_note_info ,
+.Nm elf_remove_section ,
+.Nm elf_reorder_section ,
 .Nm elf_section_count ,
 .Nm elf_section_name ,
 .Nm elf_section_type ,
@@ -31,6 +40,55 @@
 .Fa "elf_section_t *section"
 .Fa "const void *data"
 .Fa "size_t size"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_align
+.Fa "elf_section_t *section"
+.Fa "uint64_t align"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_type
+.Fa "elf_section_t *section"
+.Fa "uint32_t type"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_flags
+.Fa "elf_section_t *section"
+.Fa "uint64_t flags"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_group
+.Fa "elf_section_t *section"
+.Fa "uint32_t group"
+.Fa "int comdat"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_merge
+.Fa "elf_section_t *section"
+.Fa "uint64_t entsize"
+.Fa "int strings"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_tls
+.Fa "elf_section_t *section"
+.Fa "int enable"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_note_info
+.Fa "elf_section_t *section"
+.Fa "uint32_t note_type"
+.Fa "const char *note_name"
+.Fc
+.Ft elf_err_t
+.Fo elf_remove_section
+.Fa "elfobj_t *obj"
+.Fa "elf_section_t *section"
+.Fc
+.Ft elf_err_t
+.Fo elf_reorder_section
+.Fa "elfobj_t *obj"
+.Fa "elf_section_t *section"
+.Fa "size_t new_index"
 .Fc
 .Ft size_t
 .Fo elf_section_count
@@ -110,6 +168,8 @@ Section contains executable instructions.
 Section contains data that can be merged.
 .It Dv SHF_STRINGS
 Section contains null-terminated strings.
+.It Dv SHF_COMPRESSED
+Section payload starts with an ELF compression header.
 .It Dv SHF_GROUP
 Section is a member of a section group.
 .It Dv SHF_TLS
@@ -151,6 +211,27 @@ is recorded; no file space is allocated.
 Passing
 .Fa size
 as 0 clears any existing section data.
+.It Fn elf_section_set_align "section" "align"
+Sets section alignment in bytes.
+.It Fn elf_section_set_type "section" "type"
+Updates the section type.
+.It Fn elf_section_set_flags "section" "flags"
+Updates the section flags bitmask.
+.It Fn elf_section_set_group "section" "group" "comdat"
+Marks section as part of a section group and optionally COMDAT.
+.It Fn elf_section_set_merge "section" "entsize" "strings"
+Enables merge semantics and optional string-merge behavior.
+.It Fn elf_section_set_tls "section" "enable"
+Enables or disables
+.Dv SHF_TLS
+on the section.
+.It Fn elf_section_set_note_info "section" "note_type" "note_name"
+Configures note metadata and sets section type to
+.Dv SHT_NOTE .
+.It Fn elf_remove_section "obj" "section"
+Removes a section and compacts section indices.
+.It Fn elf_reorder_section "obj" "section" "new_index"
+Moves a section to a new order position.
 .It Fn elf_section_count "obj"
 Returns the number of sections in the object.
 .It Fn elf_section_name "section"
@@ -197,18 +278,10 @@ The library automatically aligns section offsets when writing.
 .Pp
 For sections created with
 .Fn elf_add_section ,
-the default alignment is 1 (no alignment constraint).
-To set a different alignment, modify the section's
-.Va addralign
-field directly:
-.Bd -literal
-elf_section_t *text = elf_add_section(obj, ".text",
-    SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
-if (text) {
-    /* Internal field; requires access to private header */
-    /* ((struct elf_section *)text)->addralign = 16; */
-}
-.Ed
+the default alignment is 1.
+Use
+.Fn elf_section_set_align
+to set a different alignment.
 .Ss TLS Sections
 Thread-Local Storage (TLS) sections are marked with
 .Dv SHF_TLS .
