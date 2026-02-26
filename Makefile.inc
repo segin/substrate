@@ -50,13 +50,13 @@ ifdef NATIVE_BUILD
     HOSTCFLAGS ?= -O2 -Wall
     CC := $(HOSTCC)
     CFLAGS := $(HOSTCFLAGS)
-    # Start with empty/standard LDFLAGS for host
-    USER_LDFLAGS :=
-    # Ensure no 32-bit override if host is 64-bit (unless HOSTCFLAGS specifies it)
+    # Start with empty/standard flags for host, but allow overrides
+    USER_CFLAGS := $(CFLAGS) $(USER_CFLAGS)
+    USER_LDFLAGS := $(USER_LDFLAGS)
 else
     # Target build configuration (Substrate i386)
-    USER_CFLAGS = $(CFLAGS) -I$(TOP)/sys
-    USER_LDFLAGS = -m32 -nostdlib -fno-pie -no-pie
+    USER_CFLAGS := $(CFLAGS) -I$(TOP)/sys $(USER_CFLAGS)
+    USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(USER_LDFLAGS)
 endif
 
 LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)

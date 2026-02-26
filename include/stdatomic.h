@@ -21,7 +21,7 @@ typedef _Atomic int atomic_int;
 typedef _Atomic unsigned int atomic_uint;
 typedef _Atomic long long atomic_llong;
 typedef _Atomic unsigned long long atomic_ullong;
-typedef _Atomic void *atomic_ptr;
+typedef void * _Atomic atomic_ptr;
 
 #define ATOMIC_VAR_INIT(value) (value)
 #define kill_dependency(value) (value)
@@ -37,5 +37,15 @@ typedef _Atomic void *atomic_ptr;
 #define atomic_fetch_add(obj, arg) __atomic_fetch_add((obj), (arg), __ATOMIC_SEQ_CST)
 #define atomic_fetch_sub_explicit(obj, arg, order) __atomic_fetch_sub((obj), (arg), (order))
 #define atomic_fetch_sub(obj, arg) __atomic_fetch_sub((obj), (arg), __ATOMIC_SEQ_CST)
+
+#define atomic_compare_exchange_strong_explicit(obj, expected, desired, succ, fail) \
+    __atomic_compare_exchange_n((obj), (expected), (desired), 0, (succ), (fail))
+#define atomic_compare_exchange_strong(obj, expected, desired) \
+    atomic_compare_exchange_strong_explicit((obj), (expected), (desired), __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+
+#define atomic_compare_exchange_weak_explicit(obj, expected, desired, succ, fail) \
+    __atomic_compare_exchange_n((obj), (expected), (desired), 1, (succ), (fail))
+#define atomic_compare_exchange_weak(obj, expected, desired) \
+    atomic_compare_exchange_weak_explicit((obj), (expected), (desired), __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
 
 #endif

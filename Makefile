@@ -30,8 +30,10 @@ host_dist:
 	@rm -rf host_dist
 	@mkdir -p host_dist/bin
 	@mkdir -p host_dist/sbin
-	@mkdir -p host_dist/usr/bin
+	@mkdir -p host_dist/usr/lib
 	@echo ">>> Building host tools..."
+	-$(MAKE) -C usr.lib clean
+	$(MAKE) -C usr.lib NATIVE_BUILD=1
 	-$(MAKE) -C bin clean
 	$(MAKE) -C bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
 	-$(MAKE) -C sbin clean
