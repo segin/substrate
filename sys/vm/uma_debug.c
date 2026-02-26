@@ -29,7 +29,7 @@ void uma_debug_fill_redzone(uma_zone_t *zone, void *item) {
 /*
  * Check redzone integrity
  */
-void uma_debug_check_redzone(uma_zone_t *zone, void *item) {
+void uma_debug_check_redzone_impl(uma_zone_t *zone, void *item) {
     if (!(zone->uz_flags & UMA_ZONE_REDZONE)) return;
 
     uint8_t *pre = (uint8_t *)item - UMA_REDZONE_SIZE;
@@ -59,7 +59,7 @@ void uma_debug_check_redzone(uma_zone_t *zone, void *item) {
 /*
  * Poison freed memory with pattern
  */
-void uma_debug_poison_free(uma_zone_t *zone, void *item) {
+void uma_debug_poison_free_impl(uma_zone_t *zone, void *item) {
     if (!(zone->uz_flags & UMA_ZONE_TRASH)) return;
 
     uint32_t *p = (uint32_t *)item;
@@ -73,7 +73,7 @@ void uma_debug_poison_free(uma_zone_t *zone, void *item) {
 /*
  * Poison allocated memory before constructor
  */
-void uma_debug_poison_alloc(uma_zone_t *zone, void *item) {
+void uma_debug_poison_alloc_impl(uma_zone_t *zone, void *item) {
     if (!(zone->uz_flags & UMA_ZONE_TRASH)) return;
 
     /* First check if memory still has free pattern (UAF detection) */

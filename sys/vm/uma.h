@@ -98,7 +98,7 @@ struct uma_slab {
     void                *us_data;       /* Base of object memory */
     uint32_t            us_freecount;   /* Free objects in slab */
     uint32_t            us_firstfree;   /* Index of first free object */
-    void                *us_freelist;   /* Bitmap or free indices */
+    uint8_t             *us_freelist;   /* Bitmap or free indices */
 };
 
 /*
