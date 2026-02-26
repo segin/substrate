@@ -15,7 +15,7 @@ $(SUBDIRS):
 clean:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning bin/$$dir"; \
-		$(MAKE) -C $$dir clean; \
+		if [ -d "$$dir" ]; then $(MAKE) -C $$dir clean; fi; \
 	done
 
 install:

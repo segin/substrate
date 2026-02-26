@@ -32,13 +32,13 @@ host_dist:
 	@mkdir -p host_dist/sbin
 	@mkdir -p host_dist/usr/bin
 	@echo ">>> Building host tools..."
-	$(MAKE) -C bin clean
+	-$(MAKE) -C bin clean
 	$(MAKE) -C bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
-	$(MAKE) -C sbin clean
+	-$(MAKE) -C sbin clean
 	$(MAKE) -C sbin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
-	$(MAKE) -C usr.bin/cc clean
+	-$(MAKE) -C usr.bin/cc clean
 	$(MAKE) -C usr.bin/cc NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
-	$(MAKE) -C usr.bin clean
+	-$(MAKE) -C usr.bin clean
 	$(MAKE) -C usr.bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
 	@test -x host_dist/usr/bin/cc
 	@echo ">>> Host tools installed to host_dist"
