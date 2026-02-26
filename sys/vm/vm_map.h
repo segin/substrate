@@ -8,6 +8,7 @@
 
 // Forward declarations
 struct vm_object;
+struct vm_map_hole;
 
 // VM Map Entry Inheritance
 #define VM_INHERIT_SHARE    0   // Share mapping across fork
@@ -49,6 +50,7 @@ typedef struct vm_map {
     vm_map_entry_t *header; // Sentinel node for the entry list
     vm_map_entry_t *hint;   // Hint for finding free space (optimization)
     vm_map_entry_t *root;   // Root of the splay tree
+    struct vm_map_hole *holes_root; // Root of the holes RB-Tree
     uint32_t nentries;      // Number of entries
     size_t size;            // Total virtual size
     uintptr_t min_offset;   // Lower bound of map
