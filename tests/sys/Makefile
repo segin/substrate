@@ -9,6 +9,7 @@ SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_exp
 # property_pmap.c needs fixing (missing headers) maybe? Excluding for now to ensure build.
 
 SRCS += test_minix_readdir.c
+SRCS += test_ide_dma.c
 SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vfs_busy.c
 SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
 
@@ -19,7 +20,7 @@ HOST_TESTS = host_test_udf_large_write host_test_udf_truncate_expand host_test_m
 all: tests.o $(HOST_TESTS)
 
 host_test_procfs: host_test_procfs.c
-	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys -I../.. -idirafter ../../sys/include -idirafter ../../include host_test_procfs.c -o $@
+	$(CC) -g -Wall -DHOST_TEST -Iprocfs_mocks -I. host_test_procfs.c -o $@
 
 host_test_vm_swap: host_test_vm_swap.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_vm_swap.c -o $@
@@ -57,6 +58,9 @@ host_test_div64: host_test_div64.c
 
 host_test_printf_specifiers: host_test_printf_specifiers.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_printf_specifiers.c -o $@
+
+host_test_procfs: host_test_procfs.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_procfs.c -o $@
 
 tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)

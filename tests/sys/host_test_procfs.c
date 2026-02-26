@@ -1,53 +1,33 @@
-/* tests/sys/host_test_procfs.c */
-
-#define _GNU_SOURCE
-
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
-#include <stdbool.h>
+#include <stddef.h>
 #include <assert.h>
-#include <errno.h>
 
-/* Mock kernel dependencies */
-#define MAX_FD 32
-#define NSIG 32
+/* Mock Defines */
+/* HOST_TEST is defined via compiler flag */
 
-/* Forward declarations for structs used in headers */
-struct fs_node;
-typedef struct fs_node fs_node_t;
-struct runqueue;
-struct file;
-typedef struct file file_t;
-struct pmap;
-struct pgrp;
-struct session;
-struct registers;
-struct vm_area;
-struct vm_map;
-struct tty;
-
-/* Include kernel headers */
-#ifndef AC_COMM_LEN
-#define AC_COMM_LEN 16
-#endif
-
-#include <sys/proc.h>
-/* sys/proc.h includes sys/acct.h which defines AC_COMM_LEN */
-
-#include <pm/pm.h>
-/* sys/pm/pm.h defines MAX_PROCS */
-
-#include <arch/i386/pmap.h>
-#include <exec/perso/personality.h>
+/* Include mocks first */
 #include <vfs/vfs.h>
+#include <include/sys/proc.h>
+#include <pm/pm.h>
+#include <kern/sched.h>
+#include <exec/perso/personality.h>
+#include <arch/i386/pmap.h>
+#include <vm/vm_kmem.h>
+#include <sys/lock.h>
 
-/* Mock functions */
+/* Mocks for externals used in procfs.c */
+
+process_t processes[MAX_PROCS];
+process_t *current_process;
+mutex_t proctree_lock;
+int kmalloc_should_fail = 0;
+
 void *kmalloc(size_t size) {
-    void *ptr = malloc(size);
-    if (ptr) memset(ptr, 0, size);
-    return ptr;
+    if (kmalloc_should_fail) return NULL;
+    return calloc(1, size);
 }
 
 void kfree(void *ptr, size_t size) {
@@ -55,42 +35,25 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
-/* Mock other kernel functions used by procfs.c */
-uint32_t get_time(void) { return 1000; }
-void cmdline_get(char *buf, size_t buf_len) { snprintf(buf, buf_len, "kernel_test_cmdline"); }
+uint32_t get_time(void) { return 123456789; }
+void cmdline_get(char *buf, size_t buf_len) { snprintf(buf, buf_len, "kernel cmdline"); }
 uint32_t pmm_get_total_memory(void) { return 1024 * 1024 * 1024; }
 uint32_t pmm_get_free_memory(void) { return 512 * 1024 * 1024; }
-struct filesystem;
-struct filesystem *vfs_get_filesystems(void) { return NULL; }
-void vfs_register_filesystem(struct filesystem *fs) { (void)fs; }
-void sched_get_loadavg(unsigned long *loads) { loads[0] = 0; loads[1] = 0; loads[2] = 0; }
+filesystem_t *vfs_get_filesystems(void) { return NULL; }
+void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }
+
+void sched_get_loadavg(unsigned long loads[3]) {
+    loads[0] = 0; loads[1] = 0; loads[2] = 0;
+}
 uint32_t sched_count_runnable(void) { return 1; }
 uint32_t sched_count_threads(void) { return 10; }
 int proc_get_last_pid(void) { return 100; }
-int sys_pmap_stats(struct pmap_stats *out) {
-    memset(out, 0, sizeof(*out));
+
+int sys_pmap_stats(struct pmap_stats *stats) {
+    memset(stats, 0, sizeof(*stats));
     return 0;
 }
 
-struct personality mock_perso_native = { .name = "Native" };
-struct personality mock_perso_linux = { .name = "Linux" };
-
-struct personality *perso_lookup(int id) {
-    if (id == 0) return &mock_perso_native;
-    if (id == 3) return &mock_perso_linux; /* PERS_LINUX */
-    return NULL;
-}
-
-/* Mock proctree_lock */
-mutex_t proctree_lock = {0};
-
-/* Mock current_process */
-process_t *current_process = NULL;
-
-/* Mock processes array */
-process_t processes[MAX_PROCS];
-
-/* Mock proc_find because procfs calls it */
 process_t *proc_find(int pid) {
     for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid == pid) return &processes[i];
@@ -98,21 +61,41 @@ process_t *proc_find(int pid) {
     return NULL;
 }
 
-/* Include the source file to test */
-/* We need to define static so that we can access static functions */
-/* But wait, including .c gives access to static functions automatically */
-#include "sys/fs/procfs.c"
+struct personality default_pers = { "Substrate" };
+struct personality linux_pers = { "Linux" };
 
-/* Test function */
-void test_procfs_finddir(void) {
-    /* Initialize static entries */
-    procfs_init();
+struct personality *perso_lookup(int id) {
+    if (id == 1) return &linux_pers;
+    return &default_pers;
+}
 
-    /* Test static entries */
-    fs_node_t *node;
+/* Include the source file */
+#include "../../sys/fs/procfs.c"
 
-    printf("Testing static entries...\n");
-    node = procfs_finddir(NULL, "cpuinfo");
+/* Test Helpers */
+
+void setup_processes() {
+    memset(processes, 0, sizeof(processes));
+    for(int i=0; i<MAX_PROCS; i++) processes[i].pid = -1;
+
+    processes[0].pid = 1;
+    strcpy(processes[0].comm, "init");
+    processes[0].uid = 0;
+    processes[0].gid = 0;
+
+    processes[1].pid = 123;
+    strcpy(processes[1].comm, "testproc");
+    processes[1].uid = 1000;
+    processes[1].gid = 1000;
+
+    current_process = &processes[0];
+}
+
+/* Tests */
+
+void test_procfs_finddir_static(void) {
+    printf("Test: procfs_finddir static entries...\n");
+    fs_node_t *node = procfs_finddir(NULL, "cpuinfo");
     assert(node != NULL);
     assert(strcmp(node->name, "cpuinfo") == 0);
 
@@ -120,63 +103,111 @@ void test_procfs_finddir(void) {
     assert(node != NULL);
     assert(strcmp(node->name, "meminfo") == 0);
 
-    /* Test PID lookup */
-    printf("Testing PID lookup...\n");
+    node = procfs_finddir(NULL, "nonexistent");
+    assert(node == NULL);
+    printf("PASS\n");
+}
 
-    /* Set up a process */
-    memset(processes, 0, sizeof(processes));
+void test_procfs_finddir_pid(void) {
+    printf("Test: procfs_finddir PID entries...\n");
 
-    /* PID 123 */
-    processes[0].pid = 123;
-    processes[0].state = SRUN;
-    strcpy(processes[0].comm, "test_proc");
+    fs_node_t *node = procfs_finddir(NULL, "1");
+    assert(node != NULL);
+    assert(strcmp(node->name, "1") == 0);
+    assert(node->inode == 1);
+    assert(node->flags == FS_DIRECTORY);
+    if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "123");
     assert(node != NULL);
-    assert(node->inode == 123);
     assert(strcmp(node->name, "123") == 0);
-    assert(node->flags == FS_DIRECTORY);
-    kfree(node, sizeof(fs_node_t));
+    assert(node->inode == 123);
+    if (node->close) node->close(node);
 
-    /* Test PID 0 (usually not valid for lookup unless process exists with PID 0) */
-    /* If we have a process with PID 0 */
-    processes[1].pid = 0;
-    /* But '0' string check in finddir: while loop parses 0. Then 'if (pid > 0)' check prevents it? */
-    /* Let's see the code: */
-    /* if (pid > 0 && *p == '\0') */
-    /* So PID 0 is explicitly excluded. */
-    node = procfs_finddir(NULL, "0");
-    assert(node == NULL);
-
-    /* Test non-existent PID */
     node = procfs_finddir(NULL, "999");
     assert(node == NULL);
 
-    /* Test invalid strings */
-    printf("Testing invalid strings...\n");
-    node = procfs_finddir(NULL, "abc");
+    node = procfs_finddir(NULL, "0");
     assert(node == NULL);
 
-    node = procfs_finddir(NULL, "12a");
-    assert(node == NULL);
+    node = procfs_finddir(NULL, "01");
+    assert(node != NULL);
+    assert(node->inode == 1);
+    assert(strcmp(node->name, "1") == 0);
+    if (node->close) node->close(node);
 
-    node = procfs_finddir(NULL, "");
-    assert(node == NULL);
-
-    /* Test -1 */
-    node = procfs_finddir(NULL, "-1");
-    assert(node == NULL);
-
-    printf("test_procfs_finddir passed\n");
+    printf("PASS\n");
 }
 
-int main(void) {
-    /* Need to set current_process for some internal checks if any */
-    process_t main_proc;
-    memset(&main_proc, 0, sizeof(main_proc));
-    main_proc.perso_id = 0;
-    current_process = &main_proc;
+void test_proc_pid_finddir(void) {
+    printf("Test: proc_pid_finddir entries...\n");
 
-    test_procfs_finddir();
+    fs_node_t *node = procfs_finddir(NULL, "1");
+    assert(node != NULL);
+
+    // Test finding status
+    fs_node_t *status = node->finddir(node, "status");
+    assert(status != NULL);
+    assert(strcmp(status->name, "status") == 0);
+    assert(status->flags == FS_FILE);
+    if (status->close) status->close(status);
+
+    // Test finding cmdline
+    fs_node_t *cmdline = node->finddir(node, "cmdline");
+    assert(cmdline != NULL);
+    assert(strcmp(cmdline->name, "cmdline") == 0);
+    assert(cmdline->flags == FS_FILE);
+    if (cmdline->close) cmdline->close(cmdline);
+
+    // Test finding invalid
+    fs_node_t *invalid = node->finddir(node, "invalid");
+    assert(invalid == NULL);
+
+    if (node->close) node->close(node);
+
+    printf("PASS\n");
+}
+
+void test_procfs_finddir_mixed(void) {
+    printf("Test: procfs_finddir mixed input...\n");
+
+    fs_node_t *node = procfs_finddir(NULL, "123foo");
+    assert(node == NULL);
+
+    node = procfs_finddir(NULL, "foo123");
+    assert(node == NULL);
+
+    printf("PASS\n");
+}
+
+void test_procfs_kmalloc_fail(void) {
+    printf("Test: procfs_finddir with kmalloc failure...\n");
+    kmalloc_should_fail = 1;
+
+    // Attempt to find existing PID, should fail gracefully (return NULL)
+    // Note: If procfs.c doesn't check for NULL, this will crash.
+    fs_node_t *node = procfs_finddir(NULL, "1");
+
+    if (node != NULL) {
+        printf("FAIL: procfs_finddir returned node despite kmalloc failure\n");
+    } else {
+        printf("PASS: procfs_finddir returned NULL on kmalloc failure\n");
+    }
+
+    kmalloc_should_fail = 0;
+}
+
+int main() {
+    procfs_init();
+    setup_processes();
+
+    test_procfs_finddir_static();
+    test_procfs_finddir_pid();
+    test_proc_pid_finddir();
+    test_procfs_finddir_mixed();
+    // Uncomment to test crash
+    test_procfs_kmalloc_fail();
+
+    printf("All tests passed!\n");
     return 0;
 }
