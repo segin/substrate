@@ -30,7 +30,7 @@ static int keyword(void);
 static void skip_comment(void);
 static void create_symbol_table(void);
 static char *scan_action(void);
-static void write_action(int rule, char *body, int offset);
+static void write_action(int rule, char *body, int offset, int context_base);
 static void fixup_grammar(void);
 static int get_token(void);
 static bucket *make_dummy(void);
@@ -88,7 +88,7 @@ static char *scan_action(void) {
     return buf;
 }
 
-static void write_action(int rule, char *body, int offset) {
+static void write_action(int rule, char *body, int offset, int context_base) {
     char *p = body;
     int c;
 
@@ -142,7 +142,16 @@ static void write_action(int rule, char *body, int offset) {
                      putc(c, action_file);
                  }
             } else if (c == '$') {
-                fprintf(action_file, "yyval");
+                /* $$ - lookup LHS type */
+                bucket *lhs_bp = NULL;
+                if (plhs[rule] > 0) {
+                    lhs_bp = temp_sym_map[plhs[rule]];
+                }
+                if (lhs_bp && lhs_bp->tag) {
+                    fprintf(action_file, "yyval.%s", lhs_bp->tag);
+                } else {
+                    fprintf(action_file, "yyval");
+                }
             } else if (c == '-' || isdigit(c)) {
                 int neg = 0;
                 int n = 0;
@@ -156,7 +165,21 @@ static void write_action(int rule, char *body, int offset) {
                 }
                 p--;
                 if (neg) n = -n;
-                fprintf(action_file, "yyvsp[%d]", n - offset);
+
+                /* Typed lookup for $n */
+                bucket *sym_bp = NULL;
+                if (n > 0) {
+                     int sym_idx = ritem[context_base + n - 1];
+                     if (sym_idx > 0) {
+                         sym_bp = temp_sym_map[sym_idx];
+                     }
+                }
+
+                if (sym_bp && sym_bp->tag) {
+                    fprintf(action_file, "yyvsp[%d].%s", n - offset, sym_bp->tag);
+                } else {
+                    fprintf(action_file, "yyvsp[%d]", n - offset);
+                }
             } else {
                 putc('$', action_file);
                 if (c) putc(c, action_file);
@@ -377,6 +400,7 @@ static void parse_declarations(void) {
             case LEFT:
             case RIGHT:
             case NONASSOC:
+            case TYPE:
                 /* Parse token declarations - save directive type first */
                 {
                     int decl_type = t;
@@ -384,7 +408,7 @@ static void parse_declarations(void) {
                     char *current_tag = NULL;
                     
                     /* Precedence increases with each associativity line */
-                    if (decl_type != TERM) prec_level++;
+                    if (decl_type != TERM && decl_type != TYPE) prec_level++;
                     
                     for (;;) {
                         t = get_token();
@@ -405,16 +429,20 @@ static void parse_declarations(void) {
                         
                         if (t == IDENTIFIER) {
                             bp = lookup(token_buffer);
-                            bp->class = CLASS_TERM;
+                            if (decl_type != TYPE) {
+                                bp->class = CLASS_TERM;
+                            } else {
+                                if (bp->class == UNKNOWN) bp->class = CLASS_NONTERM;
+                            }
                             
                             /* Set associativity based on saved directive type */
                             if (decl_type == LEFT) bp->assoc = LEFT_ASSOC;
                             else if (decl_type == RIGHT) bp->assoc = RIGHT_ASSOC;
                             else if (decl_type == NONASSOC) bp->assoc = NON_ASSOC;
-                            else bp->assoc = NO_ASSOC;
+                            else if (decl_type != TYPE) bp->assoc = NO_ASSOC;
                             
                             /* Set precedence for associativity declarations */
-                            if (decl_type != TERM) bp->prec = prec_level;
+                            if (decl_type != TERM && decl_type != TYPE) bp->prec = prec_level;
                             
                             /* Set type tag if present */
                             if (current_tag) bp->tag = current_tag;
@@ -630,7 +658,7 @@ static void parse_rules(void) {
                     int next_t = get_token();
                     if (next_t == '|' || next_t == ';' || next_t == MARK || next_t == 0) {
                         /* End-of-rule action - no special handling needed */
-                        write_action(nrules, body, 0);
+                        write_action(nrules, body, 0, rrhs[nrules]);
                         free(body);
                     } else {
                         /* Mid-rule action - need to create anonymous symbol */
@@ -662,7 +690,7 @@ static void parse_rules(void) {
                         /* So items count = (nitems - 1) - rrhs[nrules] */
                         int offset = (nitems - 1) - rrhs[nrules];
 
-                        write_action(mid_rule_idx, body, offset);
+                        write_action(mid_rule_idx, body, offset, rrhs[nrules]);
                         free(body);
 
                         /* Defer rule definition */
