@@ -54,27 +54,24 @@ void test_initialization(void) {
     printf("PASS\n");
 }
 
-void test_lazy_initialization(void) {
-    printf("Testing lazy initialization...\n");
+void test_auto_initialization(void) {
+    printf("Testing auto-initialization...\n");
 
-    // Reset state directly (possible because we include the source file)
+    // Manually reset initialized state
     crc32_initialized = 0;
+
+    // Clear table to ensure we are truly testing initialization logic
     memset(crc32_table, 0, sizeof(crc32_table));
 
-    // Calculate CRC of "123456789"
-    // This should trigger initialization internally
     const char *digits = "123456789";
+    // This call should trigger auto-initialization
     uint32_t crc_digits = crc32(digits, 9);
 
+    // Check if it initialized
+    TEST_ASSERT(crc32_initialized == 1, "Auto-initialization flag not set");
+
     // Check result
-    TEST_ASSERT_EQ_HEX(crc_digits, 0xCBF43926, "\"123456789\" lazy init CRC32");
-
-    // Verify initialization occurred
-    TEST_ASSERT(crc32_initialized == 1, "crc32_initialized should be 1 after lazy init");
-
-    // Verify table is populated (simple check of a few entries)
-    // Entry 1 should be non-zero (it's CRC of 0x01 shifted etc)
-    TEST_ASSERT(crc32_table[1] != 0, "crc32_table[1] should be non-zero");
+    TEST_ASSERT_EQ_HEX(crc_digits, 0xCBF43926, "Auto-initialized CRC32 result");
 
     printf("PASS\n");
 }
@@ -131,7 +128,7 @@ int main(void) {
     printf("=== CRC32 Host Test Suite ===\n");
 
     test_initialization();
-    test_lazy_initialization();
+    test_auto_initialization();
     test_vectors();
     test_large_buffer();
 
