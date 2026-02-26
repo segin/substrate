@@ -26,6 +26,7 @@ HOSTCFLAGS ?= -O2 -Wall
 export HOSTCC HOSTCFLAGS
 
 host_dist:
+	@rm -rf host_dist
 	@mkdir -p host_dist/bin
 	@mkdir -p host_dist/sbin
 	@mkdir -p host_dist/usr/bin
