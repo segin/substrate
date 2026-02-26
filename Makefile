@@ -62,7 +62,7 @@ $(SUBDIRS):
 clean:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning $$dir"; \
-		$(MAKE) -C $$dir clean; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir clean; fi; \
 	done
 	rm -rf $(DESTDIR)
 
@@ -85,7 +85,7 @@ install:
 	@mkdir -p $(DESTDIR)/var
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing $$dir"; \
-		$(MAKE) -C $$dir install; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir install; fi; \
 	done
 
 debug: all
