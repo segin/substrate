@@ -18,6 +18,7 @@ static uint32_t swap_bitmap[MAX_SWAP_PAGES / 32];
 static uint32_t swap_num_pages = 0;
 // Real implementation would have a list of swap devices/files
 
+// Global lock protecting swap_bitmap, swap_num_pages, and swap_node
 static spinlock_t swap_lock = SPINLOCK_INIT("swap_lock");
 
 typedef struct swap_pager {
