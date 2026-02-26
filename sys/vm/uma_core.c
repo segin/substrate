@@ -21,8 +21,6 @@ static int uma_ncpu = 1;
 #define UMA_MAX_CPUS 32
 #define UMA_ZONE_SIZE_MAX (sizeof(uma_zone_t) + (UMA_MAX_CPUS - 1) * sizeof(uma_cache_t))
 
-#define UMA_LARGE_INDICES(n) ((n) > 254)
-
 /* Bootstrap zone pool */
 #define UMA_BOOTSTRAP_ZONES 32
 static uint8_t uma_bootstrap_mem[UMA_BOOTSTRAP_ZONES * UMA_ZONE_SIZE_MAX] __attribute__((aligned(16)));
@@ -199,12 +197,6 @@ uma_zone_t *uma_zcreate(
         /* Formula: uz_ipers * uz_rsize + sizeof(uma_slab_t) + uz_ipers <= 4096 */
         size_t per_item = zone->uz_rsize + 1; /* +1 for freelist byte */
         zone->uz_ipers = (4096 - sizeof(uma_slab_t)) / per_item;
-
-        /* If we have too many items, we need 2 bytes per freelist entry */
-        if (UMA_LARGE_INDICES(zone->uz_ipers)) {
-            per_item = zone->uz_rsize + 2;
-            zone->uz_ipers = (4096 - sizeof(uma_slab_t)) / per_item;
-        }
     }
     
     if (zone->uz_ipers == 0) {
@@ -212,8 +204,7 @@ uma_zone_t *uma_zcreate(
     }
     
     /* Check if we need off-page slab headers */
-    size_t freelist_item_size = UMA_LARGE_INDICES(zone->uz_ipers) ? 2 : 1;
-    size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers * freelist_item_size;
+    size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
     if (zone->uz_rsize * zone->uz_ipers + slab_overhead > 4096) {
         zone->uz_flags |= UMA_ZONE_OFFPAGE;
     }
@@ -302,8 +293,6 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     void *page = NULL;
     uma_slab_t *slab = NULL;
 
-    size_t freelist_item_size = UMA_LARGE_INDICES(zone->uz_ipers) ? 2 : 1;
-
     /* Check if we need off-page slab headers */
     if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
         /* Off-page slab header */
@@ -323,7 +312,7 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         }
 
         /* Allocate separate slab header */
-        slab = kzalloc(sizeof(uma_slab_t) + zone->uz_ipers * freelist_item_size);
+        slab = kzalloc(sizeof(uma_slab_t) + zone->uz_ipers);
         if (!slab) {
             if (pages_needed > 1) {
                 pmm_free_contiguous(page, pages_needed);
@@ -344,7 +333,7 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
             return NULL;
         }
 
-        size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers * freelist_item_size;
+        size_t slab_overhead = sizeof(uma_slab_t) + zone->uz_ipers;
 
         if (zone->uz_rsize * zone->uz_ipers + slab_overhead <= 4096) {
             /* On-page slab header */
@@ -368,33 +357,32 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     
     /* Initialize free list (sequential indices) */
     
-    /* Set freelist pointer for both OFF_PAGE and ON_PAGE */
-    slab->us_freelist = (void *)(slab + 1);
+    /*
+     * Freelist map follows the slab structure in memory.
+     * For OFF_PAGE: allocated via kzalloc(sizeof(uma_slab_t) + ipers)
+     * For ON_PAGE: placed at end of page, space included in slab_overhead
+     */
+    slab->us_freelist = (uint8_t *)(slab + 1);
     
-    if (freelist_item_size == 2) {
-        uint16_t *fl = (uint16_t *)slab->us_freelist;
-        for (uint32_t i = 0; i < zone->uz_ipers; i++) {
-            fl[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFFFF;
-        }
-    } else {
-        uint8_t *fl = (uint8_t *)slab->us_freelist;
-        for (uint32_t i = 0; i < zone->uz_ipers; i++) {
-            fl[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;
-        }
+    for (uint32_t i = 0; i < zone->uz_ipers; i++) {
+        slab->us_freelist[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;
     }
     
-    /* Call init callback on each object */
-    if (zone->uz_init) {
+    /* Call init callback on each object and initialize redzones */
+    if (zone->uz_init || (zone->uz_flags & UMA_ZONE_REDZONE)) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
             void *obj = (void *)((uintptr_t)page + i * zone->uz_rsize);
-             
+            void *item = obj;
+
             /* Initialize redzone pattern */
             if (zone->uz_flags & UMA_ZONE_REDZONE) {
-               uint8_t *rz = (uint8_t *)((uintptr_t)obj + zone->uz_size);
-               for(int r=0; r<UMA_REDZONE_SIZE; r++) rz[r] = UMA_REDZONE_BYTE;
+                item = (void *)((uintptr_t)obj + UMA_REDZONE_SIZE);
+                uma_debug_fill_redzone(zone, item);
             }
             
-            zone->uz_init(obj, zone->uz_size, 0);
+            if (zone->uz_init) {
+                zone->uz_init(item, zone->uz_size, 0);
+            }
         }
     }
     
@@ -426,8 +414,7 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
             pmm_free_block(slab->us_data);
         }
 
-        size_t freelist_item_size = UMA_LARGE_INDICES(zone->uz_ipers) ? 2 : 1;
-        kfree(slab, sizeof(uma_slab_t) + zone->uz_ipers * freelist_item_size);
+        kfree(slab, sizeof(uma_slab_t) + zone->uz_ipers);
     } else {
         pmm_free_block(slab->us_data);
     }
@@ -443,15 +430,8 @@ static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab) {
     void *obj = (void *)((uintptr_t)slab->us_data + idx * zone->uz_rsize);
     
     /* Update free list */
-    if (UMA_LARGE_INDICES(zone->uz_ipers)) {
-        uint16_t *fl = (uint16_t *)slab->us_freelist;
-        slab->us_firstfree = fl[idx];
-        fl[idx] = 0xFFFF; /* Mark as allocated */
-    } else {
-        uint8_t *fl = (uint8_t *)slab->us_freelist;
-        slab->us_firstfree = fl[idx];
-        fl[idx] = 0xFF; /* Mark as allocated */
-    }
+    slab->us_firstfree = slab->us_freelist[idx];
+    slab->us_freelist[idx] = 0xFF; /* Mark as allocated */
     slab->us_freecount--;
     
     /* Handle redzone offset */
@@ -475,13 +455,7 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item) {
     uint32_t idx = ((uintptr_t)item - (uintptr_t)slab->us_data) / zone->uz_rsize;
     
     /* Add to free list */
-    if (UMA_LARGE_INDICES(zone->uz_ipers)) {
-        uint16_t *fl = (uint16_t *)slab->us_freelist;
-        fl[idx] = slab->us_firstfree;
-    } else {
-        uint8_t *fl = (uint8_t *)slab->us_freelist;
-        fl[idx] = slab->us_firstfree;
-    }
+    slab->us_freelist[idx] = slab->us_firstfree;
     slab->us_firstfree = idx;
     slab->us_freecount++;
 }
