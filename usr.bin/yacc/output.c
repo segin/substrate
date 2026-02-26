@@ -101,7 +101,7 @@ static void output_defines(void) {
     
     /* Output #define for each token - skip single-char literals */
     for (bp = first_symbol; bp != NULL; bp = bp->next) {
-        if (bp->class == CLASS_TERM && bp->value > 256) {
+        if (bp->class == CLASS_TERM) {
             /* Only output if name starts with letter or underscore (valid C identifier) */
             if (isalpha((unsigned char)bp->name[0]) || bp->name[0] == '_') {
                 fprintf(output_file, "#define %s %d\n", bp->name, bp->value);
@@ -115,7 +115,7 @@ static void output_defines(void) {
         fprintf(defines_file, "#ifndef YYTOKENTYPE\n");
         fprintf(defines_file, "#define YYTOKENTYPE\n");
         for (bp = first_symbol; bp != NULL; bp = bp->next) {
-            if (bp->class == CLASS_TERM && bp->value > 256) {
+            if (bp->class == CLASS_TERM) {
                 if (isalpha((unsigned char)bp->name[0]) || bp->name[0] == '_') {
                     fprintf(defines_file, "#define %s %d\n", bp->name, bp->value);
                 }
@@ -187,7 +187,7 @@ static void output_rule_data(void) {
     fprintf(output_file, "/* Left-hand side symbols */\n");
     fprintf(output_file, "static const short yylhs[] = {\n");
     for (i = 0; i < nrules; i++) {
-        fprintf(output_file, "  %d,\n", plhs[i]);
+        fprintf(output_file, "  %d,\n", plhs[i] - ntokens);
     }
     fprintf(output_file, "};\n\n");
 }

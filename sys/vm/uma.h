@@ -98,7 +98,7 @@ struct uma_slab {
     void                *us_data;       /* Base of object memory */
     uint32_t            us_freecount;   /* Free objects in slab */
     uint32_t            us_firstfree;   /* Index of first free object */
-    uint8_t             *us_freelist;   /* Bitmap or free indices */
+    void                *us_freelist;   /* Bitmap or free indices */
 };
 
 /*
@@ -198,6 +198,7 @@ int uma_zone_check_leaks(uma_zone_t *zone);
 /*
  * Debug support
  */
+void uma_debug_fill_redzone(uma_zone_t *zone, void *item);
 void uma_debug_check_redzone_impl(uma_zone_t *zone, void *item);
 void uma_debug_poison_free_impl(uma_zone_t *zone, void *item);
 void uma_debug_poison_alloc_impl(uma_zone_t *zone, void *item);

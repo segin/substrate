@@ -341,6 +341,11 @@ void run_kernel_tests(void) {
         extern void test_ide_perf(void);
         test_ide_perf();
     }
+
+    if (all || strcmp(test_arg, "ide_dma") == 0) {
+        extern void test_ide_dma(void);
+        test_ide_dma();
+    }
     if (all || strcmp(test_arg, "sysinfo") == 0) {
         extern int test_sysinfo(void);
         if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
