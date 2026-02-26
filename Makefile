@@ -4,7 +4,7 @@ include Makefile.inc
 # Order matters: lib is usually a dependency for bin/usr.bin
 SUBDIRS = lib sbin sys bin usr.lib usr.bin man
 
-.PHONY: all clean install efi multiboot freebsd zimage debug host_dist $(SUBDIRS)
+.PHONY: all clean install efi multiboot freebsd zimage debug host_dist host_dist_install host_install $(SUBDIRS)
 
 all: $(SUBDIRS)
 
@@ -23,20 +23,34 @@ zimage:
 # Host tools build
 HOSTCC ?= cc
 HOSTCFLAGS ?= -O2 -Wall
+HOST_DIST_PREFIX ?= /opt/substrate
 export HOSTCC HOSTCFLAGS
 
 host_dist:
+	@rm -rf host_dist
 	@mkdir -p host_dist/bin
 	@mkdir -p host_dist/sbin
 	@mkdir -p host_dist/usr/bin
 	@echo ">>> Building host tools..."
-	$(MAKE) -C bin clean
+	-$(MAKE) -C bin clean
 	$(MAKE) -C bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
-	$(MAKE) -C sbin clean
+	-$(MAKE) -C sbin clean
 	$(MAKE) -C sbin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
-	$(MAKE) -C usr.bin clean
+	-$(MAKE) -C usr.bin/cc clean
+	$(MAKE) -C usr.bin/cc NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	-$(MAKE) -C usr.bin clean
 	$(MAKE) -C usr.bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	@test -x host_dist/usr/bin/cc
 	@echo ">>> Host tools installed to host_dist"
+
+host_dist_install: host_dist
+	@test -n "$(HOST_DIST_PREFIX)"
+	@test "$(HOST_DIST_PREFIX)" != "/"
+	@mkdir -p "$(HOST_DIST_PREFIX)"
+	@cp -a host_dist/. "$(HOST_DIST_PREFIX)/"
+	@echo ">>> Host tools installed to $(HOST_DIST_PREFIX)"
+
+host_install: host_dist_install
 
 # Recursive make for each subdirectory
 $(SUBDIRS):

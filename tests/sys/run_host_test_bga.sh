@@ -6,12 +6,13 @@ cd "$DIR"
 
 echo "Compiling and running host_test_bga..."
 
-gcc -o host_test_bga host_test_bga.c \
-    -DHOST_TEST \
-    -Ibga_mocks \
-    -I../../sys \
-    -I../../sys/include \
-    -Wall -Wextra -Wno-int-to-pointer-cast
+# Compile with necessary flags
+# -DHOST_TEST: For host testing macros
+# -I bga_mocks: Mock headers
+# -I ../../sys: Kernel headers
+# -I ../../sys/include: User/System headers
+# -I .: Current directory
+gcc -o host_test_bga host_test_bga.c -DHOST_TEST -I bga_mocks -I ../../sys -I ../../sys/include -I . -Wall -Wextra
 
 if [ $? -eq 0 ]; then
     ./host_test_bga
