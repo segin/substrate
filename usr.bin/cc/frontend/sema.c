@@ -46,6 +46,8 @@ typedef struct {
     cc_type_t type;
     int struct_id;
     long array_len;
+    int array_ndim;
+    long array_dims[CC_MAX_ARRAY_DIMS];
     int depth;
 } var_entry_t;
 
@@ -235,7 +237,7 @@ static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, in
 }
 
 static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, long array_len,
-                     int depth) {
+                     int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int depth) {
     var_entry_t *next;
     char *dup;
 
@@ -254,6 +256,12 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     (*vars)[*count].type = type;
     (*vars)[*count].struct_id = struct_id;
     (*vars)[*count].array_len = array_len;
+    (*vars)[*count].array_ndim = array_ndim;
+    if (array_dims != NULL) {
+        memcpy((*vars)[*count].array_dims, array_dims, sizeof((*vars)[*count].array_dims));
+    } else {
+        memset((*vars)[*count].array_dims, 0, sizeof((*vars)[*count].array_dims));
+    }
     (*vars)[*count].depth = depth;
     (*count)++;
     return 0;
@@ -778,6 +786,48 @@ static int is_scalar_type(cc_type_t t) {
 
 static int is_array_object_type(cc_type_t t, long array_len) {
     return is_pointer_type(t) && array_len >= 0;
+}
+
+static void expr_clear_array_meta(cc_expr_t *e) {
+    if (e == NULL) {
+        return;
+    }
+    e->array_ndim = 0;
+    memset(e->array_dims, 0, sizeof(e->array_dims));
+}
+
+static void expr_set_array_meta_decl(cc_expr_t *e, long array_len, int array_ndim,
+                                     const long array_dims[CC_MAX_ARRAY_DIMS]) {
+    int i;
+    expr_clear_array_meta(e);
+    if (e == NULL || array_ndim <= 0 || array_dims == NULL) {
+        return;
+    }
+    if (array_len >= 0) {
+        e->array_ndim = array_ndim;
+        memcpy(e->array_dims, array_dims, sizeof(e->array_dims));
+        return;
+    }
+    if (array_ndim + 1 > CC_MAX_ARRAY_DIMS) {
+        return;
+    }
+    e->array_ndim = array_ndim + 1;
+    e->array_dims[0] = 0;
+    for (i = 0; i < array_ndim; ++i) {
+        e->array_dims[i + 1] = array_dims[i];
+    }
+}
+
+static void expr_copy_array_meta(cc_expr_t *dst, const cc_expr_t *src) {
+    if (dst == NULL) {
+        return;
+    }
+    if (src == NULL) {
+        expr_clear_array_meta(dst);
+        return;
+    }
+    dst->array_ndim = src->array_ndim;
+    memcpy(dst->array_dims, src->array_dims, sizeof(dst->array_dims));
 }
 
 static cc_type_t ptr_of_type(cc_type_t t) {
@@ -1482,6 +1532,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         set_diag(diag, "null expression in semantic analysis");
         return -1;
     }
+    expr_clear_array_meta(e);
 
     switch (e->kind) {
     case CC_EXPR_INT:
@@ -1506,6 +1557,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (idx >= 0) {
             e->value_type = vars[idx].type;
             e->struct_id = vars[idx].struct_id;
+            expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
             return 0;
         }
         if (e->ident != NULL && strcmp(e->ident, "__func__") == 0) {
@@ -1518,6 +1570,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (g != NULL) {
                 e->value_type = g->type;
                 e->struct_id = g->type_struct_id;
+                expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
                 if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
                     return -1;
                 }
@@ -1584,6 +1637,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         e->value_type = m->type;
         e->struct_id = m->type_struct_id;
         e->member_offset = m->offset;
+        expr_set_array_meta_decl(e, m->array_len, m->array_ndim, m->array_dims);
         return 0;
     }
 
@@ -1598,6 +1652,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (e->op == CC_BIN_COMMA) {
             e->value_type = e->rhs->value_type;
             e->struct_id = e->rhs->struct_id;
+            expr_copy_array_meta(e, e->rhs);
             return 0;
         }
         if (is_logical_op(e->op)) {
@@ -1690,11 +1745,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type)) {
                 e->value_type = e->lhs->value_type;
                 e->struct_id = e->lhs->struct_id;
+                expr_copy_array_meta(e, e->lhs);
                 return 0;
             }
             if (e->op == CC_BIN_ADD && is_integral_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
                 e->value_type = e->rhs->value_type;
                 e->struct_id = e->rhs->struct_id;
+                expr_copy_array_meta(e, e->rhs);
                 return 0;
             }
             if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
@@ -2344,6 +2401,19 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         e->value_type = dst_type;
         e->struct_id = dst_struct_id;
+        if (e->ident != NULL) {
+            int idx = vars_find_visible(vars, var_count, e->ident, depth);
+            if (idx >= 0) {
+                expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
+            } else {
+                const cc_global_t *g = find_global(tu, e->ident);
+                if (g != NULL) {
+                    expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
+                }
+            }
+        } else {
+            expr_copy_array_meta(e, e->lhs);
+        }
         return 0;
     }
 
@@ -2362,6 +2432,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             e->struct_id = e->lhs->lhs != NULL ? e->lhs->lhs->struct_id : -1;
+            expr_copy_array_meta(e, e->lhs->lhs);
             return 0;
         }
         if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL && find_function(tu, e->lhs->ident) != NULL) {
@@ -2416,6 +2487,19 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         e->struct_id = -1;
         if (e->lhs->struct_id >= 0 && (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
             e->struct_id = e->lhs->struct_id;
+        }
+        if (e->lhs->array_ndim > 0 && is_pointer_type(e->value_type)) {
+            int i;
+            e->array_ndim = e->lhs->array_ndim - 1;
+            if (e->array_ndim < 0) {
+                e->array_ndim = 0;
+            }
+            for (i = 0; i < e->array_ndim; ++i) {
+                e->array_dims[i] = e->lhs->array_dims[i + 1];
+            }
+            for (; i < CC_MAX_ARRAY_DIMS; ++i) {
+                e->array_dims[i] = 0;
+            }
         }
         if (e->value_type == CC_TYPE_VOID) {
             if (e->struct_id >= 0) {
@@ -2528,6 +2612,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             (is_pointer_type(e->lhs->value_type) || is_integral_type(e->lhs->value_type))) {
             e->value_type = e->aux_type;
             e->struct_id = e->aux_struct_id;
+            if (is_pointer_type(e->lhs->value_type)) {
+                expr_copy_array_meta(e, e->lhs);
+            }
             return 0;
         }
         if (is_integral_type(e->aux_type) && is_pointer_type(e->lhs->value_type)) {
@@ -3078,7 +3165,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "duplicate local/parameter name");
                 return -1;
             }
-            if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, depth) != 0) {
+            if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
+                          s->array_dims, depth) != 0) {
                 set_diag(diag, "out of memory adding local variable");
                 return -1;
             }
@@ -3095,6 +3183,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         if (s->array_len == 0 && inferred_len > 0) {
                             s->array_len = inferred_len;
                             (*vars)[*var_count - 1].array_len = inferred_len;
+                            if (s->array_ndim > 0 && s->array_dims[0] == 0) {
+                                s->array_dims[0] = inferred_len;
+                                (*vars)[*var_count - 1].array_dims[0] = inferred_len;
+                            }
                         }
                     } else if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
                         if (check_struct_initializer(tu, s->decl_name, s->type_struct_id, s->expr, *vars, *var_count,
@@ -3703,6 +3795,14 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     }
                     goto fail_global;
                 }
+                if (prev->array_ndim > 0 && g->array_ndim > 0 && prev->array_ndim == g->array_ndim &&
+                    memcmp(prev->array_dims, g->array_dims, sizeof(prev->array_dims)) != 0) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "conflicting file-scope array declarators: %s", g->name);
+                    }
+                    goto fail_global;
+                }
                 if (prev_static != cur_static) {
                     if (diag != NULL && diag->message[0] == '\0') {
                         snprintf(diag->message, sizeof(diag->message), "conflicting linkage for file-scope object: %s",
@@ -3740,6 +3840,9 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     }
                     if (g->array_len == 0 && inferred_len > 0) {
                         g->array_len = inferred_len;
+                        if (g->array_ndim > 0 && g->array_dims[0] == 0) {
+                            g->array_dims[0] = inferred_len;
+                        }
                     }
                 } else if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
                     if (check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
@@ -3961,8 +4064,8 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 set_diag(diag, "duplicate parameter name");
                 goto fail_func;
             }
-            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, -1, 0) !=
-                0) {
+            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, -1, 0,
+                          NULL, 0) != 0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }

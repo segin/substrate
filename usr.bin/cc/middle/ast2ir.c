@@ -14,6 +14,8 @@ typedef struct {
     cc_type_t type;
     int struct_id;
     long array_len;
+    int array_ndim;
+    long array_dims[CC_MAX_ARRAY_DIMS];
     int value;
     int is_static_storage;
     char *static_sym;
@@ -497,6 +499,54 @@ static long pointer_elem_size_bytes(const cc_translation_unit_t *tu, cc_type_t p
     return -1;
 }
 
+static long array_decl_scalar_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id,
+                                         int array_ndim) {
+    cc_type_t cur_type = array_type;
+    int cur_sid = struct_id;
+    int i;
+    if (array_ndim <= 0) {
+        return -1;
+    }
+    for (i = 0; i < array_ndim; ++i) {
+        if (!is_pointer_type(cur_type)) {
+            return -1;
+        }
+        cur_type = ptr_base_type(cur_type);
+        if (cur_type != CC_TYPE_VOID) {
+            cur_sid = -1;
+        }
+    }
+    return type_size_bytes_with_struct(tu, cur_type, cur_sid);
+}
+
+static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, const cc_expr_t *ptr_expr, long fallback) {
+    long stride = 1;
+    long scalar_size;
+    int i;
+    long dim;
+    if (ptr_expr == NULL || ptr_expr->array_ndim <= 0) {
+        return fallback;
+    }
+    scalar_size = array_decl_scalar_size_bytes(tu, ptr_expr->value_type, ptr_expr->struct_id, ptr_expr->array_ndim);
+    if (scalar_size <= 0) {
+        return fallback;
+    }
+    for (i = 1; i < ptr_expr->array_ndim; ++i) {
+        dim = ptr_expr->array_dims[i];
+        if (dim <= 0) {
+            dim = 1;
+        }
+        if (stride > LONG_MAX / dim) {
+            return fallback;
+        }
+        stride *= dim;
+    }
+    if (scalar_size > LONG_MAX / stride) {
+        return fallback;
+    }
+    return scalar_size * stride;
+}
+
 static int is_cmp_op(cc_binop_t op) {
     return op == CC_BIN_EQ || op == CC_BIN_NE || op == CC_BIN_LT || op == CC_BIN_LE || op == CC_BIN_GT ||
            op == CC_BIN_GE;
@@ -758,7 +808,8 @@ static int var_find_visible(var_entry_t *vars, size_t var_count, const char *nam
 }
 
 static int var_define(var_entry_t **vars, size_t *var_count, const char *name, cc_type_t type, int struct_id,
-                      long array_len, int value, int depth, int is_static_storage, const char *static_sym) {
+                      long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int value, int depth,
+                      int is_static_storage, const char *static_sym) {
     var_entry_t *next;
     char *dup;
     char *sym_dup = NULL;
@@ -784,6 +835,12 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     (*vars)[*var_count].type = type;
     (*vars)[*var_count].struct_id = struct_id;
     (*vars)[*var_count].array_len = array_len;
+    (*vars)[*var_count].array_ndim = array_ndim;
+    if (array_dims != NULL) {
+        memcpy((*vars)[*var_count].array_dims, array_dims, sizeof((*vars)[*var_count].array_dims));
+    } else {
+        memset((*vars)[*var_count].array_dims, 0, sizeof((*vars)[*var_count].array_dims));
+    }
     (*vars)[*var_count].value = value;
     (*vars)[*var_count].is_static_storage = is_static_storage ? 1 : 0;
     (*vars)[*var_count].static_sym = sym_dup;
@@ -1000,6 +1057,52 @@ static int is_synthetic_struct_array_member(const cc_translation_unit_t *tu, con
         return 0;
     }
     return m->array_len >= 0;
+}
+
+static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                                    const cc_expr_t *e) {
+    int idx;
+    const cc_global_t *g;
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
+        idx = var_find_visible(vars, var_count, e->ident, depth);
+        if (idx >= 0) {
+            return is_pointer_type(vars[idx].type) && vars[idx].array_len >= 0;
+        }
+        g = find_global(tu, e->ident);
+        if (g != NULL) {
+            return is_pointer_type(g->type) && g->array_len >= 0;
+        }
+    }
+    if (e->kind == CC_EXPR_MEMBER && is_synthetic_struct_array_member(tu, e)) {
+        return 1;
+    }
+    if (e->kind == CC_EXPR_CAST && e->lhs != NULL) {
+        return expr_is_array_object_ref(tu, vars, var_count, depth, e->lhs);
+    }
+    return 0;
+}
+
+static int expr_is_array_pointer_chain(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                                       const cc_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (expr_is_array_object_ref(tu, vars, var_count, depth, e)) {
+        return 1;
+    }
+    if (e->kind == CC_EXPR_DEREF && e->lhs != NULL && is_pointer_type(e->value_type)) {
+        return expr_is_array_pointer_chain(tu, vars, var_count, depth, e->lhs);
+    }
+    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && is_pointer_type(e->value_type)) {
+        if (expr_is_array_pointer_chain(tu, vars, var_count, depth, e->lhs)) {
+            return 1;
+        }
+        return expr_is_array_pointer_chain(tu, vars, var_count, depth, e->rhs);
+    }
+    return 0;
 }
 
 static int builtin_bswap_bits(const char *name) {
@@ -1663,6 +1766,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return cast_value(sf, lhs, CC_VAL_I64, diag);
         }
+        if (is_pointer_type(e->value_type) &&
+            (expr_is_array_pointer_chain(tu, vars, var_count, depth, e->lhs) ||
+             (e->lhs != NULL && e->lhs->array_ndim > 0))) {
+            lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+            if (lhs < 0) {
+                return -1;
+            }
+            return cast_value(sf, lhs, CC_VAL_I64, diag);
+        }
         long mem_size = type_size_bytes(e->value_type);
         if (mem_size <= 0) {
             set_diag(diag, "unsupported dereference type size in lowering");
@@ -1870,6 +1982,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->op == CC_BIN_SUB && is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
             long elem_size = pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id);
             int diffv;
+            long lhs_step = expr_array_step_size_bytes(tu, e->lhs, -1);
+            long rhs_step = expr_array_step_size_bytes(tu, e->rhs, -1);
+
+            if (lhs_step > 0) {
+                elem_size = lhs_step;
+            } else if (rhs_step > 0) {
+                elem_size = rhs_step;
+            }
 
             lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
             rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
@@ -1916,13 +2036,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int idxv = -1;
             long elem_size;
             cc_ssa_instr_t mul;
+            const cc_expr_t *ptr_expr = NULL;
 
             if (is_pointer_type(e->lhs->value_type)) {
                 ptrv = lhs;
                 idxv = rhs;
+                ptr_expr = e->lhs;
             } else if (e->op == CC_BIN_ADD && is_pointer_type(e->rhs->value_type)) {
                 ptrv = rhs;
                 idxv = lhs;
+                ptr_expr = e->rhs;
             } else {
                 set_diag(diag, "unsupported pointer arithmetic form in lowering");
                 return -1;
@@ -1934,9 +2057,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
 
-            {
-                elem_size = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
-            }
+            elem_size = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
+            elem_size = expr_array_step_size_bytes(tu, ptr_expr, elem_size);
             if (elem_size <= 0) {
                 set_diag(diag, "unsupported pointer base type in lowering");
                 return -1;
@@ -3159,11 +3281,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                                  (var_find_visible(vars, var_count, e->ident, depth) >= 0 ||
                                   find_global(tu, e->ident) != NULL))) {
             if (e->ident == NULL) {
+                const cc_expr_t *callee_expr = e->lhs;
                 if (e->lhs == NULL) {
                     set_diag(diag, "malformed indirect call expression");
                     return -1;
                 }
-                indirect_callee = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+                if (callee_expr->kind == CC_EXPR_DEREF && callee_expr->lhs != NULL &&
+                    is_pointer_type(callee_expr->lhs->value_type)) {
+                    callee_expr = callee_expr->lhs;
+                }
+                indirect_callee = lower_expr(tu, sf, ctx, vars, var_count, depth, callee_expr, diag);
             } else {
                 cc_expr_t callee_ref;
                 memset(&callee_ref, 0, sizeof(callee_ref));
@@ -3476,6 +3603,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     cur = cast_value(sf, vars[idx].value, want, diag);
                     if (cur < 0) {
                         return -1;
+                    }
+                    if (e->update_postfix) {
+                        int oldv = new_value(sf, want);
+                        if (oldv < 0 || emit_mov_instr(sf, oldv, cur) != 0) {
+                            set_diag(diag, "out of memory snapshotting postfix ++/-- value");
+                            return -1;
+                        }
+                        cur = oldv;
                     }
                 }
 
@@ -4627,7 +4762,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             if (is_array_obj) {
                 elem_type = ptr_base_type(s->type);
-                elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
+                elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
+                if (elem_size <= 0) {
+                    elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
+                }
                 if (elem_size <= 0 && elem_type == CC_TYPE_VOID && s->type_struct_id >= 0) {
                     elem_size = 1;
                 }
@@ -4880,7 +5018,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
 
             if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id,
-                           is_array_obj ? s->array_len : -1, -1, depth, 1, sym) != 0) {
+                           is_array_obj ? s->array_len : -1, is_array_obj ? s->array_ndim : 0,
+                           is_array_obj ? s->array_dims : NULL, -1, depth, 1, sym) != 0) {
                 set_diag(diag, "out of memory defining static local variable");
                 return -1;
             }
@@ -4949,7 +5088,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     }
                 }
             }
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, varv, depth, 0, NULL) != 0) {
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0,
+                           NULL) != 0) {
                 set_diag(diag, "out of memory defining local struct variable");
                 return -1;
             }
@@ -4959,13 +5099,16 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             cc_ssa_instr_t call_in;
             cc_ssa_instr_t st_in;
             cc_type_t elem_type = ptr_base_type(s->type);
-            long elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
+            long elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
             long arr_elems = s->array_len > 0 ? s->array_len : 1;
             long total_size;
             int onev;
             int bytesv;
             const char *alloc_sym = local_array_allocator_symbol();
 
+            if (elem_size <= 0) {
+                elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
+            }
             if (elem_size <= 0) {
                 set_diag(diag, "unsupported local array element type in lowering");
                 return -1;
@@ -5094,8 +5237,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
 
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, varv, depth, 0,
-                           NULL) != 0) {
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
+                           s->array_dims, varv, depth, 0, NULL) != 0) {
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
             }
@@ -5142,7 +5285,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
         }
-        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, varv, depth, 0, NULL) != 0) {
+        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0,
+                       NULL) != 0) {
             set_diag(diag, "out of memory defining local variable");
             return -1;
         }
@@ -7269,7 +7413,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
             v = in.dst;
             if (var_define(&vars, &var_count, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
-                           -1, v, 0, 0, NULL) != 0) {
+                           -1, 0, NULL, v, 0, 0, NULL) != 0) {
                 set_diag(diag, "out of memory defining parameter variable");
                 cc_ssa_module_free(out);
                 return -1;

@@ -9,6 +9,8 @@ typedef struct {
     char message[256];
 } cc_diag_t;
 
+#define CC_MAX_ARRAY_DIMS 4
+
 #define CC_STORAGE_STATIC  (1 << 0)
 #define CC_STORAGE_EXTERN  (1 << 1)
 #define CC_STORAGE_INLINE  (1 << 2)
@@ -164,6 +166,8 @@ struct cc_expr {
     size_t col;
     cc_type_t value_type;
     int struct_id;
+    int array_ndim;
+    long array_dims[CC_MAX_ARRAY_DIMS];
     long int_val;
     double float_val;
     char *ident;
@@ -213,6 +217,8 @@ struct cc_stmt {
     cc_type_t type;
     int type_struct_id;
     long array_len;
+    int array_ndim;
+    long array_dims[CC_MAX_ARRAY_DIMS];
     int storage;
     int attr_flags;
     long attr_align;
@@ -255,6 +261,8 @@ typedef struct {
     cc_type_t type;
     int type_struct_id;
     long array_len;
+    int array_ndim;
+    long array_dims[CC_MAX_ARRAY_DIMS];
     long offset;
     long size;
 } cc_struct_member_t;
@@ -301,6 +309,8 @@ typedef struct {
     cc_type_t type;
     int type_struct_id;
     long array_len;
+    int array_ndim;
+    long array_dims[CC_MAX_ARRAY_DIMS];
     int storage;
     int attr_flags;
     long attr_align;
