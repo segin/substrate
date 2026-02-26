@@ -8,10 +8,10 @@ CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_page
             spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
             string.o printf.o div64.o compat.o acct.o sysinfo.o \
             vfs.o vfs_cache.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o wait.o sched_decay.o libc_wrappers.o \
-            pipe.o
+            pipe.o ansi_handler.o
 
 # Unit tests
-UNIT_SRCS = unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
+UNIT_SRCS = unit/drivers/console/test_ansi.c unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
              unit/vm/test_object.c unit/vm/test_page.c unit/vm/test_fault.c \
              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_swap_real.c unit/vm/test_cow.c \
              unit/arch/test_trampoline.c \
@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir test_vm_map_leak
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -38,9 +38,9 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libc_time
 	./test_libc_stdlib
 	./test_libc_ctype
+	./test_libc_assert
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
-	./test_vm_map_leak
 
 # Duplicate rule removed
 
@@ -70,6 +70,9 @@ test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
 test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_stdlib.c -o $@
 
+test_libc_assert: lib/c/test_assert.c ../lib/c/src/assert.c
+	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_assert.c -o $@
+
 # Rules for objects
 %.o: ../sys/vm/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
@@ -84,6 +87,9 @@ test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
 %.o: ../sys/fs/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 %.o: ../sys/pm/%.c
+	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+%.o: ../sys/drivers/console/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 
 sched_i386.o: ../sys/arch/i386/sched.c
@@ -103,6 +109,8 @@ vm_map_host.o: vm_map_host.c
 %.o: unit/kern/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/vfs/%.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+%.o: unit/drivers/console/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 %.o: unit/fs/%.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
@@ -139,14 +147,11 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir test_vm_map_leak
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir
 	$(MAKE) -C sys clean
 
 bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
 	$(CC) $(CFLAGS_KERN) $^ -o $@
-
-test_vm_map_leak: sys/test_vm_map_leak.c
-	$(CC) $(CFLAGS_KERN) -DHOST_TEST $< -o $@
 
 bench_vm_map.o: bench_vm_map.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@

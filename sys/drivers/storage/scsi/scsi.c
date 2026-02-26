@@ -889,9 +889,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
         return -1;
     }
     
-    char buf[64];
-    snprintf(buf, sizeof(buf), "SCSI: Scanning bus %d via '%s'\n", bus, link->name ? link->name : "unknown");
-    kprint(buf);
+    kprintf("SCSI: Scanning bus %d via '%s'\n", bus, link->name ? link->name : "unknown");
     
     int devices_found = 0;
     
@@ -951,8 +949,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
         }
     }
     
-    snprintf(buf, sizeof(buf), "SCSI: Bus %d scan complete, %d device(s) found\n", bus, devices_found);
-    kprint(buf);
+    kprintf("SCSI: Bus %d scan complete, %d device(s) found\n", bus, devices_found);
     
     return devices_found;
 }
