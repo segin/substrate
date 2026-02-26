@@ -8,48 +8,6 @@
 #include <string.h>
 #include <stdio.h>
 
-#ifndef HOST_TEST
-static inline void write_cr3(uint32_t val) {
-    __asm__ volatile("mov %0, %%cr3" :: "r"(val) : "memory");
-}
-
-static inline uint32_t read_cr3(void) {
-    uint32_t val;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(val));
-    return val;
-}
-
-static inline void write_cr4(uint32_t val) {
-    __asm__ volatile("mov %0, %%cr4" :: "r"(val) : "memory");
-}
-
-static inline uint32_t read_cr4(void) {
-    uint32_t val;
-    __asm__ volatile("mov %%cr4, %0" : "=r"(val));
-    return val;
-}
-
-static inline void invlpg(uint32_t va) {
-    __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
-}
-
-static inline void cpu_pause(void) {
-    __asm__ volatile("pause");
-}
-
-static inline void do_cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx) {
-    __asm__ volatile("cpuid" : "=a"(*eax), "=b"(*ebx), "=c"(*ecx), "=d"(*edx) : "a"(leaf));
-}
-#else
-extern void write_cr3(uint32_t val);
-extern uint32_t read_cr3(void);
-extern void write_cr4(uint32_t val);
-extern uint32_t read_cr4(void);
-extern void invlpg(uint32_t va);
-extern void cpu_pause(void);
-extern void do_cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx);
-#endif
-
 // Kernel Page Directory (Static for bootstrap)
 // We need it 4KB aligned.
 __attribute__((aligned(4096)))
@@ -149,15 +107,16 @@ void pmap_bootstrap(void) {
 
     // Check for PGE (Global Pages) support via CPUID
     uint32_t eax, ebx, ecx, edx;
-    do_cpuid(1, &eax, &ebx, &ecx, &edx);
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
     int has_pge = (edx >> 13) & 1;  // PGE bit 13 in EDX
     int has_pse = (edx >> 3) & 1;   // PSE bit 3 in EDX
     pmap_has_pcid = (ecx >> 17) & 1; // PCID bit 17 in ECX
 
     if (has_pse) {
-        uint32_t cr4 = read_cr4();
+        uint32_t cr4;
+        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
         cr4 |= 0x10;  // CR4.PSE bit 4
-        write_cr4(cr4);
+        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
         kprint("PMAP: PSE (4MB Pages) enabled\n");
     }
     
@@ -165,9 +124,10 @@ void pmap_bootstrap(void) {
     if (has_pge) {
         kernel_pte_flags |= PTE_G;  // Mark kernel pages global
         // Enable PGE in CR4
-        uint32_t cr4 = read_cr4();
+        uint32_t cr4;
+        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
         cr4 |= 0x80;  // CR4.PGE bit 7
-        write_cr4(cr4);
+        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
         kprint("PMAP: PGE (Global Pages) enabled\n");
     }
 
@@ -224,7 +184,7 @@ void pmap_bootstrap(void) {
     pmap_lock = 0;
 
     // Enable Paging (Reload CR3)
-    write_cr3(kernel_pmap_store.pdir_phys);
+    __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));
     
     kprint("PMAP: Paging Enabled (Higher Half, 128MB mapped)\n");
     
@@ -244,7 +204,7 @@ void pmap_null_protect(void) {
     pt[0] = 0;  /* Clear present bit */
     
     /* Invalidate TLB for page 0 */
-    invlpg(0);
+    __asm__ volatile("invlpg (%0)" :: "r"((uint32_t)0));
     
     kprint("PMAP: Page 0 unmapped (NULL protection enabled)\n");
 }
@@ -270,7 +230,7 @@ void pmap_null_allow(int enable) {
     }
     
     /* Invalidate TLB for page 0 */
-    invlpg(0);
+    __asm__ volatile("invlpg (%0)" :: "r"((uint32_t)0));
 }
 
 pmap_t pmap_kernel(void) {
@@ -367,7 +327,8 @@ void pmap_destroy(pmap_t pmap) {
     uint32_t pd_phys = pmap->pdir_phys;
     
     // Edge case: Check if this is the currently active pmap
-    uint32_t current_cr3 = read_cr3();
+    uint32_t current_cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
     if (current_cr3 == pd_phys) {
         // Cannot destroy active address space!
         // Switch to kernel pmap first
@@ -542,7 +503,8 @@ void pmap_activate(pmap_t pmap) {
     if (!pmap) return;
 
     curpmap = pmap;
-    uint32_t current_cr3 = read_cr3();
+    uint32_t current_cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
     
     // Optimization: Skip flush if context hasn't changed.
     //
@@ -550,7 +512,7 @@ void pmap_activate(pmap_t pmap) {
     // PCID features (CR4.PCIDE) are only available in IA-32e (64-bit) mode.
     // In 32-bit protected mode, we rely on checking the physical address of the PD.
     if (current_cr3 != pmap->pdir_phys) {
-        write_cr3(pmap->pdir_phys);
+        __asm__ volatile("mov %0, %%cr3" :: "r"(pmap->pdir_phys));
     }
 }
 
@@ -559,7 +521,8 @@ void pmap_activate(pmap_t pmap) {
 int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
     // Must be active address space to use recursive mapping
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return -1;
 
     uint32_t pdi = PD_INDEX(va);
@@ -598,7 +561,8 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
 int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
     (void)flags;
     // Must be active address space to use recursive mapping
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return -1;
 
     uint32_t last_pdi = (uint32_t)-1;
@@ -689,6 +653,7 @@ void pmap_map_trampoline(void) {
 
 // Map a 4MB page (Single PDE, no Page Table)
 // Requires PSE to be enabled
+// Implements Page Table Eviction: If a PT exists at this PDE, it is freed.
 int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
     
@@ -696,7 +661,8 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
     if ((va & 0x3FFFFF) || (pa & 0x3FFFFF)) return -1;
     
     // Must be active address space
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return -1;
 
     uint32_t pdi = PD_INDEX(va);
@@ -732,6 +698,10 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
             if (pt_page) {
                 vm_phys_free_page(pt_page);
             }
+
+            // 5. Invalidate TLB: Replacing a page table requires flushing all TLB entries
+            // covered by it. Since iterating 1024 invlpg is slow, we do a full flush.
+            pmap_invalidate_all();
         }
     }
 
@@ -744,7 +714,8 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
     if (va < 0xC0000000) pde_flags |= PTE_U;
     
     // Global flag if supported and kernel space
-    uint32_t cr4 = read_cr4();
+    uint32_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     if ((cr4 & 0x80) && va >= 0xC0000000) {
         pde_flags |= PTE_G;
     }
@@ -760,7 +731,8 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
 }
 
 void pmap_remove(pmap_t pmap, uint32_t va) {
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return;
     
     uint32_t pdi = PD_INDEX(va);
@@ -780,73 +752,6 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
     uint32_t *pt = V_PT(pdi);
     pt[pti] = 0;
     pmap_invalidate_page(va);
-}
-
-void pmap_remove_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
-    uint32_t cr3 = read_cr3();
-    if (pmap->pdir_phys != cr3) return;
-
-    // Use a small batch on stack to delay invalidation
-    uint32_t batch_va[TLB_BATCH_THRESHOLD];
-    int batch_idx = 0;
-    int perform_full_flush = 0;
-
-    for (uint32_t va = sva; va < eva; va += 0x1000) {
-        uint32_t pdi = PD_INDEX(va);
-        uint32_t pti = PT_INDEX(va);
-
-        if (!(V_PD[pdi] & PTE_P)) {
-            // Skip 4MB chunk if PD entry not present
-            // Align to next 4MB boundary
-            uint32_t next_boundary = (va & 0xFFC00000) + 0x400000;
-            if (next_boundary > va) {
-                 va = next_boundary - 0x1000; // Loop increment will fix it
-            }
-            continue;
-        }
-
-        // Check for Large Page (4MB)
-        if (V_PD[pdi] & PTE_PS) {
-            // Remove the entire 4MB mapping
-            V_PD[pdi] = 0;
-
-            if (!perform_full_flush) {
-                if (batch_idx < TLB_BATCH_THRESHOLD) {
-                    batch_va[batch_idx++] = va;
-                } else {
-                    perform_full_flush = 1;
-                }
-            }
-
-            // Advance to end of 4MB
-            uint32_t next_boundary = (va & 0xFFC00000) + 0x400000;
-            if (next_boundary > va) {
-                 va = next_boundary - 0x1000;
-            }
-            continue;
-        }
-
-        uint32_t *pt = V_PT(pdi);
-        if (pt[pti] & PTE_P) {
-            pt[pti] = 0;
-
-            if (!perform_full_flush) {
-                if (batch_idx < TLB_BATCH_THRESHOLD) {
-                    batch_va[batch_idx++] = va;
-                } else {
-                    perform_full_flush = 1;
-                }
-            }
-        }
-    }
-
-    if (perform_full_flush) {
-        pmap_invalidate_all();
-    } else {
-        for (int i = 0; i < batch_idx; i++) {
-            pmap_invalidate_page(batch_va[i]);
-        }
-    }
 }
 
 // Kernel-only fast path: no pmap/locking overhead
@@ -873,7 +778,8 @@ void pmap_kenter(uint32_t va, uint32_t pa) {
     // Kernel pages: P, W, no U (supervisor only), G if available
     uint32_t pte_flags = PTE_P | PTE_W;
     // Check if PGE is enabled (CR4 bit 7)
-    uint32_t cr4 = read_cr4();
+    uint32_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     if (cr4 & 0x80) {
         pte_flags |= PTE_G;  // Global page
     }
@@ -892,7 +798,8 @@ void pmap_kremove(uint32_t va) {
 }
 
 uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
     
     uint32_t pdi = PD_INDEX(va);
@@ -915,7 +822,8 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
 // Returns 0 on success, -1 on error
 int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
     // Must be active address space
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return -1;
     
     // Track pages needing TLB invalidation for batching
@@ -982,7 +890,7 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
     // Batch TLB invalidation: use full flush for large ranges
     if (pages_modified > TLB_BATCH_THRESHOLD) {
         // Full TLB flush via CR3 reload
-        write_cr3(cr3);
+        __asm__ volatile("mov %0, %%cr3" :: "r"(cr3));
     } else {
         // Individual INVLPG for small ranges
         for (uint32_t va = first_va; va <= last_va && pages_modified > 0; va += 0x1000) {
@@ -1002,7 +910,8 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
 int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int cow) {
     // Must be able to access both pmaps - this is complex
     // For simplicity, we require src_pmap to be active
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (src_pmap->pdir_phys != cr3) return -1;
     
     // Map dst page directory temporarily
@@ -1088,7 +997,8 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
 // Check if a page is marked for copy-on-write
 // (page is present but not writable, with ref_count > 1)
 int pmap_page_is_cow(pmap_t pmap, uint32_t va) {
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
     
     uint32_t pdi = PD_INDEX(va);
@@ -1105,32 +1015,35 @@ int pmap_page_is_cow(pmap_t pmap, uint32_t va) {
 }
 
 void pmap_invalidate_page(uint32_t va) {
-    invlpg(va);
+    __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
     __sync_fetch_and_add(&global_pmap_stats.tlb_invlpg_count, 1);
 }
 
 // Flush entire TLB by reloading CR3 (expensive)
 void pmap_invalidate_all(void) {
-    uint32_t cr3 = read_cr3();
-    write_cr3(cr3);
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
     __sync_fetch_and_add(&global_pmap_stats.tlb_full_flush_count, 1);
 }
 
 // Flush entire TLB including global pages
 // Uses CR4.PGE toggle method (disable PGE, reload CR3, re-enable PGE)
 void pmap_flush_global_pages(void) {
-    uint32_t cr4 = read_cr4();
+    uint32_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     
     if (cr4 & 0x80) {  // PGE is enabled
         // Disable PGE
-        write_cr4(cr4 & ~0x80);
+        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4 & ~0x80));
         
         // Reload CR3 to flush TLB (now includes global pages since PGE is off)
-        uint32_t cr3 = read_cr3();
-        write_cr3(cr3);
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+        __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
         
         // Re-enable PGE
-        write_cr4(cr4);
+        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
     } else {
         // PGE not enabled, just do normal flush
         pmap_invalidate_all();
@@ -1272,7 +1185,8 @@ int pmap_is_referenced(vm_page_t *m) {
         uint32_t va = pv->va;
         
         // Only check if this is the current address space
-        uint32_t cr3 = read_cr3();
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
         if (pmap->pdir_phys != cr3) {
             pv = pv->next;
             continue;
@@ -1307,7 +1221,8 @@ void pmap_clear_reference(vm_page_t *m) {
         uint32_t va = pv->va;
         
         // Only modify current address space
-        uint32_t cr3 = read_cr3();
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
         if (pmap->pdir_phys != cr3) {
             pv = pv->next;
             continue;
@@ -1335,7 +1250,8 @@ int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
     if (!pmap) return 0;
     
     // Must be active address space
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
     
     int ref_count = 0;
@@ -1363,7 +1279,8 @@ int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va) {
     if (!pmap) return 0;
     
     // Must be active address space
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
     
     uint32_t pdi = PD_INDEX(va);
@@ -1399,7 +1316,8 @@ void pmap_track_access(vm_page_t *m) {
         uint32_t va = pv->va;
         
         // Only check if this is the current address space
-        uint32_t cr3 = read_cr3();
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
         if (pmap->pdir_phys != cr3) {
             pv = pv->next;
             continue;
@@ -1441,7 +1359,8 @@ int pmap_is_modified_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
     if (!pmap) return 0;
     
     // Must be active address space
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
     
     int mod_count = 0;
@@ -1469,7 +1388,8 @@ int pmap_test_and_clear_modify(pmap_t pmap, uint32_t va) {
     if (!pmap) return 0;
     
     // Must be active address space
-    uint32_t cr3 = read_cr3();
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
     
     uint32_t pdi = PD_INDEX(va);
@@ -1505,7 +1425,8 @@ void pmap_track_modify(vm_page_t *m, uint32_t current_time) {
         uint32_t va = pv->va;
         
         // Only check if this is the current address space
-        uint32_t cr3 = read_cr3();
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
         if (pmap->pdir_phys != cr3) {
             pv = pv->next;
             continue;
@@ -1646,76 +1567,32 @@ int sys_pmap_stats(struct pmap_stats *out) {
     return 0;
 }
 
-// Create a 4MB Page Size Extension (PSE) mapping
-// Maps a 4MB-aligned virtual address to a 4MB-aligned physical address
-int pmap_enter_pse(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t flags) {
-    if (!pmap) return -1;
-    
-    // Validate alignment (must be 4MB aligned)
-    if ((va & 0x3FFFFF) || (pa & 0x3FFFFF)) {
-        return -1; // Not 4MB aligned
-    }
-
-    uint32_t pd_index = va >> 22;
-    uint32_t *pd = (uint32_t *)pmap;
-
-    // Construct PDE with PS bit (bit 7)
-    // 4MB pages don't use page tables, the PDE points directly to physical memory
-    uint32_t pde = pa | PTE_P | PTE_PS | (flags & 0xFFF);
-    
-    // If user flag is set, ensure it's allowed (basic check, can be expanded)
-    if (flags & PTE_U) {
-        pde |= PTE_U;
-    }
-    
-    if (flags & PTE_W) {
-        pde |= PTE_W;
-    }
-    
-    // We might need to invalidate TLB if we are changing an existing mapping
-    // But for now, just overwrite
-    pd[pd_index] = pde;
-    
-    // Invalidate TLB for this address if it's the current pmap
-    // checking against current_pmap or just invlpg
-    invlpg(va);
-
-    return 0;
-}
 
 // Optimized page operations
 void pmap_copy_page(uintptr_t src_pa, uintptr_t dst_pa) {
     void *src = (void *)(src_pa + 0xC0000000);
     void *dst = (void *)(dst_pa + 0xC0000000);
-
-#ifndef HOST_TEST
     int count = 1024;
+
     __asm__ volatile (
         "cld; rep movsl"
         : "+S"(src), "+D"(dst), "+c"(count)
         :
         : "memory"
     );
-#else
-    memcpy(dst, src, 4096);
-#endif
 }
 
 void pmap_zero_page(uintptr_t pa) {
     void *dst = (void *)(pa + 0xC0000000);
-
-#ifndef HOST_TEST
     int count = 1024;
     int val = 0;
+
     __asm__ volatile (
         "cld; rep stosl"
         : "+D"(dst), "+c"(count)
         : "a"(val)
         : "memory"
     );
-#else
-    memset(dst, 0, 4096);
-#endif
 }
 
 // Debug dump of pmap contents
