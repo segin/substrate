@@ -4,11 +4,19 @@
 .Sh NAME
 .Nm elf_open ,
 .Nm elf_open_memory ,
+.Nm elf_open_with_options ,
+.Nm elf_open_memory_with_options ,
+.Nm elf_open_memory_nocopy ,
 .Nm elf_create ,
 .Nm elf_write_file ,
 .Nm elf_close ,
+.Nm elf_uses_mmap ,
+.Nm elf_is_lazy_parse_enabled ,
 .Nm elf_finalize ,
-.Nm elf_errstr
+.Nm elf_errstr ,
+.Nm elf_last_error ,
+.Nm elf_last_diagnostics ,
+.Nm elf_program_header_count
 .Nd ELF object handling library core API
 .Sh SYNOPSIS
 .In elfobj.h
@@ -19,6 +27,25 @@
 .Fc
 .Ft elf_err_t
 .Fo elf_open_memory
+.Fa "const void *buf"
+.Fa "size_t size"
+.Fa "elfobj_t **out"
+.Fc
+.Ft elf_err_t
+.Fo elf_open_with_options
+.Fa "const char *path"
+.Fa "uint32_t flags"
+.Fa "elfobj_t **out"
+.Fc
+.Ft elf_err_t
+.Fo elf_open_memory_with_options
+.Fa "const void *buf"
+.Fa "size_t size"
+.Fa "uint32_t flags"
+.Fa "elfobj_t **out"
+.Fc
+.Ft elf_err_t
+.Fo elf_open_memory_nocopy
 .Fa "const void *buf"
 .Fa "size_t size"
 .Fa "elfobj_t **out"
@@ -46,6 +73,26 @@
 .Ft const char *
 .Fo elf_errstr
 .Fa "elf_err_t err"
+.Fc
+.Ft elf_err_t
+.Fo elf_last_error
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft const char *
+.Fo elf_last_diagnostics
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft int
+.Fo elf_uses_mmap
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft int
+.Fo elf_is_lazy_parse_enabled
+.Fa "const elfobj_t *obj"
+.Fc
+.Ft uint16_t
+.Fo elf_program_header_count
+.Fa "const elfobj_t *obj"
 .Fc
 .Sh DESCRIPTION
 The
@@ -132,14 +179,11 @@ Returns NULL on allocation failure.
 .It Fn elf_write_file "obj" "path"
 Writes the ELF object to a file at
 .Fa path .
-The object must have been created with
-.Fn elf_create
-or modified after opening.
-For objects opened with
-.Fn elf_open ,
-this function returns
-.Dv ELF_ERR_STATE
-unless the object has been explicitly made writable.
+If
+.Fa obj
+is a parsed read-only object that was not modified,
+the original ELF image is written byte-for-byte.
+Mutable objects are finalized automatically before writing.
 .It Fn elf_finalize "obj"
 Prepares an object for writing by computing section layouts,
 building string tables, and resolving internal references.
@@ -157,6 +201,16 @@ Passing NULL is safe and has no effect.
 Returns a human-readable string describing the error code
 .Fa err .
 The returned string is static and must not be freed.
+.It Fn elf_last_error "obj"
+Returns the last error code recorded on
+.Fa obj .
+.It Fn elf_last_diagnostics "obj"
+Returns the current diagnostics buffer for
+.Fa obj
+as a newline-separated string.
+.It Fn elf_program_header_count "obj"
+Returns the number of parsed program headers in
+.Fa obj .
 .El
 .Ss Error Codes
 The
@@ -210,8 +264,7 @@ library provides the following thread-safety guarantees:
 is thread-safe.
 .It
 .Fn elf_register_reloc_backend
-is thread-safe for concurrent registration of different architectures,
-but concurrent registration of the same architecture is undefined.
+is internally serialized and thread-safe.
 .It
 All other functions operating on the same
 .Vt elfobj_t
@@ -374,6 +427,7 @@ int main(int argc, char *argv[]) {
 .Xr elf_symbol 3 ,
 .Xr elf_reloc 3 ,
 .Xr elf_link 3 ,
+.Xr elf_debug 3 ,
 .Xr elf_validate 3 ,
 .Xr elf_backend 3 ,
 .Xr elfobj_architecture 7 ,
