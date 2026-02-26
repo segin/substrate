@@ -78,7 +78,7 @@ static void set_fatal_error(void) { g_status = 2; }
 static void usage(FILE *out) {
     fprintf(out,
         "usage: cpio -o [-v] [-H format] [-F archive] [-R user:group]\\n"
-        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--safe-extract] [--absolute-paths]\\n"
+        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--safe-extract] [--absolute-paths] [--insecure]\\n"
         "       cpio -p [-v] [-dmu] directory\\n");
 }
 
@@ -140,8 +140,8 @@ static int make_parent_dirs(const char *path) {
 }
 
 static bool path_is_safe(const char *path, const options_t *opt) {
-    if ((opt->safe_extract || opt->no_absolute_paths) && path[0] == '/') return false;
-    if (opt->safe_extract || opt->no_absolute_paths) {
+    if (opt->no_absolute_paths && path[0] == '/') return false;
+    if (opt->safe_extract) {
         const char *p = path;
         while (*p) {
             if ((p == path || p[-1] == '/') && p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0'))
@@ -742,6 +742,7 @@ int main(int argc, char **argv) {
 
     memset(&opt, 0, sizeof(opt));
     opt.no_absolute_paths = true;
+    opt.safe_extract = true;
     opt.fmt = (fmt_t)-1;
 
     new_argv[new_argc++] = argv[0];
@@ -749,7 +750,10 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--safe-extract") == 0) opt.safe_extract = true;
         else if (strcmp(argv[i], "--no-absolute-paths") == 0) opt.no_absolute_paths = true;
         else if (strcmp(argv[i], "--absolute-paths") == 0) opt.no_absolute_paths = false;
-        else if (strcmp(argv[i], "--no-overwrite") == 0) opt.no_overwrite = true;
+        else if (strcmp(argv[i], "--insecure") == 0) {
+            opt.safe_extract = false;
+            opt.no_absolute_paths = false;
+        } else if (strcmp(argv[i], "--no-overwrite") == 0) opt.no_overwrite = true;
         else if (strcmp(argv[i], "--numeric-owner") == 0) opt.numeric_owner = true;
         else if (strncmp(argv[i], "--format=", 9) == 0) {
             const char *f = argv[i] + 9;
