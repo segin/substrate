@@ -140,6 +140,8 @@ test_libc_string
 test_libc_time
 test_libc_stdlib
 test_libc_ctype
+test_libc_assert
+bench_ext2_readdir
 udf_test
 stat_verify
 host_test_*
