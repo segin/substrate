@@ -1,4 +1,5 @@
 cc
+ccdbg
 ir-verifier
 ir-normalize
 ir-diff
