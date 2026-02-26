@@ -667,7 +667,6 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
     uint32_t pdi = PD_INDEX(va);
 
     // Check if existing mapping is conflicting
-    int replaced_pt = 0;
     if (V_PD[pdi] & PTE_P) {
         if (V_PD[pdi] & PTE_PS) {
             // Already a large page, just overwrite
@@ -698,7 +697,10 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
             if (pt_page) {
                 vm_phys_free_page(pt_page);
             }
-            replaced_pt = 1;
+
+            // 5. Invalidate TLB: Replacing a page table requires flushing all TLB entries
+            // covered by it. Since iterating 1024 invlpg is slow, we do a full flush.
+            pmap_invalidate_all();
         }
     }
 
@@ -720,17 +722,9 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
     // Write PDE
     V_PD[pdi] = pa | pde_flags;
     
-    // Invalidate TLB
-    if (replaced_pt) {
-        // If we replaced a Page Table, we may have 4KB entries cached in TLB.
-        // INVLPG on the large page address only flushes the large page entry (or one 4KB entry).
-        // To be safe and ensure no stale 4KB entries remain for this 4MB range,
-        // we perform a full TLB flush.
-        pmap_invalidate_all();
-    } else {
-        // If it was already a large page or not present, INVLPG is sufficient.
-        pmap_invalidate_page(va);
-    }
+    // Invalidate broad range (4MB) - INVLPG only invalidates one 4KB page usually?
+    // Usage of INVLPG on a large page address should invalidate the TLB entry for that large page.
+    pmap_invalidate_page(va);
     
     return 0;
 }
