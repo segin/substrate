@@ -1,0 +1,110 @@
+.Dd February 25, 2026
+.Dt ELF_DEBUG 3
+.Os Substrate
+.Sh NAME
+.Nm elf_section_is_debug ,
+.Nm elf_section_is_cfi ,
+.Nm elf_section_is_split_dwarf ,
+.Nm elf_section_is_compressed_debug ,
+.Nm elf_debug_set_compression_hint ,
+.Nm elf_debug_get_compression_hint ,
+.Nm elf_eh_frame_stats ,
+.Nm elf_debug_validate ,
+.Nm elf_debug_sort_sections
+.Nd debug and unwind helpers for libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft int
+.Fo elf_section_is_debug
+.Fa "const elf_section_t *section"
+.Fc
+.Ft int
+.Fo elf_section_is_cfi
+.Fa "const elf_section_t *section"
+.Fc
+.Ft int
+.Fo elf_section_is_split_dwarf
+.Fa "const elf_section_t *section"
+.Fc
+.Ft int
+.Fo elf_section_is_compressed_debug
+.Fa "const elf_section_t *section"
+.Fc
+.Ft elf_err_t
+.Fo elf_debug_set_compression_hint
+.Fa "elf_section_t *section"
+.Fa "uint32_t ch_type"
+.Fa "uint64_t uncompressed_size"
+.Fa "uint64_t addralign"
+.Fc
+.Ft int
+.Fo elf_debug_get_compression_hint
+.Fa "const elf_section_t *section"
+.Fa "uint32_t *ch_type_out"
+.Fa "uint64_t *uncompressed_size_out"
+.Fa "uint64_t *addralign_out"
+.Fc
+.Ft elf_err_t
+.Fo elf_eh_frame_stats
+.Fa "const elf_section_t *section"
+.Fa "size_t *cie_count_out"
+.Fa "size_t *fde_count_out"
+.Fc
+.Ft elf_err_t
+.Fo elf_debug_validate
+.Fa "elfobj_t *obj"
+.Fa "char **diagnostics"
+.Fc
+.Ft elf_err_t
+.Fo elf_debug_sort_sections
+.Fa "elfobj_t *obj"
+.Fc
+.Sh DESCRIPTION
+These interfaces provide debug/unwind-oriented classification,
+validation, and deterministic ordering.
+.Pp
+.Fn elf_section_is_debug
+returns non-zero for DWARF-style debug sections such as
+.Pa .debug_*
+and
+.Pa .zdebug_* .
+.Fn elf_section_is_cfi
+returns non-zero for CFI containers
+.Pq Pa .eh_frame , Pa .eh_frame_hdr , Pa .debug_frame .
+.Fn elf_section_is_split_dwarf
+detects split DWARF payload sections
+.Pq suffixes like Pa .dwo .
+.Pp
+.Fn elf_debug_set_compression_hint
+records compression header metadata and marks the section with
+.Dv SHF_COMPRESSED .
+.Fn elf_debug_get_compression_hint
+returns either explicit hints or parsed on-disk compression header data.
+.Pp
+.Fn elf_eh_frame_stats
+computes CIE/FDE counts for a CFI section.
+.Fn elf_debug_validate
+extends core validation with debug/CFI structural checks and
+debug-relocation cross-reference checks.
+.Fn elf_debug_sort_sections
+reorders debug/CFI sections deterministically.
+.Sh RETURN VALUES
+.Fn elf_section_is_debug ,
+.Fn elf_section_is_cfi ,
+.Fn elf_section_is_split_dwarf ,
+and
+.Fn elf_section_is_compressed_debug
+return 1 when true and 0 otherwise.
+.Pp
+.Fn elf_debug_get_compression_hint
+returns 1 when hint data is available and 0 otherwise.
+.Pp
+Other functions return
+.Dv ELF_OK
+on success or an
+.Vt elf_err_t
+error code.
+.Sh SEE ALSO
+.Xr elf_section 3 ,
+.Xr elf_validate 3 ,
+.Xr elfobj 3
