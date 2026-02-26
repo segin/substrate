@@ -150,6 +150,7 @@ extern short *item_set;
 extern short *item_set_end;
 extern unsigned *rules_used;
 extern int nstates;
+extern core *first_state;
 
 /* Closure globals (defined in closure.c) */
 extern short *first_derives;
@@ -180,6 +181,8 @@ extern int yytable_size;         /* Size of yytable/yycheck */
 extern short final_state;        /* Accept state */
 extern int SRtotal;              /* Shift/reduce conflict count */
 extern int RRtotal;              /* Reduce/reduce conflict count */
+extern short *SRconflicts;       /* Per-state S/R conflict count */
+extern short *RRconflicts;       /* Per-state R/R conflict count */
 
 /* Reader state globals if needed */
 
