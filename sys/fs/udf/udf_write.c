@@ -1037,7 +1037,7 @@ static void udf_free_long_ad_chain(fs_node_t *dev, uint32_t aed_block) {
  * Returns new length of ADs in bytes.
  */
 static uint32_t udf_process_long_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t ad_len,
-                                      uint64_t *current_offset, uint64_t new_size) {
+                                     uint64_t *current_offset, uint64_t new_size) {
     struct udf_long_ad *ads = (struct udf_long_ad *)ad_buf;
     uint32_t num_ads = ad_len / sizeof(struct udf_long_ad);
     uint32_t new_num_ads = 0;

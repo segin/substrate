@@ -74,15 +74,13 @@ static int decode_file(FILE *fp, const char *input_name) {
             out_path = filename;
 
             /* Security checks */
-            if (s_flag) {
-                /* Strip path components */
-                out_path = simple_basename(out_path);
-            } else {
-                /* Check for absolute path or .. traversal */
-                if (is_unsafe_path(out_path)) {
-                    fprintf(stderr, "uudecode: %s: illegal path (absolute or .. components). Use -s to strip.\n", out_path);
-                    return 1;
-                }
+            /* Strip path components by default for security */
+            out_path = simple_basename(out_path);
+
+            /* Check for unsafe basename (e.g. "..") */
+            if (is_unsafe_path(out_path)) {
+                fprintf(stderr, "uudecode: %s: illegal filename.\n", out_path);
+                return 1;
             }
         }
 
