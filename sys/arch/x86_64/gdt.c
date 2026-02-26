@@ -44,6 +44,14 @@ struct gdt_ptr {
     uint64_t base;
 } __attribute__((packed));
 
+/* GDT Selectors */
+#define GDT_NULL        0x00
+#define GDT_KERNEL_CODE 0x08
+#define GDT_KERNEL_DATA 0x10
+#define GDT_USER_DATA   0x18    /* Note: User data before code for SYSRET */
+#define GDT_USER_CODE   0x20
+#define GDT_TSS         0x28    /* TSS is 16 bytes (2 GDT slots) */
+
 /* Access byte flags */
 #define GDT_PRESENT     0x80
 #define GDT_DPL0        0x00
@@ -175,12 +183,14 @@ void gdt_init_percpu(int cpu_id, uint64_t rsp0) {
         : "m"(gp)
         : "rax", "memory"
     );
+#endif
     
     /* Load TSS */
+#ifndef HOST_TEST
     __asm__ volatile(
         "ltr %w0"
         :
-        : "r"((uint16_t)SEL_TSS)
+        : "r"((uint16_t)GDT_TSS)
     );
 #endif
 }
@@ -220,8 +230,8 @@ struct tss64 *tss_get(void) {
  * Set FS base (used for TLS in userspace)
  */
 void set_fs_base(uint64_t base) {
-#ifndef HOST_TEST
     /* FS.base is set via MSR 0xC0000100 (IA32_FS_BASE) */
+#ifndef HOST_TEST
     __asm__ volatile(
         "wrmsr"
         :
@@ -234,8 +244,8 @@ void set_fs_base(uint64_t base) {
  * Set GS base (used for per-CPU data in kernel)
  */
 void set_gs_base(uint64_t base) {
-#ifndef HOST_TEST
     /* GS.base is set via MSR 0xC0000101 (IA32_GS_BASE) */
+#ifndef HOST_TEST
     __asm__ volatile(
         "wrmsr"
         :
@@ -248,8 +258,8 @@ void set_gs_base(uint64_t base) {
  * Set kernel GS base (swapped on SWAPGS instruction)
  */
 void set_kernel_gs_base(uint64_t base) {
-#ifndef HOST_TEST
     /* KernelGSbase is set via MSR 0xC0000102 (IA32_KERNEL_GS_BASE) */
+#ifndef HOST_TEST
     __asm__ volatile(
         "wrmsr"
         :

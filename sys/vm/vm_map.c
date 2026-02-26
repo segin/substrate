@@ -92,8 +92,23 @@ static void vm_map_splay(vm_map_t *map, uintptr_t va) {
 
 // Internal helper: find the entry containing VA, or the entry immediately preceding it.
 static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **entry) {
-    vm_map_splay(map, va);
+    // Optimization: Check hint first
+    vm_map_entry_t *hint = map->hint;
+    if (hint && hint != map->header && va >= hint->start && va < hint->end) {
+        *entry = hint;
+        return true;
+    }
+
+    // Optimization: Check root
     vm_map_entry_t *root = map->root;
+    if (root && va >= root->start && va < root->end) {
+        *entry = root;
+        map->hint = root;
+        return true;
+    }
+
+    vm_map_splay(map, va);
+    root = map->root;
 
     if (!root) {
         *entry = map->header; // Effectively header->prev since header is empty/sentinel
