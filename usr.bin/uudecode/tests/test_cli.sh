@@ -56,8 +56,8 @@ if [ "$CONTENT" != "Cat" ]; then
 fi
 rm specific.txt
 
-# Test -s (strip path)
-echo "4. -s (strip path)"
+# Test Path Stripping (secure default)
+echo "4. Path Stripping (secure default)"
 mkdir -p unsafe_dir
 cat > test_unsafe.uu <<EOF
 begin 644 unsafe_dir/unsafe.txt
@@ -66,16 +66,20 @@ begin 644 unsafe_dir/unsafe.txt
 end
 EOF
 
-# Without -s, it writes to unsafe_dir/unsafe.txt
-echo "   Testing default behavior (no strip)..."
+# Default behavior (secure stripping)
+echo "   Testing default behavior (strip)..."
 $UUDECODE test_unsafe.uu
-if [ ! -f unsafe_dir/unsafe.txt ]; then
-    echo "Failed: unsafe_dir/unsafe.txt not created (default behavior)"
+if [ ! -f unsafe.txt ]; then
+    echo "Failed: unsafe.txt not created in CWD (secure default)"
     exit 1
 fi
-rm unsafe_dir/unsafe.txt
+if [ -f unsafe_dir/unsafe.txt ]; then
+    echo "Failed: wrote to unsafe_dir/unsafe.txt (insecure default)"
+    exit 1
+fi
+rm unsafe.txt
 
-# With -s, it writes to unsafe.txt in CWD
+# With -s (still secure)
 echo "   Testing -s behavior (strip)..."
 $UUDECODE -s test_unsafe.uu
 if [ ! -f unsafe.txt ]; then

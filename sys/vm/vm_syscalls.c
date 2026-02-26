@@ -77,80 +77,68 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     // Allocate and map pages
     // NOTE: pmm_alloc_block() returns virtual address (kernel direct mapping)
     uint64_t file_offset = offset;
+
     #define MMAP_BATCH_SIZE 64
     uintptr_t pa_batch[MMAP_BATCH_SIZE];
+    int batch_idx = 0;
+    uintptr_t batch_va_start = v_addr;
 
-    uintptr_t va = v_addr;
-    uintptr_t end_va = v_addr + length;
-
-    while (va < end_va) {
-        int batch_count = 0;
-        uintptr_t batch_va_start = va;
-
-        // Fill batch
-        while (batch_count < MMAP_BATCH_SIZE && va < end_va) {
-            void *pa_virt = pmm_alloc_block();  // Returns virtual address
-            if (!pa_virt) {
-                // Partial failure - pages in current batch need freeing
-                for (int k = 0; k < batch_count; k++) {
-                    pmm_free_block((void*)(pa_batch[k] + 0xC0000000));
-                }
-
-                // Cleanup previously mapped pages
-                for (uintptr_t cleanup_va = v_addr; cleanup_va < batch_va_start; cleanup_va += 0x1000) {
-                    uint32_t pa = pmap_extract(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
-                    if (pa) {
-                        void *cleanup_kvirt = (void *)((uintptr_t)pa + 0xC0000000);
-                        pmm_free_block(cleanup_kvirt);
-                        pmap_remove(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
-                    }
-                }
-                // Remove the vm_map entry
-                vm_map_remove(map, v_addr, v_addr + length);
-
-                return (void *)-1;
-            }
-
-            // Zero the page - pa_virt is already virtual
-            memset(pa_virt, 0, 0x1000);
-
-            // If file-backed, read data into page
-            if (file && file->f_data && ((fs_node_t*)file->f_data)->read) {
-                uint32_t bytes_to_read = 0x1000;
-                // Clamp to remaining length
-                if (va + 0x1000 > v_addr + length) {
-                    bytes_to_read = (v_addr + length) - va;
-                }
-                ((fs_node_t*)file->f_data)->read((fs_node_t*)file->f_data, file_offset, bytes_to_read, (uint8_t *)pa_virt);
-                file_offset += bytes_to_read;
-            }
-
-            // Convert virtual to physical for batch list
-            pa_batch[batch_count++] = (uintptr_t)pa_virt - 0xC0000000;
-            va += 0x1000;
+    for (uintptr_t va = v_addr; va < v_addr + length; va += 0x1000) {
+        // If batch is full, commit it
+        if (batch_idx == MMAP_BATCH_SIZE) {
+            pmap_enter_batch(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), batch_va_start, batch_idx, pa_batch, vm_prot, 0);
+            batch_idx = 0;
+            batch_va_start = va;
         }
 
-        // Commit batch
-        if (pmap_enter_batch(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), batch_va_start, batch_count, pa_batch, vm_prot, 0) < 0) {
-             // Cleanup current batch (already allocated but failed mapping)
-             // Note: pmap_enter_batch failure usually means OOM in page tables.
-             // We must free the physical pages we just allocated.
-             for (int k = 0; k < batch_count; k++) {
-                 pmm_free_block((void*)(pa_batch[k] + 0xC0000000));
-             }
+        void *pa_virt = pmm_alloc_block();  // Returns virtual address
+        if (!pa_virt) {
+            // Partial failure - pages before this are mapped
+            // Cleanup pages in current pending batch
+            for (int i = 0; i < batch_idx; i++) {
+                void *cleanup_kvirt = (void *)(pa_batch[i] + 0xC0000000);
+                pmm_free_block(cleanup_kvirt);
+            }
 
-             // Cleanup previously mapped pages
-             for (uintptr_t cleanup_va = v_addr; cleanup_va < batch_va_start; cleanup_va += 0x1000) {
-                 uint32_t pa = pmap_extract(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
-                 if (pa) {
-                     void *cleanup_kvirt = (void *)((uintptr_t)pa + 0xC0000000);
-                     pmm_free_block(cleanup_kvirt);
-                     pmap_remove(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
-                 }
-             }
-             vm_map_remove(map, v_addr, v_addr + length);
-             return (void *)-1;
+            // Cleanup previously committed batches
+            for (uintptr_t cleanup_va = v_addr; cleanup_va < batch_va_start; cleanup_va += 0x1000) {
+                uint32_t pa = pmap_extract(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
+                if (pa) {
+                    void *cleanup_kvirt = (void *)(pa + 0xC0000000);
+                    pmm_free_block(cleanup_kvirt);
+                    pmap_remove(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
+                }
+            }
+            // Remove the vm_map entry
+            vm_map_remove(map, v_addr, v_addr + length);
+
+            return (void *)-1;
         }
+
+        // Zero the page - pa_virt is already virtual
+        memset(pa_virt, 0, 0x1000);
+
+        // If file-backed, read data into page
+        if (file && file->f_data && ((fs_node_t*)file->f_data)->read) {
+            uint32_t bytes_to_read = 0x1000;
+            // Clamp to remaining length
+            if (va + 0x1000 > v_addr + length) {
+                bytes_to_read = (v_addr + length) - va;
+            }
+            ((fs_node_t*)file->f_data)->read((fs_node_t*)file->f_data, file_offset, bytes_to_read, (uint8_t *)pa_virt);
+            file_offset += bytes_to_read;
+        }
+
+        // Convert virtual to physical for pmap_enter
+        uint32_t pa_phys = (uint32_t)(uintptr_t)pa_virt - 0xC0000000;
+
+        // Add to batch
+        pa_batch[batch_idx++] = pa_phys;
+    }
+
+    // Flush remaining batch
+    if (batch_idx > 0) {
+        pmap_enter_batch(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), batch_va_start, batch_idx, pa_batch, vm_prot, 0);
     }
 
     return (void *)v_addr;

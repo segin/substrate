@@ -354,13 +354,14 @@ static int bc_div2(bc_num *n) {
 
 bc_num *bc_pow(bc_num *a, bc_num *b) {
     if (b->sign < 0) {
-        // Integer exponentiation with negative power -> 0 (for integers > 1)
-        // 1^-1 = 1, -1^-1 = -1.
-        // For now, return 0 as integer div result (unless base is 1/-1)
-        // bc standard says: "result is truncated to scale"
-        // With scale=0, 2^-2 = 0.
-        // Check for 1 or -1 base?
-        // Let's stick to 0 for now unless |a|==1.
+        // Integer exponentiation with negative power
+        // Check for division by zero (0^-n)
+        if (bc_is_zero(a)) {
+            fprintf(stderr, "bc: divide by zero\n");
+            return bc_new();
+        }
+
+        // Result is truncated to scale (0 for scale=0), unless base is 1 or -1.
         bc_num *one = bc_from_long(1);
         int cmp = bc_abs_cmp(a, one);
         bc_free(one);
