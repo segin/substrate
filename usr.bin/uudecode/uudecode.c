@@ -28,6 +28,19 @@ static const char *simple_basename(const char *path) {
     return p ? p + 1 : path;
 }
 
+static int is_unsafe_path(const char *path) {
+    if (path == NULL) return 0;
+    if (path[0] == '/') return 1; /* Absolute path */
+    /* Check for .. at start */
+    if (strncmp(path, "../", 3) == 0 || strcmp(path, "..") == 0) return 1;
+    /* Check for /.. inside */
+    if (strstr(path, "/../")) return 1;
+    /* Check for /.. at end */
+    size_t len = strlen(path);
+    if (len >= 3 && strcmp(path + len - 3, "/..") == 0) return 1;
+    return 0;
+}
+
 static int decode_file(FILE *fp, const char *input_name) {
     char line[1024];
     int mode = 0;
@@ -61,9 +74,14 @@ static int decode_file(FILE *fp, const char *input_name) {
             out_path = filename;
 
             /* Security checks */
-            /* Always strip path components for security, regardless of -s flag.
-               The -s flag is now a no-op but kept for compatibility. */
+            /* Strip path components by default for security */
             out_path = simple_basename(out_path);
+
+            /* Check for unsafe basename (e.g. "..") */
+            if (is_unsafe_path(out_path)) {
+                fprintf(stderr, "uudecode: %s: illegal filename.\n", out_path);
+                return 1;
+            }
         }
 
         /* Create file */
