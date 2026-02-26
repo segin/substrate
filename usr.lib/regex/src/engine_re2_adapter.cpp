@@ -1,5 +1,11 @@
 #ifdef REGEX_USE_RE2
 
+/*
+ * RE2 adapter implementation.
+ * This file provides the C++ implementation of the RE2 adapter, exposing
+ * a C-compatible regex_engine_vtable.
+ */
+
 // Include C++ headers first to avoid conflicts with local C headers
 #include <re2/re2.h>
 #include <string>
