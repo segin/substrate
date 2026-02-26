@@ -325,4 +325,3 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 }
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
-

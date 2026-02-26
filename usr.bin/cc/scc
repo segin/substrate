@@ -1,0 +1,74 @@
+#!/bin/sh
+set -eu
+
+self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+real_cc=${SCC_REAL_CC:-"$self_dir/cc"}
+gcc_ver=${SCC_GCC_VERSION:-13.2.0}
+gcc_major=${gcc_ver%%.*}
+gcc_triplet_default=${SCC_GCC_TRIPLET:-x86_64-pc-linux-gnu}
+
+if [ ! -x "$real_cc" ]; then
+	echo "scc: missing compiler backend: $real_cc" 1>&2
+	exit 1
+fi
+
+triplet=$gcc_triplet_default
+for a in "$@"; do
+	case "$a" in
+	-m32) triplet=i686-pc-linux-gnu ;;
+	-m64) triplet=x86_64-pc-linux-gnu ;;
+	esac
+done
+
+if [ $# -eq 1 ]; then
+	case "$1" in
+	--version|-v)
+		echo "gcc (Substrate scc wrapper) $gcc_ver"
+		exit 0
+		;;
+	-dumpversion)
+		echo "$gcc_major"
+		exit 0
+		;;
+	-dumpfullversion)
+		echo "$gcc_ver"
+		exit 0
+		;;
+	-dumpmachine)
+		echo "$triplet"
+		exit 0
+		;;
+	-print-multiarch)
+		echo "${triplet%-pc-linux-gnu}-linux-gnu"
+		exit 0
+		;;
+	-print-multi-directory)
+		echo "."
+		exit 0
+		;;
+	-print-multi-lib)
+		echo ".;"
+		exit 0
+		;;
+	-print-libgcc-file-name)
+		echo "/usr/lib/libgcc.a"
+		exit 0
+		;;
+	esac
+	case "$1" in
+	-print-prog-name=*)
+		echo "${1#-print-prog-name=}"
+		exit 0
+		;;
+	-print-file-name=*)
+		name=${1#-print-file-name=}
+		case "$name" in
+		libgcc.a) echo "/usr/lib/libgcc.a" ;;
+		*) echo "$name" ;;
+		esac
+		exit 0
+		;;
+	esac
+fi
+
+exec "$real_cc" "$@"
