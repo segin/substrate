@@ -54,6 +54,28 @@ void test_initialization(void) {
     printf("PASS\n");
 }
 
+void test_auto_initialization(void) {
+    printf("Testing auto-initialization...\n");
+
+    // Manually reset initialized state
+    crc32_initialized = 0;
+
+    // Clear table to ensure we are truly testing initialization logic
+    memset(crc32_table, 0, sizeof(crc32_table));
+
+    const char *digits = "123456789";
+    // This call should trigger auto-initialization
+    uint32_t crc_digits = crc32(digits, 9);
+
+    // Check if it initialized
+    TEST_ASSERT(crc32_initialized == 1, "Auto-initialization flag not set");
+
+    // Check result
+    TEST_ASSERT_EQ_HEX(crc_digits, 0xCBF43926, "Auto-initialized CRC32 result");
+
+    printf("PASS\n");
+}
+
 void test_vectors(void) {
     printf("Testing standard vectors...\n");
 
@@ -106,6 +128,7 @@ int main(void) {
     printf("=== CRC32 Host Test Suite ===\n");
 
     test_initialization();
+    test_auto_initialization();
     test_vectors();
     test_large_buffer();
 
