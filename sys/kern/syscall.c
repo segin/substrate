@@ -14,6 +14,7 @@
 #include <kern/console.h>
 #include <exec/perso/personality.h>
 #include <vm/vm_kmem.h>
+#include <vm/uma.h>
 #include <include/sys/thr.h>
 #include <include/sys/acct.h>
 #include <include/sys/file.h>
@@ -48,16 +49,57 @@ extern process_t *current_process;
 extern process_t processes[64];
 extern thread_t threads[MAX_THREADS];
 
-// Simple file structure allocator (Dynamic)
+// File structure allocator
+static uma_zone_t *file_zone = NULL;
 
 #define IO_CHUNK_SIZE 4096
 
+static struct {
+    mutex_t lock;
+    char buf[IO_CHUNK_SIZE];
+} io_buffers[MAX_CPUS];
+
+static volatile int io_buffers_initialized = 0;
+
+static void ensure_io_buffers_init(void) {
+    if (io_buffers_initialized) return;
+
+    static volatile int init_lock = 0;
+    while (__sync_lock_test_and_set(&init_lock, 1)) {
+        while (init_lock) __asm__("pause");
+    }
+
+    if (!io_buffers_initialized) {
+        for (int i = 0; i < MAX_CPUS; i++) {
+            mutex_init(&io_buffers[i].lock, "io_buf");
+        }
+        io_buffers_initialized = 1;
+    }
+
+    __sync_lock_release(&init_lock);
+}
+
+static void ensure_file_zone_init(void) {
+    if (file_zone) return;
+
+    static volatile int init_lock = 0;
+    while (__sync_lock_test_and_set(&init_lock, 1)) {
+        while (init_lock) __asm__("pause");
+    }
+
+    if (!file_zone) {
+        file_zone = uma_zcreate("file", sizeof(file_t), NULL, NULL, NULL, NULL, 0, 0);
+    }
+
+    __sync_lock_release(&init_lock);
+}
 
 /*
- * file_alloc - Allocate a file structure dynamically.
+ * file_alloc - Allocate a file structure from the UMA zone.
  */
 file_t *file_alloc(void) {
-    file_t *f = kzalloc(sizeof(file_t));
+    ensure_file_zone_init();
+    file_t *f = uma_zalloc(file_zone, M_WAITOK | M_ZERO);
     if (f) {
         f->f_count = 1;
     }
@@ -66,7 +108,7 @@ file_t *file_alloc(void) {
 
 void file_free(file_t *f) {
     if (!f) return;
-    kfree(f, sizeof(file_t));
+    uma_zfree(file_zone, f);
 }
 
 int kern_write(int fd, const char *buf, int len) {
