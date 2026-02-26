@@ -44,6 +44,9 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 
 # Duplicate rule removed
 
+test_libc_assert: lib/c/test_assert.c ../lib/c/src/assert.c
+	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_assert.c -o $@
+
 test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_ctype.c -o $@
 
