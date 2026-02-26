@@ -735,8 +735,41 @@ static void parse_rules(void) {
 }
 
 static void create_symbol_table(void) {
-    error_symbol = make_bucket("error");
+    bucket *end = lookup("$end");
+    end->class = CLASS_TERM;
+    end->value = 0;
+    /* Assign temp index */
+    end->index = ++temp_sym_count;
+    temp_sym_map[temp_sym_count] = end;
+
+    error_symbol = lookup("error");
     error_symbol->class = CLASS_TERM;
+    /* Assign temp index */
+    error_symbol->index = ++temp_sym_count;
+    temp_sym_map[temp_sym_count] = error_symbol;
+}
+
+static void create_augmented_rule(void) {
+    bucket *accept_sym = lookup("$accept");
+    accept_sym->class = CLASS_NONTERM;
+    /* Assign temp index */
+    if (accept_sym->index == 0) {
+        accept_sym->index = ++temp_sym_count;
+        temp_sym_map[temp_sym_count] = accept_sym;
+    }
+
+    bucket *end_sym = lookup("$end");
+
+    /* Create Rule 1: $accept : goal $end */
+    if (nitems + 3 >= MAXPROD * 4) no_space();
+
+    plhs[1] = accept_sym->index;
+    rrhs[1] = nitems;
+    rlhs[1] = accept_sym->index;
+
+    ritem[nitems++] = goal_symbol->index;
+    ritem[nitems++] = end_sym->index;
+    ritem[nitems++] = -1; /* End of Rule 1 */
 }
 
 /* Assign indices and count symbols */
@@ -748,13 +781,22 @@ static void pack_symbols(void) {
     nvars = 0;
     nsyms = 0;
     
-    /* First pass: assign indices to terminals */
+    /* Assign values to tokens that don't have them */
     for (bp = first_symbol; bp != NULL; bp = bp->next) {
         if (bp->class == CLASS_TERM) {
-            bp->index = ntokens++;
             if (bp->value == 0) {
-                bp->value = token_value++;
+                 if (strcmp(bp->name, "$end") == 0) bp->value = 0;
+                 else if (strcmp(bp->name, "error") == 0) bp->value = 256;
+                 else bp->value = token_value++;
             }
+        }
+    }
+
+    /* Assign indices = values */
+    for (bp = first_symbol; bp != NULL; bp = bp->next) {
+        if (bp->class == CLASS_TERM) {
+            bp->index = bp->value;
+            if (bp->index >= ntokens) ntokens = bp->index + 1;
         }
     }
     
@@ -799,6 +841,7 @@ void reader(void) {
     get_line(); /* Prime the pump */
     parse_declarations();
     parse_rules();
+    create_augmented_rule();
     pack_symbols();
     fixup_grammar();
     
