@@ -21,5 +21,5 @@ clean:
 install:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing bin/$$dir"; \
-		$(MAKE) -C $$dir install; \
+		if [ -d "$$dir" ]; then $(MAKE) -C $$dir install; fi; \
 	done
