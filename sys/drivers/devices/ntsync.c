@@ -13,7 +13,9 @@
  *   - Objects are automatically destroyed when all FDs are closed
  */
 
+#ifndef _KERNEL
 #define _KERNEL
+#endif
 
 #include <vfs/vfs.h>
 #include <kern/console.h>

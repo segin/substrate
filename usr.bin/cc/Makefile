@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-PROGS = cc ir-verifier ir-normalize ir-diff
+PROGS = cc cpp ir-verifier ir-normalize ir-diff
 COMMON_SRCS = ir.c parser.c verifier.c serialize.c
 CC_SRCS = cmd/cc.c cmd/pipeline.c \
 	  frontend/preproc.c frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c \
@@ -20,6 +20,9 @@ all: $(PROGS)
 cc: $(CC_SRCS) include/cc_driver.h include/cc_frontend.h include/cc_ssa.h include/cc_backend.h include/cc_pipeline.h include/cc_middle.h include/cc_target.h
 	$(CC) $(TOOL_CFLAGS) -Iinclude -o $@ $(CC_SRCS)
 
+cpp: cc
+	ln -sf cc cpp
+
 ir-verifier: ir-verifier.c $(COMMON_SRCS) ir.h
 	$(CC) $(TOOL_CFLAGS) -o $@ ir-verifier.c $(COMMON_SRCS)
 
@@ -34,6 +37,7 @@ clean:
 
 install: $(PROGS)
 	install -D cc $(DESTDIR)/usr/bin/cc
+	ln -sf cc $(DESTDIR)/usr/bin/cpp
 	install -D ir-verifier $(DESTDIR)/usr/bin/ir-verifier
 	install -D ir-normalize $(DESTDIR)/usr/bin/ir-normalize
 	install -D ir-diff $(DESTDIR)/usr/bin/ir-diff
