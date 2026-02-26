@@ -697,6 +697,10 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
             if (pt_page) {
                 vm_phys_free_page(pt_page);
             }
+
+            // 5. Invalidate TLB: Replacing a page table requires flushing all TLB entries
+            // covered by it. Since iterating 1024 invlpg is slow, we do a full flush.
+            pmap_invalidate_all();
         }
     }
 

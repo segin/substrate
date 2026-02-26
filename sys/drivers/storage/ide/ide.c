@@ -22,6 +22,7 @@
 #include <arch/x86-common/include/io.h>
 #include <kern/time.h>
 #include <kern/sched.h>
+#include <intr.h>
 
 /*
  * ============================================================
@@ -381,19 +382,11 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     
     /* Wait for completion (interrupt-driven) */
     while (!ide_irq_complete[channel]) {
-        current_thread->wait_chan = &ide_channels[channel];
-        current_thread->state = THREAD_BLOCKED;
-
-        /* Check condition again to handle lost wakeups */
-        __asm__ volatile("" : : : "memory");
-
-        if (ide_irq_complete[channel]) {
-            current_thread->state = THREAD_RUNNING;
-            current_thread->wait_chan = NULL;
-            break;
+        uint32_t flags = intr_disable();
+        if (!ide_irq_complete[channel]) {
+            sched_sleep((void *)&ide_irq_complete[channel]);
         }
-
-        sched_yield();
+        intr_restore(flags);
     }
     
     uint8_t bm_status = ide_bm_status(channel);
@@ -466,19 +459,11 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     
     /* Wait for completion */
     while (!ide_irq_complete[channel]) {
-        current_thread->wait_chan = &ide_channels[channel];
-        current_thread->state = THREAD_BLOCKED;
-
-        /* Check condition again to handle lost wakeups */
-        __asm__ volatile("" : : : "memory");
-
-        if (ide_irq_complete[channel]) {
-            current_thread->state = THREAD_RUNNING;
-            current_thread->wait_chan = NULL;
-            break;
+        uint32_t flags = intr_disable();
+        if (!ide_irq_complete[channel]) {
+            sched_sleep((void *)&ide_irq_complete[channel]);
         }
-
-        sched_yield();
+        intr_restore(flags);
     }
     
     uint8_t bm_status = ide_bm_status(channel);
@@ -963,7 +948,9 @@ void ide_irq_handler(int irq) {
     
     /* Signal completion */
     ide_irq_complete[channel] = 1;
-    sched_wakeup(&ide_channels[channel]);
+
+    /* Wake up waiting thread */
+    sched_wakeup((void *)&ide_irq_complete[channel]);
 }
 
 /*
