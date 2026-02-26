@@ -121,22 +121,25 @@ int linux_to_native_signal(int sig) {
     if (sig > 0 && sig <= LINUX_SIGTBLSZ)
         return linux_to_native_sigtbl[sig];
 
-    /*
-     * Linux Real-Time Signals (32-64).
-     * Currently unsupported as the native kernel only supports 32 signals (NSIG).
-     * Explicitly return 0 (invalid) for now.
-     */
-    if (sig >= LINUX_SIGRTMIN && sig <= LINUX_SIGRTMAX)
-        return 0;
+    /* Map Linux RT signals (32-33) to unused native signals */
+    /* Available native slots: 16 (Undefined), 29 (SIGIO/unused) */
+    if (sig == LINUX_SIGRTMIN + 0) return 16;
+    if (sig == LINUX_SIGRTMIN + 1) return 29;
 
-    return 0; // Invalid signal
+    return 0; // Invalid or unsupported RT signal
 }
 
 int native_to_linux_signal(int sig) {
+    /* Handle mapped RT signals */
+    if (sig == 16) return LINUX_SIGRTMIN + 0;
+    if (sig == 29) return LINUX_SIGRTMIN + 1;
+
     if (sig > 0 && sig <= LINUX_SIGTBLSZ)
         return native_to_linux_sigtbl[sig];
     return 0; // Invalid or RT signal
 }
+
+#ifndef HOST_TEST
 
 /* Linux TTY ioctl handler - 0x5400-0x54FF range */
 static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
@@ -515,3 +518,5 @@ struct personality personality_linux = {
     .sigreturn = linux_sys_sigreturn,
     .rt_sigreturn = linux_sys_rt_sigreturn
 };
+
+#endif /* HOST_TEST */
