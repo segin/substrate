@@ -71,6 +71,8 @@ sbin/*/
 /usr.bin/ld/ld
 /usr.bin/ld/ld.x86
 /usr.bin/ld/ld.x64
+/usr.bin/lex/lex
+/usr.bin/lex/out.txt
 /usr.bin/pax/pax
 /usr.bin/pr/pr
 /usr.bin/uudecode/uudecode
