@@ -5,6 +5,7 @@
 #include "cc_target.h"
 
 int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out_s, const char *std_mode,
-                      int emit_debug, cc_target_t target, int opt_level, cc_diag_t *diag);
+                      int emit_debug, cc_target_t target, int opt_level, int wall, int werror, int pedantic,
+                      int pedantic_errors, int gnu89_inline_mode, int gnu89_inline_override, cc_diag_t *diag);
 
 #endif

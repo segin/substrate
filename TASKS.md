@@ -7128,6 +7128,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Documentation Maintenance:**
     - [ ] **`ARCHITECTURE.md`:** Update whenever major structural changes or design decisions are made.
     - [ ] **`AGENTS.md` / `GEMINI.md`:** Update to reflect current project status, context, and new capabilities.
+    - [x] **Temporary component tasklists policy:** For active deep work, keep temporary `TASKLIST_*.md` files inside the owning component directory (for example `usr.bin/as/`, `usr.bin/ld/`, `usr.lib/elf/`). Do not track these in `ARCHITECTURE.md`; remove each tasklist when completed.
 - [ ] **Testing & Quality:**
     - [ ] **Regression Tests:** Ensure `make test` (or equivalent) passes before committing.
     - [ ] **Code Style:** adhere to kernel coding standards (KNF/Linux-style).
