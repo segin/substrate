@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -38,6 +38,7 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libc_time
 	./test_libc_stdlib
 	./test_libc_ctype
+	./test_libc_assert
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
 
@@ -68,6 +69,9 @@ test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
 
 test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_stdlib.c -o $@
+
+test_libc_assert: lib/c/test_assert.c ../lib/c/src/assert.c
+	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_assert.c -o $@
 
 # Rules for objects
 %.o: ../sys/vm/%.c
@@ -143,7 +147,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_ext2_remove_perf bench_ext2_readdir
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir
 	$(MAKE) -C sys clean
 
 bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
