@@ -92,6 +92,7 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
 int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags);
 int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
 void pmap_remove(pmap_t pmap, uintptr_t va);
+void pmap_remove_range(pmap_t pmap, uint32_t sva, uint32_t eva);
 uintptr_t pmap_extract(pmap_t pmap, uintptr_t va); // Get PA from VA
 
 // Protection flags for pmap_enter
