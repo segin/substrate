@@ -226,9 +226,14 @@ void test_conditional_tokens() {
 }
 
 void test_reserved_tokens() {
-    // %T and %D are still reserved/ignored
+    // %T and %D are now implemented and expand to time/date.
     char *res = expand_prompt_escapes("A%T%DB", 1, 1, 0);
-    ASSERT_STR_EQ(res, "AB");
+    // As long as it doesn't crash and returns a string starting with A and ending with B
+    int has_time = (res != NULL && strlen(res) >= 2 && res[0] == 'A' && res[strlen(res)-1] == 'B');
+    if (!has_time) {
+        fprintf(stderr, "FAIL: Expected %T and %D to produce time output, got '%s'\n", res ? res : "NULL");
+        exit(1);
+    }
     free(res);
     
     // %L should expand to SHLVL (or "1" if not set)

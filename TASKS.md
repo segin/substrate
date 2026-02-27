@@ -2155,6 +2155,79 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **SysFS (`/sys`):**
     - [x] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
     - [x] **Attributes:** Map kernel variables to readable/writable files.
+- [ ] **Kernel Configuration Plane (`sysctl` Core):**
+    - [ ] **Tree & ABI Model:**
+        - [ ] Define canonical `sysctl_oid` structure (number, name, kind, handler, arg pointers, format, description, version).
+        - [ ] Define canonical `sysctl_oid_list` container type and root list ownership rules.
+        - [ ] Define typed value kinds: node, int, uint, long, ulong, quad, uquad, string, opaque, struct.
+        - [ ] Define public flag bits for read-only, read-write, secure-write, boot-tunable, runtime-mutable, and deprecated nodes.
+        - [ ] Define explicit ABI stability classes (private, evolving, stable, obsolete) for exported OIDs.
+        - [ ] Add compile-time assertions for `sysctl` type-width ABI on i386 and planned x86_64.
+        - [ ] Reserve stable top-level numeric IDs (`kern`, `vm`, `vfs`, `net`, `hw`, `security`, `debug`, `compat`) and document allocation map.
+        - [ ] Add explicit "no renumbering" policy for stable exported MIB leaves.
+    - [ ] **Lookup, Traversal, and Metadata:**
+        - [ ] Implement lock-safe name lookup (`dot.path` to OID chain) with strict token validation.
+        - [ ] Implement lock-safe MIB lookup (`int[]` to OID chain) with bounds checks.
+        - [ ] Implement child enumeration primitive for a parent OID.
+        - [ ] Implement metadata query primitive exposing type, flags, format, ownership, and ABI class.
+        - [ ] Implement optional human-readable description export for each public node.
+        - [ ] Implement stable subtree walk order guarantees for tooling and regression tests.
+    - [ ] **Concurrency & Lifetime:**
+        - [ ] Define global locking hierarchy for tree traversal, registration mutation, and handler execution.
+        - [ ] Add tree read-side lock (or epoch/RCU equivalent) for high-frequency lookups.
+        - [ ] Add tree write-side lock for registration and deregistration paths.
+        - [ ] Add in-flight handler reference tracking to prevent use-after-free during deregistration.
+        - [ ] Add deferred reclamation queue for dynamically removed OIDs after reader quiescence.
+        - [ ] Add lock-order assertions in debug builds for recursion and re-entrant handler patterns.
+    - [ ] **Registration API (Kernel + Modules):**
+        - [ ] Define static registration macros for compile-time OID declarations.
+        - [ ] Implement linker-set (or equivalent table) ingestion for static OIDs during boot.
+        - [ ] Define dynamic registration API for subsystems/modules (`register`, `register_node`, `register_proc` variants).
+        - [ ] Define dynamic deregistration API with owner token validation.
+        - [ ] Add owner/lifetime metadata tying each OID to subsystem/module identity.
+        - [ ] Add duplicate detection for name and numeric collisions with deterministic error codes.
+        - [ ] Add namespace ownership rules so subsystems cannot overwrite foreign stable nodes.
+        - [ ] Add teardown barrier so module unload blocks until active handlers drain.
+    - [ ] **Boot-Time Tunables & Runtime Separation:**
+        - [ ] Bring up minimal read-only `sysctl` root before full VM/scheduler initialization.
+        - [ ] Parse bootloader/kernel command-line `sysctl.<name>=<value>` entries into early tunable buffer.
+        - [ ] Apply buffered early tunables when target nodes become registered.
+        - [ ] Enforce write-once semantics for boot-only tunables after late init transition.
+        - [ ] Expose node metadata bit distinguishing boot-only vs runtime-mutable behavior.
+        - [ ] Emit explicit diagnostics for rejected boot tunables (unknown name/type/range).
+    - [ ] **VM/Proc/IPC Configuration Namespaces:**
+        - [ ] Define stable `vm.*` subtree skeleton for VM policy and telemetry nodes.
+        - [ ] Define stable `kern.proc.*` subtree skeleton for process-limit and process-model nodes.
+        - [ ] Define stable `kern.ipc.*` subtree skeleton for SysV/POSIX IPC limits and defaults.
+        - [ ] Define mapping rules between procfs/sysfs-only metrics and mirrored `sysctl` metrics.
+        - [ ] Add per-subsystem ownership documentation for each namespace branch.
+    - [ ] **Security, Permissions, and Isolation:**
+        - [ ] Define common access-control hook signature for `sysctl` read/write authorization.
+        - [ ] Implement UID/GID baseline policy for read and write decisions.
+        - [ ] Integrate capability-aware privileged-write policy (forward-compatible with capability framework).
+        - [ ] Add per-node read-mask and write-mask controls.
+        - [ ] Add per-node personality visibility mask for selective exposure by ABI personality.
+        - [ ] Harden copyin/copyout paths against length overflow and kernel-pointer leaks.
+        - [ ] Add typed write validators (range, enum, bitmask, struct-size) and enforce them centrally.
+    - [ ] **Observability & Tooling Readiness:**
+        - [ ] Implement canonical size-probe behavior (`oldp == NULL`) for all readable node types.
+        - [ ] Implement canonical partial-read behavior for oversized user buffers.
+        - [ ] Implement tree snapshot generation primitive for future `sysctl(8)` consumers.
+        - [ ] Add kernel self-check routine validating OID tree parent/child invariants at boot.
+        - [ ] Add optional debug dump (`sysctl.debug.dump_tree`) for development diagnostics.
+    - [ ] **Testing & Validation (Kernel Side):**
+        - [ ] Add unit tests for insert/lookup/remove invariants in core OID tree structures.
+        - [ ] Add unit tests for type dispatch and flag enforcement across all node kinds.
+        - [ ] Add unit tests for boot-tunable write-once and runtime rejection behavior.
+        - [ ] Add concurrency stress tests for parallel lookup/read/write/register/unregister on SMP.
+        - [ ] Add property tests for random MIB/name inputs preserving memory safety and deterministic errors.
+        - [ ] Add fuzz harness for malformed user buffers and edge-case size transitions.
+        - [ ] Add ABI regression tests pinning stable MIB numeric assignments and metadata contracts.
+    - [ ] **Kernel Documentation:**
+        - [ ] Write `docs/kernel/sysctl_design.md` covering architecture, locking model, and lifecycle.
+        - [ ] Write `docs/kernel/sysctl_registration.md` with subsystem/module integration rules.
+        - [ ] Write `docs/kernel/sysctl_stability.md` with ABI stability/deprecation policy.
+        - [ ] Add "how to add a node" checklist with required tests/docs before merge.
 - [ ] **FUSE (`/dev/fuse`):**
     - [x] **Device Interface:** Implement `/dev/fuse` char device for control.
     - [ ] **Protocol Dispatch:**
@@ -2453,6 +2526,259 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                     - [ ] Document virtual filesystem mount semantics and expected behaviors. <!-- docs/virtual_fs.md -->
                         - Affected: `docs/`.
                         - Acceptance: Behavior of `/dev` and `/proc` is well-defined.
+                - [ ] **Commit-Atomic Expansion (`sys_mount`/mount framework)**
+                    - [ ] **Execution Rule:** Enforce "one checklist item = one commit" for all items in this expansion.
+                        - Affected: `TASKS.md`, PR/commit policy for `sys_mount` series.
+                        - Required tests: N/A (process/policy task; verify by commit history review).
+                        - Acceptance: Every item below lands as an isolated commit with matching scope and message.
+                    - [ ] **1. `sys_mount` ABI Definition**
+                        - [ ] Reserve and wire canonical syscall numbers for `SYS_mount` and `SYS_unmount` in native/Linux/FreeBSD personality dispatch tables.
+                            - Affected: `sys/include/sys/syscall.h`, `sys/kern/syscall.c`, `sys/exec/perso/perso_native.c`, `sys/exec/perso/perso_linux.c`, `sys/exec/perso/perso_freebsd.c`.
+                            - Required tests: syscall table regression (`sys/tests/test_syscall_dispatch.c`), personality dispatch smoke tests.
+                            - Acceptance: `mount`/`unmount` numbers are stable and routed correctly across supported personalities.
+                        - [ ] Define canonical kernel entry signature for `sys_mount` with filesystem type, source, target, flags, and options blob pointer/length.
+                            - Affected: `sys/include/sys/syscall.h`, `sys/kern/vfs_mount.c`.
+                            - Required tests: compile-time prototype checks, syscall invocation smoke test from `libsys`.
+                            - Acceptance: Kernel exposes one extensible ABI surface for all filesystem types.
+                        - [ ] Introduce versioned userspace ABI container (`struct mount_args`/`mount_args_v1`) with size/version fields and explicit reserved bytes.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/mount.h`, `lib/sys/include/sys/mount.h`.
+                            - Required tests: ABI layout test (`tests/include/test_mount_args_layout.c`), cross-header consistency test.
+                            - Acceptance: ABI structure is forward-compatible and identical between kernel/userspace headers.
+                        - [ ] Add compile-time `_Static_assert` checks for `struct mount_args` size/alignment/field offsets in both kernel and userspace headers.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/mount.h`.
+                            - Required tests: build-time assertion pass in `make -C sys`, `make -C lib/c`, `make -C bin`.
+                            - Acceptance: Builds fail immediately if ABI layout drifts.
+                        - [ ] Add runtime ABI validation in `sys_mount` for userspace struct size/version/alignment and reserved-field zeroing.
+                            - Affected: `sys/kern/vfs_mount.c`.
+                            - Required tests: negative ABI tests (`sys/tests/test_mount_abi_validation.c`) for short/oversized/misaligned payloads.
+                            - Acceptance: Invalid ABI payloads return deterministic `EINVAL`/`EFAULT` without kernel memory exposure.
+                        - [ ] Document calling convention, flag semantics, and baseline errno contract for `sys_mount` ABI.
+                            - Affected: `docs/abi/mount.md`.
+                            - Required tests: docs review + manpage cross-check task linkage.
+                            - Acceptance: ABI doc explicitly describes arguments, ownership rules, and error mapping.
+                    - [ ] **2. Filesystem Type Registration**
+                        - [ ] Define `vfsconf`/filesystem-type descriptor with name, mount callbacks, and capability vector.
+                            - Affected: `sys/vfs/vfs.h`, `sys/vfs/vfs_conf.h`.
+                            - Required tests: unit tests for descriptor initialization (`sys/tests/test_vfsconf.c`).
+                            - Acceptance: Every filesystem registers through one shared descriptor contract.
+                        - [ ] Implement central filesystem registry (name to mount-handler map) with lookup, duplicate detection, and lifecycle hooks.
+                            - Affected: `sys/vfs/vfs_conf.c`.
+                            - Required tests: registry tests (`sys/tests/test_vfs_registry.c`) for add/find/duplicate handling.
+                            - Acceptance: Registry supports deterministic lookup and rejects conflicting registrations.
+                        - [ ] Add built-in filesystem registration path during VFS init with explicit ordering and failure handling.
+                            - Affected: `sys/vfs/vfs_init.c`, `sys/vfs/vfs_conf.c`, built-in FS init files.
+                            - Required tests: boot-time VFS init test, kernel smoke boot with registry dump.
+                            - Acceptance: Built-in filesystems are visible in registry before first mount request.
+                        - [ ] Add loadable-module registration API (`vfs_register_module`/`vfs_unregister_module`) with busy-mount rejection on unload.
+                            - Affected: `sys/vfs/vfs_conf.c`, module interface headers.
+                            - Required tests: module lifecycle tests (`tests/sys/test_vfs_module_registry.c`) including unload-while-mounted rejection.
+                            - Acceptance: Module-backed filesystems can register/unregister safely without dangling handlers.
+                        - [ ] Require each filesystem to publish mount capability bits (virtual, device-backed, supports_force_unmount, supports_ro, etc.).
+                            - Affected: `sys/vfs/vfs.h`, per-filesystem `*_vfsops.c`.
+                            - Required tests: capability contract tests (`sys/tests/test_vfs_capabilities.c`).
+                            - Acceptance: VFS can enforce behavior based on advertised filesystem capabilities.
+                        - [ ] Enforce filesystem name validation and namespacing policy (e.g., `virt.procfs`, `virt.devfs`, `disk.ext2`) at registration.
+                            - Affected: `sys/vfs/vfs_conf.c`, `sys/vfs/vfs_conf.h`.
+                            - Required tests: invalid-name/namespace collision tests in `sys/tests/test_vfs_registry.c`.
+                            - Acceptance: Non-conforming filesystem names are rejected with `EINVAL`.
+                    - [ ] **3. Mount Lifecycle and VFS Integration**
+                        - [ ] Define mount object lifecycle states (`NEW`, `ALLOCATED`, `BOUND`, `ROOT_ATTACHED`, `ACTIVE`, `DYING`, `DEAD`) and legal transitions.
+                            - Affected: `sys/vfs/mount.h`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: lifecycle state machine tests (`sys/tests/test_mount_state_machine.c`).
+                            - Acceptance: Mount state transitions are explicit and invalid transitions are rejected/asserted.
+                        - [ ] Implement `vfs_mount_alloc()`/`vfs_mount_free()` with refcount initialization, lock setup, and failure rollback.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/mount.h`.
+                            - Required tests: allocation/rollback tests (`sys/tests/test_vfs_mount_alloc.c`).
+                            - Acceptance: No leaks or partial objects remain after failed allocation/mount setup.
+                        - [ ] Implement namespace bind step that attaches mount instance to target vnode (`v_mountedhere`) and records covering vnode.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vnode.h`, `sys/vfs/namei.c`.
+                            - Required tests: integration traversal tests (`sys/tests/test_mount_namespace_bind.c`).
+                            - Acceptance: Path resolution crosses into mounted root vnode correctly.
+                        - [ ] Implement root-vnode attach/activate flow so filesystem mount handler returns root vnode before mount activation.
+                            - Affected: `sys/vfs/vfs_mount.c`, per-filesystem mount handlers.
+                            - Required tests: mount activation tests (`sys/tests/test_mount_activation.c`) for success/failure paths.
+                            - Acceptance: Mount is only visible as active after root vnode is valid and pinned.
+                        - [ ] Define unmount reference-counting and busy rules (active vnode refs, cwd/root refs, open fds) with deterministic `EBUSY` behavior.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vnode.c`.
+                            - Required tests: busy-reference integration tests (`sys/tests/test_unmount_busy_refs.c`).
+                            - Acceptance: Busy filesystems cannot unmount unless allowed by force policy.
+                        - [ ] Implement safe nested/stacked mount handling and mount-loop detection for recursive or cyclic bind attempts.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/namei.c`.
+                            - Required tests: nested mount tests and loop rejection tests (`sys/tests/test_mount_nested.c`).
+                            - Acceptance: Legitimate nested mounts work; loop/cycle attempts fail with defined errno.
+                        - [ ] Define mount propagation behavior (private/shared/slave) and implement either support or explicit `ENOTSUP` for non-private modes.
+                            - Affected: `sys/vfs/mount.h`, `sys/kern/vfs_mount.c`, `docs/abi/mount.md`.
+                            - Required tests: propagation flag tests (`sys/tests/test_mount_propagation_flags.c`).
+                            - Acceptance: Semantics are explicit; unsupported propagation flags are rejected predictably.
+                    - [ ] **4. Userspace Mount Option Handling**
+                        - [ ] Define generic kernel mount-option format and parser API for userspace-provided option strings/blobs.
+                            - Affected: `sys/vfs/vfs_options.h`, `sys/vfs/vfs_options.c`, `include/sys/mount.h`.
+                            - Required tests: parser unit tests (`sys/tests/test_mount_options_parser.c`).
+                            - Acceptance: Generic parser produces typed option map without filesystem coupling.
+                        - [ ] Implement `copyin`-first option ingestion with strict length limits, NUL termination rules, and integer overflow checks.
+                            - Affected: `sys/kern/vfs_mount.c`, `sys/vfs/vfs_options.c`.
+                            - Required tests: boundary/overflow negative tests (`sys/tests/test_mount_options_copyin.c`).
+                            - Acceptance: Kernel never dereferences userspace option pointers directly.
+                        - [ ] Add typed getters/validators for standard options (`ro`, `rw`, `nosuid`, `nodev`, `noexec`) in generic layer.
+                            - Affected: `sys/vfs/vfs_options.c`, `sys/vfs/mount.h`.
+                            - Required tests: standard-option validation tests (`sys/tests/test_mount_options_standard.c`).
+                            - Acceptance: Standard options are parsed and validated consistently across filesystems.
+                        - [ ] Add pass-through mechanism for filesystem-specific options with per-filesystem schema validation callback.
+                            - Affected: `sys/vfs/vfs_options.c`, `sys/vfs/vfs.h`, per-filesystem mount handlers.
+                            - Required tests: FS-specific option tests (`sys/tests/test_mount_options_fs_specific.c`) for ext2/devfs/procfs.
+                            - Acceptance: Filesystem-specific options flow through generic framework and fail cleanly on schema mismatch.
+                        - [ ] Define option precedence and defaulting rules (syscall flags vs generic options vs filesystem defaults).
+                            - Affected: `sys/kern/vfs_mount.c`, `docs/abi/mount.md`, `man/man2/mount.2`.
+                            - Required tests: precedence matrix tests (`sys/tests/test_mount_option_precedence.c`).
+                            - Acceptance: Conflicting inputs resolve deterministically and are documented.
+                    - [ ] **5. Virtual Filesystem Mounting (`/dev`, `/proc`)**
+                        - [ ] Register `devfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, `nodev-safe` behavior).
+                            - Affected: `sys/fs/devfs/devfs_vfsops.c`, `sys/vfs/vfs_conf.c`.
+                            - Required tests: devfs registration tests (`sys/tests/test_devfs_registry.c`).
+                            - Acceptance: `devfs` is mountable only via generic `sys_mount` path.
+                        - [ ] Register `procfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, dynamic entries).
+                            - Affected: `sys/fs/procfs/procfs_vfsops.c`, `sys/vfs/vfs_conf.c`.
+                            - Required tests: procfs registration tests (`sys/tests/test_procfs_registry.c`).
+                            - Acceptance: `procfs` is mountable only via generic `sys_mount` path.
+                        - [ ] Implement userspace-driven mount flow in early init to mount `/dev` and `/proc` through `sys_mount` (no kernel-only implicit mount path).
+                            - Affected: `sbin/init/*`, boot init scripts, `docs/boot.md`.
+                            - Required tests: boot integration test (`tests/integration/test_boot_mount_virtual_fs.sh`).
+                            - Acceptance: System boots with `/dev` and `/proc` established by userspace `mount` calls.
+                        - [ ] Ensure virtual filesystem handlers always provide a root vnode and support required dynamic population semantics.
+                            - Affected: `sys/fs/devfs/*`, `sys/fs/procfs/*`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: runtime vnode population tests (`sys/tests/test_virtualfs_root_vnode.c`).
+                            - Acceptance: Root vnode is valid immediately after mount; dynamic nodes appear correctly.
+                        - [ ] Define and enforce allowed mount options for `devfs`/`procfs` (including explicit "no options" policy where applicable).
+                            - Affected: `sys/fs/devfs/devfs_vfsops.c`, `sys/fs/procfs/procfs_vfsops.c`, `man/man5/procfs.5`, `man/man5/devfs.5`.
+                            - Required tests: virtual-fs option validation tests (`sys/tests/test_virtualfs_mount_options.c`).
+                            - Acceptance: Unsupported options return `EINVAL` and accepted options are applied.
+                    - [ ] **6. Permission and Security Model**
+                        - [ ] Define mount authorization policy (`superuser` and/or `CAP_SYS_ADMIN` equivalent) and enforce it in syscall entry path.
+                            - Affected: `sys/kern/vfs_mount.c`, capability framework headers.
+                            - Required tests: permission tests (`sys/tests/test_mount_permissions.c`) for privileged/unprivileged callers.
+                            - Acceptance: Unauthorized mount/unmount attempts fail with `EPERM`.
+                        - [ ] Implement and enforce mount security flags (`MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV`) in VFS operation paths.
+                            - Affected: `sys/vfs/vnode_ops.c`, `sys/vfs/exec.c`, device open paths.
+                            - Required tests: security-flag behavior tests (`sys/tests/test_mount_security_flags.c`).
+                            - Acceptance: Runtime behavior matches each security flag's contract.
+                        - [ ] Harden target path resolution against symlink races and traversal escapes during mount.
+                            - Affected: `sys/vfs/namei.c`, `sys/kern/vfs_mount.c`.
+                            - Required tests: race/symlink attack tests (`sys/tests/test_mount_path_race.c`).
+                            - Acceptance: Mount operation resolves target atomically and cannot be redirected post-validation.
+                        - [ ] Enforce namespace isolation constraints so mount operations cannot escape caller namespace/chroot boundaries.
+                            - Affected: `sys/vfs/vfs_mount.c`, process namespace/chroot handling.
+                            - Required tests: namespace isolation tests (`sys/tests/test_mount_namespace_isolation.c`).
+                            - Acceptance: Mount scope stays confined to caller-visible namespace.
+                        - [ ] Perform mount-security audit pass and land hardening fixes for common vulnerabilities (`..` escape, TOCTOU, malformed options, refcount abuse).
+                            - Affected: `sys/vfs/*`, `sys/kern/vfs_mount.c`, audit notes in `docs/security/mount_audit.md`.
+                            - Required tests: regression suite (`sys/tests/test_mount_security_regression.c`).
+                            - Acceptance: Audit findings are tracked and all identified high-risk issues are closed or explicitly deferred with rationale.
+                    - [ ] **7. Error Handling and Diagnostics**
+                        - [ ] Define canonical errno mapping table for mount/unmount failures (unknown fs, invalid options, permission, busy target, invalid target).
+                            - Affected: `sys/kern/vfs_mount.c`, `docs/abi/mount.md`.
+                            - Required tests: errno mapping tests (`sys/tests/test_mount_errno_map.c`).
+                            - Acceptance: Each failure class returns stable, documented errno.
+                        - [ ] Ensure filesystem-specific mount errors propagate unchanged through VFS core and syscall boundary when safe.
+                            - Affected: `sys/vfs/vfs_mount.c`, per-filesystem `*_vfsops.c`.
+                            - Required tests: per-filesystem error propagation tests (`sys/tests/test_mount_error_passthrough.c`).
+                            - Acceptance: Userspace receives actionable FS-specific failure codes.
+                        - [ ] Add structured kernel logging for mount/unmount attempts (caller, fs type, source, target, flags, result).
+                            - Affected: `sys/kern/vfs_mount.c`, kernel logging subsystem.
+                            - Required tests: log-format tests (`sys/tests/test_mount_logging.c`) and integration checks from boot logs.
+                            - Acceptance: Successful and failed operations emit consistent diagnostic records.
+                        - [ ] Add diagnostic counters for mount/unmount successes/failures by errno and filesystem type.
+                            - Affected: `sys/vfs/vfs_stats.c`, `/proc` or sysctl exposure.
+                            - Required tests: stats counter tests (`sys/tests/test_mount_stats.c`).
+                            - Acceptance: Counters are queryable and match observed operation totals.
+                    - [ ] **8. Unmount Support**
+                        - [ ] Define `sys_unmount` ABI (`target`, `flags`) including supported lazy/force semantics and unsupported-flag behavior.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/syscall.h`, `docs/abi/mount.md`.
+                            - Required tests: ABI/flag validation tests (`sys/tests/test_unmount_abi.c`).
+                            - Acceptance: `sys_unmount` contract is explicit and version-stable.
+                        - [ ] Implement core unmount teardown pipeline (deactivate mount, detach namespace, flush/release resources, final free).
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/mount.h`.
+                            - Required tests: teardown integration tests (`sys/tests/test_unmount_teardown.c`).
+                            - Acceptance: Unmount reclaims resources without leaks or dangling mount links.
+                        - [ ] Enforce busy unmount rejection by default and force-unmount override only for filesystems that advertise support.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vfs.h`, per-filesystem capability declarations.
+                            - Required tests: busy/force policy tests (`sys/tests/test_unmount_force_policy.c`).
+                            - Acceptance: Busy mounts return `EBUSY` unless force is both requested and supported.
+                        - [ ] Validate safe teardown parity for both virtual and device-backed filesystems.
+                            - Affected: `sys/fs/devfs/*`, `sys/fs/procfs/*`, `sys/fs/ext2/*`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: mixed filesystem teardown integration tests (`sys/tests/test_unmount_virtual_real.c`).
+                            - Acceptance: Unmount sequence is correct for `/dev`, `/proc`, and real filesystems.
+                    - [ ] **9. Userland Interfaces and Tooling**
+                        - [ ] Add `mount(2)` and `unmount(2)` wrappers in `libsys` and exported libc headers using the canonical ABI.
+                            - Affected: `lib/sys/`, `include/sys/mount.h`, libc syscall wrapper wiring.
+                            - Required tests: wrapper syscall tests (`tests/libsys/test_mount_wrappers.c`).
+                            - Acceptance: Userland C programs can call wrappers without raw syscall usage.
+                        - [ ] Implement/extend `mount(8)` utility to issue generic `sys_mount` requests and support both real and virtual filesystem targets.
+                            - Affected: `bin/mount/*`, build files under `bin/`.
+                            - Required tests: utility integration tests (`tests/bin/mount/test_mount_cli.sh`).
+                            - Acceptance: `mount` utility can mount `/dev`, `/proc`, and at least one real filesystem type.
+                        - [ ] Align `mount(8)` invocation semantics with Substrate conventions (`mount <device> <mount_point> <filesystem_type>`) while retaining option support.
+                            - Affected: `bin/mount/*`, `man/man8/mount.8`.
+                            - Required tests: CLI argument parsing tests (`tests/bin/mount/test_mount_args.c`).
+                            - Acceptance: Utility accepts documented Substrate command form and rejects ambiguous input.
+                        - [ ] Update early initialization flow to mount mandatory virtual filesystems (`/dev`, `/proc`) from userspace before dependent services start.
+                            - Affected: `sbin/init/*`, `etc/init.sh`, boot docs.
+                            - Required tests: boot-sequence integration test (`tests/integration/test_init_mount_order.sh`).
+                            - Acceptance: Services relying on `/dev` and `/proc` start only after successful userspace mounts.
+                    - [ ] **10. Testing and Verification**
+                        - [ ] Add kernel unit tests for `mount_args` ABI parsing, size/version/alignment validation, and userspace copy safety.
+                            - Affected: `sys/tests/test_mount_abi_validation.c`.
+                            - Required tests: `make -C sys/tests test_mount_abi_validation`.
+                            - Acceptance: ABI parser handles valid/invalid inputs deterministically without faults.
+                        - [ ] Add kernel unit tests for filesystem registry behavior (register/lookup/duplicate/unregister busy path).
+                            - Affected: `sys/tests/test_vfs_registry.c`.
+                            - Required tests: `make -C sys/tests test_vfs_registry`.
+                            - Acceptance: Registry invariants hold under normal and error paths.
+                        - [ ] Add integration tests for mounting and unmounting `/dev` and `/proc` fully from userspace.
+                            - Affected: `tests/integration/test_mount_virtual_fs.sh`.
+                            - Required tests: full-system boot/integration run including init path.
+                            - Acceptance: Virtual filesystems can be mounted/unmounted repeatedly without reboot or leaks.
+                        - [ ] Add negative integration tests for unknown filesystem names, malformed options, invalid targets, permission failures, and busy unmounts.
+                            - Affected: `tests/integration/test_mount_errors.sh`.
+                            - Required tests: integration error suite execution in CI.
+                            - Acceptance: Each failure mode returns expected errno and leaves namespace unchanged.
+                        - [ ] Add property and fuzz targets for option parser and syscall boundary handling (size fuzzing, pointer fuzzing, option grammar fuzzing).
+                            - Affected: `tests/property/test_mount_options_prop.c`, `tests/fuzz/fuzz_mount_syscall.c`.
+                            - Required tests: property runner + fuzz runner with crash-free threshold.
+                            - Acceptance: No crashes, memory corruption, or unbounded parse behavior under fuzzed inputs.
+                    - [ ] **11. Audit and Refactor**
+                        - [ ] Audit VFS core, filesystem drivers, and init path for assumptions that mounts are kernel-internal only.
+                            - Affected: `sys/vfs/*`, `sys/fs/*`, `sys/core/main.c`, init sources.
+                            - Required tests: audit checklist review + regression boot tests.
+                            - Acceptance: All blockers to userspace-driven mounting are identified and tracked.
+                        - [ ] Refactor minimal/placeholder mount logic to require filesystem-specific mount handlers through shared VFS contracts.
+                            - Affected: `sys/vfs/vfs_mount.c`, filesystem `*_vfsops.c`.
+                            - Required tests: filesystem mount-path integration tests.
+                            - Acceptance: No filesystem bypasses generic mount framework.
+                        - [ ] Remove hardcoded or implicit virtual filesystem mount paths from kernel bootstrap once userspace flow is in place.
+                            - Affected: `sys/core/*`, `sys/kern/*` boot mount code.
+                            - Required tests: boot integration tests with userspace-only `/dev`/`/proc` mounting.
+                            - Acceptance: Kernel no longer auto-mounts `/dev` or `/proc` outside explicit compatibility mode.
+                        - [ ] Resolve or remove TODO/FIXME placeholders in mount/syscall/VFS paths with complete implementation tasks.
+                            - Affected: `sys/kern/vfs_mount.c`, `sys/vfs/*`, related headers/docs.
+                            - Required tests: full mount test matrix + static grep check for stale mount TODO markers.
+                            - Acceptance: Mount path has no placeholder logic in active code paths.
+                    - [ ] **12. Documentation**
+                        - [ ] Write `mount(2)` man page documenting syscall ABI, argument ownership, flags, and errno behavior.
+                            - Affected: `man/man2/mount.2`.
+                            - Required tests: manpage lint + ABI cross-check against `include/sys/mount.h`.
+                            - Acceptance: `mount(2)` man page is complete and matches implemented ABI.
+                        - [ ] Write `unmount(2)` man page documenting teardown semantics, busy/force behavior, and error codes.
+                            - Affected: `man/man2/unmount.2`.
+                            - Required tests: manpage lint + integration behavior cross-check.
+                            - Acceptance: `unmount(2)` man page covers supported flags and edge cases.
+                        - [ ] Write filesystem developer guide for mount handler implementation, registration, and capability reporting.
+                            - Affected: `docs/filesystems/mount-handler-guide.md`.
+                            - Required tests: doc review checklist with at least one existing filesystem validated against guide.
+                            - Acceptance: Guide is sufficient for adding a new filesystem mount handler without tribal knowledge.
+                        - [ ] Document virtual filesystem mount semantics for `/dev` and `/proc`, including expected behavior during early boot.
+                            - Affected: `docs/vfs/virtual-mounts.md`, `man/man5/devfs.5`, `man/man5/procfs.5`, `docs/boot.md`.
+                            - Required tests: documentation consistency review with init scripts and integration tests.
+                            - Acceptance: `/dev` and `/proc` behavior and required boot invocation patterns are explicitly specified.
             - [ ] **`sys_clone` (Process/Thread Creation):**
                 - [ ] **Context Duplication:**
                     - [ ] `CLONE_VM`: Share address space (refcount pmap).
@@ -2781,8 +3107,47 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] **Native Porting:**
                 - [ ] Implement `libkvm` shim in `libsys` for porting BSD tools to native ABI.
             - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`.
+    - [ ] **BSD-Style `sysctl` Syscall Surface (Native + Compat):**
+        - [ ] **Native Syscall ABI Contract:**
+            - [ ] Define canonical native `sysctl` syscall argument contract with versioned request structure.
+            - [ ] Define strict userspace pointer/length validation rules for old/new buffers.
+            - [ ] Define canonical atomic read/write semantics when both old and new values are present.
+            - [ ] Define canonical size-discovery semantics when old buffer pointer is NULL.
+            - [ ] Define canonical subtree-enumeration request contract for user tooling.
+            - [ ] Define canonical metadata-query request contract (type, flags, description, ABI class).
+            - [ ] Add syscall table entries and personality dispatch wiring for native ABI.
+        - [ ] **MIB + Name Resolution Paths:**
+            - [ ] Implement MIB-based syscall path end-to-end (`int *name`, `u_int namelen`).
+            - [ ] Implement kernel name-to-MIB translation operation for userspace helpers.
+            - [ ] Implement kernel MIB-to-name translation operation for diagnostics/tooling.
+            - [ ] Define max name depth and token-length limits with explicit `EINVAL` behavior.
+            - [ ] Add strict rejection path for mixed name/MIB invocation modes.
+        - [ ] **Error and Compatibility Semantics:**
+            - [ ] Define BSD-consistent errno mapping (`ENOENT`, `ENOMEM`, `EINVAL`, `EFAULT`, `EPERM`, `EACCES`, `ENOTDIR`).
+            - [ ] Implement forward-compat handling for unknown request-structure extensions.
+            - [ ] Implement backward-compat handling for older request versions.
+            - [ ] Add compatibility tests for partial reads, retry loops, and concurrent value mutation.
+        - [ ] **Permission & Capability Enforcement:**
+            - [ ] Wire syscall path into unified `sysctl` access-control hooks.
+            - [ ] Enforce read/write separation at syscall boundary before handler invocation.
+            - [ ] Enforce capability-gated writes for privileged nodes.
+            - [ ] Add per-personality gate checks before exposing compatibility namespace nodes.
+        - [ ] **Personality Integration & Overlays:**
+            - [ ] Define personality overlay model (native base tree + personality-specific branches).
+            - [ ] Implement FreeBSD compatibility overlay for `__sysctl` expectations.
+            - [ ] Implement NetBSD/OpenBSD compatibility overlay scaffolding with explicit unsupported-node behavior.
+            - [ ] Implement per-personality node visibility filters in traversal and enumeration paths.
+            - [ ] Add compatibility shims translating personality-specific MIBs to native internal nodes where feasible.
+        - [ ] **Userspace ABI Tests (Syscall Layer):**
+            - [ ] Add integration tests for native MIB reads/writes, size probes, and metadata queries.
+            - [ ] Add integration tests for enumeration of children and deep subtree walks.
+            - [ ] Add negative tests for malformed pointers, truncated MIBs, and invalid type writes.
+            - [ ] Add race tests for concurrent read/write against lock-protected nodes.
+            - [ ] Add ABI snapshot tests ensuring stable syscall behavior across kernel revisions.
     - [ ] **BSD Family (NetBSD/OpenBSD):**
-        - [ ] Implement `__sysctl` (MIB-based configuration).
+        - [ ] Implement `__sysctl` personality entrypoint backed by shared native `sysctl` core.
+        - [ ] Implement NetBSD/OpenBSD-specific compatibility mapping table for legacy MIB constants.
+        - [ ] Add personality tests validating expected `__sysctl` behavior and errno semantics.
         - [ ] Support BSD-specific syscalls (`ktrace`, `pledge`/`unveil`).
     - [ ] **Solaris (SVR4):**
         - [ ] Implement SVR4 syscalls (`getdents64`, `stream` ioctls).
@@ -2831,6 +3196,35 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `vfork`: Shared VM space, parent blocked until child exec/exit.
 
 ### 6. C Library (`lib/c`)
+- [ ] **`sysctl` Userspace API (`lib/c`):**
+    - [ ] **Headers & ABI Contracts:**
+        - [ ] Define and export canonical declarations in `include/sys/sysctl.h`.
+        - [ ] Define and export stable userspace data types for MIB paths and metadata results.
+        - [ ] Add compile-time guards for structure size/alignment ABI stability.
+        - [ ] Document thread-safety guarantees and reentrancy expectations in headers.
+    - [ ] **Core libc Entry Points:**
+        - [ ] Implement `sysctl()` libc wrapper with strict argument validation.
+        - [ ] Implement `sysctlbyname()` using name-to-MIB translation helper flow.
+        - [ ] Implement `sysctlnametomib()` with deterministic retry behavior.
+        - [ ] Implement helper for dynamic buffer sizing/retry loop (`ENOMEM` growth pattern).
+        - [ ] Implement typed convenience helpers (`int`, `uint`, `quad`, `string`) with explicit bounds checks.
+    - [ ] **Thread Safety & Robustness:**
+        - [ ] Ensure no static mutable buffers in libc `sysctl` helpers.
+        - [ ] Ensure all helpers preserve `errno` semantics consistently on failure.
+        - [ ] Add cancellation-safety review for wrappers used in multi-threaded callers.
+        - [ ] Add overflow-safe arithmetic helpers for buffer growth and MIB conversion.
+    - [ ] **Testing (libc Side):**
+        - [ ] Add unit tests for wrapper argument validation and errno behavior.
+        - [ ] Add unit tests for name-to-MIB and MIB-to-name translation helpers.
+        - [ ] Add integration tests for size-probe + retry loops across changing kernel values.
+        - [ ] Add thread-stress tests for concurrent wrapper usage.
+        - [ ] Add fuzz tests for malformed dotted names and oversized MIB arrays.
+    - [ ] **Manpages & Usage Guidance:**
+        - [ ] Add `man/man3/sysctl.3` documenting libc contract and thread-safety.
+        - [ ] Add `man/man3/sysctlbyname.3` with buffer sizing examples.
+        - [ ] Add `man/man3/sysctlnametomib.3` with name/MIB conversion examples.
+        - [ ] Update `man/man2/sysctl.2` to align kernel syscall semantics with libc helper behavior.
+        - [ ] Add `SEE ALSO` cross-links between `sysctl(2)` and `sysctl(3)` pages.
 - [ ] **Stdio:**
     - [ ] Implement Buffered I/O logic (`fflush`, buffer management).
     - [ ] **Complete `printf` Family Implementation (User & Kernel):**
@@ -2880,42 +3274,68 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [x] **String/Mem:**
     - [x] Optimize `memcpy`, `memset`, `memmove`.
     - [/] **Math Library (`lib/m/`):**
-        - [x] **Architecture:**
+        - [/] **Architecture & Environment:**
             - [x] `math.h` header definition.
             - [x] `math_errhandling` (errno support).
             - [x] `__fpclassify` internal helper.
-        - [x] **Classification:**
+            - [ ] **FENV (Floating-Point Environment):**
+                - [ ] `fenv.h` header definition (C99/POSIX).
+                - [ ] `feclearexcept()`, `fegetexceptflag()`, `feraiseexcept()`, `fesetexceptflag()`, `fetestexcept()`.
+                - [ ] `fegetround()`, `fesetround()`.
+                - [ ] `fegetenv()`, `feholdexcept()`, `fesetenv()`, `feupdateenv()`.
+            - [ ] **Type Variants (f, l suffixes):**
+                - [ ] Implement `float` variants (e.g., `sinf`, `cosf`).
+                - [ ] Implement `long double` variants (e.g., `sinl`, `cosl`).
+            - [ ] **Generic Math (`<tgmath.h>`):**
+                - [ ] Implement C99/C11 `<tgmath.h>` type-generic macros.
+        - [/] **Classification & Comparison (C99/C23/POSIX):**
             - [x] `fpclassify()`
             - [x] `isfinite()`
             - [x] `isinf()`
             - [x] `isnan()`
             - [x] `isnormal()`
             - [x] `signbit()`
-        - [x] **Basic Arithmetic:**
+            - [ ] `isgreater()`, `isgreaterequal()`, `isless()`, `islessequal()`, `islessgreater()`, `isunordered()`
+            - [ ] `iseqsig()`, `issignaling()` (C23)
+            - [ ] `iscanonical()`, `issubnormal()`, `iszero()` (C23)
+        - [/] **Basic Arithmetic:**
             - [x] `fabs()`
             - [x] `fmod()`
             - [x] `remainder()`
+            - [ ] `remquo()`
             - [x] `fmax()`
             - [x] `fmin()`
             - [x] `fdim()`
+            - [ ] `fma()` (Fused Multiply-Add)
+            - [ ] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23)
+        - [/] **Rounding:**
             - [x] `ceil()`
             - [x] `floor()`
             - [x] `trunc()`
             - [x] `round()`
             - [x] `rint()`
-        - [x] **Exponential & Power:**
+            - [ ] `nearbyint()`
+            - [ ] `lround()`, `llround()`
+            - [ ] `lrint()`, `llrint()`
+            - [ ] `roundeven()` (C23)
+            - [ ] `fromfp()`, `fromfpx()`, `ufromfp()`, `ufromfpx()` (C23)
+        - [/] **Exponential, Logarithmic & Power:**
             - [x] `exp()`
             - [x] `exp2()`
             - [x] `expm1()`
+            - [ ] `exp10()`, `exp10m1()`, `exp2m1()` (C23)
             - [x] `log()`
             - [x] `log2()`
             - [x] `log10()`
             - [x] `log1p()`
+            - [ ] `log10p1()`, `log2p1()`, `logp1()` (C23)
             - [x] `pow()`
+            - [ ] `pown()`, `powr()`, `rootn()`, `compound()` (C23)
             - [x] `sqrt()`
+            - [ ] `rsqrt()` (C23)
             - [x] `cbrt()`
             - [x] `hypot()`
-        - [x] **Trigonometric:**
+        - [/] **Trigonometric:**
             - [x] `sin()`
             - [x] `cos()`
             - [x] `tan()`
@@ -2923,6 +3343,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `acos()`
             - [x] `atan()`
             - [x] `atan2()`
+            - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23)
+            - [ ] `asinpi()`, `acospi()`, `atanpi()`, `atan2pi()` (C23)
         - [x] **Hyperbolic:**
             - [x] `sinh()`
             - [x] `cosh()`
@@ -2930,13 +3352,24 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `asinh()`
             - [x] `acosh()`
             - [x] `atanh()`
-        - [x] **Manipulation:**
+        - [/] **Manipulation:**
             - [x] `frexp()`
             - [x] `ldexp()`
             - [x] `modf()`
             - [x] `scalbn()`
+            - [ ] `scalbln()`
+            - [ ] `ilogb()`, `logb()`
             - [x] `nextafter()`
+            - [ ] `nexttoward()`
+            - [ ] `nextup()`, `nextdown()` (C23)
             - [x] `copysign()`
+            - [ ] `nan()`
+        - [ ] **Error & Gamma Functions (POSIX/C11):**
+            - [ ] `erf()`, `erfc()`
+            - [ ] `tgamma()`, `lgamma()` (with `signgam`)
+        - [ ] **Bessel Functions (POSIX/XSI):**
+            - [ ] `j0()`, `j1()`, `jn()`
+            - [ ] `y0()`, `y1()`, `yn()`
     - [ ] **Optimizations (i386/x87 Inline Assembly):**
         - [ ] **Trigonometric Functions:**
             - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
@@ -8586,7 +9019,7 @@ Reference: User Request (Step 31552)
         - [x] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
         - [x] Generate Default Reductions.
     - [ ] **6. Code Generation (`output.c`):**
-        - [ ] generate `y.tab.c` (parser skeleton + user actions).
+        - [x] generate `y.tab.c` (parser skeleton + user actions).
         - [ ] generate `y.tab.h` (token defines, `YYSTYPE`).
         - [ ] generate `y.output` (verbose state descriptions).
     - [ ] **7. Validation & Tests:**

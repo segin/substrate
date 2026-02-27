@@ -63,6 +63,36 @@ if [ -z "$defred_nonzero" ] || [ "$defred_nonzero" -le 0 ]; then
     echo "default reductions were not generated"
     exit 1
 fi
+cat > test_minimal_driver.c <<'EOF'
+#include "test_minimal.tab.h"
+
+int yyparse(void);
+
+int yylex(void) {
+    static int once;
+    if (once++) return 0;
+    yylval = 7;
+    return NUMBER;
+}
+
+void yyerror(const char *s) {
+    (void)s;
+}
+
+int main(void) {
+    return yyparse();
+}
+EOF
+cc -Wall -Wextra -Werror -o test_minimal_parser test_minimal.tab.c test_minimal_driver.c
+if [ $? -ne 0 ]; then
+    echo "generated y.tab.c failed to compile/link"
+    exit 1
+fi
+./test_minimal_parser
+if [ $? -ne 0 ]; then
+    echo "generated parser executable returned failure"
+    exit 1
+fi
 echo "minimal.y passed"
 
 echo "Testing calc.y..."
@@ -185,6 +215,7 @@ echo "precedence-based conflict resolution passed"
 # Cleanup
 rm -f test_minimal.tab.c test_minimal.tab.h test_minimal.output
 rm -f test_minimal.state2
+rm -f test_minimal_driver.c test_minimal_parser
 rm -f test_calc.tab.c test_calc.tab.h test_calc.output
 rm -f test_midrule.tab.c test_midrule.tab.h test_midrule.output
 rm -f test_deta.tab.c test_deta.tab.h test_deta.output

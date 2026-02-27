@@ -133,7 +133,7 @@ static void init_environment(void) {
     }
     
     // Initialize Prompt Mode
-    shell_var_set("SHELL_PROMPT_MODE", "POSIX");
+    shell_var_export("SHELL_PROMPT_MODE", "POSIX");
     shell_var_set_readonly("SHELL_PROMPT_MODE");
 }
 

@@ -29,9 +29,7 @@ static void output_check(void);
 static void output_parser(void);
 static void output_trailing_text(void);
 static void output_semantic_actions(void);
-static void write_section(const char *section_name);
 static void putc_code(FILE *f, int c);
-static void puts_code(FILE *f, const char *s);
 static void output_line_directive(FILE *f, int line, const char *file);
 
 void output(void) {
@@ -261,16 +259,15 @@ static void output_parser(void) {
     fprintf(output_file, "/* Standard yacc macros */\n");
     fprintf(output_file, "#define yyerrok   (yyerrflag = 0)\n");
     fprintf(output_file, "#define yyclearin (yychar = -1)\n");
-    fprintf(output_file, "#define YYABORT   goto yyabort\n");
-    fprintf(output_file, "#define YYACCEPT  goto yyaccept\n");
-    fprintf(output_file, "#define YYERROR   goto yyerrlab\n\n");
+    fprintf(output_file, "#define YYABORT   return 1\n");
+    fprintf(output_file, "#define YYACCEPT  return 0\n");
+    fprintf(output_file, "#define YYERROR   do { yyerrflag = 1; goto yyloop; } while (0)\n\n");
     
     fprintf(output_file, "/* External declarations */\n");
     fprintf(output_file, "extern int yylex(void);\n");
     fprintf(output_file, "extern void yyerror(const char *);\n");
     fprintf(output_file, "extern YYSTYPE yylval;\n\n");
     
-    fprintf(output_file, "int yydebug = 0;\n");
     fprintf(output_file, "int yynerrs = 0;\n");
     fprintf(output_file, "int yyerrflag = 0;\n");
     fprintf(output_file, "int yychar = -1;\n\n");
@@ -323,13 +320,14 @@ static void output_parser(void) {
     fprintf(output_file, "    }\n");
     fprintf(output_file, "    \n");
     fprintf(output_file, "    /* Check for accept: state with shift on $end (token 0) */\n");
-    fprintf(output_file, "    if (yychar == 0 && yystate == %d) goto yyaccept;\n\n", final_state);
+    fprintf(output_file, "    if (yychar == 0 && yystate == %d) return 0;\n\n", final_state);
     
     fprintf(output_file, "    /* Error handling */\n");
     fprintf(output_file, "    if (yyerrflag == 0) {\n");
     fprintf(output_file, "        yyerror(\"syntax error\");\n");
     fprintf(output_file, "        yynerrs++;\n");
     fprintf(output_file, "    }\n");
+    fprintf(output_file, "    yyerrflag = 1;\n");
     fprintf(output_file, "    goto yyloop;\n\n");
     
     fprintf(output_file, "yyshift:\n");
@@ -362,10 +360,6 @@ static void output_parser(void) {
     fprintf(output_file, "    *++yyvsp = yyval;\n");
     fprintf(output_file, "    goto yyloop;\n\n");
     
-    fprintf(output_file, "yyaccept:\n");
-    fprintf(output_file, "    return 0;\n\n");
-    
-    fprintf(output_file, "yyabort:\n");
     fprintf(output_file, "    return 1;\n");
     fprintf(output_file, "}\n\n");
 }
@@ -415,12 +409,6 @@ static void output_line_directive(FILE *f, int line, const char *file) {
 static void putc_code(FILE *f, int c) {
     putc(c, f);
     if (c == '\n') outline++;
-}
-
-static void puts_code(FILE *f, const char *s) {
-    while (*s) {
-        putc_code(f, *s++);
-    }
 }
 
 void output_header(void) {

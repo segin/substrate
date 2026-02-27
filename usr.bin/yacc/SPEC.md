@@ -200,6 +200,11 @@
 2. Conflict suppression happens per-state/per-token before packed table emission.
 3. Packed tables reflect suppressed actions and default-reduction elision.
 
+### 3.3.10 Parser C Generation
+1. Generated `y.tab.c` contains parser tables, parser skeleton, and copied semantic actions.
+2. Generated parser C is host-compilable with a minimal `yylex/yyerror` driver.
+3. Debug variable emission is single-definition to avoid duplicate-symbol compile failures.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions

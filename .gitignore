@@ -79,6 +79,8 @@ sbin/*
 /usr.bin/pr/pr
 /usr.bin/uudecode/uudecode
 /usr.bin/yacc/yacc
+/bin/cp/cp
+/bin/sh/sh
 
 # Ignore the compiled output in bin subdirs that matches the dir name
 # (This is tricky with gitignore patterns, relying on extensions is safer)

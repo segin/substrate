@@ -1,6 +1,6 @@
 #!/bin/sh
 
-SH="./sh"
+SH="${SH:-./sh}"
 
 # Test 1: Default Mode
 echo "Checking default mode..."
