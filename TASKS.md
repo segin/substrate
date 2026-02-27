@@ -3878,100 +3878,100 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape).
                 - [x] `--help`: Display help.
                 - [x] `--version`: Display version.
-        - [ ] **Output Modes:**
-            - [ ] Implement long format (`-l`) with all columns.
-            - [ ] Implement multi-column format (default for terminal).
-            - [ ] Implement single-column format (`-1`).
-            - [ ] Implement comma-separated format (`-m`).
-            - [ ] Implement by-lines format (`-x`).
-            - [ ] Auto-detect terminal vs pipe; select output mode accordingly.
-            - [ ] Handle very narrow terminals (< 20 columns) gracefully.
-        - [ ] **Long Format Details:**
-            - [ ] **File Mode String:**
-                - [ ] File type indicator (d, l, c, b, p, s, -).
-                - [ ] Owner rwx permissions.
-                - [ ] Group rwx permissions.
-                - [ ] Other rwx permissions.
-                - [ ] Setuid bit (`s`/`S` in owner execute).
-                - [ ] Setgid bit (`s`/`S` in group execute).
-                - [ ] Sticky bit (`t`/`T` in other execute).
-                - [ ] ACL indicator (`+`) when extended attributes present.
-                - [ ] Extended attribute indicator (`@`) for xattrs.
-            - [ ] **Link Count:** Print hard link count.
-            - [ ] **Owner:** Print username (or UID if `-n`).
-            - [ ] **Group:** Print group name (or GID if `-n`).
-            - [ ] **Size:** Print file size in bytes (or human-readable if `-h`).
-            - [ ] **Device Major/Minor:** Print major,minor for block/char devices.
-            - [ ] **Timestamps:**
-                - [ ] Default to mtime.
-                - [ ] Support atime with `-u`.
-                - [ ] Support ctime with `-c`.
-                - [ ] Recent files (< 6 months): show month, day, time.
-                - [ ] Old files (>= 6 months): show month, day, year.
-                - [ ] Custom time formats via `--time-style`.
-            - [ ] **Filename:** Print file name.
-            - [ ] **Symlink Target:** Print ` -> target` for symlinks.
-            - [ ] **Total Block Count:** Print `total N` line for each directory.
-        - [ ] **Symlink Behavior:**
-            - [ ] Default: `lstat()` for symlinks, show link info.
-            - [ ] `-L`: `stat()` for symlinks, show target info.
-            - [ ] Show `-> target` in long listing.
-            - [ ] Handle broken symlinks gracefully (show with error indicator).
-            - [ ] Detect symlink loops and report error.
+        - [x] **Output Modes:**
+            - [x] Implement long format (`-l`) with all columns.
+            - [x] Implement multi-column format (default for terminal).
+            - [x] Implement single-column format (`-1`).
+            - [x] Implement comma-separated format (`-m`).
+            - [x] Implement by-lines format (`-x`).
+            - [x] Auto-detect terminal vs pipe; select output mode accordingly.
+            - [x] Handle very narrow terminals (< 20 columns) gracefully.
+        - [x] **Long Format Details:**
+            - [x] **File Mode String:**
+                - [x] File type indicator (d, l, c, b, p, s, -).
+                - [x] Owner rwx permissions.
+                - [x] Group rwx permissions.
+                - [x] Other rwx permissions.
+                - [x] Setuid bit (`s`/`S` in owner execute).
+                - [x] Setgid bit (`s`/`S` in group execute).
+                - [x] Sticky bit (`t`/`T` in other execute).
+                - [x] ACL indicator (`+`) when extended attributes present.
+                - [x] Extended attribute indicator (`@`) for xattrs.
+            - [x] **Link Count:** Print hard link count.
+            - [x] **Owner:** Print username (or UID if `-n`).
+            - [x] **Group:** Print group name (or GID if `-n`).
+            - [x] **Size:** Print file size in bytes (or human-readable if `-h`).
+            - [x] **Device Major/Minor:** Print major,minor for block/char devices.
+            - [x] **Timestamps:**
+                - [x] Default to mtime.
+                - [x] Support atime with `-u`.
+                - [x] Support ctime with `-c`.
+                - [x] Recent files (< 6 months): show month, day, time.
+                - [x] Old files (>= 6 months): show month, day, year.
+                - [x] Custom time formats via `--time-style`.
+            - [x] **Filename:** Print file name.
+            - [x] **Symlink Target:** Print ` -> target` for symlinks.
+            - [x] **Total Block Count:** Print `total N` line for each directory.
+        - [x] **Symlink Behavior:**
+            - [x] Default: `lstat()` for symlinks, show link info.
+            - [x] `-L`: `stat()` for symlinks, show target info.
+            - [x] Show `-> target` in long listing.
+            - [x] Handle broken symlinks gracefully (show with error indicator).
+            - [x] Detect symlink loops and report error.
         - [ ] **Recursive Traversal (`-R`):**
-            - [ ] Implement depth-first traversal.
-            - [ ] Print directory header for each subdirectory.
-            - [ ] Handle permission denied on subdirs (warn and continue).
-            - [ ] Implement cycle detection (detect hardlink loops and symlink loops).
+            - [x] Implement depth-first traversal.
+            - [x] Print directory header for each subdirectory.
+            - [x] Handle permission denied on subdirs (warn and continue).
+            - [x] Implement cycle detection (detect hardlink loops and symlink loops).
             - [ ] Option to not cross filesystem boundaries (`--one-file-system`/`-x` GNU ext).
-            - [ ] Respect `-d` to not recurse even with `-R`.
+            - [x] Respect `-d` to not recurse even with `-R`.
         - [ ] **Sorting & Collation:**
-            - [ ] Implement name sort (default, case-sensitive).
+            - [x] Implement name sort (default, case-sensitive).
             - [ ] Implement case-insensitive name sort (locale-aware).
-            - [ ] Implement size sort (`-S`).
-            - [ ] Implement time sort (`-t`, `-u`, `-c`).
+            - [x] Implement size sort (`-S`).
+            - [x] Implement time sort (`-t`, `-u`, `-c`).
             - [ ] Implement extension sort (`-X` GNU ext).
-            - [ ] Implement version sort (`-v`).
-            - [ ] Implement reverse sort (`-r`).
-            - [ ] Implement no-sort (`-U`, `-f`).
-            - [ ] Use stable sort with tie-breakers (name as secondary).
+            - [x] Implement version sort (`-v`).
+            - [x] Implement reverse sort (`-r`).
+            - [x] Implement no-sort (`-U`, `-f`).
+            - [x] Use stable sort with tie-breakers (name as secondary).
             - [ ] Locale-aware collation via `strcoll()`.
             - [ ] Directories first option (GNU ext).
         - [ ] **Column/Width Layout:**
-            - [ ] Calculate printable width of each filename.
-            - [ ] Account for ANSI color escape sequences (non-printing).
+            - [x] Calculate printable width of each filename.
+            - [x] Account for ANSI color escape sequences (non-printing).
             - [ ] Account for combining characters (zero-width).
             - [ ] Account for wide characters (CJK, double-width).
             - [ ] Use `wcwidth()` / `wcswidth()` for Unicode handling.
-            - [ ] Pack columns to fit terminal width.
-            - [ ] Handle filenames wider than terminal width.
-            - [ ] Align columns consistently.
+            - [x] Pack columns to fit terminal width.
+            - [x] Handle filenames wider than terminal width.
+            - [x] Align columns consistently.
         - [ ] **Permissions/ACLs/Extended Attributes:**
-            - [ ] Detect ACLs via `acl_get_file()` or `getxattr("system.posix_acl_access")`.
-            - [ ] Show `+` suffix on mode string when ACLs present.
-            - [ ] Detect extended attributes via `listxattr()`.
-            - [ ] Show `@` suffix when xattrs present (macOS style).
-            - [ ] Fallback gracefully when ACL/xattr APIs unavailable.
+            - [x] Detect ACLs via `acl_get_file()` or `getxattr("system.posix_acl_access")`.
+            - [x] Show `+` suffix on mode string when ACLs present.
+            - [x] Detect extended attributes via `listxattr()`.
+            - [x] Show `@` suffix when xattrs present (macOS style).
+            - [x] Fallback gracefully when ACL/xattr APIs unavailable.
             - [ ] Option to list xattr names (`-@` BSD ext).
-        - [ ] **User/Group Name Caching:**
-            - [ ] Implement UID->username cache.
-            - [ ] Implement GID->groupname cache.
-            - [ ] Handle missing users/groups (print numeric ID).
-            - [ ] Limit cache size to prevent memory bloat.
+        - [x] **User/Group Name Caching:**
+            - [x] Implement UID->username cache.
+            - [x] Implement GID->groupname cache.
+            - [x] Handle missing users/groups (print numeric ID).
+            - [x] Limit cache size to prevent memory bloat.
         - [ ] **Error Handling:**
-            - [ ] Per-file errors: warn and continue.
-            - [ ] Directory open errors: warn and continue to next arg.
-            - [ ] Memory allocation failures: exit with proper code.
-            - [ ] Exit code 0: success.
-            - [ ] Exit code 1: minor problems (cannot access file).
-            - [ ] Exit code 2: serious trouble (cannot access command-line arg).
+            - [x] Per-file errors: warn and continue.
+            - [x] Directory open errors: warn and continue to next arg.
+            - [x] Memory allocation failures: exit with proper code.
+            - [x] Exit code 0: success.
+            - [x] Exit code 1: minor problems (cannot access file).
+            - [x] Exit code 2: serious trouble (cannot access command-line arg).
             - [ ] Never crash on any input.
         - [ ] **Performance:**
             - [ ] Minimize syscalls: batch `stat()` calls where possible.
-            - [ ] Use `lstat()` by default; only `stat()` when `-L`.
+            - [x] Use `lstat()` by default; only `stat()` when `-L`.
             - [ ] Consider `fts(3)` or custom traversal for `-R`.
             - [ ] Buffer output for efficiency.
-            - [ ] Avoid repeated `getpwuid()`/`getgrgid()` via caching.
+            - [x] Avoid repeated `getpwuid()`/`getgrgid()` via caching.
             - [ ] Profile with large directories (10K+ entries).
         - [ ] **Tests:**
             - [ ] **Unit Tests:**
@@ -3984,14 +3984,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Test sorting algorithms (all modes).
                 - [ ] Test collation with locale.
             - [ ] **Integration Tests:**
-                - [ ] Empty directory.
-                - [ ] Directory with hidden files.
-                - [ ] Directory with symlinks (valid and broken).
+                - [x] Empty directory.
+                - [x] Directory with hidden files.
+                - [x] Directory with symlinks (valid and broken).
                 - [ ] Directory with special files (devices, sockets, FIFOs).
-                - [ ] Deep directory tree (`-R`).
+                - [x] Deep directory tree (`-R`).
                 - [ ] Large directory (1000+ files).
                 - [ ] Permission denied scenarios.
-                - [ ] Symlink loops.
+                - [x] Symlink loops.
                 - [ ] Files with spaces, quotes, newlines in names.
                 - [ ] Mixed sorting criteria.
             - [ ] **Property Tests:**
@@ -4001,38 +4001,38 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Unicode filenames (combining chars, CJK).
                 - [ ] Very long filenames (PATH_MAX-1).
             - [ ] **Acceptance Tests:**
-                - [ ] `ls` empty directory -> empty output.
-                - [ ] `ls -a` -> shows `.` and `..`.
+                - [x] `ls` empty directory -> empty output.
+                - [x] `ls -a` -> shows `.` and `..`.
                 - [ ] `ls -l` -> correct 9-column output.
-                - [ ] `ls -lh` -> human sizes (K, M, G).
-                - [ ] `ls -R` -> descends into subdirectories.
-                - [ ] `ls -lS` -> sorted by size descending.
-                - [ ] `ls -lt` -> sorted by mtime descending.
-                - [ ] `ls -F` -> indicators appended.
-                - [ ] `ls --color=always | cat` -> contains ANSI codes.
-                - [ ] `ls -i` -> inode numbers shown.
-        - [ ] **Documentation:**
-            - [ ] Write `ls(1)` man page covering all options.
-            - [ ] Document output formats with examples.
-            - [ ] Document sorting behavior.
-            - [ ] Document color configuration (`LS_COLORS`).
-            - [ ] Document width calculation algorithm (developer notes).
-            - [ ] Document locale/Unicode handling (developer notes).
-            - [ ] Document ACL/xattr detection (developer notes).
+                - [x] `ls -lh` -> human sizes (K, M, G).
+                - [x] `ls -R` -> descends into subdirectories.
+                - [x] `ls -lS` -> sorted by size descending.
+                - [x] `ls -lt` -> sorted by mtime descending.
+                - [x] `ls -F` -> indicators appended.
+                - [x] `ls --color=always | cat` -> contains ANSI codes.
+                - [x] `ls -i` -> inode numbers shown.
+        - [x] **Documentation:**
+            - [x] Write `ls(1)` man page covering all options.
+            - [x] Document output formats with examples.
+            - [x] Document sorting behavior.
+            - [x] Document color configuration (`LS_COLORS`).
+            - [x] Document width calculation algorithm (developer notes).
+            - [x] Document locale/Unicode handling (developer notes).
+            - [x] Document ACL/xattr detection (developer notes).
         - [ ] **Accessibility & Machine Parsing:**
-            - [ ] Document `-1` for machine-parseable output.
-            - [ ] Document `--quoting-style` for safe parsing.
+            - [x] Document `-1` for machine-parseable output.
+            - [x] Document `--quoting-style` for safe parsing.
             - [ ] Ensure no extra whitespace or formatting breaks parsing.
             - [ ] Test with common UNIX text processing tools (`awk`, `cut`).
         - [ ] **Acceptance Criteria:**
             - [ ] All CLI options implemented and tested.
-            - [ ] Long format matches expected field layout.
-            - [ ] Sorting produces correct order for all modes.
+            - [x] Long format matches expected field layout.
+            - [x] Sorting produces correct order for all modes.
             - [ ] No crashes on any valid or malformed filenames.
             - [ ] Handles directories with 100K+ entries without OOM.
-            - [ ] Color output respects terminal capabilities.
-            - [ ] Exit codes match documented behavior.
-            - [ ] Man page complete and accurate.
+            - [x] Color output respects terminal capabilities.
+            - [x] Exit codes match documented behavior.
+            - [x] Man page complete and accurate.
             - [ ] All tests pass in CI.
     - [ ] **`cp` - Copy files and directories (Production Quality Rewrite):**
         - [ ] **Audit & Refactor Existing Code:**

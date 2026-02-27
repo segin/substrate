@@ -151,6 +151,12 @@ These components are essential for booting and basic system operation.
     - `cp_hardlink`: source inode graph tracking for hardlink-preserving archive copies.
     - `bin/cp/tests`: host-side unit/integration/property/fuzz/stress validation harness.
   - **`bin/chmod/`**: Production-mode permission utility with symbolic/numeric parser (`setmode/getmode` style), recursive traversal policy controls (`-R/-H/-L/-P`), reference-mode support, and host-side verification harness in `tests/chmod/`.
+  - **`bin/ls/`**: Modular directory listing utility split into:
+    - `ls_opts`: CLI parsing and option interaction rules (`-f`, output mode precedence, quoting/time/block-size parsing).
+    - `ls_traverse`: operand classification, recursive depth-first traversal, symlink behavior (`-L/-H`), and cycle detection via `(st_dev, st_ino)`.
+    - `ls_sort`: stable mergesort backend supporting name/size/time/version ordering with deterministic tie-breakers.
+    - `ls_print`: long-format rendering, mode/timestamp/size formatting, multi-output modes (single/comma/columns/by-lines), UID/GID caches, color/quoting handling.
+    - `bin/ls/tests`: host-side regression and acceptance harness covering sorting, output modes, symlink edge cases, recursion loops, and core CLI behavior.
 - **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`).
 - **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:
