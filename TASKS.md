@@ -4136,7 +4136,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Default signal handling.
         - [x] `trap` builtin integration.
     - [x] **Testing & Compliance:**
-        - [ ] Unit tests for all modules.
+        - [x] Unit tests for all modules.
         - [x] Script-based conformance tests.
         - [x] Coverage-guided fuzzing.
         - [x] Man page (`sh(1)`).

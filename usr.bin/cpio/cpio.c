@@ -183,17 +183,18 @@ static int cpio_write_header_newc(int fd, const char *name, const struct stat *s
 }
 
 static int cpio_write_header_odc(int fd, const char *name, const struct stat *st, uint64_t filesize, uint32_t nlink) {
-    char hdr[76 + 1];
+    char hdr[128];
     uint32_t namesz = (uint32_t)strlen(name) + 1;
     snprintf(hdr, sizeof(hdr),
-        "070707%06lo%06lo%06lo%06lo%06lo%06lo%011lo%06lo%011llo",
+        "070707%06lo%06lo%06lo%06lo%06lo%06lo%06lo%011lo%06lo%011llo",
         (unsigned long)(st->st_dev & 0777777),
         (unsigned long)(st->st_ino & 0777777),
         (unsigned long)(st->st_mode & 0777777),
         (unsigned long)(st->st_uid & 0777777),
         (unsigned long)(st->st_gid & 0777777),
         (unsigned long)nlink,
-        (unsigned long)st->st_rdev,
+        (unsigned long)(st->st_rdev & 0777777),
+        (unsigned long)st->st_mtime,
         (unsigned long)namesz,
         (unsigned long long)filesize);
     if (write_all(fd, hdr, 76) < 0) return -1;
@@ -402,15 +403,15 @@ static int parse_newc_header(int fd, entry_t *e) {
 
 static int parse_odc_header(int fd, entry_t *e) {
     char hdr[76 + 1];
-    unsigned long mode, uid, gid, nlink, rdev, namesz;
+    unsigned long mode, uid, gid, nlink, rdev, namesz, mtime;
     unsigned long long filesize;
     if (read_all(fd, hdr, 76) < 0) return -1;
     hdr[76] = '\0';
     if (strncmp(hdr, "070707", 6) != 0) return -1;
     {
         unsigned long dev_ignored, ino_ignored;
-        if (sscanf(hdr + 6, "%6lo%6lo%6lo%6lo%6lo%6lo%11lo%6lo%11llo",
-                   &dev_ignored, &ino_ignored, &mode, &uid, &gid, &nlink, &rdev, &namesz, &filesize) != 9)
+        if (sscanf(hdr + 6, "%6lo%6lo%6lo%6lo%6lo%6lo%6lo%11lo%6lo%11llo",
+                   &dev_ignored, &ino_ignored, &mode, &uid, &gid, &nlink, &rdev, &mtime, &namesz, &filesize) != 10)
             return -1;
     }
 
@@ -424,7 +425,7 @@ static int parse_odc_header(int fd, entry_t *e) {
     e->uid = (uid_t)uid;
     e->gid = (gid_t)gid;
     e->nlink = (nlink_t)nlink;
-    e->mtime = 0;
+    e->mtime = (time_t)mtime;
     e->filesize = filesize;
     e->rdev = (dev_t)rdev;
     return 0;

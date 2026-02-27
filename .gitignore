@@ -167,3 +167,12 @@ tests/sys/host_test_*
 !tests/usr.bin/**/*.ir
 bin/cat/cat
 bin/chmod/chmod
+bin/ls/ls
+bin/sh/sh
+bin/sh/sh_host
+bin/sh/test_*
+bin/sh/*.o
+bin/sh/*.scc
+bin/sh/sh_gccobj_ourlink
+bin/sh/sh_ourobj_gcclink
+bin/sh/sh_ourobj_ourlink

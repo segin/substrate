@@ -217,7 +217,15 @@ static unsigned tar_checksum(const struct tar_hdr *h) {
 }
 
 static void tar_set_octal(char *dst, size_t n, unsigned long long v) {
-    snprintf(dst, n, "%0*llo", (int)(n - 1), v);
+    char tmp[64];
+    size_t len;
+    snprintf(tmp, sizeof(tmp), "%0*llo", (int)(n - 1), v);
+    len = strlen(tmp);
+    if (len > n - 1) {
+        memcpy(dst, tmp + (len - (n - 1)), n);
+    } else {
+        memcpy(dst, tmp, len + 1);
+    }
 }
 
 static void pax_append_record(char *dst, size_t dsz, const char *key, const char *val) {

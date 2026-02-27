@@ -5976,7 +5976,7 @@ static int apply_auto_type_deduction(parser_t *p, cc_stmt_t *s) {
     return 0;
 }
 
-static int parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
+static int __attribute__((unused)) parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
     int is_typedef = 0;
     int decl_storage = 0;
     int struct_id = -1;

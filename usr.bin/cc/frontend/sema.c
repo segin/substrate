@@ -3111,7 +3111,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     }
 }
 
-static int is_zero_initializer_expr(const cc_expr_t *e) {
+static int __attribute__((unused)) is_zero_initializer_expr(const cc_expr_t *e) {
     size_t i;
     if (e == NULL) {
         return 1;
