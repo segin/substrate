@@ -1,7 +1,7 @@
 include ../Makefile.inc
 
 # Subdirectories for core libraries
-SUBDIRS = c m pthreads dl sys
+SUBDIRS = c m pthreads dl sys edit
 
 .PHONY: all clean install $(SUBDIRS)
 

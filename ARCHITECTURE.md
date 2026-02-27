@@ -23,7 +23,8 @@ This section provides a high-level overview of the project's directory and file 
 │   ├── c/                # Standard C Library (libc)
 │   ├── sys/              # System Call Wrappers (libsys)
 │   ├── m/                # Math Library (libm)
-│   └── pthreads/         # POSIX Threads Library
+│   ├── pthreads/         # POSIX Threads Library
+│   └── edit/             # Editline Library (libedit)
 ├── include/              # Userspace C Library Headers
 ├── sbin/                 # System Binaries (mkfs, fsck)
 ├── dist/                 # Build Artifacts (RootFS staging area)
@@ -172,6 +173,7 @@ These components are essential for booting and basic system operation.
         - **Error Handling:** `math_errhandling` set to `MATH_ERRNO`.
     - **`dl/`**: Dynamic linker.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new` and `thr_exit`).
+    - **`edit/`**: Editline Library (line editing, arrow keys, history).
     - **`dbm/`**: Database Manager library.
 - **`libexec/`**:
     - **`ld.so`**: Dynamic linker/loader for ELF shared objects.

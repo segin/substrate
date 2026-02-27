@@ -139,4 +139,11 @@ struct winsize {
 };
 #endif
 
+#define TCSANOW   0
+#define TCSADRAIN  1
+#define TCSAFLUSH  2
+
+int tcgetattr(int fd, struct termios *termios_p);
+int tcsetattr(int fd, int optional_actions, const struct termios *termios_p);
+
 #endif

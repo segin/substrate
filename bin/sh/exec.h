@@ -3,13 +3,23 @@
 
 #include "ast.h"
 
+typedef struct job job_t;
+
+typedef struct exec_info {
+    int background; // &
+    int pipeline;   // |
+    int subshell;   // ()
+    job_t *job;     // Current job being built
+} exec_info_t;
+
 /**
  * execute_ast - Entry point for executing a parsed AST.
  * @node: The root node of the AST to execute.
+ * @info: Execution context.
  * 
  * Returns the exit status of the command.
  */
-int execute_ast(ast_node_t *node);
+int execute_ast(ast_node_t *node, exec_info_t *info);
 int execute_line(char *line);
 void check_traps(void);
 void run_exit_trap(void);

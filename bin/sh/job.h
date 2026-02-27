@@ -32,10 +32,11 @@ void job_free(job_t *j);
 void job_add_process(job_t *j, pid_t pid, char **argv);
 void job_print_info(job_t *j, const char *status);
 job_t *find_job(pid_t pgid);
+job_t *job_find(const char *name);
 int job_is_stopped(job_t *j);
 int job_is_completed(job_t *j);
 void job_update_status(void);
-void job_wait(job_t *j);
+int job_wait(job_t *j);
 
 int builtin_jobs(int argc, char **argv);
 int builtin_fg(int argc, char **argv);

@@ -14,9 +14,13 @@
 #include <termios.h>
 #include <pwd.h>
 #include "prompt.h"
+#include <histedit.h>
 
 static int command_count = 1;
 int shell_promptvars = 0;
+
+static EditLine *el = NULL;
+static History *hist = NULL;
 
 extern int tcsetpgrp(int fd, pid_t pgrp);
 extern pid_t tcgetpgrp(int fd);
@@ -50,7 +54,7 @@ int execute_line(char *buffer) {
         
         ast_node_t *node = parser_parse(&l);
         if (node) {
-            int status = execute_ast(node);
+            int status = execute_ast(node, NULL);
             last_status = status;
             char res_buf[16];
             snprintf(res_buf, sizeof(res_buf), "%d", status);
@@ -272,6 +276,13 @@ int main(int argc, char **argv, char **envp) {
             tcsetpgrp(STDIN_FILENO, shell_pgid);
             tcgetattr(STDIN_FILENO, &shell_tmodes);
         }
+
+        el = el_init("sh", input, stdout, stderr);
+        hist = history_init();
+        if (el && hist) {
+            el_set(el, EL_HIST, history, hist);
+            el_set(el, EL_EDITOR, "emacs");
+        }
     }
     
     // Process startup files (profile for login, ENV for interactive)
@@ -342,8 +353,10 @@ int main(int argc, char **argv, char **envp) {
         if (input != stdin) fclose(input);
     } else {
         // Interactive: line-by-line
-        char buf[1024];
         while (1) {
+            char *line = NULL;
+            int count = 0;
+
             if (shell_is_interactive) {
                 job_update_status();
                 check_traps();
@@ -355,17 +368,45 @@ int main(int argc, char **argv, char **envp) {
                 }
                 if (!p) p = "$ ";
                 char *expanded = evaluate_prompt(p, command_count, extended);
-                printf("%s", expanded ? expanded : p);
+                
+                if (el) {
+                    el_set(el, EL_PROMPT, expanded ? expanded : p);
+                    line = (char *)el_gets(el, &count);
+                    if (!line) {
+                        if (expanded) free(expanded);
+                        break;
+                    }
+                } else {
+                    printf("%s", expanded ? expanded : p);
+                    fflush(stdout);
+                }
+                
                 if (expanded) free(expanded);
-                fflush(stdout);
             }
             
-            if (!fgets(buf, sizeof(buf), input)) break;
-            execute_line(buf);
-            if (shell_is_interactive) command_count++;
+            if (!line) {
+                char buf[1024];
+                if (!fgets(buf, sizeof(buf), input)) break;
+                line = buf;
+            }
+
+            if (*line) {
+                if (shell_is_interactive && hist) {
+                    HistEvent ev;
+                    history(hist, &ev, H_ENTER, line);
+                }
+                execute_line(line);
+                if (shell_is_interactive) command_count++;
+            }
+            
             check_traps();
+            line = NULL;
         }
     }
+
+    if (el) el_end(el);
+    if (hist) history_end(hist);
+
     run_exit_trap();
     return get_last_status();
 }

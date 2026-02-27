@@ -1,0 +1,128 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include "el.h"
+
+static void refresh_line(EditLine *el) {
+    /* Move cursor to start of line, clear to end of line, print prompt and buffer */
+    fprintf(el->fout, "\r\033[K%s%s", el->prompt ? el->prompt : "", el->line.buffer);
+    
+    /* Move cursor to correct position */
+    if (el->line.cursor < el->line.len) {
+        int back = el->line.len - el->line.cursor;
+        fprintf(el->fout, "\033[%dD", back);
+    }
+    fflush(el->fout);
+}
+
+const char *el_gets(EditLine *el, int *count) {
+    if (count) *count = 0;
+    if (terminal_set_raw(el) == -1) return NULL;
+
+    el->line.len = 0;
+    el->line.cursor = 0;
+    el->line.buffer[0] = '\0';
+
+    if (el->prompt) {
+        fprintf(el->fout, "%s", el->prompt);
+        fflush(el->fout);
+    }
+
+    int c;
+    while (read(fileno(el->fin), &c, 1) == 1) {
+        c &= 0xFF;
+
+        if (c == '\n' || c == '\r') {
+            fprintf(el->fout, "\r\n");
+            terminal_set_orig(el);
+            if (count) *count = el->line.len;
+            return el->line.buffer;
+        } else if (c == 0x7F || c == 0x08) { /* Backspace */
+            if (el->line.cursor > 0) {
+                memmove(el->line.buffer + el->line.cursor - 1,
+                        el->line.buffer + el->line.cursor,
+                        el->line.len - el->line.cursor + 1);
+                el->line.len--;
+                el->line.cursor--;
+                refresh_line(el);
+            }
+        } else if (c == 0x04) { /* ^D - EOF */
+            if (el->line.len == 0) {
+                terminal_set_orig(el);
+                return NULL;
+            }
+            /* If not empty, maybe delete-char? Standard editline often treats ^D as delete-char if not empty */
+            if (el->line.cursor < el->line.len) {
+                memmove(el->line.buffer + el->line.cursor,
+                        el->line.buffer + el->line.cursor + 1,
+                        el->line.len - el->line.cursor);
+                el->line.len--;
+                refresh_line(el);
+            }
+        } else if (c == 0x03) { /* ^C - Clear line */
+            fprintf(el->fout, "^C\r\n");
+            el_reset(el);
+            if (el->prompt) {
+                fprintf(el->fout, "%s", el->prompt);
+                fflush(el->fout);
+            }
+        } else if (c == 0x0C) { /* ^L - Clear screen */
+            fprintf(el->fout, "\033[H\033[2J");
+            refresh_line(el);
+        } else if (c == 0x1B) { /* ESC */
+            char seq[2];
+            if (read(fileno(el->fin), &seq[0], 1) == 1 &&
+                read(fileno(el->fin), &seq[1], 1) == 1) {
+                if (seq[0] == '[') {
+                    if (seq[1] == 'C') { /* Right */
+                        if (el->line.cursor < el->line.len) {
+                            el->line.cursor++;
+                            refresh_line(el);
+                        }
+                    } else if (seq[1] == 'D') { /* Left */
+                        if (el->line.cursor > 0) {
+                            el->line.cursor--;
+                            refresh_line(el);
+                        }
+                    } else if (seq[1] == 'A') { /* Up (History) */
+                        if (el->history) {
+                            HistEvent ev;
+                            if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                                strncpy(el->line.buffer, ev.str, el->line.cap - 1);
+                                el->line.len = strlen(el->line.buffer);
+                                el->line.cursor = el->line.len;
+                                refresh_line(el);
+                            }
+                        }
+                    } else if (seq[1] == 'B') { /* Down (History) */
+                        if (el->history) {
+                            HistEvent ev;
+                            if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                                strncpy(el->line.buffer, ev.str, el->line.cap - 1);
+                                el->line.len = strlen(el->line.buffer);
+                                el->line.cursor = el->line.len;
+                                refresh_line(el);
+                            } else {
+                                el_reset(el);
+                                refresh_line(el);
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (c >= 32 && c < 127) {
+            if (el->line.len + 1 < el->line.cap) {
+                memmove(el->line.buffer + el->line.cursor + 1,
+                        el->line.buffer + el->line.cursor,
+                        el->line.len - el->line.cursor + 1);
+                el->line.buffer[el->line.cursor] = c;
+                el->line.len++;
+                el->line.cursor++;
+                refresh_line(el);
+            }
+        }
+    }
+
+    terminal_set_orig(el);
+    return NULL;
+}
