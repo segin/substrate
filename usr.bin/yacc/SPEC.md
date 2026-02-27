@@ -178,6 +178,7 @@
 1. Reduction lookaheads are derived from goto-follow sets using digraph-computed propagation.
 2. Per-reduction lookahead vectors are computed for every LR reduction entry.
 3. Verbose output reports populated lookahead reductions and total lookahead entries.
+4. LALR working sets are released after parser table construction to avoid retained temporary memory.
 
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format

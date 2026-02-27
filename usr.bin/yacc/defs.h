@@ -232,6 +232,7 @@ void closure_new(int n); /* If using new style */
 
 /* lalr.c */
 void lalr(void);
+void lalr_free(void);
 
 /* mkpar.c */
 void make_parser(void);

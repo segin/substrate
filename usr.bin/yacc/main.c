@@ -138,6 +138,7 @@ int main(int argc, char *argv[]) {
     lr0();
     lalr();
     make_parser();
+    lalr_free();
     
     create_output_file();
     verbose();
