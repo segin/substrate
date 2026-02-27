@@ -1,0 +1,35 @@
+.Dd February 27, 2026
+.Dt LD 1
+.Os Substrate
+.Sh NAME
+.Nm ld
+.Nd Substrate linker wrapper
+.Sh SYNOPSIS
+.Nm
+.Op Fl m32 | Fl m64
+.Op Fl r | Fl shared | Fl pie | Fl static
+.Op Fl o Ar output
+.Op Fl L Ar dir
+.Op Fl l Ar name
+.Op Fl T Ar script
+.Op Fl -gc-sections
+.Op Fl -strip-all
+.Op Fl -allow-undefined
+.Ar input ...
+.Sh DESCRIPTION
+.Nm
+invokes a backend system linker and validates produced ELF output with
+.Xr libelfobj 3 .
+Mode may be inferred from input objects when not explicitly set.
+.Sh ENVIRONMENT
+.Bl -tag -width LD_BACKEND
+.It Ev LD_BACKEND
+Path/name of backend linker executable. If unset,
+.Nm
+searches PATH.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr as 1 ,
+.Xr cc 1

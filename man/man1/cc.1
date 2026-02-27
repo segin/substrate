@@ -1,0 +1,82 @@
+.Dd February 27, 2026
+.Dt CC 1
+.Os Substrate
+.Sh NAME
+.Nm cc
+.Nd Substrate C compiler driver
+.Sh SYNOPSIS
+.Nm
+.Op options
+.Ar file ...
+.Sh DESCRIPTION
+.Nm
+compiles C sources, runs the preprocessor, emits assembly/object output, and
+links via
+.Xr as 1
+and
+.Xr ld 1 .
+.Pp
+When invoked as
+.Nm cpp ,
+preprocessor-only mode is selected.
+.Sh OPTIONS
+.Bl -tag -width "-pedantic-errors"
+.It Fl E
+Preprocess only.
+.It Fl S
+Compile to assembly.
+.It Fl c
+Compile and/or assemble only, do not link.
+.It Fl o Ar file
+Set output path.
+.It Fl I Ar dir , Fl D Ar name Ns Op =value , Fl U Ar name
+Preprocessor include/macro controls.
+.It Fl include Ar file , Fl imacros Ar file
+Forced include/macro inputs.
+.It Fl P
+Suppress line markers in preprocessor output.
+.It Fl dM
+Dump macro definitions.
+.It Fl M , Fl MM , Fl MD , Fl MMD
+Emit dependency rules.
+.It Fl MF Ar file , Fl MT Ar target , Fl MQ Ar target
+Dependency output target controls.
+.It Fl std Ns = Ns Ar c90|c95|c99|c11|c17|c23
+Language mode.
+.It Fl O0 ... Fl O3
+Optimization level.
+.It Fl m32 , Fl m64
+Target i386 or x86_64 ABI.
+.It Fl g
+Emit debug information.
+.It Fl Wall , Fl Werror
+Warning controls.
+.It Fl pedantic , Fl pedantic-errors
+Standards conformance diagnostics.
+.It Fl fPIC
+Generate position-independent code.
+.It Fl fgnu89-inline , Fl fno-gnu89-inline
+Inline semantics control.
+.It Fl shared
+Link shared object.
+.It Fl pthread
+Enable pthread compile/link behavior.
+.It Fl emit-ssa
+Validate input textual IR via
+.Xr ir-verifier 1 .
+.It Fl v
+Verbose tool invocation.
+.It Fl ###
+Print pipeline commands without executing.
+.It Fl -bootstrap-gcc
+Temporary C-to-assembly fallback via host gcc.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr cpp 1 ,
+.Xr as 1 ,
+.Xr ld 1 ,
+.Xr ir-verifier 1 ,
+.Xr ir-normalize 1 ,
+.Xr ir-diff 1

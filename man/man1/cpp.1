@@ -1,0 +1,41 @@
+.Dd February 27, 2026
+.Dt CPP 1
+.Os Substrate
+.Sh NAME
+.Nm cpp
+.Nd C preprocessor front-end mode of Substrate cc
+.Sh SYNOPSIS
+.Nm
+.Op options
+.Ar file
+.Sh DESCRIPTION
+.Nm
+runs the C preprocessor stage and writes preprocessed source to standard output
+by default.
+In this toolchain,
+.Nm
+is installed as a symlink to
+.Xr cc 1
+and behaves as preprocess-only mode.
+.Sh OPTIONS
+Supports preprocessor and dependency options accepted by
+.Xr cc 1 :
+.Fl E ,
+.Fl I ,
+.Fl D ,
+.Fl U ,
+.Fl include ,
+.Fl imacros ,
+.Fl P ,
+.Fl dM ,
+.Fl M ,
+.Fl MM ,
+.Fl MD ,
+.Fl MMD ,
+.Fl MF ,
+.Fl MT ,
+.Fl MQ .
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr cc 1

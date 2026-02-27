@@ -1,492 +1,111 @@
-.Dd February 19, 2026
+.Dd February 27, 2026
 .Dt ELF_LINK 3
 .Os Substrate
 .Sh NAME
-.Nm elf_link
-.Nd ELF object linking
+.Nm elf_link ,
+.Nm elf_link_plan_create ,
+.Nm elf_link_plan_destroy ,
+.Nm elf_link_plan_add_input ,
+.Nm elf_link_plan_input_count ,
+.Nm elf_link_plan_set_section_merge_hook ,
+.Nm elf_link_plan_set_archive_hook ,
+.Nm elf_link_plan_set_gc_hook ,
+.Nm elf_link_plan_set_incremental_hook ,
+.Nm elf_link_plan_set_version_hook ,
+.Nm elf_link_plan_consider_archive_member ,
+.Nm elf_link_plan_note_incremental ,
+.Nm elf_link_plan_link ,
+.Nm elf_link_plan_map_count ,
+.Nm elf_link_plan_map_entry ,
+.Nm elf_link_load_objects ,
+.Nm elf_link_unload_objects ,
+.Nm elf_link_resolve_symbol ,
+.Nm elf_link_add_got_section ,
+.Nm elf_link_add_plt_section ,
+.Nm elf_link_add_dynamic_entry
+.Nd linker-facing APIs for object merge, symbol resolution, and link planning
 .Sh SYNOPSIS
 .In elfobj.h
 .Ft elf_err_t
-.Fo elf_link
-.Fa "elfobj_t **inputs"
-.Fa "size_t count"
-.Fa "elfobj_t **output"
-.Fc
+.Fn elf_link "elfobj_t **inputs" "size_t count" "elfobj_t **output"
+.Ft elf_link_plan_t *
+.Fn elf_link_plan_create void
+.Ft void
+.Fn elf_link_plan_destroy "elf_link_plan_t *plan"
+.Ft elf_err_t
+.Fn elf_link_plan_add_input "elf_link_plan_t *plan" "elfobj_t *obj" "const char *name"
+.Ft size_t
+.Fn elf_link_plan_input_count "const elf_link_plan_t *plan"
+.Ft elf_err_t
+.Fn elf_link_plan_set_section_merge_hook "elf_link_plan_t *plan" "elf_link_section_merge_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_archive_hook "elf_link_plan_t *plan" "elf_link_archive_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_gc_hook "elf_link_plan_t *plan" "elf_link_gc_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_incremental_hook "elf_link_plan_t *plan" "elf_link_incremental_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_version_hook "elf_link_plan_t *plan" "elf_link_version_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_consider_archive_member "elf_link_plan_t *plan" "const char *archive_path" "const char *member_name" "int *should_extract_out"
+.Ft elf_err_t
+.Fn elf_link_plan_note_incremental "elf_link_plan_t *plan" "const char *key" "const char *value"
+.Ft elf_err_t
+.Fn elf_link_plan_link "elf_link_plan_t *plan" "elfobj_t **output"
+.Ft size_t
+.Fn elf_link_plan_map_count "const elf_link_plan_t *plan"
+.Ft int
+.Fn elf_link_plan_map_entry "const elf_link_plan_t *plan" "size_t index" "elf_link_map_entry_t *out_entry"
+.Ft elf_err_t
+.Fn elf_link_load_objects "const char **paths" "size_t count" "elfobj_t ***out_objs" "size_t *out_count"
+.Ft void
+.Fn elf_link_unload_objects "elfobj_t **objs" "size_t count"
+.Ft elf_symbol_t *
+.Fn elf_link_resolve_symbol "elfobj_t **inputs" "size_t count" "const char *name" "size_t *input_index_out"
+.Ft elf_section_t *
+.Fn elf_link_add_got_section "elfobj_t *obj" "size_t entries"
+.Ft elf_section_t *
+.Fn elf_link_add_plt_section "elfobj_t *obj" "size_t entries"
+.Ft elf_err_t
+.Fn elf_link_add_dynamic_entry "elfobj_t *obj" "int64_t tag" "uint64_t value"
 .Sh DESCRIPTION
-The
 .Fn elf_link
-function merges multiple ELF relocatable object files into a single
-output object.
-This is the core operation for building libraries and executables from
-multiple source files.
+performs direct merge/link of a set of input objects.
+The plan API is a structured form that lets callers attach policy callbacks
+for section merge behavior, archive extraction decisions, section GC roots,
+incremental link notes, and symbol version handling.
 .Pp
-Linking is the process of:
-.Bl -enum
-.It
-Combining sections with the same name from different input files.
-.It
-Merging symbol tables and resolving symbol references.
-.It
-Adjusting relocation offsets and symbol indices.
-.It
-Producing a unified output object suitable for further linking or
-execution.
-.El
-.Ss Linking Pipeline
-The linking pipeline consists of the following phases:
-.Bl -tag -width "Section Merge"
-.It Sy Input Validation
-All input objects are checked for compatibility:
-.Bl -bullet
-.It
-Same architecture (machine type).
-.It
-Same ELF class (32-bit or 64-bit).
-.It
-Same byte order (endianness).
-.El
-.It Sy Section Merge
-Sections with the same name from different inputs are concatenated.
-Internal sections
-.Pq Pa .symtab , Pa .strtab , Pa .shstrtab , Pa .rel.*
-are handled specially and regenerated.
-.It Sy Symbol Resolution
-Symbols from all inputs are merged into a unified symbol table.
-Global and weak symbol conflicts are resolved according to ELF rules.
-.It Sy Relocation Adjustment
-Relocation entries are copied to the output with adjusted offsets
-and symbol references.
-.El
-.Ss Archive Extraction
-When linking against archive libraries
-.Pq Pa .a files ,
-the linker extracts only those archive members that satisfy undefined
-symbol references.
-This is called "lazy extraction" or "selective linking."
+Plan map APIs expose a deterministic symbol mapping from merged output back to
+input origin (input index/name, section, and value).
 .Pp
-The current version of
-.Nm libelfobj
-does not directly support archive files.
-Applications must extract archive members using
-.Xr ar 1
-or a similar tool before linking.
-.Ss Dead Code Elimination
-Dead code elimination (also called "garbage collection" or "GC sections")
-removes unreferenced sections from the output.
-This reduces output size and can improve runtime performance.
+.Fn elf_link_load_objects
+and
+.Fn elf_link_unload_objects
+are utility helpers for bulk object lifecycle during linker front-end passes.
 .Pp
-The algorithm:
-.Bl -enum
-.It
-Start with a set of root sections (typically those containing entry
-points or symbols with special attributes).
-.It
-Mark all sections referenced from root sections.
-.It
-Recursively mark sections referenced from marked sections.
-.It
-Discard unmarked sections.
-.El
-.Pp
-The current version of
-.Nm libelfobj
-does not implement dead code elimination.
-Applications requiring this feature should use a full linker such as
-.Xr ld 1 .
-.Ss Section GC Hooks
-Section garbage collection hooks allow applications to customize
-which sections are retained during linking.
-Hooks typically include:
-.Bl -bullet
-.It
-Root section identification.
-.It
-Reference traversal callbacks.
-.It
-Section retention decision callbacks.
-.El
-.Pp
-The current version does not expose GC hooks in the public API.
-.Ss GOT/PLT Generation
-The Global Offset Table (GOT) and Procedure Linkage Table (PLT) are
-used for position-independent code and dynamic linking:
-.Bl -tag -width "PLT"
-.It GOT
-Contains pointers to global variables and functions.
-Position-independent code loads pointers from the GOT rather than
-using absolute addresses.
-.It PLT
-Contains stubs for calling functions in shared libraries.
-Each PLT entry jumps through a corresponding GOT entry.
-.El
-.Pp
-GOT and PLT entries are typically generated by the linker when:
-.Bl -bullet
-.It
-Building position-independent executables (PIE).
-.It
-Linking against shared libraries.
-.It
-Processing certain relocation types (e.g.,
-.Dv R_X86_64_GOTPCREL ,
-.Dv R_X86_64_PLT32 ) .
-.El
-.Pp
-The current version of
-.Nm libelfobj
-does not automatically generate GOT or PLT entries.
-Applications requiring this functionality should use a full linker.
-.Ss Dynamic Linking Preparation
-Dynamic linking requires additional data structures in the output:
-.Bl -tag -width "Dynamic Section"
-.It Sy Dynamic Symbol Table
-A subset of symbols exported for dynamic linking
-.Pq Pa .dynsym section .
-.It Sy Dynamic String Table
-Strings for the dynamic symbol table
-.Pq Pa .dynstr section .
-.It Sy Hash Tables
-Symbol lookup tables
-.Pq Pa .hash or Pa .gnu.hash sections .
-.It Sy Dynamic Section
-Metadata for the dynamic linker
-.Pq Pa .dynamic section .
-.It Sy Relocation Tables
-Runtime relocations for the dynamic linker
-.Pq Pa .rela.dyn , Pa .rela.plt sections .
-.El
-.Pp
-The current version of
-.Nm libelfobj
-produces relocatable objects
-.Pq Dv ET_REL
-and does not generate dynamic linking structures.
+.Fn elf_link_add_got_section ,
+.Fn elf_link_add_plt_section ,
+and
+.Fn elf_link_add_dynamic_entry
+provide builder helpers used when producing dynamic-link aware outputs.
 .Sh RETURN VALUES
-.Fn elf_link
-returns
+.Fn elf_link_plan_create
+returns NULL on allocation failure.
+.Pp
+.Fn elf_link_resolve_symbol
+returns NULL if the symbol cannot be resolved in inputs.
+.Pp
+.Fn elf_link_plan_map_entry
+returns non-zero on success and 0 for out-of-range index.
+.Pp
+Other APIs return
 .Dv ELF_OK
-on success, or an appropriate error code on failure.
-On success,
-.Fa *output
-is set to a newly allocated
-.Vt elfobj_t
-handle that must be freed with
-.Fn elf_close .
-.Sh ERRORS
-.Fn elf_link
-may fail with:
-.Bl -tag -width "ELF_ERR_UNSUPPORTED"
-.It Dv ELF_ERR_STATE
-.Fa inputs
-is NULL,
-.Fa count
-is 0,
-.Fa output
-is NULL, or an input object is NULL.
-.It Dv ELF_ERR_UNSUPPORTED
-Input objects have incompatible architectures, classes, or byte orders.
-.It Dv ELF_ERR_OOM
-Memory allocation failed.
-.It Dv ELF_ERR_FORMAT
-Symbol resolution failed due to duplicate global symbols.
-.It Dv ELF_ERR_RELOC
-Relocation processing failed.
-.El
-.Sh EXAMPLES
-.Ss Linking Two Object Files
-.Bd -literal
-#include <elfobj.h>
-#include <stdio.h>
-
-/* Create a simple object with a function symbol */
-static elfobj_t *make_object(const char *func_name) {
-    elfobj_t *obj;
-    elf_section_t *text;
-    unsigned char code[] = { 0xC3 };  /* ret */
-
-    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
-    if (!obj) return NULL;
-
-    text = elf_add_section(obj, ".text", SHT_PROGBITS,
-                           SHF_ALLOC | SHF_EXECINSTR);
-    if (!text) {
-        elf_close(obj);
-        return NULL;
-    }
-
-    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK) {
-        elf_close(obj);
-        return NULL;
-    }
-
-    if (!elf_add_symbol(obj, func_name, 0, sizeof(code),
-                        STB_GLOBAL, STT_FUNC)) {
-        elf_close(obj);
-        return NULL;
-    }
-
-    return obj;
-}
-
-int main(void) {
-    elfobj_t *inputs[2];
-    elfobj_t *output;
-    elf_err_t err;
-
-    /* Create two input objects */
-    inputs[0] = make_object("function_a");
-    inputs[1] = make_object("function_b");
-
-    if (!inputs[0] || !inputs[1]) {
-        fprintf(stderr, "Failed to create input objects\\n");
-        if (inputs[0]) elf_close(inputs[0]);
-        if (inputs[1]) elf_close(inputs[1]);
-        return 1;
-    }
-
-    /* Link the objects */
-    err = elf_link(inputs, 2, &output);
-    if (err != ELF_OK) {
-        fprintf(stderr, "Link failed: %s\\n", elf_errstr(err));
-        elf_close(inputs[0]);
-        elf_close(inputs[1]);
-        return 1;
-    }
-
-    /* Write the output */
-    err = elf_write_file(output, "linked.o");
-    if (err != ELF_OK) {
-        fprintf(stderr, "Write failed: %s\\n", elf_errstr(err));
-        elf_close(output);
-        elf_close(inputs[0]);
-        elf_close(inputs[1]);
-        return 1;
-    }
-
-    printf("Successfully linked 2 objects into linked.o\\n");
-
-    /* Clean up */
-    elf_close(output);
-    elf_close(inputs[0]);
-    elf_close(inputs[1]);
-
-    return 0;
-}
-.Ed
-.Ss Linking with Symbol Resolution
-.Bd -literal
-#include <elfobj.h>
-#include <stdio.h>
-
-/* Create an object with an undefined symbol reference */
-static elfobj_t *make_caller(const char *name, const char *callee) {
-    elfobj_t *obj;
-    elf_section_t *text;
-    elf_symbol_t *caller_sym, *callee_sym;
-    unsigned char code[] = {
-        0xE8, 0x00, 0x00, 0x00, 0x00,  /* call <callee> */
-        0xC3                            /* ret */
-    };
-
-    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
-    if (!obj) return NULL;
-
-    text = elf_add_section(obj, ".text", SHT_PROGBITS,
-                           SHF_ALLOC | SHF_EXECINSTR);
-    if (!text) goto err;
-    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK)
-        goto err;
-
-    /* Define the caller function */
-    caller_sym = elf_add_symbol(obj, name, 0, sizeof(code),
-                                STB_GLOBAL, STT_FUNC);
-    if (!caller_sym) goto err;
-
-    /* Reference the callee (undefined symbol) */
-    callee_sym = elf_add_symbol(obj, callee, 0, 0, STB_GLOBAL, STT_NOTYPE);
-    if (!callee_sym) goto err;
-
-    /* Add relocation for the call instruction */
-    if (elf_add_relocation(text, 1, callee_sym, R_386_PC32, -4) != ELF_OK)
-        goto err;
-
-    return obj;
-
-err:
-    elf_close(obj);
-    return NULL;
-}
-
-/* Create an object that defines a function */
-static elfobj_t *make_callee(const char *name) {
-    elfobj_t *obj;
-    elf_section_t *text;
-    unsigned char code[] = { 0xC3 };  /* ret */
-
-    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
-    if (!obj) return NULL;
-
-    text = elf_add_section(obj, ".text", SHT_PROGBITS,
-                           SHF_ALLOC | SHF_EXECINSTR);
-    if (!text) goto err;
-    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK)
-        goto err;
-
-    if (!elf_add_symbol(obj, name, 0, sizeof(code), STB_GLOBAL, STT_FUNC))
-        goto err;
-
-    return obj;
-
-err:
-    elf_close(obj);
-    return NULL;
-}
-
-int main(void) {
-    elfobj_t *inputs[2];
-    elfobj_t *output;
-    elf_err_t err;
-
-    /* Create caller (references "helper") and callee (defines "helper") */
-    inputs[0] = make_caller("main", "helper");
-    inputs[1] = make_callee("helper");
-
-    if (!inputs[0] || !inputs[1]) {
-        fprintf(stderr, "Failed to create objects\\n");
-        if (inputs[0]) elf_close(inputs[0]);
-        if (inputs[1]) elf_close(inputs[1]);
-        return 1;
-    }
-
-    /* Link: the undefined "helper" reference in inputs[0] will be
-     * resolved to the definition in inputs[1] */
-    err = elf_link(inputs, 2, &output);
-    if (err != ELF_OK) {
-        fprintf(stderr, "Link failed: %s\\n", elf_errstr(err));
-        elf_close(inputs[0]);
-        elf_close(inputs[1]);
-        return 1;
-    }
-
-    err = elf_write_file(output, "resolved.o");
-    if (err != ELF_OK) {
-        fprintf(stderr, "Write failed: %s\\n", elf_errstr(err));
-        elf_close(output);
-        elf_close(inputs[0]);
-        elf_close(inputs[1]);
-        return 1;
-    }
-
-    printf("Successfully linked with symbol resolution\\n");
-
-    elf_close(output);
-    elf_close(inputs[0]);
-    elf_close(inputs[1]);
-    return 0;
-}
-.Ed
-.Ss Merging Data Sections
-.Bd -literal
-#include <elfobj.h>
-
-/* Create an object with initialized data */
-static elfobj_t *make_data_obj(const char *sym_name, int value) {
-    elfobj_t *obj;
-    elf_section_t *data;
-
-    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
-    if (!obj) return NULL;
-
-    data = elf_add_section(obj, ".data", SHT_PROGBITS,
-                           SHF_ALLOC | SHF_WRITE);
-    if (!data) goto err;
-
-    if (elf_section_set_data(data, &value, sizeof(value)) != ELF_OK)
-        goto err;
-
-    if (!elf_add_symbol(obj, sym_name, 0, sizeof(value),
-                        STB_GLOBAL, STT_OBJECT))
-        goto err;
-
-    return obj;
-
-err:
-    elf_close(obj);
-    return NULL;
-}
-
-int main(void) {
-    elfobj_t *inputs[2];
-    elfobj_t *output;
-    elf_section_t *data;
-    size_t data_size;
-    const int *values;
-
-    inputs[0] = make_data_obj("value_a", 100);
-    inputs[1] = make_data_obj("value_b", 200);
-
-    if (!inputs[0] || !inputs[1]) {
-        if (inputs[0]) elf_close(inputs[0]);
-        if (inputs[1]) elf_close(inputs[1]);
-        return 1;
-    }
-
-    if (elf_link(inputs, 2, &output) != ELF_OK) {
-        elf_close(inputs[0]);
-        elf_close(inputs[1]);
-        return 1;
-    }
-
-    /* The .data section now contains both values, concatenated */
-    data = elf_find_section(output, ".data");
-    if (data) {
-        values = elf_section_data(data, &data_size);
-        printf("Merged .data section (%zu bytes):\\n", data_size);
-        for (size_t i = 0; i < data_size / sizeof(int); i++) {
-            printf("  [%zu] = %d\\n", i, values[i]);
-        }
-    }
-
-    elf_write_file(output, "merged_data.o");
-    elf_close(output);
-    elf_close(inputs[0]);
-    elf_close(inputs[1]);
-    return 0;
-}
-.Ed
+on success and an
+.Vt elf_err_t
+error code on failure.
 .Sh SEE ALSO
-.Xr elfobj 3 ,
+.Xr elf_reloc 3 ,
 .Xr elf_section 3 ,
 .Xr elf_symbol 3 ,
-.Xr elf_reloc 3 ,
-.Xr ld 1 ,
-.Xr ar 1 ,
-.Xr elf 5
-.Sh STANDARDS
-The linking process follows the ELF specification.
-See
+.Xr elf_validate 3 ,
 .Xr elfobj 3
-for references.
-.Sh HISTORY
-The
-.Fn elf_link
-function was added to
-.Nm libelfobj
-to support simple object merging for toolchain utilities.
-.Sh BUGS
-.Bl -bullet
-.It
-Only relocatable objects
-.Pq Dv ET_REL
-can be linked.
-.It
-Archive file handling is not supported.
-.It
-Dead code elimination is not implemented.
-.It
-GOT/PLT generation is not implemented.
-.It
-Dynamic linking structures are not generated.
-.It
-Section addresses are not assigned (requires full linker layout).
-.El

@@ -1,455 +1,105 @@
-.Dd February 19, 2026
+.Dd February 27, 2026
 .Dt ELF_RELOC 3
 .Os Substrate
 .Sh NAME
 .Nm elf_add_relocation ,
-.Nm elf_reloc_count ,
+.Nm elf_section_reloc_count ,
+.Nm elf_section_reloc_at ,
+.Nm elf_reloc_at ,
+.Nm elf_reloc_offset ,
+.Nm elf_reloc_type ,
+.Nm elf_reloc_addend ,
+.Nm elf_reloc_has_addend ,
+.Nm elf_reloc_symbol ,
+.Nm elf_reloc_section ,
+.Nm elf_set_reloc_hooks ,
+.Nm elf_apply_relocation ,
+.Nm elf_apply_relocation_value ,
+.Nm elf_reloc_size_for_machine ,
+.Nm elf_reloc_is_pc_relative_for_machine ,
+.Nm elf_reloc_is_tls_for_machine ,
 .Nm elf_register_reloc_backend
-.Nd ELF relocation handling
+.Nd relocation construction, inspection, and backend dispatch for libelfobj
 .Sh SYNOPSIS
 .In elfobj.h
 .Ft elf_err_t
-.Fo elf_add_relocation
-.Fa "elf_section_t *section"
-.Fa "uint64_t offset"
-.Fa "elf_symbol_t *symbol"
-.Fa "uint32_t type"
-.Fa "int64_t addend"
-.Fc
+.Fn elf_add_relocation "elf_section_t *section" "uint64_t offset" "elf_symbol_t *symbol" "uint32_t type" "int64_t addend"
 .Ft size_t
-.Fo elf_reloc_count
-.Fa "const elfobj_t *obj"
-.Fc
+.Fn elf_section_reloc_count "const elf_section_t *section"
+.Ft elf_reloc_t *
+.Fn elf_section_reloc_at "elf_section_t *section" "size_t index"
+.Ft elf_reloc_t *
+.Fn elf_reloc_at "elfobj_t *obj" "size_t index"
+.Ft uint64_t
+.Fn elf_reloc_offset "const elf_reloc_t *reloc"
+.Ft uint32_t
+.Fn elf_reloc_type "const elf_reloc_t *reloc"
+.Ft int64_t
+.Fn elf_reloc_addend "const elf_reloc_t *reloc"
+.Ft int
+.Fn elf_reloc_has_addend "const elf_reloc_t *reloc"
+.Ft elf_symbol_t *
+.Fn elf_reloc_symbol "const elf_reloc_t *reloc"
+.Ft elf_section_t *
+.Fn elf_reloc_section "const elf_reloc_t *reloc"
 .Ft elf_err_t
-.Fo elf_register_reloc_backend
-.Fa "const struct elf_reloc_backend *backend"
-.Fc
+.Fn elf_set_reloc_hooks "elfobj_t *obj" "const elf_reloc_hooks_t *hooks" "void *user"
+.Ft elf_err_t
+.Fn elf_apply_relocation "const elf_reloc_t *reloc" "uint64_t place" "uint64_t sym_value" "uint64_t *out_value"
+.Ft elf_err_t
+.Fn elf_apply_relocation_value "const elfobj_t *obj" "uint32_t type" "uint64_t place" "uint64_t sym_value" "int64_t addend" "uint64_t *out_value"
+.Ft int
+.Fn elf_reloc_size_for_machine "uint16_t machine" "uint32_t type"
+.Ft int
+.Fn elf_reloc_is_pc_relative_for_machine "uint16_t machine" "uint32_t type"
+.Ft int
+.Fn elf_reloc_is_tls_for_machine "uint16_t machine" "uint32_t type"
+.Ft elf_err_t
+.Fn elf_register_reloc_backend "const struct elf_reloc_backend *backend"
 .Sh DESCRIPTION
-These functions manage ELF relocations, which describe how to patch
-code and data with final addresses during linking or loading.
+Relocations can be added to sections, enumerated at section/object scope,
+and evaluated through the registered backend for a target machine.
 .Pp
-Relocations are essential for:
-.Bl -bullet
-.It
-Position-independent code that must be loaded at variable addresses.
-.It
-References to symbols whose addresses are not known at compile time.
-.It
-Dynamic linking, where symbol addresses are resolved at runtime.
+.Fn elf_apply_relocation
+evaluates the exact relocation record.
+.Fn elf_apply_relocation_value
+evaluates from explicit relocation parameters without an
+.Vt elf_reloc_t
+handle.
+.Pp
+Hook callbacks installed via
+.Fn elf_set_reloc_hooks
+are invoked before/after relocation application and for incremental notes.
+These hooks are intended for linker instrumentation and diagnostics.
+.Pp
+Backend helpers report relocation width and semantics for machine/type pairs:
+.Bl -tag -width elf_reloc_is_pc_relative_for_machine
+.It Fn elf_reloc_size_for_machine
+Returns relocated field width in bytes, or -1 if unknown.
+.It Fn elf_reloc_is_pc_relative_for_machine
+Returns non-zero for PC-relative relocation classes.
+.It Fn elf_reloc_is_tls_for_machine
+Returns non-zero for TLS relocation classes.
 .El
-.Ss REL vs RELA
-ELF supports two relocation formats:
-.Bl -tag -width "RELA"
-.It REL
-Relocation entries without explicit addends.
-The addend is stored at the relocation site in the section data.
-Each entry contains:
-.Bl -bullet
-.It
-r_offset: The location to apply the relocation.
-.It
-r_info: Symbol index and relocation type.
-.El
-.It RELA
-Relocation entries with explicit addends.
-The addend is stored in the relocation entry itself.
-Each entry contains:
-.Bl -bullet
-.It
-r_offset: The location to apply the relocation.
-.It
-r_info: Symbol index and relocation type.
-.It
-r_addend: The explicit addend value.
-.El
-.El
-.Pp
-The
-.Fn elf_add_relocation
-function always creates RELA-style entries internally.
-When writing the output file, the library chooses the appropriate
-format based on the architecture and section type.
-.Ss Relocation Types
-Relocation types are architecture-specific.
-Common i386 relocation types include:
-.Bl -tag -width "R_386_PC32"
-.It Dv R_386_NONE
-No relocation; placeholder.
-.It Dv R_386_32
-Absolute 32-bit relocation.
-The value at the relocation site is replaced by:
-.Li S + A
-where S is the symbol value and A is the addend.
-.It Dv R_386_PC32
-PC-relative 32-bit relocation.
-The value at the relocation site is replaced by:
-.Li S + A - P
-where P is the place (address of the relocation).
-.El
-.Pp
-Common x86_64 relocation types include:
-.Bl -tag -width "R_X86_64_PC32"
-.It Dv R_X86_64_64
-Absolute 64-bit relocation.
-.It Dv R_X86_64_PC32
-PC-relative 32-bit relocation.
-.It Dv R_X86_64_PLT32
-PLT-relative relocation for function calls.
-.It Dv R_X86_64_GOTPCREL
-GOT-relative relocation for position-independent code.
-.El
-.Ss Functions
-.Bl -tag -width Ds
-.It Fn elf_add_relocation "section" "offset" "symbol" "type" "addend"
-Adds a relocation entry to the specified section.
-The relocation will be applied at
-.Fa offset
-within
-.Fa section ,
-referencing
-.Fa symbol .
-.Pp
-The
-.Fa type
-is an architecture-specific relocation type constant.
-The
-.Fa addend
-is a value to be added to the symbol value.
-.Pp
-The section and symbol must belong to the same object.
-The object must be mutable.
-.It Fn elf_reloc_count "obj"
-Returns the total number of relocations in the object.
-.It Fn elf_register_reloc_backend "backend"
-Registers a relocation backend for a specific architecture.
-The backend provides functions to apply relocations and query
-relocation properties.
-.Pp
-The
-.Vt struct elf_reloc_backend
-structure contains:
-.Bd -literal
-struct elf_reloc_backend {
-    uint32_t machine;           /* EM_* constant */
-    int (*apply_reloc)(const elfobj_reloc_ctx_t *ctx,
-                       uint32_t type,
-                       uint64_t place,
-                       uint64_t sym_value,
-                       int64_t addend,
-                       uint64_t *out_value);
-    int (*reloc_size)(uint32_t type);
-    int (*is_pc_relative)(uint32_t type);
-};
-.El
-.Pp
-The
-.Fa machine
-field identifies the architecture (e.g.,
-.Dv EM_386 ,
-.Dv EM_X86_64 ) .
-.Pp
-The
-.Fn apply_reloc
-callback computes the final relocation value.
-It returns 0 on success or a negative value on error.
-.Pp
-The
-.Fn reloc_size
-callback returns the size in bytes of the relocation target.
-.Pp
-The
-.Fn is_pc_relative
-callback returns non-zero if the relocation is PC-relative.
-.El
-.Ss Architecture Backend Dispatch
-The library uses a plugin-based architecture for relocation processing.
-Each supported architecture registers a backend that provides:
-.Bl -bullet
-.It
-Relocation application logic.
-.It
-Relocation size information.
-.It
-PC-relative detection.
-.El
-.Pp
-Backends are registered globally and persist for the lifetime of the
-process.
-If a backend for the same architecture is already registered, it is
-replaced.
-.Ss Overflow Detection
-When applying relocations, the backend must detect overflow conditions.
-For example, a 32-bit relocation applied to a 64-bit address may overflow.
-.Pp
-The
-.Fn apply_reloc
-callback should return an error if the computed value cannot be
-represented in the target field.
-.Pp
-Common overflow scenarios:
-.Bl -bullet
-.It
-32-bit absolute relocation for a symbol above 4GB.
-.It
-PC-relative relocation where the distance exceeds the field width.
-.It
-Signed relocation with a negative result for an unsigned field.
-.El
-.Ss PC-Relative Relocations
-PC-relative relocations are computed relative to the address of the
-relocation site (the "place").
-The formula is typically:
-.Pp
-.Dl value = symbol_value + addend - place
-.Pp
-PC-relative relocations are essential for:
-.Bl -bullet
-.It
-Position-independent code (PIC).
-.It
-Function calls via relative branches.
-.It
-Data references in shared libraries.
-.El
-.Pp
-The
-.Fn is_pc_relative
-backend callback allows the linker to identify PC-relative relocations
-for relaxation and optimization.
-.Ss Relocation Relaxation
-Relocation relaxation is an optimization technique where the linker
-replaces expensive relocation patterns with cheaper ones.
-.Pp
-For example, on x86_64:
-.Bl -bullet
-.It
-A
-.Dv R_X86_64_GOTPCREL
-can be relaxed to a direct reference if the symbol is locally defined.
-.It
-A call through the PLT can be relaxed to a direct call.
-.El
-.Pp
-The current version of
-.Nm libelfobj
-does not implement relaxation, but the backend API provides hooks for
-future implementation.
 .Sh RETURN VALUES
-.Fn elf_add_relocation
-returns
+.Fn elf_section_reloc_count
+returns the number of relocation entries for a section.
+.Pp
+.Fn elf_section_reloc_at
+and
+.Fn elf_reloc_at
+return NULL when
+.Fa index
+is out of range.
+.Pp
+Other APIs return
 .Dv ELF_OK
-on success, or an appropriate error code on failure.
-.Pp
-.Fn elf_reloc_count
-returns the number of relocations (may be 0).
-.Pp
-.Fn elf_register_reloc_backend
-returns
-.Dv ELF_OK
-on success, or an appropriate error code on failure.
-.Sh ERRORS
-.Fn elf_add_relocation
-may fail with:
-.Bl -tag -width Ds
-.It Dv ELF_ERR_OOM
-Memory allocation failed.
-.It Dv ELF_ERR_STATE
-The object is read-only, already finalized, or the section and symbol
-belong to different objects.
-.El
-.Pp
-.Fn elf_register_reloc_backend
-may fail with:
-.Bl -tag -width Ds
-.It Dv ELF_ERR_STATE
-The backend pointer is NULL or the
-.Fn apply_reloc
-callback is NULL.
-.It Dv ELF_ERR_OOM
-The maximum number of backends (16) has been reached.
-.El
-.Sh EXAMPLES
-.Ss Adding Relocations to Code
-.Bd -literal
-#include <elfobj.h>
-
-int main(void) {
-    elfobj_t *obj;
-    elf_section_t *text;
-    elf_symbol_t *target;
-    unsigned char code[] = {
-        0xE8, 0x00, 0x00, 0x00, 0x00,  /* call <target> */
-        0xC3                            /* ret */
-    };
-
-    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
-    if (!obj) return 1;
-
-    text = elf_add_section(obj, ".text", SHT_PROGBITS,
-                           SHF_ALLOC | SHF_EXECINSTR);
-    if (!text) goto err;
-    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK)
-        goto err;
-
-    /* Add a global symbol for the target function */
-    target = elf_add_symbol(obj, "target", 0, 0, STB_GLOBAL, STT_FUNC);
-    if (!target) goto err;
-
-    /* Add a PC-relative relocation at offset 1 (the 32-bit immediate
-     * in the call instruction). The addend is -4 because the
-     * displacement is relative to the next instruction. */
-    if (elf_add_relocation(text, 1, target, R_386_PC32, -4) != ELF_OK)
-        goto err;
-
-    if (elf_write_file(obj, "call.o") != ELF_OK) goto err;
-    elf_close(obj);
-    return 0;
-
-err:
-    elf_close(obj);
-    return 1;
-}
-.Ed
-.Ss Creating a Data Reference
-.Bd -literal
-#include <elfobj.h>
-
-int main(void) {
-    elfobj_t *obj;
-    elf_section_t *text, *data;
-    elf_symbol_t *var;
-    unsigned char code[] = {
-        0xA1, 0x00, 0x00, 0x00, 0x00,  /* mov eax, [var] */
-        0xC3                            /* ret */
-    };
-    int value = 42;
-
-    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
-    if (!obj) return 1;
-
-    text = elf_add_section(obj, ".text", SHT_PROGBITS,
-                           SHF_ALLOC | SHF_EXECINSTR);
-    data = elf_add_section(obj, ".data", SHT_PROGBITS,
-                           SHF_ALLOC | SHF_WRITE);
-    if (!text || !data) goto err;
-
-    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK)
-        goto err;
-    if (elf_section_set_data(data, &value, sizeof(value)) != ELF_OK)
-        goto err;
-
-    /* Add a symbol for the variable */
-    var = elf_add_symbol(obj, "my_variable", 0, sizeof(value),
-                         STB_GLOBAL, STT_OBJECT);
-    if (!var) goto err;
-
-    /* Add an absolute relocation at offset 1 (the 32-bit immediate
-     * in the mov instruction). */
-    if (elf_add_relocation(text, 1, var, R_386_32, 0) != ELF_OK)
-        goto err;
-
-    if (elf_write_file(obj, "dataref.o") != ELF_OK) goto err;
-    elf_close(obj);
-    return 0;
-
-err:
-    elf_close(obj);
-    return 1;
-}
-.Ed
-.Ss Registering a Custom Backend
-.Bd -literal
-#include <elfobj.h>
-#include <stdio.h>
-
-/* Example backend for a hypothetical architecture */
-static int my_apply_reloc(const elfobj_reloc_ctx_t *ctx,
-                          uint32_t type,
-                          uint64_t place,
-                          uint64_t sym_value,
-                          int64_t addend,
-                          uint64_t *out_value) {
-    switch (type) {
-    case 1:  /* R_MY_ABS32 */
-        *out_value = sym_value + addend;
-        /* Check for 32-bit overflow */
-        if (*out_value > 0xFFFFFFFFULL) {
-            return -1;  /* Overflow */
-        }
-        return 0;
-
-    case 2:  /* R_MY_PC32 */
-        *out_value = sym_value + addend - place;
-        /* Check for signed 32-bit range */
-        if ((int64_t)*out_value < -0x80000000LL ||
-            (int64_t)*out_value > 0x7FFFFFFFLL) {
-            return -1;  /* Overflow */
-        }
-        return 0;
-
-    default:
-        return -1;  /* Unknown relocation */
-    }
-}
-
-static int my_reloc_size(uint32_t type) {
-    (void)type;
-    return 4;  /* All relocations are 32-bit */
-}
-
-static int my_is_pc_relative(uint32_t type) {
-    return type == 2;  /* R_MY_PC32 */
-}
-
-int main(void) {
-    struct elf_reloc_backend backend = {
-        .machine = 0x9999,  /* Custom architecture ID */
-        .apply_reloc = my_apply_reloc,
-        .reloc_size = my_reloc_size,
-        .is_pc_relative = my_is_pc_relative,
-    };
-
-    elf_err_t err = elf_register_reloc_backend(&backend);
-    if (err != ELF_OK) {
-        fprintf(stderr, "Failed to register backend: %s\\n",
-                elf_errstr(err));
-        return 1;
-    }
-
-    printf("Backend registered successfully\\n");
-    return 0;
-}
-.Ed
+on success and an
+.Vt elf_err_t
+on failure.
 .Sh SEE ALSO
-.Xr elfobj 3 ,
+.Xr elf_backend 3 ,
+.Xr elf_link 3 ,
 .Xr elf_section 3 ,
 .Xr elf_symbol 3 ,
-.Xr elf_backend 3 ,
-.Xr elf 5
-.Sh STANDARDS
-Relocation types and semantics follow the architecture-specific ELF
-supplements.
-See
 .Xr elfobj 3
-for general ELF references.
-.Rs
-.%A System V Application Binary Interface
-.%T Intel386 Architecture Processor Supplement
-.Re
-.Rs
-.%A System V Application Binary Interface
-.%T AMD64 Architecture Processor Supplement
-.Re
-.Sh HISTORY
-Relocation handling has been a core feature of
-.Nm libelfobj
-since its initial implementation.
-.Sh BUGS
-.Bl -bullet
-.It
-Relaxation optimization is not implemented.
-.It
-There is no API to iterate relocations by index.
-.It
-The maximum number of backends (16) is fixed at compile time.
-.El
