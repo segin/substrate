@@ -8575,7 +8575,7 @@ Reference: User Request (Step 31552)
         - [x] Parse Declarations (`%token`, `%type`, `%union`, `%start`, precedence).
         - [x] Parse Grammar Rules and Actions (handling `{}` blocks).
     - [ ] **3. LR(0) Construction (`lr0.c`, `closure.c`):**
-        - [ ] Implement Item Set computation.
+        - [x] Implement Item Set computation.
         - [ ] Implement Closure algorithm.
         - [ ] Implement GOTO graph construction.
     - [ ] **4. LALR(1) Lookahead (`lalr.c`):**

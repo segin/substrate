@@ -152,6 +152,12 @@
 106. Memory: Efficient table compression equivalent to historical implementations
 107. Parser speed: Generated parser should match typical LALR(1) performance
 
+### 3.3.1 LR(0) Item-Set Determinism
+1. Closure item vectors are sorted before GOTO partitioning.
+2. Kernel items are grouped by shift symbol in deterministic symbol-index order.
+3. Kernel slices are sorted and deduplicated before state interning.
+4. Repeated parser generation over the same grammar must produce byte-identical state listings.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions

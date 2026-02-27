@@ -43,9 +43,30 @@ if [ ! -f test_midrule.tab.c ]; then
 fi
 echo "midrule.y passed"
 
+echo "Testing deterministic item-set generation..."
+rm -f test_deta.tab.c test_deta.tab.h test_deta.output
+rm -f test_detb.tab.c test_detb.tab.h test_detb.output
+./yacc -v -d -b test_deta ../../tests/usr.bin/yacc/expr.y
+if [ $? -ne 0 ]; then
+    echo "first deterministic run failed"
+    exit 1
+fi
+./yacc -v -d -b test_detb ../../tests/usr.bin/yacc/expr.y
+if [ $? -ne 0 ]; then
+    echo "second deterministic run failed"
+    exit 1
+fi
+if ! cmp -s test_deta.output test_detb.output; then
+    echo "deterministic output mismatch"
+    exit 1
+fi
+echo "deterministic item-set generation passed"
+
 # Cleanup
 rm -f test_minimal.tab.c test_minimal.tab.h test_minimal.output
 rm -f test_calc.tab.c test_calc.tab.h test_calc.output
 rm -f test_midrule.tab.c test_midrule.tab.h test_midrule.output
+rm -f test_deta.tab.c test_deta.tab.h test_deta.output
+rm -f test_detb.tab.c test_detb.tab.h test_detb.output
 
 exit 0
