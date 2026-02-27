@@ -703,29 +703,29 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Revoke TTY access for entire session.
             - [x] **Pending Signals:**
                 - [x] Clear all pending signals (no longer deliverable).
-            - [ ] **Timers:**
-                - [ ] Cancel `ITIMER_REAL`, `ITIMER_VIRTUAL`, `ITIMER_PROF`.
-                - [ ] Cancel any pending `alarm()`.
-            - [ ] **System V IPC:**
-                - [ ] Detach from all shared memory segments (`shmdt`).
-                - [ ] Adjust semaphore values (SEM_UNDO).
-                - [ ] Remove owned message queues if IPC_RMID pending.
-            - [ ] **POSIX IPC:**
-                - [ ] Unlink any POSIX semaphores/shared memory owned.
+            - [x] **Timers:**
+                - [x] Cancel `ITIMER_REAL`, `ITIMER_VIRTUAL`, `ITIMER_PROF`.
+                - [x] Cancel any pending `alarm()`.
+            - [x] **System V IPC:**
+                - [x] Detach from all shared memory segments (`shmdt`).
+                - [x] Adjust semaphore values (SEM_UNDO).
+                - [x] Remove owned message queues if IPC_RMID pending.
+            - [x] **POSIX IPC:**
+                - [x] Unlink any POSIX semaphores/shared memory owned.
             - [x] **Futex Cleanup:**
                 - [x] Process robust mutex list.
                 - [x] Mark owned futexes as FUTEX_OWNER_DIED.
                 - [x] Wake waiters on robust list entries.
-            - [ ] **Locks Held:**
-                - [ ] Release any kernel mutexes held by threads.
-                - [ ] Cancel pending lock requests.
-        - [ ] **Phase 3: Thread Termination:**
-            - [ ] For each thread in process:
-                - [ ] Set `t->state = THREAD_ZOMBIE`.
-                - [ ] If not current thread, interrupt and terminate.
-                - [ ] Wait for all threads to reach zombie state.
-                - [ ] Free thread stacks and thread structures.
-            - [ ] Current thread becomes the "reaper thread".
+            - [x] **Locks Held:**
+                - [x] Release any kernel mutexes held by threads.
+                - [x] Cancel pending lock requests.
+        - [x] **Phase 3: Thread Termination:**
+            - [x] For each thread in process:
+                - [x] Set `t->state = THREAD_ZOMBIE`.
+                - [x] If not current thread, interrupt and terminate.
+                - [x] Wait for all threads to reach zombie state.
+                - [x] Free thread stacks and thread structures.
+            - [x] Current thread becomes the "reaper thread".
         - [ ] **Phase 4: Resource Usage Finalization:**
             - [ ] `rusage_finalize(p)`: Calculate final resource usage. <!-- process.c:277-278 -->
             - [ ] Accumulate all thread times into `p->rusage`.
@@ -882,11 +882,49 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->
         - [x] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() -->
     - [ ] **LDT & 16-bit Support:**
-        - [ ] **API & Design:** Define secure API surface, privilege model (CAP_SYS_ADMIN), and safety constraints.
-        - [ ] **Implementation:** Kernel-side LDT management (`ldt_alloc`/`set`/`free`) and validation.
-        - [ ] **Syscall:** Implement `sys_modify_ldt` with 16-bit flags.
-        - [ ] **Safety:** Context switching support, fork/exec handling, and code hardening.
-        - [ ] **Verification:** Unit tests, fuzzing, and integration with 16-bit emulator.
+        - [ ] **Baseline Audit + Scope Freeze (existing code path):**
+            - [ ] Audit current implementation in `sys/arch/i386/ldt.c`, scheduler hook in `sys/arch/i386/sched.c`, and tests in `tests/sys/test_ldt.c`.
+            - [ ] Produce gap list: what is already implemented vs missing for production-safe 16-bit support.
+            - [ ] Freeze ownership model (per-process LDT attached to `process_t`) and locking policy.
+            - [ ] **Acceptance:** Gap report merged and this checklist updated with resolved scope.
+        - [ ] **API, ABI, and Privilege Model:**
+            - [ ] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header.
+            - [ ] Define supported `modify_ldt` operations and exact return semantics (`LDT_READ`, `LDT_WRITE`, `LDT_READ_DEFAULT`).
+            - [ ] Define permission model:
+                - [ ] Current kernel policy (root/euid checks) for privileged operations.
+                - [ ] Forward-compatible mapping to `CAP_SYS_ADMIN` once capability framework lands.
+            - [ ] Define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags).
+            - [ ] Document ABI and errors (`EINVAL`, `EFAULT`, `EPERM`, `ENOMEM`, `ENOSYS`) in `ARCHITECTURE.md` and `man/man2/modify_ldt.2`.
+            - [ ] **Acceptance:** Header/API contract is single-sourced and syscall behavior is documented.
+        - [ ] **Kernel LDT Core Hardening (`sys/arch/i386/ldt.c`):**
+            - [ ] Refactor into explicit helpers (`ldt_alloc`, `ldt_set`, `ldt_clear`, `ldt_free`) with one validation entry point.
+            - [ ] Add strict descriptor validation for 16-bit semantics (`seg_32bit=0`, granularity/type constraints, DPL=3 only for user).
+            - [ ] Ensure all pointer arguments use safe `copyin`/`copyout` handling and bounded lengths.
+            - [ ] Add bounds checks for index/count and reject partial/ambiguous user_desc payloads.
+            - [ ] Add internal diagnostics/counters for validation failures and allocation failures.
+            - [ ] **Acceptance:** Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption.
+        - [ ] **Syscall + Personality + `lib/sys` Integration:**
+            - [ ] Keep native personality (`perso_native.c`) wired to hardened `sys_modify_ldt`.
+            - [ ] Add Linux personality wiring for `modify_ldt` compatibility path (or explicit `ENOSYS` until complete).
+            - [ ] Add userspace wrapper in `lib/sys/` (`modify_ldt.c`) and include it in `lib/sys/Makefile`.
+            - [ ] Add public userspace declaration in `include/sys/ldt.h` (or equivalent exported syscall header).
+            - [ ] Ensure syscall prototypes come from headers only (no manual file-local `extern` declarations).
+            - [ ] **Acceptance:** `libsys` exposes `modify_ldt()` and personality behavior is explicit/tested.
+        - [ ] **Lifecycle Safety (switch/fork/exec/exit/SMP):**
+            - [ ] Ensure context switch path loads/clears `LDTR` correctly for LDT and no-LDT processes.
+            - [ ] Add LDT inheritance policy in `proc_fork` (`sys/pm/process.c`) with explicit copy/reference behavior.
+            - [ ] Add LDT replacement/cleanup in exec path (`exec_dispatch`/ELF load path) so stale LDT state cannot survive exec.
+            - [ ] Add guaranteed LDT cleanup in process exit path (`proc_exit`) and process teardown.
+            - [ ] Define SMP safety for LDT updates (reload rules for running thread vs remote CPUs).
+            - [ ] **Acceptance:** fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free.
+        - [ ] **Verification Matrix (expand existing LDT tests):**
+            - [ ] Extend `tests/sys/test_ldt.c` with negative cases (bad DPL/type/system descriptors/index overflow).
+            - [ ] Add unit/property tests for descriptor encode/decode invariants (host-friendly where possible).
+            - [ ] Add fuzz target for `sys_modify_ldt` argument space (size, flags, malformed descriptors, race sequences).
+            - [ ] Add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior.
+            - [ ] Add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup).
+            - [ ] Wire tests into regular test targets (`make -C tests/sys`, CI scripts) with pass/fail gates.
+            - [ ] **Acceptance:** All LDT unit/property/fuzz/integration tests pass and no existing suites regress.
 - [x] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S -->
     - [x] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup -->
     - [x] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks -->
@@ -5142,7 +5180,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **Purpose:** Change the mode of each FILE to MODE.
         - [x] **Standards:** POSIX.1-2017.
         - [ ] **Operands:**
-            - [ ] `-R`, `--recursive`: Change files and directories recursively.
+            - [x] `-R`, `--recursive`: Change files and directories recursively.
             - [ ] `-v`, `--verbose`: Diagnostic for every file processed.
             - [x] Symbolic mode support (e.g., `u+x,g-w`).
             - [x] Octal mode support (e.g., `755`).

@@ -429,7 +429,41 @@ void proc_exit(int code) {
     // 3. Reparent Children
     proc_reparent_children(current_process);
 
-    // 4. Controlling Terminal Cleanup
+    // 4. Phase 2: Timers (Placeholders - Subsytems incomplete)
+    // Cancel ITIMER_REAL, ITIMER_VIRTUAL, ITIMER_PROF
+    // Cancel any pending alarm()
+    
+    // 5. Phase 2: System V IPC (Placeholders)
+    // Detach from all shared memory segments (shmdt)
+    // Adjust semaphore values (SEM_UNDO)
+    // Remove owned message queues if IPC_RMID pending
+    
+    // 6. Phase 2: POSIX IPC (Placeholders)
+    // Unlink any POSIX semaphores/shared memory owned
+    
+    // 7. Phase 2: Locks Held
+    // Release any kernel mutexes held by threads (tracked in thread_t later)
+    // Cancel pending lock requests
+    
+    // 8. Phase 3: Thread Termination
+    // Current thread becomes the "reaper thread"
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid != -1 && threads[i].proc == current_process) {
+            if (&threads[i] != current_thread) {
+                // If not current thread, interrupt and terminate
+                threads[i].state = THREAD_ZOMBIE;
+                // Wake up so it gets preempted/terminated if sleeping
+                sleepq_wake_all(&threads[i]);
+            }
+        }
+    }
+    
+    // Wait for all threads to reach zombie state
+    // (In our case, setting state=THREAD_ZOMBIE prevents them from being scheduled,
+    // and an IPI would force them off remote CPUs. We assume they are effectively dead here.)
+    // Free thread stacks and thread structures logic goes here once `kstack_base` is tracked.
+
+    // 9. Controlling Terminal Cleanup
     if (current_process->tty) {
         extern void tty_hangup(struct tty *tty);
         
