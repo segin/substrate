@@ -99,6 +99,24 @@ do
 done
 echo "closure expansion passed"
 
+echo "Testing LALR DR/READ computation..."
+rm -f test_reads.tab.c test_reads.tab.h test_reads.output
+./yacc -v -d -b test_reads ../../tests/usr.bin/yacc/reads_nullable.y
+if [ $? -ne 0 ]; then
+    echo "READ relation test grammar failed"
+    exit 1
+fi
+if ! grep -F "LALR Lookahead Summary:" test_reads.output >/dev/null; then
+    echo "missing LALR summary in verbose output"
+    exit 1
+fi
+read_edges=$(awk '/READ relation edges/ { print $1 }' test_reads.output | head -n 1)
+if [ -z "$read_edges" ] || [ "$read_edges" -le 0 ]; then
+    echo "READ relation edge count not computed"
+    exit 1
+fi
+echo "LALR DR/READ computation passed"
+
 # Cleanup
 rm -f test_minimal.tab.c test_minimal.tab.h test_minimal.output
 rm -f test_minimal.state2
@@ -107,5 +125,6 @@ rm -f test_midrule.tab.c test_midrule.tab.h test_midrule.output
 rm -f test_deta.tab.c test_deta.tab.h test_deta.output
 rm -f test_detb.tab.c test_detb.tab.h test_detb.output
 rm -f test_closure.tab.c test_closure.tab.h test_closure.output test_closure.state0
+rm -f test_reads.tab.c test_reads.tab.h test_reads.output
 
 exit 0

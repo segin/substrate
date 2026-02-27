@@ -184,6 +184,11 @@ extern int RRtotal;              /* Reduce/reduce conflict count */
 extern short *SRconflicts;       /* Per-state S/R conflict count */
 extern short *RRconflicts;       /* Per-state R/R conflict count */
 
+/* LALR diagnostics (lalr.c) */
+extern int lalr_ngotos;
+extern int lalr_dr_term_count;
+extern int lalr_read_edge_count;
+
 /* Reader state globals if needed */
 
 /* -- Prototypes -- */

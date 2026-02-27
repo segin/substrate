@@ -8579,7 +8579,7 @@ Reference: User Request (Step 31552)
         - [x] Implement Closure algorithm.
         - [x] Implement GOTO graph construction.
     - [ ] **4. LALR(1) Lookahead (`lalr.c`):**
-        - [ ] Compute DR (Direct Read) and READ (Relation) sets.
+        - [x] Compute DR (Direct Read) and READ (Relation) sets.
         - [ ] Compute Lookaheads for each kernel item (Digraph algorithm).
     - [ ] **5. Tables & Conflicts (`mkpar.c`):**
         - [ ] Generate ACTION and GOTO tables.

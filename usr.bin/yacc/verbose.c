@@ -7,6 +7,7 @@
 #include "defs.h"
 
 extern int SRtotal, RRtotal;
+extern int lalr_ngotos, lalr_dr_term_count, lalr_read_edge_count;
 
 static void log_unused_symbols(void);
 static void log_conflicts(void);
@@ -38,6 +39,12 @@ void verbose(void) {
     fprintf(verbose_file, "  %d nonterminals\n", nvars);
     fprintf(verbose_file, "  %d rules\n", nrules);
     fprintf(verbose_file, "  %d states\n", nstates);
+    fprintf(verbose_file, "\n");
+
+    fprintf(verbose_file, "LALR Lookahead Summary:\n");
+    fprintf(verbose_file, "  %d goto transitions\n", lalr_ngotos);
+    fprintf(verbose_file, "  %d direct-read terminal entries\n", lalr_dr_term_count);
+    fprintf(verbose_file, "  %d READ relation edges\n", lalr_read_edge_count);
     fprintf(verbose_file, "\n");
     
     /* Conflict summary */

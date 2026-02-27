@@ -169,6 +169,11 @@
 3. No shift edge is emitted for states whose closure contains only completed items.
 4. LR(0) construction passes (`item sets`, `closure`, `goto graph`) are treated as one deterministic pipeline.
 
+### 3.3.4 LALR DR/READ Sets
+1. DR sets are built from terminal shifts in each goto destination state.
+2. READS relations are built only across nullable nonterminal gotos from goto destination states.
+3. DR and READ metrics are emitted in verbose output for regression validation.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions
