@@ -321,3 +321,9 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
+    for (int i = 0; i < count; i++) {
+        pmap_enter(pmap, va_start + i * 4096, pa_list[i], prot, flags);
+    }
+    return 0;
+}

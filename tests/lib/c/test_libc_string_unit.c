@@ -184,6 +184,44 @@ void run_strcat_tests(void) {
     ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strcat");
 }
 
+void run_memcmp_tests(void) {
+    printf("Running memcmp tests...\n");
+
+    // Equal buffers
+    ASSERT_EQ(libc_memcmp("abc", "abc", 3), 0, "Equal strings");
+    ASSERT_EQ(libc_memcmp("abc", "abd", 2), 0, "Equal prefixes");
+    ASSERT_EQ(libc_memcmp("", "", 0), 0, "Empty strings n=0");
+    ASSERT_EQ(libc_memcmp("abc", "xyz", 0), 0, "Different strings n=0");
+
+    // Differing buffers
+    ASSERT_TRUE(libc_memcmp("abc", "abd", 3) < 0, "abc < abd");
+    ASSERT_TRUE(libc_memcmp("abd", "abc", 3) > 0, "abd > abc");
+
+    // Test with null bytes
+    unsigned char b1[] = {'a', '\0', 'b'};
+    unsigned char b2[] = {'a', '\0', 'c'};
+    ASSERT_EQ(libc_memcmp(b1, b2, 2), 0, "Equal with embedded null");
+    ASSERT_TRUE(libc_memcmp(b1, b2, 3) < 0, "Different after embedded null");
+
+    // Test at different positions
+    ASSERT_TRUE(libc_memcmp("xbc", "abc", 3) > 0, "Different at first byte");
+    ASSERT_TRUE(libc_memcmp("axc", "abc", 3) > 0, "Different at middle byte");
+    ASSERT_TRUE(libc_memcmp("abx", "abc", 3) > 0, "Different at last byte");
+
+    // Sign verification with large values (ensure unsigned char comparison)
+    unsigned char c1 = 0xff;
+    unsigned char c2 = 0x7f;
+    ASSERT_TRUE(libc_memcmp(&c1, &c2, 1) > 0, "0xff > 0x7f (unsigned)");
+
+    // Test with larger buffers
+    char large1[1024], large2[1024];
+    memset(large1, 'A', 1024);
+    memset(large2, 'A', 1024);
+    ASSERT_EQ(libc_memcmp(large1, large2, 1024), 0, "Large equal buffers");
+    large2[1023] = 'B';
+    ASSERT_TRUE(libc_memcmp(large1, large2, 1024) < 0, "Large buffers differ at end");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -204,12 +242,18 @@ bool test_libc_strtok(void) {
     return true;
 }
 
+bool test_libc_memcmp(void) {
+    run_memcmp_tests();
+    return true;
+}
+
 #ifndef NO_MAIN
 int main(void) {
     run_strlen_tests();
     run_memmove_tests();
     run_strcat_tests();
     run_strtok_tests();
+    run_memcmp_tests();
     return 0;
 }
 #endif
