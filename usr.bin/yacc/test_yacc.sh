@@ -39,6 +39,30 @@ if grep -F 'NUMBER  reduce using rule 2 (expr)' test_minimal.output >/dev/null; 
     echo "unexpected reduce lookahead on NUMBER"
     exit 1
 fi
+first_defred=$(awk '
+    /yydefred\[\] = \{/ { in_arr = 1; next }
+    in_arr && /\};/ { exit }
+    in_arr {
+        gsub(/[ ,]/, "", $0);
+        if ($0 ~ /^-?[0-9]+$/) { print $0; exit }
+    }
+' test_minimal.tab.c)
+if [ -z "$first_defred" ] || [ "$first_defred" -ne 0 ]; then
+    echo "unexpected default reduction in initial state"
+    exit 1
+fi
+defred_nonzero=$(awk '
+    /yydefred\[\] = \{/ { in_arr = 1; next }
+    in_arr && /\};/ { print count + 0; exit }
+    in_arr {
+        gsub(/[ ,]/, "", $0);
+        if ($0 ~ /^-?[0-9]+$/ && $0 != "0") count++;
+    }
+' test_minimal.tab.c)
+if [ -z "$defred_nonzero" ] || [ "$defred_nonzero" -le 0 ]; then
+    echo "default reductions were not generated"
+    exit 1
+fi
 echo "minimal.y passed"
 
 echo "Testing calc.y..."

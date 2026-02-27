@@ -8584,7 +8584,7 @@ Reference: User Request (Step 31552)
     - [ ] **5. Tables & Conflicts (`mkpar.c`):**
         - [x] Generate ACTION and GOTO tables.
         - [x] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
-        - [ ] Generate Default Reductions.
+        - [x] Generate Default Reductions.
     - [ ] **6. Code Generation (`output.c`):**
         - [ ] generate `y.tab.c` (parser skeleton + user actions).
         - [ ] generate `y.tab.h` (token defines, `YYSTYPE`).

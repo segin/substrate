@@ -498,39 +498,57 @@ static void build_yytable(void) {
 
 
 static void defreds(void) {
-    int i;
+    int i, j;
     action *a;
-    int reduce_count;
-    int reduce_rule;
+    int has_shift;
+    int best_rule;
+    int best_count;
+    int *rule_count;
     
     /* Allocate yydefred array */
     yydefred = (short *)malloc(nstates * sizeof(short));
     if (yydefred == NULL) no_space();
+    rule_count = (int *)calloc(nrules, sizeof(int));
+    if (rule_count == NULL) no_space();
     
     /* Compute default reductions for each state */
     for (i = 0; i < nstates; i++) {
-        reduce_count = 0;
-        reduce_rule = 0;
-        
-        /* Count reduce actions (not suppressed) */
+        has_shift = 0;
+        best_rule = 0;
+        best_count = 0;
+        for (j = 0; j < nrules; j++) {
+            rule_count[j] = 0;
+        }
+
         for (a = parser[i]; a != NULL; a = a->next) {
-            if (a->action_code == REDUCE && !a->suppressed) {
-                if (reduce_count == 0) {
-                    reduce_rule = a->number;
-                    reduce_count = 1;
-                } else if (reduce_rule != a->number) {
-                    reduce_count = 2;  /* Multiple different rules */
+            if (a->suppressed) {
+                continue;
+            }
+            if (a->action_code == SHIFT) {
+                has_shift = 1;
+            } else if (a->action_code == REDUCE &&
+                       a->number >= 0 && a->number < nrules) {
+                rule_count[a->number]++;
+            }
+        }
+
+        if (!has_shift) {
+            for (j = 0; j < nrules; j++) {
+                if (rule_count[j] > best_count) {
+                    best_count = rule_count[j];
+                    best_rule = j;
+                } else if (rule_count[j] == best_count &&
+                           best_count > 0 &&
+                           j < best_rule) {
+                    best_rule = j;
                 }
             }
         }
-        
-        /* If only one reduce rule, make it the default */
-        if (reduce_count == 1) {
-            yydefred[i] = reduce_rule;
-        } else {
-            yydefred[i] = 0;  /* No default */
-        }
+
+        yydefred[i] = (best_count > 0) ? best_rule : 0;
     }
+
+    free(rule_count);
 }
 
 

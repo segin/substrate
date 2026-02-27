@@ -190,6 +190,11 @@
 2. Reduce actions inherit precedence/associativity from the reducing rule.
 3. Shift/reduce conflicts use declared precedence before fallback "shift wins".
 
+### 3.3.8 Default Reductions
+1. Default reductions are selected only for states without unsuppressed shift actions.
+2. The selected default is the most frequent unsuppressed reduce rule in the state.
+3. Reduce-table entries matching the default rule are omitted from packed tables.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions
