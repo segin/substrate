@@ -120,7 +120,6 @@ static void set_state_table(void) {
 
 
 static void initialize_states(void) {
-    int i;
     core *sp;
     
     /* Create initial state with augmented start rule: $accept : . start $end */

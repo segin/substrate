@@ -56,7 +56,6 @@ void set_first_derives(void) {
 
 void closure(short *nucleus, int n) {
     int i, j;
-    short *isp;
     int item_count;
     
     /* Initialize item_set with nucleus */

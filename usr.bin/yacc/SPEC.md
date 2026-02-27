@@ -167,6 +167,7 @@
 1. Shift and reduction records are keyed by the source LR state being processed.
 2. GOTO edge construction preserves deterministic symbol ordering per state.
 3. No shift edge is emitted for states whose closure contains only completed items.
+4. LR(0) construction passes (`item sets`, `closure`, `goto graph`) are treated as one deterministic pipeline.
 
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
