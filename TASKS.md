@@ -2925,510 +2925,422 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
             - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
 - [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:**
-    - [x] **1. Specification & Design:**
-        - [x] **Design Document:**
-            - [x] Write authoritative design doc for `ld.so` in `docs/ld.so-design.md`.
-            - [x] Document goals: POSIX/ELF-ABI compliance, BSD compatibility, performance.
-            - [x] Document ABI targets: i386 (primary), x86_64 (future).
-            - [x] Document supported ELF features: REL/RELA, PLT/GOT, TLS models.
-            - [x] Document environment variables: `LD_LIBRARY_PATH`, `LD_PRELOAD`, `LD_DEBUG`, etc.
-            - [x] Document secure behavior for setuid/setgid binaries.
-            - [x] Acceptance: design doc reviewed and approved.
-        - [x] **Architecture Matrix:**
-            - [x] Enumerate all supported relocation types per architecture.
-            - [x] Document ABI differences (i386 vs x86_64).
-            - [x] Create `docs/ld.so-reloc-matrix.md` with full relocation table.
-            - [x] Acceptance: matrix covers all targeted architectures.
-        - [x] **Symbol Resolution Specification:**
-            - [x] Define symbol resolution algorithm and precedence rules.
-            - [x] Document order: LD_PRELOAD → executable → DT_RPATH/RUNPATH → system paths.
-            - [x] Define versioning policy (DT_VERSYM, DT_VERNEED, DT_VERDEF).
-            - [x] Define SONAME handling policy.
-            - [x] Document DT_RPATH vs DT_RUNPATH semantics.
-            - [x] Document DT_HASH vs GNU_HASH interaction.
-            - [x] Acceptance: specification reviewed and edge cases documented.
-    - [ ] **2. Loader Core: ELF Parsing & Mapping:**
-        - [ ] **ELF Header Parsing:**
-            - [ ] Implement ELF header validation (magic, class, endianness, version).
-            - [ ] Implement program header table parsing.
-            - [ ] Implement section header table parsing (optional, for debugging).
-            - [ ] Parse `PT_DYNAMIC` segment and extract dynamic table.
-            - [ ] Parse all `DT_*` tags into internal structures.
-            - [ ] Files: `libexec/ld.so/elf_parse.c`, `elf_parse.h`.
-            - [ ] Tests: unit tests for valid/invalid ELF headers.
-        - [ ] **Segment Mapping:**
-            - [ ] Implement safe segment mapping with correct protections (PROT_READ/WRITE/EXEC).
-            - [ ] Handle segment alignment and page rounding.
-            - [ ] Handle file-backed mapping via `mmap()`.
-            - [ ] Implement fallback to read-into-memory for unsupported cases.
-            - [ ] Document MAP_SHARED vs MAP_PRIVATE semantics.
-            - [ ] Files: `libexec/ld.so/elf_map.c`, `elf_map.h`.
-            - [ ] Tests: mapping tests with various segment configurations.
-        - [ ] **Validation & Robustness:**
-            - [ ] Validate all offsets and sizes against file bounds.
-            - [ ] Check for integer overflow in size calculations.
-            - [ ] Reject malformed ELF files with clear error messages.
-            - [ ] Reject unsupported ELF types (mismatched architecture).
-            - [ ] Tests: unit tests with malformed/truncated/malicious ELF files.
-            - [ ] Acceptance: loader maps sample DSOs correctly, rejects malformed inputs.
-    - [ ] **3. Kernel ELF Loader Support:**
-        - [ ] **PT_INTERP Handling:**
-            - [ ] Parse `PT_INTERP` program header to identify dynamic linker path.
-            - [ ] Load dynamic linker ELF into memory alongside main executable.
-            - [ ] Transfer control to dynamic linker entry point (not main executable).
-            - [ ] Files: `sys/exec/elf_interp.c`.
-        - [ ] **Auxiliary Vector Setup:**
-            - [ ] Set up auxiliary vector (`AT_*`) entries for dynamic linker.
-            - [ ] `AT_BASE` - Base address where linker was loaded.
-            - [ ] `AT_PHDR` - Address of program headers.
-            - [ ] `AT_PHENT` - Size of program header entry.
-            - [ ] `AT_PHNUM` - Number of program headers.
-            - [ ] `AT_ENTRY` - Entry point of main executable.
-            - [ ] `AT_EXECFN` - Path to executable.
-            - [ ] `AT_RANDOM` - Pointer to 16 bytes of random data.
-            - [ ] `AT_PAGESZ` - System page size.
-            - [ ] `AT_UID`, `AT_EUID`, `AT_GID`, `AT_EGID` - User/group IDs.
-            - [ ] `AT_SECURE` - Set if running setuid/setgid (secureexec).
-            - [ ] Tests: verify auxv entries correct for various binaries.
-    - [ ] **4. Dynamic Linker Bootstrap:**
-        - [ ] **Self-Relocation:**
-            - [ ] Linker must relocate itself before any other operations.
-            - [ ] Parse own ELF headers to find own relocations.
-            - [ ] Apply `R_386_RELATIVE` relocations to fix up addresses.
-            - [ ] No libc calls during bootstrap (use raw syscalls only).
-            - [ ] Files: `libexec/ld.so/rtld_start.S`, `rtld_bootstrap.c`.
-            - [ ] Tests: verify linker starts correctly with various load addresses.
-        - [ ] **Early Initialization:**
-            - [ ] Parse auxiliary vector from stack.
-            - [ ] Initialize minimal internal state.
-            - [ ] Set up error output (write to stderr via raw syscall).
-            - [ ] Acceptance: bootstrap completes without libc dependencies.
-    - [ ] **5. Dependency Resolution & Loading Order:**
-        - [ ] **Dependency Graph Builder:**
-            - [ ] Discover `DT_NEEDED` entries recursively.
-            - [ ] Build directed acyclic graph of dependencies.
-            - [ ] Detect and handle circular dependencies.
-            - [ ] Compute correct load order (topological sort).
-            - [ ] Files: `libexec/ld.so/rtld_dep.c`, `rtld_dep.h`.
-            - [ ] Tests: tests for diamond dependencies, cycles, deep trees.
-        - [ ] **DSO Caching & Reference Counting:**
-            - [ ] Cache loaded DSOs per process (avoid duplicate loads).
-            - [ ] Implement reference counting for each loaded object.
-            - [ ] Handle `DT_SONAME` for library identity matching.
-            - [ ] Files: `libexec/ld.so/rtld_obj.c`, `rtld_obj.h`.
-        - [ ] **Search Path Policy:**
-            - [ ] Implement `LD_PRELOAD` handling.
-            - [ ] Implement `LD_LIBRARY_PATH` parsing.
-            - [ ] Implement `DT_RPATH` handling (deprecated but supported).
-            - [ ] Implement `DT_RUNPATH` handling (preferred).
-            - [ ] Implement `$ORIGIN` expansion in rpath/runpath.
-            - [ ] Implement `$LIB`, `$PLATFORM` expansion if needed.
-            - [ ] Implement system cache (`/etc/ld.so.cache`) lookup.
-            - [ ] Implement default search paths: `/lib`, `/usr/lib`, `/usr/local/lib`.
-            - [ ] Files: `libexec/ld.so/rtld_search.c`, `rtld_search.h`.
-            - [ ] Tests: tests for each search path component.
-        - [ ] **Library Loading:**
-            - [ ] Load shared libraries via `mmap()` with correct protections.
-            - [ ] Handle dependencies recursively (breadth-first order).
-            - [ ] Handle `DT_SONAME` for library identity.
-            - [ ] Tests: load order tests, constructor order tests.
-            - [ ] Acceptance: dependencies loaded in correct order.
-    - [ ] **6. Relocations & Binding:**
-        - [ ] **Relocation Processing Engine:**
-            - [ ] Implement generic relocation dispatch by type.
-            - [ ] Process non-PLT relocations before PLT relocations.
-            - [ ] Files: `libexec/ld.so/rtld_reloc.c`, `rtld_reloc.h`.
-        - [ ] **i386 Relocation Types:**
-            - [ ] `R_386_NONE` - No relocation.
-            - [ ] `R_386_32` - Absolute 32-bit relocation.
-            - [ ] `R_386_PC32` - PC-relative 32-bit relocation.
-            - [ ] `R_386_GOT32` - GOT entry offset.
-            - [ ] `R_386_PLT32` - PLT entry offset.
-            - [ ] `R_386_COPY` - Copy symbol from shared lib to executable.
-            - [ ] `R_386_GLOB_DAT` - Set GOT entry to symbol address.
-            - [ ] `R_386_JMP_SLOT` - PLT lazy binding slot.
-            - [ ] `R_386_RELATIVE` - Base address + addend.
-            - [ ] `R_386_TLS_TPOFF` - Thread-local storage offset (static TLS).
-            - [ ] `R_386_TLS_DTPMOD32` - TLS module ID.
-            - [ ] `R_386_TLS_DTPOFF32` - TLS offset within module.
-            - [ ] Tests: unit tests for each relocation type.
-        - [ ] **Lazy PLT Binding:**
-            - [ ] Implement lazy binding via PLT stubs.
-            - [ ] PLT0: Call into resolver with library and relocation index.
-            - [ ] Implement `_dl_runtime_resolve()`: resolve symbol and patch GOT.
-            - [ ] Support `LD_BIND_NOT` for debugging (don't update GOT).
-            - [ ] Files: `libexec/ld.so/rtld_plt.S`, `rtld_plt.c`.
-            - [ ] Tests: lazy binding tests with multiple calls.
-        - [ ] **Immediate Binding:**
-            - [ ] Implement `RTLD_NOW` / `LD_BIND_NOW` for eager binding.
-            - [ ] Bind all PLT slots at load time when requested.
-            - [ ] Tests: immediate binding tests.
-        - [ ] **Copy Relocations:**
-            - [ ] Implement `R_386_COPY` for data symbols.
-            - [ ] Allocate space in executable BSS for copied symbols.
-            - [ ] Copy initial data from shared library.
-            - [ ] Tests: copy relocation tests.
-        - [ ] **Thread Safety:**
-            - [ ] Implement atomic updates to GOT/PLT during lazy binding.
-            - [ ] Document and implement locking policy for concurrent bindings.
-            - [ ] Tests: concurrency tests for lazy binding under threads.
-            - [ ] Acceptance: relocations applied correctly, no races.
-    - [ ] **7. Procedure Linkage Table (PLT) & Global Offset Table (GOT):**
-        - [ ] **GOT Structure:**
-            - [ ] GOT[0]: Points to `_DYNAMIC` section.
-            - [ ] GOT[1]: Link map pointer for this object.
-            - [ ] GOT[2]: Resolver entry point (`_dl_runtime_resolve`).
-            - [ ] GOT[3+]: Function/data addresses.
-            - [ ] Document GOT layout in design doc.
-        - [ ] **PLT Structure:**
-            - [ ] PLT[0]: Common resolver stub.
-            - [ ] PLT[n]: Per-function stubs that call PLT[0].
-            - [ ] Document PLT layout and calling convention.
-            - [ ] Tests: verify PLT/GOT structure for sample DSOs.
-    - [ ] **8. Symbol Resolution & Interposition:**
-        - [ ] **Symbol Table Access:**
-            - [ ] Implement `DT_HASH` (SYSV hash) lookup.
-            - [ ] Implement `DT_GNU_HASH` (GNU hash, faster) lookup.
-            - [ ] Benchmark and prefer GNU_HASH when available.
-            - [ ] Files: `libexec/ld.so/rtld_sym.c`, `rtld_sym.h`.
-        - [ ] **Global Symbol Table:**
-            - [ ] Build global symbol table for resolution.
-            - [ ] Handle symbol preemption (LD_PRELOAD first).
-            - [ ] Handle weak vs strong symbol rules.
-            - [ ] Handle symbol visibility (DEFAULT, HIDDEN, PROTECTED).
-            - [ ] Handle undefined weak symbols (resolve to NULL).
-        - [ ] **Symbol Versioning:**
-            - [ ] Implement `DT_VERSYM` support (version symbol table).
-            - [ ] Implement `DT_VERNEED` support (version needed).
-            - [ ] Implement `DT_VERDEF` support (version definition).
-            - [ ] Match versioned symbols correctly.
-            - [ ] Tests: versioned symbol tests.
-        - [ ] **Interposition & DT_SYMBOLIC:**
-            - [ ] Implement interposition rules (first definition wins).
-            - [ ] Implement `DT_SYMBOLIC` semantics (search own symbols first).
-            - [ ] Tests: interposition tests with LD_PRELOAD and overrides.
-            - [ ] Acceptance: symbol resolution matches specification.
-    - [ ] **9. Thread-Local Storage (TLS):**
-        - [ ] **TLS Models:**
-            - [ ] Implement static TLS model (Initial Exec, Local Exec).
-            - [ ] Implement dynamic TLS model (General Dynamic, Local Dynamic).
-            - [ ] Document TLS model selection in design doc.
-            - [ ] Files: `libexec/ld.so/rtld_tls.c`, `rtld_tls.h`.
-        - [ ] **TLS Initialization:**
-            - [ ] Parse `PT_TLS` segment from each DSO.
-            - [ ] Calculate total static TLS size and offsets.
-            - [ ] Initialize TLS for main program.
-            - [ ] Initialize TLS for dlopen-ed modules.
-            - [ ] Handle TLS alignment requirements.
-        - [ ] **TLS Runtime Support:**
-            - [ ] Implement `__tls_get_addr()` for dynamic TLS access.
-            - [ ] Implement per-thread TLS allocation.
-            - [ ] Integrate with pthread runtime (thread creation).
-            - [ ] Files: `libexec/ld.so/rtld_tls_get_addr.S`.
-            - [ ] Tests: TLS correctness tests across threads.
-            - [ ] Tests: dlopen/dlclose with TLS usage.
-            - [ ] Acceptance: TLS variables isolated per thread.
-    - [ ] **10. Constructors / Destructors / Initialization Order:**
-        - [ ] **Constructor Scanning:**
-            - [ ] Scan for `.init` section (legacy).
-            - [ ] Scan for `DT_INIT` function address.
-            - [ ] Scan for `DT_PREINIT_ARRAY` (executable only).
-            - [ ] Scan for `DT_INIT_ARRAY` function pointer array.
-            - [ ] Scan for `.ctors` section (legacy GCC).
-            - [ ] Files: `libexec/ld.so/rtld_init.c`, `rtld_init.h`.
-        - [ ] **Constructor Invocation:**
-            - [ ] Call `DT_PREINIT_ARRAY` functions (executable only, before deps).
-            - [ ] Call constructors in dependency order (deps before dependents).
-            - [ ] Call `DT_INIT` before `DT_INIT_ARRAY`.
-            - [ ] Handle constructor failures (continue or abort per policy).
-            - [ ] Tests: constructor order tests with complex dependency graphs.
-        - [ ] **Destructor Invocation:**
-            - [ ] Call `DT_FINI_ARRAY` destructors on exit.
-            - [ ] Call `DT_FINI` after `DT_FINI_ARRAY`.
-            - [ ] Call `atexit()` handlers (integrate with libc).
-            - [ ] Call destructors in reverse dependency order.
-            - [ ] Call destructors on `dlclose()` when refcount reaches zero.
-            - [ ] Tests: destructor order tests, dlclose destructor tests.
-            - [ ] Acceptance: constructors/destructors run in correct order.
-    - [ ] **11. dlopen / dlsym / dlclose Runtime API (libdl):**
-        - [ ] **dlopen():**
-            - [ ] Implement `dlopen(filename, flags)` - Load shared library at runtime.
-            - [ ] Flag: `RTLD_LAZY` - Lazy binding.
-            - [ ] Flag: `RTLD_NOW` - Immediate binding (resolve all symbols).
-            - [ ] Flag: `RTLD_GLOBAL` - Symbols available for subsequent loads.
-            - [ ] Flag: `RTLD_LOCAL` - Symbols private to this object (default).
-            - [ ] Flag: `RTLD_NODELETE` - Don't unload on dlclose.
-            - [ ] Flag: `RTLD_NOLOAD` - Don't load, just return handle if loaded.
-            - [ ] Flag: `RTLD_DEEPBIND` - Put this library before global scope.
-            - [ ] Return opaque handle on success, NULL on failure.
-            - [ ] Files: `lib/dl/dlopen.c`.
-            - [ ] Tests: dlopen tests for each flag combination.
-        - [ ] **dlsym():**
-            - [ ] Implement `dlsym(handle, symbol)` - Look up symbol.
-            - [ ] Handle `RTLD_DEFAULT` - Search default library order.
-            - [ ] Handle `RTLD_NEXT` - Search libraries after caller.
-            - [ ] Handle `RTLD_SELF` - Search caller's scope.
-            - [ ] Return symbol address or NULL if not found.
-            - [ ] Files: `lib/dl/dlsym.c`.
-            - [ ] Tests: dlsym tests for each pseudo-handle.
-        - [ ] **dlclose():**
-            - [ ] Implement `dlclose(handle)` - Decrement refcount.
-            - [ ] Unload library when refcount reaches zero.
-            - [ ] Call destructors before unload.
-            - [ ] Handle `RTLD_NODELETE` (never actually unload).
-            - [ ] Handle dependencies (don't unload if still referenced).
-            - [ ] Files: `lib/dl/dlclose.c`.
-            - [ ] Tests: refcounting tests, destructor tests.
-        - [ ] **dlerror():**
-            - [ ] Implement `dlerror()` - Get last error message.
-            - [ ] Thread-safe error storage.
-            - [ ] Clear error after retrieval.
-            - [ ] Files: `lib/dl/dlerror.c`.
-        - [ ] **dladdr():**
-            - [ ] Implement `dladdr(addr, info)` - Get info about address.
-            - [ ] Populate `Dl_info` structure with filename, base, symbol name, symbol address.
-            - [ ] Files: `lib/dl/dladdr.c`.
-        - [ ] **dlinfo():**
-            - [ ] Implement `dlinfo(handle, request, info)` - Get linker info.
-            - [ ] Support `RTLD_DI_LINKMAP`, `RTLD_DI_LMID`, etc.
-            - [ ] Files: `lib/dl/dlinfo.c`.
-        - [ ] **libdl Header & Build:**
-            - [ ] Create `include/dlfcn.h` with all declarations.
-            - [ ] Build `libdl.so` shared library.
-            - [ ] Tests: integration tests for full dlopen/dlsym/dlclose lifecycle.
-            - [ ] Acceptance: runtime API matches POSIX and documented behavior.
-    - [ ] **12. Environment, Configuration & Security:**
-        - [ ] **Environment Variables:**
-            - [ ] `LD_LIBRARY_PATH` - Additional library search paths.
-            - [ ] `LD_PRELOAD` - Libraries to preload before others.
-            - [ ] `LD_BIND_NOW` - Force immediate binding.
-            - [ ] `LD_BIND_NOT` - Don't update GOT (debug).
-            - [ ] `LD_DEBUG` - Enable debug output.
-            - [ ] `LD_DEBUG_OUTPUT` - Debug output file.
-            - [ ] `LD_TRACE_LOADED_OBJECTS` - Print library list and exit (ldd mode).
-            - [ ] Document all environment variables in man page.
-        - [ ] **Secureexec Mode:**
-            - [ ] Detect setuid/setgid via `AT_SECURE` auxv entry.
-            - [ ] Ignore `LD_LIBRARY_PATH` for setuid/setgid binaries.
-            - [ ] Ignore `LD_PRELOAD` for setuid/setgid binaries.
-            - [ ] Ignore `LD_DEBUG` for setuid/setgid binaries.
-            - [ ] Ignore all `LD_*` variables in secure mode.
-            - [ ] Refuse to load libraries from user-writable directories.
-            - [ ] Verify library ownership/permissions in secure mode.
-            - [ ] Document secure behavior in design doc and man page.
-            - [ ] Tests: secureexec tests with mock setuid scenario.
-        - [ ] **RELRO (Read-Only Relocations):**
-            - [ ] Implement `PT_GNU_RELRO` segment handling.
-            - [ ] Mark relocation areas read-only after processing.
-            - [ ] Implement full RELRO with `BIND_NOW`.
-            - [ ] Tests: RELRO protection tests.
-        - [ ] **Chroot/Sysroot Handling:**
-            - [ ] Support alternate sysroot for containers/chroots.
-            - [ ] Respect `LD_SYSROOT` or similar if defined.
-            - [ ] Tests: sysroot tests.
-            - [ ] Acceptance: secure modes enforce all restrictions.
-    - [ ] **13. Configuration & Caching:**
-        - [ ] **ld.so.conf:**
-            - [ ] Implement `/etc/ld.so.conf` parsing.
-            - [ ] Support include directives for `/etc/ld.so.conf.d/*.conf`.
-            - [ ] Files: `libexec/ld.so/rtld_conf.c`.
-        - [ ] **ld.so.cache:**
-            - [ ] Define cache file format.
-            - [ ] Implement cache reader in loader.
-            - [ ] Handle cache miss gracefully (fall back to search).
-            - [ ] Handle stale/corrupt cache gracefully.
-            - [ ] Files: `libexec/ld.so/rtld_cache.c`.
-        - [ ] **ldconfig Tool:**
-            - [ ] Implement `sbin/ldconfig` to rebuild cache.
-            - [ ] Scan configured directories for shared libraries.
-            - [ ] Create symlinks for SONAME → real file.
-            - [ ] Write `/etc/ld.so.cache`.
-            - [ ] Files: `sbin/ldconfig/ldconfig.c`.
-            - [ ] Man page: `ldconfig(8)`.
-            - [ ] Tests: cache read/write tests.
-            - [ ] Acceptance: cache improves lookup performance.
-    - [ ] **14. Performance & Optimizations:**
-        - [ ] **Hash Lookup Optimization:**
-            - [ ] Prefer GNU_HASH over SYSV hash when available.
-            - [ ] Benchmark both hash algorithms.
-            - [ ] Document performance characteristics.
-        - [ ] **Lazy Binding Optimization:**
-            - [ ] Minimize overhead in PLT resolver.
-            - [ ] Cache resolved symbols efficiently.
-        - [ ] **Relocation Batching:**
-            - [ ] Process relocations in batches where possible.
-            - [ ] Minimize page faults during relocation.
-        - [ ] **Prelinking (Optional):**
-            - [ ] Document prelinking concept as optional future enhancement.
-            - [ ] Add placeholder task for `prelink` tool.
-        - [ ] **Performance Testing:**
-            - [ ] Add microbenchmarks for symbol lookup.
-            - [ ] Add benchmarks for library load time.
-            - [ ] Integrate performance tests into CI.
-            - [ ] Acceptance: measurable improvements documented.
-    - [ ] **15. Diagnostics, Auditing & Tracing:**
-        - [ ] **Debug Output:**
-            - [ ] Implement `LD_DEBUG` support with categories:
-                - [ ] `LD_DEBUG=libs` - Library search/load.
-                - [ ] `LD_DEBUG=reloc` - Relocation processing.
-                - [ ] `LD_DEBUG=symbols` - Symbol lookups.
-                - [ ] `LD_DEBUG=bindings` - Symbol bindings.
-                - [ ] `LD_DEBUG=files` - File operations.
-                - [ ] `LD_DEBUG=versions` - Version processing.
-                - [ ] `LD_DEBUG=statistics` - Runtime statistics.
-                - [ ] `LD_DEBUG=all` - All categories.
-            - [ ] Files: `libexec/ld.so/rtld_debug.c`.
-        - [ ] **Debugger Support:**
-            - [ ] Implement `r_debug` structure for GDB integration.
-            - [ ] Export `_r_debug` symbol.
-            - [ ] Implement `_dl_debug_state()` breakpoint hook.
-            - [ ] State notifications: `RT_ADD`, `RT_DELETE`, `RT_CONSISTENT`.
-            - [ ] Files: `libexec/ld.so/rtld_gdb.c`, `include/link.h`.
-            - [ ] Tests: GDB integration tests.
-        - [ ] **Audit Interface (Optional):**
-            - [ ] Implement `rtld-audit` interface for load/unload hooks.
-            - [ ] Support `LD_AUDIT` environment variable.
-            - [ ] Document audit API.
-        - [ ] **System Tracing:**
-            - [ ] Ensure loader is ktrace/strace-friendly.
-            - [ ] Document tracing techniques.
-            - [ ] Tests: trace output tests.
-            - [ ] Acceptance: diagnostics useful and documented.
-    - [ ] **16. Error Handling & Robustness:**
-        - [ ] **Failure Modes:**
-            - [ ] Define and document failure modes for each operation.
-            - [ ] Relocation failure: report symbol name and DSO.
-            - [ ] Unresolved symbol: report symbol name and search path.
-            - [ ] Constructor failure: report function address and DSO.
-            - [ ] Malformed DSO: report specific validation failure.
-        - [ ] **Error Messages:**
-            - [ ] Provide helpful diagnostics with SONAME/path information.
-            - [ ] Include failing relocation type and offset.
-            - [ ] Format: `ld.so: <DSO>: <error>: <details>`.
-        - [ ] **Graceful Degradation:**
-            - [ ] Continue loading other DSOs after non-fatal errors where possible.
-            - [ ] Document fatal vs non-fatal error policy.
-        - [ ] **Fuzzing & Sanitizers:**
-            - [ ] Fuzz test with malformed ELF files.
-            - [ ] Fuzz test with malicious relocation data.
-            - [ ] Run all tests under AddressSanitizer.
-            - [ ] Run all tests under UndefinedBehaviorSanitizer.
-            - [ ] Tests: determinism tests (same input → same output).
-            - [ ] Acceptance: loader never crashes on malformed input.
-    - [ ] **17. Thread Safety & Concurrency:**
-        - [ ] **Locking Strategy:**
-            - [ ] Define global loader lock vs per-object locks.
-            - [ ] Document locking invariants.
-            - [ ] Implement recursive-safe locking for nested dlopen.
-            - [ ] Files: `libexec/ld.so/rtld_lock.c`, `rtld_lock.h`.
-        - [ ] **Thread-Safe Operations:**
-            - [ ] Thread-safe `dlopen()`.
-            - [ ] Thread-safe `dlclose()`.
-            - [ ] Thread-safe lazy binding resolution.
-            - [ ] Thread-safe TLS allocation.
-        - [ ] **Concurrency Testing:**
-            - [ ] Stress tests with many threads calling dlopen/dlsym.
-            - [ ] Stress tests with concurrent lazy binding.
-            - [ ] Tests: deadlock detection tests.
-            - [ ] Tests: race condition tests.
-            - [ ] Acceptance: no deadlocks or races in tests.
-    - [ ] **18. Unloading & Resource Cleanup:**
-        - [ ] **dlclose Behavior:**
-            - [ ] Decrement reference count on dlclose.
-            - [ ] Unload when refcount reaches zero (unless RTLD_NODELETE).
-            - [ ] Call destructors before unload.
-            - [ ] Free TLS data for unloaded module.
-            - [ ] Unmap segments.
-        - [ ] **Unloadable Modules:**
-            - [ ] Handle case where symbols are still referenced.
-            - [ ] Document behavior (refuse unload or warn).
-            - [ ] Handle static TLS modules (cannot unload).
-        - [ ] **Leak Detection:**
-            - [ ] Run tests under sanitizers to detect leaks.
-            - [ ] Verify all allocations freed on process exit.
-            - [ ] Verify TLS and static data cleaned up.
-            - [ ] Acceptance: no leaks in tests.
-    - [ ] **19. ABI & Tooling Compatibility:**
-        - [ ] **dl_iterate_phdr:**
-            - [ ] Implement `dl_iterate_phdr()` for iterating loaded objects.
-            - [ ] Required for exception handling (libunwind, C++ EH).
-            - [ ] Files: `lib/dl/dl_iterate_phdr.c`.
-            - [ ] Header: `include/link.h`.
-        - [ ] **libdl Interface:**
-            - [ ] Provide complete `dlfcn.h` header.
-            - [ ] Provide `link.h` header (link_map, r_debug).
-            - [ ] Build `libdl.so` and `libdl.a`.
-        - [ ] **Compatibility Shims:**
-            - [ ] Document any GNU/Linux compatibility shims needed.
-            - [ ] Implement common expectations of third-party software.
-            - [ ] Tests: third-party compatibility tests.
-    - [ ] **20. Installer & Packaging:**
-        - [ ] **Install Layout:**
-            - [ ] Define interpreter path: `/libexec/ld.so` (BSD style).
-            - [ ] Alternative: `/libexec/ld-elf.so.1` for compatibility.
-            - [ ] Install `libdl.so` to `/lib`.
-            - [ ] Install headers to `/usr/include`.
-        - [ ] **Packaging:**
-            - [ ] Provide packaging scripts.
-            - [ ] Define versioning policy.
-            - [ ] Define symlink policy for upgrades.
-            - [ ] Acceptance: installer places interpreter correctly.
-    - [ ] **21. Tests & CI:**
-        - [ ] **Unit Tests:**
-            - [ ] ELF parsing tests (valid/invalid headers).
-            - [ ] Segment mapping tests.
-            - [ ] Relocation tests (each type).
-            - [ ] Symbol lookup tests (hash, versioning).
-            - [ ] TLS tests.
-        - [ ] **Integration Tests:**
-            - [ ] Build small test executables and shared libraries.
-            - [ ] Test preload functionality.
-            - [ ] Test dlopen/dlsym/dlclose lifecycle.
-            - [ ] Test constructor/destructor order.
-            - [ ] Test TLS across threads and dlopen.
-            - [ ] Test circular dependencies.
-            - [ ] Test deep dependency trees.
-        - [ ] **Property Tests:**
-            - [ ] Symbol resolution order properties.
-            - [ ] Relocation correctness properties.
-        - [ ] **Fuzz Tests:**
-            - [ ] Fuzz ELF parser with malformed files.
-            - [ ] Fuzz relocation processor.
-            - [ ] Fuzz symbol resolver.
-        - [ ] **CI Matrix:**
-            - [ ] Sanitizer builds (ASAN, UBSAN, MSAN).
-            - [ ] Multi-arch builds (i386, x86_64 when ready).
-            - [ ] Regression test suite.
-            - [ ] Performance benchmarks.
-            - [ ] Acceptance: CI green, sanitizers clean.
-    - [ ] **22. Documentation & Man Pages:**
-        - [ ] **Man Pages:**
-            - [ ] Write `ld.so(8)` man page covering:
-                - [ ] Description of dynamic linker.
-                - [ ] Environment variables.
-                - [ ] Secureexec rules.
-                - [ ] Debugging techniques.
-                - [ ] Files and paths.
-            - [ ] Write `dlopen(3)` man page with usage examples.
-            - [ ] Write `dlsym(3)` man page.
-            - [ ] Write `dlclose(3)` man page.
-            - [ ] Write `dlerror(3)` man page.
-            - [ ] Write `dladdr(3)` man page.
-            - [ ] Write `dlinfo(3)` man page.
-            - [ ] Write `dl_iterate_phdr(3)` man page.
-            - [ ] Write `ldconfig(8)` man page.
-        - [ ] **Developer Documentation:**
-            - [ ] Design document (covered in Specification).
-            - [ ] Decision log for major choices.
-            - [ ] Security notes and threat model.
-            - [ ] Migration notes for systems upgrading.
-            - [ ] Acceptance: docs reviewed and in repository.
-    - [ ] **23. Audit & Refactor Existing Code:**
-        - [ ] Audit any existing loader/runtime code in repository.
-        - [ ] Document fragile or incomplete code paths.
-        - [ ] Schedule refactor tasks before reuse.
-        - [ ] Replace all TODOs/FIXMEs with individual checklist items.
-        - [ ] Acceptance: no fragile stubs remain when core implemented.
+    - [ ] **Implementation Checklist (Commit-Atomic, Production Gate):**
+        - **1. Specification & Design**
+            - [x] Freeze `ld.so` scope, ABI targets, and unsupported-feature policy.
+                - Files/Headers: `docs/ld.so-design.md`, `docs/abi/elf-rtld-scope.md`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/spec/test_scope_matrix.c`; property `tests/libexec/ld.so/property/prop_feature_matrix.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_parser.c`.
+                - Docs: define supported/deferred/rejected feature matrix in `docs/ld.so-design.md`.
+                - Acceptance: scope matrix exists and every targeted ELF feature has a disposition and rationale.
+            - [x] Publish architecture relocation matrix for i386 now and x86_64 stub policy.
+                - Files/Headers: `docs/ld.so-reloc-matrix.md`, `libexec/ld.so/rtld_reloc_types.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_matrix_sync.c`; property `tests/libexec/ld.so/property/prop_reloc_matrix_totality.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_type_decoder.c`.
+                - Docs: add architecture matrix and unsupported relocation behavior.
+                - Acceptance: each relocation used by targeted ABIs maps to an implemented or explicitly rejected handler.
+            - [x] Specify deterministic symbol-resolution precedence and scope graph rules.
+                - Files/Headers: `docs/ld.so-symbol-resolution.md`, `libexec/ld.so/rtld_scope.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_scope_precedence.c`; property `tests/libexec/ld.so/property/prop_deterministic_lookup.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_inputs.c`.
+                - Docs: document preload/executable/dependency/path precedence and tie-breakers.
+                - Acceptance: two identical dependency graphs produce identical resolution results across runs.
+            - [x] Specify DT_RPATH/DT_RUNPATH, DT_SONAME, and versioning policy.
+                - Files/Headers: `docs/ld.so-path-and-version-policy.md`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_runpath_policy.c`; property `tests/libexec/ld.so/property/prop_soname_identity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_runpath_tokens.c`.
+                - Docs: define RPATH vs RUNPATH behavior, SONAME matching, and versioned symbol policy.
+                - Acceptance: policy doc is authoritative and referenced by loader manpages.
+        - **2. Loader Core: ELF Parsing & Mapping**
+            - [ ] Implement hardened ELF header/program-header parser with overflow guards.
+                - Files/Headers: `libexec/ld.so/elf_parse.c`, `libexec/ld.so/elf_parse.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_elf_parse_headers.c`; property `tests/libexec/ld.so/property/prop_header_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_elf_headers.c`.
+                - Docs: document parser invariants and rejection reasons in `docs/ld.so-design.md`.
+                - Acceptance: malformed/truncated headers are rejected without crash or out-of-bounds access.
+            - [ ] Implement dynamic table parser for required `DT_*` entries with strict bounds checking.
+                - Files/Headers: `libexec/ld.so/elf_dynamic.c`, `libexec/ld.so/elf_dynamic.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dynamic_table_parse.c`; property `tests/libexec/ld.so/property/prop_dt_tag_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dynamic_table.c`.
+                - Docs: add required/optional `DT_*` tag table.
+                - Acceptance: loader extracts required dynamic metadata and rejects conflicting/invalid tables.
+            - [ ] Implement page-aligned segment mapping with exact `PROT_*` transitions.
+                - Files/Headers: `libexec/ld.so/elf_map.c`, `libexec/ld.so/elf_map.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_segment_mapping.c`; property `tests/libexec/ld.so/property/prop_mapping_alignment.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_segment_layouts.c`.
+                - Docs: document mapping/protection lifecycle and W^X constraints.
+                - Acceptance: mapped segment permissions match ELF flags and pass integration probes.
+            - [ ] Implement fallback read-into-memory path for unsupported mmap edge cases.
+                - Files/Headers: `libexec/ld.so/elf_map_fallback.c`, `libexec/ld.so/elf_map.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_map_fallback.c`; property `tests/libexec/ld.so/property/prop_fallback_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_map_fallback_inputs.c`.
+                - Docs: describe when fallback mode is used and performance/security tradeoffs.
+                - Acceptance: fallback path loads valid DSOs with identical runtime behavior to mmap path.
+        - **3. Dependency Resolution & Loading Order**
+            - [ ] Implement recursive `DT_NEEDED` graph construction with cycle detection metadata.
+                - Files/Headers: `libexec/ld.so/rtld_dep.c`, `libexec/ld.so/rtld_dep.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dep_graph.c`; property `tests/libexec/ld.so/property/prop_cycle_termination.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_needed_graph.c`.
+                - Docs: describe cycle handling and graph node states.
+                - Acceptance: cyclic dependency sets terminate and produce deterministic load plans.
+            - [ ] Implement topological load-order planner for reloc/init phases.
+                - Files/Headers: `libexec/ld.so/rtld_order.c`, `libexec/ld.so/rtld_order.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_load_order.c`; property `tests/libexec/ld.so/property/prop_topo_validity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_order_inputs.c`.
+                - Docs: define ordering differences for relocation and constructor traversal.
+                - Acceptance: planned order always satisfies dependency-before-dependent invariant.
+            - [ ] Implement per-process DSO registry with SONAME identity and refcounts.
+                - Files/Headers: `libexec/ld.so/rtld_obj.c`, `libexec/ld.so/rtld_obj.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dso_registry.c`; property `tests/libexec/ld.so/property/prop_refcount_balance.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dso_identity.c`.
+                - Docs: document object lifecycle states and refcount semantics.
+                - Acceptance: duplicate loads reuse existing objects and maintain correct reference counts.
+            - [ ] Implement full search policy (`LD_PRELOAD`, `LD_LIBRARY_PATH`, RUNPATH/RPATH, cache, defaults).
+                - Files/Headers: `libexec/ld.so/rtld_search.c`, `libexec/ld.so/rtld_search.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_search_policy.c`; property `tests/libexec/ld.so/property/prop_search_precedence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_search_tokens.c`.
+                - Docs: add path precedence algorithm and token expansion rules.
+                - Acceptance: lookup order matches specification for all precedence edge cases.
+        - **4. Relocations & Binding**
+            - [ ] Implement REL/RELA dispatcher and relocation pass sequencing.
+                - Files/Headers: `libexec/ld.so/rtld_reloc.c`, `libexec/ld.so/rtld_reloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_dispatch.c`; property `tests/libexec/ld.so/property/prop_reloc_idempotence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_records.c`.
+                - Docs: document relocation pipeline and ordering guarantees.
+                - Acceptance: required relocation records execute in deterministic order without corruption.
+            - [ ] Implement core i386 relocation handlers (relative, absolute, pc-relative, glob-dat, jmp-slot).
+                - Files/Headers: `libexec/ld.so/rtld_reloc_i386.c`, `libexec/ld.so/rtld_reloc_i386.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_i386_core.c`; property `tests/libexec/ld.so/property/prop_i386_reloc_equations.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_i386_relocs.c`.
+                - Docs: enumerate implemented relocation formulas and constraints.
+                - Acceptance: relocation outputs match expected addresses for all supported i386 test fixtures.
+            - [ ] Implement copy relocation support with explicit executable-only safety checks.
+                - Files/Headers: `libexec/ld.so/rtld_copyreloc.c`, `libexec/ld.so/rtld_copyreloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_copy_reloc.c`; property `tests/libexec/ld.so/property/prop_copy_reloc_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_copy_reloc.c`.
+                - Docs: document copy-reloc constraints and rejection cases.
+                - Acceptance: data symbols requiring copy relocations initialize correctly without out-of-bounds copies.
+            - [ ] Implement lazy PLT resolver and GOT patch path.
+                - Files/Headers: `libexec/ld.so/rtld_plt.S`, `libexec/ld.so/rtld_bind.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_lazy_bind.c`; property `tests/libexec/ld.so/property/prop_bind_fixpoint.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_plt_indices.c`.
+                - Docs: describe PLT0 calling convention and resolver contract.
+                - Acceptance: first call resolves symbol and subsequent calls bypass resolver.
+            - [ ] Implement eager binding path for `RTLD_NOW` and `LD_BIND_NOW`.
+                - Files/Headers: `libexec/ld.so/rtld_now.c`, `libexec/ld.so/rtld_bind.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_bind_now.c`; property `tests/libexec/ld.so/property/prop_now_equals_lazy_endstate.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_bind_modes.c`.
+                - Docs: document lazy vs eager behavioral differences.
+                - Acceptance: eager mode resolves all bindable PLT relocations before control transfer.
+            - [ ] Add atomic GOT patching and locking for concurrent lazy binding.
+                - Files/Headers: `libexec/ld.so/rtld_bind_lock.c`, `libexec/ld.so/rtld_lock.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_atomic_got_patch.c`; property `tests/libexec/ld.so/property/prop_no_double_patch.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_concurrent_bind.c`.
+                - Docs: define lock/atomic invariants for runtime binding.
+                - Acceptance: concurrent first-call binding is race-free and resolves exactly once per slot.
+        - **5. Symbol Resolution & Interposition**
+            - [ ] Implement SYSV `DT_HASH` and GNU `DT_GNU_HASH` lookup backends.
+                - Files/Headers: `libexec/ld.so/rtld_hash.c`, `libexec/ld.so/rtld_hash.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_hash_lookup.c`; property `tests/libexec/ld.so/property/prop_hash_backend_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_hash_tables.c`.
+                - Docs: document hash backend selection and fallback.
+                - Acceptance: symbol lookup returns identical results across supported hash table variants.
+            - [ ] Implement weak/strong, visibility, and undefined-weak rules.
+                - Files/Headers: `libexec/ld.so/rtld_sym.c`, `libexec/ld.so/rtld_sym.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_symbol_strength.c`; property `tests/libexec/ld.so/property/prop_visibility_rules.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_symbol_attrs.c`.
+                - Docs: add symbol binding and visibility decision table.
+                - Acceptance: symbol selection follows ABI rules for weak/strong and visibility combinations.
+            - [ ] Implement preload-based interposition and global/local scope boundaries.
+                - Files/Headers: `libexec/ld.so/rtld_scope.c`, `libexec/ld.so/rtld_scope.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_interposition.c`; property `tests/libexec/ld.so/property/prop_scope_isolation.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_graphs.c`.
+                - Docs: document interposition precedence with `LD_PRELOAD`.
+                - Acceptance: preload libraries can override eligible global symbols without leaking local scope symbols.
+            - [ ] Implement versioned symbol matching (`DT_VERSYM`, `DT_VERNEED`, `DT_VERDEF`) when present.
+                - Files/Headers: `libexec/ld.so/rtld_versym.c`, `libexec/ld.so/rtld_versym.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_symbol_versions.c`; property `tests/libexec/ld.so/property/prop_version_match_totality.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_version_sections.c`.
+                - Docs: describe version requirement matching and failure messages.
+                - Acceptance: loader resolves only symbols satisfying requested versions and emits deterministic errors otherwise.
+        - **6. TLS (Thread-Local Storage)**
+            - [ ] Implement `PT_TLS` parsing and per-module TLS metadata registration.
+                - Files/Headers: `libexec/ld.so/rtld_tls.c`, `libexec/ld.so/rtld_tls.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_metadata.c`; property `tests/libexec/ld.so/property/prop_tls_layout_valid.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_segments.c`.
+                - Docs: document TLS metadata fields and invariants.
+                - Acceptance: each loaded module has validated TLS metadata with aligned sizes and offsets.
+            - [ ] Implement static TLS layout computation for startup objects.
+                - Files/Headers: `libexec/ld.so/rtld_tls_layout.c`, `libexec/ld.so/rtld_tls_layout.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_static_tls_layout.c`; property `tests/libexec/ld.so/property/prop_tls_alignment.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_layout.c`.
+                - Docs: describe layout algorithm and alignment constraints.
+                - Acceptance: static TLS blocks are non-overlapping, aligned, and accessible for all startup modules.
+            - [ ] Implement dynamic TLS allocation and `__tls_get_addr()` resolver.
+                - Files/Headers: `libexec/ld.so/rtld_tls_get_addr.S`, `libexec/ld.so/rtld_tls_dyn.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_get_addr.c`; property `tests/libexec/ld.so/property/prop_tls_addr_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_get_addr.c`.
+                - Docs: define `__tls_get_addr` ABI contract and failure modes.
+                - Acceptance: dynamic TLS lookups return correct per-thread addresses across repeated calls.
+            - [ ] Integrate TLS module lifecycle with `dlopen`/`dlclose` and pthread creation.
+                - Files/Headers: `libexec/ld.so/rtld_tls_lifecycle.c`, `lib/pthreads/pthread_tls_hooks.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_dlopen.c`; property `tests/libexec/ld.so/property/prop_tls_isolation_threads.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_lifecycle.c`.
+                - Docs: document TLS lifecycle events and teardown rules.
+                - Acceptance: TLS data is isolated per thread and modules loaded after startup are usable from all threads.
+        - **7. Constructors / Destructors / Initialization Order**
+            - [ ] Implement parser for `DT_PREINIT_ARRAY`, `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI`, `DT_FINI_ARRAY`.
+                - Files/Headers: `libexec/ld.so/rtld_init.c`, `libexec/ld.so/rtld_init.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_init_fini_parse.c`; property `tests/libexec/ld.so/property/prop_init_entry_validity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_init_arrays.c`.
+                - Docs: document supported initializer/finalizer sources.
+                - Acceptance: loader discovers all supported constructor/destructor entry points in fixtures.
+            - [ ] Implement dependency-respecting constructor execution order.
+                - Files/Headers: `libexec/ld.so/rtld_init_order.c`, `libexec/ld.so/rtld_order.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ctor_order.c`; property `tests/libexec/ld.so/property/prop_ctor_partial_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ctor_graphs.c`.
+                - Docs: define constructor ordering algorithm and corner cases.
+                - Acceptance: constructors run once and in dependency-correct order for complex graphs.
+            - [ ] Implement reverse-order destructor execution for process exit and `dlclose`.
+                - Files/Headers: `libexec/ld.so/rtld_fini.c`, `libexec/ld.so/rtld_fini.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dtor_order.c`; property `tests/libexec/ld.so/property/prop_dtor_reverse_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dtor_sequences.c`.
+                - Docs: describe exit vs unload finalization semantics.
+                - Acceptance: destructors run once in reverse dependency order under exit and unload paths.
+        - **8. `dlopen` / `dlsym` / `dlclose` Runtime API**
+            - [ ] Implement `dlfcn.h` ABI surface and libdl entry points skeleton.
+                - Files/Headers: `include/dlfcn.h`, `lib/dl/Makefile`, `lib/dl/dl_api.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlfcn_header.c`; property `tests/lib/dl/property/prop_flag_roundtrip.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlfcn_inputs.c`.
+                - Docs: document exported API and flag support matrix.
+                - Acceptance: headers and exported symbols compile and link for target userland.
+            - [ ] Implement `dlopen()` with `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, and `RTLD_GLOBAL`.
+                - Files/Headers: `lib/dl/dlopen.c`, `libexec/ld.so/rtld_dlopen.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlopen_flags.c`; property `tests/lib/dl/property/prop_scope_visibility_flags.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlopen_flags.c`.
+                - Docs: add `dlopen(3)` flag semantics and examples.
+                - Acceptance: requested flags change scope and binding behavior exactly as documented.
+            - [ ] Implement `dlsym()` with `RTLD_DEFAULT`, `RTLD_NEXT`, and handle-scoped lookups.
+                - Files/Headers: `lib/dl/dlsym.c`, `libexec/ld.so/rtld_dlsym.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlsym_handles.c`; property `tests/lib/dl/property/prop_dlsym_deterministic.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlsym_names.c`.
+                - Docs: define lookup origin and pseudo-handle behavior.
+                - Acceptance: pseudo-handle and explicit-handle lookups return expected symbols in precedence order.
+            - [ ] Implement `dlclose()` refcounting, unload decision, and `RTLD_NODELETE` behavior.
+                - Files/Headers: `lib/dl/dlclose.c`, `libexec/ld.so/rtld_dlclose.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlclose_refcount.c`; property `tests/lib/dl/property/prop_refcount_never_negative.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlclose_sequences.c`.
+                - Docs: document unload eligibility and nodelete semantics.
+                - Acceptance: unload occurs only when allowed and references are balanced.
+            - [ ] Implement `dlerror()` with thread-local last-error storage semantics.
+                - Files/Headers: `lib/dl/dlerror.c`, `libexec/ld.so/rtld_error.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlerror_tls.c`; property `tests/lib/dl/property/prop_dlerror_clear_once.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlerror_messages.c`.
+                - Docs: specify error lifecycle and thread safety guarantees.
+                - Acceptance: each thread observes independent last-error state that clears on retrieval.
+            - [ ] Implement `dladdr()` and `dlinfo()` for common tooling requests.
+                - Files/Headers: `lib/dl/dladdr.c`, `lib/dl/dlinfo.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dladdr_dlinfo.c`; property `tests/lib/dl/property/prop_addr_to_object.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlinfo_requests.c`.
+                - Docs: add `dladdr(3)` and `dlinfo(3)` request coverage table.
+                - Acceptance: tooling-visible metadata is stable and accurate for loaded objects.
+        - **9. Environment, Configuration & Security**
+            - [ ] Implement parser for supported `LD_*` variables with strict token validation.
+                - Files/Headers: `libexec/ld.so/rtld_env.c`, `libexec/ld.so/rtld_env.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_env_parse.c`; property `tests/libexec/ld.so/property/prop_env_parse_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ld_env.c`.
+                - Docs: enumerate accepted variables and parse rules.
+                - Acceptance: malformed env values are rejected safely with deterministic errors.
+            - [ ] Enforce secure-exec mode to ignore all unsafe `LD_*` inputs.
+                - Files/Headers: `libexec/ld.so/rtld_secure.c`, `libexec/ld.so/rtld_secure.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_ignore_env.c`; property `tests/libexec/ld.so/property/prop_secure_env_zero_effect.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_secure_env.c`.
+                - Docs: document secure-exec behavior in design and manpages.
+                - Acceptance: setuid/setgid/secure mode ignores user-controlled `LD_*` knobs.
+            - [ ] Enforce secure preload policy (deny user-controlled preload paths and objects).
+                - Files/Headers: `libexec/ld.so/rtld_preload_secure.c`, `libexec/ld.so/rtld_search.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_preload.c`; property `tests/libexec/ld.so/property/prop_preload_secure_rejection.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_preload_secure.c`.
+                - Docs: specify trusted preload directories and rejection reasons.
+                - Acceptance: secure mode never loads preloads from untrusted/user-writable locations.
+            - [ ] Validate ownership and permissions of DSOs before secure-mode use.
+                - Files/Headers: `libexec/ld.so/rtld_fs_secure.c`, `libexec/ld.so/rtld_fs_secure.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_permissions.c`; property `tests/libexec/ld.so/property/prop_secure_path_monotonicity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_secure_stat.c`.
+                - Docs: document permission and ownership checks for secure execution.
+                - Acceptance: libraries failing secure ownership/permission checks are rejected with explicit diagnostics.
+            - [ ] Implement `PT_GNU_RELRO` finalization and read-only remap after relocations.
+                - Files/Headers: `libexec/ld.so/rtld_relro.c`, `libexec/ld.so/rtld_relro.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_relro_apply.c`; property `tests/libexec/ld.so/property/prop_relro_write_blocked.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_relro_ranges.c`.
+                - Docs: add RELRO requirements and interaction with `BIND_NOW`.
+                - Acceptance: RELRO pages become read-only after relocation and remain non-writable.
+            - [ ] Implement sysroot/chroot-aware path canonicalization for loader lookups.
+                - Files/Headers: `libexec/ld.so/rtld_path.c`, `libexec/ld.so/rtld_path.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_sysroot_paths.c`; property `tests/libexec/ld.so/property/prop_no_escape_from_sysroot.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_path_canon.c`.
+                - Docs: define path resolution behavior in chroot/container contexts.
+                - Acceptance: resolved library paths cannot escape configured root boundaries.
+        - **10. Caching & `ldconfig`**
+            - [ ] Define `ld.so.cache` binary format and versioning contract.
+                - Files/Headers: `include/ldso_cache.h`, `docs/ld.so-cache-format.md`.
+                - Tests (unit/property/fuzz): unit `tests/sbin/ldconfig/unit/test_cache_format.c`; property `tests/sbin/ldconfig/property/prop_cache_roundtrip.c`; fuzz `tests/sbin/ldconfig/fuzz/fuzz_cache_parser.c`.
+                - Docs: publish cache format, endianness, and compatibility policy.
+                - Acceptance: cache format spec is versioned and parser compatibility rules are explicit.
+            - [ ] Implement secure cache reader in loader with ownership/permission validation.
+                - Files/Headers: `libexec/ld.so/rtld_cache.c`, `libexec/ld.so/rtld_cache.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_cache_reader_secure.c`; property `tests/libexec/ld.so/property/prop_cache_lookup_consistency.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_cache_reader.c`.
+                - Docs: document cache trust model and fallback policy.
+                - Acceptance: untrusted/stale/corrupt cache is ignored safely and lookup falls back to path search.
+            - [ ] Implement `ldconfig(8)` cache writer and SONAME symlink management.
+                - Files/Headers: `sbin/ldconfig/ldconfig.c`, `sbin/ldconfig/Makefile`.
+                - Tests (unit/property/fuzz): unit `tests/sbin/ldconfig/unit/test_ldconfig_scan.c`; property `tests/sbin/ldconfig/property/prop_soname_link_consistency.c`; fuzz `tests/sbin/ldconfig/fuzz/fuzz_ldconfig_inputs.c`.
+                - Docs: add `man/man8/ldconfig.8`.
+                - Acceptance: `ldconfig` generates a valid cache and expected SONAME symlinks for configured dirs.
+        - **11. Performance & Optimizations**
+            - [ ] Optimize hash lookup fast path with GNU hash bloom prefilter.
+                - Files/Headers: `libexec/ld.so/rtld_hash_gnu.c`, `libexec/ld.so/rtld_hash.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_gnu_hash_bloom.c`; property `tests/libexec/ld.so/property/prop_hash_false_positive_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_gnu_hash.c`.
+                - Docs: record algorithm and expected complexity.
+                - Acceptance: lookup fast path is measurably faster than SYSV-only baseline on benchmark corpus.
+            - [ ] Batch relocations by page locality to reduce protection flips and page faults.
+                - Files/Headers: `libexec/ld.so/rtld_reloc_batch.c`, `libexec/ld.so/rtld_reloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_batch.c`; property `tests/libexec/ld.so/property/prop_batch_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_batch.c`.
+                - Docs: document batching constraints and correctness invariants.
+                - Acceptance: batched relocation mode preserves correctness and reduces startup cost in benchmarks.
+            - [ ] Add optional prebinding/prelink experiment behind explicit build flag.
+                - Files/Headers: `libexec/ld.so/rtld_prebind.c`, `libexec/ld.so/config.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_prebind_flag.c`; property `tests/libexec/ld.so/property/prop_prebind_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_prebind_metadata.c`.
+                - Docs: document prebinding as experimental and disabled by default.
+                - Acceptance: prebind mode is off by default and does not change default correctness guarantees.
+        - **12. Diagnostics, Auditing & Tracing**
+            - [ ] Implement `LD_DEBUG` category parser and structured debug logger.
+                - Files/Headers: `libexec/ld.so/rtld_debug.c`, `libexec/ld.so/rtld_debug.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ld_debug_categories.c`; property `tests/libexec/ld.so/property/prop_debug_filtering.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_debug_env.c`.
+                - Docs: document debug categories and output format.
+                - Acceptance: selected debug categories produce stable, parseable logs without leaking unrelated events.
+            - [ ] Implement `r_debug` / `_dl_debug_state` updates for debugger attach flow.
+                - Files/Headers: `libexec/ld.so/rtld_gdb.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_r_debug_states.c`; property `tests/libexec/ld.so/property/prop_debug_state_transitions.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_link_map_lists.c`.
+                - Docs: describe debugger handshake and state transitions.
+                - Acceptance: debugger-visible link-map state transitions are correct for add/remove events.
+            - [ ] Implement optional audit hook interface for load/bind events.
+                - Files/Headers: `libexec/ld.so/rtld_audit.c`, `libexec/ld.so/rtld_audit.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_audit_callbacks.c`; property `tests/libexec/ld.so/property/prop_audit_event_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_audit_modules.c`.
+                - Docs: publish audit hook ABI and safety caveats.
+                - Acceptance: enabled audit modules receive deterministic callbacks without changing default behavior.
+            - [ ] Add trace-friendly one-line event mode for ktrace/strace correlation.
+                - Files/Headers: `libexec/ld.so/rtld_trace.c`, `libexec/ld.so/rtld_trace.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_trace_format.c`; property `tests/libexec/ld.so/property/prop_trace_event_completeness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_trace_strings.c`.
+                - Docs: define stable trace keys and field semantics.
+                - Acceptance: trace mode emits machine-parseable events with stable keys.
+        - **13. Error Handling & Robustness**
+            - [ ] Define centralized loader error catalog with stable error codes.
+                - Files/Headers: `libexec/ld.so/rtld_errcodes.h`, `libexec/ld.so/rtld_error.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_error_catalog.c`; property `tests/libexec/ld.so/property/prop_error_code_uniqueness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_error_format.c`.
+                - Docs: document error code meanings and operator guidance.
+                - Acceptance: each fatal/non-fatal condition maps to a unique, documented loader error code.
+            - [ ] Implement high-context unresolved-symbol and relocation-failure diagnostics.
+                - Files/Headers: `libexec/ld.so/rtld_diag.c`, `libexec/ld.so/rtld_error.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_diag_unresolved.c`; property `tests/libexec/ld.so/property/prop_diag_contains_context.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_diag_tokens.c`.
+                - Docs: specify diagnostic format including SONAME/path/reloc offset.
+                - Acceptance: failures report symbol, requester, candidate scope, and failing location deterministically.
+            - [ ] Add fault-injection hooks for OOM, short-read, and mprotect failures.
+                - Files/Headers: `libexec/ld.so/rtld_faultinject.c`, `libexec/ld.so/rtld_faultinject.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fault_injection.c`; property `tests/libexec/ld.so/property/prop_fault_paths_no_leak.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_fault_sequences.c`.
+                - Docs: document fault-injection controls for test-only builds.
+                - Acceptance: injected failures exit cleanly without deadlock, memory corruption, or descriptor leaks.
+            - [ ] Add malformed-DSO fuzzing harnesses for parser, relocator, and resolver subsystems.
+                - Files/Headers: `tests/libexec/ld.so/fuzz/BUILD.md`, `tests/libexec/ld.so/fuzz/fuzz_rtld_driver.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fuzz_seed_regression.c`; property `tests/libexec/ld.so/property/prop_fuzz_seed_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_rtld_driver.c`.
+                - Docs: publish fuzz seed corpus management and crash triage workflow.
+                - Acceptance: fuzz targets run continuously in CI without known crashing seeds.
+        - **14. Thread Safety & Concurrency**
+            - [ ] Implement documented loader lock hierarchy and invariants.
+                - Files/Headers: `libexec/ld.so/rtld_lock.c`, `libexec/ld.so/rtld_lock.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_lock_hierarchy.c`; property `tests/libexec/ld.so/property/prop_lock_order_no_cycle.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_lock_sequences.c`.
+                - Docs: add lock-order and reentrancy rules to design docs.
+                - Acceptance: lock acquisition graph is acyclic and validated by stress tests.
+            - [ ] Make `dlopen`/`dlsym`/`dlclose` reentrant-safe under concurrent callers.
+                - Files/Headers: `libexec/ld.so/rtld_api_locking.c`, `lib/dl/dl_thread.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_api_thread_safety.c`; property `tests/lib/dl/property/prop_parallel_api_equivalence.c`; fuzz `tests/lib/dl/fuzz/fuzz_parallel_api.c`.
+                - Docs: define API-level thread-safety guarantees and caveats.
+                - Acceptance: high-concurrency stress suite shows no deadlocks or data races.
+            - [ ] Add concurrent lazy-bind stress runner with race-detection instrumentation.
+                - Files/Headers: `tests/libexec/ld.so/integration/test_lazy_bind_race.c`, `tests/ci/test-ldso-race.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_bind_race_guards.c`; property `tests/libexec/ld.so/property/prop_lazy_bind_single_winner.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_lazy_bind_interleave.c`.
+                - Docs: document race-stress methodology and expected invariants.
+                - Acceptance: resolver races are absent across repeated high-thread-count runs.
+        - **15. Unloading & Resource Cleanup**
+            - [ ] Implement unload-eligibility analysis for reference graph and static TLS constraints.
+                - Files/Headers: `libexec/ld.so/rtld_unload.c`, `libexec/ld.so/rtld_unload.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_unload_eligibility.c`; property `tests/libexec/ld.so/property/prop_no_unload_if_referenced.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_unload_graphs.c`.
+                - Docs: document reasons unloading can be denied.
+                - Acceptance: loader unloads only safe modules and reports explicit denial reason otherwise.
+            - [ ] Implement module teardown pipeline (dtors, TLS teardown, unmap, registry removal).
+                - Files/Headers: `libexec/ld.so/rtld_teardown.c`, `libexec/ld.so/rtld_obj.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_teardown_pipeline.c`; property `tests/libexec/ld.so/property/prop_teardown_no_dangling.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_teardown_paths.c`.
+                - Docs: define teardown ordering guarantees.
+                - Acceptance: successful unload leaves no mapped segments, live TLS entries, or stale link-map entries.
+            - [ ] Add long-run load/unload churn leak tests under sanitizers.
+                - Files/Headers: `tests/libexec/ld.so/integration/test_churn_leaks.c`, `tests/ci/test-ldso-leaks.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_leak_accounting.c`; property `tests/libexec/ld.so/property/prop_churn_stable_memory.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_churn_sequences.c`.
+                - Docs: document churn-test thresholds and failure triage.
+                - Acceptance: leak and UAF checks remain clean after sustained churn workload.
+        - **16. ABI & Tooling Compatibility**
+            - [ ] Implement `dl_iterate_phdr()` and stable `dl_phdr_info` traversal semantics.
+                - Files/Headers: `lib/dl/dl_iterate_phdr.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dl_iterate_phdr.c`; property `tests/lib/dl/property/prop_phdr_iteration_complete.c`; fuzz `tests/lib/dl/fuzz/fuzz_phdr_callbacks.c`.
+                - Docs: add `man/man3/dl_iterate_phdr.3`.
+                - Acceptance: callbacks observe all loaded objects in a deterministic order.
+            - [ ] Export and maintain `link_map`/`r_debug` ABI for debuggers and unwinders.
+                - Files/Headers: `include/link.h`, `libexec/ld.so/rtld_linkmap.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_link_map_layout.c`; property `tests/libexec/ld.so/property/prop_link_map_consistency.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_link_map_ops.c`.
+                - Docs: define stable fields and compatibility guarantees.
+                - Acceptance: debugger and unwinder smoke tests consume exported link-map structures successfully.
+            - [ ] Add compatibility shims and behavioral toggles required by common third-party software.
+                - Files/Headers: `libexec/ld.so/rtld_compat.c`, `libexec/ld.so/rtld_compat.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_compat_modes.c`; property `tests/libexec/ld.so/property/prop_compat_toggle_isolation.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_compat_knobs.c`.
+                - Docs: document each shim, rationale, and default state.
+                - Acceptance: designated compatibility test corpus passes without regressing default semantics.
+        - **17. Installer & Packaging**
+            - [ ] Define and enforce interpreter install path and `PT_INTERP` contract.
+                - Files/Headers: `Makefile.inc`, `sys/exec/elf_interp.c`, `docs/ld.so-install-layout.md`.
+                - Tests (unit/property/fuzz): unit `tests/sys/exec/unit/test_interp_path.c`; property `tests/sys/exec/property/prop_interp_path_stability.c`; fuzz `tests/sys/exec/fuzz/fuzz_interp_strings.c`.
+                - Docs: specify canonical interpreter path and compatibility symlink policy.
+                - Acceptance: built executables reference installed loader path consistently.
+            - [ ] Add packaging rules for `ld.so`, `libdl.so`, symlinks, ownership, and mode bits.
+                - Files/Headers: `Makefile`, `lib/dl/Makefile`, `tools/pkg/ldso.manifest`.
+                - Tests (unit/property/fuzz): unit `tests/tools/pkg/unit/test_ldso_manifest.c`; property `tests/tools/pkg/property/prop_symlink_chain_valid.c`; fuzz `tests/tools/pkg/fuzz/fuzz_pkg_manifest.c`.
+                - Docs: document package contents and upgrade path.
+                - Acceptance: packaging output installs runtime linker assets with correct paths and permissions.
+            - [ ] Add upgrade/rollback safety checks for loader and cache transitions.
+                - Files/Headers: `tools/pkg/ldso-upgrade.sh`, `tools/pkg/ldso-rollback.sh`.
+                - Tests (unit/property/fuzz): unit `tests/tools/pkg/unit/test_upgrade_checks.c`; property `tests/tools/pkg/property/prop_upgrade_rollback_inverse.c`; fuzz `tests/tools/pkg/fuzz/fuzz_upgrade_metadata.c`.
+                - Docs: document operational playbook for loader upgrades.
+                - Acceptance: upgrade and rollback scripts preserve bootability and loader consistency.
+        - **18. Tests & CI**
+            - [ ] Create dedicated `ld.so` unit-test targets in build system.
+                - Files/Headers: `tests/libexec/ld.so/Makefile`, `tests/Makefile`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_smoke_runner.c`; property `tests/libexec/ld.so/property/prop_runner_inputs.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_runner_bootstrap.c`.
+                - Docs: document test target names and invocation.
+                - Acceptance: `make` targets execute loader unit suites reliably in CI and local runs.
+            - [ ] Add property-test harness for symbol resolution and relocation invariants.
+                - Files/Headers: `tests/libexec/ld.so/property/prop_harness.c`, `tests/libexec/ld.so/property/fixtures/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_property_seed_replay.c`; property `tests/libexec/ld.so/property/prop_harness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_property_inputs.c`.
+                - Docs: describe property generation strategy and shrinking/repro workflow.
+                - Acceptance: property suite consistently exercises randomized dependency/relocation scenarios with reproducible seeds.
+            - [ ] Add coverage-guided fuzz targets and corpus minimization workflow.
+                - Files/Headers: `tests/libexec/ld.so/fuzz/CMakeLists.txt`, `tests/libexec/ld.so/fuzz/corpus/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fuzz_harness_build.c`; property `tests/libexec/ld.so/property/prop_corpus_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_elf_fullstack.c`.
+                - Docs: define fuzz runtime budgets and crash-handling policy.
+                - Acceptance: fuzz jobs run in CI with a managed corpus and no untriaged crashes.
+            - [ ] Add sanitizer CI matrix (ASAN/UBSAN required; optional TSAN where supported).
+                - Files/Headers: `tests/ci/test-ldso.sh`, `.github/workflows/ci.yml`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_sanitizer_smoke.c`; property `tests/libexec/ld.so/property/prop_sanitizer_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_sanitizer_mode.c`.
+                - Docs: document sanitizer expectations and suppression policy.
+                - Acceptance: all loader tests pass under required sanitizers in CI.
+            - [ ] Add multi-arch job plan (i386 active, x86_64 gated) and regression baseline snapshots.
+                - Files/Headers: `tests/ci/test-ldso-matrix.sh`, `tests/libexec/ld.so/regressions/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_matrix_config.c`; property `tests/libexec/ld.so/property/prop_regression_snapshot_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_matrix_inputs.c`.
+                - Docs: document CI matrix and architecture readiness criteria.
+                - Acceptance: CI records stable regression baselines and gates changes by architecture policy.
+        - **19. Documentation & Manpages**
+            - [ ] Write `ld.so(8)` covering runtime behavior, search paths, env vars, secure mode, and diagnostics.
+                - Files/Headers: `man/man8/ld.so.8`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_ldso_man_sections.c`; property `tests/man/property/prop_ldso_man_examples_build.c`; fuzz `tests/man/fuzz/fuzz_man_escape_sequences.c`.
+                - Docs: ensure required sections include DESCRIPTION, SECURITY, ENVIRONMENT, FILES, SEE ALSO.
+                - Acceptance: manpage is complete, reviewable, and matches implemented behavior.
+            - [ ] Write `dlopen(3)`, `dlsym(3)`, `dlclose(3)`, and `dlerror(3)` with error semantics and examples.
+                - Files/Headers: `man/man3/dlopen.3`, `man/man3/dlsym.3`, `man/man3/dlclose.3`, `man/man3/dlerror.3`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_dlfcn_man_sections.c`; property `tests/man/property/prop_dlfcn_examples_compile.c`; fuzz `tests/man/fuzz/fuzz_dlfcn_man_tokens.c`.
+                - Docs: include LIBRARY, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO sections.
+                - Acceptance: API manpages compile with documentation checks and reflect runtime flags accurately.
+            - [ ] Write `dladdr(3)`, `dlinfo(3)`, and `dl_iterate_phdr(3)` tooling-focused documentation.
+                - Files/Headers: `man/man3/dladdr.3`, `man/man3/dlinfo.3`, `man/man3/dl_iterate_phdr.3`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_linker_tooling_man_sections.c`; property `tests/man/property/prop_tooling_examples_compile.c`; fuzz `tests/man/fuzz/fuzz_tooling_man_markup.c`.
+                - Docs: document supported requests, callbacks, and structure fields.
+                - Acceptance: tooling manpages align with exported headers and runtime behavior.
+            - [ ] Publish loader security threat model and operational hardening guide.
+                - Files/Headers: `docs/security/ldso-threat-model.md`, `docs/security/ldso-hardening.md`.
+                - Tests (unit/property/fuzz): unit `tests/docs/unit/test_security_doc_links.c`; property `tests/docs/property/prop_security_rule_coverage.c`; fuzz `tests/docs/fuzz/fuzz_security_doc_parser.c`.
+                - Docs: include trust boundaries, attack surfaces, and mitigation checklist.
+                - Acceptance: threat model is reviewed and maps to implemented safeguards and tests.
+        - **20. Refactor & Audit Directive**
+            - [ ] Audit existing loader/runtime code and record reuse/refactor/delete decisions per file.
+                - Files/Headers: `docs/ldso-audit-inventory.md`, `libexec/ld.so/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_audit_inventory_sync.c`; property `tests/libexec/ld.so/property/prop_inventory_complete.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_inventory_parser.c`.
+                - Docs: maintain decision log with risk classification for each legacy file.
+                - Acceptance: inventory lists all relevant files and assigns an explicit action with rationale.
+            - [ ] Convert loader-related TODO/FIXME markers into standalone commit-atomic tasks.
+                - Files/Headers: `TASKS.md`, `libexec/ld.so/*.c`, `lib/dl/*.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_no_untracked_todos.c`; property `tests/libexec/ld.so/property/prop_todo_to_task_bijection.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_todo_scanner_input.c`.
+                - Docs: update audit inventory with TODO migration status.
+                - Acceptance: no loader TODO/FIXME remains without a corresponding tracked checklist item.
+            - [ ] Add final ship gate checklist for correctness, security, performance, docs, and CI sign-off.
+                - Files/Headers: `docs/ldso-ship-gate.md`, `tests/ci/test-ldso-ship-gate.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ship_gate_schema.c`; property `tests/libexec/ld.so/property/prop_ship_gate_all_required.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ship_gate_yaml.c`.
+                - Docs: define required sign-off artifacts and rollback criteria.
+                - Acceptance: release is blocked until all ship-gate checks are green and documented.
 - [ ] **System Interface Libraries:**
     - [ ] **Native Kernel Introspection (`libsys` / `libkernel`):**
         - [ ] **Core Architecture:**
