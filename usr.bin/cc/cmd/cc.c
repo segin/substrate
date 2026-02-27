@@ -640,36 +640,22 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
     const char *std_mode = o->std != NULL ? o->std : "c99";
     const char *const *pp_flags = (const char *const *)o->cpp_flags.items;
     size_t pp_count = o->cpp_flags.count;
-    const char **tmp_flags = NULL;
-    size_t i;
-    int add_internal_p = !o->mode_E;
-
-    if (add_internal_p) {
-        tmp_flags = (const char **)calloc(pp_count + 1, sizeof(*tmp_flags));
-        if (tmp_flags == NULL) {
-            fprintf(stderr, "cpp: out of memory\n");
-            return -1;
-        }
-        for (i = 0; i < pp_count; ++i) {
-            tmp_flags[i] = o->cpp_flags.items[i];
-        }
-        tmp_flags[pp_count++] = "-P";
-        pp_flags = tmp_flags;
-    }
 
     memset(&diag, 0, sizeof(diag));
     if (cc_preprocess_file(in, out, std_mode, pp_flags, pp_count, &diag) != 0) {
-        free(tmp_flags);
         if (diag.line != 0) {
-            fprintf(stderr, "cpp:%zu:%zu: %s\n", diag.line, diag.col, diag.message);
+            if (diag.path[0] != '\0') {
+                fprintf(stderr, "%s:%zu:%zu: error: %s\n", diag.path, diag.line, diag.col, diag.message);
+            } else {
+                fprintf(stderr, "cpp:%zu:%zu: error: %s\n", diag.line, diag.col, diag.message);
+            }
         } else if (diag.message[0] != '\0') {
-            fprintf(stderr, "cpp: %s\n", diag.message);
+            fprintf(stderr, "cpp: error: %s\n", diag.message);
         } else {
-            fprintf(stderr, "cpp: preprocess failed\n");
+            fprintf(stderr, "cpp: error: preprocess failed\n");
         }
         return -1;
     }
-    free(tmp_flags);
     return 0;
 }
 
@@ -991,11 +977,15 @@ int cc_main(int argc, char **argv) {
                                       o.werror, o.pedantic, o.pedantic_errors, o.gnu89_inline_mode,
                                       o.gnu89_inline_override, &diag) != 0) {
                     if (diag.line != 0) {
-                        fprintf(stderr, "cc:%zu:%zu: %s\n", diag.line, diag.col, diag.message);
+                        if (diag.path[0] != '\0') {
+                            fprintf(stderr, "%s:%zu:%zu: error: %s\n", diag.path, diag.line, diag.col, diag.message);
+                        } else {
+                            fprintf(stderr, "cc:%zu:%zu: error: %s\n", diag.line, diag.col, diag.message);
+                        }
                     } else if (diag.message[0] != '\0') {
-                        fprintf(stderr, "cc: %s\n", diag.message);
+                        fprintf(stderr, "cc: error: %s\n", diag.message);
                     } else {
-                        fprintf(stderr, "cc: native C pipeline failed\n");
+                        fprintf(stderr, "cc: error: native C pipeline failed\n");
                     }
                     fprintf(stderr,
                             "cc: note: current native pipeline supports a strict subset "

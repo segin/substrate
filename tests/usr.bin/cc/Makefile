@@ -575,7 +575,7 @@ test:
 	grep -q "warning: computed goto is a GNU extension (non-C99)" /tmp/cc_native_c99_computed_goto_pedantic.log
 	! $(TOP)/usr.bin/cc/cc -std=c99 -pedantic-errors -c native_c99_computed_goto.c -o /tmp/cc_native_c99_computed_goto_pedantic_errors.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_ptr_add_ptr.c -o /tmp/cc_native_bad_ptr_add_ptr_loc.o 2>/tmp/cc_native_bad_ptr_add_ptr_loc.log
-	grep -Eq '^cc:[0-9]+:[0-9]+: ' /tmp/cc_native_bad_ptr_add_ptr_loc.log
+	grep -Eq '^[^:]+:[0-9]+:[0-9]+: error: ' /tmp/cc_native_bad_ptr_add_ptr_loc.log
 	sh run_conformance_c99.sh
 	sh run_diff_c99.sh
 	sh run_postc99_c11_c17.sh

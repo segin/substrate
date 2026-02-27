@@ -41,6 +41,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                       int *saw_ret, cc_diag_t *diag);
 static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym);
+static int var_find_visible(var_entry_t *vars, size_t var_count, const char *name, int depth);
+static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name);
+static int member_base_struct_id(const cc_expr_t *e);
+static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t *tu, int sid, const char *name);
 
 static void free_asm_instr_fields(cc_ssa_instr_t *in) {
     size_t i;
@@ -198,6 +202,7 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     if (d == NULL || d->message[0] != '\0') {
         return;
     }
+    d->path[0] = '\0';
     d->line = 0;
     d->col = 0;
     snprintf(d->message, sizeof(d->message), "%s", msg);
@@ -6822,6 +6827,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
     cc_ssa_module_init(out);
     if (diag != NULL) {
+        diag->path[0] = '\0';
         diag->line = 0;
         diag->col = 0;
         diag->message[0] = '\0';

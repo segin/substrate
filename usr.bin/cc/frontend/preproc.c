@@ -93,9 +93,16 @@ typedef struct {
     int relaxed_eval;
 } expr_parser_t;
 
+static const char *g_pp_diag_file = NULL;
+
 static void set_diag(cc_diag_t *diag, size_t line, size_t col, const char *msg) {
     if (diag == NULL || diag->message[0] != '\0') {
         return;
+    }
+    if (g_pp_diag_file != NULL && g_pp_diag_file[0] != '\0') {
+        snprintf(diag->path, sizeof(diag->path), "%s", g_pp_diag_file);
+    } else {
+        diag->path[0] = '\0';
     }
     diag->line = line;
     diag->col = col;
@@ -4014,21 +4021,27 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     int saw_pragma_once = 0;
     sb_t code_accum;
     int old_include_level = st->include_level;
+    const char *old_diag_file = g_pp_diag_file;
+
+    g_pp_diag_file = path;
 
     if (depth > PP_MAX_INCLUDE_DEPTH) {
         set_diag(diag, 0, 0, "include depth exceeded");
+        g_pp_diag_file = old_diag_file;
         return -1;
     }
 
     st->include_level = depth;
 
     if (once_contains(st, path)) {
+        g_pp_diag_file = old_diag_file;
         return 0;
     }
 
     fp = fopen(path, "r");
     if (fp == NULL) {
         set_diag(diag, 0, 0, "failed to open include file");
+        g_pp_diag_file = old_diag_file;
         return -1;
     }
     if (dep_add_path(st, path, 0, depth == 0) != 0) {
@@ -4551,6 +4564,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     }
 
     st->include_level = old_include_level;
+    g_pp_diag_file = old_diag_file;
     free(cond_stack);
     sb_free(&line);
     sb_free(&stripped);
@@ -4560,6 +4574,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
 
 fail:
     st->include_level = old_include_level;
+    g_pp_diag_file = old_diag_file;
     free(cond_stack);
     sb_free(&line);
     sb_free(&stripped);
@@ -4584,6 +4599,7 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
     st.enable_trigraphs = std_mode_enable_trigraphs(std_mode);
     st.std_version = std_mode_version(std_mode, &st.std_is_c11, &st.std_is_c17, &st.std_is_c23, &st.std_is_gnu);
     if (diag != NULL) {
+        diag->path[0] = '\0';
         diag->line = 0;
         diag->col = 0;
         diag->message[0] = '\0';

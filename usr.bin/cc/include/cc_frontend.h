@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 typedef struct {
+    char path[512];
     size_t line;
     size_t col;
     char message[256];

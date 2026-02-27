@@ -13,6 +13,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     int pointer_size = target == CC_TARGET_I386 ? 4 : 8;
 
     if (diag != NULL) {
+        diag->path[0] = '\0';
         diag->line = 0;
         diag->col = 0;
         diag->message[0] = '\0';

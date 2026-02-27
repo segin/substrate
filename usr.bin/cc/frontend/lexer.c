@@ -2,6 +2,7 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
     const char *src;
@@ -9,6 +10,7 @@ typedef struct {
     size_t pos;
     size_t line;
     size_t col;
+    char *logical_file;
 } cc_lexer_t;
 
 typedef enum {
@@ -113,9 +115,25 @@ typedef struct {
     int float_is_long;
     int int_is_unsigned;
     int int_is_longlong;
+    const char *file;
     size_t line;
     size_t col;
 } cc_token_t;
+
+static char *xstrdup_local(const char *s) {
+    size_t n;
+    char *p;
+    if (s == NULL) {
+        return NULL;
+    }
+    n = strlen(s);
+    p = (char *)malloc(n + 1);
+    if (p == NULL) {
+        return NULL;
+    }
+    memcpy(p, s, n + 1);
+    return p;
+}
 
 static int is_ident_start_ascii(int c) {
     return isalpha(c) || c == '_';
@@ -228,6 +246,113 @@ static int lx_at_directive_start(const cc_lexer_t *lx) {
     return 1;
 }
 
+static void lx_set_logical_file(cc_lexer_t *lx, const char *path) {
+    char *dup;
+    if (path == NULL) {
+        return;
+    }
+    dup = xstrdup_local(path);
+    if (dup == NULL) {
+        return;
+    }
+    free(lx->logical_file);
+    lx->logical_file = dup;
+}
+
+static int lx_parse_line_marker(const cc_lexer_t *lx, size_t start, size_t end, size_t *out_line, char **out_file) {
+    const char *p = lx->src + start;
+    const char *ep = lx->src + end;
+    unsigned long line_no = 0;
+    int saw_digit = 0;
+    char *file = NULL;
+
+    while (p < ep && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v'))
+        p++;
+    if (p >= ep || *p != '#') {
+        return 0;
+    }
+    p++;
+    while (p < ep && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v'))
+        p++;
+
+    if ((size_t)(ep - p) >= 4 && p[0] == 'l' && p[1] == 'i' && p[2] == 'n' && p[3] == 'e' &&
+        (p + 4 == ep || isspace((unsigned char)p[4]))) {
+        p += 4;
+        while (p < ep && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v'))
+            p++;
+    }
+
+    while (p < ep && isdigit((unsigned char)*p)) {
+        saw_digit = 1;
+        line_no = line_no * 10UL + (unsigned long)(*p - '0');
+        p++;
+    }
+    if (!saw_digit) {
+        return 0;
+    }
+    while (p < ep && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v'))
+        p++;
+
+    if (p < ep && *p == '\"') {
+        const char *q = ++p;
+        size_t cap = (size_t)(ep - q) + 1;
+        size_t w = 0;
+        file = (char *)malloc(cap);
+        if (file == NULL) {
+            return 1;
+        }
+        while (q < ep && *q != '\"') {
+            if (*q == '\\' && q + 1 < ep) {
+                q++;
+            }
+            file[w++] = *q++;
+        }
+        file[w] = '\0';
+    }
+
+    if (out_line != NULL) {
+        *out_line = line_no == 0UL ? 1 : (size_t)line_no;
+    }
+    if (out_file != NULL) {
+        *out_file = file;
+    } else {
+        free(file);
+    }
+    return 1;
+}
+
+static void lx_skip_directive_line(cc_lexer_t *lx) {
+    size_t start = lx->pos;
+    size_t end = start;
+    size_t marker_line = 0;
+    char *marker_file = NULL;
+    int has_marker;
+    int has_newline;
+
+    while (end < lx->len && lx->src[end] != '\n')
+        end++;
+    has_newline = end < lx->len && lx->src[end] == '\n';
+    has_marker = lx_parse_line_marker(lx, start, end, &marker_line, &marker_file);
+
+    lx->pos = end;
+    if (has_newline) {
+        lx->pos++;
+    }
+
+    if (has_marker) {
+        if (marker_file != NULL) {
+            lx_set_logical_file(lx, marker_file);
+        }
+        lx->line = marker_line;
+        lx->col = 1;
+    } else if (has_newline) {
+        lx->line++;
+        lx->col = 1;
+    }
+
+    free(marker_file);
+}
+
 static void lx_skip_ws_comments(cc_lexer_t *lx) {
     for (;;) {
         int c = lx_peek(lx);
@@ -258,22 +383,30 @@ static void lx_skip_ws_comments(cc_lexer_t *lx) {
             continue;
         }
         if (c == '#' && lx_at_directive_start(lx)) {
-            while ((c = lx_peek(lx)) >= 0 && c != '\n') {
-                lx_adv(lx);
-            }
+            lx_skip_directive_line(lx);
             continue;
         }
         return;
     }
 }
 
-int cc_lexer_init(cc_lexer_t *lx, const char *src, size_t len) {
+int cc_lexer_init(cc_lexer_t *lx, const char *src, size_t len, const char *path) {
+    memset(lx, 0, sizeof(*lx));
     lx->src = src;
     lx->len = len;
     lx->pos = 0;
     lx->line = 1;
     lx->col = 1;
+    lx->logical_file = xstrdup_local(path != NULL ? path : "");
     return 0;
+}
+
+void cc_lexer_deinit(cc_lexer_t *lx) {
+    if (lx == NULL) {
+        return;
+    }
+    free(lx->logical_file);
+    lx->logical_file = NULL;
 }
 
 int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
@@ -294,6 +427,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->float_is_long = 0;
     out->int_is_unsigned = 0;
     out->int_is_longlong = 0;
+    out->file = lx->logical_file;
     out->line = lx->line;
     out->col = lx->col;
 

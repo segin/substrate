@@ -418,6 +418,7 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
         int rc2 = dce_function(&m->funcs[i]);
         if (rc1 < 0 || rc2 < 0) {
             if (diag != NULL && diag->message[0] == '\0') {
+                diag->path[0] = '\0';
                 diag->line = 0;
                 diag->col = 0;
                 snprintf(diag->message, sizeof(diag->message), "out of memory in optimizer");
