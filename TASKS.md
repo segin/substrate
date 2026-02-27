@@ -4074,10 +4074,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [ ] **Integration Tests:**
         - [ ] Mock terminal interaction tests verifying escape sequence generation.
 - [ ] **Documentation:**
-    - [ ] Man page: `editline(3)`.
-    - [ ] Man page: `el_init(3)`, `el_gets(3)`, etc. (individual or consolidated).
-    - [ ] Man page: `editrc(5)`.
-    - [ ] Man page: `history(3)`.
+    - [x] Man page: `editline(3)`.
+    - [x] Man page: `el_init(3)`, `el_gets(3)`, etc. (individual or consolidated).
+    - [x] Man page: `editrc(5)`.
+    - [x] Man page: `history(3)`.
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**

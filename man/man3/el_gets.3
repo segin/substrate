@@ -1,0 +1,82 @@
+.\" Process this file with
+.\" groff -man -Tascii el_gets.3
+.\"
+.TH EL_GETS 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+el_gets, el_line, el_insertstr, el_deletestr \- read and manipulate edited input lines
+.SH LIBRARY
+Editline library (libedit, \-ledit)
+.SH SYNOPSIS
+.B #include <histedit.h>
+.PP
+.BI "const char *el_gets(EditLine *el, int *count);"
+.br
+.BI "const LineInfo *el_line(EditLine *el);"
+.br
+.BI "int el_insertstr(EditLine *el, const char *str);"
+.br
+.BI "int el_deletestr(EditLine *el, int count);"
+.PP
+.B typedef struct lineinfo {
+.br
+.BI "    const char *buffer;"
+.br
+.BI "    const char *cursor;"
+.br
+.BI "    const char *lastchar;"
+.br
+.B } LineInfo;
+.SH DESCRIPTION
+.BR el_gets ()
+reads a line using the current editline mode and returns a pointer to the
+internal line buffer. The returned pointer remains valid until the next
+editline call that mutates the line buffer.
+.PP
+If
+.I count
+is not NULL, it receives the number of bytes in the returned line,
+excluding the terminating NUL byte.
+.PP
+.BR el_line ()
+returns a snapshot of the current line state. The fields of
+.B LineInfo
+reference internal storage and must not be modified.
+.PP
+.BR el_insertstr ()
+inserts
+.I str
+at the cursor.
+.BR el_deletestr ()
+deletes up to
+.I count
+bytes starting at the cursor.
+.SH RETURN VALUE
+.BR el_gets ()
+returns a pointer to edited line data on success.
+On EOF or error it returns NULL.
+.PP
+.BR el_insertstr ()
+and
+.BR el_deletestr ()
+return 0 on success and \-1 on error.
+.PP
+.BR el_line ()
+returns a non-NULL pointer on success, otherwise NULL.
+.SH ERRORS
+.TP
+.B EINVAL
+Invalid argument.
+.TP
+.B EINTR
+Input was interrupted by a signal.
+.TP
+.B EILSEQ
+Invalid UTF-8 sequence was encountered while UTF-8 mode is enabled.
+.TP
+.B ENOMEM
+Insufficient memory for line growth.
+.SH SEE ALSO
+.BR editline (3),
+.BR el_init (3),
+.BR el_set (3),
+.BR history (3)

@@ -1,0 +1,52 @@
+.\" Process this file with
+.\" groff -man -Tascii el_source.3
+.\"
+.TH EL_SOURCE 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+el_source \- load editline commands from a configuration file
+.SH LIBRARY
+Editline library (libedit, \-ledit)
+.SH SYNOPSIS
+.B #include <histedit.h>
+.PP
+.BI "int el_source(EditLine *el, const char *file);"
+.SH DESCRIPTION
+.BR el_source ()
+reads editline commands from
+.I file
+and applies them to
+.IR el .
+.PP
+If
+.I file
+is NULL,
+.BR el_source ()
+loads the default per-user configuration file,
+typically
+.BR ~/.editrc .
+.PP
+Command syntax is described in
+.BR editrc (5).
+.SH RETURN VALUE
+Returns 0 on success and \-1 on error.
+.SH ERRORS
+.TP
+.B EINVAL
+Invalid argument.
+.TP
+.B ENOENT
+Requested configuration file was not found.
+.TP
+.B EACCES
+Permission denied while reading configuration.
+.TP
+.B EIO
+I/O error while reading the configuration file.
+.TP
+.B EPROTO
+A command line could not be parsed.
+.SH SEE ALSO
+.BR editline (3),
+.BR el_set (3),
+.BR history (3),
+.BR editrc (5)
