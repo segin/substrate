@@ -219,22 +219,6 @@ static void initialize_LA(void) {
 }
 
 
-static int map_goto(int state, int symbol) {
-    shifts *sp;
-    int i;
-    for (sp = first_shift; sp != NULL; sp = sp->next) {
-        if (sp->number == state) {
-            for (i = 0; i < sp->nshifts; i++) {
-                int dest = sp->shift[i];
-                if (accessing_symbol[dest] == symbol)
-                    return dest;
-            }
-            return -1;
-        }
-    }
-    return -1;
-}
-
 static void build_relations(void) {
     int i, j, k;
     reductions *rp;
