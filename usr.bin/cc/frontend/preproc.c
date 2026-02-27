@@ -36,6 +36,18 @@ typedef struct {
 } pp_macro_table_t;
 
 typedef struct {
+    char *name;
+    int has_macro;
+    pp_macro_t macro;
+} pp_macro_snapshot_t;
+
+typedef struct {
+    pp_macro_snapshot_t *items;
+    size_t count;
+    size_t cap;
+} pp_macro_stack_t;
+
+typedef struct {
     char **items;
     size_t count;
     size_t cap;
@@ -57,6 +69,7 @@ typedef struct {
     pp_strvec_t force_includes;
     pp_strvec_t force_imacros;
     pp_strvec_t dep_paths;
+    pp_macro_stack_t pragma_macro_stack;
     int no_default_includes;
     int show_include_paths;
     int dump_macros;
@@ -173,6 +186,9 @@ static int sb_append(sb_t *sb, const char *s);
 static int dir_exists(const char *path);
 static int path_exists(const char *path);
 static const char *path_basename(const char *path);
+static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int is_variadic, char **params,
+                     size_t param_count, const char *body);
+static void macro_unset(pp_macro_table_t *t, const char *name);
 
 static void strvec_pop_free(pp_strvec_t *v) {
     if (v == NULL || v->count == 0) {
@@ -449,6 +465,155 @@ static void macro_free_item(pp_macro_t *m) {
     free(m->params);
     free(m->body);
     memset(m, 0, sizeof(*m));
+}
+
+static int macro_clone_item(const pp_macro_t *src, pp_macro_t *dst) {
+    size_t i;
+    if (src == NULL || dst == NULL) {
+        return -1;
+    }
+    memset(dst, 0, sizeof(*dst));
+    dst->name = xstrdup(src->name != NULL ? src->name : "");
+    dst->body = xstrdup(src->body != NULL ? src->body : "");
+    dst->is_function = src->is_function;
+    dst->is_variadic = src->is_variadic;
+    dst->param_count = src->param_count;
+    if (dst->name == NULL || dst->body == NULL) {
+        macro_free_item(dst);
+        return -1;
+    }
+    if (src->param_count > 0) {
+        dst->params = (char **)calloc(src->param_count, sizeof(*dst->params));
+        if (dst->params == NULL) {
+            macro_free_item(dst);
+            return -1;
+        }
+        for (i = 0; i < src->param_count; ++i) {
+            dst->params[i] = xstrdup(src->params[i] != NULL ? src->params[i] : "");
+            if (dst->params[i] == NULL) {
+                macro_free_item(dst);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void macro_snapshot_free(pp_macro_snapshot_t *snap) {
+    if (snap == NULL) {
+        return;
+    }
+    free(snap->name);
+    snap->name = NULL;
+    if (snap->has_macro) {
+        macro_free_item(&snap->macro);
+    } else {
+        memset(&snap->macro, 0, sizeof(snap->macro));
+    }
+    snap->has_macro = 0;
+}
+
+static void macro_stack_free(pp_macro_stack_t *st) {
+    size_t i;
+    if (st == NULL) {
+        return;
+    }
+    for (i = 0; i < st->count; ++i) {
+        macro_snapshot_free(&st->items[i]);
+    }
+    free(st->items);
+    st->items = NULL;
+    st->count = 0;
+    st->cap = 0;
+}
+
+static int pragma_macro_push(pp_state_t *st, const char *name) {
+    pp_macro_snapshot_t snap;
+    pp_macro_snapshot_t *next;
+    pp_macro_t *cur;
+    if (st == NULL || name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    memset(&snap, 0, sizeof(snap));
+    snap.name = xstrdup(name);
+    if (snap.name == NULL) {
+        return -1;
+    }
+    cur = macro_find(&st->macros, name);
+    if (cur != NULL) {
+        snap.has_macro = 1;
+        if (macro_clone_item(cur, &snap.macro) != 0) {
+            macro_snapshot_free(&snap);
+            return -1;
+        }
+    }
+    if (st->pragma_macro_stack.count == st->pragma_macro_stack.cap) {
+        size_t ncap = st->pragma_macro_stack.cap == 0 ? 16 : st->pragma_macro_stack.cap * 2;
+        next = (pp_macro_snapshot_t *)realloc(st->pragma_macro_stack.items, ncap * sizeof(*next));
+        if (next == NULL) {
+            macro_snapshot_free(&snap);
+            return -1;
+        }
+        st->pragma_macro_stack.items = next;
+        st->pragma_macro_stack.cap = ncap;
+    }
+    st->pragma_macro_stack.items[st->pragma_macro_stack.count++] = snap;
+    return 0;
+}
+
+static int pragma_macro_pop(pp_state_t *st, const char *name) {
+    size_t i;
+    if (st == NULL || name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    for (i = st->pragma_macro_stack.count; i > 0; --i) {
+        pp_macro_snapshot_t *snap = &st->pragma_macro_stack.items[i - 1];
+        if (strcmp(snap->name, name) != 0) {
+            continue;
+        }
+        if (!snap->has_macro) {
+            macro_unset(&st->macros, name);
+        } else {
+            size_t pi;
+            char **params = NULL;
+            if (snap->macro.param_count > 0) {
+                params = (char **)calloc(snap->macro.param_count, sizeof(*params));
+                if (params == NULL) {
+                    return -1;
+                }
+                for (pi = 0; pi < snap->macro.param_count; ++pi) {
+                    params[pi] = xstrdup(snap->macro.params[pi] != NULL ? snap->macro.params[pi] : "");
+                    if (params[pi] == NULL) {
+                        size_t pj;
+                        for (pj = 0; pj < pi; ++pj) {
+                            free(params[pj]);
+                        }
+                        free(params);
+                        return -1;
+                    }
+                }
+            }
+            if (macro_set(&st->macros, snap->macro.name, snap->macro.is_function, snap->macro.is_variadic, params,
+                          snap->macro.param_count, snap->macro.body) != 0) {
+                if (params != NULL) {
+                    size_t pj;
+                    for (pj = 0; pj < snap->macro.param_count; ++pj) {
+                        free(params[pj]);
+                    }
+                }
+                free(params);
+                return -1;
+            }
+        }
+        macro_snapshot_free(snap);
+        if (i < st->pragma_macro_stack.count) {
+            memmove(&st->pragma_macro_stack.items[i - 1], &st->pragma_macro_stack.items[i],
+                    (st->pragma_macro_stack.count - i) * sizeof(st->pragma_macro_stack.items[0]));
+        }
+        st->pragma_macro_stack.count--;
+        return 0;
+    }
+    return 0;
 }
 
 static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int is_variadic, char **params,
@@ -729,6 +894,53 @@ static int validate_clang_pragma(const char *rest, cc_diag_t *diag, size_t line_
 
     set_diag(diag, line_no, 1, "unsupported #pragma clang directive");
     return -1;
+}
+
+static int parse_pragma_macro_name(const char *rest, const char *kw, char *out, size_t out_sz) {
+    const char *p;
+    size_t n = 0;
+    size_t kw_len;
+    if (rest == NULL || kw == NULL || out == NULL || out_sz == 0) {
+        return -1;
+    }
+    out[0] = '\0';
+    p = skip_ws(rest);
+    kw_len = strlen(kw);
+    if (strncmp(p, kw, kw_len) != 0 || (!isspace((unsigned char)p[kw_len]) && p[kw_len] != '(')) {
+        return 0;
+    }
+    p += kw_len;
+    p = skip_ws(p);
+    if (*p != '(') {
+        return -1;
+    }
+    p++;
+    p = skip_ws(p);
+    if (*p != '"') {
+        return -1;
+    }
+    p++;
+    while (*p != '\0' && *p != '"') {
+        if (n + 1 >= out_sz) {
+            return -1;
+        }
+        out[n++] = *p++;
+    }
+    if (*p != '"') {
+        return -1;
+    }
+    out[n] = '\0';
+    p++;
+    p = skip_ws(p);
+    if (*p != ')') {
+        return -1;
+    }
+    p++;
+    p = skip_ws(p);
+    if (*p != '\0') {
+        return -1;
+    }
+    return 1;
 }
 
 static char *trim_dup(const char *s) {
@@ -4459,6 +4671,8 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             if (strncmp(kw, "pragma", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 6) {
                 if (active) {
                     const char *r = skip_ws(p);
+                    char macro_name[256];
+                    int pm_rc;
                     int stdc_rc = validate_stdc_pragma(r, diag, (size_t)line_no);
                     int clang_rc;
                     if (stdc_rc < 0) {
@@ -4467,6 +4681,30 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     clang_rc = validate_clang_pragma(r, diag, (size_t)line_no);
                     if (clang_rc < 0) {
                         goto fail;
+                    }
+                    pm_rc = parse_pragma_macro_name(r, "push_macro", macro_name, sizeof(macro_name));
+                    if (pm_rc < 0) {
+                        set_diag(diag, (size_t)line_no, 1, "malformed #pragma push_macro");
+                        goto fail;
+                    }
+                    if (pm_rc > 0) {
+                        if (pragma_macro_push(st, macro_name) != 0) {
+                            set_diag(diag, (size_t)line_no, 1, "out of memory handling #pragma push_macro");
+                            goto fail;
+                        }
+                        continue;
+                    }
+                    pm_rc = parse_pragma_macro_name(r, "pop_macro", macro_name, sizeof(macro_name));
+                    if (pm_rc < 0) {
+                        set_diag(diag, (size_t)line_no, 1, "malformed #pragma pop_macro");
+                        goto fail;
+                    }
+                    if (pm_rc > 0) {
+                        if (pragma_macro_pop(st, macro_name) != 0) {
+                            set_diag(diag, (size_t)line_no, 1, "out of memory handling #pragma pop_macro");
+                            goto fail;
+                        }
+                        continue;
                     }
                     if (strncmp(r, "once", 4) == 0) {
                         saw_pragma_once = 1;
@@ -4679,6 +4917,7 @@ out:
     strvec_free(&st.force_includes);
     strvec_free(&st.force_imacros);
     strvec_free(&st.dep_paths);
+    macro_stack_free(&st.pragma_macro_stack);
     free(st.dep_target);
     free(st.dep_file);
     return rc;

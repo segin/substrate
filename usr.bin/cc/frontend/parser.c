@@ -3699,43 +3699,97 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s);
 static cc_expr_t *new_int_expr(long v);
 static cc_expr_t *parse_initializer_expr(parser_t *p);
 static cc_expr_t *parse_initializer_item(parser_t *p);
+static cc_expr_t *clone_expr(const cc_expr_t *src);
 
 static cc_expr_t *parse_initializer_item(parser_t *p) {
     if (p->tok.kind == TOK_DOT) {
-        cc_expr_t *item;
-        cc_expr_t *value;
+        char **names = NULL;
+        size_t count = 0;
+        size_t cap = 0;
+        cc_expr_t *value = NULL;
+        cc_expr_t *cur = NULL;
+        cc_expr_t *item = NULL;
+        size_t i;
 
-        if (next_tok(p) != 0) {
-            return NULL;
+        while (p->tok.kind == TOK_DOT) {
+            char **next_names;
+            if (next_tok(p) != 0) {
+                goto fail;
+            }
+            if (p->tok.kind != TOK_IDENT) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "expected member name in designated initializer");
+                goto fail;
+            }
+            if (count == cap) {
+                size_t ncap = cap == 0 ? 4 : cap * 2;
+                next_names = (char **)realloc(names, ncap * sizeof(*next_names));
+                if (next_names == NULL) {
+                    goto fail;
+                }
+                names = next_names;
+                cap = ncap;
+            }
+            names[count] = xstrdup_n(p->tok.start, p->tok.len);
+            if (names[count] == NULL) {
+                goto fail;
+            }
+            count++;
+            if (next_tok(p) != 0) {
+                goto fail;
+            }
         }
-        if (p->tok.kind != TOK_IDENT) {
+        if (count == 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "expected member name in designated initializer");
-            return NULL;
-        }
-        item = new_expr(CC_EXPR_MEMBER);
-        if (item == NULL) {
-            return NULL;
-        }
-        item->ident = xstrdup_n(p->tok.start, p->tok.len);
-        if (item->ident == NULL) {
-            free_expr(item);
-            return NULL;
-        }
-        if (next_tok(p) != 0) {
-            free_expr(item);
-            return NULL;
+            goto fail;
         }
         if (expect(p, TOK_ASSIGN, "expected '=' after designated initializer") != 0) {
-            free_expr(item);
-            return NULL;
+            goto fail;
         }
         value = parse_initializer_expr(p);
         if (value == NULL) {
-            free_expr(item);
-            return NULL;
+            goto fail;
         }
-        item->rhs = value;
+        cur = value;
+        value = NULL;
+        for (i = count; i > 1; --i) {
+            cc_expr_t *nested_member = new_expr(CC_EXPR_MEMBER);
+            cc_expr_t *nested_list = new_expr(CC_EXPR_INIT_LIST);
+            if (nested_member == NULL || nested_list == NULL) {
+                free_expr(nested_member);
+                free_expr(nested_list);
+                goto fail;
+            }
+            nested_member->ident = names[i - 1];
+            names[i - 1] = NULL;
+            nested_member->rhs = cur;
+            if (push_arg(nested_list, nested_member) != 0) {
+                nested_member->rhs = NULL;
+                free_expr(nested_list);
+                free_expr(nested_member);
+                goto fail;
+            }
+            cur = nested_list;
+        }
+        item = new_expr(CC_EXPR_MEMBER);
+        if (item == NULL) {
+            goto fail;
+        }
+        item->ident = names[0];
+        names[0] = NULL;
+        item->rhs = cur;
+        free(names);
         return item;
+fail:
+        if (names != NULL) {
+            for (i = 0; i < count; ++i) {
+                free(names[i]);
+            }
+        }
+        free(names);
+        free_expr(value);
+        free_expr(cur);
+        free_expr(item);
+        return NULL;
     }
     return parse_initializer_expr(p);
 }
@@ -3764,6 +3818,8 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
             cc_expr_t *idx_expr;
             cc_expr_t *value;
             long idx = -1;
+            long hi = -1;
+            int is_range = 0;
             size_t fill_i;
 
             if (next_tok(p) != 0) {
@@ -3782,6 +3838,28 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                 return NULL;
             }
             free_expr(idx_expr);
+            hi = idx;
+            if (p->tok.kind == TOK_ELLIPSIS) {
+                cc_expr_t *hi_expr;
+                if (next_tok(p) != 0) {
+                    free_expr(list);
+                    return NULL;
+                }
+                hi_expr = parse_expr(p);
+                if (hi_expr == NULL) {
+                    free_expr(list);
+                    return NULL;
+                }
+                if (eval_const_array_bound_expr(hi_expr, &hi) != 0 || hi < idx) {
+                    set_diag(p->diag, p->tok.line, p->tok.col,
+                             "array designator range must be non-decreasing integer constants");
+                    free_expr(hi_expr);
+                    free_expr(list);
+                    return NULL;
+                }
+                free_expr(hi_expr);
+                is_range = 1;
+            }
             if (expect(p, TOK_RBRACK, "expected ']' after array designator index") != 0 ||
                 expect(p, TOK_ASSIGN, "expected '=' after array designator") != 0) {
                 free_expr(list);
@@ -3801,13 +3879,39 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                     return NULL;
                 }
             }
-            if ((size_t)idx < list->arg_count) {
-                free_expr(list->args[idx]);
-                list->args[idx] = value;
-            } else if (push_arg(list, value) != 0) {
-                free_expr(value);
-                free_expr(list);
-                return NULL;
+            if (!is_range) {
+                if ((size_t)idx < list->arg_count) {
+                    free_expr(list->args[idx]);
+                    list->args[idx] = value;
+                } else if (push_arg(list, value) != 0) {
+                    free_expr(value);
+                    free_expr(list);
+                    return NULL;
+                }
+            } else {
+                long k;
+                for (k = idx; k <= hi; ++k) {
+                    cc_expr_t *cur = (k == idx) ? value : clone_expr(value);
+                    if (cur == NULL) {
+                        free_expr(value);
+                        free_expr(list);
+                        return NULL;
+                    }
+                    while ((size_t)k >= list->arg_count) {
+                        cc_expr_t *z = new_int_expr(0);
+                        if (z == NULL || push_arg(list, z) != 0) {
+                            free_expr(z);
+                            if (cur != value) {
+                                free_expr(cur);
+                            }
+                            free_expr(value);
+                            free_expr(list);
+                            return NULL;
+                        }
+                    }
+                    free_expr(list->args[k]);
+                    list->args[k] = cur;
+                }
             }
         } else {
             cc_expr_t *item = parse_initializer_item(p);
@@ -6161,6 +6265,14 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             }
+            if (s.array_ndim > 0) {
+                /*
+                 * Declarators of the form `(*p)[N]` carry pointee-array shape
+                 * metadata for indexing/stride but are not array objects
+                 * themselves.
+                 */
+                s.array_len = -1;
+            }
         } else {
             long suffix_array_len = -1;
             int suffix_array_ndim = 0;
@@ -6815,27 +6927,26 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
     }
 
     if (is_declspec_start(p)) {
-        if (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) {
-            cc_stmt_t *decls = NULL;
-            size_t decl_count = 0;
-            if (parse_decl_stmt_list(p, &decls, &decl_count, 1) != 0) {
-                free(decls);
-                return -1;
-            }
-            if (decl_count == 1) {
-                *s = decls[0];
-                free(decls);
-                return 0;
-            }
-            memset(s, 0, sizeof(*s));
-            s->line = p->tok.line;
-            s->col = p->tok.col;
-            s->kind = CC_STMT_BLOCK;
-            s->block_stmts = decls;
-            s->block_count = decl_count;
+        cc_stmt_t *decls = NULL;
+        size_t decl_count = 0;
+        size_t stmt_line = p->tok.line;
+        size_t stmt_col = p->tok.col;
+        if (parse_decl_stmt_list(p, &decls, &decl_count, 1) != 0) {
+            free(decls);
+            return -1;
+        }
+        if (decl_count == 1) {
+            *s = decls[0];
+            free(decls);
             return 0;
         }
-        return parse_decl_stmt(p, s, 1);
+        memset(s, 0, sizeof(*s));
+        s->line = stmt_line;
+        s->col = stmt_col;
+        s->kind = CC_STMT_BLOCK;
+        s->block_stmts = decls;
+        s->block_count = decl_count;
+        return 0;
     }
 
     if (p->tok.kind == TOK_KW_RETURN) {

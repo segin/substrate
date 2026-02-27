@@ -766,6 +766,18 @@ static int is_pointer_type(cc_type_t t) {
     return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
 }
 
+static cc_type_t ptr_base_type(cc_type_t t);
+static long type_size_bytes(cc_type_t t);
+
+static int pointer_depth(cc_type_t t) {
+    int d = 0;
+    while (is_pointer_type(t)) {
+        t = ptr_base_type(t);
+        d++;
+    }
+    return d;
+}
+
 static int is_unsigned_integral_type(cc_type_t t) {
     return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
 }
@@ -784,8 +796,11 @@ static int is_scalar_type(cc_type_t t) {
     return is_numeric_type(t) || is_pointer_type(t);
 }
 
-static int is_array_object_type(cc_type_t t, long array_len) {
-    return is_pointer_type(t) && array_len >= 0;
+static int is_array_object_type(cc_type_t t, long array_len, int array_ndim) {
+    if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
+        return 0;
+    }
+    return pointer_depth(t) == array_ndim;
 }
 
 static void expr_clear_array_meta(cc_expr_t *e) {
@@ -1063,6 +1078,9 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
         cc_type_t dbase = ptr_base_type(dst);
         cc_type_t sbase = ptr_base_type(src);
         if (dbase == CC_TYPE_VOID || sbase == CC_TYPE_VOID || dbase == sbase) {
+            return 1;
+        }
+        if (is_integral_type(dbase) && is_integral_type(sbase) && type_size_bytes(dbase) == type_size_bytes(sbase)) {
             return 1;
         }
     }
@@ -1508,8 +1526,8 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
                                     var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag);
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int fn_attr_flags, int loop_depth, int switch_depth, int *saw_return,
-                      cc_diag_t *diag);
+                      cc_type_t fn_ret_type, int fn_ret_struct_id, int fn_attr_flags, int loop_depth, int switch_depth,
+                      int *saw_return, cc_diag_t *diag);
 
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
@@ -1863,7 +1881,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "__builtin_va_arg first operand must be a pointer");
                 return -1;
             }
-            if (e->aux_type == CC_TYPE_VOID) {
+            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0) {
                 set_diag(diag, "__builtin_va_arg requires a non-void type");
                 return -1;
             }
@@ -2339,7 +2357,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (idx >= 0) {
                 dst_type = vars[idx].type;
                 dst_struct_id = vars[idx].struct_id;
-                dst_is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len);
+                dst_is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
                 if (g == NULL) {
@@ -2351,7 +2369,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 dst_type = g->type;
                 dst_struct_id = g->type_struct_id;
-                dst_is_array_object = is_array_object_type(g->type, g->array_len);
+                dst_is_array_object = is_array_object_type(g->type, g->array_len, g->array_ndim);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -2517,7 +2535,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
                 t = vars[idx].type;
-                is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len);
+                is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
                 if (g == NULL) {
@@ -2528,7 +2546,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
                 t = g->type;
-                is_array_object = is_array_object_type(g->type, g->array_len);
+                is_array_object = is_array_object_type(g->type, g->array_len, g->array_ndim);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -2673,7 +2691,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             for (j = 0; j < e->stmt_expr_count; ++j) {
-                if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, CC_TYPE_INT, 0, 0, 0,
+                if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, CC_TYPE_INT, -1, 0, 0, 0,
                                &saw_return, diag) != 0) {
                     vars_free(lvars, lcount);
                     return -1;
@@ -2998,6 +3016,7 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                                    size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag) {
     size_t i;
     cc_type_t elem_type;
+    int saw_nonlist_struct_item = 0;
 
     if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
         set_diag(diag, "array initializer must use an initializer list");
@@ -3034,15 +3053,15 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
         cc_expr_t *item = init->args[i];
         if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
             if (item->kind != CC_EXPR_INIT_LIST) {
-                if (is_null_ptr_constant(item)) {
-                    continue;
+                /*
+                 * Accept brace-elided aggregate initializers and defer strict
+                 * element shaping to lowering, which has full type/size context.
+                 */
+                if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                    return -1;
                 }
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message),
-                             "array initializer %zu for %s must use braces for struct elements", i,
-                             name != NULL ? name : "<anon>");
-                }
-                return -1;
+                saw_nonlist_struct_item = 1;
+                continue;
             }
             if (check_struct_initializer(tu, name, array_struct_id, item, vars, var_count, depth, diag) != 0) {
                 return -1;
@@ -3062,14 +3081,18 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
         }
     }
     if (out_inferred_len != NULL && array_len == 0) {
-        *out_inferred_len = (long)init->arg_count;
+        if (elem_type == CC_TYPE_VOID && array_struct_id >= 0 && saw_nonlist_struct_item) {
+            *out_inferred_len = 0;
+        } else {
+            *out_inferred_len = (long)init->arg_count;
+        }
     }
     return 0;
 }
 
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int fn_attr_flags, int loop_depth, int switch_depth, int *saw_return,
-                      cc_diag_t *diag) {
+                      cc_type_t fn_ret_type, int fn_ret_struct_id, int fn_attr_flags, int loop_depth, int switch_depth,
+                      int *saw_return, cc_diag_t *diag) {
     size_t i;
 
     if (s != NULL) {
@@ -3355,7 +3378,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "noreturn function must not contain a return statement");
             return -1;
         }
-        if (fn_ret_type == CC_TYPE_VOID) {
+        if (fn_ret_type == CC_TYPE_VOID && fn_ret_struct_id < 0) {
             if (s->expr != NULL) {
                 set_diag(diag, "void function cannot return a value");
                 return -1;
@@ -3368,7 +3391,12 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!can_convert(fn_ret_type, s->expr->value_type)) {
+            if (fn_ret_type == CC_TYPE_VOID && fn_ret_struct_id >= 0) {
+                if (!(s->expr->value_type == CC_TYPE_VOID && s->expr->struct_id == fn_ret_struct_id)) {
+                    set_diag(diag, "return type mismatch");
+                    return -1;
+                }
+            } else if (!can_convert(fn_ret_type, s->expr->value_type)) {
                 set_diag(diag, "return type mismatch");
                 return -1;
             }
@@ -3393,7 +3421,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         {
             size_t saved = *var_count;
-            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_attr_flags, loop_depth,
+            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth,
                            switch_depth,
                            saw_return, diag) != 0) {
                 return -1;
@@ -3405,7 +3433,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         if (s->else_branch != NULL) {
             size_t saved = *var_count;
-            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret_type, fn_attr_flags, loop_depth,
+            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth,
                            switch_depth,
                            saw_return, diag) != 0) {
                 return -1;
@@ -3421,7 +3449,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         {
             size_t saved = *var_count;
             for (i = 0; i < s->block_count; ++i) {
-                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, depth + 1, fn_ret_type, fn_attr_flags,
+                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, depth + 1, fn_ret_type, fn_ret_struct_id, fn_attr_flags,
                                loop_depth,
                                switch_depth,
                                saw_return, diag) != 0) {
@@ -3450,7 +3478,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "while condition cannot be void");
             return -1;
         }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_attr_flags, loop_depth + 1,
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth + 1,
                           switch_depth,
                           saw_return, diag);
 
@@ -3459,7 +3487,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "malformed do-while statement");
             return -1;
         }
-        if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_attr_flags, loop_depth + 1,
+        if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth + 1,
                        switch_depth,
                        saw_return, diag) != 0) {
             return -1;
@@ -3489,12 +3517,12 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 if (s->init_stmt->kind == CC_STMT_BLOCK) {
                     for (i = 0; i < s->init_stmt->block_count; ++i) {
                         if (check_stmt(tu, &s->init_stmt->block_stmts[i], vars, var_count, depth + 1, fn_ret_type,
-                                       fn_attr_flags, loop_depth, switch_depth, saw_return, diag) != 0) {
+                                       fn_ret_struct_id, fn_attr_flags, loop_depth, switch_depth, saw_return, diag) != 0) {
                             return -1;
                         }
                     }
                 } else {
-                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, fn_attr_flags,
+                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, fn_ret_struct_id, fn_attr_flags,
                                    loop_depth, switch_depth, saw_return, diag) != 0) {
                         return -1;
                     }
@@ -3519,7 +3547,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (s->post_expr != NULL && check_expr(tu, s->post_expr, *vars, *var_count, for_depth, diag) != 0) {
                 return -1;
             }
-            if (check_stmt(tu, s->then_branch, vars, var_count, for_depth, fn_ret_type, fn_attr_flags,
+            if (check_stmt(tu, s->then_branch, vars, var_count, for_depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags,
                            loop_depth + 1, switch_depth,
                            saw_return, diag) != 0) {
                 return -1;
@@ -3598,7 +3626,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 }
             }
         }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_attr_flags, loop_depth,
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth,
                           switch_depth + 1,
                           saw_return, diag);
 
@@ -3670,7 +3698,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "malformed labeled statement");
             return -1;
         }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_attr_flags, loop_depth,
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth,
                           switch_depth,
                           saw_return, diag);
 
@@ -4087,7 +4115,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         }
 
         for (j = 0; j < f->stmt_count; ++j) {
-            if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_type, fn_attr_flags, 0, 0, &saw_return,
+            if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_type, f->ret_struct_id, fn_attr_flags, 0, 0, &saw_return,
                            diag) != 0) {
                 goto fail_func;
             }

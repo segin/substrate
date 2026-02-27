@@ -216,6 +216,24 @@ static int is_pointer_type(cc_type_t t) {
     return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
 }
 
+static cc_type_t ptr_base_type(cc_type_t t);
+
+static int pointer_depth(cc_type_t t) {
+    int d = 0;
+    while (is_pointer_type(t)) {
+        t = ptr_base_type(t);
+        d++;
+    }
+    return d;
+}
+
+static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
+    if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
+        return 0;
+    }
+    return pointer_depth(t) == array_ndim;
+}
+
 static int is_unsigned_integral_type(cc_type_t t) {
     return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
 }
@@ -1074,11 +1092,11 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
     if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
         idx = var_find_visible(vars, var_count, e->ident, depth);
         if (idx >= 0) {
-            return is_pointer_type(vars[idx].type) && vars[idx].array_len >= 0;
+            return is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
         }
         g = find_global(tu, e->ident);
         if (g != NULL) {
-            return is_pointer_type(g->type) && g->array_len >= 0;
+            return is_array_object_decl(g->type, g->array_len, g->array_ndim);
         }
     }
     if (e->kind == CC_EXPR_MEMBER && is_synthetic_struct_array_member(tu, e)) {
@@ -1616,7 +1634,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return in.dst;
             }
                 if (g != NULL) {
-                    if (g->array_len >= 0 && is_pointer_type(g->type)) {
+                    if (is_array_object_decl(g->type, g->array_len, g->array_ndim)) {
                         return emit_global_addr(sf, g->name, diag);
                     }
                     if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
@@ -1655,7 +1673,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_diag(diag, "malformed static local symbol in lowering");
                 return -1;
             }
-            if (vars[idx].array_len >= 0 && is_pointer_type(vars[idx].type)) {
+            if (is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim)) {
                 return emit_global_addr(sf, vars[idx].static_sym, diag);
             }
             if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
@@ -2318,18 +2336,22 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (cur_ap < 0) {
                 return -1;
             }
-            memset(&in, 0, sizeof(in));
-            in.op = CC_SSA_LOAD;
-            in.dst = new_value(sf, type_to_val(e->aux_type));
-            in.lhs = cur_ap;
-            in.rhs = -1;
-            in.imm = mem_size;
-            in.is_unsigned = is_unsigned_load_type(e->aux_type) ? 1 : 0;
-            if (in.dst < 0 || push_instr(sf, in) != 0) {
-                set_diag(diag, "out of memory appending va_arg load");
-                return -1;
+            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
+                load_v = cur_ap;
+            } else {
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_LOAD;
+                in.dst = new_value(sf, type_to_val(e->aux_type));
+                in.lhs = cur_ap;
+                in.rhs = -1;
+                in.imm = mem_size;
+                in.is_unsigned = is_unsigned_load_type(e->aux_type) ? 1 : 0;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory appending va_arg load");
+                    return -1;
+                }
+                load_v = in.dst;
             }
-            load_v = in.dst;
             step = align_up_long(mem_size, g_pointer_size_bytes);
             step_v = emit_const_i64_instr(sf, step);
             if (step_v < 0) {
@@ -3472,7 +3494,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     return -1;
                 }
-                if (g->array_len >= 0 && is_pointer_type(g->type)) {
+                if (is_array_object_decl(g->type, g->array_len, g->array_ndim)) {
                     set_diag(diag, "assignment to array object is not supported");
                     return -1;
                 }
@@ -4747,7 +4769,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             char sym[256];
             int have_const_init = 0;
             int needs_runtime_init = 0;
-            int is_array_obj = (s->array_len >= 0 && is_pointer_type(s->type));
+            int is_array_obj = is_array_object_decl(s->type, s->array_len, s->array_ndim);
             int is_struct_obj = (s->type == CC_TYPE_VOID && s->type_struct_id >= 0);
             cc_type_t elem_type = CC_TYPE_VOID;
             long elem_size = 0;
@@ -5100,7 +5122,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             return 0;
         }
-        if (s->array_len >= 0 && is_pointer_type(s->type)) {
+        if (is_array_object_decl(s->type, s->array_len, s->array_ndim)) {
             cc_ssa_instr_t call_in;
             cc_ssa_instr_t st_in;
             cc_type_t elem_type = ptr_base_type(s->type);
@@ -6885,7 +6907,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 is_struct_global = 1;
                 struct_id = tu->globals[i].type_struct_id;
                 struct_elems = 1;
-            } else if (is_pointer_type(tu->globals[i].type) && tu->globals[i].array_len >= 0 &&
+            } else if (is_array_object_decl(tu->globals[i].type, tu->globals[i].array_len, tu->globals[i].array_ndim) &&
                        ptr_base_type(tu->globals[i].type) == CC_TYPE_VOID && tu->globals[i].type_struct_id >= 0) {
                 is_struct_global = 1;
                 struct_id = tu->globals[i].type_struct_id;

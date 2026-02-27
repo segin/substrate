@@ -1364,18 +1364,8 @@ fail:
 }
 
 static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *out, cc_diag_t *diag) {
-    int nvals;
-    int ninstr;
-    int has_cfg = 0;
-    int *def_at;
-    int *last_use;
-    int *active_vals;
-    int active_count = 0;
-    int *free_slots;
-    int free_count = 0;
-    int next_slot = 0;
     int i;
-    int j;
+    int nvals;
 
     memset(out, 0, sizeof(*out));
     out->slot_size = slot_size;
@@ -1385,101 +1375,15 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
     }
 
     nvals = f->value_count;
-    ninstr = (int)f->instr_count;
-
-    for (i = 0; i < ninstr; ++i) {
-        cc_ssa_opcode_t op = f->instrs[i].op;
-        if (op == CC_SSA_LABEL || op == CC_SSA_BR || op == CC_SSA_BR_COND || op == CC_SSA_ADDR) {
-            has_cfg = 1;
-            break;
-        }
-    }
-
-    /*
-     * Linear liveness/reuse is only sound for straight-line code. Once labels
-     * and branches are present, keep one slot per value id to preserve
-     * loop/back-edge semantics.
-     */
-    if (has_cfg) {
-        out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
-        if (out->slot_of == NULL) {
-            set_diag(diag, "out of memory building stack slot layout");
-            return -1;
-        }
-        for (i = 0; i < nvals; ++i) {
-            out->slot_of[i] = i;
-        }
-        out->slot_count = nvals;
-        return 0;
-    }
-
     out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
-    def_at = (int *)malloc((size_t)nvals * sizeof(*def_at));
-    last_use = (int *)malloc((size_t)nvals * sizeof(*last_use));
-    active_vals = (int *)malloc((size_t)nvals * sizeof(*active_vals));
-    free_slots = (int *)malloc((size_t)nvals * sizeof(*free_slots));
-    if (out->slot_of == NULL || def_at == NULL || last_use == NULL || active_vals == NULL || free_slots == NULL) {
-        free(def_at);
-        free(last_use);
-        free(active_vals);
-        free(free_slots);
-        slot_layout_free(out);
+    if (out->slot_of == NULL) {
         set_diag(diag, "out of memory building stack slot layout");
         return -1;
     }
-
     for (i = 0; i < nvals; ++i) {
-        out->slot_of[i] = -1;
-        def_at[i] = ninstr;
-        last_use[i] = -1;
+        out->slot_of[i] = i;
     }
-
-    for (i = 0; i < ninstr; ++i) {
-        const cc_ssa_instr_t *in = &f->instrs[i];
-        size_t a;
-        if (in->dst >= 0 && in->dst < nvals && i < def_at[in->dst]) {
-            def_at[in->dst] = i;
-        }
-        mark_use(last_use, nvals, in->lhs, i);
-        mark_use(last_use, nvals, in->rhs, i);
-        for (a = 0; a < in->arg_count; ++a) {
-            mark_use(last_use, nvals, in->args[a], i);
-        }
-        for (a = 0; a < in->asm_out_count; ++a) {
-            mark_use(last_use, nvals, in->asm_out_values[a], i);
-        }
-        for (a = 0; a < in->asm_in_count; ++a) {
-            mark_use(last_use, nvals, in->asm_in_values[a], i);
-        }
-    }
-
-    for (i = 0; i < nvals; ++i) {
-        int def_i = def_at[i];
-        if (def_i == ninstr) {
-            def_i = 0;
-        }
-
-        for (j = 0; j < active_count;) {
-            int av = active_vals[j];
-            if (last_use[av] < def_i) {
-                free_slots[free_count++] = out->slot_of[av];
-                active_vals[j] = active_vals[active_count - 1];
-                active_count--;
-                continue;
-            }
-            j++;
-        }
-
-        out->slot_of[i] = allocate_slot(free_slots, &free_count, &next_slot);
-        active_vals[active_count++] = i;
-    }
-
-    out->slot_count = next_slot;
-
-    free(def_at);
-    free(last_use);
-    free(active_vals);
-    free(free_slots);
+    out->slot_count = nvals;
     return 0;
 }
 
@@ -1717,8 +1621,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_ADDR:
+                /*
+                 * Taking an address of an SSA-backed local requires the
+                 * current value to be materialized in its stack slot.
+                 */
+                int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tleaq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
@@ -1754,8 +1662,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_LOAD:
+                /*
+                 * Pointer-based loads must observe prior writes to possibly
+                 * aliased locals.
+                 */
+                int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                     long mem_size = in->imm > 0 ? in->imm : 8;
                     if (mem_size == 4) {
@@ -1771,19 +1683,19 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     long mem_size = in->imm > 0 ? in->imm : 8;
                     if (mem_size == 1) {
                         if (in->is_unsigned) {
-                            fprintf(fp, "\tmovzbl (%s), %s\n", ist.regs[rp], ist.regs[rd]);
+                            fprintf(fp, "\tmovzbl (%s), %s\n", ist.regs[rp], reg64_to32(ist.regs[rd]));
                         } else {
                             fprintf(fp, "\tmovsbq (%s), %s\n", ist.regs[rp], ist.regs[rd]);
                         }
                     } else if (mem_size == 2) {
                         if (in->is_unsigned) {
-                            fprintf(fp, "\tmovzwl (%s), %s\n", ist.regs[rp], ist.regs[rd]);
+                            fprintf(fp, "\tmovzwl (%s), %s\n", ist.regs[rp], reg64_to32(ist.regs[rd]));
                         } else {
                             fprintf(fp, "\tmovswq (%s), %s\n", ist.regs[rp], ist.regs[rd]);
                         }
                     } else if (mem_size == 4) {
                         if (in->is_unsigned) {
-                            fprintf(fp, "\tmovl (%s), %s\n", ist.regs[rp], ist.regs[rd]);
+                            fprintf(fp, "\tmovl (%s), %s\n", ist.regs[rp], reg64_to32(ist.regs[rd]));
                         } else {
                             fprintf(fp, "\tmovslq (%s), %s\n", ist.regs[rp], ist.regs[rd]);
                         }
@@ -1795,6 +1707,11 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_STORE:
+                /*
+                 * Unknown-pointer stores can alias any promoted local. Keep
+                 * semantics correct by spilling/invalidating integer cache.
+                 */
+                int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->rhs] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
@@ -1830,6 +1747,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         }
                     }
                 }
+                int_regs_flush(fp, f, &lay, &ist);
                 break;
 
             case CC_SSA_ADD:
@@ -2322,8 +2240,12 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_ADDR:
+                /*
+                 * Taking an address of an SSA-backed local requires the
+                 * current value to be materialized in its stack slot.
+                 */
+                int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tleal %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                     fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
                 } else {
@@ -2359,8 +2281,12 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_LOAD:
+                /*
+                 * Pointer-based loads must observe prior writes to possibly
+                 * aliased locals.
+                 */
+                int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
                     long mem_size = in->imm > 0 ? in->imm : 8;
                     if (mem_size == 4) {
@@ -2386,6 +2312,11 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_STORE:
+                /*
+                 * Unknown-pointer stores can alias any promoted local. Keep
+                 * semantics correct by spilling/invalidating integer cache.
+                 */
+                int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->rhs] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
@@ -2419,6 +2350,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                         }
                     }
                 }
+                int_regs_flush(fp, f, &lay, &ist);
                 break;
 
             case CC_SSA_ADD:

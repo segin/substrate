@@ -662,7 +662,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
 static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const char *out_s) {
     char stdflag[64];
     int want_trigraphs = 1;
-    size_t argc = 11 + o->c_flags.count;
+    size_t argc = 13 + o->c_flags.count;
     char **argv;
     size_t i;
     size_t at = 0;
@@ -675,6 +675,9 @@ static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const ch
     argv[at++] = "gcc";
     argv[at++] = "-S";
     argv[at++] = (char *)target_gcc_flag(o->target);
+    /* Force C language mode so bootstrap .i with #line markers is accepted. */
+    argv[at++] = "-x";
+    argv[at++] = "c";
     snprintf(stdflag, sizeof(stdflag), "-std=%s", o->std != NULL ? o->std : "gnu99");
     argv[at++] = stdflag;
     if (want_trigraphs) {
