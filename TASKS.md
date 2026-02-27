@@ -4926,140 +4926,140 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] No memory leaks (valgrind clean).
             - [ ] Man page complete and accurate.
             - [ ] All tests pass in CI.
-    - [ ] **`cat` - Concatenate files and print on standard output (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/cat/cat.c` for TODO comments, fragile code.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture.
-            - [ ] Extract option parsing into separate function.
-            - [ ] Extract I/O loop into reusable function.
-            - [ ] Write unit tests for each module.
-        - [ ] **CLI Options (POSIX + Extensions):**
-            - [ ] `-u`: Write bytes unbuffered (POSIX).
-            - [ ] `-` (dash): Read from stdin (POSIX).
-            - [ ] `-n`, `--number`: Number all output lines.
-            - [ ] `-b`, `--number-nonblank`: Number non-blank lines only.
-            - [ ] `-s`, `--squeeze-blank`: Suppress repeated empty lines.
-            - [ ] `-E`, `--show-ends`: Display `$` at end of each line.
-            - [ ] `-T`, `--show-tabs`: Display TAB as `^I`.
-            - [ ] `-v`, `--show-nonprinting`: Display control chars as `^X`, M-X.
-            - [ ] `-A`, `--show-all`: Equivalent to `-vET`.
-            - [ ] `-e`: Equivalent to `-vE`.
-            - [ ] `-t`: Equivalent to `-vT`.
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Input Handling:**
-            - [ ] Read from files specified as arguments.
-            - [ ] Read from stdin if no files or `-` argument.
-            - [ ] Handle multiple `-` arguments (read stdin multiple times).
-            - [ ] Handle binary files (pass through unchanged).
-            - [ ] Handle empty files (output nothing).
-            - [ ] Handle very large files (streaming, no full buffering).
-            - [ ] Handle files with no trailing newline.
-        - [ ] **Output Handling:**
-            - [ ] Write to stdout.
-            - [ ] `-u` flag: unbuffered writes (one syscall per read).
-            - [ ] Default: buffered I/O for performance.
-            - [ ] Handle `EINTR` on write (retry).
-            - [ ] Handle `EPIPE` gracefully (broken pipe).
-            - [ ] Handle partial writes.
-        - [ ] **Line Numbering (`-n`, `-b`):**
-            - [ ] Right-justify line numbers in 6-character field.
-            - [ ] Follow number with TAB separator.
-            - [ ] `-n`: Number all lines including blank.
-            - [ ] `-b`: Number only non-blank lines.
-            - [ ] Line counter persists across files.
-            - [ ] Handle lines without trailing newline.
-        - [ ] **Blank Line Squeezing (`-s`):**
-            - [ ] Replace multiple consecutive blank lines with one.
-            - [ ] Track state across read boundaries.
-            - [ ] Works correctly with `-n` (numbers squeezed output).
-        - [ ] **End-of-Line Marker (`-E`):**
-            - [ ] Display `$` before each newline.
-            - [ ] Handle lines without trailing newline.
-        - [ ] **Tab Display (`-T`):**
-            - [ ] Display TAB characters as `^I`.
-        - [ ] **Non-Printing Characters (`-v`):**
-            - [ ] Display control chars (0x00-0x1F) as `^@` through `^_`.
-            - [ ] Display DEL (0x7F) as `^?`.
-            - [ ] Display high-bit chars (0x80-0x9F) as `M-^@` through `M-^_`.
-            - [ ] Display high-bit chars (0xA0-0xFE) as `M- ` through `M-~`.
-            - [ ] Display 0xFF as `M-^?`.
-            - [ ] Exception: TAB, NL, FF handled separately.
-        - [ ] **Error Handling:**
-            - [ ] Continue to next file on per-file error.
-            - [ ] Print error message to stderr for each failure.
-            - [ ] Return nonzero exit code if any file failed.
-            - [ ] Exit code 0: all files processed successfully.
-            - [ ] Exit code 1: at least one file could not be read.
-            - [ ] Handle `ENOENT`, `EACCES`, `EISDIR`.
-        - [ ] **Special Cases:**
-            - [ ] Handle directories (error: is a directory).
-            - [ ] Handle device files (read normally).
-            - [ ] Handle FIFOs/pipes.
-            - [ ] Handle socket files (error or read).
-            - [ ] Symlinks: follow to target.
-        - [ ] **Performance:**
-            - [ ] Use efficient buffer size (e.g., 64KB).
-            - [ ] Minimize syscalls in default mode.
-            - [ ] Streaming: never buffer entire file.
-            - [ ] Consider `sendfile()` for file-to-stdout (optional).
-        - [ ] **Build & Installation:**
-            - [ ] Update `bin/cat/Makefile`.
-            - [ ] Install to `/bin/cat`.
-            - [ ] Add to root filesystem `dist/`.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Option parsing.
-                - [ ] Line numbering logic.
-                - [ ] Blank squeezing state machine.
-                - [ ] Non-printing character encoding.
-            - [ ] **Integration Tests:**
-                - [ ] Basic: `cat file` -> prints contents.
-                - [ ] Multiple files: `cat file1 file2` -> concatenated.
-                - [ ] Stdin: `echo test | cat` -> "test".
-                - [ ] Dash: `cat - file` -> stdin then file.
-                - [ ] Line numbers: `cat -n file` -> numbered lines.
-                - [ ] Non-blank numbers: `cat -b file`.
-                - [ ] Squeeze blank: `cat -s file`.
-                - [ ] Show ends: `cat -E file` -> `$` at EOL.
-                - [ ] Show tabs: `cat -T file` -> `^I`.
-                - [ ] Show non-printing: `cat -v file`.
-                - [ ] Show all: `cat -A file`.
-                - [ ] Unbuffered: `cat -u file`.
-                - [ ] Binary file passthrough.
-                - [ ] Empty file.
-                - [ ] Very large file.
-                - [ ] File without trailing newline.
-                - [ ] Directory argument (error).
-            - [ ] **Error Handling Tests:**
-                - [ ] Nonexistent file.
-                - [ ] Permission denied.
-                - [ ] Continue after error.
-            - [ ] **Property Tests:**
-                - [ ] Output byte count equals input byte count (without options).
-                - [ ] Line count matches with `-n`.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz binary files.
-                - [ ] Fuzz option combinations.
-            - [ ] **Acceptance Tests:**
-                - [ ] `cat file` -> prints contents.
-                - [ ] `cat file1 file2` -> prints concatenated.
-                - [ ] `cat -n file` -> lines numbered.
-                - [ ] `cat -` -> reads stdin.
-        - [ ] **Documentation:**
-            - [ ] Write `cat(1)` man page covering all options.
-            - [ ] Document POSIX `-u` behavior.
-            - [ ] Document `-v` encoding scheme.
-            - [ ] Document error continuation behavior.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All POSIX options implemented (`-u`).
-            - [ ] All common extensions implemented (`-n`, `-b`, `-s`, `-E`, `-T`, `-v`).
-            - [ ] Binary files handled correctly.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Correct exit codes.
-            - [ ] Man page complete.
-            - [ ] All tests pass in CI.
+    - [x] **`cat` - Concatenate files and print on standard output (Production Quality Rewrite):**
+        - [x] **Audit & Refactor Existing Code:**
+            - [x] Audit existing `bin/cat/cat.c` for TODO comments, fragile code.
+            - [x] Document all functionality gaps and bugs.
+            - [x] Create refactoring plan: modular architecture.
+            - [x] Extract option parsing into separate function.
+            - [x] Extract I/O loop into reusable function.
+            - [x] Write unit tests for each module.
+        - [x] **CLI Options (POSIX + Extensions):**
+            - [x] `-u`: Write bytes unbuffered (POSIX).
+            - [x] `-` (dash): Read from stdin (POSIX).
+            - [x] `-n`, `--number`: Number all output lines.
+            - [x] `-b`, `--number-nonblank`: Number non-blank lines only.
+            - [x] `-s`, `--squeeze-blank`: Suppress repeated empty lines.
+            - [x] `-E`, `--show-ends`: Display `$` at end of each line.
+            - [x] `-T`, `--show-tabs`: Display TAB as `^I`.
+            - [x] `-v`, `--show-nonprinting`: Display control chars as `^X`, M-X.
+            - [x] `-A`, `--show-all`: Equivalent to `-vET`.
+            - [x] `-e`: Equivalent to `-vE`.
+            - [x] `-t`: Equivalent to `-vT`.
+            - [x] `--help`: Display help and exit.
+            - [x] `--version`: Display version and exit.
+        - [x] **Input Handling:**
+            - [x] Read from files specified as arguments.
+            - [x] Read from stdin if no files or `-` argument.
+            - [x] Handle multiple `-` arguments (read stdin multiple times).
+            - [x] Handle binary files (pass through unchanged).
+            - [x] Handle empty files (output nothing).
+            - [x] Handle very large files (streaming, no full buffering).
+            - [x] Handle files with no trailing newline.
+        - [x] **Output Handling:**
+            - [x] Write to stdout.
+            - [x] `-u` flag: unbuffered writes (one syscall per read).
+            - [x] Default: buffered I/O for performance.
+            - [x] Handle `EINTR` on write (retry).
+            - [x] Handle `EPIPE` gracefully (broken pipe).
+            - [x] Handle partial writes.
+        - [x] **Line Numbering (`-n`, `-b`):**
+            - [x] Right-justify line numbers in 6-character field.
+            - [x] Follow number with TAB separator.
+            - [x] `-n`: Number all lines including blank.
+            - [x] `-b`: Number only non-blank lines.
+            - [x] Line counter persists across files.
+            - [x] Handle lines without trailing newline.
+        - [x] **Blank Line Squeezing (`-s`):**
+            - [x] Replace multiple consecutive blank lines with one.
+            - [x] Track state across read boundaries.
+            - [x] Works correctly with `-n` (numbers squeezed output).
+        - [x] **End-of-Line Marker (`-E`):**
+            - [x] Display `$` before each newline.
+            - [x] Handle lines without trailing newline.
+        - [x] **Tab Display (`-T`):**
+            - [x] Display TAB characters as `^I`.
+        - [x] **Non-Printing Characters (`-v`):**
+            - [x] Display control chars (0x00-0x1F) as `^@` through `^_`.
+            - [x] Display DEL (0x7F) as `^?`.
+            - [x] Display high-bit chars (0x80-0x9F) as `M-^@` through `M-^_`.
+            - [x] Display high-bit chars (0xA0-0xFE) as `M- ` through `M-~`.
+            - [x] Display 0xFF as `M-^?`.
+            - [x] Exception: TAB, NL, FF handled separately.
+        - [x] **Error Handling:**
+            - [x] Continue to next file on per-file error.
+            - [x] Print error message to stderr for each failure.
+            - [x] Return nonzero exit code if any file failed.
+            - [x] Exit code 0: all files processed successfully.
+            - [x] Exit code 1: at least one file could not be read.
+            - [x] Handle `ENOENT`, `EACCES`, `EISDIR`.
+        - [x] **Special Cases:**
+            - [x] Handle directories (error: is a directory).
+            - [x] Handle device files (read normally).
+            - [x] Handle FIFOs/pipes.
+            - [x] Handle socket files (error or read).
+            - [x] Symlinks: follow to target.
+        - [x] **Performance:**
+            - [x] Use efficient buffer size (e.g., 64KB).
+            - [x] Minimize syscalls in default mode.
+            - [x] Streaming: never buffer entire file.
+            - [x] Consider `sendfile()` for file-to-stdout (optional).
+        - [x] **Build & Installation:**
+            - [x] Update `bin/cat/Makefile`.
+            - [x] Install to `/bin/cat`.
+            - [x] Add to root filesystem `dist/`.
+        - [x] **Tests:**
+            - [x] **Unit Tests:**
+                - [x] Option parsing.
+                - [x] Line numbering logic.
+                - [x] Blank squeezing state machine.
+                - [x] Non-printing character encoding.
+            - [x] **Integration Tests:**
+                - [x] Basic: `cat file` -> prints contents.
+                - [x] Multiple files: `cat file1 file2` -> concatenated.
+                - [x] Stdin: `echo test | cat` -> "test".
+                - [x] Dash: `cat - file` -> stdin then file.
+                - [x] Line numbers: `cat -n file` -> numbered lines.
+                - [x] Non-blank numbers: `cat -b file`.
+                - [x] Squeeze blank: `cat -s file`.
+                - [x] Show ends: `cat -E file` -> `$` at EOL.
+                - [x] Show tabs: `cat -T file` -> `^I`.
+                - [x] Show non-printing: `cat -v file`.
+                - [x] Show all: `cat -A file`.
+                - [x] Unbuffered: `cat -u file`.
+                - [x] Binary file passthrough.
+                - [x] Empty file.
+                - [x] Very large file.
+                - [x] File without trailing newline.
+                - [x] Directory argument (error).
+            - [x] **Error Handling Tests:**
+                - [x] Nonexistent file.
+                - [x] Permission denied.
+                - [x] Continue after error.
+            - [x] **Property Tests:**
+                - [x] Output byte count equals input byte count (without options).
+                - [x] Line count matches with `-n`.
+            - [x] **Fuzz Tests:**
+                - [x] Fuzz binary files.
+                - [x] Fuzz option combinations.
+            - [x] **Acceptance Tests:**
+                - [x] `cat file` -> prints contents.
+                - [x] `cat file1 file2` -> prints concatenated.
+                - [x] `cat -n file` -> lines numbered.
+                - [x] `cat -` -> reads stdin.
+        - [x] **Documentation:**
+            - [x] Write `cat(1)` man page covering all options.
+            - [x] Document POSIX `-u` behavior.
+            - [x] Document `-v` encoding scheme.
+            - [x] Document error continuation behavior.
+        - [x] **Acceptance Criteria:**
+            - [x] All POSIX options implemented (`-u`).
+            - [x] All common extensions implemented (`-n`, `-b`, `-s`, `-E`, `-T`, `-v`).
+            - [x] Binary files handled correctly.
+            - [x] No memory leaks (valgrind clean).
+            - [x] Correct exit codes.
+            - [x] Man page complete.
+            - [x] All tests pass in CI.
     - [ ] **`echo` - Display a line of text (Standalone `/bin/echo`):**
         - [ ] **Design & Rationale:**
             - [ ] Create standalone `/bin/echo` executable separate from shell builtin.

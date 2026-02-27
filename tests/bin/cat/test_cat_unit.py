@@ -95,6 +95,9 @@ def main():
         combo = td / "combo.bin"
         combo.write_bytes(b"\nA\t\x01\n\nB\n")
 
+        literal_dash = td / "-"
+        literal_dash.write_bytes(b"dash-file\n")
+
         good = td / "good.txt"
         good.write_bytes(b"GOOD\n")
 
@@ -102,6 +105,15 @@ def main():
         rng = random.Random(20260227)
         huge_data = bytes(rng.getrandbits(8) for _ in range(2 * 1024 * 1024))
         huge.write_bytes(huge_data)
+
+        nodent = td / "nonexist"
+
+        protected = td / "protected.txt"
+        protected.write_bytes(b"secret\n")
+        os.chmod(protected, 0)
+
+        directory = td / "dir"
+        directory.mkdir()
 
         rc, out, err = run_cmd(bin_path, [str(plain)])
         expect_eq(rc, 0, "basic cat exit")
@@ -120,17 +132,21 @@ def main():
         expect_eq(rc, 0, "-s exit")
         expect_eq(out, b"\n", "-s output")
 
-        rc, out, _ = run_cmd(bin_path, ["-e", str(plain)])
-        expect_eq(rc, 0, "-e exit")
-        expect_eq(out, b"alpha$\n$\nbeta$\n", "-e output")
+        rc, out, _ = run_cmd(bin_path, ["-E", str(plain)])
+        expect_eq(rc, 0, "-E exit")
+        expect_eq(out, b"alpha$\n$\nbeta$\n", "-E output")
 
-        rc, out, _ = run_cmd(bin_path, ["-t", str(tabs)])
-        expect_eq(rc, 0, "-t exit")
-        expect_eq(out, b"^IA^I\n", "-t output")
+        rc, out, _ = run_cmd(bin_path, ["-T", str(tabs)])
+        expect_eq(rc, 0, "-T exit")
+        expect_eq(out, b"^IA^I\n", "-T output")
 
         rc, out, _ = run_cmd(bin_path, ["-v", str(ctrl)])
         expect_eq(rc, 0, "-v exit")
         expect_eq(out, vis_expected(ctrl_data, show_nonprint=True), "-v output")
+
+        rc, out, _ = run_cmd(bin_path, ["-A", str(tabs)])
+        expect_eq(rc, 0, "-A exit")
+        expect_eq(out, b"^IA^I$\n", "-A output")
 
         rc, out, _ = run_cmd(bin_path, ["-t", str(ctrl)])
         expect_eq(rc, 0, "-t implies -v exit")
@@ -151,6 +167,40 @@ def main():
         rc, out, _ = run_cmd(bin_path, ["-b", "-e", "-s", "-t", str(combo)])
         expect_eq(rc, 0, "combined flags exit")
         expect_eq(out, b"$\n     1\tA^I^A$\n$\n     2\tB$\n", "combined flags output")
+
+        rc, out, _ = run_cmd(bin_path, ["--number", str(plain)])
+        expect_eq(rc, 0, "--number exit")
+        expect_eq(out, b"     1\talpha\n     2\t\n     3\tbeta\n", "--number output")
+
+        rc, out, _ = run_cmd(bin_path, ["--number-nonblank", str(plain)])
+        expect_eq(rc, 0, "--number-nonblank exit")
+        expect_eq(out, b"     1\talpha\n\n     2\tbeta\n", "--number-nonblank output")
+
+        rc, out, _ = run_cmd(bin_path, ["--show-ends", str(plain)])
+        expect_eq(rc, 0, "--show-ends exit")
+        expect_eq(out, b"alpha$\n$\nbeta$\n", "--show-ends output")
+
+        rc, out, _ = run_cmd(bin_path, ["--show-tabs", str(tabs)])
+        expect_eq(rc, 0, "--show-tabs exit")
+        expect_eq(out, b"^IA^I\n", "--show-tabs output")
+
+        rc, out, _ = run_cmd(bin_path, ["--show-nonprinting", str(ctrl)])
+        expect_eq(rc, 0, "--show-nonprinting exit")
+        expect_eq(out, vis_expected(ctrl_data, show_nonprint=True), "--show-nonprinting output")
+
+        rc, out, _ = run_cmd(bin_path, ["--show-all", str(tabs)])
+        expect_eq(rc, 0, "--show-all exit")
+        expect_eq(out, b"^IA^I$\n", "--show-all output")
+
+        rc, out, err = run_cmd(bin_path, ["--help"])
+        expect_eq(rc, 0, "--help exit")
+        expect(b"Usage:" in out, "--help output missing usage")
+        expect_eq(err, b"", "--help stderr")
+
+        rc, out, err = run_cmd(bin_path, ["--version"])
+        expect_eq(rc, 0, "--version exit")
+        expect(b"cat (Substrate)" in out, "--version output missing")
+        expect_eq(err, b"", "--version stderr")
 
         rc, out, err = run_cmd(bin_path, ["-B", "32", str(huge)])
         expect_eq(rc, 0, "-B decimal exit")
@@ -173,11 +223,30 @@ def main():
         expect_eq(rc, 0, "only-newlines exit")
         expect_eq(out, b"\n\n\n", "only-newlines output")
 
-        missing = td / "missing.txt"
-        rc, out, err = run_cmd(bin_path, [str(missing), str(good)])
+        rc, out, _ = run_cmd(bin_path, ["--", str(literal_dash)])
+        expect_eq(rc, 0, "-- end-of-options exit")
+        expect_eq(out, b"dash-file\n", "-- end-of-options output")
+
+        rc, out, err = run_cmd(bin_path, [str(nodent), str(good)])
         expect(rc != 0, "missing file should set failure")
         expect_eq(out, good.read_bytes(), "good file should still be processed")
-        expect(str(missing).encode() in err, "missing filename should appear in stderr")
+        expect(str(nodent).encode() in err, "missing filename should appear in stderr")
+
+        if not os.access(protected, os.R_OK):
+            rc, _, err = run_cmd(bin_path, [str(protected)])
+            expect(rc != 0, "permission denied should be nonzero")
+            expect(str(protected).encode() in err, "permission denied filename missing")
+
+        rc, _, err = run_cmd(bin_path, [str(directory)])
+        expect(rc != 0, "directory read should be nonzero")
+        expect(str(directory).encode() in err, "directory error missing")
+
+        rc, out, err = run_cmd(bin_path, ["-u", str(good)])
+        expect_eq(rc, 0, "-u exit")
+        expect_eq(out, b"GOOD\n", "-u output")
+        expect_eq(err, b"", "-u stderr")
+
+        os.chmod(protected, 0o600)
 
     print("unit tests passed")
     return 0

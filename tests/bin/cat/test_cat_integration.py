@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
+import errno
 import os
 import pty
 import select
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
-import time
-import errno
 from pathlib import Path
 
 
@@ -92,9 +92,11 @@ def main():
         expect_eq(rc, 0, "mixed files and stdin exit")
         expect_eq(out, b"file-1\nstdin-segment\nfile-2\n", "mixed files and stdin output")
 
-        rc, out, _ = run_capture(bin_path, ["--"], stdin_data=b"stdin-via-double-dash\n")
-        expect_eq(rc, 0, "double-dash stdin exit")
-        expect_eq(out, b"stdin-via-double-dash\n", "double-dash stdin output")
+        dash_file = td / "-"
+        dash_file.write_bytes(b"literal-dash\n")
+        rc, out, _ = run_capture(bin_path, ["--", str(dash_file)])
+        expect_eq(rc, 0, "-- end-of-options exit")
+        expect_eq(out, b"literal-dash\n", "-- end-of-options output")
 
         out_file = td / "out.txt"
         with out_file.open("wb") as fp:
@@ -117,6 +119,11 @@ def main():
         expect_eq(out, b"file-1\n", "-f regular file output")
         expect_eq(err, b"", "-f regular file stderr")
 
+        rc, out, err = run_capture(bin_path, ["-u", str(f1)])
+        expect_eq(rc, 0, "-u regular file exit")
+        expect_eq(out, b"file-1\n", "-u regular file output")
+        expect_eq(err, b"", "-u regular file stderr")
+
         rc, out, _ = run_capture(bin_path, ["-f", "/dev/null"])
         expect_eq(rc, 0, "-f /dev/null exit")
         expect_eq(out, b"", "-f /dev/null output")
@@ -136,6 +143,17 @@ def main():
         expect_eq(rc, 0, "-f fifo exit")
         expect_eq(out, b"fifo-data\n", "-f fifo output")
         expect_eq(err, b"", "-f fifo stderr")
+
+        sock_path = td / "sock.unix"
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(sock_path))
+        listener.listen(1)
+        listener.close()
+
+        rc, out, err = run_capture(bin_path, [str(sock_path)])
+        expect(rc != 0, "socket path should fail or be unsupported for plain read")
+        expect_eq(out, b"", "socket path output")
+        expect(str(sock_path).encode() in err, "socket path stderr filename")
 
     print("integration tests passed")
     return 0

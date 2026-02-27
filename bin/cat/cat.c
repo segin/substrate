@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,8 +11,13 @@
 
 #include "cat_cooked.h"
 
-#define CAT_STACK_BUFSIZE ((size_t)BUFSIZ)
+#define CAT_STACK_BUFSIZE 65536u
 #define CAT_COOKED_SINK_BUFSIZE 4096u
+#define CAT_VERSION_STRING "cat (Substrate) 1.0"
+
+#define CAT_PROCESS_FILE_ERROR 1
+#define CAT_PROCESS_STDOUT_ERROR -1
+#define CAT_PROCESS_BROKEN_PIPE -2
 
 struct cat_options {
     const char *progname;
@@ -27,10 +33,14 @@ struct cat_options {
     bool show_tabs;
     bool unbuffered_stdout;
     bool show_nonprint;
+
+    bool show_help;
+    bool show_version;
 };
 
 struct cat_sink {
     int fd;
+    bool unbuffered;
     unsigned char buf[CAT_COOKED_SINK_BUFSIZE];
     size_t used;
 };
@@ -41,6 +51,8 @@ struct cat_test_hooks {
     size_t read_max;
     long write_eintr_every;
     size_t write_max;
+    bool write_epipe_once;
+
     bool malloc_fail_once;
     long lock_eintr_count;
     int lock_fail_errno;
@@ -48,6 +60,7 @@ struct cat_test_hooks {
     unsigned long read_calls;
     unsigned long write_calls;
     bool malloc_failed;
+    bool write_epipe_used;
 };
 
 static struct cat_test_hooks g_cat_test_hooks;
@@ -81,36 +94,72 @@ static void cat_test_hooks_load(void)
     g_cat_test_hooks.read_max = (size_t)cat_env_to_long("CAT_TEST_READ_MAX", 0);
     g_cat_test_hooks.write_eintr_every = cat_env_to_long("CAT_TEST_WRITE_EINTR_EVERY", 0);
     g_cat_test_hooks.write_max = (size_t)cat_env_to_long("CAT_TEST_WRITE_MAX", 0);
+    g_cat_test_hooks.write_epipe_once = cat_env_to_long("CAT_TEST_WRITE_EPIPE_ONCE", 0) != 0;
+
     g_cat_test_hooks.malloc_fail_once = cat_env_to_long("CAT_TEST_MALLOC_FAIL", 0) != 0;
     g_cat_test_hooks.lock_eintr_count = cat_env_to_long("CAT_TEST_LOCK_EINTR_COUNT", 0);
     g_cat_test_hooks.lock_fail_errno = (int)cat_env_to_long("CAT_TEST_LOCK_FAIL_ERRNO", 0);
+
     g_cat_test_hooks_init = true;
 }
 #endif
 
 static bool cat_is_stdin_name(const char *name)
 {
-    return strcmp(name, "-") == 0 || strcmp(name, "--") == 0;
+    return strcmp(name, "-") == 0;
 }
 
-static void cat_usage(const char *progname)
+static void cat_usage(FILE *stream, const char *progname)
 {
-    fprintf(stderr, "Usage: %s [-B bsize] [-beflnstuv] [-] [file ...]\n", progname);
+    fprintf(stream,
+            "Usage: %s [-ABbefEflnstTuv] [--help] [--version] [-] [file ...]\\n"
+            "       %s [-B bsize] [-ABbefEflnstTuv] [--help] [--version] [-] [file ...]\\n",
+            progname, progname);
+}
+
+static void cat_print_help(const struct cat_options *options)
+{
+    cat_usage(stdout, options->progname);
+    fputs("\\n"
+          "Concatenate files and print on standard output.\\n"
+          "\\n"
+          "Options:\\n"
+          "  -A, --show-all           equivalent to -vET\\n"
+          "  -B bsize                 set raw-mode buffer size in bytes (decimal/hex)\\n"
+          "  -b, --number-nonblank    number non-blank output lines (implies -n)\\n"
+          "  -e                       equivalent to -vE\\n"
+          "  -E, --show-ends          display $ at end of each line\\n"
+          "  -f                       open files with fast/non-blocking semantics first\\n"
+          "  -l                       lock stdout for writing with fcntl(F_SETLKW)\\n"
+          "  -n, --number             number all output lines\\n"
+          "  -s, --squeeze-blank      suppress repeated empty output lines\\n"
+          "  -t                       equivalent to -vT\\n"
+          "  -T, --show-tabs          display TAB characters as ^I\\n"
+          "  -u                       unbuffered stdout mode\\n"
+          "  -v, --show-nonprinting   use ^ and M- notation for non-printing bytes\\n"
+          "      --help               display this help and exit\\n"
+          "      --version            output version information and exit\\n",
+          stdout);
+}
+
+static void cat_print_version(void)
+{
+    puts(CAT_VERSION_STRING);
 }
 
 static void cat_warn_file(const struct cat_options *options, const char *name)
 {
-    fprintf(stderr, "%s: %s: %s\n", options->progname, name, strerror(errno));
+    fprintf(stderr, "%s: %s: %s\\n", options->progname, name, strerror(errno));
 }
 
 static void cat_warn_stdout(const struct cat_options *options)
 {
-    fprintf(stderr, "%s: stdout: %s\n", options->progname, strerror(errno));
+    fprintf(stderr, "%s: stdout: %s\\n", options->progname, strerror(errno));
 }
 
 static void cat_warnx(const struct cat_options *options, const char *message)
 {
-    fprintf(stderr, "%s: %s\n", options->progname, message);
+    fprintf(stderr, "%s: %s\\n", options->progname, message);
 }
 
 static ssize_t cat_sys_read(int fd, void *buf, size_t count)
@@ -140,6 +189,12 @@ static ssize_t cat_sys_write(int fd, const void *buf, size_t count)
     if (g_cat_test_hooks.write_eintr_every > 0 &&
         (g_cat_test_hooks.write_calls % (unsigned long)g_cat_test_hooks.write_eintr_every) == 0) {
         errno = EINTR;
+        return -1;
+    }
+
+    if (g_cat_test_hooks.write_epipe_once && !g_cat_test_hooks.write_epipe_used) {
+        g_cat_test_hooks.write_epipe_used = true;
+        errno = EPIPE;
         return -1;
     }
 
@@ -250,26 +305,52 @@ static int cat_parse_buffer_size(const char *text, size_t *value_out)
     return 0;
 }
 
-static int cat_parse_options(int argc, char **argv, struct cat_options *options)
+static int cat_parse_short_options(const char *arg,
+                                   int argc,
+                                   char **argv,
+                                   int *idx,
+                                   struct cat_options *options)
 {
-    int ch;
+    size_t j;
 
-    opterr = 0;
-    while ((ch = getopt(argc, argv, "B:beflnstuv")) != -1) {
-        switch (ch) {
-        case 'B':
-            if (cat_parse_buffer_size(optarg, &options->buffer_size) < 0) {
+    for (j = 1; arg[j] != '\0'; j++) {
+        switch (arg[j]) {
+        case 'A':
+            options->show_nonprint = true;
+            options->show_ends = true;
+            options->show_tabs = true;
+            break;
+        case 'B': {
+            const char *value = NULL;
+
+            if (arg[j + 1] != '\0') {
+                value = arg + j + 1;
+                j = strlen(arg) - 1;
+            } else {
+                if ((*idx + 1) >= argc) {
+                    cat_warnx(options, "option -B requires an argument");
+                    return -1;
+                }
+                (*idx)++;
+                value = argv[*idx];
+            }
+
+            if (cat_parse_buffer_size(value, &options->buffer_size) < 0) {
                 cat_warnx(options, "invalid buffer size for -B");
                 return -1;
             }
             options->buffer_size_set = true;
-            break;
+            return 0;
+        }
         case 'b':
             options->number_nonblank = true;
             options->number_all = true;
             break;
         case 'e':
             options->show_nonprint = true;
+            options->show_ends = true;
+            break;
+        case 'E':
             options->show_ends = true;
             break;
         case 'f':
@@ -288,6 +369,9 @@ static int cat_parse_options(int argc, char **argv, struct cat_options *options)
             options->show_nonprint = true;
             options->show_tabs = true;
             break;
+        case 'T':
+            options->show_tabs = true;
+            break;
         case 'u':
             options->unbuffered_stdout = true;
             break;
@@ -295,11 +379,76 @@ static int cat_parse_options(int argc, char **argv, struct cat_options *options)
             options->show_nonprint = true;
             break;
         default:
-            cat_usage(options->progname);
+            fprintf(stderr, "%s: invalid option -- '%c'\\n", options->progname, arg[j]);
+            cat_usage(stderr, options->progname);
             return -1;
         }
     }
 
+    return 0;
+}
+
+static int cat_parse_long_option(const char *arg, struct cat_options *options)
+{
+    if (strcmp(arg, "--number") == 0) {
+        options->number_all = true;
+    } else if (strcmp(arg, "--number-nonblank") == 0) {
+        options->number_nonblank = true;
+        options->number_all = true;
+    } else if (strcmp(arg, "--squeeze-blank") == 0) {
+        options->squeeze_blank = true;
+    } else if (strcmp(arg, "--show-ends") == 0) {
+        options->show_ends = true;
+    } else if (strcmp(arg, "--show-tabs") == 0) {
+        options->show_tabs = true;
+    } else if (strcmp(arg, "--show-nonprinting") == 0) {
+        options->show_nonprint = true;
+    } else if (strcmp(arg, "--show-all") == 0) {
+        options->show_nonprint = true;
+        options->show_ends = true;
+        options->show_tabs = true;
+    } else if (strcmp(arg, "--help") == 0) {
+        options->show_help = true;
+    } else if (strcmp(arg, "--version") == 0) {
+        options->show_version = true;
+    } else {
+        fprintf(stderr, "%s: unrecognized option '%s'\\n", options->progname, arg);
+        cat_usage(stderr, options->progname);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int cat_parse_options(int argc, char **argv, struct cat_options *options, int *first_file)
+{
+    int i;
+
+    for (i = 1; i < argc; i++) {
+        const char *arg = argv[i];
+
+        if (arg[0] != '-' || arg[1] == '\0') {
+            break;
+        }
+
+        if (strcmp(arg, "--") == 0) {
+            i++;
+            break;
+        }
+
+        if (arg[1] == '-') {
+            if (cat_parse_long_option(arg, options) < 0) {
+                return -1;
+            }
+            continue;
+        }
+
+        if (cat_parse_short_options(arg, argc, argv, &i, options) < 0) {
+            return -1;
+        }
+    }
+
+    *first_file = i;
     return 0;
 }
 
@@ -354,6 +503,10 @@ static int cat_sink_emit(void *ctx, const unsigned char *data, size_t len)
     struct cat_sink *sink = (struct cat_sink *)ctx;
     size_t off = 0;
 
+    if (sink->unbuffered) {
+        return cat_write_all(data, len);
+    }
+
     while (off < len) {
         size_t room = sizeof(sink->buf) - sink->used;
         size_t chunk;
@@ -396,7 +549,7 @@ static int cat_lock_stdout_fd(const struct cat_options *options)
             continue;
         }
 
-        fprintf(stderr, "%s: unable to lock stdout: %s\n", options->progname, strerror(errno));
+        fprintf(stderr, "%s: unable to lock stdout: %s\\n", options->progname, strerror(errno));
         return -1;
     }
 }
@@ -419,7 +572,7 @@ static int cat_unlock_stdout_fd(const struct cat_options *options)
             continue;
         }
 
-        fprintf(stderr, "%s: unable to unlock stdout: %s\n", options->progname, strerror(errno));
+        fprintf(stderr, "%s: unable to unlock stdout: %s\\n", options->progname, strerror(errno));
         return -1;
     }
 }
@@ -433,7 +586,7 @@ struct cat_raw_buffer {
 
 static int cat_raw_buffer_init(struct cat_raw_buffer *raw, const struct cat_options *options)
 {
-    size_t selected = CAT_STACK_BUFSIZE;
+    size_t selected = sizeof(raw->stack_buf);
 
     raw->buf = raw->stack_buf;
     raw->len = sizeof(raw->stack_buf);
@@ -455,7 +608,7 @@ static int cat_raw_buffer_init(struct cat_raw_buffer *raw, const struct cat_opti
         void *mem = cat_sys_malloc(selected);
         if (mem == NULL) {
             fprintf(stderr,
-                    "%s: warning: unable to allocate %lu-byte buffer, using %lu-byte fallback\n",
+                    "%s: warning: unable to allocate %lu-byte buffer, using %lu-byte fallback\\n",
                     options->progname,
                     (unsigned long)selected,
                     (unsigned long)sizeof(raw->stack_buf));
@@ -511,7 +664,6 @@ static void cat_maybe_clear_nonblock(int fd, const struct cat_options *options, 
         if (errno == EINTR) {
             continue;
         }
-
         cat_warn_file(options, name);
         return;
     }
@@ -533,12 +685,15 @@ static int cat_process_raw_fd(int fd,
                 continue;
             }
             cat_warn_file(options, name);
-            return 1;
+            return CAT_PROCESS_FILE_ERROR;
         }
 
         if (cat_write_all(raw->buf, (size_t)n) < 0) {
+            if (errno == EPIPE) {
+                return CAT_PROCESS_BROKEN_PIPE;
+            }
             cat_warn_stdout(options);
-            return -1;
+            return CAT_PROCESS_STDOUT_ERROR;
         }
     }
 }
@@ -562,7 +717,7 @@ static int cat_process_raw_file(const char *name,
     fd = cat_sys_open_ro(name, open_flags);
     if (fd < 0) {
         cat_warn_file(options, name);
-        return 1;
+        return CAT_PROCESS_FILE_ERROR;
     }
 
     if (options->fast_open) {
@@ -573,7 +728,7 @@ static int cat_process_raw_file(const char *name,
     if (close(fd) < 0) {
         cat_warn_file(options, name);
         if (rc == 0) {
-            rc = 1;
+            rc = CAT_PROCESS_FILE_ERROR;
         }
     }
 
@@ -597,7 +752,7 @@ static int cat_process_cooked_stream(FILE *fp,
                     continue;
                 }
                 cat_warn_file(options, name);
-                return 1;
+                return CAT_PROCESS_FILE_ERROR;
             }
             break;
         }
@@ -605,15 +760,21 @@ static int cat_process_cooked_stream(FILE *fp,
         {
             unsigned char byte = (unsigned char)ch;
             if (cat_cooked_process(&byte, 1, cfg, state, cat_sink_emit, sink) < 0) {
+                if (errno == EPIPE) {
+                    return CAT_PROCESS_BROKEN_PIPE;
+                }
                 cat_warn_stdout(options);
-                return -1;
+                return CAT_PROCESS_STDOUT_ERROR;
             }
         }
     }
 
     if (cat_sink_flush(sink) < 0) {
+        if (errno == EPIPE) {
+            return CAT_PROCESS_BROKEN_PIPE;
+        }
         cat_warn_stdout(options);
-        return -1;
+        return CAT_PROCESS_STDOUT_ERROR;
     }
 
     return 0;
@@ -635,14 +796,14 @@ static int cat_process_cooked_file(const char *name,
     fp = fopen(name, "rb");
     if (fp == NULL) {
         cat_warn_file(options, name);
-        return 1;
+        return CAT_PROCESS_FILE_ERROR;
     }
 
     rc = cat_process_cooked_stream(fp, options, name, cfg, state, sink);
     if (fclose(fp) != 0) {
         cat_warn_file(options, name);
         if (rc == 0) {
-            rc = 1;
+            rc = CAT_PROCESS_FILE_ERROR;
         }
     }
 
@@ -655,12 +816,28 @@ int main(int argc, char **argv)
     int status = 0;
     bool locked = false;
     bool cooked_mode;
+    int first_file = argc;
 
     memset(&options, 0, sizeof(options));
     options.progname = (argv[0] != NULL && argv[0][0] != '\0') ? argv[0] : "cat";
 
-    if (cat_parse_options(argc, argv, &options) < 0) {
+    (void)signal(SIGPIPE, SIG_IGN);
+
+    if (cat_parse_options(argc, argv, &options, &first_file) < 0) {
         return 1;
+    }
+
+    if (options.show_help) {
+        cat_print_help(&options);
+        return 0;
+    }
+    if (options.show_version) {
+        cat_print_version();
+        return 0;
+    }
+
+    if (options.number_nonblank) {
+        options.number_all = true;
     }
 
     if (options.unbuffered_stdout) {
@@ -692,33 +869,42 @@ int main(int argc, char **argv)
 
         cat_cooked_state_init(&cooked_state);
         sink.fd = STDOUT_FILENO;
+        sink.unbuffered = options.unbuffered_stdout;
         sink.used = 0;
 
-        if (optind >= argc) {
+        if (first_file >= argc) {
             int rc = cat_process_cooked_file("-", &options, &cfg, &cooked_state, &sink);
-            if (rc < 0) {
+            if (rc == CAT_PROCESS_BROKEN_PIPE) {
+                goto out;
+            }
+            if (rc == CAT_PROCESS_STDOUT_ERROR) {
                 status = 1;
                 goto out;
             }
-            if (rc > 0) {
+            if (rc == CAT_PROCESS_FILE_ERROR) {
                 status = 1;
             }
         } else {
-            for (i = optind; i < argc; i++) {
+            for (i = first_file; i < argc; i++) {
                 int rc = cat_process_cooked_file(argv[i], &options, &cfg, &cooked_state, &sink);
-                if (rc < 0) {
+                if (rc == CAT_PROCESS_BROKEN_PIPE) {
+                    goto out;
+                }
+                if (rc == CAT_PROCESS_STDOUT_ERROR) {
                     status = 1;
                     goto out;
                 }
-                if (rc > 0) {
+                if (rc == CAT_PROCESS_FILE_ERROR) {
                     status = 1;
                 }
             }
         }
 
         if (cat_sink_flush(&sink) < 0) {
-            cat_warn_stdout(&options);
-            status = 1;
+            if (errno != EPIPE) {
+                cat_warn_stdout(&options);
+                status = 1;
+            }
             goto out;
         }
     } else {
@@ -730,25 +916,33 @@ int main(int argc, char **argv)
             goto out;
         }
 
-        if (optind >= argc) {
+        if (first_file >= argc) {
             int rc = cat_process_raw_file("-", &options, &raw);
-            if (rc < 0) {
+            if (rc == CAT_PROCESS_BROKEN_PIPE) {
+                cat_raw_buffer_destroy(&raw);
+                goto out;
+            }
+            if (rc == CAT_PROCESS_STDOUT_ERROR) {
                 status = 1;
                 cat_raw_buffer_destroy(&raw);
                 goto out;
             }
-            if (rc > 0) {
+            if (rc == CAT_PROCESS_FILE_ERROR) {
                 status = 1;
             }
         } else {
-            for (i = optind; i < argc; i++) {
+            for (i = first_file; i < argc; i++) {
                 int rc = cat_process_raw_file(argv[i], &options, &raw);
-                if (rc < 0) {
+                if (rc == CAT_PROCESS_BROKEN_PIPE) {
+                    cat_raw_buffer_destroy(&raw);
+                    goto out;
+                }
+                if (rc == CAT_PROCESS_STDOUT_ERROR) {
                     status = 1;
                     cat_raw_buffer_destroy(&raw);
                     goto out;
                 }
-                if (rc > 0) {
+                if (rc == CAT_PROCESS_FILE_ERROR) {
                     status = 1;
                 }
             }

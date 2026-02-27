@@ -1,153 +1,181 @@
 .TH CAT 1 "February 2026" "Substrate" "User Commands"
 .SH NAME
-cat \- concatenate files and print on the standard output
+cat \- concatenate files and print on standard output
 .SH SYNOPSIS
 .B cat
+.RB [ \-ABbefEflnstTuv ]
 .RB [ \-B " bsize ]"
-.RB [ \-beflnstuv ]
 .RB [ \- ]
 .RI [ file ...]
+.br
+.B cat
+.RB [ \-A ]
+.RB [ \-b | \-n ]
+.RB [ \-e | \-E ]
+.RB [ \-t | \-T ]
+.RB [ \-suv ]
+.RB [ \-f ]
+.RB [ \-l ]
+.RB [ \-B " bsize ]
+.RB [ \-\-number | \-\-number\-nonblank | \-\-squeeze\-blank ]
+.RB [ \-\-show\-all | \-\-show\-ends | \-\-show\-tabs | \-\-show\-nonprinting ]
+.RI [ file ...]
+.br
+.B cat
+.RB [ \-\-help | \-\-version ]
 .SH DESCRIPTION
 .B cat
-copies each input file to standard output in argument order.
-If no file operands are given, input is read from standard input.
-The file names
-.B -
-and
-.B --
-are treated as aliases for standard input.
+writes each input file to standard output in order.
+If no files are specified, or if a file is
+.BR - ,
+input is read from standard input.
 .PP
-Two execution modes are used:
-.TP
-Raw mode (default)
-Selected when no text-processing flags are enabled. Uses
-.BR open (2),
-.BR read (2),
-and
-.BR write (2)
-with a high-throughput buffer and full partial-write handling.
-.TP
-Cooked mode
-Selected when any of
+With no text processing flags enabled,
+.B cat
+uses a raw high-throughput read/write loop.
+When any of
+.BR \-A ,
 .BR \-b ,
 .BR \-e ,
+.BR \-E ,
 .BR \-n ,
 .BR \-s ,
 .BR \-t ,
+.BR \-T ,
 or
 .BR \-v
-is enabled. Performs byte-oriented text transformations (line numbering,
-blank squeezing, tab/end markers, and non-printable visualization).
+is enabled,
+.B cat
+uses cooked byte-oriented processing.
 .SH OPTIONS
 .TP
 .BI \-B " bsize"
-Set the raw mode buffer size in bytes. Decimal and hexadecimal forms are accepted.
-When omitted,
-.B cat
-uses stdout block size when it is larger than the built-in fallback.
+Set raw mode buffer size in bytes. Accepts decimal or hexadecimal values.
 .TP
-.B \-b
-Number non-blank output lines. Implies
+.BR \-A , " " \-\-show\-all
+Equivalent to
+.BR \-vET .
+.TP
+.BR \-b , " " \-\-number\-nonblank
+Number non-blank output lines; implies
 .BR \-n .
 .TP
 .B \-e
 Equivalent to
-.B \-v
-plus end markers (show
+.BR \-vE .
+.TP
+.BR \-E , " " \-\-show\-ends
+Display
 .B $
-before each newline).
+before each newline.
 .TP
 .B \-f
-Fast-open behavior for raw mode file opens: open with temporary non-blocking
-semantics when possible, then restore blocking mode.
+Raw-mode fast-open semantics: attempt non-blocking open first,
+then restore blocking mode.
 .TP
 .B \-l
-Acquire and hold a blocking stdout write lock for the full run using
+Lock stdout for writing with
 .BR fcntl (2)
-record locking.
+(
+.BR F_SETLKW ,
+.BR F_WRLCK )
+for the entire operation.
 .TP
-.B \-n
+.BR \-n , " " \-\-number
 Number all output lines.
 .TP
-.B \-s
-Squeeze repeated adjacent empty lines into one empty line.
+.BR \-s , " " \-\-squeeze\-blank
+Collapse multiple adjacent empty lines into one.
 .TP
 .B \-t
 Equivalent to
-.B \-v
-plus tab visualization (
-.B ^I
-).
+.BR \-vT .
+.TP
+.BR \-T , " " \-\-show\-tabs
+Display TAB as
+.BR ^I .
 .TP
 .B \-u
-Set stdout to unbuffered stdio mode (
+Set stdout to unbuffered mode (
 .BR setbuf (3)
 with NULL).
+.PP
+In raw mode this keeps direct syscall-based output behavior.
+In cooked mode this disables the internal cooked output buffer.
 .TP
-.B \-v
-Visualize non-printable bytes using caret and
+.BR \-v , " " \-\-show\-nonprinting
+Display non-printable bytes using caret and
 .B M-
 notation.
-Bytes with the high bit set are shown as
-.B M-
-plus the low 7-bit form.
-.SH LOCKING
+.TP
+.B \-\-help
+Display help and exit.
+.TP
+.B \-\-version
+Display version information and exit.
+.SH NON-PRINTING BYTE ENCODING
 With
-.BR \-l ,
-.B cat
-uses a whole-file write lock on stdout (start 0, length 0,
-.BR F_WRLCK ,
-.BR F_SETLKW ).
-Lock acquisition retries on
-.BR EINTR .
-.PP
-Policy: if stdout locking fails (including unsupported locking backends),
-.B cat
-exits with non-zero status and prints a diagnostic.
-.PP
-Potential deadlock: if another process holds an incompatible lock while waiting
-for this process to release a resource needed to make progress,
-both processes can block indefinitely.
-.SH VISUALIZATION RULES
-In cooked mode with
 .BR \-v :
 .IP "1." 4
-0x00\-0x1F and 0x7F use caret form (for example,
+0x00-0x1F are shown as
 .B ^@
-,
-.BR ^? ).
+through
+.BR ^_ .
 .IP "2." 4
-TAB and newline stay literal unless transformed by
-.BR \-t
-or
-.BR \-e .
+0x7F is shown as
+.BR ^? .
 .IP "3." 4
-0x80\-0xFF emit
+0x80-0xFF are shown as
 .B M-
-followed by the low 7-bit visualization.
+followed by the low 7-bit encoding.
+.IP "4." 4
+TAB and NL are handled separately by
+.BR \-T
+and
+.BR \-E .
+.SH ERROR HANDLING
+If a file cannot be opened or read,
+.B cat
+prints a diagnostic to stderr, records failure, and continues with remaining files.
+A stdout write failure is fatal for further processing.
+.PP
+Broken pipe (
+.BR EPIPE )
+is handled quietly so pipelines terminate cleanly.
+.SH LOCKING NOTES
+With
+.BR \-l ,
+stdout remains locked for the whole command.
+If locking is unsupported or fails,
+.B cat
+prints an error and exits non-zero.
+Advisory locking can deadlock if cooperating processes hold incompatible locks.
 .SH EXIT STATUS
 .TP
 .B 0
-All inputs processed successfully.
+All requested output completed successfully.
 .TP
 .B 1
-One or more failures occurred (open/read/write/lock/close).
+At least one error occurred (file open/read error, stdout failure, lock failure, etc.).
 .SH EXAMPLES
 .TP
+.B cat file
+Print one file.
+.TP
 .B cat file1 file2
-Concatenate files in order.
+Concatenate multiple files.
 .TP
 .B cat -n file
 Number all lines.
 .TP
 .B cat -b -s file
-Number only non-blank lines and squeeze blank runs.
+Number non-blank lines and squeeze blank runs.
 .TP
-.B cat -vte file
-Show tabs, non-printables, and line ends.
+.B cat -A file
+Show tabs, line ends, and non-printable bytes.
 .TP
-.B cat -l output_source > locked_output
-Hold an advisory write lock on stdout for the command duration.
+.B cat -u - file
+Read standard input and write unbuffered output.
 .SH SEE ALSO
 .BR cp (1),
 .BR tee (1),

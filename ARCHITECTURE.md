@@ -140,6 +140,10 @@ The system follows a monolithic kernel architecture with a strict separation bet
 ### Core Userland (`bin/`, `lib/`)
 These components are essential for booting and basic system operation.
 - **`bin/`**: Fundamental Unix utilities (`sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, `kill`, `sync`, etc.).
+  - **`bin/cat/`**: Production `cat` utility with dual execution paths:
+    - Raw engine: `open/read/write` streaming path with dynamic buffer sizing (`-B` override, stdout block-size probe, 64KiB fallback), partial-write handling, and `EINTR` retry.
+    - Cooked engine: byte-oriented transform path for `-n/-b/-s/-E/-T/-v` (`-A/-e/-t` composites), implemented in reusable module `cat_cooked.c`.
+    - Robustness: optional fast open (`-f`), stdout write lock (`-l`), graceful broken-pipe handling, and Linux host validation harness in `tests/bin/cat/` (unit/integration/property/fuzz/regression + sanitizer/valgrind CI script `tests/ci/test-cat.sh`).
   - **`bin/cp/`**: Production copy utility with modular engine:
     - `cp_opts`: CLI parsing and conflict policy (`-f/-i/-n`, `-H/-L/-P`, preserve sets).
     - `cp_copy`: recursive traversal, sparse-aware data movement, atomic replace, special-file handling.

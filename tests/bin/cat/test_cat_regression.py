@@ -89,7 +89,7 @@ def main():
         # Malloc failure fallback path for large -B.
         env = base_env.copy()
         env["CAT_TEST_MALLOC_FAIL"] = "1"
-        rc, out, err = run_cmd(hook_bin, ["-B", "65536", str(src)], env=env)
+        rc, out, err = run_cmd(hook_bin, ["-B", "262144", str(src)], env=env)
         expect_eq(rc, 0, "malloc fallback exit")
         expect_eq(out, payload, "malloc fallback output")
         expect(b"fallback" in err, "malloc fallback warning missing")
@@ -109,6 +109,13 @@ def main():
         rc, _, err = run_cmd(hook_bin, ["-l", str(src)], env=env)
         expect(rc != 0, "lock failure should be nonzero")
         expect(b"unable to lock stdout" in err, "lock failure message missing")
+
+        # EPIPE is handled gracefully (no stderr, successful early exit).
+        env = base_env.copy()
+        env["CAT_TEST_WRITE_EPIPE_ONCE"] = "1"
+        rc, _, err = run_cmd(hook_bin, [str(src)], env=env)
+        expect_eq(rc, 0, "EPIPE graceful exit")
+        expect_eq(err, b"", "EPIPE stderr should be empty")
 
         # Real fcntl lock waiting behavior.
         out_file = td / "locked-out.bin"
