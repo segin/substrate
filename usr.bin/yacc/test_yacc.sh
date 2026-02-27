@@ -18,6 +18,19 @@ if [ ! -f test_minimal.tab.c ]; then
     echo "test_minimal.tab.c missing"
     exit 1
 fi
+awk '
+    /^State 2:/ { in_state = 1; next }
+    /^State [0-9]+:/ { if (in_state) exit }
+    { if (in_state) print }
+' test_minimal.output > test_minimal.state2
+if grep -F "NUMBER  shift" test_minimal.state2 >/dev/null; then
+    echo "unexpected shift edge in reduce state (GOTO graph wiring bug)"
+    exit 1
+fi
+if ! grep -F "NUMBER  shift" test_minimal.output >/dev/null; then
+    echo "missing NUMBER shift edge in minimal grammar"
+    exit 1
+fi
 echo "minimal.y passed"
 
 echo "Testing calc.y..."
@@ -88,6 +101,7 @@ echo "closure expansion passed"
 
 # Cleanup
 rm -f test_minimal.tab.c test_minimal.tab.h test_minimal.output
+rm -f test_minimal.state2
 rm -f test_calc.tab.c test_calc.tab.h test_calc.output
 rm -f test_midrule.tab.c test_midrule.tab.h test_midrule.output
 rm -f test_deta.tab.c test_deta.tab.h test_deta.output

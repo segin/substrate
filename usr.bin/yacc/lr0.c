@@ -44,8 +44,8 @@ static void generate_states(void);
 static int get_state(int symbol);
 static void new_item_sets(void);
 static void append_states(void);
-static void save_shifts(void);
-static void save_reductions(void);
+static void save_shifts(int stateno);
+static void save_reductions(int stateno);
 static core *new_state(int symbol);
 static int cmp_short(const void *a, const void *b);
 
@@ -341,7 +341,7 @@ static void append_states(void) {
     }
 }
 
-static void save_shifts(void) {
+static void save_shifts(int stateno) {
     shifts *sp;
     int i;
     
@@ -351,7 +351,7 @@ static void save_shifts(void) {
     if (sp == NULL) no_space();
     
     sp->next = NULL;
-    sp->number = nstates - 1;  /* Current state being processed */
+    sp->number = stateno;
     sp->nshifts = current_nshifts;
     for (i = 0; i < current_nshifts; i++)
         sp->shift[i] = shiftset[i];
@@ -366,7 +366,7 @@ static void save_shifts(void) {
 }
 
 
-static void save_reductions(void) {
+static void save_reductions(int stateno) {
     int count;
     int i;
     short *isp;
@@ -386,7 +386,7 @@ static void save_reductions(void) {
     if (rp == NULL) no_space();
     
     rp->next = NULL;
-    rp->number = nstates - 1;
+    rp->number = stateno;
     rp->nreds = count;
     for (i = 0; i < count; i++)
         rp->rules[i] = redset[i];
@@ -417,8 +417,8 @@ static void generate_states(void) {
         append_states();
         
         /* Save shift and reduction information */
-        save_shifts();
-        save_reductions();
+        save_shifts(sp->number);
+        save_reductions(sp->number);
         
         sp = sp->next;
     }

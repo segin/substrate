@@ -163,6 +163,11 @@
 2. Each production contributes at most one `B -> .γ` item per closure set.
 3. Closure output is sorted and deduplicated before LR(0) kernel partitioning.
 
+### 3.3.3 GOTO Graph Correctness
+1. Shift and reduction records are keyed by the source LR state being processed.
+2. GOTO edge construction preserves deterministic symbol ordering per state.
+3. No shift edge is emitted for states whose closure contains only completed items.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions
