@@ -77,9 +77,9 @@ static void set_fatal_error(void) { g_status = 2; }
 
 static void usage(FILE *out) {
     fprintf(out,
-        "usage: cpio -o [-v] [-H format] [-F archive] [-R user:group]\\n"
-        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--safe-extract] [--absolute-paths] [--insecure]\\n"
-        "       cpio -p [-v] [-dmu] directory\\n");
+        "usage: cpio -o [-v] [-H format] [-F archive] [-R user:group]\n"
+        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--safe-extract] [--absolute-paths] [--insecure]\n"
+        "       cpio -p [-v] [-dmu] directory\n");
 }
 
 static int parse_owner(const char *s, uid_t *uid, gid_t *gid) {

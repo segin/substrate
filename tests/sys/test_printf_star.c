@@ -73,5 +73,5 @@ void test_printf_star(void) {
     sprintf(buf, "Hello%nWorld", &count);
     if (count != 5) panic("test_printf_star: n count");
 
-    kprint("PASS: printf all remaining features (e, g, wide, n)\\n");
+    kprint("PASS: printf all remaining features (e, g, wide, n)\n");
 }

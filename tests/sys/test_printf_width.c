@@ -41,5 +41,5 @@ void test_printf_width(void) {
         if (strlen(buf) < 5) panic("test_printf_width: fuzz min width");
     }
     
-    kprint("PASS: printf numeric width\\n");
+    kprint("PASS: printf numeric width\n");
 }

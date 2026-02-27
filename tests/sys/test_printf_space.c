@@ -27,5 +27,5 @@ void test_printf_space_flag(void) {
         if (buf[0] != ' ') panic("test_printf_space_flag: property test positive");
     }
     
-    kprint("PASS: printf space flag\\n");
+    kprint("PASS: printf space flag\n");
 }

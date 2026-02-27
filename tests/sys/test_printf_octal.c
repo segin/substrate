@@ -42,5 +42,5 @@ void test_printf_octal(void) {
         if (strlen(buf) == 0) panic("test_printf_octal: fuzz empty");
     }
     
-    kprint("PASS: printf octal\\n");
+    kprint("PASS: printf octal\n");
 }
