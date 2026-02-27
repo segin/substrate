@@ -8576,7 +8576,7 @@ Reference: User Request (Step 31552)
         - [x] Parse Grammar Rules and Actions (handling `{}` blocks).
     - [ ] **3. LR(0) Construction (`lr0.c`, `closure.c`):**
         - [x] Implement Item Set computation.
-        - [ ] Implement Closure algorithm.
+        - [x] Implement Closure algorithm.
         - [ ] Implement GOTO graph construction.
     - [ ] **4. LALR(1) Lookahead (`lalr.c`):**
         - [ ] Compute DR (Direct Read) and READ (Relation) sets.

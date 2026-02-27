@@ -62,11 +62,36 @@ if ! cmp -s test_deta.output test_detb.output; then
 fi
 echo "deterministic item-set generation passed"
 
+echo "Testing closure expansion..."
+rm -f test_closure.tab.c test_closure.tab.h test_closure.output test_closure.state0
+./yacc -v -d -b test_closure ../../tests/usr.bin/yacc/closure_chain.y
+if [ $? -ne 0 ]; then
+    echo "closure test grammar failed"
+    exit 1
+fi
+awk '
+    /^State 0:/ { in_state = 1; next }
+    /^State [0-9]+:/ { if (in_state) exit }
+    { if (in_state) print }
+' test_closure.output > test_closure.state0
+for pat in \
+    '$accept : . start $end' \
+    'a : b .' \
+    'b : C .'
+do
+    if ! grep -F "$pat" test_closure.output >/dev/null; then
+        echo "closure expansion evidence missing: $pat"
+        exit 1
+    fi
+done
+echo "closure expansion passed"
+
 # Cleanup
 rm -f test_minimal.tab.c test_minimal.tab.h test_minimal.output
 rm -f test_calc.tab.c test_calc.tab.h test_calc.output
 rm -f test_midrule.tab.c test_midrule.tab.h test_midrule.output
 rm -f test_deta.tab.c test_deta.tab.h test_deta.output
 rm -f test_detb.tab.c test_detb.tab.h test_detb.output
+rm -f test_closure.tab.c test_closure.tab.h test_closure.output test_closure.state0
 
 exit 0

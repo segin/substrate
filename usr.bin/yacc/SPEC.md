@@ -158,6 +158,11 @@
 3. Kernel slices are sorted and deduplicated before state interning.
 4. Repeated parser generation over the same grammar must produce byte-identical state listings.
 
+### 3.3.2 Closure Semantics
+1. Closure expansion is transitive over nonterminals reachable after the dot.
+2. Each production contributes at most one `B -> .γ` item per closure set.
+3. Closure output is sorted and deduplicated before LR(0) kernel partitioning.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions
