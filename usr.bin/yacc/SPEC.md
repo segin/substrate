@@ -180,6 +180,11 @@
 3. Verbose output reports populated lookahead reductions and total lookahead entries.
 4. LALR working sets are released after parser table construction to avoid retained temporary memory.
 
+### 3.3.6 ACTION/GOTO Table Construction
+1. ACTION rows include terminal shifts and lookahead-scoped reductions.
+2. GOTO defaults are selected per nonterminal from the most frequent destination.
+3. Compressed goto entries store only non-default source-state exceptions.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions

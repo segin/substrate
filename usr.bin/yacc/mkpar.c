@@ -7,6 +7,10 @@
 
 #include "defs.h"
 
+#define BITS_PER_WORD 32
+#define WORDSIZE(n) (((n) + BITS_PER_WORD - 1) / BITS_PER_WORD)
+#define TESTBIT(a, i) ((a)[(i) / BITS_PER_WORD] & (1U << ((i) % BITS_PER_WORD)))
+
 /* Parser table storage */
 action **parser;            /* ACTION table: parser[state] -> list of actions */
 int SRtotal;                /* Total shift/reduce conflicts */
@@ -17,7 +21,7 @@ short *RRconflicts;         /* Per-state R/R conflict count */
 short final_state;          /* Accept state */
 
 static action *parse_actions(int stateno);
-static action *add_reduce(action *alist, int ruleno, short *la);
+static action *add_reduce(action *alist, int ruleno, unsigned *la);
 static action *add_shift(action *alist, int symbol, int state);
 static void find_final_state(void);
 static void remove_conflicts(void);
@@ -56,6 +60,10 @@ static action *parse_actions(int stateno) {
     shifts *sp;
     reductions *rp;
     int i;
+    int red_idx;
+    int nwords;
+
+    nwords = WORDSIZE(ntokens);
     
     /* Find shifts for this state */
     for (sp = first_shift; sp != NULL; sp = sp->next) {
@@ -73,25 +81,14 @@ static action *parse_actions(int stateno) {
     }
     
     /* Find reductions for this state */
+    red_idx = 0;
     for (rp = first_reduction; rp != NULL; rp = rp->next) {
-        if (rp->number == stateno) {
-            /* Add reduce action for each rule */
-            for (i = 0; i < rp->nreds; i++) {
-                int ruleno = rp->rules[i];
-                /* For now, reduce on all tokens (LR(0) behavior) */
-                /* LALR would use LA sets here */
-                action *a = (action *)malloc(sizeof(action));
-                if (a == NULL) no_space();
-                a->next = alist;
-                a->symbol = -1;  /* All tokens (default) */
-                a->number = ruleno;
-                a->prec = 0;
-                a->action_code = REDUCE;
-                a->assoc = NO_ASSOC;
-                a->suppressed = 0;
-                alist = a;
+        for (i = 0; i < rp->nreds; i++) {
+            if (rp->number == stateno && red_idx < lalr_nreductions) {
+                unsigned *la = lalr_LA + red_idx * nwords;
+                alist = add_reduce(alist, rp->rules[i], la);
             }
-            break;
+            red_idx++;
         }
     }
     
@@ -116,27 +113,26 @@ static action *add_shift(action *alist, int symbol, int state) {
     return a;
 }
 
-static action *add_reduce(action *alist, int ruleno, short *la) {
+static action *add_reduce(action *alist, int ruleno, unsigned *la) {
     action *a;
     int i;
     
     /* Add reduce action for each lookahead in la */
     for (i = 0; i < ntokens; i++) {
-        /* Check if token i is in lookahead set */
-        /* if (TESTBIT(la, i)) { ... } */
-        
-        a = (action *)malloc(sizeof(action));
-        if (a == NULL) no_space();
-        
-        a->next = alist;
-        a->symbol = i;
-        a->number = ruleno;
-        a->prec = 0;  /* Get from rule's precedence */
-        a->action_code = REDUCE;
-        a->assoc = NO_ASSOC;
-        a->suppressed = 0;
-        
-        alist = a;
+        if (TESTBIT(la, i)) {
+            a = (action *)malloc(sizeof(action));
+            if (a == NULL) no_space();
+            
+            a->next = alist;
+            a->symbol = i;
+            a->number = ruleno;
+            a->prec = 0;  /* Precedence filled during conflict pass */
+            a->action_code = REDUCE;
+            a->assoc = NO_ASSOC;
+            a->suppressed = 0;
+            
+            alist = a;
+        }
     }
     
     return alist;
@@ -173,23 +169,34 @@ static void build_goto_table(void) {
     yygindex = (short *)calloc(nvars, sizeof(short));
     if (yydgoto == NULL || yygindex == NULL) no_space();
     
-    /* For each non-terminal, find all states it transitions from */
+    /* For each nonterminal choose the most common destination as default goto. */
     for (i = 0; i < nvars; i++) {
         int sym = ntokens + i;
-        int default_dest = -1;
-        int max_count = 0;
-        
-        /* Find the most common destination to use as default */
-        /* (Simplified: just find any transition for now) */
+        int best_dest = -1;
+        int best_count = 0;
+        int *dest_freq = (int *)calloc(nstates, sizeof(int));
+        if (dest_freq == NULL) no_space();
+
         for (sp = first_shift; sp != NULL; sp = sp->next) {
             for (j = 0; j < sp->nshifts; j++) {
                 int dest = sp->shift[j];
                 if (accessing_symbol[dest] == sym) {
-                    yydgoto[i] = dest;
-                    break;
+                    dest_freq[dest]++;
+                    if (dest_freq[dest] > best_count ||
+                        (dest_freq[dest] == best_count &&
+                         (best_dest < 0 || dest < best_dest))) {
+                        best_count = dest_freq[dest];
+                        best_dest = dest;
+                    }
                 }
             }
         }
+
+        if (best_dest < 0) {
+            best_dest = 0;
+        }
+        yydgoto[i] = best_dest;
+        free(dest_freq);
     }
 }
 
@@ -430,8 +437,10 @@ static void build_yytable(void) {
                 for (j = 0; j < sp->nshifts; j++) {
                     int dest = sp->shift[j];
                     if (accessing_symbol[dest] == sym) {
-                        yytable[base + sp->number] = dest;
-                        yycheck[base + sp->number] = sp->number;
+                        if (dest != yydgoto[i]) {
+                            yytable[base + sp->number] = dest;
+                            yycheck[base + sp->number] = sp->number;
+                        }
                     }
                 }
             }

@@ -14,7 +14,7 @@ static short *from_state;       /* Source state of each goto */
 static short *to_state;         /* Destination state of each goto */
 
 static unsigned *F;             /* FIRST sets as bit vectors */
-static unsigned *LA;            /* Lookahead sets (bit vectors) */
+unsigned *lalr_LA;             /* Lookahead sets (bit vectors) */
 static short **lookback;        /* Map reductions to gotos */
 static short **includes;        /* Propagation edges */
 
@@ -229,7 +229,7 @@ static void initialize_F(void) {
     }
 }
 
-static int nreductions;
+int lalr_nreductions;
 
 static void initialize_LA(void) {
     int i;
@@ -237,13 +237,13 @@ static void initialize_LA(void) {
     int nwords;
     
     nwords = WORDSIZE(ntokens);
-    nreductions = 0;
+    lalr_nreductions = 0;
     for (rp = first_reduction; rp != NULL; rp = rp->next) {
-        nreductions += rp->nreds;
+        lalr_nreductions += rp->nreds;
     }
     
-    LA = (unsigned *)calloc(nreductions * nwords, sizeof(unsigned));
-    if (LA == NULL) no_space();
+    lalr_LA = (unsigned *)calloc(lalr_nreductions * nwords, sizeof(unsigned));
+    if (lalr_LA == NULL) no_space();
     
     /* Initially, only rule 0 (accept) gets $end token if it's there */
     /* Find which reduction is for rule 0 */
@@ -251,7 +251,7 @@ static void initialize_LA(void) {
     for (rp = first_reduction; rp != NULL; rp = rp->next) {
         for (i = 0; i < rp->nreds; i++) {
             if (rp->rules[i] == 0) {  /* Rule 0: $accept -> start $end */
-                SETBIT(LA + red_idx * nwords, 0);  /* Token 0 is $end */
+                SETBIT(lalr_LA + red_idx * nwords, 0);  /* Token 0 is $end */
             }
             red_idx++;
         }
@@ -343,7 +343,7 @@ static void compute_lookaheads(void) {
 
     for (rp = first_reduction; rp != NULL; rp = rp->next) {
         for (i = 0; i < rp->nreds; i++) {
-            unsigned *la = LA + red_idx * nwords;
+            unsigned *la = lalr_LA + red_idx * nwords;
             int ruleno = rp->rules[i];
             int q = rp->number;
             int rhs_start = rrhs[ruleno];
@@ -469,7 +469,7 @@ void lalr_free(void) {
     if (from_state) free(from_state);
     if (to_state) free(to_state);
     if (F) free(F);
-    if (LA) free(LA);
+    if (lalr_LA) free(lalr_LA);
     if (includes) {
         for (i = 0; i < ngotos; i++) {
             if (includes[i]) free(includes[i]);

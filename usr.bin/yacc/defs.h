@@ -190,6 +190,8 @@ extern int lalr_dr_term_count;
 extern int lalr_read_edge_count;
 extern int lalr_la_entry_count;
 extern int lalr_la_reduction_count;
+extern unsigned *lalr_LA;
+extern int lalr_nreductions;
 
 /* Reader state globals if needed */
 

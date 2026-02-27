@@ -31,6 +31,14 @@ if ! grep -F "NUMBER  shift" test_minimal.output >/dev/null; then
     echo "missing NUMBER shift edge in minimal grammar"
     exit 1
 fi
+if ! grep -F '$end  reduce using rule 2 (expr)' test_minimal.output >/dev/null; then
+    echo "missing expected reduce lookahead on \$end"
+    exit 1
+fi
+if grep -F 'NUMBER  reduce using rule 2 (expr)' test_minimal.output >/dev/null; then
+    echo "unexpected reduce lookahead on NUMBER"
+    exit 1
+fi
 echo "minimal.y passed"
 
 echo "Testing calc.y..."

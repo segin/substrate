@@ -8582,7 +8582,7 @@ Reference: User Request (Step 31552)
         - [x] Compute DR (Direct Read) and READ (Relation) sets.
         - [x] Compute Lookaheads for each kernel item (Digraph algorithm).
     - [ ] **5. Tables & Conflicts (`mkpar.c`):**
-        - [ ] Generate ACTION and GOTO tables.
+        - [x] Generate ACTION and GOTO tables.
         - [ ] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
         - [ ] Generate Default Reductions.
     - [ ] **6. Code Generation (`output.c`):**
