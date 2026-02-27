@@ -8,6 +8,7 @@
 
 extern int SRtotal, RRtotal;
 extern int lalr_ngotos, lalr_dr_term_count, lalr_read_edge_count;
+extern int lalr_la_entry_count, lalr_la_reduction_count;
 
 static void log_unused_symbols(void);
 static void log_conflicts(void);
@@ -45,6 +46,8 @@ void verbose(void) {
     fprintf(verbose_file, "  %d goto transitions\n", lalr_ngotos);
     fprintf(verbose_file, "  %d direct-read terminal entries\n", lalr_dr_term_count);
     fprintf(verbose_file, "  %d READ relation edges\n", lalr_read_edge_count);
+    fprintf(verbose_file, "  %d reductions with lookaheads\n", lalr_la_reduction_count);
+    fprintf(verbose_file, "  %d lookahead terminal entries\n", lalr_la_entry_count);
     fprintf(verbose_file, "\n");
     
     /* Conflict summary */

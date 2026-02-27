@@ -174,6 +174,11 @@
 2. READS relations are built only across nullable nonterminal gotos from goto destination states.
 3. DR and READ metrics are emitted in verbose output for regression validation.
 
+### 3.3.5 LALR Lookahead Propagation
+1. Reduction lookaheads are derived from goto-follow sets using digraph-computed propagation.
+2. Per-reduction lookahead vectors are computed for every LR reduction entry.
+3. Verbose output reports populated lookahead reductions and total lookahead entries.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions

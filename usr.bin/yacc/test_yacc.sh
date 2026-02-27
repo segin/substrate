@@ -115,6 +115,16 @@ if [ -z "$read_edges" ] || [ "$read_edges" -le 0 ]; then
     echo "READ relation edge count not computed"
     exit 1
 fi
+la_reductions=$(awk '/reductions with lookaheads/ { print $1 }' test_reads.output | head -n 1)
+la_entries=$(awk '/lookahead terminal entries/ { print $1 }' test_reads.output | head -n 1)
+if [ -z "$la_reductions" ] || [ "$la_reductions" -le 0 ]; then
+    echo "lookahead reductions not computed"
+    exit 1
+fi
+if [ -z "$la_entries" ] || [ "$la_entries" -le 0 ]; then
+    echo "lookahead entries not computed"
+    exit 1
+fi
 echo "LALR DR/READ computation passed"
 
 # Cleanup

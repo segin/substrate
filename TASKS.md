@@ -8580,7 +8580,7 @@ Reference: User Request (Step 31552)
         - [x] Implement GOTO graph construction.
     - [ ] **4. LALR(1) Lookahead (`lalr.c`):**
         - [x] Compute DR (Direct Read) and READ (Relation) sets.
-        - [ ] Compute Lookaheads for each kernel item (Digraph algorithm).
+        - [x] Compute Lookaheads for each kernel item (Digraph algorithm).
     - [ ] **5. Tables & Conflicts (`mkpar.c`):**
         - [ ] Generate ACTION and GOTO tables.
         - [ ] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.

@@ -38,6 +38,8 @@ static short **relations;
 int lalr_ngotos;
 int lalr_dr_term_count;
 int lalr_read_edge_count;
+int lalr_la_entry_count;
+int lalr_la_reduction_count;
 
 /* Forward declarations */
 static void set_goto_map(void);
@@ -49,6 +51,7 @@ static void initialize_LA(void);
 static void compute_lookaheads(void);
 static shifts *find_shifts_for_state(int state);
 static int find_goto_index(int state, int symbol);
+static int find_predecessor_state(int dest_state, int symbol);
 static void digraph(short **relation);
 static void traverse(int i);
 
@@ -56,6 +59,8 @@ void lalr(void) {
     lalr_ngotos = 0;
     lalr_dr_term_count = 0;
     lalr_read_edge_count = 0;
+    lalr_la_entry_count = 0;
+    lalr_la_reduction_count = 0;
     set_nullable();
     set_goto_map();
     initialize_F();
@@ -177,6 +182,21 @@ static int find_goto_index(int state, int symbol) {
             return i;
         }
     }
+    return -1;
+}
+
+static int find_predecessor_state(int dest_state, int symbol) {
+    shifts *sp;
+    int i;
+
+    for (sp = first_shift; sp != NULL; sp = sp->next) {
+        for (i = 0; i < sp->nshifts; i++) {
+            if (sp->shift[i] == dest_state && accessing_symbol[dest_state] == symbol) {
+                return sp->number;
+            }
+        }
+    }
+
     return -1;
 }
 
@@ -313,18 +333,60 @@ static void compute_FOLLOWS(void) {
 
 /* Propagate lookaheads to reductions */
 static void compute_lookaheads(void) {
-    int i;
+    int i, j;
     int nwords = WORDSIZE(ntokens);
     reductions *rp;
     int red_idx = 0;
     
+    lalr_la_entry_count = 0;
+    lalr_la_reduction_count = 0;
+
     for (rp = first_reduction; rp != NULL; rp = rp->next) {
         for (i = 0; i < rp->nreds; i++) {
             unsigned *la = LA + red_idx * nwords;
-            /* In a full implementation, we'd union lookaheads from related gotos.
-               For this phase, ensure at least rule 0 has $end. */
-            if (rp->rules[i] == 0) {
+            int ruleno = rp->rules[i];
+            int q = rp->number;
+            int rhs_start = rrhs[ruleno];
+            int rhs_len = 0;
+            int lhs = plhs[ruleno];
+            int g;
+            int has_la = 0;
+
+            while (ritem[rhs_start + rhs_len] >= 0) {
+                rhs_len++;
+            }
+
+            /* Walk backwards over RHS to reach the pre-reduction state. */
+            for (j = rhs_len - 1; j >= 0; j--) {
+                int sym = ritem[rhs_start + j];
+                q = find_predecessor_state(q, sym);
+                if (q < 0) {
+                    break;
+                }
+            }
+
+            if (q >= 0) {
+                g = find_goto_index(q, lhs);
+                if (g >= 0) {
+                    unsigned *follow = F + g * nwords;
+                    for (j = 0; j < nwords; j++) {
+                        la[j] |= follow[j];
+                    }
+                }
+            }
+
+            if (ruleno == 1) {
                 SETBIT(la, 0);
+            }
+
+            for (j = 0; j < ntokens; j++) {
+                if (TESTBIT(la, j)) {
+                    lalr_la_entry_count++;
+                    has_la = 1;
+                }
+            }
+            if (has_la) {
+                lalr_la_reduction_count++;
             }
             red_idx++;
         }
@@ -334,7 +396,6 @@ static void compute_lookaheads(void) {
 /* DeRemer-Pennello digraph algorithm for transitive closure */
 static void digraph(short **relation) {
     int i;
-    int nwords = WORDSIZE(ntokens);
     
     infinity = ngotos + 2;
     INDEX = (int *)calloc(ngotos, sizeof(int));
@@ -387,7 +448,7 @@ static void traverse(int i) {
     
     /* If we're at SCC root, propagate to all in SCC */
     if (INDEX[i] == height) {
-        while (top > 0 && vertices[top - 1] >= i) {
+        do {
             j = vertices[--top];
             INDEX[j] = infinity;
             if (j != i) {
@@ -396,7 +457,7 @@ static void traverse(int i) {
                 for (int k = 0; k < nwords; k++)
                     dst[k] = base[k];
             }
-        }
+        } while (j != i);
     }
 }
 

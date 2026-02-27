@@ -188,6 +188,8 @@ extern short *RRconflicts;       /* Per-state R/R conflict count */
 extern int lalr_ngotos;
 extern int lalr_dr_term_count;
 extern int lalr_read_edge_count;
+extern int lalr_la_entry_count;
+extern int lalr_la_reduction_count;
 
 /* Reader state globals if needed */
 
