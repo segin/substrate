@@ -2057,10 +2057,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 } else {
                     int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rr;
+                    if (ist.reg_dirty[rl]) {
+                        int_regs_spill_reg(fp, f, &lay, &ist, rl);
+                        rl = int_regs_load(fp, f, &lay, &ist, in->lhs, rl, -1);
+                    }
                     if (in->op == CC_SSA_DIV) {
                         int rax = int_reg_index(&ist, "%rax");
                         int rdx = int_reg_index(&ist, "%rdx");
+                        int rcx = int_reg_index(&ist, "%rcx");
                         int rr_div;
+                        int lhs_dirty = ist.reg_dirty[rl];
                         if (rax < 0 || rdx < 0) {
                             int_regs_free(&ist);
                             slot_layout_free(&lay);
@@ -2070,11 +2076,24 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         if (rl != rax) {
                             int_regs_clobber_reg(fp, f, &lay, &ist, rax);
                             fprintf(fp, "\tmovq %s, %%rax\n", ist.regs[rl]);
-                            int_regs_bind(&ist, in->lhs, rax, 0);
+                            int_regs_bind(&ist, in->lhs, rax, lhs_dirty);
                             rl = rax;
                         }
                         int_regs_clobber_reg(fp, f, &lay, &ist, rdx);
                         rr_div = int_regs_load(fp, f, &lay, &ist, in->rhs, -1, rax);
+                        if (rr_div == rdx) {
+                            int rhs_dirty = ist.reg_dirty[rr_div];
+                            if (rcx < 0 || rcx == rax || rcx == rdx) {
+                                int_regs_free(&ist);
+                                slot_layout_free(&lay);
+                                set_diag(diag, "x86_64 register set missing divisor scratch register");
+                                return -1;
+                            }
+                            int_regs_clobber_reg(fp, f, &lay, &ist, rcx);
+                            fprintf(fp, "\tmovq %%rdx, %%rcx\n");
+                            int_regs_bind(&ist, in->rhs, rcx, rhs_dirty);
+                            rr_div = rcx;
+                        }
                         if (in->is_unsigned) {
                             fprintf(fp, "\txorq %%rdx, %%rdx\n");
                             fprintf(fp, "\tdivq %s\n", ist.regs[rr_div]);
@@ -2082,17 +2101,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                             fprintf(fp, "\tcqto\n");
                             fprintf(fp, "\tidivq %s\n", ist.regs[rr_div]);
                         }
-                        {
-                            int rd = int_regs_define(fp, f, &lay, &ist, in->dst, rax, -1);
-                            if (strcmp(ist.regs[rd], "%rax") != 0) {
-                                fprintf(fp, "\tmovq %%rax, %s\n", ist.regs[rd]);
-                            }
-                        }
+                        int_regs_bind(&ist, in->dst, rax, 1);
                         break;
                     }
                     if (in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) {
                         int rcx = int_reg_index(&ist, "%rcx");
                         int rr_shift;
+                        int rhs_dirty = 0;
                         if (rcx < 0) {
                             int_regs_free(&ist);
                             slot_layout_free(&lay);
@@ -2102,26 +2117,25 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         if (rl == rcx) {
                             int alt = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, rcx);
                             if (alt == rcx) {
+                                int lhs_dirty = ist.reg_dirty[rcx];
                                 alt = int_regs_define(fp, f, &lay, &ist, in->lhs, -1, rcx);
                                 fprintf(fp, "\tmovq %%rcx, %s\n", ist.regs[alt]);
+                                ist.reg_dirty[alt] = (unsigned char)(lhs_dirty ? 1 : 0);
                             }
                             rl = alt;
                         }
                         int_regs_clobber_reg(fp, f, &lay, &ist, rcx);
                         rr_shift = int_regs_load(fp, f, &lay, &ist, in->rhs, rcx, rl);
+                        rhs_dirty = ist.reg_dirty[rr_shift];
                         if (rr_shift != rcx) {
                             fprintf(fp, "\tmovq %s, %%rcx\n", ist.regs[rr_shift]);
-                            int_regs_bind(&ist, in->rhs, rcx, 0);
+                            int_regs_bind(&ist, in->rhs, rcx, rhs_dirty);
                         }
                         fprintf(fp, "\tandq $63, %%rcx\n");
                         fprintf(fp, "\t%s %%cl, %s\n",
                                 in->op == CC_SSA_SHL ? "shlq" : (in->is_unsigned ? "shrq" : "sarq"), ist.regs[rl]);
                         int_regs_remap_dst(fp, f, &lay, &ist, in->dst, rl);
                         break;
-                    }
-                    if (ist.reg_dirty[rl]) {
-                        int_regs_spill_reg(fp, f, &lay, &ist, rl);
-                        rl = int_regs_load(fp, f, &lay, &ist, in->lhs, rl, -1);
                     }
                     rr = int_regs_load(fp, f, &lay, &ist, in->rhs, -1, rl);
                     if (in->op == CC_SSA_ADD) {
@@ -2806,6 +2820,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path,
                 int emit_debug, cc_target_t target, cc_diag_t *diag) {
     FILE *fp;
+    cc_mir_module_t mir;
 
     if (diag != NULL) {
         diag->path[0] = '\0';
@@ -2819,6 +2834,18 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         set_diag(diag, "failed to open assembly output");
         return -1;
     }
+
+    cc_mir_module_init(&mir);
+    if (cc_backend_lower_to_mir(m, &mir, diag) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    if (cc_backend_mir_validate(&mir, diag) != 0) {
+        cc_mir_module_free(&mir);
+        fclose(fp);
+        return -1;
+    }
+    cc_mir_module_free(&mir);
 
     if (emit_debug && src_path != NULL) {
         fprintf(fp, ".file 1 \"%s\"\n", src_path);

@@ -17,7 +17,7 @@ endif
 
 all: $(PROGS)
 
-cc: $(CC_SRCS) include/cc_driver.h include/cc_frontend.h include/cc_ssa.h include/cc_backend.h include/cc_pipeline.h include/cc_middle.h include/cc_target.h
+cc: $(CC_SRCS) include/cc_driver.h include/cc_frontend.h include/cc_ssa.h include/cc_backend.h include/cc_mir.h include/cc_pipeline.h include/cc_middle.h include/cc_target.h
 	$(CC) $(TOOL_CFLAGS) -Iinclude -o $@ $(CC_SRCS)
 
 cpp: cc
