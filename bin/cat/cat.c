@@ -112,33 +112,33 @@ static bool cat_is_stdin_name(const char *name)
 static void cat_usage(FILE *stream, const char *progname)
 {
     fprintf(stream,
-            "Usage: %s [-ABbefEflnstTuv] [--help] [--version] [-] [file ...]\\n"
-            "       %s [-B bsize] [-ABbefEflnstTuv] [--help] [--version] [-] [file ...]\\n",
+            "Usage: %s [-ABbefEflnstTuv] [--help] [--version] [-] [file ...]\n"
+            "       %s [-B bsize] [-ABbefEflnstTuv] [--help] [--version] [-] [file ...]\n",
             progname, progname);
 }
 
 static void cat_print_help(const struct cat_options *options)
 {
     cat_usage(stdout, options->progname);
-    fputs("\\n"
-          "Concatenate files and print on standard output.\\n"
-          "\\n"
-          "Options:\\n"
-          "  -A, --show-all           equivalent to -vET\\n"
-          "  -B bsize                 set raw-mode buffer size in bytes (decimal/hex)\\n"
-          "  -b, --number-nonblank    number non-blank output lines (implies -n)\\n"
-          "  -e                       equivalent to -vE\\n"
-          "  -E, --show-ends          display $ at end of each line\\n"
-          "  -f                       open files with fast/non-blocking semantics first\\n"
-          "  -l                       lock stdout for writing with fcntl(F_SETLKW)\\n"
-          "  -n, --number             number all output lines\\n"
-          "  -s, --squeeze-blank      suppress repeated empty output lines\\n"
-          "  -t                       equivalent to -vT\\n"
-          "  -T, --show-tabs          display TAB characters as ^I\\n"
-          "  -u                       unbuffered stdout mode\\n"
-          "  -v, --show-nonprinting   use ^ and M- notation for non-printing bytes\\n"
-          "      --help               display this help and exit\\n"
-          "      --version            output version information and exit\\n",
+    fputs("\n"
+          "Concatenate files and print on standard output.\n"
+          "\n"
+          "Options:\n"
+          "  -A, --show-all           equivalent to -vET\n"
+          "  -B bsize                 set raw-mode buffer size in bytes (decimal/hex)\n"
+          "  -b, --number-nonblank    number non-blank output lines (implies -n)\n"
+          "  -e                       equivalent to -vE\n"
+          "  -E, --show-ends          display $ at end of each line\n"
+          "  -f                       open files with fast/non-blocking semantics first\n"
+          "  -l                       lock stdout for writing with fcntl(F_SETLKW)\n"
+          "  -n, --number             number all output lines\n"
+          "  -s, --squeeze-blank      suppress repeated empty output lines\n"
+          "  -t                       equivalent to -vT\n"
+          "  -T, --show-tabs          display TAB characters as ^I\n"
+          "  -u                       unbuffered stdout mode\n"
+          "  -v, --show-nonprinting   use ^ and M- notation for non-printing bytes\n"
+          "      --help               display this help and exit\n"
+          "      --version            output version information and exit\n",
           stdout);
 }
 
@@ -149,17 +149,17 @@ static void cat_print_version(void)
 
 static void cat_warn_file(const struct cat_options *options, const char *name)
 {
-    fprintf(stderr, "%s: %s: %s\\n", options->progname, name, strerror(errno));
+    fprintf(stderr, "%s: %s: %s\n", options->progname, name, strerror(errno));
 }
 
 static void cat_warn_stdout(const struct cat_options *options)
 {
-    fprintf(stderr, "%s: stdout: %s\\n", options->progname, strerror(errno));
+    fprintf(stderr, "%s: stdout: %s\n", options->progname, strerror(errno));
 }
 
 static void cat_warnx(const struct cat_options *options, const char *message)
 {
-    fprintf(stderr, "%s: %s\\n", options->progname, message);
+    fprintf(stderr, "%s: %s\n", options->progname, message);
 }
 
 static ssize_t cat_sys_read(int fd, void *buf, size_t count)
@@ -379,7 +379,7 @@ static int cat_parse_short_options(const char *arg,
             options->show_nonprint = true;
             break;
         default:
-            fprintf(stderr, "%s: invalid option -- '%c'\\n", options->progname, arg[j]);
+            fprintf(stderr, "%s: invalid option -- '%c'\n", options->progname, arg[j]);
             cat_usage(stderr, options->progname);
             return -1;
         }
@@ -412,7 +412,7 @@ static int cat_parse_long_option(const char *arg, struct cat_options *options)
     } else if (strcmp(arg, "--version") == 0) {
         options->show_version = true;
     } else {
-        fprintf(stderr, "%s: unrecognized option '%s'\\n", options->progname, arg);
+        fprintf(stderr, "%s: unrecognized option '%s'\n", options->progname, arg);
         cat_usage(stderr, options->progname);
         return -1;
     }
@@ -549,7 +549,7 @@ static int cat_lock_stdout_fd(const struct cat_options *options)
             continue;
         }
 
-        fprintf(stderr, "%s: unable to lock stdout: %s\\n", options->progname, strerror(errno));
+        fprintf(stderr, "%s: unable to lock stdout: %s\n", options->progname, strerror(errno));
         return -1;
     }
 }
@@ -572,7 +572,7 @@ static int cat_unlock_stdout_fd(const struct cat_options *options)
             continue;
         }
 
-        fprintf(stderr, "%s: unable to unlock stdout: %s\\n", options->progname, strerror(errno));
+        fprintf(stderr, "%s: unable to unlock stdout: %s\n", options->progname, strerror(errno));
         return -1;
     }
 }
@@ -608,7 +608,7 @@ static int cat_raw_buffer_init(struct cat_raw_buffer *raw, const struct cat_opti
         void *mem = cat_sys_malloc(selected);
         if (mem == NULL) {
             fprintf(stderr,
-                    "%s: warning: unable to allocate %lu-byte buffer, using %lu-byte fallback\\n",
+                    "%s: warning: unable to allocate %lu-byte buffer, using %lu-byte fallback\n",
                     options->progname,
                     (unsigned long)selected,
                     (unsigned long)sizeof(raw->stack_buf));
