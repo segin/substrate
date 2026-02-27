@@ -1,5 +1,5 @@
 /*
- * sys/include/sys/vt.h - Virtual Terminal Subsystem
+ * sys/sys/vt.h - Virtual Terminal Subsystem
  */
 
 #ifndef _SYS_VT_H

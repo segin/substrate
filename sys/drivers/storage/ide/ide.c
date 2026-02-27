@@ -19,7 +19,7 @@
 #include <kern/console.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/ide/ide.h>
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <intr.h>

@@ -1,5 +1,5 @@
 /*
- * sys/include/sys/sysctl.h
+ * sys/sys/sysctl.h
  *
  * System control interface (sysctl).
  */

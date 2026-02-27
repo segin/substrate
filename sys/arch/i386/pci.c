@@ -1,5 +1,5 @@
 #include <arch/i386/pci.h>
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <stdio.h>
 

@@ -1,6 +1,6 @@
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
-#include <arch/x86-common/include/lapic.h>
+#include <arch/x86-common/lapic.h>
 #include <vm/vm_page.h>
 #include <vm/phys_mem.h>
 #include <kern/panic.h>

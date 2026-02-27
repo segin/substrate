@@ -7,7 +7,7 @@
 #include <kern/sched.h>
 #include <sys/proc.h>
 #include <stdint.h>
-#include "../arch/x86-common/include/lapic.h"
+#include "../arch/x86-common/lapic.h"
 
 /* IPI vector defined in sched.h */
 

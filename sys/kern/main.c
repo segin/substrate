@@ -27,8 +27,8 @@
 #include <arch/i386/smp.h>
 #include <arch/i386/syscall.h>
 #include <arch/i386/fpu/fpu_emu.h>
-#include <arch/x86-common/include/rtc.h>
-#include <arch/x86-common/include/multiboot.h>
+#include <arch/x86-common/rtc.h>
+#include <arch/x86-common/multiboot.h>
 #include <sys/freebsd_boot.h>
 
 #include <sys/param.h>

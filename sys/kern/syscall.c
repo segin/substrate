@@ -34,7 +34,7 @@
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/reboot.h>
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>

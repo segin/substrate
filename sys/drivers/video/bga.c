@@ -2,7 +2,7 @@
 #include <sys/file.h>
 #include <kern/console.h>
 #include <drivers/video/fb.h>
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF

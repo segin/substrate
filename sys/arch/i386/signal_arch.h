@@ -1,5 +1,5 @@
 /*
- * sys/arch/i386/include/signal_arch.h - i386 Signal Context Structures
+ * sys/arch/i386/signal_arch.h - i386 Signal Context Structures
  */
 
 #ifndef _ARCH_I386_SIGNAL_ARCH_H

@@ -1,6 +1,6 @@
 #include <drivers/video/vga.h>
 #include <kern/console.h>
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 #include <stdint.h>
 #include <string.h>
 

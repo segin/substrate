@@ -82,8 +82,9 @@
 #define SYS_FUTEX   240
 #define SYS_SYSCTL  202
 #define SYS_PMAP_STATS 241
+#define SYS_THR_EXIT 431
+#define SYS_THR_SELF 432
 #define SYS_THR_NEW 455
-#define SYS_THR_EXIT 456
 #define SYS_THR_JOIN 457
 #define SYS_PROC_INFO 242
 #define SYS_PROC_LIST 243

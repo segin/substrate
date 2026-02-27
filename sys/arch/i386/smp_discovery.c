@@ -7,7 +7,7 @@
 #include <arch/i386/percpu.h>
 #include <arch/i386/gdt.h>
 #include <sys/proc.h>
-#include <arch/x86-common/include/lapic.h>
+#include <arch/x86-common/lapic.h>
 
 // Externs for Scheduler and IDT
 extern process_t processes[];

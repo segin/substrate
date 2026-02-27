@@ -1,6 +1,6 @@
 #include <arch/i386/idt.h>
 #include <drivers/video/vga.h>
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 #include <string.h>
 #include <stdio.h>
 #include <drivers/input/keyboard.h>
