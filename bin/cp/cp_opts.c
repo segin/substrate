@@ -34,46 +34,62 @@ void cp_options_init(struct cp_options *opts)
     opts->buffer_size = CP_DEFAULT_BUFSIZE;
     opts->atomic_replace = 1;
     opts->non_tty_default = CP_PROMPT_DEFAULT_NO;
+    opts->backup_control = CP_BACKUP_NONE;
+    opts->backup_suffix = "~";
+    opts->reflink_mode = CP_REFLINK_AUTO;
 }
 
-static int cp_set_preserve_item(struct cp_options *opts, const char *item)
+static int cp_set_preserve_item(struct cp_options *opts, const char *item, int enable)
 {
+    int v = enable ? 1 : 0;
+
     if (strcmp(item, "mode") == 0) {
-        opts->preserve_mode = 1;
+        opts->preserve_mode = v;
         return 0;
     }
     if (strcmp(item, "ownership") == 0 || strcmp(item, "owner") == 0) {
-        opts->preserve_owner = 1;
+        opts->preserve_owner = v;
         return 0;
     }
     if (strcmp(item, "timestamps") == 0 || strcmp(item, "time") == 0) {
-        opts->preserve_timestamps = 1;
+        opts->preserve_timestamps = v;
         return 0;
     }
     if (strcmp(item, "links") == 0) {
-        opts->preserve_links = 1;
+        opts->preserve_links = v;
         return 0;
     }
     if (strcmp(item, "xattr") == 0 || strcmp(item, "xattrs") == 0) {
-        opts->preserve_xattr = 1;
+        opts->preserve_xattr = v;
         return 0;
     }
     if (strcmp(item, "acl") == 0 || strcmp(item, "acls") == 0) {
-        opts->preserve_acl = 1;
+        opts->preserve_acl = v;
         return 0;
     }
     if (strcmp(item, "flags") == 0) {
-        opts->preserve_flags = 1;
+        opts->preserve_flags = v;
         return 0;
     }
     if (strcmp(item, "all") == 0 || strcmp(item, "a") == 0) {
-        cp_enable_preserve_all(opts);
+        if (enable) {
+            cp_enable_preserve_all(opts);
+        } else {
+            opts->preserve_mode = 0;
+            opts->preserve_owner = 0;
+            opts->preserve_timestamps = 0;
+            opts->preserve_links = 0;
+            opts->preserve_xattr = 0;
+            opts->preserve_acl = 0;
+            opts->preserve_flags = 0;
+            opts->preserve_all = 0;
+        }
         return 0;
     }
     return -1;
 }
 
-static int cp_parse_preserve_list(struct cp_options *opts, const char *value)
+static int cp_parse_preserve_list(struct cp_options *opts, const char *value, int enable)
 {
     char *copy;
     char *tok;
@@ -91,11 +107,17 @@ static int cp_parse_preserve_list(struct cp_options *opts, const char *value)
     }
 
     while (tok) {
-        if (cp_set_preserve_item(opts, tok) != 0) {
+        if (cp_set_preserve_item(opts, tok, enable) != 0) {
             free(copy);
             return -1;
         }
         tok = strtok_r(NULL, ",", &saveptr);
+    }
+
+    if (!(opts->preserve_mode && opts->preserve_owner && opts->preserve_timestamps &&
+          opts->preserve_links && opts->preserve_xattr && opts->preserve_acl &&
+          opts->preserve_flags)) {
+        opts->preserve_all = 0;
     }
 
     free(copy);
@@ -172,6 +194,20 @@ int cp_parse_size(const char *text, size_t *out_size, const char **err_msg)
     return 0;
 }
 
+static int cp_token_looks_size(const char *text)
+{
+    if (!text || !*text) {
+        return 0;
+    }
+    if (isdigit((unsigned char)text[0])) {
+        return 1;
+    }
+    if (text[0] == '+' || text[0] == '-') {
+        return isdigit((unsigned char)text[1]);
+    }
+    return 0;
+}
+
 static int cp_parse_sparse_mode(struct cp_options *opts, const char *value)
 {
     if (strcmp(value, "auto") == 0) {
@@ -184,6 +220,44 @@ static int cp_parse_sparse_mode(struct cp_options *opts, const char *value)
     }
     if (strcmp(value, "never") == 0) {
         opts->sparse_mode = CP_SPARSE_NEVER;
+        return 0;
+    }
+    return -1;
+}
+
+static int cp_parse_backup_control(enum cp_backup_control *out, const char *value)
+{
+    if (strcmp(value, "none") == 0 || strcmp(value, "off") == 0 || strcmp(value, "never") == 0) {
+        *out = CP_BACKUP_NONE;
+        return 0;
+    }
+    if (strcmp(value, "simple") == 0 || strcmp(value, "nil") == 0) {
+        *out = CP_BACKUP_SIMPLE;
+        return 0;
+    }
+    if (strcmp(value, "numbered") == 0 || strcmp(value, "t") == 0) {
+        *out = CP_BACKUP_NUMBERED;
+        return 0;
+    }
+    if (strcmp(value, "existing") == 0) {
+        *out = CP_BACKUP_EXISTING;
+        return 0;
+    }
+    return -1;
+}
+
+static int cp_parse_reflink_mode(struct cp_options *opts, const char *value)
+{
+    if (strcmp(value, "never") == 0) {
+        opts->reflink_mode = CP_REFLINK_NEVER;
+        return 0;
+    }
+    if (strcmp(value, "auto") == 0) {
+        opts->reflink_mode = CP_REFLINK_AUTO;
+        return 0;
+    }
+    if (strcmp(value, "always") == 0) {
+        opts->reflink_mode = CP_REFLINK_ALWAYS;
         return 0;
     }
     return -1;
@@ -216,8 +290,14 @@ static int cp_parse_long_opt(struct cp_options *opts, const char *arg,
             }
             opts->buffer_size_explicit = 1;
         } else if (strcmp(name, "preserve") == 0) {
-            if (cp_parse_preserve_list(opts, value) != 0) {
+            if (cp_parse_preserve_list(opts, value, 1) != 0) {
                 *err_msg = "invalid --preserve list";
+                free((void *)name);
+                return -1;
+            }
+        } else if (strcmp(name, "no-preserve") == 0) {
+            if (cp_parse_preserve_list(opts, value, 0) != 0) {
+                *err_msg = "invalid --no-preserve list";
                 free((void *)name);
                 return -1;
             }
@@ -234,6 +314,22 @@ static int cp_parse_long_opt(struct cp_options *opts, const char *arg,
                 opts->non_tty_default = CP_PROMPT_DEFAULT_NO;
             } else {
                 *err_msg = "--interactive-default accepts yes|no";
+                free((void *)name);
+                return -1;
+            }
+        } else if (strcmp(name, "backup") == 0) {
+            if (cp_parse_backup_control(&opts->backup_control, value) != 0) {
+                *err_msg = "invalid --backup control";
+                free((void *)name);
+                return -1;
+            }
+        } else if (strcmp(name, "suffix") == 0) {
+            opts->backup_suffix = value;
+        } else if (strcmp(name, "target-directory") == 0) {
+            opts->target_directory = value;
+        } else if (strcmp(name, "reflink") == 0) {
+            if (cp_parse_reflink_mode(opts, value) != 0) {
+                *err_msg = "invalid --reflink mode";
                 free((void *)name);
                 return -1;
             }
@@ -266,10 +362,15 @@ static int cp_parse_long_opt(struct cp_options *opts, const char *arg,
         opts->force_silent = 0;
         return 0;
     }
+    if (strcmp(name, "verbose") == 0) {
+        opts->verbose = 1;
+        return 0;
+    }
     if (strcmp(name, "archive") == 0) {
         opts->archive = 1;
         opts->recursive = 1;
         opts->symlink_mode = CP_SYMLINK_PHYSICAL;
+        opts->preserve_links = 1;
         cp_enable_preserve_all(opts);
         return 0;
     }
@@ -319,8 +420,20 @@ static int cp_parse_long_opt(struct cp_options *opts, const char *arg,
             return -1;
         }
         *idx += 1;
-        if (cp_parse_preserve_list(opts, argv[*idx]) != 0) {
+        if (cp_parse_preserve_list(opts, argv[*idx], 1) != 0) {
             *err_msg = "invalid --preserve list";
+            return -1;
+        }
+        return 0;
+    }
+    if (strcmp(name, "no-preserve") == 0) {
+        if (*idx + 1 >= argc) {
+            *err_msg = "--no-preserve requires an argument";
+            return -1;
+        }
+        *idx += 1;
+        if (cp_parse_preserve_list(opts, argv[*idx], 0) != 0) {
+            *err_msg = "invalid --no-preserve list";
             return -1;
         }
         return 0;
@@ -363,6 +476,59 @@ static int cp_parse_long_opt(struct cp_options *opts, const char *arg,
     }
     if (strcmp(name, "progress") == 0) {
         opts->progress = 1;
+        return 0;
+    }
+    if (strcmp(name, "backup") == 0) {
+        opts->backup_control = CP_BACKUP_SIMPLE;
+        if (*idx + 1 < argc && argv[*idx + 1][0] != '-') {
+            enum cp_backup_control parsed;
+            if (cp_parse_backup_control(&parsed, argv[*idx + 1]) == 0) {
+                opts->backup_control = parsed;
+                *idx += 1;
+            }
+        }
+        return 0;
+    }
+    if (strcmp(name, "target-directory") == 0) {
+        if (*idx + 1 >= argc) {
+            *err_msg = "--target-directory requires argument";
+            return -1;
+        }
+        *idx += 1;
+        opts->target_directory = argv[*idx];
+        return 0;
+    }
+    if (strcmp(name, "no-target-directory") == 0) {
+        opts->no_target_directory = 1;
+        return 0;
+    }
+    if (strcmp(name, "suffix") == 0) {
+        if (*idx + 1 >= argc) {
+            *err_msg = "--suffix requires argument";
+            return -1;
+        }
+        *idx += 1;
+        opts->backup_suffix = argv[*idx];
+        return 0;
+    }
+    if (strcmp(name, "remove-destination") == 0) {
+        opts->remove_destination = 1;
+        return 0;
+    }
+    if (strcmp(name, "update") == 0) {
+        opts->update_only = 1;
+        return 0;
+    }
+    if (strcmp(name, "reflink") == 0) {
+        if (*idx + 1 >= argc) {
+            *err_msg = "--reflink requires mode";
+            return -1;
+        }
+        *idx += 1;
+        if (cp_parse_reflink_mode(opts, argv[*idx]) != 0) {
+            *err_msg = "invalid --reflink mode";
+            return -1;
+        }
         return 0;
     }
     if (strcmp(name, "help") == 0) {
@@ -437,11 +603,20 @@ static int cp_parse_short_opt(struct cp_options *opts, const char *arg,
             opts->overwrite_mode = CP_OVERWRITE_NOCLOBBER;
             opts->force_silent = 0;
             break;
+        case 'v':
+            opts->verbose = 1;
+            opts->progress = 1;
+            break;
         case 'a':
             opts->archive = 1;
             opts->recursive = 1;
             opts->symlink_mode = CP_SYMLINK_PHYSICAL;
+            opts->preserve_links = 1;
             cp_enable_preserve_all(opts);
+            break;
+        case 'd':
+            opts->symlink_mode = CP_SYMLINK_PHYSICAL;
+            opts->preserve_links = 1;
             break;
         case 'l':
             if (opts->link_mode == CP_LINKMODE_SYM) {
@@ -457,24 +632,61 @@ static int cp_parse_short_opt(struct cp_options *opts, const char *arg,
             }
             opts->link_mode = CP_LINKMODE_SYM;
             break;
-        case 'b':
+        case 'b': {
+            size_t parsed_size;
+            const char *local_err = NULL;
+
             if (arg[j + 1] != '\0') {
                 if (cp_parse_size(&arg[j + 1], &opts->buffer_size, err_msg) != 0) {
                     return -1;
                 }
                 opts->buffer_size_explicit = 1;
+                return 0;
+            }
+
+            if (*idx + 1 < argc && cp_token_looks_size(argv[*idx + 1])) {
+                if (cp_parse_size(argv[*idx + 1], &parsed_size, &local_err) != 0) {
+                    *err_msg = local_err;
+                    return -1;
+                }
+                opts->buffer_size = parsed_size;
+                opts->buffer_size_explicit = 1;
+                *idx += 1;
+            } else {
+                opts->backup_control = CP_BACKUP_SIMPLE;
+            }
+            break;
+        }
+        case 'S':
+            if (arg[j + 1] != '\0') {
+                opts->backup_suffix = &arg[j + 1];
             } else {
                 if (*idx + 1 >= argc) {
-                    *err_msg = "-b requires a size";
+                    *err_msg = "-S requires backup suffix";
                     return -1;
                 }
                 *idx += 1;
-                if (cp_parse_size(argv[*idx], &opts->buffer_size, err_msg) != 0) {
-                    return -1;
-                }
-                opts->buffer_size_explicit = 1;
+                opts->backup_suffix = argv[*idx];
             }
             return 0;
+        case 't':
+            if (arg[j + 1] != '\0') {
+                opts->target_directory = &arg[j + 1];
+            } else {
+                if (*idx + 1 >= argc) {
+                    *err_msg = "-t requires directory";
+                    return -1;
+                }
+                *idx += 1;
+                opts->target_directory = argv[*idx];
+            }
+            return 0;
+        case 'T':
+            opts->no_target_directory = 1;
+            break;
+        case 'u':
+            opts->update_only = 1;
+            break;
         case 'p':
             cp_enable_preserve_basic(opts);
             if (arg[j + 1] != '\0') {
@@ -541,16 +753,34 @@ int cp_parse_options(struct cp_options *opts, int argc, char **argv,
         return 0;
     }
 
-    if (i >= argc - 1) {
-        *err_msg = "missing SOURCE and DEST operands";
+    if (opts->target_directory) {
+        opts->dest = opts->target_directory;
+        opts->source_count = argc - i;
+        if (opts->source_count < 1) {
+            *err_msg = "missing SOURCE operand for target directory mode";
+            return -1;
+        }
+    } else {
+        if (i >= argc - 1) {
+            *err_msg = "missing SOURCE and DEST operands";
+            return -1;
+        }
+        opts->source_count = argc - i - 1;
+        opts->dest = argv[argc - 1];
+    }
+
+    if (opts->no_target_directory && opts->source_count > 1) {
+        *err_msg = "-T/--no-target-directory cannot be used with multiple sources";
         return -1;
     }
 
-    opts->source_count = argc - i - 1;
-    opts->dest = argv[argc - 1];
-
     if (opts->link_mode == CP_LINKMODE_HARD) {
-        /* hard-link mode never follows link targets */
+        opts->symlink_mode = CP_SYMLINK_PHYSICAL;
+    }
+
+    if (opts->archive) {
+        opts->recursive = 1;
+        opts->preserve_links = 1;
         opts->symlink_mode = CP_SYMLINK_PHYSICAL;
     }
 
@@ -560,5 +790,5 @@ int cp_parse_options(struct cp_options *opts, int argc, char **argv,
 const char *cp_options_usage(const char *progname)
 {
     (void)progname;
-    return "Usage: cp [ -R [-H | -L | -P] ] [ -f | -i | -n ] [ -p[a|mode] ] [ -l | -s ] [ -b bufsize ] [--sparse=auto|always|never] [--atomic-replace|--no-atomic-replace] [--progress] SOURCE... DEST\n";
+    return "Usage: cp [ -R [-H | -L | -P] ] [ -f | -i | -n ] [ -p[a|mode] ] [ -l | -s ] [ -b [bufsize] ] [ -t DIRECTORY | SOURCE... DEST ] [--backup[=CONTROL]] [--sparse=auto|always|never] [--reflink=auto|always|never] [--remove-destination] [--atomic-replace|--no-atomic-replace] [--update] SOURCE... DEST\n";
 }

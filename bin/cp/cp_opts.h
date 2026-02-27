@@ -35,6 +35,19 @@ enum cp_non_tty_prompt_default {
     CP_PROMPT_DEFAULT_YES = 1,
 };
 
+enum cp_backup_control {
+    CP_BACKUP_NONE = 0,
+    CP_BACKUP_SIMPLE = 1,
+    CP_BACKUP_NUMBERED = 2,
+    CP_BACKUP_EXISTING = 3,
+};
+
+enum cp_reflink_mode {
+    CP_REFLINK_NEVER = 0,
+    CP_REFLINK_AUTO = 1,
+    CP_REFLINK_ALWAYS = 2,
+};
+
 struct cp_options {
     int recursive;
     enum cp_symlink_mode symlink_mode;
@@ -53,13 +66,22 @@ struct cp_options {
 
     int archive;
     int force_silent;
+    int verbose;
     int progress;
     int atomic_replace;
+    int remove_destination;
+    int update_only;
 
     enum cp_non_tty_prompt_default non_tty_default;
+    enum cp_backup_control backup_control;
+    const char *backup_suffix;
+    enum cp_reflink_mode reflink_mode;
 
     size_t buffer_size;
     int buffer_size_explicit;
+
+    const char *target_directory;
+    int no_target_directory;
 
     int show_help;
     int show_version;

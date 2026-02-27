@@ -22,7 +22,7 @@ zimage:
 
 # Host tools build
 HOSTCC ?= cc
-HOSTCFLAGS ?= -O2 -Wall
+HOSTCFLAGS ?= -O2 $(WARNFLAGS)
 HOST_DIST_PREFIX ?= /opt/substrate
 export HOSTCC HOSTCFLAGS
 

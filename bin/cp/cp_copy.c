@@ -29,9 +29,22 @@
 #  include <sys/sendfile.h>
 #  define CP_HAVE_SENDFILE 1
 # endif
+# if __has_include(<sys/ioctl.h>)
+#  include <sys/ioctl.h>
+# endif
 # if __has_include(<sys/types.h>)
 #  include <sys/types.h>
 # endif
+# if __has_include(<linux/fs.h>)
+#  include <linux/fs.h>
+#  define CP_HAVE_FICLONE 1
+# endif
+#endif
+
+#if defined(CP_HOST_BUILD)
+#define CP_ST_MTIME_NSEC(st) ((st)->st_mtim.tv_nsec)
+#else
+#define CP_ST_MTIME_NSEC(st) ((st)->st_mtime_nsec)
 #endif
 
 static void cp_diag(struct cp_context *ctx,
@@ -58,12 +71,35 @@ static void cp_diag(struct cp_context *ctx,
     ctx->had_error = 1;
 }
 
-static void cp_diag_simple(struct cp_context *ctx, const char *msg)
+static void cp_warn(struct cp_context *ctx,
+                    const char *src,
+                    const char *dst,
+                    const char *what,
+                    int errnum)
 {
-    if (!ctx->opts->force_silent) {
-        fprintf(stderr, "%s: %s\n", ctx->progname, msg);
+    if (ctx->opts->force_silent) {
+        return;
     }
-    ctx->had_error = 1;
+    if (dst) {
+        fprintf(stderr, "%s: %s -> %s: warning: %s: %s\n",
+                ctx->progname, src ? src : "(none)", dst, what, strerror(errnum));
+    } else if (src) {
+        fprintf(stderr, "%s: %s: warning: %s: %s\n",
+                ctx->progname, src, what, strerror(errnum));
+    } else {
+        fprintf(stderr, "%s: warning: %s: %s\n", ctx->progname, what, strerror(errnum));
+    }
+}
+
+static void cp_verbose(struct cp_context *ctx, const char *fmt,
+                       const char *a, const char *b)
+{
+    if (!ctx->opts->verbose || ctx->opts->force_silent) {
+        return;
+    }
+    fprintf(stderr, "%s: ", ctx->progname);
+    fprintf(stderr, fmt, a, b);
+    fputc('\n', stderr);
 }
 
 static void cp_preserve_warn_bridge(void *userdata,
@@ -168,6 +204,138 @@ static int cp_should_skip_existing(struct cp_context *ctx,
         return !cp_prompt_overwrite(ctx->opts, dst);
     }
 
+    return 0;
+}
+
+static int cp_backup_exists(const char *path)
+{
+    struct stat st;
+    return lstat(path, &st) == 0;
+}
+
+static char *cp_backup_simple_path(const struct cp_options *opts, const char *dst)
+{
+    size_t len = strlen(dst);
+    size_t slen = strlen(opts->backup_suffix ? opts->backup_suffix : "~");
+    char *out = (char *)malloc(len + slen + 1);
+    if (!out) {
+        return NULL;
+    }
+    memcpy(out, dst, len);
+    memcpy(out + len, opts->backup_suffix ? opts->backup_suffix : "~", slen);
+    out[len + slen] = '\0';
+    return out;
+}
+
+static char *cp_backup_numbered_path(const char *dst, int n)
+{
+    char suffix[48];
+    size_t len = strlen(dst);
+    int slen = snprintf(suffix, sizeof(suffix), ".~%d~", n);
+    char *out;
+
+    if (slen < 0 || (size_t)slen >= sizeof(suffix)) {
+        errno = EINVAL;
+        return NULL;
+    }
+    out = (char *)malloc(len + (size_t)slen + 1);
+    if (!out) {
+        return NULL;
+    }
+    memcpy(out, dst, len);
+    memcpy(out + len, suffix, (size_t)slen);
+    out[len + (size_t)slen] = '\0';
+    return out;
+}
+
+static int cp_find_backup_numbered(const char *dst, int *max_found)
+{
+    int n;
+    int seen = 0;
+    int maxn = 0;
+
+    for (n = 1; n < 10000; ++n) {
+        char *candidate = cp_backup_numbered_path(dst, n);
+        if (!candidate) {
+            return -1;
+        }
+        if (cp_backup_exists(candidate)) {
+            seen = 1;
+            maxn = n;
+        } else {
+            free(candidate);
+            break;
+        }
+        free(candidate);
+    }
+
+    *max_found = seen ? maxn : 0;
+    return 0;
+}
+
+static char *cp_backup_path_for_control(const struct cp_options *opts, const char *dst)
+{
+    enum cp_backup_control control = opts->backup_control;
+
+    if (control == CP_BACKUP_NONE) {
+        return NULL;
+    }
+    if (control == CP_BACKUP_SIMPLE) {
+        return cp_backup_simple_path(opts, dst);
+    }
+    if (control == CP_BACKUP_EXISTING || control == CP_BACKUP_NUMBERED) {
+        int maxn = 0;
+        if (cp_find_backup_numbered(dst, &maxn) != 0) {
+            return NULL;
+        }
+        if (control == CP_BACKUP_EXISTING && maxn == 0) {
+            return cp_backup_simple_path(opts, dst);
+        }
+        return cp_backup_numbered_path(dst, maxn + 1);
+    }
+    errno = EINVAL;
+    return NULL;
+}
+
+static int cp_maybe_backup_destination(struct cp_context *ctx,
+                                       const char *src,
+                                       const char *dst,
+                                       int dst_exists)
+{
+    char *backup_path;
+
+    if (!dst_exists || ctx->opts->backup_control == CP_BACKUP_NONE) {
+        return 0;
+    }
+
+    backup_path = cp_backup_path_for_control(ctx->opts, dst);
+    if (!backup_path) {
+        cp_diag(ctx, src, dst, "compute backup destination", errno ? errno : ENOMEM);
+        return -1;
+    }
+
+    if (rename(dst, backup_path) != 0) {
+        cp_diag(ctx, src, dst, "create backup", errno);
+        free(backup_path);
+        return -1;
+    }
+
+    cp_verbose(ctx, "backup %s -> %s", dst, backup_path);
+    free(backup_path);
+    return 0;
+}
+
+static int cp_src_is_newer(const struct stat *src, const struct stat *dst)
+{
+    if (src->st_mtime > dst->st_mtime) {
+        return 1;
+    }
+    if (src->st_mtime < dst->st_mtime) {
+        return 0;
+    }
+    if (CP_ST_MTIME_NSEC(src) > CP_ST_MTIME_NSEC(dst)) {
+        return 1;
+    }
     return 0;
 }
 
@@ -427,6 +595,13 @@ static int cp_link_mode_op(struct cp_context *ctx,
         return 0;
     }
 
+    if (cp_maybe_backup_destination(ctx, src, dst, dst_exists) != 0) {
+        return -1;
+    }
+    if (dst_exists && ctx->opts->backup_control != CP_BACKUP_NONE) {
+        dst_exists = 0;
+    }
+
     if (dst_exists) {
         if (cp_remove_existing(dst, dst_st) != 0) {
             cp_diag(ctx, src, dst, "remove existing destination", errno);
@@ -439,6 +614,7 @@ static int cp_link_mode_op(struct cp_context *ctx,
             cp_diag(ctx, src, dst, "hard link", errno);
             return -1;
         }
+        cp_verbose(ctx, "hardlink %s -> %s", src, dst);
         return 0;
     }
 
@@ -447,6 +623,7 @@ static int cp_link_mode_op(struct cp_context *ctx,
         cp_diag(ctx, src, dst, "symbolic link", errno);
         return -1;
     }
+    cp_verbose(ctx, "symlink %s -> %s", src, dst);
     return 0;
 #else
     (void)src;
@@ -469,6 +646,13 @@ static int cp_copy_symlink_obj(struct cp_context *ctx,
 
     if (cp_should_skip_existing(ctx, dst, dst_exists)) {
         return 0;
+    }
+
+    if (cp_maybe_backup_destination(ctx, src, dst, dst_exists) != 0) {
+        return -1;
+    }
+    if (dst_exists && ctx->opts->backup_control != CP_BACKUP_NONE) {
+        dst_exists = 0;
     }
 
     if (dst_exists) {
@@ -509,6 +693,7 @@ static int cp_copy_symlink_obj(struct cp_context *ctx,
         free(target);
         return -1;
     }
+    cp_verbose(ctx, "copy symlink %s -> %s", src, dst);
 #else
     cp_diag(ctx, src, dst, "symbolic links unsupported on this target", ENOSYS);
     free(target);
@@ -532,13 +717,15 @@ static int cp_copy_special(struct cp_context *ctx,
                            const struct stat *dst_st,
                            int dst_exists)
 {
-    if (!(ctx->opts->archive || ctx->opts->preserve_all)) {
-        cp_diag_simple(ctx, "special file encountered without -a/-p a; skipping");
-        return -1;
-    }
-
     if (cp_should_skip_existing(ctx, dst, dst_exists)) {
         return 0;
+    }
+
+    if (cp_maybe_backup_destination(ctx, src, dst, dst_exists) != 0) {
+        return -1;
+    }
+    if (dst_exists && ctx->opts->backup_control != CP_BACKUP_NONE) {
+        dst_exists = 0;
     }
 
     if (dst_exists) {
@@ -554,6 +741,7 @@ static int cp_copy_special(struct cp_context *ctx,
             cp_diag(ctx, src, dst, "create FIFO", errno);
             return -1;
         }
+        cp_verbose(ctx, "copy fifo %s -> %s", src, dst);
 #else
         cp_diag(ctx, src, dst, "special file creation unsupported on this target", ENOSYS);
         return -1;
@@ -564,6 +752,7 @@ static int cp_copy_special(struct cp_context *ctx,
             cp_diag(ctx, src, dst, "create device node", errno);
             return -1;
         }
+        cp_verbose(ctx, "copy special %s -> %s", src, dst);
 #else
         cp_diag(ctx, src, dst, "device node creation unsupported on this target", ENOSYS);
         return -1;
@@ -605,6 +794,12 @@ static int cp_copy_regular(struct cp_context *ctx,
         return -1;
     }
 
+    if (dst_exists && ctx->opts->update_only &&
+        !cp_src_is_newer(src_st, dst_st)) {
+        cp_verbose(ctx, "skip (destination newer or same age) %s -> %s", src, dst);
+        return 0;
+    }
+
     if (ctx->opts->preserve_links && src_st->st_nlink > 1) {
         const char *existing = cp_hardlink_map_get(&ctx->hardlinks, src_st->st_dev, src_st->st_ino);
         if (existing) {
@@ -622,6 +817,9 @@ static int cp_copy_regular(struct cp_context *ctx,
                 cp_diag(ctx, src, dst, "preserve hardlink", errno);
                 return -1;
             }
+            cp_warn(ctx, src, dst,
+                    "cannot preserve hardlink across filesystems, copying data",
+                    EXDEV);
         }
     }
 

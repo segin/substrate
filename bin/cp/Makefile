@@ -12,6 +12,7 @@ CP_COMMON_SRCS = cp_opts.c cp_path.c cp_hardlink.c cp_atomic.c cp_preserve.c cp_
 TEST_CFLAGS = -O1 -g -Wall -Wextra -DCP_HOST_BUILD -D_GNU_SOURCE -I.
 
 UNIT_BINS = test_opts test_path test_hardlink_map test_atomic test_sparse
+EXTRA_CLEAN += cp_host $(UNIT_BINS) fuzz_opts_path fuzz_sparse_preserve
 
 .PHONY: test unit integration property stress fuzz fuzz-run ci
 
@@ -72,6 +73,3 @@ fuzz-run: fuzz
 ci: unit integration property stress fuzz-run
 
 test: ci
-
-clean:
-	rm -f $(PROG) $(OBJS) cp_host $(UNIT_BINS) fuzz_opts_path fuzz_sparse_preserve

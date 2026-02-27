@@ -9,6 +9,7 @@ include ../../Makefile.inc
 
 SRCS ?= $(PROG).c
 OBJS = $(SRCS:.c=.o)
+EXTRA_CLEAN ?=
 
 LDFLAGS := $(USER_LDFLAGS)
 LIBC_DIR = $(TOP)/lib/c
@@ -37,7 +38,7 @@ $(PROG): $(OBJS)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(PROG) $(OBJS)
+	rm -f $(PROG) $(OBJS) $(EXTRA_CLEAN)
 
 BINDIR ?= $(DESTDIR)/bin
 
