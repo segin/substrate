@@ -4038,6 +4038,47 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `lib/sys/sysctl.c`: Wrapper function.
         - [x] Man page: `sysctl(2)`.
 
+### 6b. Editline Library (`lib/edit`)
+- [ ] **Core Foundation:**
+    - [ ] Create `lib/edit/` directory structure.
+    - [ ] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: Initialize editline state.
+    - [ ] Implement `el_end(EditLine *el)`: Clean up editline state.
+    - [ ] Implement `el_reset(EditLine *el)`: Reset state to defaults.
+    - [ ] Define internal structures for line state, terminal state, and key-bindings.
+- [ ] **Line Editing Engine:**
+    - [ ] Implement line buffer management (insertion, deletion, navigation).
+    - [ ] Implement Emacs-style key-bindings (default).
+    - [ ] Implement Vi-style navigation and insertion modes.
+    - [ ] Implement UTF-8 support for line editing and navigation.
+- [ ] **Terminal & I/O Handling:**
+    - [ ] Implement basic termcap/terminfo query support for cursor movement and clearing.
+    - [ ] Implement raw mode switching for the tty.
+    - [ ] Handle window resize signals (`SIGWINCH`) and recalculate layout.
+    - [ ] Implement signal handling (SIGINT, SIGQUIT, SIGTSTP) during `el_gets`.
+- [ ] **Command & Variable Interface:**
+    - [ ] Implement `el_set()` and `el_get()` for configuration (e.g., editors, prompts, signals).
+    - [ ] Implement `el_source()` to parse and execute `.editrc` commands.
+    - [ ] Implement builtin editor commands (backward-char, forward-word, etc.).
+- [ ] **History Management:**
+    - [ ] Implement `history_init()` and `history_end()`.
+    - [ ] Implement `history()` interface for adding, searching, and traversing history.
+    - [ ] Support loading and saving history to/from files.
+- [ ] **Testing:**
+    - [ ] **Unit Tests:**
+        - [ ] Test line buffer manipulation logic (independent of terminal).
+        - [ ] Test history traversal and search algorithms.
+        - [ ] Test `.editrc` command parsing.
+    - [ ] **Property Tests:**
+        - [ ] Verify line buffer invariants during randomized editing operations.
+        - [ ] Verify history consistency across multiple additions and removals.
+    - [ ] **Integration Tests:**
+        - [ ] Mock terminal interaction tests verifying escape sequence generation.
+- [ ] **Documentation:**
+    - [ ] Man page: `editline(3)`.
+    - [ ] Man page: `el_init(3)`, `el_gets(3)`, etc. (individual or consolidated).
+    - [ ] Man page: `editrc(5)`.
+    - [ ] Man page: `history(3)`.
+
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
     - [ ] **Code Audit & Infrastructure:**
