@@ -1012,6 +1012,14 @@ static int int_regs_flush(FILE *fp, const cc_ssa_function_t *f, const slot_layou
     return 0;
 }
 
+static int int_regs_clobber_reg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *st,
+                                int reg) {
+    if (reg < 0 || reg >= st->reg_count) {
+        return 0;
+    }
+    return int_regs_spill_reg(fp, f, lay, st, reg);
+}
+
 static int instr_uses_value(const cc_ssa_instr_t *in, int value) {
     size_t i;
     if (in == NULL || value < 0) {
@@ -2049,32 +2057,66 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 } else {
                     int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rr;
-                    if (in->op == CC_SSA_DIV || in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) {
-                        int_regs_flush(fp, f, &lay, &ist);
-                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
-                        if (in->op == CC_SSA_DIV) {
-                            if (in->is_unsigned) {
-                                fprintf(fp, "\txorq %%rdx, %%rdx\n");
-                                fprintf(fp, "\tdivq %d(%%rbp)\n", slot_off(&lay, in->rhs));
-                            } else {
-                                fprintf(fp, "\tcqto\n");
-                                fprintf(fp, "\tidivq %d(%%rbp)\n", slot_off(&lay, in->rhs));
-                            }
-                        } else if (in->op == CC_SSA_SHL) {
-                            fprintf(fp, "\tmovq %d(%%rbp), %%rcx\n", slot_off(&lay, in->rhs));
-                            fprintf(fp, "\tandq $63, %%rcx\n");
-                            fprintf(fp, "\tshlq %%cl, %%rax\n");
+                    if (in->op == CC_SSA_DIV) {
+                        int rax = int_reg_index(&ist, "%rax");
+                        int rdx = int_reg_index(&ist, "%rdx");
+                        int rr_div;
+                        if (rax < 0 || rdx < 0) {
+                            int_regs_free(&ist);
+                            slot_layout_free(&lay);
+                            set_diag(diag, "x86_64 register set missing %rax/%rdx");
+                            return -1;
+                        }
+                        if (rl != rax) {
+                            int_regs_clobber_reg(fp, f, &lay, &ist, rax);
+                            fprintf(fp, "\tmovq %s, %%rax\n", ist.regs[rl]);
+                            int_regs_bind(&ist, in->lhs, rax, 0);
+                            rl = rax;
+                        }
+                        int_regs_clobber_reg(fp, f, &lay, &ist, rdx);
+                        rr_div = int_regs_load(fp, f, &lay, &ist, in->rhs, -1, rax);
+                        if (in->is_unsigned) {
+                            fprintf(fp, "\txorq %%rdx, %%rdx\n");
+                            fprintf(fp, "\tdivq %s\n", ist.regs[rr_div]);
                         } else {
-                            fprintf(fp, "\tmovq %d(%%rbp), %%rcx\n", slot_off(&lay, in->rhs));
-                            fprintf(fp, "\tandq $63, %%rcx\n");
-                            fprintf(fp, "\t%s %%cl, %%rax\n", in->is_unsigned ? "shrq" : "sarq");
+                            fprintf(fp, "\tcqto\n");
+                            fprintf(fp, "\tidivq %s\n", ist.regs[rr_div]);
                         }
                         {
-                            int rd = int_regs_define(fp, f, &lay, &ist, in->dst, int_reg_index(&ist, "%rax"), -1);
+                            int rd = int_regs_define(fp, f, &lay, &ist, in->dst, rax, -1);
                             if (strcmp(ist.regs[rd], "%rax") != 0) {
                                 fprintf(fp, "\tmovq %%rax, %s\n", ist.regs[rd]);
                             }
                         }
+                        break;
+                    }
+                    if (in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) {
+                        int rcx = int_reg_index(&ist, "%rcx");
+                        int rr_shift;
+                        if (rcx < 0) {
+                            int_regs_free(&ist);
+                            slot_layout_free(&lay);
+                            set_diag(diag, "x86_64 register set missing %rcx");
+                            return -1;
+                        }
+                        if (rl == rcx) {
+                            int alt = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, rcx);
+                            if (alt == rcx) {
+                                alt = int_regs_define(fp, f, &lay, &ist, in->lhs, -1, rcx);
+                                fprintf(fp, "\tmovq %%rcx, %s\n", ist.regs[alt]);
+                            }
+                            rl = alt;
+                        }
+                        int_regs_clobber_reg(fp, f, &lay, &ist, rcx);
+                        rr_shift = int_regs_load(fp, f, &lay, &ist, in->rhs, rcx, rl);
+                        if (rr_shift != rcx) {
+                            fprintf(fp, "\tmovq %s, %%rcx\n", ist.regs[rr_shift]);
+                            int_regs_bind(&ist, in->rhs, rcx, 0);
+                        }
+                        fprintf(fp, "\tandq $63, %%rcx\n");
+                        fprintf(fp, "\t%s %%cl, %s\n",
+                                in->op == CC_SSA_SHL ? "shlq" : (in->is_unsigned ? "shrq" : "sarq"), ist.regs[rl]);
+                        int_regs_remap_dst(fp, f, &lay, &ist, in->dst, rl);
                         break;
                     }
                     if (ist.reg_dirty[rl]) {
