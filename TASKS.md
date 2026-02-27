@@ -5138,19 +5138,19 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `touch newfile` -> file created
             - [ ] `touch existing` -> mtime updated
             - [ ] `touch -c nonexist` -> file not created
-    - [ ] **`chmod` - Change file mode bits:**
-        - [ ] **Purpose:** Change the mode of each FILE to MODE.
-        - [ ] **Standards:** POSIX.1-2017.
+    - [/] **`chmod` - Change file mode bits:**
+        - [x] **Purpose:** Change the mode of each FILE to MODE.
+        - [x] **Standards:** POSIX.1-2017.
         - [ ] **Operands:**
             - [ ] `-R`, `--recursive`: Change files and directories recursively.
             - [ ] `-v`, `--verbose`: Diagnostic for every file processed.
-            - [ ] Symbolic mode support (e.g., `u+x,g-w`).
-            - [ ] Octal mode support (e.g., `755`).
-        - [ ] **Runtime:**
-            - [ ] Recursive traversal logic for `-R`.
-            - [ ] Parsing complex symbolic mode strings.
-        - [ ] **Library dependencies:**
-            - [ ] `chmod`, `fchmodat`, `parse_mode_string`
+            - [x] Symbolic mode support (e.g., `u+x,g-w`).
+            - [x] Octal mode support (e.g., `755`).
+        - [x] **Runtime:**
+            - [x] Recursive traversal logic for `-R`.
+            - [x] Parsing complex symbolic mode strings.
+        - [x] **Library dependencies:**
+            - [x] `chmod`, `fchmodat`, `parse_mode_string`
         - [ ] **Acceptance tests:**
             - [ ] `chmod 755 file` -> mode is 755
             - [ ] `chmod +x file` -> executable bit set
