@@ -928,6 +928,13 @@ static void emit_frame_store_reg(FILE *fp, int is_64bit, const char *reg, long o
     }
 }
 
+static void emit_i386_copy_f64_param_to_slot(FILE *fp, const slot_layout_t *lay, int dst, int poff) {
+    emit_frame_load_reg(fp, 0, poff, "%eax");
+    emit_frame_store_reg(fp, 0, "%eax", slot_off(lay, dst));
+    emit_frame_load_reg(fp, 0, poff + 4, "%eax");
+    emit_frame_store_reg(fp, 0, "%eax", slot_off(lay, dst) + 4);
+}
+
 static void int_regs_free(int_reg_state_t *st) {
     if (st == NULL) {
         return;
@@ -992,11 +999,7 @@ static int int_regs_spill_reg(FILE *fp, const cc_ssa_function_t *f, const slot_l
     }
     if (st->reg_dirty[r] && f->value_types[v] == CC_VAL_I64) {
         off = slot_off(lay, v);
-        if (st->is_64bit) {
-            fprintf(fp, "\tmovq %s, %ld(%%rbp)\n", st->regs[r], off);
-        } else {
-            fprintf(fp, "\tmovl %s, %ld(%%ebp)\n", st->regs[r], off);
-        }
+        emit_frame_store_reg(fp, st->is_64bit, st->regs[r], off);
     }
     st->val_reg[v] = -1;
     st->reg_val[r] = -1;
@@ -1595,27 +1598,145 @@ static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_in
     *out_xmm_regs = xmm;
 }
 
+static int emit_x86_64_cmp_float(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                 const cc_ssa_instr_t *in) {
+    int rd;
+    int_regs_flush(fp, f, lay, ist);
+    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(lay, in->lhs));
+    fprintf(fp, "\tucomisd %d(%%rbp), %%xmm0\n", slot_off(lay, in->rhs));
+    rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
+    emit_float_setcc_to_reg(fp, in->cmp_kind, ist->regs[rd], 1);
+    return 0;
+}
+
+static int emit_x86_64_cmp_int(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                               const cc_ssa_instr_t *in) {
+    const char *m = setcc_int_mnemonic(in->cmp_kind, in->is_unsigned);
+    int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+    int rr = int_regs_load(fp, f, lay, ist, in->rhs, -1, rl);
+    int rd;
+    fprintf(fp, "\tcmpq %s, %s\n", ist->regs[rr], ist->regs[rl]);
+    rd = int_regs_define(fp, f, lay, ist, in->dst, rl, rr);
+    fprintf(fp, "\t%s %s\n", m, reg64_to8(ist->regs[rd]));
+    emit_setcc_zext_to_reg(fp, ist->regs[rd], 1);
+    return 0;
+}
+
 static int emit_x86_64_cmp(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                            const cc_ssa_instr_t *in) {
     if (f->value_types[in->lhs] == CC_VAL_F64 || f->value_types[in->rhs] == CC_VAL_F64) {
-        int rd;
-        int_regs_flush(fp, f, lay, ist);
-        fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(lay, in->lhs));
-        fprintf(fp, "\tucomisd %d(%%rbp), %%xmm0\n", slot_off(lay, in->rhs));
-        rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
-        emit_float_setcc_to_reg(fp, in->cmp_kind, ist->regs[rd], 1);
-        return 0;
+        return emit_x86_64_cmp_float(fp, f, lay, ist, in);
     } else {
-        const char *m = setcc_int_mnemonic(in->cmp_kind, in->is_unsigned);
-        int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
-        int rr = int_regs_load(fp, f, lay, ist, in->rhs, -1, rl);
-        int rd;
-        fprintf(fp, "\tcmpq %s, %s\n", ist->regs[rr], ist->regs[rl]);
-        rd = int_regs_define(fp, f, lay, ist, in->dst, rl, rr);
-        fprintf(fp, "\t%s %s\n", m, reg64_to8(ist->regs[rd]));
-        emit_setcc_zext_to_reg(fp, ist->regs[rd], 1);
+        return emit_x86_64_cmp_int(fp, f, lay, ist, in);
+    }
+}
+
+static int emit_x86_64_store_value_to_rsp(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                          int value, size_t off_rsp, cc_diag_t *diag) {
+    if (value < 0 || value >= f->value_count) {
+        set_diag(diag, "call argument value out of range");
+        return -1;
+    }
+    if (f->value_types[value] == CC_VAL_F64) {
+        fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(lay, value));
+        fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", off_rsp);
+    } else {
+        fprintf(fp, "\tmovq %d(%%rbp), %%r11\n", slot_off(lay, value));
+        fprintf(fp, "\tmovq %%r11, %zu(%%rsp)\n", off_rsp);
+    }
+    return 0;
+}
+
+static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                             int value, const abi_loc_t *loc, cc_diag_t *diag) {
+    if (value < 0 || value >= f->value_count) {
+        set_diag(diag, "call argument value out of range");
+        return -1;
+    }
+    if (loc->kind == ABI_LOC_XMM) {
+        const char *reg = arg_reg64_xmm(loc->index);
+        if (reg == NULL) {
+            set_diag(diag, "call with unsupported floating argument index");
+            return -1;
+        }
+        if (f->value_types[value] != CC_VAL_F64) {
+            set_diag(diag, "internal error: non-float assigned to XMM argument");
+            return -1;
+        }
+        fprintf(fp, "\tmovsd %d(%%rbp), %s\n", slot_off(lay, value), reg);
         return 0;
     }
+    if (loc->kind == ABI_LOC_GPR) {
+        const char *reg = arg_reg64_gpr(loc->index);
+        if (reg == NULL) {
+            set_diag(diag, "call with unsupported integer argument index");
+            return -1;
+        }
+        if (f->value_types[value] == CC_VAL_F64) {
+            set_diag(diag, "internal error: float assigned to integer argument register");
+            return -1;
+        }
+        fprintf(fp, "\tmovq %d(%%rbp), %s\n", slot_off(lay, value), reg);
+        return 0;
+    }
+    if (loc->kind == ABI_LOC_STACK) {
+        return emit_x86_64_store_value_to_rsp(fp, f, lay, value, loc->index * 8, diag);
+    }
+    set_diag(diag, "internal error: unknown ABI argument location");
+    return -1;
+}
+
+static void emit_x86_64_normalize_int_return(FILE *fp, long ret_bytes, int is_unsigned) {
+    if (ret_bytes == 1) {
+        if (is_unsigned) {
+            fprintf(fp, "\tmovzbl %%al, %%eax\n");
+        } else {
+            fprintf(fp, "\tmovsbq %%al, %%rax\n");
+        }
+    } else if (ret_bytes == 2) {
+        if (is_unsigned) {
+            fprintf(fp, "\tmovzwl %%ax, %%eax\n");
+        } else {
+            fprintf(fp, "\tmovswq %%ax, %%rax\n");
+        }
+    } else if (ret_bytes == 4) {
+        if (is_unsigned) {
+            fprintf(fp, "\tmovl %%eax, %%eax\n");
+        } else {
+            fprintf(fp, "\tmovslq %%eax, %%rax\n");
+        }
+    }
+}
+
+static void emit_x86_64_store_float_indirect(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, long mem_size) {
+    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(lay, in->lhs));
+    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(lay, in->rhs));
+    if (mem_size == 4) {
+        fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+        fprintf(fp, "\tmovss %%xmm0, (%%rax)\n");
+    } else {
+        fprintf(fp, "\tmovsd %%xmm0, (%%rax)\n");
+    }
+}
+
+static void emit_x86_64_store_int_indirect(FILE *fp, const int_reg_state_t *ist, int rp, int rv, long mem_size) {
+    if (mem_size == 1) {
+        fprintf(fp, "\tmovb %s, (%s)\n", reg64_to8(ist->regs[rv]), ist->regs[rp]);
+    } else if (mem_size == 2) {
+        fprintf(fp, "\tmovw %s, (%s)\n", reg64_to16(ist->regs[rv]), ist->regs[rp]);
+    } else if (mem_size == 4) {
+        fprintf(fp, "\tmovl %s, (%s)\n", reg64_to32(ist->regs[rv]), ist->regs[rp]);
+    } else {
+        fprintf(fp, "\tmovq %s, (%s)\n", ist->regs[rv], ist->regs[rp]);
+    }
+}
+
+static void emit_x86_64_store_aggregate_indirect(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, long mem_size) {
+    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(lay, in->lhs));
+    fprintf(fp, "\tmovq %%rax, %%rdi\n");
+    fprintf(fp, "\tmovq %d(%%rbp), %%rsi\n", slot_off(lay, in->rhs));
+    fprintf(fp, "\tmovq $%ld, %%rdx\n", mem_size);
+    fprintf(fp, "\tcall memcpy\n");
 }
 
 static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
@@ -1651,41 +1772,17 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         fprintf(fp, "\tsubq $%zu, %%rsp\n", stack_total);
     }
     for (a = 0; a < in->arg_count; ++a) {
+        int arg_value = in->args[a];
         if (in->call_is_variadic) {
             size_t copy_off = copy_base + a * 8;
-            if (f->value_types[in->args[a]] == CC_VAL_F64) {
-                fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(lay, in->args[a]));
-                fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", copy_off);
-            } else {
-                fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(lay, in->args[a]));
-                fprintf(fp, "\tmovq %%rax, %zu(%%rsp)\n", copy_off);
+            if (emit_x86_64_store_value_to_rsp(fp, f, lay, arg_value, copy_off, diag) != 0) {
+                free(locs);
+                return -1;
             }
         }
-        if (locs[a].kind == ABI_LOC_XMM) {
-            const char *reg = arg_reg64_xmm(locs[a].index);
-            if (reg == NULL) {
-                set_diag(diag, "call with unsupported floating argument index");
-                free(locs);
-                return -1;
-            }
-            fprintf(fp, "\tmovsd %d(%%rbp), %s\n", slot_off(lay, in->args[a]), reg);
-        } else if (locs[a].kind == ABI_LOC_GPR) {
-            const char *reg = arg_reg64_gpr(locs[a].index);
-            if (reg == NULL) {
-                set_diag(diag, "call with unsupported integer argument index");
-                free(locs);
-                return -1;
-            }
-            fprintf(fp, "\tmovq %d(%%rbp), %s\n", slot_off(lay, in->args[a]), reg);
-        } else {
-            size_t off = locs[a].index * 8;
-            if (f->value_types[in->args[a]] == CC_VAL_F64) {
-                fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(lay, in->args[a]));
-                fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", off);
-            } else {
-                fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(lay, in->args[a]));
-                fprintf(fp, "\tmovq %%rax, %zu(%%rsp)\n", off);
-            }
+        if (emit_x86_64_move_value_to_abi_loc(fp, f, lay, arg_value, &locs[a], diag) != 0) {
+            free(locs);
+            return -1;
         }
     }
     if (in->call_is_variadic) {
@@ -1693,8 +1790,8 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         fprintf(fp, "\tmovb $%zu, %%al\n", xmm_regs);
     }
     if (in->op == CC_SSA_CALLI) {
-        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(lay, in->lhs));
-        fprintf(fp, "\tcall *%%rax\n");
+        fprintf(fp, "\tmovq %d(%%rbp), %%r11\n", slot_off(lay, in->lhs));
+        fprintf(fp, "\tcall *%%r11\n");
     } else {
         fprintf(fp, "\tcall %s\n", in->sym);
     }
@@ -1707,25 +1804,7 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
             fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(lay, in->dst));
         } else {
             long ret_bytes = in->imm > 0 ? in->imm : 8;
-            if (ret_bytes == 1) {
-                if (in->is_unsigned) {
-                    fprintf(fp, "\tmovzbl %%al, %%eax\n");
-                } else {
-                    fprintf(fp, "\tmovsbq %%al, %%rax\n");
-                }
-            } else if (ret_bytes == 2) {
-                if (in->is_unsigned) {
-                    fprintf(fp, "\tmovzwl %%ax, %%eax\n");
-                } else {
-                    fprintf(fp, "\tmovswq %%ax, %%rax\n");
-                }
-            } else if (ret_bytes == 4) {
-                if (in->is_unsigned) {
-                    fprintf(fp, "\tmovl %%eax, %%eax\n");
-                } else {
-                    fprintf(fp, "\tmovslq %%eax, %%rax\n");
-                }
-            }
+            emit_x86_64_normalize_int_return(fp, ret_bytes, in->is_unsigned);
             {
                 int rd = int_regs_define(fp, f, lay, ist, in->dst, int_reg_index(ist, "%rax"), -1);
                 if (strcmp(ist->regs[rd], "%rax") != 0) {
@@ -1988,16 +2067,8 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                  */
                 int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->rhs] == CC_VAL_F64) {
-                    int_regs_flush(fp, f, &lay, &ist);
-                    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                     long mem_size = in->imm > 0 ? in->imm : 8;
-                    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
-                    if (mem_size == 4) {
-                        fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
-                        fprintf(fp, "\tmovss %%xmm0, (%%rax)\n");
-                    } else {
-                        fprintf(fp, "\tmovsd %%xmm0, (%%rax)\n");
-                    }
+                    emit_x86_64_store_float_indirect(fp, &lay, in, mem_size);
                 } else {
                     int rp = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rv = int_regs_load(fp, f, &lay, &ist, in->rhs, -1, rp);
@@ -2005,21 +2076,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     if (mem_size > 8) {
                         /* Aggregate copy: rhs is source address, lhs is destination address. */
                         int_regs_flush(fp, f, &lay, &ist);
-                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
-                        fprintf(fp, "\tmovq %%rax, %%rdi\n");
-                        fprintf(fp, "\tmovq %d(%%rbp), %%rsi\n", slot_off(&lay, in->rhs));
-                        fprintf(fp, "\tmovq $%ld, %%rdx\n", mem_size);
-                        fprintf(fp, "\tcall memcpy\n");
+                        emit_x86_64_store_aggregate_indirect(fp, &lay, in, mem_size);
                     } else {
-                        if (mem_size == 1) {
-                            fprintf(fp, "\tmovb %s, (%s)\n", reg64_to8(ist.regs[rv]), ist.regs[rp]);
-                        } else if (mem_size == 2) {
-                            fprintf(fp, "\tmovw %s, (%s)\n", reg64_to16(ist.regs[rv]), ist.regs[rp]);
-                        } else if (mem_size == 4) {
-                            fprintf(fp, "\tmovl %s, (%s)\n", reg64_to32(ist.regs[rv]), ist.regs[rp]);
-                        } else {
-                            fprintf(fp, "\tmovq %s, (%s)\n", ist.regs[rv], ist.regs[rp]);
-                        }
+                        emit_x86_64_store_int_indirect(fp, &ist, rp, rv, mem_size);
                     }
                 }
                 int_regs_flush(fp, f, &lay, &ist);
@@ -2381,10 +2440,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 int poff = i386_param_offset(f, in->param_index);
                 if (f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
-                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", poff);
-                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
-                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", poff + 4);
-                    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst) + 4);
+                    emit_i386_copy_f64_param_to_slot(fp, &lay, in->dst, poff);
                 } else {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                     fprintf(fp, "\tmovl %d(%%ebp), %s\n", poff, ist.regs[rd]);
