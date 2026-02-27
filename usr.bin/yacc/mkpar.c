@@ -177,7 +177,6 @@ static action *add_reduce(action *alist, int ruleno, unsigned *la) {
 
 short *yydgoto;
 short *yygindex;
-static short *goto_base;
 
 static void find_final_state(void) {
     int i;

@@ -195,6 +195,11 @@
 2. The selected default is the most frequent unsuppressed reduce rule in the state.
 3. Reduce-table entries matching the default rule are omitted from packed tables.
 
+### 3.3.9 Table/Conflict Pipeline
+1. ACTION/GOTO construction runs before conflict suppression and default-reduction selection.
+2. Conflict suppression happens per-state/per-token before packed table emission.
+3. Packed tables reflect suppressed actions and default-reduction elision.
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions
