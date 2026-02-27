@@ -5857,6 +5857,340 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] Write `roff(7)` language reference.
             - [ ] Write `man(1)` user manual.
             - [ ] Write `mandoc_impl.md` developer design doc.
+        - [ ] **`roff` / `nroff` / `man` (Production-Quality Task Expansion):**
+            - [ ] **Compatibility Baseline & Scope Control:**
+                - [ ] Define normative baseline: POSIX where defined, BSD `mandoc` semantics preferred where unspecified.
+                - [ ] Produce behavior matrix for V7/BSD roff, BSD mandoc, and GNU groff.
+                - [ ] Record compatibility priorities for `man` output correctness over full troff feature coverage.
+                - [ ] Enumerate explicitly supported macro packages and minimum versions.
+                - [ ] Enumerate explicitly unsupported GNU groff-only extensions as non-goals.
+                - [ ] Add task gate requiring incompatibility entries for every intentional divergence.
+                - [ ] Define per-feature status tags: implemented, compatible-subset, stubbed, deferred.
+            - [ ] **`roff` / `nroff` CLI Frontend:**
+                - [ ] Add `bin/roff/` program skeleton with argument parser and usage output.
+                - [ ] Add `bin/nroff/` frontend aliasing roff engine with terminal defaults.
+                - [ ] Implement `-man`, `-mdoc`, and `-ms` package selection flags.
+                - [ ] Implement `-Tascii` device selection and default device logic for `nroff`.
+                - [ ] Implement `-m` package loading path semantics compatible with BSD tooling.
+                - [ ] Implement register preset flags (`-rX=N`) and string preset flags (`-dX=VALUE`).
+                - [ ] Implement warning/diagnostic control flags and quiet mode.
+                - [ ] Implement stdin and file-list processing order exactly as specified by CLI.
+                - [ ] Implement deterministic exit codes for parse, include, and runtime formatting failures.
+                - [ ] Add `roff(1)` and `nroff(1)` option tables synchronized with implementation.
+            - [ ] **Core Engine: Input Stream, Tokenization, and Lexical Rules:**
+                - [ ] Implement unified input source stack for files, `.so` includes, and diversions.
+                - [ ] Track source coordinates (file, line, column, include depth) for diagnostics.
+                - [ ] Implement line reader with newline preservation and escaped-newline handling.
+                - [ ] Implement request line detection for both `.` and `'` control prefixes.
+                - [ ] Implement comment line and empty control line semantics.
+                - [ ] Implement argument lexer preserving escaped spaces and quoted segments.
+                - [ ] Implement token categories: text, request, macro call, escape, and transparent-through tokens.
+                - [ ] Implement pushback/unread token support for lookahead-sensitive parsing.
+                - [ ] Implement tokenizer behavior for copy mode vs interpretation mode.
+                - [ ] Add hard limits for token length, argument count, and input recursion depth.
+            - [ ] **Core Engine: Escape Sequence Parsing and Expansion:**
+                - [ ] Implement escape dispatcher for one-char, two-char, bracketed, and long-name forms.
+                - [ ] Implement literal escape handling (`\\`, `\e`) and escaped control chars.
+                - [ ] Implement special character escapes (`\(xx`, `\[name]`) with lookup table.
+                - [ ] Implement string register interpolation (`\*x`, `\*(xx`, `\*[name]`).
+                - [ ] Implement numeric register interpolation (`\nx`, `\n(xx`, `\n[name]`) with formatting options.
+                - [ ] Implement number-format escape modifiers (`\n+`, `\n-`) semantics.
+                - [ ] Implement font/style escapes used by terminal backend.
+                - [ ] Implement width-measurement escapes with backend callback hooks.
+                - [ ] Implement conditional-inline escapes used by macro packages.
+                - [ ] Implement copy-mode suppression rules for escapes inside macro definitions.
+                - [ ] Implement unknown escape fallback policy with warning classing.
+                - [ ] Implement truncation-safe UTF-8/byte handling for escape parser in nroff mode.
+            - [ ] **Core Engine: Requests, Macros, and Macro Invocation:**
+                - [ ] Implement request dispatch table with fast lookup by canonical request name.
+                - [ ] Implement user macro definition (`.de`) with proper terminator handling.
+                - [ ] Implement append-to-macro (`.am`) preserving previous body.
+                - [ ] Implement remove/rename behavior for user-defined macros.
+                - [ ] Implement macro invocation with positional arguments (`$1`..`$9`, `$*`, `$@` behavior decision task).
+                - [ ] Implement argument quoting/spacing rules for macro expansion.
+                - [ ] Implement nested macro expansion depth limits and overflow diagnostics.
+                - [ ] Implement recursion detection and deterministic failure behavior.
+                - [ ] Implement request-vs-macro name precedence and conflict resolution.
+                - [ ] Implement copy-mode capture for macro bodies with delayed expansion.
+            - [ ] **Core Engine: Registers and String Storage:**
+                - [ ] Implement numeric register table with signed integer storage.
+                - [ ] Implement auto-increment/decrement register operations.
+                - [ ] Implement numeric register default-value semantics for undefined names.
+                - [ ] Implement string register table with mutable replacement and append operations.
+                - [ ] Implement register namespaces and name normalization rules.
+                - [ ] Implement register deletion APIs and lifecycle handling.
+                - [ ] Implement per-environment register visibility policy decision and documentation.
+                - [ ] Implement register serialization helpers for diagnostics/testing.
+            - [ ] **Core Engine: Conditionals and Control Flow:**
+                - [ ] Implement `.if` expression parser for numeric, string, and definedness tests.
+                - [ ] Implement `.ie` and `.el` chain handling with proper else binding.
+                - [ ] Implement block conditionals (`\{` / `\}`) and nested block depth tracking.
+                - [ ] Implement `.while` loop execution with loop guard limits.
+                - [ ] Implement `.break`-style loop interruption request (if supported) and fallback behavior.
+                - [ ] Implement short-circuit parsing for false branches without side effects.
+                - [ ] Emit diagnostics for unterminated conditional blocks and malformed predicates.
+            - [ ] **Core Engine: Diversions, Traps, and Deferred Material:**
+                - [ ] Implement diversion start/stop (`.di`) and append diversion (`.da`).
+                - [ ] Implement named diversion storage and retrieval lifecycle.
+                - [ ] Implement diversion nesting semantics and stack management.
+                - [ ] Implement diversion line numbering and diagnostics preservation.
+                - [ ] Implement top-of-page and page-location trap registration.
+                - [ ] Implement trap invocation ordering and re-entrancy safety.
+                - [ ] Implement diversion replay into normal input stream with source attribution.
+            - [ ] **Core Engine: Environments and State Stacking:**
+                - [ ] Implement environment switch request (`.ev`) with stack-aware push/pop behavior.
+                - [ ] Track fill mode, adjust mode, indentation, temporary indent, and line length per environment.
+                - [ ] Track font/style state and spacing parameters per environment.
+                - [ ] Track tab stops and leaders per environment.
+                - [ ] Track numbering/format state per environment when compatibility requires it.
+                - [ ] Implement environment copy/clone behavior for macro package needs.
+                - [ ] Implement hard limits and diagnostics for environment depth exhaustion.
+            - [ ] **Core Engine: Line Breaking, Filling, and Adjustment:**
+                - [ ] Implement no-fill and fill modes (`.nf`/`.fi`) with state transitions.
+                - [ ] Implement adjustable line assembly with word buffering.
+                - [ ] Implement left/right adjustment and centering behaviors required by man macros.
+                - [ ] Implement sentence-space handling policy and compatibility toggle.
+                - [ ] Implement indentation requests (`.in`, `.ti`) and restoration semantics.
+                - [ ] Implement line length changes (`.ll`) and pending line flush behavior.
+                - [ ] Implement vertical spacing (`.sp`, `.br`) interactions with filled output.
+                - [ ] Implement keep-together behavior required by tagged paragraphs.
+                - [ ] Implement blank-line propagation rules for literal displays.
+                - [ ] Add deterministic wrapping rules for overlong tokens and unbreakable strings.
+            - [ ] **Core Engine: Hyphenation Hooks (Initial Stub + Interfaces):**
+                - [ ] Define hyphenation interface between formatter and language-specific engine.
+                - [ ] Add default disabled behavior matching conservative nroff expectations.
+                - [ ] Add request-level toggles for enabling/disabling hyphenation.
+                - [ ] Implement soft-hyphen insertion points plumbing without enabling algorithms yet.
+                - [ ] Add metrics hooks so future hyphenation can influence line breaker decisions.
+            - [ ] **Core Engine: Number Formatting and Scaling Units:**
+                - [ ] Implement parser for roff numeric expressions with optional sign and defaults.
+                - [ ] Implement scaling units (`u`, `i`, `c`, `P`, `p`, `m`, `n`, `v`) with nroff-specific conversions.
+                - [ ] Implement absolute vs relative assignments for numeric requests.
+                - [ ] Implement format request for registers (decimal, roman, alphabetic formats).
+                - [ ] Implement unit conversion overflow checks and saturation diagnostics.
+                - [ ] Implement deterministic rounding policy for fractional internal units.
+            - [ ] **Core Engine: Input Sourcing and `.so` Semantics:**
+                - [ ] Implement `.so` path resolution using current file directory first.
+                - [ ] Implement include search path list for macro directories and man tree includes.
+                - [ ] Implement include recursion detection and cycle diagnostics.
+                - [ ] Implement include depth limits with actionable error messages.
+                - [ ] Implement include failure behavior compatibility option (fatal vs warning) and default choice.
+                - [ ] Preserve source locations across include boundaries for error reporting.
+            - [ ] **Core Engine: Error Handling and Diagnostics:**
+                - [ ] Define diagnostic classes: parse error, compatibility warning, runtime warning, internal bug.
+                - [ ] Emit source-rich diagnostics with file:line and macro/include backtrace.
+                - [ ] Add warning categories for unsupported requests and ignored escapes.
+                - [ ] Add strict mode that upgrades selected warnings to errors for test gating.
+                - [ ] Add recoverable parse paths so malformed lines do not crash formatter.
+                - [ ] Add deterministic memory/OOM error propagation from engine to CLI exit codes.
+            - [ ] **Macro Packages: `-man` Required Coverage:**
+                - [ ] Implement document prologue macros: `.TH`, `.DT`, `.UC` with BSD-compatible defaults.
+                - [ ] Implement sectioning macros: `.SH`, `.SS`.
+                - [ ] Implement paragraph macros: `.PP`, `.P`, `.LP`.
+                - [ ] Implement tagged/indented paragraph macros: `.TP`, `.IP`, `.HP`, `.TQ`.
+                - [ ] Implement font-switching macros: `.B`, `.I`, `.BR`, `.RB`, `.BI`, `.IB`, `.IR`, `.RI`.
+                - [ ] Implement spacing control macros: `.sp`, `.br`, `.nf`, `.fi` wrappers as expected by pages.
+                - [ ] Implement display-like helpers used in common man sources.
+                - [ ] Implement `.RS`/`.RE` relative indent stack behavior.
+                - [ ] Implement synopsis helpers preserving argument spacing.
+                - [ ] Implement literal block behavior used by code examples.
+                - [ ] Implement macro argument defaulting and empty-argument behavior matching BSD man.
+                - [ ] Implement macro redefinition safety policy for local overrides in pages.
+            - [ ] **Macro Packages: `-mdoc` Required Coverage:**
+                - [ ] Implement prologue validation for `.Dd`, `.Dt`, `.Os`.
+                - [ ] Implement section/block macros: `.Sh`, `.Ss`, `.Pp`.
+                - [ ] Implement list macros: `.Bl`, `.It`, `.El` with key list types (`-bullet`, `-enum`, `-tag`, `-diag`, `-hang`, `-ohang`, `-inset`).
+                - [ ] Implement display macros: `.Bd`, `.Ed`.
+                - [ ] Implement enclosure macros: `.Oo`/`.Oc`, `.Op`, `.Aq`, `.Bq`, `.Dq`, `.Pq`, `.Brq`.
+                - [ ] Implement argument/flag/name macros: `.Nm`, `.Fl`, `.Ar`, `.Cm`, `.Ic`.
+                - [ ] Implement cross-reference macros: `.Xr`, `.Sx`.
+                - [ ] Implement library/function macros: `.Lb`, `.In`, `.Fn`, `.Fa`, `.Ft`, `.Fo`, `.Fc`.
+                - [ ] Implement standards/history metadata macros: `.St`, `.At`, `.Bx`, `.Fx`, `.Nx`, `.Ox`, `.Dx`.
+                - [ ] Implement punctuation handling and spacing suppression rules required by mdoc grammar.
+                - [ ] Implement callable semantic node model so macros can influence formatting context.
+                - [ ] Add compatibility tasks for commonly used but non-standard mdoc idioms.
+            - [ ] **Macro Packages: Minimal `-ms` Compatibility:**
+                - [ ] Implement paragraph macros `.PP`, `.LP`, `.IP`.
+                - [ ] Implement heading macros `.NH`, `.SH`.
+                - [ ] Implement quote/display basics needed for legacy docs in tree.
+                - [ ] Implement title/date author subset required for simple manuscripts.
+                - [ ] Document unsupported advanced `-ms` requests as explicit non-goals.
+            - [ ] **Macro Expansion Semantics, Scoping, and Redefinition:**
+                - [ ] Define argument interpolation rules for quoted vs unquoted macro arguments.
+                - [ ] Define late-expansion vs early-expansion behavior for nested macros.
+                - [ ] Implement local temporary strings/registers for package internals when required.
+                - [ ] Implement macro shadowing and unshadowing rules across include boundaries.
+                - [ ] Implement safe redefinition guards for core package macros in strict mode.
+                - [ ] Implement `.als`-style aliasing decision (support or explicit incompatibility task).
+                - [ ] Add diagnostics when pages rely on unsupported macro-argument edge behaviors.
+            - [ ] **Output Backend: ASCII Terminal (`nroff`-Style):**
+                - [ ] Implement backend abstraction separating layout tree from device rendering.
+                - [ ] Implement plain terminal text renderer with deterministic whitespace policy.
+                - [ ] Implement indentation output logic with tab/space balancing.
+                - [ ] Implement page header/footer emission for macros that require it.
+                - [ ] Implement literal-mode rendering without fill/adjust transformations.
+                - [ ] Implement fallback glyph mapping for unsupported special characters.
+                - [ ] Implement configurable line width default (80) with CLI/environment overrides.
+                - [ ] Implement optional margin clipping diagnostics for overflowed lines.
+            - [ ] **Output Backend: Overstrike, Bold, and Underline:**
+                - [ ] Implement backspace overstrike sequences for bold rendering.
+                - [ ] Implement underline rendering using underscore-backspace conventions.
+                - [ ] Implement conflict resolution when nested font changes overlap.
+                - [ ] Implement backend switch to disable overstrike for plain-output consumers.
+                - [ ] Add tests verifying historical terminal output byte-for-byte for styled tokens.
+            - [ ] **Output Backend: Width, Tabs, and Indentation Calculations:**
+                - [ ] Implement tab stop table with default and custom stops.
+                - [ ] Implement tab expansion in both fill and no-fill contexts.
+                - [ ] Implement escape-aware display width calculation for style and zero-width escapes.
+                - [ ] Implement wide-character policy decision and ASCII fallback in `nroff`.
+                - [ ] Implement tagged paragraph width balancing for `.TP` and `.It -tag`.
+                - [ ] Implement hanging-indent behavior for continuation lines.
+                - [ ] Implement indentation stack overflow checks with diagnostics.
+            - [ ] **Output Backend: Future Device Hooks (Tasks Only):**
+                - [ ] Define stable intermediate representation for block/inline/layout nodes.
+                - [ ] Define backend vtable for HTML/PDF/PostScript future renderers.
+                - [ ] Add no-op HTML backend stub behind compile-time flag.
+                - [ ] Add no-op PDF backend stub behind compile-time flag.
+                - [ ] Document backend API contracts and invariants in developer design doc.
+            - [ ] **Compatibility Targets and Explicit Non-Goals:**
+                - [ ] Create per-request compatibility notes vs BSD mandoc and groff.
+                - [ ] Add decision task for each known BSD/GNU behavioral conflict.
+                - [ ] Prefer BSD output when conflicts are user-visible in manpages.
+                - [ ] Mark GNU-only extensions (`.als`, `.do`, `.nop`, `.while` edge cases, GNU long names, device controls) as unsupported unless explicitly accepted.
+                - [ ] Add diagnostics for ignored GNU-specific requests when encountered.
+                - [ ] Add compatibility mode switch task only if real-world pages require it.
+                - [ ] Add regression corpus of historical manpages from BSD and Unix variants.
+            - [ ] **`man` Command: CLI, Modes, and Exit Behavior:**
+                - [ ] Implement `man` argument parser supporting section-prefix and name forms.
+                - [ ] Implement `man <section> <name>` and `man <name> <section>` disambiguation.
+                - [ ] Implement options `-a`, `-f`, `-k`, `-w`, `-M`, `-m`, `-s`, `-S`, `-l`, `-P`, `-C`.
+                - [ ] Implement `-f` whatis mode behavior and output formatting.
+                - [ ] Implement `-k` apropos mode behavior and keyword matching.
+                - [ ] Implement `-w` path-only mode without invoking formatter.
+                - [ ] Implement `-a` all-matches traversal with pager/session behavior.
+                - [ ] Implement consistent exit codes: success, no entry, usage, runtime failure.
+                - [ ] Implement option conflict resolution and precedence rules.
+                - [ ] Document BSD-vs-GNU option behavior decisions explicitly.
+            - [ ] **`man` Command: Page Discovery and Search Path Resolution:**
+                - [ ] Implement section canonicalization and alias mapping (for `3`, `3p`, `n`, local sections).
+                - [ ] Implement default search order with configurable section list.
+                - [ ] Implement `MANPATH` parser including empty-field inheritance semantics.
+                - [ ] Implement system path defaults and user path overlay semantics.
+                - [ ] Implement `-M` temporary MANPATH override semantics.
+                - [ ] Implement architecture/OS-specific suffix directory search when configured.
+                - [ ] Implement locale-aware subdirectory fallback chain.
+                - [ ] Implement exact-name match before partial/alias match policy.
+                - [ ] Implement support for source suffixes (`.1`, `.1.gz`, `.1.bz2`, `.1.xz`, etc.).
+                - [ ] Implement deterministic tie-breaking for duplicate page names across paths.
+                - [ ] Emit ambiguity diagnostics listing candidate pages and sections.
+            - [ ] **`man` Command: Preprocessing Pipeline and Roff Invocation:**
+                - [ ] Implement page format detection (`man` vs `mdoc`) by content heuristics and safe fallbacks.
+                - [ ] Implement explicit macro package override via CLI.
+                - [ ] Build internal roff invocation pipeline without unsafe shell string concatenation.
+                - [ ] Implement decompression pipeline for `.gz`, `.bz2`, and `.xz` sources.
+                - [ ] Implement optional preprocessor stage hooks (`tbl`, `eqn`, `pic`) as stubs with diagnostics.
+                - [ ] Implement charset detection and conversion path for legacy encodings.
+                - [ ] Implement pass-through of selected formatter warnings in verbose mode.
+                - [ ] Ensure temporary file/pipe lifecycle is leak-free and signal-safe.
+            - [ ] **`man` Command: Pager and Terminal Integration:**
+                - [ ] Implement pager resolution precedence: `-P`, `MANPAGER`, `PAGER`, fallback pager.
+                - [ ] Implement fallback pager when `less` is unavailable.
+                - [ ] Implement `LESS` environment integration and sane defaults.
+                - [ ] Implement non-interactive output mode when stdout is not a tty.
+                - [ ] Implement SIGPIPE-safe behavior when pager exits early.
+                - [ ] Preserve formatter backspace sequences expected by pager (`less -R`/plain mode decision task).
+                - [ ] Implement terminal width detection and pass width to formatter.
+            - [ ] **`man` Command: Caching, Catpages, and Performance:**
+                - [ ] Implement catpage directory layout keyed by path, section, and locale.
+                - [ ] Implement cache key metadata including source mtime, size, and formatter version.
+                - [ ] Implement cache reuse on valid metadata match.
+                - [ ] Implement cache invalidation on source/formatter/config change.
+                - [ ] Implement atomic cache writes using temp file + rename.
+                - [ ] Implement file permission and ownership policy for shared cache directories.
+                - [ ] Implement per-user cache fallback when system cache is not writable.
+                - [ ] Add lock strategy preventing cache corruption under concurrent `man` processes.
+                - [ ] Add performance benchmarks for cold-cache and warm-cache runs.
+            - [ ] **`man` Command: Diagnostics and UX:**
+                - [ ] Implement missing page error with searched paths and sections.
+                - [ ] Implement ambiguous match message with ranked candidates.
+                - [ ] Implement section-conflict guidance when same name exists in multiple sections.
+                - [ ] Implement concise hints (`Try 'man 2 foo'`) for common ambiguity cases.
+                - [ ] Implement user-friendly `-k`/`-f` no-result messages.
+                - [ ] Implement localized error output boundaries and UTF-8 safety.
+                - [ ] Ensure all diagnostics are testable and stable for golden tests.
+            - [ ] **Security and Robustness (`roff` + `man`):**
+                - [ ] Forbid path traversal outside allowed roots for `.so` and `man -l` unless explicitly requested.
+                - [ ] Ensure decompressor invocation uses execve argv arrays, never shell expansion.
+                - [ ] Add input size limits for decompressed streams to mitigate zip-bomb style abuse.
+                - [ ] Add recursion and macro expansion limits to prevent CPU/memory exhaustion.
+                - [ ] Harden temporary file creation (`mkstemp`) and directory permissions.
+                - [ ] Validate environment variables (`MANPATH`, `PAGER`, `LESS`) before use.
+                - [ ] Add privilege boundary policy for setuid/setgid contexts (disable unsafe features).
+            - [ ] **Testing: Unit Coverage (Roff/Man):**
+                - [ ] Add lexer unit tests for request/text/escape tokenization boundaries.
+                - [ ] Add parser unit tests for request argument splitting and quoting.
+                - [ ] Add unit tests for register arithmetic, formatting, and default values.
+                - [ ] Add unit tests for string register interpolation across nested macro calls.
+                - [ ] Add unit tests for `.if`/`.ie`/`.el` precedence and nesting.
+                - [ ] Add unit tests for `.while` loop termination and guard limits.
+                - [ ] Add unit tests for diversion capture and replay ordering.
+                - [ ] Add unit tests for environment push/pop state isolation.
+                - [ ] Add unit tests for fill/no-fill transitions and line-break decisions.
+                - [ ] Add unit tests for scaling unit conversions and rounding behavior.
+                - [ ] Add unit tests for `.so` include path resolution and failure modes.
+                - [ ] Add unit tests for `man` section parsing, option precedence, and path selection.
+                - [ ] Add unit tests for compressed source detection and decompressor dispatch.
+                - [ ] Add unit tests for cache key generation and invalidation decisions.
+                - [ ] Add unit tests for user-facing diagnostic message selection.
+            - [ ] **Testing: Property-Based Coverage:**
+                - [ ] Add property tests for random nested macro definitions and expansions.
+                - [ ] Add property tests for random conditional trees with deterministic evaluation.
+                - [ ] Add property tests for random environment stack operations preserving invariants.
+                - [ ] Add property tests for random indentation/tab configurations with width invariants.
+                - [ ] Add property tests for include graph generation with cycle detection invariants.
+                - [ ] Add property tests for `man` search path permutations yielding stable ranking.
+                - [ ] Add property tests for cache metadata monotonicity across file timestamp changes.
+            - [ ] **Testing: Fuzzer Targets:**
+                - [ ] Add fuzz target for escape sequence parser.
+                - [ ] Add fuzz target for request/macro argument parser.
+                - [ ] Add fuzz target for macro expansion engine with recursion guards.
+                - [ ] Add fuzz target for conditional expression parser.
+                - [ ] Add fuzz target for diversion/environment stack state machine.
+                - [ ] Add fuzz target for scaling-unit numeric parser.
+                - [ ] Add fuzz target for malformed `.so` include directives and path normalization.
+                - [ ] Add fuzz target for mdoc inline punctuation and delimiter parsing.
+                - [ ] Add fuzz target for `man` CLI option parser and mixed positional arguments.
+                - [ ] Add fuzz target for `MANPATH` parser and separator edge cases.
+                - [ ] Add fuzz target for compressed input decoding wrappers with truncated/corrupt streams.
+                - [ ] Integrate all fuzzers into CI with corpus minimization and crash triage workflow.
+            - [ ] **Testing: Integration, Golden Output, and Performance:**
+                - [ ] Build golden corpus from project manpages across `man` and `mdoc` styles.
+                - [ ] Add integration test rendering corpus with internal `nroff` and comparing stable fixtures.
+                - [ ] Add differential tests against BSD mandoc for selected canonical pages.
+                - [ ] Add differential tests against groff for overlapping supported feature subset.
+                - [ ] Add end-to-end tests for `man` discovery (`section`, `MANPATH`, compressed pages, pager bypass).
+                - [ ] Add end-to-end tests for `man -k` and `man -f` with prepared whatis database fixtures.
+                - [ ] Add stress test for large manpage sets and repeated invocations.
+                - [ ] Add performance budget checks for startup latency and throughput.
+            - [ ] **Documentation Deliverables:**
+                - [ ] Write `man/man7/roff.7` language and request reference for supported subset.
+                - [ ] Write `man/man1/roff.1` command manual.
+                - [ ] Write `man/man1/nroff.1` command manual with terminal-specific behavior.
+                - [ ] Write `man/man1/man.1` command manual including all implemented options.
+                - [ ] Write `man/man7/man.7` macro package reference for supported macros.
+                - [ ] Write `man/man7/mdoc.7` supported semantic macro reference and limitations.
+                - [ ] Write `man/man7/ms.7` minimal compatibility reference and explicit non-goals.
+                - [ ] Document implementation-defined behavior for escapes, spacing, and diagnostics.
+                - [ ] Document BSD-vs-GNU compatibility choices and rationale.
+                - [ ] Document security model for includes, decompression, and pager invocation.
+                - [ ] Write developer design document for roff engine architecture, data flow, and extension points.
+                - [ ] Add maintainer guide for adding new requests/macros/backends safely.
+            - [ ] **Release Gating and Completion Criteria:**
+                - [ ] Define required pass criteria for unit/property/fuzz/integration suites.
+                - [ ] Define compatibility acceptance thresholds against BSD mandoc corpus.
+                - [ ] Define performance acceptance thresholds for `man` warm and cold paths.
+                - [ ] Define documentation completeness checklist before marking feature complete.
+                - [ ] Add final audit task verifying no unchecked intentional incompatibilities remain undocumented.
 
 ### 8. LibC & Build System (User Requests & Audit)
 - [ ] **LibC Core Compliance (Audit Findings):**

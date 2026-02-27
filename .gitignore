@@ -163,3 +163,5 @@ tests/sys/host_test_*
 !tests/usr.bin/**/
 !tests/usr.bin/**/Makefile
 !tests/usr.bin/**/*.ir
+bin/cat/cat
+bin/chmod/chmod
