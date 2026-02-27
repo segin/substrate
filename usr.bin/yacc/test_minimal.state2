@@ -1,0 +1,4 @@
+    $accept : expr . $end
+
+    $end  shift, and go to state 3
+
