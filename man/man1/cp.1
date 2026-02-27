@@ -1,0 +1,181 @@
+." cp(1)
+.TH CP 1 "February 2026" "Substrate" "User Commands"
+.SH NAME
+cp \- copy files and directories
+.SH SYNOPSIS
+.B cp
+.RI [ \-R " [\-H|\-L|\-P] ]
+.RI [ \-f | \-i | \-n ]
+.RI [ \-p [ a|mode ] ]
+.RI [ \-l | \-s ]
+.RI [ \-b " bufsize ]"
+.RI [ \-\-sparse = MODE ]
+.RI [ \-\-atomic-replace | \-\-no-atomic-replace ]
+.RI [ \-\-progress ]
+.RI SOURCE ... DEST
+.SH DESCRIPTION
+.B cp
+copies regular files and, with
+.BR \-R ,
+directories.
+.PP
+Destination resolution:
+.TP
+- If DEST exists and is a directory, each SOURCE is copied to DEST/basename(SOURCE).
+.TP
+- If multiple SOURCE operands are provided, DEST must be an existing directory.
+.TP
+- If one SOURCE is provided and DEST is a non-directory path, SOURCE is copied to DEST.
+.SH OPTIONS
+.TP
+.BR \-R , " \-r" , " --recursive"
+Recurse into directories.
+.TP
+.B \-H
+When recursing, follow symlinks specified on the command line only.
+.TP
+.BR \-L , " --dereference"
+When recursing, follow all symlinks.
+.TP
+.BR \-P , " --no-dereference"
+Copy symlink objects themselves. This is the default recursive behavior.
+.TP
+.BR \-f , " --force"
+Force overwrite and suppress human-readable warnings. Exit status still reports errors.
+.TP
+.BR \-i , " --interactive"
+Prompt before overwrite. On non-tty input, default answer is "no" unless
+.B --interactive-default=yes
+is set.
+.TP
+.BR \-n , " --no-clobber"
+Never overwrite existing files.
+.TP
+.BR \-p " [a|mode]"
+Preserve attributes. Bare
+.B \-p
+preserves mode, owner/group, and timestamps.
+.B \-p a
+preserves all available attributes (mode/owner/time/links/xattr/acl/flags).
+.B \-p mode
+preserves mode only.
+.TP
+.BR \-a , " --archive"
+Archive mode: equivalent to recursive copy with full metadata and hardlink preservation.
+.TP
+.BR \-l , " --link"
+Create hard links instead of copying file contents.
+.TP
+.BR \-s , " --symbolic-link"
+Create symbolic links instead of copying file contents. The link target text is the original SOURCE argument.
+.TP
+.BR \-b , " --buffer-size=" SIZE
+Set I/O buffer size. SIZE accepts decimal or hexadecimal numbers and suffixes such as k, m, g, kb, mb, gb.
+.TP
+.BR "--preserve=" LIST
+Preserve a comma-separated list: mode, ownership, timestamps, links, xattr, acl, flags, all.
+.TP
+.BR "--sparse=" MODE
+Sparse policy: auto (default), always, or never.
+.TP
+.B --atomic-replace
+Enable temporary-file copy followed by rename for overwrite operations (default).
+.TP
+.B --no-atomic-replace
+Disable atomic replacement and write directly to destination.
+.TP
+.B --progress
+Print per-file copy progress lines to standard error.
+.TP
+.BR "--interactive-default=" yes|no
+Set non-tty default answer for
+.BR \-i .
+.TP
+.B --help
+Display usage and option summary.
+.TP
+.B --version
+Display version and exit.
+.SH RECURSION AND SYMLINK SEMANTICS
+For recursive copies:
+.TP
+- Default is physical traversal (
+.BR \-P ).
+.TP
+- 
+.B \-H
+follows command-line symlinks only.
+.TP
+- 
+.B \-L
+follows all symlinks.
+.PP
+Directory traversal skips
+.B .
+and
+.B ..
+and tracks visited directory inodes to avoid symlink-induced cycles.
+.SH METADATA PRESERVATION
+With
+.B \-p
+or
+.BR \-a ,
+.B cp
+preserves requested metadata on a best-effort basis.
+.PP
+If owner/group changes require privilege and fail, the copy still completes unless a fatal I/O error occurs. Xattr/ACL/flags preservation degrades gracefully on unsupported platforms.
+.SH SPECIAL FILES
+With archive/all-preserve modes,
+.B cp
+recreates FIFOs and device nodes when permitted. Socket nodes are reported and skipped.
+.SH ATOMIC REPLACE
+When overwriting regular files,
+.B cp
+can write to a temporary file in the destination directory, fsync it, and rename it over the destination. On failure, temporary files are cleaned up.
+.SH EXIT STATUS
+.TP
+0
+All requested copies succeeded.
+.TP
+1
+One or more paths failed to copy, or a fatal write/fsync/rename error occurred.
+.SH EXAMPLES
+.TP
+cp file1 file2
+Copy one file.
+.TP
+cp file1 file2 dir/
+Copy multiple files into a directory.
+.TP
+cp -R -P srcdir dstdir
+Recursive physical copy.
+.TP
+cp -R -L srcdir dstdir
+Recursive logical copy (follow symlinks).
+.TP
+cp -a srcdir backup/
+Archive copy with metadata and hardlink graph preservation.
+.TP
+cp -l source dest
+Create a hardlink.
+.TP
+cp -s source dest
+Create a symlink to source.
+.SH TROUBLESHOOTING
+.TP
+"destination for multiple sources must be a directory"
+Create destination directory first or pass a single source.
+.TP
+"hard link ... Cross-device link"
+Hard links require source and destination on the same filesystem.
+.TP
+"symbolic links unsupported on this target"
+The current target runtime does not expose symlink creation.
+.SH SEE ALSO
+.BR mv (1),
+.BR ln (1),
+.BR mkdir (1),
+.BR stat (2),
+.BR link (2),
+.BR readlink (2),
+.BR mknod (2)
