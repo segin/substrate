@@ -28,10 +28,17 @@ typedef struct {
 } label_entry_t;
 
 typedef struct {
+    const cc_stmt_t *decl;
+    int value;
+} hoisted_alloc_entry_t;
+
+typedef struct {
     label_entry_t *labels;
     size_t label_count;
     const cc_function_t *fn;
     cc_ssa_module_t *mod;
+    hoisted_alloc_entry_t *hoisted_allocs;
+    size_t hoisted_alloc_count;
 } lower_ctx_t;
 
 static int emit_trap_instr(cc_ssa_function_t *sf);
@@ -41,6 +48,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                       int *saw_ret, cc_diag_t *diag);
 static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym);
+static const cc_expr_t *selected_generic_expr(const cc_expr_t *e);
 static int var_find_visible(var_entry_t *vars, size_t var_count, const char *name, int depth);
 static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name);
 static int member_base_struct_id(const cc_expr_t *e);
@@ -106,6 +114,144 @@ static char *xstrdup(const char *s) {
         memcpy(p, s, n);
     }
     return p;
+}
+
+static size_t utf8_seq_len(unsigned char b0) {
+    if ((b0 & 0x80u) == 0) return 1;
+    if ((b0 & 0xE0u) == 0xC0u) return 2;
+    if ((b0 & 0xF0u) == 0xE0u) return 3;
+    if ((b0 & 0xF8u) == 0xF0u) return 4;
+    return 1;
+}
+
+static unsigned long decode_escape_unit(const unsigned char *s, size_t n, size_t *adv_out) {
+    unsigned long v = 0;
+    size_t i = 0;
+    if (adv_out != NULL) {
+        *adv_out = 0;
+    }
+    if (n == 0) {
+        return 0;
+    }
+    if (s[0] == 'x') {
+        i = 1;
+        while (i < n) {
+            unsigned char c = s[i];
+            unsigned d;
+            if (c >= '0' && c <= '9') d = (unsigned)(c - '0');
+            else if (c >= 'a' && c <= 'f') d = 10u + (unsigned)(c - 'a');
+            else if (c >= 'A' && c <= 'F') d = 10u + (unsigned)(c - 'A');
+            else break;
+            v = (v << 4) | d;
+            i++;
+        }
+        if (i == 1) {
+            i = 1;
+            v = 0;
+        }
+        if (adv_out != NULL) {
+            *adv_out = i;
+        }
+        return v;
+    }
+    if (s[0] >= '0' && s[0] <= '7') {
+        int k = 0;
+        while (i < n && k < 3 && s[i] >= '0' && s[i] <= '7') {
+            v = (v << 3) | (unsigned long)(s[i] - '0');
+            i++;
+            k++;
+        }
+        if (adv_out != NULL) {
+            *adv_out = i;
+        }
+        return v;
+    }
+    switch (s[0]) {
+    case 'a': v = '\a'; break;
+    case 'b': v = '\b'; break;
+    case 'f': v = '\f'; break;
+    case 'n': v = '\n'; break;
+    case 'r': v = '\r'; break;
+    case 't': v = '\t'; break;
+    case 'v': v = '\v'; break;
+    case '\\': v = '\\'; break;
+    case '\'': v = '\''; break;
+    case '\"': v = '\"'; break;
+    case '?': v = '\?'; break;
+    default: v = s[0]; break;
+    }
+    if (adv_out != NULL) {
+        *adv_out = 1;
+    }
+    return v;
+}
+
+static int decode_string_units(const cc_expr_t *e, int wide, unsigned long **out_units, size_t *out_count) {
+    const unsigned char *s;
+    size_t n;
+    size_t i;
+    unsigned long *vals = NULL;
+    size_t count = 0;
+
+    if (out_units == NULL || out_count == NULL || e == NULL || e->kind != CC_EXPR_STR || e->ident == NULL) {
+        return -1;
+    }
+    *out_units = NULL;
+    *out_count = 0;
+    s = (const unsigned char *)e->ident;
+    n = strlen(e->ident);
+    if (n >= 2 && s[0] == '"' && s[n - 1] == '"') {
+        i = 1;
+        n -= 1;
+    } else {
+        i = 0;
+    }
+    while (i < n) {
+        unsigned long v;
+        size_t adv = 1;
+        unsigned long *next;
+        if (s[i] == '\\') {
+            i++;
+            if (i >= n) {
+                break;
+            }
+            v = decode_escape_unit(s + i, n - i, &adv);
+            if (adv == 0) adv = 1;
+            i += adv;
+        } else if (!wide) {
+            v = s[i];
+            i++;
+        } else {
+            size_t seq = utf8_seq_len(s[i]);
+            size_t j;
+            if (seq == 0) seq = 1;
+            if (i + seq > n) seq = 1;
+            v = 0;
+            if (seq == 1) {
+                v = s[i];
+            } else if (seq == 2) {
+                v = (unsigned long)(s[i] & 0x1Fu);
+            } else if (seq == 3) {
+                v = (unsigned long)(s[i] & 0x0Fu);
+            } else {
+                v = (unsigned long)(s[i] & 0x07u);
+            }
+            for (j = 1; j < seq; ++j) {
+                v = (v << 6) | (unsigned long)(s[i + j] & 0x3Fu);
+            }
+            i += seq;
+        }
+        next = (unsigned long *)realloc(vals, (count + 1) * sizeof(*next));
+        if (next == NULL) {
+            free(vals);
+            return -1;
+        }
+        vals = next;
+        vals[count++] = v;
+    }
+    *out_units = vals;
+    *out_count = count;
+    return 0;
 }
 
 static char *quote_c_string(const char *raw) {
@@ -612,6 +758,8 @@ static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
 static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                       var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag);
 static int lower_collect_labels_expr(cc_ssa_function_t *sf, const cc_expr_t *e, lower_ctx_t *ctx, cc_diag_t *diag);
+static int lower_collect_hoisted_allocs(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, lower_ctx_t *ctx,
+                                        const cc_stmt_t *s, cc_diag_t *diag);
 
 static int lower_find_label(const lower_ctx_t *ctx, const char *name) {
     size_t i;
@@ -621,6 +769,36 @@ static int lower_find_label(const lower_ctx_t *ctx, const char *name) {
         }
     }
     return -1;
+}
+
+static int lower_find_hoisted_alloc(const lower_ctx_t *ctx, const cc_stmt_t *decl) {
+    size_t i;
+    if (ctx == NULL || decl == NULL) {
+        return -1;
+    }
+    for (i = 0; i < ctx->hoisted_alloc_count; ++i) {
+        if (ctx->hoisted_allocs[i].decl == decl) {
+            return ctx->hoisted_allocs[i].value;
+        }
+    }
+    return -1;
+}
+
+static int append_hoisted_alloc(lower_ctx_t *ctx, const cc_stmt_t *decl, int value, cc_diag_t *diag) {
+    hoisted_alloc_entry_t *next;
+    if (ctx == NULL || decl == NULL || value < 0) {
+        return -1;
+    }
+    next = (hoisted_alloc_entry_t *)realloc(ctx->hoisted_allocs, (ctx->hoisted_alloc_count + 1) * sizeof(*next));
+    if (next == NULL) {
+        set_diag(diag, "out of memory recording hoisted local storage");
+        return -1;
+    }
+    ctx->hoisted_allocs = next;
+    ctx->hoisted_allocs[ctx->hoisted_alloc_count].decl = decl;
+    ctx->hoisted_allocs[ctx->hoisted_alloc_count].value = value;
+    ctx->hoisted_alloc_count++;
+    return 0;
 }
 
 static int lower_collect_labels(cc_ssa_function_t *sf, const cc_stmt_t *s, lower_ctx_t *ctx, cc_diag_t *diag) {
@@ -1092,11 +1270,13 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
     if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
         idx = var_find_visible(vars, var_count, e->ident, depth);
         if (idx >= 0) {
-            return is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
+            return (vars[idx].array_ndim > 0 && vars[idx].array_len >= 0) ||
+                   is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
         }
         g = find_global(tu, e->ident);
         if (g != NULL) {
-            return is_array_object_decl(g->type, g->array_len, g->array_ndim);
+            return (g->array_ndim > 0 && g->array_len >= 0) ||
+                   is_array_object_decl(g->type, g->array_len, g->array_ndim);
         }
     }
     if (e->kind == CC_EXPR_MEMBER && is_synthetic_struct_array_member(tu, e)) {
@@ -1289,6 +1469,146 @@ static int is_freestanding_mode(void) {
 
 static const char *local_array_allocator_symbol(void) {
     return is_freestanding_mode() ? "kzalloc" : "calloc";
+}
+
+static int emit_local_storage_alloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag) {
+    cc_ssa_instr_t call_in;
+    const char *alloc_sym = local_array_allocator_symbol();
+    int onev = -1;
+    int bytesv;
+    int dst;
+
+    if (total_size <= 0) {
+        set_diag(diag, "invalid local storage size");
+        return -1;
+    }
+    bytesv = emit_const_i64_instr(sf, total_size);
+    if (bytesv < 0) {
+        return -1;
+    }
+    if (strcmp(alloc_sym, "calloc") == 0) {
+        onev = emit_const_i64_instr(sf, 1);
+        if (onev < 0) {
+            return -1;
+        }
+    }
+    dst = new_value(sf, CC_VAL_I64);
+    if (dst < 0) {
+        set_diag(diag, "out of memory allocating local storage value");
+        return -1;
+    }
+    memset(&call_in, 0, sizeof(call_in));
+    call_in.op = CC_SSA_CALL;
+    call_in.call_is_variadic = 0;
+    call_in.sym = xstrdup(alloc_sym);
+    call_in.arg_count = strcmp(alloc_sym, "calloc") == 0 ? 2 : 1;
+    call_in.args = (int *)calloc(call_in.arg_count, sizeof(*call_in.args));
+    call_in.dst = dst;
+    if (call_in.sym == NULL || call_in.args == NULL) {
+        free(call_in.sym);
+        free(call_in.args);
+        set_diag(diag, "out of memory allocating local storage call");
+        return -1;
+    }
+    if (call_in.arg_count == 2) {
+        call_in.args[0] = onev;
+        call_in.args[1] = bytesv;
+    } else {
+        call_in.args[0] = bytesv;
+    }
+    if (push_instr(sf, call_in) != 0) {
+        free(call_in.sym);
+        free(call_in.args);
+        set_diag(diag, "out of memory appending local storage call");
+        return -1;
+    }
+    return dst;
+}
+
+static int stmt_needs_hoisted_alloc(const cc_stmt_t *s) {
+    if (s == NULL || s->kind != CC_STMT_DECL) {
+        return 0;
+    }
+    if ((s->storage & CC_STORAGE_STATIC) != 0) {
+        return 0;
+    }
+    if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+        return 1;
+    }
+    return is_array_object_decl(s->type, s->array_len, s->array_ndim);
+}
+
+static int lower_collect_hoisted_allocs(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, lower_ctx_t *ctx,
+                                        const cc_stmt_t *s, cc_diag_t *diag) {
+    long total_size;
+    long elem_size;
+    long elem_count;
+    int value;
+    size_t i;
+
+    if (s == NULL || ctx == NULL || sf == NULL || tu == NULL) {
+        return 0;
+    }
+
+    if (stmt_needs_hoisted_alloc(s) && lower_find_hoisted_alloc(ctx, s) < 0) {
+        if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+            total_size = type_size_bytes_with_struct(tu, s->type, s->type_struct_id);
+            if (total_size <= 0) {
+                total_size = 1;
+            }
+        } else {
+            cc_type_t elem_type = ptr_base_type(s->type);
+            elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
+            if (elem_size <= 0) {
+                elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
+            }
+            if (elem_size <= 0) {
+                set_diag(diag, "unsupported hoisted local array element type");
+                return -1;
+            }
+            elem_count = s->array_len > 0 ? s->array_len : 1;
+            if (elem_count <= 0 || elem_size > LONG_MAX / elem_count) {
+                set_diag(diag, "local array allocation size overflow");
+                return -1;
+            }
+            total_size = elem_size * elem_count;
+        }
+        value = emit_local_storage_alloc(sf, total_size, diag);
+        if (value < 0) {
+            return -1;
+        }
+        if (append_hoisted_alloc(ctx, s, value, diag) != 0) {
+            return -1;
+        }
+    }
+
+    switch (s->kind) {
+    case CC_STMT_LABEL:
+        return lower_collect_hoisted_allocs(tu, sf, ctx, s->then_branch, diag);
+    case CC_STMT_IF:
+        if (lower_collect_hoisted_allocs(tu, sf, ctx, s->then_branch, diag) != 0) {
+            return -1;
+        }
+        return lower_collect_hoisted_allocs(tu, sf, ctx, s->else_branch, diag);
+    case CC_STMT_WHILE:
+    case CC_STMT_DO:
+    case CC_STMT_SWITCH:
+        return lower_collect_hoisted_allocs(tu, sf, ctx, s->then_branch, diag);
+    case CC_STMT_FOR:
+        if (lower_collect_hoisted_allocs(tu, sf, ctx, s->init_stmt, diag) != 0) {
+            return -1;
+        }
+        return lower_collect_hoisted_allocs(tu, sf, ctx, s->then_branch, diag);
+    case CC_STMT_BLOCK:
+        for (i = 0; i < s->block_count; ++i) {
+            if (lower_collect_hoisted_allocs(tu, sf, ctx, &s->block_stmts[i], diag) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    default:
+        return 0;
+    }
 }
 
 static long align_up_long(long n, long a) {
@@ -1581,6 +1901,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     in.false_label = -1;
 
     switch (e->kind) {
+    case CC_EXPR_GENERIC: {
+        const cc_expr_t *sel = selected_generic_expr(e);
+        if (sel == NULL) {
+            set_diag(diag, "unresolved _Generic expression in lowering");
+            return -1;
+        }
+        return lower_expr(tu, sf, ctx, vars, var_count, depth, sel, diag);
+    }
     case CC_EXPR_INT:
         in.op = CC_SSA_CONST;
         in.dst = new_value(sf, CC_VAL_I64);
@@ -1634,7 +1962,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return in.dst;
             }
                 if (g != NULL) {
-                    if (is_array_object_decl(g->type, g->array_len, g->array_ndim)) {
+                    if ((g->array_ndim > 0 && g->array_len >= 0) ||
+                        is_array_object_decl(g->type, g->array_len, g->array_ndim)) {
                         return emit_global_addr(sf, g->name, diag);
                     }
                     if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
@@ -1673,7 +2002,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_diag(diag, "malformed static local symbol in lowering");
                 return -1;
             }
-            if (is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim)) {
+            if ((vars[idx].array_ndim > 0 && vars[idx].array_len >= 0) ||
+                is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim)) {
                 return emit_global_addr(sf, vars[idx].static_sym, diag);
             }
             if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
@@ -1789,7 +2119,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return cast_value(sf, lhs, CC_VAL_I64, diag);
         }
-        if (is_pointer_type(e->value_type) &&
+        if (is_pointer_type(e->value_type) && e->array_ndim > 0 &&
             (expr_is_array_pointer_chain(tu, vars, var_count, depth, e->lhs) ||
              (e->lhs != NULL && e->lhs->array_ndim > 0))) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
@@ -2074,6 +2404,21 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
 
+            /*
+             * Array indexing canonicalization can surface as pointer arithmetic
+             * over a dereferenced array base. Use the underlying base address,
+             * not the loaded first element value.
+             */
+            if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_DEREF && ptr_expr->lhs != NULL &&
+                is_pointer_type(ptr_expr->value_type) &&
+                expr_is_array_pointer_chain(tu, vars, var_count, depth, ptr_expr->lhs)) {
+                int basev = lower_expr(tu, sf, ctx, vars, var_count, depth, ptr_expr->lhs, diag);
+                if (basev < 0) {
+                    return -1;
+                }
+                ptrv = basev;
+            }
+
             ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
             idxv = cast_value(sf, idxv, CC_VAL_I64, diag);
             if (ptrv < 0 || idxv < 0) {
@@ -2337,7 +2682,24 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
-                load_v = cur_ap;
+                /*
+                 * Aggregate varargs are passed as pointers in this SSA ABI.
+                 * va_arg(T struct) therefore reads one pointer-sized slot and
+                 * yields the pointed object address.
+                 */
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_LOAD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = cur_ap;
+                in.rhs = -1;
+                in.imm = g_pointer_size_bytes;
+                in.is_unsigned = 1;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory appending va_arg aggregate pointer load");
+                    return -1;
+                }
+                load_v = in.dst;
+                step = g_pointer_size_bytes;
             } else {
                 memset(&in, 0, sizeof(in));
                 in.op = CC_SSA_LOAD;
@@ -2351,8 +2713,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 load_v = in.dst;
+                step = align_up_long(mem_size, g_pointer_size_bytes);
             }
-            step = align_up_long(mem_size, g_pointer_size_bytes);
             step_v = emit_const_i64_instr(sf, step);
             if (step_v < 0) {
                 return -1;
@@ -3309,13 +3671,40 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                                   find_global(tu, e->ident) != NULL))) {
             if (e->ident == NULL) {
                 const cc_expr_t *callee_expr = e->lhs;
+                cc_expr_t callee_tmp;
                 if (e->lhs == NULL) {
                     set_diag(diag, "malformed indirect call expression");
                     return -1;
                 }
                 if (callee_expr->kind == CC_EXPR_DEREF && callee_expr->lhs != NULL &&
                     is_pointer_type(callee_expr->lhs->value_type)) {
-                    callee_expr = callee_expr->lhs;
+                    int keep_deref = 0;
+                    const cc_expr_t *d = callee_expr->lhs;
+                    if (expr_is_array_pointer_chain(tu, vars, var_count, depth, d)) {
+                        keep_deref = 1;
+                    }
+                    if (d->kind == CC_EXPR_BIN && (d->op == CC_BIN_ADD || d->op == CC_BIN_SUB)) {
+                        if (d->lhs != NULL && d->lhs->kind == CC_EXPR_DEREF && d->lhs->lhs != NULL &&
+                            expr_is_array_pointer_chain(tu, vars, var_count, depth, d->lhs->lhs)) {
+                            keep_deref = 1;
+                        }
+                        if (d->rhs != NULL && d->rhs->kind == CC_EXPR_DEREF && d->rhs->lhs != NULL &&
+                            expr_is_array_pointer_chain(tu, vars, var_count, depth, d->rhs->lhs)) {
+                            keep_deref = 1;
+                        }
+                    }
+                    if (!keep_deref) {
+                        callee_expr = callee_expr->lhs;
+                    }
+                }
+                if (callee_expr->kind == CC_EXPR_BIN &&
+                    (callee_expr->op == CC_BIN_ADD || callee_expr->op == CC_BIN_SUB) &&
+                    callee_expr->lhs != NULL && callee_expr->lhs->kind == CC_EXPR_DEREF &&
+                    callee_expr->lhs->lhs != NULL &&
+                    expr_is_array_pointer_chain(tu, vars, var_count, depth, callee_expr->lhs->lhs)) {
+                    callee_tmp = *callee_expr;
+                    callee_tmp.lhs = callee_expr->lhs->lhs;
+                    callee_expr = &callee_tmp;
                 }
                 indirect_callee = lower_expr(tu, sf, ctx, vars, var_count, depth, callee_expr, diag);
             } else {
@@ -4498,11 +4887,21 @@ static const cc_expr_t *unwrap_scalar_initializer_expr(const cc_expr_t *e, cc_di
     if (e->kind != CC_EXPR_INIT_LIST) {
         return e;
     }
-    if (e->arg_count == 1 && e->args != NULL && e->args[0] != NULL) {
+    if (e->arg_count >= 1 && e->args != NULL && e->args[0] != NULL) {
         return e->args[0];
     }
-    set_diag(diag, "scalar initializer list must contain exactly one element");
+    set_diag(diag, "scalar initializer list is empty");
     return NULL;
+}
+
+static const cc_expr_t *selected_generic_expr(const cc_expr_t *e) {
+    if (e == NULL || e->kind != CC_EXPR_GENERIC) {
+        return NULL;
+    }
+    if (e->generic_selected < 0 || e->args == NULL || (size_t)e->generic_selected >= e->arg_count) {
+        return NULL;
+    }
+    return e->args[e->generic_selected];
 }
 
 static int is_zero_initializer_expr(const cc_expr_t *e) {
@@ -4526,9 +4925,216 @@ static int is_zero_initializer_expr(const cc_expr_t *e) {
             return is_zero_initializer_expr(e->args[0]);
         }
         return 0;
+    case CC_EXPR_GENERIC: {
+        const cc_expr_t *sel = selected_generic_expr(e);
+        return sel != NULL ? is_zero_initializer_expr(sel) : 0;
+    }
     default:
         return 0;
     }
+}
+
+static int expr_matches_struct_value(const cc_expr_t *e, int struct_id) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->value_type == CC_TYPE_VOID && e->struct_id == struct_id) {
+        return 1;
+    }
+    if (e->kind == CC_EXPR_CAST && e->aux_type == CC_TYPE_VOID && e->aux_struct_id == struct_id && e->lhs != NULL &&
+        e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id == struct_id) {
+        return 1;
+    }
+    return 0;
+}
+
+static size_t estimate_struct_init_consumed(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *list,
+                                            size_t start, int depth) {
+    const cc_struct_def_t *sd;
+    size_t i = start;
+    size_t next_member = 0;
+
+    if (tu == NULL || list == NULL || list->kind != CC_EXPR_INIT_LIST || struct_id < 0 ||
+        (size_t)struct_id >= tu->struct_count || depth > 32) {
+        return 1;
+    }
+    sd = &tu->structs[struct_id];
+    if (sd->is_union) {
+        return (i < list->arg_count) ? 1 : 0;
+    }
+    while (next_member < sd->member_count && i < list->arg_count) {
+        const cc_expr_t *raw = list->args[i];
+        const cc_expr_t *item = raw;
+        size_t member_idx = next_member;
+        const cc_struct_member_t *m;
+        size_t consumed;
+        long max_items;
+        long elem_size;
+
+        if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL) {
+            int didx = find_struct_member_index_by_name(sd, raw->ident);
+            if (didx < 0) {
+                break;
+            }
+            member_idx = (size_t)didx;
+            item = raw->rhs;
+        } else if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->ident != NULL && i > start) {
+            break;
+        }
+        if (member_idx >= sd->member_count) {
+            break;
+        }
+        m = &sd->members[member_idx];
+        next_member = struct_next_init_member_index(sd, member_idx);
+        if (sd->has_flexible_array && member_idx + 1 == sd->member_count) {
+            i++;
+            continue;
+        }
+        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
+                i++;
+                continue;
+            }
+            if (item != NULL && expr_matches_struct_value(item, m->type_struct_id)) {
+                i++;
+                continue;
+            }
+            consumed = estimate_struct_init_consumed(tu, m->type_struct_id, list, i, depth + 1);
+            if (consumed == 0) {
+                consumed = 1;
+            }
+            i += consumed;
+            continue;
+        }
+        if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+            if (item != NULL && (item->kind == CC_EXPR_INIT_LIST || item->kind == CC_EXPR_STR)) {
+                i++;
+                continue;
+            }
+            elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+            if (elem_size <= 0) {
+                elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+            }
+            max_items = m->array_len > 0 ? m->array_len : (elem_size > 0 ? (m->size / elem_size) : 1);
+            if (max_items <= 0) {
+                max_items = 1;
+            }
+            consumed = 1;
+            while (consumed < (size_t)max_items && i + consumed < list->arg_count) {
+                const cc_expr_t *cand = list->args[i + consumed];
+                if (cand != NULL && cand->kind == CC_EXPR_INIT_LIST) {
+                    break;
+                }
+                if (cand != NULL && cand->kind == CC_EXPR_MEMBER && cand->lhs == NULL && cand->ident != NULL) {
+                    break;
+                }
+                consumed++;
+            }
+            i += consumed;
+            continue;
+        }
+        i++;
+    }
+    if (i <= start) {
+        return 1;
+    }
+    return i - start;
+}
+
+static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf,
+                                                 const lower_ctx_t *ctx, var_entry_t *vars, size_t var_count,
+                                                 int depth, int field_ptr, const cc_struct_member_t *m,
+                                                 const cc_expr_t *item, cc_diag_t *diag) {
+    cc_type_t elem_type;
+    long elem_size;
+    long max_items;
+    unsigned long *units = NULL;
+    size_t unit_count = 0;
+    size_t i;
+    int wide;
+    (void)ctx;
+    (void)vars;
+    (void)var_count;
+    (void)depth;
+
+    if (m == NULL || item == NULL || item->kind != CC_EXPR_STR) {
+        return -1;
+    }
+    elem_type = ptr_base_type(m->type);
+    elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    if (elem_size <= 0) {
+        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+    }
+    if (elem_size <= 0 || m->size <= 0) {
+        return -1;
+    }
+    max_items = m->array_len > 0 ? m->array_len : (m->size / elem_size);
+    if (max_items <= 0) {
+        return -1;
+    }
+    wide = (item->aux_type == CC_TYPE_INT || item->aux_type == CC_TYPE_UINT || item->aux_type == CC_TYPE_LONG_LONG ||
+            item->aux_type == CC_TYPE_ULONG_LONG);
+    if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+        return -1;
+    }
+    if (wide && !is_integral_type(elem_type)) {
+        return -1;
+    }
+    if (decode_string_units(item, wide, &units, &unit_count) != 0) {
+        set_diag(diag, "failed to decode string initializer");
+        return -1;
+    }
+    if ((long)unit_count > max_items) {
+        free(units);
+        set_diag(diag, "string initializer exceeds fixed-size struct member array");
+        return -1;
+    }
+    for (i = 0; i < unit_count + (unit_count < (size_t)max_items ? 1 : 0); ++i) {
+        cc_ssa_instr_t in;
+        int elem_ptr = field_ptr;
+        int cval;
+        if (i > 0) {
+            int offv = emit_const_i64_instr(sf, (long)i * elem_size);
+            if (offv < 0) {
+                free(units);
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_ADD;
+            in.dst = new_value(sf, CC_VAL_I64);
+            in.lhs = field_ptr;
+            in.rhs = offv;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                free(units);
+                set_diag(diag, "out of memory computing struct string element address");
+                return -1;
+            }
+            elem_ptr = in.dst;
+        }
+                        cval = emit_const_i64_instr(sf, i < unit_count ? (long)units[i] : 0);
+        if (cval < 0) {
+            free(units);
+            return -1;
+        }
+        cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+        if (cval < 0) {
+            free(units);
+            return -1;
+        }
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_STORE;
+        in.dst = -1;
+        in.lhs = elem_ptr;
+        in.rhs = cval;
+        in.imm = elem_size;
+        if (push_instr(sf, in) != 0) {
+            free(units);
+            set_diag(diag, "out of memory storing struct string initializer element");
+            return -1;
+        }
+    }
+    free(units);
+    return 0;
 }
 
 static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf,
@@ -4546,12 +5152,15 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
     }
 
     elem_type = ptr_base_type(m->type);
-    elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+    elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    if (elem_size <= 0) {
+        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+    }
     if (elem_size <= 0 || m->size <= 0) {
         set_diag(diag, "unsupported array-like struct member size in initializer lowering");
         return -1;
     }
-    max_items = m->size / elem_size;
+    max_items = m->array_len > 0 ? m->array_len : (m->size / elem_size);
     if (max_items <= 0) {
         set_diag(diag, "invalid array-like struct member extent in initializer lowering");
         return -1;
@@ -4663,18 +5272,14 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
             item = raw->rhs;
         }
         if (member_idx >= sd->member_count) {
-            set_diag(diag, "too many items in local struct initializer");
-            return -1;
+            break;
         }
         m = &sd->members[member_idx];
         if (!sd->is_union) {
             next_member = struct_next_init_member_index(sd, member_idx);
         }
-        if (sd->has_flexible_array && member_idx + 1 == sd->member_count && m->size == 0) {
-            if (!is_zero_initializer_expr(item)) {
-                set_diag(diag, "flexible array member cannot be initialized");
-                return -1;
-            }
+        if (sd->has_flexible_array && member_idx + 1 == sd->member_count) {
+            /* GNU-compatible extension: accept and ignore flexible-array initializers. */
             continue;
         }
         if (m->offset != 0) {
@@ -4695,14 +5300,66 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
         }
 
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            if (item->kind != CC_EXPR_INIT_LIST) {
-                if (is_zero_initializer_expr(item)) {
+            const cc_expr_t *nested_item = item;
+            if (item->kind == CC_EXPR_CAST && item->aux_type == CC_TYPE_VOID && item->aux_struct_id == m->type_struct_id &&
+                item->lhs != NULL && item->lhs->kind == CC_EXPR_INIT_LIST) {
+                nested_item = item->lhs;
+            }
+            if (nested_item->kind != CC_EXPR_INIT_LIST) {
+                if (nested_item->value_type == CC_TYPE_VOID && nested_item->struct_id == m->type_struct_id) {
+                    int rhsv;
+                    long sub_sz = type_size_bytes_with_struct(tu, CC_TYPE_VOID, m->type_struct_id);
+                    const cc_expr_t *copy_expr = nested_item;
+                    if (copy_expr->kind == CC_EXPR_CAST && copy_expr->aux_type == CC_TYPE_VOID &&
+                        copy_expr->aux_struct_id == m->type_struct_id && copy_expr->lhs != NULL &&
+                        copy_expr->lhs->value_type == CC_TYPE_VOID && copy_expr->lhs->struct_id == m->type_struct_id) {
+                        copy_expr = copy_expr->lhs;
+                    }
+                    if (sub_sz <= 0) {
+                        sub_sz = 1;
+                    }
+                    rhsv = lower_expr(tu, sf, ctx, vars, var_count, depth, copy_expr, diag);
+                    if (rhsv < 0) {
+                        return -1;
+                    }
+                    if (emit_memcpy_instr(sf, field_ptr, rhsv, sub_sz, diag) != 0) {
+                        return -1;
+                    }
                     continue;
                 }
-                set_diag(diag, "nested struct initializer requires braces");
-                return -1;
+                size_t consumed = 0;
+                const cc_expr_t **tmp_args;
+                cc_expr_t tmp_list;
+
+                consumed = estimate_struct_init_consumed(tu, m->type_struct_id, init, i, 0);
+                if (consumed == 0) {
+                    consumed = 1;
+                }
+                tmp_args = (const cc_expr_t **)calloc(consumed, sizeof(*tmp_args));
+                if (tmp_args == NULL) {
+                    set_diag(diag, "out of memory collecting brace-elided aggregate initializers");
+                    return -1;
+                }
+                {
+                    size_t ci;
+                    for (ci = 0; ci < consumed && i + ci < init->arg_count; ++ci) {
+                        tmp_args[ci] = init->args[i + ci];
+                    }
+                }
+                memset(&tmp_list, 0, sizeof(tmp_list));
+                tmp_list.kind = CC_EXPR_INIT_LIST;
+                tmp_list.arg_count = consumed;
+                tmp_list.args = (cc_expr_t **)tmp_args;
+                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, field_ptr, m->type_struct_id,
+                                             &tmp_list, diag) != 0) {
+                    free(tmp_args);
+                    return -1;
+                }
+                free(tmp_args);
+                i += consumed - 1;
+                continue;
             }
-            if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, field_ptr, m->type_struct_id, item,
+            if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, field_ptr, m->type_struct_id, nested_item,
                                          diag) != 0) {
                 return -1;
             }
@@ -4718,8 +5375,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 return -1;
             }
             if (item->kind == CC_EXPR_INIT_LIST) {
-                long natural_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
-                if (is_pointer_type(m->type) && (m->size != natural_size || item->arg_count > 1)) {
+                if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
                     if (lower_struct_array_member_init_to_ptr(tu, sf, ctx, vars, var_count, depth, field_ptr, m, item,
                                                               diag) != 0) {
                         return -1;
@@ -4730,6 +5386,59 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 if (item_expr == NULL) {
                     return -1;
                 }
+            } else if (is_array_object_decl(m->type, m->array_len, m->array_ndim) && item->kind == CC_EXPR_STR) {
+                if (lower_store_string_to_fixed_array_ptr(tu, sf, ctx, vars, var_count, depth, field_ptr, m, item,
+                                                          diag) != 0) {
+                    return -1;
+                }
+                continue;
+            } else if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+                size_t consumed = 1;
+                long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+                long max_items;
+                const cc_expr_t **tmp_args;
+                cc_expr_t tmp_list;
+
+                if (elem_size <= 0) {
+                    elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+                }
+                max_items = m->array_len > 0 ? m->array_len : (elem_size > 0 ? (m->size / elem_size) : 1);
+                if (max_items <= 0) {
+                    max_items = 1;
+                }
+                while (consumed < (size_t)max_items && i + consumed < init->arg_count) {
+                    const cc_expr_t *cand = init->args[i + consumed];
+                    if (cand != NULL && cand->kind == CC_EXPR_INIT_LIST) {
+                        break;
+                    }
+                    if (cand != NULL && cand->kind == CC_EXPR_MEMBER && cand->lhs == NULL && cand->ident != NULL) {
+                        break;
+                    }
+                    consumed++;
+                }
+                tmp_args = (const cc_expr_t **)calloc(consumed, sizeof(*tmp_args));
+                if (tmp_args == NULL) {
+                    set_diag(diag, "out of memory collecting brace-elided array member initializers");
+                    return -1;
+                }
+                {
+                    size_t ci;
+                    for (ci = 0; ci < consumed; ++ci) {
+                        tmp_args[ci] = init->args[i + ci];
+                    }
+                }
+                memset(&tmp_list, 0, sizeof(tmp_list));
+                tmp_list.kind = CC_EXPR_INIT_LIST;
+                tmp_list.arg_count = consumed;
+                tmp_list.args = (cc_expr_t **)tmp_args;
+                if (lower_struct_array_member_init_to_ptr(tu, sf, ctx, vars, var_count, depth, field_ptr, m, &tmp_list,
+                                                          diag) != 0) {
+                    free(tmp_args);
+                    return -1;
+                }
+                free(tmp_args);
+                i += consumed - 1;
+                continue;
             }
             v = lower_expr(tu, sf, ctx, vars, var_count, depth, item_expr, diag);
             if (v < 0) {
@@ -4956,15 +5665,24 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 item_ptr = st_in.dst;
                             }
                             if (elem_type == CC_TYPE_VOID && s->type_struct_id >= 0) {
-                                if (s->expr->args[ii]->kind != CC_EXPR_INIT_LIST) {
-                                    if (is_zero_initializer_expr(s->expr->args[ii])) {
-                                        continue;
-                                    }
-                                    set_diag(diag, "struct array initializer element requires braces");
-                                    return -1;
+                                const cc_expr_t *elem_init = s->expr->args[ii];
+                                const cc_expr_t *tmp_args[1];
+                                cc_expr_t tmp_list;
+                                if (elem_init->kind == CC_EXPR_CAST && elem_init->aux_type == CC_TYPE_VOID &&
+                                    elem_init->aux_struct_id == s->type_struct_id && elem_init->lhs != NULL &&
+                                    elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
+                                    elem_init = elem_init->lhs;
+                                }
+                                if (elem_init->kind != CC_EXPR_INIT_LIST) {
+                                    memset(&tmp_list, 0, sizeof(tmp_list));
+                                    tmp_args[0] = elem_init;
+                                    tmp_list.kind = CC_EXPR_INIT_LIST;
+                                    tmp_list.arg_count = 1;
+                                    tmp_list.args = (cc_expr_t **)tmp_args;
+                                    elem_init = &tmp_list;
                                 }
                                 if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, item_ptr,
-                                                             s->type_struct_id, s->expr->args[ii], diag) != 0) {
+                                                             s->type_struct_id, elem_init, diag) != 0) {
                                     return -1;
                                 }
                             } else {
@@ -5053,52 +5771,16 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             return 0;
         }
         if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
-            cc_ssa_instr_t call_in;
-            int onev;
-            int sizev;
-            const char *alloc_sym = local_array_allocator_symbol();
             long sz = type_size_bytes_with_struct(tu, s->type, s->type_struct_id);
+            int prealloc = lower_find_hoisted_alloc(ctx, s);
             if (sz <= 0) {
                 /* GNU empty-struct extension: materialize as 1-byte storage object. */
                 sz = 1;
             }
-            sizev = emit_const_i64_instr(sf, sz);
-            if (sizev < 0) {
+            varv = prealloc >= 0 ? prealloc : emit_local_storage_alloc(sf, sz, diag);
+            if (varv < 0) {
                 return -1;
             }
-            onev = -1;
-            if (strcmp(alloc_sym, "calloc") == 0) {
-                onev = emit_const_i64_instr(sf, 1);
-                if (onev < 0) {
-                    return -1;
-                }
-            }
-            memset(&call_in, 0, sizeof(call_in));
-            call_in.op = CC_SSA_CALL;
-            call_in.call_is_variadic = 0;
-            call_in.sym = xstrdup(alloc_sym);
-            call_in.arg_count = strcmp(alloc_sym, "calloc") == 0 ? 2 : 1;
-            call_in.args = (int *)calloc(call_in.arg_count, sizeof(*call_in.args));
-            call_in.dst = new_value(sf, CC_VAL_I64);
-            if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
-                free(call_in.sym);
-                free(call_in.args);
-                set_diag(diag, "out of memory allocating local struct storage call");
-                return -1;
-            }
-            if (call_in.arg_count == 2) {
-                call_in.args[0] = onev;
-                call_in.args[1] = sizev;
-            } else {
-                call_in.args[0] = sizev;
-            }
-            if (push_instr(sf, call_in) != 0) {
-                free(call_in.sym);
-                free(call_in.args);
-                set_diag(diag, "out of memory appending local struct storage call");
-                return -1;
-            }
-            varv = call_in.dst;
             if (s->expr != NULL) {
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
                     if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, varv, s->type_struct_id,
@@ -5123,15 +5805,12 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             return 0;
         }
         if (is_array_object_decl(s->type, s->array_len, s->array_ndim)) {
-            cc_ssa_instr_t call_in;
             cc_ssa_instr_t st_in;
             cc_type_t elem_type = ptr_base_type(s->type);
             long elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
             long arr_elems = s->array_len > 0 ? s->array_len : 1;
             long total_size;
-            int onev;
-            int bytesv;
-            const char *alloc_sym = local_array_allocator_symbol();
+            int prealloc = lower_find_hoisted_alloc(ctx, s);
 
             if (elem_size <= 0) {
                 elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
@@ -5143,50 +5822,19 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (arr_elems <= 0) {
                 arr_elems = 1;
             }
+            if (elem_size > LONG_MAX / arr_elems) {
+                set_diag(diag, "local array size overflow in lowering");
+                return -1;
+            }
             total_size = elem_size * arr_elems;
             if (total_size <= 0) {
                 set_diag(diag, "invalid local array size in lowering");
                 return -1;
             }
-
-            bytesv = emit_const_i64_instr(sf, total_size);
-            if (bytesv < 0) {
+            varv = prealloc >= 0 ? prealloc : emit_local_storage_alloc(sf, total_size, diag);
+            if (varv < 0) {
                 return -1;
             }
-            onev = -1;
-            if (strcmp(alloc_sym, "calloc") == 0) {
-                onev = emit_const_i64_instr(sf, 1);
-                if (onev < 0) {
-                    return -1;
-                }
-            }
-
-            memset(&call_in, 0, sizeof(call_in));
-            call_in.op = CC_SSA_CALL;
-            call_in.call_is_variadic = 0;
-            call_in.sym = xstrdup(alloc_sym);
-            call_in.arg_count = strcmp(alloc_sym, "calloc") == 0 ? 2 : 1;
-            call_in.args = (int *)calloc(call_in.arg_count, sizeof(*call_in.args));
-            call_in.dst = new_value(sf, CC_VAL_I64);
-            if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
-                free(call_in.sym);
-                free(call_in.args);
-                set_diag(diag, "out of memory allocating local array storage call");
-                return -1;
-            }
-            if (call_in.arg_count == 2) {
-                call_in.args[0] = onev;
-                call_in.args[1] = bytesv;
-            } else {
-                call_in.args[0] = bytesv;
-            }
-            if (push_instr(sf, call_in) != 0) {
-                free(call_in.sym);
-                free(call_in.args);
-                set_diag(diag, "out of memory appending local array storage call");
-                return -1;
-            }
-            varv = call_in.dst;
 
             if (s->expr != NULL) {
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
@@ -5210,15 +5858,24 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             item_ptr = st_in.dst;
                         }
                         if (elem_type == CC_TYPE_VOID && s->type_struct_id >= 0) {
-                            if (s->expr->args[ii]->kind != CC_EXPR_INIT_LIST) {
-                                if (is_zero_initializer_expr(s->expr->args[ii])) {
-                                    continue;
-                                }
-                                set_diag(diag, "struct array initializer element requires braces");
-                                return -1;
+                            const cc_expr_t *elem_init = s->expr->args[ii];
+                            const cc_expr_t *tmp_args[1];
+                            cc_expr_t tmp_list;
+                            if (elem_init->kind == CC_EXPR_CAST && elem_init->aux_type == CC_TYPE_VOID &&
+                                elem_init->aux_struct_id == s->type_struct_id && elem_init->lhs != NULL &&
+                                elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
+                                elem_init = elem_init->lhs;
+                            }
+                            if (elem_init->kind != CC_EXPR_INIT_LIST) {
+                                memset(&tmp_list, 0, sizeof(tmp_list));
+                                tmp_args[0] = elem_init;
+                                tmp_list.kind = CC_EXPR_INIT_LIST;
+                                tmp_list.arg_count = 1;
+                                tmp_list.args = (cc_expr_t **)tmp_args;
+                                elem_init = &tmp_list;
                             }
                             if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, item_ptr,
-                                                         s->type_struct_id, s->expr->args[ii], diag) != 0) {
+                                                         s->type_struct_id, elem_init, diag) != 0) {
                                 return -1;
                             }
                         } else {
@@ -5242,6 +5899,65 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             }
                         }
                     }
+                } else if (s->expr->kind == CC_EXPR_STR) {
+                    unsigned long *units = NULL;
+                    size_t unit_count = 0;
+                    size_t ii;
+                    int wide = (s->expr->aux_type == CC_TYPE_INT || s->expr->aux_type == CC_TYPE_UINT ||
+                                s->expr->aux_type == CC_TYPE_LONG_LONG || s->expr->aux_type == CC_TYPE_ULONG_LONG);
+                    if (decode_string_units(s->expr, wide, &units, &unit_count) != 0) {
+                        set_diag(diag, "failed to decode string initializer");
+                        return -1;
+                    }
+                    if ((long)unit_count > arr_elems) {
+                        free(units);
+                        set_diag(diag, "string initializer exceeds local array size");
+                        return -1;
+                    }
+                    for (ii = 0; ii < unit_count + (unit_count < (size_t)arr_elems ? 1 : 0); ++ii) {
+                        int item_ptr = varv;
+                        int cval;
+                        if (ii > 0) {
+                            int offv = emit_const_i64_instr(sf, (long)ii * elem_size);
+                            if (offv < 0) {
+                                free(units);
+                                return -1;
+                            }
+                            memset(&st_in, 0, sizeof(st_in));
+                            st_in.op = CC_SSA_ADD;
+                            st_in.dst = new_value(sf, CC_VAL_I64);
+                            st_in.lhs = varv;
+                            st_in.rhs = offv;
+                            if (st_in.dst < 0 || push_instr(sf, st_in) != 0) {
+                                free(units);
+                                set_diag(diag, "out of memory computing local array string element address");
+                                return -1;
+                            }
+                            item_ptr = st_in.dst;
+                        }
+                        cval = emit_const_i64_instr(sf, ii < unit_count ? (long)units[ii] : 0);
+                        if (cval < 0) {
+                            free(units);
+                            return -1;
+                        }
+                        cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+                        if (cval < 0) {
+                            free(units);
+                            return -1;
+                        }
+                        memset(&st_in, 0, sizeof(st_in));
+                        st_in.op = CC_SSA_STORE;
+                        st_in.dst = -1;
+                        st_in.lhs = item_ptr;
+                        st_in.rhs = cval;
+                        st_in.imm = elem_size;
+                        if (push_instr(sf, st_in) != 0) {
+                            free(units);
+                            set_diag(diag, "out of memory storing local array string element");
+                            return -1;
+                        }
+                    }
+                    free(units);
                 } else {
                     v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
                     if (v < 0) {
@@ -6187,6 +6903,16 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         }
         return 0;
     }
+    if (e->kind == CC_EXPR_GENERIC) {
+        const cc_expr_t *sel = selected_generic_expr(e);
+        if (sel == NULL) {
+            return -1;
+        }
+        return eval_global_init_expr(tu, sel, out_i, out_f, out_is_float, out_sym);
+    }
+    if (e->kind == CC_EXPR_MEMBER && e->lhs == NULL && e->rhs != NULL) {
+        return eval_global_init_expr(tu, e->rhs, out_i, out_f, out_is_float, out_sym);
+    }
     switch (e->kind) {
     case CC_EXPR_INT:
         *out_i = e->int_val;
@@ -6373,6 +7099,16 @@ static int eval_global_init_item(const cc_translation_unit_t *tu, const cc_expr_
     if (e == NULL) {
         return 0;
     }
+    if (e->kind == CC_EXPR_GENERIC) {
+        const cc_expr_t *sel = selected_generic_expr(e);
+        if (sel == NULL) {
+            return -1;
+        }
+        return eval_global_init_item(tu, sel, out);
+    }
+    if (e->kind == CC_EXPR_MEMBER && e->lhs == NULL && e->rhs != NULL) {
+        return eval_global_init_item(tu, e->rhs, out);
+    }
     switch (e->kind) {
     case CC_EXPR_INT:
         out->init_i = e->int_val;
@@ -6443,11 +7179,26 @@ static size_t struct_next_init_member_index(const cc_struct_def_t *sd, size_t me
     if (sd == NULL || member_idx >= sd->member_count) {
         return next;
     }
+    if (sd->members[member_idx].size == 0) {
+        return next;
+    }
     off = sd->members[member_idx].offset;
     while (next < sd->member_count && sd->members[next].offset == off) {
         next++;
     }
     return next;
+}
+
+static int struct_has_flexible_tail(const cc_struct_def_t *sd) {
+    const cc_struct_member_t *m;
+    if (sd == NULL || sd->member_count == 0) {
+        return 0;
+    }
+    if (sd->has_flexible_array) {
+        return 1;
+    }
+    m = &sd->members[sd->member_count - 1];
+    return m->array_ndim > 0 && m->array_dims[m->array_ndim - 1] == 0;
 }
 
 static int append_global_reloc(global_reloc_t **arr, size_t *count, long offset, long size, const char *sym,
@@ -6613,9 +7364,158 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
     return 0;
 }
 
-static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init, long base,
-                                     unsigned char *buf, long buf_size, global_reloc_t **relocs, size_t *reloc_count,
-                                     cc_diag_t *diag) {
+static int is_member_designator_expr(const cc_expr_t *e) {
+    return e != NULL && e->kind == CC_EXPR_MEMBER && e->lhs == NULL && e->rhs != NULL && e->ident != NULL;
+}
+
+static const cc_expr_t *extract_struct_init_list_expr(const cc_expr_t *e, int struct_id) {
+    if (e == NULL) {
+        return NULL;
+    }
+    if (e->kind == CC_EXPR_INIT_LIST) {
+        return e;
+    }
+    if (e->kind == CC_EXPR_CAST && e->aux_type == CC_TYPE_VOID && e->aux_struct_id == struct_id && e->lhs != NULL &&
+        e->lhs->kind == CC_EXPR_INIT_LIST) {
+        return e->lhs;
+    }
+    return NULL;
+}
+
+static int fill_fixed_char_array_from_string(const cc_expr_t *expr, cc_type_t elem_type, long elem_size, long max_elems,
+                                             long field_off, unsigned char *buf, long buf_size, cc_diag_t *diag) {
+    unsigned long *units = NULL;
+    size_t unit_count = 0;
+    size_t i;
+    size_t ncopy;
+    int wide;
+
+    if (expr == NULL || expr->kind != CC_EXPR_STR || max_elems < 0 || elem_size <= 0) {
+        return -1;
+    }
+    wide = (expr->aux_type == CC_TYPE_INT || expr->aux_type == CC_TYPE_UINT || expr->aux_type == CC_TYPE_LONG_LONG ||
+            expr->aux_type == CC_TYPE_ULONG_LONG);
+    if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+        return -1;
+    }
+    if (wide && !is_integral_type(elem_type)) {
+        return -1;
+    }
+    if (decode_string_units(expr, wide, &units, &unit_count) != 0) {
+        set_diag(diag, "failed to decode string initializer");
+        return -1;
+    }
+    ncopy = unit_count;
+    if ((long)ncopy > max_elems) {
+        ncopy = (size_t)max_elems;
+    }
+    for (i = 0; i < ncopy; ++i) {
+        long off = field_off + (long)i * elem_size;
+        if (off < 0 || off + elem_size > buf_size) {
+            free(units);
+            set_diag(diag, "string initializer write exceeds destination object size");
+            return -1;
+        }
+        store_const_bytes(buf, off, elem_size, units[i]);
+    }
+    if ((long)unit_count < max_elems) {
+        long off = field_off + (long)unit_count * elem_size;
+        if (off < 0 || off + elem_size > buf_size) {
+            free(units);
+            set_diag(diag, "string terminator write exceeds destination object size");
+            return -1;
+        }
+        store_const_bytes(buf, off, elem_size, 0);
+    }
+    free(units);
+    return 0;
+}
+
+static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init_list,
+                                            size_t *cursor, long base, unsigned char *buf, long buf_size,
+                                            global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag);
+
+static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
+                                                       const cc_expr_t *src_list, size_t *cursor, long field_off,
+                                                       unsigned char *buf, long buf_size, global_reloc_t **relocs,
+                                                       size_t *reloc_count, cc_diag_t *diag) {
+    cc_type_t elem_type;
+    long elem_size;
+    long max_elems;
+    long j;
+
+    if (m == NULL || src_list == NULL || src_list->kind != CC_EXPR_INIT_LIST || cursor == NULL) {
+        set_diag(diag, "invalid array-like struct member initializer");
+        return -1;
+    }
+    elem_type = ptr_base_type(m->type);
+    elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    if (elem_size <= 0) {
+        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+    }
+    if (elem_size <= 0 || m->size <= 0) {
+        set_diag(diag, "invalid array-like struct member extent");
+        return -1;
+    }
+    max_elems = m->array_len > 0 ? m->array_len : (m->size / elem_size);
+    for (j = 0; j < max_elems && *cursor < src_list->arg_count; ++j) {
+        const cc_expr_t *raw = src_list->args[*cursor];
+        long elem_off = field_off + j * elem_size;
+        const cc_expr_t *elem_expr = raw;
+
+        if (is_member_designator_expr(raw)) {
+            break;
+        }
+
+        if (raw != NULL && raw->kind == CC_EXPR_STR) {
+            if (fill_fixed_char_array_from_string(raw, elem_type, elem_size, max_elems, field_off, buf, buf_size,
+                                                  diag) != 0) {
+                return -1;
+            }
+            (*cursor)++;
+            return 0;
+        }
+
+        if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            const cc_expr_t *sl = extract_struct_init_list_expr(raw, m->type_struct_id);
+            if (sl != NULL) {
+                size_t sub = 0;
+                if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, sl, &sub, elem_off, buf, buf_size, relocs,
+                                                     reloc_count, diag) != 0) {
+                    return -1;
+                }
+                if (sub < sl->arg_count) {
+                    set_diag(diag, "too many nested struct initializers in array-like member");
+                    return -1;
+                }
+                (*cursor)++;
+                continue;
+            }
+            if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, src_list, cursor, elem_off, buf, buf_size,
+                                                 relocs, reloc_count, diag) != 0) {
+                return -1;
+            }
+            continue;
+        }
+
+        if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
+            elem_expr = unwrap_scalar_initializer_expr(raw, diag);
+            if (elem_expr == NULL) {
+                return -1;
+            }
+        }
+        if (store_scalar_global_init(tu, elem_type, m->type_struct_id, elem_size, elem_expr, buf, buf_size, elem_off,
+                                     relocs, reloc_count, diag) != 0) {
+            return -1;
+        }
+        (*cursor)++;
+    }
+    return 0;
+}
+
+static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init_list,
+                                            size_t *cursor, long base, unsigned char *buf, long buf_size,
+                                            global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
     const cc_struct_def_t *sd;
     size_t i;
     size_t next_member = 0;
@@ -6624,46 +7524,55 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
         set_diag(diag, "invalid struct type in global initializer flattening");
         return -1;
     }
-    if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+    if (init_list == NULL || init_list->kind != CC_EXPR_INIT_LIST || cursor == NULL) {
         set_diag(diag, "struct global initializer must use braces");
         return -1;
     }
 
     sd = &tu->structs[struct_id];
-    if (sd->is_union && init->arg_count > 1) {
-        set_diag(diag, "too many initializers for union global initializer");
-        return -1;
-    }
-    for (i = 0; i < init->arg_count; ++i) {
-        const cc_expr_t *raw = init->args[i];
+    i = *cursor;
+    while (i < init_list->arg_count) {
+        const cc_expr_t *raw = init_list->args[i];
         const cc_expr_t *item = raw;
         const cc_struct_member_t *m;
         size_t member_idx = next_member;
         long field_off;
         long scalar_size;
+        int is_designator = 0;
+        int consumed_item = 0;
+        long natural_size;
 
-        if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL) {
+        if (is_member_designator_expr(raw)) {
             int didx = find_struct_member_index_by_name(sd, raw->ident);
             if (didx < 0) {
                 set_diag(diag, "unknown designated struct member in global initializer");
                 return -1;
             }
+            is_designator = 1;
             member_idx = (size_t)didx;
             item = raw->rhs;
+            consumed_item = 1;
+            i++;
+        }
+        if (!is_designator && member_idx >= sd->member_count) {
+            break;
         }
         if (member_idx >= sd->member_count) {
-            set_diag(diag, "too many items in struct global initializer");
-            return -1;
+            i = init_list->arg_count;
+            break;
         }
 
         m = &sd->members[member_idx];
         if (!sd->is_union) {
             next_member = struct_next_init_member_index(sd, member_idx);
+        } else if (!is_designator) {
+            /* A plain union initializer initializes a single member. */
+            next_member = sd->member_count;
         }
-        if (sd->has_flexible_array && member_idx + 1 == sd->member_count && m->size == 0) {
-            if (!is_zero_initializer_expr(item)) {
-                set_diag(diag, "flexible array member cannot be initialized");
-                return -1;
+        if (struct_has_flexible_tail(sd) && member_idx + 1 == sd->member_count) {
+            /* GNU-compatible extension: accept and ignore flexible-array initializers. */
+            if (!consumed_item) {
+                i++;
             }
             continue;
         }
@@ -6673,8 +7582,89 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
             return -1;
         }
 
+        natural_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
+
+        if (sd->is_union && item != NULL && item->kind == CC_EXPR_INIT_LIST && m->type != CC_TYPE_VOID &&
+            !is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+            size_t ui;
+            size_t pos = 0;
+            for (ui = 0; ui < item->arg_count; ++ui) {
+                const cc_expr_t *u_raw = item->args[ui];
+                const cc_expr_t *u_item = u_raw;
+                const cc_struct_member_t *um;
+                int u_idx;
+                long u_size;
+                long u_off;
+                if (is_member_designator_expr(u_raw)) {
+                    u_idx = find_struct_member_index_by_name(sd, u_raw->ident);
+                    if (u_idx < 0) {
+                        set_diag(diag, "unknown designated union submember in global initializer");
+                        return -1;
+                    }
+                    u_item = u_raw->rhs;
+                } else {
+                    u_idx = (int)pos++;
+                }
+                if (u_idx < 0 || (size_t)u_idx >= sd->member_count) {
+                    break;
+                }
+                um = &sd->members[u_idx];
+                if (um->type == CC_TYPE_VOID && um->type_struct_id >= 0) {
+                    const cc_expr_t *u_nested = extract_struct_init_list_expr(u_item, um->type_struct_id);
+                    if (u_nested != NULL) {
+                        size_t sub = 0;
+                        u_off = base + um->offset;
+                        if (flatten_struct_init_bytes_cursor(tu, um->type_struct_id, u_nested, &sub, u_off, buf, buf_size,
+                                                             relocs, reloc_count, diag) != 0) {
+                            return -1;
+                        }
+                        continue;
+                    }
+                }
+                if (u_item != NULL && u_item->kind == CC_EXPR_INIT_LIST) {
+                    u_item = unwrap_scalar_initializer_expr(u_item, diag);
+                    if (u_item == NULL) {
+                        return -1;
+                    }
+                }
+                u_size = type_size_bytes_with_struct(tu, um->type, um->type_struct_id);
+                if (u_size <= 0) {
+                    u_size = um->size;
+                }
+                if (u_size <= 0) {
+                    continue;
+                }
+                u_off = base + um->offset;
+                if (store_scalar_global_init(tu, um->type, um->type_struct_id, u_size, u_item, buf, buf_size, u_off,
+                                             relocs, reloc_count, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!consumed_item) {
+                i++;
+            }
+            continue;
+        }
+
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            if (item == NULL || item->kind != CC_EXPR_INIT_LIST) {
+            const cc_expr_t *nested = extract_struct_init_list_expr(item, m->type_struct_id);
+            if (nested != NULL) {
+                size_t sub = 0;
+                if (!consumed_item) {
+                    i++;
+                    consumed_item = 1;
+                }
+                if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, nested, &sub, field_off, buf, buf_size,
+                                                     relocs, reloc_count, diag) != 0) {
+                    return -1;
+                }
+                if (sub < nested->arg_count) {
+                    set_diag(diag, "too many nested struct initializers");
+                    return -1;
+                }
+                continue;
+            }
+            if (is_designator) {
                 long z_i = 0;
                 double z_f = 0.0;
                 int z_is_float = 0;
@@ -6688,64 +7678,71 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
                 set_diag(diag, "nested struct global initializer requires braces");
                 return -1;
             }
-            if (flatten_struct_init_bytes(tu, m->type_struct_id, item, field_off, buf, buf_size, relocs, reloc_count,
-                                          diag) != 0) {
+            if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, init_list, &i, field_off, buf, buf_size,
+                                                 relocs, reloc_count, diag) != 0) {
                 return -1;
             }
             continue;
         }
 
-        if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
-            long natural_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
-            if (is_pointer_type(m->type) && (m->size != natural_size || item->arg_count > 1)) {
-                cc_type_t elem_type = ptr_base_type(m->type);
-                long elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
-                long max_elems;
-                size_t j;
-                if (elem_size <= 0 || m->size <= 0) {
-                    set_diag(diag, "invalid array-like struct member in global initializer");
+        if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+            if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
+                size_t sub = 0;
+                if (!consumed_item) {
+                    i++;
+                    consumed_item = 1;
+                }
+                if (flatten_arraylike_struct_member_from_cursor(tu, m, item, &sub, field_off, buf, buf_size, relocs,
+                                                                reloc_count, diag) != 0) {
                     return -1;
                 }
-                max_elems = m->size / elem_size;
-                if (item->arg_count > (size_t)max_elems) {
+                if (sub < item->arg_count) {
                     set_diag(diag, "too many elements for array-like struct member initializer");
                     return -1;
                 }
-                for (j = 0; j < item->arg_count; ++j) {
-                    long elem_off = field_off + (long)j * elem_size;
-                    const cc_expr_t *elem_expr = item->args[j];
-                    if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-                        if (elem_expr == NULL || elem_expr->kind != CC_EXPR_INIT_LIST) {
-                            long z_i = 0;
-                            double z_f = 0.0;
-                            int z_is_float = 0;
-                            char *z_sym = NULL;
-                            if (eval_global_init_expr(tu, elem_expr, &z_i, &z_f, &z_is_float, &z_sym) == 0 &&
-                                z_sym == NULL && (z_is_float ? (z_f == 0.0) : (z_i == 0))) {
-                                free(z_sym);
-                                continue;
-                            }
-                            free(z_sym);
-                            set_diag(diag, "struct array member initializer element requires braces");
-                            return -1;
-                        }
-                        if (flatten_struct_init_bytes(tu, m->type_struct_id, elem_expr, elem_off, buf, buf_size, relocs,
-                                                      reloc_count, diag) != 0) {
-                            return -1;
-                        }
-                    } else {
-                        if (store_scalar_global_init(tu, elem_type, m->type_struct_id, elem_size, elem_expr, buf,
-                                                     buf_size, elem_off, relocs, reloc_count, diag) != 0) {
-                            return -1;
-                        }
-                    }
+                continue;
+            }
+            if (item != NULL && item->kind == CC_EXPR_STR) {
+                cc_type_t elem_type = ptr_base_type(m->type);
+                long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+                long max_elems;
+                if (elem_size <= 0) {
+                    elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+                }
+                max_elems = elem_size > 0 ? (m->array_len > 0 ? m->array_len : (m->size / elem_size)) : 0;
+                if (fill_fixed_char_array_from_string(item, elem_type, elem_size, max_elems, field_off, buf, buf_size,
+                                                      diag) != 0) {
+                    set_diag(diag, "invalid string initializer for fixed-size array struct member");
+                    return -1;
+                }
+                if (!consumed_item) {
+                    i++;
+                    consumed_item = 1;
                 }
                 continue;
             }
+            if (flatten_arraylike_struct_member_from_cursor(tu, m, init_list, &i, field_off, buf, buf_size, relocs,
+                                                            reloc_count, diag) != 0) {
+                return -1;
+            }
+            continue;
         }
 
-        scalar_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
+        if (!consumed_item) {
+            i++;
+            consumed_item = 1;
+        }
+        if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
+            item = unwrap_scalar_initializer_expr(item, diag);
+            if (item == NULL) {
+                return -1;
+            }
+        }
+        scalar_size = natural_size;
         if (scalar_size <= 0) {
+            scalar_size = m->size;
+        }
+        if (m->size > 0 && scalar_size > m->size) {
             scalar_size = m->size;
         }
         if (scalar_size <= 0) {
@@ -6755,6 +7752,105 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
         if (store_scalar_global_init(tu, m->type, m->type_struct_id, scalar_size, item, buf, buf_size, field_off,
                                      relocs, reloc_count, diag) != 0) {
             return -1;
+        }
+    }
+    *cursor = i;
+    return 0;
+}
+
+static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init, long base,
+                                     unsigned char *buf, long buf_size, global_reloc_t **relocs, size_t *reloc_count,
+                                     cc_diag_t *diag) {
+    size_t cur = 0;
+    const cc_struct_def_t *sd = NULL;
+    if (tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count) {
+        sd = &tu->structs[struct_id];
+    }
+    if (flatten_struct_init_bytes_cursor(tu, struct_id, init, &cur, base, buf, buf_size, relocs, reloc_count, diag) !=
+        0) {
+        return -1;
+    }
+    (void)sd;
+    return 0;
+}
+
+static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_type_t scalar_type, int scalar_struct_id,
+                                            const long *dims, int ndim, const cc_expr_t *list, size_t *cursor,
+                                            long base, unsigned char *buf, long buf_size, global_reloc_t **relocs,
+                                            size_t *reloc_count, cc_diag_t *diag) {
+    long scalar_size;
+    long i;
+
+    if (tu == NULL || dims == NULL || ndim <= 0 || list == NULL || list->kind != CC_EXPR_INIT_LIST || cursor == NULL) {
+        set_diag(diag, "invalid scalar array initializer");
+        return -1;
+    }
+    scalar_size = type_size_bytes_with_struct(tu, scalar_type, scalar_struct_id);
+    if (scalar_size <= 0) {
+        set_diag(diag, "unsupported scalar array element type in global initializer");
+        return -1;
+    }
+    if (dims[0] < 0) {
+        set_diag(diag, "invalid array dimension in global initializer");
+        return -1;
+    }
+
+    if (ndim == 1) {
+        for (i = 0; i < dims[0] && *cursor < list->arg_count; ++i) {
+            const cc_expr_t *item = list->args[*cursor];
+            long elem_off = base + i * scalar_size;
+            if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
+                item = unwrap_scalar_initializer_expr(item, diag);
+                if (item == NULL) {
+                    return -1;
+                }
+            }
+            if (store_scalar_global_init(tu, scalar_type, scalar_struct_id, scalar_size, item, buf, buf_size, elem_off,
+                                         relocs, reloc_count, diag) != 0) {
+                return -1;
+            }
+            (*cursor)++;
+        }
+        return 0;
+    }
+
+    {
+        long sub_count = 1;
+        long sub_size;
+        int d;
+        for (d = 1; d < ndim; ++d) {
+            long dim = dims[d] > 0 ? dims[d] : 1;
+            if (sub_count > LONG_MAX / dim) {
+                set_diag(diag, "array initializer dimension overflow");
+                return -1;
+            }
+            sub_count *= dim;
+        }
+        if (scalar_size > LONG_MAX / sub_count) {
+            set_diag(diag, "array initializer byte-size overflow");
+            return -1;
+        }
+        sub_size = scalar_size * sub_count;
+        for (i = 0; i < dims[0] && *cursor < list->arg_count; ++i) {
+            const cc_expr_t *raw = list->args[*cursor];
+            long sub_base = base + i * sub_size;
+            if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
+                size_t sub_cur = 0;
+                (*cursor)++;
+                if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_struct_id, dims + 1, ndim - 1, raw,
+                                                     &sub_cur, sub_base, buf, buf_size, relocs, reloc_count, diag) != 0) {
+                    return -1;
+                }
+                if (sub_cur < raw->arg_count) {
+                    set_diag(diag, "too many nested array initializers");
+                    return -1;
+                }
+            } else {
+                if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_struct_id, dims + 1, ndim - 1, list,
+                                                     cursor, sub_base, buf, buf_size, relocs, reloc_count, diag) != 0) {
+                    return -1;
+                }
+            }
         }
     }
     return 0;
@@ -6921,6 +8017,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 long total_size;
                 int any_nonzero = 0;
                 size_t z;
+                const cc_expr_t *struct_init = init;
 
                 if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count ||
                     !tu->structs[struct_id].complete || tu->structs[struct_id].size <= 0) {
@@ -6959,7 +8056,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     out->globals[i].init_sym = NULL;
                     continue;
                 }
-                if (init->kind != CC_EXPR_INIT_LIST) {
+                if (tu->globals[i].type == CC_TYPE_VOID && init->kind == CC_EXPR_CAST && init->aux_type == CC_TYPE_VOID &&
+                    init->aux_struct_id == struct_id && init->lhs != NULL && init->lhs->kind == CC_EXPR_INIT_LIST) {
+                    struct_init = init->lhs;
+                }
+                if (struct_init->kind != CC_EXPR_INIT_LIST) {
                     if (diag != NULL && diag->message[0] == '\0') {
                         snprintf(diag->message, sizeof(diag->message),
                                  "struct global initializer for %s must use braces", tu->globals[i].name);
@@ -6976,51 +8077,56 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 }
 
                 if (tu->globals[i].type == CC_TYPE_VOID) {
-                    if (flatten_struct_init_bytes(tu, struct_id, init, 0, buf, total_size, &relocs, &reloc_count,
+                    if (flatten_struct_init_bytes(tu, struct_id, struct_init, 0, buf, total_size, &relocs, &reloc_count,
                                                   diag) != 0) {
+                        if (diag != NULL && strcmp(diag->message, "too many items in struct global initializer") == 0) {
+                            snprintf(diag->message, sizeof(diag->message), "too many items in struct global initializer for %s",
+                                     tu->globals[i].name);
+                        }
                         free(buf);
                         free_global_relocs(relocs, reloc_count);
                         cc_ssa_module_free(out);
                         return -1;
                     }
                 } else {
-                    size_t j;
-                    if (init->arg_count > (size_t)struct_elems) {
-                        if (diag != NULL && diag->message[0] == '\0') {
-                            snprintf(diag->message, sizeof(diag->message),
-                                     "too many struct elements in array initializer for %s", tu->globals[i].name);
+                    size_t cur = 0;
+                    long j;
+                    for (j = 0; j < struct_elems && cur < struct_init->arg_count; ++j) {
+                        const cc_expr_t *raw = struct_init->args[cur];
+                        const cc_expr_t *elem_list = extract_struct_init_list_expr(raw, struct_id);
+                        if (elem_list != NULL) {
+                            size_t sub = 0;
+                            cur++;
+                            if (flatten_struct_init_bytes_cursor(tu, struct_id, elem_list, &sub, j * struct_size, buf,
+                                                                 total_size, &relocs, &reloc_count, diag) != 0) {
+                                free(buf);
+                                free_global_relocs(relocs, reloc_count);
+                                cc_ssa_module_free(out);
+                                return -1;
+                            }
+                            if (sub < elem_list->arg_count) {
+                                set_diag(diag, "too many initializers in struct array element");
+                                free(buf);
+                                free_global_relocs(relocs, reloc_count);
+                                cc_ssa_module_free(out);
+                                return -1;
+                            }
+                            continue;
                         }
+                        if (flatten_struct_init_bytes_cursor(tu, struct_id, struct_init, &cur, j * struct_size, buf, total_size,
+                                                             &relocs, &reloc_count, diag) != 0) {
+                            free(buf);
+                            free_global_relocs(relocs, reloc_count);
+                            cc_ssa_module_free(out);
+                            return -1;
+                        }
+                    }
+                    if (cur < struct_init->arg_count) {
+                        set_diag(diag, "too many struct elements in array initializer");
                         free(buf);
                         free_global_relocs(relocs, reloc_count);
                         cc_ssa_module_free(out);
                         return -1;
-                    }
-                    for (j = 0; j < init->arg_count; ++j) {
-                        const cc_expr_t *elem = init->args[j];
-                        if (elem == NULL || elem->kind != CC_EXPR_INIT_LIST) {
-                            long z_i = 0;
-                            double z_f = 0.0;
-                            int z_is_float = 0;
-                            char *z_sym = NULL;
-                            if (eval_global_init_expr(tu, elem, &z_i, &z_f, &z_is_float, &z_sym) == 0 &&
-                                z_sym == NULL && (z_is_float ? (z_f == 0.0) : (z_i == 0))) {
-                                free(z_sym);
-                                continue;
-                            }
-                            free(z_sym);
-                            set_diag(diag, "struct array global initializer element requires braces");
-                            free(buf);
-                            free_global_relocs(relocs, reloc_count);
-                            cc_ssa_module_free(out);
-                            return -1;
-                        }
-                        if (flatten_struct_init_bytes(tu, struct_id, elem, (long)j * struct_size, buf, total_size,
-                                                      &relocs, &reloc_count, diag) != 0) {
-                            free(buf);
-                            free_global_relocs(relocs, reloc_count);
-                            cc_ssa_module_free(out);
-                            return -1;
-                        }
                     }
                 }
 
@@ -7094,6 +8200,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 }
                 if (flatten_struct_init_bytes(tu, lit_sid, init->lhs->lhs, 0, buf, lit_size, &relocs, &reloc_count,
                                               diag) != 0) {
+                    if (diag != NULL && strcmp(diag->message, "too many items in struct global initializer") == 0) {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "too many items in compound-literal struct initializer for %s", tu->globals[i].name);
+                    }
                     free(buf);
                     free_global_relocs(relocs, reloc_count);
                     cc_ssa_module_free(out);
@@ -7204,6 +8314,141 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     out->globals[i].init_is_symbol = 0;
                     out->globals[i].init_sym = NULL;
                     continue;
+                }
+                if (is_pointer_type(out->globals[i].type) && out->globals[i].array_len >= 0 &&
+                    tu->globals[i].array_ndim > 0 && ptr_base_type(tu->globals[i].type) != CC_TYPE_VOID) {
+                    int needs_flatten = tu->globals[i].array_ndim > 1;
+                    size_t jj;
+                    for (jj = 0; jj < init->arg_count; ++jj) {
+                        if (init->args[jj] != NULL && init->args[jj]->kind == CC_EXPR_INIT_LIST) {
+                            needs_flatten = 1;
+                            break;
+                        }
+                    }
+                    if (needs_flatten) {
+                        cc_type_t scalar_type = tu->globals[i].type;
+                        int scalar_sid = tu->globals[i].type_struct_id;
+                        long dims[CC_MAX_ARRAY_DIMS];
+                        int nd = tu->globals[i].array_ndim;
+                        long scalar_size;
+                        long elem_count = 1;
+                        long total_size;
+                        unsigned char *buf = NULL;
+                        global_reloc_t *relocs = NULL;
+                        size_t reloc_count = 0;
+                        int any_nonzero = 0;
+                        size_t cur = 0;
+                        size_t z;
+                        int d;
+
+                        if (nd > CC_MAX_ARRAY_DIMS) {
+                            set_diag(diag, "array dimension count exceeds compiler limit");
+                            cc_ssa_module_free(out);
+                            return -1;
+                        }
+                        for (d = 0; d < nd; ++d) {
+                            dims[d] = tu->globals[i].array_dims[d];
+                        }
+                        if (dims[0] <= 0) {
+                            dims[0] = tu->globals[i].array_len > 0 ? tu->globals[i].array_len : (long)init->arg_count;
+                        }
+                        for (d = 0; d < nd; ++d) {
+                            if (dims[d] <= 0) {
+                                set_diag(diag, "invalid array dimension in global initializer");
+                                cc_ssa_module_free(out);
+                                return -1;
+                            }
+                        }
+                        for (d = 0; d < nd; ++d) {
+                            if (!is_pointer_type(scalar_type)) {
+                                set_diag(diag, "malformed array type in global initializer");
+                                cc_ssa_module_free(out);
+                                return -1;
+                            }
+                            scalar_type = ptr_base_type(scalar_type);
+                            if (scalar_type != CC_TYPE_VOID) {
+                                scalar_sid = -1;
+                            }
+                        }
+                        scalar_size = type_size_bytes_with_struct(tu, scalar_type, scalar_sid);
+                        if (scalar_size <= 0) {
+                            set_diag(diag, "unsupported scalar array element type in global initializer");
+                            cc_ssa_module_free(out);
+                            return -1;
+                        }
+                        for (d = 0; d < nd; ++d) {
+                            if (elem_count > LONG_MAX / dims[d]) {
+                                set_diag(diag, "array element count overflow in global initializer");
+                                cc_ssa_module_free(out);
+                                return -1;
+                            }
+                            elem_count *= dims[d];
+                        }
+                        if (scalar_size > LONG_MAX / elem_count) {
+                            set_diag(diag, "array byte-size overflow in global initializer");
+                            cc_ssa_module_free(out);
+                            return -1;
+                        }
+                        total_size = scalar_size * elem_count;
+                        buf = (unsigned char *)calloc((size_t)total_size, 1);
+                        if (buf == NULL) {
+                            set_diag(diag, "out of memory allocating global array initializer buffer");
+                            cc_ssa_module_free(out);
+                            return -1;
+                        }
+                        if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_sid, dims, nd, init, &cur, 0, buf,
+                                                             total_size, &relocs, &reloc_count, diag) != 0) {
+                            free(buf);
+                            free_global_relocs(relocs, reloc_count);
+                            cc_ssa_module_free(out);
+                            return -1;
+                        }
+                        if (cur < init->arg_count) {
+                            set_diag(diag, "too many elements in global array initializer");
+                            free(buf);
+                            free_global_relocs(relocs, reloc_count);
+                            cc_ssa_module_free(out);
+                            return -1;
+                        }
+                        for (z = 0; z < (size_t)total_size; ++z) {
+                            if (buf[z] != 0) {
+                                any_nonzero = 1;
+                                break;
+                            }
+                        }
+                        out->globals[i].type = CC_TYPE_PTR_UCHAR;
+                        out->globals[i].type_struct_id = -1;
+                        out->globals[i].array_len = total_size;
+                        if (!any_nonzero && reloc_count == 0) {
+                            out->globals[i].has_init = 0;
+                            out->globals[i].init_i = 0;
+                            out->globals[i].init_f = 0.0;
+                            out->globals[i].init_is_float = 0;
+                            out->globals[i].init_is_string = 0;
+                            out->globals[i].init_is_symbol = 0;
+                            out->globals[i].init_sym = NULL;
+                            free(buf);
+                            free_global_relocs(relocs, reloc_count);
+                            continue;
+                        }
+                        if (build_global_stream_from_bytes(&out->globals[i], buf, total_size, relocs, reloc_count,
+                                                           diag) != 0) {
+                            free(buf);
+                            free_global_relocs(relocs, reloc_count);
+                            cc_ssa_module_free(out);
+                            return -1;
+                        }
+                        out->globals[i].has_init = 1;
+                        out->globals[i].init_i = 0;
+                        out->globals[i].init_f = 0.0;
+                        out->globals[i].init_is_float = 0;
+                        out->globals[i].init_is_string = 0;
+                        out->globals[i].init_is_symbol = 0;
+                        out->globals[i].init_sym = NULL;
+                        free(buf);
+                        free_global_relocs(relocs, reloc_count);
+                        continue;
+                    }
                 }
                 if (init->arg_count == 0) {
                     if (diag != NULL && diag->message[0] == '\0') {
@@ -7454,6 +8699,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 return -1;
             }
         }
+        for (j = 0; j < af->stmt_count; ++j) {
+            if (lower_collect_hoisted_allocs(tu, sf, &lctx, &af->stmts[j], diag) != 0) {
+                cc_ssa_module_free(out);
+                return -1;
+            }
+        }
 
         for (j = 0; j < af->stmt_count; ++j) {
             if (lower_stmt(tu, sf, &vars, &var_count, &lctx, 0, -1, -1, &af->stmts[j], &saw_ret, diag) != 0) {
@@ -7487,6 +8738,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             free(lctx.labels[j].name);
         }
         free(lctx.labels);
+        free(lctx.hoisted_allocs);
     }
 
     return 0;

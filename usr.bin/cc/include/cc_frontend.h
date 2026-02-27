@@ -153,6 +153,7 @@ typedef enum {
     CC_EXPR_CAST,
     CC_EXPR_SIZEOF,
     CC_EXPR_INIT_LIST,
+    CC_EXPR_GENERIC,
     CC_EXPR_TERNARY,
     CC_EXPR_STMT
 } cc_expr_kind_t;
@@ -183,6 +184,11 @@ struct cc_expr {
     int aux_struct_id;
     cc_expr_t **args;
     size_t arg_count;
+    cc_type_t *generic_types;
+    int *generic_struct_ids;
+    unsigned char *generic_is_default;
+    size_t generic_count;
+    long generic_selected;
     cc_stmt_t *stmt_expr_stmts;
     size_t stmt_expr_count;
 };

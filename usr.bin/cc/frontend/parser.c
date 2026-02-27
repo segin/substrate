@@ -510,7 +510,15 @@ static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id
 }
 
 static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_id) {
-    long n = parser_type_size_bytes(p, t, struct_id);
+    long n;
+    if (t == CC_TYPE_VOID && struct_id >= 0 && (size_t)struct_id < p->struct_count && p->structs[struct_id].complete) {
+        n = p->structs[struct_id].align;
+        if (n <= 0) {
+            n = 1;
+        }
+        return n;
+    }
+    n = parser_type_size_bytes(p, t, struct_id);
     if (n <= 0) {
         return -1;
     }
@@ -563,11 +571,15 @@ static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
         if (msize <= 0) {
             msize = parser_type_size_bytes(p, sd->members[i].type, sd->members[i].type_struct_id);
         }
-        if (msize <= 0) {
+        if (msize < 0) {
             msize = g_parser_pointer_size_bytes;
         }
         if (malign <= 0) {
-            malign = g_parser_pointer_size_bytes;
+            if (msize == 0) {
+                malign = 1;
+            } else {
+                malign = g_parser_pointer_size_bytes;
+            }
         }
         if (packed) {
             malign = 1;
@@ -1514,11 +1526,15 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
                     msize = parser_type_size_bytes(p, mtype, mstruct);
                     malign = parser_type_align_bytes(p, mtype, mstruct);
-                    if (msize <= 0) {
+                    if (msize < 0) {
                         msize = g_parser_pointer_size_bytes;
                     }
                     if (malign <= 0) {
-                        malign = g_parser_pointer_size_bytes;
+                        if (msize == 0) {
+                            malign = 1;
+                        } else {
+                            malign = g_parser_pointer_size_bytes;
+                        }
                     }
                     if ((mdecl_attrs.flags & CC_ATTR_PACKED) != 0) {
                         malign = 1;
@@ -2421,6 +2437,24 @@ static char *dup_string_token(const cc_token_t *tok) {
         return xstrdup_n("", 0);
     }
     return xstrdup_n(tok->start + begin, end - begin);
+}
+
+static cc_type_t string_token_char_type(const parser_t *p, const cc_token_t *tok) {
+    if (p == NULL || tok == NULL || tok->kind != TOK_STR || tok->start == NULL) {
+        return CC_TYPE_CHAR;
+    }
+    if (tok->start > p->lx.src) {
+        char c1 = tok->start[-1];
+        if (c1 == 'L' || c1 == 'u' || c1 == 'U') {
+            return CC_TYPE_INT;
+        }
+    }
+    if (tok->start > p->lx.src + 1) {
+        if (tok->start[-2] == 'u' && tok->start[-1] == '8') {
+            return CC_TYPE_CHAR;
+        }
+    }
+    return CC_TYPE_CHAR;
 }
 
 static int append_string_piece(char **dst, const char *piece) {
@@ -3451,6 +3485,7 @@ static cc_expr_t *new_expr(cc_expr_kind_t kind) {
         e->member_offset = 0;
         e->aux_type = CC_TYPE_VOID;
         e->aux_struct_id = -1;
+        e->generic_selected = -1;
     }
     return e;
 }
@@ -3468,6 +3503,9 @@ static void free_expr(cc_expr_t *e) {
         free_expr(e->args[i]);
     }
     free(e->args);
+    free(e->generic_types);
+    free(e->generic_struct_ids);
+    free(e->generic_is_default);
     for (i = 0; i < e->stmt_expr_count; ++i) {
         free_stmt(&e->stmt_expr_stmts[i]);
     }
@@ -4033,8 +4071,6 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
     generic_assoc_t *items = NULL;
     size_t count = 0;
     size_t cap = 0;
-    long selected = -1;
-    long default_idx = -1;
     cc_expr_t *result = NULL;
     size_t i;
 
@@ -4136,9 +4172,6 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
             cap = ncap;
         }
         items[count] = assoc;
-        if (assoc.is_default) {
-            default_idx = (long)count;
-        }
         count++;
 
         if (p->tok.kind != TOK_COMMA) {
@@ -4168,29 +4201,40 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
         return NULL;
     }
 
-    for (i = 0; i < count; ++i) {
-        if (items[i].is_default) {
-            continue;
+    result = new_expr(CC_EXPR_GENERIC);
+    if (result == NULL) {
+        free_expr(control);
+        for (i = 0; i < count; ++i) {
+            free_expr(items[i].expr);
         }
-        if (items[i].type == control->value_type && items[i].struct_id == control->struct_id) {
-            selected = (long)i;
-            break;
+        free(items);
+        return NULL;
+    }
+    result->lhs = control;
+    control = NULL;
+    result->args = (cc_expr_t **)calloc(count, sizeof(*result->args));
+    result->generic_types = (cc_type_t *)calloc(count, sizeof(*result->generic_types));
+    result->generic_struct_ids = (int *)calloc(count, sizeof(*result->generic_struct_ids));
+    result->generic_is_default = (unsigned char *)calloc(count, sizeof(*result->generic_is_default));
+    if (result->args == NULL || result->generic_types == NULL || result->generic_struct_ids == NULL ||
+        result->generic_is_default == NULL) {
+        free_expr(result);
+        for (i = 0; i < count; ++i) {
+            free_expr(items[i].expr);
         }
+        free(items);
+        return NULL;
     }
-    if (selected < 0) {
-        selected = default_idx;
-    }
-    if (selected < 0) {
-        selected = 0;
-    }
-
-    result = items[selected].expr;
-    items[selected].expr = NULL;
+    result->arg_count = count;
+    result->generic_count = count;
     for (i = 0; i < count; ++i) {
-        free_expr(items[i].expr);
+        result->args[i] = items[i].expr;
+        items[i].expr = NULL;
+        result->generic_types[i] = items[i].type;
+        result->generic_struct_ids[i] = items[i].struct_id;
+        result->generic_is_default[i] = (unsigned char)(items[i].is_default ? 1 : 0);
     }
     free(items);
-    free_expr(control);
     return result;
 }
 
@@ -4236,6 +4280,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
     }
 
     if (p->tok.kind == TOK_STR) {
+        cc_type_t str_ty = string_token_char_type(p, &p->tok);
         char *lit = xstrdup_n(p->tok.start, p->tok.len);
         e = new_expr(CC_EXPR_STR);
         if (e == NULL || lit == NULL) {
@@ -4243,18 +4288,26 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return NULL;
         }
         e->ident = lit;
-        e->value_type = CC_TYPE_PTR_CHAR;
+        e->aux_type = str_ty;
+        e->value_type = str_ty == CC_TYPE_INT ? CC_TYPE_PTR_INT : CC_TYPE_PTR_CHAR;
         if (next_tok(p) != 0) {
             free_expr(e);
             return NULL;
         }
         while (p->tok.kind == TOK_STR) {
+            cc_type_t part_ty = string_token_char_type(p, &p->tok);
             char *part = xstrdup_n(p->tok.start, p->tok.len);
             size_t alen;
             size_t plen;
             char *next_lit;
             if (part == NULL) {
                 free_expr(e);
+                return NULL;
+            }
+            if (part_ty != str_ty) {
+                free(part);
+                free_expr(e);
+                set_diag(p->diag, p->tok.line, p->tok.col, "cannot concatenate narrow and wide string literals");
                 return NULL;
             }
             alen = strlen(e->ident);
@@ -4960,6 +5013,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->update_postfix = src->update_postfix;
     dst->aux_type = src->aux_type;
     dst->aux_struct_id = src->aux_struct_id;
+    dst->generic_selected = src->generic_selected;
 
     if (src->ident != NULL) {
         dst->ident = xstrdup_n(src->ident, strlen(src->ident));
@@ -5005,6 +5059,19 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
                 return NULL;
             }
         }
+    }
+    if (src->generic_count > 0) {
+        dst->generic_types = (cc_type_t *)calloc(src->generic_count, sizeof(*dst->generic_types));
+        dst->generic_struct_ids = (int *)calloc(src->generic_count, sizeof(*dst->generic_struct_ids));
+        dst->generic_is_default = (unsigned char *)calloc(src->generic_count, sizeof(*dst->generic_is_default));
+        if (dst->generic_types == NULL || dst->generic_struct_ids == NULL || dst->generic_is_default == NULL) {
+            free_expr(dst);
+            return NULL;
+        }
+        memcpy(dst->generic_types, src->generic_types, src->generic_count * sizeof(*dst->generic_types));
+        memcpy(dst->generic_struct_ids, src->generic_struct_ids, src->generic_count * sizeof(*dst->generic_struct_ids));
+        memcpy(dst->generic_is_default, src->generic_is_default, src->generic_count * sizeof(*dst->generic_is_default));
+        dst->generic_count = src->generic_count;
     }
     if (src->stmt_expr_count > 0) {
         dst->stmt_expr_stmts = (cc_stmt_t *)calloc(src->stmt_expr_count, sizeof(*dst->stmt_expr_stmts));

@@ -1,5 +1,6 @@
 #include "cc_frontend.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1093,6 +1094,195 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
     return 0;
 }
 
+static size_t utf8_seq_len(unsigned char b0) {
+    if ((b0 & 0x80u) == 0) return 1;
+    if ((b0 & 0xE0u) == 0xC0u) return 2;
+    if ((b0 & 0xF0u) == 0xE0u) return 3;
+    if ((b0 & 0xF8u) == 0xF0u) return 4;
+    return 1;
+}
+
+static size_t decoded_string_unit_count(const cc_expr_t *e, int wide) {
+    const unsigned char *s;
+    size_t n = 0;
+    size_t i = 0;
+    size_t units = 0;
+
+    if (e == NULL || e->kind != CC_EXPR_STR || e->ident == NULL) {
+        return 0;
+    }
+    s = (const unsigned char *)e->ident;
+    n = strlen(e->ident);
+    if (n >= 2 && s[0] == '"' && s[n - 1] == '"') {
+        i = 1;
+        n -= 1;
+    }
+    while (i < n) {
+        if (s[i] == '\\') {
+            i++;
+            if (i >= n) {
+                break;
+            }
+            if (s[i] == 'x') {
+                i++;
+                while (i < n) {
+                    unsigned char c = s[i];
+                    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                        break;
+                    }
+                    i++;
+                }
+            } else if (s[i] >= '0' && s[i] <= '7') {
+                int k = 0;
+                while (i < n && k < 3 && s[i] >= '0' && s[i] <= '7') {
+                    i++;
+                    k++;
+                }
+            } else {
+                i++;
+            }
+            units++;
+            continue;
+        }
+        if (!wide) {
+            i++;
+            units++;
+            continue;
+        }
+        {
+            size_t adv = utf8_seq_len(s[i]);
+            if (adv == 0) adv = 1;
+            if (i + adv > n) adv = 1;
+            i += adv;
+            units++;
+        }
+    }
+    return units;
+}
+
+static int check_array_string_initializer(const char *name, cc_type_t array_type, long *array_len_io, cc_expr_t *init,
+                                          long *inferred_len_out, cc_diag_t *diag) {
+    cc_type_t elem_type;
+    int wide;
+    size_t units;
+    long need;
+
+    if (!is_pointer_type(array_type) || array_len_io == NULL || init == NULL || init->kind != CC_EXPR_STR) {
+        return 1;
+    }
+    elem_type = ptr_base_type(array_type);
+    wide = (init->aux_type == CC_TYPE_INT || init->aux_type == CC_TYPE_UINT || init->aux_type == CC_TYPE_LONG_LONG ||
+            init->aux_type == CC_TYPE_ULONG_LONG);
+    if (wide) {
+        if (!is_integral_type(elem_type)) {
+            return 1;
+        }
+    } else if (!(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+        return 1;
+    }
+
+    units = decoded_string_unit_count(init, wide);
+    need = (long)units + 1;
+    if (*array_len_io == 0) {
+        *array_len_io = need;
+        if (inferred_len_out != NULL) {
+            *inferred_len_out = need;
+        }
+        return 0;
+    }
+    if (*array_len_io > 0 && (long)units > *array_len_io) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "string initializer too long for array %s",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    return 0;
+}
+
+static int generic_assoc_matches(cc_type_t assoc_type, int assoc_struct_id, cc_type_t ctrl_type, int ctrl_struct_id) {
+    if (assoc_type == ctrl_type && assoc_struct_id == ctrl_struct_id) {
+        return 1;
+    }
+    if (is_pointer_type(assoc_type) && is_pointer_type(ctrl_type)) {
+        if (assoc_type == ctrl_type && (assoc_struct_id == ctrl_struct_id || assoc_struct_id < 0 || ctrl_struct_id < 0)) {
+            return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+static int printf_like_format_index(const char *name, size_t *idx_out) {
+    if (name == NULL || idx_out == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "printf") == 0 || strcmp(name, "vprintf") == 0) {
+        *idx_out = 0;
+        return 1;
+    }
+    if (strcmp(name, "fprintf") == 0 || strcmp(name, "sprintf") == 0 || strcmp(name, "vfprintf") == 0 ||
+        strcmp(name, "vsprintf") == 0) {
+        *idx_out = 1;
+        return 1;
+    }
+    if (strcmp(name, "snprintf") == 0 || strcmp(name, "vsnprintf") == 0) {
+        *idx_out = 2;
+        return 1;
+    }
+    return 0;
+}
+
+static char *rewrite_printf_long_double_format(const char *literal) {
+    size_t n;
+    char *out;
+    size_t i = 0;
+    size_t o = 0;
+    int changed = 0;
+    if (literal == NULL) {
+        return NULL;
+    }
+    n = strlen(literal);
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    while (i < n) {
+        if (literal[i] != '%') {
+            out[o++] = literal[i++];
+            continue;
+        }
+        out[o++] = literal[i++];
+        if (i < n && literal[i] == '%') {
+            out[o++] = literal[i++];
+            continue;
+        }
+        while (i < n) {
+            char c = literal[i];
+            if (c == 'L' && i + 1 < n &&
+                (literal[i + 1] == 'f' || literal[i + 1] == 'F' || literal[i + 1] == 'e' || literal[i + 1] == 'E' ||
+                 literal[i + 1] == 'g' || literal[i + 1] == 'G' || literal[i + 1] == 'a' || literal[i + 1] == 'A')) {
+                changed = 1;
+                i++;
+                continue;
+            }
+            out[o++] = c;
+            i++;
+            if (c == 'd' || c == 'i' || c == 'o' || c == 'u' || c == 'x' || c == 'X' || c == 'f' || c == 'F' ||
+                c == 'e' || c == 'E' || c == 'g' || c == 'G' || c == 'a' || c == 'A' || c == 'c' || c == 's' ||
+                c == 'p' || c == 'n') {
+                break;
+            }
+        }
+    }
+    out[o] = '\0';
+    if (!changed) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
 static const cc_struct_member_t *find_union_cast_member(const cc_translation_unit_t *tu, int struct_id,
                                                         const cc_expr_t *src_expr) {
     const cc_struct_def_t *sd;
@@ -1112,6 +1302,21 @@ static const cc_struct_member_t *find_union_cast_member(const cc_translation_uni
         }
     }
     return NULL;
+}
+
+static const cc_function_t *generic_selected_function(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    const cc_expr_t *sel;
+    if (tu == NULL || e == NULL || e->kind != CC_EXPR_GENERIC || e->args == NULL || e->arg_count == 0) {
+        return NULL;
+    }
+    if (e->generic_selected < 0 || (size_t)e->generic_selected >= e->arg_count) {
+        return NULL;
+    }
+    sel = e->args[e->generic_selected];
+    if (sel == NULL || sel->kind != CC_EXPR_IDENT || sel->ident == NULL) {
+        return NULL;
+    }
+    return find_function(tu, sel->ident);
 }
 
 static cc_type_t integral_promo_type(cc_type_t t) {
@@ -1524,6 +1729,9 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
 
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
                                     var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag);
+static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, cc_type_t array_type,
+                                   int array_struct_id, long array_len, cc_expr_t *init, var_entry_t *vars,
+                                   size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag);
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
                       cc_type_t fn_ret_type, int fn_ret_struct_id, int fn_attr_flags, int loop_depth, int switch_depth,
@@ -1566,9 +1774,61 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         return 0;
 
     case CC_EXPR_STR:
-        e->value_type = CC_TYPE_PTR_CHAR;
+        if (e->aux_type == CC_TYPE_INT || e->aux_type == CC_TYPE_UINT || e->aux_type == CC_TYPE_LONG_LONG ||
+            e->aux_type == CC_TYPE_ULONG_LONG) {
+            e->value_type = CC_TYPE_PTR_INT;
+        } else {
+            e->value_type = CC_TYPE_PTR_CHAR;
+        }
         e->struct_id = -1;
         return 0;
+
+    case CC_EXPR_GENERIC: {
+        long selected = -1;
+        long default_idx = -1;
+        long first_match = -1;
+        size_t match_count = 0;
+
+        if (e->lhs == NULL || e->args == NULL || e->arg_count == 0 || e->generic_count != e->arg_count ||
+            e->generic_types == NULL || e->generic_struct_ids == NULL || e->generic_is_default == NULL) {
+            set_diag(diag, "malformed _Generic expression");
+            return -1;
+        }
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (e->generic_is_default[i]) {
+                default_idx = (long)i;
+                continue;
+            }
+            if (generic_assoc_matches(e->generic_types[i], e->generic_struct_ids[i], e->lhs->value_type,
+                                      e->lhs->struct_id)) {
+                if (first_match < 0) {
+                    first_match = (long)i;
+                }
+                match_count++;
+            }
+        }
+        if (match_count == 0) {
+            selected = default_idx;
+        } else if (match_count > 1 && is_pointer_type(e->lhs->value_type) && default_idx >= 0) {
+            selected = default_idx;
+        } else {
+            selected = first_match;
+        }
+        if (selected < 0) {
+            selected = 0;
+        }
+        e->generic_selected = selected;
+        e->value_type = e->args[selected]->value_type;
+        e->struct_id = e->args[selected]->struct_id;
+        expr_copy_array_meta(e, e->args[selected]);
+        return 0;
+    }
 
     case CC_EXPR_IDENT: {
         int idx = vars_find_visible(vars, var_count, e->ident, depth);
@@ -2281,6 +2541,17 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         }
+        if (e->ident != NULL) {
+            size_t fmt_i;
+            if (printf_like_format_index(e->ident, &fmt_i) && fmt_i < e->arg_count && e->args[fmt_i] != NULL &&
+                e->args[fmt_i]->kind == CC_EXPR_STR && e->args[fmt_i]->ident != NULL) {
+                char *rw = rewrite_printf_long_double_format(e->args[fmt_i]->ident);
+                if (rw != NULL) {
+                    free(e->args[fmt_i]->ident);
+                    e->args[fmt_i]->ident = rw;
+                }
+            }
+        }
         if (callee != NULL && callee->has_prototype && (callee->attr_flags & CC_ATTR_NONNULL) != 0) {
             for (i = 0; i < e->arg_count && i < callee->param_count; ++i) {
                 if (!is_pointer_type(callee->params[i].type)) {
@@ -2338,10 +2609,17 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
         } else {
-            e->value_type = ptr_base_type(indirect_callee_type);
-            e->struct_id = -1;
-            if (indirect_callee_struct_id >= 0 && (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
-                e->struct_id = indirect_callee_struct_id;
+            const cc_function_t *gfn = generic_selected_function(tu, e->lhs);
+            if (gfn != NULL) {
+                e->value_type = gfn->ret_type;
+                e->struct_id = gfn->ret_struct_id;
+            } else {
+                e->value_type = ptr_base_type(indirect_callee_type);
+                e->struct_id = -1;
+                if (indirect_callee_struct_id >= 0 &&
+                    (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
+                    e->struct_id = indirect_callee_struct_id;
+                }
             }
         }
         return 0;
@@ -2900,11 +3178,135 @@ static size_t struct_next_init_member(const cc_struct_def_t *sd, size_t member_i
     if (sd == NULL || member_idx >= sd->member_count) {
         return next;
     }
+    if (sd->members[member_idx].size == 0) {
+        return next;
+    }
     off = sd->members[member_idx].offset;
     while (next < sd->member_count && sd->members[next].offset == off) {
         next++;
     }
     return next;
+}
+
+static int struct_has_aggregate_member(const cc_translation_unit_t *tu, int struct_id) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    (void)tu;
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        return 0;
+    }
+    sd = &tu->structs[struct_id];
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            return 1;
+        }
+        if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static long struct_scalar_slots(const cc_translation_unit_t *tu, int struct_id, int depth) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    long slots = 0;
+    if (depth > 32 || tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        return -1;
+    }
+    sd = &tu->structs[struct_id];
+    if (sd->is_union) {
+        return 1;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (sd->has_flexible_array && i + 1 == sd->member_count) {
+            continue;
+        }
+        if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
+            long cnt = m->array_len > 0 ? m->array_len : 1;
+            cc_type_t elem = ptr_base_type(m->type);
+            if (elem == CC_TYPE_VOID && m->type_struct_id >= 0) {
+                long sub = struct_scalar_slots(tu, m->type_struct_id, depth + 1);
+                if (sub < 0) {
+                    return -1;
+                }
+                if (slots > LONG_MAX - cnt * sub) {
+                    return -1;
+                }
+                slots += cnt * sub;
+            } else {
+                if (slots > LONG_MAX - cnt) {
+                    return -1;
+                }
+                slots += cnt;
+            }
+            continue;
+        }
+        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            long sub = struct_scalar_slots(tu, m->type_struct_id, depth + 1);
+            if (sub < 0) {
+                return -1;
+            }
+            if (slots > LONG_MAX - sub) {
+                return -1;
+            }
+            slots += sub;
+            continue;
+        }
+        if (slots == LONG_MAX) {
+            return -1;
+        }
+        slots++;
+    }
+    if (slots <= 0) {
+        slots = 1;
+    }
+    return slots;
+}
+
+static long infer_struct_array_len_from_init(const cc_translation_unit_t *tu, int struct_id, cc_expr_t *init) {
+    long slots;
+    size_t cur = 0;
+    long elems = 0;
+    if (tu == NULL || init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+        return -1;
+    }
+    slots = struct_scalar_slots(tu, struct_id, 0);
+    if (slots <= 0) {
+        return -1;
+    }
+    while (cur < init->arg_count) {
+        cc_expr_t *raw = init->args[cur];
+        if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
+            elems++;
+            cur++;
+            continue;
+        }
+        if (raw != NULL && raw->kind == CC_EXPR_CAST && raw->aux_type == CC_TYPE_VOID && raw->aux_struct_id == struct_id &&
+            raw->lhs != NULL && raw->lhs->kind == CC_EXPR_INIT_LIST) {
+            elems++;
+            cur++;
+            continue;
+        }
+        {
+            long consumed = 0;
+            while (cur < init->arg_count && consumed < slots) {
+                cc_expr_t *it = init->args[cur];
+                if (consumed > 0 && it != NULL && it->kind == CC_EXPR_INIT_LIST) {
+                    break;
+                }
+                consumed++;
+                cur++;
+            }
+            if (consumed == 0) {
+                cur++;
+            }
+            elems++;
+        }
+    }
+    return elems > 0 ? elems : 1;
 }
 
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
@@ -2925,21 +3327,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         return -1;
     }
     sd = &tu->structs[struct_id];
-    if (sd->is_union) {
-        if (init->arg_count > 1) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "too many initializers for union %s",
-                         name != NULL ? name : "<anon>");
-            }
-            return -1;
-        }
-    } else if (init->arg_count > sd->member_count) {
-        if (diag != NULL && diag->message[0] == '\0') {
-            snprintf(diag->message, sizeof(diag->message), "too many initializers for struct %s",
-                     name != NULL ? name : "<anon>");
-        }
-        return -1;
-    }
+    (void)sd;
     for (i = 0; i < init->arg_count; ++i) {
         cc_expr_t *raw = init->args[i];
         cc_expr_t *item = raw;
@@ -2960,38 +3348,61 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             item = raw->rhs;
         }
         if (member_idx >= sd->member_count) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "too many initializers for struct %s",
-                         name != NULL ? name : "<anon>");
+            if (!sd->is_union && struct_has_aggregate_member(tu, struct_id)) {
+                member_idx = sd->member_count - 1;
+            } else {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "too many initializers for struct %s",
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
             }
-            return -1;
         }
 
         m = &sd->members[member_idx];
         if (!sd->is_union) {
             next_member = struct_next_init_member(sd, member_idx);
         }
-        if (sd->has_flexible_array && member_idx + 1 == sd->member_count && m->size == 0) {
-            if (!is_zero_initializer_expr(item)) {
+        if (sd->has_flexible_array && member_idx + 1 == sd->member_count) {
+            /* GNU-compatible extension: accept and ignore flexible-array initializers. */
+            continue;
+        }
+        if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
+            cc_type_t elem_type = ptr_base_type(m->type);
+            if (item->kind == CC_EXPR_INIT_LIST) {
+                if (check_array_initializer(tu, name, m->type, m->type_struct_id, m->array_len, item, vars, var_count,
+                                            depth, NULL, diag) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!can_convert(elem_type, item->value_type) &&
+                !(is_pointer_type(elem_type) && is_integral_type(item->value_type) && is_null_ptr_constant(item))) {
                 if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message),
-                             "flexible array member cannot be initialized in struct %s",
-                             name != NULL ? name : "<anon>");
+                    snprintf(diag->message, sizeof(diag->message), "cannot convert array member initializer %zu for %s",
+                             i, name != NULL ? name : "<anon>");
                 }
                 return -1;
             }
             continue;
         }
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            if (item->kind != CC_EXPR_INIT_LIST) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message),
-                             "member initializer %zu for aggregate %s must use braces", i,
-                             name != NULL ? name : "<anon>");
-                }
+            cc_expr_t *nested = NULL;
+            if (item->kind == CC_EXPR_INIT_LIST) {
+                nested = item;
+            } else if (item->kind == CC_EXPR_CAST && item->aux_type == CC_TYPE_VOID &&
+                       item->aux_struct_id == m->type_struct_id && item->lhs != NULL &&
+                       item->lhs->kind == CC_EXPR_INIT_LIST) {
+                nested = item->lhs;
+            }
+            if (nested != NULL &&
+                check_struct_initializer(tu, name, m->type_struct_id, nested, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (check_struct_initializer(tu, name, m->type_struct_id, item, vars, var_count, depth, diag) != 0) {
+            if (nested == NULL && check_expr(tu, item, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             continue;
@@ -3082,7 +3493,8 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
     }
     if (out_inferred_len != NULL && array_len == 0) {
         if (elem_type == CC_TYPE_VOID && array_struct_id >= 0 && saw_nonlist_struct_item) {
-            *out_inferred_len = 0;
+            long inferred = infer_struct_array_len_from_init(tu, array_struct_id, init);
+            *out_inferred_len = inferred > 0 ? inferred : 0;
         } else {
             *out_inferred_len = (long)init->arg_count;
         }
@@ -3248,6 +3660,24 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         free((*vars)[*var_count - 1].name);
                         (*var_count)--;
                         return -1;
+                    }
+                    if (is_pointer_type(s->type) && s->array_len >= 0 && s->expr->kind == CC_EXPR_STR) {
+                        long inferred_len = -1;
+                        int rc = check_array_string_initializer(s->decl_name, s->type, &s->array_len, s->expr,
+                                                                &inferred_len, diag);
+                        if (rc < 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        if (rc == 0) {
+                            (*vars)[*var_count - 1].array_len = s->array_len;
+                            if (s->array_ndim > 0 && s->array_dims[0] == 0 && inferred_len > 0) {
+                                s->array_dims[0] = inferred_len;
+                                (*vars)[*var_count - 1].array_dims[0] = inferred_len;
+                            }
+                            return 0;
+                        }
                     }
                     if (!can_convert(init_type, s->expr->value_type) &&
                         !(is_pointer_type(init_type) && is_integral_type(s->expr->value_type) &&
@@ -3898,6 +4328,20 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             } else {
                 if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0) {
                     goto fail_global;
+                }
+                if (is_pointer_type(g->type) && g->array_len >= 0 && g->init->kind == CC_EXPR_STR) {
+                    long inferred_len = -1;
+                    int rc = check_array_string_initializer(g->name, g->type, &g->array_len, g->init, &inferred_len,
+                                                            diag);
+                    if (rc < 0) {
+                        goto fail_global;
+                    }
+                    if (rc == 0) {
+                        if (g->array_ndim > 0 && g->array_dims[0] == 0 && inferred_len > 0) {
+                            g->array_dims[0] = inferred_len;
+                        }
+                        continue;
+                    }
                 }
                 if (!can_convert(g->type, g->init->value_type) &&
                     !(is_pointer_type(g->type) && is_integral_type(g->init->value_type) &&
