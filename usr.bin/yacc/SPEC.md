@@ -142,6 +142,11 @@
 103. Resource errors: Memory exhaustion with graceful failure
 104. File errors: Permission denied, disk full with appropriate exit codes
 
+### 3.2.1 Reader Invariants
+1. Mid-rule action synthetic symbols (`$@N`) are interned in the global symbol table.
+2. Synthetic symbols participate in symbol packing and verbose output like normal nonterminals.
+3. Reader output (`plhs`, `rrhs`, `ritem`) must not contain unresolved temporary indices.
+
 ### 3.3 PERFORMANCE CHARACTERISTICS
 105. Time complexity: O(n³) worst-case for state construction (typical yacc algorithm)
 106. Memory: Efficient table compression equivalent to historical implementations

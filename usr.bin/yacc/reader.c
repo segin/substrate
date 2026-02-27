@@ -43,7 +43,11 @@ static int action_rule_len;
 static bucket *make_dummy(void) {
     char name[32];
     snprintf(name, sizeof(name), "$@%d", ++gen_sym_count);
-    bucket *bp = make_bucket(name);
+    /*
+     * Mid-rule action symbols must be interned in the global symbol table
+     * so pack_symbols()/verbose output can resolve stable final indices.
+     */
+    bucket *bp = lookup(name);
     bp->class = CLASS_NONTERM;
     
     /* Assign temp index */

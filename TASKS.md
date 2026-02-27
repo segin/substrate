@@ -8570,7 +8570,7 @@ Reference: User Request (Step 31552)
         - [x] Create `usr.bin/yacc` directory and Makefile.
         - [x] Implement `main.c` argument parsing (POSIX options `-d`, `-l`, `-t`, `-v`, `-b`, `-p`).
         - [x] Implement Symbol Table (buckets, hashing) for tokens and non-terminals.
-    - [ ] **2. Grammar Reader (`reader.c`):**
+    - [x] **2. Grammar Reader (`reader.c`):**
         - [x] Implement Lexical Analyzer for Yacc input (C code vs Declarations vs Rules).
         - [x] Parse Declarations (`%token`, `%type`, `%union`, `%start`, precedence).
         - [x] Parse Grammar Rules and Actions (handling `{}` blocks).
