@@ -140,6 +140,13 @@ The system follows a monolithic kernel architecture with a strict separation bet
 ### Core Userland (`bin/`, `lib/`)
 These components are essential for booting and basic system operation.
 - **`bin/`**: Fundamental Unix utilities (`sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, `kill`, `sync`, etc.).
+  - **`bin/cp/`**: Production copy utility with modular engine:
+    - `cp_opts`: CLI parsing and conflict policy (`-f/-i/-n`, `-H/-L/-P`, preserve sets).
+    - `cp_copy`: recursive traversal, sparse-aware data movement, atomic replace, special-file handling.
+    - `cp_preserve`: metadata/xattr/ACL best-effort preservation.
+    - `cp_hardlink`: source inode graph tracking for hardlink-preserving archive copies.
+    - `bin/cp/tests`: host-side unit/integration/property/fuzz/stress validation harness.
+  - **`bin/chmod/`**: Production-mode permission utility with symbolic/numeric parser (`setmode/getmode` style), recursive traversal policy controls (`-R/-H/-L/-P`), reference-mode support, and host-side verification harness in `tests/chmod/`.
 - **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`).
 - **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:

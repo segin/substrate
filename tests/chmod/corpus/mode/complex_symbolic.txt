@@ -1,0 +1,1 @@
+u=rwX,g+w,o-r,u-s,+t

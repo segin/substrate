@@ -1,0 +1,147 @@
+.TH CHMOD 1 "February 2026" "Substrate" "User Commands"
+.SH NAME
+chmod \- change file mode bits
+.SH SYNOPSIS
+.B chmod
+.RB [ -R " [" -H " | " -L " | " -P ]]
+.RB [ -dfh ]
+.I mode
+.I file
+.RI ...
+.PP
+.B chmod
+.RB [ -R " [" -H " | " -L " | " -P ]]
+.RB [ -dfh ]
+.BI --reference= rfile
+.I file
+.RI ...
+.SH DESCRIPTION
+The
+.B chmod
+utility changes mode bits on each specified
+.IR file .
+Modes may be numeric (octal) or symbolic.
+.PP
+Numeric modes set permissions directly (for example,
+.BR 755 ).
+Symbolic modes are evaluated with setmode/getmode semantics (for example,
+.BR u+rwx,g-w ).
+.PP
+When
+.B --reference
+is used,
+.B chmod
+copies mode bits from the reference file's
+.B st_mode
+permissions.
+.SH OPTIONS
+.TP
+.BR -R
+Recurse into directories.
+.TP
+.BR -H
+When used with
+.BR -R ,
+follow symbolic links given on the command line, but do not follow other
+symbolic links encountered during traversal.
+.TP
+.BR -L
+When used with
+.BR -R ,
+follow all symbolic links during traversal.
+.TP
+.BR -P
+Do not follow symbolic links during recursive traversal (default recursive
+policy).
+.TP
+.BR --reference= RFILE
+Use mode bits from
+.I RFILE
+instead of a mode operand.
+.TP
+.BR -d
+Change mode on directories only.
+Non-directory entries are skipped.
+.TP
+.BR -f
+Suppress most diagnostics. Errors still cause a nonzero exit status.
+.TP
+.BR -h
+Attempt to change the mode of symbolic links themselves instead of their
+targets.
+.SH SYMBOLIC MODES
+Symbolic modes support:
+.TP
+.B who
+One or more of
+.BR u ,
+.BR g ,
+.BR o ,
+.BR a .
+.TP
+.B operation
+One of
+.BR + ,
+.BR - ,
+.BR = .
+.TP
+.B permissions
+Any combination of
+.BR r ,
+.BR w ,
+.BR x ,
+.BR X ,
+.BR s ,
+.BR t ,
+.BR u ,
+.BR g ,
+.BR o .
+.PP
+The mode parser accepts comma-separated clauses and applies them in order.
+.SH ERROR HANDLING
+On per-path failure,
+.B chmod
+records failure, continues processing remaining operands, and exits nonzero.
+Error messages include the program name and target path unless
+.B -f
+is specified.
+.SH PORTABILITY NOTES
+On platforms where changing symbolic-link mode bits is unsupported,
+.B -h
+fails for symbolic links with a clear diagnostic and nonzero status.
+No destructive fallback is used.
+.SH EXIT STATUS
+.TP
+.B 0
+All requested mode changes succeeded (or were intentionally skipped by
+.BR -d ).
+.TP
+.B 1
+One or more operations failed.
+.SH EXAMPLES
+.TP
+.B chmod 755 file
+Set file permissions to rwxr-xr-x.
+.TP
+.B chmod u=rwX,g+rX,o-rwx -R project
+Recursively grant user read/write and conditional execute, grant group
+read/execute, and clear other permissions.
+.TP
+.B chmod -d 700 dir1 dir2 file
+Change only directories
+.B dir1
+and
+.BR dir2 ;
+skip
+.BR file .
+.TP
+.B chmod --reference=template.conf target.conf
+Apply mode bits from
+.B template.conf
+to
+.BR target.conf .
+.SH SEE ALSO
+.BR stat (2),
+.BR lstat (2),
+.BR readlink (2),
+.BR chown (1)
