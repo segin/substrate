@@ -162,7 +162,7 @@ static void cp_copy_acls(const struct cp_options *opts,
 #if defined(CP_HAVE_ACL)
     acl_t acl;
 
-    if (!opts->preserve_acl && !opts->preserve_all) {
+    if (!opts->preserve_acl && !opts->preserve_all && !opts->preserve_xattr) {
         return;
     }
 

@@ -49,6 +49,12 @@ Multi-column format.
 Comma-separated format.
 .It Fl x
 By-lines multi-column packing.
+.It Fl X
+Sort by file extension.
+.It Fl -ignore-case
+Sort names case-insensitively.
+.It Fl -group-directories-first
+List directories before non-directories during sorting.
 .It Fl i , -inode
 Print inode numbers.
 .It Fl s , -size
@@ -93,6 +99,8 @@ and
 Natural version sort.
 .It Fl R , -recursive
 Recursive depth-first directory traversal.
+.It Fl -one-file-system
+Do not recurse into directories on a different filesystem device.
 .It Fl -hide Ns = Ns Ar pattern
 Hide implied entries matching
 .Ar pattern
@@ -134,6 +142,8 @@ C-style quoted names.
 .It Fl -quoting-style Ns = Ns Ar word
 One of
 .Sy literal | shell | shell-always | c | escape .
+.It Fl @
+In long format, print extended attribute names beneath each entry when available.
 .It Fl -color Ns = Ns Ar when
 Color mode:
 .Sy never | auto | always .
@@ -197,6 +207,8 @@ uses locale collation
 for name ordering; target builds use bytewise comparison.
 .Pp
 Size/time/version sorts use name as a deterministic tie-breaker.
+.Pp
+Optional sort modes include case-insensitive, extension-based, and directories-first ordering.
 .Sh RECURSION
 Recursive mode is depth-first.
 Directory headers are printed before each subtree.
@@ -242,9 +254,18 @@ Developer notes:
 .It
 Column width is computed from rendered entry text width; color escapes are excluded from width math.
 .It
-Unicode width handling is conservative and degrades safely on non-Unicode libc targets.
+Unicode width uses UTF-8 decoding with
+.Fn wcwidth
+plus combining/CJK fallbacks for stable alignment.
 .It
 ACL/xattr indicators are best-effort and gracefully degrade when xattr APIs are unavailable.
+.It
+Machine-parseable output should prefer
+.Fl 1
+with
+.Fl -quoting-style Ns =literal
+or
+.Fl -quoting-style Ns =escape .
 .El
 .Sh SEE ALSO
 .Xr stat 2 ,

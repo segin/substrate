@@ -10,6 +10,8 @@ cp \- copy files and directories
 .RI [ \-l | \-s ]
 .RI [ \-b " bufsize ]"
 .RI [ \-\-sparse = MODE ]
+.RI [ \-\-reflink = WHEN ]
+.RI [ \-\-remove-destination ]
 .RI [ \-\-atomic-replace | \-\-no-atomic-replace ]
 .RI [ \-\-progress ]
 .RI SOURCE ... DEST
@@ -77,6 +79,16 @@ Preserve a comma-separated list: mode, ownership, timestamps, links, xattr, acl,
 .TP
 .BR "--sparse=" MODE
 Sparse policy: auto (default), always, or never.
+.TP
+.BR "--reflink=" WHEN
+Copy-on-write clone policy: never, auto, or always.
+When set to
+.B always
+and clone is unsupported, copy fails.
+.TP
+.B --remove-destination
+Remove an existing destination path before opening/writing the replacement.
+This replaces symlink paths themselves rather than writing through them.
 .TP
 .B --atomic-replace
 Enable temporary-file copy followed by rename for overwrite operations (default).

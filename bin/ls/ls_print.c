@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <wchar.h>
 
 #if defined(__has_include)
 #if __has_include(<sys/xattr.h>)
@@ -285,7 +286,13 @@ static char *quote_escape(const char *name, bool hide_controls) {
             continue;
         }
 
-        if (isspace(c) || c == '\\' || c == '\'' || c == '"') {
+        if (c == '\n') {
+            append_str(&buf, &len, &cap, "\\n", 2);
+        } else if (c == '\t') {
+            append_str(&buf, &len, &cap, "\\t", 2);
+        } else if (c == '\r') {
+            append_str(&buf, &len, &cap, "\\r", 2);
+        } else if (isspace(c) || c == '\\' || c == '\'' || c == '"') {
             append_char(&buf, &len, &cap, '\\');
             append_char(&buf, &len, &cap, (char)c);
         } else if (!isprint(c)) {
@@ -305,12 +312,78 @@ static char *quote_escape(const char *name, bool hide_controls) {
 
 static size_t display_width_utf8(const char *s) {
     size_t width = 0;
-    while (*s != '\0') {
-        unsigned char c = (unsigned char)*s++;
-        if ((c & 0xC0u) != 0x80u) {
-            width++;
+    const unsigned char *p = (const unsigned char *)s;
+
+    while (*p != '\0') {
+        uint32_t cp;
+        size_t step = 1;
+        int w = 1;
+
+        if ((p[0] & 0x80u) == 0) {
+            cp = p[0];
+            step = 1;
+        } else if ((p[0] & 0xE0u) == 0xC0u &&
+                   p[1] != '\0' &&
+                   (p[1] & 0xC0u) == 0x80u) {
+            cp = ((uint32_t)(p[0] & 0x1Fu) << 6) |
+                 (uint32_t)(p[1] & 0x3Fu);
+            step = 2;
+        } else if ((p[0] & 0xF0u) == 0xE0u &&
+                   p[1] != '\0' &&
+                   p[2] != '\0' &&
+                   (p[1] & 0xC0u) == 0x80u &&
+                   (p[2] & 0xC0u) == 0x80u) {
+            cp = ((uint32_t)(p[0] & 0x0Fu) << 12) |
+                 ((uint32_t)(p[1] & 0x3Fu) << 6) |
+                 (uint32_t)(p[2] & 0x3Fu);
+            step = 3;
+        } else if ((p[0] & 0xF8u) == 0xF0u &&
+                   p[1] != '\0' &&
+                   p[2] != '\0' &&
+                   p[3] != '\0' &&
+                   (p[1] & 0xC0u) == 0x80u &&
+                   (p[2] & 0xC0u) == 0x80u &&
+                   (p[3] & 0xC0u) == 0x80u) {
+            cp = ((uint32_t)(p[0] & 0x07u) << 18) |
+                 ((uint32_t)(p[1] & 0x3Fu) << 12) |
+                 ((uint32_t)(p[2] & 0x3Fu) << 6) |
+                 (uint32_t)(p[3] & 0x3Fu);
+            step = 4;
+        } else {
+            cp = p[0];
+            step = 1;
         }
+
+        if (cp <= 0x10FFFFu) {
+            int ww = wcwidth((wchar_t)cp);
+            if (ww >= 0) {
+                w = ww;
+            } else if ((cp >= 0x0300u && cp <= 0x036Fu) ||
+                       (cp >= 0x1AB0u && cp <= 0x1AFFu) ||
+                       (cp >= 0x1DC0u && cp <= 0x1DFFu) ||
+                       (cp >= 0x20D0u && cp <= 0x20FFu) ||
+                       (cp >= 0xFE20u && cp <= 0xFE2Fu)) {
+                w = 0;
+            } else if ((cp >= 0x1100u && cp <= 0x115Fu) ||
+                       (cp >= 0x2E80u && cp <= 0xA4CFu) ||
+                       (cp >= 0xAC00u && cp <= 0xD7A3u) ||
+                       (cp >= 0xF900u && cp <= 0xFAFFu) ||
+                       (cp >= 0xFE10u && cp <= 0xFE19u) ||
+                       (cp >= 0xFE30u && cp <= 0xFE6Fu) ||
+                       (cp >= 0xFF00u && cp <= 0xFF60u) ||
+                       (cp >= 0xFFE0u && cp <= 0xFFE6u)) {
+                w = 2;
+            } else {
+                w = 1;
+            }
+        }
+
+        if (w > 0) {
+            width += (size_t)w;
+        }
+        p += step;
     }
+
     return width;
 }
 
@@ -660,6 +733,40 @@ static char detect_attr_indicator(const file_info_t *f) {
     return ' ';
 }
 
+static void print_xattr_names(const file_info_t *f) {
+#if LS_HAVE_XATTR
+    ssize_t n = listxattr(f->full_path, NULL, 0);
+    if (n > 0) {
+        char *buf = (char *)malloc((size_t)n + 1);
+        if (buf != NULL) {
+            ssize_t got = listxattr(f->full_path, buf, (size_t)n);
+            if (got > 0) {
+                size_t i = 0;
+                int first = 1;
+                printf("\t");
+                while (i < (size_t)got) {
+                    const char *name = buf + i;
+                    size_t l = strlen(name);
+                    if (l == 0) {
+                        break;
+                    }
+                    if (!first) {
+                        printf(", ");
+                    }
+                    printf("%s", name);
+                    first = 0;
+                    i += l + 1;
+                }
+                printf("\n");
+            }
+            free(buf);
+        }
+    }
+#else
+    (void)f;
+#endif
+}
+
 static void format_mode_string(const file_info_t *f, char out[12]) {
     mode_t m = f->st.st_mode;
 
@@ -822,6 +929,9 @@ static void print_long(const char *label, file_info_t *files, size_t count,
             printf(" [loop]");
         }
         printf("\n");
+        if (config->list_xattr_names) {
+            print_xattr_names(&files[i]);
+        }
 
         free(plain);
         free(name);

@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,9 @@
 #endif
 #ifndef ELOOP
 #define ELOOP EINVAL
+#endif
+#ifndef PATH_MAX
+#define PATH_MAX 4096
 #endif
 
 #if defined(CP_HOST_BUILD) && defined(__has_include)
@@ -345,6 +349,94 @@ static int cp_remove_existing(const char *path, const struct stat *st)
         return rmdir(path);
     }
     return unlink(path);
+}
+
+static int cp_try_reflink_clone(int src_fd, int dst_fd)
+{
+#if defined(CP_HOST_BUILD) && defined(CP_HAVE_FICLONE)
+    if (ioctl(dst_fd, FICLONE, src_fd) == 0) {
+        return 0;
+    }
+    return -1;
+#else
+    (void)src_fd;
+    (void)dst_fd;
+    errno = EOPNOTSUPP;
+    return -1;
+#endif
+}
+
+static char *cp_realpath_existing(const char *path)
+{
+    char *resolved = (char *)malloc(PATH_MAX);
+    if (!resolved) {
+        return NULL;
+    }
+    if (!realpath(path, resolved)) {
+        free(resolved);
+        return NULL;
+    }
+    return resolved;
+}
+
+static char *cp_realpath_maybe_missing(const char *path)
+{
+    char *resolved = cp_realpath_existing(path);
+    if (resolved) {
+        return resolved;
+    }
+    if (errno != ENOENT) {
+        return NULL;
+    }
+
+    {
+        char *parent = cp_path_dirname(path);
+        const char *base = cp_path_basename(path);
+        char *parent_real;
+        char *joined;
+
+        if (!parent) {
+            return NULL;
+        }
+        parent_real = cp_realpath_existing(parent);
+        free(parent);
+        if (!parent_real) {
+            return NULL;
+        }
+        joined = cp_path_join(parent_real, base);
+        free(parent_real);
+        return joined;
+    }
+}
+
+static int cp_is_same_or_subpath(const char *root_path, const char *candidate_path)
+{
+    int result = 0;
+    char *root_real = cp_realpath_existing(root_path);
+    char *cand_real;
+    size_t root_len;
+
+    if (!root_real) {
+        return 0;
+    }
+
+    cand_real = cp_realpath_maybe_missing(candidate_path);
+    if (!cand_real) {
+        free(root_real);
+        return 0;
+    }
+
+    root_len = strlen(root_real);
+    if (strcmp(root_real, cand_real) == 0) {
+        result = 1;
+    } else if (strncmp(cand_real, root_real, root_len) == 0 &&
+               cand_real[root_len] == '/') {
+        result = 1;
+    }
+
+    free(root_real);
+    free(cand_real);
+    return result;
 }
 
 static ssize_t cp_read_retry(int fd, void *buf, size_t len)
@@ -788,6 +880,7 @@ static int cp_copy_regular(struct cp_context *ctx,
     int using_atomic = 0;
     mode_t create_mode = (src_st->st_mode & 0777);
     off_t bytes_copied = 0;
+    int used_reflink = 0;
 
     if (dst_exists && src_st->st_dev == dst_st->st_dev && src_st->st_ino == dst_st->st_ino) {
         cp_diag(ctx, src, dst, "source and destination are the same file", EINVAL);
@@ -827,6 +920,19 @@ static int cp_copy_regular(struct cp_context *ctx,
         return 0;
     }
 
+    if (dst_exists && S_ISDIR(dst_st->st_mode)) {
+        cp_diag(ctx, src, dst, "destination is a directory", EISDIR);
+        return -1;
+    }
+
+    if (dst_exists && ctx->opts->remove_destination) {
+        if (cp_remove_existing(dst, dst_st) != 0) {
+            cp_diag(ctx, src, dst, "remove existing destination", errno);
+            return -1;
+        }
+        dst_exists = 0;
+    }
+
     src_fd = open(src, O_RDONLY, 0);
     if (src_fd < 0) {
         cp_diag(ctx, src, dst, "open source", errno);
@@ -840,10 +946,6 @@ static int cp_copy_regular(struct cp_context *ctx,
         }
         using_atomic = 1;
     } else {
-        if (dst_exists && S_ISDIR(dst_st->st_mode)) {
-            cp_diag(ctx, src, dst, "destination is a directory", EISDIR);
-            goto out;
-        }
         dst_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, (int)create_mode);
         if (dst_fd < 0) {
             cp_diag(ctx, src, dst, "open destination", errno);
@@ -851,7 +953,17 @@ static int cp_copy_regular(struct cp_context *ctx,
         }
     }
 
-    if (ctx->opts->sparse_mode != CP_SPARSE_NEVER && src_st->st_size > 0) {
+    if (ctx->opts->reflink_mode != CP_REFLINK_NEVER) {
+        if (cp_try_reflink_clone(src_fd, dst_fd) == 0) {
+            used_reflink = 1;
+            bytes_copied = src_st->st_size;
+        } else if (ctx->opts->reflink_mode == CP_REFLINK_ALWAYS) {
+            cp_diag(ctx, src, dst, "reflink clone", errno);
+            goto out;
+        }
+    }
+
+    if (!used_reflink && ctx->opts->sparse_mode != CP_SPARSE_NEVER && src_st->st_size > 0) {
         off_t cur = lseek(src_fd, 0, SEEK_CUR);
         if (cur >= 0 && cp_copy_sparse_seek_hole(src_fd, dst_fd, src_st->st_size) == 0) {
             bytes_copied = src_st->st_size;
@@ -866,7 +978,7 @@ static int cp_copy_regular(struct cp_context *ctx,
                 goto out;
             }
         }
-    } else {
+    } else if (!used_reflink) {
 #ifdef CP_HOST_BUILD
         if (ctx->opts->sparse_mode == CP_SPARSE_NEVER && src_st->st_size > 0 &&
             cp_try_copy_file_range(src_fd, dst_fd, src_st->st_size) == 0) {
@@ -1083,6 +1195,10 @@ static int cp_copy_path(struct cp_context *ctx,
     }
 
     if (S_ISDIR(src_stat.st_mode)) {
+        if (cp_is_same_or_subpath(src, dst)) {
+            cp_diag(ctx, src, dst, "cannot copy a directory into itself", EINVAL);
+            return -1;
+        }
         return cp_copy_directory(ctx, src, &src_stat, dst, &dst_lstat, dst_exists);
     }
 

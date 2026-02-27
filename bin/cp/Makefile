@@ -58,13 +58,13 @@ fuzz:
 
 fuzz-run: fuzz
 	@if [ -x ./fuzz_opts_path ]; then \
-		td=$$(mktemp -d /tmp/cp_fuzz_opts.XXXXXX); \
+		td=$$(mktemp -d $${TMPDIR:-/tmp}/cp_fuzz_opts.XXXXXX); \
 		cp tests/fuzz/corpus_opts_path/* $$td/; \
 		./fuzz_opts_path -max_total_time=5 -max_len=1024 -rss_limit_mb=512 -verbosity=0 $$td; \
 		rm -rf $$td; \
 	fi
 	@if [ -x ./fuzz_sparse_preserve ]; then \
-		td=$$(mktemp -d /tmp/cp_fuzz_sparse.XXXXXX); \
+		td=$$(mktemp -d $${TMPDIR:-/tmp}/cp_fuzz_sparse.XXXXXX); \
 		cp tests/fuzz/corpus_sparse_preserve/* $$td/; \
 		./fuzz_sparse_preserve -max_total_time=5 -max_len=1024 -rss_limit_mb=512 -verbosity=0 $$td; \
 		rm -rf $$td; \

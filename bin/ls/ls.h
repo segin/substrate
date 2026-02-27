@@ -65,6 +65,9 @@ typedef struct {
     bool sort_time;
     bool no_sort;
     bool version_sort;
+    bool sort_extension;
+    bool sort_ignore_case;
+    bool dirs_first;
     ls_time_type_t time_type;
     ls_time_style_t time_style;
     const char *time_style_format;
@@ -79,6 +82,7 @@ typedef struct {
     long block_size;
 
     bool recursive;
+    bool one_file_system;
     const char *hide_pattern;
     ls_color_mode_t color;
     int term_width;
@@ -86,6 +90,7 @@ typedef struct {
     bool hide_control_chars;
     bool literal;
     ls_quote_mode_t quoting_style;
+    bool list_xattr_names;
 
     bool show_help;
     bool show_version;

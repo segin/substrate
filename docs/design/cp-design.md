@@ -36,6 +36,11 @@
 - Fallback scans read buffers and uses destination `lseek` for zero-only blocks.
 - Destination is truncated to source logical size when holes are used.
 
+### Reflink Handling
+- `--reflink=auto` attempts clone first (FICLONE on supported hosts), then falls back to regular copy.
+- `--reflink=always` requires clone support and fails if clone cannot be performed.
+- `--reflink=never` skips clone attempts.
+
 ### Performance Policy
 - Buffer size selection:
   - explicit `-b/--buffer-size` if provided;
@@ -56,6 +61,7 @@
   4. rename temp over destination.
   5. cleanup temp on any error.
 - Toggle with `--no-atomic-replace`.
+- `--remove-destination` removes destination path first (important for symlink replacement semantics).
 
 ## Security Notes
 - Uses path-based operations where portable descriptor-only APIs are unavailable.

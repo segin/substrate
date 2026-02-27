@@ -16,7 +16,8 @@ assert_exists() {
     [ -e "$1" ] || fail "missing path: $1"
 }
 
-WORK=$(mktemp -d /tmp/cp_int.XXXXXX)
+TMPBASE=${TMPDIR:-/tmp}
+WORK=$(mktemp -d "$TMPBASE/cp_int.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
 # file -> file
@@ -120,11 +121,35 @@ printf 'second' > "$WORK/nc_src"
 "$CP_BIN" -n "$WORK/nc_src" "$WORK/nc_dst"
 [ "$(cat "$WORK/nc_dst")" = "first" ] || fail "-n should not overwrite"
 
+# --remove-destination should replace symlink itself, not its target
+printf 'old-target' > "$WORK/rd_target"
+printf 'new-data' > "$WORK/rd_src"
+ln -s "$WORK/rd_target" "$WORK/rd_dst"
+"$CP_BIN" --remove-destination "$WORK/rd_src" "$WORK/rd_dst"
+[ ! -L "$WORK/rd_dst" ] || fail "--remove-destination should replace symlink path"
+[ "$(cat "$WORK/rd_dst")" = "new-data" ] || fail "--remove-destination data mismatch"
+[ "$(cat "$WORK/rd_target")" = "old-target" ] || fail "--remove-destination should not overwrite symlink target"
+
 # interactive non-tty default no
 printf 'orig' > "$WORK/i_dst"
 printf 'new' > "$WORK/i_src"
 "$CP_BIN" -i "$WORK/i_src" "$WORK/i_dst" < /dev/null
 [ "$(cat "$WORK/i_dst")" = "orig" ] || fail "-i should default no on non-tty"
+
+# recursive self-copy guard
+mkdir -p "$WORK/self/src"
+printf 'self' > "$WORK/self/src/file"
+if "$CP_BIN" -R "$WORK/self/src" "$WORK/self/src/subdir" 2>/dev/null; then
+    fail "recursive self-copy should fail"
+fi
+
+# --reflink semantics
+printf 'reflink-data' > "$WORK/reflink_src"
+"$CP_BIN" --reflink=auto "$WORK/reflink_src" "$WORK/reflink_auto"
+assert_file_eq "$WORK/reflink_src" "$WORK/reflink_auto"
+if "$CP_BIN" --reflink=always "$WORK/reflink_src" "$WORK/reflink_always" 2>/dev/null; then
+    assert_file_eq "$WORK/reflink_src" "$WORK/reflink_always"
+fi
 
 # cross-filesystem hardlink failure (best effort)
 if [ -d /dev/shm ]; then

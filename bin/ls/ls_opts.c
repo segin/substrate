@@ -165,12 +165,16 @@ void ls_print_usage(const char *prog) {
     printf("  -n, --numeric-uid-gid      like -l, but show numeric user/group IDs\n");
     printf("  -r, --reverse              reverse order while sorting\n");
     printf("  -S                         sort by file size, largest first\n");
+    printf("  -X                         sort by file extension\n");
     printf("  -t                         sort by time, newest first\n");
     printf("  -u                         with -lt: sort by, and show, access time\n");
     printf("  -c                         with -lt: sort by, and show, status change time\n");
     printf("  -U                         do not sort; list entries in directory order\n");
     printf("  -f                         do not sort, enable -aU, disable -ls and color\n");
     printf("  -v                         natural sort of version numbers within text\n");
+    printf("      --ignore-case          ignore case while sorting names\n");
+    printf("      --group-directories-first\n");
+    printf("                             group directories before files\n");
     printf("  -L, --dereference          follow symlinks and show target metadata\n");
     printf("  -H                         follow symlinks listed on command line only\n");
     printf("  -h, --human-readable       print sizes in human readable format\n");
@@ -183,6 +187,7 @@ void ls_print_usage(const char *prog) {
     printf("      --file-type            like -F, but do not append *\n");
     printf("  -i, --inode                print inode number of each file\n");
     printf("  -R, --recursive            list subdirectories recursively\n");
+    printf("      --one-file-system      do not recurse across filesystem boundaries\n");
     printf("      --hide=PATTERN         hide implied entries matching PATTERN in -R\n");
     printf("      --color=WHEN           colorize output; WHEN=never,auto,always\n");
     printf("  -w, --width=COLS           set output width\n");
@@ -192,6 +197,7 @@ void ls_print_usage(const char *prog) {
     printf("      --show-control-chars   show control chars as-is (default)\n");
     printf("  -N, --literal              print raw entry names\n");
     printf("  -Q, --quote-name           enclose entry names in double quotes\n");
+    printf("  -@                         display extended attribute names\n");
     printf("      --quoting-style=WORD   literal,shell,shell-always,c,escape\n");
     printf("      --help                 display this help and exit\n");
     printf("      --version              output version information and exit\n");
@@ -269,6 +275,8 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                     config->reverse = true;
                 } else if (name_len == 9 && strncmp(arg + 2, "recursive", 9) == 0) {
                     config->recursive = true;
+                } else if (name_len == 15 && strncmp(arg + 2, "one-file-system", 15) == 0) {
+                    config->one_file_system = true;
                 } else if (name_len == 4 && strncmp(arg + 2, "hide", 4) == 0) {
                     if (value == NULL && i + 1 < argc) {
                         value = argv[++i];
@@ -284,6 +292,10 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                     config->si_units = true;
                 } else if (name_len == 9 && strncmp(arg + 2, "file-type", 9) == 0) {
                     config->file_type = true;
+                } else if (name_len == 11 && strncmp(arg + 2, "ignore-case", 11) == 0) {
+                    config->sort_ignore_case = true;
+                } else if (name_len == 23 && strncmp(arg + 2, "group-directories-first", 23) == 0) {
+                    config->dirs_first = true;
                 } else if (name_len == 10 && strncmp(arg + 2, "block-size", 10) == 0) {
                     long size;
                     if (value == NULL && i + 1 < argc) {
@@ -450,6 +462,9 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                         case 'Q':
                             config->quote_names = true;
                             break;
+                        case '@':
+                            config->list_xattr_names = true;
+                            break;
                         case 'r':
                             config->reverse = true;
                             break;
@@ -461,6 +476,9 @@ int ls_parse_opts(int argc, char **argv, ls_config_t *config, char ***files, int
                             break;
                         case 'S':
                             config->sort_size = true;
+                            break;
+                        case 'X':
+                            config->sort_extension = true;
                             break;
                         case 't':
                             config->sort_time = true;

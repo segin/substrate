@@ -4039,29 +4039,29 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Man page: `sysctl(2)`.
 
 ### 6b. Editline Library (`lib/edit`)
-- [ ] **Core Foundation:**
-    - [ ] Create `lib/edit/` directory structure.
-    - [ ] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: Initialize editline state.
-    - [ ] Implement `el_end(EditLine *el)`: Clean up editline state.
-    - [ ] Implement `el_reset(EditLine *el)`: Reset state to defaults.
-    - [ ] Define internal structures for line state, terminal state, and key-bindings.
+- [x] **Core Foundation:**
+    - [x] Create `lib/edit/` directory structure.
+    - [x] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: Initialize editline state.
+    - [x] Implement `el_end(EditLine *el)`: Clean up editline state.
+    - [x] Implement `el_reset(EditLine *el)`: Reset state to defaults.
+    - [x] Define internal structures for line state, terminal state, and key-bindings.
 - [ ] **Line Editing Engine:**
-    - [ ] Implement line buffer management (insertion, deletion, navigation).
-    - [ ] Implement Emacs-style key-bindings (default).
+    - [x] Implement line buffer management (insertion, deletion, navigation).
+    - [x] Implement Emacs-style key-bindings (default).
     - [ ] Implement Vi-style navigation and insertion modes.
     - [ ] Implement UTF-8 support for line editing and navigation.
-- [ ] **Terminal & I/O Handling:**
-    - [ ] Implement basic termcap/terminfo query support for cursor movement and clearing.
-    - [ ] Implement raw mode switching for the tty.
+- [x] **Terminal & I/O Handling:**
+    - [x] Implement basic termcap/terminfo query support for cursor movement and clearing.
+    - [x] Implement raw mode switching for the tty.
     - [ ] Handle window resize signals (`SIGWINCH`) and recalculate layout.
     - [ ] Implement signal handling (SIGINT, SIGQUIT, SIGTSTP) during `el_gets`.
 - [ ] **Command & Variable Interface:**
-    - [ ] Implement `el_set()` and `el_get()` for configuration (e.g., editors, prompts, signals).
+    - [x] Implement `el_set()` and `el_get()` for configuration (e.g., editors, prompts, signals).
     - [ ] Implement `el_source()` to parse and execute `.editrc` commands.
-    - [ ] Implement builtin editor commands (backward-char, forward-word, etc.).
-- [ ] **History Management:**
-    - [ ] Implement `history_init()` and `history_end()`.
-    - [ ] Implement `history()` interface for adding, searching, and traversing history.
+    - [x] Implement builtin editor commands (backward-char, forward-word, etc.).
+- [x] **History Management:**
+    - [x] Implement `history_init()` and `history_end()`.
+    - [x] Implement `history()` interface for adding, searching, and traversing history.
     - [ ] Support loading and saving history to/from files.
 - [ ] **Testing:**
     - [ ] **Unit Tests:**
@@ -4277,7 +4277,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Document color/attribute codes.
                 - [x] Document limits (depth, length, etc).
 - [ ] **Core Utilities:**
-    - [ ] **`ls` - List directory contents (Production Quality Rewrite):**
+    - [x] **`ls` - List directory contents (Production Quality Rewrite):**
         - [x] **Audit & Refactor Existing Code:**
             - [x] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
             - [x] Document all functionality gaps and bugs.
@@ -4392,92 +4392,92 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Show `-> target` in long listing.
             - [x] Handle broken symlinks gracefully (show with error indicator).
             - [x] Detect symlink loops and report error.
-        - [ ] **Recursive Traversal (`-R`):**
+        - [x] **Recursive Traversal (`-R`):**
             - [x] Implement depth-first traversal.
             - [x] Print directory header for each subdirectory.
             - [x] Handle permission denied on subdirs (warn and continue).
             - [x] Implement cycle detection (detect hardlink loops and symlink loops).
-            - [ ] Option to not cross filesystem boundaries (`--one-file-system`/`-x` GNU ext).
+            - [x] Option to not cross filesystem boundaries (`--one-file-system`/`-x` GNU ext).
             - [x] Respect `-d` to not recurse even with `-R`.
-        - [ ] **Sorting & Collation:**
+        - [x] **Sorting & Collation:**
             - [x] Implement name sort (default, case-sensitive).
-            - [ ] Implement case-insensitive name sort (locale-aware).
+            - [x] Implement case-insensitive name sort (locale-aware).
             - [x] Implement size sort (`-S`).
             - [x] Implement time sort (`-t`, `-u`, `-c`).
-            - [ ] Implement extension sort (`-X` GNU ext).
+            - [x] Implement extension sort (`-X` GNU ext).
             - [x] Implement version sort (`-v`).
             - [x] Implement reverse sort (`-r`).
             - [x] Implement no-sort (`-U`, `-f`).
             - [x] Use stable sort with tie-breakers (name as secondary).
-            - [ ] Locale-aware collation via `strcoll()`.
-            - [ ] Directories first option (GNU ext).
-        - [ ] **Column/Width Layout:**
+            - [x] Locale-aware collation via `strcoll()`.
+            - [x] Directories first option (GNU ext).
+        - [x] **Column/Width Layout:**
             - [x] Calculate printable width of each filename.
             - [x] Account for ANSI color escape sequences (non-printing).
-            - [ ] Account for combining characters (zero-width).
-            - [ ] Account for wide characters (CJK, double-width).
-            - [ ] Use `wcwidth()` / `wcswidth()` for Unicode handling.
+            - [x] Account for combining characters (zero-width).
+            - [x] Account for wide characters (CJK, double-width).
+            - [x] Use `wcwidth()` / `wcswidth()` for Unicode handling.
             - [x] Pack columns to fit terminal width.
             - [x] Handle filenames wider than terminal width.
             - [x] Align columns consistently.
-        - [ ] **Permissions/ACLs/Extended Attributes:**
+        - [x] **Permissions/ACLs/Extended Attributes:**
             - [x] Detect ACLs via `acl_get_file()` or `getxattr("system.posix_acl_access")`.
             - [x] Show `+` suffix on mode string when ACLs present.
             - [x] Detect extended attributes via `listxattr()`.
             - [x] Show `@` suffix when xattrs present (macOS style).
             - [x] Fallback gracefully when ACL/xattr APIs unavailable.
-            - [ ] Option to list xattr names (`-@` BSD ext).
+            - [x] Option to list xattr names (`-@` BSD ext).
         - [x] **User/Group Name Caching:**
             - [x] Implement UID->username cache.
             - [x] Implement GID->groupname cache.
             - [x] Handle missing users/groups (print numeric ID).
             - [x] Limit cache size to prevent memory bloat.
-        - [ ] **Error Handling:**
+        - [x] **Error Handling:**
             - [x] Per-file errors: warn and continue.
             - [x] Directory open errors: warn and continue to next arg.
             - [x] Memory allocation failures: exit with proper code.
             - [x] Exit code 0: success.
             - [x] Exit code 1: minor problems (cannot access file).
             - [x] Exit code 2: serious trouble (cannot access command-line arg).
-            - [ ] Never crash on any input.
-        - [ ] **Performance:**
-            - [ ] Minimize syscalls: batch `stat()` calls where possible.
+            - [x] Never crash on any input.
+        - [x] **Performance:**
+            - [x] Minimize syscalls: batch `stat()` calls where possible.
             - [x] Use `lstat()` by default; only `stat()` when `-L`.
-            - [ ] Consider `fts(3)` or custom traversal for `-R`.
-            - [ ] Buffer output for efficiency.
+            - [x] Consider `fts(3)` or custom traversal for `-R`.
+            - [x] Buffer output for efficiency.
             - [x] Avoid repeated `getpwuid()`/`getgrgid()` via caching.
-            - [ ] Profile with large directories (10K+ entries).
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Test mode string formatting for all file types.
-                - [ ] Test mode string with setuid/setgid/sticky.
-                - [ ] Test size formatting (bytes, KB, MB, GB, TB).
-                - [ ] Test human-readable size formatting.
-                - [ ] Test timestamp formatting (recent vs old).
-                - [ ] Test column width calculation.
-                - [ ] Test sorting algorithms (all modes).
-                - [ ] Test collation with locale.
-            - [ ] **Integration Tests:**
+            - [x] Profile with large directories (10K+ entries).
+        - [x] **Tests:**
+            - [x] **Unit Tests:**
+                - [x] Test mode string formatting for all file types.
+                - [x] Test mode string with setuid/setgid/sticky.
+                - [x] Test size formatting (bytes, KB, MB, GB, TB).
+                - [x] Test human-readable size formatting.
+                - [x] Test timestamp formatting (recent vs old).
+                - [x] Test column width calculation.
+                - [x] Test sorting algorithms (all modes).
+                - [x] Test collation with locale.
+            - [x] **Integration Tests:**
                 - [x] Empty directory.
                 - [x] Directory with hidden files.
                 - [x] Directory with symlinks (valid and broken).
-                - [ ] Directory with special files (devices, sockets, FIFOs).
+                - [x] Directory with special files (devices, sockets, FIFOs).
                 - [x] Deep directory tree (`-R`).
-                - [ ] Large directory (1000+ files).
-                - [ ] Permission denied scenarios.
+                - [x] Large directory (1000+ files).
+                - [x] Permission denied scenarios.
                 - [x] Symlink loops.
-                - [ ] Files with spaces, quotes, newlines in names.
-                - [ ] Mixed sorting criteria.
-            - [ ] **Property Tests:**
-                - [ ] Random filenames don't crash (fuzzing).
-                - [ ] Binary characters in filenames handled.
-                - [ ] Control characters handled.
-                - [ ] Unicode filenames (combining chars, CJK).
-                - [ ] Very long filenames (PATH_MAX-1).
-            - [ ] **Acceptance Tests:**
+                - [x] Files with spaces, quotes, newlines in names.
+                - [x] Mixed sorting criteria.
+            - [x] **Property Tests:**
+                - [x] Random filenames don't crash (fuzzing).
+                - [x] Binary characters in filenames handled.
+                - [x] Control characters handled.
+                - [x] Unicode filenames (combining chars, CJK).
+                - [x] Very long filenames (PATH_MAX-1).
+            - [x] **Acceptance Tests:**
                 - [x] `ls` empty directory -> empty output.
                 - [x] `ls -a` -> shows `.` and `..`.
-                - [ ] `ls -l` -> correct 9-column output.
+                - [x] `ls -l` -> correct 9-column output.
                 - [x] `ls -lh` -> human sizes (K, M, G).
                 - [x] `ls -R` -> descends into subdirectories.
                 - [x] `ls -lS` -> sorted by size descending.
@@ -4493,223 +4493,223 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Document width calculation algorithm (developer notes).
             - [x] Document locale/Unicode handling (developer notes).
             - [x] Document ACL/xattr detection (developer notes).
-        - [ ] **Accessibility & Machine Parsing:**
+        - [x] **Accessibility & Machine Parsing:**
             - [x] Document `-1` for machine-parseable output.
             - [x] Document `--quoting-style` for safe parsing.
-            - [ ] Ensure no extra whitespace or formatting breaks parsing.
-            - [ ] Test with common UNIX text processing tools (`awk`, `cut`).
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented and tested.
+            - [x] Ensure no extra whitespace or formatting breaks parsing.
+            - [x] Test with common UNIX text processing tools (`awk`, `cut`).
+        - [x] **Acceptance Criteria:**
+            - [x] All CLI options implemented and tested.
             - [x] Long format matches expected field layout.
             - [x] Sorting produces correct order for all modes.
-            - [ ] No crashes on any valid or malformed filenames.
-            - [ ] Handles directories with 100K+ entries without OOM.
+            - [x] No crashes on any valid or malformed filenames.
+            - [x] Handles directories with 100K+ entries without OOM.
             - [x] Color output respects terminal capabilities.
             - [x] Exit codes match documented behavior.
             - [x] Man page complete and accurate.
-            - [ ] All tests pass in CI.
-    - [ ] **`cp` - Copy files and directories (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/cp/cp.c` for TODO comments, fragile code, and incomplete features.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture with separate files.
-            - [ ] Extract option parsing into `cp_opts.c` and `cp_opts.h`.
-            - [ ] Extract copy engine into `cp_copy.c` and `cp_copy.h`.
-            - [ ] Extract metadata preservation into `cp_preserve.c` and `cp_preserve.h`.
-            - [ ] Extract atomic replace logic into `cp_atomic.c` and `cp_atomic.h`.
-            - [ ] Write unit tests for each extracted module.
-        - [ ] **Basic CLI Options:**
-            - [ ] `-r`, `-R`, `--recursive`: Copy directories recursively.
-            - [ ] `-f`, `--force`: Force overwrite, remove destination if needed.
-            - [ ] `-i`, `--interactive`: Prompt before overwrite.
-            - [ ] `-n`, `--no-clobber`: Do not overwrite existing files.
-            - [ ] `-v`, `--verbose`: Explain what is being done.
-            - [ ] `-d`: Same as `--no-dereference --preserve=links`.
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Preservation Options:**
-            - [ ] `-p`: Preserve mode, ownership, timestamps.
-            - [ ] `-a`, `--archive`: Same as `-dR --preserve=all`.
-            - [ ] `--preserve=LIST`: Preserve specified attributes.
-                - [ ] `--preserve=mode`: Preserve file mode bits.
-                - [ ] `--preserve=ownership`: Preserve owner and group.
-                - [ ] `--preserve=timestamps`: Preserve atime and mtime.
-                - [ ] `--preserve=links`: Preserve hard links in source tree.
-                - [ ] `--preserve=xattr`: Preserve extended attributes.
-                - [ ] `--preserve=all`: All of the above.
-            - [ ] `--no-preserve=LIST`: Do not preserve specified attributes.
-        - [ ] **Link Options:**
-            - [ ] `-l`, `--link`: Create hard links instead of copying.
-            - [ ] `-s`, `--symbolic-link`: Create symbolic links instead of copying.
-            - [ ] `-L`, `--dereference`: Always follow symlinks in source.
-            - [ ] `-P`, `--no-dereference`: Never follow symlinks (default).
-            - [ ] `-H`: Follow symlinks on command line only.
-        - [ ] **Sparse File Options:**
-            - [ ] `--sparse=auto`: Detect and create sparse files automatically (default).
-            - [ ] `--sparse=always`: Always create sparse files (even for regular data).
-            - [ ] `--sparse=never`: Never create sparse files.
-            - [ ] Implement `SEEK_DATA`/`SEEK_HOLE` for hole detection.
-            - [ ] Fallback to zero-block detection when `SEEK_HOLE` unavailable.
-        - [ ] **Buffer & Performance Options:**
-            - [ ] `-b SIZE`, `--buffer-size=SIZE`: Set IO buffer size.
-            - [ ] Default buffer size (64KB or configurable).
-            - [ ] Use `copy_file_range()` when available and beneficial.
-            - [ ] Use `sendfile()` as optimization on Linux.
-            - [ ] Fallback to portable `read()`/`write()` loop.
-            - [ ] Profile and tune buffer sizes for various file sizes.
-        - [ ] **Backup Options:**
-            - [ ] `-b`, `--backup`: Make backup of each existing destination file.
-            - [ ] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never).
-            - [ ] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`).
-        - [ ] **Target Directory Options:**
-            - [ ] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Copy all sources into target dir.
-            - [ ] `-T`, `--no-target-directory`: Treat destination as normal file.
-        - [ ] **Miscellaneous Options:**
-            - [ ] `--reflink=WHEN`: Control clone/CoW (auto, always, never).
-            - [ ] `--remove-destination`: Remove existing dest files before copy.
-            - [ ] `-u`, `--update`: Copy only when source is newer or dest missing.
-        - [ ] **Basic Copy Operations:**
-            - [ ] **Single File to File:**
-                - [ ] Create destination file with correct mode.
-                - [ ] Copy data from source to destination.
-                - [ ] Preserve metadata as requested.
-                - [ ] Handle existing destination per flags.
-            - [ ] **Multiple Files to Directory:**
-                - [ ] Verify destination is a directory.
-                - [ ] Construct destination paths correctly.
-                - [ ] Process each source file.
-                - [ ] Handle errors per-file (warn and continue).
-            - [ ] **Directory Recursion (`-R`/`-a`):**
-                - [ ] Create destination directory structure.
-                - [ ] Traverse source directory depth-first.
-                - [ ] Copy regular files, symlinks, devices, FIFOs.
-                - [ ] Preserve directory permissions after contents copied.
-                - [ ] Handle permission denied (warn and continue).
-        - [ ] **Atomic Replace:**
-            - [ ] Create temporary file in destination directory.
-            - [ ] Use unique naming (`.cp.XXXXXX` pattern).
-            - [ ] Copy all data to temporary file.
-            - [ ] Set correct permissions on temporary file.
-            - [ ] Call `fsync()` on file descriptor.
-            - [ ] `rename()` temporary file to destination.
-            - [ ] Handle rename failure (cross-device, permissions).
-            - [ ] Clean up temporary file on any failure.
-            - [ ] Atomic replace for regular files only.
-        - [ ] **Hardlink Graph Preservation:**
-            - [ ] Detect when multiple source files are hard links to same inode.
-            - [ ] Maintain map of (source_dev, source_ino) -> destination_path.
-            - [ ] On second encounter, create hard link to first copy.
-            - [ ] Efficient hash map implementation for large trees.
-            - [ ] Handle cross-device scenarios (cannot preserve links).
-        - [ ] **Extended Attributes & ACLs:**
-            - [ ] Detect platform support for xattrs (`getxattr()`, `setxattr()`).
-            - [ ] List source file xattrs with `listxattr()`.
-            - [ ] Copy each xattr to destination.
-            - [ ] Handle xattr size limits.
-            - [ ] Detect platform support for ACLs.
-            - [ ] Copy ACLs when `--preserve=all` or `--preserve=xattr`.
-            - [ ] Graceful degradation when APIs unavailable.
-            - [ ] Warn when preservation fails (non-fatal).
-        - [ ] **Special Files:**
-            - [ ] **Symlinks:** Copy link target or create symlink based on flags.
-            - [ ] **Block Devices:** Use `mknod()` with `-R`.
-            - [ ] **Character Devices:** Use `mknod()` with `-R`.
-            - [ ] **FIFOs:** Use `mkfifo()` with `-R`.
-            - [ ] **Sockets:** Skip or warn (cannot copy).
-        - [ ] **Cross-Device Handling:**
-            - [ ] Detect cross-device copy (stat source and dest dirs).
-            - [ ] `-l` (hardlink) fails across devices with clear error.
-            - [ ] `-s` (symlink) works across devices.
-            - [ ] Regular copy works across devices.
-            - [ ] Hardlink preservation fails across devices (warn).
-        - [ ] **Error Handling & Robustness:**
-            - [ ] Handle `EINTR` during read/write (retry).
-            - [ ] Handle partial writes (continue from where left off).
-            - [ ] Handle `ENOSPC` (disk full) gracefully.
-            - [ ] Handle `EDQUOT` (quota exceeded) gracefully.
-            - [ ] Clean up partial destination on failure.
-            - [ ] Signal handling: catch SIGINT/SIGTERM, cleanup, exit.
-            - [ ] Write robust signal-safe cleanup routines.
-            - [ ] Exit code 0: success.
-            - [ ] Exit code 1: some files could not be copied.
-            - [ ] Never crash on any input.
-        - [ ] **Path Handling:**
-            - [ ] No fixed-size path buffers (use dynamic allocation).
-            - [ ] Hygienic path joining (handle trailing slashes).
-            - [ ] Detect and reject self-copy attempts.
-            - [ ] Handle paths with special characters.
-            - [ ] Handle paths at `PATH_MAX` limit.
-        - [ ] **Permission & Ownership Handling:**
-            - [ ] Create destination with source mode (masked by umask initially).
-            - [ ] After copy complete, chmod to exact source mode.
-            - [ ] If root, chown to source owner:group.
-            - [ ] If not root, preserve group if possible.
-            - [ ] Warn if ownership cannot be preserved.
-            - [ ] Handle setuid/setgid bits correctly.
-        - [ ] **Timestamp Preservation:**
-            - [ ] Read source atime and mtime.
-            - [ ] Use `utimensat()` for nanosecond precision.
-            - [ ] Fallback to `utimes()` if needed.
-            - [ ] Preserve timestamps after all data written.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Test atomic replace helper.
-                - [ ] Test sparse file detection.
-                - [ ] Test hardlink map operations.
-                - [ ] Test path joining logic.
-                - [ ] Test metadata preservation helpers.
-                - [ ] Test buffer allocation.
-            - [ ] **Integration Tests:**
-                - [ ] Copy single file to new file.
-                - [ ] Copy single file to existing file.
-                - [ ] Copy multiple files to directory.
-                - [ ] Copy directory recursively.
-                - [ ] Copy with `-p` (permissions preserved).
-                - [ ] Copy with `-a` (archive mode).
-                - [ ] Copy hardlinked files (links preserved).
-                - [ ] Copy sparse files (holes preserved).
-                - [ ] Copy symlinks with `-d` and `-L`.
-                - [ ] Copy special files (devices, FIFOs).
-                - [ ] Copy files with xattrs.
-                - [ ] Copy across filesystems.
-                - [ ] Handle permission denied.
-                - [ ] Handle disk full.
-                - [ ] Handle self-copy attempt.
-            - [ ] **Property Tests:**
-                - [ ] Random file content survives copy.
-                - [ ] Random metadata preserved correctly.
-                - [ ] Random directory structures copy correctly.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz path handling with binary filenames.
-                - [ ] Fuzz metadata parsing.
-                - [ ] Fuzz option parsing.
-            - [ ] **Acceptance Tests:**
-                - [ ] `cp file1 file2` -> file2 identical to file1.
-                - [ ] `cp -r dir1 dir2` -> dir2 contains copy of dir1.
-                - [ ] `cp -a` -> timestamps, permissions, links preserved.
-                - [ ] `cp -i existing` -> prompts user.
-                - [ ] `cp -n existing` -> skips overwrite.
-                - [ ] `cp -l` -> creates hard links.
-                - [ ] `cp -s` -> creates symlinks.
-                - [ ] Atomic replace verified (no partial files on interrupt).
-        - [ ] **Documentation:**
-            - [ ] Write `cp(1)` man page covering all options.
-            - [ ] Document preservation behavior in detail.
-            - [ ] Document sparse file handling.
-            - [ ] Document atomic replace mechanism.
-            - [ ] Write developer design doc for data flow.
-            - [ ] Document hardlink preservation algorithm.
-            - [ ] Document cross-device handling.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented and tested.
-            - [ ] Atomic replace demonstrated (no partial files).
-            - [ ] Hardlink preservation works for multi-file inputs.
-            - [ ] Sparse files copied efficiently.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Correct behavior across all flag combinations.
-            - [ ] Exit codes match documented behavior.
-            - [ ] Man page complete and accurate.
-            - [ ] All tests pass in CI.
+            - [x] All tests pass in CI.
+    - [x] **`cp` - Copy files and directories (Production Quality Rewrite):**
+        - [x] **Audit & Refactor Existing Code:**
+            - [x] Audit existing `bin/cp/cp.c` for TODO comments, fragile code, and incomplete features.
+            - [x] Document all functionality gaps and bugs.
+            - [x] Create refactoring plan: modular architecture with separate files.
+            - [x] Extract option parsing into `cp_opts.c` and `cp_opts.h`.
+            - [x] Extract copy engine into `cp_copy.c` and `cp_copy.h`.
+            - [x] Extract metadata preservation into `cp_preserve.c` and `cp_preserve.h`.
+            - [x] Extract atomic replace logic into `cp_atomic.c` and `cp_atomic.h`.
+            - [x] Write unit tests for each extracted module.
+        - [x] **Basic CLI Options:**
+            - [x] `-r`, `-R`, `--recursive`: Copy directories recursively.
+            - [x] `-f`, `--force`: Force overwrite, remove destination if needed.
+            - [x] `-i`, `--interactive`: Prompt before overwrite.
+            - [x] `-n`, `--no-clobber`: Do not overwrite existing files.
+            - [x] `-v`, `--verbose`: Explain what is being done.
+            - [x] `-d`: Same as `--no-dereference --preserve=links`.
+            - [x] `--help`: Display help and exit.
+            - [x] `--version`: Display version and exit.
+        - [x] **Preservation Options:**
+            - [x] `-p`: Preserve mode, ownership, timestamps.
+            - [x] `-a`, `--archive`: Same as `-dR --preserve=all`.
+            - [x] `--preserve=LIST`: Preserve specified attributes.
+                - [x] `--preserve=mode`: Preserve file mode bits.
+                - [x] `--preserve=ownership`: Preserve owner and group.
+                - [x] `--preserve=timestamps`: Preserve atime and mtime.
+                - [x] `--preserve=links`: Preserve hard links in source tree.
+                - [x] `--preserve=xattr`: Preserve extended attributes.
+                - [x] `--preserve=all`: All of the above.
+            - [x] `--no-preserve=LIST`: Do not preserve specified attributes.
+        - [x] **Link Options:**
+            - [x] `-l`, `--link`: Create hard links instead of copying.
+            - [x] `-s`, `--symbolic-link`: Create symbolic links instead of copying.
+            - [x] `-L`, `--dereference`: Always follow symlinks in source.
+            - [x] `-P`, `--no-dereference`: Never follow symlinks (default).
+            - [x] `-H`: Follow symlinks on command line only.
+        - [x] **Sparse File Options:**
+            - [x] `--sparse=auto`: Detect and create sparse files automatically (default).
+            - [x] `--sparse=always`: Always create sparse files (even for regular data).
+            - [x] `--sparse=never`: Never create sparse files.
+            - [x] Implement `SEEK_DATA`/`SEEK_HOLE` for hole detection.
+            - [x] Fallback to zero-block detection when `SEEK_HOLE` unavailable.
+        - [x] **Buffer & Performance Options:**
+            - [x] `-b SIZE`, `--buffer-size=SIZE`: Set IO buffer size.
+            - [x] Default buffer size (64KB or configurable).
+            - [x] Use `copy_file_range()` when available and beneficial.
+            - [x] Use `sendfile()` as optimization on Linux.
+            - [x] Fallback to portable `read()`/`write()` loop.
+            - [x] Profile and tune buffer sizes for various file sizes.
+        - [x] **Backup Options:**
+            - [x] `-b`, `--backup`: Make backup of each existing destination file.
+            - [x] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never).
+            - [x] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`).
+        - [x] **Target Directory Options:**
+            - [x] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Copy all sources into target dir.
+            - [x] `-T`, `--no-target-directory`: Treat destination as normal file.
+        - [x] **Miscellaneous Options:**
+            - [x] `--reflink=WHEN`: Control clone/CoW (auto, always, never).
+            - [x] `--remove-destination`: Remove existing dest files before copy.
+            - [x] `-u`, `--update`: Copy only when source is newer or dest missing.
+        - [x] **Basic Copy Operations:**
+            - [x] **Single File to File:**
+                - [x] Create destination file with correct mode.
+                - [x] Copy data from source to destination.
+                - [x] Preserve metadata as requested.
+                - [x] Handle existing destination per flags.
+            - [x] **Multiple Files to Directory:**
+                - [x] Verify destination is a directory.
+                - [x] Construct destination paths correctly.
+                - [x] Process each source file.
+                - [x] Handle errors per-file (warn and continue).
+            - [x] **Directory Recursion (`-R`/`-a`):**
+                - [x] Create destination directory structure.
+                - [x] Traverse source directory depth-first.
+                - [x] Copy regular files, symlinks, devices, FIFOs.
+                - [x] Preserve directory permissions after contents copied.
+                - [x] Handle permission denied (warn and continue).
+        - [x] **Atomic Replace:**
+            - [x] Create temporary file in destination directory.
+            - [x] Use unique naming (`.cp.XXXXXX` pattern).
+            - [x] Copy all data to temporary file.
+            - [x] Set correct permissions on temporary file.
+            - [x] Call `fsync()` on file descriptor.
+            - [x] `rename()` temporary file to destination.
+            - [x] Handle rename failure (cross-device, permissions).
+            - [x] Clean up temporary file on any failure.
+            - [x] Atomic replace for regular files only.
+        - [x] **Hardlink Graph Preservation:**
+            - [x] Detect when multiple source files are hard links to same inode.
+            - [x] Maintain map of (source_dev, source_ino) -> destination_path.
+            - [x] On second encounter, create hard link to first copy.
+            - [x] Efficient hash map implementation for large trees.
+            - [x] Handle cross-device scenarios (cannot preserve links).
+        - [x] **Extended Attributes & ACLs:**
+            - [x] Detect platform support for xattrs (`getxattr()`, `setxattr()`).
+            - [x] List source file xattrs with `listxattr()`.
+            - [x] Copy each xattr to destination.
+            - [x] Handle xattr size limits.
+            - [x] Detect platform support for ACLs.
+            - [x] Copy ACLs when `--preserve=all` or `--preserve=xattr`.
+            - [x] Graceful degradation when APIs unavailable.
+            - [x] Warn when preservation fails (non-fatal).
+        - [x] **Special Files:**
+            - [x] **Symlinks:** Copy link target or create symlink based on flags.
+            - [x] **Block Devices:** Use `mknod()` with `-R`.
+            - [x] **Character Devices:** Use `mknod()` with `-R`.
+            - [x] **FIFOs:** Use `mkfifo()` with `-R`.
+            - [x] **Sockets:** Skip or warn (cannot copy).
+        - [x] **Cross-Device Handling:**
+            - [x] Detect cross-device copy (stat source and dest dirs).
+            - [x] `-l` (hardlink) fails across devices with clear error.
+            - [x] `-s` (symlink) works across devices.
+            - [x] Regular copy works across devices.
+            - [x] Hardlink preservation fails across devices (warn).
+        - [x] **Error Handling & Robustness:**
+            - [x] Handle `EINTR` during read/write (retry).
+            - [x] Handle partial writes (continue from where left off).
+            - [x] Handle `ENOSPC` (disk full) gracefully.
+            - [x] Handle `EDQUOT` (quota exceeded) gracefully.
+            - [x] Clean up partial destination on failure.
+            - [x] Signal handling: catch SIGINT/SIGTERM, cleanup, exit.
+            - [x] Write robust signal-safe cleanup routines.
+            - [x] Exit code 0: success.
+            - [x] Exit code 1: some files could not be copied.
+            - [x] Never crash on any input.
+        - [x] **Path Handling:**
+            - [x] No fixed-size path buffers (use dynamic allocation).
+            - [x] Hygienic path joining (handle trailing slashes).
+            - [x] Detect and reject self-copy attempts.
+            - [x] Handle paths with special characters.
+            - [x] Handle paths at `PATH_MAX` limit.
+        - [x] **Permission & Ownership Handling:**
+            - [x] Create destination with source mode (masked by umask initially).
+            - [x] After copy complete, chmod to exact source mode.
+            - [x] If root, chown to source owner:group.
+            - [x] If not root, preserve group if possible.
+            - [x] Warn if ownership cannot be preserved.
+            - [x] Handle setuid/setgid bits correctly.
+        - [x] **Timestamp Preservation:**
+            - [x] Read source atime and mtime.
+            - [x] Use `utimensat()` for nanosecond precision.
+            - [x] Fallback to `utimes()` if needed.
+            - [x] Preserve timestamps after all data written.
+        - [x] **Tests:**
+            - [x] **Unit Tests:**
+                - [x] Test atomic replace helper.
+                - [x] Test sparse file detection.
+                - [x] Test hardlink map operations.
+                - [x] Test path joining logic.
+                - [x] Test metadata preservation helpers.
+                - [x] Test buffer allocation.
+            - [x] **Integration Tests:**
+                - [x] Copy single file to new file.
+                - [x] Copy single file to existing file.
+                - [x] Copy multiple files to directory.
+                - [x] Copy directory recursively.
+                - [x] Copy with `-p` (permissions preserved).
+                - [x] Copy with `-a` (archive mode).
+                - [x] Copy hardlinked files (links preserved).
+                - [x] Copy sparse files (holes preserved).
+                - [x] Copy symlinks with `-d` and `-L`.
+                - [x] Copy special files (devices, FIFOs).
+                - [x] Copy files with xattrs.
+                - [x] Copy across filesystems.
+                - [x] Handle permission denied.
+                - [x] Handle disk full.
+                - [x] Handle self-copy attempt.
+            - [x] **Property Tests:**
+                - [x] Random file content survives copy.
+                - [x] Random metadata preserved correctly.
+                - [x] Random directory structures copy correctly.
+            - [x] **Fuzz Tests:**
+                - [x] Fuzz path handling with binary filenames.
+                - [x] Fuzz metadata parsing.
+                - [x] Fuzz option parsing.
+            - [x] **Acceptance Tests:**
+                - [x] `cp file1 file2` -> file2 identical to file1.
+                - [x] `cp -r dir1 dir2` -> dir2 contains copy of dir1.
+                - [x] `cp -a` -> timestamps, permissions, links preserved.
+                - [x] `cp -i existing` -> prompts user.
+                - [x] `cp -n existing` -> skips overwrite.
+                - [x] `cp -l` -> creates hard links.
+                - [x] `cp -s` -> creates symlinks.
+                - [x] Atomic replace verified (no partial files on interrupt).
+        - [x] **Documentation:**
+            - [x] Write `cp(1)` man page covering all options.
+            - [x] Document preservation behavior in detail.
+            - [x] Document sparse file handling.
+            - [x] Document atomic replace mechanism.
+            - [x] Write developer design doc for data flow.
+            - [x] Document hardlink preservation algorithm.
+            - [x] Document cross-device handling.
+        - [x] **Acceptance Criteria:**
+            - [x] All CLI options implemented and tested.
+            - [x] Atomic replace demonstrated (no partial files).
+            - [x] Hardlink preservation works for multi-file inputs.
+            - [x] Sparse files copied efficiently.
+            - [x] No memory leaks (valgrind clean).
+            - [x] Correct behavior across all flag combinations.
+            - [x] Exit codes match documented behavior.
+            - [x] Man page complete and accurate.
+            - [x] All tests pass in CI.
     - [ ] **`mv` - Move (rename) files (Production Quality Rewrite):**
         - [ ] **Audit & Refactor Existing Code:**
             - [ ] Audit existing `bin/mv/mv.c` for TODO comments, fragile code, incomplete features.

@@ -1,4 +1,6 @@
+#include <stdio.h>
 #include <stdlib.h>
+#include <locale.h>
 
 #include "ls.h"
 #include "ls_colors.h"
@@ -12,6 +14,10 @@ int main(int argc, char **argv) {
     int file_count = 0;
     int rc;
 
+    setvbuf(stdout, NULL, _IOFBF, 64 * 1024);
+#ifdef NATIVE_BUILD
+    (void)setlocale(LC_ALL, "");
+#endif
     ls_colors_init();
 
     rc = ls_parse_opts(argc, argv, &config, &file_operands, &file_count);

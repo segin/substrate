@@ -15,13 +15,23 @@
 
 int main(void)
 {
-    char tmpdir[] = "/tmp/cp_atomic_test.XXXXXX";
+    const char *tmpbase = getenv("TMPDIR");
+    const char suffix[] = "/cp_atomic_test.XXXXXX";
+    char *tmpdir;
     char *dir;
     char *dest;
     char *tmp_path = NULL;
     int fd = -1;
     int in;
     char buf[16];
+
+    if (!tmpbase || !*tmpbase) {
+        tmpbase = "/tmp";
+    }
+
+    tmpdir = (char *)malloc(strlen(tmpbase) + sizeof(suffix));
+    CHECK(tmpdir != NULL);
+    snprintf(tmpdir, strlen(tmpbase) + sizeof(suffix), "%s%s", tmpbase, suffix);
 
     dir = mkdtemp(tmpdir);
     CHECK(dir != NULL);
@@ -45,5 +55,6 @@ int main(void)
     rmdir(dir);
     free(dest);
     free(tmp_path);
+    free(tmpdir);
     return 0;
 }

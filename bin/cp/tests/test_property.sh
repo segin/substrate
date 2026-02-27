@@ -2,7 +2,8 @@
 set -eu
 
 CP_BIN=${1:-./cp_host}
-WORK=$(mktemp -d /tmp/cp_prop.XXXXXX)
+TMPBASE=${TMPDIR:-/tmp}
+WORK=$(mktemp -d "$TMPBASE/cp_prop.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
 iter=0

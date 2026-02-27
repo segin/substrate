@@ -44,6 +44,15 @@ typedef struct {
     int exit_code;
 } ls_runtime_t;
 
+static int needs_metadata_stat(const ls_config_t *config) {
+    if (config->long_fmt || config->show_blocks || config->inode) return 1;
+    if (config->sort_size || config->sort_time || config->dirs_first) return 1;
+    if (config->dereference || config->recursive || config->one_file_system) return 1;
+    if (config->classify || config->file_type || config->slash_dirs) return 1;
+    if (config->color != LS_COLOR_NEVER || config->list_xattr_names) return 1;
+    return 0;
+}
+
 static void file_info_clear(file_info_t *f) {
     if (f == NULL) {
         return;
@@ -308,16 +317,37 @@ static int collect_path_info(ls_runtime_t *rt,
     return 0;
 }
 
+static int collect_name_only_info(const char *name, const char *full_path, size_t index, file_info_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->name = strdup(name);
+    if (out->name == NULL) {
+        return -1;
+    }
+    out->full_path = strdup(full_path);
+    if (out->full_path == NULL) {
+        file_info_clear(out);
+        return -1;
+    }
+    out->input_index = index;
+    out->stat_ok = false;
+    out->st.st_mode = S_IFREG;
+    return 0;
+}
+
 static int list_directory(ls_runtime_t *rt,
                           const char *path,
                           const ls_config_t *config,
                           bool command_line_arg,
-                          bool print_header);
+                          bool print_header,
+                          dev_t root_dev,
+                          bool root_dev_valid);
 
 static int recurse_into_subdirs(ls_runtime_t *rt,
                                 const char *parent,
                                 file_vec_t *entries,
-                                const ls_config_t *config) {
+                                const ls_config_t *config,
+                                dev_t root_dev,
+                                bool root_dev_valid) {
     size_t i;
 
     for (i = 0; i < entries->len; i++) {
@@ -327,6 +357,10 @@ static int recurse_into_subdirs(ls_runtime_t *rt,
             continue;
         }
         if (strcmp(f->name, ".") == 0 || strcmp(f->name, "..") == 0) {
+            continue;
+        }
+
+        if (config->one_file_system && root_dev_valid && f->st.st_dev != root_dev) {
             continue;
         }
 
@@ -342,7 +376,7 @@ static int recurse_into_subdirs(ls_runtime_t *rt,
 
         (void)parent;
         putchar('\n');
-        if (list_directory(rt, f->full_path, config, false, true) != 0) {
+        if (list_directory(rt, f->full_path, config, false, true, root_dev, root_dev_valid) != 0) {
             return -1;
         }
     }
@@ -354,11 +388,14 @@ static int list_directory(ls_runtime_t *rt,
                           const char *path,
                           const ls_config_t *config,
                           bool command_line_arg,
-                          bool print_header) {
+                          bool print_header,
+                          dev_t root_dev,
+                          bool root_dev_valid) {
     DIR *dir;
     struct dirent *ent;
     file_vec_t entries;
     size_t idx = 0;
+    int want_stat = needs_metadata_stat(config);
 
     memset(&entries, 0, sizeof(entries));
 
@@ -388,13 +425,17 @@ static int list_directory(ls_runtime_t *rt,
             return -1;
         }
 
-        rc = collect_path_info(rt,
-                               ent->d_name,
-                               full_path,
-                               config->dereference,
-                               false,
-                               idx,
-                               &fi);
+        if (want_stat) {
+            rc = collect_path_info(rt,
+                                   ent->d_name,
+                                   full_path,
+                                   config->dereference,
+                                   false,
+                                   idx,
+                                   &fi);
+        } else {
+            rc = collect_name_only_info(ent->d_name, full_path, idx, &fi);
+        }
         free(full_path);
         if (rc < 0) {
             closedir(dir);
@@ -421,7 +462,7 @@ static int list_directory(ls_runtime_t *rt,
     ls_print_list(path, entries.items, entries.len, config, true);
 
     if (config->recursive && !config->directory) {
-        if (recurse_into_subdirs(rt, path, &entries, config) != 0) {
+        if (recurse_into_subdirs(rt, path, &entries, config, root_dev, root_dev_valid) != 0) {
             file_vec_free(&entries);
             return -1;
         }
@@ -500,7 +541,13 @@ int ls_run(const ls_config_t *config, char **paths, int path_count) {
             goto done;
         }
 
-        if (list_directory(&rt, dirs.items[i].path, config, true, print_header) != 0) {
+        if (list_directory(&rt,
+                           dirs.items[i].path,
+                           config,
+                           true,
+                           print_header,
+                           dirs.items[i].st.st_dev,
+                           true) != 0) {
             set_exit_code(&rt, LS_EXIT_SERIOUS);
             goto done;
         }
