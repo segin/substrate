@@ -185,6 +185,11 @@
 2. GOTO defaults are selected per nonterminal from the most frequent destination.
 3. Compressed goto entries store only non-default source-state exceptions.
 
+### 3.3.7 Conflict Resolution Inputs
+1. Shift actions inherit precedence/associativity from their terminal symbol.
+2. Reduce actions inherit precedence/associativity from the reducing rule.
+3. Shift/reduce conflicts use declared precedence before fallback "shift wins".
+
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format
 109. Extension documentation: Clearly marked implementation extensions

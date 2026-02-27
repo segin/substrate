@@ -135,6 +135,29 @@ if [ -z "$la_entries" ] || [ "$la_entries" -le 0 ]; then
 fi
 echo "LALR DR/READ computation passed"
 
+echo "Testing precedence-based conflict resolution..."
+rm -f test_cnop.tab.c test_cnop.tab.h test_cnop.output test_cnop.log
+rm -f test_cyes.tab.c test_cyes.tab.h test_cyes.output test_cyes.log
+./yacc -v -d -b test_cnop ../../tests/usr.bin/yacc/conflict_no_prec.y > test_cnop.log 2>&1
+if [ $? -ne 0 ]; then
+    echo "no-precedence conflict grammar failed unexpectedly"
+    exit 1
+fi
+if ! grep -F "shift/reduce" test_cnop.log >/dev/null; then
+    echo "expected shift/reduce conflict not reported for no-precedence grammar"
+    exit 1
+fi
+./yacc -v -d -b test_cyes ../../tests/usr.bin/yacc/conflict_with_prec.y > test_cyes.log 2>&1
+if [ $? -ne 0 ]; then
+    echo "precedence conflict grammar failed unexpectedly"
+    exit 1
+fi
+if grep -F "shift/reduce" test_cyes.log >/dev/null; then
+    echo "precedence declarations did not resolve shift/reduce conflicts"
+    exit 1
+fi
+echo "precedence-based conflict resolution passed"
+
 # Cleanup
 rm -f test_minimal.tab.c test_minimal.tab.h test_minimal.output
 rm -f test_minimal.state2
@@ -144,5 +167,7 @@ rm -f test_deta.tab.c test_deta.tab.h test_deta.output
 rm -f test_detb.tab.c test_detb.tab.h test_detb.output
 rm -f test_closure.tab.c test_closure.tab.h test_closure.output test_closure.state0
 rm -f test_reads.tab.c test_reads.tab.h test_reads.output
+rm -f test_cnop.tab.c test_cnop.tab.h test_cnop.output test_cnop.log
+rm -f test_cyes.tab.c test_cyes.tab.h test_cyes.output test_cyes.log
 
 exit 0

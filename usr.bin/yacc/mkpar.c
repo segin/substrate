@@ -19,6 +19,10 @@ int SRexpect;               /* Expected S/R conflicts from %expect */
 short *SRconflicts;         /* Per-state S/R conflict count */
 short *RRconflicts;         /* Per-state R/R conflict count */
 short final_state;          /* Accept state */
+static short *symbol_prec;  /* Precedence by symbol index */
+static char *symbol_assoc;  /* Associativity by symbol index */
+static short *rule_prec;    /* Precedence by rule number */
+static char *rule_assoc;    /* Associativity by rule number */
 
 static action *parse_actions(int stateno);
 static action *add_reduce(action *alist, int ruleno, unsigned *la);
@@ -31,6 +35,7 @@ static void defreds(void);
 static void build_goto_table(void);
 static void build_yytable(void);
 static void free_action_row(action *a);
+static void build_precedence_tables(void);
 
 void make_parser(void) {
     int i;
@@ -40,6 +45,8 @@ void make_parser(void) {
     RRconflicts = (short *)calloc(nstates, sizeof(short));
     if (parser == NULL || SRconflicts == NULL || RRconflicts == NULL)
         no_space();
+
+    build_precedence_tables();
     
     /* Build action lists for each state */
     for (i = 0; i < nstates; i++) {
@@ -52,6 +59,36 @@ void make_parser(void) {
     defreds();
     build_goto_table();
     build_yytable();
+}
+
+static void build_precedence_tables(void) {
+    int i, j;
+    bucket *bp;
+
+    symbol_prec = (short *)calloc(nsyms, sizeof(short));
+    symbol_assoc = (char *)calloc(nsyms, sizeof(char));
+    rule_prec = (short *)calloc(nrules, sizeof(short));
+    rule_assoc = (char *)calloc(nrules, sizeof(char));
+    if (symbol_prec == NULL || symbol_assoc == NULL ||
+        rule_prec == NULL || rule_assoc == NULL)
+        no_space();
+
+    for (bp = first_symbol; bp != NULL; bp = bp->next) {
+        if (bp->index >= 0 && bp->index < nsyms) {
+            symbol_prec[bp->index] = bp->prec;
+            symbol_assoc[bp->index] = bp->assoc;
+        }
+    }
+
+    for (i = 1; i < nrules; i++) {
+        for (j = rrhs[i]; ritem[j] >= 0; j++) {
+            int sym = ritem[j];
+            if (sym >= 0 && sym < ntokens && symbol_prec[sym] > 0) {
+                rule_prec[i] = symbol_prec[sym];
+                rule_assoc[i] = symbol_assoc[sym];
+            }
+        }
+    }
 }
 
 
@@ -105,9 +142,9 @@ static action *add_shift(action *alist, int symbol, int state) {
     a->next = alist;
     a->symbol = symbol;
     a->number = state;
-    a->prec = 0;        /* Shifts don't have precedence */
+    a->prec = (symbol >= 0 && symbol < nsyms) ? symbol_prec[symbol] : 0;
     a->action_code = SHIFT;
-    a->assoc = NO_ASSOC;
+    a->assoc = (symbol >= 0 && symbol < nsyms) ? symbol_assoc[symbol] : NO_ASSOC;
     a->suppressed = 0;
     
     return a;
@@ -126,9 +163,9 @@ static action *add_reduce(action *alist, int ruleno, unsigned *la) {
             a->next = alist;
             a->symbol = i;
             a->number = ruleno;
-            a->prec = 0;  /* Precedence filled during conflict pass */
+            a->prec = (ruleno >= 0 && ruleno < nrules) ? rule_prec[ruleno] : 0;
             a->action_code = REDUCE;
-            a->assoc = NO_ASSOC;
+            a->assoc = (ruleno >= 0 && ruleno < nrules) ? rule_assoc[ruleno] : NO_ASSOC;
             a->suppressed = 0;
             
             alist = a;
@@ -225,32 +262,43 @@ static void remove_conflicts(void) {
 }
 
 static void resolve_conflict(int state, action *a, action *b) {
+    action *shift_act = NULL;
+    action *reduce_act = NULL;
+
     /* Apply precedence and associativity rules */
-    
+
     if (a->action_code == SHIFT && b->action_code == REDUCE) {
+        shift_act = a;
+        reduce_act = b;
+    } else if (a->action_code == REDUCE && b->action_code == SHIFT) {
+        shift_act = b;
+        reduce_act = a;
+    }
+
+    if (shift_act && reduce_act) {
         /* Shift/reduce conflict */
-        if (a->prec > 0 && b->prec > 0) {
-            if (a->prec > b->prec) {
-                b->suppressed = 1;  /* Suppress reduce */
-            } else if (a->prec < b->prec) {
-                a->suppressed = 1;  /* Suppress shift */
+        if (shift_act->prec > 0 && reduce_act->prec > 0) {
+            if (shift_act->prec > reduce_act->prec) {
+                reduce_act->suppressed = 1;  /* Suppress reduce */
+            } else if (shift_act->prec < reduce_act->prec) {
+                shift_act->suppressed = 1;  /* Suppress shift */
             } else {
                 /* Equal precedence: use associativity */
-                switch (a->assoc) {
+                switch (shift_act->assoc) {
                 case LEFT_ASSOC:
-                    a->suppressed = 1;  /* Reduce */
+                    shift_act->suppressed = 1;  /* Reduce */
                     break;
                 case RIGHT_ASSOC:
-                    b->suppressed = 1;  /* Shift */
+                    reduce_act->suppressed = 1;  /* Shift */
                     break;
                 case NON_ASSOC:
                     /* Both suppressed -> error */
-                    a->suppressed = 1;
-                    b->suppressed = 1;
+                    shift_act->suppressed = 1;
+                    reduce_act->suppressed = 1;
                     break;
                 default:
                     /* No associativity: default to shift */
-                    b->suppressed = 2;  /* Suppressed with warning */
+                    reduce_act->suppressed = 2;  /* Suppressed with warning */
                     SRconflicts[state]++;
                     SRtotal++;
                     break;
@@ -258,7 +306,7 @@ static void resolve_conflict(int state, action *a, action *b) {
             }
         } else {
             /* No precedence declared: default shift */
-            b->suppressed = 2;
+            reduce_act->suppressed = 2;
             SRconflicts[state]++;
             SRtotal++;
         }

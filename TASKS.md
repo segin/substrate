@@ -8583,7 +8583,7 @@ Reference: User Request (Step 31552)
         - [x] Compute Lookaheads for each kernel item (Digraph algorithm).
     - [ ] **5. Tables & Conflicts (`mkpar.c`):**
         - [x] Generate ACTION and GOTO tables.
-        - [ ] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
+        - [x] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
         - [ ] Generate Default Reductions.
     - [ ] **6. Code Generation (`output.c`):**
         - [ ] generate `y.tab.c` (parser skeleton + user actions).
