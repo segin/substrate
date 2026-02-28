@@ -221,14 +221,14 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Combine qualifiers: `xO` = shared const.
 
 ### 4g. D Mangling Grammar — Function Attributes
-- [ ] `Na` — pure.
-- [ ] `Nb` — nothrow.
-- [ ] `Nc` — ref.
-- [ ] `Nd` — @property.
-- [ ] `Ne` — @trusted.
-- [ ] `Nf` — @safe.
-- [ ] `Ni` — @nogc.
-- [ ] `Nj` — return ref.
+- [x] `Na` — pure.
+- [x] `Nb` — nothrow.
+- [x] `Nc` — ref.
+- [x] `Nd` — @property.
+- [x] `Ne` — @trusted.
+- [x] `Nf` — @safe.
+- [x] `Ni` — @nogc.
+- [x] `Nj` — return ref.
 
 ### 4h. D Mangling — Special Sequences
 - [ ] `__lambda<N>` — lambda/anonymous function.
