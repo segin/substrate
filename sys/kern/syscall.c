@@ -54,31 +54,6 @@ static uma_zone_t *file_zone = NULL;
 
 #define IO_CHUNK_SIZE 4096
 
-static struct {
-    mutex_t lock;
-    char buf[IO_CHUNK_SIZE];
-} io_buffers[MAX_CPUS];
-
-static volatile int io_buffers_initialized = 0;
-
-static void ensure_io_buffers_init(void) {
-    if (io_buffers_initialized) return;
-
-    static volatile int init_lock = 0;
-    while (__sync_lock_test_and_set(&init_lock, 1)) {
-        while (init_lock) __asm__("pause");
-    }
-
-    if (!io_buffers_initialized) {
-        for (int i = 0; i < MAX_CPUS; i++) {
-            mutex_init(&io_buffers[i].lock, "io_buf");
-        }
-        io_buffers_initialized = 1;
-    }
-
-    __sync_lock_release(&init_lock);
-}
-
 static void ensure_file_zone_init(void) {
     if (file_zone) return;
 
