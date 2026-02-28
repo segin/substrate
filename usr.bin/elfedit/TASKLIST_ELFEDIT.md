@@ -99,9 +99,9 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 
 ## 8. Build System
 
-- [ ] Create `Makefile` linking `libelfobj.a`.
-- [ ] `NATIVE_BUILD=1` support.
-- [ ] `install` to `$(DESTDIR)/usr/bin/elfedit`.
+- [x] Create `Makefile` linking `libelfobj.a`.
+- [x] `NATIVE_BUILD=1` support.
+- [x] `install` to `$(DESTDIR)/usr/bin/elfedit`.
 
 ## 9. Testing
 

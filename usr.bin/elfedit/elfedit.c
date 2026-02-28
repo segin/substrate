@@ -1,4 +1,4 @@
-#include <elfobj.h>
+#include "elfobj.h"
 
 #include <errno.h>
 #include <getopt.h>
