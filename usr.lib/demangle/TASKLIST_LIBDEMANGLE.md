@@ -436,9 +436,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Demangle all symbols from a large C++ project (e.g. LLVM `.o` files).
 
 ### 9y. Buffer API Tests
-- [ ] `demangle_buf()` with exact‑fit buffer: returns 0.
-- [ ] `demangle_buf()` with too‑small buffer: returns -2, buffer contains truncated output.
-- [ ] `demangle_buf()` with 1‑byte buffer: returns -2, buffer is `'\0'`.
+- [x] `demangle_buf()` with exact‑fit buffer: returns 0.
+- [x] `demangle_buf()` with too‑small buffer: returns -2, buffer contains truncated output.
+- [x] `demangle_buf()` with 1‑byte buffer: returns -2, buffer is `'\0'`.
 
 ## 10. Documentation
 
