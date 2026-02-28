@@ -70,6 +70,22 @@ static int strvec_push(strvec_t *v, const char *s) {
     return 0;
 }
 
+static const char *translate_march_cpu(const as_ctx_t *ctx, const char *cpu) {
+    if (cpu == NULL || cpu[0] == '\0') {
+        return cpu;
+    }
+    if (strcmp(cpu, "x86-64") == 0 || strcmp(cpu, "x86-64-v1") == 0) {
+        return "generic64";
+    }
+    if (strcmp(cpu, "x86-64-v2") == 0 || strcmp(cpu, "x86-64-v3") == 0 || strcmp(cpu, "x86-64-v4") == 0) {
+        return "generic64";
+    }
+    if (strcmp(cpu, "generic") == 0) {
+        return ctx->mode64 ? "generic64" : "generic32";
+    }
+    return cpu;
+}
+
 static void strvec_free(strvec_t *v) {
     size_t i;
 
@@ -275,12 +291,17 @@ static int validate_output_file(const as_ctx_t *ctx) {
 int main(int argc, char **argv) {
     as_ctx_t ctx;
     int i;
+    int query_version = 0;
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.out_path = "a.out.o";
     ctx.self_path = argv[0];
 
     for (i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+            query_version = 1;
+            continue;
+        }
         if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
@@ -304,15 +325,17 @@ int main(int argc, char **argv) {
             strcmp(argv[i], "-Wa") == 0 || strcmp(argv[i], "-march") == 0 ||
             strcmp(argv[i], "-mtune") == 0) {
             char combo[1024];
+            const char *value;
 
             if (i + 1 >= argc) {
                 usage(argv[0]);
                 strvec_free(&ctx.pass);
                 return 2;
             }
+            value = argv[i + 1];
 
             if (strcmp(argv[i], "-Wa") == 0) {
-                if (snprintf(combo, sizeof(combo), "-Wa,%s", argv[i + 1]) >= (int)sizeof(combo)) {
+                if (snprintf(combo, sizeof(combo), "-Wa,%s", value) >= (int)sizeof(combo)) {
                     strvec_free(&ctx.pass);
                     return 1;
                 }
@@ -320,8 +343,13 @@ int main(int argc, char **argv) {
                     strvec_free(&ctx.pass);
                     return 1;
                 }
+            } else if (strcmp(argv[i], "-mtune") == 0) {
+                /* Accepted for driver compatibility; no encoding effect in GAS. */
             } else {
-                if (strvec_push(&ctx.pass, argv[i]) != 0 || strvec_push(&ctx.pass, argv[i + 1]) != 0) {
+                if (strcmp(argv[i], "-march") == 0) {
+                    value = translate_march_cpu(&ctx, value);
+                }
+                if (strvec_push(&ctx.pass, argv[i]) != 0 || strvec_push(&ctx.pass, value) != 0) {
                     strvec_free(&ctx.pass);
                     return 1;
                 }
@@ -330,9 +358,43 @@ int main(int argc, char **argv) {
             continue;
         }
 
+        if (strcmp(argv[i], "-msse") == 0 || strcmp(argv[i], "-mno-sse") == 0 ||
+            strcmp(argv[i], "-msse2") == 0 || strcmp(argv[i], "-mno-sse2") == 0 ||
+            strcmp(argv[i], "-mmmx") == 0 || strcmp(argv[i], "-mno-mmx") == 0 ||
+            strcmp(argv[i], "-mfpmath=sse") == 0 || strcmp(argv[i], "-mfpmath=387") == 0) {
+            /* Accepted for driver compatibility; not forwarded to GAS. */
+            continue;
+        }
+        if (strcmp(argv[i], "-mfpmath") == 0) {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                strvec_free(&ctx.pass);
+                return 2;
+            }
+            ++i;
+            continue;
+        }
+
         if (strncmp(argv[i], "-I", 2) == 0 || strncmp(argv[i], "-D", 2) == 0 ||
             strncmp(argv[i], "-march=", 7) == 0 || strncmp(argv[i], "-mtune=", 7) == 0 ||
             strncmp(argv[i], "-Wa,", 4) == 0 || strcmp(argv[i], "-g") == 0) {
+            if (strncmp(argv[i], "-mtune=", 7) == 0) {
+                /* Accepted for driver compatibility; no encoding effect in GAS. */
+                continue;
+            }
+            if (strncmp(argv[i], "-march=", 7) == 0) {
+                char march_opt[128];
+                const char *cpu = translate_march_cpu(&ctx, argv[i] + 7);
+                if (snprintf(march_opt, sizeof(march_opt), "-march=%s", cpu) >= (int)sizeof(march_opt)) {
+                    strvec_free(&ctx.pass);
+                    return 1;
+                }
+                if (strvec_push(&ctx.pass, march_opt) != 0) {
+                    strvec_free(&ctx.pass);
+                    return 1;
+                }
+                continue;
+            }
             if (strvec_push(&ctx.pass, argv[i]) != 0) {
                 strvec_free(&ctx.pass);
                 return 1;
@@ -355,6 +417,12 @@ int main(int argc, char **argv) {
             return 2;
         }
         ctx.in_path = argv[i];
+    }
+
+    if (query_version) {
+        printf("GNU assembler (GNU Binutils) 2.40\n");
+        strvec_free(&ctx.pass);
+        return 0;
     }
 
     if (ctx.in_path == NULL) {

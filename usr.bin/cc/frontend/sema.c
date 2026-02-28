@@ -4148,9 +4148,12 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         diag->message[0] = '\0';
     }
 
-    if (tu == NULL || (tu->func_count == 0 && tu->global_count == 0)) {
-        set_diag(diag, "translation unit is empty");
+    if (tu == NULL) {
+        set_diag(diag, "invalid translation unit");
         return -1;
+    }
+    if (tu->func_count == 0 && tu->global_count == 0) {
+        return 0;
     }
 
     for (i = 0; i < tu->global_count; ++i) {
