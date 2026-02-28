@@ -21,9 +21,9 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Warn if changing type would make file structurally inconsistent (e.g. ET_EXEC → ET_REL without removing program headers).
 
 ### 2b. `--output-machine=<machine>`
-- [ ] Set `e_machine` via `elf_set_machine()`.
-- [ ] Accept: `i386` (3), `x86_64`/`x86-64` (62), `arm` (40), `aarch64` (183), `mips` (8), `riscv` (243), or numeric value.
-- [ ] Warn that changing machine doesn't re‑encode instructions or relocations.
+- [x] Set `e_machine` via `elf_set_machine()`.
+- [x] Accept: `i386` (3), `x86_64`/`x86-64` (62), `arm` (40), `aarch64` (183), `mips` (8), `riscv` (243), or numeric value.
+- [x] Warn that changing machine doesn't re‑encode instructions or relocations.
 
 ### 2c. `--output-osabi=<osabi>`
 - [ ] Set `EI_OSABI` byte in `e_ident`.

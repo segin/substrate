@@ -55,6 +55,18 @@ typedef enum {
 #ifndef EM_X86_64
 #define EM_X86_64 62
 #endif
+#ifndef EM_MIPS
+#define EM_MIPS 8
+#endif
+#ifndef EM_ARM
+#define EM_ARM 40
+#endif
+#ifndef EM_AARCH64
+#define EM_AARCH64 183
+#endif
+#ifndef EM_RISCV
+#define EM_RISCV 243
+#endif
 
 #ifndef SHT_NULL
 #define SHT_NULL 0
@@ -330,6 +342,7 @@ elf_err_t elf_register_reloc_backend(const struct elf_reloc_backend *backend);
 elfobj_t *elf_create(uint16_t type, uint16_t machine, elfobj_class_t cls, elfobj_endian_t endian);
 elf_err_t elf_finalize(elfobj_t *obj);
 elf_err_t elf_set_type(elfobj_t *obj, uint16_t type);
+elf_err_t elf_set_machine(elfobj_t *obj, uint16_t machine);
 uint16_t elf_type(const elfobj_t *obj);
 uint16_t elf_machine(const elfobj_t *obj);
 elfobj_class_t elf_class(const elfobj_t *obj);

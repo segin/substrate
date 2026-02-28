@@ -420,6 +420,18 @@ elf_err_t elf_set_type(elfobj_t *obj, uint16_t type) {
     return ELF_OK;
 }
 
+elf_err_t elf_set_machine(elfobj_t *obj, uint16_t machine) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    obj->machine = machine;
+    obj->dirty = 1;
+    return ELF_OK;
+}
+
 uint16_t elf_type(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->type;
 }

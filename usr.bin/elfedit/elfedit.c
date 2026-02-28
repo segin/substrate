@@ -16,7 +16,9 @@ typedef struct {
     const char *input_path;
     const char *output_path;
     uint16_t output_type;
+    uint16_t output_machine;
     int have_output_type;
+    int have_output_machine;
 } elfedit_ctx_t;
 
 static const char *g_progname = "elfedit";
@@ -32,7 +34,9 @@ static void warnf(const char *fmt, ...) {
 }
 
 static void usage(FILE *out) {
-    fprintf(out, "usage: %s [-o output] [--output-type type] <input>\n", g_progname);
+    fprintf(out,
+            "usage: %s [-o output] [--output-type type] [--output-machine machine] <input>\n",
+            g_progname);
 }
 
 static int parse_u16(const char *text, uint16_t *out) {
@@ -75,13 +79,42 @@ static int parse_output_type(const char *arg, uint16_t *out) {
     return parse_u16(arg, out);
 }
 
+static int parse_output_machine(const char *arg, uint16_t *out) {
+    if (strcasecmp(arg, "i386") == 0) {
+        *out = EM_386;
+        return 0;
+    }
+    if (strcasecmp(arg, "x86_64") == 0 || strcasecmp(arg, "x86-64") == 0) {
+        *out = EM_X86_64;
+        return 0;
+    }
+    if (strcasecmp(arg, "arm") == 0) {
+        *out = EM_ARM;
+        return 0;
+    }
+    if (strcasecmp(arg, "aarch64") == 0) {
+        *out = EM_AARCH64;
+        return 0;
+    }
+    if (strcasecmp(arg, "mips") == 0) {
+        *out = EM_MIPS;
+        return 0;
+    }
+    if (strcasecmp(arg, "riscv") == 0) {
+        *out = EM_RISCV;
+        return 0;
+    }
+    return parse_u16(arg, out);
+}
+
 static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
     int ch;
-    uint16_t parsed_type;
+    uint16_t parsed_value;
     static const struct option long_opts[] = {
         { "help", no_argument, NULL, 'h' },
         { "output", required_argument, NULL, 'o' },
         { "output-type", required_argument, NULL, 1000 },
+        { "output-machine", required_argument, NULL, 1001 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -96,12 +129,20 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
             ctx->output_path = optarg;
             break;
         case 1000:
-            if (parse_output_type(optarg, &parsed_type) != 0) {
+            if (parse_output_type(optarg, &parsed_value) != 0) {
                 warnf("unknown type: %s", optarg);
                 return -1;
             }
             ctx->have_output_type = 1;
-            ctx->output_type = parsed_type;
+            ctx->output_type = parsed_value;
+            break;
+        case 1001:
+            if (parse_output_machine(optarg, &parsed_value) != 0) {
+                warnf("unknown machine: %s", optarg);
+                return -1;
+            }
+            ctx->have_output_machine = 1;
+            ctx->output_machine = parsed_value;
             break;
         default:
             usage(stderr);
@@ -172,6 +213,20 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
         err = elf_set_type(obj, ctx->output_type);
         if (err != ELF_OK) {
             warnf("failed to set ELF type: %s", elf_errstr(err));
+            return -1;
+        }
+    }
+
+    if (ctx->have_output_machine) {
+        uint16_t old_machine = elf_machine(obj);
+
+        if (old_machine != ctx->output_machine) {
+            warnf("warning: changing machine does not re-encode instructions or relocations");
+        }
+
+        err = elf_set_machine(obj, ctx->output_machine);
+        if (err != ELF_OK) {
+            warnf("failed to set ELF machine: %s", elf_errstr(err));
             return -1;
         }
     }
