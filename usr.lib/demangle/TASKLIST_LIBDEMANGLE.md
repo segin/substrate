@@ -325,9 +325,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Template pack: `J...E` handling.
 
 ### 9f. Substitution Tests
-- [ ] Names exercising `S_`, `S0_`, `S1_` lookups.
-- [ ] Standard subs: `_ZNSt6vectorIiSaIiEE...`.
-- [ ] `Ss` → `std::string`.
+- [x] Names exercising `S_`, `S0_`, `S1_` lookups.
+- [x] Standard subs: `_ZNSt6vectorIiSaIiEE...`.
+- [x] `Ss` → `std::string`.
 
 ### 9g. Type‑Only Tests (`DEMANGLE_TYPES`)
 - [ ] `i` → `int`.
