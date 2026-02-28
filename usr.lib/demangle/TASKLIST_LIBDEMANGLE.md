@@ -169,9 +169,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 ## 4. D Language Demangler (tertiary)
 
 ### 4a. Detection
-- [ ] Detect D mangling: symbol starts with `_D`.
-- [ ] `DEMANGLE_AUTO`: try D if `_D` prefix and Itanium parse fails.
-- [ ] `DEMANGLE_DLANG`: force D only.
+- [x] Detect D mangling: symbol starts with `_D`.
+- [x] `DEMANGLE_AUTO`: try D if `_D` prefix and Itanium parse fails.
+- [x] `DEMANGLE_DLANG`: force D only.
 
 ### 4b. Parser Architecture
 - [ ] Recursive‑descent parser with cursor.

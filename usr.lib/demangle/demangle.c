@@ -95,6 +95,7 @@ demangle_dispatch(const char *mangled, unsigned options)
         if (out != NULL) {
             return out;
         }
+        return demangle_itanium(mangled, (int)options);
     }
 
     if (starts_with(mangled, "_Z") || (options & DEMANGLE_TYPES) != 0u) {
