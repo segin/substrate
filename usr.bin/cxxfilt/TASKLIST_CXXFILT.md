@@ -70,14 +70,14 @@ Map CLI style names to `libdemangle` option flags:
 
 ## 4. Flags
 
-- [ ] `-s <style>`: demangling style (see §2).
-- [ ] `-n` / `--no-strip-underscore`: don't strip leading `_`.
-- [ ] `-_` / `--strip-underscore`: strip leading `_`.
-- [ ] `-p` / `--no-params`: pass `DEMANGLE_NO_PARAMS` to `demangle()`.
-- [ ] `-t` / `--types`: pass `DEMANGLE_TYPES` to `demangle()`.
-- [ ] `-i` / `--no-verbose`: pass `DEMANGLE_NO_VERBOSE` to `demangle()`.
-- [ ] `--help` / `-h`: usage.
-- [ ] `--version` / `-V`: print version (use `demangle_version()`).
+- [x] `-s <style>`: demangling style (see §2).
+- [x] `-n` / `--no-strip-underscore`: don't strip leading `_`.
+- [x] `-_` / `--strip-underscore`: strip leading `_`.
+- [x] `-p` / `--no-params`: pass `DEMANGLE_NO_PARAMS` to `demangle()`.
+- [x] `-t` / `--types`: pass `DEMANGLE_TYPES` to `demangle()`.
+- [x] `-i` / `--no-verbose`: pass `DEMANGLE_NO_VERBOSE` to `demangle()`.
+- [x] `--help` / `-h`: usage.
+- [x] `--version` / `-V`: print version (use `demangle_version()`).
 
 ---
 
