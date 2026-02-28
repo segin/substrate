@@ -2518,30 +2518,26 @@ static void emit_i386_i2f_sse(FILE *fp, const cc_ssa_function_t *f, const slot_l
 }
 
 static void emit_i386_i2f_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                              const cc_ssa_instr_t *in) {
+                              const cc_ssa_instr_t *in, int scratch_off) {
     int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
-    fprintf(fp, "\tsubl $8, %%esp\n");
-    fprintf(fp, "\tmovl %s, (%%esp)\n", ist->regs[rl]);
-    fprintf(fp, "\tfildl (%%esp)\n");
+    fprintf(fp, "\tmovl %s, %d(%%ebp)\n", ist->regs[rl], scratch_off);
+    fprintf(fp, "\tfildl %d(%%ebp)\n", scratch_off);
     fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
-    fprintf(fp, "\taddl $8, %%esp\n");
 }
 
 static void emit_i386_f2i_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                              int src_slot, const char *dst_reg) {
+                              int src_slot, const char *dst_reg, int scratch_off) {
     int_regs_flush(fp, f, lay, ist);
     int_regs_clobber_reg(fp, f, lay, ist, int_reg_index(ist, "%eax"));
-    fprintf(fp, "\tsubl $12, %%esp\n");
-    fprintf(fp, "\tfnstcw (%%esp)\n");
-    fprintf(fp, "\tmovw (%%esp), %%ax\n");
+    fprintf(fp, "\tfnstcw %d(%%ebp)\n", scratch_off);
+    fprintf(fp, "\tmovw %d(%%ebp), %%ax\n", scratch_off);
     fprintf(fp, "\torw $0x0c00, %%ax\n");
-    fprintf(fp, "\tmovw %%ax, 2(%%esp)\n");
-    fprintf(fp, "\tfldcw 2(%%esp)\n");
+    fprintf(fp, "\tmovw %%ax, %d(%%ebp)\n", scratch_off + 2);
+    fprintf(fp, "\tfldcw %d(%%ebp)\n", scratch_off + 2);
     fprintf(fp, "\tfldl %d(%%ebp)\n", src_slot);
-    fprintf(fp, "\tfistpl 4(%%esp)\n");
-    fprintf(fp, "\tfldcw (%%esp)\n");
-    fprintf(fp, "\tmovl 4(%%esp), %s\n", dst_reg);
-    fprintf(fp, "\taddl $12, %%esp\n");
+    fprintf(fp, "\tfistpl %d(%%ebp)\n", scratch_off + 4);
+    fprintf(fp, "\tfldcw %d(%%ebp)\n", scratch_off);
+    fprintf(fp, "\tmovl %d(%%ebp), %s\n", scratch_off + 4, dst_reg);
 }
 
 static void emit_i386_fround32_sse(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
@@ -2552,57 +2548,57 @@ static void emit_i386_fround32_sse(FILE *fp, const slot_layout_t *lay, const cc_
     fprintf(fp, "\tmovsd %s, %d(%%ebp)\n", tmp, slot_off(lay, in->dst));
 }
 
-static void emit_i386_fround32_x87(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
-    fprintf(fp, "\tsubl $8, %%esp\n");
+static void emit_i386_fround32_x87(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, int scratch_off) {
     fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->lhs));
-    fprintf(fp, "\tfstps (%%esp)\n");
-    fprintf(fp, "\tflds (%%esp)\n");
+    fprintf(fp, "\tfstps %d(%%ebp)\n", scratch_off);
+    fprintf(fp, "\tflds %d(%%ebp)\n", scratch_off);
     fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
-    fprintf(fp, "\taddl $8, %%esp\n");
 }
 
-static void emit_i386_load_fp_indirect(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, int use_x87_fp) {
+static void emit_i386_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                       const cc_ssa_instr_t *in, int use_x87_fp) {
     long mem_size = in->imm > 0 ? in->imm : 8;
+    int rp = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
 
-    emit_frame_load_reg(fp, 0, slot_off(lay, in->lhs), "%eax");
     if (use_x87_fp) {
         if (mem_size == 4) {
-            fprintf(fp, "\tflds (%%eax)\n");
+            fprintf(fp, "\tflds (%s)\n", ist->regs[rp]);
         } else {
-            fprintf(fp, "\tfldl (%%eax)\n");
+            fprintf(fp, "\tfldl (%s)\n", ist->regs[rp]);
         }
         fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
     } else {
         const char *tmp = i386_fp_tmp_reg();
         if (mem_size == 4) {
-            fprintf(fp, "\tmovss (%%eax), %s\n", tmp);
+            fprintf(fp, "\tmovss (%s), %s\n", ist->regs[rp], tmp);
             fprintf(fp, "\tcvtss2sd %s, %s\n", tmp, tmp);
         } else {
-            fprintf(fp, "\tmovsd (%%eax), %s\n", tmp);
+            fprintf(fp, "\tmovsd (%s), %s\n", ist->regs[rp], tmp);
         }
         fprintf(fp, "\tmovsd %s, %d(%%ebp)\n", tmp, slot_off(lay, in->dst));
     }
 }
 
-static void emit_i386_store_fp_indirect(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, int use_x87_fp) {
+static void emit_i386_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                        const cc_ssa_instr_t *in, int use_x87_fp) {
     long mem_size = in->imm > 0 ? in->imm : 8;
+    int rp = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
 
-    emit_frame_load_reg(fp, 0, slot_off(lay, in->lhs), "%eax");
     if (use_x87_fp) {
         fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->rhs));
         if (mem_size == 4) {
-            fprintf(fp, "\tfstps (%%eax)\n");
+            fprintf(fp, "\tfstps (%s)\n", ist->regs[rp]);
         } else {
-            fprintf(fp, "\tfstpl (%%eax)\n");
+            fprintf(fp, "\tfstpl (%s)\n", ist->regs[rp]);
         }
     } else {
         const char *tmp = i386_fp_tmp_reg();
         fprintf(fp, "\tmovsd %d(%%ebp), %s\n", slot_off(lay, in->rhs), tmp);
         if (mem_size == 4) {
             fprintf(fp, "\tcvtsd2ss %s, %s\n", tmp, tmp);
-            fprintf(fp, "\tmovss %s, (%%eax)\n", tmp);
+            fprintf(fp, "\tmovss %s, (%s)\n", tmp, ist->regs[rp]);
         } else {
-            fprintf(fp, "\tmovsd %s, (%%eax)\n", tmp);
+            fprintf(fp, "\tmovsd %s, (%s)\n", tmp, ist->regs[rp]);
         }
     }
 }
@@ -2656,48 +2652,33 @@ static void emit_i386_mov_fp(FILE *fp, const slot_layout_t *lay, const cc_ssa_in
     }
 }
 
-static void emit_i386_set_dst_i32_from_reg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
-                                           int_reg_state_t *ist, int dst, const char *src_reg) {
-    if (f->value_types[dst] == CC_VAL_F64) {
-        fprintf(fp, "\tmovl %s, %d(%%ebp)\n", src_reg, slot_off(lay, dst));
-    } else {
-        int rd = int_regs_define(fp, f, lay, ist, dst, -1, -1);
-        if (strcmp(ist->regs[rd], src_reg) != 0) {
-            fprintf(fp, "\tmovl %s, %s\n", src_reg, ist->regs[rd]);
-        }
-    }
-}
-
-static void emit_i386_load_literal_addr_to_eax(FILE *fp, const char *literal) {
-    fprintf(fp, "\tmovl $%s, %%eax\n", literal);
-}
-
 static void emit_i386_addr_of_local(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                     const cc_ssa_instr_t *in) {
-    fprintf(fp, "\tleal %d(%%ebp), %%eax\n", slot_off(lay, in->lhs));
-    emit_i386_set_dst_i32_from_reg(fp, f, lay, ist, in->dst, "%eax");
+    int rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
+    fprintf(fp, "\tleal %d(%%ebp), %s\n", slot_off(lay, in->lhs), ist->regs[rd]);
 }
 
 static void emit_i386_addr_of_global_sym(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                          const cc_ssa_instr_t *in) {
-    emit_i386_load_literal_addr_to_eax(fp, in->sym);
-    emit_i386_set_dst_i32_from_reg(fp, f, lay, ist, in->dst, "%eax");
+    int rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
+    fprintf(fp, "\tmovl $%s, %s\n", in->sym, ist->regs[rd]);
 }
 
 static void emit_i386_addr_of_local_label(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                           const cc_ssa_instr_t *in) {
+    int rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
     fprintf(fp, "\tmovl $");
     emit_local_label(fp, f->name, in->label);
-    fprintf(fp, ", %%eax\n");
-    emit_i386_set_dst_i32_from_reg(fp, f, lay, ist, in->dst, "%eax");
+    fprintf(fp, ", %s\n", ist->regs[rd]);
 }
 
 static void emit_i386_addr_of_string_label(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                            int dst, size_t fn_index, size_t instr_index) {
     char label[96];
+    int rd;
     snprintf(label, sizeof(label), ".L__cc_str_%zu_%zu", fn_index, instr_index);
-    emit_i386_load_literal_addr_to_eax(fp, label);
-    emit_i386_set_dst_i32_from_reg(fp, f, lay, ist, dst, "%eax");
+    rd = int_regs_define(fp, f, lay, ist, dst, -1, -1);
+    fprintf(fp, "\tmovl $%s, %s\n", label, ist->regs[rd]);
 }
 
 static void emit_i386_load_scalar_indirect(FILE *fp, int_reg_state_t *ist, int rp, int rd, long mem_size, int is_unsigned) {
@@ -2802,12 +2783,12 @@ static void emit_i386_normalize_int_return(FILE *fp, long ret_bytes, int is_unsi
 }
 
 static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int value, long *stack_bytes) {
+    int off;
+
     if (f->value_types[value] == CC_VAL_F64) {
-        fprintf(fp, "\tsubl $8, %%esp\n");
-        emit_frame_load_reg(fp, 0, slot_off(lay, value), "%eax");
-        fprintf(fp, "\tmovl %%eax, 0(%%esp)\n");
-        emit_frame_load_reg(fp, 0, slot_off(lay, value) + 4, "%eax");
-        fprintf(fp, "\tmovl %%eax, 4(%%esp)\n");
+        off = slot_off(lay, value);
+        fprintf(fp, "\tpushl %d(%%ebp)\n", off + 4);
+        fprintf(fp, "\tpushl %d(%%ebp)\n", off);
         *stack_bytes += 8;
     } else {
         fprintf(fp, "\tpushl %d(%%ebp)\n", slot_off(lay, value));
@@ -2873,6 +2854,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         size_t j;
         int frame;
         int use_x87_fp = 0;
+        int scratch_off;
 
         if (g_i386_has_mmx && g_i386_isa_level < 5) {
             set_diag(diag, "i386 MMX codegen requires -march=i586 or newer");
@@ -2892,7 +2874,8 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         if (build_slot_layout(f, 8, &lay, diag) != 0) {
             return -1;
         }
-        frame = (lay.slot_count * 8 + 15) & ~15;
+        frame = (lay.slot_count * 8 + 16 + 15) & ~15;
+        scratch_off = -frame;
 
         fprintf(fp, "\n");
         emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
@@ -3001,7 +2984,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                  */
                 int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->dst] == CC_VAL_F64) {
-                    emit_i386_load_fp_indirect(fp, &lay, in, use_x87_fp);
+                    emit_i386_load_fp_indirect(fp, f, &lay, &ist, in, use_x87_fp);
                 } else {
                     int rp = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, rp, -1);
@@ -3018,7 +3001,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                  */
                 int_regs_flush(fp, f, &lay, &ist);
                 if (f->value_types[in->rhs] == CC_VAL_F64) {
-                    emit_i386_store_fp_indirect(fp, &lay, in, use_x87_fp);
+                    emit_i386_store_fp_indirect(fp, f, &lay, &ist, in, use_x87_fp);
                 } else {
                     int rp = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rv = int_regs_load(fp, f, &lay, &ist, in->rhs, -1, rp);
@@ -3090,7 +3073,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
             case CC_SSA_I2F:
                 if (use_x87_fp) {
-                    emit_i386_i2f_x87(fp, f, &lay, &ist, in);
+                    emit_i386_i2f_x87(fp, f, &lay, &ist, in, scratch_off);
                 } else {
                     emit_i386_i2f_sse(fp, f, &lay, &ist, in);
                 }
@@ -3100,7 +3083,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                     if (use_x87_fp) {
-                        emit_i386_f2i_x87(fp, f, &lay, &ist, slot_off(&lay, in->lhs), ist.regs[rd]);
+                        emit_i386_f2i_x87(fp, f, &lay, &ist, slot_off(&lay, in->lhs), ist.regs[rd], scratch_off);
                     } else {
                         fprintf(fp, "\tcvttsd2sil %d(%%ebp), %s\n", slot_off(&lay, in->lhs), ist.regs[rd]);
                     }
@@ -3109,7 +3092,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
             case CC_SSA_FROUND32:
                 if (use_x87_fp) {
-                    emit_i386_fround32_x87(fp, &lay, in);
+                    emit_i386_fround32_x87(fp, &lay, in, scratch_off);
                 } else {
                     emit_i386_fround32_sse(fp, &lay, in);
                 }
