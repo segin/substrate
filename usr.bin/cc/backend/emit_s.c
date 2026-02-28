@@ -2692,32 +2692,79 @@ static void emit_i386_load_scalar_indirect(FILE *fp, int_reg_state_t *ist, int r
 }
 
 static int emit_i386_int_div_or_shift(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                                      const cc_ssa_instr_t *in) {
-    int rd;
+                                      const cc_ssa_instr_t *in, cc_diag_t *diag) {
+    int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+    int rcx = int_reg_index(ist, "%ecx");
 
-    int_regs_flush(fp, f, lay, ist);
-    emit_frame_load_reg(fp, 0, slot_off(lay, in->lhs), "%eax");
+    if (ist->reg_dirty[rl]) {
+        int_regs_spill_reg(fp, f, lay, ist, rl);
+        rl = int_regs_load(fp, f, lay, ist, in->lhs, rl, -1);
+    }
     if (in->op == CC_SSA_DIV) {
+        int rax = int_reg_index(ist, "%eax");
+        int rdx = int_reg_index(ist, "%edx");
+        int rr_div;
+
+        if (rax < 0 || rdx < 0) {
+            set_diag(diag, "i386 register set missing %eax/%edx");
+            return -1;
+        }
+        if (rl != rax) {
+            int lhs_dirty = ist->reg_dirty[rl];
+            int_regs_clobber_reg(fp, f, lay, ist, rax);
+            fprintf(fp, "\tmovl %s, %%eax\n", ist->regs[rl]);
+            int_regs_bind(ist, in->lhs, rax, lhs_dirty);
+            rl = rax;
+        }
+        int_regs_clobber_reg(fp, f, lay, ist, rdx);
+        rr_div = int_regs_load(fp, f, lay, ist, in->rhs, -1, rax);
+        if (rr_div == rdx) {
+            int rhs_dirty = ist->reg_dirty[rr_div];
+            if (rcx < 0 || rcx == rax || rcx == rdx) {
+                set_diag(diag, "i386 register set missing divisor scratch register");
+                return -1;
+            }
+            int_regs_clobber_reg(fp, f, lay, ist, rcx);
+            fprintf(fp, "\tmovl %%edx, %%ecx\n");
+            int_regs_bind(ist, in->rhs, rcx, rhs_dirty);
+            rr_div = rcx;
+        }
         if (in->is_unsigned) {
             fprintf(fp, "\txorl %%edx, %%edx\n");
-            fprintf(fp, "\tdivl %d(%%ebp)\n", slot_off(lay, in->rhs));
+            fprintf(fp, "\tdivl %s\n", ist->regs[rr_div]);
         } else {
             fprintf(fp, "\tcltd\n");
-            fprintf(fp, "\tidivl %d(%%ebp)\n", slot_off(lay, in->rhs));
+            fprintf(fp, "\tidivl %s\n", ist->regs[rr_div]);
         }
-    } else if (in->op == CC_SSA_SHL) {
-        emit_frame_load_reg(fp, 0, slot_off(lay, in->rhs), "%ecx");
-        fprintf(fp, "\tandl $31, %%ecx\n");
-        fprintf(fp, "\tshll %%cl, %%eax\n");
-    } else {
-        emit_frame_load_reg(fp, 0, slot_off(lay, in->rhs), "%ecx");
-        fprintf(fp, "\tandl $31, %%ecx\n");
-        fprintf(fp, "\t%s %%cl, %%eax\n", in->is_unsigned ? "shrl" : "sarl");
+        int_regs_bind(ist, in->dst, rax, 1);
+        return 0;
     }
-    rd = int_regs_define(fp, f, lay, ist, in->dst, int_reg_index(ist, "%eax"), -1);
-    if (strcmp(ist->regs[rd], "%eax") != 0) {
-        fprintf(fp, "\tmovl %%eax, %s\n", ist->regs[rd]);
+    if (rcx < 0) {
+        set_diag(diag, "i386 register set missing %ecx");
+        return -1;
     }
+    if (rl == rcx) {
+        int alt = int_regs_load(fp, f, lay, ist, in->lhs, -1, rcx);
+        if (alt == rcx) {
+            int lhs_dirty = ist->reg_dirty[rcx];
+            alt = int_regs_define(fp, f, lay, ist, in->lhs, -1, rcx);
+            fprintf(fp, "\tmovl %%ecx, %s\n", ist->regs[alt]);
+            ist->reg_dirty[alt] = (unsigned char)(lhs_dirty ? 1 : 0);
+        }
+        rl = alt;
+    }
+    int_regs_clobber_reg(fp, f, lay, ist, rcx);
+    {
+        int rr_shift = int_regs_load(fp, f, lay, ist, in->rhs, rcx, rl);
+        int rhs_dirty = ist->reg_dirty[rr_shift];
+        if (rr_shift != rcx) {
+            fprintf(fp, "\tmovl %s, %%ecx\n", ist->regs[rr_shift]);
+            int_regs_bind(ist, in->rhs, rcx, rhs_dirty);
+        }
+    }
+    fprintf(fp, "\tandl $31, %%ecx\n");
+    fprintf(fp, "\t%s %%cl, %s\n", in->op == CC_SSA_SHL ? "shll" : (in->is_unsigned ? "shrl" : "sarl"), ist->regs[rl]);
+    int_regs_remap_dst(fp, f, lay, ist, in->dst, rl);
     return 0;
 }
 
@@ -2765,11 +2812,8 @@ static void emit_i386_va_start(FILE *fp, const cc_ssa_function_t *f, const slot_
     int rd;
     int_regs_flush(fp, f, lay, ist);
     poff = i386_variadic_start_offset(f, (int)in->imm);
-    rd = int_regs_define(fp, f, lay, ist, in->dst, int_reg_index(ist, "%eax"), -1);
-    fprintf(fp, "\tleal %d(%%ebp), %%eax\n", poff);
-    if (strcmp(ist->regs[rd], "%eax") != 0) {
-        fprintf(fp, "\tmovl %%eax, %s\n", ist->regs[rd]);
-    }
+    rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
+    fprintf(fp, "\tleal %d(%%ebp), %s\n", poff, ist->regs[rd]);
 }
 
 static void emit_i386_normalize_int_return(FILE *fp, long ret_bytes, int is_unsigned) {
@@ -2798,8 +2842,7 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
 
 static void emit_i386_call_target(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
     if (in->op == CC_SSA_CALLI) {
-        emit_frame_load_reg(fp, 0, slot_off(lay, in->lhs), "%eax");
-        fprintf(fp, "\tcall *%%eax\n");
+        fprintf(fp, "\tcall *%d(%%ebp)\n", slot_off(lay, in->lhs));
     } else {
         fprintf(fp, "\tcall %s\n", in->sym);
     }
@@ -3045,7 +3088,11 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rr;
                     if (in->op == CC_SSA_DIV || in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) {
-                        emit_i386_int_div_or_shift(fp, f, &lay, &ist, in);
+                        if (emit_i386_int_div_or_shift(fp, f, &lay, &ist, in, diag) != 0) {
+                            int_regs_free(&ist);
+                            slot_layout_free(&lay);
+                            return -1;
+                        }
                         break;
                     }
                     if (ist.reg_dirty[rl]) {
