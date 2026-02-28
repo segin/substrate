@@ -5,7 +5,9 @@
 #include <arch/i386/pmap.h>
 #include <stddef.h>
 
+#ifndef P2V
 #define P2V(x) ((uintptr_t)(x) + 0xC0000000)
+#endif
 
 // Helper to copy a page (Optimized with pmap_copy_page)
 static void page_copy(uintptr_t src_pa, uintptr_t dst_pa) {
