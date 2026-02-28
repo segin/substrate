@@ -313,11 +313,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `_ZN3FooD2Ev` → `Foo::~Foo()`.
 
 ### 9d. Special Name Tests
-- [ ] `_ZTV3Foo` → `vtable for Foo`.
-- [ ] `_ZTI3Foo` → `typeinfo for Foo`.
-- [ ] `_ZTS3Foo` → `typeinfo name for Foo`.
-- [ ] `_ZTT3Foo` → `VTT for Foo`.
-- [ ] `_ZGVN3Foo3barE` → `guard variable for Foo::bar`.
+- [x] `_ZTV3Foo` → `vtable for Foo`.
+- [x] `_ZTI3Foo` → `typeinfo for Foo`.
+- [x] `_ZTS3Foo` → `typeinfo name for Foo`.
+- [x] `_ZTT3Foo` → `VTT for Foo`.
+- [x] `_ZGVN3Foo3barE` → `guard variable for Foo::bar`.
 
 ### 9e. Template Tests
 - [ ] Nested templates: `_ZN1AIiE1BIS_IjEE3fooEv` → complex nested template.
