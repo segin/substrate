@@ -6,12 +6,12 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 
 ## 1. `libelfobj` Integration
 
-- [ ] Open input with `elf_open()`.
-- [ ] Apply mutations via `libelfobj` setter APIs.
-- [ ] Validate with `elf_validate()` before writing.
-- [ ] Write with `elf_write_file()`.
-- [ ] `elf_close()` on all handles.
-- [ ] In‑place mode: open, mutate, write to temp, rename over original.
+- [x] Open input with `elf_open()`.
+- [x] Apply mutations via `libelfobj` setter APIs.
+- [x] Validate with `elf_validate()` before writing.
+- [x] Write with `elf_write_file()`.
+- [x] `elf_close()` on all handles.
+- [x] In‑place mode: open, mutate, write to temp, rename over original.
 
 ## 2. ELF Header Edits
 
