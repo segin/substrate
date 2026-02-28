@@ -396,9 +396,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Non‑Rust `_ZN` (Itanium): not detected as Rust legacy.
 
 ### 9r. D Language Basic Tests
-- [ ] `_D3std5stdio7writelnFAaZv` → `std.stdio.writeln(char[], void)` (or similar).
-- [ ] Simple function: `_D3foo3barFiZi` → `foo.bar(int) → int`.
-- [ ] Nested module path: `_D3std5range10primitives...`.
+- [x] `_D3std5stdio7writelnFAaZv` → `std.stdio.writeln(char[], void)` (or similar).
+- [x] Simple function: `_D3foo3barFiZi` → `foo.bar(int) → int`.
+- [x] Nested module path: `_D3std5range10primitives...`.
 
 ### 9s. D Template Instance Tests
 - [ ] `_D3std5array__T5ArrayTiZ5Array...` → `std.array.Array!(int)...`.
