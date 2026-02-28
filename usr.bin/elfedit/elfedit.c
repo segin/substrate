@@ -13,6 +13,12 @@
 #include <unistd.h>
 
 typedef struct {
+    char **items;
+    size_t count;
+    size_t cap;
+} strlist_t;
+
+typedef struct {
     const char *input_path;
     const char *output_path;
     uint16_t output_type;
@@ -27,9 +33,14 @@ typedef struct {
     int have_output_abiversion;
     int have_output_flags;
     int have_output_entry;
+    strlist_t set_section_type_specs;
+    strlist_t set_section_flags_specs;
+    strlist_t set_section_align_specs;
+    strlist_t rename_section_specs;
 } elfedit_ctx_t;
 
 static const char *g_progname = "elfedit";
+static void ctx_cleanup(elfedit_ctx_t *ctx);
 
 static void warnf(const char *fmt, ...) {
     va_list ap;
@@ -45,8 +56,66 @@ static void usage(FILE *out) {
     fprintf(out,
             "usage: %s [-o output] [--output-type type] [--output-machine machine]\n"
             "       [--output-osabi osabi] [--output-abiversion version]\n"
-            "       [--output-flags value] [--output-entry addr] <input>\n",
+            "       [--output-flags value] [--output-entry addr]\n"
+            "       [--set-section-type name=type] [--set-section-flags name=flags]\n"
+            "       [--set-section-align name=align] [--rename-section old=new] <input>\n",
             g_progname);
+}
+
+static char *xstrdup(const char *s) {
+    size_t n;
+    char *copy;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    n = strlen(s) + 1;
+    copy = (char *)malloc(n);
+    if (copy == NULL) {
+        return NULL;
+    }
+    memcpy(copy, s, n);
+    return copy;
+}
+
+static int strlist_push(strlist_t *list, const char *value) {
+    char **next;
+    size_t new_cap;
+    char *dup;
+
+    if (list == NULL || value == NULL) {
+        return -1;
+    }
+    if (list->count == list->cap) {
+        new_cap = list->cap == 0 ? 4 : list->cap * 2;
+        next = (char **)realloc(list->items, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        list->items = next;
+        list->cap = new_cap;
+    }
+    dup = xstrdup(value);
+    if (dup == NULL) {
+        return -1;
+    }
+    list->items[list->count++] = dup;
+    return 0;
+}
+
+static void strlist_free(strlist_t *list) {
+    size_t i;
+
+    if (list == NULL) {
+        return;
+    }
+    for (i = 0; i < list->count; ++i) {
+        free(list->items[i]);
+    }
+    free(list->items);
+    list->items = NULL;
+    list->count = 0;
+    list->cap = 0;
 }
 
 static int parse_u32(const char *text, uint32_t *out) {
@@ -179,6 +248,269 @@ static int parse_u8(const char *text, uint8_t *out) {
     return 0;
 }
 
+static int split_assignment(const char *spec, char **left_out, char **right_out) {
+    char *dup;
+    char *eq;
+
+    if (spec == NULL || left_out == NULL || right_out == NULL) {
+        return -1;
+    }
+    dup = xstrdup(spec);
+    if (dup == NULL) {
+        return -1;
+    }
+    eq = strchr(dup, '=');
+    if (eq == NULL || eq == dup || eq[1] == '\0') {
+        free(dup);
+        return -1;
+    }
+    *eq = '\0';
+    *left_out = dup;
+    *right_out = eq + 1;
+    return 0;
+}
+
+static char *trim_ws(char *s) {
+    char *end;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') {
+        ++s;
+    }
+    end = s + strlen(s);
+    while (end > s && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n' || end[-1] == '\r')) {
+        --end;
+    }
+    *end = '\0';
+    return s;
+}
+
+static int parse_section_type(const char *arg, uint32_t *out) {
+    uint32_t numeric = 0;
+
+    if (strcasecmp(arg, "progbits") == 0) {
+        *out = SHT_PROGBITS;
+        return 0;
+    }
+    if (strcasecmp(arg, "nobits") == 0) {
+        *out = SHT_NOBITS;
+        return 0;
+    }
+    if (strcasecmp(arg, "note") == 0) {
+        *out = SHT_NOTE;
+        return 0;
+    }
+    if (strcasecmp(arg, "symtab") == 0) {
+        *out = SHT_SYMTAB;
+        return 0;
+    }
+    if (strcasecmp(arg, "strtab") == 0) {
+        *out = SHT_STRTAB;
+        return 0;
+    }
+    if (strcasecmp(arg, "rela") == 0) {
+        *out = SHT_RELA;
+        return 0;
+    }
+    if (strcasecmp(arg, "rel") == 0) {
+        *out = SHT_REL;
+        return 0;
+    }
+    if (strcasecmp(arg, "dynamic") == 0) {
+        *out = SHT_DYNAMIC;
+        return 0;
+    }
+    if (strcasecmp(arg, "hash") == 0) {
+        *out = SHT_HASH;
+        return 0;
+    }
+    if (parse_u32(arg, &numeric) != 0) {
+        return -1;
+    }
+    *out = numeric;
+    return 0;
+}
+
+static int parse_section_flags(const char *arg, uint64_t *out) {
+    char *dup;
+    char *tok;
+    char *save = NULL;
+    uint64_t flags = 0;
+    uint64_t numeric = 0;
+
+    if (parse_u64(arg, &numeric) == 0) {
+        *out = numeric;
+        return 0;
+    }
+
+    dup = xstrdup(arg);
+    if (dup == NULL) {
+        return -1;
+    }
+    for (tok = strtok_r(dup, ",", &save); tok != NULL; tok = strtok_r(NULL, ",", &save)) {
+        tok = trim_ws(tok);
+        if (strcmp(tok, "alloc") == 0) {
+            flags |= SHF_ALLOC;
+        } else if (strcmp(tok, "write") == 0) {
+            flags |= SHF_WRITE;
+        } else if (strcmp(tok, "execinstr") == 0) {
+            flags |= SHF_EXECINSTR;
+        } else if (strcmp(tok, "merge") == 0) {
+            flags |= SHF_MERGE;
+        } else if (strcmp(tok, "strings") == 0) {
+            flags |= SHF_STRINGS;
+        } else if (strcmp(tok, "tls") == 0) {
+            flags |= SHF_TLS;
+        } else if (strcmp(tok, "group") == 0) {
+            flags |= SHF_GROUP;
+        } else if (strcmp(tok, "compressed") == 0) {
+            flags |= SHF_COMPRESSED;
+        } else {
+            free(dup);
+            return -1;
+        }
+    }
+    free(dup);
+    *out = flags;
+    return 0;
+}
+
+static elf_section_t *find_section_or_error(elfobj_t *obj, const char *name) {
+    elf_section_t *sec = elf_find_section(obj, name);
+    if (sec == NULL) {
+        warnf("section '%s' not found", name);
+    }
+    return sec;
+}
+
+static int apply_section_type_specs(elfobj_t *obj, const strlist_t *specs) {
+    size_t i;
+
+    for (i = 0; i < specs->count; ++i) {
+        char *lhs = NULL;
+        char *rhs = NULL;
+        uint32_t type;
+        elf_section_t *sec;
+
+        if (split_assignment(specs->items[i], &lhs, &rhs) != 0) {
+            warnf("invalid section type assignment: %s", specs->items[i]);
+            return -1;
+        }
+        if (parse_section_type(rhs, &type) != 0) {
+            warnf("unknown section type: %s", rhs);
+            free(lhs);
+            return -1;
+        }
+        sec = find_section_or_error(obj, lhs);
+        if (sec == NULL) {
+            free(lhs);
+            return -1;
+        }
+        if (elf_section_set_type(sec, type) != ELF_OK) {
+            warnf("failed to set section type for '%s'", lhs);
+            free(lhs);
+            return -1;
+        }
+        free(lhs);
+    }
+    return 0;
+}
+
+static int apply_section_flags_specs(elfobj_t *obj, const strlist_t *specs) {
+    size_t i;
+
+    for (i = 0; i < specs->count; ++i) {
+        char *lhs = NULL;
+        char *rhs = NULL;
+        uint64_t flags;
+        elf_section_t *sec;
+
+        if (split_assignment(specs->items[i], &lhs, &rhs) != 0) {
+            warnf("invalid section flags assignment: %s", specs->items[i]);
+            return -1;
+        }
+        if (parse_section_flags(rhs, &flags) != 0) {
+            warnf("unknown section flags: %s", rhs);
+            free(lhs);
+            return -1;
+        }
+        sec = find_section_or_error(obj, lhs);
+        if (sec == NULL) {
+            free(lhs);
+            return -1;
+        }
+        if (elf_section_set_flags(sec, flags) != ELF_OK) {
+            warnf("failed to set section flags for '%s'", lhs);
+            free(lhs);
+            return -1;
+        }
+        free(lhs);
+    }
+    return 0;
+}
+
+static int apply_section_align_specs(elfobj_t *obj, const strlist_t *specs) {
+    size_t i;
+
+    for (i = 0; i < specs->count; ++i) {
+        char *lhs = NULL;
+        char *rhs = NULL;
+        uint64_t align;
+        elf_section_t *sec;
+
+        if (split_assignment(specs->items[i], &lhs, &rhs) != 0) {
+            warnf("invalid section alignment assignment: %s", specs->items[i]);
+            return -1;
+        }
+        if (parse_u64(rhs, &align) != 0) {
+            warnf("invalid section alignment: %s", rhs);
+            free(lhs);
+            return -1;
+        }
+        sec = find_section_or_error(obj, lhs);
+        if (sec == NULL) {
+            free(lhs);
+            return -1;
+        }
+        if (elf_section_set_align(sec, align) != ELF_OK) {
+            warnf("failed to set section alignment for '%s'", lhs);
+            free(lhs);
+            return -1;
+        }
+        free(lhs);
+    }
+    return 0;
+}
+
+static int apply_rename_section_specs(elfobj_t *obj, const strlist_t *specs) {
+    size_t i;
+
+    for (i = 0; i < specs->count; ++i) {
+        char *lhs = NULL;
+        char *rhs = NULL;
+        elf_section_t *sec;
+
+        if (split_assignment(specs->items[i], &lhs, &rhs) != 0) {
+            warnf("invalid section rename assignment: %s", specs->items[i]);
+            return -1;
+        }
+        sec = find_section_or_error(obj, lhs);
+        if (sec == NULL) {
+            free(lhs);
+            return -1;
+        }
+        if (elf_section_set_name(sec, rhs) != ELF_OK) {
+            warnf("failed to rename section '%s' to '%s'", lhs, rhs);
+            free(lhs);
+            return -1;
+        }
+        free(lhs);
+    }
+    return 0;
+}
+
 static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
     int ch;
     uint16_t parsed_value;
@@ -192,6 +524,10 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
         { "output-abiversion", required_argument, NULL, 1003 },
         { "output-flags", required_argument, NULL, 1004 },
         { "output-entry", required_argument, NULL, 1005 },
+        { "set-section-type", required_argument, NULL, 1010 },
+        { "set-section-flags", required_argument, NULL, 1011 },
+        { "set-section-align", required_argument, NULL, 1012 },
+        { "rename-section", required_argument, NULL, 1013 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -250,6 +586,30 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
                 return -1;
             }
             ctx->have_output_entry = 1;
+            break;
+        case 1010:
+            if (strlist_push(&ctx->set_section_type_specs, optarg) != 0) {
+                warnf("out of memory");
+                return -1;
+            }
+            break;
+        case 1011:
+            if (strlist_push(&ctx->set_section_flags_specs, optarg) != 0) {
+                warnf("out of memory");
+                return -1;
+            }
+            break;
+        case 1012:
+            if (strlist_push(&ctx->set_section_align_specs, optarg) != 0) {
+                warnf("out of memory");
+                return -1;
+            }
+            break;
+        case 1013:
+            if (strlist_push(&ctx->rename_section_specs, optarg) != 0) {
+                warnf("out of memory");
+                return -1;
+            }
             break;
         default:
             usage(stderr);
@@ -370,6 +730,19 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
         }
     }
 
+    if (apply_section_type_specs(obj, &ctx->set_section_type_specs) != 0) {
+        return -1;
+    }
+    if (apply_section_flags_specs(obj, &ctx->set_section_flags_specs) != 0) {
+        return -1;
+    }
+    if (apply_section_align_specs(obj, &ctx->set_section_align_specs) != 0) {
+        return -1;
+    }
+    if (apply_rename_section_specs(obj, &ctx->rename_section_specs) != 0) {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -420,6 +793,16 @@ static int write_output(const elfedit_ctx_t *ctx, elfobj_t *obj) {
     return 0;
 }
 
+static void ctx_cleanup(elfedit_ctx_t *ctx) {
+    if (ctx == NULL) {
+        return;
+    }
+    strlist_free(&ctx->set_section_type_specs);
+    strlist_free(&ctx->set_section_flags_specs);
+    strlist_free(&ctx->set_section_align_specs);
+    strlist_free(&ctx->rename_section_specs);
+}
+
 int main(int argc, char **argv) {
     elfedit_ctx_t ctx;
     elfobj_t *obj = NULL;
@@ -431,6 +814,7 @@ int main(int argc, char **argv) {
     }
 
     if (parse_args(argc, argv, &ctx) != 0) {
+        ctx_cleanup(&ctx);
         return 1;
     }
 
@@ -455,5 +839,6 @@ out:
     if (obj != NULL) {
         elf_close(obj);
     }
+    ctx_cleanup(&ctx);
     return rc;
 }

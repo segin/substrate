@@ -43,12 +43,12 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 
 ## 3. Section Header Edits
 
-- [ ] `--set-section-type <name>=<type>`: change `sh_type` via `elf_section_set_type()`.
-  - [ ] Accept: `progbits`, `nobits`, `note`, `symtab`, `strtab`, `rela`, `rel`, `dynamic`, `hash`, or numeric.
-- [ ] `--set-section-flags <name>=<flags>`: change `sh_flags` via `elf_section_set_flags()`.
-  - [ ] Accept: comma‑separated list of `alloc`, `write`, `execinstr`, `merge`, `strings`, `tls`, `group`, `compressed`, or hex value.
-- [ ] `--set-section-align <name>=<align>`: change `sh_addralign` via `elf_section_set_align()`.
-- [ ] `--rename-section <old>=<new>`: change section name in `.shstrtab`.
+- [x] `--set-section-type <name>=<type>`: change `sh_type` via `elf_section_set_type()`.
+  - [x] Accept: `progbits`, `nobits`, `note`, `symtab`, `strtab`, `rela`, `rel`, `dynamic`, `hash`, or numeric.
+- [x] `--set-section-flags <name>=<flags>`: change `sh_flags` via `elf_section_set_flags()`.
+  - [x] Accept: comma‑separated list of `alloc`, `write`, `execinstr`, `merge`, `strings`, `tls`, `group`, `compressed`, or hex value.
+- [x] `--set-section-align <name>=<align>`: change `sh_addralign` via `elf_section_set_align()`.
+- [x] `--rename-section <old>=<new>`: change section name in `.shstrtab`.
 
 ## 4. Program Header Edits
 

@@ -89,6 +89,7 @@ typedef enum {
 #define SHT_SYMTAB 2
 #define SHT_STRTAB 3
 #define SHT_RELA 4
+#define SHT_HASH 5
 #define SHT_DYNAMIC 6
 #define SHT_NOTE 7
 #define SHT_NOBITS 8
@@ -267,6 +268,7 @@ elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t 
 elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align);
 elf_err_t elf_section_set_type(elf_section_t *section, uint32_t type);
 elf_err_t elf_section_set_flags(elf_section_t *section, uint64_t flags);
+elf_err_t elf_section_set_name(elf_section_t *section, const char *name);
 elf_err_t elf_section_set_group(elf_section_t *section, uint32_t group, int comdat);
 elf_err_t elf_section_set_merge(elf_section_t *section, uint64_t entsize, int strings);
 elf_err_t elf_section_set_tls(elf_section_t *section, int enable);

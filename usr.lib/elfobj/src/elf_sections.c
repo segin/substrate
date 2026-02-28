@@ -169,6 +169,25 @@ elf_err_t elf_section_set_flags(elf_section_t *section, uint64_t flags) {
     return ELF_OK;
 }
 
+elf_err_t elf_section_set_name(elf_section_t *section, const char *name) {
+    char *dup;
+
+    if (section == NULL || section->obj == NULL || name == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (!is_mutable_obj(section->obj)) {
+        return ELF_ERR_STATE;
+    }
+    dup = elf__strdup(name);
+    if (dup == NULL) {
+        return ELF_ERR_OOM;
+    }
+    free(section->name);
+    section->name = dup;
+    section->obj->dirty = 1;
+    return ELF_OK;
+}
+
 elf_err_t elf_section_set_group(elf_section_t *section, uint32_t group, int comdat) {
     if (section == NULL || section->obj == NULL) {
         return ELF_ERR_STATE;
