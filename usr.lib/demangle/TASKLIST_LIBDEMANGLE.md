@@ -22,11 +22,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 ## 2. Itanium ABI Demangler (primary)
 
 ### 2a. Parser Architecture
-- [ ] Recursive‑descent parser operating on `const char *` input with cursor.
-- [ ] No heap allocation during parse — build output directly into growable buffer.
-- [ ] Substitution table: fixed‑capacity array (256 entries), overflow = fail gracefully.
-- [ ] Template argument stack for nested template resolution.
-- [ ] Recursion depth counter with configurable limit (default 256).
+- [x] Recursive‑descent parser operating on `const char *` input with cursor.
+- [x] No heap allocation during parse — build output directly into growable buffer.
+- [x] Substitution table: fixed‑capacity array (256 entries), overflow = fail gracefully.
+- [x] Template argument stack for nested template resolution.
+- [x] Recursion depth counter with configurable limit (default 256).
 
 ### 2b. Core Grammar Coverage
 - [ ] `<mangled-name>` → `_Z <encoding>`.
