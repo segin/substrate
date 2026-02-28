@@ -53,7 +53,7 @@ PY
 
   mkdir -p "$ROOT/safe_out"
   set +e
-  (cd "$ROOT/safe_out" && "$TAR_BIN" -xf "$ROOT/unsafe2.tar" --safe-extract)
+  (cd "$ROOT/safe_out" && "$TAR_BIN" -xf "$ROOT/unsafe2.tar")
   rc=$?
   set -e
   [[ $rc -eq 0 ]]

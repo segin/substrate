@@ -81,7 +81,11 @@ static int i2oct(char *d, size_t n, uint64_t v) {
     uint64_t max = 1;
     for (size_t i = 0; i < n - 1; i++) max <<= 3;
     if (v >= max) return -1;
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(d, n, "%0*llo", (int)n - 1, (unsigned long long)v);
+#pragma GCC diagnostic pop
     return 0;
 }
 
@@ -155,7 +159,8 @@ static int pax_append(char **buf, size_t *len, const char *k, const char *v) {
     while (1) {
         r = d + 1 + m;
         int nd = 1; for (int t = r; t >= 10; t /= 10) nd++;
-        if (nd == d) break; d = nd;
+        if (nd == d) break;
+        d = nd;
     }
     char line[8192];
     int n = snprintf(line, sizeof(line), "%d %s", r, body);
@@ -365,10 +370,8 @@ static char *map_extract_path(const char *in) {
     }
     char *out = strdup(p); free(dup);
     if (!out) return NULL;
-    if (opt.safe_extract) {
-        if (strstr(out, "../") || strstr(out, "/..") || !strcmp(out, "..") || in[0] == '/') {
-            free(out); return NULL;
-        }
+    if (strstr(out, "../") || strstr(out, "/..") || !strcmp(out, "..") || in[0] == '/') {
+        free(out); return NULL;
     }
     return out;
 }
@@ -497,9 +500,13 @@ static int process_read(FILE *in, bool extract) {
                 break;
         }
 
-        if (opt.preserve_permissions) chmod(target, (mode_t)oct2i(h.mode, sizeof(h.mode)) & 07777);
-        if (!opt.no_same_owner) lchown(target, (uid_t)(ps.uid >= 0 ? ps.uid : oct2i(h.uid, sizeof(h.uid))),
-                                       (gid_t)(ps.gid >= 0 ? ps.gid : oct2i(h.gid, sizeof(h.gid))));
+        if (opt.preserve_permissions) {
+            if (chmod(target, (mode_t)oct2i(h.mode, sizeof(h.mode)) & 07777)) {}
+        }
+        if (!opt.no_same_owner) {
+            if (lchown(target, (uid_t)(ps.uid >= 0 ? ps.uid : oct2i(h.uid, sizeof(h.uid))),
+                       (gid_t)(ps.gid >= 0 ? ps.gid : oct2i(h.gid, sizeof(h.gid))))) {}
+        }
         struct timespec ts[2] = {{0}};
         ts[0].tv_sec = oct2i(h.mtime, sizeof(h.mtime));
         ts[1].tv_sec = ps.mtime >= 0 ? ps.mtime : oct2i(h.mtime, sizeof(h.mtime));
