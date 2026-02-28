@@ -415,9 +415,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Qualifiers: `xi` → `const(int)`, `yi` → `immutable(int)`.
 
 ### 9u. D Edge Case Tests
-- [ ] Non‑D `_D...` name (C symbol starting with `_D`): `DEMANGLE_DLANG` returns `NULL`, `DEMANGLE_AUTO` tries Itanium.
-- [ ] D runtime symbols (`_d_*`): passed through (C mangling).
-- [ ] `__lambda` / `__unittest` special sequences.
+- [x] Non‑D `_D...` name (C symbol starting with `_D`): `DEMANGLE_DLANG` returns `NULL`, `DEMANGLE_AUTO` tries Itanium.
+- [x] D runtime symbols (`_d_*`): passed through (C mangling).
+- [x] `__lambda` / `__unittest` special sequences.
 
 ### 9v. Auto‑Detection Tests
 - [ ] `_Z...` → Itanium.
