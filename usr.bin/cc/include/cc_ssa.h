@@ -52,6 +52,10 @@ typedef enum {
     CC_SSA_RET
 } cc_ssa_opcode_t;
 
+#define CC_SSA_ASM_MEM_INDIRECT_ENCODE(v) (-(int)((v) + 2))
+#define CC_SSA_ASM_MEM_INDIRECT_P(v) ((v) <= -2)
+#define CC_SSA_ASM_MEM_INDIRECT_DECODE(v) (-(int)(v) - 2)
+
 typedef struct {
     cc_ssa_opcode_t op;
     int dst;

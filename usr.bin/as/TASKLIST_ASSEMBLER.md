@@ -76,16 +76,16 @@ Execution policy:
 - [x] Stable encoding choices for reproducible output.
 
 ## 6) Relocations and ELF Emission
-- [ ] Emit ET_REL ELF32 for i386 mode.
-- [ ] Emit ET_REL ELF64 for x86_64 mode.
-- [ ] i386 relocation set (`R_386_*`) required by `ld`.
-- [ ] x86_64 relocation set (`R_X86_64_*`) required by `ld`.
-- [ ] REL/RELA handling per target ABI requirements.
-- [ ] Addend handling correctness.
-- [ ] Section-relative and symbol-relative relocation encoding.
-- [ ] Relocation overflow checks and deterministic failure.
-- [ ] String table and symbol table construction.
-- [ ] Section header layout/alignment correctness.
+- [x] Emit ET_REL ELF32 for i386 mode.
+- [x] Emit ET_REL ELF64 for x86_64 mode.
+- [x] i386 relocation set (`R_386_*`) required by `ld`.
+- [x] x86_64 relocation set (`R_X86_64_*`) required by `ld`.
+- [x] REL/RELA handling per target ABI requirements.
+- [x] Addend handling correctness.
+- [x] Section-relative and symbol-relative relocation encoding.
+- [x] Relocation overflow checks and deterministic failure.
+- [x] String table and symbol table construction.
+- [x] Section header layout/alignment correctness.
 
 ## 7) Directives and Data Emission
 - [ ] Data directives (`.byte/.short/.long/.quad`) endianness/width correctness.

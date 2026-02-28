@@ -273,7 +273,7 @@ static int asm_operand_is_lvalue(const cc_expr_t *e) {
     if (e == NULL) {
         return 0;
     }
-    if (e->kind == CC_EXPR_IDENT) {
+    if (e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_DEREF || e->kind == CC_EXPR_MEMBER) {
         return 1;
     }
     return 0;
@@ -391,6 +391,7 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
         return -1;
     }
     while (t[i] != '\0') {
+        int has_modifier = 0;
         if (t[i] != '%') {
             i++;
             continue;
@@ -399,6 +400,11 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
         if (t[i] == '%') {
             i++;
             continue;
+        }
+        if (t[i] == 'c' || t[i] == 'P' || t[i] == 'q' || t[i] == 'k' || t[i] == 'w' || t[i] == 'b' ||
+            t[i] == 'h' || t[i] == 'z' || t[i] == 'n') {
+            has_modifier = 1;
+            i++;
         }
         if (t[i] >= '0' && t[i] <= '9') {
             long n = 0;
@@ -410,6 +416,37 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                 set_diag(diag, "asm template operand index is out of range");
                 return -1;
             }
+            continue;
+        }
+        if (has_modifier && t[i] == '[') {
+            size_t b = ++i;
+            while (t[i] != '\0' && t[i] != ']') {
+                i++;
+            }
+            if (t[i] != ']') {
+                set_diag(diag, "asm template has unterminated named operand");
+                return -1;
+            }
+            if (i == b) {
+                set_diag(diag, "asm template has empty named operand");
+                return -1;
+            }
+            {
+                char *nm = (char *)malloc(i - b + 1);
+                if (nm == NULL) {
+                    set_diag(diag, "out of memory validating asm template");
+                    return -1;
+                }
+                memcpy(nm, t + b, i - b);
+                nm[i - b] = '\0';
+                if (!asm_find_named_operand(s, nm)) {
+                    free(nm);
+                    set_diag(diag, "asm template references unknown named operand");
+                    return -1;
+                }
+                free(nm);
+            }
+            i++;
             continue;
         }
         if (t[i] == 'l') {
@@ -3819,8 +3856,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_ASM: {
         size_t i2;
-        if (s->asm_template == NULL || s->asm_template[0] == '\0') {
-            set_diag(diag, "asm statement requires a non-empty template");
+        if (s->asm_template == NULL) {
+            set_diag(diag, "asm statement is missing a template");
             return -1;
         }
         if (s->asm_is_goto && s->asm_goto_label_count == 0) {
@@ -4268,10 +4305,10 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
             goto fail_global;
         }
-        if ((g->storage & (CC_STORAGE_AUTO | CC_STORAGE_REGISTER)) != 0) {
+        if ((g->storage & CC_STORAGE_AUTO) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),
-                         "file-scope object cannot use auto/register storage: %s", g->name);
+                         "file-scope object cannot use auto storage: %s", g->name);
             }
             goto fail_global;
         }

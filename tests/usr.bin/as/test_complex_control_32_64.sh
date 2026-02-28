@@ -89,7 +89,7 @@ gcc -m64 -O3 -fPIC -fstack-protector-strong -fno-plt -fverbose-asm -g -S -o "$TM
 gcc -m32 -O2 -fPIC -fstack-protector-strong -fno-plt -fverbose-asm -g -S -o "$TMP/complex32.s" "$TMP/complex.c"
 
 "$AS" -64 -march=x86-64-v2 -Wa,--gdwarf-2 -o "$TMP/complex64.o" "$TMP/complex64.s"
-"$AS" -32 -march=generic -Wa,--gdwarf-2 -o "$TMP/complex32.o" "$TMP/complex32.s"
+"$AS" -32 -march=native -Wa,--gdwarf-2 -o "$TMP/complex32.o" "$TMP/complex32.s"
 
 "$LD" -m64 -r -o "$TMP/complex64.r.o" "$TMP/complex64.o"
 "$LD" -m32 -r -o "$TMP/complex32.r.o" "$TMP/complex32.o"

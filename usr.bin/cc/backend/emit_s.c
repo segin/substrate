@@ -327,6 +327,7 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
         return NULL;
     }
     while (tmpl[i] != '\0') {
+        int strip_dollar = 0;
         if (tmpl[i] != '%') {
             if (append_c(&out, &len, &cap, tmpl[i]) != 0) {
                 free(out);
@@ -344,8 +345,17 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
             i++;
             continue;
         }
+        if (tmpl[i] == 'c') {
+            strip_dollar = 1;
+            i++;
+        } else if (tmpl[i] == 'P' || tmpl[i] == 'q' || tmpl[i] == 'k' || tmpl[i] == 'w' || tmpl[i] == 'b' ||
+                   tmpl[i] == 'h' || tmpl[i] == 'z' || tmpl[i] == 'n') {
+            i++;
+        }
         if (tmpl[i] >= '0' && tmpl[i] <= '9') {
             long n = 0;
+            const char *op_text;
+            size_t op_len;
             while (tmpl[i] >= '0' && tmpl[i] <= '9') {
                 n = n * 10 + (long)(tmpl[i] - '0');
                 i++;
@@ -355,7 +365,13 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 free(out);
                 return NULL;
             }
-            if (append_text(&out, &len, &cap, operand_texts[n], strlen(operand_texts[n])) != 0) {
+            op_text = operand_texts[n];
+            op_len = strlen(op_text);
+            if (strip_dollar && op_len > 0 && op_text[0] == '$') {
+                op_text++;
+                op_len--;
+            }
+            if (append_text(&out, &len, &cap, op_text, op_len) != 0) {
                 free(out);
                 return NULL;
             }
@@ -423,6 +439,8 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
         if (tmpl[i] == '[') {
             size_t b = ++i;
             int idx;
+            const char *op_text;
+            size_t op_len;
             while (tmpl[i] != '\0' && tmpl[i] != ']') {
                 i++;
             }
@@ -447,14 +465,31 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 free(out);
                 return NULL;
             }
-            if (append_text(&out, &len, &cap, operand_texts[idx], strlen(operand_texts[idx])) != 0) {
+            op_text = operand_texts[idx];
+            op_len = strlen(op_text);
+            if (strip_dollar && op_len > 0 && op_text[0] == '$') {
+                op_text++;
+                op_len--;
+            }
+            if (append_text(&out, &len, &cap, op_text, op_len) != 0) {
                 free(out);
                 return NULL;
             }
             i++;
             continue;
         }
-        set_diag(diag, "asm template has unsupported '%' reference");
+        {
+            char msg[96];
+            unsigned char ch = (unsigned char)tmpl[i];
+            if (ch == '\0') {
+                snprintf(msg, sizeof(msg), "asm template has truncated '%%' reference");
+            } else if (ch >= 32 && ch < 127) {
+                snprintf(msg, sizeof(msg), "asm template has unsupported '%%%c' reference", ch);
+            } else {
+                snprintf(msg, sizeof(msg), "asm template has unsupported '%%' reference (0x%02x)", ch);
+            }
+            set_diag(diag, msg);
+        }
         free(out);
         return NULL;
     }
@@ -1397,14 +1432,24 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
 
     for (i = 0; i < out_n; ++i) {
         const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
-        int v = in->asm_out_values != NULL ? in->asm_out_values[i] : -1;
+        int vraw = in->asm_out_values != NULL ? in->asm_out_values[i] : -1;
+        int is_indirect = CC_SSA_ASM_MEM_INDIRECT_P(vraw);
+        int v = is_indirect ? CC_SSA_ASM_MEM_INDIRECT_DECODE(vraw) : vraw;
         long off = slot_off(lay, v);
         const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
         if (in->asm_out_names != NULL && in->asm_out_names[i] != NULL) {
             op_names[i] = in->asm_out_names[i];
         }
         if (asm_constraint_is_memory_only(c)) {
-            op_text[i] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
+            if (is_indirect) {
+                const char *areg = is_64bit ? pick_generic_reg64(reg_pick++) : pick_generic_reg32(reg_pick++);
+                char abuf[32];
+                emit_frame_load_reg(fp, is_64bit, off, areg);
+                snprintf(abuf, sizeof(abuf), "(%s)", areg);
+                op_text[i] = dup_cstr(abuf);
+            } else {
+                op_text[i] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
+            }
             if (op_text[i] == NULL) {
                 goto oom;
             }

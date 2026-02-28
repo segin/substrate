@@ -1080,13 +1080,32 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
 
     while (1) {
         if ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
-            tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+            tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
             if (skip_decl_gnu_suffix(p, out_attrs) != 0) {
                 return -1;
             }
             continue;
         }
         if (p->tok.kind == TOK_IDENT) {
+            if (tok_is_ident(p, "__auto_type")) {
+                if (!parser_is_gnu_mode()) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "__auto_type requires GNU mode");
+                    return -1;
+                }
+                seen = 1;
+                seen_type = 1;
+                seen_alias = 1;
+                alias_type = CC_TYPE_INT;
+                alias_struct_id = -1;
+                alias_array_len = -1;
+                alias_array_ndim = 0;
+                memset(alias_array_dims, 0, sizeof(alias_array_dims));
+                storage_flags |= CC_STORAGE_AUTO_TYPE;
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                continue;
+            }
             if (p->tok.len == strlen("__builtin_va_list") &&
                 strncmp(p->tok.start, "__builtin_va_list", p->tok.len) == 0) {
                 if (seen_type) {
@@ -2462,7 +2481,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         }
     }
     while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
-           tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+           tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
         if (skip_decl_gnu_suffix(p, NULL) != 0) {
             return -1;
         }
@@ -2488,7 +2507,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             }
         }
         while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
-               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
                 return -1;
             }
@@ -3100,7 +3119,7 @@ static int parse_asm_stmt(parser_t *p, cc_stmt_t *s) {
                 if (next_tok(p) != 0) {
                     return -1;
                 }
-                if (p->tok.kind != TOK_RPAREN) {
+                if (p->tok.kind != TOK_RPAREN && p->tok.kind != TOK_COLON) {
                     if (parse_asm_clobber_list(p, &s->asm_clobbers, &s->asm_clobber_count) != 0) {
                         return -1;
                     }
@@ -3597,7 +3616,7 @@ static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs) {
             }
             continue;
         }
-        if (!(tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm"))) {
+        if (!(tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm"))) {
             break;
         }
         if (next_tok(p) != 0) {
@@ -3738,7 +3757,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         }
     }
     while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
-           tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+           tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
         if (skip_decl_gnu_suffix(p, NULL) != 0) {
             return -1;
         }
@@ -3764,7 +3783,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             }
         }
         while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
-               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
                 return -1;
             }
@@ -6525,7 +6544,7 @@ static int apply_auto_type_deduction(parser_t *p, cc_stmt_t *s) {
     if ((s->storage & CC_STORAGE_AUTO_TYPE) == 0) {
         return 0;
     }
-    if (!parser_is_c23_or_newer()) {
+    if (!parser_is_c23_or_newer() && !parser_is_gnu_mode()) {
         set_diag(p->diag, s->line, s->col, "auto type deduction requires C23 or newer");
         return -1;
     }
@@ -8233,6 +8252,20 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         return -1;
     }
     while (p.tok.kind != TOK_EOF) {
+        if (p.tok.kind == TOK_SEMI) {
+            if (next_tok(&p) != 0) {
+                cc_lexer_deinit(&p.lx);
+                parser_free_hoisted_funcs(&p);
+                parser_free_typedefs(&p);
+                parser_free_vars(&p);
+                parser_free_enum_consts(&p);
+                parser_free_structs(&p);
+                free(buf);
+                cc_tu_free(out);
+                return -1;
+            }
+            continue;
+        }
         if (is_static_assert_tok(&p)) {
             if (parse_static_assert_decl(&p, 1) != 0) {
                 cc_lexer_deinit(&p.lx);

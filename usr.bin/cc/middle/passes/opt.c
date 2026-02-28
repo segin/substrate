@@ -77,6 +77,9 @@ static int fold_function(cc_ssa_function_t *f) {
                 size_t a;
                 for (a = 0; a < in->asm_out_count; ++a) {
                     int ov = in->asm_out_values[a];
+                    if (CC_SSA_ASM_MEM_INDIRECT_P(ov)) {
+                        ov = CC_SSA_ASM_MEM_INDIRECT_DECODE(ov);
+                    }
                     if (ov >= 0 && ov < f->value_count) {
                         st[ov].known = 0;
                     }
@@ -310,8 +313,12 @@ static void mark_uses(const cc_ssa_instr_t *in, int *uses) {
         }
     }
     for (i = 0; i < in->asm_out_count; ++i) {
-        if (in->asm_out_values[i] >= 0) {
-            uses[in->asm_out_values[i]]++;
+        int ov = in->asm_out_values[i];
+        if (CC_SSA_ASM_MEM_INDIRECT_P(ov)) {
+            ov = CC_SSA_ASM_MEM_INDIRECT_DECODE(ov);
+        }
+        if (ov >= 0) {
+            uses[ov]++;
         }
     }
     for (i = 0; i < in->asm_in_count; ++i) {

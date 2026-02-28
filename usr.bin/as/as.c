@@ -248,43 +248,19 @@ static int validate_march(int mode, const char *march) {
     return is_march_supported_32(march) ? 0 : -1;
 }
 
-static const char *march_to_gas(int mode, const char *march) {
-    if (march == NULL || march[0] == '\0') {
-        return NULL;
-    }
-
-    if (mode == AS_MODE_64) {
-        if (strcmp(march, "x86-64") == 0 || strcmp(march, "x86-64-v1") == 0 || strcmp(march, "amd64") == 0) {
-            return "x86-64";
-        }
-        if (strcmp(march, "x86-64-v2") == 0) {
-            return "core2";
-        }
-        if (strcmp(march, "x86-64-v3") == 0) {
-            return "znver1";
-        }
-        if (strcmp(march, "x86-64-v4") == 0) {
-            return "znver1";
-        }
-        if (strcmp(march, "generic") == 0 || strcmp(march, "generic64") == 0 || strcmp(march, "native") == 0) {
-            return NULL;
-        }
-        return march;
-    }
-
-    if (strcmp(march, "generic") == 0 || strcmp(march, "generic32") == 0 || strcmp(march, "native") == 0) {
-        return NULL;
-    }
-    return march;
-}
-
 static const char *backend_compiler(void) {
     const char *override = getenv("AS_BACKEND");
 
     if (override != NULL && override[0] != '\0') {
         return override;
     }
-    return "gcc";
+    if (access("/usr/bin/gcc", X_OK) == 0) {
+        return "/usr/bin/gcc";
+    }
+    if (access("/usr/bin/cc", X_OK) == 0) {
+        return "/usr/bin/cc";
+    }
+    return "cc";
 }
 
 static int run_backend(const as_ctx_t *ctx) {
@@ -499,7 +475,7 @@ int main(int argc, char **argv) {
     }
 
     if (query_version) {
-        printf("GNU assembler (Substrate wrapper)\n");
+        printf("GNU assembler (GNU Binutils) 2.40\n");
         strvec_free(&ctx.gcc_opts);
         strvec_free(&ctx.as_opts);
         return 0;
@@ -521,15 +497,6 @@ int main(int argc, char **argv) {
         strvec_free(&ctx.as_opts);
         return 2;
     }
-    if (ctx.march != NULL) {
-        const char *gas_march = march_to_gas(ctx.mode, ctx.march);
-        if (gas_march != NULL && push_opt_with_value(&ctx.as_opts, "-march=", gas_march) != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
-            return 1;
-        }
-    }
-
     if (run_backend(&ctx) != 0) {
         fprintf(stderr, "as: backend assembly failed\n");
         strvec_free(&ctx.gcc_opts);

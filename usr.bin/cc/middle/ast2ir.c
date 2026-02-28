@@ -56,6 +56,22 @@ static const cc_global_t *find_global(const cc_translation_unit_t *tu, const cha
 static int member_base_struct_id(const cc_expr_t *e);
 static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t *tu, int sid, const char *name);
 
+static int asm_constraint_has(const char *c, char ch) {
+    return c != NULL && strchr(c, ch) != NULL;
+}
+
+static int asm_constraint_is_memory_only(const char *c) {
+    if (c == NULL) {
+        return 0;
+    }
+    if (asm_constraint_has(c, 'm') && !asm_constraint_has(c, 'r') && !asm_constraint_has(c, 'q') &&
+        !asm_constraint_has(c, 'a') && !asm_constraint_has(c, 'b') && !asm_constraint_has(c, 'c') &&
+        !asm_constraint_has(c, 'd') && !asm_constraint_has(c, 'S') && !asm_constraint_has(c, 'D')) {
+        return 1;
+    }
+    return 0;
+}
+
 static void free_asm_instr_fields(cc_ssa_instr_t *in) {
     size_t i;
     if (in == NULL) {
@@ -6160,20 +6176,29 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
         }
         for (i4 = 0; i4 < in.asm_out_count; ++i4) {
-            int vidx;
+            int vidx = -1;
             const cc_asm_operand_t *op = &s->asm_outputs[i4];
-            if (op->expr == NULL || op->expr->kind != CC_EXPR_IDENT || op->expr->ident == NULL) {
+            if (op->expr != NULL && op->expr->kind == CC_EXPR_IDENT && op->expr->ident != NULL) {
+                vidx = var_find_visible(*vars, *var_count, op->expr->ident, depth);
+                if (vidx < 0) {
+                    free_asm_instr_fields(&in);
+                    set_diag(diag, "asm output target must reference a local variable");
+                    return -1;
+                }
+                in.asm_out_values[i4] = (*vars)[vidx].value;
+            } else if (op->expr != NULL && op->expr->kind == CC_EXPR_DEREF && op->expr->lhs != NULL &&
+                       asm_constraint_is_memory_only(op->constraint)) {
+                int addrv = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr->lhs, diag);
+                if (addrv < 0) {
+                    free_asm_instr_fields(&in);
+                    return -1;
+                }
+                in.asm_out_values[i4] = CC_SSA_ASM_MEM_INDIRECT_ENCODE(addrv);
+            } else {
                 free_asm_instr_fields(&in);
-                set_diag(diag, "unsupported asm output target (requires local identifier)");
+                set_diag(diag, "unsupported asm output target (requires local identifier or memory dereference)");
                 return -1;
             }
-            vidx = var_find_visible(*vars, *var_count, op->expr->ident, depth);
-            if (vidx < 0) {
-                free_asm_instr_fields(&in);
-                set_diag(diag, "asm output target must reference a local variable");
-                return -1;
-            }
-            in.asm_out_values[i4] = (*vars)[vidx].value;
             in.asm_out_constraints[i4] = xstrdup(op->constraint != NULL ? op->constraint : "");
             if (op->name != NULL) {
                 in.asm_out_names[i4] = xstrdup(op->name);
