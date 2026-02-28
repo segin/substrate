@@ -220,15 +220,20 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
             // Simple approach: read directly into kernel buffer then copy page-by-page
             if (phdr.p_filesz > 0) {
                 // Allocate temporary buffer in kernel space for segment data
-                static uint8_t segment_buffer[1024*1024]; // 1MB max segment size
-                if (phdr.p_filesz > sizeof(segment_buffer)) {
+                if (phdr.p_filesz > 1024*1024) {
                     kprint("ELF: Segment too large\n");
+                    return 0;
+                }
+                uint8_t *segment_buffer = kmalloc(phdr.p_filesz);
+                if (!segment_buffer) {
+                    kprint("ELF: Failed to allocate memory for segment data\n");
                     return 0;
                 }
                 
                 // Read entire segment into kernel buffer
                 if (file->read(file, phdr.p_offset, phdr.p_filesz, segment_buffer) != phdr.p_filesz) {
                     kprint("ELF: Failed to read segment data\n");
+                    kfree(segment_buffer, phdr.p_filesz);
                     return 0;
                 }
                 
@@ -260,6 +265,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                         bytes_copied += copy_size;
                     }
                 }
+                kfree(segment_buffer, phdr.p_filesz);
             }
             
             // BSS is already zeroed since we memset each page

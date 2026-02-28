@@ -1,14 +1,3 @@
-#!/bin/bash
-set -e
-
-# Clean up
-rm -f uncompress gen_z.py test1.txt test1.txt.Z out1.txt file2 file2.Z file3.Z out3.txt file4 file4.Z bad.Z
-
-# Build uncompress
-cc -Wall -Wextra -Wno-unused-parameter -I../../../usr.bin/compress -o uncompress ../../../usr.bin/compress/uncompress.c
-
-# Create python script for .Z generation
-cat > gen_z.py <<EOF
 import sys
 
 def main():
@@ -83,53 +72,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-EOF
-
-# Test 1: Basic text file
-echo "Hello World! This is a test file for uncompress." > test1.txt
-python3 gen_z.py test1.txt test1.txt.Z
-
-# Test default behavior (stdin -> stdout)
-cat test1.txt.Z | ./uncompress > out1.txt
-diff test1.txt out1.txt
-
-# Test 2: File argument
-cp test1.txt.Z file2.Z
-./uncompress file2.Z
-if [ -f file2.Z ]; then echo "Error: file2.Z not removed"; exit 1; fi
-if [ ! -f file2 ]; then echo "Error: file2 not created"; exit 1; fi
-diff test1.txt file2
-rm file2
-
-# Test 3: -c flag
-cp test1.txt.Z file3.Z
-./uncompress -c file3.Z > out3.txt
-if [ ! -f file3.Z ]; then echo "Error: file3.Z removed with -c"; exit 1; fi
-diff test1.txt out3.txt
-rm file3.Z out3.txt
-
-# Test 4: -f flag
-echo "existing" > file4
-cp test1.txt.Z file4.Z
-# Should fail without -f
-if ./uncompress file4.Z 2>/dev/null; then
-    echo "Error: uncompress should have failed when output file exists"
-    exit 1
-fi
-if [ "$(cat file4)" != "existing" ]; then echo "Error: overwrote file4 without -f"; exit 1; fi
-
-# Should succeed with -f
-./uncompress -f file4.Z
-diff test1.txt file4
-rm file4
-
-# Test 5: Corrupt input (bad magic)
-echo "bad" > bad.Z
-if ./uncompress bad.Z 2>/dev/null; then
-    echo "Error: accepted bad magic"
-    exit 1
-fi
-# Verify output not created
-if [ -f bad ]; then echo "Error: created bad output"; exit 1; fi
-
-echo "All tests passed!"
