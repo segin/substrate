@@ -335,8 +335,152 @@ static void test_udf_truncate_extent(void) {
     kprintf("test_udf_truncate_extent: PASSED\n");
 }
 
+
+
+static void test_udf_truncate_extent_long(void) {
+    kprintf("Running test_udf_truncate_extent_long...\n");
+
+    /* Reset mock disk */
+    memset(mock_disk, 0, sizeof(mock_disk));
+    write_called = 0;
+
+    /* Setup Space Bitmap (Sector 0) similar to previous test */
+    struct udf_space_bitmap *sbm = (struct udf_space_bitmap *)mock_disk;
+    sbm->tag.tag_id = UDF_TAG_SBD;
+    sbm->tag.desc_version = 2;
+    sbm->tag.tag_location = 0;
+    sbm->num_bits = 32; /* 4 bytes */
+    sbm->num_bytes = 4;
+
+    uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
+    /* Mark block 2, 3 as allocated (where we put our file data) */
+    /* Block 2 -> byte 0, bit 2. Block 3 -> byte 0, bit 3. */
+    bitmap_data[0] |= (1 << 2) | (1 << 3);
+
+    /* Calculate CRC */
+    sbm->tag.desc_crc_len = 4;
+    sbm->tag.desc_crc = udf_crc(bitmap_data, 4);
+    sbm->tag.tag_checksum = udf_tag_checksum(&sbm->tag);
+
+    /* Load bitmap */
+    udf_ctx.device = &mock_dev;
+    if (udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
+        kprintf("FAILED: Setup bitmap failed\n");
+        return;
+    }
+
+    /* Setup File Entry at Sector 1 */
+    uint32_t fe_sector = 1;
+    struct udf_fe *fe = (struct udf_fe *)(mock_disk + fe_sector * UDF_SECTOR_SIZE);
+
+    memset(fe, 0, sizeof(struct udf_fe));
+    fe->tag.tag_id = UDF_TAG_FE;
+    fe->tag.tag_location = fe_sector;
+    fe->icb_tag.flags = UDF_ICB_FLAG_AD_LONG; /* Extent-based Long */
+    fe->info_length = 4096; /* 2 blocks */
+    fe->alloc_desc_length = 2 * sizeof(struct udf_long_ad);
+
+    /* Add Extents */
+    /* Extents start after FE header + ext_attr_length (0) */
+    struct udf_long_ad *ads = (struct udf_long_ad *)((uint8_t *)fe + sizeof(struct udf_fe));
+
+    /* Extent 1: Block 2, Length 2048 */
+    ads[0].length = 2048; /* Type 0: Allocated & Recorded */
+    ads[0].block = 2;
+    ads[0].partition = 1;
+
+    /* Extent 2: Block 3, Length 2048 */
+    ads[1].length = 2048;
+    ads[1].block = 3;
+    ads[1].partition = 1;
+
+    /* Calculate FE checksum */
+    fe->tag.tag_checksum = udf_tag_checksum(&fe->tag);
+
+    /* Test 1: Truncate to 3000 bytes (partial block) */
+    /* Should keep Block 2 fully, shrink Block 3 to 952 bytes */
+    /* Both blocks should remain allocated */
+
+    struct udf_fe fe_copy;
+    memcpy(&fe_copy, fe, sizeof(struct udf_fe));
+
+    int res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 3000);
+
+    if (res != 0) {
+        kprintf("FAILED: udf_truncate returned %d (expected 0)\n", res);
+        return;
+    }
+
+    if (fe_copy.info_length != 3000) {
+        kprintf("FAILED: info_length = %llu (expected 3000)\n", fe_copy.info_length);
+        return;
+    }
+
+    /* Verify disk update */
+    struct udf_fe *disk_fe = (struct udf_fe *)(mock_disk + fe_sector * UDF_SECTOR_SIZE);
+    struct udf_long_ad *disk_ads = (struct udf_long_ad *)((uint8_t *)disk_fe + sizeof(struct udf_fe));
+
+    if (disk_fe->info_length != 3000) {
+        kprintf("FAILED: Disk info_length = %llu\n", disk_fe->info_length);
+        return;
+    }
+
+    if ((disk_ads[1].length & 0x3FFFFFFF) != 952) {
+        kprintf("FAILED: AD[1] length = %u (expected 952)\n", disk_ads[1].length & 0x3FFFFFFF);
+        return;
+    }
+
+    /* Verify Block 3 still allocated (bit 3 set) */
+    if (!(bitmap_data[0] & (1 << 3))) {
+         kprintf("FAILED: Block 3 was freed incorrectly\n");
+         return;
+    }
+
+    /* Test 2: Truncate to 1024 bytes */
+    /* Should keep Block 2 (partial), Remove Block 3 */
+    /* Block 3 should be freed */
+
+    res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 1024);
+
+    if (res != 0) {
+        kprintf("FAILED: udf_truncate (2) returned %d\n", res);
+        return;
+    }
+
+    if (fe_copy.info_length != 1024) {
+        kprintf("FAILED: info_length (2) = %llu\n", fe_copy.info_length);
+        return;
+    }
+
+    /* Verify disk update */
+    /* AD[0] should be 1024, AD[1] should be gone */
+    disk_ads = (struct udf_long_ad *)((uint8_t *)disk_fe + sizeof(struct udf_fe));
+
+    if ((disk_ads[0].length & 0x3FFFFFFF) != 1024) {
+        kprintf("FAILED: AD[0] length = %u (expected 1024)\n", disk_ads[0].length & 0x3FFFFFFF);
+        return;
+    }
+
+    if (disk_fe->alloc_desc_length != sizeof(struct udf_long_ad)) {
+        kprintf("FAILED: alloc_desc_length = %u (expected %u)\n",
+                disk_fe->alloc_desc_length, sizeof(struct udf_long_ad));
+        return;
+    }
+
+    /* Verify Block 3 Freed */
+    /* Reload bitmap from disk (since udf_free_block writes it back) */
+    /* udf_free_block updates the mock_disk directly */
+    if (bitmap_data[0] & (1 << 3)) {
+        kprintf("FAILED: Block 3 was NOT freed\n");
+        return;
+    }
+
+    kprintf("test_udf_truncate_extent_long: PASSED\n");
+}
+
 void run_udf_write_tests(void) {
     test_udf_allocation_writeback();
     test_udf_large_file_write();
     test_udf_truncate_extent();
+    test_udf_truncate_extent_long();
 }
