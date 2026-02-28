@@ -16,16 +16,16 @@ Execution policy:
 ---
 
 ## 1) Core CLI and Driver Semantics
-- [ ] `as -o file.o file.s` baseline behavior.
-- [ ] `-32` and `-64` mode forcing.
-- [ ] Target inference when mode flag is absent.
-- [ ] `-g` debug generation path.
-- [ ] `-I` include directory handling.
-- [ ] `-Dname[=value]` symbol predefine handling.
-- [ ] `-Wa,` pass-through interoperability for compiler driver use.
-- [ ] `-march` feature-level handling with diagnostics on unsupported levels.
-- [ ] `-mtune` acceptance and metadata plumbing.
-- [ ] Deterministic argument parsing and stable diagnostics ordering.
+- [x] `as -o file.o file.s` baseline behavior.
+- [x] `-32` and `-64` mode forcing.
+- [x] Target inference when mode flag is absent.
+- [x] `-g` debug generation path.
+- [x] `-I` include directory handling.
+- [x] `-Dname[=value]` symbol predefine handling.
+- [x] `-Wa,` pass-through interoperability for compiler driver use.
+- [x] `-march` feature-level handling with diagnostics on unsupported levels.
+- [x] `-mtune` acceptance and metadata plumbing.
+- [x] Deterministic argument parsing and stable diagnostics ordering.
 
 ## 2) Lexing, Parsing, and Assembly Source Model
 - [ ] Tokenization for labels, mnemonics, operands, directives, comments.
@@ -146,4 +146,3 @@ Execution policy:
 - [ ] ABI contract tests for generated ELF metadata.
 - [ ] Release criteria and gating matrix documented.
 - [ ] Post-release regression triage process defined.
-

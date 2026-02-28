@@ -1,4 +1,4 @@
-.Dd February 27, 2026
+.Dd February 28, 2026
 .Dt AS 1
 .Os Substrate
 .Sh NAME
@@ -17,15 +17,21 @@
 .Ar input.s
 .Sh DESCRIPTION
 .Nm
-invokes a backend assembler and validates the emitted object using
+invokes a backend compiler driver
+.Pq usually
+.Xr gcc 1
+in assembler mode and validates the emitted object using
 .Xr libelfobj 3 .
 The wrapper selects 32-bit or 64-bit mode and performs ELF sanity checks.
 .Sh ENVIRONMENT
 .Bl -tag -width AS_BACKEND
 .It Ev AS_BACKEND
-Path/name of backend assembler executable. If unset,
+Path/name of backend compiler driver executable. If unset,
 .Nm
-searches PATH.
+uses
+.Ev CC
+or falls back to
+.Dq gcc .
 .El
 .Sh EXIT STATUS
 .Ex -std
