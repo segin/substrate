@@ -14,6 +14,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 #define TAR_BLOCK 512
 #define PAX_TYPE 'x'
@@ -81,7 +82,11 @@ static int i2oct(char *d, size_t n, uint64_t v) {
     uint64_t max = 1;
     for (size_t i = 0; i < n - 1; i++) max <<= 3;
     if (v >= max) return -1;
-    snprintf(d, n, "%0*llo", (int)n - 1, (unsigned long long)v);
+    d[n - 1] = '\0';
+    for (size_t i = n - 1; i > 0; i--) {
+        d[i - 1] = '0' + (v & 7);
+        v >>= 3;
+    }
     return 0;
 }
 
@@ -105,6 +110,8 @@ static bool verify_checksum(const struct tar_header *h) {
     return memcmp(t.chksum, h->chksum, 7) == 0;
 }
 
+static pid_t arc_pid = -1;
+
 static int split_name(const char *path, char name[100], char prefix[155]) {
     memset(name, 0, 100); memset(prefix, 0, 155);
     size_t len = strlen(path);
@@ -124,27 +131,78 @@ static FILE *open_write(bool *pipep) {
     *pipep = false;
     if (!opt.archive || strcmp(opt.archive, "-") == 0) return stdout;
     if (opt.comp == COMP_NONE) return fopen(opt.archive, "wb");
-    char cmd[PATH_MAX + 64];
-    const char *c = opt.comp == COMP_GZIP ? "gzip -c >" : (opt.comp == COMP_XZ ? "xz -c >" : "bzip2 -c >");
-    snprintf(cmd, sizeof(cmd), "%s '%s'", c, opt.archive);
+
+    int pfd[2];
+    if (pipe(pfd) < 0) return NULL;
+
+    arc_pid = fork();
+    if (arc_pid < 0) {
+        close(pfd[0]);
+        close(pfd[1]);
+        return NULL;
+    }
+
+    if (arc_pid == 0) {
+        close(pfd[1]);
+        if (dup2(pfd[0], STDIN_FILENO) < 0) exit(1);
+        close(pfd[0]);
+
+        int out_fd = open(opt.archive, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (out_fd < 0) exit(1);
+        if (dup2(out_fd, STDOUT_FILENO) < 0) exit(1);
+        close(out_fd);
+
+        const char *prog = opt.comp == COMP_GZIP ? "gzip" : (opt.comp == COMP_XZ ? "xz" : "bzip2");
+        execlp(prog, prog, "-c", NULL);
+        exit(1);
+    }
+
+    close(pfd[0]);
     *pipep = true;
-    return popen(cmd, "w");
+    return fdopen(pfd[1], "w");
 }
 
 static FILE *open_read(bool *pipep) {
     *pipep = false;
     if (!opt.archive || strcmp(opt.archive, "-") == 0) return stdin;
     if (opt.comp == COMP_NONE) return fopen(opt.archive, "rb");
-    char cmd[PATH_MAX + 64];
-    const char *c = opt.comp == COMP_GZIP ? "gzip -dc" : (opt.comp == COMP_XZ ? "xz -dc" : "bzip2 -dc");
-    snprintf(cmd, sizeof(cmd), "%s '%s'", c, opt.archive);
+
+    int pfd[2];
+    if (pipe(pfd) < 0) return NULL;
+
+    arc_pid = fork();
+    if (arc_pid < 0) {
+        close(pfd[0]);
+        close(pfd[1]);
+        return NULL;
+    }
+
+    if (arc_pid == 0) {
+        close(pfd[0]);
+        if (dup2(pfd[1], STDOUT_FILENO) < 0) exit(1);
+        close(pfd[1]);
+
+        int in_fd = open(opt.archive, O_RDONLY);
+        if (in_fd < 0) exit(1);
+        if (dup2(in_fd, STDIN_FILENO) < 0) exit(1);
+        close(in_fd);
+
+        const char *prog = opt.comp == COMP_GZIP ? "gzip" : (opt.comp == COMP_XZ ? "xz" : "bzip2");
+        execlp(prog, prog, "-dc", NULL);
+        exit(1);
+    }
+
+    close(pfd[1]);
     *pipep = true;
-    return popen(cmd, "r");
+    return fdopen(pfd[0], "r");
 }
 
 static void close_arc(FILE *f, bool pipep) {
     if (!f || f == stdin || f == stdout) return;
-    if (pipep) pclose(f); else fclose(f);
+    fclose(f);
+    if (pipep && arc_pid > 0) {
+        waitpid(arc_pid, NULL, 0);
+    }
 }
 
 static int pax_append(char **buf, size_t *len, const char *k, const char *v) {
@@ -155,7 +213,8 @@ static int pax_append(char **buf, size_t *len, const char *k, const char *v) {
     while (1) {
         r = d + 1 + m;
         int nd = 1; for (int t = r; t >= 10; t /= 10) nd++;
-        if (nd == d) break; d = nd;
+        if (nd == d) break;
+        d = nd;
     }
     char line[8192];
     int n = snprintf(line, sizeof(line), "%d %s", r, body);
@@ -365,10 +424,8 @@ static char *map_extract_path(const char *in) {
     }
     char *out = strdup(p); free(dup);
     if (!out) return NULL;
-    if (opt.safe_extract) {
-        if (strstr(out, "../") || strstr(out, "/..") || !strcmp(out, "..") || in[0] == '/') {
-            free(out); return NULL;
-        }
+    if (strstr(out, "../") || strstr(out, "/..") || !strcmp(out, "..") || in[0] == '/') {
+        free(out); return NULL;
     }
     return out;
 }
@@ -498,8 +555,12 @@ static int process_read(FILE *in, bool extract) {
         }
 
         if (opt.preserve_permissions) chmod(target, (mode_t)oct2i(h.mode, sizeof(h.mode)) & 07777);
-        if (!opt.no_same_owner) lchown(target, (uid_t)(ps.uid >= 0 ? ps.uid : oct2i(h.uid, sizeof(h.uid))),
-                                       (gid_t)(ps.gid >= 0 ? ps.gid : oct2i(h.gid, sizeof(h.gid))));
+        if (!opt.no_same_owner) {
+            if (lchown(target, (uid_t)(ps.uid >= 0 ? ps.uid : oct2i(h.uid, sizeof(h.uid))),
+                       (gid_t)(ps.gid >= 0 ? ps.gid : oct2i(h.gid, sizeof(h.gid)))) < 0) {
+                // ignore
+            }
+        }
         struct timespec ts[2] = {{0}};
         ts[0].tv_sec = oct2i(h.mtime, sizeof(h.mtime));
         ts[1].tv_sec = ps.mtime >= 0 ? ps.mtime : oct2i(h.mtime, sizeof(h.mtime));

@@ -2365,6 +2365,26 @@ static int tok_is_ident(parser_t *p, const char *s) {
     return p->tok.kind == TOK_IDENT && p->tok.len == n && strncmp(p->tok.start, s, n) == 0;
 }
 
+static int tok_is_gnu_attr_name(parser_t *p, const char *s) {
+    size_t n;
+
+    if (tok_is_ident(p, s)) {
+        return 1;
+    }
+    if (p->tok.kind != TOK_IDENT || p->tok.len < 4) {
+        return 0;
+    }
+    if (p->tok.start[0] != '_' || p->tok.start[1] != '_' || p->tok.start[p->tok.len - 2] != '_' ||
+        p->tok.start[p->tok.len - 1] != '_') {
+        return 0;
+    }
+    n = strlen(s);
+    if (p->tok.len != n + 4) {
+        return 0;
+    }
+    return strncmp(p->tok.start + 2, s, n) == 0;
+}
+
 static void decl_attrs_reset(decl_attrs_t *a) {
     if (a == NULL) {
         return;
@@ -2953,44 +2973,58 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_vector_size;
     int is_ext_vector_type;
     int is_may_alias;
+    int is_mode;
     int has_num = 0;
     long num = 0;
     char *sec = NULL;
     int any_known;
+    char attr_name[96];
+    size_t attr_name_len = 0;
+    size_t attr_line = 0;
+    size_t attr_col = 0;
 
     if (p->tok.kind != TOK_IDENT) {
         return 0;
     }
-    is_aligned = tok_is_ident(p, "aligned");
-    is_section = tok_is_ident(p, "section");
-    is_packed = tok_is_ident(p, "packed");
-    is_deprecated = tok_is_ident(p, "deprecated");
-    is_noreturn = tok_is_ident(p, "noreturn");
-    is_unused = tok_is_ident(p, "unused");
-    is_used = tok_is_ident(p, "used");
-    is_always_inline = tok_is_ident(p, "always_inline");
-    is_noinline = tok_is_ident(p, "noinline");
-    is_hot = tok_is_ident(p, "hot");
-    is_cold = tok_is_ident(p, "cold");
-    is_format = tok_is_ident(p, "format");
-    is_nonnull = tok_is_ident(p, "nonnull");
-    is_malloc_fn = tok_is_ident(p, "malloc");
-    is_alias = tok_is_ident(p, "alias");
-    is_weak = tok_is_ident(p, "weak");
-    is_flatten = tok_is_ident(p, "flatten");
-    is_target = tok_is_ident(p, "target");
-    is_visibility = tok_is_ident(p, "visibility");
-    is_tls_model = tok_is_ident(p, "tls_model");
-    is_cleanup = tok_is_ident(p, "cleanup");
-    is_transparent_union = tok_is_ident(p, "transparent_union");
-    is_vector_size = tok_is_ident(p, "vector_size");
-    is_ext_vector_type = tok_is_ident(p, "ext_vector_type");
-    is_may_alias = tok_is_ident(p, "may_alias");
+    attr_name_len = p->tok.len;
+    attr_line = p->tok.line;
+    attr_col = p->tok.col;
+    if (attr_name_len >= sizeof(attr_name)) {
+        attr_name_len = sizeof(attr_name) - 1;
+    }
+    memcpy(attr_name, p->tok.start, attr_name_len);
+    attr_name[attr_name_len] = '\0';
+    is_aligned = tok_is_gnu_attr_name(p, "aligned");
+    is_section = tok_is_gnu_attr_name(p, "section");
+    is_packed = tok_is_gnu_attr_name(p, "packed");
+    is_deprecated = tok_is_gnu_attr_name(p, "deprecated");
+    is_noreturn = tok_is_gnu_attr_name(p, "noreturn");
+    is_unused = tok_is_gnu_attr_name(p, "unused");
+    is_used = tok_is_gnu_attr_name(p, "used");
+    is_always_inline = tok_is_gnu_attr_name(p, "always_inline");
+    is_noinline = tok_is_gnu_attr_name(p, "noinline");
+    is_hot = tok_is_gnu_attr_name(p, "hot");
+    is_cold = tok_is_gnu_attr_name(p, "cold");
+    is_format = tok_is_gnu_attr_name(p, "format");
+    is_nonnull = tok_is_gnu_attr_name(p, "nonnull");
+    is_malloc_fn = tok_is_gnu_attr_name(p, "malloc");
+    is_alias = tok_is_gnu_attr_name(p, "alias");
+    is_weak = tok_is_gnu_attr_name(p, "weak");
+    is_flatten = tok_is_gnu_attr_name(p, "flatten");
+    is_target = tok_is_gnu_attr_name(p, "target");
+    is_visibility = tok_is_gnu_attr_name(p, "visibility");
+    is_tls_model = tok_is_gnu_attr_name(p, "tls_model");
+    is_cleanup = tok_is_gnu_attr_name(p, "cleanup");
+    is_transparent_union = tok_is_gnu_attr_name(p, "transparent_union");
+    is_vector_size = tok_is_gnu_attr_name(p, "vector_size");
+    is_ext_vector_type = tok_is_gnu_attr_name(p, "ext_vector_type");
+    is_may_alias = tok_is_gnu_attr_name(p, "may_alias");
+    is_mode = tok_is_gnu_attr_name(p, "mode");
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
                 is_always_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
                 is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_transparent_union ||
-                is_vector_size || is_ext_vector_type || is_may_alias;
+                is_vector_size || is_ext_vector_type || is_may_alias || is_mode;
 
     if (next_tok(p) != 0) {
         return -1;
@@ -3103,7 +3137,14 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         }
     }
     if (!any_known && parser_is_gnu_mode() && p->diag != NULL && p->diag->message[0] == '\0') {
-        set_diag(p->diag, p->tok.line, p->tok.col, "unsupported GNU attribute");
+        snprintf(p->diag->message, sizeof(p->diag->message), "unsupported GNU attribute '%s'", attr_name);
+        p->diag->line = attr_line;
+        p->diag->col = attr_col;
+        if (g_parser_diag_file != NULL && g_parser_diag_file[0] != '\0') {
+            snprintf(p->diag->path, sizeof(p->diag->path), "%s", g_parser_diag_file);
+        } else {
+            p->diag->path[0] = '\0';
+        }
         free(sec);
         return -1;
     }

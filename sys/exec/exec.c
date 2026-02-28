@@ -13,10 +13,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <kern/console.h>
+struct thr_param;
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/fcntl.h>
-#include <sys/kern_syscalls.h>
 
 static struct exec_binary_handler *exec_handlers = NULL;
 
@@ -36,6 +36,11 @@ void exec_register_handler(struct exec_binary_handler *handler) {
  */
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     if (!path) return -ENOENT;
+
+    // 0. Check execute permissions
+    if (kern_access(path, X_OK) != 0) {
+        return -EACCES;
+    }
 
     // 1. Open the file to read the header
     int fd = kern_open(path, O_RDONLY, 0);

@@ -50,6 +50,33 @@ static void test_crc32_fox(void) {
     }
 }
 
+static void test_crc32_zeros(void) {
+    uint8_t data[32] = {0};
+    uint32_t expected = 0x190A55AD;
+    uint32_t actual = crc32(data, sizeof(data));
+
+    if (actual != expected) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "FAIL: crc32(zeros) expected 0x190A55AD, got 0x%x\n", actual);
+        kprint(msg);
+        failed_tests++;
+    }
+}
+
+static void test_crc32_ones(void) {
+    uint8_t data[32];
+    memset(data, 0xFF, sizeof(data));
+    uint32_t expected = 0xFF6CAB0B;
+    uint32_t actual = crc32(data, sizeof(data));
+
+    if (actual != expected) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "FAIL: crc32(ones) expected 0xFF6CAB0B, got 0x%x\n", actual);
+        kprint(msg);
+        failed_tests++;
+    }
+}
+
 void run_crc32_tests(void) {
     kprint("\n=== CRC32 TESTS ===\n");
     failed_tests = 0;
@@ -60,6 +87,8 @@ void run_crc32_tests(void) {
     test_crc32_empty();
     test_crc32_basic();
     test_crc32_fox();
+    test_crc32_zeros();
+    test_crc32_ones();
 
     if (failed_tests == 0) {
         kprint("CRC32 Tests: PASS\n");

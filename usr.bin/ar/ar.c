@@ -495,9 +495,10 @@ static void extract_members(char **members, int count) {
             }
         }
         if (match) {
-            if (modifiers & MOD_VERBOSE) printf("x - %s\n", cur->name);
-            int fd = open(cur->name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            if (fd < 0) warn("%s", cur->name);
+            const char *base = get_basename(cur->name);
+            if (modifiers & MOD_VERBOSE) printf("x - %s\n", base);
+            int fd = open(base, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd < 0) warn("%s", base);
             else {
                 write(fd, cur->data, cur->size);
                 close(fd);

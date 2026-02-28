@@ -30,10 +30,6 @@ static uint32_t fuzz_rand(void) {
     return (fuzz_state >> 16) & 0x7FFF;
 }
 
-static uint32_t fuzz_rand32(void) {
-    return (fuzz_rand() << 16) | fuzz_rand();
-}
-
 // Mock bitmap helpers
 static bool is_block_free(uint32_t block) {
     if (block >= PMM_MAX_BLOCKS) return false;
@@ -213,7 +209,6 @@ void fuzz_pmm_ops(uint32_t seed) {
     mock_pmm_free_block(p);
     // Second free should be handled gracefully (or trapped in debug mode)
     // Our mock just sets the bit again, so count increases incorrectly
-    uint32_t before = mock_free_count;
     mock_pmm_free_block(p);
     // In a real implementation, this would be caught
     // For now, just note the discrepancy

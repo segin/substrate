@@ -37,6 +37,8 @@ typedef struct {
     int pthread_flag;
     int emit_ssa;
     int bootstrap_gcc;
+    int query_print_file_name;
+    int query_print_libgcc_file_name;
     int nostdlib;
     int nodefaultlibs;
     int gnu89_inline_mode;
@@ -56,6 +58,8 @@ typedef struct {
     const char *opt_level;
     const char *output;
     const char *forced_lang;
+    const char *print_file_name;
+    const char *parse_bad_arg;
 
     strvec_t cpp_flags;
     strvec_t c_flags;
@@ -371,6 +375,8 @@ static void usage(const char *prog) {
             "  -v                 verbose stages\n"
             "  -###               print commands without executing\n"
             "  -emit-ssa          run IR verification utility on input .ir\n"
+            "  -print-file-name=<name>   print discovered runtime/include path\n"
+            "  -print-libgcc-file-name   print discovered libgcc path\n"
             "  --bootstrap-gcc    temporary fallback C->.s via host gcc\n",
             prog);
 }
@@ -459,8 +465,10 @@ static int i386_features_from_arch_name(const char *name, int *out_level, int *o
 static int parse_args(int argc, char **argv, cc_opts_t *o) {
     int i;
 
+    o->parse_bad_arg = NULL;
     for (i = 1; i < argc; ++i) {
         const char *a = argv[i];
+        o->parse_bad_arg = a;
 
         if (strcmp(a, "-E") == 0) {
             o->mode_E = 1;
@@ -550,6 +558,23 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         }
         if (strcmp(a, "-emit-ssa") == 0) {
             o->emit_ssa = 1;
+            continue;
+        }
+        if (strncmp(a, "-print-file-name=", 17) == 0) {
+            o->query_print_file_name = 1;
+            o->print_file_name = a + 17;
+            continue;
+        }
+        if (strcmp(a, "-print-file-name") == 0) {
+            if (i + 1 >= argc) {
+                return -1;
+            }
+            o->query_print_file_name = 1;
+            o->print_file_name = argv[++i];
+            continue;
+        }
+        if (strcmp(a, "-print-libgcc-file-name") == 0) {
+            o->query_print_libgcc_file_name = 1;
             continue;
         }
         if (strcmp(a, "--bootstrap-gcc") == 0) {
@@ -915,11 +940,15 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
 
     if (o->mode_E + o->mode_S + o->mode_c > 1) {
+        o->parse_bad_arg = "-E/-S/-c";
         fprintf(stderr, "cc: -E, -S, and -c are mutually exclusive\n");
         return -1;
     }
 
-    if (o->inputs.count == 0) {
+    if (o->inputs.count == 0 && !o->query_print_file_name && !o->query_print_libgcc_file_name) {
+        if (o->parse_bad_arg == NULL) {
+            o->parse_bad_arg = "<no-input>";
+        }
         return -1;
     }
 
@@ -1238,7 +1267,34 @@ int cc_main(int argc, char **argv) {
     }
 
     if (parse_args(argc, argv, &o) != 0) {
+        if (o.parse_bad_arg != NULL && o.parse_bad_arg[0] != '\0') {
+            fprintf(stderr, "cc: invalid or unsupported parameter: %s\n", o.parse_bad_arg);
+        }
         usage(argv[0]);
+        goto out;
+    }
+
+    if (o.query_print_file_name) {
+        char path[PATH_MAX];
+        const char *name = o.print_file_name != NULL ? o.print_file_name : "";
+        if (name[0] == '\0') {
+            printf("\n");
+        } else if (gcc_print_file_name(name, o.target, path) == 0) {
+            printf("%s\n", path);
+        } else {
+            printf("%s\n", name);
+        }
+        rc = 0;
+        goto out;
+    }
+    if (o.query_print_libgcc_file_name) {
+        char path[PATH_MAX];
+        if (gcc_print_libgcc(o.target, path) == 0) {
+            printf("%s\n", path);
+        } else {
+            printf("libgcc.a\n");
+        }
+        rc = 0;
         goto out;
     }
 

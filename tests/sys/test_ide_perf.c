@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include <kern/console.h>
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 
 /*
  * Naive implementation mirroring the original IDE driver code
