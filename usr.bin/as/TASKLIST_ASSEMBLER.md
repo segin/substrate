@@ -64,16 +64,16 @@ Execution policy:
 - [x] Invalid operand form diagnostics with source location.
 
 ## 5) Instruction Encoding: x86_64 Baseline
-- [ ] REX prefix generation and validation.
-- [ ] 64-bit operand/address-size semantics.
-- [ ] RIP-relative addressing support.
-- [ ] SysV AMD64 call/jump relocation forms.
-- [ ] SSE2+ scalar/vector baseline used by compiler output.
-- [ ] TLS access pattern instruction forms.
-- [ ] PLT/GOT access pattern instruction forms.
-- [ ] ISA feature gating by `-march`.
-- [ ] Mode-specific forbidden instruction diagnostics.
-- [ ] Stable encoding choices for reproducible output.
+- [x] REX prefix generation and validation.
+- [x] 64-bit operand/address-size semantics.
+- [x] RIP-relative addressing support.
+- [x] SysV AMD64 call/jump relocation forms.
+- [x] SSE2+ scalar/vector baseline used by compiler output.
+- [x] TLS access pattern instruction forms.
+- [x] PLT/GOT access pattern instruction forms.
+- [x] ISA feature gating by `-march`.
+- [x] Mode-specific forbidden instruction diagnostics.
+- [x] Stable encoding choices for reproducible output.
 
 ## 6) Relocations and ELF Emission
 - [ ] Emit ET_REL ELF32 for i386 mode.
