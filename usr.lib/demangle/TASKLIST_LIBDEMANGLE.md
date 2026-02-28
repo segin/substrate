@@ -149,11 +149,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Guard against circular backrefs (depth limit).
 
 ### 3j. Rust Legacy Demangling
-- [ ] Pattern: `_ZN <length1> <ident1> ... <length_n> <hash_17chars> E`.
-- [ ] Strip trailing `::h<hex_hash>` from output.
-- [ ] Convert `$` escapes: `$LT$` → `<`, `$GT$` → `>`, `$RF$` → `&`, `$LP$` → `(`, `$RP$` → `)`, `$C$` → `,`, `$SP$` → `@`, `$BP$` → `*`, `$u20$` → ` `, `$u27$` → `'`, `$u5b$` → `[`, `$u5d$` → `]`, `$u7b$` → `{`, `$u7d$` → `}`, `$u3b$` → `;`, `$u7e$` → `~`, etc.
-- [ ] Join components with `::`.
-- [ ] Fallback: if parsing fails, return `NULL`.
+- [x] Pattern: `_ZN <length1> <ident1> ... <length_n> <hash_17chars> E`.
+- [x] Strip trailing `::h<hex_hash>` from output.
+- [x] Convert `$` escapes: `$LT$` → `<`, `$GT$` → `>`, `$RF$` → `&`, `$LP$` → `(`, `$RP$` → `)`, `$C$` → `,`, `$SP$` → `@`, `$BP$` → `*`, `$u20$` → ` `, `$u27$` → `'`, `$u5b$` → `[`, `$u5d$` → `]`, `$u7b$` → `{`, `$u7d$` → `}`, `$u3b$` → `;`, `$u7e$` → `~`, etc.
+- [x] Join components with `::`.
+- [x] Fallback: if parsing fails, return `NULL`.
 
 ### 3k. Output Formatting
 - [ ] Paths separated by `::`.
