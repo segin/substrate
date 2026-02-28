@@ -41,16 +41,16 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `<template-arg>` → `<type>` | `<expr-primary>` | `X <expression> E` | `J <template-arg>* E` (pack).
 
 ### 2c. Type Demangling
-- [ ] Builtin types: `v`, `w`, `b`, `c`, `a`, `h`, `s`, `t`, `i`, `j`, `l`, `m`, `x`, `y`, `n`, `o`, `f`, `d`, `e`, `g`, `z`, `Dd`, `De`, `Df`, `Dh`, `Di`, `Ds`, `Da`, `Dc`, `Dn`.
-- [ ] `<pointer-type>` (`P`), `<reference-type>` (`R`), `<rvalue-reference>` (`O`).
-- [ ] `<complex-type>` (`C`), `<imaginary-type>` (`G`).
-- [ ] CV qualifiers (`K`, `V`, `r`) applied to types.
-- [ ] `<function-type>` → `F [Y] <type>+ E` (with optional extern "C" marker `Y`).
-- [ ] `<array-type>` → `A <number> _ <type>`.
-- [ ] `<pointer-to-member>` → `M <type> <type>`.
-- [ ] `<template-param>` → `T_` | `T <seq-id> _`.
-- [ ] `<decltype>` → `Dt` / `DT`.
-- [ ] Vendor‑extended type → `u <source-name>`.
+- [x] Builtin types: `v`, `w`, `b`, `c`, `a`, `h`, `s`, `t`, `i`, `j`, `l`, `m`, `x`, `y`, `n`, `o`, `f`, `d`, `e`, `g`, `z`, `Dd`, `De`, `Df`, `Dh`, `Di`, `Ds`, `Da`, `Dc`, `Dn`.
+- [x] `<pointer-type>` (`P`), `<reference-type>` (`R`), `<rvalue-reference>` (`O`).
+- [x] `<complex-type>` (`C`), `<imaginary-type>` (`G`).
+- [x] CV qualifiers (`K`, `V`, `r`) applied to types.
+- [x] `<function-type>` → `F [Y] <type>+ E` (with optional extern "C" marker `Y`).
+- [x] `<array-type>` → `A <number> _ <type>`.
+- [x] `<pointer-to-member>` → `M <type> <type>`.
+- [x] `<template-param>` → `T_` | `T <seq-id> _`.
+- [x] `<decltype>` → `Dt` / `DT`.
+- [x] Vendor‑extended type → `u <source-name>`.
 
 ### 2d. Substitutions
 - [ ] Build substitution table during parse.

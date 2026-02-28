@@ -12,6 +12,7 @@
 #define DM_BUF_INITIAL_CAP 256u
 #define DM_SUBST_CAP 256u
 #define DM_TEMPLATE_STACK_CAP 64u
+#define DM_TEMPLATE_ARG_CAP 64u
 #define DM_RECURSION_DEFAULT_LIMIT 256
 
 enum {
@@ -35,6 +36,9 @@ typedef struct dm_subst {
 
 typedef struct dm_template_frame {
     size_t output_off;
+    size_t arg_off[DM_TEMPLATE_ARG_CAP];
+    size_t arg_len[DM_TEMPLATE_ARG_CAP];
+    size_t arg_count;
 } dm_template_frame_t;
 
 typedef struct dm_itanium_parser {
@@ -54,6 +58,10 @@ typedef struct dm_itanium_parser {
 
     dm_template_frame_t template_frames[DM_TEMPLATE_STACK_CAP];
     size_t template_depth;
+
+    size_t last_template_off[DM_TEMPLATE_ARG_CAP];
+    size_t last_template_len[DM_TEMPLATE_ARG_CAP];
+    size_t last_template_count;
 } dm_itanium_parser_t;
 
 typedef struct dm_parse_mark {
@@ -62,11 +70,13 @@ typedef struct dm_parse_mark {
     unsigned member_quals;
     size_t substitution_count;
     size_t template_depth;
+    size_t last_template_count;
 } dm_parse_mark_t;
 
 static int buf_reserve(dm_buf_t *buf, size_t extra);
 static int buf_append(dm_buf_t *buf, const char *s, size_t n);
 static int buf_appendc(dm_buf_t *buf, char ch);
+static int buf_insert(dm_buf_t *buf, size_t off, const char *s, size_t n);
 static int buf_printf(dm_buf_t *buf, const char *fmt, ...);
 static char *buf_take(dm_buf_t *buf);
 static void buf_destroy(dm_buf_t *buf);
@@ -76,10 +86,13 @@ static int parser_enter(dm_itanium_parser_t *p);
 static void parser_leave(dm_itanium_parser_t *p);
 static int parser_push_template_frame(dm_itanium_parser_t *p);
 static int parser_pop_template_frame(dm_itanium_parser_t *p);
+static int parser_record_template_arg(dm_itanium_parser_t *p, size_t off, size_t len);
+static int parser_capture_template_frame(dm_itanium_parser_t *p);
 static int parser_add_substitution(dm_itanium_parser_t *p, size_t off, size_t len);
 static int parser_append_output_slice(dm_itanium_parser_t *p, size_t off, size_t len);
 
 static int parse_number(dm_itanium_parser_t *p, size_t *out);
+static int parse_seq_id(dm_itanium_parser_t *p, size_t *out);
 
 static int parse_encoding(dm_itanium_parser_t *p);
 static int parse_special_name(dm_itanium_parser_t *p);
@@ -102,11 +115,20 @@ static int parse_template_arg(dm_itanium_parser_t *p);
 static int parse_bare_function_type(dm_itanium_parser_t *p);
 
 static int parse_type(dm_itanium_parser_t *p);
+static int parse_template_param(dm_itanium_parser_t *p);
+static int parse_function_type(dm_itanium_parser_t *p);
+static int parse_array_type(dm_itanium_parser_t *p);
+static int parse_pointer_to_member(dm_itanium_parser_t *p);
+static int parse_decltype_type(dm_itanium_parser_t *p);
+static int parse_vendor_type(dm_itanium_parser_t *p);
 static int parse_expression(dm_itanium_parser_t *p);
 static int parse_expr_primary(dm_itanium_parser_t *p);
 
 static void mark_save(dm_itanium_parser_t *p, dm_parse_mark_t *m);
 static void mark_restore(dm_itanium_parser_t *p, const dm_parse_mark_t *m);
+
+static int is_void_text(const dm_buf_t *buf, size_t off, size_t len);
+static int has_n_bytes(const char *s, size_t n);
 
 static int
 buf_reserve(dm_buf_t *buf, size_t extra)
@@ -172,6 +194,27 @@ buf_appendc(dm_buf_t *buf, char ch)
 
     buf->data[buf->len++] = ch;
     buf->data[buf->len] = '\0';
+    return 0;
+}
+
+static int
+buf_insert(dm_buf_t *buf, size_t off, const char *s, size_t n)
+{
+    if (buf == NULL || s == NULL || off > buf->len) {
+        return -1;
+    }
+
+    if (n == 0u) {
+        return 0;
+    }
+
+    if (buf_reserve(buf, n) != 0) {
+        return -1;
+    }
+
+    memmove(buf->data + off + n, buf->data + off, buf->len - off + 1u);
+    memcpy(buf->data + off, s, n);
+    buf->len += n;
     return 0;
 }
 
@@ -280,6 +323,7 @@ parser_push_template_frame(dm_itanium_parser_t *p)
         return -1;
     }
 
+    memset(&p->template_frames[p->template_depth], 0, sizeof(p->template_frames[p->template_depth]));
     p->template_frames[p->template_depth].output_off = p->out.len;
     p->template_depth++;
     return 0;
@@ -293,6 +337,46 @@ parser_pop_template_frame(dm_itanium_parser_t *p)
     }
 
     p->template_depth--;
+    return 0;
+}
+
+static int
+parser_record_template_arg(dm_itanium_parser_t *p, size_t off, size_t len)
+{
+    dm_template_frame_t *frame;
+
+    if (p->template_depth == 0u) {
+        return -1;
+    }
+
+    frame = &p->template_frames[p->template_depth - 1u];
+    if (frame->arg_count >= DM_TEMPLATE_ARG_CAP) {
+        return -1;
+    }
+
+    frame->arg_off[frame->arg_count] = off;
+    frame->arg_len[frame->arg_count] = len;
+    frame->arg_count++;
+    return 0;
+}
+
+static int
+parser_capture_template_frame(dm_itanium_parser_t *p)
+{
+    dm_template_frame_t *frame;
+    size_t i;
+
+    if (p->template_depth == 0u) {
+        return -1;
+    }
+
+    frame = &p->template_frames[p->template_depth - 1u];
+    p->last_template_count = frame->arg_count;
+    for (i = 0u; i < frame->arg_count; i++) {
+        p->last_template_off[i] = frame->arg_off[i];
+        p->last_template_len[i] = frame->arg_len[i];
+    }
+
     return 0;
 }
 
@@ -342,6 +426,7 @@ mark_save(dm_itanium_parser_t *p, dm_parse_mark_t *m)
     m->member_quals = p->member_quals;
     m->substitution_count = p->substitution_count;
     m->template_depth = p->template_depth;
+    m->last_template_count = p->last_template_count;
 }
 
 static void
@@ -351,11 +436,26 @@ mark_restore(dm_itanium_parser_t *p, const dm_parse_mark_t *m)
     p->member_quals = m->member_quals;
     p->substitution_count = m->substitution_count;
     p->template_depth = m->template_depth;
+    p->last_template_count = m->last_template_count;
 
     if (m->out_len <= p->out.len) {
         p->out.len = m->out_len;
         p->out.data[p->out.len] = '\0';
     }
+}
+
+static int
+has_n_bytes(const char *s, size_t n)
+{
+    size_t i;
+
+    for (i = 0u; i < n; i++) {
+        if (s[i] == '\0') {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 static int
@@ -386,6 +486,50 @@ parse_number(dm_itanium_parser_t *p, size_t *out)
 }
 
 static int
+parse_seq_id(dm_itanium_parser_t *p, size_t *out)
+{
+    size_t v;
+    int saw;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+
+    v = 0u;
+    saw = 0;
+    while (isalnum((unsigned char)p->cur[0])) {
+        unsigned d;
+        size_t nv;
+
+        saw = 1;
+        if (p->cur[0] >= '0' && p->cur[0] <= '9') {
+            d = (unsigned)(p->cur[0] - '0');
+        } else if (p->cur[0] >= 'A' && p->cur[0] <= 'Z') {
+            d = 10u + (unsigned)(p->cur[0] - 'A');
+        } else if (p->cur[0] >= 'a' && p->cur[0] <= 'z') {
+            d = 10u + (unsigned)(p->cur[0] - 'a');
+        } else {
+            return -1;
+        }
+
+        nv = v * 36u + d;
+        if (nv < v) {
+            return -1;
+        }
+
+        v = nv;
+        p->cur++;
+    }
+
+    if (!saw) {
+        return -1;
+    }
+
+    *out = v;
+    return 0;
+}
+
+static int
 parse_source_name(dm_itanium_parser_t *p)
 {
     const char *id;
@@ -397,7 +541,7 @@ parse_source_name(dm_itanium_parser_t *p)
     }
 
     id = p->cur;
-    if (len == 0u || id[len - 1u] == '\0') {
+    if (len == 0u || !has_n_bytes(id, len)) {
         return -1;
     }
 
@@ -763,6 +907,12 @@ append_member_qualifiers(dm_itanium_parser_t *p)
 }
 
 static int
+is_void_text(const dm_buf_t *buf, size_t off, size_t len)
+{
+    return len == 4u && off + len <= buf->len && memcmp(buf->data + off, "void", 4u) == 0;
+}
+
+static int
 parse_bare_function_type(dm_itanium_parser_t *p)
 {
     int suppress_params;
@@ -776,19 +926,16 @@ parse_bare_function_type(dm_itanium_parser_t *p)
 
     first = 1;
     while (p->cur[0] != '\0') {
-        dm_parse_mark_t m;
         size_t before;
+        size_t parsed_len;
 
-        mark_save(p, &m);
         before = p->out.len;
-
         if (parse_type(p) != 0) {
-            mark_restore(p, &m);
-            break;
+            return -1;
         }
 
-        if (first && p->out.len - before == 4u &&
-            memcmp(p->out.data + before, "void", 4u) == 0 && p->cur[0] == '\0') {
+        parsed_len = p->out.len - before;
+        if (first && p->cur[0] == '\0' && is_void_text(&p->out, before, parsed_len)) {
             p->out.len = before;
             p->out.data[p->out.len] = '\0';
             break;
@@ -797,34 +944,13 @@ parse_bare_function_type(dm_itanium_parser_t *p)
         if (suppress_params) {
             p->out.len = before;
             p->out.data[p->out.len] = '\0';
-        } else {
-            if (!first && buf_append(&p->out, ", ", 2u) != 0) {
+        } else if (!first) {
+            if (buf_insert(&p->out, before, ", ", 2u) != 0) {
                 return -1;
-            }
-            if (!first) {
-                size_t just_len = p->out.len - before;
-                size_t src_off = before - just_len;
-                (void)src_off;
             }
         }
 
         first = 0;
-
-        if (!suppress_params) {
-            dm_parse_mark_t m2;
-            size_t tmp_before;
-
-            mark_save(p, &m2);
-            tmp_before = p->out.len;
-            mark_restore(p, &m);
-            if (parse_type(p) != 0) {
-                return -1;
-            }
-            if (tmp_before != p->out.len) {
-                return -1;
-            }
-            (void)m2;
-        }
     }
 
     if (!suppress_params && buf_appendc(&p->out, ')') != 0) {
@@ -838,49 +964,69 @@ static int
 parse_template_args(dm_itanium_parser_t *p)
 {
     int first;
+    int pushed;
 
     if (p->cur[0] != 'I') {
         return -1;
     }
 
     p->cur++;
+    pushed = 0;
 
     if (parser_push_template_frame(p) != 0) {
         return -1;
     }
+    pushed = 1;
 
     if (buf_appendc(&p->out, '<') != 0) {
-        return -1;
+        goto fail;
     }
 
     first = 1;
     while (p->cur[0] != '\0' && p->cur[0] != 'E') {
+        size_t arg_off;
+
         if (!first && buf_append(&p->out, ", ", 2u) != 0) {
-            return -1;
+            goto fail;
         }
 
+        arg_off = p->out.len;
         if (parse_template_arg(p) != 0) {
-            return -1;
+            goto fail;
+        }
+
+        if (parser_record_template_arg(p, arg_off, p->out.len - arg_off) != 0) {
+            goto fail;
         }
 
         first = 0;
     }
 
     if (p->cur[0] != 'E') {
-        return -1;
+        goto fail;
     }
 
     p->cur++;
 
     if (buf_appendc(&p->out, '>') != 0) {
-        return -1;
+        goto fail;
+    }
+
+    if (parser_capture_template_frame(p) != 0) {
+        goto fail;
     }
 
     if (parser_pop_template_frame(p) != 0) {
-        return -1;
+        goto fail;
     }
 
     return 0;
+
+fail:
+    if (pushed) {
+        (void)parser_pop_template_frame(p);
+    }
+    return -1;
 }
 
 static int
@@ -997,6 +1143,212 @@ parse_expression(dm_itanium_parser_t *p)
 }
 
 static int
+parse_template_param(dm_itanium_parser_t *p)
+{
+    size_t idx;
+
+    if (p->cur[0] != 'T') {
+        return -1;
+    }
+
+    p->cur++;
+    if (p->cur[0] == '_') {
+        idx = 0u;
+        p->cur++;
+    } else {
+        size_t seq;
+
+        if (parse_seq_id(p, &seq) != 0 || p->cur[0] != '_') {
+            return -1;
+        }
+
+        p->cur++;
+        idx = seq + 1u;
+    }
+
+    if (idx >= p->last_template_count) {
+        return -1;
+    }
+
+    return parser_append_output_slice(p, p->last_template_off[idx], p->last_template_len[idx]);
+}
+
+static int
+parse_function_type(dm_itanium_parser_t *p)
+{
+    int first;
+    int extern_c;
+
+    if (p->cur[0] != 'F') {
+        return -1;
+    }
+
+    p->cur++;
+    extern_c = 0;
+
+    if (p->cur[0] == 'Y') {
+        extern_c = 1;
+        p->cur++;
+    }
+
+    if (extern_c && buf_append(&p->out, "extern \"C\" ", 11u) != 0) {
+        return -1;
+    }
+
+    if (parse_type(p) != 0) {
+        return -1;
+    }
+
+    if (buf_append(&p->out, " (", 2u) != 0) {
+        return -1;
+    }
+
+    first = 1;
+    while (p->cur[0] != '\0' && p->cur[0] != 'E') {
+        size_t before;
+        size_t parsed_len;
+
+        before = p->out.len;
+        if (parse_type(p) != 0) {
+            return -1;
+        }
+
+        parsed_len = p->out.len - before;
+        if (first && p->cur[0] == 'E' && is_void_text(&p->out, before, parsed_len)) {
+            p->out.len = before;
+            p->out.data[p->out.len] = '\0';
+            break;
+        }
+
+        if (!first && buf_insert(&p->out, before, ", ", 2u) != 0) {
+            return -1;
+        }
+
+        first = 0;
+    }
+
+    if (p->cur[0] != 'E') {
+        return -1;
+    }
+
+    p->cur++;
+
+    return buf_appendc(&p->out, ')');
+}
+
+static int
+parse_array_type(dm_itanium_parser_t *p)
+{
+    size_t dim;
+    int has_dim;
+
+    if (p->cur[0] != 'A') {
+        return -1;
+    }
+
+    p->cur++;
+
+    has_dim = 0;
+    dim = 0u;
+    if (isdigit((unsigned char)p->cur[0])) {
+        has_dim = 1;
+        if (parse_number(p, &dim) != 0) {
+            return -1;
+        }
+    }
+
+    if (p->cur[0] != '_') {
+        return -1;
+    }
+
+    p->cur++;
+
+    if (parse_type(p) != 0) {
+        return -1;
+    }
+
+    if (has_dim) {
+        return buf_printf(&p->out, "[%zu]", dim);
+    }
+
+    return buf_append(&p->out, "[]", 2u);
+}
+
+static int
+parse_pointer_to_member(dm_itanium_parser_t *p)
+{
+    size_t class_off;
+    size_t class_len;
+
+    if (p->cur[0] != 'M') {
+        return -1;
+    }
+
+    p->cur++;
+
+    class_off = p->out.len;
+    if (parse_type(p) != 0) {
+        return -1;
+    }
+    class_len = p->out.len - class_off;
+
+    if (buf_append(&p->out, "::*", 3u) != 0) {
+        return -1;
+    }
+
+    if (parse_type(p) != 0) {
+        return -1;
+    }
+
+    (void)class_len;
+    return 0;
+}
+
+static int
+parse_decltype_type(dm_itanium_parser_t *p)
+{
+    if (p->cur[0] != 'D' || (p->cur[1] != 't' && p->cur[1] != 'T')) {
+        return -1;
+    }
+
+    p->cur += 2;
+
+    if (buf_append(&p->out, "decltype(", 9u) != 0) {
+        return -1;
+    }
+
+    if (parse_expression(p) != 0) {
+        return -1;
+    }
+
+    if (p->cur[0] != 'E') {
+        return -1;
+    }
+
+    p->cur++;
+    return buf_appendc(&p->out, ')');
+}
+
+static int
+parse_vendor_type(dm_itanium_parser_t *p)
+{
+    if (p->cur[0] != 'u') {
+        return -1;
+    }
+
+    p->cur++;
+    if (buf_append(&p->out, "vendor(", 7u) != 0) {
+        return -1;
+    }
+
+    if (parse_source_name(p) != 0) {
+        return -1;
+    }
+
+    return buf_appendc(&p->out, ')');
+}
+
+static int
 parse_type(dm_itanium_parser_t *p)
 {
     static const struct {
@@ -1017,9 +1369,12 @@ parse_type(dm_itanium_parser_t *p)
         { 'm', "unsigned long" },
         { 'x', "long long" },
         { 'y', "unsigned long long" },
+        { 'n', "__int128" },
+        { 'o', "unsigned __int128" },
         { 'f', "float" },
         { 'd', "double" },
         { 'e', "long double" },
+        { 'g', "__float128" },
         { 'z', "..." }
     };
     size_t i;
@@ -1052,6 +1407,53 @@ parse_type(dm_itanium_parser_t *p)
             return buf_append(&p->out, " volatile", 9u);
         }
         return buf_append(&p->out, " restrict", 9u);
+    }
+
+    if (p->cur[0] == 'C') {
+        p->cur++;
+        if (parse_type(p) != 0) {
+            return -1;
+        }
+        return buf_append(&p->out, " _Complex", 9u);
+    }
+
+    if (p->cur[0] == 'G') {
+        p->cur++;
+        if (parse_type(p) != 0) {
+            return -1;
+        }
+        return buf_append(&p->out, " _Imaginary", 11u);
+    }
+
+    if (parse_function_type(p) == 0 ||
+        parse_array_type(p) == 0 ||
+        parse_pointer_to_member(p) == 0 ||
+        parse_template_param(p) == 0 ||
+        parse_decltype_type(p) == 0 ||
+        parse_vendor_type(p) == 0) {
+        return 0;
+    }
+
+    if (p->cur[0] == 'D') {
+        const char *name = NULL;
+
+        switch (p->cur[1]) {
+        case 'd': name = "decimal64"; break;
+        case 'e': name = "decimal128"; break;
+        case 'f': name = "decimal32"; break;
+        case 'h': name = "half"; break;
+        case 'i': name = "char32_t"; break;
+        case 's': name = "char16_t"; break;
+        case 'a': name = "auto"; break;
+        case 'c': name = "decltype(auto)"; break;
+        case 'n': name = "std::nullptr_t"; break;
+        default: break;
+        }
+
+        if (name != NULL) {
+            p->cur += 2;
+            return buf_append(&p->out, name, strlen(name));
+        }
     }
 
     for (i = 0u; i < sizeof(builtin) / sizeof(builtin[0]); i++) {
@@ -1126,10 +1528,18 @@ demangle_itanium(const char *mangled, int options)
         return NULL;
     }
 
-    if (parse_encoding(&parser) != 0 || parser.cur[0] != '\0') {
-        parser_leave(&parser);
-        buf_destroy(&parser.out);
-        return NULL;
+    if (mangled[0] == '_' && mangled[1] == 'Z') {
+        if (parse_encoding(&parser) != 0 || parser.cur[0] != '\0') {
+            parser_leave(&parser);
+            buf_destroy(&parser.out);
+            return NULL;
+        }
+    } else {
+        if ((options & DEMANGLE_TYPES) == 0 || parse_type(&parser) != 0 || parser.cur[0] != '\0') {
+            parser_leave(&parser);
+            buf_destroy(&parser.out);
+            return NULL;
+        }
     }
 
     parser_leave(&parser);
