@@ -29,16 +29,16 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Recursion depth counter with configurable limit (default 256).
 
 ### 2b. Core Grammar Coverage
-- [ ] `<mangled-name>` → `_Z <encoding>`.
-- [ ] `<encoding>` → `<name> <bare-function-type>` | `<special-name>`.
-- [ ] `<name>` → `<nested-name>` | `<unscoped-name>` | `<local-name>`.
-- [ ] `<nested-name>` → `N [<CV-quals>] [<ref-qual>] <prefix>+ <unqualified-name> E`.
-- [ ] `<unqualified-name>` → `<source-name>` | `<operator-name>` | `<ctor-dtor-name>` | `<unnamed-type-name>`.
-- [ ] `<source-name>` → `<number> <identifier>`.
-- [ ] `<operator-name>` → all standard C++ operators (`nw`, `na`, `dl`, `da`, `ps`, `ng`, `ad`, `de`, `co`, `pl`, `mi`, `ml`, `dv`, `rm`, `an`, `or`, `eo`, `ls`, `rs`, `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `ss`, `nt`, `pp`, `mm`, `cm`, `pm`, `pt`, `cl`, `ix`, `qu`, `cv`, `li`, `v0`–`v9`).
-- [ ] `<ctor-dtor-name>` → `C1`/`C2`/`C3`/`CI1`/`CI2`, `D0`/`D1`/`D2`.
-- [ ] `<template-args>` → `I <template-arg>+ E`.
-- [ ] `<template-arg>` → `<type>` | `<expr-primary>` | `X <expression> E` | `J <template-arg>* E` (pack).
+- [x] `<mangled-name>` → `_Z <encoding>`.
+- [x] `<encoding>` → `<name> <bare-function-type>` | `<special-name>`.
+- [x] `<name>` → `<nested-name>` | `<unscoped-name>` | `<local-name>`.
+- [x] `<nested-name>` → `N [<CV-quals>] [<ref-qual>] <prefix>+ <unqualified-name> E`.
+- [x] `<unqualified-name>` → `<source-name>` | `<operator-name>` | `<ctor-dtor-name>` | `<unnamed-type-name>`.
+- [x] `<source-name>` → `<number> <identifier>`.
+- [x] `<operator-name>` → all standard C++ operators (`nw`, `na`, `dl`, `da`, `ps`, `ng`, `ad`, `de`, `co`, `pl`, `mi`, `ml`, `dv`, `rm`, `an`, `or`, `eo`, `ls`, `rs`, `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `ss`, `nt`, `pp`, `mm`, `cm`, `pm`, `pt`, `cl`, `ix`, `qu`, `cv`, `li`, `v0`–`v9`).
+- [x] `<ctor-dtor-name>` → `C1`/`C2`/`C3`/`CI1`/`CI2`, `D0`/`D1`/`D2`.
+- [x] `<template-args>` → `I <template-arg>+ E`.
+- [x] `<template-arg>` → `<type>` | `<expr-primary>` | `X <expression> E` | `J <template-arg>* E` (pack).
 
 ### 2c. Type Demangling
 - [ ] Builtin types: `v`, `w`, `b`, `c`, `a`, `h`, `s`, `t`, `i`, `j`, `l`, `m`, `x`, `y`, `n`, `o`, `f`, `d`, `e`, `g`, `z`, `Dd`, `De`, `Df`, `Dh`, `Di`, `Ds`, `Da`, `Dc`, `Dn`.
