@@ -58,13 +58,13 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Standard substitutions: `St` (std), `Sa` (std::allocator), `Sb` (std::basic_string), `Ss` (std::string), `Si` (std::istream), `So` (std::ostream), `Sd` (std::iostream).
 
 ### 2e. Special Names
-- [ ] `TV <type>` — vtable.
-- [ ] `TT <type>` — VTT.
-- [ ] `TI <type>` — typeinfo.
-- [ ] `TS <type>` — typeinfo name.
-- [ ] `GV <name>` — guard variable.
-- [ ] `Tc`/`Th`/`Tv` — thunks (with offset parsing).
-- [ ] `T` — transaction clones (deferred).
+- [x] `TV <type>` — vtable.
+- [x] `TT <type>` — VTT.
+- [x] `TI <type>` — typeinfo.
+- [x] `TS <type>` — typeinfo name.
+- [x] `GV <name>` — guard variable.
+- [x] `Tc`/`Th`/`Tv` — thunks (with offset parsing).
+- [x] `T` — transaction clones (deferred).
 
 ### 2f. Expressions and Literals
 - [ ] Integer literals: `L <type> <number> E`.
