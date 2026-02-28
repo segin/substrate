@@ -40,16 +40,16 @@ Execution policy:
 - [x] Conditional assembly (`.if`/`.ifdef`/`.ifndef`/`.else`/`.endif`).
 
 ## 3) Section, Symbol, and Expression Semantics
-- [ ] `.text`, `.data`, `.bss` section switching.
-- [ ] `.section` with flags/type metadata.
-- [ ] Symbol bindings: local/global/weak.
-- [ ] Symbol visibility controls and type/size metadata.
-- [ ] Absolute vs relocatable expression classification.
-- [ ] Expression folding with width/sign correctness.
-- [ ] Overflow diagnostics for immediate and displacement expressions.
-- [ ] Symbol redefinition and multiply-defined diagnostics.
-- [ ] `.comm` / `.lcomm` semantics.
-- [ ] Alignment directives (`.align`, `.p2align`, `.balign`) semantics.
+- [x] `.text`, `.data`, `.bss` section switching.
+- [x] `.section` with flags/type metadata.
+- [x] Symbol bindings: local/global/weak.
+- [x] Symbol visibility controls and type/size metadata.
+- [x] Absolute vs relocatable expression classification.
+- [x] Expression folding with width/sign correctness.
+- [x] Overflow diagnostics for immediate and displacement expressions.
+- [x] Symbol redefinition and multiply-defined diagnostics.
+- [x] `.comm` / `.lcomm` semantics.
+- [x] Alignment directives (`.align`, `.p2align`, `.balign`) semantics.
 
 ## 4) Instruction Encoding: i386 Baseline
 - [ ] Integer ALU instruction families.
