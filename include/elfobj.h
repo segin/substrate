@@ -378,6 +378,12 @@ size_t elf_symbol_count(const elfobj_t *obj);
 size_t elf_reloc_count(const elfobj_t *obj);
 uint16_t elf_program_header_count(const elfobj_t *obj);
 size_t elf_segment_count(const elfobj_t *obj);
+uint32_t elf_program_header_type(const elfobj_t *obj, size_t index);
+uint32_t elf_program_header_flags(const elfobj_t *obj, size_t index);
+uint64_t elf_program_header_align(const elfobj_t *obj, size_t index);
+elf_err_t elf_program_header_set_type(elfobj_t *obj, size_t index, uint32_t type);
+elf_err_t elf_program_header_set_flags(elfobj_t *obj, size_t index, uint32_t flags);
+elf_err_t elf_program_header_set_align(elfobj_t *obj, size_t index, uint64_t align);
 
 const char *elf_section_name(const elf_section_t *section);
 uint32_t elf_section_type(const elf_section_t *section);

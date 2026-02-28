@@ -37,6 +37,9 @@ typedef struct {
     strlist_t set_section_flags_specs;
     strlist_t set_section_align_specs;
     strlist_t rename_section_specs;
+    strlist_t set_segment_type_specs;
+    strlist_t set_segment_flags_specs;
+    strlist_t set_segment_align_specs;
 } elfedit_ctx_t;
 
 static const char *g_progname = "elfedit";
@@ -58,7 +61,9 @@ static void usage(FILE *out) {
             "       [--output-osabi osabi] [--output-abiversion version]\n"
             "       [--output-flags value] [--output-entry addr]\n"
             "       [--set-section-type name=type] [--set-section-flags name=flags]\n"
-            "       [--set-section-align name=align] [--rename-section old=new] <input>\n",
+            "       [--set-section-align name=align] [--rename-section old=new]\n"
+            "       [--set-segment-type idx=type] [--set-segment-flags idx=flags]\n"
+            "       [--set-segment-align idx=align] <input>\n",
             g_progname);
 }
 
@@ -377,6 +382,72 @@ static int parse_section_flags(const char *arg, uint64_t *out) {
     return 0;
 }
 
+static int parse_segment_type(const char *arg, uint32_t *out) {
+    uint32_t numeric = 0;
+
+    if (strcasecmp(arg, "null") == 0) {
+        *out = PT_NULL;
+        return 0;
+    }
+    if (strcasecmp(arg, "load") == 0) {
+        *out = PT_LOAD;
+        return 0;
+    }
+    if (strcasecmp(arg, "dynamic") == 0) {
+        *out = PT_DYNAMIC;
+        return 0;
+    }
+    if (strcasecmp(arg, "interp") == 0) {
+        *out = PT_INTERP;
+        return 0;
+    }
+    if (strcasecmp(arg, "note") == 0) {
+        *out = PT_NOTE;
+        return 0;
+    }
+    if (strcasecmp(arg, "phdr") == 0) {
+        *out = PT_PHDR;
+        return 0;
+    }
+    if (strcasecmp(arg, "tls") == 0) {
+        *out = PT_TLS;
+        return 0;
+    }
+    if (parse_u32(arg, &numeric) != 0) {
+        return -1;
+    }
+    *out = numeric;
+    return 0;
+}
+
+static int parse_segment_flags(const char *arg, uint32_t *out) {
+    uint32_t numeric = 0;
+    uint32_t flags = 0;
+    size_t i;
+
+    if (parse_u32(arg, &numeric) == 0) {
+        *out = numeric;
+        return 0;
+    }
+    if (arg == NULL || arg[0] == '\0') {
+        return -1;
+    }
+    for (i = 0; arg[i] != '\0'; ++i) {
+        char ch = arg[i];
+        if (ch == 'r' || ch == 'R') {
+            flags |= 0x4;
+        } else if (ch == 'w' || ch == 'W') {
+            flags |= 0x2;
+        } else if (ch == 'x' || ch == 'X') {
+            flags |= 0x1;
+        } else {
+            return -1;
+        }
+    }
+    *out = flags;
+    return 0;
+}
+
 static elf_section_t *find_section_or_error(elfobj_t *obj, const char *name) {
     elf_section_t *sec = elf_find_section(obj, name);
     if (sec == NULL) {
@@ -511,6 +582,141 @@ static int apply_rename_section_specs(elfobj_t *obj, const strlist_t *specs) {
     return 0;
 }
 
+static int parse_segment_index(const char *text, size_t *out) {
+    uint64_t value;
+
+    if (parse_u64(text, &value) != 0 || value > (uint64_t)SIZE_MAX) {
+        return -1;
+    }
+    *out = (size_t)value;
+    return 0;
+}
+
+static int segment_index_in_range(elfobj_t *obj, size_t idx) {
+    size_t count = (size_t)elf_program_header_count(obj);
+    if (idx < count) {
+        return 1;
+    }
+    if (count == 0) {
+        warnf("segment index %lu out of range (0-0)", (unsigned long)idx);
+    } else {
+        warnf("segment index %lu out of range (0-%lu)",
+              (unsigned long)idx, (unsigned long)(count - 1));
+    }
+    return 0;
+}
+
+static int apply_segment_type_specs(elfobj_t *obj, const strlist_t *specs) {
+    size_t i;
+
+    for (i = 0; i < specs->count; ++i) {
+        char *lhs = NULL;
+        char *rhs = NULL;
+        size_t idx;
+        uint32_t type;
+
+        if (split_assignment(specs->items[i], &lhs, &rhs) != 0) {
+            warnf("invalid segment type assignment: %s", specs->items[i]);
+            return -1;
+        }
+        if (parse_segment_index(lhs, &idx) != 0) {
+            warnf("invalid segment index: %s", lhs);
+            free(lhs);
+            return -1;
+        }
+        if (!segment_index_in_range(obj, idx)) {
+            free(lhs);
+            return -1;
+        }
+        if (parse_segment_type(rhs, &type) != 0) {
+            warnf("unknown segment type: %s", rhs);
+            free(lhs);
+            return -1;
+        }
+        if (elf_program_header_set_type(obj, idx, type) != ELF_OK) {
+            warnf("failed to set segment type for index %lu", (unsigned long)idx);
+            free(lhs);
+            return -1;
+        }
+        free(lhs);
+    }
+    return 0;
+}
+
+static int apply_segment_flags_specs(elfobj_t *obj, const strlist_t *specs) {
+    size_t i;
+
+    for (i = 0; i < specs->count; ++i) {
+        char *lhs = NULL;
+        char *rhs = NULL;
+        size_t idx;
+        uint32_t flags;
+
+        if (split_assignment(specs->items[i], &lhs, &rhs) != 0) {
+            warnf("invalid segment flags assignment: %s", specs->items[i]);
+            return -1;
+        }
+        if (parse_segment_index(lhs, &idx) != 0) {
+            warnf("invalid segment index: %s", lhs);
+            free(lhs);
+            return -1;
+        }
+        if (!segment_index_in_range(obj, idx)) {
+            free(lhs);
+            return -1;
+        }
+        if (parse_segment_flags(rhs, &flags) != 0) {
+            warnf("invalid segment flags: %s", rhs);
+            free(lhs);
+            return -1;
+        }
+        if (elf_program_header_set_flags(obj, idx, flags) != ELF_OK) {
+            warnf("failed to set segment flags for index %lu", (unsigned long)idx);
+            free(lhs);
+            return -1;
+        }
+        free(lhs);
+    }
+    return 0;
+}
+
+static int apply_segment_align_specs(elfobj_t *obj, const strlist_t *specs) {
+    size_t i;
+
+    for (i = 0; i < specs->count; ++i) {
+        char *lhs = NULL;
+        char *rhs = NULL;
+        size_t idx;
+        uint64_t align;
+
+        if (split_assignment(specs->items[i], &lhs, &rhs) != 0) {
+            warnf("invalid segment align assignment: %s", specs->items[i]);
+            return -1;
+        }
+        if (parse_segment_index(lhs, &idx) != 0) {
+            warnf("invalid segment index: %s", lhs);
+            free(lhs);
+            return -1;
+        }
+        if (!segment_index_in_range(obj, idx)) {
+            free(lhs);
+            return -1;
+        }
+        if (parse_u64(rhs, &align) != 0) {
+            warnf("invalid segment alignment: %s", rhs);
+            free(lhs);
+            return -1;
+        }
+        if (elf_program_header_set_align(obj, idx, align) != ELF_OK) {
+            warnf("failed to set segment alignment for index %lu", (unsigned long)idx);
+            free(lhs);
+            return -1;
+        }
+        free(lhs);
+    }
+    return 0;
+}
+
 static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
     int ch;
     uint16_t parsed_value;
@@ -528,6 +734,9 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
         { "set-section-flags", required_argument, NULL, 1011 },
         { "set-section-align", required_argument, NULL, 1012 },
         { "rename-section", required_argument, NULL, 1013 },
+        { "set-segment-type", required_argument, NULL, 1020 },
+        { "set-segment-flags", required_argument, NULL, 1021 },
+        { "set-segment-align", required_argument, NULL, 1022 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -607,6 +816,24 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
             break;
         case 1013:
             if (strlist_push(&ctx->rename_section_specs, optarg) != 0) {
+                warnf("out of memory");
+                return -1;
+            }
+            break;
+        case 1020:
+            if (strlist_push(&ctx->set_segment_type_specs, optarg) != 0) {
+                warnf("out of memory");
+                return -1;
+            }
+            break;
+        case 1021:
+            if (strlist_push(&ctx->set_segment_flags_specs, optarg) != 0) {
+                warnf("out of memory");
+                return -1;
+            }
+            break;
+        case 1022:
+            if (strlist_push(&ctx->set_segment_align_specs, optarg) != 0) {
                 warnf("out of memory");
                 return -1;
             }
@@ -743,6 +970,20 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
         return -1;
     }
 
+    if (ctx->set_segment_type_specs.count != 0 || ctx->set_segment_flags_specs.count != 0 ||
+        ctx->set_segment_align_specs.count != 0) {
+        warnf("note: segment content is not modified; segment edits are metadata-only");
+    }
+    if (apply_segment_type_specs(obj, &ctx->set_segment_type_specs) != 0) {
+        return -1;
+    }
+    if (apply_segment_flags_specs(obj, &ctx->set_segment_flags_specs) != 0) {
+        return -1;
+    }
+    if (apply_segment_align_specs(obj, &ctx->set_segment_align_specs) != 0) {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -801,6 +1042,9 @@ static void ctx_cleanup(elfedit_ctx_t *ctx) {
     strlist_free(&ctx->set_section_flags_specs);
     strlist_free(&ctx->set_section_align_specs);
     strlist_free(&ctx->rename_section_specs);
+    strlist_free(&ctx->set_segment_type_specs);
+    strlist_free(&ctx->set_segment_flags_specs);
+    strlist_free(&ctx->set_segment_align_specs);
 }
 
 int main(int argc, char **argv) {

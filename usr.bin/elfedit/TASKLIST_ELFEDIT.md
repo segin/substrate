@@ -52,10 +52,10 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 
 ## 4. Program Header Edits
 
-- [ ] `--set-segment-type <idx>=<type>`: change `p_type` (accept named types or numeric).
-- [ ] `--set-segment-flags <idx>=<flags>`: change `p_flags` (accept `r`, `w`, `x` combo or hex).
-- [ ] `--set-segment-align <idx>=<align>`: change `p_align`.
-- [ ] Note: segment content is not modified — these are metadata‑only edits.
+- [x] `--set-segment-type <idx>=<type>`: change `p_type` (accept named types or numeric).
+- [x] `--set-segment-flags <idx>=<flags>`: change `p_flags` (accept `r`, `w`, `x` combo or hex).
+- [x] `--set-segment-align <idx>=<align>`: change `p_align`.
+- [x] Note: segment content is not modified — these are metadata‑only edits.
 
 ## 5. Validation and Safety
 

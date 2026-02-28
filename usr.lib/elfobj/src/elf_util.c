@@ -536,6 +536,72 @@ uint16_t elf_program_header_count(const elfobj_t *obj) {
     return obj == NULL ? 0 : (uint16_t)obj->phdr_count;
 }
 
+uint32_t elf_program_header_type(const elfobj_t *obj, size_t index) {
+    if (obj == NULL || index >= obj->phdr_count) {
+        return 0;
+    }
+    return obj->phdrs[index].type;
+}
+
+uint32_t elf_program_header_flags(const elfobj_t *obj, size_t index) {
+    if (obj == NULL || index >= obj->phdr_count) {
+        return 0;
+    }
+    return obj->phdrs[index].flags;
+}
+
+uint64_t elf_program_header_align(const elfobj_t *obj, size_t index) {
+    if (obj == NULL || index >= obj->phdr_count) {
+        return 0;
+    }
+    return obj->phdrs[index].align;
+}
+
+elf_err_t elf_program_header_set_type(elfobj_t *obj, size_t index, uint32_t type) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    if (index >= obj->phdr_count) {
+        return ELF_ERR_BOUNDS;
+    }
+    obj->phdrs[index].type = type;
+    obj->dirty = 1;
+    return ELF_OK;
+}
+
+elf_err_t elf_program_header_set_flags(elfobj_t *obj, size_t index, uint32_t flags) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    if (index >= obj->phdr_count) {
+        return ELF_ERR_BOUNDS;
+    }
+    obj->phdrs[index].flags = flags;
+    obj->dirty = 1;
+    return ELF_OK;
+}
+
+elf_err_t elf_program_header_set_align(elfobj_t *obj, size_t index, uint64_t align) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    if (index >= obj->phdr_count) {
+        return ELF_ERR_BOUNDS;
+    }
+    obj->phdrs[index].align = align == 0 ? 1 : align;
+    obj->dirty = 1;
+    return ELF_OK;
+}
+
 size_t elf_segment_count(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->segment_count;
 }
