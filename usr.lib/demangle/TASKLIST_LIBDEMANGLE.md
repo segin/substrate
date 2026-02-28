@@ -365,10 +365,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Trait object: `D <dyn-bounds> <lifetime>` → `dyn Trait + 'a`.
 
 ### 9l. Rust v0 Const Tests
-- [ ] Integer const: type + hex value → correct decimal display.
-- [ ] Negative integer: `n` prefix → negative number.
-- [ ] Bool const: `0_` → `false`, `1_` → `true`.
-- [ ] Char const: Unicode scalar → `'X'`.
+- [x] Integer const: type + hex value → correct decimal display.
+- [x] Negative integer: `n` prefix → negative number.
+- [x] Bool const: `0_` → `false`, `1_` → `true`.
+- [x] Char const: Unicode scalar → `'X'`.
 
 ### 9m. Rust v0 Lifetime and Binder Tests
 - [ ] Erased lifetime: `L_` → `'_`.
