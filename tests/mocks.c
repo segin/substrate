@@ -76,41 +76,6 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
     return 0;
 }
 
-int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
-    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
-    return 0;
-}
-
-int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
-    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
-    return 0;
-}
-
-int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
-    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
-    return 0;
-}
-
-int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
-    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
-    return 0;
-}
-
-int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
-    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
-    return 0;
-}
-
-int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
-    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
-    return 0;
-}
-
-int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
-    (void)pmap; (void)va_start; (void)count; (void)pa_list; (void)prot; (void)flags;
-    return 0;
-}
-
 uintptr_t pmap_extract(pmap_t p, uintptr_t va) {
     (void)p;
     return va;
