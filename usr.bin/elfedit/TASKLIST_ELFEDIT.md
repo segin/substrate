@@ -106,11 +106,11 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 ## 9. Testing
 
 ### 9a. ELF Header Tests
-- [ ] Change `e_type`: ET_REL → ET_DYN → readelf confirms.
-- [ ] Change `e_machine`: EM_386 → EM_X86_64 → readelf confirms.
-- [ ] Change `EI_OSABI`: ELFOSABI_NONE → ELFOSABI_LINUX → readelf confirms.
-- [ ] Change `e_entry`: set to 0xDEAD → readelf confirms.
-- [ ] Change `e_flags`: set arbitrary value → readelf confirms.
+- [x] Change `e_type`: ET_REL → ET_DYN → readelf confirms.
+- [x] Change `e_machine`: EM_386 → EM_X86_64 → readelf confirms.
+- [x] Change `EI_OSABI`: ELFOSABI_NONE → ELFOSABI_LINUX → readelf confirms.
+- [x] Change `e_entry`: set to 0xDEAD → readelf confirms.
+- [x] Change `e_flags`: set arbitrary value → readelf confirms.
 
 ### 9b. Section Header Tests
 - [ ] Change `.data` flags to add `SHF_EXECINSTR` → readelf confirms.
