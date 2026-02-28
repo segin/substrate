@@ -84,11 +84,13 @@ static int dlang_parse_type_core(dlang_parser_t *p);
 static int dlang_parse_function_type(dlang_parser_t *p, char cconv);
 static int dlang_parse_mangled_name(dlang_parser_t *p);
 static int dlang_is_type_start(char ch);
+static int dlang_is_attr_code(char ch);
 
 static char *dlang_take_segment(dlang_parser_t *p, size_t off);
 static char *dlang_wrap_type(const char *prefix, const char *inner, const char *suffix);
 static int dlang_append_attrs(dlang_buf_t *buf, unsigned attrs);
 static int dlang_format_special_name(dlang_buf_t *buf, const char *s, size_t len, int *formatted);
+static char *dlang_delegate_from_function(const char *inner);
 
 static char *dlang_demangle_symbol(const char *mangled, int options);
 
@@ -532,38 +534,55 @@ dlang_parse_template_value(dlang_parser_t *p)
 static int
 dlang_parse_template_arg(dlang_parser_t *p)
 {
+    size_t off;
+    char *ty;
+    char *val;
     size_t n;
 
     if (p->cur[0] == 'T') {
         p->cur++;
-        if (dlang_buf_append(&p->out, "type(", 5u) != 0 ||
-            dlang_parse_type(p) != 0 ||
-            dlang_buf_appendc(&p->out, ')') != 0) {
-            return -1;
-        }
-        return 0;
+        return dlang_parse_type(p);
     }
 
     if (p->cur[0] == 'V') {
         p->cur++;
-        if (dlang_buf_append(&p->out, "value(", 6u) != 0 ||
-            dlang_parse_type(p) != 0 ||
-            dlang_buf_appendc(&p->out, '=') != 0 ||
-            dlang_parse_template_value(p) != 0 ||
-            dlang_buf_appendc(&p->out, ')') != 0) {
+        off = p->out.len;
+        if (dlang_parse_type(p) != 0) {
             return -1;
         }
+        ty = dlang_take_segment(p, off);
+        if (ty == NULL) {
+            return -1;
+        }
+
+        off = p->out.len;
+        if (dlang_parse_template_value(p) != 0) {
+            free(ty);
+            return -1;
+        }
+        val = dlang_take_segment(p, off);
+        if (val == NULL) {
+            free(ty);
+            return -1;
+        }
+
+        if (dlang_buf_append(&p->out, ty, strlen(ty)) != 0 ||
+            dlang_buf_appendc(&p->out, '(') != 0 ||
+            dlang_buf_append(&p->out, val, strlen(val)) != 0 ||
+            dlang_buf_appendc(&p->out, ')') != 0) {
+            free(ty);
+            free(val);
+            return -1;
+        }
+
+        free(ty);
+        free(val);
         return 0;
     }
 
     if (p->cur[0] == 'S') {
         p->cur++;
-        if (dlang_buf_append(&p->out, "alias(", 6u) != 0 ||
-            dlang_parse_qualified_name(p) != 0 ||
-            dlang_buf_appendc(&p->out, ')') != 0) {
-            return -1;
-        }
-        return 0;
+        return dlang_parse_qualified_name(p);
     }
 
     if (p->cur[0] == 'X') {
@@ -571,9 +590,7 @@ dlang_parse_template_arg(dlang_parser_t *p)
         if (dlang_parse_number(p, &n) != 0 || n == 0u || p->cur[n - 1u] == '\0') {
             return -1;
         }
-        if (dlang_buf_append(&p->out, "extern(", 7u) != 0 ||
-            dlang_buf_append(&p->out, p->cur, n) != 0 ||
-            dlang_buf_appendc(&p->out, ')') != 0) {
+        if (dlang_buf_append(&p->out, p->cur, n) != 0) {
             return -1;
         }
         p->cur += n;
@@ -770,18 +787,88 @@ dlang_append_attrs(dlang_buf_t *buf, unsigned attrs)
 }
 
 static int
+dlang_is_attr_code(char ch)
+{
+    switch (ch) {
+    case 'a':
+    case 'b':
+    case 'c':
+    case 'd':
+    case 'e':
+    case 'f':
+    case 'i':
+    case 'j':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static char *
+dlang_delegate_from_function(const char *inner)
+{
+    const char *needle;
+    const char *pos;
+    size_t head_len;
+    size_t tail_len;
+    char *out;
+
+    if (inner == NULL) {
+        return NULL;
+    }
+
+    needle = " function(";
+    pos = strstr(inner, needle);
+    if (pos == NULL) {
+        return dlang_wrap_type("", inner, " delegate");
+    }
+
+    head_len = (size_t)(pos - inner);
+    tail_len = strlen(pos + strlen(needle));
+    out = (char *)malloc(head_len + 10u + tail_len + 1u);
+    if (out == NULL) {
+        return NULL;
+    }
+
+    if (head_len > 0u) {
+        memcpy(out, inner, head_len);
+    }
+    memcpy(out + head_len, " delegate(", 10u);
+    memcpy(out + head_len + 10u, pos + strlen(needle), tail_len);
+    out[head_len + 10u + tail_len] = '\0';
+    return out;
+}
+
+static int
 dlang_parse_function_type(dlang_parser_t *p, char cconv)
 {
+    unsigned attrs;
     char **params;
     size_t param_count;
     size_t param_cap;
     char *ret;
     size_t ret_off;
 
+    attrs = 0u;
     params = NULL;
     param_count = 0u;
     param_cap = 0u;
     ret = NULL;
+
+    while (p->cur[0] == 'N' && dlang_is_attr_code(p->cur[1])) {
+        switch (p->cur[1]) {
+        case 'a': attrs |= DLANG_ATTR_PURE; break;
+        case 'b': attrs |= DLANG_ATTR_NOTHROW; break;
+        case 'c': attrs |= DLANG_ATTR_REF; break;
+        case 'd': attrs |= DLANG_ATTR_PROPERTY; break;
+        case 'e': attrs |= DLANG_ATTR_TRUSTED; break;
+        case 'f': attrs |= DLANG_ATTR_SAFE; break;
+        case 'i': attrs |= DLANG_ATTR_NOGC; break;
+        case 'j': attrs |= DLANG_ATTR_RETREF; break;
+        default: break;
+        }
+        p->cur += 2;
+    }
 
     while (p->cur[0] != '\0' && p->cur[0] != 'Z') {
         char prefix[64];
@@ -801,7 +888,7 @@ dlang_parse_function_type(dlang_parser_t *p, char cconv)
             prefix_len = 0u;
 
             while (p->cur[0] == 'J' || p->cur[0] == 'K' || p->cur[0] == 'L' ||
-                   p->cur[0] == 'M' || p->cur[0] == 'N') {
+                   p->cur[0] == 'M' || (p->cur[0] == 'N' && !dlang_is_attr_code(p->cur[1]))) {
                 const char *tok = NULL;
                 size_t tok_len = 0u;
 
@@ -903,6 +990,10 @@ dlang_parse_function_type(dlang_parser_t *p, char cconv)
     }
 
     if (dlang_buf_appendc(&p->out, ')') != 0) {
+        goto fail;
+    }
+
+    if (dlang_append_attrs(&p->out, attrs) != 0) {
         goto fail;
     }
 
@@ -1074,6 +1165,7 @@ dlang_parse_type_core(dlang_parser_t *p)
     if (p->cur[0] == 'D') {
         size_t off;
         char *inner;
+        char *delegate_text;
 
         p->cur++;
         off = p->out.len;
@@ -1084,15 +1176,19 @@ dlang_parse_type_core(dlang_parser_t *p)
         if (inner == NULL) {
             return -1;
         }
-        if (dlang_buf_append(&p->out, inner, strlen(inner)) != 0 ||
-            dlang_buf_append(&p->out, " delegate", 9u) != 0) {
-            free(inner);
+        delegate_text = dlang_delegate_from_function(inner);
+        free(inner);
+        if (delegate_text == NULL) {
             return -1;
         }
-        free(inner);
+
+        if (dlang_buf_append(&p->out, delegate_text, strlen(delegate_text)) != 0) {
+            free(delegate_text);
+            return -1;
+        }
+        free(delegate_text);
         return 0;
     }
-
     if (p->cur[0] == 'B') {
         size_t n;
         size_t off;
@@ -1244,6 +1340,9 @@ dlang_parse_type(dlang_parser_t *p)
 static int
 dlang_parse_mangled_name(dlang_parser_t *p)
 {
+    size_t type_off;
+    char *type_text;
+
     if (dlang_parser_enter(p) != 0) {
         return -1;
     }
@@ -1258,10 +1357,25 @@ dlang_parse_mangled_name(dlang_parser_t *p)
         return -1;
     }
 
+    type_off = p->out.len;
     if (dlang_parse_type(p) != 0) {
         dlang_parser_leave(p);
         return -1;
     }
+
+    type_text = dlang_take_segment(p, type_off);
+    if (type_text == NULL) {
+        dlang_parser_leave(p);
+        return -1;
+    }
+
+    if (dlang_buf_append(&p->out, ": ", 2u) != 0 ||
+        dlang_buf_append(&p->out, type_text, strlen(type_text)) != 0) {
+        free(type_text);
+        dlang_parser_leave(p);
+        return -1;
+    }
+    free(type_text);
 
     dlang_parser_leave(p);
     return 0;

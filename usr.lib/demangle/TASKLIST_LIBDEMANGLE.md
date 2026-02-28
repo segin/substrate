@@ -243,13 +243,13 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `__InterfaceZ` — interface info.
 
 ### 4i. Output Formatting
-- [ ] Module‑qualified names separated by `.`: `std.stdio.writeln`.
-- [ ] Template instances: `Foo!(int, string)`.
-- [ ] Function signatures: `int function(int, ref int) pure nothrow @safe`.
-- [ ] Arrays: `int[]`, `int[5]`, `int[string]`.
-- [ ] Pointers: `int*`.
-- [ ] Delegates: `int delegate(int)`.
-- [ ] Qualifiers: `const(int)`, `immutable(char[])`, `shared(int*)`.
+- [x] Module‑qualified names separated by `.`: `std.stdio.writeln`.
+- [x] Template instances: `Foo!(int, string)`.
+- [x] Function signatures: `int function(int, ref int) pure nothrow @safe`.
+- [x] Arrays: `int[]`, `int[5]`, `int[string]`.
+- [x] Pointers: `int*`.
+- [x] Delegates: `int delegate(int)`.
+- [x] Qualifiers: `const(int)`, `immutable(char[])`, `shared(int*)`.
 
 ### 4j. Edge Cases
 - [ ] Symbols with back‑references within qualified names.
