@@ -97,6 +97,17 @@ void test_vectors(void) {
     // Expected: 0x414FA339
     TEST_ASSERT_EQ_HEX(crc_fox, 0x414FA339, "Fox sentence CRC32");
 
+    // 4. All zeros (32 bytes)
+    uint8_t zeros[32] = {0};
+    uint32_t crc_zeros = crc32(zeros, sizeof(zeros));
+    TEST_ASSERT_EQ_HEX(crc_zeros, 0x190A55AD, "All zeros CRC32");
+
+    // 5. All ones (32 bytes)
+    uint8_t ones[32];
+    memset(ones, 0xFF, sizeof(ones));
+    uint32_t crc_ones = crc32(ones, sizeof(ones));
+    TEST_ASSERT_EQ_HEX(crc_ones, 0xFF6CAB0B, "All ones CRC32");
+
     printf("PASS\n");
 }
 
@@ -124,7 +135,7 @@ void test_large_buffer(void) {
     printf("PASS\n");
 }
 
-void test_auto_initialization(void) {
+void test_auto_initialization_internal(void) {
     printf("Testing auto-initialization in crc32()...\n");
 
     // Manually reset state to simulate uninitialized start
@@ -152,7 +163,7 @@ int main(void) {
     test_auto_initialization();
     test_vectors();
     test_large_buffer();
-    test_auto_initialization();
+    test_auto_initialization_internal();
 
     printf("=== All Tests Passed ===\n");
     return 0;
