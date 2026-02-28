@@ -60,11 +60,11 @@ Map CLI style names to `libdemangle` option flags:
 
 ## 3. Failure Behavior
 
-- [ ] `demangle()` returns `NULL` for unrecognized input — output original string unchanged.
-- [ ] Truncated mangled name: output original unchanged.
-- [ ] Library handles recursion depth guards internally — no crash.
-- [ ] Malformed grammar: output original unchanged, no crash.
-- [ ] Never exit non‑zero for demangling failures — failures are expected for non‑C++ input.
+- [x] `demangle()` returns `NULL` for unrecognized input — output original string unchanged.
+- [x] Truncated mangled name: output original unchanged.
+- [x] Library handles recursion depth guards internally — no crash.
+- [x] Malformed grammar: output original unchanged, no crash.
+- [x] Never exit non‑zero for demangling failures — failures are expected for non‑C++ input.
 
 ---
 
