@@ -90,6 +90,7 @@ static int parser_record_template_arg(dm_itanium_parser_t *p, size_t off, size_t
 static int parser_capture_template_frame(dm_itanium_parser_t *p);
 static int parser_add_substitution(dm_itanium_parser_t *p, size_t off, size_t len);
 static int parser_append_output_slice(dm_itanium_parser_t *p, size_t off, size_t len);
+static int parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx);
 
 static int parse_number(dm_itanium_parser_t *p, size_t *out);
 static int parse_seq_id(dm_itanium_parser_t *p, size_t *out);
@@ -105,6 +106,7 @@ static int parse_name_component(dm_itanium_parser_t *p, size_t prev_off, size_t 
 static int parse_unqualified_name(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len,
                                   size_t *comp_off, size_t *comp_len);
 static int parse_source_name(dm_itanium_parser_t *p);
+static int parse_substitution(dm_itanium_parser_t *p);
 static int parse_operator_name(dm_itanium_parser_t *p);
 static int parse_ctor_dtor_name(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len);
 static int parse_unnamed_type_name(dm_itanium_parser_t *p);
@@ -418,6 +420,16 @@ parser_append_output_slice(dm_itanium_parser_t *p, size_t off, size_t len)
     return 0;
 }
 
+static int
+parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx)
+{
+    if (idx >= p->substitution_count) {
+        return -1;
+    }
+
+    return parser_append_output_slice(p, p->substitutions[idx].off, p->substitutions[idx].len);
+}
+
 static void
 mark_save(dm_itanium_parser_t *p, dm_parse_mark_t *m)
 {
@@ -556,6 +568,55 @@ parse_source_name(dm_itanium_parser_t *p)
     }
 
     return 0;
+}
+
+static int
+parse_substitution(dm_itanium_parser_t *p)
+{
+    size_t idx;
+
+    if (p->cur[0] != 'S') {
+        return -1;
+    }
+
+    if (p->cur[1] == '_') {
+        p->cur += 2;
+        return parser_lookup_substitution(p, 0u);
+    }
+
+    switch (p->cur[1]) {
+    case 't':
+        p->cur += 2;
+        return buf_append(&p->out, "std", 3u);
+    case 'a':
+        p->cur += 2;
+        return buf_append(&p->out, "std::allocator", 14u);
+    case 'b':
+        p->cur += 2;
+        return buf_append(&p->out, "std::basic_string", 17u);
+    case 's':
+        p->cur += 2;
+        return buf_append(&p->out, "std::string", 11u);
+    case 'i':
+        p->cur += 2;
+        return buf_append(&p->out, "std::istream", 12u);
+    case 'o':
+        p->cur += 2;
+        return buf_append(&p->out, "std::ostream", 12u);
+    case 'd':
+        p->cur += 2;
+        return buf_append(&p->out, "std::iostream", 13u);
+    default:
+        break;
+    }
+
+    p->cur++;
+    if (parse_seq_id(p, &idx) != 0 || p->cur[0] != '_') {
+        return -1;
+    }
+
+    p->cur++;
+    return parser_lookup_substitution(p, idx + 1u);
 }
 
 static int
@@ -722,11 +783,18 @@ static int
 parse_name_component(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len,
                      size_t *comp_off, size_t *comp_len)
 {
+    dm_parse_mark_t m;
     size_t off;
     size_t len;
 
     if (parse_unqualified_name(p, prev_off, prev_len, &off, &len) != 0) {
-        return -1;
+        mark_save(p, &m);
+        off = p->out.len;
+        if (parse_substitution(p) != 0) {
+            mark_restore(p, &m);
+            return -1;
+        }
+        len = p->out.len - off;
     }
 
     if (p->cur[0] == 'I' && parse_template_args(p) != 0) {

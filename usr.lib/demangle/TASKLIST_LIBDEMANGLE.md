@@ -53,9 +53,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Vendor‑extended type → `u <source-name>`.
 
 ### 2d. Substitutions
-- [ ] Build substitution table during parse.
-- [ ] `S_`, `S <seq-id> _` lookups.
-- [ ] Standard substitutions: `St` (std), `Sa` (std::allocator), `Sb` (std::basic_string), `Ss` (std::string), `Si` (std::istream), `So` (std::ostream), `Sd` (std::iostream).
+- [x] Build substitution table during parse.
+- [x] `S_`, `S <seq-id> _` lookups.
+- [x] Standard substitutions: `St` (std), `Sa` (std::allocator), `Sb` (std::basic_string), `Ss` (std::string), `Si` (std::istream), `So` (std::ostream), `Sd` (std::iostream).
 
 ### 2e. Special Names
 - [ ] `TV <type>` — vtable.
@@ -79,17 +79,183 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 
 ## 3. Rust Demangler (secondary)
 
-- [ ] Detect `_R` prefix.
-- [ ] Parse Rust v0 mangling: `<path>`, `<impl-path>`, `<type>`, `<const>`.
-- [ ] Handle crate disambiguators and closure/shim names.
-- [ ] Output: `crate::module::function` style.
-- [ ] Fallback: output original on parse failure.
+### 3a. Detection and Legacy
+- [ ] Detect Rust v0 mangling: symbol starts with `_R`.
+- [ ] Detect Rust legacy mangling: symbol starts with `_ZN` and ends with `17h<hex_hash>E` pattern.
+- [ ] `DEMANGLE_AUTO`: try Rust v0 first if `_R`, then fall back to Itanium.
+- [ ] `DEMANGLE_RUST`: force Rust v0 only, return `NULL` for non‑Rust input.
 
-## 4. D Language Demangler (tertiary, defer if not needed)
+### 3b. Parser Architecture
+- [ ] Recursive‑descent parser on `const char *` with cursor (same pattern as Itanium).
+- [ ] Backref table: dynamic array of `(start, end)` byte ranges into the mangled string.
+- [ ] Recursion depth counter (default limit 128).
+- [ ] Output via shared growable buffer (§5).
 
-- [ ] Detect `_D` prefix.
-- [ ] Parse D mangling scheme (LName‑based).
-- [ ] Defer unless toolchain needs it.
+### 3c. Rust v0 Grammar — Paths (`<path>`)
+- [ ] `C <disambiguator>? <identifier>` — crate root.
+- [ ] `N <namespace> <path> <disambiguator>? <identifier>` — nested path.
+  - [ ] Namespace tag: `v` (value ns), `t` (type ns), lowercase = internal, uppercase = user‑visible.
+- [ ] `M <impl-path> <type>` — inherent impl `<Type>`.
+- [ ] `X <impl-path> <type> <path>` — trait impl `<Type as Trait>`.
+- [ ] `Y <type> <path>` — trait definition reference `<Type as Trait>`.
+- [ ] `I <path> <generic-arg>+ E` — generic instantiation `path::<A, B, ...>`.
+
+### 3d. Rust v0 Grammar — Identifiers
+- [ ] `<identifier>` → `[u] <decimal-number> [_] <bytes>`.
+  - [ ] `u` prefix indicates Punycode‑encoded Unicode identifier.
+  - [ ] `_` separator present only when `<bytes>` starts with a digit or `_`.
+- [ ] Punycode decoding: implement RFC 3492 decoder for `u`‑prefixed identifiers.
+- [ ] Map decoded identifiers to `{ident}` display form for non‑ASCII names.
+
+### 3e. Rust v0 Grammar — Types (`<type>`)
+- [ ] Basic types: single‑char encodings:
+  - [ ] `b` (bool), `c` (char), `e` (str), `u` (unit `()`), `a` (i8), `s` (i16), `l` (i32), `x` (i64), `n` (i128), `i` (isize).
+  - [ ] `h` (u8), `t` (u16), `m` (u32), `y` (u64), `o` (u128), `j` (usize).
+  - [ ] `f` (f32), `d` (f64), `z` (! / never), `p` (placeholder `_`), `v` (variadic `...`).
+- [ ] `R <lifetime>? <type>` — shared reference `&T` / `&'a T`.
+- [ ] `Q <lifetime>? <type>` — mutable reference `&mut T`.
+- [ ] `P <type>` — raw const pointer `*const T`.
+- [ ] `O <type>` — raw mut pointer `*mut T`.
+- [ ] `A <type> <const>` — array `[T; N]`.
+- [ ] `S <type>` — slice `[T]`.
+- [ ] `T <type>* E` — tuple `(A, B, ...)`.
+- [ ] `F <fn-sig>` — function pointer.
+  - [ ] `<fn-sig>` → `<binder>? U? (K <abi>)? <type>* E <type>`.
+  - [ ] `U` = unsafe, `K` = ABI (e.g. `KC` = `extern "C"`).
+  - [ ] `<binder>` → `G <base-62-number>` (higher‑ranked lifetimes).
+- [ ] `D <dyn-bounds> <lifetime>` — trait object `dyn Trait + 'a`.
+  - [ ] `<dyn-bounds>` → `<binder>? <dyn-trait>* E`.
+  - [ ] `<dyn-trait>` → `<path> <dyn-trait-assoc-binding>*`.
+- [ ] `B <backref>` — backreference to a previously parsed type.
+
+### 3f. Rust v0 Grammar — Const Values (`<const>`)
+- [ ] `<const>` → `<type> <const-data>` | `B <backref>` | `p` (placeholder `_`).
+- [ ] Integer const: `<hex-digits> _` (value in hex, `n` prefix for negative).
+- [ ] Bool const: `0_` (false), `1_` (true).
+- [ ] Char const: Unicode scalar value as hex.
+
+### 3g. Rust v0 Grammar — Lifetimes and Binders
+- [ ] `<lifetime>` → `L <base-62-number>` (de Bruijn index).
+- [ ] `<base-62-number>` → `_` (0) | `<digit>+ _` (value + 1, base 62: `0-9 a-z A-Z`).
+- [ ] Lifetime display: `'_` for erased, `'a`, `'b`, ... for bound lifetimes.
+
+### 3h. Rust v0 Grammar — Disambiguators
+- [ ] `<disambiguator>` → `s <base-62-number>`.
+- [ ] Display: suppress in output (internal compiler detail), unless verbose mode requested.
+
+### 3i. Rust v0 Grammar — Backreferences
+- [ ] `B <base-62-number>` — refers to a byte offset in the mangled string.
+- [ ] Re‑parse from that offset to recover the referenced entity.
+- [ ] Guard against circular backrefs (depth limit).
+
+### 3j. Rust Legacy Demangling
+- [ ] Pattern: `_ZN <length1> <ident1> ... <length_n> <hash_17chars> E`.
+- [ ] Strip trailing `::h<hex_hash>` from output.
+- [ ] Convert `$` escapes: `$LT$` → `<`, `$GT$` → `>`, `$RF$` → `&`, `$LP$` → `(`, `$RP$` → `)`, `$C$` → `,`, `$SP$` → `@`, `$BP$` → `*`, `$u20$` → ` `, `$u27$` → `'`, `$u5b$` → `[`, `$u5d$` → `]`, `$u7b$` → `{`, `$u7d$` → `}`, `$u3b$` → `;`, `$u7e$` → `~`, etc.
+- [ ] Join components with `::`.
+- [ ] Fallback: if parsing fails, return `NULL`.
+
+### 3k. Output Formatting
+- [ ] Paths separated by `::`.
+- [ ] Generic args in `<A, B>` angle brackets.
+- [ ] Function pointers: `fn(A, B) -> C` or `unsafe extern "C" fn(A) -> B`.
+- [ ] References: `&T`, `&mut T`, `&'a T`.
+- [ ] Tuples: `(A, B, C)`.
+- [ ] Arrays: `[T; N]`.
+- [ ] Trait objects: `dyn Trait<Assoc = T> + 'a`.
+- [ ] Closures: `crate::module::{closure#0}`.
+- [ ] Shims: `crate::module::{shim:vtable#0}`.
+
+## 4. D Language Demangler (tertiary)
+
+### 4a. Detection
+- [ ] Detect D mangling: symbol starts with `_D`.
+- [ ] `DEMANGLE_AUTO`: try D if `_D` prefix and Itanium parse fails.
+- [ ] `DEMANGLE_DLANG`: force D only.
+
+### 4b. Parser Architecture
+- [ ] Recursive‑descent parser with cursor.
+- [ ] LName‑based: `<number> <chars>` length‑prefixed identifiers.
+- [ ] Recursion depth guard (default limit 128).
+- [ ] Output via shared growable buffer (§5).
+
+### 4c. D Mangling Grammar — Qualified Names
+- [ ] `<MangledName>` → `_D <QualifiedName> <Type>`.
+- [ ] `<QualifiedName>` → `<SymbolName>+`.
+- [ ] `<SymbolName>` → `<LName>` | `<TemplateInstanceName>`.
+- [ ] `<LName>` → `<Number> <chars>` (length‑prefixed UTF‑8 identifier).
+- [ ] `<Number>` → decimal digit sequence.
+
+### 4d. D Mangling Grammar — Template Instances
+- [ ] `<TemplateInstanceName>` → `__T <LName> <TemplateArgs> Z`.
+- [ ] `<TemplateArgs>` → `<TemplateArg>+`.
+- [ ] `<TemplateArg>` :
+  - [ ] `T <Type>` — type argument.
+  - [ ] `V <Type> <Value>` — value argument.
+  - [ ] `S <QualifiedName>` — symbol argument (alias).
+  - [ ] `X <Number> <ExternMangledName>` — external (C/C++) symbol.
+- [ ] `<Value>` — encoded integer/float/string/null values.
+
+### 4e. D Mangling Grammar — Types
+- [ ] Basic types: `v` (void), `g` (byte), `h` (ubyte), `s` (short), `t` (ushort), `i` (int), `k` (uint), `l` (long), `m` (ulong), `f` (float), `d` (double), `e` (real), `o` (ifloat), `p` (idouble), `j` (ireal), `q` (cfloat), `r` (cdouble), `c` (creal), `b` (bool), `a` (char), `u` (wchar), `w` (dchar).
+- [ ] `A <Type>` — dynamic array `T[]`.
+- [ ] `G <Number> <Type>` — static array `T[N]`.
+- [ ] `H <Type> <Type>` — associative array `V[K]`.
+- [ ] `P <Type>` — pointer `T*`.
+- [ ] `E <QualifiedName>` — enum type.
+- [ ] `C <QualifiedName>` — class type.
+- [ ] `S <QualifiedName>` — struct type.
+- [ ] `I <QualifiedName>` — interface type.
+- [ ] `D <Type>` — delegate.
+- [ ] `F ... Z <Type>` — function type (with parameter encoding).
+  - [ ] Parameter storage classes: `J` (out), `K` (ref), `L` (lazy), `M` (scope), `N` (return).
+  - [ ] Calling conventions: `F` (D), `U` (C), `W` (Windows), `V` (Pascal), `R` (C++).
+- [ ] `B <Number> <Type>` — tuple type.
+- [ ] `n` — typeof(null).
+
+### 4f. D Mangling Grammar — Qualifiers
+- [ ] `x` — const.
+- [ ] `y` — immutable.
+- [ ] `O` — shared.
+- [ ] `Ng` — inout (wild).
+- [ ] Combine qualifiers: `xO` = shared const.
+
+### 4g. D Mangling Grammar — Function Attributes
+- [ ] `Na` — pure.
+- [ ] `Nb` — nothrow.
+- [ ] `Nc` — ref.
+- [ ] `Nd` — @property.
+- [ ] `Ne` — @trusted.
+- [ ] `Nf` — @safe.
+- [ ] `Ni` — @nogc.
+- [ ] `Nj` — return ref.
+
+### 4h. D Mangling — Special Sequences
+- [ ] `__lambda<N>` — lambda/anonymous function.
+- [ ] `__dgliteral<N>` — delegate literal.
+- [ ] `__unittest<N>` — unit test.
+- [ ] `__modctor` — module constructor.
+- [ ] `__moddtor` — module destructor.
+- [ ] `__aggr<N>` — aggregate.
+- [ ] `__initZ` — init symbol.
+- [ ] `__ClassZ` — class info.
+- [ ] `__vtblZ` — vtable.
+- [ ] `__InterfaceZ` — interface info.
+
+### 4i. Output Formatting
+- [ ] Module‑qualified names separated by `.`: `std.stdio.writeln`.
+- [ ] Template instances: `Foo!(int, string)`.
+- [ ] Function signatures: `int function(int, ref int) pure nothrow @safe`.
+- [ ] Arrays: `int[]`, `int[5]`, `int[string]`.
+- [ ] Pointers: `int*`.
+- [ ] Delegates: `int delegate(int)`.
+- [ ] Qualifiers: `const(int)`, `immutable(char[])`, `shared(int*)`.
+
+### 4j. Edge Cases
+- [ ] Symbols with back‑references within qualified names.
+- [ ] Deeply nested template instantiations.
+- [ ] Mixed D + C linkage symbols (`__T ... X ...`).
+- [ ] Symbols from D runtime (`_d_*` symbols — these use C mangling, pass through).
 
 ## 5. Growable Output Buffer
 
@@ -180,20 +346,96 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [ ] Deeply nested (>256 depth) → `NULL`, no crash.
 - [ ] 64 KiB mangled name → completes or returns `NULL`, no crash.
 
-### 9j. Rust Tests (when implemented)
-- [ ] `_RNvCs...` → Rust v0 path.
-- [ ] Non‑Rust `_R...` → `NULL`.
+### 9j. Rust v0 Basic Tests
+- [ ] Crate root: `_RNvC6mycrate3foo` → `mycrate::foo`.
+- [ ] Nested path: `_RNvNtC6mycrate3mod3bar` → `mycrate::mod::bar`.
+- [ ] Inherent impl: `_RNvMC6mycrateNtC6mycrate3Foo3baz` → `<mycrate::Foo>::baz`.
+- [ ] Trait impl: `_RNvXC6mycrateNtC6mycrate3FooNtC6mycrate5Trait3qux` → `<mycrate::Foo as mycrate::Trait>::qux`.
+- [ ] Generic instantiation: `_RINvC6mycrate3fooNtC6mycrate3BarECs...` → `mycrate::foo::<mycrate::Bar>`.
 
-### 9k. Fuzz Tests
+### 9k. Rust v0 Type Tests
+- [ ] Basic types: `l` → `i32`, `b` → `bool`, `c` → `char`, `e` → `str`.
+- [ ] Reference: `R <type>` → `&T`.
+- [ ] Mutable reference: `Q <type>` → `&mut T`.
+- [ ] Pointer: `P <type>` → `*const T`, `O <type>` → `*mut T`.
+- [ ] Array: `A <type> <const>` → `[T; N]`.
+- [ ] Slice: `S <type>` → `[T]`.
+- [ ] Tuple: `T <type>* E` → `(A, B)`.
+- [ ] Function pointer: `F U KC <type> E <type>` → `unsafe extern "C" fn(A) -> B`.
+- [ ] Trait object: `D <dyn-bounds> <lifetime>` → `dyn Trait + 'a`.
+
+### 9l. Rust v0 Const Tests
+- [ ] Integer const: type + hex value → correct decimal display.
+- [ ] Negative integer: `n` prefix → negative number.
+- [ ] Bool const: `0_` → `false`, `1_` → `true`.
+- [ ] Char const: Unicode scalar → `'X'`.
+
+### 9m. Rust v0 Lifetime and Binder Tests
+- [ ] Erased lifetime: `L_` → `'_`.
+- [ ] Bound lifetime: `L0_` → `'a`, `L1_` → `'b`.
+- [ ] Higher‑ranked function pointer with lifetimes.
+
+### 9n. Rust v0 Backref Tests
+- [ ] Type backref `B <offset>` resolves correctly.
+- [ ] Circular backref: returns `NULL`, no crash.
+- [ ] Nested backrefs (backref to a backref).
+
+### 9o. Rust v0 Closure / Shim Tests
+- [ ] Closure: namespace `C` → `{closure#0}`.
+- [ ] Shim: namespace `S` → `{shim:vtable#0}`.
+- [ ] Multiple closures with disambiguators.
+
+### 9p. Rust v0 Punycode Tests
+- [ ] Unicode identifier with `u` prefix: decoded correctly.
+- [ ] ASCII‑only identifier without `u` prefix: passed through.
+
+### 9q. Rust Legacy Demangling Tests
+- [ ] `_ZN6mycrate3foo17h1234567890abcdefE` → `mycrate::foo`.
+- [ ] `$LT$` / `$GT$` / `$RF$` escapes → `<`, `>`, `&`.
+- [ ] `$u20$` → space, `$u27$` → `'`.
+- [ ] Non‑Rust `_ZN` (Itanium): not detected as Rust legacy.
+
+### 9r. D Language Basic Tests
+- [ ] `_D3std5stdio7writelnFAaZv` → `std.stdio.writeln(char[], void)` (or similar).
+- [ ] Simple function: `_D3foo3barFiZi` → `foo.bar(int) → int`.
+- [ ] Nested module path: `_D3std5range10primitives...`.
+
+### 9s. D Template Instance Tests
+- [ ] `_D3std5array__T5ArrayTiZ5Array...` → `std.array.Array!(int)...`.
+- [ ] Template with value argument: `V` encoding.
+- [ ] Template with symbol argument: `S` encoding.
+
+### 9t. D Type Tests
+- [ ] Basic types: `i` → `int`, `k` → `uint`, `f` → `float`, `a` → `char`.
+- [ ] Dynamic array: `Ai` → `int[]`.
+- [ ] Static array: `G3i` → `int[3]`.
+- [ ] Associative array: `Hia` → `int[char]`.
+- [ ] Pointer: `Pi` → `int*`.
+- [ ] Delegate: `Di...` → `delegate(...)`.
+- [ ] Qualifiers: `xi` → `const(int)`, `yi` → `immutable(int)`.
+
+### 9u. D Edge Case Tests
+- [ ] Non‑D `_D...` name (C symbol starting with `_D`): `DEMANGLE_DLANG` returns `NULL`, `DEMANGLE_AUTO` tries Itanium.
+- [ ] D runtime symbols (`_d_*`): passed through (C mangling).
+- [ ] `__lambda` / `__unittest` special sequences.
+
+### 9v. Auto‑Detection Tests
+- [ ] `_Z...` → Itanium.
+- [ ] `_R...` → Rust v0.
+- [ ] `_D...` → D (if Itanium fails).
+- [ ] `_ZN...17h<hex>E` → Rust legacy.
+- [ ] Plain `main` → `NULL` (not mangled).
+
+### 9w. Fuzz Tests
 - [ ] libFuzzer harness calling `demangle()` with arbitrary byte sequences.
 - [ ] AFL harness on `c++filt` stdin mode.
 - [ ] No crashes, no ASAN/UBSAN violations.
 
-### 9l. Corpus Tests
+### 9x. Corpus Tests
 - [ ] Demangle all symbols from `libstdc++.a` and compare against `__cxa_demangle`.
 - [ ] Demangle all symbols from a large C++ project (e.g. LLVM `.o` files).
 
-### 9m. Buffer API Tests
+### 9y. Buffer API Tests
 - [ ] `demangle_buf()` with exact‑fit buffer: returns 0.
 - [ ] `demangle_buf()` with too‑small buffer: returns -2, buffer contains truncated output.
 - [ ] `demangle_buf()` with 1‑byte buffer: returns -2, buffer is `'\0'`.
