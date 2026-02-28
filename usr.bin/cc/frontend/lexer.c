@@ -255,7 +255,12 @@ static void lx_set_logical_file(cc_lexer_t *lx, const char *path) {
     if (dup == NULL) {
         return;
     }
-    free(lx->logical_file);
+    /*
+     * Parser lookahead frequently copies lexer state by value. Those shallow
+     * snapshots may share logical_file pointers with the primary lexer. Freeing
+     * the previous pointer here can invalidate shared snapshots and trigger
+     * double-free on later token reads.
+     */
     lx->logical_file = dup;
 }
 

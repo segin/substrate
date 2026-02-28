@@ -218,9 +218,10 @@ static int names_find(char **names, size_t count, const char *name) {
 
 static int vars_find_visible(var_entry_t *vars, size_t count, const char *name, int depth) {
     size_t i = count;
+    (void)depth;
     while (i > 0) {
         i--;
-        if (vars[i].depth <= depth && strcmp(vars[i].name, name) == 0) {
+        if (strcmp(vars[i].name, name) == 0) {
             return (int)i;
         }
     }
@@ -1304,6 +1305,34 @@ static const cc_struct_member_t *find_union_cast_member(const cc_translation_uni
     return NULL;
 }
 
+static int transparent_union_accepts_type(const cc_translation_unit_t *tu, int struct_id, cc_type_t src_type,
+                                          int src_struct_id) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    if (tu == NULL || struct_id < 0) {
+        return 0;
+    }
+    sd = find_struct_def(tu, struct_id);
+    if (sd == NULL || !sd->complete || !sd->is_union) {
+        return 0;
+    }
+    if ((sd->attr_flags & CC_ATTR_TRANSPARENT_UNION) == 0 && !is_pointer_type(src_type)) {
+        return 0;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (!can_convert(m->type, src_type)) {
+            continue;
+        }
+        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0 && src_type == CC_TYPE_VOID && src_struct_id >= 0 &&
+            m->type_struct_id != src_struct_id) {
+            continue;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 static const cc_function_t *generic_selected_function(const cc_translation_unit_t *tu, const cc_expr_t *e) {
     const cc_expr_t *sel;
     if (tu == NULL || e == NULL || e->kind != CC_EXPR_GENERIC || e->args == NULL || e->arg_count == 0) {
@@ -1410,6 +1439,9 @@ typedef enum {
     BUILTIN_SUB_OVERFLOW,
     BUILTIN_MUL_OVERFLOW,
     BUILTIN_OBJECT_SIZE,
+    BUILTIN_MEMCPY,
+    BUILTIN_MEMMOVE,
+    BUILTIN_MEMSET,
     BUILTIN_MEMCPY_CHK,
     BUILTIN_MEMMOVE_CHK,
     BUILTIN_MEMSET_CHK,
@@ -1478,6 +1510,15 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_object_size") == 0) {
         return BUILTIN_OBJECT_SIZE;
+    }
+    if (strcmp(name, "__builtin_memcpy") == 0) {
+        return BUILTIN_MEMCPY;
+    }
+    if (strcmp(name, "__builtin_memmove") == 0) {
+        return BUILTIN_MEMMOVE;
+    }
+    if (strcmp(name, "__builtin_memset") == 0) {
+        return BUILTIN_MEMSET;
     }
     if (strcmp(name, "__builtin___memcpy_chk") == 0) {
         return BUILTIN_MEMCPY_CHK;
@@ -2006,6 +2047,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "incompatible pointer types in comparison");
                 return -1;
             }
+            if (getenv("CC_DEBUG_SEMA_CMP") != NULL) {
+                fprintf(stderr,
+                        "cc-debug: ordered cmp lhs(kind=%d type=%d sid=%d ident=%s) rhs(kind=%d type=%d sid=%d ident=%s) line=%zu col=%zu\n",
+                        (int)e->lhs->kind, (int)e->lhs->value_type, e->lhs->struct_id,
+                        e->lhs->ident != NULL ? e->lhs->ident : "<null>", (int)e->rhs->kind, (int)e->rhs->value_type,
+                        e->rhs->struct_id, e->rhs->ident != NULL ? e->rhs->ident : "<null>", e->line, e->col);
+            }
             set_diag(diag, "ordered comparison operators require numeric or compatible pointer operands");
             return -1;
         }
@@ -2316,9 +2364,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = -1;
             return 0;
         }
-        if (bk == BUILTIN_MEMCPY_CHK || bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
-            if (e->arg_count < 4) {
-                set_diag(diag, "__builtin___mem*_chk has wrong argument count");
+        if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET || bk == BUILTIN_MEMCPY_CHK ||
+            bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
+            size_t min_args = (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET) ? 3 : 4;
+            if (e->arg_count < min_args) {
+                set_diag(diag, min_args == 3 ? "__builtin_mem* has wrong argument count"
+                                             : "__builtin___mem*_chk has wrong argument count");
                 return -1;
             }
             for (i = 0; i < e->arg_count; ++i) {
@@ -2327,7 +2378,21 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
             }
             if (!is_pointer_type(e->args[0]->value_type)) {
-                set_diag(diag, "__builtin___mem*_chk first argument must be a pointer");
+                set_diag(diag, "memory builtin first argument must be a pointer");
+                return -1;
+            }
+            if ((bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMCPY_CHK ||
+                 bk == BUILTIN_MEMMOVE_CHK) &&
+                !is_pointer_type(e->args[1]->value_type)) {
+                set_diag(diag, "memory builtin source argument must be a pointer");
+                return -1;
+            }
+            if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !is_integral_type(e->args[1]->value_type)) {
+                set_diag(diag, "memory builtin fill byte must be integral");
+                return -1;
+            }
+            if (!is_integral_type(e->args[2]->value_type)) {
+                set_diag(diag, "memory builtin size argument must be integral");
                 return -1;
             }
             e->value_type = e->args[0]->value_type;
@@ -2500,12 +2565,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (is_pointer_type(e->lhs->value_type)) {
-                indirect_callee_type = e->lhs->value_type;
-                indirect_callee_struct_id = e->lhs->struct_id;
-            } else if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL && is_pointer_type(e->lhs->lhs->value_type)) {
+            if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL && is_pointer_type(e->lhs->lhs->value_type)) {
                 indirect_callee_type = e->lhs->lhs->value_type;
                 indirect_callee_struct_id = e->lhs->lhs->struct_id;
+            } else if (is_pointer_type(e->lhs->value_type)) {
+                indirect_callee_type = e->lhs->value_type;
+                indirect_callee_struct_id = e->lhs->struct_id;
             } else {
                 set_diag(diag, "call target must be a function pointer");
                 return -1;
@@ -2533,9 +2598,18 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (callee != NULL && callee->has_prototype && i < callee->param_count &&
                 !can_convert(callee->params[i].type, e->args[i]->value_type) &&
                 !(is_pointer_type(callee->params[i].type) && is_integral_type(e->args[i]->value_type) &&
-                  is_null_ptr_constant(e->args[i]))) {
+                  is_null_ptr_constant(e->args[i])) &&
+                !(callee->params[i].type == CC_TYPE_VOID && callee->params[i].type_struct_id >= 0 &&
+                  transparent_union_accepts_type(tu, callee->params[i].type_struct_id, e->args[i]->value_type,
+                                                 e->args[i]->struct_id))) {
+                if (getenv("CC_DEBUG_CALL_ARGS") != NULL) {
+                    fprintf(stderr,
+                            "cc-debug: call %s arg%zu expect(type=%d sid=%d) got(type=%d sid=%d)\n",
+                            e->ident != NULL ? e->ident : "<indirect>", i + 1, (int)callee->params[i].type,
+                            callee->params[i].type_struct_id, (int)e->args[i]->value_type, e->args[i]->struct_id);
+                }
                 if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "cannot convert arg %zu in call to %s", i,
+                    snprintf(diag->message, sizeof(diag->message), "cannot convert arg %zu in call to %s", i + 1,
                              e->ident);
                 }
                 return -1;
@@ -2553,17 +2627,17 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
         }
         if (callee != NULL && callee->has_prototype && (callee->attr_flags & CC_ATTR_NONNULL) != 0) {
-            for (i = 0; i < e->arg_count && i < callee->param_count; ++i) {
-                if (!is_pointer_type(callee->params[i].type)) {
-                    continue;
+            /*
+             * We currently record only the presence of nonnull, not its index list.
+             * Be conservative and validate only the first prototype argument.
+             */
+            if (e->arg_count > 0 && callee->param_count > 0 && is_pointer_type(callee->params[0].type) &&
+                is_null_ptr_constant(e->args[0])) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "nonnull argument 1 in call to %s is null",
+                             e->ident != NULL ? e->ident : "<indirect>");
                 }
-                if (is_null_ptr_constant(e->args[i])) {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message), "nonnull argument %zu in call to %s is null",
-                                 i + 1, e->ident != NULL ? e->ident : "<indirect>");
-                    }
-                    return -1;
-                }
+                return -1;
             }
         }
         if (callee != NULL) {
@@ -2801,18 +2875,24 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (e->struct_id >= 0) {
                 return 0;
             }
-            set_diag(diag, "cannot dereference void pointer");
-            return -1;
+            if (g_pedantic) {
+                if (emit_warning(diag, e->line, e->col, "dereferencing 'void *' is a GNU extension", 1) != 0) {
+                    return -1;
+                }
+            }
+            return 0;
         }
         return 0;
 
     case CC_EXPR_UPDATE: {
         cc_type_t t;
+        int t_struct_id = -1;
         int is_array_object = 0;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
                 t = vars[idx].type;
+                t_struct_id = vars[idx].struct_id;
                 is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
@@ -2824,6 +2904,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
                 t = g->type;
+                t_struct_id = g->type_struct_id;
                 is_array_object = is_array_object_type(g->type, g->array_len, g->array_ndim);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
@@ -2831,6 +2912,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             t = e->lhs->value_type;
+            t_struct_id = e->lhs->struct_id;
         } else {
             set_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
             return -1;
@@ -2846,7 +2928,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return -1;
         }
         e->value_type = t;
-        e->struct_id = -1;
+        if (is_pointer_type(t) && t_struct_id >= 0) {
+            e->struct_id = t_struct_id;
+        } else {
+            e->struct_id = -1;
+        }
         return 0;
     }
 
@@ -3878,18 +3964,24 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
     case CC_STMT_BLOCK:
         {
             size_t saved = *var_count;
+            int child_depth = depth + 1;
+            if (s->is_synthetic_block) {
+                child_depth = depth;
+            }
             for (i = 0; i < s->block_count; ++i) {
-                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, depth + 1, fn_ret_type, fn_ret_struct_id, fn_attr_flags,
+                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, child_depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags,
                                loop_depth,
                                switch_depth,
                                saw_return, diag) != 0) {
                     return -1;
                 }
             }
-            for (i = saved; i < *var_count; ++i) {
-                free((*vars)[i].name);
+            if (!s->is_synthetic_block) {
+                for (i = saved; i < *var_count; ++i) {
+                    free((*vars)[i].name);
+                }
+                *var_count = saved;
             }
-            *var_count = saved;
             return 0;
         }
 
@@ -4257,13 +4349,40 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     }
                     goto fail_global;
                 }
-                if (prev->array_ndim > 0 && g->array_ndim > 0 && prev->array_ndim == g->array_ndim &&
-                    memcmp(prev->array_dims, g->array_dims, sizeof(prev->array_dims)) != 0) {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message),
-                                 "conflicting file-scope array declarators: %s", g->name);
+                if (prev->array_ndim > 0 && g->array_ndim > 0) {
+                    int ad;
+                    if (prev->array_ndim != g->array_ndim) {
+                        if (getenv("CC_DEBUG_GLOBAL_ARRAY") != NULL) {
+                            fprintf(stderr, "cc-debug: array ndim mismatch %s prev_ndim=%d cur_ndim=%d\n", g->name,
+                                    prev->array_ndim, g->array_ndim);
+                        }
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message),
+                                     "conflicting file-scope array declarators: %s", g->name);
+                        }
+                        goto fail_global;
                     }
-                    goto fail_global;
+                    for (ad = 0; ad < prev->array_ndim; ++ad) {
+                        long pd = prev->array_dims[ad];
+                        long gd = g->array_dims[ad];
+                        /*
+                         * Treat zero-length dimensions as incomplete bounds
+                         * (`extern T a[]`) that are compatible with concrete
+                         * bounds in another declaration.
+                         */
+                        if (pd != 0 && gd != 0 && pd != gd) {
+                            if (getenv("CC_DEBUG_GLOBAL_ARRAY") != NULL) {
+                                fprintf(stderr,
+                                        "cc-debug: array dim mismatch %s dim=%d prev=%ld cur=%ld prev_len=%ld cur_len=%ld\n",
+                                        g->name, ad, pd, gd, prev->array_len, g->array_len);
+                            }
+                            if (diag != NULL && diag->message[0] == '\0') {
+                                snprintf(diag->message, sizeof(diag->message),
+                                         "conflicting file-scope array declarators: %s", g->name);
+                            }
+                            goto fail_global;
+                        }
+                    }
                 }
                 if (prev_static != cur_static) {
                     if (diag != NULL && diag->message[0] == '\0') {
@@ -4444,12 +4563,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
             goto fail_global;
         }
-        if ((f->attr_flags & CC_ATTR_FORMAT) != 0 && !f->is_variadic) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "format function '%s' must be variadic", f->name);
-            }
-            goto fail_global;
-        }
+        /* GCC accepts format-like attributes on some non-variadic declarations (e.g. v*printf forms). */
         if ((f->attr_flags & CC_ATTR_NONNULL) != 0 && (!f->has_prototype || f->param_count == 0)) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),

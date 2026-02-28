@@ -18,10 +18,12 @@
 
 #define PP_MAX_INCLUDE_DEPTH 128
 #define PP_MAX_EXPAND_DEPTH 32
-#define PP_MAX_EXPAND_PASSES 16
-#define PP_MAX_EXPANDED_TEXT (1024 * 1024)
+#define PP_MAX_EXPAND_PASSES 2
+#define PP_MAX_EXPANDED_TEXT (64 * 1024 * 1024)
 #define PP_MAX_OUTPUT_SIZE (64 * 1024 * 1024)
 #define PP_EMPTY_ARG_MARKER '\x1f'
+#define PP_HIDE_MACRO_BEGIN '\x1d'
+#define PP_HIDE_MACRO_END '\x1c'
 
 typedef struct {
     char *name;
@@ -36,6 +38,7 @@ typedef struct {
     pp_macro_t *items;
     size_t count;
     size_t cap;
+    int sorted;
 } pp_macro_table_t;
 
 typedef struct {
@@ -198,6 +201,22 @@ static const char *path_basename(const char *path);
 static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int is_variadic, char **params,
                      size_t param_count, const char *body);
 static void macro_unset(pp_macro_table_t *t, const char *name);
+static char *mask_hidden_macro_name_tokens(const char *src, const char *name);
+static char *unmask_hidden_macro_tokens(const char *src);
+
+static int macro_item_name_cmp(const void *ap, const void *bp) {
+    const pp_macro_t *a = (const pp_macro_t *)ap;
+    const pp_macro_t *b = (const pp_macro_t *)bp;
+    return strcmp(a->name, b->name);
+}
+
+static void macro_table_ensure_sorted(pp_macro_table_t *t) {
+    if (t == NULL || t->count < 2 || t->sorted) {
+        return;
+    }
+    qsort(t->items, t->count, sizeof(t->items[0]), macro_item_name_cmp);
+    t->sorted = 1;
+}
 
 static void strvec_pop_free(pp_strvec_t *v) {
     if (v == NULL || v->count == 0) {
@@ -456,10 +475,24 @@ static int std_mode_version(const char *std_mode, int *out_is_c11, int *out_is_c
 }
 
 static pp_macro_t *macro_find(pp_macro_table_t *t, const char *name) {
-    size_t i;
-    for (i = 0; i < t->count; ++i) {
-        if (strcmp(t->items[i].name, name) == 0) {
-            return &t->items[i];
+    size_t lo;
+    size_t hi;
+    if (t == NULL || name == NULL || t->count == 0) {
+        return NULL;
+    }
+    macro_table_ensure_sorted(t);
+    lo = 0;
+    hi = t->count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        int cmp = strcmp(t->items[mid].name, name);
+        if (cmp == 0) {
+            return &t->items[mid];
+        }
+        if (cmp < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
         }
     }
     return NULL;
@@ -641,6 +674,7 @@ static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int
         }
         m = &t->items[t->count++];
         memset(m, 0, sizeof(*m));
+        t->sorted = 0;
     } else {
         macro_free_item(m);
     }
@@ -680,6 +714,7 @@ static void macro_table_free(pp_macro_table_t *t) {
     t->items = NULL;
     t->count = 0;
     t->cap = 0;
+    t->sorted = 0;
 }
 
 static const char *skip_ws(const char *s) {
@@ -966,6 +1001,10 @@ static int add_builtin_macros(pp_state_t *st) {
     const char *ptrdiff_type = st->target_bits == 32 ? "int" : "long int";
     const char *wchar_type = "int";
     const char *ptr_size = st->target_bits == 32 ? "4" : "8";
+    const char *long_max = st->target_bits == 32 ? "2147483647L" : "9223372036854775807L";
+    const char *size_max = st->target_bits == 32 ? "4294967295U" : "18446744073709551615UL";
+    const char *ptrdiff_max = st->target_bits == 32 ? "2147483647" : "9223372036854775807L";
+    const char *uintptr_max = st->target_bits == 32 ? "4294967295U" : "18446744073709551615UL";
     char stdc_ver[32];
     if (macro_set(&st->macros, "__STDC__", 0, 0, NULL, 0, "1") != 0) {
         return -1;
@@ -996,6 +1035,42 @@ static int add_builtin_macros(pp_state_t *st) {
         return -1;
     }
     if (macro_set(&st->macros, "__SIZEOF_POINTER__", 0, 0, NULL, 0, ptr_size) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__CHAR_BIT__", 0, 0, NULL, 0, "8") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SCHAR_MAX__", 0, 0, NULL, 0, "127") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SHRT_MAX__", 0, 0, NULL, 0, "32767") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_MAX__", 0, 0, NULL, 0, "2147483647") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LONG_MAX__", 0, 0, NULL, 0, long_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LONG_LONG_MAX__", 0, 0, NULL, 0, "9223372036854775807LL") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__WCHAR_MAX__", 0, 0, NULL, 0, "2147483647") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZE_MAX__", 0, 0, NULL, 0, size_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__PTRDIFF_MAX__", 0, 0, NULL, 0, ptrdiff_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INTMAX_MAX__", 0, 0, NULL, 0, "9223372036854775807LL") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINTMAX_MAX__", 0, 0, NULL, 0, "18446744073709551615ULL") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINTPTR_MAX__", 0, 0, NULL, 0, uintptr_max) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__ATOMIC_RELAXED", 0, 0, NULL, 0, "0") != 0) {
@@ -3108,6 +3183,17 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                 i = j;
                 continue;
             }
+            if (strcmp(name, "__func__") == 0 || strcmp(name, "__FUNCTION__") == 0 ||
+                strcmp(name, "__PRETTY_FUNCTION__") == 0) {
+                if (sb_append(&out, "\"__func__\"") != 0) {
+                    free(name);
+                    sb_free(&out);
+                    return NULL;
+                }
+                free(name);
+                i = j;
+                continue;
+            }
             if (strcmp(name, "__FILE_NAME__") == 0) {
                 sb_t lit;
                 memset(&lit, 0, sizeof(lit));
@@ -3216,6 +3302,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                 }
                 if (!m->is_function) {
                     char *exp_body;
+                    char *masked_body;
                     if (disabled != NULL && strvec_push(disabled, name) != 0) {
                         free(name);
                         sb_free(&out);
@@ -3230,6 +3317,14 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         sb_free(&out);
                         return NULL;
                     }
+                    masked_body = mask_hidden_macro_name_tokens(exp_body, name);
+                    free(exp_body);
+                    if (masked_body == NULL) {
+                        free(name);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    exp_body = masked_body;
                     if (sb_append(&out, exp_body) != 0) {
                         free(exp_body);
                         free(name);
@@ -3249,6 +3344,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     size_t ai;
                     char *subst = NULL;
                     char *exp_subst = NULL;
+                    char *masked_subst = NULL;
                     while (src[k] == ' ' || src[k] == '\t') {
                         k++;
                     }
@@ -3375,6 +3471,21 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         sb_free(&out);
                         return NULL;
                     }
+                    masked_subst = mask_hidden_macro_name_tokens(exp_subst, name);
+                    free(exp_subst);
+                    if (masked_subst == NULL) {
+                        free(subst);
+                        free(name);
+                        for (ai = 0; ai < arg_count; ++ai) {
+                            free(args[ai]);
+                            free(exp_args[ai]);
+                        }
+                        free(args);
+                        free(exp_args);
+                        sb_free(&out);
+                        return NULL;
+                    }
+                    exp_subst = masked_subst;
                     if (sb_append(&out, exp_subst) != 0) {
                         free(exp_subst);
                         free(subst);
@@ -3401,6 +3512,208 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     continue;
                 }
             }
+        }
+        if (sb_append_c(&out, src[i]) != 0) {
+            sb_free(&out);
+            return NULL;
+        }
+        i++;
+    }
+    if (out.buf == NULL) {
+        return xstrdup("");
+    }
+    return out.buf;
+}
+
+static int parse_pragma_operator(const char *src, size_t start, size_t *out_end) {
+    size_t i = start;
+    size_t j;
+    int depth = 0;
+
+    if (src == NULL || out_end == NULL) {
+        return 0;
+    }
+    if (strncmp(src + i, "_Pragma", 7) != 0) {
+        return 0;
+    }
+    if (i > 0 && is_ident_char((unsigned char)src[i - 1])) {
+        return 0;
+    }
+    if (is_ident_char((unsigned char)src[i + 7])) {
+        return 0;
+    }
+    j = i + 7;
+    while (src[j] == ' ' || src[j] == '\t' || src[j] == '\r' || src[j] == '\n' || src[j] == '\f' || src[j] == '\v') {
+        j++;
+    }
+    if (src[j] != '(') {
+        return 0;
+    }
+
+    for (; src[j] != '\0'; ++j) {
+        if (src[j] == '"' || src[j] == '\'') {
+            char q = src[j];
+            ++j;
+            while (src[j] != '\0') {
+                if (src[j] == '\\' && src[j + 1] != '\0') {
+                    j += 2;
+                    continue;
+                }
+                if (src[j] == q) {
+                    break;
+                }
+                ++j;
+            }
+            if (src[j] == '\0') {
+                return 0;
+            }
+            continue;
+        }
+        if (src[j] == '(') {
+            depth++;
+            continue;
+        }
+        if (src[j] == ')') {
+            depth--;
+            if (depth == 0) {
+                *out_end = j + 1;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static char *strip_pragma_operators(const char *src) {
+    sb_t out;
+    size_t i = 0;
+
+    if (src == NULL) {
+        return NULL;
+    }
+    memset(&out, 0, sizeof(out));
+    while (src[i] != '\0') {
+        size_t end = 0;
+        if (parse_pragma_operator(src, i, &end)) {
+            size_t next = end;
+            int need_sep = 0;
+            while (src[next] == ' ' || src[next] == '\t') {
+                next++;
+            }
+            if (out.len > 0 && is_ident_char((unsigned char)out.buf[out.len - 1]) &&
+                is_ident_char((unsigned char)src[next])) {
+                need_sep = 1;
+            }
+            if (need_sep && sb_append_c(&out, ' ') != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+            i = end;
+            continue;
+        }
+        if (sb_append_c(&out, src[i]) != 0) {
+            sb_free(&out);
+            return NULL;
+        }
+        i++;
+    }
+    if (out.buf == NULL) {
+        return xstrdup("");
+    }
+    return out.buf;
+}
+
+static char *mask_hidden_macro_name_tokens(const char *src, const char *name) {
+    sb_t out;
+    size_t i = 0;
+    size_t nlen;
+    if (src == NULL || name == NULL || name[0] == '\0') {
+        return xstrdup(src != NULL ? src : "");
+    }
+    nlen = strlen(name);
+    memset(&out, 0, sizeof(out));
+    while (src[i] != '\0') {
+        if (is_ident_start((unsigned char)src[i])) {
+            size_t j = i + 1;
+            while (is_ident_char((unsigned char)src[j])) {
+                j++;
+            }
+            if ((j - i) == nlen && strncmp(src + i, name, nlen) == 0) {
+                size_t ni;
+                if (sb_append_c(&out, (char)PP_HIDE_MACRO_BEGIN) != 0) {
+                    sb_free(&out);
+                    return NULL;
+                }
+                for (ni = 0; ni < nlen; ++ni) {
+                    char oct[4];
+                    unsigned v = (unsigned char)name[ni];
+                    oct[0] = (char)('0' + ((v / 64) % 8));
+                    oct[1] = (char)('0' + ((v / 8) % 8));
+                    oct[2] = (char)('0' + (v % 8));
+                    oct[3] = '\0';
+                    if (sb_append_n(&out, oct, 3) != 0) {
+                        sb_free(&out);
+                        return NULL;
+                    }
+                }
+                if (sb_append_c(&out, (char)PP_HIDE_MACRO_END) != 0) {
+                    sb_free(&out);
+                    return NULL;
+                }
+            } else if (sb_append_n(&out, src + i, j - i) != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+            i = j;
+            continue;
+        }
+        if (sb_append_c(&out, src[i]) != 0) {
+            sb_free(&out);
+            return NULL;
+        }
+        i++;
+    }
+    if (out.buf == NULL) {
+        return xstrdup("");
+    }
+    return out.buf;
+}
+
+static char *unmask_hidden_macro_tokens(const char *src) {
+    sb_t out;
+    size_t i = 0;
+    if (src == NULL) {
+        return NULL;
+    }
+    memset(&out, 0, sizeof(out));
+    while (src[i] != '\0') {
+        if ((unsigned char)src[i] == (unsigned char)PP_HIDE_MACRO_BEGIN) {
+            i++;
+            while (src[i] != '\0' && (unsigned char)src[i] != (unsigned char)PP_HIDE_MACRO_END) {
+                unsigned d0, d1, d2, v;
+                if (src[i] < '0' || src[i] > '7' || src[i + 1] < '0' || src[i + 1] > '7' || src[i + 2] < '0' ||
+                    src[i + 2] > '7') {
+                    i++;
+                    continue;
+                }
+                d0 = (unsigned)(src[i] - '0');
+                d1 = (unsigned)(src[i + 1] - '0');
+                d2 = (unsigned)(src[i + 2] - '0');
+                v = d0 * 64 + d1 * 8 + d2;
+                if (sb_append_c(&out, (char)v) != 0) {
+                    sb_free(&out);
+                    return NULL;
+                }
+                i += 3;
+            }
+            if ((unsigned char)src[i] == (unsigned char)PP_HIDE_MACRO_END) {
+                i++;
+            }
+            continue;
+        }
+        if ((unsigned char)src[i] == (unsigned char)PP_HIDE_MACRO_END) {
+            i++;
+            continue;
         }
         if (sb_append_c(&out, src[i]) != 0) {
             sb_free(&out);
@@ -3456,11 +3769,24 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
             return NULL;
         }
         if (strcmp(next, cur) == 0) {
+            char *normalized = strip_pragma_operators(next);
+            char *unmasked;
             free(cur);
             if (use_local_disabled) {
                 strvec_free(disabled);
             }
-            return next;
+            free(next);
+            if (normalized == NULL) {
+                set_diag(diag, (size_t)line, 1, "out of memory stripping _Pragma operators");
+                return NULL;
+            }
+            unmasked = unmask_hidden_macro_tokens(normalized);
+            free(normalized);
+            if (unmasked == NULL) {
+                set_diag(diag, (size_t)line, 1, "out of memory unmasking hidden macro tokens");
+                return NULL;
+            }
+            return unmasked;
         }
         free(cur);
         cur = next;
@@ -3468,7 +3794,22 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
     if (use_local_disabled) {
         strvec_free(disabled);
     }
-    return cur;
+    {
+        char *normalized = strip_pragma_operators(cur);
+        char *unmasked;
+        free(cur);
+        if (normalized == NULL) {
+            set_diag(diag, (size_t)line, 1, "out of memory stripping _Pragma operators");
+            return NULL;
+        }
+        unmasked = unmask_hidden_macro_tokens(normalized);
+        free(normalized);
+        if (unmasked == NULL) {
+            set_diag(diag, (size_t)line, 1, "out of memory unmasking hidden macro tokens");
+            return NULL;
+        }
+        return unmasked;
+    }
 }
 
 static int eval_condition(pp_state_t *st, const char *expr, const char *file, int line, int *out_true, cc_diag_t *diag) {

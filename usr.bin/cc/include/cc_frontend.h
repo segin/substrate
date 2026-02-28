@@ -232,6 +232,7 @@ struct cc_stmt {
     char *attr_section;
     char *attr_alias;
     cc_stmt_kind_t kind;
+    int is_synthetic_block;
     char *decl_name;
     char *label_name;
     cc_expr_t *expr;

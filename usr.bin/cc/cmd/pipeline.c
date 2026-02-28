@@ -4,6 +4,16 @@
 #include "cc_pipeline.h"
 #include "cc_ssa.h"
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
+
+static double now_seconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + ((double)ts.tv_nsec / 1000000000.0);
+}
+
 int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out_s, const char *std_mode,
                       int emit_debug, cc_target_t target, int opt_level, int wall, int werror, int pedantic,
                       int pedantic_errors, int gnu89_inline_mode, int gnu89_inline_override, int i386_isa_level,
@@ -13,6 +23,13 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     cc_ssa_module_t ssa;
     int rc = -1;
     int pointer_size = target == CC_TARGET_I386 ? 4 : 8;
+    int timings = getenv("CC_TIMINGS") != NULL;
+    double t_parse = 0.0;
+    double t_sema = 0.0;
+    double t_ast2ir = 0.0;
+    double t_opt = 0.0;
+    double t_emit = 0.0;
+    double t0 = 0.0;
 
     if (diag != NULL) {
         diag->path[0] = '\0';
@@ -31,24 +48,52 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     cc_backend_set_i386_fp_math_mode(i386_fp_math_mode);
     cc_ssa_set_pointer_size(pointer_size);
 
+    if (timings) {
+        t0 = now_seconds();
+    }
     if (cc_parse_file(in_c, &tu, diag) != 0) {
         return -1;
+    }
+    if (timings) {
+        t_parse = now_seconds() - t0;
+        fprintf(stderr, "cc: timing parse=%.3fs\n", t_parse);
+        t0 = now_seconds();
     }
     if (cc_sema_check(&tu, diag) != 0) {
         cc_tu_free(&tu);
         return -1;
     }
+    if (timings) {
+        t_sema = now_seconds() - t0;
+        fprintf(stderr, "cc: timing sema=%.3fs\n", t_sema);
+        t0 = now_seconds();
+    }
     if (cc_ast_to_ssa(&tu, &ssa, diag) != 0) {
         cc_tu_free(&tu);
         return -1;
+    }
+    if (timings) {
+        t_ast2ir = now_seconds() - t0;
+        fprintf(stderr, "cc: timing ast2ir=%.3fs\n", t_ast2ir);
+        t0 = now_seconds();
     }
     if (cc_run_middle_passes(&ssa, opt_level, diag) != 0) {
         cc_ssa_module_free(&ssa);
         cc_tu_free(&tu);
         return -1;
     }
+    if (timings) {
+        t_opt = now_seconds() - t0;
+        fprintf(stderr, "cc: timing opt=%.3fs\n", t_opt);
+        t0 = now_seconds();
+    }
     if (cc_emit_gas(&ssa, out_s, display_src, emit_debug, target, diag) == 0) {
         rc = 0;
+    }
+    if (timings) {
+        t_emit = now_seconds() - t0;
+        fprintf(stderr, "cc: timing parse=%.3fs sema=%.3fs ast2ir=%.3fs opt=%.3fs emit=%.3fs total=%.3fs\n", t_parse,
+                t_sema, t_ast2ir, t_opt, t_emit, t_parse + t_sema + t_ast2ir + t_opt + t_emit);
     }
 
     cc_ssa_module_free(&ssa);

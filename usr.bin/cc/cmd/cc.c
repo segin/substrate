@@ -957,7 +957,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
 
 static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
     cc_diag_t diag;
-    const char *std_mode = o->std != NULL ? o->std : "c99";
+    const char *std_mode = o->std != NULL ? o->std : "gnu89";
     const char *const *pp_flags = (const char *const *)o->cpp_flags.items;
     size_t pp_count = o->cpp_flags.count;
     const char *pp_in = in;
@@ -1183,20 +1183,27 @@ static int run_emit_ssa_tool(const cc_opts_t *o, const char *self, const char *i
 }
 
 static int derive_out(const char *in, const char *ext, char out[PATH_MAX]) {
-    const char *dot = strrchr(in, '.');
+    const char *base_in = strrchr(in, '/');
+    const char *dot;
     size_t base;
 
-    if (dot == NULL) {
-        base = strlen(in);
+    if (base_in != NULL) {
+        base_in++;
     } else {
-        base = (size_t)(dot - in);
+        base_in = in;
+    }
+    dot = strrchr(base_in, '.');
+    if (dot == NULL) {
+        base = strlen(base_in);
+    } else {
+        base = (size_t)(dot - base_in);
     }
 
     if (base + strlen(ext) + 1 > PATH_MAX) {
         return -1;
     }
 
-    memcpy(out, in, base);
+    memcpy(out, base_in, base);
     out[base] = '\0';
     strcat(out, ext);
     return 0;
@@ -1440,7 +1447,8 @@ int cc_main(int argc, char **argv) {
                 } else {
                     unsetenv("CC_FREESTANDING");
                 }
-                if (cc_compile_c_to_s(out_pp, in, out_s, o.std, o.debug, o.target, opt_level_num(&o), o.wall,
+                if (cc_compile_c_to_s(out_pp, in, out_s, o.std != NULL ? o.std : "gnu89", o.debug, o.target,
+                                      opt_level_num(&o), o.wall,
                                       o.werror, o.pedantic, o.pedantic_errors, o.gnu89_inline_mode,
                                       o.gnu89_inline_override, o.i386_isa_level, o.i386_has_sse2, o.i386_has_mmx,
                                       o.i386_fp_math_mode, &diag) != 0) {

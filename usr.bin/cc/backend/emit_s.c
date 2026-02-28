@@ -2476,70 +2476,102 @@ static int i386_has_ud2(void) {
     return g_i386_isa_level >= 6;
 }
 
-static int emit_i386_float_binop_sse(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, cc_diag_t *diag) {
-    const char *tmp = i386_fp_tmp_reg();
-    const char *op = NULL;
+static const char *i386_float_binop_mnemonic(cc_ssa_opcode_t op, int use_x87) {
+    switch (op) {
+    case CC_SSA_ADD:
+        return use_x87 ? "faddl" : "addsd";
+    case CC_SSA_SUB:
+        return use_x87 ? "fsubl" : "subsd";
+    case CC_SSA_MUL:
+        return use_x87 ? "fmull" : "mulsd";
+    case CC_SSA_DIV:
+        return use_x87 ? "fdivl" : "divsd";
+    default:
+        return NULL;
+    }
+}
 
-    if (in->op == CC_SSA_ADD) op = "addsd";
-    else if (in->op == CC_SSA_SUB) op = "subsd";
-    else if (in->op == CC_SSA_MUL) op = "mulsd";
-    else if (in->op == CC_SSA_DIV) op = "divsd";
-    else {
+static void emit_i386_sse_load_f64(FILE *fp, const slot_layout_t *lay, int value, const char *xmm) {
+    fprintf(fp, "\tmovsd %d(%%ebp), %s\n", slot_off(lay, value), xmm);
+}
+
+static void emit_i386_sse_store_f64(FILE *fp, const slot_layout_t *lay, const char *xmm, int value) {
+    fprintf(fp, "\tmovsd %s, %d(%%ebp)\n", xmm, slot_off(lay, value));
+}
+
+static void emit_i386_x87_load_f64(FILE *fp, const slot_layout_t *lay, int value) {
+    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, value));
+}
+
+static void emit_i386_x87_store_f64(FILE *fp, const slot_layout_t *lay, int value) {
+    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, value));
+}
+
+static int emit_i386_float_binop_sse(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, cc_diag_t *diag) {
+    const char *op = i386_float_binop_mnemonic(in->op, 0);
+    const char *tmp = i386_fp_tmp_reg();
+
+    if (op == NULL) {
         set_diag(diag, "invalid floating arithmetic opcode");
         return -1;
     }
 
-    fprintf(fp, "\tmovsd %d(%%ebp), %s\n", slot_off(lay, in->lhs), tmp);
+    emit_i386_sse_load_f64(fp, lay, in->lhs, tmp);
     fprintf(fp, "\t%s %d(%%ebp), %s\n", op, slot_off(lay, in->rhs), tmp);
-    fprintf(fp, "\tmovsd %s, %d(%%ebp)\n", tmp, slot_off(lay, in->dst));
+    emit_i386_sse_store_f64(fp, lay, tmp, in->dst);
     return 0;
 }
 
 static int emit_i386_float_binop_x87(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, cc_diag_t *diag) {
-    const char *op = NULL;
+    const char *op = i386_float_binop_mnemonic(in->op, 1);
 
-    if (in->op == CC_SSA_ADD) op = "faddl";
-    else if (in->op == CC_SSA_SUB) op = "fsubl";
-    else if (in->op == CC_SSA_MUL) op = "fmull";
-    else if (in->op == CC_SSA_DIV) op = "fdivl";
-    else {
+    if (op == NULL) {
         set_diag(diag, "invalid floating arithmetic opcode");
         return -1;
     }
 
-    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->lhs));
+    emit_i386_x87_load_f64(fp, lay, in->lhs);
     fprintf(fp, "\t%s %d(%%ebp)\n", op, slot_off(lay, in->rhs));
-    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
+    emit_i386_x87_store_f64(fp, lay, in->dst);
+    return 0;
+}
+
+static void emit_i386_cmp_float_flags_sse(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
+    const char *tmp = i386_fp_tmp_reg();
+    emit_i386_sse_load_f64(fp, lay, in->lhs, tmp);
+    fprintf(fp, "\tucomisd %d(%%ebp), %s\n", slot_off(lay, in->rhs), tmp);
+}
+
+static void emit_i386_cmp_float_flags_x87(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
+    emit_i386_x87_load_f64(fp, lay, in->rhs);
+    emit_i386_x87_load_f64(fp, lay, in->lhs);
+    fprintf(fp, "\tfucompp\n");
+    fprintf(fp, "\tfnstsw %%ax\n");
+    fprintf(fp, "\tsahf\n");
+}
+
+static int emit_i386_cmp_float_result(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                      const cc_ssa_instr_t *in) {
+    int rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
+    emit_float_setcc_to_reg(fp, in->cmp_kind, ist->regs[rd], 0);
     return 0;
 }
 
 static int emit_i386_cmp_float_sse(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                    const cc_ssa_instr_t *in) {
-    const char *tmp = i386_fp_tmp_reg();
-    int rd;
-
     int_regs_flush(fp, f, lay, ist);
-    fprintf(fp, "\tmovsd %d(%%ebp), %s\n", slot_off(lay, in->lhs), tmp);
-    fprintf(fp, "\tucomisd %d(%%ebp), %s\n", slot_off(lay, in->rhs), tmp);
-    rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
-    emit_float_setcc_to_reg(fp, in->cmp_kind, ist->regs[rd], 0);
-    return 0;
+    emit_i386_cmp_float_flags_sse(fp, lay, in);
+    return emit_i386_cmp_float_result(fp, f, lay, ist, in);
 }
 
 static int emit_i386_cmp_float_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                    const cc_ssa_instr_t *in) {
-    int rd;
+    int eax = int_reg_index(ist, "%eax");
 
     int_regs_flush(fp, f, lay, ist);
-    int_regs_clobber_reg(fp, f, lay, ist, int_reg_index(ist, "%eax"));
-    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->rhs));
-    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->lhs));
-    fprintf(fp, "\tfucompp\n");
-    fprintf(fp, "\tfnstsw %%ax\n");
-    fprintf(fp, "\tsahf\n");
-    rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
-    emit_float_setcc_to_reg(fp, in->cmp_kind, ist->regs[rd], 0);
-    return 0;
+    int_regs_clobber_reg(fp, f, lay, ist, eax);
+    emit_i386_cmp_float_flags_x87(fp, lay, in);
+    return emit_i386_cmp_float_result(fp, f, lay, ist, in);
 }
 
 static int emit_i386_cmp_int(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
@@ -2738,54 +2770,38 @@ static void emit_i386_load_scalar_indirect(FILE *fp, int_reg_state_t *ist, int r
     }
 }
 
-static int emit_i386_int_div_or_shift(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                                      const cc_ssa_instr_t *in, cc_diag_t *diag) {
-    int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
-    int rcx = int_reg_index(ist, "%ecx");
-
-    if (ist->reg_dirty[rl]) {
+static int i386_load_clean_lhs(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist, int lhs) {
+    int rl = int_regs_load(fp, f, lay, ist, lhs, -1, -1);
+    if (rl >= 0 && ist->reg_dirty[rl]) {
         int_regs_spill_reg(fp, f, lay, ist, rl);
-        rl = int_regs_load(fp, f, lay, ist, in->lhs, rl, -1);
+        rl = int_regs_load(fp, f, lay, ist, lhs, rl, -1);
     }
-    if (in->op == CC_SSA_DIV) {
-        int rax = int_reg_index(ist, "%eax");
-        int rdx = int_reg_index(ist, "%edx");
-        int rr_div;
+    return rl;
+}
 
-        if (rax < 0 || rdx < 0) {
-            set_diag(diag, "i386 register set missing %eax/%edx");
-            return -1;
-        }
-        if (rl != rax) {
-            int lhs_dirty = ist->reg_dirty[rl];
-            int_regs_clobber_reg(fp, f, lay, ist, rax);
-            fprintf(fp, "\tmovl %s, %%eax\n", ist->regs[rl]);
-            int_regs_bind(ist, in->lhs, rax, lhs_dirty);
-            rl = rax;
-        }
-        int_regs_clobber_reg(fp, f, lay, ist, rdx);
-        rr_div = int_regs_load(fp, f, lay, ist, in->rhs, -1, rax);
-        if (rr_div == rdx) {
-            int rhs_dirty = ist->reg_dirty[rr_div];
-            if (rcx < 0 || rcx == rax || rcx == rdx) {
-                set_diag(diag, "i386 register set missing divisor scratch register");
-                return -1;
-            }
-            int_regs_clobber_reg(fp, f, lay, ist, rcx);
-            fprintf(fp, "\tmovl %%edx, %%ecx\n");
-            int_regs_bind(ist, in->rhs, rcx, rhs_dirty);
-            rr_div = rcx;
-        }
-        if (in->is_unsigned) {
-            fprintf(fp, "\txorl %%edx, %%edx\n");
-            fprintf(fp, "\tdivl %s\n", ist->regs[rr_div]);
-        } else {
-            fprintf(fp, "\tcltd\n");
-            fprintf(fp, "\tidivl %s\n", ist->regs[rr_div]);
-        }
-        int_regs_bind(ist, in->dst, rax, 1);
-        return 0;
+static int i386_move_lhs_to_eax(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                const cc_ssa_instr_t *in, int rl, int rax, cc_diag_t *diag) {
+    if (rax < 0) {
+        set_diag(diag, "i386 register set missing %eax");
+        return -1;
     }
+    if (rl == rax) {
+        return rl;
+    }
+    {
+        int lhs_dirty = ist->reg_dirty[rl];
+        int_regs_clobber_reg(fp, f, lay, ist, rax);
+        fprintf(fp, "\tmovl %s, %%eax\n", ist->regs[rl]);
+        int_regs_bind(ist, in->lhs, rax, lhs_dirty);
+    }
+    return rax;
+}
+
+static int i386_bind_shift_count_in_ecx(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                        const cc_ssa_instr_t *in, int rl, int rcx, cc_diag_t *diag) {
+    int rr_shift;
+    int rhs_dirty;
+
     if (rcx < 0) {
         set_diag(diag, "i386 register set missing %ecx");
         return -1;
@@ -2801,33 +2817,103 @@ static int emit_i386_int_div_or_shift(FILE *fp, const cc_ssa_function_t *f, cons
         rl = alt;
     }
     int_regs_clobber_reg(fp, f, lay, ist, rcx);
-    {
-        int rr_shift = int_regs_load(fp, f, lay, ist, in->rhs, rcx, rl);
-        int rhs_dirty = ist->reg_dirty[rr_shift];
-        if (rr_shift != rcx) {
-            fprintf(fp, "\tmovl %s, %%ecx\n", ist->regs[rr_shift]);
-            int_regs_bind(ist, in->rhs, rcx, rhs_dirty);
+    rr_shift = int_regs_load(fp, f, lay, ist, in->rhs, rcx, rl);
+    rhs_dirty = ist->reg_dirty[rr_shift];
+    if (rr_shift != rcx) {
+        fprintf(fp, "\tmovl %s, %%ecx\n", ist->regs[rr_shift]);
+        int_regs_bind(ist, in->rhs, rcx, rhs_dirty);
+    }
+    return rl;
+}
+
+static int i386_emit_div(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                         const cc_ssa_instr_t *in, int rl, int rcx, cc_diag_t *diag) {
+    int rax = int_reg_index(ist, "%eax");
+    int rdx = int_reg_index(ist, "%edx");
+    int rr_div;
+
+    if (rax < 0 || rdx < 0) {
+        set_diag(diag, "i386 register set missing %eax/%edx");
+        return -1;
+    }
+    rl = i386_move_lhs_to_eax(fp, f, lay, ist, in, rl, rax, diag);
+    if (rl < 0) {
+        return -1;
+    }
+
+    int_regs_clobber_reg(fp, f, lay, ist, rdx);
+    rr_div = int_regs_load(fp, f, lay, ist, in->rhs, -1, rax);
+    if (rr_div == rdx) {
+        int rhs_dirty = ist->reg_dirty[rr_div];
+        if (rcx < 0 || rcx == rax || rcx == rdx) {
+            set_diag(diag, "i386 register set missing divisor scratch register");
+            return -1;
         }
+        int_regs_clobber_reg(fp, f, lay, ist, rcx);
+        fprintf(fp, "\tmovl %%edx, %%ecx\n");
+        int_regs_bind(ist, in->rhs, rcx, rhs_dirty);
+        rr_div = rcx;
+    }
+
+    if (in->is_unsigned) {
+        fprintf(fp, "\txorl %%edx, %%edx\n");
+        fprintf(fp, "\tdivl %s\n", ist->regs[rr_div]);
+    } else {
+        fprintf(fp, "\tcltd\n");
+        fprintf(fp, "\tidivl %s\n", ist->regs[rr_div]);
+    }
+    int_regs_bind(ist, in->dst, rax, 1);
+    return 0;
+}
+
+static int i386_emit_shift(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                           const cc_ssa_instr_t *in, int rl, int rcx, cc_diag_t *diag) {
+    const char *mnemonic = in->op == CC_SSA_SHL ? "shll" : (in->is_unsigned ? "shrl" : "sarl");
+
+    rl = i386_bind_shift_count_in_ecx(fp, f, lay, ist, in, rl, rcx, diag);
+    if (rl < 0) {
+        return -1;
     }
     fprintf(fp, "\tandl $31, %%ecx\n");
-    fprintf(fp, "\t%s %%cl, %s\n", in->op == CC_SSA_SHL ? "shll" : (in->is_unsigned ? "shrl" : "sarl"), ist->regs[rl]);
+    fprintf(fp, "\t%s %%cl, %s\n", mnemonic, ist->regs[rl]);
     int_regs_remap_dst(fp, f, lay, ist, in->dst, rl);
     return 0;
 }
 
+static int emit_i386_int_div_or_shift(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                      const cc_ssa_instr_t *in, cc_diag_t *diag) {
+    int rl = i386_load_clean_lhs(fp, f, lay, ist, in->lhs);
+    int rcx = int_reg_index(ist, "%ecx");
+
+    if (in->op == CC_SSA_DIV) {
+        return i386_emit_div(fp, f, lay, ist, in, rl, rcx, diag);
+    }
+    return i386_emit_shift(fp, f, lay, ist, in, rl, rcx, diag);
+}
+
+static const char *i386_int_binop_mnemonic(cc_ssa_opcode_t op) {
+    switch (op) {
+    case CC_SSA_ADD:
+        return "addl";
+    case CC_SSA_SUB:
+        return "subl";
+    case CC_SSA_MUL:
+        return "imull";
+    case CC_SSA_AND:
+        return "andl";
+    case CC_SSA_OR:
+        return "orl";
+    case CC_SSA_XOR:
+        return "xorl";
+    default:
+        return NULL;
+    }
+}
+
 static void emit_i386_int_binop_regular(FILE *fp, const int_reg_state_t *ist, const cc_ssa_instr_t *in, int rr, int rl) {
-    if (in->op == CC_SSA_ADD) {
-        fprintf(fp, "\taddl %s, %s\n", ist->regs[rr], ist->regs[rl]);
-    } else if (in->op == CC_SSA_SUB) {
-        fprintf(fp, "\tsubl %s, %s\n", ist->regs[rr], ist->regs[rl]);
-    } else if (in->op == CC_SSA_MUL) {
-        fprintf(fp, "\timull %s, %s\n", ist->regs[rr], ist->regs[rl]);
-    } else if (in->op == CC_SSA_AND) {
-        fprintf(fp, "\tandl %s, %s\n", ist->regs[rr], ist->regs[rl]);
-    } else if (in->op == CC_SSA_OR) {
-        fprintf(fp, "\torl %s, %s\n", ist->regs[rr], ist->regs[rl]);
-    } else if (in->op == CC_SSA_XOR) {
-        fprintf(fp, "\txorl %s, %s\n", ist->regs[rr], ist->regs[rl]);
+    const char *m = i386_int_binop_mnemonic(in->op);
+    if (m != NULL) {
+        fprintf(fp, "\t%s %s, %s\n", m, ist->regs[rr], ist->regs[rl]);
     }
 }
 
@@ -2836,10 +2922,14 @@ static void emit_i386_label_def(FILE *fp, const char *fn, int label) {
     fprintf(fp, ":\n");
 }
 
-static void emit_i386_jump_label(FILE *fp, const char *fn, int label) {
-    fprintf(fp, "\tjmp ");
+static void emit_i386_jcc_label(FILE *fp, const char *cc, const char *fn, int label) {
+    fprintf(fp, "\t%s ", cc);
     emit_local_label(fp, fn, label);
     fprintf(fp, "\n");
+}
+
+static void emit_i386_jump_label(FILE *fp, const char *fn, int label) {
+    emit_i386_jcc_label(fp, "jmp", fn, label);
 }
 
 static void emit_i386_branch_cond(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
@@ -2847,52 +2937,48 @@ static void emit_i386_branch_cond(FILE *fp, const cc_ssa_function_t *f, const sl
     int rc = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
     fprintf(fp, "\tcmpl $0, %s\n", ist->regs[rc]);
     int_regs_flush(fp, f, lay, ist);
-    fprintf(fp, "\tjne ");
-    emit_local_label(fp, f->name, in->true_label);
-    fprintf(fp, "\n");
+    emit_i386_jcc_label(fp, "jne", f->name, in->true_label);
     emit_i386_jump_label(fp, f->name, in->false_label);
 }
 
 static void emit_i386_va_start(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                const cc_ssa_instr_t *in) {
-    int poff;
+    int poff = i386_variadic_start_offset(f, (int)in->imm);
     int rd;
     int_regs_flush(fp, f, lay, ist);
-    poff = i386_variadic_start_offset(f, (int)in->imm);
     rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
     fprintf(fp, "\tleal %d(%%ebp), %s\n", poff, ist->regs[rd]);
 }
 
 static void emit_i386_normalize_int_return(FILE *fp, long ret_bytes, int is_unsigned) {
-    if (ret_bytes == 1) {
-        if (is_unsigned) fprintf(fp, "\tmovzbl %%al, %%eax\n");
-        else fprintf(fp, "\tmovsbl %%al, %%eax\n");
-    } else if (ret_bytes == 2) {
-        if (is_unsigned) fprintf(fp, "\tmovzwl %%ax, %%eax\n");
-        else fprintf(fp, "\tmovswl %%ax, %%eax\n");
-    }
+    if (ret_bytes == 1)
+        fprintf(fp, "\t%s %%al, %%eax\n", is_unsigned ? "movzbl" : "movsbl");
+    else if (ret_bytes == 2)
+        fprintf(fp, "\t%s %%ax, %%eax\n", is_unsigned ? "movzwl" : "movswl");
+}
+
+static void emit_i386_push_slot(FILE *fp, int off) {
+    fprintf(fp, "\tpushl %d(%%ebp)\n", off);
 }
 
 static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int value, long *stack_bytes) {
-    int off;
+    int off = slot_off(lay, value);
 
     if (f->value_types[value] == CC_VAL_F64) {
-        off = slot_off(lay, value);
-        fprintf(fp, "\tpushl %d(%%ebp)\n", off + 4);
-        fprintf(fp, "\tpushl %d(%%ebp)\n", off);
+        emit_i386_push_slot(fp, off + 4);
+        emit_i386_push_slot(fp, off);
         *stack_bytes += 8;
     } else {
-        fprintf(fp, "\tpushl %d(%%ebp)\n", slot_off(lay, value));
+        emit_i386_push_slot(fp, off);
         *stack_bytes += 4;
     }
 }
 
 static void emit_i386_call_target(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
-    if (in->op == CC_SSA_CALLI) {
+    if (in->op == CC_SSA_CALLI)
         fprintf(fp, "\tcall *%d(%%ebp)\n", slot_off(lay, in->lhs));
-    } else {
+    else
         fprintf(fp, "\tcall %s\n", in->sym);
-    }
 }
 
 static void emit_i386_capture_call_result(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
