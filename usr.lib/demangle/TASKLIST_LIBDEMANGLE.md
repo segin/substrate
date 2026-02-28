@@ -197,21 +197,21 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `<Value>` — encoded integer/float/string/null values.
 
 ### 4e. D Mangling Grammar — Types
-- [ ] Basic types: `v` (void), `g` (byte), `h` (ubyte), `s` (short), `t` (ushort), `i` (int), `k` (uint), `l` (long), `m` (ulong), `f` (float), `d` (double), `e` (real), `o` (ifloat), `p` (idouble), `j` (ireal), `q` (cfloat), `r` (cdouble), `c` (creal), `b` (bool), `a` (char), `u` (wchar), `w` (dchar).
-- [ ] `A <Type>` — dynamic array `T[]`.
-- [ ] `G <Number> <Type>` — static array `T[N]`.
-- [ ] `H <Type> <Type>` — associative array `V[K]`.
-- [ ] `P <Type>` — pointer `T*`.
-- [ ] `E <QualifiedName>` — enum type.
-- [ ] `C <QualifiedName>` — class type.
-- [ ] `S <QualifiedName>` — struct type.
-- [ ] `I <QualifiedName>` — interface type.
-- [ ] `D <Type>` — delegate.
-- [ ] `F ... Z <Type>` — function type (with parameter encoding).
-  - [ ] Parameter storage classes: `J` (out), `K` (ref), `L` (lazy), `M` (scope), `N` (return).
-  - [ ] Calling conventions: `F` (D), `U` (C), `W` (Windows), `V` (Pascal), `R` (C++).
-- [ ] `B <Number> <Type>` — tuple type.
-- [ ] `n` — typeof(null).
+- [x] Basic types: `v` (void), `g` (byte), `h` (ubyte), `s` (short), `t` (ushort), `i` (int), `k` (uint), `l` (long), `m` (ulong), `f` (float), `d` (double), `e` (real), `o` (ifloat), `p` (idouble), `j` (ireal), `q` (cfloat), `r` (cdouble), `c` (creal), `b` (bool), `a` (char), `u` (wchar), `w` (dchar).
+- [x] `A <Type>` — dynamic array `T[]`.
+- [x] `G <Number> <Type>` — static array `T[N]`.
+- [x] `H <Type> <Type>` — associative array `V[K]`.
+- [x] `P <Type>` — pointer `T*`.
+- [x] `E <QualifiedName>` — enum type.
+- [x] `C <QualifiedName>` — class type.
+- [x] `S <QualifiedName>` — struct type.
+- [x] `I <QualifiedName>` — interface type.
+- [x] `D <Type>` — delegate.
+- [x] `F ... Z <Type>` — function type (with parameter encoding).
+  - [x] Parameter storage classes: `J` (out), `K` (ref), `L` (lazy), `M` (scope), `N` (return).
+  - [x] Calling conventions: `F` (D), `U` (C), `W` (Windows), `V` (Pascal), `R` (C++).
+- [x] `B <Number> <Type>` — tuple type.
+- [x] `n` — typeof(null).
 
 ### 4f. D Mangling Grammar — Qualifiers
 - [ ] `x` — const.
