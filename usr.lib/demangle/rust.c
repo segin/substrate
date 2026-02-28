@@ -61,6 +61,7 @@ static void rust_parser_destroy(rust_parser_t *p);
 static int rust_parser_enter(rust_parser_t *p);
 static void rust_parser_leave(rust_parser_t *p);
 static int rust_parser_add_backref(rust_parser_t *p, const char *start, const char *end);
+static int rust_parser_resolve_backref(rust_parser_t *p, size_t off, const char **target);
 
 static void rust_mark_save(rust_parser_t *p, rust_mark_t *m);
 static void rust_mark_restore(rust_parser_t *p, const rust_mark_t *m);
@@ -334,6 +335,30 @@ rust_parser_add_backref(rust_parser_t *p, const char *start, const char *end)
     p->backrefs[p->backref_count].start = start;
     p->backrefs[p->backref_count].end = end;
     p->backref_count++;
+    return 0;
+}
+
+static int
+rust_parser_resolve_backref(rust_parser_t *p, size_t off, const char **target)
+{
+    const char *base;
+    size_t len;
+
+    if (p == NULL || target == NULL || p->input == NULL) {
+        return -1;
+    }
+
+    base = p->input;
+    if (starts_with(base, "_R")) {
+        base += 2;
+    }
+
+    len = strlen(base);
+    if (off > len) {
+        return -1;
+    }
+
+    *target = base + off;
     return 0;
 }
 
@@ -816,14 +841,33 @@ rust_parse_v0_const(rust_parser_t *p)
     }
 
     if (p->cur[0] == 'B') {
+        const char *save_cur;
+        const char *target;
+        rust_mark_t mark;
+
         p->cur++;
         if (rust_parse_base62(p, &idx) != 0) {
             return -1;
         }
-        if (idx >= p->backref_count) {
+
+        save_cur = p->cur;
+        if (rust_parser_resolve_backref(p, idx, &target) != 0 || target >= save_cur) {
             return -1;
         }
-        return rust_buf_append(&p->out, "<backref-const>", 14u);
+
+        rust_mark_save(p, &mark);
+        if (rust_parser_enter(p) != 0) {
+            return -1;
+        }
+        p->cur = target;
+        if (rust_parse_v0_const(p) != 0) {
+            rust_mark_restore(p, &mark);
+            rust_parser_leave(p);
+            return -1;
+        }
+        rust_parser_leave(p);
+        p->cur = save_cur;
+        return 0;
     }
 
     rust_mark_save(p, &m);
@@ -1152,21 +1196,32 @@ rust_parse_v0_type(rust_parser_t *p)
 
     if (p->cur[0] == 'B') {
         const char *save_cur;
-        size_t idx;
+        const char *target;
+        size_t off;
         rust_mark_t mark;
 
         p->cur++;
-        if (rust_parse_base62(p, &idx) != 0 || idx >= p->backref_count) {
+        if (rust_parse_base62(p, &off) != 0) {
             return -1;
         }
 
         save_cur = p->cur;
-        rust_mark_save(p, &mark);
-        p->cur = p->backrefs[idx].start;
-        if (rust_parse_v0_type(p) != 0) {
-            rust_mark_restore(p, &mark);
+        if (rust_parser_resolve_backref(p, off, &target) != 0 || target >= save_cur) {
             return -1;
         }
+
+        rust_mark_save(p, &mark);
+        if (rust_parser_enter(p) != 0) {
+            return -1;
+        }
+
+        p->cur = target;
+        if (rust_parse_v0_type(p) != 0) {
+            rust_mark_restore(p, &mark);
+            rust_parser_leave(p);
+            return -1;
+        }
+        rust_parser_leave(p);
         p->cur = save_cur;
         return 0;
     }

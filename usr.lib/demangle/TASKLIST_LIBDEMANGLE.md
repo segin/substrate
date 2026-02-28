@@ -144,9 +144,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Display: suppress in output (internal compiler detail), unless verbose mode requested.
 
 ### 3i. Rust v0 Grammar — Backreferences
-- [ ] `B <base-62-number>` — refers to a byte offset in the mangled string.
-- [ ] Re‑parse from that offset to recover the referenced entity.
-- [ ] Guard against circular backrefs (depth limit).
+- [x] `B <base-62-number>` — refers to a byte offset in the mangled string.
+- [x] Re‑parse from that offset to recover the referenced entity.
+- [x] Guard against circular backrefs (depth limit).
 
 ### 3j. Rust Legacy Demangling
 - [ ] Pattern: `_ZN <length1> <ident1> ... <length_n> <hash_17chars> E`.
