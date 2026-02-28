@@ -163,8 +163,8 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Tuples: `(A, B, C)`.
 - [x] Arrays: `[T; N]`.
 - [x] Trait objects: `dyn Trait<Assoc = T> + 'a`.
-- [ ] Closures: `crate::module::{closure#0}`.
-- [ ] Shims: `crate::module::{shim:vtable#0}`.
+- [x] Closures: `crate::module::{closure#0}`.
+- [x] Shims: `crate::module::{shim:vtable#0}`.
 
 ## 4. D Language Demangler (tertiary)
 

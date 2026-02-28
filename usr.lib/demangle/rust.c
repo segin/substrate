@@ -68,7 +68,8 @@ static void rust_mark_restore(rust_parser_t *p, const rust_mark_t *m);
 
 static int rust_parse_decimal(rust_parser_t *p, size_t *out);
 static int rust_parse_base62(rust_parser_t *p, size_t *out);
-static int rust_parse_optional_disambiguator(rust_parser_t *p);
+static int rust_parse_optional_disambiguator(rust_parser_t *p, int *present, size_t *value);
+static int rust_ident_contains(const char *s, size_t len, const char *needle);
 static int rust_parse_v0_identifier(rust_parser_t *p);
 static int rust_parse_v0_type(rust_parser_t *p);
 static int rust_parse_v0_const(rust_parser_t *p);
@@ -455,10 +456,17 @@ rust_parse_base62(rust_parser_t *p, size_t *out)
 }
 
 static int
-rust_parse_optional_disambiguator(rust_parser_t *p)
+rust_parse_optional_disambiguator(rust_parser_t *p, int *present, size_t *value)
 {
     size_t tmp;
     const char *save;
+
+    if (present != NULL) {
+        *present = 0;
+    }
+    if (value != NULL) {
+        *value = 0u;
+    }
 
     if (p->cur[0] != 's') {
         return 0;
@@ -469,6 +477,13 @@ rust_parse_optional_disambiguator(rust_parser_t *p)
     if (rust_parse_base62(p, &tmp) != 0) {
         p->cur = save;
         return 0;
+    }
+
+    if (present != NULL) {
+        *present = 1;
+    }
+    if (value != NULL) {
+        *value = tmp;
     }
 
     if ((p->options & DEMANGLE_NO_VERBOSE) == 0) {
@@ -499,6 +514,30 @@ rust_parse_optional_disambiguator(rust_parser_t *p)
         }
         if (rust_buf_appendc(&p->out, '}') != 0) {
             return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int
+rust_ident_contains(const char *s, size_t len, const char *needle)
+{
+    size_t i;
+    size_t nlen;
+
+    if (s == NULL || needle == NULL) {
+        return 0;
+    }
+
+    nlen = strlen(needle);
+    if (nlen == 0u || nlen > len) {
+        return 0;
+    }
+
+    for (i = 0u; i + nlen <= len; i++) {
+        if (memcmp(s + i, needle, nlen) == 0) {
+            return 1;
         }
     }
 
@@ -1276,13 +1315,15 @@ rust_parse_v0_path(rust_parser_t *p)
 
     if (p->cur[0] == 'C') {
         p->cur++;
-        if (rust_parse_optional_disambiguator(p) != 0 || rust_parse_v0_identifier(p) != 0) {
+        if (rust_parse_optional_disambiguator(p, NULL, NULL) != 0 || rust_parse_v0_identifier(p) != 0) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
             return -1;
         }
     } else if (p->cur[0] == 'N') {
         char ns;
+        int has_dis;
+        size_t dis_val;
 
         p->cur++;
         ns = p->cur[0];
@@ -1293,19 +1334,105 @@ rust_parse_v0_path(rust_parser_t *p)
         }
         p->cur++;
 
-        if (rust_parse_v0_path(p) != 0 || rust_parse_optional_disambiguator(p) != 0) {
+        has_dis = 0;
+        dis_val = 0u;
+
+        if (rust_parse_v0_path(p) != 0 || rust_parse_optional_disambiguator(p, &has_dis, &dis_val) != 0) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
             return -1;
         }
 
         if (islower((unsigned char)ns)) {
-            if (rust_buf_append(&p->out, "::{", 3u) != 0 ||
-                rust_parse_v0_identifier(p) != 0 ||
-                rust_buf_appendc(&p->out, '}') != 0) {
+            size_t ident_off;
+            size_t ident_len;
+
+            if (rust_buf_append(&p->out, "::", 2u) != 0) {
                 rust_mark_restore(p, &m);
                 rust_parser_leave(p);
                 return -1;
+            }
+
+            ident_off = p->out.len;
+            if (rust_parse_v0_identifier(p) != 0) {
+                rust_mark_restore(p, &m);
+                rust_parser_leave(p);
+                return -1;
+            }
+            ident_len = p->out.len - ident_off;
+
+            if (rust_ident_contains(p->out.data + ident_off, ident_len, "closure")) {
+                p->out.len = ident_off;
+                p->out.data[p->out.len] = '\0';
+                if (rust_buf_append(&p->out, "{closure#", 9u) != 0) {
+                    rust_mark_restore(p, &m);
+                    rust_parser_leave(p);
+                    return -1;
+                }
+                {
+                    char numbuf[32];
+                    size_t n = 0u;
+                    size_t v = has_dis ? dis_val : 0u;
+                    if (v == 0u) {
+                        numbuf[n++] = '0';
+                    } else {
+                        char rev[32];
+                        size_t r = 0u;
+                        while (v > 0u && r < sizeof(rev)) {
+                            rev[r++] = (char)('0' + (v % 10u));
+                            v /= 10u;
+                        }
+                        while (r > 0u) {
+                            numbuf[n++] = rev[--r];
+                        }
+                    }
+                    if (rust_buf_append(&p->out, numbuf, n) != 0 ||
+                        rust_buf_appendc(&p->out, '}') != 0) {
+                        rust_mark_restore(p, &m);
+                        rust_parser_leave(p);
+                        return -1;
+                    }
+                }
+            } else if (rust_ident_contains(p->out.data + ident_off, ident_len, "shim") ||
+                       rust_ident_contains(p->out.data + ident_off, ident_len, "vtable")) {
+                p->out.len = ident_off;
+                p->out.data[p->out.len] = '\0';
+                if (rust_buf_append(&p->out, "{shim:vtable#", 13u) != 0) {
+                    rust_mark_restore(p, &m);
+                    rust_parser_leave(p);
+                    return -1;
+                }
+                {
+                    char numbuf[32];
+                    size_t n = 0u;
+                    size_t v = has_dis ? dis_val : 0u;
+                    if (v == 0u) {
+                        numbuf[n++] = '0';
+                    } else {
+                        char rev[32];
+                        size_t r = 0u;
+                        while (v > 0u && r < sizeof(rev)) {
+                            rev[r++] = (char)('0' + (v % 10u));
+                            v /= 10u;
+                        }
+                        while (r > 0u) {
+                            numbuf[n++] = rev[--r];
+                        }
+                    }
+                    if (rust_buf_append(&p->out, numbuf, n) != 0 ||
+                        rust_buf_appendc(&p->out, '}') != 0) {
+                        rust_mark_restore(p, &m);
+                        rust_parser_leave(p);
+                        return -1;
+                    }
+                }
+            } else {
+                if (rust_buf_insert(&p->out, ident_off, "{", 1u) != 0 ||
+                    rust_buf_appendc(&p->out, '}') != 0) {
+                    rust_mark_restore(p, &m);
+                    rust_parser_leave(p);
+                    return -1;
+                }
             }
         } else {
             if (rust_buf_append(&p->out, "::", 2u) != 0 || rust_parse_v0_identifier(p) != 0) {
