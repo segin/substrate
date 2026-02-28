@@ -333,7 +333,11 @@ static int process_file(const char *name) {
     }
 
     if (out != stdout) {
-        fclose(out);
+        if (fclose(out) != 0) {
+            perror(out_name);
+            res = -1;
+        }
+
         if (res == 0) {
             /* Success. Restore mode/times. */
             /* We have in_sb from stat() */
@@ -351,6 +355,7 @@ static int process_file(const char *name) {
             /* Unlink input file */
             if (unlink(in_name) < 0) {
                 perror(in_name);
+                res = -1;
             }
         } else {
             /* Failure. Remove partial output. */
