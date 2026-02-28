@@ -19,10 +19,12 @@ typedef struct {
     uint16_t output_machine;
     uint8_t output_osabi;
     uint8_t output_abiversion;
+    uint32_t output_flags;
     int have_output_type;
     int have_output_machine;
     int have_output_osabi;
     int have_output_abiversion;
+    int have_output_flags;
 } elfedit_ctx_t;
 
 static const char *g_progname = "elfedit";
@@ -40,11 +42,12 @@ static void warnf(const char *fmt, ...) {
 static void usage(FILE *out) {
     fprintf(out,
             "usage: %s [-o output] [--output-type type] [--output-machine machine]\n"
-            "       [--output-osabi osabi] [--output-abiversion version] <input>\n",
+            "       [--output-osabi osabi] [--output-abiversion version]\n"
+            "       [--output-flags value] <input>\n",
             g_progname);
 }
 
-static int parse_u16(const char *text, uint16_t *out) {
+static int parse_u32(const char *text, uint32_t *out) {
     char *end = NULL;
     unsigned long v;
 
@@ -53,7 +56,17 @@ static int parse_u16(const char *text, uint16_t *out) {
     }
     errno = 0;
     v = strtoul(text, &end, 0);
-    if (errno != 0 || end == text || *end != '\0' || v > 0xffffUL) {
+    if (errno != 0 || end == text || *end != '\0' || v > 0xffffffffUL) {
+        return -1;
+    }
+    *out = (uint32_t)v;
+    return 0;
+}
+
+static int parse_u16(const char *text, uint16_t *out) {
+    uint32_t v = 0;
+
+    if (parse_u32(text, &v) != 0 || v > 0xffffu) {
         return -1;
     }
     *out = (uint16_t)v;
@@ -159,6 +172,7 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
         { "output-machine", required_argument, NULL, 1001 },
         { "output-osabi", required_argument, NULL, 1002 },
         { "output-abiversion", required_argument, NULL, 1003 },
+        { "output-flags", required_argument, NULL, 1004 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -203,6 +217,13 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
             }
             ctx->have_output_abiversion = 1;
             ctx->output_abiversion = parsed_byte;
+            break;
+        case 1004:
+            if (parse_u32(optarg, &ctx->output_flags) != 0) {
+                warnf("invalid flags value: %s", optarg);
+                return -1;
+            }
+            ctx->have_output_flags = 1;
             break;
         default:
             usage(stderr);
@@ -303,6 +324,14 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
         err = elf_set_abiversion(obj, ctx->output_abiversion);
         if (err != ELF_OK) {
             warnf("failed to set ELF ABI version: %s", elf_errstr(err));
+            return -1;
+        }
+    }
+
+    if (ctx->have_output_flags) {
+        err = elf_set_flags(obj, ctx->output_flags);
+        if (err != ELF_OK) {
+            warnf("failed to set ELF flags: %s", elf_errstr(err));
             return -1;
         }
     }

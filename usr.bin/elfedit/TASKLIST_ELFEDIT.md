@@ -34,8 +34,8 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Accept numeric value 0–255.
 
 ### 2e. `--output-flags=<flags>`
-- [ ] Set `e_flags` field.
-- [ ] Accept hex or decimal value.
+- [x] Set `e_flags` field.
+- [x] Accept hex or decimal value.
 
 ### 2f. `--output-entry=<addr>`
 - [ ] Set `e_entry` via `elf_set_entry()`.
