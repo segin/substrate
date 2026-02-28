@@ -40,5 +40,5 @@ void test_printf_zero_flag(void) {
         if (strlen(buf) < 5) panic("test_printf_zero_flag: fuzz width");
     }
     
-    kprint("PASS: printf 0 flag\\n");
+    kprint("PASS: printf 0 flag\n");
 }

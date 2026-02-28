@@ -13,6 +13,13 @@ static short *derives;      /* derives[i] = first rule deriving symbol i */
 static short *next_rule;    /* next_rule[r] = next rule with same LHS as r, or -1 */
 
 static void set_eff(void);
+static int cmp_short(const void *a, const void *b);
+
+static int cmp_short(const void *a, const void *b) {
+    short sa = *(const short *)a;
+    short sb = *(const short *)b;
+    return (sa > sb) - (sa < sb);
+}
 
 void set_first_derives(void) {
     int i;
@@ -34,21 +41,21 @@ void set_first_derives(void) {
     
     /* Build derives chain: scan rules in reverse to build forward linked list */
     /* For each rule, prepend to chain for its LHS */
-    for (i = nrules - 1; i >= 2; i--) {
+    for (i = nrules - 1; i >= 1; i--) {
         short lhs_sym = plhs[i];
         if (lhs_sym >= ntokens) {  /* Non-terminal */
             next_rule[i] = derives[lhs_sym];
             derives[lhs_sym] = i;
-            if (first_derives[lhs_sym] == -1) {
-                first_derives[lhs_sym] = i;
-            }
         }
+    }
+
+    for (i = ntokens; i < nsyms; i++) {
+        first_derives[i] = derives[i];
     }
 }
 
 void closure(short *nucleus, int n) {
-    int i;
-    short *isp;
+    int i, j;
     int item_count;
     
     /* Initialize item_set with nucleus */
@@ -64,9 +71,11 @@ void closure(short *nucleus, int n) {
         rules_used[i] = 0;
     }
     
-    /* Compute closure: for each item A -> α·Bβ where B is non-terminal,
-       add all rules B -> ·γ */
-    /* Process all items, including newly added ones */
+    /*
+     * Compute transitive closure:
+     * for each item A -> α . B β where B is nonterminal,
+     * add all productions B -> . γ.
+     */
     for (i = 0; i < item_count; i++) {
         short item = item_set[i];
         short symbol = ritem[item];
@@ -99,6 +108,18 @@ void closure(short *nucleus, int n) {
                 rule = next_rule[rule];
             }
         }
+    }
+
+    if (item_count > 1) {
+        qsort(item_set, (size_t)item_count, sizeof(short), cmp_short);
+        j = 1;
+        for (i = 1; i < item_count; i++) {
+            if (item_set[i] != item_set[j - 1]) {
+                item_set[j++] = item_set[i];
+            }
+        }
+        item_count = j;
+        item_set_end = item_set + item_count;
     }
 }
 

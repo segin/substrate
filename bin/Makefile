@@ -15,11 +15,11 @@ $(SUBDIRS):
 clean:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning bin/$$dir"; \
-		$(MAKE) -C $$dir clean; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir clean; fi; \
 	done
 
 install:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing bin/$$dir"; \
-		$(MAKE) -C $$dir install; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir install; fi; \
 	done

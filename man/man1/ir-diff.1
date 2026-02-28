@@ -1,0 +1,26 @@
+.Dd February 27, 2026
+.Dt IR-DIFF 1
+.Os Substrate
+.Sh NAME
+.Nm ir-diff
+.Nd semantic diff for textual SSA IR modules after normalization
+.Sh SYNOPSIS
+.Nm
+.Ar left.ir right.ir
+.Sh DESCRIPTION
+.Nm
+normalizes both IR inputs and compares normalized output.
+Differences are reported independent of superficial formatting.
+.Sh EXIT STATUS
+.Bl -tag -width 2
+.It 0
+Normalized IR is equivalent.
+.It 1
+IR differs or parse/verify failed.
+.It 2
+Invalid command usage.
+.El
+.Sh SEE ALSO
+.Xr ir-verifier 1 ,
+.Xr ir-normalize 1 ,
+.Xr cc 1

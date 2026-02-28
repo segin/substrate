@@ -1,0 +1,273 @@
+.Dd February 27, 2026
+.Dt LS 1
+.Os
+.Sh NAME
+.Nm ls
+.Nd list directory contents
+.Sh SYNOPSIS
+.Nm
+.Op Ar OPTION ...
+.Op Ar FILE ...
+.Sh DESCRIPTION
+The
+.Nm
+utility lists information about files and directories.
+When no
+.Ar FILE
+is given,
+.Pa .
+is listed.
+.Pp
+Default output is multi-column when writing to a terminal and one entry per line otherwise.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl a , -all
+Include entries whose names begin with a dot.
+.It Fl A , -almost-all
+Include dotfiles but still omit
+.Pa .
+and
+.Pa .. .
+.It Fl d , -directory
+List directory operands themselves instead of their contents.
+.It Fl I Ar pattern , -ignore Ns = Ns Ar pattern
+Hide implied entries matching
+.Ar pattern .
+.It Fl l
+Long format.
+.It Fl g
+Long format without owner name.
+.It Fl o
+Long format without group name.
+.It Fl n , -numeric-uid-gid
+Long format with numeric UID/GID.
+.It Fl 1
+One entry per line.
+.It Fl C
+Multi-column format.
+.It Fl m
+Comma-separated format.
+.It Fl x
+By-lines multi-column packing.
+.It Fl X
+Sort by file extension.
+.It Fl -ignore-case
+Sort names case-insensitively.
+.It Fl -group-directories-first
+List directories before non-directories during sorting.
+.It Fl i , -inode
+Print inode numbers.
+.It Fl s , -size
+Print allocated size in blocks.
+.It Fl h , -human-readable
+Human readable sizes.
+.It Fl k , -kibibytes
+Use 1024-byte blocks.
+.It Fl -block-size Ns = Ns Ar SIZE
+Scale printed sizes by
+.Ar SIZE .
+.It Fl -si
+Use powers of 1000 for human-readable sizes.
+.It Fl r , -reverse
+Reverse sort order.
+.It Fl S
+Sort by file size, largest first.
+.It Fl t
+Sort by selected timestamp, newest first.
+.It Fl u
+Use access time for
+.Fl t
+and
+.Fl l .
+.It Fl c
+Use status-change time for
+.Fl t
+and
+.Fl l .
+.It Fl U
+Do not sort.
+.It Fl f
+Equivalent to enabling
+.Fl a
+and
+.Fl U ,
+and disabling color,
+.Fl l ,
+and
+.Fl s .
+.It Fl v
+Natural version sort.
+.It Fl R , -recursive
+Recursive depth-first directory traversal.
+.It Fl -one-file-system
+Do not recurse into directories on a different filesystem device.
+.It Fl -hide Ns = Ns Ar pattern
+Hide implied entries matching
+.Ar pattern
+during recursive listing.
+.It Fl L , -dereference
+Follow symlinks for metadata and traversal.
+.It Fl H
+Follow symlinks for command-line operands only.
+.It Fl F , -classify
+Append type indicators
+.Pq one of */=>@| .
+.It Fl p
+Append
+.Sq /
+to directories.
+.It Fl -file-type
+Like
+.Fl F
+but without
+.Sq *
+for executables.
+.It Fl w Ar cols , Fl -width Ns = Ns Ar cols
+Set display width in columns.
+.It Fl -time Ns = Ns Ar word
+Select time field:
+.Sy atime | access | use | ctime | status | mtime | modification .
+.It Fl -time-style Ns = Ns Ar style
+Select time format:
+.Sy locale | iso | long-iso | full-iso | +FORMAT .
+.It Fl q , -hide-control-chars
+Render nongraphic bytes as
+.Sq ? .
+.It Fl -show-control-chars
+Disable control-character hiding.
+.It Fl N , -literal
+Literal names.
+.It Fl Q , -quote-name
+C-style quoted names.
+.It Fl -quoting-style Ns = Ns Ar word
+One of
+.Sy literal | shell | shell-always | c | escape .
+.It Fl @
+In long format, print extended attribute names beneath each entry when available.
+.It Fl -color Ns = Ns Ar when
+Color mode:
+.Sy never | auto | always .
+.It Fl -help
+Display help and exit.
+.It Fl -version
+Display version and exit.
+.El
+.Sh OUTPUT MODES
+The output mode is selected in this order:
+.Bl -bullet
+.It
+.Fl l
+(long format)
+.It
+.Fl m
+(comma)
+.It
+.Fl 1
+(single column)
+.It
+.Fl x
+(by-lines columns)
+.It
+.Fl C
+or terminal auto-detection (columns)
+.It
+fallback single-column
+.El
+.Pp
+Very narrow displays
+.Pq less than 20 columns
+fall back to one entry per line.
+.Sh LONG FORMAT
+Each entry contains mode, link count, owner, group, size/device numbers,
+timestamp, and name.
+.Pp
+The mode field includes file type and rwx bits, including setuid/setgid/sticky
+state. A trailing
+.Sq +
+indicates POSIX ACL xattrs and
+.Sq @
+indicates non-ACL extended attributes when xattr APIs are available.
+.Pp
+For symlinks shown as symlinks,
+.Nm
+prints
+.Sq " -> target"
+(and marks dangling links).
+.Pp
+Directory long listings print a leading
+.Sq total N
+line.
+.Sh SORTING
+Default sorting is name order.
+.Pp
+When available in host builds,
+.Nm
+uses locale collation
+.Pq Fn strcoll
+for name ordering; target builds use bytewise comparison.
+.Pp
+Size/time/version sorts use name as a deterministic tie-breaker.
+.Pp
+Optional sort modes include case-insensitive, extension-based, and directories-first ordering.
+.Sh RECURSION
+Recursive mode is depth-first.
+Directory headers are printed before each subtree.
+Permission/open errors are reported and traversal continues.
+Directory cycles are detected using
+.Pq dev,ino
+pairs and reported.
+.Sh EXIT STATUS
+.Ex -std
+.Bl -tag -width Ds
+.It 0
+Successful completion.
+.It 1
+Minor problems (for example, unreadable subdirectories).
+.It 2
+Serious trouble (for example, inaccessible command-line operand, allocation failure).
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width LS_COLORS
+.It Ev LS_COLORS
+File-type color map.
+.It Ev COLUMNS
+Fallback terminal width when ioctl width is unavailable.
+.El
+.Sh EXAMPLES
+List all files including dotfiles:
+.Bd -literal -offset indent
+$ ls -a
+.Ed
+.Pp
+Long format sorted by newest modification time:
+.Bd -literal -offset indent
+$ ls -lt
+.Ed
+.Pp
+Recursive listing with color forced:
+.Bd -literal -offset indent
+$ ls -R --color=always
+.Ed
+.Sh NOTES
+Developer notes:
+.Bl -bullet
+.It
+Column width is computed from rendered entry text width; color escapes are excluded from width math.
+.It
+Unicode width uses UTF-8 decoding with
+.Fn wcwidth
+plus combining/CJK fallbacks for stable alignment.
+.It
+ACL/xattr indicators are best-effort and gracefully degrade when xattr APIs are unavailable.
+.It
+Machine-parseable output should prefer
+.Fl 1
+with
+.Fl -quoting-style Ns =literal
+or
+.Fl -quoting-style Ns =escape .
+.El
+.Sh SEE ALSO
+.Xr stat 2 ,
+.Xr readlink 2 ,
+.Xr lstat 2

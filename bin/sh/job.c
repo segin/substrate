@@ -101,6 +101,39 @@ job_t *find_job(pid_t pgid) {
     return NULL;
 }
 
+job_t *job_find(const char *name) {
+    if (!name) return NULL;
+    if (name[0] == '%') {
+        if (name[1] == '%' || name[1] == '+') {
+            job_t *j = first_job;
+            if (j) while (j->next) j = j->next;
+            return j;
+        } else if (name[1] == '-') {
+            job_t *j = first_job;
+            job_t *prev = NULL;
+            if (j) while (j->next) { prev = j; j = j->next; }
+            return prev ? prev : j;
+        }
+        int id = atoi(name + 1);
+        job_t *j = first_job;
+        while (j && j->id != id) j = j->next;
+        return j;
+    } else {
+        pid_t pid = atoi(name);
+        // Try PGID first
+        job_t *j = find_job(pid);
+        if (j) return j;
+        // Try process PID
+        for (j = first_job; j; j = j->next) {
+            process_t *p;
+            for (p = j->first_process; p; p = p->next) {
+                if (p->pid == pid) return j;
+            }
+        }
+    }
+    return NULL;
+}
+
 int job_is_stopped(job_t *j) {
     process_t *p;
     for (p = j->first_process; p; p = p->next) {
@@ -120,7 +153,7 @@ int job_is_completed(job_t *j) {
 }
 
 void job_print_info(job_t *j, const char *status) {
-    fprintf(stderr, "[%d] %s\t%s\n", j->id, status, j->command ? j->command : "(unknown)");
+    fprintf(stderr, "[%d] %d %s\t%s\n", j->id, (int)j->pgid, status, j->command ? j->command : "(unknown)");
 }
 
 static int mark_process_status(pid_t pid, int status) {
@@ -172,7 +205,7 @@ void job_update_status(void) {
     }
 }
 
-void job_wait(job_t *j) {
+int job_wait(job_t *j) {
     int status;
     pid_t pid;
 
@@ -184,10 +217,18 @@ void job_wait(job_t *j) {
             break;
         }
     }
+
+    // Return the status of the last process in the pipeline
+    process_t *p = j->first_process;
+    while (p && p->next) p = p->next;
+    return p ? p->status : 0;
 }
 
 int builtin_jobs(int argc, char **argv) {
-    (void)argc; (void)argv;
+    int show_pids = 0;
+    if (argc > 1 && strcmp(argv[1], "-l") == 0) {
+        show_pids = 1;
+    }
     job_update_status(); // Sync before listing
     job_t *j = first_job;
     while (j) {
@@ -195,25 +236,24 @@ int builtin_jobs(int argc, char **argv) {
         if (job_is_completed(j)) status = "Done";
         else if (job_is_stopped(j)) status = "Stopped";
         
-        printf("[%d] %s\t%s\n", j->id, status, j->command ? j->command : "(unknown)");
+        if (show_pids) {
+            printf("[%d] %d %s\t%s\n", j->id, (int)j->pgid, status, j->command ? j->command : "(unknown)");
+        } else {
+            printf("[%d] %s\t%s\n", j->id, status, j->command ? j->command : "(unknown)");
+        }
         j = j->next;
     }
     return 0;
 }
 
+
 int builtin_fg(int argc, char **argv) {
     extern pid_t shell_pgid;
+    extern struct termios shell_tmodes;
     job_t *j = NULL;
 
     if (argc > 1) {
-        if (argv[1][0] == '%') {
-            int id = atoi(argv[1] + 1);
-            j = first_job;
-            while (j && j->id != id) j = j->next;
-        } else {
-            pid_t pgid = atoi(argv[1]);
-            j = find_job(pgid);
-        }
+        j = job_find(argv[1]);
     } else {
         j = first_job;
         if (j) while (j->next) j = j->next;
@@ -239,6 +279,7 @@ int builtin_fg(int argc, char **argv) {
     job_wait(j);
     
     tcsetpgrp(STDIN_FILENO, shell_pgid);
+    tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
     return 0;
 }
 
@@ -246,14 +287,7 @@ int builtin_bg(int argc, char **argv) {
     job_t *j = NULL;
 
     if (argc > 1) {
-        if (argv[1][0] == '%') {
-            int id = atoi(argv[1] + 1);
-            j = first_job;
-            while (j && j->id != id) j = j->next;
-        } else {
-            pid_t pgid = atoi(argv[1]);
-            j = find_job(pgid);
-        }
+        j = job_find(argv[1]);
     } else {
         j = first_job;
         if (j) while (j->next) j = j->next;

@@ -1,0 +1,34 @@
+.Dd February 27, 2026
+.Dt AS 1
+.Os Substrate
+.Sh NAME
+.Nm as
+.Nd Substrate assembler wrapper
+.Sh SYNOPSIS
+.Nm
+.Op Fl 32 | Fl 64
+.Op Fl g
+.Op Fl I Ar dir
+.Op Fl D Ar macro
+.Op Fl march Ar cpu
+.Op Fl mtune Ar cpu
+.Op Fl Wa Ar opts
+.Op Fl o Ar output
+.Ar input.s
+.Sh DESCRIPTION
+.Nm
+invokes a backend assembler and validates the emitted object using
+.Xr libelfobj 3 .
+The wrapper selects 32-bit or 64-bit mode and performs ELF sanity checks.
+.Sh ENVIRONMENT
+.Bl -tag -width AS_BACKEND
+.It Ev AS_BACKEND
+Path/name of backend assembler executable. If unset,
+.Nm
+searches PATH.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr ld 1 ,
+.Xr cc 1

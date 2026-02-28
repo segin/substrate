@@ -251,19 +251,17 @@ static int loop_break_count = 0;
 static int loop_continue_count = 0;
 
 // Forward declarations of handlers
-static int execute_simple_command(ast_simple_command_t *cmd);
-static int execute_function(function_entry_t *func, int argc, char **argv);
-static int execute_function_def(ast_function_t *func_def);
+static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info);
+static int execute_function(function_entry_t *func, int argc, char **argv, exec_info_t *info);
+static int execute_function_def(ast_function_t *func_def, exec_info_t *info);
 static int handle_return(int argc, char **argv);
-static int execute_pipeline(ast_pipeline_t *pipe);
-static int execute_binary_op(ast_binary_op_t *bin);
-static int execute_if(ast_if_t *if_node);
-static int execute_while(ast_while_t *w);
-static int execute_for(ast_for_t *f);
-static int execute_for(ast_for_t *f);
-static int execute_case(ast_case_t *c);
-static int execute_subshell(ast_subshell_t *sub);
-static int execute_subshell(ast_subshell_t *sub);
+static int execute_pipeline(ast_pipeline_t *pipe, exec_info_t *info);
+static int execute_binary_op(ast_binary_op_t *bin, exec_info_t *info);
+static int execute_if(ast_if_t *if_node, exec_info_t *info);
+static int execute_while(ast_while_t *w, exec_info_t *info);
+static int execute_for(ast_for_t *f, exec_info_t *info);
+static int execute_case(ast_case_t *c, exec_info_t *info);
+static int execute_subshell(ast_subshell_t *sub, exec_info_t *info);
 static int apply_redirections(ast_redirection_t *redir);
 static char *find_in_path(const char *cmd);
 
@@ -331,9 +329,12 @@ static void restore_redirections(fd_save_t *save) {
     }
 }
 
-int execute_ast(ast_node_t *node) {
+int execute_ast(ast_node_t *node, exec_info_t *info) {
     ensure_runtime_tables();
     if (!node) return 0;
+
+    exec_info_t default_info = {0};
+    if (!info) info = &default_info;
 
     int status = 0;
     fd_save_t *saved_fds = NULL;
@@ -353,45 +354,40 @@ int execute_ast(ast_node_t *node) {
 
     switch (node->type) {
         case NODE_SIMPLE_COMMAND:
-            // Simple command handles its own redirections (builtins vs external)
-            // For now, external commands fork so we don't save.
-            status = execute_simple_command((ast_simple_command_t *)node);
+            status = execute_simple_command((ast_simple_command_t *)node, info);
             break;
         case NODE_PIPELINE:
-            status = execute_pipeline((ast_pipeline_t *)node);
+            status = execute_pipeline((ast_pipeline_t *)node, info);
             break;
         case NODE_BINARY_OP: {
             ast_binary_op_t *bin = (ast_binary_op_t *)node;
             /* AND/OR lists handle errors internally - skip errexit check for their result */
             if (bin->op == OP_AND || bin->op == OP_OR) {
-                status = execute_binary_op(bin);
+                status = execute_binary_op(bin, info);
                 if (saved_fds) restore_redirections(saved_fds);
                 return status;  /* Skip errexit check - AND/OR handles errors */
             } else {
-                status = execute_binary_op(bin);
+                status = execute_binary_op(bin, info);
             }
             break;
         }
         case NODE_IF:
-            status = execute_if((ast_if_t *)node);
+            status = execute_if((ast_if_t *)node, info);
             break;
         case NODE_WHILE:
-            status = execute_while((ast_while_t *)node);
+            status = execute_while((ast_while_t *)node, info);
             break;
         case NODE_FOR:
-            status = execute_for((ast_for_t *)node);
+            status = execute_for((ast_for_t *)node, info);
             break;
         case NODE_CASE:
-            status = execute_case((ast_case_t *)node);
+            status = execute_case((ast_case_t *)node, info);
             break;
         case NODE_FUNCTION:
-            status = execute_function_def((ast_function_t *)node);
+            status = execute_function_def((ast_function_t *)node, info);
             break;
         case NODE_SUBSHELL:
-            // Subshell forks, so we can just apply redirections in the child handler if needed,
-            // or here? execute_subshell likely forks.
-            // Let's modify execute_subshell to apply redirections after fork.
-            status = execute_subshell((ast_subshell_t *)node);
+            status = execute_subshell((ast_subshell_t *)node, info);
             break;
         default:
             fprintf(stderr, "%s: Unknown node type %d\n", shell_var_get_name(), node->type);
@@ -671,20 +667,55 @@ static int builtin_wait(int argc, char **argv) {
 }
 
 static int builtin_kill(int argc, char **argv) {
-    if (argc < 2) { fprintf(stderr, "kill: usage: kill [-sig] pid\n"); return 1; }
+    if (argc < 2) { fprintf(stderr, "kill: usage: kill [-sig] pid...\n"); return 1; }
     int sig = SIGTERM;
     int idx = 1;
-    if (argv[1][0] == '-') {
+    if (argv[1][0] == '-' && (argv[1][1] < '0' || argv[1][1] > '9') && argv[1][1] != '\0') {
         sig = parse_signal(argv[1]+1);
         if (sig < 0) {
             fprintf(stderr, "kill: %s: invalid signal specification\n", argv[1]+1);
             return 1;
         }
         idx = 2;
+    } else if (argv[1][0] == '-' && argv[1][1] >= '0' && argv[1][1] <= '9') {
+        // -signal number directly, like -9
+        sig = atoi(argv[1]+1);
+        idx = 2;
     }
-    if (idx >= argc) return 1;
-    if (kill(atoi(argv[idx]), sig) < 0) { perror("kill"); return 1; }
-    return 0;
+    
+    if (idx >= argc) {
+        fprintf(stderr, "kill: usage: kill [-sig] pid...\n");
+        return 1;
+    }
+    
+    int errors = 0;
+    for (int i = idx; i < argc; i++) {
+        job_t *j = job_find(argv[i]);
+        if (j) {
+            if (kill(-j->pgid, sig) < 0) {
+                perror("kill");
+                errors++;
+            } else {
+                if (sig == SIGCONT) {
+                    process_t *p;
+                    for (p = j->first_process; p; p = p->next) p->stopped = 0;
+                    j->notified = 0;
+                }
+            }
+        } else {
+            pid_t pid = atoi(argv[i]);
+            if (pid == 0 && argv[i][0] != '0') {
+                fprintf(stderr, "kill: %s: invalid job or pid\n", argv[i]);
+                errors++;
+                continue;
+            }
+            if (kill(pid, sig) < 0) {
+                perror("kill");
+                errors++;
+            }
+        }
+    }
+    return errors ? 1 : 0;
 }
 
 static int builtin_local(int argc, char **argv) {
@@ -1395,7 +1426,7 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
     return new_env;
 }
 
-static int execute_simple_command(ast_simple_command_t *cmd) {
+static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) {
     if (cmd->arg_count == 0) {
         /* Assignments only: VAR=val */
         fd_save_t *saved_fds = NULL;
@@ -1462,7 +1493,7 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
     function_entry_t *func = functions;
     while (func) {
         if (strcmp(func->name, argv[0]) == 0) {
-            int ret = execute_function(func, argc, argv);
+            int ret = execute_function(func, argc, argv, info);
             if (saved_fds) restore_redirections(saved_fds);
             for (int i = 0; argv[i]; i++) free(argv[i]);
             free(argv);
@@ -1481,22 +1512,79 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
         return 127;
     }
 
-    pid_t pid = fork();
+    /* Resolve if we need to fork. We fork if we're not already in a child (pipeline or background) */
+    int must_fork = !(info->pipeline || info->background);
+    pid_t pid;
+
+    if (must_fork) {
+        pid = fork();
+    } else {
+        pid = 0; // We're already in a child
+    }
+
     if (pid == 0) {
-        reset_traps();
+        if (must_fork) reset_traps();
+        if (shell_is_interactive) {
+            /* If we're the lead of a new job, setpgid. 
+               If we're already in a job, it's handled by the supervisor. */
+            if (must_fork) {
+                setpgid(0, 0);
+                if (!info->background) tcsetpgrp(STDIN_FILENO, getpid());
+            }
+            signal(SIGINT, SIG_DFL);
+            signal(SIGQUIT, SIG_DFL);
+            signal(SIGTSTP, SIG_DFL);
+            signal(SIGTTIN, SIG_DFL);
+            signal(SIGTTOU, SIG_DFL);
+            signal(SIGCHLD, SIG_DFL);
+        }
         char **env = merge_env(shell_var_get_envp(), cmd->assign_count, cmd->assignments);
         execve(full_path, argv, env);
         perror(argv[0]);
         _exit(1);
     } else if (pid > 0) {
-        int wait_status;
-        waitpid(pid, &wait_status, 0);
+        job_t *job = info->job;
+
+        if (shell_is_interactive && must_fork) {
+            setpgid(pid, pid);
+            if (!info->background) tcsetpgrp(STDIN_FILENO, pid);
+            job = job_new();
+            job->pgid = pid;
+            job->command = ast_to_string((ast_node_t *)cmd);
+            job_add_process(job, pid, argv);
+        }
+
+        int wait_status = 0;
+        if (must_fork) {
+            if (info->background) {
+                printf("[%d] %d %s\n", job->id, (int)pid, job->command);
+            } else {
+                waitpid(pid, &wait_status, WUNTRACED);
+            }
+        }
+
+        if (shell_is_interactive && must_fork && !info->background) {
+            tcsetpgrp(STDIN_FILENO, shell_pgid);
+            tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
+
+            if (WIFSTOPPED(wait_status)) {
+                job->notified = 0;
+                printf("\n[%d]+ Stopped\t%s\n", job->id, job->command);
+            } else {
+                job_free(job);
+            }
+        }
+
         if (saved_fds) restore_redirections(saved_fds);
         free(full_path);
         for (int i = 0; argv[i]; i++) free(argv[i]);
         free(argv);
-        if (WIFEXITED(wait_status)) return WEXITSTATUS(wait_status);
-        return 1;
+        if (must_fork) {
+            if (WIFEXITED(wait_status)) return WEXITSTATUS(wait_status);
+            if (WIFSTOPPED(wait_status)) return 128 + WSTOPSIG(wait_status);
+            return 1;
+        }
+        return 0; // Already in child, status handled by waitpid in supervisor
     } else {
         perror("fork");
         if (saved_fds) restore_redirections(saved_fds);
@@ -1507,15 +1595,17 @@ static int execute_simple_command(ast_simple_command_t *cmd) {
     }
 }
 
-static int execute_pipeline(ast_pipeline_t *pipe_node) {
+static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     int n = pipe_node->command_count;
     int pipefds[2 * (n - 1)];
 
-    // Create job if interactive
-    job_t *job = NULL;
-    if (shell_is_interactive) {
+    /* Create job if interactive and not already in one */
+    job_t *job = info->job;
+    int created_job = 0;
+    if (shell_is_interactive && !job) {
         job = job_new();
         job->command = ast_to_string((ast_node_t *)pipe_node);
+        created_job = 1;
     }
 
     for (int i = 0; i < n - 1; i++) {
@@ -1524,6 +1614,11 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
             return 1;
         }
     }
+
+    /* Prepare info for children */
+    exec_info_t child_info = *info;
+    child_info.pipeline = 1;
+    child_info.job = job;
 
     pid_t pids[n];
     for (int i = 0; i < n; i++) {
@@ -1538,7 +1633,9 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
                } else {
                    setpgid(pid, pids[0]);
                }
-               if (i == 0) tcsetpgrp(STDIN_FILENO, pid);
+               
+               /* First command in foreground pipeline gets the terminal */
+               if (i == 0 && !info->background) tcsetpgrp(STDIN_FILENO, pid);
                
                // Reset signal handlers to default
                signal(SIGINT, SIG_DFL);
@@ -1550,15 +1647,17 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
             }
 
             if (i > 0) {
-                dup2(pipefds[(i - 1) * 2], 0);
+                dup2(pipefds[(i - 1) * 2], STDIN_FILENO);
             }
             if (i < n - 1) {
-                dup2(pipefds[i * 2 + 1], 1);
+                dup2(pipefds[i * 2 + 1], STDOUT_FILENO);
             }
             for (int k = 0; k < 2 * (n - 1); k++) {
                 close(pipefds[k]);
             }
-            exit(execute_ast(pipe_node->commands[i]));
+            
+            /* execute_ast will not fork again because child_info.pipeline = 1 */
+            exit(execute_ast(pipe_node->commands[i], &child_info));
         } else if (pids[i] < 0) {
              perror("fork");
              return 1;
@@ -1569,7 +1668,6 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
             if (i == 0) job->pgid = pids[0];
             setpgid(pids[i], job->pgid);
             // Add process to job
-            // Need command name? Simple reconstruction or valid guess
             job_add_process(job, pids[i], NULL); 
         }
     }
@@ -1578,92 +1676,66 @@ static int execute_pipeline(ast_pipeline_t *pipe_node) {
         close(pipefds[i]);
     }
 
-    if (shell_is_interactive && job) {
+    if (shell_is_interactive && job && created_job) {
         tcsetpgrp(STDIN_FILENO, job->pgid);
         
-        // Wait for job
-        int status;
-        waitpid(-job->pgid, &status, WUNTRACED);
+        if (info->background) {
+            printf("[%d] %d %s\n", job->id, (int)job->pgid, job->command);
+            return 0;
+        }
         
-        // Verify if stopped or exited
-        if (WIFSTOPPED(status)) {
-            printf("\n[%d]+ Stopped\t(job %d)\n", (int)job->pgid, (int)job->pgid);
-            // Don't free job, keep it
+        // Wait for job
+        int wait_status;
+        wait_status = job_wait(job);
+
+        if (WIFSTOPPED(wait_status)) {
+            job->notified = 0;
+            printf("\n[%d]+ Stopped\t%s\n", job->id, job->command);
         } else {
-             // Mark completed
-             // job_free(job);
+            job_free(job);
         }
         
         tcsetpgrp(STDIN_FILENO, shell_pgid);
-    } else {
-        // Non-interactive wait
-        int last_status = 0;
+        tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
+    }
+    
+    /* Non-interactive or not the creator: wait for all children if not background */
+    int last_status = 0;
+    if (!info->background) {
         for (int i = 0; i < n; i++) {
-            int status;
-            waitpid(pids[i], &status, 0);
-            if (i == n - 1 && WIFEXITED(status)) {
-                last_status = WEXITSTATUS(status);
+            int ws;
+            waitpid(pids[i], &ws, 0);
+            if (i == n - 1) {
+                if (WIFEXITED(ws)) last_status = WEXITSTATUS(ws);
+                else last_status = 1;
             }
         }
-        return last_status;
     }
 
-    return 0; // Return job status properly?
+    return last_status;
 }
 
-static int execute_binary_op(ast_binary_op_t *bin) {
-    // Handle background execution specially
+static int execute_binary_op(ast_binary_op_t *bin, exec_info_t *info) {
+    // Handle background execution by passing it down to avoid double-forking
     if (bin->op == OP_BACKGROUND) {
-        pid_t pid = fork();
-        if (pid == 0) {
-            reset_traps();
-            // Child: run the command
-            if (shell_is_interactive) {
-                // Create new process group
-                setpgid(0, 0);
-                // Reset signal handlers
-                signal(SIGINT, SIG_DFL);
-                signal(SIGQUIT, SIG_DFL);
-                signal(SIGTSTP, SIG_DFL);
-                signal(SIGTTIN, SIG_DFL);
-                signal(SIGTTOU, SIG_DFL);
-                signal(SIGCHLD, SIG_DFL);
-            }
-            exit(execute_ast(bin->left));
-        } else if (pid > 0) {
-            // Parent: add to job list
-            if (shell_is_interactive) {
-                setpgid(pid, pid);
-                job_t *job = job_new();
-                job->pgid = pid;
-                job->command = ast_to_string(bin->left);
-                job_add_process(job, pid, NULL);
-                printf("[%d] %d\n", job->id, (int)pid);
-            }
-            // Set $! to PID of background process
-            char pid_buf[16];
-            snprintf(pid_buf, sizeof(pid_buf), "%d", (int)pid);
-            shell_var_set("!", pid_buf);
-            
-            // Continue with right side if present (OP_BACKGROUND is unary, but just in case)
-            if (bin->right) {
-                return execute_ast(bin->right);
-            }
-            return 0;  // Background commands return 0 immediately
-        } else {
-            perror("fork");
-            return 1;
+        exec_info_t bg_info = *info;
+        bg_info.background = 1;
+        execute_ast(bin->left, &bg_info);
+        
+        if (bin->right) {
+            return execute_ast(bin->right, info);
         }
+        return 0; // Background commands return 0
     }
     
     int left_status;
     if (bin->op == OP_AND || bin->op == OP_OR) {
         /* POSIX: errexit ignored for any command of an AND-OR list other than the last */
         errexit_disabled++;
-        left_status = execute_ast(bin->left);
+        left_status = execute_ast(bin->left, info);
         errexit_disabled--;
     } else {
-        left_status = execute_ast(bin->left);
+        left_status = execute_ast(bin->left, info);
     }
     
     // Update $? after each command so subsequent commands can see it
@@ -1676,11 +1748,11 @@ static int execute_binary_op(ast_binary_op_t *bin) {
     switch (bin->op) {
         case OP_SEQ:
             check_traps();
-            return execute_ast(bin->right);
+            return execute_ast(bin->right, info);
         case OP_AND:
             if (left_status == 0) {
                 check_traps();
-                return execute_ast(bin->right);  /* Right is "last" - errexit applies */
+                return execute_ast(bin->right, info);  /* Right is "last" - errexit applies */
             }
             /* Short-circuit: left failed, don't execute right.
              * errexit is skipped by early return in execute_ast for AND nodes */
@@ -1688,7 +1760,7 @@ static int execute_binary_op(ast_binary_op_t *bin) {
         case OP_OR:
             if (left_status != 0) {
                 check_traps();
-                return execute_ast(bin->right);  /* Right is "last" - errexit applies */
+                return execute_ast(bin->right, info);  /* Right is "last" - errexit applies */
             }
             /* Short-circuit: left succeeded, return it */
             return left_status;
@@ -1698,34 +1770,34 @@ static int execute_binary_op(ast_binary_op_t *bin) {
     return 1;
 }
 
-static int execute_if(ast_if_t *if_node) {
+static int execute_if(ast_if_t *if_node, exec_info_t *info) {
     errexit_disabled++;
-    int cond_status = execute_ast(if_node->condition);
+    int cond_status = execute_ast(if_node->condition, info);
     errexit_disabled--;
     
     if (func_return_signaled || loop_break_count > 0 || loop_continue_count > 0) return cond_status;
     
     if (cond_status == 0) {
-        return execute_ast(if_node->then_body);
+        return execute_ast(if_node->then_body, info);
     } else {
         if (if_node->else_body)
-            return execute_ast(if_node->else_body);
+            return execute_ast(if_node->else_body, info);
         return 0;
     }
 }
 
-static int execute_while(ast_while_t *w) {
+static int execute_while(ast_while_t *w, exec_info_t *info) {
     int status = 0;
     while (1) {
         errexit_disabled++;
-        int cond_status = execute_ast(w->condition);
+        int cond_status = execute_ast(w->condition, info);
         errexit_disabled--;
         check_traps();
         
         if (cond_status != 0) break;
         
         if (func_return_signaled) return status;
-        status = execute_ast(w->body);
+        status = execute_ast(w->body, info);
         check_traps();
         if (func_return_signaled) return status;
         if (loop_break_count > 0) {
@@ -1741,14 +1813,14 @@ static int execute_while(ast_while_t *w) {
     return status;
 }
 
-static int execute_for(ast_for_t *f) {
+static int execute_for(ast_for_t *f, exec_info_t *info) {
     int status = 0;
     char **expanded = expand_list(f->elements);
     if (!expanded) return 0;
     
     for (int i = 0; expanded[i] != NULL; i++) {
         shell_var_set(f->var_name, expanded[i]);
-        status = execute_ast(f->body);
+        status = execute_ast(f->body, info);
         check_traps();
         if (func_return_signaled) {
             for (int k = 0; expanded[k]; k++) free(expanded[k]);
@@ -1771,7 +1843,7 @@ static int execute_for(ast_for_t *f) {
     return status;
 }
 
-static int execute_case(ast_case_t *c) {
+static int execute_case(ast_case_t *c, exec_info_t *info) {
     char *word = expand_word(c->word);
     if (!word) word = strdup("");
     int status = 0;
@@ -1788,7 +1860,7 @@ static int execute_case(ast_case_t *c) {
         free(pattern);
         
         if (match) {
-            status = execute_ast(item->body);
+            status = execute_ast(item->body, info);
             break; 
         }
         item = item->next;
@@ -1798,20 +1870,41 @@ static int execute_case(ast_case_t *c) {
     return status;
 }
 
-static int execute_subshell(ast_subshell_t *sub) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        reset_traps();
-        exit(execute_ast(sub->list));
+static int execute_subshell(ast_subshell_t *sub, exec_info_t *info) {
+    /* If we are already in a child (pipeline or background), we can just execute the list directly.
+       POSIX says (list) executes in a subshell environment. Being in a child provides that. */
+    int must_fork = !(info->pipeline || info->background || info->subshell);
+    pid_t pid;
+
+    if (must_fork) {
+        pid = fork();
+    } else {
+        pid = 0;
     }
-    int status;
-    waitpid(pid, &status, 0);
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    return 1;
+
+    if (pid == 0) {
+        if (must_fork) reset_traps();
+        
+        /* New context for subshell */
+        exec_info_t sub_info = *info;
+        sub_info.subshell = 1;
+        
+        exit(execute_ast(sub->list, &sub_info));
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) return WEXITSTATUS(status);
+        if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+        return 1;
+    } else {
+        perror("fork");
+        return 1;
+    }
 }
 
 // Implement execute_function_def
-static int execute_function_def(ast_function_t *func_def) {
+static int execute_function_def(ast_function_t *func_def, exec_info_t *info) {
+    (void)info;
     if (!func_def || !func_def->name) return 1;
     
     // Check if exists
@@ -1838,7 +1931,7 @@ static int execute_function_def(ast_function_t *func_def) {
     return 0;
 }
 
-static int execute_function(function_entry_t *func, int argc, char **argv) {
+static int execute_function(function_entry_t *func, int argc, char **argv, exec_info_t *info) {
     shell_var_push_args();
     shell_var_push_scope();
     shell_var_set_args(argc, argv);
@@ -1848,7 +1941,7 @@ static int execute_function(function_entry_t *func, int argc, char **argv) {
     int saved_return_status = func_return_status;
     func_return_signaled = 0;
     
-    int status = execute_ast(func->body);
+    int status = execute_ast(func->body, info);
     
     if (func_return_signaled) {
         status = func_return_status;

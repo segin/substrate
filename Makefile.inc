@@ -10,6 +10,13 @@ LD ?= ld
 AR ?= ar
 AS ?= as
 
+# Warning policy
+WARNFLAGS ?= -Wall -Wextra
+WERROR ?= -Werror
+ifneq ($(NO_WERROR),1)
+WARNFLAGS += $(WERROR)
+endif
+
 TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 # Branding utility for native Substrate binaries
@@ -19,7 +26,7 @@ BRANDELF = $(TOP)/usr.bin/brandelf/brandelf
 DESTDIR ?= $(TOP)/dist
 
 # Base flags for 32-bit x86
-COMMON_FLAGS = -m32 -Wall -Wextra -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx
+COMMON_FLAGS = -m32 $(WARNFLAGS) -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx
 USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include 2>/dev/null)
@@ -47,16 +54,16 @@ KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) -I$(KERNEL_SRC)
 ifdef NATIVE_BUILD
     # Host build configuration
     HOSTCC ?= cc
-    HOSTCFLAGS ?= -O2 -Wall
+    HOSTCFLAGS ?= -O2 $(WARNFLAGS)
     CC := $(HOSTCC)
     CFLAGS := $(HOSTCFLAGS)
-    # Start with empty/standard LDFLAGS for host
-    USER_LDFLAGS :=
-    # Ensure no 32-bit override if host is 64-bit (unless HOSTCFLAGS specifies it)
+    # Start with empty/standard flags for host, but allow overrides
+    USER_CFLAGS := $(CFLAGS) $(USER_CFLAGS)
+    USER_LDFLAGS := $(USER_LDFLAGS)
 else
     # Target build configuration (Substrate i386)
-    USER_CFLAGS = $(CFLAGS) -I$(TOP)/sys
-    USER_LDFLAGS = -m32 -nostdlib -fno-pie -no-pie
+    USER_CFLAGS := $(CFLAGS) -I$(TOP)/sys $(USER_CFLAGS)
+    USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(USER_LDFLAGS)
 endif
 
 LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)

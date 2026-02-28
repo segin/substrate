@@ -150,6 +150,7 @@ extern short *item_set;
 extern short *item_set_end;
 extern unsigned *rules_used;
 extern int nstates;
+extern core *first_state;
 
 /* Closure globals (defined in closure.c) */
 extern short *first_derives;
@@ -180,6 +181,17 @@ extern int yytable_size;         /* Size of yytable/yycheck */
 extern short final_state;        /* Accept state */
 extern int SRtotal;              /* Shift/reduce conflict count */
 extern int RRtotal;              /* Reduce/reduce conflict count */
+extern short *SRconflicts;       /* Per-state S/R conflict count */
+extern short *RRconflicts;       /* Per-state R/R conflict count */
+
+/* LALR diagnostics (lalr.c) */
+extern int lalr_ngotos;
+extern int lalr_dr_term_count;
+extern int lalr_read_edge_count;
+extern int lalr_la_entry_count;
+extern int lalr_la_reduction_count;
+extern unsigned *lalr_LA;
+extern int lalr_nreductions;
 
 /* Reader state globals if needed */
 
@@ -222,6 +234,7 @@ void closure_new(int n); /* If using new style */
 
 /* lalr.c */
 void lalr(void);
+void lalr_free(void);
 
 /* mkpar.c */
 void make_parser(void);

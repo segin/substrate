@@ -1,0 +1,26 @@
+.Dd February 27, 2026
+.Dt IR-VERIFIER 1
+.Os Substrate
+.Sh NAME
+.Nm ir-verifier
+.Nd verify textual SSA IR module correctness
+.Sh SYNOPSIS
+.Nm
+.Ar input.ir
+.Sh DESCRIPTION
+.Nm
+parses a textual IR module and runs structural/type verification.
+It reports parse/verify diagnostics with line numbers.
+.Sh EXIT STATUS
+.Bl -tag -width 2
+.It 0
+IR parsed and verified successfully.
+.It 1
+Parse or verification failure.
+.It 2
+Invalid command usage.
+.El
+.Sh SEE ALSO
+.Xr ir-normalize 1 ,
+.Xr ir-diff 1 ,
+.Xr cc 1

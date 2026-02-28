@@ -1,89 +1,127 @@
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+
 #include "ls_colors.h"
 
-// LS_COLORS format: "key=value:key=value:..."
-// Keys: di=directory, ln=link, ex=executable, fi=file, so=socket, pi=pipe, bd=block, cd=char
-
-static char color_di[32] = "\033[1;34m"; // directory - blue
-static char color_ln[32] = "\033[1;36m"; // symlink - cyan
-static char color_ex[32] = "\033[1;32m"; // executable - green
-static char color_fi[32] = "";           // regular file
-static char color_so[32] = "\033[1;35m"; // socket - magenta
-static char color_pi[32] = "\033[33m";   // pipe - brown/yellow
-static char color_bd[32] = "\033[1;33m"; // block device
-static char color_cd[32] = "\033[1;33m"; // char device
-static char color_or[32] = "\033[1;31m"; // orphan link - red
+static char color_di[32] = "\033[1;34m";
+static char color_ln[32] = "\033[1;36m";
+static char color_ex[32] = "\033[1;32m";
+static char color_fi[32] = "";
+static char color_so[32] = "\033[1;35m";
+static char color_pi[32] = "\033[33m";
+static char color_bd[32] = "\033[1;33m";
+static char color_cd[32] = "\033[1;33m";
+static char color_or[32] = "\033[1;31m";
 static char color_reset[16] = "\033[0m";
 
-static int initialized = 0;
+static bool initialized;
 
-static void parse_color(const char *key, const char *val, int vlen) {
-    char buf[32];
-    if (vlen >= 31) vlen = 30;
-    
-    // Convert LS_COLORS value (like "01;34") to ANSI escape
-    buf[0] = '\033';
-    buf[1] = '[';
-    memcpy(buf + 2, val, vlen);
-    buf[2 + vlen] = 'm';
-    buf[3 + vlen] = '\0';
-    
-    if (strncmp(key, "di", 2) == 0) memcpy(color_di, buf, 32);
-    else if (strncmp(key, "ln", 2) == 0) memcpy(color_ln, buf, 32);
-    else if (strncmp(key, "ex", 2) == 0) memcpy(color_ex, buf, 32);
-    else if (strncmp(key, "fi", 2) == 0) memcpy(color_fi, buf, 32);
-    else if (strncmp(key, "so", 2) == 0) memcpy(color_so, buf, 32);
-    else if (strncmp(key, "pi", 2) == 0) memcpy(color_pi, buf, 32);
-    else if (strncmp(key, "bd", 2) == 0) memcpy(color_bd, buf, 32);
-    else if (strncmp(key, "cd", 2) == 0) memcpy(color_cd, buf, 32);
-    else if (strncmp(key, "or", 2) == 0) memcpy(color_or, buf, 32);
-    else if (strncmp(key, "rs", 2) == 0) { // reset
-        if (vlen < 14) {
-            color_reset[0] = '\033';
-            color_reset[1] = '[';
-            memcpy(color_reset + 2, val, vlen);
-            color_reset[2 + vlen] = 'm';
-            color_reset[3 + vlen] = '\0';
-        }
+static void write_ansi_code(char *dst, size_t dstsz, const char *val, size_t vlen) {
+    if (dst == NULL || dstsz < 4) {
+        return;
+    }
+
+    if (vlen + 4 > dstsz) {
+        vlen = dstsz - 4;
+    }
+
+    dst[0] = '\033';
+    dst[1] = '[';
+    memcpy(dst + 2, val, vlen);
+    dst[2 + vlen] = 'm';
+    dst[3 + vlen] = '\0';
+}
+
+static void assign_color(const char *key, size_t klen, const char *val, size_t vlen) {
+    if (klen == 2 && strncmp(key, "di", 2) == 0) {
+        write_ansi_code(color_di, sizeof(color_di), val, vlen);
+    } else if (klen == 2 && strncmp(key, "ln", 2) == 0) {
+        write_ansi_code(color_ln, sizeof(color_ln), val, vlen);
+    } else if (klen == 2 && strncmp(key, "ex", 2) == 0) {
+        write_ansi_code(color_ex, sizeof(color_ex), val, vlen);
+    } else if (klen == 2 && strncmp(key, "fi", 2) == 0) {
+        write_ansi_code(color_fi, sizeof(color_fi), val, vlen);
+    } else if (klen == 2 && strncmp(key, "so", 2) == 0) {
+        write_ansi_code(color_so, sizeof(color_so), val, vlen);
+    } else if (klen == 2 && strncmp(key, "pi", 2) == 0) {
+        write_ansi_code(color_pi, sizeof(color_pi), val, vlen);
+    } else if (klen == 2 && strncmp(key, "bd", 2) == 0) {
+        write_ansi_code(color_bd, sizeof(color_bd), val, vlen);
+    } else if (klen == 2 && strncmp(key, "cd", 2) == 0) {
+        write_ansi_code(color_cd, sizeof(color_cd), val, vlen);
+    } else if (klen == 2 && strncmp(key, "or", 2) == 0) {
+        write_ansi_code(color_or, sizeof(color_or), val, vlen);
+    } else if (klen == 2 && strncmp(key, "rs", 2) == 0) {
+        write_ansi_code(color_reset, sizeof(color_reset), val, vlen);
     }
 }
 
 void ls_colors_init(void) {
-    if (initialized) return;
-    initialized = 1;
-    
-    char *lscolors = getenv("LS_COLORS");
-    if (!lscolors) return;
-    
-    char *p = lscolors;
-    while (*p) {
-        // Find key
-        char *eq = strchr(p, '=');
-        if (!eq) break;
-        
-        // Find value end
-        char *colon = strchr(eq + 1, ':');
-        int vlen = colon ? (colon - eq - 1) : (int)strlen(eq + 1);
-        
-        parse_color(p, eq + 1, vlen);
-        
-        if (!colon) break;
-        p = colon + 1;
+    const char *spec;
+
+    if (initialized) {
+        return;
+    }
+    initialized = true;
+
+    spec = getenv("LS_COLORS");
+    if (spec == NULL || *spec == '\0') {
+        return;
+    }
+
+    while (*spec != '\0') {
+        const char *eq = strchr(spec, '=');
+        const char *colon;
+        size_t klen;
+        size_t vlen;
+
+        if (eq == NULL) {
+            break;
+        }
+
+        colon = strchr(eq + 1, ':');
+        klen = (size_t)(eq - spec);
+        vlen = colon ? (size_t)(colon - (eq + 1)) : strlen(eq + 1);
+
+        if (klen > 0 && vlen > 0) {
+            assign_color(spec, klen, eq + 1, vlen);
+        }
+
+        if (colon == NULL) {
+            break;
+        }
+        spec = colon + 1;
     }
 }
 
 const char *ls_colors_get(const char *name, mode_t mode) {
-    (void)name; // Can be used for extension-based coloring later
-    
-    if (S_ISDIR(mode)) return color_di;
-    if (S_ISLNK(mode)) return color_ln;
-    if (S_ISSOCK(mode)) return color_so;
-    if (S_ISFIFO(mode)) return color_pi;
-    if (S_ISBLK(mode)) return color_bd;
-    if (S_ISCHR(mode)) return color_cd;
-    if (mode & (S_IXUSR | S_IXGRP | S_IXOTH)) return color_ex;
+    (void)name;
+
+    if (S_ISDIR(mode)) {
+        return color_di;
+    }
+    if (S_ISLNK(mode)) {
+        return color_ln;
+    }
+    if (S_ISSOCK(mode)) {
+        return color_so;
+    }
+    if (S_ISFIFO(mode)) {
+        return color_pi;
+    }
+    if (S_ISBLK(mode)) {
+        return color_bd;
+    }
+    if (S_ISCHR(mode)) {
+        return color_cd;
+    }
+    if ((mode & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0) {
+        return color_ex;
+    }
+
     return color_fi;
 }
 

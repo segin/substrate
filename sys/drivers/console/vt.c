@@ -7,7 +7,7 @@
 #include <kern/console.h>
 #include <string.h>
 #include <sys/tty.h>
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 
 static vt_state_t vt_states[VT_MAX];
 static int active_vt = 0;

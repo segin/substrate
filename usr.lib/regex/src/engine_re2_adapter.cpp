@@ -1,5 +1,11 @@
 #ifdef REGEX_USE_RE2
 
+/*
+ * RE2 adapter implementation.
+ * This file provides the C++ implementation of the RE2 adapter, exposing
+ * a C-compatible regex_engine_vtable.
+ */
+
 // Include C++ headers first to avoid conflicts with local C headers
 #include <re2/re2.h>
 #include <string>
@@ -10,7 +16,18 @@
 
 extern "C" {
 // Include internal headers inside extern "C" to ensure C linkage for internal types/functions
+#ifdef __cplusplus
+#define wchar_t __wchar_t_renamed
+#endif
 #include "regex_internal.h"
+#ifdef __cplusplus
+#undef wchar_t
+// Fix NULL definition from C stddef.h which is incompatible with C++
+#ifdef NULL
+#undef NULL
+#define NULL 0
+#endif
+#endif
 }
 
 extern "C" {
@@ -430,7 +447,18 @@ const regex_engine_vtable *regex_engine_re2_vtable(void) {
 #else
 
 // Fallback if not enabled
+#ifdef __cplusplus
+#define wchar_t __wchar_t_renamed
+#endif
 #include <stddef.h>
+#ifdef __cplusplus
+#undef wchar_t
+// Fix NULL definition from C stddef.h which is incompatible with C++
+#ifdef NULL
+#undef NULL
+#define NULL 0
+#endif
+#endif
 
 extern "C" {
 // Must include internal header to see declaration, but since it's C++ without extern C guard in header,

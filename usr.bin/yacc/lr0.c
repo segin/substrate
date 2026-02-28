@@ -15,7 +15,7 @@ unsigned *rules_used;
 /* State storage */
 int nstates;
 static core **state_set;        /* Hash table for states */
-static core *first_state;       /* Linked list of all states */
+core *first_state;              /* Linked list of all states */
 static core *last_state;
 static int current_nshifts;     /* Number of shifts for current state */
 static short *shift_symbol;     /* Symbols we shift on */
@@ -24,6 +24,7 @@ static short *shiftset;         /* Shift set */
 static short *kernel_base;      /* Base of kernel items per state */
 static short *kernel_end;       /* End of kernel items per state */
 static short *kernel_items;     /* Kernel item storage */
+static int *symbol_count;       /* Item counts per symbol */
 
 /* Global shift/reduction lists */
 shifts *first_shift = NULL;
@@ -43,9 +44,10 @@ static void generate_states(void);
 static int get_state(int symbol);
 static void new_item_sets(void);
 static void append_states(void);
-static void save_shifts(void);
-static void save_reductions(void);
+static void save_shifts(int stateno);
+static void save_reductions(int stateno);
 static core *new_state(int symbol);
+static int cmp_short(const void *a, const void *b);
 
 void lr0(void) {
     allocate_storage();
@@ -62,8 +64,8 @@ static void allocate_storage(void) {
 static void allocate_item_sets(void) {
     int i;
     
-    /* Allocate item set storage - needs to hold all items */
-    item_set = (short *)malloc((nitems + 1) * sizeof(short));
+    /* Closure can add each rule's start item to the nucleus. */
+    item_set = (short *)malloc((nitems + nrules + 1) * sizeof(short));
     if (item_set == NULL) no_space();
     
     /* Bit vector for rules used in closure */
@@ -84,13 +86,16 @@ static void allocate_item_sets(void) {
     kernel_base = (short *)malloc(nsyms * sizeof(short));
     kernel_end = (short *)malloc(nsyms * sizeof(short));
     kernel_items = (short *)malloc(nitems * sizeof(short));
-    if (kernel_base == NULL || kernel_end == NULL || kernel_items == NULL)
+    symbol_count = (int *)malloc(nsyms * sizeof(int));
+    if (kernel_base == NULL || kernel_end == NULL || kernel_items == NULL ||
+        symbol_count == NULL)
         no_space();
     
     /* Initialize kernel base indices */
     for (i = 0; i < nsyms; i++) {
         kernel_base[i] = -1;
         kernel_end[i] = -1;
+        symbol_count[i] = 0;
     }
 }
 
@@ -115,7 +120,6 @@ static void set_state_table(void) {
 
 
 static void initialize_states(void) {
-    int i;
     core *sp;
     
     /* Create initial state with augmented start rule: $accept : . start $end */
@@ -128,7 +132,7 @@ static void initialize_states(void) {
     /* Actually, we need to create augmented grammar first */
     
     /* Initialize item_set with the initial kernel */
-    item_set[0] = rrhs[2];  /* First item of first rule */
+    item_set[0] = rrhs[1];  /* First item of first rule (augmented) */
     item_set_end = item_set + 1;
     
     /* Create state 0 */
@@ -142,7 +146,7 @@ static void initialize_states(void) {
     sp->nitems = 1;
     sp->items = (short *)malloc(sizeof(short));
     if (sp->items == NULL) no_space();
-    sp->items[0] = rrhs[2];
+    sp->items[0] = rrhs[1];
     
     first_state = sp;
     last_state = sp;
@@ -153,51 +157,89 @@ static void initialize_states(void) {
     state_set[0] = sp;
 }
 
+static int cmp_short(const void *a, const void *b) {
+    short sa = *(const short *)a;
+    short sb = *(const short *)b;
+    return (sa > sb) - (sa < sb);
+}
+
 
 /* Compute GOTO for all symbols from current state's closure */
 static void new_item_sets(void) {
-    int i;
+    int i, j;
     short *isp;
     int symbol;
-    int count;
+    int next_slot;
+    int item_count;
     
     /* Clear kernel arrays */
     for (i = 0; i < nsyms; i++) {
         kernel_base[i] = -1;
         kernel_end[i] = -1;
+        symbol_count[i] = 0;
     }
     current_nshifts = 0;
+
+    item_count = (int)(item_set_end - item_set);
+    if (item_count > 1) {
+        qsort(item_set, (size_t)item_count, sizeof(short), cmp_short);
+    }
     
-    /* Scan closure items - for each item A -> α.Xβ, add A -> αX.β to kernel(X) */
+    /* Count items that shift on each symbol. */
     for (isp = item_set; isp < item_set_end; isp++) {
         short item = *isp;
         symbol = ritem[item];
-        
-        if (symbol > 0) {  /* Not end of rule (negative = end marker) */
-            /* Add item+1 to kernel for symbol */
-            if (kernel_base[symbol] < 0) {
-                /* First item for this symbol */
-                shift_symbol[current_nshifts++] = symbol;
-                kernel_base[symbol] = 0;  /* Will be set properly below */
-            }
+
+        if (symbol >= 0) {
+            symbol_count[symbol]++;
         }
     }
-    
-    /* Now do a second pass to actually store items */
-    /* Reset and accumulate counts first */
-    count = 0;
+
+    /* Assign deterministic symbol ordering and per-symbol slices. */
+    next_slot = 0;
+    for (symbol = 0; symbol < nsyms; symbol++) {
+        if (symbol_count[symbol] > 0) {
+            shift_symbol[current_nshifts++] = symbol;
+            kernel_base[symbol] = (short)next_slot;
+            kernel_end[symbol] = (short)next_slot;
+            next_slot += symbol_count[symbol];
+        }
+    }
+
+    /* Populate kernel slices with advanced items. */
+    for (isp = item_set; isp < item_set_end; isp++) {
+        short item = *isp;
+        symbol = ritem[item];
+        if (symbol >= 0) {
+            kernel_items[kernel_end[symbol]++] = item + 1;
+        }
+    }
+
+    /*
+     * Normalize each kernel slice:
+     * - sort item numbers for reproducible state keys;
+     * - remove duplicates for correct set semantics.
+     */
     for (i = 0; i < current_nshifts; i++) {
+        int start;
+        int end;
+        int write;
         symbol = shift_symbol[i];
-        kernel_base[symbol] = count;
-        kernel_end[symbol] = count;
-        
-        /* Count items for this symbol */
-        for (isp = item_set; isp < item_set_end; isp++) {
-            if (ritem[*isp] == symbol) {
-                kernel_items[kernel_end[symbol]++] = *isp + 1;  /* Advance dot */
-                count++;
+        start = kernel_base[symbol];
+        end = kernel_end[symbol];
+        if (end - start <= 1) {
+            continue;
+        }
+
+        qsort(kernel_items + start, (size_t)(end - start), sizeof(short), cmp_short);
+
+        write = start + 1;
+        for (j = start + 1; j < end; j++) {
+            if (kernel_items[j] != kernel_items[write - 1]) {
+                kernel_items[write++] = kernel_items[j];
             }
         }
+        kernel_end[symbol] = (short)write;
     }
 }
 
@@ -298,7 +340,7 @@ static void append_states(void) {
     }
 }
 
-static void save_shifts(void) {
+static void save_shifts(int stateno) {
     shifts *sp;
     int i;
     
@@ -308,7 +350,7 @@ static void save_shifts(void) {
     if (sp == NULL) no_space();
     
     sp->next = NULL;
-    sp->number = nstates - 1;  /* Current state being processed */
+    sp->number = stateno;
     sp->nshifts = current_nshifts;
     for (i = 0; i < current_nshifts; i++)
         sp->shift[i] = shiftset[i];
@@ -323,7 +365,7 @@ static void save_shifts(void) {
 }
 
 
-static void save_reductions(void) {
+static void save_reductions(int stateno) {
     int count;
     int i;
     short *isp;
@@ -343,7 +385,7 @@ static void save_reductions(void) {
     if (rp == NULL) no_space();
     
     rp->next = NULL;
-    rp->number = nstates - 1;
+    rp->number = stateno;
     rp->nreds = count;
     for (i = 0; i < count; i++)
         rp->rules[i] = redset[i];
@@ -374,8 +416,8 @@ static void generate_states(void) {
         append_states();
         
         /* Save shift and reduction information */
-        save_shifts();
-        save_reductions();
+        save_shifts(sp->number);
+        save_reductions(sp->number);
         
         sp = sp->next;
     }

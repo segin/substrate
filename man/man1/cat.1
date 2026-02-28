@@ -1,110 +1,184 @@
-.\" cat(1) man page
 .TH CAT 1 "February 2026" "Substrate" "User Commands"
 .SH NAME
 cat \- concatenate files and print on standard output
 .SH SYNOPSIS
 .B cat
-.RI [ OPTION ]...
-.RI [ FILE ]...
+.RB [ \-ABbefEflnstTuv ]
+.RB [ \-B " bsize ]"
+.RB [ \- ]
+.RI [ file ...]
+.br
+.B cat
+.RB [ \-A ]
+.RB [ \-b | \-n ]
+.RB [ \-e | \-E ]
+.RB [ \-t | \-T ]
+.RB [ \-suv ]
+.RB [ \-f ]
+.RB [ \-l ]
+.RB [ \-B " bsize ]
+.RB [ \-\-number | \-\-number\-nonblank | \-\-squeeze\-blank ]
+.RB [ \-\-show\-all | \-\-show\-ends | \-\-show\-tabs | \-\-show\-nonprinting ]
+.RI [ file ...]
+.br
+.B cat
+.RB [ \-\-help | \-\-version ]
 .SH DESCRIPTION
-Concatenate FILE(s) to standard output.
+.B cat
+writes each input file to standard output in order.
+If no files are specified, or if a file is
+.BR - ,
+input is read from standard input.
 .PP
-With no FILE, or when FILE is \-, read standard input.
+With no text processing flags enabled,
+.B cat
+uses a raw high-throughput read/write loop.
+When any of
+.BR \-A ,
+.BR \-b ,
+.BR \-e ,
+.BR \-E ,
+.BR \-n ,
+.BR \-s ,
+.BR \-t ,
+.BR \-T ,
+or
+.BR \-v
+is enabled,
+.B cat
+uses cooked byte-oriented processing.
 .SH OPTIONS
 .TP
-.BR \-A ", " \-\-show\-all
-Equivalent to \fB\-vET\fR.
+.BI \-B " bsize"
+Set raw mode buffer size in bytes. Accepts decimal or hexadecimal values.
 .TP
-.BR \-b ", " \-\-number\-nonblank
-Number non-blank output lines, overrides \fB\-n\fR.
+.BR \-A , " " \-\-show\-all
+Equivalent to
+.BR \-vET .
+.TP
+.BR \-b , " " \-\-number\-nonblank
+Number non-blank output lines; implies
+.BR \-n .
 .TP
 .B \-e
-Equivalent to \fB\-vE\fR.
+Equivalent to
+.BR \-vE .
 .TP
-.BR \-E ", " \-\-show\-ends
-Display $ at end of each line.
+.BR \-E , " " \-\-show\-ends
+Display
+.B $
+before each newline.
 .TP
-.BR \-n ", " \-\-number
+.B \-f
+Raw-mode fast-open semantics: attempt non-blocking open first,
+then restore blocking mode.
+.TP
+.B \-l
+Lock stdout for writing with
+.BR fcntl (2)
+(
+.BR F_SETLKW ,
+.BR F_WRLCK )
+for the entire operation.
+.TP
+.BR \-n , " " \-\-number
 Number all output lines.
 .TP
-.BR \-s ", " \-\-squeeze\-blank
-Suppress repeated empty output lines.
+.BR \-s , " " \-\-squeeze\-blank
+Collapse multiple adjacent empty lines into one.
 .TP
 .B \-t
-Equivalent to \fB\-vT\fR.
+Equivalent to
+.BR \-vT .
 .TP
-.BR \-T ", " \-\-show\-tabs
-Display TAB characters as ^I.
+.BR \-T , " " \-\-show\-tabs
+Display TAB as
+.BR ^I .
 .TP
 .B \-u
-(ignored) Write unbuffered. This option is accepted for POSIX
-compatibility but has no effect as output is already unbuffered.
+Set stdout to unbuffered mode (
+.BR setbuf (3)
+with NULL).
+.PP
+In raw mode this keeps direct syscall-based output behavior.
+In cooked mode this disables the internal cooked output buffer.
 .TP
-.BR \-v ", " \-\-show\-nonprinting
-Use ^ and M- notation for non-printing characters,
-except for linefeed and tab.
+.BR \-v , " " \-\-show\-nonprinting
+Display non-printable bytes using caret and
+.B M-
+notation.
 .TP
 .B \-\-help
-Display help message and exit.
+Display help and exit.
 .TP
 .B \-\-version
-Output version information and exit.
-.SH "NON-PRINTING CHARACTER NOTATION"
-When \fB\-v\fR is specified, non-printing characters are displayed as follows:
+Display version information and exit.
+.SH NON-PRINTING BYTE ENCODING
+With
+.BR \-v :
+.IP "1." 4
+0x00-0x1F are shown as
+.B ^@
+through
+.BR ^_ .
+.IP "2." 4
+0x7F is shown as
+.BR ^? .
+.IP "3." 4
+0x80-0xFF are shown as
+.B M-
+followed by the low 7-bit encoding.
+.IP "4." 4
+TAB and NL are handled separately by
+.BR \-T
+and
+.BR \-E .
+.SH ERROR HANDLING
+If a file cannot be opened or read,
+.B cat
+prints a diagnostic to stderr, records failure, and continues with remaining files.
+A stdout write failure is fatal for further processing.
+.PP
+Broken pipe (
+.BR EPIPE )
+is handled quietly so pipelines terminate cleanly.
+.SH LOCKING NOTES
+With
+.BR \-l ,
+stdout remains locked for the whole command.
+If locking is unsupported or fails,
+.B cat
+prints an error and exits non-zero.
+Advisory locking can deadlock if cooperating processes hold incompatible locks.
+.SH EXIT STATUS
 .TP
-Control characters (0x00-0x1F)
-Displayed as ^@ through ^_
+.B 0
+All requested output completed successfully.
 .TP
-DEL (0x7F)
-Displayed as ^?
-.TP
-High-bit characters (0x80-0x9F)
-Displayed as M-^@ through M-^_
-.TP
-High-bit characters (0xA0-0xFE)
-Displayed as M-\  through M-~
-.TP
-0xFF
-Displayed as M-^?
-.SH "EXIT STATUS"
-.TP
-0
-All files were processed successfully.
-.TP
-1
-An error occurred reading or writing one or more files.
+.B 1
+At least one error occurred (file open/read error, stdout failure, lock failure, etc.).
 .SH EXAMPLES
 .TP
-cat file
-Output contents of file to standard output.
+.B cat file
+Print one file.
 .TP
-cat file1 file2 > combined
-Concatenate file1 and file2 into combined.
+.B cat file1 file2
+Concatenate multiple files.
 .TP
-cat -n file
-Number all output lines.
+.B cat -n file
+Number all lines.
 .TP
-cat -b file
-Number only non-blank lines.
+.B cat -b -s file
+Number non-blank lines and squeeze blank runs.
 .TP
-cat -s file
-Squeeze multiple blank lines into one.
+.B cat -A file
+Show tabs, line ends, and non-printable bytes.
 .TP
-cat -A file
-Show all non-printing characters, tabs, and end-of-line markers.
-.SH "SEE ALSO"
-.BR tac (1),
-.BR head (1),
-.BR tail (1),
-.BR more (1)
-.SH STANDARDS
-The
-.B cat
-utility is compliant with POSIX.1-2017.
-.PP
-The options \fB\-b\fR, \fB\-e\fR, \fB\-n\fR, \fB\-s\fR, \fB\-t\fR, \fB\-v\fR,
-\fB\-A\fR, \fB\-E\fR, and \fB\-T\fR are extensions.
-.SH HISTORY
-The
-.B cat
-utility appeared in Version 1 AT&T UNIX.
+.B cat -u - file
+Read standard input and write unbuffered output.
+.SH SEE ALSO
+.BR cp (1),
+.BR tee (1),
+.BR fcntl (2),
+.BR read (2),
+.BR write (2)

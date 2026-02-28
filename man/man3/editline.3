@@ -1,0 +1,197 @@
+.\" Process this file with
+.\" groff -man -Tascii editline.3
+.\"
+.TH EDITLINE 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+editline \- command-line editing and history interface
+.SH LIBRARY
+Editline library (libedit, \-ledit)
+.SH SYNOPSIS
+.B #include <histedit.h>
+.PP
+.B typedef struct editline EditLine;
+.br
+.B typedef struct history History;
+.PP
+.B typedef struct lineinfo {
+.br
+.BI "    const char *buffer;"
+.br
+.BI "    const char *cursor;"
+.br
+.BI "    const char *lastchar;"
+.br
+.B } LineInfo;
+.PP
+.B typedef struct hist_event {
+.br
+.BI "    int num;"
+.br
+.BI "    const char *str;"
+.br
+.B } HistEvent;
+.PP
+.BI "EditLine *el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr);"
+.br
+.BI "void el_end(EditLine *el);"
+.br
+.BI "void el_reset(EditLine *el);"
+.br
+.BI "const char *el_gets(EditLine *el, int *count);"
+.br
+.BI "int el_set(EditLine *el, int op, ...);"
+.br
+.BI "int el_get(EditLine *el, int op, ...);"
+.br
+.BI "int el_source(EditLine *el, const char *file);"
+.br
+.BI "const LineInfo *el_line(EditLine *el);"
+.br
+.BI "int el_insertstr(EditLine *el, const char *str);"
+.br
+.BI "int el_deletestr(EditLine *el, int count);"
+.PP
+.BI "History *history_init(void);"
+.br
+.BI "void history_end(History *h);"
+.br
+.BI "int history(History *h, HistEvent *ev, int op, ...);"
+.SH DESCRIPTION
+The
+.B editline
+library provides interactive line editing, key binding, prompt handling,
+and command history support for user-space programs.
+.PP
+Public interfaces are grouped as:
+.TP
+.B Session lifecycle
+.BR el_init (3),
+.BR el_end (3),
+.BR el_reset (3)
+.TP
+.B Interactive input
+.BR el_gets (3),
+.BR el_line (3),
+.BR el_insertstr (3),
+.BR el_deletestr (3)
+.TP
+.B Configuration
+.BR el_set (3),
+.BR el_get (3),
+.BR el_source (3)
+.TP
+.B History
+.BR history (3),
+.BR history_init (3),
+.BR history_end (3)
+.SH PUBLIC MACROS
+Public operation macros used with
+.BR el_set ()
+and
+.BR el_get ()
+include:
+.TP
+.B EL_PROMPT
+Set/get primary prompt callback.
+.TP
+.B EL_RPROMPT
+Set/get right-side prompt callback.
+.TP
+.B EL_EDITOR
+Set/get editing mode (for example, "emacs" or "vi").
+.TP
+.B EL_SIGNAL
+Enable or disable internal signal handling.
+.TP
+.B EL_BIND
+Configure key bindings.
+.TP
+.B EL_ADDFN
+Register a custom editor function.
+.TP
+.B EL_HIST
+Attach a history backend callback and handle.
+.TP
+.B EL_GETCFN
+Set/get low-level character input callback.
+.TP
+.B EL_CLIENTDATA
+Set/get application-owned opaque pointer.
+.TP
+.B EL_REFRESH
+Request immediate redisplay.
+.TP
+.B EL_GETTC
+Query terminal capability values.
+.TP
+.B EL_SETTY
+Apply tty mode presets.
+.TP
+.B EL_GETTY
+Read current tty mode presets.
+.PP
+Public history operation macros used with
+.BR history ()
+include:
+.TP
+.B H_ENTER
+Append a new entry.
+.TP
+.B H_APPEND
+Append text to current entry.
+.TP
+.B H_PREV
+Move to previous entry.
+.TP
+.B H_NEXT
+Move to next entry.
+.TP
+.B H_CURR
+Read current entry.
+.TP
+.B H_FIRST
+Move to oldest entry.
+.TP
+.B H_LAST
+Move to newest entry.
+.TP
+.B H_SET
+Jump to entry by index.
+.TP
+.B H_CLEAR
+Remove all entries.
+.TP
+.B H_LOAD
+Load history from file.
+.TP
+.B H_SAVE
+Save history to file.
+.TP
+.B H_SETSIZE
+Set history size limit.
+.TP
+.B H_GETSIZE
+Get history size limit.
+.TP
+.B H_SETUNIQUE
+Enable or disable duplicate suppression.
+.TP
+.B H_GETUNIQUE
+Get duplicate suppression state.
+.TP
+.B H_END
+End history traversal state.
+.PP
+Public editor command return macros are:
+.BR CC_NORM ,
+.BR CC_NEWLINE ,
+.BR CC_EOF ,
+and
+.BR CC_ERROR .
+.SH SEE ALSO
+.BR el_init (3),
+.BR el_gets (3),
+.BR el_set (3),
+.BR el_source (3),
+.BR history (3),
+.BR editrc (5)

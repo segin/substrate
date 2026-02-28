@@ -34,7 +34,7 @@
 #include <sys/proc.h>
 #include <kern/console.h>
 #include <arch/i386/idt.h>
-#include <arch/i386/include/signal_arch.h>
+#include <arch/i386/signal_arch.h>
 #include <string.h>
 
 

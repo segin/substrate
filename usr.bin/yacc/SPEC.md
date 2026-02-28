@@ -142,10 +142,68 @@
 103. Resource errors: Memory exhaustion with graceful failure
 104. File errors: Permission denied, disk full with appropriate exit codes
 
+### 3.2.1 Reader Invariants
+1. Mid-rule action synthetic symbols (`$@N`) are interned in the global symbol table.
+2. Synthetic symbols participate in symbol packing and verbose output like normal nonterminals.
+3. Reader output (`plhs`, `rrhs`, `ritem`) must not contain unresolved temporary indices.
+
 ### 3.3 PERFORMANCE CHARACTERISTICS
 105. Time complexity: O(n³) worst-case for state construction (typical yacc algorithm)
 106. Memory: Efficient table compression equivalent to historical implementations
 107. Parser speed: Generated parser should match typical LALR(1) performance
+
+### 3.3.1 LR(0) Item-Set Determinism
+1. Closure item vectors are sorted before GOTO partitioning.
+2. Kernel items are grouped by shift symbol in deterministic symbol-index order.
+3. Kernel slices are sorted and deduplicated before state interning.
+4. Repeated parser generation over the same grammar must produce byte-identical state listings.
+
+### 3.3.2 Closure Semantics
+1. Closure expansion is transitive over nonterminals reachable after the dot.
+2. Each production contributes at most one `B -> .γ` item per closure set.
+3. Closure output is sorted and deduplicated before LR(0) kernel partitioning.
+
+### 3.3.3 GOTO Graph Correctness
+1. Shift and reduction records are keyed by the source LR state being processed.
+2. GOTO edge construction preserves deterministic symbol ordering per state.
+3. No shift edge is emitted for states whose closure contains only completed items.
+4. LR(0) construction passes (`item sets`, `closure`, `goto graph`) are treated as one deterministic pipeline.
+
+### 3.3.4 LALR DR/READ Sets
+1. DR sets are built from terminal shifts in each goto destination state.
+2. READS relations are built only across nullable nonterminal gotos from goto destination states.
+3. DR and READ metrics are emitted in verbose output for regression validation.
+
+### 3.3.5 LALR Lookahead Propagation
+1. Reduction lookaheads are derived from goto-follow sets using digraph-computed propagation.
+2. Per-reduction lookahead vectors are computed for every LR reduction entry.
+3. Verbose output reports populated lookahead reductions and total lookahead entries.
+4. LALR working sets are released after parser table construction to avoid retained temporary memory.
+
+### 3.3.6 ACTION/GOTO Table Construction
+1. ACTION rows include terminal shifts and lookahead-scoped reductions.
+2. GOTO defaults are selected per nonterminal from the most frequent destination.
+3. Compressed goto entries store only non-default source-state exceptions.
+
+### 3.3.7 Conflict Resolution Inputs
+1. Shift actions inherit precedence/associativity from their terminal symbol.
+2. Reduce actions inherit precedence/associativity from the reducing rule.
+3. Shift/reduce conflicts use declared precedence before fallback "shift wins".
+
+### 3.3.8 Default Reductions
+1. Default reductions are selected only for states without unsuppressed shift actions.
+2. The selected default is the most frequent unsuppressed reduce rule in the state.
+3. Reduce-table entries matching the default rule are omitted from packed tables.
+
+### 3.3.9 Table/Conflict Pipeline
+1. ACTION/GOTO construction runs before conflict suppression and default-reduction selection.
+2. Conflict suppression happens per-state/per-token before packed table emission.
+3. Packed tables reflect suppressed actions and default-reduction elision.
+
+### 3.3.10 Parser C Generation
+1. Generated `y.tab.c` contains parser tables, parser skeleton, and copied semantic actions.
+2. Generated parser C is host-compilable with a minimal `yylex/yyerror` driver.
+3. Debug variable emission is single-definition to avoid duplicate-symbol compile failures.
 
 ### 3.4 DOCUMENTATION
 108. Manual page: Conforming to POSIX man page format

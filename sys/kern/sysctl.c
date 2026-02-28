@@ -99,8 +99,6 @@ void sysctl_init(void) {
     sysctl_register_oid(&sysctl_hw_model);
     sysctl_register_oid(&sysctl_hw_ncpu);
     sysctl_register_oid(&sysctl_hw_pagesize);
-
-    sysctl_initialized = 1;
 }
 
 

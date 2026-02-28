@@ -1,0 +1,1 @@
+-R -a --preserve=all src dst

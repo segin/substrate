@@ -1,0 +1,62 @@
+.\" Process this file with
+.\" groff -man -Tascii editrc.5
+.\"
+.TH EDITRC 5 "February 2026" "Substrate" "File Formats"
+.SH NAME
+editrc \- editline startup configuration file
+.SH DESCRIPTION
+The
+.B editrc
+file configures behavior of applications that use
+.BR editline (3).
+.PP
+Each non-empty line contains one command and arguments. Lines beginning
+with
+.B #
+are comments.
+.PP
+The parser uses shell-like tokenization rules for whitespace and quoting.
+.SH FILES
+.TP
+.B ~/.editrc
+Per-user editline configuration.
+.TP
+.B /etc/editrc
+System-wide default configuration.
+.SH COMMANDS
+Common commands include:
+.TP
+.BI "bind " key " " command
+Bind a key sequence to an editor command.
+.TP
+.BI "editor " mode
+Set editing mode, typically
+.B emacs
+or
+.BR vi .
+.TP
+.BI "settc " cap " " value
+Set terminal capability override.
+.TP
+.BI "setty " mode
+Apply tty mode preset.
+.TP
+.BI "history " op " ..."
+Configure history behavior (size, uniqueness, load/save).
+.SH EXAMPLE
+.nf
+# Use vi key bindings
+editor vi
+
+# Keep 1000 commands and avoid adjacent duplicates
+history size 1000
+history unique on
+
+# Common key bindings
+bind "^A" beginning-of-line
+bind "^E" end-of-line
+.fi
+.SH SEE ALSO
+.BR editline (3),
+.BR el_source (3),
+.BR history (3)

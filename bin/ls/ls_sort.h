@@ -3,6 +3,6 @@
 
 #include "ls.h"
 
-void ls_sort_entries(file_info_t *files, int count, const ls_config_t *config);
+void ls_sort_entries(file_info_t *files, size_t count, const ls_config_t *config);
 
-#endif // LS_SORT_H
+#endif

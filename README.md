@@ -35,5 +35,28 @@ To launch the kernel in QEMU:
 - **[Specifications](docs/specs/)**: Detailed technical specifications for drivers, filesystems, and kernel subsystems.
 - **[Tasks](TASKS.md)**: Roadmap and current development status.
 
+## cp Utility Validation
+
+Production `cp` validation is hosted in `bin/cp/` and includes unit, integration,
+property, fuzz, and stress coverage.
+
+```bash
+make -C bin/cp NATIVE_BUILD=1 ci
+```
+
+CI entry point:
+
+```bash
+tests/ci/test-cp.sh
+```
+
+Fuzz crash reproduction:
+
+```bash
+cd bin/cp
+./fuzz_opts_path crash-<id>
+./fuzz_sparse_preserve crash-<id>
+```
+
 ## Contributing
 Please refer to **[AGENTS.md](AGENTS.md)** for development guidelines and standards.

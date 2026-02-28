@@ -3,6 +3,6 @@
 
 #include "ls.h"
 
-void ls_list_dir(const char *path, const ls_config_t *config);
+int ls_run(const ls_config_t *config, char **paths, int path_count);
 
-#endif // LS_TRAVERSE_H
+#endif

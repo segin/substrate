@@ -23,7 +23,8 @@ This section provides a high-level overview of the project's directory and file 
 │   ├── c/                # Standard C Library (libc)
 │   ├── sys/              # System Call Wrappers (libsys)
 │   ├── m/                # Math Library (libm)
-│   └── pthreads/         # POSIX Threads Library
+│   ├── pthreads/         # POSIX Threads Library
+│   └── edit/             # Editline Library (libedit)
 ├── include/              # Userspace C Library Headers
 ├── sbin/                 # System Binaries (mkfs, fsck)
 ├── dist/                 # Build Artifacts (RootFS staging area)
@@ -140,6 +141,23 @@ The system follows a monolithic kernel architecture with a strict separation bet
 ### Core Userland (`bin/`, `lib/`)
 These components are essential for booting and basic system operation.
 - **`bin/`**: Fundamental Unix utilities (`sh`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `cat`, `grep`, `wc`, `ps`, `kill`, `sync`, etc.).
+  - **`bin/cat/`**: Production `cat` utility with dual execution paths:
+    - Raw engine: `open/read/write` streaming path with dynamic buffer sizing (`-B` override, stdout block-size probe, 64KiB fallback), partial-write handling, and `EINTR` retry.
+    - Cooked engine: byte-oriented transform path for `-n/-b/-s/-E/-T/-v` (`-A/-e/-t` composites), implemented in reusable module `cat_cooked.c`.
+    - Robustness: optional fast open (`-f`), stdout write lock (`-l`), graceful broken-pipe handling, and Linux host validation harness in `tests/bin/cat/` (unit/integration/property/fuzz/regression + sanitizer/valgrind CI script `tests/ci/test-cat.sh`).
+  - **`bin/cp/`**: Production copy utility with modular engine:
+    - `cp_opts`: CLI parsing and conflict policy (`-f/-i/-n`, `-H/-L/-P`, preserve sets).
+    - `cp_copy`: recursive traversal, sparse-aware data movement, atomic replace, special-file handling.
+    - `cp_preserve`: metadata/xattr/ACL best-effort preservation.
+    - `cp_hardlink`: source inode graph tracking for hardlink-preserving archive copies.
+    - `bin/cp/tests`: host-side unit/integration/property/fuzz/stress validation harness.
+  - **`bin/chmod/`**: Production-mode permission utility with symbolic/numeric parser (`setmode/getmode` style), recursive traversal policy controls (`-R/-H/-L/-P`), reference-mode support, and host-side verification harness in `tests/chmod/`.
+  - **`bin/ls/`**: Modular directory listing utility split into:
+    - `ls_opts`: CLI parsing and option interaction rules (`-f`, output mode precedence, quoting/time/block-size parsing).
+    - `ls_traverse`: operand classification, recursive depth-first traversal, symlink behavior (`-L/-H`), and cycle detection via `(st_dev, st_ino)`.
+    - `ls_sort`: stable mergesort backend supporting name/size/time/version ordering with deterministic tie-breakers.
+    - `ls_print`: long-format rendering, mode/timestamp/size formatting, multi-output modes (single/comma/columns/by-lines), UID/GID caches, color/quoting handling.
+    - `bin/ls/tests`: host-side regression and acceptance harness covering sorting, output modes, symlink edge cases, recursion loops, and core CLI behavior.
 - **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`).
 - **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:
@@ -155,6 +173,7 @@ These components are essential for booting and basic system operation.
         - **Error Handling:** `math_errhandling` set to `MATH_ERRNO`.
     - **`dl/`**: Dynamic linker.
     - **`pthreads/`**: POSIX Threads library (wraps `thr_new` and `thr_exit`).
+    - **`edit/`**: Editline Library (line editing, arrow keys, history).
     - **`dbm/`**: Database Manager library.
 - **`libexec/`**:
     - **`ld.so`**: Dynamic linker/loader for ELF shared objects.

@@ -1,4 +1,4 @@
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 #include <drivers/input/keyboard.h>
 #include <kern/console.h>
 #include <string.h>

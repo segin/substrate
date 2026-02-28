@@ -14,7 +14,7 @@ static short *from_state;       /* Source state of each goto */
 static short *to_state;         /* Destination state of each goto */
 
 static unsigned *F;             /* FIRST sets as bit vectors */
-static unsigned *LA;            /* Lookahead sets (bit vectors) */
+unsigned *lalr_LA;             /* Lookahead sets (bit vectors) */
 static short **lookback;        /* Map reductions to gotos */
 static short **includes;        /* Propagation edges */
 
@@ -35,6 +35,12 @@ static int *INDEX;
 static unsigned *R;
 static short **relations;
 
+int lalr_ngotos;
+int lalr_dr_term_count;
+int lalr_read_edge_count;
+int lalr_la_entry_count;
+int lalr_la_reduction_count;
+
 /* Forward declarations */
 static void set_goto_map(void);
 static void initialize_F(void);
@@ -43,10 +49,18 @@ static void build_relations(void);
 static void compute_FOLLOWS(void);
 static void initialize_LA(void);
 static void compute_lookaheads(void);
+static shifts *find_shifts_for_state(int state);
+static int find_goto_index(int state, int symbol);
+static int find_predecessor_state(int dest_state, int symbol);
 static void digraph(short **relation);
 static void traverse(int i);
 
 void lalr(void) {
+    lalr_ngotos = 0;
+    lalr_dr_term_count = 0;
+    lalr_read_edge_count = 0;
+    lalr_la_entry_count = 0;
+    lalr_la_reduction_count = 0;
     set_nullable();
     set_goto_map();
     initialize_F();
@@ -92,7 +106,7 @@ static void set_nullable(void) {
 }
 
 static void set_goto_map(void) {
-    int i, j;
+    int i;
     shifts *sp;
     int count;
     short *temp_map;
@@ -143,67 +157,93 @@ static void set_goto_map(void) {
     }
     
     free(temp_map);
+    lalr_ngotos = ngotos;
 }
 
 
-/* Initialize FIRST sets */
-static void initialize_F(void) {
-    int i, j, k;
-    int nwords;
-    int changed;
-    
-    nwords = WORDSIZE(ntokens);
-    F = (unsigned *)calloc(nsyms * nwords, sizeof(unsigned));
-    if (F == NULL) no_space();
-    
-    /* FIRST(terminal) = {terminal} */
-    for (i = 0; i < ntokens; i++) {
-        SETBIT(F + i * nwords, i);
+static shifts *find_shifts_for_state(int state) {
+    shifts *sp;
+    for (sp = first_shift; sp != NULL; sp = sp->next) {
+        if (sp->number == state) {
+            return sp;
+        }
     }
-    
-    /* Compute FIRST sets for non-terminals using fixpoint iteration */
-    do {
-        changed = 0;
-        for (i = 2; i < nrules; i++) {
-            int lhs = plhs[i];
-            unsigned *lhs_first = F + lhs * nwords;
-            
-            /* For each symbol in RHS */
-            for (j = rrhs[i]; ritem[j] >= 0; j++) {
-                int sym = ritem[j];
-                unsigned *sym_first = F + sym * nwords;
-                
-                /* Add FIRST(sym) to FIRST(lhs) */
-                for (k = 0; k < nwords; k++) {
-                    unsigned old = lhs_first[k];
-                    lhs_first[k] |= sym_first[k];
-                    if (lhs_first[k] != old)
-                        changed = 1;
-                }
-                
-                /* Stop if sym is not nullable */
-                if (!nullable[sym])
-                    break;
+    return NULL;
+}
+
+static int find_goto_index(int state, int symbol) {
+    int i;
+    int var = symbol - ntokens;
+    if (var < 0 || var >= nvars) {
+        return -1;
+    }
+    for (i = goto_map[var]; i < goto_map[var + 1]; i++) {
+        if (from_state[i] == state) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int find_predecessor_state(int dest_state, int symbol) {
+    shifts *sp;
+    int i;
+
+    for (sp = first_shift; sp != NULL; sp = sp->next) {
+        for (i = 0; i < sp->nshifts; i++) {
+            if (sp->shift[i] == dest_state && accessing_symbol[dest_state] == symbol) {
+                return sp->number;
             }
         }
-    } while (changed);
+    }
+
+    return -1;
 }
 
-static int nreductions;
+/* Initialize direct-read sets DR(p, A) for each goto (p, A). */
+static void initialize_F(void) {
+    int i, j;
+    int nwords;
+    shifts *sp;
+
+    nwords = WORDSIZE(ntokens);
+    F = (unsigned *)calloc(ngotos * nwords, sizeof(unsigned));
+    if (F == NULL) no_space();
+
+    lalr_dr_term_count = 0;
+    for (i = 0; i < ngotos; i++) {
+        unsigned *dr = F + i * nwords;
+        int p = to_state[i];
+        sp = find_shifts_for_state(p);
+        if (!sp) {
+            continue;
+        }
+        for (j = 0; j < sp->nshifts; j++) {
+            int dest = sp->shift[j];
+            int sym = accessing_symbol[dest];
+            if (sym < ntokens && !TESTBIT(dr, sym)) {
+                SETBIT(dr, sym);
+                lalr_dr_term_count++;
+            }
+        }
+    }
+}
+
+int lalr_nreductions;
 
 static void initialize_LA(void) {
-    int i, j;
+    int i;
     reductions *rp;
     int nwords;
     
     nwords = WORDSIZE(ntokens);
-    nreductions = 0;
+    lalr_nreductions = 0;
     for (rp = first_reduction; rp != NULL; rp = rp->next) {
-        nreductions += rp->nreds;
+        lalr_nreductions += rp->nreds;
     }
     
-    LA = (unsigned *)calloc(nreductions * nwords, sizeof(unsigned));
-    if (LA == NULL) no_space();
+    lalr_LA = (unsigned *)calloc(lalr_nreductions * nwords, sizeof(unsigned));
+    if (lalr_LA == NULL) no_space();
     
     /* Initially, only rule 0 (accept) gets $end token if it's there */
     /* Find which reduction is for rule 0 */
@@ -211,110 +251,77 @@ static void initialize_LA(void) {
     for (rp = first_reduction; rp != NULL; rp = rp->next) {
         for (i = 0; i < rp->nreds; i++) {
             if (rp->rules[i] == 0) {  /* Rule 0: $accept -> start $end */
-                SETBIT(LA + red_idx * nwords, 0);  /* Token 0 is $end */
+                SETBIT(lalr_LA + red_idx * nwords, 0);  /* Token 0 is $end */
             }
             red_idx++;
         }
     }
 }
 
-
-static int map_goto(int state, int symbol) {
-    shifts *sp;
-    int i;
-    for (sp = first_shift; sp != NULL; sp = sp->next) {
-        if (sp->number == state) {
-            for (i = 0; i < sp->nshifts; i++) {
-                int dest = sp->shift[i];
-                if (accessing_symbol[dest] == symbol)
-                    return dest;
-            }
-            return -1;
-        }
-    }
-    return -1;
-}
 
 static void build_relations(void) {
-    int i, j, k;
-    reductions *rp;
+    int i, j;
+    int *counts;
+    int *fills;
     shifts *sp;
-    int nwords = WORDSIZE(ntokens);
-    
-    /* Allocate relation arrays */
-    includes = (short **)calloc(ngotos, sizeof(short *));
-    lookback = (short **)calloc(nreductions, sizeof(short *));
-    if (includes == NULL || lookback == NULL)
-        no_space();
-    
-    /* For each goto (q, A) -> p */
-    for (i = 0; i < ngotos; i++) {
-        int q = from_state[i];
-        int p = to_state[i];
-        int A = accessing_symbol[p];
-        
-        /* READS relation: terminals that can follow A in this context */
-        /* For each goto (p, B) -> r, if B is nullable, READS includes READS(p, B) */
-        /* Also terminals shifted from p are added to F[i] */
-        shifts *sp;
-        for (sp = first_shift; sp != NULL; sp = sp->next) {
-            if (sp->number == p) {
-                for (j = 0; j < sp->nshifts; j++) {
-                    int dest = sp->shift[j];
-                    int sym = accessing_symbol[dest];
-                    if (sym < ntokens) {
-                        SETBIT(F + i * nwords, sym);
-                    }
-                }
-                break;
-            }
-        }
-    }
-    
-    /* lookback relation: map reductions to gotos they can propagation-back to */
-    int red_idx = 0;
-    for (rp = first_reduction; rp != NULL; rp = rp->next) {
-        int r = rp->number;
-        for (i = 0; i < rp->nreds; i++) {
-            int ruleno = rp->rules[i];
-            /* Find state q before the reduction: q -> RHS -> r */
-            int q = r;
-            int rhs_start = rrhs[ruleno];
-            int len = 0;
-            while (ritem[rhs_start + len] >= 0) len++;
-            
-            for (j = len - 1; j >= 0; j--) {
-                int sym = ritem[rhs_start + j];
-                /* find p such that p --sym--> q */
-                shifts *tmp_sp;
-                int found = 0;
-                for (tmp_sp = first_shift; tmp_sp != NULL; tmp_sp = tmp_sp->next) {
-                    for (k = 0; k < tmp_sp->nshifts; k++) {
-                        if (tmp_sp->shift[k] == q && accessing_symbol[q] == sym) {
-                            q = tmp_sp->number;
-                            found = 1;
-                            break;
-                        }
-                    }
-                    if (found) break;
-                }
-            }
-            
-            /* q is now the state before the rule's RHS. 
-               The reduction corresponds to the goto from q on lhs. */
-            int lhs = plhs[ruleno];
-            for (j = goto_map[lhs - ntokens]; j < goto_map[lhs - ntokens + 1]; j++) {
-                if (from_state[j] == q) {
-                    /* In a full implementation, we'd record this link 
-                       to propagate lookaheads from GOTO j to REDUCTION red_idx. */
-                    break;
-                }
-            }
-            red_idx++;
-        }
-    }
-}
 
+    includes = (short **)calloc(ngotos, sizeof(short *));
+    if (includes == NULL)
+        no_space();
+
+    counts = (int *)calloc(ngotos, sizeof(int));
+    fills = (int *)calloc(ngotos, sizeof(int));
+    if (counts == NULL || fills == NULL)
+        no_space();
+
+    /* First pass: count READS edges for allocation. */
+    for (i = 0; i < ngotos; i++) {
+        int p = to_state[i];
+        sp = find_shifts_for_state(p);
+        if (!sp) {
+            continue;
+        }
+        for (j = 0; j < sp->nshifts; j++) {
+            int dest = sp->shift[j];
+            int sym = accessing_symbol[dest];
+            if (sym >= ntokens && nullable[sym] && find_goto_index(p, sym) >= 0) {
+                counts[i]++;
+            }
+        }
+    }
+
+    for (i = 0; i < ngotos; i++) {
+        if (counts[i] > 0) {
+            includes[i] = (short *)malloc((counts[i] + 1) * sizeof(short));
+            if (includes[i] == NULL)
+                no_space();
+            includes[i][counts[i]] = -1;
+        }
+    }
+
+    lalr_read_edge_count = 0;
+    for (i = 0; i < ngotos; i++) {
+        int p = to_state[i];
+        sp = find_shifts_for_state(p);
+        if (!sp || includes[i] == NULL) {
+            continue;
+        }
+        for (j = 0; j < sp->nshifts; j++) {
+            int dest = sp->shift[j];
+            int sym = accessing_symbol[dest];
+            if (sym >= ntokens && nullable[sym]) {
+                int g = find_goto_index(p, sym);
+                if (g >= 0) {
+                    includes[i][fills[i]++] = (short)g;
+                    lalr_read_edge_count++;
+                }
+            }
+        }
+    }
+
+    free(counts);
+    free(fills);
+}
 
 
 /* Compute FOLLOW sets using digraph algorithm */
@@ -326,18 +333,60 @@ static void compute_FOLLOWS(void) {
 
 /* Propagate lookaheads to reductions */
 static void compute_lookaheads(void) {
-    int i, j, k;
+    int i, j;
     int nwords = WORDSIZE(ntokens);
     reductions *rp;
     int red_idx = 0;
     
+    lalr_la_entry_count = 0;
+    lalr_la_reduction_count = 0;
+
     for (rp = first_reduction; rp != NULL; rp = rp->next) {
         for (i = 0; i < rp->nreds; i++) {
-            unsigned *la = LA + red_idx * nwords;
-            /* In a full implementation, we'd union lookaheads from related gotos.
-               For this phase, ensure at least rule 0 has $end. */
-            if (rp->rules[i] == 0) {
+            unsigned *la = lalr_LA + red_idx * nwords;
+            int ruleno = rp->rules[i];
+            int q = rp->number;
+            int rhs_start = rrhs[ruleno];
+            int rhs_len = 0;
+            int lhs = plhs[ruleno];
+            int g;
+            int has_la = 0;
+
+            while (ritem[rhs_start + rhs_len] >= 0) {
+                rhs_len++;
+            }
+
+            /* Walk backwards over RHS to reach the pre-reduction state. */
+            for (j = rhs_len - 1; j >= 0; j--) {
+                int sym = ritem[rhs_start + j];
+                q = find_predecessor_state(q, sym);
+                if (q < 0) {
+                    break;
+                }
+            }
+
+            if (q >= 0) {
+                g = find_goto_index(q, lhs);
+                if (g >= 0) {
+                    unsigned *follow = F + g * nwords;
+                    for (j = 0; j < nwords; j++) {
+                        la[j] |= follow[j];
+                    }
+                }
+            }
+
+            if (ruleno == 1) {
                 SETBIT(la, 0);
+            }
+
+            for (j = 0; j < ntokens; j++) {
+                if (TESTBIT(la, j)) {
+                    lalr_la_entry_count++;
+                    has_la = 1;
+                }
+            }
+            if (has_la) {
+                lalr_la_reduction_count++;
             }
             red_idx++;
         }
@@ -347,7 +396,6 @@ static void compute_lookaheads(void) {
 /* DeRemer-Pennello digraph algorithm for transitive closure */
 static void digraph(short **relation) {
     int i;
-    int nwords = WORDSIZE(ntokens);
     
     infinity = ngotos + 2;
     INDEX = (int *)calloc(ngotos, sizeof(int));
@@ -400,7 +448,7 @@ static void traverse(int i) {
     
     /* If we're at SCC root, propagate to all in SCC */
     if (INDEX[i] == height) {
-        while (top > 0 && vertices[top - 1] >= i) {
+        do {
             j = vertices[--top];
             INDEX[j] = infinity;
             if (j != i) {
@@ -409,18 +457,24 @@ static void traverse(int i) {
                 for (int k = 0; k < nwords; k++)
                     dst[k] = base[k];
             }
-        }
+        } while (j != i);
     }
 }
 
 /* Free LALR computation data */
 void lalr_free(void) {
+    int i;
     if (nullable) free(nullable);
     if (goto_map) free(goto_map);
     if (from_state) free(from_state);
     if (to_state) free(to_state);
     if (F) free(F);
-    if (LA) free(LA);
-    if (includes) free(includes);
+    if (lalr_LA) free(lalr_LA);
+    if (includes) {
+        for (i = 0; i < ngotos; i++) {
+            if (includes[i]) free(includes[i]);
+        }
+        free(includes);
+    }
     if (lookback) free(lookback);
 }

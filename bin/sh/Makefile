@@ -4,6 +4,8 @@ OBJS=$(SRCS:.c=.o)
 
 include ../../Makefile.bin.inc
 
+LDADD = -L$(TOP)/lib/edit -ledit
+
 ifndef NATIVE_BUILD
 USER_CFLAGS += -I$(TOP)/sys
 endif
@@ -26,6 +28,9 @@ test_job: job.c tests/test_job.c
 test_util: util.c tests/test_util.c
 	gcc -g -I. -o $@ util.c tests/test_util.c
 
+test_exec: exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
+	gcc -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
+
 fuzzer: lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
 	clang -g -fsanitize=fuzzer,address -I. -o $@ lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
 
@@ -35,15 +40,25 @@ fuzz_ps1: prompt.c util.c shell_var.c tests/fuzz_ps1_parser.c
 fuzz_parser: lexer.c parser.c shell_var.c util.c tests/fuzz_parser.c
 	$(CC) -g -I. -o $@ $^
 
-test: all test_lexer test_parser test_expand test_shell_var test_job test_util
+fuzz_expand: expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand.c
+	clang -g -fsanitize=fuzzer,address -I. -o $@ expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand.c
+
+sh_host: $(SRCS)
+	$(MAKE) -C $(TOP)/lib/edit NATIVE_BUILD=1 clean all
+	cp $(TOP)/include/histedit.h .
+	$(CC) -g -D_GNU_SOURCE -I. -o $@ $(SRCS) -L$(TOP)/lib/edit -ledit
+	rm histedit.h
+
+test: all test_lexer test_parser test_expand test_shell_var test_job test_util test_exec test_prompt sh_host
 	./test_lexer
 	./test_parser
 	./test_expand
 	./test_shell_var
 	./test_job
 	./test_util
+	./test_exec
 	./test_prompt
-	sh tests/test_prompt_mode.sh
+	SH="./sh_host" sh tests/test_prompt_mode.sh
 
 test_prompt: prompt.c util.c shell_var.c tests/test_prompt.c
 	gcc -g -I. -o $@ prompt.c util.c shell_var.c tests/test_prompt.c

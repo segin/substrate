@@ -26,5 +26,5 @@ void test_printf_hash_flag(void) {
         }
     }
     
-    kprint("PASS: printf # flag\\n");
+    kprint("PASS: printf # flag\n");
 }

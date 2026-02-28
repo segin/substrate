@@ -10,7 +10,7 @@
 #include <kern/ansi_handler.h>
 #include <kern/cmdline.h>
 
-#include <arch/x86-common/include/io.h>
+#include <arch/x86-common/io.h>
 
 #include <drivers/video/hw_text.h>
 #include <drivers/video/vga.h>

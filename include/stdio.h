@@ -102,4 +102,6 @@ int rename(const char *oldpath, const char *newpath);
 FILE *tmpfile(void);
 char *tmpnam(char *s);
 
+#define fileno(f) ((f)->fd)
+
 #endif

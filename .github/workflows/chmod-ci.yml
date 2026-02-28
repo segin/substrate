@@ -1,0 +1,38 @@
+name: chmod-ci
+
+on:
+  push:
+    paths:
+      - 'bin/chmod/**'
+      - 'tests/chmod/**'
+      - 'tests/ci/test-chmod.sh'
+      - 'man/man1/chmod.1'
+      - 'docs/design/chmod-design.md'
+      - '.github/workflows/chmod-ci.yml'
+  pull_request:
+    paths:
+      - 'bin/chmod/**'
+      - 'tests/chmod/**'
+      - 'tests/ci/test-chmod.sh'
+      - 'man/man1/chmod.1'
+      - 'docs/design/chmod-design.md'
+      - '.github/workflows/chmod-ci.yml'
+
+jobs:
+  chmod-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3
+
+      - name: Run chmod CI Script
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          tests/ci/test-chmod.sh

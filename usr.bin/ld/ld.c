@@ -292,12 +292,17 @@ static int validate_output(const ld_ctx_t *ctx) {
 int main(int argc, char **argv) {
     ld_ctx_t ctx;
     int i;
+    int query_version = 0;
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.out_path = "a.out";
     ctx.self_path = argv[0];
 
     for (i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+            query_version = 1;
+            continue;
+        }
         if (strcmp(argv[i], "-m32") == 0) {
             ctx.mode = 32;
             continue;
@@ -345,6 +350,13 @@ int main(int argc, char **argv) {
             strvec_free(&ctx.inputs);
             return 1;
         }
+    }
+
+    if (query_version && ctx.inputs.count == 0) {
+        printf("GNU ld (GNU Binutils) 2.40\n");
+        strvec_free(&ctx.pass);
+        strvec_free(&ctx.inputs);
+        return 0;
     }
 
     if (ctx.inputs.count == 0) {

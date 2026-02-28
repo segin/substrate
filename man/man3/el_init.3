@@ -1,0 +1,57 @@
+.\" Process this file with
+.\" groff -man -Tascii el_init.3
+.\"
+.TH EL_INIT 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+el_init, el_end, el_reset \- initialize and reset editline state
+.SH LIBRARY
+Editline library (libedit, \-ledit)
+.SH SYNOPSIS
+.B #include <histedit.h>
+.PP
+.BI "EditLine *el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr);"
+.br
+.BI "void el_end(EditLine *el);"
+.br
+.BI "void el_reset(EditLine *el);"
+.SH DESCRIPTION
+.BR el_init ()
+creates an editline session object and binds it to the three stdio streams
+used for input, output, and diagnostics.
+.PP
+.I prog
+is used in diagnostics and configuration context.
+.BR el_end ()
+releases all resources associated with
+.IR el .
+.PP
+.BR el_reset ()
+restores runtime state to default editor, keymap, and terminal settings
+without destroying the session object.
+.SH RETURN VALUE
+.BR el_init ()
+returns a valid
+.B EditLine
+pointer on success. On failure, NULL is returned and
+.I errno
+is set.
+.PP
+.BR el_end ()
+and
+.BR el_reset ()
+return no value.
+.SH ERRORS
+.TP
+.B EINVAL
+One or more arguments were invalid.
+.TP
+.B ENOMEM
+Memory allocation failed.
+.TP
+.B ENOTTY
+The configured input stream is not a tty and terminal mode setup failed.
+.SH SEE ALSO
+.BR editline (3),
+.BR el_gets (3),
+.BR el_set (3),
+.BR history (3)

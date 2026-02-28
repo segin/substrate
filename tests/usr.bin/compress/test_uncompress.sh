@@ -112,14 +112,10 @@ rm file3.Z out3.txt
 echo "existing" > file4
 cp test1.txt.Z file4.Z
 # Should fail without -f
-# Note: uncompress prints to stderr but returns 0 if skipping?
-# Standard uncompress returns >0 if error occurred.
-# My code just prints to stderr and returns. `main` returns 0.
-# I should fix `main` to return non-zero on error if possible, but
-# standard `gzip` returns 0 even if it skips one file?
-# Actually `gzip` returns 1 if warning.
-# I will check output file content to verify it didn't overwrite.
-./uncompress file4.Z 2>/dev/null || true
+if ./uncompress file4.Z 2>/dev/null; then
+    echo "Error: uncompress should have failed when output file exists"
+    exit 1
+fi
 if [ "$(cat file4)" != "existing" ]; then echo "Error: overwrote file4 without -f"; exit 1; fi
 
 # Should succeed with -f
@@ -129,7 +125,10 @@ rm file4
 
 # Test 5: Corrupt input (bad magic)
 echo "bad" > bad.Z
-./uncompress bad.Z && echo "Error: accepted bad magic" && exit 1 || true
+if ./uncompress bad.Z 2>/dev/null; then
+    echo "Error: accepted bad magic"
+    exit 1
+fi
 # Verify output not created
 if [ -f bad ]; then echo "Error: created bad output"; exit 1; fi
 

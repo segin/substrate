@@ -1,0 +1,87 @@
+.\" Process this file with
+.\" groff -man -Tascii el_set.3
+.\"
+.TH EL_SET 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+el_set, el_get \- configure and query editline session parameters
+.SH LIBRARY
+Editline library (libedit, \-ledit)
+.SH SYNOPSIS
+.B #include <histedit.h>
+.PP
+.BI "int el_set(EditLine *el, int op, ...);"
+.br
+.BI "int el_get(EditLine *el, int op, ...);"
+.SH DESCRIPTION
+.BR el_set ()
+updates editline session options selected by
+.IR op .
+.BR el_get ()
+reads current option values selected by
+.IR op .
+.PP
+The public operation macros are:
+.TP
+.B EL_PROMPT
+Set/get primary prompt callback.
+.TP
+.B EL_RPROMPT
+Set/get right prompt callback.
+.TP
+.B EL_EDITOR
+Set/get editing mode name.
+.TP
+.B EL_SIGNAL
+Set/get internal signal handling enable state.
+.TP
+.B EL_BIND
+Bind key sequences to editor commands.
+.TP
+.B EL_ADDFN
+Register an application-defined editor command.
+.TP
+.B EL_HIST
+Attach history backend and state.
+.TP
+.B EL_GETCFN
+Set/get raw character reader callback.
+.TP
+.B EL_CLIENTDATA
+Set/get application-owned opaque pointer.
+.TP
+.B EL_REFRESH
+Force prompt and line redisplay.
+.TP
+.B EL_GETTC
+Query a terminal capability.
+.TP
+.B EL_SETTY
+Apply tty mode presets.
+.TP
+.B EL_GETTY
+Fetch tty mode presets.
+.PP
+Argument types for each operation are defined by
+.BR <histedit.h> .
+.SH RETURN VALUE
+Both
+.BR el_set ()
+and
+.BR el_get ()
+return 0 on success and \-1 on error.
+.SH ERRORS
+.TP
+.B EINVAL
+Invalid operation or invalid operation arguments.
+.TP
+.B ENOTSUP
+Operation is recognized but not supported in the active backend.
+.TP
+.B ENOMEM
+Memory allocation failed while updating internal state.
+.SH SEE ALSO
+.BR editline (3),
+.BR el_init (3),
+.BR el_gets (3),
+.BR history (3),
+.BR editrc (5)

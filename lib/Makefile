@@ -1,7 +1,7 @@
 include ../Makefile.inc
 
 # Subdirectories for core libraries
-SUBDIRS = c m pthreads dl sys
+SUBDIRS = c m pthreads dl sys edit
 
 .PHONY: all clean install $(SUBDIRS)
 
@@ -15,11 +15,11 @@ $(SUBDIRS):
 clean:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning lib/$$dir"; \
-		$(MAKE) -C $$dir clean; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir clean; fi; \
 	done
 
 install:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing lib/$$dir"; \
-		$(MAKE) -C $$dir install; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir install; fi; \
 	done

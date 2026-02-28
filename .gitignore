@@ -29,14 +29,16 @@ sys/kernel.bin
 # Userland binaries (specific ignores based on directory structure)
 # It's better to ignore by path if possible or clean before commit, 
 # but here are common patterns for this project structure:
-bin/*/
+bin/*
+!bin/*/
 !bin/*/Makefile
 !bin/*/*.c
 !bin/*/*.h
 !bin/*/*.S
 !bin/*/src/
 
-sbin/*/
+sbin/*
+!sbin/*/
 !sbin/*/Makefile
 !sbin/*/*.c
 !sbin/*/*.h
@@ -77,6 +79,8 @@ sbin/*/
 /usr.bin/pr/pr
 /usr.bin/uudecode/uudecode
 /usr.bin/yacc/yacc
+/bin/cp/cp
+/bin/sh/sh
 
 # Ignore the compiled output in bin subdirs that matches the dir name
 # (This is tricky with gitignore patterns, relying on extensions is safer)
@@ -140,6 +144,8 @@ test_libc_string
 test_libc_time
 test_libc_stdlib
 test_libc_ctype
+test_libc_assert
+bench_ext2_readdir
 udf_test
 stat_verify
 host_test_*
@@ -159,3 +165,16 @@ tests/sys/host_test_*
 !tests/usr.bin/**/
 !tests/usr.bin/**/Makefile
 !tests/usr.bin/**/*.ir
+bin/cat/cat
+bin/chmod/chmod
+bin/ls/ls
+bin/sh/sh
+bin/sh/sh_host
+bin/sh/test_*
+bin/sh/*.o
+bin/sh/*.scc
+bin/sh/sh_gccobj_ourlink
+bin/sh/sh_ourobj_gcclink
+bin/sh/sh_ourobj_ourlink
+usr.bin/yacc/test_minimal_parser
+usr.bin/yacc/test_minimal.output

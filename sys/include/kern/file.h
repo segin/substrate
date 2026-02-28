@@ -1,5 +1,5 @@
 /*
- * sys/include/kern/file.h - Internal kernel file management APIs
+ * sys/kern/file.h - Internal kernel file management APIs
  */
 
 #ifndef _KERN_FILE_H

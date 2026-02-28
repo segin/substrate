@@ -1,0 +1,117 @@
+.\" Process this file with
+.\" groff -man -Tascii history.3
+.\"
+.TH HISTORY 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+history_init, history_end, history \- editline history management interface
+.SH LIBRARY
+Editline library (libedit, \-ledit)
+.SH SYNOPSIS
+.B #include <histedit.h>
+.PP
+.B typedef struct history History;
+.PP
+.B typedef struct hist_event {
+.br
+.BI "    int num;"
+.br
+.BI "    const char *str;"
+.br
+.B } HistEvent;
+.PP
+.BI "History *history_init(void);"
+.br
+.BI "void history_end(History *h);"
+.br
+.BI "int history(History *h, HistEvent *ev, int op, ...);"
+.SH DESCRIPTION
+.BR history_init ()
+creates a history state object.
+.BR history_end ()
+releases that object.
+.PP
+.BR history ()
+performs commands selected by
+.I op
+and optionally reports results in
+.IR ev .
+.PP
+Public operation macros are:
+.TP
+.B H_ENTER
+Add a new history entry.
+.TP
+.B H_APPEND
+Append text to the current entry.
+.TP
+.B H_PREV
+Move to the previous entry.
+.TP
+.B H_NEXT
+Move to the next entry.
+.TP
+.B H_CURR
+Read the current entry.
+.TP
+.B H_FIRST
+Move to the first entry.
+.TP
+.B H_LAST
+Move to the most recent entry.
+.TP
+.B H_SET
+Select an entry by absolute history index.
+.TP
+.B H_CLEAR
+Clear the history list.
+.TP
+.B H_LOAD
+Load history from a file.
+.TP
+.B H_SAVE
+Save history to a file.
+.TP
+.B H_SETSIZE
+Set maximum number of history entries.
+.TP
+.B H_GETSIZE
+Get maximum number of history entries.
+.TP
+.B H_SETUNIQUE
+Enable or disable duplicate suppression.
+.TP
+.B H_GETUNIQUE
+Get duplicate suppression state.
+.TP
+.B H_END
+End traversal/search state.
+.SH RETURN VALUE
+.BR history_init ()
+returns a valid
+.B History
+pointer on success, or NULL on error.
+.PP
+.BR history ()
+returns 0 on success and \-1 on error.
+.BR history_end ()
+returns no value.
+.SH ERRORS
+.TP
+.B EINVAL
+Invalid operation or arguments.
+.TP
+.B ENOMEM
+Memory allocation failed.
+.TP
+.B ENOENT
+No matching entry found.
+.TP
+.B ERANGE
+Requested history index is out of range.
+.TP
+.B EIO
+Load/save operation failed.
+.SH SEE ALSO
+.BR editline (3),
+.BR el_set (3),
+.BR editrc (5)

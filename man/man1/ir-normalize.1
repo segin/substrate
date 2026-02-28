@@ -1,0 +1,26 @@
+.Dd February 27, 2026
+.Dt IR-NORMALIZE 1
+.Os Substrate
+.Sh NAME
+.Nm ir-normalize
+.Nd parse, verify, and emit canonical textual SSA IR
+.Sh SYNOPSIS
+.Nm
+.Ar input.ir
+.Sh DESCRIPTION
+.Nm
+reads an IR module, verifies it, and writes normalized serialized IR to
+standard output for deterministic diffing/regression tests.
+.Sh EXIT STATUS
+.Bl -tag -width 2
+.It 0
+Normalization succeeded.
+.It 1
+Parse/verify/serialization failure.
+.It 2
+Invalid command usage.
+.El
+.Sh SEE ALSO
+.Xr ir-verifier 1 ,
+.Xr ir-diff 1 ,
+.Xr cc 1
