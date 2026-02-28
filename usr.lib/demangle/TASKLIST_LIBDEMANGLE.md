@@ -371,9 +371,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Char const: Unicode scalar → `'X'`.
 
 ### 9m. Rust v0 Lifetime and Binder Tests
-- [ ] Erased lifetime: `L_` → `'_`.
-- [ ] Bound lifetime: `L0_` → `'a`, `L1_` → `'b`.
-- [ ] Higher‑ranked function pointer with lifetimes.
+- [x] Erased lifetime: `L_` → `'_`.
+- [x] Bound lifetime: `L0_` → `'a`, `L1_` → `'b`.
+- [x] Higher‑ranked function pointer with lifetimes.
 
 ### 9n. Rust v0 Backref Tests
 - [ ] Type backref `B <offset>` resolves correctly.
