@@ -13,6 +13,8 @@
 #include <sys/types.h>
 #include <sys/resource.h>
 
+struct thr_param;
+
 /* Process management */
 extern int sys_exit(int);
 extern int sys_fork(void);

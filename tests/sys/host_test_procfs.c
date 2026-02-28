@@ -197,6 +197,30 @@ void test_procfs_kmalloc_fail(void) {
     kmalloc_should_fail = 0;
 }
 
+void test_proc_status_injection(void) {
+    printf("Test: proc_status_injection...\n");
+
+    // Set up a process with injected characters
+    processes[1].pid = 999;
+    strcpy(processes[1].comm, "fake\nUid:\t0");
+    processes[1].uid = 1000;
+    processes[1].gid = 1000;
+
+    char buffer[1024];
+    proc_generate_status(buffer, sizeof(buffer), &processes[1]);
+
+    // Verify that the newline and tab were sanitized to '_'
+    if (strstr(buffer, "fake_Uid:_0") == NULL) {
+        printf("Buffer content:\n%s\n", buffer);
+        fflush(stdout);
+    }
+    assert(strstr(buffer, "fake_Uid:_0") != NULL);
+    assert(strstr(buffer, "Uid:\t0\n") == NULL);
+    assert(strstr(buffer, "\nUid:\t0") == NULL);
+
+    printf("PASS\n");
+}
+
 int main() {
     procfs_init();
     setup_processes();
@@ -205,6 +229,7 @@ int main() {
     test_procfs_finddir_pid();
     test_proc_pid_finddir();
     test_procfs_finddir_mixed();
+    test_proc_status_injection();
     // Uncomment to test crash
     test_procfs_kmalloc_fail();
 
