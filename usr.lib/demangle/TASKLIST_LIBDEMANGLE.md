@@ -386,8 +386,8 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Multiple closures with disambiguators.
 
 ### 9p. Rust v0 Punycode Tests
-- [ ] Unicode identifier with `u` prefix: decoded correctly.
-- [ ] ASCII‑only identifier without `u` prefix: passed through.
+- [x] Unicode identifier with `u` prefix: decoded correctly.
+- [x] ASCII‑only identifier without `u` prefix: passed through.
 
 ### 9q. Rust Legacy Demangling Tests
 - [ ] `_ZN6mycrate3foo17h1234567890abcdefE` → `mycrate::foo`.
