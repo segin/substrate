@@ -67,12 +67,12 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `T` — transaction clones (deferred).
 
 ### 2f. Expressions and Literals
-- [ ] Integer literals: `L <type> <number> E`.
-- [ ] Nullptr: `LDnE`.
-- [ ] Expression operators: `cl`, `ix`, `qu`, `st`, `sz`, `at`, `az`, etc.
-- [ ] Cast expressions: `cv <type> <expr>`.
-- [ ] Fold expressions (C++17): `fL`, `fR`, `fl`, `fr`.
-- [ ] Pack expansion: `sp`.
+- [x] Integer literals: `L <type> <number> E`.
+- [x] Nullptr: `LDnE`.
+- [x] Expression operators: `cl`, `ix`, `qu`, `st`, `sz`, `at`, `az`, etc.
+- [x] Cast expressions: `cv <type> <expr>`.
+- [x] Fold expressions (C++17): `fL`, `fR`, `fl`, `fr`.
+- [x] Pack expansion: `sp`.
 
 ### 2g. Lambda / Closure Types
 - [ ] `Ul <type>* E [<number>] _`.

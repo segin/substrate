@@ -125,6 +125,10 @@ static int parse_pointer_to_member(dm_itanium_parser_t *p);
 static int parse_decltype_type(dm_itanium_parser_t *p);
 static int parse_vendor_type(dm_itanium_parser_t *p);
 static int parse_expression(dm_itanium_parser_t *p);
+static int parse_expression_operator(dm_itanium_parser_t *p);
+static int parse_cast_expression(dm_itanium_parser_t *p);
+static int parse_fold_expression(dm_itanium_parser_t *p);
+static int parse_pack_expansion(dm_itanium_parser_t *p);
 static int parse_expr_primary(dm_itanium_parser_t *p);
 
 static void mark_save(dm_itanium_parser_t *p, dm_parse_mark_t *m);
@@ -1228,17 +1232,163 @@ parse_expr_primary(dm_itanium_parser_t *p)
 }
 
 static int
+parse_cast_expression(dm_itanium_parser_t *p)
+{
+    if (!(p->cur[0] == 'c' && p->cur[1] == 'v')) {
+        return -1;
+    }
+
+    p->cur += 2;
+    if (buf_appendc(&p->out, '(') != 0) {
+        return -1;
+    }
+    if (parse_type(p) != 0) {
+        return -1;
+    }
+    if (buf_appendc(&p->out, ')') != 0) {
+        return -1;
+    }
+    return parse_expression(p);
+}
+
+static int
+parse_fold_expression(dm_itanium_parser_t *p)
+{
+    if (p->cur[0] != 'f' ||
+        (p->cur[1] != 'L' && p->cur[1] != 'R' && p->cur[1] != 'l' && p->cur[1] != 'r')) {
+        return -1;
+    }
+
+    if (buf_printf(&p->out, "fold[%c%c](", p->cur[0], p->cur[1]) != 0) {
+        return -1;
+    }
+    p->cur += 2;
+
+    if (parse_expression(p) != 0) {
+        return -1;
+    }
+
+    if (p->cur[0] != 'E') {
+        if (buf_append(&p->out, ", ", 2u) != 0) {
+            return -1;
+        }
+        if (parse_expression(p) != 0) {
+            return -1;
+        }
+    }
+
+    return buf_appendc(&p->out, ')');
+}
+
+static int
+parse_pack_expansion(dm_itanium_parser_t *p)
+{
+    if (!(p->cur[0] == 's' && p->cur[1] == 'p')) {
+        return -1;
+    }
+
+    p->cur += 2;
+    if (buf_append(&p->out, "pack_expand(", 12u) != 0) {
+        return -1;
+    }
+    if (parse_expression(p) != 0) {
+        return -1;
+    }
+    return buf_appendc(&p->out, ')');
+}
+
+static int
+parse_expression_operator(dm_itanium_parser_t *p)
+{
+    static const struct {
+        const char code[3];
+        const char *name;
+        int arity;
+    } ops[] = {
+        { "cl", "call", 2 },
+        { "ix", "index", 2 },
+        { "qu", "cond", 3 },
+        { "st", "sizeof", 1 },
+        { "sz", "sizeof...", 1 },
+        { "at", "alignof", 1 },
+        { "az", "alignof...", 1 }
+    };
+    size_t i;
+    int argi;
+
+    for (i = 0u; i < sizeof(ops) / sizeof(ops[0]); i++) {
+        if (p->cur[0] == ops[i].code[0] && p->cur[1] == ops[i].code[1]) {
+            p->cur += 2;
+            if (buf_append(&p->out, ops[i].name, strlen(ops[i].name)) != 0 ||
+                buf_appendc(&p->out, '(') != 0) {
+                return -1;
+            }
+
+            for (argi = 0; argi < ops[i].arity; argi++) {
+                if (argi > 0 && buf_append(&p->out, ", ", 2u) != 0) {
+                    return -1;
+                }
+                if (parse_expression(p) != 0) {
+                    return -1;
+                }
+            }
+
+            return buf_appendc(&p->out, ')');
+        }
+    }
+
+    return -1;
+}
+
+static int
 parse_expression(dm_itanium_parser_t *p)
 {
     dm_parse_mark_t m;
+    int ok;
+
+    if (parser_enter(p) != 0) {
+        return -1;
+    }
 
     mark_save(p, &m);
-    if (parse_expr_primary(p) == 0) {
+    ok = parse_expr_primary(p);
+    if (ok == 0) {
+        parser_leave(p);
         return 0;
     }
 
     mark_restore(p, &m);
-    return parse_name(p);
+    ok = parse_cast_expression(p);
+    if (ok == 0) {
+        parser_leave(p);
+        return 0;
+    }
+
+    mark_restore(p, &m);
+    ok = parse_fold_expression(p);
+    if (ok == 0) {
+        parser_leave(p);
+        return 0;
+    }
+
+    mark_restore(p, &m);
+    ok = parse_pack_expansion(p);
+    if (ok == 0) {
+        parser_leave(p);
+        return 0;
+    }
+
+    mark_restore(p, &m);
+    ok = parse_expression_operator(p);
+    if (ok == 0) {
+        parser_leave(p);
+        return 0;
+    }
+
+    mark_restore(p, &m);
+    ok = parse_name(p);
+    parser_leave(p);
+    return ok;
 }
 
 static int
