@@ -28,16 +28,16 @@ Execution policy:
 - [x] Deterministic argument parsing and stable diagnostics ordering.
 
 ## 2) Lexing, Parsing, and Assembly Source Model
-- [ ] Tokenization for labels, mnemonics, operands, directives, comments.
-- [ ] Numeric literal forms (dec/oct/hex/bin where supported).
-- [ ] String and character literal escape handling.
-- [ ] Local label forms and forward/backward reference handling.
-- [ ] Statement grammar for AT&T syntax.
-- [ ] Statement grammar for Intel syntax (selectable mode).
-- [ ] Robust recovery from syntax errors to emit multiple diagnostics.
-- [ ] Include stack tracking and cycle detection.
-- [ ] Macro definition/expansion (`.macro`/`.endm`) with argument substitution.
-- [ ] Conditional assembly (`.if`/`.ifdef`/`.ifndef`/`.else`/`.endif`).
+- [x] Tokenization for labels, mnemonics, operands, directives, comments.
+- [x] Numeric literal forms (dec/oct/hex/bin where supported).
+- [x] String and character literal escape handling.
+- [x] Local label forms and forward/backward reference handling.
+- [x] Statement grammar for AT&T syntax.
+- [x] Statement grammar for Intel syntax (selectable mode).
+- [x] Robust recovery from syntax errors to emit multiple diagnostics.
+- [x] Include stack tracking and cycle detection.
+- [x] Macro definition/expansion (`.macro`/`.endm`) with argument substitution.
+- [x] Conditional assembly (`.if`/`.ifdef`/`.ifndef`/`.else`/`.endif`).
 
 ## 3) Section, Symbol, and Expression Semantics
 - [ ] `.text`, `.data`, `.bss` section switching.
