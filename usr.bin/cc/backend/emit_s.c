@@ -2710,6 +2710,87 @@ static void emit_i386_load_scalar_indirect(FILE *fp, int_reg_state_t *ist, int r
     }
 }
 
+static int emit_i386_int_div_or_shift(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                      const cc_ssa_instr_t *in) {
+    int rd;
+
+    int_regs_flush(fp, f, lay, ist);
+    emit_frame_load_reg(fp, 0, slot_off(lay, in->lhs), "%eax");
+    if (in->op == CC_SSA_DIV) {
+        if (in->is_unsigned) {
+            fprintf(fp, "\txorl %%edx, %%edx\n");
+            fprintf(fp, "\tdivl %d(%%ebp)\n", slot_off(lay, in->rhs));
+        } else {
+            fprintf(fp, "\tcltd\n");
+            fprintf(fp, "\tidivl %d(%%ebp)\n", slot_off(lay, in->rhs));
+        }
+    } else if (in->op == CC_SSA_SHL) {
+        emit_frame_load_reg(fp, 0, slot_off(lay, in->rhs), "%ecx");
+        fprintf(fp, "\tandl $31, %%ecx\n");
+        fprintf(fp, "\tshll %%cl, %%eax\n");
+    } else {
+        emit_frame_load_reg(fp, 0, slot_off(lay, in->rhs), "%ecx");
+        fprintf(fp, "\tandl $31, %%ecx\n");
+        fprintf(fp, "\t%s %%cl, %%eax\n", in->is_unsigned ? "shrl" : "sarl");
+    }
+    rd = int_regs_define(fp, f, lay, ist, in->dst, int_reg_index(ist, "%eax"), -1);
+    if (strcmp(ist->regs[rd], "%eax") != 0) {
+        fprintf(fp, "\tmovl %%eax, %s\n", ist->regs[rd]);
+    }
+    return 0;
+}
+
+static void emit_i386_int_binop_regular(FILE *fp, const int_reg_state_t *ist, const cc_ssa_instr_t *in, int rr, int rl) {
+    if (in->op == CC_SSA_ADD) {
+        fprintf(fp, "\taddl %s, %s\n", ist->regs[rr], ist->regs[rl]);
+    } else if (in->op == CC_SSA_SUB) {
+        fprintf(fp, "\tsubl %s, %s\n", ist->regs[rr], ist->regs[rl]);
+    } else if (in->op == CC_SSA_MUL) {
+        fprintf(fp, "\timull %s, %s\n", ist->regs[rr], ist->regs[rl]);
+    } else if (in->op == CC_SSA_AND) {
+        fprintf(fp, "\tandl %s, %s\n", ist->regs[rr], ist->regs[rl]);
+    } else if (in->op == CC_SSA_OR) {
+        fprintf(fp, "\torl %s, %s\n", ist->regs[rr], ist->regs[rl]);
+    } else if (in->op == CC_SSA_XOR) {
+        fprintf(fp, "\txorl %s, %s\n", ist->regs[rr], ist->regs[rl]);
+    }
+}
+
+static void emit_i386_label_def(FILE *fp, const char *fn, int label) {
+    emit_local_label(fp, fn, label);
+    fprintf(fp, ":\n");
+}
+
+static void emit_i386_jump_label(FILE *fp, const char *fn, int label) {
+    fprintf(fp, "\tjmp ");
+    emit_local_label(fp, fn, label);
+    fprintf(fp, "\n");
+}
+
+static void emit_i386_branch_cond(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                  const cc_ssa_instr_t *in) {
+    int rc = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+    fprintf(fp, "\tcmpl $0, %s\n", ist->regs[rc]);
+    int_regs_flush(fp, f, lay, ist);
+    fprintf(fp, "\tjne ");
+    emit_local_label(fp, f->name, in->true_label);
+    fprintf(fp, "\n");
+    emit_i386_jump_label(fp, f->name, in->false_label);
+}
+
+static void emit_i386_va_start(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                               const cc_ssa_instr_t *in) {
+    int poff;
+    int rd;
+    int_regs_flush(fp, f, lay, ist);
+    poff = i386_variadic_start_offset(f, (int)in->imm);
+    rd = int_regs_define(fp, f, lay, ist, in->dst, int_reg_index(ist, "%eax"), -1);
+    fprintf(fp, "\tleal %d(%%ebp), %%eax\n", poff);
+    if (strcmp(ist->regs[rd], "%eax") != 0) {
+        fprintf(fp, "\tmovl %%eax, %s\n", ist->regs[rd]);
+    }
+}
+
 static void emit_i386_normalize_int_return(FILE *fp, long ret_bytes, int is_unsigned) {
     if (ret_bytes == 1) {
         if (is_unsigned) fprintf(fp, "\tmovzbl %%al, %%eax\n");
@@ -2981,31 +3062,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rr;
                     if (in->op == CC_SSA_DIV || in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) {
-                        int_regs_flush(fp, f, &lay, &ist);
-                        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
-                        if (in->op == CC_SSA_DIV) {
-                            if (in->is_unsigned) {
-                                fprintf(fp, "\txorl %%edx, %%edx\n");
-                                fprintf(fp, "\tdivl %d(%%ebp)\n", slot_off(&lay, in->rhs));
-                            } else {
-                                fprintf(fp, "\tcltd\n");
-                                fprintf(fp, "\tidivl %d(%%ebp)\n", slot_off(&lay, in->rhs));
-                            }
-                        } else if (in->op == CC_SSA_SHL) {
-                            fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", slot_off(&lay, in->rhs));
-                            fprintf(fp, "\tandl $31, %%ecx\n");
-                            fprintf(fp, "\tshll %%cl, %%eax\n");
-                        } else {
-                            fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", slot_off(&lay, in->rhs));
-                            fprintf(fp, "\tandl $31, %%ecx\n");
-                            fprintf(fp, "\t%s %%cl, %%eax\n", in->is_unsigned ? "shrl" : "sarl");
-                        }
-                        {
-                            int rd = int_regs_define(fp, f, &lay, &ist, in->dst, int_reg_index(&ist, "%eax"), -1);
-                            if (strcmp(ist.regs[rd], "%eax") != 0) {
-                                fprintf(fp, "\tmovl %%eax, %s\n", ist.regs[rd]);
-                            }
-                        }
+                        emit_i386_int_div_or_shift(fp, f, &lay, &ist, in);
                         break;
                     }
                     if (ist.reg_dirty[rl]) {
@@ -3013,19 +3070,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                         rl = int_regs_load(fp, f, &lay, &ist, in->lhs, rl, -1);
                     }
                     rr = int_regs_load(fp, f, &lay, &ist, in->rhs, -1, rl);
-                    if (in->op == CC_SSA_ADD) {
-                        fprintf(fp, "\taddl %s, %s\n", ist.regs[rr], ist.regs[rl]);
-                    } else if (in->op == CC_SSA_SUB) {
-                        fprintf(fp, "\tsubl %s, %s\n", ist.regs[rr], ist.regs[rl]);
-                    } else if (in->op == CC_SSA_MUL) {
-                        fprintf(fp, "\timull %s, %s\n", ist.regs[rr], ist.regs[rl]);
-                    } else if (in->op == CC_SSA_AND) {
-                        fprintf(fp, "\tandl %s, %s\n", ist.regs[rr], ist.regs[rl]);
-                    } else if (in->op == CC_SSA_OR) {
-                        fprintf(fp, "\torl %s, %s\n", ist.regs[rr], ist.regs[rl]);
-                    } else if (in->op == CC_SSA_XOR) {
-                        fprintf(fp, "\txorl %s, %s\n", ist.regs[rr], ist.regs[rl]);
-                    }
+                    emit_i386_int_binop_regular(fp, &ist, in, rr, rl);
                     int_regs_remap_dst(fp, f, &lay, &ist, in->dst, rl);
                 }
                 break;
@@ -3072,41 +3117,20 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
             case CC_SSA_LABEL:
                 int_regs_flush(fp, f, &lay, &ist);
-                emit_local_label(fp, f->name, in->label);
-                fprintf(fp, ":\n");
+                emit_i386_label_def(fp, f->name, in->label);
                 break;
 
             case CC_SSA_BR:
                 int_regs_flush(fp, f, &lay, &ist);
-                fprintf(fp, "\tjmp ");
-                emit_local_label(fp, f->name, in->label);
-                fprintf(fp, "\n");
+                emit_i386_jump_label(fp, f->name, in->label);
                 break;
 
             case CC_SSA_BR_COND:
-                {
-                    int rc = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
-                    fprintf(fp, "\tcmpl $0, %s\n", ist.regs[rc]);
-                    int_regs_flush(fp, f, &lay, &ist);
-                }
-                fprintf(fp, "\tjne ");
-                emit_local_label(fp, f->name, in->true_label);
-                fprintf(fp, "\n");
-                fprintf(fp, "\tjmp ");
-                emit_local_label(fp, f->name, in->false_label);
-                fprintf(fp, "\n");
+                emit_i386_branch_cond(fp, f, &lay, &ist, in);
                 break;
 
             case CC_SSA_VA_START: {
-                int_regs_flush(fp, f, &lay, &ist);
-                int poff = i386_variadic_start_offset(f, (int)in->imm);
-                {
-                    int rd = int_regs_define(fp, f, &lay, &ist, in->dst, int_reg_index(&ist, "%eax"), -1);
-                    fprintf(fp, "\tleal %d(%%ebp), %%eax\n", poff);
-                    if (strcmp(ist.regs[rd], "%eax") != 0) {
-                        fprintf(fp, "\tmovl %%eax, %s\n", ist.regs[rd]);
-                    }
-                }
+                emit_i386_va_start(fp, f, &lay, &ist, in);
                 break;
             }
 
