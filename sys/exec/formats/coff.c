@@ -13,6 +13,7 @@
 #include <sys/proc.h>
 #include <arch/i386/pmap.h>
 
+
 int coff_load_file(void *file, uint32_t size) {
     coff_filehdr_t *filehdr = (coff_filehdr_t *)file;
 
