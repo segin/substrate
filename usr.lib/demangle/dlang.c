@@ -56,10 +56,12 @@ static int dlang_parser_add_name_ref(dlang_parser_t *p, size_t off, size_t len);
 
 static int dlang_parse_number(dlang_parser_t *p, size_t *out);
 static int dlang_parse_lname(dlang_parser_t *p);
+static int dlang_parse_template_instance_name(dlang_parser_t *p);
 static int dlang_parse_symbol_name(dlang_parser_t *p);
 static int dlang_parse_qualified_name(dlang_parser_t *p);
 static int dlang_parse_type(dlang_parser_t *p);
 static int dlang_parse_mangled_name(dlang_parser_t *p);
+static int dlang_is_type_start(char ch);
 
 static char *dlang_demangle_symbol(const char *mangled, int options);
 
@@ -309,8 +311,58 @@ dlang_parse_lname(dlang_parser_t *p)
 }
 
 static int
+dlang_parse_template_instance_name(dlang_parser_t *p)
+{
+    int first;
+
+    if (!(p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T')) {
+        return -1;
+    }
+
+    p->cur += 3;
+    if (dlang_parse_lname(p) != 0 || dlang_buf_append(&p->out, "!(", 2u) != 0) {
+        return -1;
+    }
+
+    first = 1;
+    while (p->cur[0] != '\0' && p->cur[0] != 'Z') {
+        if (!first && dlang_buf_append(&p->out, ", ", 2u) != 0) {
+            return -1;
+        }
+
+        if ((p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T')) {
+            if (dlang_parse_template_instance_name(p) != 0) {
+                return -1;
+            }
+        } else if (isdigit((unsigned char)p->cur[0])) {
+            if (dlang_parse_lname(p) != 0) {
+                return -1;
+            }
+        } else {
+            if (dlang_buf_appendc(&p->out, '?') != 0) {
+                return -1;
+            }
+            p->cur++;
+        }
+
+        first = 0;
+    }
+
+    if (p->cur[0] != 'Z' || dlang_buf_appendc(&p->out, ')') != 0) {
+        return -1;
+    }
+
+    p->cur++;
+    return 0;
+}
+
+static int
 dlang_parse_symbol_name(dlang_parser_t *p)
 {
+    if (p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T') {
+        return dlang_parse_template_instance_name(p);
+    }
+
     return dlang_parse_lname(p);
 }
 
@@ -320,7 +372,8 @@ dlang_parse_qualified_name(dlang_parser_t *p)
     int first;
 
     first = 1;
-    while (isdigit((unsigned char)p->cur[0])) {
+    while (isdigit((unsigned char)p->cur[0]) ||
+           (p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T')) {
         if (!first && dlang_buf_appendc(&p->out, '.') != 0) {
             return -1;
         }
@@ -336,10 +389,102 @@ dlang_parse_qualified_name(dlang_parser_t *p)
 }
 
 static int
+dlang_is_type_start(char ch)
+{
+    if (ch == '\0') {
+        return 0;
+    }
+
+    switch (ch) {
+    case 'v': case 'g': case 'h': case 's': case 't': case 'i': case 'k':
+    case 'l': case 'm': case 'f': case 'd': case 'e': case 'o': case 'p':
+    case 'j': case 'q': case 'r': case 'c': case 'b': case 'a': case 'u':
+    case 'w': case 'A': case 'G': case 'H': case 'P': case 'E': case 'C':
+    case 'S': case 'I': case 'D': case 'F': case 'U': case 'W': case 'V':
+    case 'R': case 'B': case 'n': case 'x': case 'y': case 'O': case 'N':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int
 dlang_parse_type(dlang_parser_t *p)
 {
-    (void)p;
-    return -1;
+    if (p->cur[0] == '\0') {
+        return -1;
+    }
+
+    while (p->cur[0] == 'x' || p->cur[0] == 'y' || p->cur[0] == 'O') {
+        p->cur++;
+    }
+    if (p->cur[0] == 'N' && p->cur[1] == 'g') {
+        p->cur += 2;
+    }
+
+    switch (p->cur[0]) {
+    case 'A':
+        p->cur++;
+        return dlang_parse_type(p);
+    case 'G':
+        p->cur++;
+        if (dlang_parse_number(p, &(size_t){0}) != 0) {
+            return -1;
+        }
+        return dlang_parse_type(p);
+    case 'H':
+        p->cur++;
+        if (dlang_parse_type(p) != 0 || dlang_parse_type(p) != 0) {
+            return -1;
+        }
+        return 0;
+    case 'P':
+    case 'D':
+        p->cur++;
+        return dlang_parse_type(p);
+    case 'E':
+    case 'C':
+    case 'S':
+    case 'I':
+        p->cur++;
+        return dlang_parse_qualified_name(p);
+    case 'B':
+        p->cur++;
+        if (dlang_parse_number(p, &(size_t){0}) != 0) {
+            return -1;
+        }
+        return dlang_parse_type(p);
+    case 'F':
+    case 'U':
+    case 'W':
+    case 'V':
+    case 'R':
+        p->cur++;
+        while (p->cur[0] != '\0' && p->cur[0] != 'Z') {
+            while (p->cur[0] == 'J' || p->cur[0] == 'K' || p->cur[0] == 'L' ||
+                   p->cur[0] == 'M' || p->cur[0] == 'N') {
+                p->cur++;
+            }
+            if (p->cur[0] == 'X') {
+                p->cur++;
+                break;
+            }
+            if (dlang_parse_type(p) != 0) {
+                return -1;
+            }
+        }
+        if (p->cur[0] != 'Z') {
+            return -1;
+        }
+        p->cur++;
+        return dlang_parse_type(p);
+    default:
+        if (isalpha((unsigned char)p->cur[0])) {
+            p->cur++;
+            return 0;
+        }
+        return -1;
+    }
 }
 
 static int
@@ -350,6 +495,16 @@ dlang_parse_mangled_name(dlang_parser_t *p)
     }
 
     if (dlang_parse_qualified_name(p) != 0) {
+        dlang_parser_leave(p);
+        return -1;
+    }
+
+    if (!dlang_is_type_start(p->cur[0])) {
+        dlang_parser_leave(p);
+        return -1;
+    }
+
+    if (dlang_parse_type(p) != 0) {
         dlang_parser_leave(p);
         return -1;
     }

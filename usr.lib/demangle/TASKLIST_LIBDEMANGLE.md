@@ -180,11 +180,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Output via shared growable buffer (§5).
 
 ### 4c. D Mangling Grammar — Qualified Names
-- [ ] `<MangledName>` → `_D <QualifiedName> <Type>`.
-- [ ] `<QualifiedName>` → `<SymbolName>+`.
-- [ ] `<SymbolName>` → `<LName>` | `<TemplateInstanceName>`.
-- [ ] `<LName>` → `<Number> <chars>` (length‑prefixed UTF‑8 identifier).
-- [ ] `<Number>` → decimal digit sequence.
+- [x] `<MangledName>` → `_D <QualifiedName> <Type>`.
+- [x] `<QualifiedName>` → `<SymbolName>+`.
+- [x] `<SymbolName>` → `<LName>` | `<TemplateInstanceName>`.
+- [x] `<LName>` → `<Number> <chars>` (length‑prefixed UTF‑8 identifier).
+- [x] `<Number>` → decimal digit sequence.
 
 ### 4d. D Mangling Grammar — Template Instances
 - [ ] `<TemplateInstanceName>` → `__T <LName> <TemplateArgs> Z`.
