@@ -53,8 +53,8 @@ Map CLI style names to `libdemangle` option flags:
 | `dlang`                  | `DEMANGLE_DLANG`    |
 | `none`                   | pass‑through (skip) |
 
-- [ ] Parse `-s <style>` and convert to the appropriate `DEMANGLE_*` flag.
-- [ ] `none` style: output all names unchanged (no `demangle()` call).
+- [x] Parse `-s <style>` and convert to the appropriate `DEMANGLE_*` flag.
+- [x] `none` style: output all names unchanged (no `demangle()` call).
 
 ---
 
