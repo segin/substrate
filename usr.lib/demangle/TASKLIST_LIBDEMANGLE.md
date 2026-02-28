@@ -442,8 +442,8 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 
 ## 10. Documentation
 
-- [ ] Write `demangle.3` overview man page: library purpose, header, linking, option flags, thread safety, examples.
-- [ ] Write `demangle_buf.3` man page: signature, buffer semantics, return values (0 / -1 / -2), truncation behavior.
-- [ ] Write `demangle_free.3` man page: signature, when to call, NULL safety.
-- [ ] Write `demangle_version.3` man page: signature, return value format.
-- [ ] Install all man pages to `$(DESTDIR)/usr/share/man/man3/`.
+- [x] Write `demangle.3` overview man page: library purpose, header, linking, option flags, thread safety, examples.
+- [x] Write `demangle_buf.3` man page: signature, buffer semantics, return values (0 / -1 / -2), truncation behavior.
+- [x] Write `demangle_free.3` man page: signature, when to call, NULL safety.
+- [x] Write `demangle_version.3` man page: signature, return value format.
+- [x] Install all man pages to `$(DESTDIR)/usr/share/man/man3/`.

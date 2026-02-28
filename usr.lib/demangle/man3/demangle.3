@@ -1,0 +1,67 @@
+.TH demangle 3 "February 2026" "Substrate" "Library Functions"
+.SH NAME
+demangle \- demangle C++, Rust, and D mangled symbol names
+.SH SYNOPSIS
+.nf
+.B #include <demangle.h>
+.PP
+.BI "char *demangle(const char *" mangled ", int " options ");"
+.fi
+.SH LIBRARY
+libdemangle (\fI-l:libdemangle.a\fR)
+.SH DESCRIPTION
+.B demangle()
+converts a mangled symbol name to a human-readable form.
+It supports Itanium C++ ABI symbols, Rust symbols (v0 and legacy), and D symbols.
+.PP
+If demangling fails, or if the input is not recognized as a supported mangling,
+.B demangle()
+returns
+.BR NULL .
+.PP
+The caller owns the returned string and must release it with
+.BR demangle_free (3).
+.SH OPTIONS
+.TP
+.B DEMANGLE_AUTO
+Auto-detect mangling scheme.
+.TP
+.B DEMANGLE_ITANIUM
+Force Itanium C++ demangling.
+.TP
+.B DEMANGLE_RUST
+Force Rust demangling.
+.TP
+.B DEMANGLE_DLANG
+Force D demangling.
+.TP
+.B DEMANGLE_TYPES
+Enable type-only Itanium demangling (for encodings like
+.B i
+or
+.BR PKc ).
+.TP
+.B DEMANGLE_NO_PARAMS
+Suppress parameter lists where supported.
+.TP
+.B DEMANGLE_NO_VERBOSE
+Suppress verbose qualifiers where supported.
+.SH RETURN VALUE
+On success, returns a newly allocated NUL-terminated string.
+On failure, returns
+.BR NULL .
+.SH THREAD SAFETY
+Thread-safe and reentrant.
+All parser state is local to each call.
+.SH EXAMPLES
+.nf
+char *s = demangle("_Z3fooi", DEMANGLE_AUTO);
+if (s != NULL) {
+    /* s == "foo(int)" */
+    demangle_free(s);
+}
+.fi
+.SH SEE ALSO
+.BR demangle_buf (3),
+.BR demangle_free (3),
+.BR demangle_version (3)

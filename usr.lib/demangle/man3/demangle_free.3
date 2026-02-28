@@ -1,0 +1,22 @@
+.TH demangle_free 3 "February 2026" "Substrate" "Library Functions"
+.SH NAME
+demangle_free \- free memory returned by demangle
+.SH SYNOPSIS
+.nf
+.B #include <demangle.h>
+.PP
+.BI "void demangle_free(char *" str ");"
+.fi
+.SH LIBRARY
+libdemangle (\fI-l:libdemangle.a\fR)
+.SH DESCRIPTION
+.B demangle_free()
+releases memory returned by
+.BR demangle (3).
+.PP
+Passing
+.B NULL
+is safe.
+.SH SEE ALSO
+.BR demangle (3),
+.BR free (3)

@@ -1,0 +1,42 @@
+.TH demangle_buf 3 "February 2026" "Substrate" "Library Functions"
+.SH NAME
+demangle_buf \- demangle symbol names into a caller-provided buffer
+.SH SYNOPSIS
+.nf
+.B #include <demangle.h>
+.PP
+.BI "int demangle_buf(const char *" mangled ", char *" buf ", size_t " bufsz ", int " options ");"
+.fi
+.SH LIBRARY
+libdemangle (\fI-l:libdemangle.a\fR)
+.SH DESCRIPTION
+.B demangle_buf()
+demangles
+.I mangled
+using
+.I options
+and writes the result to
+.IR buf .
+.PP
+If the destination is too small, output is truncated and always NUL-terminated
+when
+.I bufsz
+is nonzero.
+.SH RETURN VALUE
+.TP
+.B 0
+Success, full demangled string written.
+.TP
+.B -1
+Demangling failed or invalid arguments.
+.TP
+.B -2
+Output buffer too small; truncated output written.
+.SH EXAMPLES
+.nf
+char out[32];
+int rc = demangle_buf("_Z3foov", out, sizeof(out), DEMANGLE_AUTO);
+.fi
+.SH SEE ALSO
+.BR demangle (3),
+.BR demangle_free (3)
