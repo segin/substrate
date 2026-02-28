@@ -268,12 +268,12 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 
 ## 6. Error / Failure Handling
 
-- [ ] Parse failure at any point: return `NULL` from `demangle()`.
-- [ ] Never crash on malformed input — every code path must handle unexpected bytes.
-- [ ] Recursion depth exceeded: return `NULL`.
-- [ ] Substitution table overflow: return `NULL`.
-- [ ] Memory allocation failure: return `NULL`.
-- [ ] Empty input / NULL input: return `NULL`.
+- [x] Parse failure at any point: return `NULL` from `demangle()`.
+- [x] Never crash on malformed input — every code path must handle unexpected bytes.
+- [x] Recursion depth exceeded: return `NULL`.
+- [x] Substitution table overflow: return `NULL`.
+- [x] Memory allocation failure: return `NULL`.
+- [x] Empty input / NULL input: return `NULL`.
 
 ## 7. Performance
 
