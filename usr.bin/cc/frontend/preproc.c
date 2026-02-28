@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -1200,6 +1203,30 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
     }
 }
 
+static FILE *safe_popen_read(const char *cmd, const char *arg1, pid_t *out_pid) {
+    int fds[2];
+    if (pipe(fds) < 0) {
+        return NULL;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return NULL;
+    }
+    if (pid == 0) {
+        close(fds[0]);
+        dup2(fds[1], STDOUT_FILENO);
+        close(fds[1]);
+        char *const argv[] = {(char *)cmd, (char *)arg1, NULL};
+        execvp(cmd, argv);
+        exit(127);
+    }
+    close(fds[1]);
+    *out_pid = pid;
+    return fdopen(fds[0], "r");
+}
+
 static int add_default_include_paths(pp_state_t *st) {
     DIR *d;
     struct dirent *ent;
@@ -1226,17 +1253,18 @@ static int add_default_include_paths(pp_state_t *st) {
         host_cc = "cc";
     }
     for (ti = 0; ti < sizeof(tool_dirs) / sizeof(tool_dirs[0]); ++ti) {
-        char cmd[PATH_MAX + 64];
+        char arg1[PATH_MAX + 64];
         char buf[PATH_MAX];
         FILE *fp;
         size_t n;
+        pid_t child_pid;
         if (strchr(host_cc, ' ') != NULL || strchr(host_cc, '\t') != NULL) {
             continue;
         }
-        if (snprintf(cmd, sizeof(cmd), "%s -print-file-name=%s", host_cc, tool_dirs[ti]) >= (int)sizeof(cmd)) {
+        if (snprintf(arg1, sizeof(arg1), "-print-file-name=%s", tool_dirs[ti]) >= (int)sizeof(arg1)) {
             continue;
         }
-        fp = popen(cmd, "r");
+        fp = safe_popen_read(host_cc, arg1, &child_pid);
         if (fp == NULL) {
             continue;
         }
@@ -1247,12 +1275,14 @@ static int add_default_include_paths(pp_state_t *st) {
             }
             if (buf[0] != '\0' && strcmp(buf, tool_dirs[ti]) != 0 && dir_exists(buf)) {
                 if (strvec_push_unique(&st->system_include_paths, buf) != 0) {
-                    pclose(fp);
+                    fclose(fp);
+                    waitpid(child_pid, NULL, 0);
                     return -1;
                 }
             }
         }
-        pclose(fp);
+        fclose(fp);
+        waitpid(child_pid, NULL, 0);
     }
     d = opendir("/usr/include");
     if (d == NULL) {
