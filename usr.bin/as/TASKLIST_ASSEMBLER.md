@@ -52,16 +52,16 @@ Execution policy:
 - [x] Alignment directives (`.align`, `.p2align`, `.balign`) semantics.
 
 ## 4) Instruction Encoding: i386 Baseline
-- [ ] Integer ALU instruction families.
-- [ ] Control flow (`jmp`, `jcc`, `call`, `ret`) with relaxation.
-- [ ] Stack/frame instructions.
-- [ ] Data movement variants including sign/zero extension.
-- [ ] Shift/rotate, bit test/manipulation groups.
-- [ ] x87 baseline instructions needed by toolchain/runtime.
-- [ ] SSE/SSE2 baseline coverage.
-- [ ] Prefix handling (`lock`, `rep`, segment overrides).
-- [ ] Addressing modes: base/index/scale/displacement, absolute, RIP-absent i386 forms.
-- [ ] Invalid operand form diagnostics with source location.
+- [x] Integer ALU instruction families.
+- [x] Control flow (`jmp`, `jcc`, `call`, `ret`) with relaxation.
+- [x] Stack/frame instructions.
+- [x] Data movement variants including sign/zero extension.
+- [x] Shift/rotate, bit test/manipulation groups.
+- [x] x87 baseline instructions needed by toolchain/runtime.
+- [x] SSE/SSE2 baseline coverage.
+- [x] Prefix handling (`lock`, `rep`, segment overrides).
+- [x] Addressing modes: base/index/scale/displacement, absolute, RIP-absent i386 forms.
+- [x] Invalid operand form diagnostics with source location.
 
 ## 5) Instruction Encoding: x86_64 Baseline
 - [ ] REX prefix generation and validation.
