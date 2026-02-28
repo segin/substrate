@@ -30,8 +30,8 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Accept: `none`/`sysv` (0), `linux` (3), `freebsd` (9), `substrate` (if assigned), or numeric.
 
 ### 2d. `--output-abiversion=<version>`
-- [ ] Set `EI_ABIVERSION` byte.
-- [ ] Accept numeric value 0–255.
+- [x] Set `EI_ABIVERSION` byte.
+- [x] Accept numeric value 0–255.
 
 ### 2e. `--output-flags=<flags>`
 - [ ] Set `e_flags` field.

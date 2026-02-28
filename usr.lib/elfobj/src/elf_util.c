@@ -444,6 +444,18 @@ elf_err_t elf_set_osabi(elfobj_t *obj, uint8_t osabi) {
     return ELF_OK;
 }
 
+elf_err_t elf_set_abiversion(elfobj_t *obj, uint8_t abiversion) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    obj->abiversion = abiversion;
+    obj->dirty = 1;
+    return ELF_OK;
+}
+
 uint16_t elf_type(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->type;
 }
@@ -454,6 +466,10 @@ uint16_t elf_machine(const elfobj_t *obj) {
 
 uint8_t elf_osabi(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->osabi;
+}
+
+uint8_t elf_abiversion(const elfobj_t *obj) {
+    return obj == NULL ? 0 : obj->abiversion;
 }
 
 elfobj_class_t elf_class(const elfobj_t *obj) {

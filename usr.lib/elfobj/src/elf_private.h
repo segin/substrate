@@ -14,6 +14,9 @@
 #ifndef EI_VERSION
 #define EI_VERSION 6
 #endif
+#ifndef EI_ABIVERSION
+#define EI_ABIVERSION 8
+#endif
 #ifndef ELFDATA2LSB
 #define ELFDATA2LSB 1
 #endif
@@ -159,6 +162,7 @@ struct elfobj {
     uint16_t type;
     uint16_t machine;
     uint8_t osabi;
+    uint8_t abiversion;
     uint64_t entry;
     uint32_t flags;
 

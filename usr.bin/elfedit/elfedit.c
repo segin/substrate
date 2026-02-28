@@ -18,9 +18,11 @@ typedef struct {
     uint16_t output_type;
     uint16_t output_machine;
     uint8_t output_osabi;
+    uint8_t output_abiversion;
     int have_output_type;
     int have_output_machine;
     int have_output_osabi;
+    int have_output_abiversion;
 } elfedit_ctx_t;
 
 static const char *g_progname = "elfedit";
@@ -38,7 +40,7 @@ static void warnf(const char *fmt, ...) {
 static void usage(FILE *out) {
     fprintf(out,
             "usage: %s [-o output] [--output-type type] [--output-machine machine]\n"
-            "       [--output-osabi osabi] <input>\n",
+            "       [--output-osabi osabi] [--output-abiversion version] <input>\n",
             g_progname);
 }
 
@@ -136,16 +138,27 @@ static int parse_output_osabi(const char *arg, uint8_t *out) {
     return 0;
 }
 
+static int parse_u8(const char *text, uint8_t *out) {
+    uint16_t parsed = 0;
+
+    if (parse_u16(text, &parsed) != 0 || parsed > 0xffu) {
+        return -1;
+    }
+    *out = (uint8_t)parsed;
+    return 0;
+}
+
 static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
     int ch;
     uint16_t parsed_value;
-    uint8_t parsed_osabi;
+    uint8_t parsed_byte;
     static const struct option long_opts[] = {
         { "help", no_argument, NULL, 'h' },
         { "output", required_argument, NULL, 'o' },
         { "output-type", required_argument, NULL, 1000 },
         { "output-machine", required_argument, NULL, 1001 },
         { "output-osabi", required_argument, NULL, 1002 },
+        { "output-abiversion", required_argument, NULL, 1003 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -176,12 +189,20 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
             ctx->output_machine = parsed_value;
             break;
         case 1002:
-            if (parse_output_osabi(optarg, &parsed_osabi) != 0) {
+            if (parse_output_osabi(optarg, &parsed_byte) != 0) {
                 warnf("unknown osabi: %s", optarg);
                 return -1;
             }
             ctx->have_output_osabi = 1;
-            ctx->output_osabi = parsed_osabi;
+            ctx->output_osabi = parsed_byte;
+            break;
+        case 1003:
+            if (parse_u8(optarg, &parsed_byte) != 0) {
+                warnf("invalid abiversion: %s", optarg);
+                return -1;
+            }
+            ctx->have_output_abiversion = 1;
+            ctx->output_abiversion = parsed_byte;
             break;
         default:
             usage(stderr);
@@ -274,6 +295,14 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
         err = elf_set_osabi(obj, ctx->output_osabi);
         if (err != ELF_OK) {
             warnf("failed to set ELF OSABI: %s", elf_errstr(err));
+            return -1;
+        }
+    }
+
+    if (ctx->have_output_abiversion) {
+        err = elf_set_abiversion(obj, ctx->output_abiversion);
+        if (err != ELF_OK) {
+            warnf("failed to set ELF ABI version: %s", elf_errstr(err));
             return -1;
         }
     }

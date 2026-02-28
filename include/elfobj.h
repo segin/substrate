@@ -359,9 +359,11 @@ elf_err_t elf_finalize(elfobj_t *obj);
 elf_err_t elf_set_type(elfobj_t *obj, uint16_t type);
 elf_err_t elf_set_machine(elfobj_t *obj, uint16_t machine);
 elf_err_t elf_set_osabi(elfobj_t *obj, uint8_t osabi);
+elf_err_t elf_set_abiversion(elfobj_t *obj, uint8_t abiversion);
 uint16_t elf_type(const elfobj_t *obj);
 uint16_t elf_machine(const elfobj_t *obj);
 uint8_t elf_osabi(const elfobj_t *obj);
+uint8_t elf_abiversion(const elfobj_t *obj);
 elfobj_class_t elf_class(const elfobj_t *obj);
 elfobj_endian_t elf_endian(const elfobj_t *obj);
 
