@@ -140,8 +140,8 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Lifetime display: `'_` for erased, `'a`, `'b`, ... for bound lifetimes.
 
 ### 3h. Rust v0 Grammar — Disambiguators
-- [ ] `<disambiguator>` → `s <base-62-number>`.
-- [ ] Display: suppress in output (internal compiler detail), unless verbose mode requested.
+- [x] `<disambiguator>` → `s <base-62-number>`.
+- [x] Display: suppress in output (internal compiler detail), unless verbose mode requested.
 
 ### 3i. Rust v0 Grammar — Backreferences
 - [ ] `B <base-62-number>` — refers to a byte offset in the mangled string.

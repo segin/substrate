@@ -443,6 +443,37 @@ rust_parse_optional_disambiguator(rust_parser_t *p)
         return 0;
     }
 
+    if ((p->options & DEMANGLE_NO_VERBOSE) == 0) {
+        if (rust_buf_append(&p->out, "{s", 2u) != 0) {
+            return -1;
+        }
+        {
+            char numbuf[32];
+            size_t n = 0u;
+            size_t v = tmp;
+
+            if (v == 0u) {
+                numbuf[n++] = '0';
+            } else {
+                char rev[32];
+                size_t r = 0u;
+                while (v > 0u && r < sizeof(rev)) {
+                    rev[r++] = (char)('0' + (v % 10u));
+                    v /= 10u;
+                }
+                while (r > 0u) {
+                    numbuf[n++] = rev[--r];
+                }
+            }
+            if (rust_buf_append(&p->out, numbuf, n) != 0) {
+                return -1;
+            }
+        }
+        if (rust_buf_appendc(&p->out, '}') != 0) {
+            return -1;
+        }
+    }
+
     return 0;
 }
 
