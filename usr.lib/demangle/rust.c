@@ -51,6 +51,7 @@ static int rust_is_legacy(const char *mangled);
 static int rust_buf_reserve(rust_buf_t *buf, size_t extra);
 static int rust_buf_append(rust_buf_t *buf, const char *s, size_t n);
 static int rust_buf_appendc(rust_buf_t *buf, char ch);
+static int rust_buf_insert(rust_buf_t *buf, size_t off, const char *s, size_t n);
 static char *rust_buf_take(rust_buf_t *buf);
 static void rust_buf_destroy(rust_buf_t *buf);
 
@@ -68,6 +69,9 @@ static int rust_parse_base62(rust_parser_t *p, size_t *out);
 static int rust_parse_optional_disambiguator(rust_parser_t *p);
 static int rust_parse_v0_identifier(rust_parser_t *p);
 static int rust_parse_v0_type(rust_parser_t *p);
+static int rust_parse_v0_const(rust_parser_t *p);
+static int rust_parse_v0_lifetime(rust_parser_t *p, int display);
+static int rust_parse_v0_dyn_trait(rust_parser_t *p);
 static int rust_parse_v0_generic_arg(rust_parser_t *p);
 static int rust_parse_v0_path(rust_parser_t *p);
 
@@ -197,6 +201,27 @@ rust_buf_appendc(rust_buf_t *buf, char ch)
 
     buf->data[buf->len++] = ch;
     buf->data[buf->len] = '\0';
+    return 0;
+}
+
+static int
+rust_buf_insert(rust_buf_t *buf, size_t off, const char *s, size_t n)
+{
+    if (buf == NULL || s == NULL || off > buf->len) {
+        return -1;
+    }
+
+    if (n == 0u) {
+        return 0;
+    }
+
+    if (rust_buf_reserve(buf, n) != 0) {
+        return -1;
+    }
+
+    memmove(buf->data + off + n, buf->data + off, buf->len - off + 1u);
+    memcpy(buf->data + off, s, n);
+    buf->len += n;
     return 0;
 }
 
@@ -708,6 +733,129 @@ rust_parse_v0_identifier(rust_parser_t *p)
 }
 
 static int
+rust_parse_v0_lifetime(rust_parser_t *p, int display)
+{
+    size_t idx;
+    char letter;
+
+    if (p->cur[0] != 'L') {
+        return -1;
+    }
+
+    p->cur++;
+    if (rust_parse_base62(p, &idx) != 0) {
+        return -1;
+    }
+
+    if (!display) {
+        return 0;
+    }
+
+    if (rust_buf_appendc(&p->out, '\'') != 0) {
+        return -1;
+    }
+
+    if (idx == 0u) {
+        return rust_buf_appendc(&p->out, '_');
+    }
+
+    letter = (char)('a' + (idx - 1u) % 26u);
+    if (rust_buf_appendc(&p->out, letter) != 0) {
+        return -1;
+    }
+    if (idx > 26u) {
+        return rust_buf_append(&p->out, "...", 3u);
+    }
+
+    return 0;
+}
+
+static int
+rust_parse_v0_const(rust_parser_t *p)
+{
+    rust_mark_t m;
+    size_t value_off;
+    size_t idx;
+
+    if (p->cur[0] == 'p') {
+        p->cur++;
+        return rust_buf_appendc(&p->out, '_');
+    }
+
+    if (p->cur[0] == 'B') {
+        p->cur++;
+        if (rust_parse_base62(p, &idx) != 0) {
+            return -1;
+        }
+        if (idx >= p->backref_count) {
+            return -1;
+        }
+        return rust_buf_append(&p->out, "<backref-const>", 14u);
+    }
+
+    rust_mark_save(p, &m);
+    value_off = p->out.len;
+    if (rust_parse_v0_type(p) != 0) {
+        return -1;
+    }
+    p->out.len = value_off;
+    p->out.data[p->out.len] = '\0';
+
+    if ((p->cur[0] == '0' || p->cur[0] == '1') && p->cur[1] == '_') {
+        int is_true = (p->cur[0] == '1');
+        p->cur += 2;
+        return rust_buf_append(&p->out, is_true ? "true" : "false", is_true ? 4u : 5u);
+    }
+
+    if (p->cur[0] == 'n') {
+        if (rust_buf_appendc(&p->out, '-') != 0) {
+            return -1;
+        }
+        p->cur++;
+    }
+
+    if (!is_hex_char(p->cur[0])) {
+        rust_mark_restore(p, &m);
+        return -1;
+    }
+
+    if (rust_buf_append(&p->out, "0x", 2u) != 0) {
+        return -1;
+    }
+    while (is_hex_char(p->cur[0])) {
+        if (rust_buf_appendc(&p->out, p->cur[0]) != 0) {
+            return -1;
+        }
+        p->cur++;
+    }
+
+    if (p->cur[0] != '_') {
+        return -1;
+    }
+    p->cur++;
+    return 0;
+}
+
+static int
+rust_parse_v0_dyn_trait(rust_parser_t *p)
+{
+    if (rust_parse_v0_path(p) != 0) {
+        return -1;
+    }
+
+    while (p->cur[0] == 'p' || p->cur[0] == 'B') {
+        if (rust_buf_append(&p->out, " + Assoc=", 9u) != 0) {
+            return -1;
+        }
+        if (rust_parse_v0_generic_arg(p) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int
 rust_parse_v0_type(rust_parser_t *p)
 {
     static const struct {
@@ -722,6 +870,7 @@ rust_parse_v0_type(rust_parser_t *p)
         { 'j', "usize" },{ 'f', "f32" },  { 'd', "f64" },
         { 'z', "!" },    { 'p', "_" },    { 'v', "..." }
     };
+    rust_mark_t m;
     size_t i;
 
     for (i = 0u; i < sizeof(basic) / sizeof(basic[0]); i++) {
@@ -731,7 +880,233 @@ rust_parse_v0_type(rust_parser_t *p)
         }
     }
 
-    return rust_parse_v0_path(p);
+    if (p->cur[0] == 'R' || p->cur[0] == 'Q') {
+        int is_mut = (p->cur[0] == 'Q');
+        p->cur++;
+        if (rust_buf_appendc(&p->out, '&') != 0) {
+            return -1;
+        }
+        if (p->cur[0] == 'L') {
+            if (rust_parse_v0_lifetime(p, 1) != 0 || rust_buf_appendc(&p->out, ' ') != 0) {
+                return -1;
+            }
+        }
+        if (is_mut && rust_buf_append(&p->out, "mut ", 4u) != 0) {
+            return -1;
+        }
+        return rust_parse_v0_type(p);
+    }
+
+    if (p->cur[0] == 'P' || p->cur[0] == 'O') {
+        int is_mut = (p->cur[0] == 'O');
+        p->cur++;
+        if (rust_buf_append(&p->out, is_mut ? "*mut " : "*const ", is_mut ? 5u : 7u) != 0) {
+            return -1;
+        }
+        return rust_parse_v0_type(p);
+    }
+
+    if (p->cur[0] == 'A') {
+        p->cur++;
+        if (rust_buf_appendc(&p->out, '[') != 0 ||
+            rust_parse_v0_type(p) != 0 ||
+            rust_buf_append(&p->out, "; ", 2u) != 0 ||
+            rust_parse_v0_const(p) != 0 ||
+            rust_buf_appendc(&p->out, ']') != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (p->cur[0] == 'S') {
+        p->cur++;
+        if (rust_buf_appendc(&p->out, '[') != 0 ||
+            rust_parse_v0_type(p) != 0 ||
+            rust_buf_appendc(&p->out, ']') != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (p->cur[0] == 'T') {
+        int first = 1;
+        int count = 0;
+
+        p->cur++;
+        if (rust_buf_appendc(&p->out, '(') != 0) {
+            return -1;
+        }
+        while (p->cur[0] != '\0' && p->cur[0] != 'E') {
+            if (!first && rust_buf_append(&p->out, ", ", 2u) != 0) {
+                return -1;
+            }
+            if (rust_parse_v0_type(p) != 0) {
+                return -1;
+            }
+            first = 0;
+            count++;
+        }
+        if (p->cur[0] != 'E') {
+            return -1;
+        }
+        p->cur++;
+        if (count == 1 && rust_buf_appendc(&p->out, ',') != 0) {
+            return -1;
+        }
+        return rust_buf_appendc(&p->out, ')');
+    }
+
+    if (p->cur[0] == 'F') {
+        int is_unsafe = 0;
+        int has_abi = 0;
+        const char *abi = "Rust";
+        size_t ret_off;
+        size_t ret_len;
+
+        p->cur++;
+
+        if (p->cur[0] == 'G') {
+            size_t binder;
+            p->cur++;
+            if (rust_parse_base62(p, &binder) != 0) {
+                return -1;
+            }
+            (void)binder;
+        }
+
+        if (p->cur[0] == 'U') {
+            is_unsafe = 1;
+            p->cur++;
+        }
+
+        if (p->cur[0] == 'K') {
+            has_abi = 1;
+            p->cur++;
+            if (p->cur[0] == 'C') {
+                abi = "C";
+                p->cur++;
+            }
+        }
+
+        if (is_unsafe && rust_buf_append(&p->out, "unsafe ", 7u) != 0) {
+            return -1;
+        }
+        if (has_abi) {
+            if (rust_buf_append(&p->out, "extern \"", 8u) != 0 ||
+                rust_buf_append(&p->out, abi, strlen(abi)) != 0 ||
+                rust_buf_append(&p->out, "\" ", 2u) != 0) {
+                return -1;
+            }
+        }
+        if (rust_buf_append(&p->out, "fn(", 3u) != 0) {
+            return -1;
+        }
+
+        {
+            int first = 1;
+            while (p->cur[0] != '\0' && p->cur[0] != 'E') {
+                if (!first && rust_buf_append(&p->out, ", ", 2u) != 0) {
+                    return -1;
+                }
+                if (rust_parse_v0_type(p) != 0) {
+                    return -1;
+                }
+                first = 0;
+            }
+        }
+
+        if (p->cur[0] != 'E') {
+            return -1;
+        }
+        p->cur++;
+
+        if (rust_buf_appendc(&p->out, ')') != 0) {
+            return -1;
+        }
+
+        ret_off = p->out.len;
+        if (rust_parse_v0_type(p) != 0) {
+            return -1;
+        }
+        ret_len = p->out.len - ret_off;
+        if (!(ret_len == 2u && memcmp(p->out.data + ret_off, "()", 2u) == 0)) {
+            if (rust_buf_insert(&p->out, ret_off, " -> ", 4u) != 0) {
+                return -1;
+            }
+        } else {
+            p->out.len = ret_off;
+            p->out.data[p->out.len] = '\0';
+        }
+        return 0;
+    }
+
+    if (p->cur[0] == 'D') {
+        int first = 1;
+
+        p->cur++;
+        if (rust_buf_append(&p->out, "dyn ", 4u) != 0) {
+            return -1;
+        }
+
+        if (p->cur[0] == 'G') {
+            size_t binder;
+            p->cur++;
+            if (rust_parse_base62(p, &binder) != 0) {
+                return -1;
+            }
+            (void)binder;
+        }
+
+        while (p->cur[0] != '\0' && p->cur[0] != 'E') {
+            if (!first && rust_buf_append(&p->out, " + ", 3u) != 0) {
+                return -1;
+            }
+            if (rust_parse_v0_dyn_trait(p) != 0) {
+                return -1;
+            }
+            first = 0;
+        }
+
+        if (p->cur[0] != 'E') {
+            return -1;
+        }
+        p->cur++;
+
+        if (p->cur[0] == 'L') {
+            if (rust_buf_append(&p->out, " + ", 3u) != 0 || rust_parse_v0_lifetime(p, 1) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    if (p->cur[0] == 'B') {
+        const char *save_cur;
+        size_t idx;
+        rust_mark_t mark;
+
+        p->cur++;
+        if (rust_parse_base62(p, &idx) != 0 || idx >= p->backref_count) {
+            return -1;
+        }
+
+        save_cur = p->cur;
+        rust_mark_save(p, &mark);
+        p->cur = p->backrefs[idx].start;
+        if (rust_parse_v0_type(p) != 0) {
+            rust_mark_restore(p, &mark);
+            return -1;
+        }
+        p->cur = save_cur;
+        return 0;
+    }
+
+    rust_mark_save(p, &m);
+    if (rust_parse_v0_path(p) == 0) {
+        return 0;
+    }
+    rust_mark_restore(p, &m);
+    return -1;
 }
 
 static int
@@ -741,6 +1116,16 @@ rust_parse_v0_generic_arg(rust_parser_t *p)
 
     rust_mark_save(p, &m);
     if (rust_parse_v0_type(p) == 0) {
+        return 0;
+    }
+
+    rust_mark_restore(p, &m);
+    if (rust_parse_v0_const(p) == 0) {
+        return 0;
+    }
+
+    rust_mark_restore(p, &m);
+    if (rust_parse_v0_lifetime(p, 1) == 0) {
         return 0;
     }
 
@@ -840,9 +1225,7 @@ rust_parse_v0_path(rust_parser_t *p)
             rust_parse_v0_type(p) != 0 ||
             rust_buf_append(&p->out, " as ", 4u) != 0 ||
             rust_parse_v0_path(p) != 0 ||
-            rust_buf_appendc(&p->out, '>') != 0 ||
-            rust_buf_append(&p->out, "::", 2u) != 0 ||
-            rust_parse_v0_path(p) != 0) {
+            rust_buf_appendc(&p->out, '>') != 0) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
             return -1;

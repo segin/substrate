@@ -108,25 +108,25 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Map decoded identifiers to `{ident}` display form for non‑ASCII names.
 
 ### 3e. Rust v0 Grammar — Types (`<type>`)
-- [ ] Basic types: single‑char encodings:
-  - [ ] `b` (bool), `c` (char), `e` (str), `u` (unit `()`), `a` (i8), `s` (i16), `l` (i32), `x` (i64), `n` (i128), `i` (isize).
-  - [ ] `h` (u8), `t` (u16), `m` (u32), `y` (u64), `o` (u128), `j` (usize).
-  - [ ] `f` (f32), `d` (f64), `z` (! / never), `p` (placeholder `_`), `v` (variadic `...`).
-- [ ] `R <lifetime>? <type>` — shared reference `&T` / `&'a T`.
-- [ ] `Q <lifetime>? <type>` — mutable reference `&mut T`.
-- [ ] `P <type>` — raw const pointer `*const T`.
-- [ ] `O <type>` — raw mut pointer `*mut T`.
-- [ ] `A <type> <const>` — array `[T; N]`.
-- [ ] `S <type>` — slice `[T]`.
-- [ ] `T <type>* E` — tuple `(A, B, ...)`.
-- [ ] `F <fn-sig>` — function pointer.
-  - [ ] `<fn-sig>` → `<binder>? U? (K <abi>)? <type>* E <type>`.
-  - [ ] `U` = unsafe, `K` = ABI (e.g. `KC` = `extern "C"`).
-  - [ ] `<binder>` → `G <base-62-number>` (higher‑ranked lifetimes).
-- [ ] `D <dyn-bounds> <lifetime>` — trait object `dyn Trait + 'a`.
-  - [ ] `<dyn-bounds>` → `<binder>? <dyn-trait>* E`.
-  - [ ] `<dyn-trait>` → `<path> <dyn-trait-assoc-binding>*`.
-- [ ] `B <backref>` — backreference to a previously parsed type.
+- [x] Basic types: single‑char encodings:
+  - [x] `b` (bool), `c` (char), `e` (str), `u` (unit `()`), `a` (i8), `s` (i16), `l` (i32), `x` (i64), `n` (i128), `i` (isize).
+  - [x] `h` (u8), `t` (u16), `m` (u32), `y` (u64), `o` (u128), `j` (usize).
+  - [x] `f` (f32), `d` (f64), `z` (! / never), `p` (placeholder `_`), `v` (variadic `...`).
+- [x] `R <lifetime>? <type>` — shared reference `&T` / `&'a T`.
+- [x] `Q <lifetime>? <type>` — mutable reference `&mut T`.
+- [x] `P <type>` — raw const pointer `*const T`.
+- [x] `O <type>` — raw mut pointer `*mut T`.
+- [x] `A <type> <const>` — array `[T; N]`.
+- [x] `S <type>` — slice `[T]`.
+- [x] `T <type>* E` — tuple `(A, B, ...)`.
+- [x] `F <fn-sig>` — function pointer.
+  - [x] `<fn-sig>` → `<binder>? U? (K <abi>)? <type>* E <type>`.
+  - [x] `U` = unsafe, `K` = ABI (e.g. `KC` = `extern "C"`).
+  - [x] `<binder>` → `G <base-62-number>` (higher‑ranked lifetimes).
+- [x] `D <dyn-bounds> <lifetime>` — trait object `dyn Trait + 'a`.
+  - [x] `<dyn-bounds>` → `<binder>? <dyn-trait>* E`.
+  - [x] `<dyn-trait>` → `<path> <dyn-trait-assoc-binding>*`.
+- [x] `B <backref>` — backreference to a previously parsed type.
 
 ### 3f. Rust v0 Grammar — Const Values (`<const>`)
 - [ ] `<const>` → `<type> <const-data>` | `B <backref>` | `p` (placeholder `_`).
