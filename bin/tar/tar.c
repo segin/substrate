@@ -424,10 +424,8 @@ static char *map_extract_path(const char *in) {
     }
     char *out = strdup(p); free(dup);
     if (!out) return NULL;
-    if (opt.safe_extract) {
-        if (strstr(out, "../") || strstr(out, "/..") || !strcmp(out, "..") || in[0] == '/') {
-            free(out); return NULL;
-        }
+    if (strstr(out, "../") || strstr(out, "/..") || !strcmp(out, "..") || in[0] == '/') {
+        free(out); return NULL;
     }
     return out;
 }
