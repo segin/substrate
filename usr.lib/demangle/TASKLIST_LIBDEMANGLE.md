@@ -92,13 +92,13 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Output via shared growable buffer (§5).
 
 ### 3c. Rust v0 Grammar — Paths (`<path>`)
-- [ ] `C <disambiguator>? <identifier>` — crate root.
-- [ ] `N <namespace> <path> <disambiguator>? <identifier>` — nested path.
-  - [ ] Namespace tag: `v` (value ns), `t` (type ns), lowercase = internal, uppercase = user‑visible.
-- [ ] `M <impl-path> <type>` — inherent impl `<Type>`.
-- [ ] `X <impl-path> <type> <path>` — trait impl `<Type as Trait>`.
-- [ ] `Y <type> <path>` — trait definition reference `<Type as Trait>`.
-- [ ] `I <path> <generic-arg>+ E` — generic instantiation `path::<A, B, ...>`.
+- [x] `C <disambiguator>? <identifier>` — crate root.
+- [x] `N <namespace> <path> <disambiguator>? <identifier>` — nested path.
+  - [x] Namespace tag: `v` (value ns), `t` (type ns), lowercase = internal, uppercase = user‑visible.
+- [x] `M <impl-path> <type>` — inherent impl `<Type>`.
+- [x] `X <impl-path> <type> <path>` — trait impl `<Type as Trait>`.
+- [x] `Y <type> <path>` — trait definition reference `<Type as Trait>`.
+- [x] `I <path> <generic-arg>+ E` — generic instantiation `path::<A, B, ...>`.
 
 ### 3d. Rust v0 Grammar — Identifiers
 - [ ] `<identifier>` → `[u] <decimal-number> [_] <bytes>`.
