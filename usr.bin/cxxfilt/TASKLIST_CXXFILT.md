@@ -96,9 +96,9 @@ Map CLI style names to `libdemangle` option flags:
 
 ## 6. Error Handling
 
-- [ ] Stdin read error: report to stderr, exit 1.
-- [ ] Invalid `-s` style: error message, exit 1.
-- [ ] All other errors (bad names): pass through, exit 0.
+- [x] Stdin read error: report to stderr, exit 1.
+- [x] Invalid `-s` style: error message, exit 1.
+- [x] All other errors (bad names): pass through, exit 0.
 
 ---
 
