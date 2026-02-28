@@ -9,7 +9,6 @@
 
 #include <demangle.h>
 
-#define DLANG_BUF_INITIAL_CAP 256u
 #define DLANG_RECURSION_DEFAULT_LIMIT 128
 
 enum {
@@ -30,11 +29,7 @@ enum {
     DLANG_ATTR_RETREF = 1u << 7
 };
 
-typedef struct dlang_buf {
-    char *data;
-    size_t len;
-    size_t cap;
-} dlang_buf_t;
+typedef demangle_buf_t dlang_buf_t;
 
 typedef struct dlang_name_ref {
     size_t off;
@@ -144,98 +139,31 @@ dlang_strdup(const char *s)
 static int
 dlang_buf_reserve(dlang_buf_t *buf, size_t extra)
 {
-    size_t need;
-    size_t cap;
-    char *next;
-
-    if (buf == NULL) {
-        return -1;
-    }
-
-    need = buf->len + extra + 1u;
-    if (need <= buf->cap) {
-        return 0;
-    }
-
-    cap = (buf->cap == 0u) ? DLANG_BUF_INITIAL_CAP : buf->cap;
-    while (cap < need) {
-        size_t doubled = cap << 1;
-        if (doubled < cap) {
-            return -1;
-        }
-        cap = doubled;
-    }
-
-    next = (char *)realloc(buf->data, cap);
-    if (next == NULL) {
-        return -1;
-    }
-
-    buf->data = next;
-    buf->cap = cap;
-    return 0;
+    return demangle_buf_reserve(buf, extra);
 }
 
 static int
 dlang_buf_append(dlang_buf_t *buf, const char *s, size_t n)
 {
-    if (buf == NULL || s == NULL) {
-        return -1;
-    }
-
-    if (dlang_buf_reserve(buf, n) != 0) {
-        return -1;
-    }
-
-    if (n > 0u) {
-        memcpy(buf->data + buf->len, s, n);
-        buf->len += n;
-    }
-
-    buf->data[buf->len] = '\0';
-    return 0;
+    return demangle_buf_append(buf, s, n);
 }
 
 static int
 dlang_buf_appendc(dlang_buf_t *buf, char ch)
 {
-    if (dlang_buf_reserve(buf, 1u) != 0) {
-        return -1;
-    }
-
-    buf->data[buf->len++] = ch;
-    buf->data[buf->len] = '\0';
-    return 0;
+    return demangle_buf_appendc(buf, ch);
 }
 
 static char *
 dlang_buf_take(dlang_buf_t *buf)
 {
-    char *ret;
-
-    if (buf == NULL || buf->data == NULL) {
-        return NULL;
-    }
-
-    buf->data[buf->len] = '\0';
-    ret = buf->data;
-    buf->data = NULL;
-    buf->len = 0u;
-    buf->cap = 0u;
-    return ret;
+    return demangle_buf_take(buf);
 }
 
 static void
 dlang_buf_destroy(dlang_buf_t *buf)
 {
-    if (buf == NULL) {
-        return;
-    }
-
-    free(buf->data);
-    buf->data = NULL;
-    buf->len = 0u;
-    buf->cap = 0u;
+    demangle_buf_destroy(buf);
 }
 
 static int

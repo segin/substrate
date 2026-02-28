@@ -259,12 +259,12 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 
 ## 5. Growable Output Buffer
 
-- [ ] Internal `struct demangle_buf { char *data; size_t len, cap; }`.
-- [ ] `buf_append(buf, str, len)` — grow by 2× when full.
-- [ ] `buf_appendc(buf, ch)` — single char.
-- [ ] `buf_printf(buf, fmt, ...)` — formatted append.
-- [ ] Initial capacity: 256 bytes (covers most symbols without realloc).
-- [ ] Final NUL termination.
+- [x] Internal `struct demangle_buf { char *data; size_t len, cap; }`.
+- [x] `buf_append(buf, str, len)` — grow by 2× when full.
+- [x] `buf_appendc(buf, ch)` — single char.
+- [x] `buf_printf(buf, fmt, ...)` — formatted append.
+- [x] Initial capacity: 256 bytes (covers most symbols without realloc).
+- [x] Final NUL termination.
 
 ## 6. Error / Failure Handling
 

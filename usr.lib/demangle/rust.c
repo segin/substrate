@@ -9,14 +9,9 @@
 
 #include <demangle.h>
 
-#define RUST_BUF_INITIAL_CAP 256u
 #define RUST_RECURSION_DEFAULT_LIMIT 128
 
-typedef struct rust_buf {
-    char *data;
-    size_t len;
-    size_t cap;
-} rust_buf_t;
+typedef demangle_buf_t rust_buf_t;
 
 typedef struct rust_backref {
     const char *start;
@@ -146,68 +141,19 @@ rust_is_legacy(const char *mangled)
 static int
 rust_buf_reserve(rust_buf_t *buf, size_t extra)
 {
-    size_t need;
-    size_t cap;
-    char *next;
-
-    if (buf == NULL) {
-        return -1;
-    }
-
-    need = buf->len + extra + 1u;
-    if (need <= buf->cap) {
-        return 0;
-    }
-
-    cap = (buf->cap == 0u) ? RUST_BUF_INITIAL_CAP : buf->cap;
-    while (cap < need) {
-        size_t doubled = cap << 1;
-        if (doubled < cap) {
-            return -1;
-        }
-        cap = doubled;
-    }
-
-    next = (char *)realloc(buf->data, cap);
-    if (next == NULL) {
-        return -1;
-    }
-
-    buf->data = next;
-    buf->cap = cap;
-    return 0;
+    return demangle_buf_reserve(buf, extra);
 }
 
 static int
 rust_buf_append(rust_buf_t *buf, const char *s, size_t n)
 {
-    if (buf == NULL || s == NULL) {
-        return -1;
-    }
-
-    if (rust_buf_reserve(buf, n) != 0) {
-        return -1;
-    }
-
-    if (n > 0u) {
-        memcpy(buf->data + buf->len, s, n);
-        buf->len += n;
-    }
-
-    buf->data[buf->len] = '\0';
-    return 0;
+    return demangle_buf_append(buf, s, n);
 }
 
 static int
 rust_buf_appendc(rust_buf_t *buf, char ch)
 {
-    if (rust_buf_reserve(buf, 1u) != 0) {
-        return -1;
-    }
-
-    buf->data[buf->len++] = ch;
-    buf->data[buf->len] = '\0';
-    return 0;
+    return demangle_buf_appendc(buf, ch);
 }
 
 static int
@@ -234,31 +180,13 @@ rust_buf_insert(rust_buf_t *buf, size_t off, const char *s, size_t n)
 static char *
 rust_buf_take(rust_buf_t *buf)
 {
-    char *ret;
-
-    if (buf == NULL || buf->data == NULL) {
-        return NULL;
-    }
-
-    buf->data[buf->len] = '\0';
-    ret = buf->data;
-    buf->data = NULL;
-    buf->len = 0u;
-    buf->cap = 0u;
-    return ret;
+    return demangle_buf_take(buf);
 }
 
 static void
 rust_buf_destroy(rust_buf_t *buf)
 {
-    if (buf == NULL) {
-        return;
-    }
-
-    free(buf->data);
-    buf->data = NULL;
-    buf->len = 0u;
-    buf->cap = 0u;
+    demangle_buf_destroy(buf);
 }
 
 static int
