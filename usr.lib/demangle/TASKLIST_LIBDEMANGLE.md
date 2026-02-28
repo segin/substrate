@@ -135,9 +135,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Char const: Unicode scalar value as hex.
 
 ### 3g. Rust v0 Grammar — Lifetimes and Binders
-- [ ] `<lifetime>` → `L <base-62-number>` (de Bruijn index).
-- [ ] `<base-62-number>` → `_` (0) | `<digit>+ _` (value + 1, base 62: `0-9 a-z A-Z`).
-- [ ] Lifetime display: `'_` for erased, `'a`, `'b`, ... for bound lifetimes.
+- [x] `<lifetime>` → `L <base-62-number>` (de Bruijn index).
+- [x] `<base-62-number>` → `_` (0) | `<digit>+ _` (value + 1, base 62: `0-9 a-z A-Z`).
+- [x] Lifetime display: `'_` for erased, `'a`, `'b`, ... for bound lifetimes.
 
 ### 3h. Rust v0 Grammar — Disambiguators
 - [ ] `<disambiguator>` → `s <base-62-number>`.
