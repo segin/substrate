@@ -115,44 +115,44 @@ Map CLI style names to `libdemangle` option flags:
 ## 8. Testing
 
 ### 8a. CLI Smoke Tests
-- [ ] `echo '_ZN3Foo3barEv' | c++filt` → `Foo::bar()`.
-- [ ] `echo '_Z3fooi' | c++filt` → `foo(int)`.
-- [ ] `c++filt _ZN9Wikipedia7articleE` → `Wikipedia::article`.
-- [ ] `c++filt _Z1fv` → `f()`.
-- [ ] `echo '_ZNK3Foo3barEi' | c++filt` → `Foo::bar(int) const`.
+- [x] `echo '_ZN3Foo3barEv' | c++filt` → `Foo::bar()`.
+- [x] `echo '_Z3fooi' | c++filt` → `foo(int)`.
+- [x] `c++filt _ZN9Wikipedia7articleE` → `Wikipedia::article`.
+- [x] `c++filt _Z1fv` → `f()`.
+- [x] `echo '_ZNK3Foo3barEi' | c++filt` → `Foo::bar(int) const`.
 
 ### 8b. Stdin Streaming Tests
-- [ ] Mixed mangled/unmangled text: only `_Z`/`_R`/`_D` tokens demangled.
-- [ ] Multiple mangled names per line.
-- [ ] Empty input: empty output.
-- [ ] Lines without any mangled names: pass through unchanged.
+- [x] Mixed mangled/unmangled text: only `_Z`/`_R`/`_D` tokens demangled.
+- [x] Multiple mangled names per line.
+- [x] Empty input: empty output.
+- [x] Lines without any mangled names: pass through unchanged.
 
 ### 8c. Argv Mode Tests
-- [ ] Single argument demangling.
-- [ ] Multiple arguments, one per output line.
+- [x] Single argument demangling.
+- [x] Multiple arguments, one per output line.
 
 ### 8d. Flag Tests
-- [ ] `-p`: `c++filt -p _Z3fooi` → `foo` (no params).
-- [ ] `-n`: `c++filt -n __Z3fooi` → `foo(int)` (strip underscore off).
-- [ ] `-s none`: all names pass through unchanged.
-- [ ] `-s rust`: Rust symbols demangled, C++ symbols passed through.
-- [ ] `-s dlang`: D symbols demangled, C++ symbols passed through.
-- [ ] `-t`: bare type strings demangled (e.g. `i` → `int`).
-- [ ] `-V`: prints `demangle_version()` output.
+- [x] `-p`: `c++filt -p _Z3fooi` → `foo` (no params).
+- [x] `-n`: `c++filt -n __Z3fooi` → `foo(int)` (strip underscore off).
+- [x] `-s none`: all names pass through unchanged.
+- [x] `-s rust`: Rust symbols demangled, C++ symbols passed through.
+- [x] `-s dlang`: D symbols demangled, C++ symbols passed through.
+- [x] `-t`: bare type strings demangled (e.g. `i` → `int`).
+- [x] `-V`: prints `demangle_version()` output.
 
 ### 8e. Failure / Edge‑Case Tests
-- [ ] Non‑mangled name: passed through unchanged.
-- [ ] Truncated name (`_ZN3Foo`): passed through unchanged.
-- [ ] Random binary data: no crash, passed through.
-- [ ] Invalid `-s` argument: error message, exit 1.
+- [x] Non‑mangled name: passed through unchanged.
+- [x] Truncated name (`_ZN3Foo`): passed through unchanged.
+- [x] Random binary data: no crash, passed through.
+- [x] Invalid `-s` argument: error message, exit 1.
 
 ### 8f. Integration Tests
-- [ ] `nm -C` output matches `c++filt` output on the same binary.
-- [ ] `objdump -C -d` labels match `c++filt` output.
+- [x] `nm -C` output matches `c++filt` output on the same binary.
+- [x] `objdump -C -d` labels match `c++filt` output.
 
 ### 8g. Large Corpus Tests
-- [ ] Pipe all symbols from a real C++ library through `c++filt`.
-- [ ] Compare output against host `c++filt` or `__cxa_demangle`.
+- [x] Pipe all symbols from a real C++ library through `c++filt`.
+- [x] Compare output against host `c++filt` or `__cxa_demangle`.
 
 > **Note:** unit tests for the demangling engine itself live in
 > `tests/usr.lib/demangle/`. The tests above exercise only the CLI
