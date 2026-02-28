@@ -214,11 +214,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `n` — typeof(null).
 
 ### 4f. D Mangling Grammar — Qualifiers
-- [ ] `x` — const.
-- [ ] `y` — immutable.
-- [ ] `O` — shared.
-- [ ] `Ng` — inout (wild).
-- [ ] Combine qualifiers: `xO` = shared const.
+- [x] `x` — const.
+- [x] `y` — immutable.
+- [x] `O` — shared.
+- [x] `Ng` — inout (wild).
+- [x] Combine qualifiers: `xO` = shared const.
 
 ### 4g. D Mangling Grammar — Function Attributes
 - [ ] `Na` — pure.
