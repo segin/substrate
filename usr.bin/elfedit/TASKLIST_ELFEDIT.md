@@ -137,10 +137,10 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Edit core file without `--force`: rejected.
 
 ### 9g. Edge Cases
-- [ ] ELF32 and ELF64 inputs.
-- [ ] ELF with no sections (only program headers).
-- [ ] Multiple edits in one invocation (e.g. change type + machine + osabi).
-- [ ] No‑op invocation (no edit flags): exits 0 quietly.
+- [x] ELF32 and ELF64 inputs.
+- [x] ELF with no sections (only program headers).
+- [x] Multiple edits in one invocation (e.g. change type + machine + osabi).
+- [x] No‑op invocation (no edit flags): exits 0 quietly.
 
 ### 9h. Round‑Trip Tests
 - [ ] Change type → change back → file functionally identical.

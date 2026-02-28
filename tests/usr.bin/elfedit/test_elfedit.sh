@@ -200,6 +200,114 @@ EOF
         "$TOP/usr.lib/elfobj/libelfobj.a" -o "$TMP/mk_core_fixture"
 }
 
+build_fixture64_maker() {
+    cat >"$TMP/mk_fixture64.c" <<'EOF'
+#include "elfobj.h"
+#include <stdint.h>
+
+int main(int argc, char **argv) {
+    static const uint8_t code[] = {0xC3};
+    elfobj_t *obj;
+    elf_section_t *text;
+
+    if (argc != 2) {
+        return 1;
+    }
+    obj = elf_create(ET_REL, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return 2;
+    }
+    text = elf_add_section(obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+    if (text == NULL) {
+        elf_close(obj);
+        return 3;
+    }
+    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK) {
+        elf_close(obj);
+        return 4;
+    }
+    if (elf_write_file(obj, argv[1]) != ELF_OK) {
+        elf_close(obj);
+        return 5;
+    }
+    elf_close(obj);
+    return 0;
+}
+EOF
+    cc -Wall -Wextra -idirafter "$TOP/include" "$TMP/mk_fixture64.c" \
+        "$TOP/usr.lib/elfobj/libelfobj.a" -o "$TMP/mk_fixture64"
+}
+
+build_nosections_fixture_maker() {
+    cat >"$TMP/mk_nosections_fixture.c" <<'EOF'
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+static void wr16(uint8_t *p, uint16_t v) {
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+}
+static void wr32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+    p[2] = (uint8_t)((v >> 16) & 0xff);
+    p[3] = (uint8_t)((v >> 24) & 0xff);
+}
+
+int main(int argc, char **argv) {
+    uint8_t img[84];
+    FILE *fp;
+
+    if (argc != 2) {
+        return 1;
+    }
+    memset(img, 0, sizeof(img));
+    img[0] = 0x7f;
+    img[1] = 'E';
+    img[2] = 'L';
+    img[3] = 'F';
+    img[4] = 1;
+    img[5] = 1;
+    img[6] = 1;
+    wr16(img + 16, 1);
+    wr16(img + 18, 3);
+    wr32(img + 20, 1);
+    wr32(img + 24, 0);
+    wr32(img + 28, 52);
+    wr32(img + 32, 0);
+    wr32(img + 36, 0);
+    wr16(img + 40, 52);
+    wr16(img + 42, 32);
+    wr16(img + 44, 1);
+    wr16(img + 46, 40);
+    wr16(img + 48, 0);
+    wr16(img + 50, 0);
+
+    wr32(img + 52, 1);
+    wr32(img + 56, 0);
+    wr32(img + 60, 0);
+    wr32(img + 64, 0);
+    wr32(img + 68, 0);
+    wr32(img + 72, 0);
+    wr32(img + 76, 5);
+    wr32(img + 80, 0x1000);
+
+    fp = fopen(argv[1], "wb");
+    if (fp == NULL) {
+        return 2;
+    }
+    if (fwrite(img, 1, sizeof(img), fp) != sizeof(img)) {
+        fclose(fp);
+        return 3;
+    }
+    fclose(fp);
+    return 0;
+}
+EOF
+    cc -Wall -Wextra "$TMP/mk_nosections_fixture.c" -o "$TMP/mk_nosections_fixture"
+}
+
 assert_grep() {
     pattern="$1"
     path="$2"
@@ -371,15 +479,56 @@ test_9f_safety() {
     assert_grep "refusing to edit core files without --force" "$TMP/core_fail.err"
 }
 
+test_9g_edge_cases() {
+    sum_before=""
+    sum_after=""
+
+    "$TMP/mk_fixture" "$TMP/edge32.o"
+    "$TMP/mk_fixture64" "$TMP/edge64.o"
+    "$TOP/usr.bin/elfedit/elfedit" --output-entry 0x888 -o "$TMP/edge32_out.o" "$TMP/edge32.o"
+    "$TOP/usr.bin/elfedit/elfedit" --output-entry 0x999 -o "$TMP/edge64_out.o" "$TMP/edge64.o"
+    readelf -h "$TMP/edge32_out.o" >"$TMP/edge32.hdr"
+    readelf -h "$TMP/edge64_out.o" >"$TMP/edge64.hdr"
+    assert_grep "Class:[[:space:]]+ELF32" "$TMP/edge32.hdr"
+    assert_grep "Class:[[:space:]]+ELF64" "$TMP/edge64.hdr"
+
+    "$TMP/mk_nosections_fixture" "$TMP/nosections.elf"
+    "$TOP/usr.bin/elfedit/elfedit" --output-entry 0x1234 -o "$TMP/nosections_out.elf" \
+        "$TMP/nosections.elf"
+    readelf -h "$TMP/nosections_out.elf" >"$TMP/nosections.hdr"
+    assert_grep "Entry point address:[[:space:]]+0x1234" "$TMP/nosections.hdr"
+
+    "$TMP/mk_segment_fixture" "$TMP/multi.elf"
+    "$TOP/usr.bin/elfedit/elfedit" --output-type dyn --output-machine x86_64 \
+        --output-osabi linux --output-entry 0xabc -o "$TMP/multi_out.elf" "$TMP/multi.elf"
+    readelf -h "$TMP/multi_out.elf" >"$TMP/multi.hdr"
+    assert_grep "Type:[[:space:]]+DYN" "$TMP/multi.hdr"
+    assert_grep "Machine:[[:space:]]+Advanced Micro Devices X86-64" "$TMP/multi.hdr"
+    assert_grep "OS/ABI:[[:space:]]+UNIX - GNU" "$TMP/multi.hdr"
+    assert_grep "Entry point address:[[:space:]]+0xabc" "$TMP/multi.hdr"
+
+    cp "$TMP/multi.elf" "$TMP/noop.elf"
+    sum_before="$(cksum "$TMP/noop.elf" | awk '{print $1":"$2}')"
+    "$TOP/usr.bin/elfedit/elfedit" "$TMP/noop.elf" >"$TMP/noop.out" 2>"$TMP/noop.err"
+    sum_after="$(cksum "$TMP/noop.elf" | awk '{print $1":"$2}')"
+    if [ "$sum_before" != "$sum_after" ]; then
+        echo "no-op invocation modified file" >&2
+        return 1
+    fi
+}
+
 build_tools
 build_fixture_maker
 build_segment_fixture_maker
 build_invalid_fixture_maker
 build_core_fixture_maker
+build_fixture64_maker
+build_nosections_fixture_maker
 test_9a_headers
 test_9b_sections
 test_9c_program_headers
 test_9d_validation
 test_9e_dry_run
 test_9f_safety
-echo "ok: elfedit 9a/9f tests"
+test_9g_edge_cases
+echo "ok: elfedit 9a/9g tests"
