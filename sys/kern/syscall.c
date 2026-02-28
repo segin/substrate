@@ -61,7 +61,7 @@ static struct {
 
 static volatile int io_buffers_initialized = 0;
 
-static void ensure_io_buffers_init(void) {
+void ensure_io_buffers_init(void) {
     if (io_buffers_initialized) return;
 
     static volatile int init_lock = 0;
