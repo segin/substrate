@@ -174,10 +174,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `DEMANGLE_DLANG`: force D only.
 
 ### 4b. Parser Architecture
-- [ ] Recursive‑descent parser with cursor.
-- [ ] LName‑based: `<number> <chars>` length‑prefixed identifiers.
-- [ ] Recursion depth guard (default limit 128).
-- [ ] Output via shared growable buffer (§5).
+- [x] Recursive‑descent parser with cursor.
+- [x] LName‑based: `<number> <chars>` length‑prefixed identifiers.
+- [x] Recursion depth guard (default limit 128).
+- [x] Output via shared growable buffer (§5).
 
 ### 4c. D Mangling Grammar — Qualified Names
 - [ ] `<MangledName>` → `_D <QualifiedName> <Type>`.
