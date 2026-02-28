@@ -22,8 +22,12 @@ build_fixture_maker() {
 
 int main(int argc, char **argv) {
     static const uint8_t code[] = {0xC3};
+    static const uint8_t data[] = {0x11, 0x22, 0x33, 0x44};
+    static const uint8_t comment[] = {'o', 'k', '\0'};
     elfobj_t *obj;
     elf_section_t *text;
+    elf_section_t *datasec;
+    elf_section_t *commentsec;
 
     if (argc != 2) {
         return 1;
@@ -42,9 +46,27 @@ int main(int argc, char **argv) {
         elf_close(obj);
         return 4;
     }
-    if (elf_write_file(obj, argv[1]) != ELF_OK) {
+    datasec = elf_add_section(obj, ".data", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
+    if (datasec == NULL) {
         elf_close(obj);
         return 5;
+    }
+    if (elf_section_set_data(datasec, data, sizeof(data)) != ELF_OK) {
+        elf_close(obj);
+        return 6;
+    }
+    commentsec = elf_add_section(obj, ".comment", SHT_PROGBITS, 0);
+    if (commentsec == NULL) {
+        elf_close(obj);
+        return 7;
+    }
+    if (elf_section_set_data(commentsec, comment, sizeof(comment)) != ELF_OK) {
+        elf_close(obj);
+        return 8;
+    }
+    if (elf_write_file(obj, argv[1]) != ELF_OK) {
+        elf_close(obj);
+        return 9;
     }
     elf_close(obj);
     return 0;
@@ -87,7 +109,32 @@ test_9a_headers() {
     assert_grep "Flags:[[:space:]]+0x1234" "$TMP/flags.hdr"
 }
 
+test_9b_sections() {
+    "$TMP/mk_fixture" "$TMP/sections_base.o"
+
+    "$TOP/usr.bin/elfedit/elfedit" --set-section-flags .data=alloc,write,execinstr \
+        -o "$TMP/sections_flags.o" "$TMP/sections_base.o"
+    readelf -S "$TMP/sections_flags.o" >"$TMP/sections_flags.txt"
+    assert_grep "\\.data[[:space:]]+PROGBITS.*WAX" "$TMP/sections_flags.txt"
+
+    "$TOP/usr.bin/elfedit/elfedit" --set-section-type .comment=note \
+        -o "$TMP/sections_type.o" "$TMP/sections_base.o"
+    readelf -S "$TMP/sections_type.o" >"$TMP/sections_type.txt"
+    assert_grep "\\.comment[[:space:]]+NOTE" "$TMP/sections_type.txt"
+
+    "$TOP/usr.bin/elfedit/elfedit" --set-section-align .text=16 \
+        -o "$TMP/sections_align.o" "$TMP/sections_base.o"
+    readelf -S "$TMP/sections_align.o" >"$TMP/sections_align.txt"
+    assert_grep "\\.text[[:space:]]+PROGBITS.*[[:space:]]16$" "$TMP/sections_align.txt"
+
+    "$TOP/usr.bin/elfedit/elfedit" --rename-section .text=.code \
+        -o "$TMP/sections_rename.o" "$TMP/sections_base.o"
+    readelf -S "$TMP/sections_rename.o" >"$TMP/sections_rename.txt"
+    assert_grep "\\.code[[:space:]]+PROGBITS" "$TMP/sections_rename.txt"
+}
+
 build_tools
 build_fixture_maker
 test_9a_headers
-echo "ok: elfedit 9a header tests"
+test_9b_sections
+echo "ok: elfedit 9a/9b tests"

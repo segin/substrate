@@ -113,10 +113,10 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Change `e_flags`: set arbitrary value → readelf confirms.
 
 ### 9b. Section Header Tests
-- [ ] Change `.data` flags to add `SHF_EXECINSTR` → readelf confirms.
-- [ ] Change `.comment` type to `SHT_NOTE` → readelf confirms.
-- [ ] Change `.text` alignment → readelf confirms.
-- [ ] Rename `.text` to `.code` → readelf confirms.
+- [x] Change `.data` flags to add `SHF_EXECINSTR` → readelf confirms.
+- [x] Change `.comment` type to `SHT_NOTE` → readelf confirms.
+- [x] Change `.text` alignment → readelf confirms.
+- [x] Rename `.text` to `.code` → readelf confirms.
 
 ### 9c. Program Header Tests
 - [ ] Change `PT_LOAD` flags from `PF_R|PF_X` to `PF_R|PF_W|PF_X` → readelf confirms.
