@@ -123,9 +123,9 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Change segment alignment → readelf confirms.
 
 ### 9d. Validation Tests
-- [ ] Legal edit: exits 0, output valid.
-- [ ] Illegal edit without `--force`: exits 1, original unchanged.
-- [ ] Illegal edit with `--force`: exits 0, output written with warning.
+- [x] Legal edit: exits 0, output valid.
+- [x] Illegal edit without `--force`: exits 1, original unchanged.
+- [x] Illegal edit with `--force`: exits 0, output written with warning.
 
 ### 9e. Dry‑Run Tests
 - [ ] `--dry-run`: no file modification, diagnostic output.

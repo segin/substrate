@@ -125,6 +125,55 @@ EOF
         "$TOP/usr.lib/elfobj/libelfobj.a" -o "$TMP/mk_segment_fixture"
 }
 
+build_invalid_fixture_maker() {
+    cat >"$TMP/mk_invalid_fixture.c" <<'EOF'
+#include "elfobj.h"
+#include <stdint.h>
+
+int main(int argc, char **argv) {
+    static const uint8_t code[] = {0xC3};
+    elfobj_t *obj;
+    elf_section_t *text;
+    elf_segment_t *seg;
+
+    if (argc != 2) {
+        return 1;
+    }
+
+    obj = elf_create(ET_DYN, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return 2;
+    }
+    text = elf_add_section(obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+    if (text == NULL) {
+        elf_close(obj);
+        return 3;
+    }
+    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK) {
+        elf_close(obj);
+        return 4;
+    }
+    seg = elf_add_load_segment(obj, 0x5, 0x1000);
+    if (seg == NULL) {
+        elf_close(obj);
+        return 5;
+    }
+    if (elf_segment_add_section(seg, text) != ELF_OK) {
+        elf_close(obj);
+        return 6;
+    }
+    if (elf_write_file(obj, argv[1]) != ELF_OK) {
+        elf_close(obj);
+        return 7;
+    }
+    elf_close(obj);
+    return 0;
+}
+EOF
+    cc -Wall -Wextra -idirafter "$TOP/include" "$TMP/mk_invalid_fixture.c" \
+        "$TOP/usr.lib/elfobj/libelfobj.a" -o "$TMP/mk_invalid_fixture"
+}
+
 assert_grep() {
     pattern="$1"
     path="$2"
@@ -196,10 +245,43 @@ test_9c_program_headers() {
     assert_grep "0x2000" "$TMP/segments_align.txt"
 }
 
+test_9d_validation() {
+    before_sum=""
+    after_sum=""
+
+    "$TMP/mk_segment_fixture" "$TMP/valid_base.elf"
+
+    "$TOP/usr.bin/elfedit/elfedit" --set-segment-align 0=0x2000 \
+        -o "$TMP/valid_edit.elf" "$TMP/valid_base.elf"
+    readelf -l "$TMP/valid_edit.elf" >"$TMP/valid_check.txt"
+    assert_grep "0x2000" "$TMP/valid_check.txt"
+
+    "$TMP/mk_invalid_fixture" "$TMP/invalid_base.elf"
+    before_sum="$(cksum "$TMP/invalid_base.elf" | awk '{print $1":"$2}')"
+    if "$TOP/usr.bin/elfedit/elfedit" --output-entry 0x222 \
+        "$TMP/invalid_base.elf" >"$TMP/illegal_fail.out" 2>"$TMP/illegal_fail.err"; then
+        echo "expected illegal edit to fail without --force" >&2
+        return 1
+    fi
+    after_sum="$(cksum "$TMP/invalid_base.elf" | awk '{print $1":"$2}')"
+    if [ "$before_sum" != "$after_sum" ]; then
+        echo "illegal edit modified original file" >&2
+        return 1
+    fi
+
+    "$TOP/usr.bin/elfedit/elfedit" --force --output-entry 0x222 \
+        -o "$TMP/illegal_force.elf" "$TMP/invalid_base.elf" >"$TMP/illegal_force.out" \
+        2>"$TMP/illegal_force.err"
+    test -f "$TMP/illegal_force.elf"
+    assert_grep "WARNING: writing structurally invalid ELF" "$TMP/illegal_force.err"
+}
+
 build_tools
 build_fixture_maker
 build_segment_fixture_maker
+build_invalid_fixture_maker
 test_9a_headers
 test_9b_sections
 test_9c_program_headers
-echo "ok: elfedit 9a/9c tests"
+test_9d_validation
+echo "ok: elfedit 9a/9d tests"
