@@ -86,10 +86,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `DEMANGLE_RUST`: force Rust v0 only, return `NULL` for non‑Rust input.
 
 ### 3b. Parser Architecture
-- [ ] Recursive‑descent parser on `const char *` with cursor (same pattern as Itanium).
-- [ ] Backref table: dynamic array of `(start, end)` byte ranges into the mangled string.
-- [ ] Recursion depth counter (default limit 128).
-- [ ] Output via shared growable buffer (§5).
+- [x] Recursive‑descent parser on `const char *` with cursor (same pattern as Itanium).
+- [x] Backref table: dynamic array of `(start, end)` byte ranges into the mangled string.
+- [x] Recursion depth counter (default limit 128).
+- [x] Output via shared growable buffer (§5).
 
 ### 3c. Rust v0 Grammar — Paths (`<path>`)
 - [ ] `C <disambiguator>? <identifier>` — crate root.
