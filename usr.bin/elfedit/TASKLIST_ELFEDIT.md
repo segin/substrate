@@ -82,11 +82,11 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 
 ## 6. Additional Options
 
-- [ ] `--input-mmap`: hint to use memory‑mapped I/O for large files.
-- [ ] `-v` / `--verbose`: print each field change as it's applied.
-- [ ] `-o <file>` / `--output=<file>`: write to different file (don't modify in‑place).
-- [ ] `--version` / `-V`: print version.
-- [ ] `--help` / `-h`: print usage.
+- [x] `--input-mmap`: hint to use memory‑mapped I/O for large files.
+- [x] `-v` / `--verbose`: print each field change as it's applied.
+- [x] `-o <file>` / `--output=<file>`: write to different file (don't modify in‑place).
+- [x] `--version` / `-V`: print version.
+- [x] `--help` / `-h`: print usage.
 
 ## 7. Error Handling
 

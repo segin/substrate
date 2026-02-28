@@ -21,6 +21,8 @@ typedef struct {
 typedef struct {
     const char *input_path;
     const char *output_path;
+    int input_mmap;
+    int verbose;
     uint16_t output_type;
     uint16_t output_machine;
     uint8_t output_osabi;
@@ -45,7 +47,9 @@ typedef struct {
 } elfedit_ctx_t;
 
 static const char *g_progname = "elfedit";
+static int g_verbose = 0;
 static void ctx_cleanup(elfedit_ctx_t *ctx);
+#define ELFEDIT_VERSION "0.1.0"
 
 static void warnf(const char *fmt, ...) {
     va_list ap;
@@ -57,9 +61,23 @@ static void warnf(const char *fmt, ...) {
     fputc('\n', stderr);
 }
 
+static void verbf(const char *fmt, ...) {
+    va_list ap;
+
+    if (!g_verbose) {
+        return;
+    }
+    fprintf(stderr, "%s: ", g_progname);
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-f] [-n] [-o output] [--output-type type] [--output-machine machine]\n"
+            "usage: %s [-f] [-n] [-v] [--input-mmap] [-o output]\n"
+            "       [--output-type type] [--output-machine machine]\n"
             "       [--output-osabi osabi] [--output-abiversion version]\n"
             "       [--output-flags value] [--output-entry addr]\n"
             "       [--set-section-type name=type] [--set-section-flags name=flags]\n"
@@ -67,6 +85,10 @@ static void usage(FILE *out) {
             "       [--set-segment-type idx=type] [--set-segment-flags idx=flags]\n"
             "       [--set-segment-align idx=align] <input>\n",
             g_progname);
+}
+
+static void print_version(void) {
+    printf("%s %s\n", g_progname, ELFEDIT_VERSION);
 }
 
 static char *xstrdup(const char *s) {
@@ -487,6 +509,7 @@ static int apply_section_type_specs(elfobj_t *obj, const strlist_t *specs) {
             free(lhs);
             return -1;
         }
+        verbf("set section '%s' type -> %u", lhs, (unsigned)type);
         if (elf_section_set_type(sec, type) != ELF_OK) {
             warnf("failed to set section type for '%s'", lhs);
             free(lhs);
@@ -520,6 +543,7 @@ static int apply_section_flags_specs(elfobj_t *obj, const strlist_t *specs) {
             free(lhs);
             return -1;
         }
+        verbf("set section '%s' flags -> 0x%llx", lhs, (unsigned long long)flags);
         if (elf_section_set_flags(sec, flags) != ELF_OK) {
             warnf("failed to set section flags for '%s'", lhs);
             free(lhs);
@@ -553,6 +577,7 @@ static int apply_section_align_specs(elfobj_t *obj, const strlist_t *specs) {
             free(lhs);
             return -1;
         }
+        verbf("set section '%s' align -> %llu", lhs, (unsigned long long)align);
         if (elf_section_set_align(sec, align) != ELF_OK) {
             warnf("failed to set section alignment for '%s'", lhs);
             free(lhs);
@@ -580,6 +605,7 @@ static int apply_rename_section_specs(elfobj_t *obj, const strlist_t *specs) {
             free(lhs);
             return -1;
         }
+        verbf("rename section '%s' -> '%s'", lhs, rhs);
         if (elf_section_set_name(sec, rhs) != ELF_OK) {
             warnf("failed to rename section '%s' to '%s'", lhs, rhs);
             free(lhs);
@@ -641,6 +667,7 @@ static int apply_segment_type_specs(elfobj_t *obj, const strlist_t *specs) {
             free(lhs);
             return -1;
         }
+        verbf("set segment[%lu] type -> %u", (unsigned long)idx, (unsigned)type);
         if (elf_program_header_set_type(obj, idx, type) != ELF_OK) {
             warnf("failed to set segment type for index %lu", (unsigned long)idx);
             free(lhs);
@@ -678,6 +705,7 @@ static int apply_segment_flags_specs(elfobj_t *obj, const strlist_t *specs) {
             free(lhs);
             return -1;
         }
+        verbf("set segment[%lu] flags -> 0x%x", (unsigned long)idx, (unsigned)flags);
         if (elf_program_header_set_flags(obj, idx, flags) != ELF_OK) {
             warnf("failed to set segment flags for index %lu", (unsigned long)idx);
             free(lhs);
@@ -715,6 +743,7 @@ static int apply_segment_align_specs(elfobj_t *obj, const strlist_t *specs) {
             free(lhs);
             return -1;
         }
+        verbf("set segment[%lu] align -> %llu", (unsigned long)idx, (unsigned long long)align);
         if (elf_program_header_set_align(obj, idx, align) != ELF_OK) {
             warnf("failed to set segment alignment for index %lu", (unsigned long)idx);
             free(lhs);
@@ -732,7 +761,10 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
     static const struct option long_opts[] = {
         { "force", no_argument, NULL, 'f' },
         { "dry-run", no_argument, NULL, 'n' },
+        { "verbose", no_argument, NULL, 'v' },
+        { "version", no_argument, NULL, 'V' },
         { "help", no_argument, NULL, 'h' },
+        { "input-mmap", no_argument, NULL, 2000 },
         { "output", required_argument, NULL, 'o' },
         { "output-type", required_argument, NULL, 1000 },
         { "output-machine", required_argument, NULL, 1001 },
@@ -752,7 +784,7 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
 
     memset(ctx, 0, sizeof(*ctx));
 
-    while ((ch = getopt_long(argc, argv, "fhno:", long_opts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "fhnvVo:", long_opts, NULL)) != -1) {
         switch (ch) {
         case 'f':
             ctx->force = 1;
@@ -760,9 +792,18 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
         case 'n':
             ctx->dry_run = 1;
             break;
+        case 'v':
+            ctx->verbose = 1;
+            break;
+        case 'V':
+            print_version();
+            exit(0);
         case 'h':
             usage(stdout);
             exit(0);
+        case 2000:
+            ctx->input_mmap = 1;
+            break;
         case 'o':
             ctx->output_path = optarg;
             break;
@@ -920,6 +961,7 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
                   (unsigned)phnum);
         }
 
+        verbf("set e_type: %u -> %u", (unsigned)old_type, (unsigned)ctx->output_type);
         err = elf_set_type(obj, ctx->output_type);
         if (err != ELF_OK) {
             warnf("failed to set ELF type: %s", elf_errstr(err));
@@ -934,6 +976,7 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
             warnf("warning: changing machine does not re-encode instructions or relocations");
         }
 
+        verbf("set e_machine: %u -> %u", (unsigned)old_machine, (unsigned)ctx->output_machine);
         err = elf_set_machine(obj, ctx->output_machine);
         if (err != ELF_OK) {
             warnf("failed to set ELF machine: %s", elf_errstr(err));
@@ -942,6 +985,7 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
     }
 
     if (ctx->have_output_osabi) {
+        verbf("set EI_OSABI: %u -> %u", (unsigned)elf_osabi(obj), (unsigned)ctx->output_osabi);
         err = elf_set_osabi(obj, ctx->output_osabi);
         if (err != ELF_OK) {
             warnf("failed to set ELF OSABI: %s", elf_errstr(err));
@@ -950,6 +994,8 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
     }
 
     if (ctx->have_output_abiversion) {
+        verbf("set EI_ABIVERSION: %u -> %u", (unsigned)elf_abiversion(obj),
+              (unsigned)ctx->output_abiversion);
         err = elf_set_abiversion(obj, ctx->output_abiversion);
         if (err != ELF_OK) {
             warnf("failed to set ELF ABI version: %s", elf_errstr(err));
@@ -960,6 +1006,7 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
     if (ctx->have_output_flags) {
         uint16_t machine = ctx->have_output_machine ? ctx->output_machine : elf_machine(obj);
         warn_flags_conflict(machine, ctx->output_flags);
+        verbf("set e_flags: 0x%x -> 0x%x", (unsigned)elf_flags(obj), (unsigned)ctx->output_flags);
         err = elf_set_flags(obj, ctx->output_flags);
         if (err != ELF_OK) {
             warnf("failed to set ELF flags: %s", elf_errstr(err));
@@ -968,6 +1015,8 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
     }
 
     if (ctx->have_output_entry) {
+        verbf("set e_entry: 0x%llx -> 0x%llx", (unsigned long long)elf_entry(obj),
+              (unsigned long long)ctx->output_entry);
         err = elf_set_entry(obj, ctx->output_entry);
         if (err != ELF_OK) {
             warnf("failed to set ELF entry: %s", elf_errstr(err));
@@ -1121,10 +1170,15 @@ int main(int argc, char **argv) {
         ctx_cleanup(&ctx);
         return 1;
     }
+    g_verbose = ctx.verbose;
 
-    if (elf_open(ctx.input_path, &obj) != ELF_OK) {
+    if ((ctx.input_mmap ? elf_open_with_options(ctx.input_path, ELFOBJ_OPEN_USE_MMAP, &obj)
+                        : elf_open(ctx.input_path, &obj)) != ELF_OK) {
         warnf("%s: failed to open ELF object", ctx.input_path);
         goto out;
+    }
+    if (ctx.input_mmap) {
+        verbf("input mmap requested: %s", elf_uses_mmap(obj) ? "active" : "not active");
     }
 
     if (!ctx.force && elf_type(obj) == ET_CORE) {

@@ -1,6 +1,10 @@
 include ../../Makefile.inc
 
+ifeq ($(NATIVE_BUILD),1)
+CFLAGS := $(CFLAGS) -idirafter ../../include -idirafter ../../sys -idirafter ../../sys/include -I./src
+else
 CFLAGS := $(CFLAGS) -I../../include -I../../sys -I../../sys/include -I./src
+endif
 
 LIBNAME = libelfobj.a
 SRCS = src/elf_read.c src/elf_write.c src/elf_sections.c src/elf_symbols.c \
