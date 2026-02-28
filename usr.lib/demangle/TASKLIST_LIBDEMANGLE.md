@@ -427,9 +427,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Plain `main` → `NULL` (not mangled).
 
 ### 9w. Fuzz Tests
-- [ ] libFuzzer harness calling `demangle()` with arbitrary byte sequences.
-- [ ] AFL harness on `c++filt` stdin mode.
-- [ ] No crashes, no ASAN/UBSAN violations.
+- [x] libFuzzer harness calling `demangle()` with arbitrary byte sequences.
+- [x] AFL harness on `c++filt` stdin mode.
+- [x] No crashes, no ASAN/UBSAN violations.
 
 ### 9x. Corpus Tests
 - [ ] Demangle all symbols from `libstdc++.a` and compare against `__cxa_demangle`.
