@@ -381,9 +381,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Nested backrefs (backref to a backref).
 
 ### 9o. Rust v0 Closure / Shim Tests
-- [ ] Closure: namespace `C` → `{closure#0}`.
-- [ ] Shim: namespace `S` → `{shim:vtable#0}`.
-- [ ] Multiple closures with disambiguators.
+- [x] Closure: namespace `C` → `{closure#0}`.
+- [x] Shim: namespace `S` → `{shim:vtable#0}`.
+- [x] Multiple closures with disambiguators.
 
 ### 9p. Rust v0 Punycode Tests
 - [ ] Unicode identifier with `u` prefix: decoded correctly.
