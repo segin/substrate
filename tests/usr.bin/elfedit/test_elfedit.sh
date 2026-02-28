@@ -76,6 +76,55 @@ EOF
         "$TOP/usr.lib/elfobj/libelfobj.a" -o "$TMP/mk_fixture"
 }
 
+build_segment_fixture_maker() {
+    cat >"$TMP/mk_segment_fixture.c" <<'EOF'
+#include "elfobj.h"
+#include <stdint.h>
+
+int main(int argc, char **argv) {
+    static const uint8_t code[] = {0xC3};
+    elfobj_t *obj;
+    elf_section_t *text;
+    elf_segment_t *seg;
+
+    if (argc != 2) {
+        return 1;
+    }
+
+    obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return 2;
+    }
+    text = elf_add_section(obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+    if (text == NULL) {
+        elf_close(obj);
+        return 3;
+    }
+    if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK) {
+        elf_close(obj);
+        return 4;
+    }
+    seg = elf_add_load_segment(obj, 0x5, 0x1000);
+    if (seg == NULL) {
+        elf_close(obj);
+        return 5;
+    }
+    if (elf_segment_add_section(seg, text) != ELF_OK) {
+        elf_close(obj);
+        return 6;
+    }
+    if (elf_write_file(obj, argv[1]) != ELF_OK) {
+        elf_close(obj);
+        return 7;
+    }
+    elf_close(obj);
+    return 0;
+}
+EOF
+    cc -Wall -Wextra -idirafter "$TOP/include" "$TMP/mk_segment_fixture.c" \
+        "$TOP/usr.lib/elfobj/libelfobj.a" -o "$TMP/mk_segment_fixture"
+}
+
 assert_grep() {
     pattern="$1"
     path="$2"
@@ -133,8 +182,24 @@ test_9b_sections() {
     assert_grep "\\.code[[:space:]]+PROGBITS" "$TMP/sections_rename.txt"
 }
 
+test_9c_program_headers() {
+    "$TMP/mk_segment_fixture" "$TMP/segments_base.elf"
+
+    "$TOP/usr.bin/elfedit/elfedit" --set-segment-flags 0=rwx \
+        -o "$TMP/segments_flags.elf" "$TMP/segments_base.elf"
+    readelf -l "$TMP/segments_flags.elf" >"$TMP/segments_flags.txt"
+    assert_grep "LOAD.*RWE" "$TMP/segments_flags.txt"
+
+    "$TOP/usr.bin/elfedit/elfedit" --set-segment-align 0=0x2000 \
+        -o "$TMP/segments_align.elf" "$TMP/segments_base.elf"
+    readelf -l "$TMP/segments_align.elf" >"$TMP/segments_align.txt"
+    assert_grep "0x2000" "$TMP/segments_align.txt"
+}
+
 build_tools
 build_fixture_maker
+build_segment_fixture_maker
 test_9a_headers
 test_9b_sections
-echo "ok: elfedit 9a/9b tests"
+test_9c_program_headers
+echo "ok: elfedit 9a/9c tests"

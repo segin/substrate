@@ -119,8 +119,8 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Rename `.text` to `.code` → readelf confirms.
 
 ### 9c. Program Header Tests
-- [ ] Change `PT_LOAD` flags from `PF_R|PF_X` to `PF_R|PF_W|PF_X` → readelf confirms.
-- [ ] Change segment alignment → readelf confirms.
+- [x] Change `PT_LOAD` flags from `PF_R|PF_X` to `PF_R|PF_W|PF_X` → readelf confirms.
+- [x] Change segment alignment → readelf confirms.
 
 ### 9d. Validation Tests
 - [ ] Legal edit: exits 0, output valid.
