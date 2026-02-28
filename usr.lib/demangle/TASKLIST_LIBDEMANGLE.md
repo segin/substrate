@@ -432,8 +432,8 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] No crashes, no ASAN/UBSAN violations.
 
 ### 9x. Corpus Tests
-- [ ] Demangle all symbols from `libstdc++.a` and compare against `__cxa_demangle`.
-- [ ] Demangle all symbols from a large C++ project (e.g. LLVM `.o` files).
+- [x] Demangle all symbols from `libstdc++.a` and compare against `__cxa_demangle`.
+- [x] Demangle all symbols from a large C++ project (e.g. LLVM `.o` files).
 
 ### 9y. Buffer API Tests
 - [ ] `demangle_buf()` with exact‑fit buffer: returns 0.
