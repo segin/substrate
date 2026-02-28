@@ -24,20 +24,20 @@ Goal: implement `c++filt`‑compatible demangler utility, using `usr.lib/demangl
 ## 1. Input / Output Modes
 
 ### 1a. Stdin Streaming (default)
-- [ ] Read stdin line by line.
-- [ ] For each line: scan for mangled tokens (`_Z...`, `_R...`, `_D...`), call `demangle()` on each, replace in‑place, output line.
-- [ ] Non‑mangled text passes through unchanged.
-- [ ] Handle names embedded in larger tokens (e.g. `_ZN3Foo3barEv:` — demangle up to non‑name char).
+- [x] Read stdin line by line.
+- [x] For each line: scan for mangled tokens (`_Z...`, `_R...`, `_D...`), call `demangle()` on each, replace in‑place, output line.
+- [x] Non‑mangled text passes through unchanged.
+- [x] Handle names embedded in larger tokens (e.g. `_ZN3Foo3barEv:` — demangle up to non‑name char).
 
 ### 1b. Argv Mode
-- [ ] Arguments on command line are individual mangled names.
-- [ ] Print demangled name per line.
-- [ ] If no arguments and no stdin: read stdin.
+- [x] Arguments on command line are individual mangled names.
+- [x] Print demangled name per line.
+- [x] If no arguments and no stdin: read stdin.
 
 ### 1c. Whole‑Symbol vs Embedded
-- [ ] Default: scan for `_Z`/`_R`/`_D` prefixed tokens in each line, demangle only those.
-- [ ] `--no-strip-underscore` / `-n`: do not strip leading `_` before demangling.
-- [ ] `--strip-underscore` / `-_`: strip one leading underscore (for systems that prepend `_`).
+- [x] Default: scan for `_Z`/`_R`/`_D` prefixed tokens in each line, demangle only those.
+- [x] `--no-strip-underscore` / `-n`: do not strip leading `_` before demangling.
+- [x] `--strip-underscore` / `-_`: strip one leading underscore (for systems that prepend `_`).
 
 ---
 
