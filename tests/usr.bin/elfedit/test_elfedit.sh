@@ -174,6 +174,32 @@ EOF
         "$TOP/usr.lib/elfobj/libelfobj.a" -o "$TMP/mk_invalid_fixture"
 }
 
+build_core_fixture_maker() {
+    cat >"$TMP/mk_core_fixture.c" <<'EOF'
+#include "elfobj.h"
+
+int main(int argc, char **argv) {
+    elfobj_t *obj;
+
+    if (argc != 2) {
+        return 1;
+    }
+    obj = elf_create(ET_CORE, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return 2;
+    }
+    if (elf_write_file(obj, argv[1]) != ELF_OK) {
+        elf_close(obj);
+        return 3;
+    }
+    elf_close(obj);
+    return 0;
+}
+EOF
+    cc -Wall -Wextra -idirafter "$TOP/include" "$TMP/mk_core_fixture.c" \
+        "$TOP/usr.lib/elfobj/libelfobj.a" -o "$TMP/mk_core_fixture"
+}
+
 assert_grep() {
     pattern="$1"
     path="$2"
@@ -300,13 +326,60 @@ test_9e_dry_run() {
     assert_grep "dry-run: validation failed" "$TMP/dry_bad.out"
 }
 
+test_9f_safety() {
+    mode_before=""
+    mode_after=""
+    sum_before=""
+    sum_after=""
+
+    "$TMP/mk_segment_fixture" "$TMP/safe_perm.elf"
+    chmod 640 "$TMP/safe_perm.elf"
+    mode_before="$(stat -c %a "$TMP/safe_perm.elf")"
+    "$TOP/usr.bin/elfedit/elfedit" --output-entry 0x555 "$TMP/safe_perm.elf"
+    mode_after="$(stat -c %a "$TMP/safe_perm.elf")"
+    if [ "$mode_before" != "$mode_after" ]; then
+        echo "in-place edit changed file permissions" >&2
+        return 1
+    fi
+
+    mkdir "$TMP/ro"
+    cp "$TMP/safe_perm.elf" "$TMP/ro/fail.elf"
+    sum_before="$(cksum "$TMP/ro/fail.elf" | awk '{print $1":"$2}')"
+    chmod 555 "$TMP/ro"
+    if "$TOP/usr.bin/elfedit/elfedit" --output-entry 0x666 \
+        "$TMP/ro/fail.elf" >"$TMP/write_fail.out" 2>"$TMP/write_fail.err"; then
+        echo "expected write failure in read-only directory" >&2
+        return 1
+    fi
+    chmod 755 "$TMP/ro"
+    sum_after="$(cksum "$TMP/ro/fail.elf" | awk '{print $1":"$2}')"
+    if [ "$sum_before" != "$sum_after" ]; then
+        echo "write failure modified original file" >&2
+        return 1
+    fi
+    if ls "$TMP/ro/fail.elf.elfedit.tmp."* >/dev/null 2>&1; then
+        echo "temporary file was not cleaned up after write failure" >&2
+        return 1
+    fi
+
+    "$TMP/mk_core_fixture" "$TMP/core.elf"
+    if "$TOP/usr.bin/elfedit/elfedit" --output-entry 0x777 \
+        "$TMP/core.elf" >"$TMP/core_fail.out" 2>"$TMP/core_fail.err"; then
+        echo "core file edit should fail without --force" >&2
+        return 1
+    fi
+    assert_grep "refusing to edit core files without --force" "$TMP/core_fail.err"
+}
+
 build_tools
 build_fixture_maker
 build_segment_fixture_maker
 build_invalid_fixture_maker
+build_core_fixture_maker
 test_9a_headers
 test_9b_sections
 test_9c_program_headers
 test_9d_validation
 test_9e_dry_run
-echo "ok: elfedit 9a/9e tests"
+test_9f_safety
+echo "ok: elfedit 9a/9f tests"

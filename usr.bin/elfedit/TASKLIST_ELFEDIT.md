@@ -132,9 +132,9 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] `--dry-run` + illegal edit: reports validation failure.
 
 ### 9f. Safety Tests
-- [ ] In‑place edit preserves file permissions.
-- [ ] Write failure: original untouched, temp cleaned up.
-- [ ] Edit core file without `--force`: rejected.
+- [x] In‑place edit preserves file permissions.
+- [x] Write failure: original untouched, temp cleaned up.
+- [x] Edit core file without `--force`: rejected.
 
 ### 9g. Edge Cases
 - [ ] ELF32 and ELF64 inputs.

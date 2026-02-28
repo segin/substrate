@@ -1114,6 +1114,8 @@ static void print_dry_run_summary(const elfedit_ctx_t *ctx, int valid) {
 static int write_output(const elfedit_ctx_t *ctx, elfobj_t *obj) {
     const char *target = ctx->output_path != NULL ? ctx->output_path : ctx->input_path;
     int in_place = paths_same_file(target, ctx->input_path);
+    int have_target_stat = 0;
+    struct stat st_target;
     char tmp_path[PATH_MAX];
 
     if (!in_place) {
@@ -1128,11 +1130,26 @@ static int write_output(const elfedit_ctx_t *ctx, elfobj_t *obj) {
         warnf("%s: failed to create temporary output: %s", target, strerror(errno));
         return -1;
     }
+    if (stat(target, &st_target) == 0) {
+        have_target_stat = 1;
+    }
 
     if (elf_write_file(obj, tmp_path) != ELF_OK) {
         warnf("%s: write failed: %s", tmp_path, elf_errstr(elf_last_error(obj)));
         unlink(tmp_path);
         return -1;
+    }
+    if (have_target_stat) {
+        if (chmod(tmp_path, st_target.st_mode & 07777) != 0) {
+            warnf("%s: failed to preserve mode bits: %s", tmp_path, strerror(errno));
+            unlink(tmp_path);
+            return -1;
+        }
+        if (chown(tmp_path, st_target.st_uid, st_target.st_gid) != 0 && errno != EPERM) {
+            warnf("%s: failed to preserve ownership: %s", tmp_path, strerror(errno));
+            unlink(tmp_path);
+            return -1;
+        }
     }
     if (rename(tmp_path, target) != 0) {
         warnf("%s: failed to replace original: %s", target, strerror(errno));
