@@ -1233,6 +1233,9 @@ rust_parse_v0_path(rust_parser_t *p)
 {
     rust_mark_t m;
     const char *start;
+    const char *resume;
+    const char *target;
+    size_t off;
 
     if (rust_parser_enter(p) != 0) {
         return -1;
@@ -1241,7 +1244,23 @@ rust_parse_v0_path(rust_parser_t *p)
     start = p->cur;
     rust_mark_save(p, &m);
 
-    if (p->cur[0] == 'C') {
+    if (p->cur[0] == 'B') {
+        p->cur++;
+        if (rust_parse_base62(p, &off) != 0 || rust_parser_resolve_backref(p, off, &target) != 0) {
+            rust_mark_restore(p, &m);
+            rust_parser_leave(p);
+            return -1;
+        }
+
+        resume = p->cur;
+        p->cur = target;
+        if (rust_parse_v0_path(p) != 0) {
+            rust_mark_restore(p, &m);
+            rust_parser_leave(p);
+            return -1;
+        }
+        p->cur = resume;
+    } else if (p->cur[0] == 'C') {
         p->cur++;
         if (rust_parse_optional_disambiguator(p, NULL, NULL) != 0 || rust_parse_v0_identifier(p) != 0) {
             rust_mark_restore(p, &m);

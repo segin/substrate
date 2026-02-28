@@ -294,11 +294,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 ## 9. Testing
 
 ### 9a. Itanium Basic Tests
-- [ ] `_Z3foov` → `foo()`.
-- [ ] `_Z3fooi` → `foo(int)`.
-- [ ] `_ZN3Foo3barEv` → `Foo::bar()`.
-- [ ] `_ZNK3Foo3barEi` → `Foo::bar(int) const`.
-- [ ] `_Z3fooIiEvT_` → `void foo<int>(int)`.
+- [x] `_Z3foov` → `foo()`.
+- [x] `_Z3fooi` → `foo(int)`.
+- [x] `_ZN3Foo3barEv` → `Foo::bar()`.
+- [x] `_ZNK3Foo3barEi` → `Foo::bar(int) const`.
+- [x] `_Z3fooIiEvT_` → `void foo<int>(int)`.
 
 ### 9b. Operator Tests
 - [ ] `_ZN3FooplERKS_` → `Foo::operator+(Foo const&)`.
