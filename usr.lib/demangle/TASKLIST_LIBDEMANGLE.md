@@ -347,11 +347,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] 64 KiB mangled name → completes or returns `NULL`, no crash.
 
 ### 9j. Rust v0 Basic Tests
-- [ ] Crate root: `_RNvC6mycrate3foo` → `mycrate::foo`.
-- [ ] Nested path: `_RNvNtC6mycrate3mod3bar` → `mycrate::mod::bar`.
-- [ ] Inherent impl: `_RNvMC6mycrateNtC6mycrate3Foo3baz` → `<mycrate::Foo>::baz`.
-- [ ] Trait impl: `_RNvXC6mycrateNtC6mycrate3FooNtC6mycrate5Trait3qux` → `<mycrate::Foo as mycrate::Trait>::qux`.
-- [ ] Generic instantiation: `_RINvC6mycrate3fooNtC6mycrate3BarECs...` → `mycrate::foo::<mycrate::Bar>`.
+- [x] Crate root: `_RNvC6mycrate3foo` → `mycrate::foo`.
+- [x] Nested path: `_RNvNtC6mycrate3mod3bar` → `mycrate::mod::bar`.
+- [x] Inherent impl: `_RNvMC6mycrateNtC6mycrate3Foo3baz` → `<mycrate::Foo>::baz`.
+- [x] Trait impl: `_RNvXC6mycrateNtC6mycrate3FooNtC6mycrate5Trait3qux` → `<mycrate::Foo as mycrate::Trait>::qux`.
+- [x] Generic instantiation: `_RINvC6mycrate3fooNtC6mycrate3BarECs...` → `mycrate::foo::<mycrate::Bar>`.
 
 ### 9k. Rust v0 Type Tests
 - [ ] Basic types: `l` → `i32`, `b` → `bool`, `c` → `char`, `e` → `str`.
