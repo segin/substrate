@@ -401,9 +401,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Nested module path: `_D3std5range10primitives...`.
 
 ### 9s. D Template Instance Tests
-- [ ] `_D3std5array__T5ArrayTiZ5Array...` → `std.array.Array!(int)...`.
-- [ ] Template with value argument: `V` encoding.
-- [ ] Template with symbol argument: `S` encoding.
+- [x] `_D3std5array__T5ArrayTiZ5Array...` → `std.array.Array!(int)...`.
+- [x] Template with value argument: `V` encoding.
+- [x] Template with symbol argument: `S` encoding.
 
 ### 9t. D Type Tests
 - [ ] Basic types: `i` → `int`, `k` → `uint`, `f` → `float`, `a` → `char`.
