@@ -129,10 +129,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `B <backref>` — backreference to a previously parsed type.
 
 ### 3f. Rust v0 Grammar — Const Values (`<const>`)
-- [ ] `<const>` → `<type> <const-data>` | `B <backref>` | `p` (placeholder `_`).
-- [ ] Integer const: `<hex-digits> _` (value in hex, `n` prefix for negative).
-- [ ] Bool const: `0_` (false), `1_` (true).
-- [ ] Char const: Unicode scalar value as hex.
+- [x] `<const>` → `<type> <const-data>` | `B <backref>` | `p` (placeholder `_`).
+- [x] Integer const: `<hex-digits> _` (value in hex, `n` prefix for negative).
+- [x] Bool const: `0_` (false), `1_` (true).
+- [x] Char const: Unicode scalar value as hex.
 
 ### 3g. Rust v0 Grammar — Lifetimes and Binders
 - [ ] `<lifetime>` → `L <base-62-number>` (de Bruijn index).

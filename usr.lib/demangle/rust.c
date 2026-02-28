@@ -1,6 +1,7 @@
 #include "demangle_internal.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -776,6 +777,7 @@ rust_parse_v0_const(rust_parser_t *p)
     rust_mark_t m;
     size_t value_off;
     size_t idx;
+    char type_tag;
 
     if (p->cur[0] == 'p') {
         p->cur++;
@@ -794,6 +796,7 @@ rust_parse_v0_const(rust_parser_t *p)
     }
 
     rust_mark_save(p, &m);
+    type_tag = p->cur[0];
     value_off = p->out.len;
     if (rust_parse_v0_type(p) != 0) {
         return -1;
@@ -819,14 +822,50 @@ rust_parse_v0_const(rust_parser_t *p)
         return -1;
     }
 
-    if (rust_buf_append(&p->out, "0x", 2u) != 0) {
-        return -1;
-    }
-    while (is_hex_char(p->cur[0])) {
-        if (rust_buf_appendc(&p->out, p->cur[0]) != 0) {
+    {
+        const char *digits = p->cur;
+        size_t digits_len = 0u;
+        unsigned long cp = 0ul;
+        int overflow = 0;
+
+        while (is_hex_char(p->cur[0])) {
+            unsigned v;
+            if (p->cur[0] >= '0' && p->cur[0] <= '9') {
+                v = (unsigned)(p->cur[0] - '0');
+            } else if (p->cur[0] >= 'a' && p->cur[0] <= 'f') {
+                v = 10u + (unsigned)(p->cur[0] - 'a');
+            } else {
+                v = 10u + (unsigned)(p->cur[0] - 'A');
+            }
+
+            if (!overflow) {
+                if (cp > (ULONG_MAX - v) / 16ul) {
+                    overflow = 1;
+                } else {
+                    cp = cp * 16ul + (unsigned long)v;
+                }
+            }
+
+            p->cur++;
+            digits_len++;
+        }
+
+        if (type_tag == 'c' && !overflow && cp <= 0x10FFFFul) {
+            if (cp >= 0x20ul && cp < 0x7Ful && cp != '\'' && cp != '\\') {
+                if (rust_buf_appendc(&p->out, '\'') != 0 ||
+                    rust_buf_appendc(&p->out, (char)cp) != 0 ||
+                    rust_buf_appendc(&p->out, '\'') != 0) {
+                    return -1;
+                }
+            } else if (rust_buf_append(&p->out, "'\\u{", 4u) != 0 ||
+                       rust_buf_append(&p->out, digits, digits_len) != 0 ||
+                       rust_buf_append(&p->out, "}'", 2u) != 0) {
+                return -1;
+            }
+        } else if (rust_buf_append(&p->out, "0x", 2u) != 0 ||
+                   rust_buf_append(&p->out, digits, digits_len) != 0) {
             return -1;
         }
-        p->cur++;
     }
 
     if (p->cur[0] != '_') {
