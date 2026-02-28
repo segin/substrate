@@ -187,14 +187,14 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `<Number>` → decimal digit sequence.
 
 ### 4d. D Mangling Grammar — Template Instances
-- [ ] `<TemplateInstanceName>` → `__T <LName> <TemplateArgs> Z`.
-- [ ] `<TemplateArgs>` → `<TemplateArg>+`.
-- [ ] `<TemplateArg>` :
-  - [ ] `T <Type>` — type argument.
-  - [ ] `V <Type> <Value>` — value argument.
-  - [ ] `S <QualifiedName>` — symbol argument (alias).
-  - [ ] `X <Number> <ExternMangledName>` — external (C/C++) symbol.
-- [ ] `<Value>` — encoded integer/float/string/null values.
+- [x] `<TemplateInstanceName>` → `__T <LName> <TemplateArgs> Z`.
+- [x] `<TemplateArgs>` → `<TemplateArg>+`.
+- [x] `<TemplateArg>` :
+  - [x] `T <Type>` — type argument.
+  - [x] `V <Type> <Value>` — value argument.
+  - [x] `S <QualifiedName>` — symbol argument (alias).
+  - [x] `X <Number> <ExternMangledName>` — external (C/C++) symbol.
+- [x] `<Value>` — encoded integer/float/string/null values.
 
 ### 4e. D Mangling Grammar — Types
 - [ ] Basic types: `v` (void), `g` (byte), `h` (ubyte), `s` (short), `t` (ushort), `i` (int), `k` (uint), `l` (long), `m` (ulong), `f` (float), `d` (double), `e` (real), `o` (ifloat), `p` (idouble), `j` (ireal), `q` (cfloat), `r` (cdouble), `c` (creal), `b` (bool), `a` (char), `u` (wchar), `w` (dchar).

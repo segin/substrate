@@ -56,6 +56,8 @@ static int dlang_parser_add_name_ref(dlang_parser_t *p, size_t off, size_t len);
 
 static int dlang_parse_number(dlang_parser_t *p, size_t *out);
 static int dlang_parse_lname(dlang_parser_t *p);
+static int dlang_parse_template_arg(dlang_parser_t *p);
+static int dlang_parse_template_value(dlang_parser_t *p);
 static int dlang_parse_template_instance_name(dlang_parser_t *p);
 static int dlang_parse_symbol_name(dlang_parser_t *p);
 static int dlang_parse_qualified_name(dlang_parser_t *p);
@@ -311,6 +313,112 @@ dlang_parse_lname(dlang_parser_t *p)
 }
 
 static int
+dlang_parse_template_value(dlang_parser_t *p)
+{
+    if (p->cur[0] == 'n') {
+        p->cur++;
+        if (dlang_buf_appendc(&p->out, '-') != 0) {
+            return -1;
+        }
+    }
+
+    if (isdigit((unsigned char)p->cur[0])) {
+        size_t n = 0u;
+        while (isdigit((unsigned char)p->cur[0])) {
+            n = n * 10u + (size_t)(p->cur[0] - '0');
+            if (dlang_buf_appendc(&p->out, p->cur[0]) != 0) {
+                return -1;
+            }
+            p->cur++;
+        }
+
+        if (p->cur[0] == '_') {
+            p->cur++;
+            return 0;
+        }
+
+        if (n > 0u && p->cur[n - 1u] != '\0') {
+            if (dlang_buf_appendc(&p->out, '"') != 0 ||
+                dlang_buf_append(&p->out, p->cur, n) != 0 ||
+                dlang_buf_appendc(&p->out, '"') != 0) {
+                return -1;
+            }
+            p->cur += n;
+            return 0;
+        }
+    }
+
+    if (p->cur[0] == 'N') {
+        p->cur++;
+        return dlang_buf_append(&p->out, "null", 4u);
+    }
+
+    if (p->cur[0] == '\0') {
+        return -1;
+    }
+
+    if (dlang_buf_appendc(&p->out, p->cur[0]) != 0) {
+        return -1;
+    }
+    p->cur++;
+    return 0;
+}
+
+static int
+dlang_parse_template_arg(dlang_parser_t *p)
+{
+    size_t n;
+
+    if (p->cur[0] == 'T') {
+        p->cur++;
+        if (dlang_buf_append(&p->out, "type(", 5u) != 0 ||
+            dlang_parse_type(p) != 0 ||
+            dlang_buf_appendc(&p->out, ')') != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (p->cur[0] == 'V') {
+        p->cur++;
+        if (dlang_buf_append(&p->out, "value(", 6u) != 0 ||
+            dlang_parse_type(p) != 0 ||
+            dlang_buf_append(&p->out, "=", 1u) != 0 ||
+            dlang_parse_template_value(p) != 0 ||
+            dlang_buf_appendc(&p->out, ')') != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (p->cur[0] == 'S') {
+        p->cur++;
+        if (dlang_buf_append(&p->out, "alias(", 6u) != 0 ||
+            dlang_parse_qualified_name(p) != 0 ||
+            dlang_buf_appendc(&p->out, ')') != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    if (p->cur[0] == 'X') {
+        p->cur++;
+        if (dlang_parse_number(p, &n) != 0 || n == 0u || p->cur[n - 1u] == '\0') {
+            return -1;
+        }
+        if (dlang_buf_append(&p->out, "extern(", 7u) != 0 ||
+            dlang_buf_append(&p->out, p->cur, n) != 0 ||
+            dlang_buf_appendc(&p->out, ')') != 0) {
+            return -1;
+        }
+        p->cur += n;
+        return 0;
+    }
+
+    return -1;
+}
+
+static int
 dlang_parse_template_instance_name(dlang_parser_t *p)
 {
     int first;
@@ -330,19 +438,8 @@ dlang_parse_template_instance_name(dlang_parser_t *p)
             return -1;
         }
 
-        if ((p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T')) {
-            if (dlang_parse_template_instance_name(p) != 0) {
-                return -1;
-            }
-        } else if (isdigit((unsigned char)p->cur[0])) {
-            if (dlang_parse_lname(p) != 0) {
-                return -1;
-            }
-        } else {
-            if (dlang_buf_appendc(&p->out, '?') != 0) {
-                return -1;
-            }
-            p->cur++;
+        if (dlang_parse_template_arg(p) != 0) {
+            return -1;
         }
 
         first = 0;
