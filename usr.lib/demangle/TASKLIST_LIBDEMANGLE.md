@@ -390,10 +390,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] ASCII‑only identifier without `u` prefix: passed through.
 
 ### 9q. Rust Legacy Demangling Tests
-- [ ] `_ZN6mycrate3foo17h1234567890abcdefE` → `mycrate::foo`.
-- [ ] `$LT$` / `$GT$` / `$RF$` escapes → `<`, `>`, `&`.
-- [ ] `$u20$` → space, `$u27$` → `'`.
-- [ ] Non‑Rust `_ZN` (Itanium): not detected as Rust legacy.
+- [x] `_ZN6mycrate3foo17h1234567890abcdefE` → `mycrate::foo`.
+- [x] `$LT$` / `$GT$` / `$RF$` escapes → `<`, `>`, `&`.
+- [x] `$u20$` → space, `$u27$` → `'`.
+- [x] Non‑Rust `_ZN` (Itanium): not detected as Rust legacy.
 
 ### 9r. D Language Basic Tests
 - [ ] `_D3std5stdio7writelnFAaZv` → `std.stdio.writeln(char[], void)` (or similar).
