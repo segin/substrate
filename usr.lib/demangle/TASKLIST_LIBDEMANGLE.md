@@ -156,13 +156,13 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Fallback: if parsing fails, return `NULL`.
 
 ### 3k. Output Formatting
-- [ ] Paths separated by `::`.
-- [ ] Generic args in `<A, B>` angle brackets.
-- [ ] Function pointers: `fn(A, B) -> C` or `unsafe extern "C" fn(A) -> B`.
-- [ ] References: `&T`, `&mut T`, `&'a T`.
-- [ ] Tuples: `(A, B, C)`.
-- [ ] Arrays: `[T; N]`.
-- [ ] Trait objects: `dyn Trait<Assoc = T> + 'a`.
+- [x] Paths separated by `::`.
+- [x] Generic args in `<A, B>` angle brackets.
+- [x] Function pointers: `fn(A, B) -> C` or `unsafe extern "C" fn(A) -> B`.
+- [x] References: `&T`, `&mut T`, `&'a T`.
+- [x] Tuples: `(A, B, C)`.
+- [x] Arrays: `[T; N]`.
+- [x] Trait objects: `dyn Trait<Assoc = T> + 'a`.
 - [ ] Closures: `crate::module::{closure#0}`.
 - [ ] Shims: `crate::module::{shim:vtable#0}`.
 
