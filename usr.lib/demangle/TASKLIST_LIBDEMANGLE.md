@@ -330,9 +330,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `Ss` → `std::string`.
 
 ### 9g. Type‑Only Tests (`DEMANGLE_TYPES`)
-- [ ] `i` → `int`.
-- [ ] `PKc` → `char const*`.
-- [ ] `FvvE` → `void ()`.
+- [x] `i` → `int`.
+- [x] `PKc` → `char const*`.
+- [x] `FvvE` → `void ()`.
 
 ### 9h. Options Tests
 - [ ] `DEMANGLE_NO_PARAMS`: `_Z3fooi` → `foo`.
