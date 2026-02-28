@@ -7,6 +7,7 @@ typedef struct {
     char path[512];
     size_t line;
     size_t col;
+    size_t error_count;
     char message[256];
 } cc_diag_t;
 

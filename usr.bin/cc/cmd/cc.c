@@ -1451,7 +1451,13 @@ int cc_main(int argc, char **argv) {
                                       o.werror, o.pedantic, o.pedantic_errors, o.gnu89_inline_mode,
                                       o.gnu89_inline_override, o.i386_isa_level, o.i386_has_sse2, o.i386_has_mmx,
                                       o.i386_fp_math_mode, &diag) != 0) {
-                    if (diag.line != 0) {
+                    if (diag.error_count > 0) {
+                        if (diag.message[0] != '\0') {
+                            fprintf(stderr, "cc: error: %s\n", diag.message);
+                        } else {
+                            fprintf(stderr, "cc: error: %zu error(s) generated\n", diag.error_count);
+                        }
+                    } else if (diag.line != 0) {
                         if (diag.path[0] != '\0') {
                             fprintf(stderr, "%s:%zu:%zu: error: %s\n", diag.path, diag.line, diag.col, diag.message);
                         } else {
@@ -1462,9 +1468,6 @@ int cc_main(int argc, char **argv) {
                     } else {
                         fprintf(stderr, "cc: error: native C pipeline failed\n");
                     }
-                    fprintf(stderr,
-                            "cc: note: current native pipeline supports a strict subset "
-                            "(int/bool/char/unsigned-char/short/unsigned-short/unsigned-int/long-long/unsigned-long-long/float/double scalar + one/two/three/four-level pointer functions/prototypes, typedef aliases, declarations (including C99 for-init declarations), assignments/calls, unary address-of/dereference pointer ops, pointer arithmetic/indexing (`ptr +/- int`, `int + ptr`, compatible `ptr - ptr` for non-void pointers, and `ptr[idx]`/`idx[ptr]`), compound assignments, ++/--, if/else, while/do/for, switch/case/default, goto/labels, break/continue, empty statements (`;`), C95 digraph/trigraph lexical forms, arithmetic/logical/bitwise/shift/comma operators (including &&/|| short-circuit), ternary `?:`, scalar casts, pointer/integer casts, `sizeof` on supported scalar types, numeric comparisons, and returns)\n");
                     goto out;
                 }
             }

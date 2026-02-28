@@ -3649,6 +3649,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         diag->path[0] = '\0';
         diag->line = 0;
         diag->col = 0;
+        diag->error_count = 0;
         diag->message[0] = '\0';
     }
 

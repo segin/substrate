@@ -1040,6 +1040,9 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__SIZEOF_POINTER__", 0, 0, NULL, 0, ptr_size) != 0) {
         return -1;
     }
+    if (macro_set(&st->macros, "__SIZEOF_INT128__", 0, 0, NULL, 0, "16") != 0) {
+        return -1;
+    }
     if (macro_set(&st->macros, "__CHAR_BIT__", 0, 0, NULL, 0, "8") != 0) {
         return -1;
     }
@@ -5405,6 +5408,7 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
         diag->path[0] = '\0';
         diag->line = 0;
         diag->col = 0;
+        diag->error_count = 0;
         diag->message[0] = '\0';
     }
 

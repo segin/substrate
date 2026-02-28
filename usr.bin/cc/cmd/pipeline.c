@@ -35,6 +35,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         diag->path[0] = '\0';
         diag->line = 0;
         diag->col = 0;
+        diag->error_count = 0;
         diag->message[0] = '\0';
     }
 

@@ -8591,6 +8591,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         diag->path[0] = '\0';
         diag->line = 0;
         diag->col = 0;
+        diag->error_count = 0;
         diag->message[0] = '\0';
     }
 

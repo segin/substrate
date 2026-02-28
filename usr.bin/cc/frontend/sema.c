@@ -4301,6 +4301,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         diag->path[0] = '\0';
         diag->line = 0;
         diag->col = 0;
+        diag->error_count = 0;
         diag->message[0] = '\0';
     }
 
