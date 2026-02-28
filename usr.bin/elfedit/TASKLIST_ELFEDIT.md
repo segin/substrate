@@ -128,8 +128,8 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Illegal edit with `--force`: exits 0, output written with warning.
 
 ### 9e. Dry‑Run Tests
-- [ ] `--dry-run`: no file modification, diagnostic output.
-- [ ] `--dry-run` + illegal edit: reports validation failure.
+- [x] `--dry-run`: no file modification, diagnostic output.
+- [x] `--dry-run` + illegal edit: reports validation failure.
 
 ### 9f. Safety Tests
 - [ ] In‑place edit preserves file permissions.

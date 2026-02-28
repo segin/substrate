@@ -276,6 +276,30 @@ test_9d_validation() {
     assert_grep "WARNING: writing structurally invalid ELF" "$TMP/illegal_force.err"
 }
 
+test_9e_dry_run() {
+    before_sum=""
+    after_sum=""
+
+    "$TMP/mk_segment_fixture" "$TMP/dry_base.elf"
+    before_sum="$(cksum "$TMP/dry_base.elf" | awk '{print $1":"$2}')"
+    "$TOP/usr.bin/elfedit/elfedit" --dry-run --output-entry 0x333 \
+        "$TMP/dry_base.elf" >"$TMP/dry_ok.out" 2>"$TMP/dry_ok.err"
+    after_sum="$(cksum "$TMP/dry_base.elf" | awk '{print $1":"$2}')"
+    if [ "$before_sum" != "$after_sum" ]; then
+        echo "dry-run unexpectedly modified file" >&2
+        return 1
+    fi
+    assert_grep "dry-run: validation passed" "$TMP/dry_ok.out"
+
+    "$TMP/mk_invalid_fixture" "$TMP/dry_invalid.elf"
+    if "$TOP/usr.bin/elfedit/elfedit" --dry-run --output-entry 0x444 \
+        "$TMP/dry_invalid.elf" >"$TMP/dry_bad.out" 2>"$TMP/dry_bad.err"; then
+        echo "dry-run expected validation failure" >&2
+        return 1
+    fi
+    assert_grep "dry-run: validation failed" "$TMP/dry_bad.out"
+}
+
 build_tools
 build_fixture_maker
 build_segment_fixture_maker
@@ -284,4 +308,5 @@ test_9a_headers
 test_9b_sections
 test_9c_program_headers
 test_9d_validation
-echo "ok: elfedit 9a/9d tests"
+test_9e_dry_run
+echo "ok: elfedit 9a/9e tests"
