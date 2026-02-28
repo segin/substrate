@@ -277,11 +277,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 
 ## 7. Performance
 
-- [ ] O(n) parsing per name (single‑pass, no backtracking).
-- [ ] Substitution table: contiguous array, not linked list.
-- [ ] Target: 100k symbols demangled in < 1 second on modern hardware.
-- [ ] No global/static mutable state — fully reentrant.
-- [ ] Thread‑safe: all state is stack‑local or in the output buffer.
+- [x] O(n) parsing per name (single‑pass, no backtracking).
+- [x] Substitution table: contiguous array, not linked list.
+- [x] Target: 100k symbols demangled in < 1 second on modern hardware.
+- [x] No global/static mutable state — fully reentrant.
+- [x] Thread‑safe: all state is stack‑local or in the output buffer.
 
 ## 8. Build System
 
