@@ -420,11 +420,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `__lambda` / `__unittest` special sequences.
 
 ### 9v. Auto‑Detection Tests
-- [ ] `_Z...` → Itanium.
-- [ ] `_R...` → Rust v0.
-- [ ] `_D...` → D (if Itanium fails).
-- [ ] `_ZN...17h<hex>E` → Rust legacy.
-- [ ] Plain `main` → `NULL` (not mangled).
+- [x] `_Z...` → Itanium.
+- [x] `_R...` → Rust v0.
+- [x] `_D...` → D (if Itanium fails).
+- [x] `_ZN...17h<hex>E` → Rust legacy.
+- [x] Plain `main` → `NULL` (not mangled).
 
 ### 9w. Fuzz Tests
 - [ ] libFuzzer harness calling `demangle()` with arbitrary byte sequences.
