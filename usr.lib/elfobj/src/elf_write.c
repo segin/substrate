@@ -218,9 +218,17 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
 
     for (i = 0; i < obj->section_count; ++i) {
         const struct elf_section *s = obj->sections[i];
+        const char *name = s->name ? s->name : "";
         out_sec_t out;
+
+        if (strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 ||
+            strcmp(name, ".shstrtab") == 0 ||
+            ((s->type == SHT_REL || s->type == SHT_RELA) &&
+             (strncmp(name, ".rel", 4) == 0 || strncmp(name, ".rela", 5) == 0))) {
+            continue;
+        }
         memset(&out, 0, sizeof(out));
-        out.name = s->name ? s->name : "";
+        out.name = name;
         out.type = s->type;
         out.flags = s->flags;
         out.addr = s->addr;

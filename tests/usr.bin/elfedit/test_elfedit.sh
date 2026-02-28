@@ -317,6 +317,18 @@ assert_grep() {
     fi
 }
 
+header_fingerprint() {
+    in="$1"
+    out="$2"
+    readelf -h "$in" | awk '
+        /Type:/ ||
+        /Machine:/ ||
+        /OS\/ABI:/ ||
+        /ABI Version:/ ||
+        /Entry point address:/ ||
+        /Flags:/ { print }' >"$out"
+}
+
 test_9a_headers() {
     "$TMP/mk_fixture" "$TMP/base.o"
 
@@ -517,6 +529,32 @@ test_9g_edge_cases() {
     fi
 }
 
+test_9h_roundtrip() {
+    "$TMP/mk_fixture" "$TMP/round_base.o"
+    "$TOP/usr.bin/elfedit/elfedit" --output-type dyn -o "$TMP/round_dyn.o" "$TMP/round_base.o"
+    "$TOP/usr.bin/elfedit/elfedit" --output-type rel -o "$TMP/round_back.o" "$TMP/round_dyn.o"
+    header_fingerprint "$TMP/round_base.o" "$TMP/round_base.fp"
+    header_fingerprint "$TMP/round_back.o" "$TMP/round_back.fp"
+    cmp "$TMP/round_base.fp" "$TMP/round_back.fp"
+
+    if command -v elfedit >/dev/null 2>&1; then
+        host_elfedit="$(command -v elfedit)"
+        host_ok=0
+        if "$host_elfedit" --output-type dyn --output "$TMP/host_dyn.o" "$TMP/round_base.o" \
+            >/dev/null 2>&1; then
+            host_ok=1
+        elif "$host_elfedit" --output-type dyn -o "$TMP/host_dyn.o" "$TMP/round_base.o" \
+            >/dev/null 2>&1; then
+            host_ok=1
+        fi
+        if [ "$host_ok" -eq 1 ]; then
+            header_fingerprint "$TMP/round_dyn.o" "$TMP/ours_dyn.fp"
+            header_fingerprint "$TMP/host_dyn.o" "$TMP/host_dyn.fp"
+            cmp "$TMP/ours_dyn.fp" "$TMP/host_dyn.fp"
+        fi
+    fi
+}
+
 build_tools
 build_fixture_maker
 build_segment_fixture_maker
@@ -531,4 +569,5 @@ test_9d_validation
 test_9e_dry_run
 test_9f_safety
 test_9g_edge_cases
-echo "ok: elfedit 9a/9g tests"
+test_9h_roundtrip
+echo "ok: elfedit 9a/9h tests"

@@ -143,8 +143,8 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] No‑op invocation (no edit flags): exits 0 quietly.
 
 ### 9h. Round‑Trip Tests
-- [ ] Change type → change back → file functionally identical.
-- [ ] Compare with host `elfedit` output on same operation.
+- [x] Change type → change back → file functionally identical.
+- [x] Compare with host `elfedit` output on same operation.
 
 ## 10. Man Page
 
