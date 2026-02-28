@@ -376,9 +376,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Higher‑ranked function pointer with lifetimes.
 
 ### 9n. Rust v0 Backref Tests
-- [ ] Type backref `B <offset>` resolves correctly.
-- [ ] Circular backref: returns `NULL`, no crash.
-- [ ] Nested backrefs (backref to a backref).
+- [x] Type backref `B <offset>` resolves correctly.
+- [x] Circular backref: returns `NULL`, no crash.
+- [x] Nested backrefs (backref to a backref).
 
 ### 9o. Rust v0 Closure / Shim Tests
 - [ ] Closure: namespace `C` → `{closure#0}`.
