@@ -354,15 +354,15 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Generic instantiation: `_RINvC6mycrate3fooNtC6mycrate3BarECs...` → `mycrate::foo::<mycrate::Bar>`.
 
 ### 9k. Rust v0 Type Tests
-- [ ] Basic types: `l` → `i32`, `b` → `bool`, `c` → `char`, `e` → `str`.
-- [ ] Reference: `R <type>` → `&T`.
-- [ ] Mutable reference: `Q <type>` → `&mut T`.
-- [ ] Pointer: `P <type>` → `*const T`, `O <type>` → `*mut T`.
-- [ ] Array: `A <type> <const>` → `[T; N]`.
-- [ ] Slice: `S <type>` → `[T]`.
-- [ ] Tuple: `T <type>* E` → `(A, B)`.
-- [ ] Function pointer: `F U KC <type> E <type>` → `unsafe extern "C" fn(A) -> B`.
-- [ ] Trait object: `D <dyn-bounds> <lifetime>` → `dyn Trait + 'a`.
+- [x] Basic types: `l` → `i32`, `b` → `bool`, `c` → `char`, `e` → `str`.
+- [x] Reference: `R <type>` → `&T`.
+- [x] Mutable reference: `Q <type>` → `&mut T`.
+- [x] Pointer: `P <type>` → `*const T`, `O <type>` → `*mut T`.
+- [x] Array: `A <type> <const>` → `[T; N]`.
+- [x] Slice: `S <type>` → `[T]`.
+- [x] Tuple: `T <type>* E` → `(A, B)`.
+- [x] Function pointer: `F U KC <type> E <type>` → `unsafe extern "C" fn(A) -> B`.
+- [x] Trait object: `D <dyn-bounds> <lifetime>` → `dyn Trait + 'a`.
 
 ### 9l. Rust v0 Const Tests
 - [ ] Integer const: type + hex value → correct decimal display.
