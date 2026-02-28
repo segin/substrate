@@ -60,25 +60,25 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 ## 5. Validation and Safety
 
 ### 5a. Pre‑Write Validation
-- [ ] Call `elf_validate()` with `ELF_VALIDATE_STRICT` before writing.
-- [ ] Report all diagnostics from `elf_last_diagnostics()`.
-- [ ] Refuse to write if strict validation fails (unless `--force`).
+- [x] Call `elf_validate()` with `ELF_VALIDATE_STRICT` before writing.
+- [x] Report all diagnostics from `elf_last_diagnostics()`.
+- [x] Refuse to write if strict validation fails (unless `--force`).
 
 ### 5b. Dry‑Run Mode (`--dry-run` / `-n`)
-- [ ] Apply all mutations, run validation, report results — do not write.
-- [ ] Print summary of changes that would be made.
-- [ ] Exit 0 if valid, 1 if validation would fail.
+- [x] Apply all mutations, run validation, report results — do not write.
+- [x] Print summary of changes that would be made.
+- [x] Exit 0 if valid, 1 if validation would fail.
 
 ### 5c. Unsafe Operations
-- [ ] `--force` / `-f`: write even if validation fails.
-- [ ] Print `WARNING: writing structurally invalid ELF` to stderr.
-- [ ] Never silently produce invalid output (always diagnostic).
+- [x] `--force` / `-f`: write even if validation fails.
+- [x] Print `WARNING: writing structurally invalid ELF` to stderr.
+- [x] Never silently produce invalid output (always diagnostic).
 
 ### 5d. Guardrails
-- [ ] Warn on type changes that break structural invariants (e.g. ET_EXEC → ET_REL).
-- [ ] Warn on machine changes (instructions not re‑encoded).
-- [ ] Warn on flags changes that conflict with machine ABI.
-- [ ] Refuse to edit core files by default (allow with `--force`).
+- [x] Warn on type changes that break structural invariants (e.g. ET_EXEC → ET_REL).
+- [x] Warn on machine changes (instructions not re‑encoded).
+- [x] Warn on flags changes that conflict with machine ABI.
+- [x] Refuse to edit core files by default (allow with `--force`).
 
 ## 6. Additional Options
 

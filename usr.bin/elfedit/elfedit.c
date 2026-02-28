@@ -27,6 +27,8 @@ typedef struct {
     uint8_t output_abiversion;
     uint32_t output_flags;
     uint64_t output_entry;
+    int force;
+    int dry_run;
     int have_output_type;
     int have_output_machine;
     int have_output_osabi;
@@ -57,7 +59,7 @@ static void warnf(const char *fmt, ...) {
 
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-o output] [--output-type type] [--output-machine machine]\n"
+            "usage: %s [-f] [-n] [-o output] [--output-type type] [--output-machine machine]\n"
             "       [--output-osabi osabi] [--output-abiversion version]\n"
             "       [--output-flags value] [--output-entry addr]\n"
             "       [--set-section-type name=type] [--set-section-flags name=flags]\n"
@@ -448,6 +450,12 @@ static int parse_segment_flags(const char *arg, uint32_t *out) {
     return 0;
 }
 
+static void warn_flags_conflict(uint16_t machine, uint32_t flags) {
+    if ((machine == EM_386 || machine == EM_X86_64) && flags != 0) {
+        warnf("warning: e_flags=0x%x may conflict with machine ABI", flags);
+    }
+}
+
 static elf_section_t *find_section_or_error(elfobj_t *obj, const char *name) {
     elf_section_t *sec = elf_find_section(obj, name);
     if (sec == NULL) {
@@ -722,6 +730,8 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
     uint16_t parsed_value;
     uint8_t parsed_byte;
     static const struct option long_opts[] = {
+        { "force", no_argument, NULL, 'f' },
+        { "dry-run", no_argument, NULL, 'n' },
         { "help", no_argument, NULL, 'h' },
         { "output", required_argument, NULL, 'o' },
         { "output-type", required_argument, NULL, 1000 },
@@ -742,8 +752,14 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
 
     memset(ctx, 0, sizeof(*ctx));
 
-    while ((ch = getopt_long(argc, argv, "ho:", long_opts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "fhno:", long_opts, NULL)) != -1) {
         switch (ch) {
+        case 'f':
+            ctx->force = 1;
+            break;
+        case 'n':
+            ctx->dry_run = 1;
+            break;
         case 'h':
             usage(stdout);
             exit(0);
@@ -942,6 +958,8 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
     }
 
     if (ctx->have_output_flags) {
+        uint16_t machine = ctx->have_output_machine ? ctx->output_machine : elf_machine(obj);
+        warn_flags_conflict(machine, ctx->output_flags);
         err = elf_set_flags(obj, ctx->output_flags);
         if (err != ELF_OK) {
             warnf("failed to set ELF flags: %s", elf_errstr(err));
@@ -987,20 +1005,61 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
     return 0;
 }
 
-static int validate_object(elfobj_t *obj) {
-    elf_err_t err;
-    char *diag = NULL;
+static void print_validation_diagnostics(elfobj_t *obj) {
+    const char *diag = elf_last_diagnostics(obj);
+    const char *line_start;
+    const char *p;
 
-    err = elf_validate(obj, &diag);
-    if (err != ELF_OK) {
-        const char *last = elf_last_diagnostics(obj);
-        warnf("validation failed: %s",
-              (diag != NULL && diag[0] != '\0') ? diag : (last != NULL ? last : elf_errstr(err)));
-        free(diag);
-        return -1;
+    if (diag == NULL || diag[0] == '\0') {
+        return;
     }
-    free(diag);
-    return 0;
+    line_start = diag;
+    p = diag;
+    while (*p != '\0') {
+        if (*p == '\n') {
+            if (p > line_start) {
+                fprintf(stderr, "%s: %.*s\n", g_progname, (int)(p - line_start), line_start);
+            }
+            line_start = p + 1;
+        }
+        ++p;
+    }
+    if (*line_start != '\0') {
+        fprintf(stderr, "%s: %s\n", g_progname, line_start);
+    }
+}
+
+static int run_strict_validation(elfobj_t *obj) {
+    elf_err_t err;
+
+    (void)elf_set_validation_mode(obj, ELF_VALIDATE_STRICT);
+    err = elf_validate(obj, NULL);
+    print_validation_diagnostics(obj);
+    return err == ELF_OK ? 0 : -1;
+}
+
+static size_t requested_edit_count(const elfedit_ctx_t *ctx) {
+    size_t n = 0;
+
+    n += ctx->have_output_type ? 1u : 0u;
+    n += ctx->have_output_machine ? 1u : 0u;
+    n += ctx->have_output_osabi ? 1u : 0u;
+    n += ctx->have_output_abiversion ? 1u : 0u;
+    n += ctx->have_output_flags ? 1u : 0u;
+    n += ctx->have_output_entry ? 1u : 0u;
+    n += ctx->set_section_type_specs.count;
+    n += ctx->set_section_flags_specs.count;
+    n += ctx->set_section_align_specs.count;
+    n += ctx->rename_section_specs.count;
+    n += ctx->set_segment_type_specs.count;
+    n += ctx->set_segment_flags_specs.count;
+    n += ctx->set_segment_align_specs.count;
+    return n;
+}
+
+static void print_dry_run_summary(const elfedit_ctx_t *ctx, int valid) {
+    printf("dry-run: %s\n", valid ? "validation passed" : "validation failed");
+    printf("dry-run: %lu edit(s) would be applied\n", (unsigned long)requested_edit_count(ctx));
 }
 
 static int write_output(const elfedit_ctx_t *ctx, elfobj_t *obj) {
@@ -1050,6 +1109,7 @@ static void ctx_cleanup(elfedit_ctx_t *ctx) {
 int main(int argc, char **argv) {
     elfedit_ctx_t ctx;
     elfobj_t *obj = NULL;
+    int valid = 0;
     int rc = 1;
 
     if (argv[0] != NULL && argv[0][0] != '\0') {
@@ -1067,11 +1127,27 @@ int main(int argc, char **argv) {
         goto out;
     }
 
+    if (!ctx.force && elf_type(obj) == ET_CORE) {
+        warnf("refusing to edit core files without --force");
+        goto out;
+    }
+
     if (apply_mutations(&ctx, obj) != 0) {
         goto out;
     }
-    if (validate_object(obj) != 0) {
+    valid = run_strict_validation(obj) == 0;
+
+    if (ctx.dry_run) {
+        print_dry_run_summary(&ctx, valid);
+        rc = valid ? 0 : 1;
         goto out;
+    }
+
+    if (!valid) {
+        if (!ctx.force) {
+            goto out;
+        }
+        fprintf(stderr, "WARNING: writing structurally invalid ELF\n");
     }
     if (write_output(&ctx, obj) != 0) {
         goto out;
