@@ -80,10 +80,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 ## 3. Rust Demangler (secondary)
 
 ### 3a. Detection and Legacy
-- [ ] Detect Rust v0 mangling: symbol starts with `_R`.
-- [ ] Detect Rust legacy mangling: symbol starts with `_ZN` and ends with `17h<hex_hash>E` pattern.
-- [ ] `DEMANGLE_AUTO`: try Rust v0 first if `_R`, then fall back to Itanium.
-- [ ] `DEMANGLE_RUST`: force Rust v0 only, return `NULL` for non‑Rust input.
+- [x] Detect Rust v0 mangling: symbol starts with `_R`.
+- [x] Detect Rust legacy mangling: symbol starts with `_ZN` and ends with `17h<hex_hash>E` pattern.
+- [x] `DEMANGLE_AUTO`: try Rust v0 first if `_R`, then fall back to Itanium.
+- [x] `DEMANGLE_RUST`: force Rust v0 only, return `NULL` for non‑Rust input.
 
 ### 3b. Parser Architecture
 - [ ] Recursive‑descent parser on `const char *` with cursor (same pattern as Itanium).

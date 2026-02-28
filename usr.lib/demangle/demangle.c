@@ -53,6 +53,8 @@ normalize_options(int options, unsigned *out)
 static char *
 demangle_dispatch(const char *mangled, unsigned options)
 {
+    char *out;
+
     if (mangled == NULL || mangled[0] == '\0') {
         return NULL;
     }
@@ -73,16 +75,30 @@ demangle_dispatch(const char *mangled, unsigned options)
         return NULL;
     }
 
-    if (starts_with(mangled, "_Z") || (options & DEMANGLE_TYPES) != 0u) {
+    if (starts_with(mangled, "_R")) {
+        out = demangle_rust(mangled, (int)options);
+        if (out != NULL) {
+            return out;
+        }
         return demangle_itanium(mangled, (int)options);
     }
 
-    if (starts_with(mangled, "_R")) {
-        return demangle_rust(mangled, (int)options);
+    if (starts_with(mangled, "_ZN")) {
+        out = demangle_rust(mangled, (int)options);
+        if (out != NULL) {
+            return out;
+        }
     }
 
     if (starts_with(mangled, "_D")) {
-        return demangle_dlang(mangled, (int)options);
+        out = demangle_dlang(mangled, (int)options);
+        if (out != NULL) {
+            return out;
+        }
+    }
+
+    if (starts_with(mangled, "_Z") || (options & DEMANGLE_TYPES) != 0u) {
+        return demangle_itanium(mangled, (int)options);
     }
 
     return NULL;
