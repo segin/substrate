@@ -1,10 +1,8 @@
 #include "elfobj.h"
 #include <errno.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -13,6 +11,10 @@
 #define EM_X86_64 62
 #endif
 
+#define AS_MODE_AUTO (-1)
+#define AS_MODE_32 0
+#define AS_MODE_64 1
+
 typedef struct {
     char **items;
     size_t count;
@@ -20,16 +22,18 @@ typedef struct {
 } strvec_t;
 
 typedef struct {
-    int mode64;
+    int mode;
     const char *in_path;
     const char *out_path;
     const char *self_path;
-    strvec_t pass;
+    const char *march;
+    strvec_t gcc_opts;
+    strvec_t as_opts;
 } as_ctx_t;
 
 static void usage(const char *prog) {
     fprintf(stderr,
-            "usage: %s [-32|-64] [-g] [-I dir] [-D macro] [-march cpu] [-mtune cpu] "
+            "usage: %s [-32|-64] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
             "[-Wa opts] [-o output] input.s\n",
             prog);
 }
@@ -70,22 +74,6 @@ static int strvec_push(strvec_t *v, const char *s) {
     return 0;
 }
 
-static const char *translate_march_cpu(const as_ctx_t *ctx, const char *cpu) {
-    if (cpu == NULL || cpu[0] == '\0') {
-        return cpu;
-    }
-    if (strcmp(cpu, "x86-64") == 0 || strcmp(cpu, "x86-64-v1") == 0) {
-        return "generic64";
-    }
-    if (strcmp(cpu, "x86-64-v2") == 0 || strcmp(cpu, "x86-64-v3") == 0 || strcmp(cpu, "x86-64-v4") == 0) {
-        return "generic64";
-    }
-    if (strcmp(cpu, "generic") == 0) {
-        return ctx->mode64 ? "generic64" : "generic32";
-    }
-    return cpu;
-}
-
 static void strvec_free(strvec_t *v) {
     size_t i;
 
@@ -98,153 +86,230 @@ static void strvec_free(strvec_t *v) {
     v->cap = 0;
 }
 
-static int same_file(const char *a, const char *b) {
-    struct stat sa;
-    struct stat sb;
+static int push_opt_with_value(strvec_t *v, const char *opt, const char *value) {
+    size_t olen;
+    size_t vlen;
+    char *buf;
+    int rc;
 
-    if (a == NULL || b == NULL) {
-        return 0;
+    if (opt == NULL || value == NULL) {
+        return -1;
     }
-    if (stat(a, &sa) != 0 || stat(b, &sb) != 0) {
-        return 0;
+    olen = strlen(opt);
+    vlen = strlen(value);
+    buf = (char *)malloc(olen + vlen + 1);
+    if (buf == NULL) {
+        return -1;
     }
-    return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+    memcpy(buf, opt, olen);
+    memcpy(buf + olen, value, vlen);
+    buf[olen + vlen] = '\0';
+
+    rc = strvec_push(v, buf);
+    free(buf);
+    return rc;
 }
 
-static char *path_join(const char *dir, const char *leaf) {
-    size_t dlen;
-    size_t llen;
-    size_t need_slash;
-    char *out;
-
-    if (dir == NULL || leaf == NULL) {
-        return NULL;
-    }
-    dlen = strlen(dir);
-    llen = strlen(leaf);
-    need_slash = dlen > 0 && dir[dlen - 1] != '/';
-    out = (char *)malloc(dlen + need_slash + llen + 1);
-    if (out == NULL) {
-        return NULL;
-    }
-    memcpy(out, dir, dlen);
-    if (need_slash) {
-        out[dlen++] = '/';
-    }
-    memcpy(out + dlen, leaf, llen);
-    out[dlen + llen] = '\0';
-    return out;
-}
-
-static char *find_backend_as(const as_ctx_t *ctx) {
-    const char *override = getenv("AS_BACKEND");
-    const char *path_env;
-    char *dup;
+static int strvec_push_csv(strvec_t *v, const char *csv) {
+    char *tmp;
     char *tok;
     char *saveptr;
+    int pushed = 0;
 
-    if (override != NULL && override[0] != '\0') {
-        if (strchr(override, '/') != NULL && same_file(override, ctx->self_path)) {
-            fprintf(stderr, "as.x86: AS_BACKEND resolves to this wrapper (%s)\n", override);
-            return NULL;
+    if (csv == NULL) {
+        return -1;
+    }
+    tmp = xstrdup(csv);
+    if (tmp == NULL) {
+        return -1;
+    }
+
+    for (tok = strtok_r(tmp, ",", &saveptr); tok != NULL; tok = strtok_r(NULL, ",", &saveptr)) {
+        if (tok[0] == '\0') {
+            continue;
         }
-        return xstrdup(override);
-    }
-
-    path_env = getenv("PATH");
-    if (path_env != NULL && path_env[0] != '\0') {
-        dup = xstrdup(path_env);
-        if (dup == NULL) {
-            return NULL;
+        if (strvec_push(v, tok) != 0) {
+            free(tmp);
+            return -1;
         }
-        for (tok = strtok_r(dup, ":", &saveptr); tok != NULL; tok = strtok_r(NULL, ":", &saveptr)) {
-            char *cand;
-
-            if (tok[0] == '\0') {
-                continue;
-            }
-            cand = path_join(tok, "as");
-            if (cand == NULL) {
-                free(dup);
-                return NULL;
-            }
-            if (access(cand, X_OK) == 0) {
-                if (!same_file(cand, ctx->self_path)) {
-                    free(dup);
-                    return cand;
-                }
-            }
-            free(cand);
-        }
-        free(dup);
+        pushed = 1;
     }
 
-    if (access("/usr/bin/as", X_OK) == 0 && !same_file("/usr/bin/as", ctx->self_path)) {
-        return xstrdup("/usr/bin/as");
-    }
-    if (access("/bin/as", X_OK) == 0 && !same_file("/bin/as", ctx->self_path)) {
-        return xstrdup("/bin/as");
-    }
-
-    fprintf(stderr,
-            "as.x86: no backend assembler found (set AS_BACKEND or adjust PATH)\n");
-    return NULL;
+    free(tmp);
+    return pushed ? 0 : -1;
 }
 
-static int run_gas_backend(const as_ctx_t *ctx) {
+static int infer_mode_from_prog(const char *prog) {
+    const char *base;
+
+    if (prog == NULL) {
+        return AS_MODE_AUTO;
+    }
+
+    base = strrchr(prog, '/');
+    base = base == NULL ? prog : base + 1;
+
+    if (strcmp(base, "as.x64") == 0) {
+        return AS_MODE_64;
+    }
+    if (strcmp(base, "as.x86") == 0) {
+        return AS_MODE_32;
+    }
+    return AS_MODE_AUTO;
+}
+
+static int infer_mode_from_march(const char *march) {
+    if (march == NULL || march[0] == '\0') {
+        return AS_MODE_AUTO;
+    }
+    if (strncmp(march, "x86-64", 6) == 0 || strcmp(march, "amd64") == 0 || strcmp(march, "generic64") == 0) {
+        return AS_MODE_64;
+    }
+    if (strcmp(march, "i386") == 0 || strcmp(march, "i486") == 0 || strcmp(march, "i586") == 0 ||
+        strcmp(march, "i686") == 0 || strcmp(march, "generic32") == 0) {
+        return AS_MODE_32;
+    }
+    return AS_MODE_AUTO;
+}
+
+static int infer_mode(const as_ctx_t *ctx) {
+    int mode;
+
+    mode = infer_mode_from_prog(ctx->self_path);
+    if (mode != AS_MODE_AUTO) {
+        return mode;
+    }
+
+    mode = infer_mode_from_march(ctx->march);
+    if (mode != AS_MODE_AUTO) {
+        return mode;
+    }
+
+#if defined(__x86_64__) || defined(__amd64__)
+    return AS_MODE_64;
+#else
+    return AS_MODE_32;
+#endif
+}
+
+static int is_march_supported_64(const char *march) {
+    static const char *const allow[] = {
+        "x86-64",
+        "x86-64-v1",
+        "x86-64-v2",
+        "x86-64-v3",
+        "x86-64-v4",
+        "generic",
+        "generic64",
+        "native",
+        "amd64",
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(allow) / sizeof(allow[0]); ++i) {
+        if (strcmp(march, allow[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int is_march_supported_32(const char *march) {
+    static const char *const allow[] = {
+        "i386",
+        "i486",
+        "i586",
+        "i686",
+        "pentium",
+        "pentiumpro",
+        "pentium4",
+        "athlon",
+        "generic",
+        "generic32",
+        "native",
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(allow) / sizeof(allow[0]); ++i) {
+        if (strcmp(march, allow[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int validate_march(int mode, const char *march) {
+    if (march == NULL || march[0] == '\0') {
+        return 0;
+    }
+    if (mode == AS_MODE_64) {
+        return is_march_supported_64(march) ? 0 : -1;
+    }
+    return is_march_supported_32(march) ? 0 : -1;
+}
+
+static const char *backend_compiler(void) {
+    const char *override = getenv("AS_BACKEND");
+    const char *cc = getenv("CC");
+
+    if (override != NULL && override[0] != '\0') {
+        return override;
+    }
+    if (cc != NULL && cc[0] != '\0') {
+        return cc;
+    }
+    return "gcc";
+}
+
+static int run_backend(const as_ctx_t *ctx) {
     size_t i;
     size_t argc;
     char **argv;
-    char *backend;
+    size_t at = 0;
+    const char *cc_prog;
     pid_t pid;
     int status;
 
-    backend = find_backend_as(ctx);
-    if (backend == NULL) {
-        return -1;
-    }
-
-    argc = 5 + ctx->pass.count;
+    cc_prog = backend_compiler();
+    argc = 8 + ctx->gcc_opts.count + (ctx->as_opts.count * 2);
     argv = (char **)calloc(argc + 1, sizeof(*argv));
     if (argv == NULL) {
-        free(backend);
         return -1;
     }
 
-    argv[0] = backend;
-    argv[1] = ctx->mode64 ? "--64" : "--32";
+    argv[at++] = (char *)cc_prog;
+    argv[at++] = "-c";
+    argv[at++] = "-x";
+    argv[at++] = "assembler-with-cpp";
+    argv[at++] = ctx->mode == AS_MODE_64 ? "-m64" : "-m32";
 
-    for (i = 0; i < ctx->pass.count; ++i) {
-        argv[2 + i] = ctx->pass.items[i];
+    for (i = 0; i < ctx->gcc_opts.count; ++i) {
+        argv[at++] = ctx->gcc_opts.items[i];
+    }
+    for (i = 0; i < ctx->as_opts.count; ++i) {
+        argv[at++] = "-Xassembler";
+        argv[at++] = ctx->as_opts.items[i];
     }
 
-    argv[2 + ctx->pass.count] = "-o";
-    argv[3 + ctx->pass.count] = (char *)ctx->out_path;
-    argv[4 + ctx->pass.count] = (char *)ctx->in_path;
-    argv[5 + ctx->pass.count] = NULL;
+    argv[at++] = "-o";
+    argv[at++] = (char *)ctx->out_path;
+    argv[at++] = (char *)ctx->in_path;
+    argv[at] = NULL;
 
     pid = fork();
     if (pid < 0) {
-        free(backend);
         free(argv);
         return -1;
     }
     if (pid == 0) {
-        if (strchr(argv[0], '/') != NULL) {
-            execv(argv[0], argv);
-        } else {
-            execvp(argv[0], argv);
-        }
+        execvp(argv[0], argv);
         _exit(127);
     }
 
     if (waitpid(pid, &status, 0) < 0) {
-        free(backend);
         free(argv);
         return -1;
     }
-
-    free(backend);
     free(argv);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         return -1;
@@ -258,32 +323,30 @@ static int validate_output_file(const as_ctx_t *ctx) {
 
     err = elf_open(ctx->out_path, &check);
     if (err != ELF_OK) {
-        fprintf(stderr, "as.x86: failed to open output %s: %s\n", ctx->out_path, elf_errstr(err));
+        fprintf(stderr, "as: failed to open output %s: %s\n", ctx->out_path, elf_errstr(err));
         return -1;
     }
 
     if (elf_type(check) != ET_REL) {
-        fprintf(stderr, "as.x86: output is not ET_REL\n");
+        fprintf(stderr, "as: output is not ET_REL\n");
         elf_close(check);
         return -1;
     }
 
-    if (ctx->mode64) {
+    if (ctx->mode == AS_MODE_64) {
         if (elf_class(check) != ELFOBJ_CLASS_64 || elf_machine(check) != EM_X86_64) {
-            fprintf(stderr, "as.x86: output is not x86_64 ELF64\n");
+            fprintf(stderr, "as: output is not x86_64 ELF64\n");
             elf_close(check);
             return -1;
         }
     } else {
         if (elf_class(check) != ELFOBJ_CLASS_32 || elf_machine(check) != EM_386) {
-            fprintf(stderr, "as.x86: output is not i386 ELF32\n");
+            fprintf(stderr, "as: output is not i386 ELF32\n");
             elf_close(check);
             return -1;
         }
     }
 
-    /* Keep strict format/type/class checks here; full validator has known false
-     * positives for some compiler-generated relocation layouts at this stage. */
     elf_close(check);
     return 0;
 }
@@ -294,154 +357,164 @@ int main(int argc, char **argv) {
     int query_version = 0;
 
     memset(&ctx, 0, sizeof(ctx));
+    ctx.mode = AS_MODE_AUTO;
     ctx.out_path = "a.out.o";
     ctx.self_path = argv[0];
 
     for (i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+        const char *arg = argv[i];
+
+        if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
             query_version = 1;
             continue;
         }
-        if (strcmp(argv[i], "-o") == 0) {
+        if (strcmp(arg, "-o") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.pass);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
                 return 2;
             }
             ctx.out_path = argv[++i];
             continue;
         }
-
-        if (strcmp(argv[i], "-32") == 0 || strcmp(argv[i], "--32") == 0) {
-            ctx.mode64 = 0;
+        if (strcmp(arg, "-32") == 0 || strcmp(arg, "--32") == 0) {
+            ctx.mode = AS_MODE_32;
             continue;
         }
-        if (strcmp(argv[i], "-64") == 0 || strcmp(argv[i], "--64") == 0) {
-            ctx.mode64 = 1;
+        if (strcmp(arg, "-64") == 0 || strcmp(arg, "--64") == 0) {
+            ctx.mode = AS_MODE_64;
             continue;
         }
-
-        if (strcmp(argv[i], "-I") == 0 || strcmp(argv[i], "-D") == 0 ||
-            strcmp(argv[i], "-Wa") == 0 || strcmp(argv[i], "-march") == 0 ||
-            strcmp(argv[i], "-mtune") == 0) {
-            char combo[1024];
+        if (strcmp(arg, "-g") == 0) {
+            if (strvec_push(&ctx.gcc_opts, arg) != 0) {
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 1;
+            }
+            continue;
+        }
+        if (strcmp(arg, "-I") == 0 || strcmp(arg, "-D") == 0 || strcmp(arg, "-march") == 0 ||
+            strcmp(arg, "-mtune") == 0) {
             const char *value;
+            const char *prefix;
 
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.pass);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
                 return 2;
             }
-            value = argv[i + 1];
-
-            if (strcmp(argv[i], "-Wa") == 0) {
-                if (snprintf(combo, sizeof(combo), "-Wa,%s", value) >= (int)sizeof(combo)) {
-                    strvec_free(&ctx.pass);
-                    return 1;
-                }
-                if (strvec_push(&ctx.pass, combo) != 0) {
-                    strvec_free(&ctx.pass);
-                    return 1;
-                }
-            } else if (strcmp(argv[i], "-mtune") == 0) {
-                /* Accepted for driver compatibility; no encoding effect in GAS. */
+            value = argv[++i];
+            if (strcmp(arg, "-I") == 0) {
+                prefix = "-I";
+            } else if (strcmp(arg, "-D") == 0) {
+                prefix = "-D";
+            } else if (strcmp(arg, "-march") == 0) {
+                prefix = "-march=";
+                ctx.march = value;
             } else {
-                if (strcmp(argv[i], "-march") == 0) {
-                    value = translate_march_cpu(&ctx, value);
-                }
-                if (strvec_push(&ctx.pass, argv[i]) != 0 || strvec_push(&ctx.pass, value) != 0) {
-                    strvec_free(&ctx.pass);
-                    return 1;
-                }
+                prefix = "-mtune=";
             }
-            ++i;
+            if (push_opt_with_value(&ctx.gcc_opts, prefix, value) != 0) {
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 1;
+            }
             continue;
         }
-
-        if (strcmp(argv[i], "-msse") == 0 || strcmp(argv[i], "-mno-sse") == 0 ||
-            strcmp(argv[i], "-msse2") == 0 || strcmp(argv[i], "-mno-sse2") == 0 ||
-            strcmp(argv[i], "-mmmx") == 0 || strcmp(argv[i], "-mno-mmx") == 0 ||
-            strcmp(argv[i], "-mfpmath=sse") == 0 || strcmp(argv[i], "-mfpmath=387") == 0) {
-            /* Accepted for driver compatibility; not forwarded to GAS. */
-            continue;
-        }
-        if (strcmp(argv[i], "-mfpmath") == 0) {
+        if (strcmp(arg, "-Wa") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.pass);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
                 return 2;
             }
-            ++i;
+            if (strvec_push_csv(&ctx.as_opts, argv[++i]) != 0) {
+                fprintf(stderr, "as: invalid -Wa argument\n");
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
             continue;
         }
-
-        if (strncmp(argv[i], "-I", 2) == 0 || strncmp(argv[i], "-D", 2) == 0 ||
-            strncmp(argv[i], "-march=", 7) == 0 || strncmp(argv[i], "-mtune=", 7) == 0 ||
-            strncmp(argv[i], "-Wa,", 4) == 0 || strcmp(argv[i], "-g") == 0) {
-            if (strncmp(argv[i], "-mtune=", 7) == 0) {
-                /* Accepted for driver compatibility; no encoding effect in GAS. */
-                continue;
+        if (strncmp(arg, "-Wa,", 4) == 0) {
+            if (strvec_push_csv(&ctx.as_opts, arg + 4) != 0) {
+                fprintf(stderr, "as: invalid -Wa argument\n");
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
             }
-            if (strncmp(argv[i], "-march=", 7) == 0) {
-                char march_opt[128];
-                const char *cpu = translate_march_cpu(&ctx, argv[i] + 7);
-                if (snprintf(march_opt, sizeof(march_opt), "-march=%s", cpu) >= (int)sizeof(march_opt)) {
-                    strvec_free(&ctx.pass);
-                    return 1;
-                }
-                if (strvec_push(&ctx.pass, march_opt) != 0) {
-                    strvec_free(&ctx.pass);
-                    return 1;
-                }
-                continue;
+            continue;
+        }
+        if (strncmp(arg, "-I", 2) == 0 || strncmp(arg, "-D", 2) == 0 || strncmp(arg, "-march=", 7) == 0 ||
+            strncmp(arg, "-mtune=", 7) == 0) {
+            if (strncmp(arg, "-march=", 7) == 0) {
+                ctx.march = arg + 7;
             }
-            if (strvec_push(&ctx.pass, argv[i]) != 0) {
-                strvec_free(&ctx.pass);
+            if (strvec_push(&ctx.gcc_opts, arg) != 0) {
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
                 return 1;
             }
             continue;
         }
 
-        if (argv[i][0] == '-') {
-            /* Keep compatibility by forwarding unknown options to the backend. */
-            if (strvec_push(&ctx.pass, argv[i]) != 0) {
-                strvec_free(&ctx.pass);
+        if (arg[0] == '-') {
+            if (strvec_push(&ctx.as_opts, arg) != 0) {
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
                 return 1;
             }
             continue;
         }
 
         if (ctx.in_path != NULL) {
-            fprintf(stderr, "as.x86: multiple input files are not supported\n");
-            strvec_free(&ctx.pass);
+            fprintf(stderr, "as: multiple input files are not supported\n");
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
             return 2;
         }
-        ctx.in_path = argv[i];
+        ctx.in_path = arg;
     }
 
     if (query_version) {
-        printf("GNU assembler (GNU Binutils) 2.40\n");
-        strvec_free(&ctx.pass);
+        printf("GNU assembler (Substrate wrapper)\n");
+        strvec_free(&ctx.gcc_opts);
+        strvec_free(&ctx.as_opts);
         return 0;
     }
 
     if (ctx.in_path == NULL) {
         usage(argv[0]);
-        strvec_free(&ctx.pass);
+        strvec_free(&ctx.gcc_opts);
+        strvec_free(&ctx.as_opts);
+        return 2;
+    }
+    if (ctx.mode == AS_MODE_AUTO) {
+        ctx.mode = infer_mode(&ctx);
+    }
+    if (validate_march(ctx.mode, ctx.march) != 0) {
+        fprintf(stderr, "as: unsupported -march=%s for %s mode\n", ctx.march,
+                ctx.mode == AS_MODE_64 ? "64-bit" : "32-bit");
+        strvec_free(&ctx.gcc_opts);
+        strvec_free(&ctx.as_opts);
         return 2;
     }
 
-    if (run_gas_backend(&ctx) != 0) {
-        fprintf(stderr, "as.x86: backend assembly failed\n");
-        strvec_free(&ctx.pass);
+    if (run_backend(&ctx) != 0) {
+        fprintf(stderr, "as: backend assembly failed\n");
+        strvec_free(&ctx.gcc_opts);
+        strvec_free(&ctx.as_opts);
         return 1;
     }
-
     if (validate_output_file(&ctx) != 0) {
-        strvec_free(&ctx.pass);
+        strvec_free(&ctx.gcc_opts);
+        strvec_free(&ctx.as_opts);
         return 1;
     }
 
-    strvec_free(&ctx.pass);
+    strvec_free(&ctx.gcc_opts);
+    strvec_free(&ctx.as_opts);
     return 0;
 }

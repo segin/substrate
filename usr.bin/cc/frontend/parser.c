@@ -2461,6 +2461,12 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             }
         }
     }
+    while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+           tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+        if (skip_decl_gnu_suffix(p, NULL) != 0) {
+            return -1;
+        }
+    }
     if (p->tok.kind == TOK_LPAREN) {
         wrapped = 1;
         if (next_tok(p) != 0) {
@@ -2479,6 +2485,12 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 if (next_tok(p) != 0) {
                     return -1;
                 }
+            }
+        }
+        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+            if (skip_decl_gnu_suffix(p, NULL) != 0) {
+                return -1;
             }
         }
     }
@@ -3725,6 +3737,12 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             }
         }
     }
+    while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+           tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+        if (skip_decl_gnu_suffix(p, NULL) != 0) {
+            return -1;
+        }
+    }
     if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
         grouped_ptr_decl = 1;
         if (next_tok(p) != 0) {
@@ -3743,6 +3761,12 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 if (next_tok(p) != 0) {
                     return -1;
                 }
+            }
+        }
+        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm")) {
+            if (skip_decl_gnu_suffix(p, NULL) != 0) {
+                return -1;
             }
         }
         if (p->tok.kind == TOK_IDENT) {

@@ -551,9 +551,16 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
         } else if (out->len == 5 && out->start[0] == 's' && out->start[1] == 'h' &&
                    out->start[2] == 'o' && out->start[3] == 'r' && out->start[4] == 't') {
             out->kind = TOK_KW_SHORT;
-        } else if (out->len == 6 && out->start[0] == 's' && out->start[1] == 'i' &&
-                   out->start[2] == 'g' && out->start[3] == 'n' && out->start[4] == 'e' &&
-                   out->start[5] == 'd') {
+        } else if ((out->len == 6 && out->start[0] == 's' && out->start[1] == 'i' &&
+                    out->start[2] == 'g' && out->start[3] == 'n' && out->start[4] == 'e' &&
+                    out->start[5] == 'd') ||
+                   (out->len == 8 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 's' && out->start[3] == 'i' && out->start[4] == 'g' &&
+                    out->start[5] == 'n' && out->start[6] == 'e' && out->start[7] == 'd') ||
+                   (out->len == 10 && out->start[0] == '_' && out->start[1] == '_' &&
+                    out->start[2] == 's' && out->start[3] == 'i' && out->start[4] == 'g' &&
+                    out->start[5] == 'n' && out->start[6] == 'e' && out->start[7] == 'd' &&
+                    out->start[8] == '_' && out->start[9] == '_')) {
             out->kind = TOK_KW_SIGNED;
         } else if (out->len == 6 && out->start[0] == 's' && out->start[1] == 't' &&
                    out->start[2] == 'a' && out->start[3] == 't' && out->start[4] == 'i' &&
