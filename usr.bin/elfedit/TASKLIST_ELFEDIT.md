@@ -1,5 +1,7 @@
 # `usr.bin/elfedit` Tasklist
 
+Status: CONSUMED (all tasks completed on 2026-02-28).
+
 Goal: implement `elfedit` mutations on top of `libelfobj`.
 
 ---
