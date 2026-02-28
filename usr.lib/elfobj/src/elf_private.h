@@ -158,6 +158,7 @@ struct elfobj {
     elfobj_endian_t endian;
     uint16_t type;
     uint16_t machine;
+    uint8_t osabi;
     uint64_t entry;
     uint32_t flags;
 

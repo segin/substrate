@@ -550,6 +550,7 @@ static elf_err_t parse_object(elfobj_t *obj) {
     } else {
         return ELF_ERR_FORMAT;
     }
+    obj->osabi = b[EI_OSABI];
 
     if (obj->cls == ELFOBJ_CLASS_32) {
         if (obj->image_size < sizeof(Elf32_Ehdr)) {

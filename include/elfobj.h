@@ -67,6 +67,21 @@ typedef enum {
 #ifndef EM_RISCV
 #define EM_RISCV 243
 #endif
+#ifndef ELFOSABI_NONE
+#define ELFOSABI_NONE 0
+#endif
+#ifndef ELFOSABI_SYSV
+#define ELFOSABI_SYSV 0
+#endif
+#ifndef ELFOSABI_LINUX
+#define ELFOSABI_LINUX 3
+#endif
+#ifndef ELFOSABI_FREEBSD
+#define ELFOSABI_FREEBSD 9
+#endif
+#ifndef ELFOSABI_SUBSTRATE
+#define ELFOSABI_SUBSTRATE 64
+#endif
 
 #ifndef SHT_NULL
 #define SHT_NULL 0
@@ -343,8 +358,10 @@ elfobj_t *elf_create(uint16_t type, uint16_t machine, elfobj_class_t cls, elfobj
 elf_err_t elf_finalize(elfobj_t *obj);
 elf_err_t elf_set_type(elfobj_t *obj, uint16_t type);
 elf_err_t elf_set_machine(elfobj_t *obj, uint16_t machine);
+elf_err_t elf_set_osabi(elfobj_t *obj, uint8_t osabi);
 uint16_t elf_type(const elfobj_t *obj);
 uint16_t elf_machine(const elfobj_t *obj);
+uint8_t elf_osabi(const elfobj_t *obj);
 elfobj_class_t elf_class(const elfobj_t *obj);
 elfobj_endian_t elf_endian(const elfobj_t *obj);
 

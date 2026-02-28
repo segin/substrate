@@ -17,8 +17,10 @@ typedef struct {
     const char *output_path;
     uint16_t output_type;
     uint16_t output_machine;
+    uint8_t output_osabi;
     int have_output_type;
     int have_output_machine;
+    int have_output_osabi;
 } elfedit_ctx_t;
 
 static const char *g_progname = "elfedit";
@@ -35,7 +37,8 @@ static void warnf(const char *fmt, ...) {
 
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-o output] [--output-type type] [--output-machine machine] <input>\n",
+            "usage: %s [-o output] [--output-type type] [--output-machine machine]\n"
+            "       [--output-osabi osabi] <input>\n",
             g_progname);
 }
 
@@ -107,14 +110,42 @@ static int parse_output_machine(const char *arg, uint16_t *out) {
     return parse_u16(arg, out);
 }
 
+static int parse_output_osabi(const char *arg, uint8_t *out) {
+    uint16_t parsed = 0;
+
+    if (strcasecmp(arg, "none") == 0 || strcasecmp(arg, "sysv") == 0) {
+        *out = ELFOSABI_SYSV;
+        return 0;
+    }
+    if (strcasecmp(arg, "linux") == 0) {
+        *out = ELFOSABI_LINUX;
+        return 0;
+    }
+    if (strcasecmp(arg, "freebsd") == 0) {
+        *out = ELFOSABI_FREEBSD;
+        return 0;
+    }
+    if (strcasecmp(arg, "substrate") == 0) {
+        *out = ELFOSABI_SUBSTRATE;
+        return 0;
+    }
+    if (parse_u16(arg, &parsed) != 0 || parsed > 0xffu) {
+        return -1;
+    }
+    *out = (uint8_t)parsed;
+    return 0;
+}
+
 static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
     int ch;
     uint16_t parsed_value;
+    uint8_t parsed_osabi;
     static const struct option long_opts[] = {
         { "help", no_argument, NULL, 'h' },
         { "output", required_argument, NULL, 'o' },
         { "output-type", required_argument, NULL, 1000 },
         { "output-machine", required_argument, NULL, 1001 },
+        { "output-osabi", required_argument, NULL, 1002 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -143,6 +174,14 @@ static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
             }
             ctx->have_output_machine = 1;
             ctx->output_machine = parsed_value;
+            break;
+        case 1002:
+            if (parse_output_osabi(optarg, &parsed_osabi) != 0) {
+                warnf("unknown osabi: %s", optarg);
+                return -1;
+            }
+            ctx->have_output_osabi = 1;
+            ctx->output_osabi = parsed_osabi;
             break;
         default:
             usage(stderr);
@@ -227,6 +266,14 @@ static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
         err = elf_set_machine(obj, ctx->output_machine);
         if (err != ELF_OK) {
             warnf("failed to set ELF machine: %s", elf_errstr(err));
+            return -1;
+        }
+    }
+
+    if (ctx->have_output_osabi) {
+        err = elf_set_osabi(obj, ctx->output_osabi);
+        if (err != ELF_OK) {
+            warnf("failed to set ELF OSABI: %s", elf_errstr(err));
             return -1;
         }
     }

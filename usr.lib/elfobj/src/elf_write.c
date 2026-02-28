@@ -477,6 +477,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         img[EI_CLASS] = ELFCLASS32;
         img[EI_DATA] = obj->endian == ELFOBJ_ENDIAN_BE ? ELFDATA2MSB : ELFDATA2LSB;
         img[EI_VERSION] = EV_CURRENT;
+        img[EI_OSABI] = obj->osabi;
         elf__wr16(img + 16, obj->endian, obj->type);
         elf__wr16(img + 18, obj->endian, obj->machine);
         elf__wr32(img + 20, obj->endian, EV_CURRENT);
@@ -498,6 +499,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         img[EI_CLASS] = ELFCLASS64;
         img[EI_DATA] = obj->endian == ELFOBJ_ENDIAN_BE ? ELFDATA2MSB : ELFDATA2LSB;
         img[EI_VERSION] = EV_CURRENT;
+        img[EI_OSABI] = obj->osabi;
         elf__wr16(img + 16, obj->endian, obj->type);
         elf__wr16(img + 18, obj->endian, obj->machine);
         elf__wr32(img + 20, obj->endian, EV_CURRENT);

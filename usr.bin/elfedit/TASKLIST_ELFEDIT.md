@@ -26,8 +26,8 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Warn that changing machine doesn't re‑encode instructions or relocations.
 
 ### 2c. `--output-osabi=<osabi>`
-- [ ] Set `EI_OSABI` byte in `e_ident`.
-- [ ] Accept: `none`/`sysv` (0), `linux` (3), `freebsd` (9), `substrate` (if assigned), or numeric.
+- [x] Set `EI_OSABI` byte in `e_ident`.
+- [x] Accept: `none`/`sysv` (0), `linux` (3), `freebsd` (9), `substrate` (if assigned), or numeric.
 
 ### 2d. `--output-abiversion=<version>`
 - [ ] Set `EI_ABIVERSION` byte.
