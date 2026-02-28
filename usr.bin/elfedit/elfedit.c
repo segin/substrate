@@ -1158,6 +1158,7 @@ static void ctx_cleanup(elfedit_ctx_t *ctx) {
 int main(int argc, char **argv) {
     elfedit_ctx_t ctx;
     elfobj_t *obj = NULL;
+    elf_err_t open_err;
     int valid = 0;
     int rc = 1;
 
@@ -1172,9 +1173,14 @@ int main(int argc, char **argv) {
     }
     g_verbose = ctx.verbose;
 
-    if ((ctx.input_mmap ? elf_open_with_options(ctx.input_path, ELFOBJ_OPEN_USE_MMAP, &obj)
-                        : elf_open(ctx.input_path, &obj)) != ELF_OK) {
-        warnf("%s: failed to open ELF object", ctx.input_path);
+    open_err = ctx.input_mmap ? elf_open_with_options(ctx.input_path, ELFOBJ_OPEN_USE_MMAP, &obj)
+                              : elf_open(ctx.input_path, &obj);
+    if (open_err != ELF_OK) {
+        if (open_err == ELF_ERR_FORMAT) {
+            fprintf(stderr, "%s: %s: not an ELF file\n", g_progname, ctx.input_path);
+        } else {
+            warnf("%s: failed to open ELF object", ctx.input_path);
+        }
         goto out;
     }
     if (ctx.input_mmap) {
@@ -1183,6 +1189,11 @@ int main(int argc, char **argv) {
 
     if (!ctx.force && elf_type(obj) == ET_CORE) {
         warnf("refusing to edit core files without --force");
+        goto out;
+    }
+    if (requested_edit_count(&ctx) == 0) {
+        warnf("no edits requested");
+        rc = 0;
         goto out;
     }
 

@@ -90,12 +90,12 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 
 ## 7. Error Handling
 
-- [ ] Non‑ELF input: `elfedit: <file>: not an ELF file`, exit 1.
-- [ ] Unknown type/machine/osabi name: `elfedit: unknown <thing>: <value>`, exit 1.
-- [ ] Section name not found: `elfedit: section '<name>' not found`, exit 1.
-- [ ] Segment index out of range: `elfedit: segment index <N> out of range (0–<max>)`, exit 1.
-- [ ] No edits requested: warn, exit 0 (no‑op).
-- [ ] Write failure: remove temp file, report error, exit 1.
+- [x] Non‑ELF input: `elfedit: <file>: not an ELF file`, exit 1.
+- [x] Unknown type/machine/osabi name: `elfedit: unknown <thing>: <value>`, exit 1.
+- [x] Section name not found: `elfedit: section '<name>' not found`, exit 1.
+- [x] Segment index out of range: `elfedit: segment index <N> out of range (0–<max>)`, exit 1.
+- [x] No edits requested: warn, exit 0 (no‑op).
+- [x] Write failure: remove temp file, report error, exit 1.
 
 ## 8. Build System
 
