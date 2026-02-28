@@ -1,6 +1,6 @@
 include ../Makefile.inc
 
-SUBDIRS = bc regex libuu elfobj
+SUBDIRS = bc regex demangle libuu elfobj
 
 .PHONY: all clean install $(SUBDIRS)
 

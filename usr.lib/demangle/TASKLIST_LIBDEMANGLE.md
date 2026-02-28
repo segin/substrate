@@ -285,11 +285,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 
 ## 8. Build System
 
-- [ ] Create `Makefile` producing `libdemangle.a`.
-- [ ] Install header to `$(DESTDIR)/usr/include/demangle.h`.
-- [ ] Install library to `$(DESTDIR)/usr/lib/libdemangle.a`.
-- [ ] `NATIVE_BUILD=1` support for host testing.
-- [ ] No dependency on `libelfobj` — pure string processing.
+- [x] Create `Makefile` producing `libdemangle.a`.
+- [x] Install header to `$(DESTDIR)/usr/include/demangle.h`.
+- [x] Install library to `$(DESTDIR)/usr/lib/libdemangle.a`.
+- [x] `NATIVE_BUILD=1` support for host testing.
+- [x] No dependency on `libelfobj` — pure string processing.
 
 ## 9. Testing
 
