@@ -98,6 +98,10 @@ demangle_dispatch(const char *mangled, unsigned options)
         return demangle_itanium(mangled, (int)options);
     }
 
+    if (starts_with(mangled, "_d_")) {
+        return demangle_dlang(mangled, (int)options);
+    }
+
     if (starts_with(mangled, "_Z") || (options & DEMANGLE_TYPES) != 0u) {
         return demangle_itanium(mangled, (int)options);
     }

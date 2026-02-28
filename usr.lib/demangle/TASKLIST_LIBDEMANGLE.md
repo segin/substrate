@@ -252,10 +252,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Qualifiers: `const(int)`, `immutable(char[])`, `shared(int*)`.
 
 ### 4j. Edge Cases
-- [ ] Symbols with back‑references within qualified names.
-- [ ] Deeply nested template instantiations.
-- [ ] Mixed D + C linkage symbols (`__T ... X ...`).
-- [ ] Symbols from D runtime (`_d_*` symbols — these use C mangling, pass through).
+- [x] Symbols with back‑references within qualified names.
+- [x] Deeply nested template instantiations.
+- [x] Mixed D + C linkage symbols (`__T ... X ...`).
+- [x] Symbols from D runtime (`_d_*` symbols — these use C mangling, pass through).
 
 ## 5. Growable Output Buffer
 

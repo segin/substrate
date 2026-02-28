@@ -58,6 +58,8 @@ typedef struct dlang_parser {
 
 static int starts_with(const char *s, const char *prefix);
 static int dlang_is_mangled(const char *mangled);
+static int dlang_is_runtime_symbol(const char *mangled);
+static char *dlang_strdup(const char *s);
 
 static int dlang_buf_reserve(dlang_buf_t *buf, size_t extra);
 static int dlang_buf_append(dlang_buf_t *buf, const char *s, size_t n);
@@ -111,6 +113,32 @@ static int
 dlang_is_mangled(const char *mangled)
 {
     return starts_with(mangled, "_D");
+}
+
+static int
+dlang_is_runtime_symbol(const char *mangled)
+{
+    return starts_with(mangled, "_d_");
+}
+
+static char *
+dlang_strdup(const char *s)
+{
+    size_t n;
+    char *ret;
+
+    if (s == NULL) {
+        return NULL;
+    }
+
+    n = strlen(s);
+    ret = (char *)malloc(n + 1u);
+    if (ret == NULL) {
+        return NULL;
+    }
+
+    memcpy(ret, s, n + 1u);
+    return ret;
 }
 
 static int
@@ -606,7 +634,12 @@ dlang_parse_template_instance_name(dlang_parser_t *p)
     int first;
     size_t off;
 
+    if (dlang_parser_enter(p) != 0) {
+        return -1;
+    }
+
     if (!(p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T')) {
+        dlang_parser_leave(p);
         return -1;
     }
 
@@ -614,16 +647,19 @@ dlang_parse_template_instance_name(dlang_parser_t *p)
     p->cur += 3;
 
     if (dlang_parse_lname(p) != 0 || dlang_buf_append(&p->out, "!(", 2u) != 0) {
+        dlang_parser_leave(p);
         return -1;
     }
 
     first = 1;
     while (p->cur[0] != '\0' && p->cur[0] != 'Z') {
         if (!first && dlang_buf_append(&p->out, ", ", 2u) != 0) {
+            dlang_parser_leave(p);
             return -1;
         }
 
         if (dlang_parse_template_arg(p) != 0) {
+            dlang_parser_leave(p);
             return -1;
         }
 
@@ -631,11 +667,18 @@ dlang_parse_template_instance_name(dlang_parser_t *p)
     }
 
     if (p->cur[0] != 'Z' || dlang_buf_appendc(&p->out, ')') != 0) {
+        dlang_parser_leave(p);
         return -1;
     }
 
     p->cur++;
-    return dlang_parser_add_name_ref(p, off, p->out.len - off);
+    if (dlang_parser_add_name_ref(p, off, p->out.len - off) != 0) {
+        dlang_parser_leave(p);
+        return -1;
+    }
+
+    dlang_parser_leave(p);
+    return 0;
 }
 
 static int
@@ -1387,6 +1430,12 @@ dlang_demangle_symbol(const char *mangled, int options)
     dlang_parser_t p;
     char *ret;
 
+    (void)options;
+
+    if (dlang_is_runtime_symbol(mangled)) {
+        return dlang_strdup(mangled);
+    }
+
     if (!dlang_is_mangled(mangled)) {
         return NULL;
     }
@@ -1411,6 +1460,10 @@ demangle_dlang(const char *mangled, int options)
 {
     if (mangled == NULL || mangled[0] == '\0') {
         return NULL;
+    }
+
+    if (dlang_is_runtime_symbol(mangled)) {
+        return dlang_strdup(mangled);
     }
 
     if ((options & DEMANGLE_DLANG) != 0) {
