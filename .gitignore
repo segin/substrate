@@ -70,6 +70,7 @@ sbin/*
 /usr.bin/cc/ir-diff
 /usr.bin/compress/uncompress
 /usr.bin/cpio/cpio
+/usr.bin/elfedit/elfedit
 /usr.bin/ld/ld
 /usr.bin/ld/ld.x86
 /usr.bin/ld/ld.x64
