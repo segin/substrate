@@ -38,8 +38,8 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 - [x] Accept hex or decimal value.
 
 ### 2f. `--output-entry=<addr>`
-- [ ] Set `e_entry` via `elf_set_entry()`.
-- [ ] Accept hex (`0x...`) or decimal address.
+- [x] Set `e_entry` via `elf_set_entry()`.
+- [x] Accept hex (`0x...`) or decimal address.
 
 ## 3. Section Header Edits
 

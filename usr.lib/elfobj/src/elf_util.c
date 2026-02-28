@@ -468,6 +468,18 @@ elf_err_t elf_set_flags(elfobj_t *obj, uint32_t flags) {
     return ELF_OK;
 }
 
+elf_err_t elf_set_entry(elfobj_t *obj, uint64_t entry) {
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    obj->entry = entry;
+    obj->dirty = 1;
+    return ELF_OK;
+}
+
 uint16_t elf_type(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->type;
 }
@@ -486,6 +498,10 @@ uint8_t elf_abiversion(const elfobj_t *obj) {
 
 uint32_t elf_flags(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->flags;
+}
+
+uint64_t elf_entry(const elfobj_t *obj) {
+    return obj == NULL ? 0 : obj->entry;
 }
 
 elfobj_class_t elf_class(const elfobj_t *obj) {
