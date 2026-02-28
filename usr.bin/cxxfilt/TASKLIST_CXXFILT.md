@@ -104,11 +104,11 @@ Map CLI style names to `libdemangle` option flags:
 
 ## 7. Build System
 
-- [ ] Create `Makefile` in `usr.bin/cxxfilt/`.
-- [ ] Link against `usr.lib/demangle/libdemangle.a` and libc.
-- [ ] No `libelfobj` dependency (pure string processing via `libdemangle`).
-- [ ] `NATIVE_BUILD=1` support (link against host libc + `libdemangle` built for host).
-- [ ] `install` to `$(DESTDIR)/usr/bin/c++filt`.
+- [x] Create `Makefile` in `usr.bin/cxxfilt/`.
+- [x] Link against `usr.lib/demangle/libdemangle.a` and libc.
+- [x] No `libelfobj` dependency (pure string processing via `libdemangle`).
+- [x] `NATIVE_BUILD=1` support (link against host libc + `libdemangle` built for host).
+- [x] `install` to `$(DESTDIR)/usr/bin/c++filt`.
 
 ---
 
