@@ -1,0 +1,205 @@
+.Dd February 28, 2026
+.Dt ELFEDIT 1
+.Os Substrate
+.Sh NAME
+.Nm elfedit
+.Nd edit ELF metadata fields safely with validation controls
+.Sh SYNOPSIS
+.Nm
+.Op Fl f
+.Op Fl n
+.Op Fl v
+.Op Fl -input-mmap
+.Op Fl o Ar output
+.Op Fl -output-type Ns = Ns Ar type
+.Op Fl -output-machine Ns = Ns Ar machine
+.Op Fl -output-osabi Ns = Ns Ar osabi
+.Op Fl -output-abiversion Ns = Ns Ar version
+.Op Fl -output-flags Ns = Ns Ar flags
+.Op Fl -output-entry Ns = Ns Ar address
+.Op Fl -set-section-type Ar name Ns = Ns Ar type
+.Op Fl -set-section-flags Ar name Ns = Ns Ar flags
+.Op Fl -set-section-align Ar name Ns = Ns Ar align
+.Op Fl -rename-section Ar old Ns = Ns Ar new
+.Op Fl -set-segment-type Ar idx Ns = Ns Ar type
+.Op Fl -set-segment-flags Ar idx Ns = Ns Ar flags
+.Op Fl -set-segment-align Ar idx Ns = Ns Ar align
+.Ar input
+.Sh DESCRIPTION
+.Nm
+opens an ELF file, applies requested metadata edits through
+.Xr libelfobj 3 ,
+runs strict validation, and writes the result either in-place or to
+an alternate path.
+In-place updates are written through a temporary file and then renamed over the
+original.
+.Pp
+Without
+.Fl f ,
+strict validation failures prevent writing.
+With
+.Fl n ,
+all edits and validation run but no file is written.
+.Sh OPTIONS
+.Bl -tag -width "--output-abiversion"
+.It Fl f , Fl -force
+Write output even when strict validation fails.
+Prints:
+.Dq WARNING: writing structurally invalid ELF .
+.It Fl n , Fl -dry-run
+Apply edits and run validation but do not write output.
+Exit status is 0 when validation passes and 1 when validation fails.
+.It Fl v , Fl -verbose
+Print each field mutation as it is applied.
+.It Fl -input-mmap
+Hint to use memory-mapped input for parsing.
+.It Fl o Ar file , Fl -output Ns = Ns Ar file
+Write to a separate output path instead of in-place replacement.
+.It Fl V , Fl -version
+Print
+.Nm
+version information.
+.It Fl h , Fl -help
+Print command usage.
+.El
+.Sh HEADER EDIT VALUES
+.Ss "--output-type"
+.Bl -column "name" "value"
+.It Sy name Ta Sy value
+.It none Ta 0
+.It rel Ta 1
+.It exec Ta 2
+.It dyn Ta 3
+.It core Ta 4
+.El
+.Pp
+Numeric values are also accepted.
+.Ss "--output-machine"
+.Bl -column "name" "value"
+.It Sy name Ta Sy value
+.It i386 Ta 3
+.It x86_64 Ta 62
+.It x86-64 Ta 62
+.It arm Ta 40
+.It aarch64 Ta 183
+.It mips Ta 8
+.It riscv Ta 243
+.El
+.Pp
+Numeric values are also accepted.
+.Ss "--output-osabi"
+.Bl -column "name" "value"
+.It Sy name Ta Sy value
+.It none Ta 0
+.It sysv Ta 0
+.It linux Ta 3
+.It freebsd Ta 9
+.It substrate Ta 64
+.El
+.Pp
+Numeric values in the range 0-255 are also accepted.
+.Sh EDIT OPERATIONS
+.Bl -tag -width "--set-section-flags"
+.It Fl -output-abiversion Ns = Ns Ar version
+Set
+.Va EI_ABIVERSION
+(0-255).
+.It Fl -output-flags Ns = Ns Ar flags
+Set ELF header
+.Va e_flags
+(decimal or hexadecimal).
+.It Fl -output-entry Ns = Ns Ar address
+Set ELF header
+.Va e_entry
+(decimal or hexadecimal).
+.It Fl -set-section-type Ar name Ns = Ns Ar type
+Set
+.Va sh_type
+for section
+.Ar name .
+Types accepted:
+.Dq progbits ,
+.Dq nobits ,
+.Dq note ,
+.Dq symtab ,
+.Dq strtab ,
+.Dq rela ,
+.Dq rel ,
+.Dq dynamic ,
+.Dq hash ,
+or numeric.
+.It Fl -set-section-flags Ar name Ns = Ns Ar flags
+Set
+.Va sh_flags
+for section
+.Ar name .
+Accepts either a hexadecimal/decimal number or a comma-separated list:
+.Dq alloc ,
+.Dq write ,
+.Dq execinstr ,
+.Dq merge ,
+.Dq strings ,
+.Dq tls ,
+.Dq group ,
+.Dq compressed .
+.It Fl -set-section-align Ar name Ns = Ns Ar align
+Set
+.Va sh_addralign
+for section
+.Ar name .
+.It Fl -rename-section Ar old Ns = Ns Ar new
+Rename a section in
+.Pa .shstrtab .
+.It Fl -set-segment-type Ar idx Ns = Ns Ar type
+Set program header
+.Va p_type
+at index
+.Ar idx .
+Named values include
+.Dq null ,
+.Dq load ,
+.Dq dynamic ,
+.Dq interp ,
+.Dq note ,
+.Dq phdr ,
+.Dq tls ,
+or numeric.
+.It Fl -set-segment-flags Ar idx Ns = Ns Ar flags
+Set program header
+.Va p_flags
+at index
+.Ar idx .
+Accepts
+.Dq r ,
+.Dq w ,
+.Dq x
+combos (e.g. rwx) or numeric.
+.It Fl -set-segment-align Ar idx Ns = Ns Ar align
+Set program header
+.Va p_align
+at index
+.Ar idx .
+Segment payload bytes are not rewritten; these are metadata edits.
+.El
+.Sh DIAGNOSTICS
+Common failures include:
+.Bl -bullet
+.It
+.Dq elfedit: <file>: not an ELF file
+.It
+.Dq elfedit: unknown type: <value>
+or equivalent machine/osabi errors
+.It
+.Dq elfedit: section '<name>' not found
+.It
+.Dq elfedit: segment index <N> out of range (0-<max>)
+.It
+strict validation diagnostics from
+.Xr elf_validate 3
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr readelf 1 ,
+.Xr libelfobj 3 ,
+.Xr elf_validate 3

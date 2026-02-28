@@ -13,3 +13,10 @@ $(PROG): ../../usr.lib/elfobj/libelfobj.a
 
 ../../usr.lib/elfobj/libelfobj.a:
 	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
+
+.PHONY: install-man
+
+install: install-man
+
+install-man:
+	install -D ../../man/man1/elfedit.1 $(DESTDIR)/usr/share/man/man1/elfedit.1

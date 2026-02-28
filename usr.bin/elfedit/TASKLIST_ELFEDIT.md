@@ -148,6 +148,6 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 
 ## 10. Man Page
 
-- [ ] Write `elfedit.1` covering all edit operations, validation, and safety flags.
-- [ ] Document named values for type/machine/osabi in tables.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [x] Write `elfedit.1` covering all edit operations, validation, and safety flags.
+- [x] Document named values for type/machine/osabi in tables.
+- [x] Install to `$(DESTDIR)/usr/share/man/man1/`.
