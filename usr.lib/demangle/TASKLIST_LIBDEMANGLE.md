@@ -339,12 +339,12 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `DEMANGLE_NO_VERBOSE`: `_ZNK3Foo3barEv` → `Foo::bar()` (no `const`).
 
 ### 9i. Failure / Edge Case Tests
-- [ ] Non‑mangled name → `NULL`.
-- [ ] Empty string → `NULL`.
-- [ ] `NULL` input → `NULL`.
-- [ ] Truncated `_ZN3Foo` → `NULL`.
-- [ ] Deeply nested (>256 depth) → `NULL`, no crash.
-- [ ] 64 KiB mangled name → completes or returns `NULL`, no crash.
+- [x] Non‑mangled name → `NULL`.
+- [x] Empty string → `NULL`.
+- [x] `NULL` input → `NULL`.
+- [x] Truncated `_ZN3Foo` → `NULL`.
+- [x] Deeply nested (>256 depth) → `NULL`, no crash.
+- [x] 64 KiB mangled name → completes or returns `NULL`, no crash.
 
 ### 9j. Rust v0 Basic Tests
 - [ ] Crate root: `_RNvC6mycrate3foo` → `mycrate::foo`.
