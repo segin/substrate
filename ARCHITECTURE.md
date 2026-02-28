@@ -158,7 +158,8 @@ These components are essential for booting and basic system operation.
     - `ls_sort`: stable mergesort backend supporting name/size/time/version ordering with deterministic tie-breakers.
     - `ls_print`: long-format rendering, mode/timestamp/size formatting, multi-output modes (single/comma/columns/by-lines), UID/GID caches, color/quoting handling.
     - `bin/ls/tests`: host-side regression and acceptance harness covering sorting, output modes, symlink edge cases, recursion loops, and core CLI behavior.
-- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`).
+- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`, `c++filt`).
+  - **`c++filt`**: CLI demangling frontend that streams stdin or argv operands and delegates all symbol parsing to `libdemangle` (Itanium, Rust, and D styles).
 - **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:
     - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.

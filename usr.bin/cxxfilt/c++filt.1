@@ -1,0 +1,65 @@
+.TH c++filt 1 "February 2026" "Substrate" "User Commands"
+.SH NAME
+c++filt \- demangle Itanium, Rust, and D symbol names
+.SH SYNOPSIS
+.B c++filt
+.RI [ options ]
+.RI [ mangled-name ... ]
+.SH DESCRIPTION
+.B c++filt
+is a command-line wrapper around
+.BR libdemangle .
+It reads mangled names from arguments or standard input and prints demangled forms.
+.PP
+Supported mangling schemes:
+Itanium C++ ABI (
+.B _Z
+prefix), Rust (
+.B _R
+and legacy Rust patterns), and D (
+.B _D
+prefix).
+.SH OPTIONS
+.TP
+.BI "-s, --style " style
+Select style: auto, gnu-v3, itanium, rust, dlang, none.
+.TP
+.B -n, --no-strip-underscore
+Do not strip a leading underscore.
+.TP
+.B -_, --strip-underscore
+Strip one leading underscore before demangling.
+.TP
+.B -p, --no-params
+Omit function parameter types.
+.TP
+.B -t, --types
+Attempt bare type demangling.
+.TP
+.B -i, --no-verbose
+Suppress verbose qualifiers where supported.
+.TP
+.B -h, --help
+Show usage help.
+.TP
+.B -V, --version
+Print
+.B demangle_version()
+string.
+.SH INPUT MODES
+If one or more operands are provided, each operand is treated as one input name.
+Otherwise,
+.B c++filt
+reads stdin line-by-line and demangles embedded mangled tokens.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Option parsing error or stdin read error.
+.SH SEE ALSO
+.BR demangle (3),
+.BR demangle_buf (3),
+.BR nm (1),
+.BR objdump (1)

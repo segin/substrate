@@ -162,6 +162,6 @@ Map CLI style names to `libdemangle` option flags:
 
 ## 9. Man Page
 
-- [ ] Write `c++filt.1` covering all flags, styles, and input modes.
-- [ ] Document supported mangling schemes (Itanium, Rust, D-lang) and reference `demangle(3)`.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [x] Write `c++filt.1` covering all flags, styles, and input modes.
+- [x] Document supported mangling schemes (Itanium, Rust, D-lang) and reference `demangle(3)`.
+- [x] Install to `$(DESTDIR)/usr/share/man/man1/`.
