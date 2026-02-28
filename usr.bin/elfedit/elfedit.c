@@ -1,17 +1,22 @@
 #include <elfobj.h>
 
 #include <errno.h>
+#include <getopt.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 typedef struct {
     const char *input_path;
     const char *output_path;
+    uint16_t output_type;
+    int have_output_type;
 } elfedit_ctx_t;
 
 static const char *g_progname = "elfedit";
@@ -27,21 +32,76 @@ static void warnf(const char *fmt, ...) {
 }
 
 static void usage(FILE *out) {
-    fprintf(out, "usage: %s [-o output] <input>\n", g_progname);
+    fprintf(out, "usage: %s [-o output] [--output-type type] <input>\n", g_progname);
+}
+
+static int parse_u16(const char *text, uint16_t *out) {
+    char *end = NULL;
+    unsigned long v;
+
+    if (text == NULL || text[0] == '\0' || out == NULL) {
+        return -1;
+    }
+    errno = 0;
+    v = strtoul(text, &end, 0);
+    if (errno != 0 || end == text || *end != '\0' || v > 0xffffUL) {
+        return -1;
+    }
+    *out = (uint16_t)v;
+    return 0;
+}
+
+static int parse_output_type(const char *arg, uint16_t *out) {
+    if (strcasecmp(arg, "none") == 0) {
+        *out = ET_NONE;
+        return 0;
+    }
+    if (strcasecmp(arg, "rel") == 0) {
+        *out = ET_REL;
+        return 0;
+    }
+    if (strcasecmp(arg, "exec") == 0) {
+        *out = ET_EXEC;
+        return 0;
+    }
+    if (strcasecmp(arg, "dyn") == 0) {
+        *out = ET_DYN;
+        return 0;
+    }
+    if (strcasecmp(arg, "core") == 0) {
+        *out = ET_CORE;
+        return 0;
+    }
+    return parse_u16(arg, out);
 }
 
 static int parse_args(int argc, char **argv, elfedit_ctx_t *ctx) {
     int ch;
+    uint16_t parsed_type;
+    static const struct option long_opts[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "output", required_argument, NULL, 'o' },
+        { "output-type", required_argument, NULL, 1000 },
+        { NULL, 0, NULL, 0 }
+    };
 
     memset(ctx, 0, sizeof(*ctx));
 
-    while ((ch = getopt(argc, argv, "ho:")) != -1) {
+    while ((ch = getopt_long(argc, argv, "ho:", long_opts, NULL)) != -1) {
         switch (ch) {
         case 'h':
             usage(stdout);
             exit(0);
         case 'o':
             ctx->output_path = optarg;
+            break;
+        case 1000:
+            if (parse_output_type(optarg, &parsed_type) != 0) {
+                warnf("unknown type: %s", optarg);
+                return -1;
+            }
+            ctx->have_output_type = 1;
+            ctx->output_type = parsed_type;
             break;
         default:
             usage(stderr);
@@ -98,8 +158,24 @@ static int mktemp_for_target(const char *target_path, char *out, size_t out_size
 }
 
 static int apply_mutations(elfedit_ctx_t *ctx, elfobj_t *obj) {
-    (void)ctx;
-    (void)obj;
+    elf_err_t err;
+
+    if (ctx->have_output_type) {
+        uint16_t old_type = elf_type(obj);
+        uint16_t phnum = elf_program_header_count(obj);
+
+        if (old_type != ctx->output_type && ctx->output_type == ET_REL && phnum != 0) {
+            warnf("warning: changing type to ET_REL with %u program headers may be structurally inconsistent",
+                  (unsigned)phnum);
+        }
+
+        err = elf_set_type(obj, ctx->output_type);
+        if (err != ELF_OK) {
+            warnf("failed to set ELF type: %s", elf_errstr(err));
+            return -1;
+        }
+    }
+
     return 0;
 }
 

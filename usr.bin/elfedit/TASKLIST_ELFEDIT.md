@@ -16,9 +16,9 @@ Goal: implement `elfedit` mutations on top of `libelfobj`.
 ## 2. ELF Header Edits
 
 ### 2a. `--output-type=<type>`
-- [ ] Set `e_type` via `elf_set_type()`.
-- [ ] Accept: `none` (0), `rel` (1), `exec` (2), `dyn` (3), `core` (4), or numeric value.
-- [ ] Warn if changing type would make file structurally inconsistent (e.g. ET_EXEC → ET_REL without removing program headers).
+- [x] Set `e_type` via `elf_set_type()`.
+- [x] Accept: `none` (0), `rel` (1), `exec` (2), `dyn` (3), `core` (4), or numeric value.
+- [x] Warn if changing type would make file structurally inconsistent (e.g. ET_EXEC → ET_REL without removing program headers).
 
 ### 2b. `--output-machine=<machine>`
 - [ ] Set `e_machine` via `elf_set_machine()`.

@@ -609,7 +609,7 @@ static elf_err_t parse_object(elfobj_t *obj) {
     }
 
     detect_special_sections(obj);
-    obj->readonly = 1;
+    obj->readonly = 0;
     obj->dirty = 0;
     return ELF_OK;
 }
