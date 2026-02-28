@@ -1490,6 +1490,7 @@ typedef enum {
     BUILTIN_ASSUME,
     BUILTIN_ASSUME_ALIGNED,
     BUILTIN_UNPREDICTABLE,
+    BUILTIN_CLZ,
     BUILTIN_CTZ,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
@@ -1552,7 +1553,12 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_unpredictable") == 0) {
         return BUILTIN_UNPREDICTABLE;
     }
-    if (strcmp(name, "__builtin_ctz") == 0) {
+    if (strcmp(name, "__builtin_clz") == 0 || strcmp(name, "__builtin_clzl") == 0 ||
+        strcmp(name, "__builtin_clzll") == 0) {
+        return BUILTIN_CLZ;
+    }
+    if (strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
+        strcmp(name, "__builtin_ctzll") == 0) {
         return BUILTIN_CTZ;
     }
     if (strcmp(name, "__builtin_add_overflow") == 0) {
@@ -2359,16 +2365,18 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = e->args[0]->struct_id;
             return 0;
         }
-        if (bk == BUILTIN_CTZ) {
+        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ) {
             if (e->arg_count != 1) {
-                set_diag(diag, "__builtin_ctz expects exactly 1 argument");
+                set_diag(diag, bk == BUILTIN_CLZ ? "__builtin_clz expects exactly 1 argument"
+                                                 : "__builtin_ctz expects exactly 1 argument");
                 return -1;
             }
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             if (!is_integral_type(e->args[0]->value_type)) {
-                set_diag(diag, "__builtin_ctz argument must be integral");
+                set_diag(diag, bk == BUILTIN_CLZ ? "__builtin_clz argument must be integral"
+                                                 : "__builtin_ctz argument must be integral");
                 return -1;
             }
             e->value_type = CC_TYPE_INT;

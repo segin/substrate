@@ -1356,6 +1356,7 @@ typedef enum {
     BUILTIN_ASSUME,
     BUILTIN_ASSUME_ALIGNED,
     BUILTIN_UNPREDICTABLE,
+    BUILTIN_CLZ,
     BUILTIN_CTZ,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
@@ -1421,7 +1422,12 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_unpredictable") == 0) {
         return BUILTIN_UNPREDICTABLE;
     }
-    if (strcmp(name, "__builtin_ctz") == 0) {
+    if (strcmp(name, "__builtin_clz") == 0 || strcmp(name, "__builtin_clzl") == 0 ||
+        strcmp(name, "__builtin_clzll") == 0) {
+        return BUILTIN_CLZ;
+    }
+    if (strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
+        strcmp(name, "__builtin_ctzll") == 0) {
         return BUILTIN_CTZ;
     }
     if (strcmp(name, "__builtin_add_overflow") == 0) {
@@ -1813,6 +1819,457 @@ static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_d
         return -1;
     }
     return in.dst;
+}
+
+static int eval_const_i64_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out) {
+    long a;
+    long b;
+
+    if (e == NULL || out == NULL) {
+        return -1;
+    }
+
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        *out = e->int_val;
+        return 0;
+
+    case CC_EXPR_BIN:
+        if (eval_const_i64_expr(tu, e->lhs, &a) != 0 || eval_const_i64_expr(tu, e->rhs, &b) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case CC_BIN_ADD:
+            *out = a + b;
+            return 0;
+        case CC_BIN_SUB:
+            *out = a - b;
+            return 0;
+        case CC_BIN_MUL:
+            *out = a * b;
+            return 0;
+        case CC_BIN_DIV:
+            if (b == 0) {
+                return -1;
+            }
+            *out = a / b;
+            return 0;
+        case CC_BIN_MOD:
+            if (b == 0) {
+                return -1;
+            }
+            *out = a % b;
+            return 0;
+        case CC_BIN_SHL:
+            *out = a << (b & 63);
+            return 0;
+        case CC_BIN_SHR:
+            *out = a >> (b & 63);
+            return 0;
+        case CC_BIN_BAND:
+            *out = a & b;
+            return 0;
+        case CC_BIN_BOR:
+            *out = a | b;
+            return 0;
+        case CC_BIN_BXOR:
+            *out = a ^ b;
+            return 0;
+        case CC_BIN_EQ:
+            *out = (a == b) ? 1 : 0;
+            return 0;
+        case CC_BIN_NE:
+            *out = (a != b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LT:
+            *out = (a < b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LE:
+            *out = (a <= b) ? 1 : 0;
+            return 0;
+        case CC_BIN_GT:
+            *out = (a > b) ? 1 : 0;
+            return 0;
+        case CC_BIN_GE:
+            *out = (a >= b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LAND:
+            *out = (a != 0 && b != 0) ? 1 : 0;
+            return 0;
+        case CC_BIN_LOR:
+            *out = (a != 0 || b != 0) ? 1 : 0;
+            return 0;
+        case CC_BIN_COMMA:
+            *out = b;
+            return 0;
+        default:
+            return -1;
+        }
+
+    case CC_EXPR_CAST:
+        if (e->aux_type == CC_TYPE_VOID) {
+            return -1;
+        }
+        return eval_const_i64_expr(tu, e->lhs, out);
+
+    case CC_EXPR_SIZEOF:
+        if (e->lhs != NULL) {
+            *out = type_size_bytes_with_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+        } else {
+            *out = type_size_bytes_with_struct(tu, e->aux_type, e->aux_struct_id);
+        }
+        return *out < 0 ? -1 : 0;
+
+    case CC_EXPR_TERNARY:
+        if (eval_const_i64_expr(tu, e->lhs, &a) != 0) {
+            return -1;
+        }
+        if (a != 0) {
+            if (e->rhs == NULL) {
+                *out = a;
+                return 0;
+            }
+            return eval_const_i64_expr(tu, e->rhs, out);
+        }
+        return eval_const_i64_expr(tu, e->third, out);
+
+    case CC_EXPR_CALL:
+        if (e->ident != NULL && strcmp(e->ident, "__builtin_constant_p") == 0 && e->arg_count == 1 &&
+            e->args[0] != NULL) {
+            if (e->args[0]->kind == CC_EXPR_FLOAT || e->args[0]->kind == CC_EXPR_STR ||
+                eval_const_i64_expr(tu, e->args[0], &a) == 0) {
+                *out = 1;
+            } else {
+                *out = 0;
+            }
+            return 0;
+        }
+        return -1;
+
+    default:
+        return -1;
+    }
+}
+
+static int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int lhs, int rhs, int is_unsigned,
+                                cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = op;
+    in.is_unsigned = is_unsigned ? 1 : 0;
+    in.dst = new_value(sf, CC_VAL_I64);
+    in.lhs = lhs;
+    in.rhs = rhs;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering integer builtin");
+        return -1;
+    }
+    return in.dst;
+}
+
+static int emit_const_u64_instr(cc_ssa_function_t *sf, unsigned long long v, cc_diag_t *diag) {
+    unsigned long lo_u = (unsigned long)(v & 0xffffffffULL);
+    unsigned long hi_u = (unsigned long)((v >> 32) & 0xffffffffULL);
+    int lo;
+    int hi;
+    int c32;
+
+    lo = emit_const_i64_instr(sf, (long)lo_u);
+    if (lo < 0) {
+        return -1;
+    }
+    if (hi_u == 0) {
+        return lo;
+    }
+    hi = emit_const_i64_instr(sf, (long)hi_u);
+    c32 = emit_const_i64_instr(sf, 32);
+    if (hi < 0 || c32 < 0) {
+        return -1;
+    }
+    hi = emit_i64_binop_instr(sf, CC_SSA_SHL, hi, c32, 0, diag);
+    if (hi < 0) {
+        return -1;
+    }
+    return emit_i64_binop_instr(sf, CC_SSA_OR, hi, lo, 0, diag);
+}
+
+static int builtin_bitop_width(const cc_expr_t *e) {
+    int n;
+
+    if (e == NULL || e->ident == NULL) {
+        return 32;
+    }
+    n = (int)strlen(e->ident);
+    if (n >= 2 && e->ident[n - 2] == 'l' && e->ident[n - 1] == 'l') {
+        return 64;
+    }
+    if (n >= 1 && e->ident[n - 1] == 'l') {
+        int bits = g_pointer_size_bytes * 8;
+        if (bits > 0) {
+            return bits > 64 ? 64 : bits;
+        }
+        return 64;
+    }
+    return 32;
+}
+
+static int lower_popcount64(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
+    int m1;
+    int m2;
+    int m4;
+    int h01;
+    int c1;
+    int c2;
+    int c4;
+    int c56;
+    int t;
+
+    m1 = emit_const_u64_instr(sf, 0x5555555555555555ULL, diag);
+    m2 = emit_const_u64_instr(sf, 0x3333333333333333ULL, diag);
+    m4 = emit_const_u64_instr(sf, 0x0f0f0f0f0f0f0f0fULL, diag);
+    h01 = emit_const_u64_instr(sf, 0x0101010101010101ULL, diag);
+    c1 = emit_const_i64_instr(sf, 1);
+    c2 = emit_const_i64_instr(sf, 2);
+    c4 = emit_const_i64_instr(sf, 4);
+    c56 = emit_const_i64_instr(sf, 56);
+    if (m1 < 0 || m2 < 0 || m4 < 0 || h01 < 0 || c1 < 0 || c2 < 0 || c4 < 0 || c56 < 0) {
+        return -1;
+    }
+
+    t = emit_i64_binop_instr(sf, CC_SSA_SHR, v, c1, 1, diag);
+    if (t < 0) {
+        return -1;
+    }
+    t = emit_i64_binop_instr(sf, CC_SSA_AND, t, m1, 0, diag);
+    if (t < 0) {
+        return -1;
+    }
+    v = emit_i64_binop_instr(sf, CC_SSA_SUB, v, t, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+
+    t = emit_i64_binop_instr(sf, CC_SSA_SHR, v, c2, 1, diag);
+    if (t < 0) {
+        return -1;
+    }
+    t = emit_i64_binop_instr(sf, CC_SSA_AND, t, m2, 0, diag);
+    if (t < 0) {
+        return -1;
+    }
+    v = emit_i64_binop_instr(sf, CC_SSA_AND, v, m2, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+    v = emit_i64_binop_instr(sf, CC_SSA_ADD, v, t, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+
+    t = emit_i64_binop_instr(sf, CC_SSA_SHR, v, c4, 1, diag);
+    if (t < 0) {
+        return -1;
+    }
+    v = emit_i64_binop_instr(sf, CC_SSA_ADD, v, t, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+    v = emit_i64_binop_instr(sf, CC_SSA_AND, v, m4, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+    v = emit_i64_binop_instr(sf, CC_SSA_MUL, v, h01, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+    return emit_i64_binop_instr(sf, CC_SSA_SHR, v, c56, 1, diag);
+}
+
+static int lower_builtin_ctz(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                             var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    int bits;
+    int x;
+    int zero;
+    int low;
+    int v;
+    int one;
+
+    bits = builtin_bitop_width(e);
+    if (bits <= 0 || bits > 64) {
+        bits = 64;
+    }
+
+    x = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+    if (x < 0) {
+        return -1;
+    }
+    x = cast_value(sf, x, CC_VAL_I64, diag);
+    if (x < 0) {
+        return -1;
+    }
+    x = normalize_integral_value(sf, x, e->args[0]->value_type, diag);
+    if (x < 0) {
+        return -1;
+    }
+
+    if (bits < 64) {
+        unsigned long long mask = (1ULL << bits) - 1ULL;
+        int cmask = emit_const_u64_instr(sf, mask, diag);
+        if (cmask < 0) {
+            return -1;
+        }
+        x = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
+        if (x < 0) {
+            return -1;
+        }
+    }
+
+    zero = emit_const_i64_instr(sf, 0);
+    one = emit_const_i64_instr(sf, 1);
+    if (zero < 0 || one < 0) {
+        return -1;
+    }
+
+    v = emit_i64_binop_instr(sf, CC_SSA_SUB, zero, x, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+    low = emit_i64_binop_instr(sf, CC_SSA_AND, x, v, 0, diag);
+    if (low < 0) {
+        return -1;
+    }
+    v = emit_i64_binop_instr(sf, CC_SSA_SUB, low, one, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+
+    if (bits < 64) {
+        unsigned long long mask = (1ULL << bits) - 1ULL;
+        int cmask = emit_const_u64_instr(sf, mask, diag);
+        if (cmask < 0) {
+            return -1;
+        }
+        v = emit_i64_binop_instr(sf, CC_SSA_AND, v, cmask, 0, diag);
+        if (v < 0) {
+            return -1;
+        }
+    }
+
+    return lower_popcount64(sf, v, diag);
+}
+
+static int lower_builtin_clz(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                             var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    int bits;
+    int x;
+    int pc;
+    int c1;
+    int c2;
+    int c4;
+    int c8;
+    int c16;
+    int c32;
+    int cbits;
+    int t;
+
+    bits = builtin_bitop_width(e);
+    if (bits <= 0 || bits > 64) {
+        bits = 64;
+    }
+
+    x = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+    if (x < 0) {
+        return -1;
+    }
+    x = cast_value(sf, x, CC_VAL_I64, diag);
+    if (x < 0) {
+        return -1;
+    }
+    x = normalize_integral_value(sf, x, e->args[0]->value_type, diag);
+    if (x < 0) {
+        return -1;
+    }
+
+    if (bits < 64) {
+        unsigned long long mask = (1ULL << bits) - 1ULL;
+        int cmask = emit_const_u64_instr(sf, mask, diag);
+        if (cmask < 0) {
+            return -1;
+        }
+        x = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
+        if (x < 0) {
+            return -1;
+        }
+    }
+
+    c1 = emit_const_i64_instr(sf, 1);
+    c2 = emit_const_i64_instr(sf, 2);
+    c4 = emit_const_i64_instr(sf, 4);
+    c8 = emit_const_i64_instr(sf, 8);
+    c16 = emit_const_i64_instr(sf, 16);
+    c32 = emit_const_i64_instr(sf, 32);
+    cbits = emit_const_i64_instr(sf, bits);
+    if (c1 < 0 || c2 < 0 || c4 < 0 || c8 < 0 || c16 < 0 || c32 < 0 || cbits < 0) {
+        return -1;
+    }
+
+    t = emit_i64_binop_instr(sf, CC_SSA_SHR, x, c1, 1, diag);
+    if (t < 0) {
+        return -1;
+    }
+    x = emit_i64_binop_instr(sf, CC_SSA_OR, x, t, 0, diag);
+    if (x < 0) {
+        return -1;
+    }
+    t = emit_i64_binop_instr(sf, CC_SSA_SHR, x, c2, 1, diag);
+    if (t < 0) {
+        return -1;
+    }
+    x = emit_i64_binop_instr(sf, CC_SSA_OR, x, t, 0, diag);
+    if (x < 0) {
+        return -1;
+    }
+    t = emit_i64_binop_instr(sf, CC_SSA_SHR, x, c4, 1, diag);
+    if (t < 0) {
+        return -1;
+    }
+    x = emit_i64_binop_instr(sf, CC_SSA_OR, x, t, 0, diag);
+    if (x < 0) {
+        return -1;
+    }
+    t = emit_i64_binop_instr(sf, CC_SSA_SHR, x, c8, 1, diag);
+    if (t < 0) {
+        return -1;
+    }
+    x = emit_i64_binop_instr(sf, CC_SSA_OR, x, t, 0, diag);
+    if (x < 0) {
+        return -1;
+    }
+    t = emit_i64_binop_instr(sf, CC_SSA_SHR, x, c16, 1, diag);
+    if (t < 0) {
+        return -1;
+    }
+    x = emit_i64_binop_instr(sf, CC_SSA_OR, x, t, 0, diag);
+    if (x < 0) {
+        return -1;
+    }
+    if (bits > 32) {
+        t = emit_i64_binop_instr(sf, CC_SSA_SHR, x, c32, 1, diag);
+        if (t < 0) {
+            return -1;
+        }
+        x = emit_i64_binop_instr(sf, CC_SSA_OR, x, t, 0, diag);
+        if (x < 0) {
+            return -1;
+        }
+    }
+
+    pc = lower_popcount64(sf, x, diag);
+    if (pc < 0) {
+        return -1;
+    }
+    return emit_i64_binop_instr(sf, CC_SSA_SUB, cbits, pc, 0, diag);
 }
 
 static int emit_global_addr(cc_ssa_function_t *sf, const char *name, cc_diag_t *diag) {
@@ -2823,11 +3280,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         if (bk == BUILTIN_CONSTANT_P) {
             int is_const = 0;
+            long dummy = 0;
             if (e->arg_count != 1 || e->args[0] == NULL) {
                 set_diag(diag, "__builtin_constant_p lowering expects 1 argument");
                 return -1;
             }
-            if (e->args[0]->kind == CC_EXPR_INT || e->args[0]->kind == CC_EXPR_FLOAT || e->args[0]->kind == CC_EXPR_STR) {
+            if (e->args[0]->kind == CC_EXPR_FLOAT || e->args[0]->kind == CC_EXPR_STR ||
+                eval_const_i64_expr(tu, e->args[0], &dummy) == 0) {
                 is_const = 1;
             }
             return emit_const_i64_instr(sf, is_const);
@@ -3248,184 +3707,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return call_in.dst;
         }
-        if (bk == BUILTIN_CTZ) {
-            cc_ssa_instr_t bin;
-            int x;
-            int zero;
-            int one;
-            int neg;
-            int low;
-            int v;
-            int t;
-            int m1;
-            int m2;
-            int m3;
-            int m4;
-            int sh;
+        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ) {
             if (e->arg_count != 1 || e->args[0] == NULL) {
-                set_diag(diag, "__builtin_ctz lowering expects 1 argument");
+                set_diag(diag, bk == BUILTIN_CLZ ? "__builtin_clz lowering expects 1 argument"
+                                                 : "__builtin_ctz lowering expects 1 argument");
                 return -1;
             }
-            x = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
-            if (x < 0) {
-                return -1;
+            if (bk == BUILTIN_CLZ) {
+                return lower_builtin_clz(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
-            x = cast_value(sf, x, CC_VAL_I64, diag);
-            if (x < 0) {
-                return -1;
-            }
-            zero = emit_const_i64_instr(sf, 0);
-            one = emit_const_i64_instr(sf, 1);
-            m1 = emit_const_i64_instr(sf, 0x55555555L);
-            m2 = emit_const_i64_instr(sf, 0x33333333L);
-            m3 = emit_const_i64_instr(sf, 0x0f0f0f0fL);
-            m4 = emit_const_i64_instr(sf, 0x01010101L);
-            sh = emit_const_i64_instr(sf, 24);
-            if (zero < 0 || one < 0 || m1 < 0 || m2 < 0 || m3 < 0 || m4 < 0 || sh < 0) {
-                return -1;
-            }
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_SUB;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = zero;
-            bin.rhs = x;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            neg = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_AND;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = x;
-            bin.rhs = neg;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            low = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_SUB;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = low;
-            bin.rhs = one;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            v = bin.dst;
-
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_SHR;
-            bin.is_unsigned = 1;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = one;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            t = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_AND;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = t;
-            bin.rhs = m1;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            t = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_SUB;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = t;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            v = bin.dst;
-
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_AND;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = m2;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            low = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_SHR;
-            bin.is_unsigned = 1;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = emit_const_i64_instr(sf, 2);
-            if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            t = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_AND;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = t;
-            bin.rhs = m2;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            t = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_ADD;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = low;
-            bin.rhs = t;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            v = bin.dst;
-
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_SHR;
-            bin.is_unsigned = 1;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = emit_const_i64_instr(sf, 4);
-            if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            t = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_ADD;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = t;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            v = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_AND;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = m3;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            v = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_MUL;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = m4;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            v = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_SHR;
-            bin.is_unsigned = 1;
-            bin.dst = new_value(sf, CC_VAL_I64);
-            bin.lhs = v;
-            bin.rhs = sh;
-            if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                return -1;
-            }
-            return bin.dst;
+            return lower_builtin_ctz(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
             return emit_const_i64_instr(sf, 0);
@@ -4608,6 +4899,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     }
 
     case CC_EXPR_TERNARY: {
+        long cond_const = 0;
         int cond;
         int cond_raw;
         int dst;
@@ -4621,6 +4913,24 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->lhs == NULL || e->third == NULL) {
             set_diag(diag, "malformed conditional expression in lowering");
             return -1;
+        }
+
+        if (eval_const_i64_expr(tu, e->lhs, &cond_const) == 0) {
+            int sv;
+            cc_value_type_t want = type_to_val(e->value_type);
+            if (cond_const != 0) {
+                if (e->rhs == NULL) {
+                    sv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+                } else {
+                    sv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
+                }
+            } else {
+                sv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->third, diag);
+            }
+            if (sv < 0) {
+                return -1;
+            }
+            return cast_value(sf, sv, want, diag);
         }
 
         cond_raw = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
@@ -8332,6 +8642,17 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 return -1;
             }
 
+            if ((tu->globals[i].storage & CC_STORAGE_EXTERN) != 0 && init == NULL) {
+                out->globals[i].has_init = 0;
+                out->globals[i].init_i = 0;
+                out->globals[i].init_f = 0.0;
+                out->globals[i].init_is_float = 0;
+                out->globals[i].init_is_string = 0;
+                out->globals[i].init_is_symbol = 0;
+                out->globals[i].init_sym = NULL;
+                continue;
+            }
+
             if (tu->globals[i].type == CC_TYPE_VOID && tu->globals[i].type_struct_id >= 0) {
                 is_struct_global = 1;
                 struct_id = tu->globals[i].type_struct_id;
@@ -8354,7 +8675,20 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
                 if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count ||
                     !tu->structs[struct_id].complete || tu->structs[struct_id].size <= 0) {
-                    set_diag(diag, "invalid struct type in global lowering");
+                    if (diag != NULL) {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "invalid struct type in global lowering: %s (sid=%d count=%zu complete=%d size=%ld)",
+                                 tu->globals[i].name != NULL ? tu->globals[i].name : "<anon>", struct_id,
+                                 tu != NULL ? tu->struct_count : 0,
+                                 (tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count)
+                                     ? tu->structs[struct_id].complete
+                                     : 0,
+                                 (tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count)
+                                     ? tu->structs[struct_id].size
+                                     : 0L);
+                    } else {
+                        set_diag(diag, "invalid struct type in global lowering");
+                    }
                     cc_ssa_module_free(out);
                     return -1;
                 }

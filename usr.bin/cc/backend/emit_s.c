@@ -185,6 +185,29 @@ static int asm_constraint_is_immediate(const char *c) {
     return asm_constraint_has(c, 'i');
 }
 
+static int asm_constraint_allows_register(const char *c) {
+    if (c == NULL) {
+        return 1;
+    }
+    if (asm_constraint_has(c, 'r') || asm_constraint_has(c, 'q') || asm_constraint_has(c, 'a') ||
+        asm_constraint_has(c, 'b') || asm_constraint_has(c, 'c') || asm_constraint_has(c, 'd') ||
+        asm_constraint_has(c, 'S') || asm_constraint_has(c, 'D') || asm_constraint_has(c, 'g')) {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_constraint_allows_memory(const char *c) {
+    if (c == NULL) {
+        return 0;
+    }
+    if (asm_constraint_has(c, 'm') || asm_constraint_has(c, 'o') || asm_constraint_has(c, 'V') ||
+        asm_constraint_has(c, 'g')) {
+        return 1;
+    }
+    return 0;
+}
+
 static int asm_constraint_is_memory_only(const char *c) {
     if (c == NULL) {
         return 0;
@@ -552,14 +575,18 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     }
 }
 
-static const cc_ssa_instr_t *find_def_instr(const cc_ssa_function_t *f, int value) {
+static const cc_ssa_instr_t *find_def_instr_before(const cc_ssa_function_t *f, int value, size_t max_instr_index) {
     size_t i;
-    if (f == NULL || value < 0) {
+    if (f == NULL || value < 0 || f->instr_count == 0) {
         return NULL;
     }
-    for (i = 0; i < f->instr_count; ++i) {
-        if (f->instrs[i].dst == value) {
-            return &f->instrs[i];
+    if (max_instr_index >= f->instr_count) {
+        max_instr_index = f->instr_count - 1;
+    }
+    for (i = max_instr_index + 1; i > 0; --i) {
+        const cc_ssa_instr_t *in = &f->instrs[i - 1];
+        if (in->dst == value) {
+            return in;
         }
     }
     return NULL;
@@ -672,10 +699,11 @@ static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_i
     return -1;
 }
 
-static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, long *out_imm) {
+static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, size_t max_instr_index, long *out_imm) {
     int *def_index;
     unsigned char *visiting;
     size_t i;
+    size_t limit;
     int rc;
 
     if (f == NULL || value < 0 || value >= f->value_count || out_imm == NULL) {
@@ -691,7 +719,11 @@ static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, long 
     for (i = 0; i < (size_t)f->value_count; ++i) {
         def_index[i] = -1;
     }
-    for (i = 0; i < f->instr_count; ++i) {
+    limit = max_instr_index + 1;
+    if (limit > f->instr_count) {
+        limit = f->instr_count;
+    }
+    for (i = 0; i < limit; ++i) {
         const cc_ssa_instr_t *in = &f->instrs[i];
         if (in->dst >= 0 && in->dst < f->value_count) {
             def_index[in->dst] = (int)i;
@@ -1570,7 +1602,7 @@ static const char *reg32_to16(const char *r) {
 }
 
 static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
-                           int is_64bit, cc_diag_t *diag) {
+                           size_t instr_index, int is_64bit, cc_diag_t *diag) {
     size_t out_n = in->asm_out_count;
     size_t in_n = in->asm_in_count;
     size_t total = out_n + in_n;
@@ -1665,20 +1697,44 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
         if (asm_constraint_is_immediate(c)) {
             long imm = 0;
             char ibuf[64];
-            if (find_const_i64_for_value(f, v, &imm) != 0) {
-                const cc_ssa_instr_t *def = find_def_instr(f, v);
+            if (find_const_i64_for_value(f, v, instr_index, &imm) == 0) {
+                snprintf(ibuf, sizeof(ibuf), "$%ld", imm);
+                op_text[slot] = dup_cstr(ibuf);
+                if (op_text[slot] == NULL) {
+                    goto oom;
+                }
+                continue;
+            }
+            if (!asm_constraint_allows_register(c) && !asm_constraint_allows_memory(c)) {
+                const cc_ssa_instr_t *def = find_def_instr_before(f, v, instr_index);
                 char msg[256];
-                snprintf(msg, sizeof(msg), "asm immediate constraint requires constant input (fn=%s value=%d def=%s)",
-                         f->name != NULL ? f->name : "<anon>", v, def != NULL ? ssa_op_name(def->op) : "none");
+                if (def != NULL && def->op == CC_SSA_MOV) {
+                    long lhs_imm = 0;
+                    int lhs_const =
+                        (def->lhs >= 0) ? (find_const_i64_for_value(f, def->lhs, instr_index, &lhs_imm) == 0) : 0;
+                    const cc_ssa_instr_t *lhs_def =
+                        def->lhs >= 0 ? find_def_instr_before(f, def->lhs, instr_index) : NULL;
+                    snprintf(msg, sizeof(msg),
+                             "asm immediate constraint requires constant input (fn=%s value=%d type=%d def=mov lhs=%d lhs_type=%d lhs_def=%s lhs_const=%d lhs_imm=%ld)",
+                             f->name != NULL ? f->name : "<anon>", v,
+                             (v >= 0 && v < f->value_count) ? (int)f->value_types[v] : -1, def->lhs,
+                             (def->lhs >= 0 && def->lhs < f->value_count) ? (int)f->value_types[def->lhs] : -1,
+                             lhs_def != NULL ? ssa_op_name(lhs_def->op) : "none", lhs_const, lhs_imm);
+                } else {
+                    snprintf(msg, sizeof(msg), "asm immediate constraint requires constant input (fn=%s value=%d def=%s)",
+                             f->name != NULL ? f->name : "<anon>", v, def != NULL ? ssa_op_name(def->op) : "none");
+                }
                 set_diag(diag, msg);
                 goto fail;
             }
-            snprintf(ibuf, sizeof(ibuf), "$%ld", imm);
-            op_text[slot] = dup_cstr(ibuf);
-            if (op_text[slot] == NULL) {
-                goto oom;
+            if (asm_constraint_allows_memory(c) && !asm_constraint_allows_register(c)) {
+                long off = slot_off(lay, v);
+                op_text[slot] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
+                if (op_text[slot] == NULL) {
+                    goto oom;
+                }
+                continue;
             }
-            continue;
         }
         if (asm_constraint_is_memory_only(c)) {
             long off = slot_off(lay, v);
@@ -2597,7 +2653,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_ASM:
                 int_regs_flush(fp, f, &lay, &ist);
-                if (emit_inline_asm(fp, f, &lay, in, 1, diag) != 0) {
+                if (emit_inline_asm(fp, f, &lay, in, j, 1, diag) != 0) {
                     int_regs_free(&ist);
                     slot_layout_free(&lay);
                     return -1;
@@ -3534,7 +3590,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
             case CC_SSA_ASM:
                 int_regs_flush(fp, f, &lay, &ist);
-                if (emit_inline_asm(fp, f, &lay, in, 0, diag) != 0) {
+                if (emit_inline_asm(fp, f, &lay, in, j, 0, diag) != 0) {
                     int_regs_free(&ist);
                     slot_layout_free(&lay);
                     return -1;

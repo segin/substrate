@@ -791,7 +791,10 @@ static int has_builtin_name(const char *name) {
         return 0;
     }
     if (strcmp(name, "__builtin_expect") == 0 || strcmp(name, "__builtin_constant_p") == 0 ||
-        strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_bswap16") == 0 ||
+        strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
+        strcmp(name, "__builtin_ctzll") == 0 || strcmp(name, "__builtin_clz") == 0 ||
+        strcmp(name, "__builtin_clzl") == 0 || strcmp(name, "__builtin_clzll") == 0 ||
+        strcmp(name, "__builtin_bswap16") == 0 ||
         strcmp(name, "__builtin_bswap32") == 0 || strcmp(name, "__builtin_bswap64") == 0 ||
         strcmp(name, "__builtin_add_overflow") == 0 || strcmp(name, "__builtin_sub_overflow") == 0 ||
         strcmp(name, "__builtin_mul_overflow") == 0 || strcmp(name, "__builtin_object_size") == 0 ||
@@ -2098,23 +2101,52 @@ static int strip_comments_line(const char *in, int *in_block_comment, sb_t *out)
 }
 
 static int parse_int_literal(const char *s, long long *out) {
+    const char *p;
     char *end;
-    long long v;
+    unsigned long long uv;
+    int has_unsigned = 0;
+
     if (s == NULL || *s == '\0') {
         return -1;
     }
+
+    p = s;
+    if (*p == '+' || *p == '-') {
+        p++;
+    }
+    while (*p != '\0' && (isalnum((unsigned char)*p) || *p == 'x' || *p == 'X')) {
+        p++;
+    }
+    while (*p == 'u' || *p == 'U' || *p == 'l' || *p == 'L') {
+        if (*p == 'u' || *p == 'U') {
+            has_unsigned = 1;
+        }
+        p++;
+    }
+    if (*p != '\0') {
+        return -1;
+    }
+
     errno = 0;
-    v = strtoll(s, &end, 0);
-    if (end == s || errno != 0) {
+    uv = strtoull(s, &end, 0);
+    if (end == s || errno == ERANGE) {
         return -1;
     }
     while (*end == 'u' || *end == 'U' || *end == 'l' || *end == 'L') {
+        if (*end == 'u' || *end == 'U') {
+            has_unsigned = 1;
+        }
         end++;
     }
     if (*end != '\0') {
         return -1;
     }
-    *out = v;
+
+    if (has_unsigned && uv > (unsigned long long)LLONG_MAX) {
+        *out = LLONG_MAX;
+    } else {
+        *out = (long long)uv;
+    }
     return 0;
 }
 
@@ -2340,6 +2372,9 @@ static long long parse_expr_unary(expr_parser_t *p, int *ok) {
     expr_skip_ws(p);
     if (expr_match(p, "!")) {
         return !parse_expr_unary(p, ok);
+    }
+    if (expr_match(p, "~")) {
+        return ~parse_expr_unary(p, ok);
     }
     if (expr_match(p, "-")) {
         return -parse_expr_unary(p, ok);

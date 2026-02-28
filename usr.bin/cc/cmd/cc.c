@@ -699,8 +699,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
                 return -1;
             }
             if (strvec_push(&o->c_flags, a) != 0 || strvec_push(&o->c_flags, argv[i + 1]) != 0 ||
-                strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->cpp_flags, argv[i + 1]) != 0 ||
-                strvec_push(&o->as_flags, a) != 0 || strvec_push(&o->as_flags, argv[i + 1]) != 0) {
+                strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
                 return -1;
             }
             if (!is_tune && i386_features_from_arch_name(argv[i + 1], &level, &has_sse, &has_sse2, &has_mmx,
@@ -727,7 +726,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             int supports_mmx = 0;
             const char *eq = strchr(a, '=');
             int is_tune = strncmp(a, "-mtune=", 7) == 0;
-            if (strvec_push(&o->c_flags, a) != 0 || strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->as_flags, a) != 0) {
+            if (strvec_push(&o->c_flags, a) != 0 || strvec_push(&o->cpp_flags, a) != 0) {
                 return -1;
             }
             if (!is_tune &&
