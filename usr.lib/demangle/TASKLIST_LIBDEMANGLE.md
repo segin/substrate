@@ -307,10 +307,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `_ZN3FoodlEPv` → `Foo::operator delete(void*)`.
 
 ### 9c. Constructor / Destructor Tests
-- [ ] `_ZN3FooC1Ev` → `Foo::Foo()`.
-- [ ] `_ZN3FooC2Ei` → `Foo::Foo(int)`.
-- [ ] `_ZN3FooD0Ev` → `Foo::~Foo()`.
-- [ ] `_ZN3FooD2Ev` → `Foo::~Foo()`.
+- [x] `_ZN3FooC1Ev` → `Foo::Foo()`.
+- [x] `_ZN3FooC2Ei` → `Foo::Foo(int)`.
+- [x] `_ZN3FooD0Ev` → `Foo::~Foo()`.
+- [x] `_ZN3FooD2Ev` → `Foo::~Foo()`.
 
 ### 9d. Special Name Tests
 - [ ] `_ZTV3Foo` → `vtable for Foo`.
