@@ -101,11 +101,11 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `I <path> <generic-arg>+ E` — generic instantiation `path::<A, B, ...>`.
 
 ### 3d. Rust v0 Grammar — Identifiers
-- [ ] `<identifier>` → `[u] <decimal-number> [_] <bytes>`.
-  - [ ] `u` prefix indicates Punycode‑encoded Unicode identifier.
-  - [ ] `_` separator present only when `<bytes>` starts with a digit or `_`.
-- [ ] Punycode decoding: implement RFC 3492 decoder for `u`‑prefixed identifiers.
-- [ ] Map decoded identifiers to `{ident}` display form for non‑ASCII names.
+- [x] `<identifier>` → `[u] <decimal-number> [_] <bytes>`.
+  - [x] `u` prefix indicates Punycode‑encoded Unicode identifier.
+  - [x] `_` separator present only when `<bytes>` starts with a digit or `_`.
+- [x] Punycode decoding: implement RFC 3492 decoder for `u`‑prefixed identifiers.
+- [x] Map decoded identifiers to `{ident}` display form for non‑ASCII names.
 
 ### 3e. Rust v0 Grammar — Types (`<type>`)
 - [ ] Basic types: single‑char encodings:

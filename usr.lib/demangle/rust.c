@@ -74,6 +74,9 @@ static int rust_parse_v0_path(rust_parser_t *p);
 static int rust_parse_v0_symbol(rust_parser_t *p);
 static char *rust_demangle_v0(const char *mangled, int options);
 static char *rust_demangle_legacy(const char *mangled, int options);
+static int rust_has_n_bytes(const char *s, size_t n);
+static int rust_utf8_append_codepoint(rust_buf_t *buf, uint32_t cp);
+static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii);
 
 static int
 starts_with(const char *s, const char *prefix)
@@ -418,10 +421,233 @@ rust_parse_optional_disambiguator(rust_parser_t *p)
 }
 
 static int
+rust_has_n_bytes(const char *s, size_t n)
+{
+    size_t i;
+
+    for (i = 0u; i < n; i++) {
+        if (s[i] == '\0') {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int
+rust_utf8_append_codepoint(rust_buf_t *buf, uint32_t cp)
+{
+    char tmp[4];
+    size_t n;
+
+    if (cp <= 0x7Fu) {
+        tmp[0] = (char)cp;
+        n = 1u;
+    } else if (cp <= 0x7FFu) {
+        tmp[0] = (char)(0xC0u | (cp >> 6));
+        tmp[1] = (char)(0x80u | (cp & 0x3Fu));
+        n = 2u;
+    } else if (cp <= 0xFFFFu) {
+        tmp[0] = (char)(0xE0u | (cp >> 12));
+        tmp[1] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+        tmp[2] = (char)(0x80u | (cp & 0x3Fu));
+        n = 3u;
+    } else if (cp <= 0x10FFFFu) {
+        tmp[0] = (char)(0xF0u | (cp >> 18));
+        tmp[1] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
+        tmp[2] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+        tmp[3] = (char)(0x80u | (cp & 0x3Fu));
+        n = 4u;
+    } else {
+        return -1;
+    }
+
+    return rust_buf_append(buf, tmp, n);
+}
+
+static unsigned
+rust_puny_digit(char ch)
+{
+    if (ch >= 'a' && ch <= 'z') {
+        return (unsigned)(ch - 'a');
+    }
+    if (ch >= 'A' && ch <= 'Z') {
+        return (unsigned)(ch - 'A');
+    }
+    if (ch >= '0' && ch <= '9') {
+        return 26u + (unsigned)(ch - '0');
+    }
+    return 0xFFFFFFFFu;
+}
+
+static unsigned
+rust_puny_adapt(unsigned delta, unsigned numpoints, int first_time)
+{
+    unsigned k;
+
+    delta = first_time ? (delta / 700u) : (delta / 2u);
+    delta += delta / numpoints;
+
+    k = 0u;
+    while (delta > 455u) {
+        delta /= 35u;
+        k += 36u;
+    }
+
+    return k + (36u * delta) / (delta + 38u);
+}
+
+static int
+rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
+{
+    uint32_t *cps;
+    size_t cp_count;
+    size_t cp_cap;
+    size_t idx;
+    size_t basic_end;
+    unsigned n;
+    unsigned i;
+    unsigned bias;
+
+    if (in == NULL || out == NULL || non_ascii == NULL) {
+        return -1;
+    }
+
+    cps = NULL;
+    cp_count = 0u;
+    cp_cap = 0u;
+    *non_ascii = 0;
+
+    basic_end = 0u;
+    for (idx = 0u; idx < in_len; idx++) {
+        if (in[idx] == '-') {
+            basic_end = idx + 1u;
+        }
+    }
+
+    for (idx = 0u; idx < basic_end; idx++) {
+        uint32_t cp;
+        if (in[idx] == '-') {
+            continue;
+        }
+        cp = (uint32_t)(unsigned char)in[idx];
+        if (cp_count == cp_cap) {
+            size_t next_cap = (cp_cap == 0u) ? 16u : cp_cap * 2u;
+            uint32_t *next = (uint32_t *)realloc(cps, next_cap * sizeof(*next));
+            if (next == NULL) {
+                free(cps);
+                return -1;
+            }
+            cps = next;
+            cp_cap = next_cap;
+        }
+        cps[cp_count++] = cp;
+    }
+
+    n = 128u;
+    i = 0u;
+    bias = 72u;
+    idx = basic_end;
+
+    while (idx < in_len) {
+        unsigned oldi;
+        unsigned w;
+        unsigned k;
+        size_t ins;
+
+        oldi = i;
+        w = 1u;
+        for (k = 36u;; k += 36u) {
+            unsigned digit;
+            unsigned t;
+            unsigned step;
+
+            if (idx >= in_len) {
+                free(cps);
+                return -1;
+            }
+
+            digit = rust_puny_digit(in[idx++]);
+            if (digit >= 36u) {
+                free(cps);
+                return -1;
+            }
+
+            if (digit > (UINT32_MAX - i) / w) {
+                free(cps);
+                return -1;
+            }
+            i += digit * w;
+
+            if (k <= bias + 1u) {
+                t = 1u;
+            } else if (k >= bias + 26u) {
+                t = 26u;
+            } else {
+                t = k - bias;
+            }
+
+            if (digit < t) {
+                break;
+            }
+
+            step = 36u - t;
+            if (w > UINT32_MAX / step) {
+                free(cps);
+                return -1;
+            }
+            w *= step;
+        }
+
+        bias = rust_puny_adapt(i - oldi, (unsigned)(cp_count + 1u), oldi == 0u);
+        if (i / (cp_count + 1u) > UINT32_MAX - n) {
+            free(cps);
+            return -1;
+        }
+
+        n += i / (unsigned)(cp_count + 1u);
+        ins = i % (unsigned)(cp_count + 1u);
+        i = (unsigned)ins;
+
+        if (cp_count == cp_cap) {
+            size_t next_cap = (cp_cap == 0u) ? 16u : cp_cap * 2u;
+            uint32_t *next = (uint32_t *)realloc(cps, next_cap * sizeof(*next));
+            if (next == NULL) {
+                free(cps);
+                return -1;
+            }
+            cps = next;
+            cp_cap = next_cap;
+        }
+
+        memmove(&cps[ins + 1u], &cps[ins], (cp_count - ins) * sizeof(*cps));
+        cps[ins] = n;
+        cp_count++;
+        i++;
+    }
+
+    for (idx = 0u; idx < cp_count; idx++) {
+        if (cps[idx] > 0x7Fu) {
+            *non_ascii = 1;
+        }
+        if (rust_utf8_append_codepoint(out, cps[idx]) != 0) {
+            free(cps);
+            return -1;
+        }
+    }
+
+    free(cps);
+    return 0;
+}
+
+static int
 rust_parse_v0_identifier(rust_parser_t *p)
 {
+    const char *bytes;
     size_t len;
     int is_unicode;
+    int had_sep;
+    int need_sep;
 
     if (p->cur[0] == 'u') {
         is_unicode = 1;
@@ -434,27 +660,50 @@ rust_parse_v0_identifier(rust_parser_t *p)
         return -1;
     }
 
-    if ((p->cur[0] == '_' || isdigit((unsigned char)p->cur[0])) && p->cur[0] == '_') {
+    had_sep = 0;
+    if (p->cur[0] == '_') {
+        had_sep = 1;
         p->cur++;
     }
 
-    if (len == 0u) {
+    if (len == 0u || !rust_has_n_bytes(p->cur, len)) {
         return -1;
     }
 
-    if (is_unicode && rust_buf_appendc(&p->out, '{') != 0) {
+    bytes = p->cur;
+    need_sep = (bytes[0] == '_' || isdigit((unsigned char)bytes[0]));
+    if ((need_sep && !had_sep) || (!need_sep && had_sep)) {
         return -1;
     }
 
-    if (rust_buf_append(&p->out, p->cur, len) != 0) {
+    if (is_unicode) {
+        rust_buf_t decoded;
+        int non_ascii;
+
+        memset(&decoded, 0, sizeof(decoded));
+        if (rust_puny_decode(bytes, len, &decoded, &non_ascii) != 0) {
+            rust_buf_destroy(&decoded);
+            return -1;
+        }
+
+        if (non_ascii && rust_buf_appendc(&p->out, '{') != 0) {
+            rust_buf_destroy(&decoded);
+            return -1;
+        }
+        if (decoded.len > 0u && rust_buf_append(&p->out, decoded.data, decoded.len) != 0) {
+            rust_buf_destroy(&decoded);
+            return -1;
+        }
+        if (non_ascii && rust_buf_appendc(&p->out, '}') != 0) {
+            rust_buf_destroy(&decoded);
+            return -1;
+        }
+        rust_buf_destroy(&decoded);
+    } else if (rust_buf_append(&p->out, bytes, len) != 0) {
         return -1;
     }
 
-    if (is_unicode && rust_buf_appendc(&p->out, '}') != 0) {
-        return -1;
-    }
-
-    p->cur += len;
+    p->cur = bytes + len;
     return 0;
 }
 
