@@ -320,9 +320,9 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `_ZGVN3Foo3barE` → `guard variable for Foo::bar`.
 
 ### 9e. Template Tests
-- [ ] Nested templates: `_ZN1AIiE1BIS_IjEE3fooEv` → complex nested template.
-- [ ] Template literal args: `_Z3fooILi42EEvv` → `void foo<42>()`.
-- [ ] Template pack: `J...E` handling.
+- [x] Nested templates: `_ZN1AIiE1BIS_IjEE3fooEv` → complex nested template.
+- [x] Template literal args: `_Z3fooILi42EEvv` → `void foo<42>()`.
+- [x] Template pack: `J...E` handling.
 
 ### 9f. Substitution Tests
 - [ ] Names exercising `S_`, `S0_`, `S1_` lookups.
