@@ -2884,10 +2884,56 @@ static int append_string_piece(char **dst, const char *piece) {
     return 0;
 }
 
+static char *unescape_string_piece(const char *in) {
+    size_t i;
+    size_t j;
+    size_t n;
+    char *out;
+
+    if (in == NULL) {
+        return NULL;
+    }
+    n = strlen(in);
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    j = 0;
+    for (i = 0; i < n; ++i) {
+        if (in[i] == '\\' && i + 1 < n) {
+            char c = in[++i];
+            if (c == 'n') out[j++] = '\n';
+            else if (c == 't') out[j++] = '\t';
+            else if (c == 'r') out[j++] = '\r';
+            else if (c == '\\') out[j++] = '\\';
+            else if (c == '"') out[j++] = '"';
+            else out[j++] = c;
+            continue;
+        }
+        out[j++] = in[i];
+    }
+    out[j] = '\0';
+    return out;
+}
+
 static char *parse_string_concat_literal(parser_t *p) {
     char *out = NULL;
     while (p->tok.kind == TOK_STR) {
-        char *part = dup_string_token(&p->tok);
+        char *raw = dup_string_token(&p->tok);
+        char *tmp;
+        char *part;
+        if (raw == NULL) {
+            free(out);
+            return NULL;
+        }
+        tmp = unescape_string_piece(raw);
+        free(raw);
+        if (tmp == NULL) {
+            free(out);
+            return NULL;
+        }
+        part = unescape_string_piece(tmp);
+        free(tmp);
         if (part == NULL) {
             free(out);
             return NULL;

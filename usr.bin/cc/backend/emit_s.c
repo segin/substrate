@@ -515,16 +515,192 @@ static int emit_asm_lines(FILE *fp, const char *text) {
     return 0;
 }
 
-static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, long *out_imm) {
+static const char *ssa_op_name(cc_ssa_opcode_t op) {
+    switch (op) {
+    case CC_SSA_PARAM: return "param";
+    case CC_SSA_CONST: return "const";
+    case CC_SSA_STR: return "str";
+    case CC_SSA_GADDR: return "gaddr";
+    case CC_SSA_LADDR: return "laddr";
+    case CC_SSA_ADD: return "add";
+    case CC_SSA_SUB: return "sub";
+    case CC_SSA_MUL: return "mul";
+    case CC_SSA_DIV: return "div";
+    case CC_SSA_AND: return "and";
+    case CC_SSA_OR: return "or";
+    case CC_SSA_XOR: return "xor";
+    case CC_SSA_SHL: return "shl";
+    case CC_SSA_SHR: return "shr";
+    case CC_SSA_ADDR: return "addr";
+    case CC_SSA_LOAD: return "load";
+    case CC_SSA_STORE: return "store";
+    case CC_SSA_MOV: return "mov";
+    case CC_SSA_CMP: return "cmp";
+    case CC_SSA_I2F: return "i2f";
+    case CC_SSA_F2I: return "f2i";
+    case CC_SSA_FROUND32: return "fround32";
+    case CC_SSA_LABEL: return "label";
+    case CC_SSA_BR: return "br";
+    case CC_SSA_BR_COND: return "br_cond";
+    case CC_SSA_VA_START: return "va_start";
+    case CC_SSA_CALL: return "call";
+    case CC_SSA_CALLI: return "calli";
+    case CC_SSA_ASM: return "asm";
+    case CC_SSA_TRAP: return "trap";
+    case CC_SSA_RET: return "ret";
+    default: return "unknown";
+    }
+}
+
+static const cc_ssa_instr_t *find_def_instr(const cc_ssa_function_t *f, int value) {
     size_t i;
+    if (f == NULL || value < 0) {
+        return NULL;
+    }
     for (i = 0; i < f->instr_count; ++i) {
-        const cc_ssa_instr_t *in = &f->instrs[i];
-        if (in->dst == value && in->op == CC_SSA_CONST && f->value_types[value] == CC_VAL_I64) {
-            *out_imm = in->imm;
-            return 0;
+        if (f->instrs[i].dst == value) {
+            return &f->instrs[i];
         }
     }
+    return NULL;
+}
+
+static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_index, int value, unsigned char *visiting,
+                                    long *out_imm) {
+    const cc_ssa_instr_t *in;
+    long a;
+    long b;
+
+    if (f == NULL || def_index == NULL || visiting == NULL || out_imm == NULL) {
+        return -1;
+    }
+    if (value < 0 || value >= f->value_count) {
+        return -1;
+    }
+    if (f->value_types[value] != CC_VAL_I64) {
+        return -1;
+    }
+    if (visiting[value]) {
+        return -1;
+    }
+    if (def_index[value] < 0 || (size_t)def_index[value] >= f->instr_count) {
+        return -1;
+    }
+    in = &f->instrs[def_index[value]];
+    if (in->dst != value) {
+        return -1;
+    }
+
+    visiting[value] = 1;
+    switch (in->op) {
+    case CC_SSA_CONST:
+        *out_imm = in->imm;
+        visiting[value] = 0;
+        return 0;
+
+    case CC_SSA_MOV:
+        if (eval_const_i64_for_value(f, def_index, in->lhs, visiting, out_imm) == 0) {
+            visiting[value] = 0;
+            return 0;
+        }
+        break;
+
+    case CC_SSA_ADD:
+    case CC_SSA_SUB:
+    case CC_SSA_MUL:
+    case CC_SSA_DIV:
+    case CC_SSA_AND:
+    case CC_SSA_OR:
+    case CC_SSA_XOR:
+    case CC_SSA_SHL:
+    case CC_SSA_SHR:
+        if (eval_const_i64_for_value(f, def_index, in->lhs, visiting, &a) != 0 ||
+            eval_const_i64_for_value(f, def_index, in->rhs, visiting, &b) != 0) {
+            break;
+        }
+        if (in->op == CC_SSA_ADD) {
+            *out_imm = a + b;
+        } else if (in->op == CC_SSA_SUB) {
+            *out_imm = a - b;
+        } else if (in->op == CC_SSA_MUL) {
+            *out_imm = a * b;
+        } else if (in->op == CC_SSA_DIV) {
+            if (b == 0) {
+                break;
+            }
+            *out_imm = in->is_unsigned ? (long)((unsigned long)a / (unsigned long)b) : (a / b);
+        } else if (in->op == CC_SSA_AND) {
+            *out_imm = a & b;
+        } else if (in->op == CC_SSA_OR) {
+            *out_imm = a | b;
+        } else if (in->op == CC_SSA_XOR) {
+            *out_imm = a ^ b;
+        } else if (in->op == CC_SSA_SHL) {
+            *out_imm = a << (b & 63);
+        } else {
+            *out_imm = in->is_unsigned ? (long)((unsigned long)a >> (b & 63)) : (a >> (b & 63));
+        }
+        visiting[value] = 0;
+        return 0;
+
+    case CC_SSA_CMP:
+        if (eval_const_i64_for_value(f, def_index, in->lhs, visiting, &a) != 0 ||
+            eval_const_i64_for_value(f, def_index, in->rhs, visiting, &b) != 0) {
+            break;
+        }
+        if (in->cmp_kind == CC_CMP_EQ) {
+            *out_imm = (a == b);
+        } else if (in->cmp_kind == CC_CMP_NE) {
+            *out_imm = (a != b);
+        } else if (in->cmp_kind == CC_CMP_LT) {
+            *out_imm = in->is_unsigned ? ((unsigned long)a < (unsigned long)b) : (a < b);
+        } else if (in->cmp_kind == CC_CMP_LE) {
+            *out_imm = in->is_unsigned ? ((unsigned long)a <= (unsigned long)b) : (a <= b);
+        } else if (in->cmp_kind == CC_CMP_GT) {
+            *out_imm = in->is_unsigned ? ((unsigned long)a > (unsigned long)b) : (a > b);
+        } else {
+            *out_imm = in->is_unsigned ? ((unsigned long)a >= (unsigned long)b) : (a >= b);
+        }
+        visiting[value] = 0;
+        return 0;
+
+    default:
+        break;
+    }
+
+    visiting[value] = 0;
     return -1;
+}
+
+static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, long *out_imm) {
+    int *def_index;
+    unsigned char *visiting;
+    size_t i;
+    int rc;
+
+    if (f == NULL || value < 0 || value >= f->value_count || out_imm == NULL) {
+        return -1;
+    }
+    def_index = (int *)malloc((size_t)f->value_count * sizeof(*def_index));
+    visiting = (unsigned char *)calloc((size_t)f->value_count, sizeof(*visiting));
+    if (def_index == NULL || visiting == NULL) {
+        free(def_index);
+        free(visiting);
+        return -1;
+    }
+    for (i = 0; i < (size_t)f->value_count; ++i) {
+        def_index[i] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        if (in->dst >= 0 && in->dst < f->value_count) {
+            def_index[in->dst] = (int)i;
+        }
+    }
+    rc = eval_const_i64_for_value(f, def_index, value, visiting, out_imm);
+    free(def_index);
+    free(visiting);
+    return rc;
 }
 
 static void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_index, const char *literal,
@@ -1490,7 +1666,11 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
             long imm = 0;
             char ibuf[64];
             if (find_const_i64_for_value(f, v, &imm) != 0) {
-                set_diag(diag, "asm immediate constraint requires constant input");
+                const cc_ssa_instr_t *def = find_def_instr(f, v);
+                char msg[256];
+                snprintf(msg, sizeof(msg), "asm immediate constraint requires constant input (fn=%s value=%d def=%s)",
+                         f->name != NULL ? f->name : "<anon>", v, def != NULL ? ssa_op_name(def->op) : "none");
+                set_diag(diag, msg);
                 goto fail;
             }
             snprintf(ibuf, sizeof(ibuf), "$%ld", imm);

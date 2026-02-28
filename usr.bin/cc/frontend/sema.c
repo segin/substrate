@@ -280,21 +280,18 @@ static int asm_operand_is_lvalue(const cc_expr_t *e) {
 }
 
 static int asm_valid_constraint_char(int ch) {
-    if (ch >= '0' && ch <= '9') {
+    if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
         return 1;
     }
-    if (ch == '=' || ch == '+' || ch == '&' || ch == '%' || ch == '!' || ch == '*') {
-        return 1;
-    }
-    if (ch == 'r' || ch == 'm' || ch == 'i' || ch == 'g' || ch == 'q' || ch == 'a' || ch == 'b' || ch == 'c' ||
-        ch == 'd' || ch == 'S' || ch == 'D' || ch == 'f' || ch == 'x' || ch == 'X') {
+    if (ch == '=' || ch == '+' || ch == '&' || ch == '%' || ch == '!' || ch == '*' || ch == '@' || ch == '?' ||
+        ch == '^' || ch == '$' || ch == '<' || ch == '>' || ch == '#' || ch == '|' || ch == '~' || ch == ',') {
         return 1;
     }
     return 0;
 }
 
 static int asm_constraint_allows_memory(const char *c) {
-    return c != NULL && strchr(c, 'm') != NULL;
+    return c != NULL && (strchr(c, 'm') != NULL || strchr(c, 'o') != NULL || strchr(c, 'V') != NULL);
 }
 
 static int asm_constraint_allows_register(const char *c) {
@@ -306,10 +303,21 @@ static int asm_constraint_allows_register(const char *c) {
 }
 
 static int asm_constraint_is_imm(const char *c) {
-    if (c == NULL) {
+    size_t i;
+    if (c == NULL)
         return 0;
+    for (i = 0; c[i] != '\0'; ++i) {
+        int ch = (unsigned char)c[i];
+        if (ch == 'i' || ch == 'n')
+            return 1;
+        if (ch >= 'I' && ch <= 'P')
+            return 1;
     }
-    return strchr(c, 'i') != NULL;
+    return 0;
+}
+
+static int asm_constraint_is_flag_output(const char *c) {
+    return c != NULL && strncmp(c, "=@cc", 4) == 0;
 }
 
 static int asm_validate_constraint(const char *c, int is_output, size_t out_count, int pointer_size, cc_diag_t *diag) {
@@ -341,13 +349,24 @@ static int asm_validate_constraint(const char *c, int is_output, size_t out_coun
     for (i = 0; c[i] != '\0'; ++i) {
         int ch = (unsigned char)c[i];
         if (!asm_valid_constraint_char(ch)) {
-            set_diag(diag, "asm operand constraint contains unsupported character");
+            if (diag != NULL && diag->message[0] == '\0') {
+                if (ch >= 32 && ch < 127) {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "asm operand constraint contains unsupported character '%c' in \"%s\"", ch, c);
+                } else {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "asm operand constraint contains unsupported byte 0x%02x in \"%s\"", ch, c);
+                }
+            }
             return -1;
         }
     }
     if (strchr(c, 'q') != NULL && pointer_size != 4 && pointer_size != 8) {
         set_diag(diag, "asm 'q' constraint requires x86 target");
         return -1;
+    }
+    if (is_output && asm_constraint_is_flag_output(c)) {
+        return 0;
     }
     has_class = asm_constraint_allows_memory(c) || asm_constraint_allows_register(c) || asm_constraint_is_imm(c);
     if (!has_class) {
