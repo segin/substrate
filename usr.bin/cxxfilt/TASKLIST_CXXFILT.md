@@ -85,9 +85,9 @@ Map CLI style names to `libdemangle` option flags:
 
 `libdemangle.a` is already built under `usr.lib/demangle/`. Other tools link against it:
 
-- [ ] `nm -C`: call `demangle()` on each symbol name.
-- [ ] `objdump -C`: call `demangle()` on disassembly labels.
-- [ ] `addr2line -C`: call `demangle()` on function names.
+- [x] `nm -C`: call `demangle()` on each symbol name.
+- [x] `objdump -C`: call `demangle()` on disassembly labels.
+- [x] `addr2line -C`: call `demangle()` on function names.
 
 > These belong to the respective tool tasklists. Listed here for
 > cross‑reference only.
