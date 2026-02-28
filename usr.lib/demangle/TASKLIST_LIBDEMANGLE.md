@@ -75,7 +75,7 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Pack expansion: `sp`.
 
 ### 2g. Lambda / Closure Types
-- [ ] `Ul <type>* E [<number>] _`.
+- [x] `Ul <type>* E [<number>] _`.
 
 ## 3. Rust Demangler (secondary)
 

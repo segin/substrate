@@ -764,6 +764,54 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
 {
     size_t id;
 
+    if (p->cur[0] == 'U' && p->cur[1] == 'l') {
+        int first;
+        int has_id;
+        size_t lambda_id;
+
+        p->cur += 2;
+        has_id = 0;
+        lambda_id = 0u;
+
+        if (buf_append(&p->out, "{lambda(", 8u) != 0) {
+            return -1;
+        }
+
+        first = 1;
+        while (p->cur[0] != '\0' && p->cur[0] != 'E') {
+            size_t before = p->out.len;
+            if (parse_type(p) != 0) {
+                return -1;
+            }
+            if (!first && buf_insert(&p->out, before, ", ", 2u) != 0) {
+                return -1;
+            }
+            first = 0;
+        }
+
+        if (p->cur[0] != 'E') {
+            return -1;
+        }
+        p->cur++;
+
+        if (isdigit((unsigned char)p->cur[0])) {
+            if (parse_number(p, &lambda_id) != 0) {
+                return -1;
+            }
+            has_id = 1;
+        }
+
+        if (p->cur[0] != '_') {
+            return -1;
+        }
+        p->cur++;
+
+        if (has_id) {
+            return buf_printf(&p->out, ")#%zu}", lambda_id);
+        }
+        return buf_append(&p->out, ")}", 2u);
+    }
+
     if (!(p->cur[0] == 'U' && p->cur[1] == 't')) {
         return -1;
     }
