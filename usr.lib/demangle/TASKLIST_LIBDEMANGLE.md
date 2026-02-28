@@ -335,8 +335,8 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `FvvE` → `void ()`.
 
 ### 9h. Options Tests
-- [ ] `DEMANGLE_NO_PARAMS`: `_Z3fooi` → `foo`.
-- [ ] `DEMANGLE_NO_VERBOSE`: `_ZNK3Foo3barEv` → `Foo::bar()` (no `const`).
+- [x] `DEMANGLE_NO_PARAMS`: `_Z3fooi` → `foo`.
+- [x] `DEMANGLE_NO_VERBOSE`: `_ZNK3Foo3barEv` → `Foo::bar()` (no `const`).
 
 ### 9i. Failure / Edge Case Tests
 - [ ] Non‑mangled name → `NULL`.
