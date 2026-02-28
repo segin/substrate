@@ -231,16 +231,16 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `Nj` — return ref.
 
 ### 4h. D Mangling — Special Sequences
-- [ ] `__lambda<N>` — lambda/anonymous function.
-- [ ] `__dgliteral<N>` — delegate literal.
-- [ ] `__unittest<N>` — unit test.
-- [ ] `__modctor` — module constructor.
-- [ ] `__moddtor` — module destructor.
-- [ ] `__aggr<N>` — aggregate.
-- [ ] `__initZ` — init symbol.
-- [ ] `__ClassZ` — class info.
-- [ ] `__vtblZ` — vtable.
-- [ ] `__InterfaceZ` — interface info.
+- [x] `__lambda<N>` — lambda/anonymous function.
+- [x] `__dgliteral<N>` — delegate literal.
+- [x] `__unittest<N>` — unit test.
+- [x] `__modctor` — module constructor.
+- [x] `__moddtor` — module destructor.
+- [x] `__aggr<N>` — aggregate.
+- [x] `__initZ` — init symbol.
+- [x] `__ClassZ` — class info.
+- [x] `__vtblZ` — vtable.
+- [x] `__InterfaceZ` — interface info.
 
 ### 4i. Output Formatting
 - [ ] Module‑qualified names separated by `.`: `std.stdio.writeln`.
