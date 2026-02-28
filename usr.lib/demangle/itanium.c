@@ -94,6 +94,7 @@ static int parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx);
 
 static int parse_number(dm_itanium_parser_t *p, size_t *out);
 static int parse_seq_id(dm_itanium_parser_t *p, size_t *out);
+static int parse_signed_number_token(dm_itanium_parser_t *p, long long *out);
 
 static int parse_encoding(dm_itanium_parser_t *p);
 static int parse_special_name(dm_itanium_parser_t *p);
@@ -538,6 +539,36 @@ parse_seq_id(dm_itanium_parser_t *p, size_t *out)
     }
 
     *out = v;
+    return 0;
+}
+
+static int
+parse_signed_number_token(dm_itanium_parser_t *p, long long *out)
+{
+    size_t mag;
+    int neg;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+
+    neg = 0;
+    if (p->cur[0] == 'n') {
+        neg = 1;
+        p->cur++;
+    }
+
+    if (parse_number(p, &mag) != 0 || p->cur[0] != '_') {
+        return -1;
+    }
+
+    p->cur++;
+    if (neg) {
+        *out = -(long long)mag;
+    } else {
+        *out = (long long)mag;
+    }
+
     return 0;
 }
 
@@ -1537,7 +1568,112 @@ parse_type(dm_itanium_parser_t *p)
 static int
 parse_special_name(dm_itanium_parser_t *p)
 {
-    (void)p;
+    if (p->cur[0] == 'T' && p->cur[1] == 'V') {
+        p->cur += 2;
+        if (buf_append(&p->out, "vtable for ", 11u) != 0) {
+            return -1;
+        }
+        return parse_type(p);
+    }
+
+    if (p->cur[0] == 'T' && p->cur[1] == 'T') {
+        p->cur += 2;
+        if (buf_append(&p->out, "VTT for ", 8u) != 0) {
+            return -1;
+        }
+        return parse_type(p);
+    }
+
+    if (p->cur[0] == 'T' && p->cur[1] == 'I') {
+        p->cur += 2;
+        if (buf_append(&p->out, "typeinfo for ", 13u) != 0) {
+            return -1;
+        }
+        return parse_type(p);
+    }
+
+    if (p->cur[0] == 'T' && p->cur[1] == 'S') {
+        p->cur += 2;
+        if (buf_append(&p->out, "typeinfo name for ", 18u) != 0) {
+            return -1;
+        }
+        return parse_type(p);
+    }
+
+    if (p->cur[0] == 'G' && p->cur[1] == 'V') {
+        p->cur += 2;
+        if (buf_append(&p->out, "guard variable for ", 19u) != 0) {
+            return -1;
+        }
+        return parse_name(p);
+    }
+
+    if (p->cur[0] == 'T' && (p->cur[1] == 'c' || p->cur[1] == 'h' || p->cur[1] == 'v')) {
+        char kind = p->cur[1];
+        long long off1 = 0;
+        long long off2 = 0;
+        int have1 = 0;
+        int have2 = 0;
+
+        p->cur += 2;
+
+        if (parse_signed_number_token(p, &off1) == 0) {
+            have1 = 1;
+            if (kind != 'h' && parse_signed_number_token(p, &off2) == 0) {
+                have2 = 1;
+            }
+        }
+
+        if (kind == 'c') {
+            if (buf_append(&p->out, "covariant return thunk to ", 26u) != 0) {
+                return -1;
+            }
+        } else if (kind == 'h') {
+            if (buf_append(&p->out, "non-virtual thunk to ", 21u) != 0) {
+                return -1;
+            }
+        } else {
+            if (buf_append(&p->out, "virtual thunk to ", 17u) != 0) {
+                return -1;
+            }
+        }
+
+        if (parser_enter(p) != 0) {
+            return -1;
+        }
+        if (parse_encoding(p) != 0) {
+            parser_leave(p);
+            return -1;
+        }
+        parser_leave(p);
+
+        if (have1) {
+            if (have2) {
+                return buf_printf(&p->out, " [offsets %lld, %lld]", off1, off2);
+            }
+            return buf_printf(&p->out, " [offset %lld]", off1);
+        }
+
+        return 0;
+    }
+
+    if (p->cur[0] == 'T') {
+        p->cur++;
+        if (buf_append(&p->out, "transaction clone for ", 22u) != 0) {
+            return -1;
+        }
+
+        if (parser_enter(p) != 0) {
+            return -1;
+        }
+        if (parse_encoding(p) != 0) {
+            parser_leave(p);
+            return -1;
+        }
+        parser_leave(p);
+        return 0;
+    }
+
     return -1;
 }
 
