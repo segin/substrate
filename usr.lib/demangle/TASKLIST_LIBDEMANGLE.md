@@ -406,13 +406,13 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] Template with symbol argument: `S` encoding.
 
 ### 9t. D Type Tests
-- [ ] Basic types: `i` → `int`, `k` → `uint`, `f` → `float`, `a` → `char`.
-- [ ] Dynamic array: `Ai` → `int[]`.
-- [ ] Static array: `G3i` → `int[3]`.
-- [ ] Associative array: `Hia` → `int[char]`.
-- [ ] Pointer: `Pi` → `int*`.
-- [ ] Delegate: `Di...` → `delegate(...)`.
-- [ ] Qualifiers: `xi` → `const(int)`, `yi` → `immutable(int)`.
+- [x] Basic types: `i` → `int`, `k` → `uint`, `f` → `float`, `a` → `char`.
+- [x] Dynamic array: `Ai` → `int[]`.
+- [x] Static array: `G3i` → `int[3]`.
+- [x] Associative array: `Hia` → `int[char]`.
+- [x] Pointer: `Pi` → `int*`.
+- [x] Delegate: `Di...` → `delegate(...)`.
+- [x] Qualifiers: `xi` → `const(int)`, `yi` → `immutable(int)`.
 
 ### 9u. D Edge Case Tests
 - [ ] Non‑D `_D...` name (C symbol starting with `_D`): `DEMANGLE_DLANG` returns `NULL`, `DEMANGLE_AUTO` tries Itanium.
