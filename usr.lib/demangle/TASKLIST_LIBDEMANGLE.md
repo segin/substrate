@@ -301,10 +301,10 @@ Goal: implement a shared C demangling library (`libdemangle.a`) consumed by `c++
 - [x] `_Z3fooIiEvT_` → `void foo<int>(int)`.
 
 ### 9b. Operator Tests
-- [ ] `_ZN3FooplERKS_` → `Foo::operator+(Foo const&)`.
-- [ ] `_ZN3FooclEi` → `Foo::operator()(int)`.
-- [ ] `_ZN3FoocvfEv` → `Foo::operator float()`.
-- [ ] `_ZN3FoodlEPv` → `Foo::operator delete(void*)`.
+- [x] `_ZN3FooplERKS_` → `Foo::operator+(Foo const&)`.
+- [x] `_ZN3FooclEi` → `Foo::operator()(int)`.
+- [x] `_ZN3FoocvfEv` → `Foo::operator float()`.
+- [x] `_ZN3FoodlEPv` → `Foo::operator delete(void*)`.
 
 ### 9c. Constructor / Destructor Tests
 - [ ] `_ZN3FooC1Ev` → `Foo::Foo()`.
