@@ -252,6 +252,17 @@ static struct dirent proc_dirent;
 
 /* Helper to generate status string */
 static int proc_generate_status(char *b, size_t s, process_t *proc) {
+    char comm_safe[AC_COMM_LEN + 1];
+    strncpy(comm_safe, proc->comm, AC_COMM_LEN);
+    comm_safe[AC_COMM_LEN] = '\0';
+
+    /* Sanitize comm to prevent procfs line injection */
+    for (int i = 0; comm_safe[i] != '\0'; i++) {
+        if ((unsigned char)comm_safe[i] < 32 || (unsigned char)comm_safe[i] == 127) {
+            comm_safe[i] = '_';
+        }
+    }
+
     struct personality *pers = perso_lookup(current_process->perso_id);
     if (pers && strcmp(pers->name, "Linux") == 0) {
         return snprintf(b, s,
@@ -261,7 +272,7 @@ static int proc_generate_status(char *b, size_t s, process_t *proc) {
             "Pid:\t%d\n"
             "Uid:\t%d\t%d\t%d\t%d\n"
             "Gid:\t%d\t%d\t%d\t%d\n",
-            proc->comm, proc->pid, proc->pid,
+            comm_safe, proc->pid, proc->pid,
             proc->uid, proc->uid, proc->uid, proc->uid,
             proc->gid, proc->gid, proc->gid, proc->gid);
     } else {
@@ -271,7 +282,7 @@ static int proc_generate_status(char *b, size_t s, process_t *proc) {
             "Uid:\t%d\n"
             "Gid:\t%d\n"
             "State:\tRunning\n",
-            proc->comm, proc->pid, proc->uid, proc->gid);
+            comm_safe, proc->pid, proc->uid, proc->gid);
     }
 }
 
