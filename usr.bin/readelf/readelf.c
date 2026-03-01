@@ -128,6 +128,7 @@ typedef struct {
     int show_section_headers;
     int show_symbols;
     int only_dynsyms;
+    int show_relocs;
 } readelf_opts_t;
 
 typedef struct {
@@ -890,6 +891,191 @@ static void print_symbol_tables(const readelf_opts_t *opts, const elf_view_t *vi
     }
 }
 
+static const char *reloc_type_i386(uint32_t type) {
+    switch (type) {
+        case 0: return "R_386_NONE";
+        case 1: return "R_386_32";
+        case 2: return "R_386_PC32";
+        case 3: return "R_386_GOT32";
+        case 4: return "R_386_PLT32";
+        case 5: return "R_386_COPY";
+        case 6: return "R_386_GLOB_DAT";
+        case 7: return "R_386_JMP_SLOT";
+        case 8: return "R_386_RELATIVE";
+        case 9: return "R_386_GOTOFF";
+        case 10: return "R_386_GOTPC";
+        case 14: return "R_386_TLS_TPOFF";
+        case 15: return "R_386_TLS_IE";
+        case 16: return "R_386_TLS_GOTIE";
+        case 17: return "R_386_TLS_LE";
+        case 18: return "R_386_TLS_GD";
+        case 19: return "R_386_TLS_LDM";
+        case 20: return "R_386_16";
+        case 21: return "R_386_PC16";
+        case 22: return "R_386_8";
+        case 23: return "R_386_PC8";
+        case 32: return "R_386_TLS_LDO_32";
+        case 35: return "R_386_TLS_DTPMOD32";
+        case 36: return "R_386_TLS_DTPOFF32";
+        case 38: return "R_386_SIZE32";
+        case 42: return "R_386_IRELATIVE";
+        case 43: return "R_386_GOT32X";
+        default: return NULL;
+    }
+}
+
+static const char *reloc_type_name(uint16_t machine, uint32_t type) {
+    if (machine == EM_386) {
+        return reloc_type_i386(type);
+    }
+    return NULL;
+}
+
+static int symbol_name_value_at(const elf_view_t *view, const elf_header_t *hdr,
+                                const section_header_t *symtab, uint32_t symidx,
+                                const char **name_out, uint64_t *value_out) {
+    section_header_t strsec;
+    uint32_t st_name = 0;
+    uint8_t st_info = 0;
+    uint8_t st_other = 0;
+    uint16_t st_shndx = 0;
+    uint64_t st_value = 0;
+    uint64_t st_size = 0;
+
+    if (symtab == NULL || name_out == NULL || value_out == NULL || symtab->entsize == 0) {
+        return -1;
+    }
+    if ((uint64_t)symidx >= (symtab->size / symtab->entsize)) {
+        *name_out = "<corrupt>";
+        *value_out = 0;
+        return -1;
+    }
+    if (symtab->link >= shnum_resolved(hdr) || read_shdr(view, hdr, symtab->link, &strsec) != 0 ||
+        strsec.off + strsec.size > view->size) {
+        *name_out = "<corrupt>";
+        *value_out = 0;
+        return -1;
+    }
+    if (view->cls == ELFOBJ_CLASS_64) {
+        if (read_sym64(view, symtab->off, symidx, symtab->entsize, &st_name, &st_info, &st_other,
+                       &st_shndx, &st_value, &st_size) != 0) {
+            *name_out = "<corrupt>";
+            *value_out = 0;
+            return -1;
+        }
+    } else {
+        if (read_sym32(view, symtab->off, symidx, symtab->entsize, &st_name, &st_info, &st_other,
+                       &st_shndx, &st_value, &st_size) != 0) {
+            *name_out = "<corrupt>";
+            *value_out = 0;
+            return -1;
+        }
+    }
+    if (st_name >= strsec.size) {
+        *name_out = "<corrupt>";
+    } else {
+        *name_out = (const char *)(view->data + strsec.off + st_name);
+    }
+    *value_out = st_value;
+    return 0;
+}
+
+static void print_relocations(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    uint64_t i;
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t relsec;
+        section_header_t symtab;
+        uint64_t count;
+        uint64_t j;
+
+        if (read_shdr(view, hdr, (size_t)i, &relsec) != 0) {
+            break;
+        }
+        if (relsec.type != SHT_REL && relsec.type != SHT_RELA) {
+            continue;
+        }
+        if (relsec.link >= shnum || read_shdr(view, hdr, relsec.link, &symtab) != 0) {
+            warnf("relocation section %" PRIu64 " has invalid symbol table link", i);
+            continue;
+        }
+        if (relsec.entsize == 0 || relsec.off + relsec.size > view->size) {
+            warnf("relocation section %" PRIu64 " appears truncated", i);
+            continue;
+        }
+
+        count = relsec.size / relsec.entsize;
+        printf("\nRelocation section at offset 0x%" PRIx64 " contains %" PRIu64 " entries:\n",
+               relsec.off, count);
+        printf("  Offset          Info           Type           Sym.Value    Sym.Name + Addend\n");
+
+        for (j = 0; j < count; ++j) {
+            uint64_t base = relsec.off + (j * relsec.entsize);
+            uint64_t r_off = 0;
+            uint64_t r_info = 0;
+            uint32_t r_type = 0;
+            uint32_t r_sym = 0;
+            int64_t r_addend = 0;
+            const char *rtype_name_local;
+            char type_buf[32];
+            const char *sym_name = "<none>";
+            uint64_t sym_val = 0;
+
+            if (view->cls == ELFOBJ_CLASS_64) {
+                if (view_u64(view, (size_t)(base + 0), &r_off) != 0 ||
+                    view_u64(view, (size_t)(base + 8), &r_info) != 0) {
+                    break;
+                }
+                r_type = (uint32_t)(r_info & 0xffffffffu);
+                r_sym = (uint32_t)(r_info >> 32);
+                if (relsec.type == SHT_RELA) {
+                    uint64_t add_u = 0;
+                    if (view_u64(view, (size_t)(base + 16), &add_u) != 0) {
+                        break;
+                    }
+                    r_addend = (int64_t)add_u;
+                }
+            } else {
+                uint32_t off32 = 0, info32 = 0, add32 = 0;
+                if (view_u32(view, (size_t)(base + 0), &off32) != 0 ||
+                    view_u32(view, (size_t)(base + 4), &info32) != 0) {
+                    break;
+                }
+                r_off = off32;
+                r_info = info32;
+                r_type = info32 & 0xffu;
+                r_sym = info32 >> 8;
+                if (relsec.type == SHT_RELA) {
+                    if (view_u32(view, (size_t)(base + 8), &add32) != 0) {
+                        break;
+                    }
+                    r_addend = (int32_t)add32;
+                }
+            }
+
+            (void)symbol_name_value_at(view, hdr, &symtab, r_sym, &sym_name, &sym_val);
+            rtype_name_local = reloc_type_name(hdr->machine, r_type);
+            if (rtype_name_local == NULL) {
+                snprintf(type_buf, sizeof(type_buf), "%u", r_type);
+                rtype_name_local = type_buf;
+            }
+
+            if (view->cls == ELFOBJ_CLASS_64) {
+                printf("%016" PRIx64 "  %016" PRIx64 " %-14s %016" PRIx64 " %s",
+                       r_off, r_info, rtype_name_local, sym_val, sym_name);
+            } else {
+                printf("%08" PRIx64 "  %08" PRIx64 " %-14s %08" PRIx64 " %s",
+                       r_off, r_info, rtype_name_local, sym_val, sym_name);
+            }
+            if (relsec.type == SHT_RELA) {
+                printf(" %+" PRId64, r_addend);
+            }
+            printf("\n");
+        }
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -1075,6 +1261,7 @@ static void usage(FILE *out) {
             "  -l, --program-headers   Display program headers\n"
             "  -S, --section-headers   Display section headers\n"
             "  -s, --syms,--symbols    Display symbol table entries\n"
+            "  -r, --relocs            Display relocations\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -1097,6 +1284,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"sections", no_argument, NULL, 'S'},
         {"syms", no_argument, NULL, 's'},
         {"symbols", no_argument, NULL, 's'},
+        {"relocs", no_argument, NULL, 'r'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -1113,7 +1301,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsSeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsrSeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -1127,6 +1315,9 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 's':
                 opts->show_symbols = 1;
                 break;
+            case 'r':
+                opts->show_relocs = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -1137,6 +1328,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_program_headers = 1;
                 opts->show_section_headers = 1;
                 opts->show_symbols = 1;
+                opts->show_relocs = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -1201,7 +1393,8 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     if (!opts->show_file_header &&
         !opts->show_program_headers &&
         !opts->show_section_headers &&
-        !opts->show_symbols) {
+        !opts->show_symbols &&
+        !opts->show_relocs) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -1265,6 +1458,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_symbols) {
         print_symbol_tables(opts, &view, &hdr);
+    }
+    if (opts->show_relocs) {
+        print_relocations(&view, &hdr);
     }
 
 out:

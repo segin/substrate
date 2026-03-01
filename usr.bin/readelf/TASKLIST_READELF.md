@@ -70,15 +70,15 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 6. Relocation Tables (`-r` / `--relocs`)
 
-- [ ] Display all `SHT_REL` and `SHT_RELA` sections.
-- [ ] Columns: offset, info, type, sym.value, sym.name + addend.
+- [x] Display all `SHT_REL` and `SHT_RELA` sections.
+- [x] Columns: offset, info, type, sym.value, sym.name + addend.
 - [ ] Decode relocation type names per architecture:
 
 ### 6a. i386 Relocation Names
-- [ ] `R_386_NONE`, `R_386_32`, `R_386_PC32`, `R_386_GOT32`, `R_386_PLT32`, `R_386_COPY`, `R_386_GLOB_DAT`, `R_386_JMP_SLOT`, `R_386_RELATIVE`, `R_386_GOTOFF`, `R_386_GOTPC`, `R_386_GOT32X`.
-- [ ] `R_386_TLS_TPOFF`, `R_386_TLS_IE`, `R_386_TLS_GOTIE`, `R_386_TLS_LE`, `R_386_TLS_GD`, `R_386_TLS_LDM`, `R_386_TLS_LDO_32`, `R_386_TLS_DTPMOD32`, `R_386_TLS_DTPOFF32`.
-- [ ] `R_386_16`, `R_386_PC16`, `R_386_8`, `R_386_PC8`, `R_386_SIZE32`.
-- [ ] `R_386_IRELATIVE`.
+- [x] `R_386_NONE`, `R_386_32`, `R_386_PC32`, `R_386_GOT32`, `R_386_PLT32`, `R_386_COPY`, `R_386_GLOB_DAT`, `R_386_JMP_SLOT`, `R_386_RELATIVE`, `R_386_GOTOFF`, `R_386_GOTPC`, `R_386_GOT32X`.
+- [x] `R_386_TLS_TPOFF`, `R_386_TLS_IE`, `R_386_TLS_GOTIE`, `R_386_TLS_LE`, `R_386_TLS_GD`, `R_386_TLS_LDM`, `R_386_TLS_LDO_32`, `R_386_TLS_DTPMOD32`, `R_386_TLS_DTPOFF32`.
+- [x] `R_386_16`, `R_386_PC16`, `R_386_8`, `R_386_PC8`, `R_386_SIZE32`.
+- [x] `R_386_IRELATIVE`.
 
 ### 6b. x86-64 Relocation Names
 - [ ] `R_X86_64_NONE`, `R_X86_64_64`, `R_X86_64_PC32`, `R_X86_64_GOT32`, `R_X86_64_PLT32`, `R_X86_64_COPY`, `R_X86_64_GLOB_DAT`, `R_X86_64_JUMP_SLOT`, `R_X86_64_RELATIVE`.
