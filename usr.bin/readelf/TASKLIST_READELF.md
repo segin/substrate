@@ -230,11 +230,11 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] Verify all field values against known-good `readelf -h` output.
 
 ### 19b. Section/Segment Tests
-- [ ] All section types display with correct names.
-- [ ] ARM-specific: `SHT_ARM_EXIDX`, `SHT_ARM_ATTRIBUTES` displayed.
-- [ ] AArch64-specific: `SHT_AARCH64_ATTRIBUTES` displayed.
-- [ ] `PT_ARM_EXIDX` segment displayed.
-- [ ] Section-to-segment mapping correct.
+- [x] All section types display with correct names.
+- [x] ARM-specific: `SHT_ARM_EXIDX`, `SHT_ARM_ATTRIBUTES` displayed.
+- [x] AArch64-specific: `SHT_AARCH64_ATTRIBUTES` displayed.
+- [x] `PT_ARM_EXIDX` segment displayed.
+- [x] Section-to-segment mapping correct.
 
 ### 19c. Symbol Tests
 - [ ] `.symtab` and `.dynsym` both displayed.
