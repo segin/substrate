@@ -15,9 +15,9 @@ Goal: implement a production `ar` where ELF member inspection/parsing comes from
 
 ## 2. ELF32/ELF64 and Cross‑Endian Support
 
-- [ ] Through `libelfobj`, transparently handle ELF64 members (`ELFCLASS64`) for symbol extraction.
-- [ ] Through `libelfobj`, transparently handle big‑endian ELF members (e.g. MIPS `.o` cross‑compiled on an LE host).
-- [ ] Validate: mixed ELF32 + ELF64 members in a single archive produce a correct `__.SYMDEF`.
+- [x] Through `libelfobj`, transparently handle ELF64 members (`ELFCLASS64`) for symbol extraction.
+- [x] Through `libelfobj`, transparently handle big‑endian ELF members (e.g. MIPS `.o` cross‑compiled on an LE host).
+- [x] Validate: mixed ELF32 + ELF64 members in a single archive produce a correct `__.SYMDEF`.
 
 ## 3. Core Operations (`r`, `d`, `x`, `t`, `q`, `m`, `p`)
 
