@@ -194,6 +194,7 @@ These components are essential for booting and basic system operation.
   - x86 relocation kind mapping/emission lives in `usr.bin/as/as_x86_reloc.c`, covering i386 and x86-64 relocation families used by assembler emission paths; regression coverage lives in `tests/usr.bin/as/test_x86_reloc_core.sh`.
   - x86-64-v2 core opcode support (`lahf`, `sahf`, `popcnt`, and dedicated `cmpxchg16b` form) is staged in `usr.bin/as/as_x86_v2.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_v2_core.sh`.
   - SSE3 opcode support (`addsub*`, `hadd*`, `hsub*`, `lddqu`, `mov*ddup/*sldup/*shdup`, `fisttp`, `monitor`, `mwait`) is staged in `usr.bin/as/as_x86_sse3.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_sse3_core.sh`.
+  - SSSE3 opcode support (`pabs*`, `palignr`, `phadd*`, `phsub*`, `pmaddubsw`, `pmulhrsw`, `pshufb`, `psign*`) is staged in `usr.bin/as/as_x86_ssse3.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_ssse3_core.sh`.
   - CLI compatibility surface now includes `-msyntax=att|intel`, warning controls (`-W/--warn/--no-warn/--fatal-warnings`), `--defsym`, `-al` listings, `--statistics`, and `--target-help` with regression coverage in `tests/usr.bin/as/test_cli_extended.sh`.
   - For complete ISA coverage during migration, it still forwards final assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).

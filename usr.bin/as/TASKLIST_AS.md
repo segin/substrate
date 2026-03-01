@@ -130,8 +130,8 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `FISTTP` (m16/m32/m64), `MONITOR`, `MWAIT`
 
 ### 3c. SSSE3
-- [ ] `PABSB/W/D`, `PALIGNR`, `PHADDW/D/SW`, `PHSUBW/D/SW`
-- [ ] `PMADDUBSW`, `PMULHRSW`, `PSHUFB`, `PSIGNB/W/D`
+- [x] `PABSB/W/D`, `PALIGNR`, `PHADDW/D/SW`, `PHSUBW/D/SW`
+- [x] `PMADDUBSW`, `PMULHRSW`, `PSHUFB`, `PSIGNB/W/D`
 
 ### 3d. SSE4.1
 - [ ] `BLENDPD/PS`, `BLENDVPD/VPS`, `DPPD/DPPS`
