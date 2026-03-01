@@ -23,3 +23,11 @@ $(PROG): ../../usr.lib/elfobj/libelfobj.a
 ../../usr.lib/elfobj/libelfobj.a:
 	$(MAKE) -C ../../usr.lib/elfobj
 endif
+
+.PHONY: install-man
+
+install: install-man
+
+install-man:
+	mkdir -p $(DESTDIR)/usr/man/man1
+	install -m 0644 size.1 $(DESTDIR)/usr/man/man1/size.1

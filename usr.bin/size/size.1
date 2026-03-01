@@ -1,0 +1,75 @@
+.Dd March 1, 2026
+.Dt SIZE 1
+.Os
+.Sh NAME
+.Nm size
+.Nd report section sizes for ELF objects and archives
+.Sh SYNOPSIS
+.Nm
+.Op Fl A | Fl B | Fl -format Ns = Ns Cm sysv | berkeley | gnu
+.Op Fl d | Fl o | Fl x | Fl -radix Ns = Ns Cm 8 | 10 | 16
+.Op Fl t | Fl -totals
+.Op Fl -common
+.Op Fl -target Ns = Ns Ar bfdname
+.Ar file ...
+.Sh DESCRIPTION
+.Nm
+prints size accounting for ELF input files.
+By default it emits Berkeley-style output with
+text, data, bss, decimal total, and hexadecimal total columns.
+Archive input
+.Pq Pa .a
+is traversed per member and printed as
+.Li archive(member) .
+Thin archives are resolved from filesystem member paths.
+.Pp
+The command supports Berkeley, SysV, and GNU display styles and can apply
+radix formatting to all numeric columns.
+.Sh OPTIONS
+.Bl -tag -width "--format=berkeley"
+.It Fl A , Fl -format=sysv
+Use SysV output format with per-section tables.
+.It Fl B , Fl -format=berkeley
+Use Berkeley output format (default).
+.It Fl -format=gnu
+Use GNU output format.
+.It Fl d , Fl -radix=10
+Format numeric output in decimal.
+.It Fl o , Fl -radix=8
+Format numeric output in octal.
+.It Fl x , Fl -radix=16
+Format numeric output in hexadecimal.
+.It Fl t , Fl -totals
+Force printing a grand total row/table.
+For multiple inputs, totals are printed by default.
+.It Fl -common
+Include
+.Dv SHN_COMMON
+symbol sizes in the bss total.
+.It Fl -target= Ns Ar bfdname
+Accepted for GNU compatibility and ignored.
+.It Fl V , Fl -version
+Print version information and exit.
+.It Fl h , Fl -help
+Show usage and exit.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Pp
+Returns 0 on success.
+Returns 1 if any input file fails to process.
+Non-ELF top-level inputs are reported as file format not recognized.
+.Sh EXAMPLES
+.Bl -tag -width Ds
+.It Berkeley format (default)
+.Dl size foo.o bar.o
+.It SysV per-section output
+.Dl size -A libfoo.a
+.It GNU format with hexadecimal radix
+.Dl size --format=gnu -x foo.o
+.El
+.Sh SEE ALSO
+.Xr ar 1 ,
+.Xr readelf 1 ,
+.Xr objdump 1 ,
+.Xr elfobj 3
