@@ -31,9 +31,9 @@ Goal: implement `size` using section accounting from `libelfobj`.
 - [x] Multiple files: one row each + grand total row.
 
 ### 3b. SysV Format (`-A` / `--format=sysv`)
-- [ ] Per‑section breakdown table: Section, Size, Addr.
-- [ ] Per‑file section table with header: `<filename>  :`.
-- [ ] Total row at bottom.
+- [x] Per‑section breakdown table: Section, Size, Addr.
+- [x] Per‑file section table with header: `<filename>  :`.
+- [x] Total row at bottom.
 
 ### 3c. GNU Format (`--format=gnu`)
 - [ ] Header: `      text       data        bss      total filename`.

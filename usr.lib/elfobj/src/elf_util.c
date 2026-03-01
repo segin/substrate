@@ -625,6 +625,10 @@ uint64_t elf_section_flags(const elf_section_t *section) {
     return section == NULL ? 0 : section->flags;
 }
 
+uint64_t elf_section_addr(const elf_section_t *section) {
+    return section == NULL ? 0 : section->addr;
+}
+
 uint64_t elf_section_size(const elf_section_t *section) {
     return section == NULL ? 0 : section->size;
 }

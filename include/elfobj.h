@@ -389,6 +389,7 @@ elf_err_t elf_program_header_set_align(elfobj_t *obj, size_t index, uint64_t ali
 const char *elf_section_name(const elf_section_t *section);
 uint32_t elf_section_type(const elf_section_t *section);
 uint64_t elf_section_flags(const elf_section_t *section);
+uint64_t elf_section_addr(const elf_section_t *section);
 uint64_t elf_section_size(const elf_section_t *section);
 const void *elf_section_data(const elf_section_t *section, size_t *size_out);
 

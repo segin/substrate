@@ -7,6 +7,7 @@ Goal: extend `libelfobj` with complete multi-architecture support for i386, x86-
 ## 0. Generic Tooling API Support
 
 - [x] Add indexed section accessor `elf_section_get(const elfobj_t *, size_t)` for consumer utilities (`size`, `objdump`, `readelf`) that need stable section iteration.
+- [x] Add section address accessor `elf_section_addr(const elf_section_t *)` for utilities that emit per-section address tables (for example SysV `size -A`).
 
 ---
 
