@@ -698,10 +698,10 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 
 ## 16. Documentation
 
-- [ ] Update `README.md` with full multi-architecture support notes.
-- [ ] Document all relocation backend registration APIs.
-- [ ] Document ARM build attributes API.
-- [ ] Document GNU property API.
-- [ ] Document relocation name API.
-- [ ] Update `COMPATIBILITY_MATRIX.md` with ARM/AArch64 entries.
-- [ ] Man page updates for `elfobj.3` with per-arch API functions.
+- [x] Update `README.md` with full multi-architecture support notes.
+- [x] Document all relocation backend registration APIs.
+- [x] Document ARM build attributes API.
+- [x] Document GNU property API.
+- [x] Document relocation name API.
+- [x] Update `COMPATIBILITY_MATRIX.md` with ARM/AArch64 entries.
+- [x] Man page updates for `elfobj.3` with per-arch API functions.

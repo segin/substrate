@@ -18,6 +18,8 @@ Notes:
 Implemented and tested for:
 - i386 SysV psABI relocation sizing and PC-relative rules.
 - x86_64 SysV psABI relocation sizing and PC-relative rules.
+- ARM EABI relocation sizing/PC-relative/TLS classification and EXIDX/attributes validation.
+- AArch64 ELF relocation sizing/PC-relative/TLS classification and GNU property validation.
 - Relocation arithmetic conformance checks via `elf_apply_relocation_value()`.
 
 ## Test Mapping

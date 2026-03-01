@@ -8,10 +8,16 @@
 .Nm elf_open_memory_with_options ,
 .Nm elf_open_memory_nocopy ,
 .Nm elf_create ,
+.Nm elf_init_i386 ,
+.Nm elf_init_x86_64 ,
+.Nm elf_init_arm ,
+.Nm elf_init_aarch64 ,
 .Nm elf_write_file ,
 .Nm elf_finalize ,
 .Nm elf_close ,
 .Nm elf_set_type ,
+.Nm elf_set_flags ,
+.Nm elf_flags ,
 .Nm elf_type ,
 .Nm elf_machine ,
 .Nm elf_class ,
@@ -23,6 +29,20 @@
 .Nm elf_reloc_count ,
 .Nm elf_program_header_count ,
 .Nm elf_segment_count ,
+.Nm elf_arm_attribute_count ,
+.Nm elf_arm_attribute_tag_at ,
+.Nm elf_arm_attribute_value_at ,
+.Nm elf_arm_attribute_string_at ,
+.Nm elf_note_count ,
+.Nm elf_note_at ,
+.Nm elf_gnu_property_count ,
+.Nm elf_gnu_property_at ,
+.Nm elf_x86_isa_level ,
+.Nm elf_x86_feature_flags ,
+.Nm elf_aarch64_feature_flags ,
+.Nm elf_add_gnu_property_x86 ,
+.Nm elf_add_gnu_property_aarch64 ,
+.Nm elf_reloc_name_for_machine ,
 .Nm elf_errstr ,
 .Nm elf_last_error ,
 .Nm elf_last_diagnostics
@@ -41,6 +61,14 @@
 .Fn elf_open_memory_nocopy "const void *buf" "size_t size" "elfobj_t **out"
 .Ft elfobj_t *
 .Fn elf_create "uint16_t type" "uint16_t machine" "elfobj_class_t cls" "elfobj_endian_t endian"
+.Ft elfobj_t *
+.Fn elf_init_i386 void
+.Ft elfobj_t *
+.Fn elf_init_x86_64 void
+.Ft elfobj_t *
+.Fn elf_init_arm void
+.Ft elfobj_t *
+.Fn elf_init_aarch64 void
 .Ft elf_err_t
 .Fn elf_write_file "elfobj_t *obj" "const char *path"
 .Ft elf_err_t
@@ -49,6 +77,10 @@
 .Fn elf_close "elfobj_t *obj"
 .Ft elf_err_t
 .Fn elf_set_type "elfobj_t *obj" "uint16_t type"
+.Ft elf_err_t
+.Fn elf_set_flags "elfobj_t *obj" "uint32_t flags"
+.Ft uint32_t
+.Fn elf_flags "const elfobj_t *obj"
 .Ft uint16_t
 .Fn elf_type "const elfobj_t *obj"
 .Ft uint16_t
@@ -71,6 +103,34 @@
 .Fn elf_program_header_count "const elfobj_t *obj"
 .Ft size_t
 .Fn elf_segment_count "const elfobj_t *obj"
+.Ft size_t
+.Fn elf_arm_attribute_count "const elfobj_t *obj"
+.Ft uint32_t
+.Fn elf_arm_attribute_tag_at "const elfobj_t *obj" "size_t index"
+.Ft uint64_t
+.Fn elf_arm_attribute_value_at "const elfobj_t *obj" "size_t index"
+.Ft const char *
+.Fn elf_arm_attribute_string_at "const elfobj_t *obj" "size_t index"
+.Ft size_t
+.Fn elf_note_count "const elfobj_t *obj"
+.Ft int
+.Fn elf_note_at "const elfobj_t *obj" "size_t index" "elf_note_info_t *out"
+.Ft size_t
+.Fn elf_gnu_property_count "const elfobj_t *obj"
+.Ft int
+.Fn elf_gnu_property_at "const elfobj_t *obj" "size_t index" "elf_gnu_property_info_t *out"
+.Ft uint32_t
+.Fn elf_x86_isa_level "const elfobj_t *obj"
+.Ft uint32_t
+.Fn elf_x86_feature_flags "const elfobj_t *obj"
+.Ft uint32_t
+.Fn elf_aarch64_feature_flags "const elfobj_t *obj"
+.Ft elf_err_t
+.Fn elf_add_gnu_property_x86 "elfobj_t *obj" "uint32_t isa_needed" "uint32_t isa_used" "uint32_t feature_1"
+.Ft elf_err_t
+.Fn elf_add_gnu_property_aarch64 "elfobj_t *obj" "uint32_t feature_1"
+.Ft const char *
+.Fn elf_reloc_name_for_machine "uint16_t machine" "uint32_t type"
 .Ft const char *
 .Fn elf_errstr "elf_err_t err"
 .Ft elf_err_t

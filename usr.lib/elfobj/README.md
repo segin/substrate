@@ -7,12 +7,19 @@
 - Support ET_REL, ET_EXEC, ET_DYN, and read-only ET_CORE parsing.
 - Build/modify sections, symbols, and relocations.
 - Apply relocations through architecture backends (i386/x86_64) with overflow and TLS checks.
+- Apply relocations through architecture backends (i386/x86_64/ARM/AArch64) with overflow and TLS checks.
 - Emit valid ELF objects with generated string/symbol/relocation tables.
 - Provide linker-facing object merge API and validation diagnostics.
 - Provide linker-plan APIs with merge/archive/GC/version/incremental hooks and link-map introspection.
 - Parse and validate program headers, notes, dynamic, and versioning sections.
 - Provide section mutation/reorder APIs and explicit segment mapping helpers.
 - Provide symbol versioning metadata, deterministic symbol ordering, and hash lookups.
+- Parse ARM build attributes via `elf_arm_attribute_*` APIs.
+- Parse and emit GNU property notes via `elf_note_*`, `elf_gnu_property_*`,
+  `elf_add_gnu_property_x86()`, and `elf_add_gnu_property_aarch64()`.
+- Provide relocation naming via `elf_reloc_name_for_machine()`.
+- Provide architecture initializers (`elf_init_i386()`, `elf_init_x86_64()`,
+  `elf_init_arm()`, `elf_init_aarch64()`).
 
 ## Build
 - `make -C usr.lib/elfobj`
