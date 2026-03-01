@@ -138,12 +138,12 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 ## 2. DWARF Line‑Program Decoder
 
 ### 2a. Line Number Header (DWARF v2–v5) **(FR‑10)**
-- [ ] Parse `unit_length`, `version`, `header_length`, `minimum_instruction_length`, `maximum_operations_per_instruction`.
-- [ ] Parse `default_is_stmt`, `line_base`, `line_range`, `opcode_base`.
-- [ ] Parse standard opcode length table.
-- [ ] Parse include directories table (v4: null‑terminated list; v5: directory entry format).
-- [ ] Parse file name table (v4: null‑terminated entries; v5: file name entry format).
-- [ ] Validate header fields against `.debug_line` section bounds.
+- [x] Parse `unit_length`, `version`, `header_length`, `minimum_instruction_length`, `maximum_operations_per_instruction`.
+- [x] Parse `default_is_stmt`, `line_base`, `line_range`, `opcode_base`.
+- [x] Parse standard opcode length table.
+- [x] Parse include directories table (v4: null‑terminated list; v5: directory entry format).
+- [x] Parse file name table (v4: null‑terminated entries; v5: file name entry format).
+- [x] Validate header fields against `.debug_line` section bounds.
 
 ### 2b. Standard Opcodes **(FR‑11)**
 - [ ] `DW_LNS_copy` — append row, reset discriminator.

@@ -14,6 +14,20 @@
 
 #define ADDR2LINE_VERSION "0.1.0"
 
+#define DW_FORM_addr 0x01u
+#define DW_FORM_data1 0x0bu
+#define DW_FORM_data2 0x05u
+#define DW_FORM_data4 0x06u
+#define DW_FORM_data8 0x07u
+#define DW_FORM_string 0x08u
+#define DW_FORM_strp 0x0eu
+#define DW_FORM_udata 0x0fu
+#define DW_FORM_sec_offset 0x17u
+#define DW_FORM_line_strp 0x1fu
+
+#define DW_LNCT_path 0x1u
+#define DW_LNCT_directory_index 0x2u
+
 typedef struct {
     const char *exe_path;
     const char **addr_args;
@@ -37,6 +51,45 @@ typedef struct {
 } debug_blob_t;
 
 typedef struct {
+    char *name;
+    uint64_t dir_index;
+} line_file_t;
+
+typedef struct {
+    uint64_t content_type;
+    uint64_t form;
+} line_format_t;
+
+typedef struct {
+    uint64_t unit_offset;
+    uint64_t unit_length;
+    uint64_t header_length;
+    uint16_t version;
+    uint8_t addr_size;
+    uint8_t segment_selector_size;
+    size_t offset_size;
+
+    uint8_t min_insn_length;
+    uint8_t max_ops_per_insn;
+    uint8_t default_is_stmt;
+    int8_t line_base;
+    uint8_t line_range;
+    uint8_t opcode_base;
+
+    uint8_t *std_opcode_lengths;
+    size_t std_opcode_count;
+
+    char **include_dirs;
+    size_t include_dir_count;
+
+    line_file_t *files;
+    size_t file_count;
+
+    const uint8_t *program;
+    size_t program_size;
+} line_unit_t;
+
+typedef struct {
     elfobj_t *elf;
     char *path;
     elfobj_class_t elf_class;
@@ -56,6 +109,10 @@ typedef struct {
     func_symbol_t *func_syms;
     size_t func_count;
     size_t func_cap;
+
+    line_unit_t *line_units;
+    size_t line_unit_count;
+    size_t line_unit_cap;
 } addr2line_image_t;
 
 static const char *g_progname = "addr2line";
@@ -102,6 +159,573 @@ static uint64_t rd_be64(const uint8_t *p) {
     return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) | ((uint64_t)p[2] << 40) |
            ((uint64_t)p[3] << 32) | ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) |
            ((uint64_t)p[6] << 8) | (uint64_t)p[7];
+}
+
+static char *dup_bytes_as_cstr(const uint8_t *data, size_t n) {
+    char *s;
+    if (data == NULL) {
+        return NULL;
+    }
+    s = (char *)malloc(n + 1u);
+    if (s == NULL) {
+        return NULL;
+    }
+    memcpy(s, data, n);
+    s[n] = '\0';
+    return s;
+}
+
+static int read_exact(const uint8_t **pp, const uint8_t *end, size_t n,
+                      const uint8_t **out) {
+    const uint8_t *p = *pp;
+    if ((size_t)(end - p) < n) {
+        return -1;
+    }
+    if (out != NULL) {
+        *out = p;
+    }
+    *pp = p + n;
+    return 0;
+}
+
+static int read_u8_cursor(const uint8_t **pp, const uint8_t *end, uint8_t *out) {
+    const uint8_t *p;
+    if (read_exact(pp, end, 1, &p) != 0) {
+        return -1;
+    }
+    *out = p[0];
+    return 0;
+}
+
+static int read_u16_cursor(const uint8_t **pp, const uint8_t *end,
+                           elfobj_endian_t e, uint16_t *out) {
+    const uint8_t *p;
+    if (read_exact(pp, end, 2, &p) != 0) {
+        return -1;
+    }
+    if (e == ELFOBJ_ENDIAN_BE) {
+        *out = (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+    } else {
+        *out = (uint16_t)(((uint16_t)p[1] << 8) | p[0]);
+    }
+    return 0;
+}
+
+static int read_u32_cursor(const uint8_t **pp, const uint8_t *end,
+                           elfobj_endian_t e, uint32_t *out) {
+    const uint8_t *p;
+    if (read_exact(pp, end, 4, &p) != 0) {
+        return -1;
+    }
+    *out = rd_u32(p, e);
+    return 0;
+}
+
+static int read_u64_cursor(const uint8_t **pp, const uint8_t *end,
+                           elfobj_endian_t e, uint64_t *out) {
+    const uint8_t *p;
+    if (read_exact(pp, end, 8, &p) != 0) {
+        return -1;
+    }
+    *out = rd_u64(p, e);
+    return 0;
+}
+
+static int read_uleb128(const uint8_t **pp, const uint8_t *end, uint64_t *out) {
+    uint64_t value = 0;
+    unsigned shift = 0;
+    const uint8_t *p = *pp;
+
+    while (p < end) {
+        uint8_t byte = *p++;
+        value |= ((uint64_t)(byte & 0x7fu)) << shift;
+        if ((byte & 0x80u) == 0) {
+            *pp = p;
+            *out = value;
+            return 0;
+        }
+        shift += 7u;
+        if (shift >= 64u) {
+            return -1;
+        }
+    }
+
+    return -1;
+}
+
+static int read_offset(const uint8_t **pp, const uint8_t *end, elfobj_endian_t e,
+                       size_t offset_size, uint64_t *out) {
+    if (offset_size == 4u) {
+        uint32_t v = 0;
+        if (read_u32_cursor(pp, end, e, &v) != 0) {
+            return -1;
+        }
+        *out = (uint64_t)v;
+        return 0;
+    }
+    if (offset_size == 8u) {
+        return read_u64_cursor(pp, end, e, out);
+    }
+    return -1;
+}
+
+static int read_cstring_dup(const uint8_t **pp, const uint8_t *end, char **out) {
+    const uint8_t *start = *pp;
+    const uint8_t *p = start;
+    while (p < end && *p != 0) {
+        p++;
+    }
+    if (p >= end) {
+        return -1;
+    }
+    *out = dup_bytes_as_cstr(start, (size_t)(p - start));
+    if (*out == NULL) {
+        return -1;
+    }
+    *pp = p + 1;
+    return 0;
+}
+
+static int line_unit_add_dir(line_unit_t *u, char *dir) {
+    char **next = (char **)realloc(u->include_dirs,
+                                   (u->include_dir_count + 1u) * sizeof(*next));
+    if (next == NULL) {
+        free(dir);
+        return -1;
+    }
+    u->include_dirs = next;
+    u->include_dirs[u->include_dir_count++] = dir;
+    return 0;
+}
+
+static int line_unit_add_file(line_unit_t *u, line_file_t file) {
+    line_file_t *next = (line_file_t *)realloc(u->files,
+                                               (u->file_count + 1u) * sizeof(*next));
+    if (next == NULL) {
+        free(file.name);
+        return -1;
+    }
+    u->files = next;
+    u->files[u->file_count++] = file;
+    return 0;
+}
+
+static void line_unit_free(line_unit_t *u) {
+    size_t i;
+    if (u == NULL) {
+        return;
+    }
+
+    free(u->std_opcode_lengths);
+    for (i = 0; i < u->include_dir_count; ++i) {
+        free(u->include_dirs[i]);
+    }
+    free(u->include_dirs);
+
+    for (i = 0; i < u->file_count; ++i) {
+        free(u->files[i].name);
+    }
+    free(u->files);
+    memset(u, 0, sizeof(*u));
+}
+
+static int image_append_line_unit(addr2line_image_t *img, line_unit_t *u) {
+    line_unit_t *next;
+    if (img->line_unit_count == img->line_unit_cap) {
+        size_t new_cap = img->line_unit_cap == 0 ? 16u : img->line_unit_cap * 2u;
+        next = (line_unit_t *)realloc(img->line_units, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        img->line_units = next;
+        img->line_unit_cap = new_cap;
+    }
+    img->line_units[img->line_unit_count++] = *u;
+    memset(u, 0, sizeof(*u));
+    return 0;
+}
+
+static const char *lookup_debug_str(const debug_blob_t *blob, uint64_t off) {
+    size_t i;
+    if (blob == NULL || !blob->present || blob->data == NULL || off >= blob->size) {
+        return NULL;
+    }
+    for (i = (size_t)off; i < blob->size; ++i) {
+        if (blob->data[i] == 0) {
+            return (const char *)(blob->data + off);
+        }
+    }
+    return NULL;
+}
+
+static int parse_line_form_value(const addr2line_image_t *img,
+                                 const uint8_t **pp,
+                                 const uint8_t *end,
+                                 size_t offset_size,
+                                 uint8_t addr_size,
+                                 uint64_t form,
+                                 char **out_string,
+                                 uint64_t *out_u64) {
+    uint64_t v = 0;
+    *out_string = NULL;
+    *out_u64 = 0;
+
+    switch (form) {
+    case DW_FORM_string:
+        return read_cstring_dup(pp, end, out_string);
+    case DW_FORM_data1: {
+        uint8_t x = 0;
+        if (read_u8_cursor(pp, end, &x) != 0) {
+            return -1;
+        }
+        *out_u64 = x;
+        return 0;
+    }
+    case DW_FORM_data2: {
+        uint16_t x = 0;
+        if (read_u16_cursor(pp, end, img->elf_endian, &x) != 0) {
+            return -1;
+        }
+        *out_u64 = x;
+        return 0;
+    }
+    case DW_FORM_data4:
+    case DW_FORM_strp:
+    case DW_FORM_line_strp:
+    case DW_FORM_sec_offset: {
+        uint32_t x = 0;
+        if (offset_size == 8u &&
+            (form == DW_FORM_strp || form == DW_FORM_line_strp || form == DW_FORM_sec_offset)) {
+            if (read_u64_cursor(pp, end, img->elf_endian, &v) != 0) {
+                return -1;
+            }
+            *out_u64 = v;
+            if (form == DW_FORM_strp || form == DW_FORM_line_strp) {
+                const debug_blob_t *strsec =
+                    (form == DW_FORM_line_strp) ? &img->debug_line_str : &img->debug_str;
+                const char *s = lookup_debug_str(strsec, v);
+                if (s != NULL) {
+                    *out_string = strdup(s);
+                    if (*out_string == NULL) {
+                        return -1;
+                    }
+                }
+            }
+            return 0;
+        }
+        if (read_u32_cursor(pp, end, img->elf_endian, &x) != 0) {
+            return -1;
+        }
+        *out_u64 = (uint64_t)x;
+        if (form == DW_FORM_strp || form == DW_FORM_line_strp) {
+            const debug_blob_t *strsec =
+                (form == DW_FORM_line_strp) ? &img->debug_line_str : &img->debug_str;
+            const char *s = lookup_debug_str(strsec, *out_u64);
+            if (s != NULL) {
+                *out_string = strdup(s);
+                if (*out_string == NULL) {
+                    return -1;
+                }
+            }
+        }
+        return 0;
+    }
+    case DW_FORM_data8:
+        if (read_u64_cursor(pp, end, img->elf_endian, &v) != 0) {
+            return -1;
+        }
+        *out_u64 = v;
+        return 0;
+    case DW_FORM_udata:
+        return read_uleb128(pp, end, out_u64);
+    case DW_FORM_addr:
+        if (addr_size == 8u) {
+            if (read_u64_cursor(pp, end, img->elf_endian, &v) != 0) {
+                return -1;
+            }
+            *out_u64 = v;
+            return 0;
+        }
+        if (addr_size == 4u) {
+            uint32_t x = 0;
+            if (read_u32_cursor(pp, end, img->elf_endian, &x) != 0) {
+                return -1;
+            }
+            *out_u64 = x;
+            return 0;
+        }
+        return -1;
+    default:
+        return -1;
+    }
+}
+
+static int parse_line_v5_table(const addr2line_image_t *img,
+                               line_unit_t *u,
+                               const uint8_t **pp,
+                               const uint8_t *end,
+                               int file_table) {
+    uint64_t fmt_count = 0;
+    uint64_t entry_count = 0;
+    line_format_t *fmts = NULL;
+    uint64_t i;
+
+    if (read_uleb128(pp, end, &fmt_count) != 0) {
+        return -1;
+    }
+    fmts = (line_format_t *)calloc((size_t)fmt_count, sizeof(*fmts));
+    if (fmt_count > 0 && fmts == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < fmt_count; ++i) {
+        if (read_uleb128(pp, end, &fmts[i].content_type) != 0 ||
+            read_uleb128(pp, end, &fmts[i].form) != 0) {
+            free(fmts);
+            return -1;
+        }
+    }
+
+    if (read_uleb128(pp, end, &entry_count) != 0) {
+        free(fmts);
+        return -1;
+    }
+
+    for (i = 0; i < entry_count; ++i) {
+        char *path = NULL;
+        uint64_t dir_index = 0;
+        uint64_t j;
+
+        for (j = 0; j < fmt_count; ++j) {
+            char *s = NULL;
+            uint64_t n = 0;
+            if (parse_line_form_value(img,
+                                      pp,
+                                      end,
+                                      u->offset_size,
+                                      u->addr_size,
+                                      fmts[j].form,
+                                      &s,
+                                      &n) != 0) {
+                free(path);
+                free(fmts);
+                return -1;
+            }
+
+            if (fmts[j].content_type == DW_LNCT_path) {
+                free(path);
+                path = s;
+                s = NULL;
+            } else if (file_table && fmts[j].content_type == DW_LNCT_directory_index) {
+                dir_index = n;
+            }
+            free(s);
+        }
+
+        if (path == NULL) {
+            path = strdup("");
+            if (path == NULL) {
+                free(fmts);
+                return -1;
+            }
+        }
+
+        if (file_table) {
+            line_file_t f;
+            f.name = path;
+            f.dir_index = dir_index;
+            if (line_unit_add_file(u, f) != 0) {
+                free(fmts);
+                return -1;
+            }
+        } else {
+            if (line_unit_add_dir(u, path) != 0) {
+                free(fmts);
+                return -1;
+            }
+        }
+    }
+
+    free(fmts);
+    return 0;
+}
+
+static int parse_line_v2_v4_tables(line_unit_t *u, const uint8_t **pp, const uint8_t *end) {
+    while (*pp < end && **pp != 0) {
+        char *dir = NULL;
+        if (read_cstring_dup(pp, end, &dir) != 0) {
+            return -1;
+        }
+        if (line_unit_add_dir(u, dir) != 0) {
+            return -1;
+        }
+    }
+    if (*pp >= end) {
+        return -1;
+    }
+    (*pp)++;
+
+    while (*pp < end && **pp != 0) {
+        line_file_t f;
+        uint64_t unused = 0;
+        memset(&f, 0, sizeof(f));
+        if (read_cstring_dup(pp, end, &f.name) != 0 ||
+            read_uleb128(pp, end, &f.dir_index) != 0 ||
+            read_uleb128(pp, end, &unused) != 0 ||
+            read_uleb128(pp, end, &unused) != 0) {
+            free(f.name);
+            return -1;
+        }
+        if (line_unit_add_file(u, f) != 0) {
+            return -1;
+        }
+    }
+    if (*pp >= end) {
+        return -1;
+    }
+    (*pp)++;
+    return 0;
+}
+
+static int parse_debug_line_units(addr2line_image_t *img) {
+    const uint8_t *p = img->debug_line.data;
+    const uint8_t *end = img->debug_line.data + img->debug_line.size;
+
+    while (p < end) {
+        const uint8_t *unit_start = p;
+        line_unit_t u;
+        uint32_t len32 = 0;
+        uint64_t unit_length = 0;
+        const uint8_t *unit_end;
+        const uint8_t *header_start;
+        const uint8_t *header_end;
+        uint64_t header_len = 0;
+        uint16_t version = 0;
+        uint8_t byte = 0;
+        size_t i;
+
+        memset(&u, 0, sizeof(u));
+
+        if ((size_t)(end - p) < 4u) {
+            return -1;
+        }
+        if (read_u32_cursor(&p, end, img->elf_endian, &len32) != 0) {
+            return -1;
+        }
+        if (len32 == 0u) {
+            break;
+        }
+        if (len32 == 0xffffffffu) {
+            u.offset_size = 8u;
+            if (read_u64_cursor(&p, end, img->elf_endian, &unit_length) != 0) {
+                return -1;
+            }
+        } else {
+            u.offset_size = 4u;
+            unit_length = len32;
+        }
+        if ((uint64_t)(end - p) < unit_length) {
+            return -1;
+        }
+        unit_end = p + (size_t)unit_length;
+
+        if (read_u16_cursor(&p, unit_end, img->elf_endian, &version) != 0) {
+            return -1;
+        }
+        if (version < 2u || version > 5u) {
+            return -1;
+        }
+        u.version = version;
+        u.unit_offset = (uint64_t)(unit_start - img->debug_line.data);
+        u.unit_length = unit_length;
+        u.addr_size = (img->elf_class == ELFOBJ_CLASS_64) ? 8u : 4u;
+        u.segment_selector_size = 0u;
+
+        if (version >= 5u) {
+            if (read_u8_cursor(&p, unit_end, &u.addr_size) != 0 ||
+                read_u8_cursor(&p, unit_end, &u.segment_selector_size) != 0) {
+                return -1;
+            }
+        }
+
+        if (read_offset(&p, unit_end, img->elf_endian, u.offset_size, &header_len) != 0) {
+            return -1;
+        }
+        u.header_length = header_len;
+        header_start = p;
+        if ((uint64_t)(unit_end - p) < header_len) {
+            return -1;
+        }
+        header_end = p + (size_t)header_len;
+
+        if (read_u8_cursor(&p, header_end, &u.min_insn_length) != 0) {
+            return -1;
+        }
+        if (version >= 4u) {
+            if (read_u8_cursor(&p, header_end, &u.max_ops_per_insn) != 0) {
+                return -1;
+            }
+        } else {
+            u.max_ops_per_insn = 1u;
+        }
+        if (u.max_ops_per_insn == 0u) {
+            u.max_ops_per_insn = 1u;
+        }
+        if (read_u8_cursor(&p, header_end, &u.default_is_stmt) != 0 ||
+            read_u8_cursor(&p, header_end, &byte) != 0 ||
+            read_u8_cursor(&p, header_end, &u.line_range) != 0 ||
+            read_u8_cursor(&p, header_end, &u.opcode_base) != 0) {
+            return -1;
+        }
+        u.line_base = (int8_t)byte;
+        if (u.line_range == 0u || u.opcode_base == 0u) {
+            return -1;
+        }
+
+        u.std_opcode_count = (size_t)(u.opcode_base - 1u);
+        if (u.std_opcode_count > 0u) {
+            u.std_opcode_lengths = (uint8_t *)malloc(u.std_opcode_count);
+            if (u.std_opcode_lengths == NULL) {
+                return -1;
+            }
+            for (i = 0; i < u.std_opcode_count; ++i) {
+                if (read_u8_cursor(&p, header_end, &u.std_opcode_lengths[i]) != 0) {
+                    line_unit_free(&u);
+                    return -1;
+                }
+            }
+        }
+
+        if (version >= 5u) {
+            if (parse_line_v5_table(img, &u, &p, header_end, 0) != 0 ||
+                parse_line_v5_table(img, &u, &p, header_end, 1) != 0) {
+                line_unit_free(&u);
+                return -1;
+            }
+        } else {
+            if (parse_line_v2_v4_tables(&u, &p, header_end) != 0) {
+                line_unit_free(&u);
+                return -1;
+            }
+        }
+
+        if (p != header_end) {
+            line_unit_free(&u);
+            return -1;
+        }
+        (void)header_start;
+
+        u.program = header_end;
+        u.program_size = (size_t)(unit_end - header_end);
+
+        if (image_append_line_unit(img, &u) != 0) {
+            line_unit_free(&u);
+            return -1;
+        }
+        p = unit_end;
+    }
+
+    return 0;
 }
 
 static int func_symbol_cmp(const void *lhs, const void *rhs) {
@@ -339,6 +963,8 @@ static int load_debug_blob(addr2line_image_t *img, const char *canonical_name,
 }
 
 static void image_reset(addr2line_image_t *img) {
+    size_t i;
+
     if (img == NULL) {
         return;
     }
@@ -366,6 +992,10 @@ static void image_reset(addr2line_image_t *img) {
     }
 
     free(img->func_syms);
+    for (i = 0; i < img->line_unit_count; ++i) {
+        line_unit_free(&img->line_units[i]);
+    }
+    free(img->line_units);
     free(img->path);
 
     if (img->elf != NULL) {
@@ -477,6 +1107,12 @@ static int image_open(addr2line_image_t *img, const char *path) {
 
     if (image_collect_symbols(img) != 0) {
         fprintf(stderr, "%s: out of memory\n", g_progname);
+        image_reset(img);
+        return -1;
+    }
+
+    if (img->debug_line.present && parse_debug_line_units(img) != 0) {
+        warnf("malformed .debug_line section in %s", path);
         image_reset(img);
         return -1;
     }
