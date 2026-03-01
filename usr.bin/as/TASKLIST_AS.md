@@ -125,9 +125,9 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `POPCNT r16/r32/r64, r/m16/32/64` — `F3 0F B8 /r`
 
 ### 3b. SSE3
-- [ ] `ADDSUBPD`, `ADDSUBPS`, `HADDPD`, `HADDPS`, `HSUBPD`, `HSUBPS`
-- [ ] `LDDQU`, `MOVDDUP`, `MOVSHDUP`, `MOVSLDUP`
-- [ ] `FISTTP` (m16/m32/m64), `MONITOR`, `MWAIT`
+- [x] `ADDSUBPD`, `ADDSUBPS`, `HADDPD`, `HADDPS`, `HSUBPD`, `HSUBPS`
+- [x] `LDDQU`, `MOVDDUP`, `MOVSHDUP`, `MOVSLDUP`
+- [x] `FISTTP` (m16/m32/m64), `MONITOR`, `MWAIT`
 
 ### 3c. SSSE3
 - [ ] `PABSB/W/D`, `PALIGNR`, `PHADDW/D/SW`, `PHSUBW/D/SW`
