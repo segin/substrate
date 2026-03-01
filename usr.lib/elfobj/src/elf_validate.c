@@ -99,6 +99,65 @@ static int section_is_allocated(const struct elf_section *s) {
     return (s->flags & SHF_ALLOC) != 0 && s->type != SHT_NOBITS && s->size != 0;
 }
 
+static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
+    if (ctx == NULL || obj == NULL) {
+        return 1;
+    }
+
+    switch (obj->machine) {
+        case EM_386:
+            if (obj->cls != ELFOBJ_CLASS_32) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_386 requires ELFCLASS32");
+            }
+            if (obj->endian != ELFOBJ_ENDIAN_LE) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_386 requires little-endian");
+            }
+            break;
+        case EM_X86_64:
+            if (obj->cls != ELFOBJ_CLASS_64) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_X86_64 requires ELFCLASS64");
+            }
+            if (obj->endian != ELFOBJ_ENDIAN_LE) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_X86_64 requires little-endian");
+            }
+            break;
+        case EM_ARM: {
+            uint32_t eabi = obj->flags & 0xFF000000u;
+            if (obj->cls != ELFOBJ_CLASS_32) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_ARM requires ELFCLASS32");
+            }
+            if (eabi != 0 && eabi < EF_ARM_ABI_VER5) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_ARM requires EABI version >= 5");
+            }
+            if ((obj->flags & EF_ARM_ABI_FLOAT_HARD) != 0 &&
+                (obj->flags & EF_ARM_ABI_FLOAT_SOFT) != 0) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_ARM has conflicting float ABI flags");
+            }
+            break;
+        }
+        case EM_AARCH64:
+            if (obj->cls != ELFOBJ_CLASS_64) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_AARCH64 requires ELFCLASS64");
+            }
+            if (obj->flags != 0 && obj->flags != EF_AARCH64_CHERI_PURECAP) {
+                return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_AARCH64 has unknown e_flags bits");
+            }
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
 elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, char **diagnostics) {
     size_t i;
     size_t j;
@@ -131,6 +190,10 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
     if (ensure_err != ELF_OK) {
         (void)report_diag(&ctx, ELF_DIAG_ERROR, ensure_err, UINT64_MAX,
                           "failed to materialize symbols/relocations");
+        goto done;
+    }
+
+    if (validate_machine_basics(&ctx, obj)) {
         goto done;
     }
 
