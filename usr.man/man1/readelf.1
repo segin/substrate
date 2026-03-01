@@ -1,0 +1,105 @@
+.TH READELF 1 "March 2026" "Substrate" "User Commands"
+.SH NAME
+readelf \- display information about ELF files
+.SH SYNOPSIS
+.B readelf
+[\fIoptions\fR] \fIfile\fR...
+.SH DESCRIPTION
+.B readelf
+inspects ELF32/ELF64 objects and prints headers, sections, segments, symbols,
+relocations, dynamic tags, notes, version data, hash histograms, ARM-specific
+metadata, dumps, DWARF summaries, and core-file note information.
+.SH OPTIONS
+.TP
+.B \-h, \-\-file-header
+Display ELF header.
+.TP
+.B \-l, \-\-program-headers
+Display program headers.
+.TP
+.B \-S, \-\-section-headers
+Display section headers.
+.TP
+.B \-s, \-\-syms, \-\-symbols
+Display symbol tables.
+.TP
+.B \-\-dyn-syms
+Display only dynamic symbols.
+.TP
+.B \-r, \-\-relocs
+Display relocation tables.
+.TP
+.B \-d, \-\-dynamic
+Display dynamic section.
+.TP
+.B \-n, \-\-notes
+Display note sections and note segments.
+.TP
+.B \-V, \-\-version-info
+Display version sections.
+.TP
+.B \-I, \-\-histogram
+Display hash table statistics.
+.TP
+.B \-g, \-\-section-groups
+Display section groups.
+.TP
+.B \-u, \-\-unwind
+Display ARM unwind information.
+.TP
+.B \-A, \-\-arch-specific
+Display ARM architecture attributes.
+.TP
+.B \-x \fIsection\fR, \-\-hex-dump=\fIsection\fR
+Hex dump section by name or index.
+.TP
+.B \-p \fIsection\fR, \-\-string-dump=\fIsection\fR
+String dump section by name or index.
+.TP
+.B \-w \fIkind\fR, \-\-debug-dump=\fIkind\fR
+Display DWARF debug information kind.
+.TP
+.B \-c
+Display core-file notes (also auto-enabled for ET_CORE).
+.TP
+.B \-e, \-\-headers
+Equivalent to \fB-h -l -S\fR.
+.TP
+.B \-a, \-\-all
+Equivalent to core display set (\fB-h -l -S -s -r -d -V -A -I\fR).
+.TP
+.B \-W, \-\-wide
+Do not truncate selected output fields.
+.TP
+.B \-t, \-\-section-details
+Enable detailed section display mode.
+.TP
+.B \-C, \-\-demangle
+Demangle symbol names.
+.TP
+.B \-D, \-\-use-dynamic
+Use dynamic symbol table when printing symbols.
+.TP
+.B \-\-sym-base=\fI0|8|10|16\fR
+Select symbol value radix.
+.TP
+.B \-\-print-sysv
+Enable SysV-compatible formatting where supported.
+.TP
+.B \-\-help
+Display help.
+.TP
+.B \-\-version
+Display version.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error (for example, non-ELF input or malformed file).
+.SH SEE ALSO
+.BR elfedit (1),
+.BR objdump (1),
+.BR nm (1),
+.BR elfobj (3)

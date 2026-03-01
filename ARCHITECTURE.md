@@ -158,10 +158,11 @@ These components are essential for booting and basic system operation.
     - `ls_sort`: stable mergesort backend supporting name/size/time/version ordering with deterministic tie-breakers.
     - `ls_print`: long-format rendering, mode/timestamp/size formatting, multi-output modes (single/comma/columns/by-lines), UID/GID caches, color/quoting handling.
     - `bin/ls/tests`: host-side regression and acceptance harness covering sorting, output modes, symlink edge cases, recursion loops, and core CLI behavior.
-- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`, `c++filt`, `elfedit`, `addr2line`).
+- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`, `c++filt`, `elfedit`, `addr2line`, `readelf`).
   - **`c++filt`**: CLI demangling frontend that streams stdin or argv operands and delegates all symbol parsing to `libdemangle` (Itanium, Rust, and D styles).
   - **`elfedit`**: ELF metadata editor built on `libelfobj` with safe in-place replacement, strict validation/force controls, dry-run mode, ELF header/section/program-header mutation options, and host regression coverage in `tests/usr.bin/elfedit/test_elfedit.sh`.
   - **`addr2line`**: DWARF-backed address resolver using `libelfobj` section access with in-process line-program decoding (DWARF v2-v5), function/subprogram lookup, inline chain rendering, section-relative/PIE address adjustments, and optional demangling via `libdemangle`.
+  - **`readelf`**: ELF inspection utility built on `libelfobj` with header/section/segment/symbol/relocation/dynamic/note/version/hash/group displays, ARM-specific unwind and attributes modes, dump modes (`-x/-p/-w`), and host smoke coverage in `tests/usr.bin/readelf/test_readelf.sh`.
 - **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:
     - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.
@@ -187,6 +188,7 @@ These components are essential for booting and basic system operation.
 ### Toolchain Utilities (`usr.bin/as`, `usr.bin/ld`)
 - **`as`**: x86 assembler tool for i386/x86_64 with an in-tree standalone frontend under active rollout.
   - Current frontend includes native lexing/parsing/symbol-table/section-state/data-directive/ELF-emission/relaxation modules (`usr.bin/as/as_lexer.c`, `usr.bin/as/as_parser.c`, `usr.bin/as/as_symtab.c`, `usr.bin/as/as_sections.c`, `usr.bin/as/as_data.c`, `usr.bin/as/as_elf_emit.c`, `usr.bin/as/as_relax.c`) with host-side coverage in `tests/usr.bin/as/test_lexer_core.sh`, `tests/usr.bin/as/test_parser_core.sh`, `tests/usr.bin/as/test_symtab_core.sh`, `tests/usr.bin/as/test_sections_core.sh`, `tests/usr.bin/as/test_data_core.sh`, `tests/usr.bin/as/test_elf_emit_core.sh`, and `tests/usr.bin/as/test_relax_core.sh`.
+  - CLI compatibility surface now includes `-msyntax=att|intel`, warning controls (`-W/--warn/--no-warn/--fatal-warnings`), `--defsym`, `-al` listings, `--statistics`, and `--target-help` with regression coverage in `tests/usr.bin/as/test_cli_extended.sh`.
   - For complete ISA coverage during migration, it still forwards final assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).
   - Exposes optional safety limits (`--max-input-bytes`, `--max-line-bytes`, `--max-token-length`, `--max-macro-depth`, `--max-include-depth`) and optional structured wrapper diagnostics via `AS_ERROR_CODES=1`.
