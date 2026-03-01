@@ -511,61 +511,61 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 11. Testing
 
 ### 11a. Relocation Backend Unit Tests
-- [ ] For each ARM relocation type: known input (S, A, P, GOT) → expected output value.
-- [ ] Overflow: ARM `R_ARM_CALL` with offset > ±32MB → error.
-- [ ] Overflow: AArch64 `R_AARCH64_JUMP26` with offset > ±128MB → error.
-- [ ] Overflow: `R_AARCH64_ADR_PREL_PG_HI21` with page delta > ±4GB → error.
-- [ ] Alignment: `R_AARCH64_LDST32_ABS_LO12_NC` with non-4-byte-aligned → error.
-- [ ] Thumb interwork: `R_ARM_CALL` to Thumb target → T bit set correctly.
-- [ ] AArch64 ADRP+ADD pair: page calculation correct for page-aligned and non-aligned addresses.
-- [ ] AArch64 MOVW_UABS_G0/G1/G2/G3: correct 16-bit slice extraction.
-- [ ] ARM MOVW/MOVT: correct instruction field insertion for known bit patterns.
-- [ ] Thumb BL encoding: J1/J2 bits encode correctly for positive and negative offsets.
-- [ ] PC-relative classification: every PC-relative reloc returns true, every absolute returns false.
-- [ ] TLS classification: every TLS reloc returns true, non-TLS returns false.
-- [ ] All reloc sizes match expected values.
+- [x] For each ARM relocation type: known input (S, A, P, GOT) → expected output value.
+- [x] Overflow: ARM `R_ARM_CALL` with offset > ±32MB → error.
+- [x] Overflow: AArch64 `R_AARCH64_JUMP26` with offset > ±128MB → error.
+- [x] Overflow: `R_AARCH64_ADR_PREL_PG_HI21` with page delta > ±4GB → error.
+- [x] Alignment: `R_AARCH64_LDST32_ABS_LO12_NC` with non-4-byte-aligned → error.
+- [x] Thumb interwork: `R_ARM_CALL` to Thumb target → T bit set correctly.
+- [x] AArch64 ADRP+ADD pair: page calculation correct for page-aligned and non-aligned addresses.
+- [x] AArch64 MOVW_UABS_G0/G1/G2/G3: correct 16-bit slice extraction.
+- [x] ARM MOVW/MOVT: correct instruction field insertion for known bit patterns.
+- [x] Thumb BL encoding: J1/J2 bits encode correctly for positive and negative offsets.
+- [x] PC-relative classification: every PC-relative reloc returns true, every absolute returns false.
+- [x] TLS classification: every TLS reloc returns true, non-TLS returns false.
+- [x] All reloc sizes match expected values.
 
 ### 11b. Read/Write Round-Trip Tests
-- [ ] Read ARM ELF32 object → inspect sections/symbols/relocs → write back → byte-compare.
-- [ ] Read AArch64 ELF64 object → inspect → write back → byte-compare.
-- [ ] Read ARM object with `.ARM.exidx` → section present with correct `sh_link`.
-- [ ] Read ARM object with `.ARM.attributes` → parse attributes, verify tag values.
-- [ ] Read AArch64 object with `.note.gnu.property` → BTI/PAC flags extracted.
-- [ ] Create ARM object from scratch → write → `readelf -a` validates headers/sections/symbols/relocs.
-- [ ] Create AArch64 object from scratch → write → `readelf -a` validates.
-- [ ] Big-endian ARM object: read and write with correct byte order.
+- [x] Read ARM ELF32 object → inspect sections/symbols/relocs → write back → byte-compare.
+- [x] Read AArch64 ELF64 object → inspect → write back → byte-compare.
+- [x] Read ARM object with `.ARM.exidx` → section present with correct `sh_link`.
+- [x] Read ARM object with `.ARM.attributes` → parse attributes, verify tag values.
+- [x] Read AArch64 object with `.note.gnu.property` → BTI/PAC flags extracted.
+- [x] Create ARM object from scratch → write → `readelf -a` validates headers/sections/symbols/relocs.
+- [x] Create AArch64 object from scratch → write → `readelf -a` validates.
+- [x] Big-endian ARM object: read and write with correct byte order.
 
 ### 11c. Validation Tests
-- [ ] ARM ELF with `ELFCLASS64` → rejected.
-- [ ] AArch64 ELF with `ELFCLASS32` → rejected.
-- [ ] ARM ELF with conflicting float ABI flags → diagnostic.
-- [ ] ARM ELF with missing `.ARM.exidx` `SHF_LINK_ORDER` → diagnostic.
-- [ ] AArch64 ELF with unknown `e_flags` → warning.
-- [ ] Unrecognized relocation type → diagnostic.
+- [x] ARM ELF with `ELFCLASS64` → rejected.
+- [x] AArch64 ELF with `ELFCLASS32` → rejected.
+- [x] ARM ELF with conflicting float ABI flags → diagnostic.
+- [x] ARM ELF with missing `.ARM.exidx` `SHF_LINK_ORDER` → diagnostic.
+- [x] AArch64 ELF with unknown `e_flags` → warning.
+- [x] Unrecognized relocation type → diagnostic.
 
 ### 11d. Link Planning Tests
-- [ ] Merge two ARM objects → `e_flags` union is correct.
-- [ ] Merge hard-float + soft-float ARM objects → error.
-- [ ] Merge ARM + AArch64 objects → rejected (class mismatch).
-- [ ] `.ARM.attributes` merge: compatible objects → merged, incompatible → error.
-- [ ] AArch64 `.note.gnu.property` merge: BTI+PAC from both inputs → AND of features.
+- [x] Merge two ARM objects → `e_flags` union is correct.
+- [x] Merge hard-float + soft-float ARM objects → error.
+- [x] Merge ARM + AArch64 objects → rejected (class mismatch).
+- [x] `.ARM.attributes` merge: compatible objects → merged, incompatible → error.
+- [x] AArch64 `.note.gnu.property` merge: BTI+PAC from both inputs → AND of features.
 
 ### 11e. Build Attributes Tests
-- [ ] Parse `.ARM.attributes` from GCC-produced ARM object.
-- [ ] All standard tags readable via API.
-- [ ] Unknown vendor subsections skipped without error.
-- [ ] Tag compatibility check across two inputs for `Tag_CPU_arch`, `Tag_FP_arch`, `Tag_ABI_VFP_args`.
+- [x] Parse `.ARM.attributes` from GCC-produced ARM object.
+- [x] All standard tags readable via API.
+- [x] Unknown vendor subsections skipped without error.
+- [x] Tag compatibility check across two inputs for `Tag_CPU_arch`, `Tag_FP_arch`, `Tag_ABI_VFP_args`.
 
 ### 11f. DWARF Tests
-- [ ] ARM DWARF register numbers map correctly in `.debug_frame` / `.eh_frame`.
-- [ ] AArch64 DWARF register numbers map correctly.
-- [ ] CFA restoration rules work for ARM R11 frame pointer.
-- [ ] CFA restoration rules work for AArch64 X29 frame pointer.
+- [x] ARM DWARF register numbers map correctly in `.debug_frame` / `.eh_frame`.
+- [x] AArch64 DWARF register numbers map correctly.
+- [x] CFA restoration rules work for ARM R11 frame pointer.
+- [x] CFA restoration rules work for AArch64 X29 frame pointer.
 
 ### 11g. Fuzz Tests
-- [ ] Fuzz ARM ELF object parsing → crash-free.
-- [ ] Fuzz AArch64 ELF object parsing → crash-free.
-- [ ] Fuzz `.ARM.attributes` section parsing → crash-free.
+- [x] Fuzz ARM ELF object parsing → crash-free.
+- [x] Fuzz AArch64 ELF object parsing → crash-free.
+- [x] Fuzz `.ARM.attributes` section parsing → crash-free.
 
 ---
 
