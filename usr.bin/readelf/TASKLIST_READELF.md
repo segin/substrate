@@ -15,23 +15,23 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 2. ELF Header Display (`-h` / `--file-header`)
 
-- [ ] Display `e_ident` magic bytes.
-- [ ] Display class: `ELF32` / `ELF64`.
-- [ ] Display data encoding: `2's complement, little endian` / `big endian`.
-- [ ] Display ELF version.
-- [ ] Display OS/ABI: `ELFOSABI_NONE`/`LINUX`/`FREEBSD`/`ARM`/etc. with numeric fallback.
-- [ ] Display ABI version.
-- [ ] Display type: `REL`/`EXEC`/`DYN`/`CORE` with numeric fallback.
-- [ ] Display machine: `Intel 80386` / `Advanced Micro Devices X86-64` / `ARM` / `AArch64` / numeric fallback for unknown.
-- [ ] Display version.
-- [ ] Display entry point address.
-- [ ] Display program header offset, section header offset.
-- [ ] Display flags with arch-specific decoding:
-    - [ ] ARM: `EF_ARM_ABI_VER5`, `EF_ARM_ABI_FLOAT_HARD`/`SOFT`, `EF_ARM_BE8`, `EF_ARM_INTERWORK`.
-    - [ ] AArch64: flags (typically 0).
-    - [ ] x86: flags (typically 0).
-- [ ] Display header sizes (ELF header, program header entry, section header entry).
-- [ ] Display counts (program headers, section headers, section name string table index).
+- [x] Display `e_ident` magic bytes.
+- [x] Display class: `ELF32` / `ELF64`.
+- [x] Display data encoding: `2's complement, little endian` / `big endian`.
+- [x] Display ELF version.
+- [x] Display OS/ABI: `ELFOSABI_NONE`/`LINUX`/`FREEBSD`/`ARM`/etc. with numeric fallback.
+- [x] Display ABI version.
+- [x] Display type: `REL`/`EXEC`/`DYN`/`CORE` with numeric fallback.
+- [x] Display machine: `Intel 80386` / `Advanced Micro Devices X86-64` / `ARM` / `AArch64` / numeric fallback for unknown.
+- [x] Display version.
+- [x] Display entry point address.
+- [x] Display program header offset, section header offset.
+- [x] Display flags with arch-specific decoding:
+    - [x] ARM: `EF_ARM_ABI_VER5`, `EF_ARM_ABI_FLOAT_HARD`/`SOFT`, `EF_ARM_BE8`, `EF_ARM_INTERWORK`.
+    - [x] AArch64: flags (typically 0).
+    - [x] x86: flags (typically 0).
+- [x] Display header sizes (ELF header, program header entry, section header entry).
+- [x] Display counts (program headers, section headers, section name string table index).
 
 ## 3. Section Headers Display (`-S` / `--section-headers` / `--sections`)
 
