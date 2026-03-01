@@ -40,12 +40,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Section alignment via `.balign`/`.p2align`/`.align`.
 
 ### 1e. Data Directives
-- [ ] `.byte`, `.short`/`.hword`, `.long`/`.int`, `.quad`/`.8byte`.
-- [ ] `.float`, `.double`.
-- [ ] `.ascii`, `.asciz`/`.string`.
-- [ ] `.zero`/`.space`, `.fill`.
-- [ ] `.skip`, `.org`.
-- [ ] `.incbin` for binary inclusion.
+- [x] `.byte`, `.short`/`.hword`, `.long`/`.int`, `.quad`/`.8byte`.
+- [x] `.float`, `.double`.
+- [x] `.ascii`, `.asciz`/`.string`.
+- [x] `.zero`/`.space`, `.fill`.
+- [x] `.skip`, `.org`.
+- [x] `.incbin` for binary inclusion.
 
 ### 1f. ELF Output (via `libelfobj`)
 - [ ] Generate ET_REL ELF32 (i386, ARMv7) and ELF64 (x86-64, AArch64).
