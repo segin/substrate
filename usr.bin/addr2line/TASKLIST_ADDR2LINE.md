@@ -301,8 +301,8 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] `SHF_COMPRESSED` `.debug_line`: verify transparent decompression.
 
 ### 10i. Integration Tests
-- [ ] Compile `.c` → `a.out` with `-g`, run addr2line on known function address, verify output.
-- [ ] Compare output against host `addr2line` on same binary.
+- [x] Compile `.c` → `a.out` with `-g`, run addr2line on known function address, verify output.
+- [x] Compare output against host `addr2line` on same binary.
 
 ---
 

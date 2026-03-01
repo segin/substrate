@@ -119,6 +119,16 @@ SRC
     cc -g -gdwarf-4 -no-pie -o "$out" $objs "$TMP/unit_main.o"
 }
 
+build_fixture_a_out() {
+    dir=$1
+    mkdir -p "$dir"
+    cat > "$dir/main_integ.c" <<'SRC'
+int integ(int x) { return x + 21; }
+int main(void) { return integ(2); }
+SRC
+    cc -g -gdwarf-4 -no-pie -o "$dir/a.out" "$dir/main_integ.c"
+}
+
 first_line() {
     printf '%s\n' "$1" | sed -n '1p'
 }
@@ -355,6 +365,23 @@ SRC
     objcopy --compress-debug-sections=zlib "$TMP/exec64_v5" "$TMP/exec64_shfcomp"
     OUT_SHFC=$($BIN -e "$TMP/exec64_shfcomp" 0x$A5)
     expect_eq "10h-2" "$OUT_SHFC" "$OUT_BASE_COMP"
+
+    # 10i-1: compile to a.out and resolve a known function address
+    build_fixture_a_out "$TMP/integration"
+    INTEG_ADDR=$(addr_of "$TMP/integration/a.out" integ)
+    [ -n "$INTEG_ADDR" ] || fail "10i-1 integ symbol not found"
+    OUT_10I=$(
+        cd "$TMP/integration"
+        "$BIN" 0x$INTEG_ADDR
+    )
+    expect_nonempty_match "10i-1" "$OUT_10I" 'main_integ\.c:[0-9]+'
+
+    # 10i-2: compare output with host addr2line on same binary
+    HOST_10I=$(
+        cd "$TMP/integration"
+        addr2line 0x$INTEG_ADDR
+    )
+    expect_eq "10i-2" "$OUT_10I" "$HOST_10I"
 
     pass "all"
 }
