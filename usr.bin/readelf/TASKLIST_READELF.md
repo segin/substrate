@@ -131,9 +131,9 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 10. Hash Tables (`--histogram` / `-I`)
 
-- [ ] Decode SYSV hash table (`.hash`): nbuckets, nchain, bucket distribution histogram.
-- [ ] Decode GNU hash table (`.gnu.hash`): nbuckets, symndx, maskwords, shift2, bloom filter size, bucket distribution.
-- [ ] Display chain length statistics and histogram.
+- [x] Decode SYSV hash table (`.hash`): nbuckets, nchain, bucket distribution histogram.
+- [x] Decode GNU hash table (`.gnu.hash`): nbuckets, symndx, maskwords, shift2, bloom filter size, bucket distribution.
+- [x] Display chain length statistics and histogram.
 
 ## 11. Section Groups (`-g` / `--section-groups`)
 

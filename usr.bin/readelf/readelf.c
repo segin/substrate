@@ -210,6 +210,7 @@ typedef struct {
     int show_dynamic;
     int show_notes;
     int show_version_info;
+    int show_histogram;
 } readelf_opts_t;
 
 typedef struct {
@@ -1942,6 +1943,102 @@ static void print_version_info(const elf_view_t *view, const elf_header_t *hdr) 
     free(secs);
 }
 
+static void print_hash_histogram(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    uint64_t i;
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
+            break;
+        }
+        if ((sh.type == SHT_HASH || sh.type == SHT_GNU_HASH) &&
+            sh.off + sh.size <= view->size && sh.size >= 8) {
+            elf_view_t sv = {.data = view->data + sh.off, .size = (size_t)sh.size, .endian = view->endian};
+            uint32_t nbuckets = 0, nchain = 0;
+            uint32_t max_chain = 0;
+            uint64_t total = 0;
+            uint32_t nonempty = 0;
+            uint32_t b;
+
+            if (sh.type == SHT_HASH) {
+                const uint8_t *base = sv.data;
+                const uint32_t *buckets;
+                const uint32_t *chains;
+                if (view_u32(&sv, 0, &nbuckets) != 0 || view_u32(&sv, 4, &nchain) != 0) {
+                    continue;
+                }
+                if ((size_t)(8 + (nbuckets + nchain) * 4) > sv.size) {
+                    continue;
+                }
+                buckets = (const uint32_t *)(const void *)(base + 8);
+                chains = buckets + nbuckets;
+                for (b = 0; b < nbuckets; ++b) {
+                    uint32_t idx = buckets[b];
+                    uint32_t clen = 0;
+                    while (idx != 0 && idx < nchain) {
+                        ++clen;
+                        idx = chains[idx];
+                    }
+                    if (clen) {
+                        ++nonempty;
+                        total += clen;
+                        if (clen > max_chain) max_chain = clen;
+                    }
+                }
+                printf("\nSYSV hash table: nbucket=%u nchain=%u\n", nbuckets, nchain);
+            } else {
+                uint32_t symndx = 0, maskwords = 0, shift2 = 0;
+                size_t bloom_bytes;
+                size_t off;
+                if (view_u32(&sv, 0, &nbuckets) != 0 || view_u32(&sv, 4, &symndx) != 0 ||
+                    view_u32(&sv, 8, &maskwords) != 0 || view_u32(&sv, 12, &shift2) != 0) {
+                    continue;
+                }
+                bloom_bytes = (size_t)maskwords * (view->cls == ELFOBJ_CLASS_64 ? 8 : 4);
+                off = 16 + bloom_bytes;
+                if (off + (size_t)nbuckets * 4 > sv.size) {
+                    continue;
+                }
+                {
+                    const uint32_t *buckets = (const uint32_t *)(const void *)(sv.data + off);
+                    const uint32_t *chains = buckets + nbuckets;
+                    size_t chain_off = off + (size_t)nbuckets * 4;
+                    for (b = 0; b < nbuckets; ++b) {
+                        uint32_t idx = buckets[b];
+                        uint32_t clen = 0;
+                        if (idx < symndx) {
+                            continue;
+                        }
+                        while (chain_off + (size_t)(idx - symndx) * 4 + 4 <= sv.size) {
+                            uint32_t h = chains[idx - symndx];
+                            ++clen;
+                            if (h & 1u) {
+                                break;
+                            }
+                            ++idx;
+                        }
+                        if (clen) {
+                            ++nonempty;
+                            total += clen;
+                            if (clen > max_chain) max_chain = clen;
+                        }
+                    }
+                }
+                printf("\nGNU hash table: nbucket=%u symndx=%u maskwords=%u shift2=%u bloom_bytes=%zu\n",
+                       nbuckets, symndx, maskwords, shift2, bloom_bytes);
+            }
+
+            if (nonempty == 0) {
+                printf("  no non-empty buckets\n");
+            } else {
+                printf("  non-empty buckets=%u/%u avg_chain=%.2f max_chain=%u\n",
+                       nonempty, nbuckets, (double)total / (double)nonempty, max_chain);
+            }
+        }
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -2131,6 +2228,7 @@ static void usage(FILE *out) {
             "  -d, --dynamic           Display dynamic section\n"
             "  -n, --notes             Display notes\n"
             "  -V, --version-info      Display version sections\n"
+            "  -I, --histogram         Display hash histogram\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -2157,6 +2255,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"dynamic", no_argument, NULL, 'd'},
         {"notes", no_argument, NULL, 'n'},
         {"version-info", no_argument, NULL, 'V'},
+        {"histogram", no_argument, NULL, 'I'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -2173,7 +2272,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsrdnVSeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsrdnVISeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -2199,6 +2298,9 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 'V':
                 opts->show_version_info = 1;
                 break;
+            case 'I':
+                opts->show_histogram = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -2213,6 +2315,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_dynamic = 1;
                 opts->show_notes = 1;
                 opts->show_version_info = 1;
+                opts->show_histogram = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -2281,7 +2384,8 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         !opts->show_relocs &&
         !opts->show_dynamic &&
         !opts->show_notes &&
-        !opts->show_version_info) {
+        !opts->show_version_info &&
+        !opts->show_histogram) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -2357,6 +2461,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_version_info) {
         print_version_info(&view, &hdr);
+    }
+    if (opts->show_histogram) {
+        print_hash_histogram(&view, &hdr);
     }
 
 out:
