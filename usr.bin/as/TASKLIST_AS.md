@@ -58,10 +58,10 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `.eh_frame` / `.eh_frame_hdr` CFI via `.cfi_*` directives.
 
 ### 1g. Relaxation Engine
-- [ ] Branch relaxation: short→near→far jump promotion.
-- [ ] x86: `jmp rel8` → `jmp rel32` relaxation.
-- [ ] ARM: branch offset range checking; Thumb→ARM interwork veneer insertion.
-- [ ] Iterative relaxation until stable.
+- [x] Branch relaxation: short→near→far jump promotion.
+- [x] x86: `jmp rel8` → `jmp rel32` relaxation.
+- [x] ARM: branch offset range checking; Thumb→ARM interwork veneer insertion.
+- [x] Iterative relaxation until stable.
 
 ### 1h. CLI Interface
 - [ ] `-o output.o`, `-c` (ignored compat), `-g` (debug info).
