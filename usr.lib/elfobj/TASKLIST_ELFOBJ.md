@@ -420,14 +420,14 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 
 ## 6. ELF Write (`elf_write.c`)
 
-- [ ] Write ELF32 (`EM_ARM`) with REL relocations.
-- [ ] Write ELF64 (`EM_AARCH64`) with RELA relocations.
-- [ ] Write correct `e_flags` for ARM: EABI version, float ABI, interwork.
-- [ ] Write `SHT_ARM_EXIDX` and `SHT_ARM_ATTRIBUTES` sections.
-- [ ] Write `PT_ARM_EXIDX` segment.
-- [ ] Write `.note.gnu.property` with BTI/PAC flags for AArch64.
-- [ ] Endian-correct output for big-endian ARM.
-- [ ] Correct `e_entry` with Thumb bit for ARM entry points.
+- [x] Write ELF32 (`EM_ARM`) with REL relocations.
+- [x] Write ELF64 (`EM_AARCH64`) with RELA relocations.
+- [x] Write correct `e_flags` for ARM: EABI version, float ABI, interwork.
+- [x] Write `SHT_ARM_EXIDX` and `SHT_ARM_ATTRIBUTES` sections.
+- [x] Write `PT_ARM_EXIDX` segment.
+- [x] Write `.note.gnu.property` with BTI/PAC flags for AArch64.
+- [x] Endian-correct output for big-endian ARM.
+- [x] Correct `e_entry` with Thumb bit for ARM entry points.
 
 ---
 

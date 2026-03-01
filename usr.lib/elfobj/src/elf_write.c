@@ -89,10 +89,25 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
     size_t n = 0;
     size_t entsz = 0;
     uint8_t *buf;
+    int use_rela_default = (obj->cls == ELFOBJ_CLASS_64);
+
+    if (obj->machine == EM_ARM) {
+        use_rela_default = 0;
+    } else if (obj->machine == EM_AARCH64) {
+        use_rela_default = 1;
+    }
 
     for (i = 0; i < target->reloc_count; ++i) {
         const struct elf_reloc *r = target->relocs[i];
-        if (r != NULL && ((r->has_addend != 0) == (with_addend != 0))) {
+        int reloc_has_addend;
+        if (r == NULL) {
+            continue;
+        }
+        reloc_has_addend = use_rela_default;
+        if (obj->machine != EM_ARM && obj->machine != EM_AARCH64) {
+            reloc_has_addend = r->has_addend != 0;
+        }
+        if ((reloc_has_addend != 0) == (with_addend != 0)) {
             n++;
         }
     }
@@ -118,8 +133,16 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
         const struct elf_reloc *r = target->relocs[i];
         size_t sym_index = 0;
         uint8_t *p;
+        int reloc_has_addend;
 
-        if (r == NULL || ((r->has_addend != 0) != (with_addend != 0))) {
+        if (r == NULL) {
+            continue;
+        }
+        reloc_has_addend = use_rela_default;
+        if (obj->machine != EM_ARM && obj->machine != EM_AARCH64) {
+            reloc_has_addend = r->has_addend != 0;
+        }
+        if ((reloc_has_addend != 0) != (with_addend != 0)) {
             continue;
         }
         p = buf + (n * entsz);
@@ -137,7 +160,7 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
                 elf__wr32(p + 8, obj->endian, (uint32_t)r->addend);
             }
         } else {
-            uint64_t info = ELF64_R_INFO(sym_index, r->type);
+            uint64_t info = ELF64_R_INFO((uint64_t)sym_index, r->type);
             elf__wr64(p + 0, obj->endian, r->offset);
             elf__wr64(p + 8, obj->endian, info);
             if (with_addend) {
@@ -711,6 +734,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     ptype = PT_INTERP;
                 } else if (secs[i].flags & SHF_TLS) {
                     ptype = PT_TLS;
+                } else if (obj->machine == EM_ARM && secs[i].type == SHT_ARM_EXIDX) {
+                    ptype = PT_ARM_EXIDX;
                 }
                 if (ptype == 0) {
                     continue;
