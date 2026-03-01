@@ -237,12 +237,12 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 8. Error Handling
 
-- [ ] Non‑ELF input: `addr2line: <file>: file format not recognized`, exit 1. **(NF‑01)**
-- [ ] Missing `.debug_line`: all lookups return `??:0`, exit 0 (not an error). **(NF‑02)**
-- [ ] Malformed DWARF: print `??:0` for affected addresses, warn on stderr, continue. **(NF‑03)**
-- [ ] Invalid address format on input: warn on stderr, print `??:0`, continue. **(NF‑04)**
-- [ ] `-e` file not found: error message, exit 1. **(NF‑05)**
-- [ ] Permission denied: error message, exit 1. **(NF‑05)**
+- [x] Non‑ELF input: `addr2line: <file>: file format not recognized`, exit 1. **(NF‑01)**
+- [x] Missing `.debug_line`: all lookups return `??:0`, exit 0 (not an error). **(NF‑02)**
+- [x] Malformed DWARF: print `??:0` for affected addresses, warn on stderr, continue. **(NF‑03)**
+- [x] Invalid address format on input: warn on stderr, print `??:0`, continue. **(NF‑04)**
+- [x] `-e` file not found: error message, exit 1. **(NF‑05)**
+- [x] Permission denied: error message, exit 1. **(NF‑05)**
 
 ---
 

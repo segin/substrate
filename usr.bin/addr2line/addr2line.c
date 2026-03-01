@@ -1923,6 +1923,55 @@ static void image_reset(addr2line_image_t *img) {
     memset(img, 0, sizeof(*img));
 }
 
+static void image_clear_line_cache(addr2line_image_t *img) {
+    size_t i;
+    free(img->line_entries);
+    img->line_entries = NULL;
+    img->line_entry_count = 0;
+    img->line_entry_cap = 0;
+
+    free(img->line_rows);
+    img->line_rows = NULL;
+    img->line_row_count = 0;
+    img->line_row_cap = 0;
+
+    for (i = 0; i < img->line_unit_count; ++i) {
+        line_unit_free(&img->line_units[i]);
+    }
+    free(img->line_units);
+    img->line_units = NULL;
+    img->line_unit_count = 0;
+    img->line_unit_cap = 0;
+}
+
+static void image_clear_debug_info_cache(addr2line_image_t *img) {
+    size_t i;
+    for (i = 0; i < img->subprogram_count; ++i) {
+        dwarf_subprogram_free(&img->subprograms[i]);
+    }
+    free(img->subprograms);
+    img->subprograms = NULL;
+    img->subprogram_count = 0;
+    img->subprogram_cap = 0;
+
+    for (i = 0; i < img->inline_count; ++i) {
+        dwarf_inline_free(&img->inlines[i]);
+    }
+    free(img->inlines);
+    img->inlines = NULL;
+    img->inline_count = 0;
+    img->inline_cap = 0;
+
+    for (i = 0; i < img->die_name_count; ++i) {
+        free(img->die_names[i].name);
+        free(img->die_names[i].linkage_name);
+    }
+    free(img->die_names);
+    img->die_names = NULL;
+    img->die_name_count = 0;
+    img->die_name_cap = 0;
+}
+
 static int image_append_func_symbol(addr2line_image_t *img,
                                     uint64_t value,
                                     uint64_t size,
@@ -3402,8 +3451,7 @@ static int image_open(addr2line_image_t *img, const char *path) {
 
     if (img->debug_line.present && parse_debug_line_units(img) != 0) {
         warnf("malformed .debug_line section in %s", path);
-        image_reset(img);
-        return -1;
+        image_clear_line_cache(img);
     }
     if (img->debug_line.present && build_line_entries(img) != 0) {
         fprintf(stderr, "%s: out of memory\n", g_progname);
@@ -3412,10 +3460,7 @@ static int image_open(addr2line_image_t *img, const char *path) {
     }
     if (img->debug_info.present && parse_debug_info_subprograms(img) != 0) {
         warnf("malformed .debug_info section in %s", path);
-        while (img->subprogram_count > 0u) {
-            img->subprogram_count--;
-            dwarf_subprogram_free(&img->subprograms[img->subprogram_count]);
-        }
+        image_clear_debug_info_cache(img);
     }
 
     return 0;
