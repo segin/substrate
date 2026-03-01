@@ -166,8 +166,10 @@ tests/sys/host_test_*
 !tests/usr.bin/**/
 !tests/usr.bin/**/Makefile
 !tests/usr.bin/**/*.ir
+# Specific userland binaries
 bin/cat/cat
 bin/chmod/chmod
+bin/cp/cp
 bin/ls/ls
 bin/sh/sh
 bin/sh/sh_host
@@ -177,6 +179,24 @@ bin/sh/*.scc
 bin/sh/sh_gccobj_ourlink
 bin/sh/sh_ourobj_gcclink
 bin/sh/sh_ourobj_ourlink
+bin/bc/bc_host
+bin/native_test/native_test
+bin/native_test/native_test_standalone
+
+# Stray top-level test binaries
+/test_linux_signals
+/tests/bench_vm_map
+/tests/reproduce_issue
+/tests/usr.bin/compress/uncompress
+
+# usr.bin tool binaries
+usr.bin/addr2line/addr2line
+usr.bin/cxxfilt/c++filt
+usr.bin/lex/test_posix
+usr.bin/size/size
 usr.bin/yacc/test_minimal_parser
 usr.bin/yacc/test_minimal.output
-usr.bin/size/size
+
+# sbin binaries
+sbin/fsck/fsck
+sbin/mkfs/mkfs
