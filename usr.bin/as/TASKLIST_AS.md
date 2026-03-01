@@ -161,11 +161,11 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `VTESTPS/PD`, `VZEROALL`, `VZEROUPPER`
 
 ### 4b. AVX2 (256-bit integer)
-- [ ] All SSE2 integer → 256-bit VEX forms
-- [ ] `VBROADCASTI128`, `VEXTRACTI128`, `VINSERTI128`, `VPBLENDD`
-- [ ] `VPBROADCASTB/W/D/Q`, `VPERMD/PS/PD/Q`, `VPERM2I128`
-- [ ] `VPMASKMOVD/Q`, `VPSLLVD/Q`, `VPSRLVD/Q`, `VPSRAVD`
-- [ ] `VGATHERDPS/DPD/QPS/QPD`, `VPGATHERDD/DQ/QD/QQ` (VSIB)
+- [x] All SSE2 integer → 256-bit VEX forms
+- [x] `VBROADCASTI128`, `VEXTRACTI128`, `VINSERTI128`, `VPBLENDD`
+- [x] `VPBROADCASTB/W/D/Q`, `VPERMD/PS/PD/Q`, `VPERM2I128`
+- [x] `VPMASKMOVD/Q`, `VPSLLVD/Q`, `VPSRLVD/Q`, `VPSRAVD`
+- [x] `VGATHERDPS/DPD/QPS/QPD`, `VPGATHERDD/DQ/QD/QQ` (VSIB)
 
 ### 4c. BMI1
 - [ ] `ANDN`, `BEXTR`, `BLSI`, `BLSMSK`, `BLSR`, `TZCNT` (r32/r64)
