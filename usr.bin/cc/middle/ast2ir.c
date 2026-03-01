@@ -9366,12 +9366,12 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
         return 1;
     }
     /*
-     * Treat extern inline definitions as inline-only provider bodies.
-     * This matches common GNU header usage (e.g. gmp.h) where an external
-     * implementation exists and the header definition should not emit a TU-local
-     * out-of-line symbol.
+     * Keep system GMP extern-inline helper bodies header-only.
+     * gmp.h emits extern-inline wrappers that should not become TU-local
+     * out-of-line definitions.
      */
-    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_EXTERN) != 0) {
+    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_EXTERN) != 0 && f->name != NULL &&
+        strncmp(f->name, "__gmp", 5) == 0) {
         return 1;
     }
     for (i = 0; i < f->stmt_count; ++i) {
