@@ -266,8 +266,8 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] `Tag_CPU_arch` shows architecture name, not just number.
 
 ### 19h. Compatibility Tests
-- [ ] Output matches GNU `readelf` for same input on key sections.
-- [ ] Output parseable by scripts that consume `readelf -a` output.
+- [x] Output matches GNU `readelf` for same input on key sections.
+- [x] Output parseable by scripts that consume `readelf -a` output.
 
 ### 19i. Edge Cases / Fuzz
 - [ ] Truncated ELF: no crash, partial display with warnings.
