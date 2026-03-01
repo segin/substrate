@@ -14,6 +14,7 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/time.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
@@ -35,12 +36,17 @@
 /* Modifiers */
 #define MOD_VERBOSE     0x0001
 #define MOD_UPDATE      0x0002
+#define MOD_AFTER       0x0004
 #define MOD_COUNT       0x0008
+#define MOD_BEFORE      0x0010
+#define MOD_PRESERVE    0x0020
 
 static char *archive_name;
 static int operation = 0;
 static int modifiers = 0;
 static const char *progname;
+static const char *position_member = NULL;
+static bool no_same_owner = false;
 
 /* Structure to hold in-memory archive member */
 struct ar_memb {
@@ -79,6 +85,15 @@ static void delete_members(char **members, int count);
 static void move_members(char **members, int count);
 static void print_members(char **members, int count);
 static void ranlib(void);
+static bool parse_numeric_field(const char *field, size_t field_len, int base, long long *out);
+static void list_insert_tail(struct ar_memb *node);
+static bool list_insert_relative(struct ar_memb *node, const char *anchor_name, bool before);
+static struct ar_memb *list_find_first(const char *name, struct ar_memb **prev_out);
+static int parse_mode_field(const struct ar_memb *m, mode_t *out_mode);
+static int parse_uid_field(const struct ar_memb *m, uid_t *out_uid);
+static int parse_gid_field(const struct ar_memb *m, gid_t *out_gid);
+static int parse_mtime_field(const struct ar_memb *m, time_t *out_time);
+static bool name_has_path_components(const char *name);
 
 int main(int argc, char *argv[])
 {
@@ -98,8 +113,28 @@ int main(int argc, char *argv[])
     if (argc < 2) usage();
 
     int argi = 1;
-    char *key = argv[argi];
-    if (key[0] == '-') key++;
+    while (argi < argc && strncmp(argv[argi], "--", 2) == 0) {
+        if (strcmp(argv[argi], "--") == 0) {
+            argi++;
+            break;
+        }
+        if (strcmp(argv[argi], "--no-same-owner") == 0) {
+            no_same_owner = true;
+            argi++;
+            continue;
+        }
+        warnx("unknown option: %s", argv[argi]);
+        usage();
+    }
+
+    if (argi >= argc) {
+        usage();
+    }
+
+    char *key = argv[argi++];
+    if (key[0] == '-') {
+        key++;
+    }
 
     while (*key) {
         switch (*key) {
@@ -114,6 +149,10 @@ int main(int argc, char *argv[])
         case 's': modifiers |= AR_TABLE; break;
         case 'v': modifiers |= MOD_VERBOSE; break;
         case 'u': modifiers |= MOD_UPDATE; break;
+        case 'a': modifiers |= MOD_AFTER; break;
+        case 'b':
+        case 'i': modifiers |= MOD_BEFORE; break;
+        case 'o': modifiers |= MOD_PRESERVE; break;
         default:
             warnx("illegal option -- %c", *key);
             usage();
@@ -121,17 +160,21 @@ int main(int argc, char *argv[])
         key++;
     }
 
-    argi++;
-    if (argi >= argc && (operation & (AR_DELETE|AR_EXTRACT|AR_LIST)) == 0 && !(operation == 0 && (modifiers & AR_TABLE))) {
-        /* Need archive name at least */
-        if (argi == argc) usage();
+    if ((modifiers & MOD_AFTER) && (modifiers & MOD_BEFORE)) {
+        errx(1, "only one of -a or -b/-i can be specified");
     }
 
-    if (argi < argc) {
-        archive_name = argv[argi++];
-    } else {
+    if ((modifiers & (MOD_AFTER | MOD_BEFORE)) != 0) {
+        if (argi >= argc) {
+            errx(1, "position modifier requires a member name");
+        }
+        position_member = argv[argi++];
+    }
+
+    if (argi >= argc) {
         usage();
     }
+    archive_name = argv[argi++];
 
     char **files = &argv[argi];
     int file_count = argc - argi;
@@ -151,8 +194,11 @@ int main(int argc, char *argv[])
 
     if (op_count > 1) errx(1, "only one operation can be specified");
     if (op_count == 0) usage();
+    if ((operation & AR_APPEND) && (modifiers & MOD_UPDATE)) {
+        errx(1, "modifier -u is incompatible with -q");
+    }
 
-    if (operation != AR_APPEND && operation != AR_REPLACE && operation != AR_CREATE) {
+    if (operation != AR_APPEND && operation != AR_REPLACE) {
         read_archive(archive_name);
     } else {
         if (access(archive_name, F_OK) == 0) {
@@ -246,6 +292,169 @@ static const char *get_basename(const char *path) {
     return p ? p + 1 : path;
 }
 
+static bool parse_numeric_field(const char *field, size_t field_len, int base, long long *out) {
+    char tmp[64];
+    char *end = NULL;
+    long long value;
+
+    if (out == NULL || field_len == 0 || field_len >= sizeof(tmp)) {
+        return false;
+    }
+
+    memcpy(tmp, field, field_len);
+    tmp[field_len] = '\0';
+
+    errno = 0;
+    value = strtoll(tmp, &end, base);
+    if (errno != 0 || end == tmp) {
+        return false;
+    }
+
+    while (*end == ' ') {
+        end++;
+    }
+    if (*end != '\0') {
+        return false;
+    }
+
+    *out = value;
+    return true;
+}
+
+static void list_insert_tail(struct ar_memb *node) {
+    struct ar_memb *cur;
+
+    if (node == NULL) {
+        return;
+    }
+    node->next = NULL;
+
+    if (head == NULL) {
+        head = node;
+        return;
+    }
+
+    cur = head;
+    while (cur->next != NULL) {
+        cur = cur->next;
+    }
+    cur->next = node;
+}
+
+static bool list_insert_relative(struct ar_memb *node, const char *anchor_name, bool before) {
+    struct ar_memb *anchor;
+    struct ar_memb *anchor_prev = NULL;
+
+    if (node == NULL || anchor_name == NULL || anchor_name[0] == '\0') {
+        return false;
+    }
+
+    anchor = list_find_first(anchor_name, &anchor_prev);
+    if (anchor == NULL) {
+        return false;
+    }
+
+    if (before) {
+        if (anchor_prev != NULL) {
+            anchor_prev->next = node;
+        } else {
+            head = node;
+        }
+        node->next = anchor;
+        return true;
+    }
+
+    node->next = anchor->next;
+    anchor->next = node;
+    return true;
+}
+
+static struct ar_memb *list_find_first(const char *name, struct ar_memb **prev_out) {
+    struct ar_memb *cur = head;
+    struct ar_memb *prev = NULL;
+
+    while (cur != NULL) {
+        if (!cur->deleted && strcmp(cur->name, name) == 0) {
+            if (prev_out != NULL) {
+                *prev_out = prev;
+            }
+            return cur;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+
+    if (prev_out != NULL) {
+        *prev_out = NULL;
+    }
+    return NULL;
+}
+
+static int parse_mode_field(const struct ar_memb *m, mode_t *out_mode) {
+    long long value;
+
+    if (m == NULL || out_mode == NULL) {
+        return -1;
+    }
+    if (!parse_numeric_field(m->hdr.ar_mode, sizeof(m->hdr.ar_mode), 8, &value) || value < 0) {
+        return -1;
+    }
+    *out_mode = (mode_t)value;
+    return 0;
+}
+
+static int parse_uid_field(const struct ar_memb *m, uid_t *out_uid) {
+    long long value;
+
+    if (m == NULL || out_uid == NULL) {
+        return -1;
+    }
+    if (!parse_numeric_field(m->hdr.ar_uid, sizeof(m->hdr.ar_uid), 10, &value) || value < 0) {
+        return -1;
+    }
+    *out_uid = (uid_t)value;
+    return 0;
+}
+
+static int parse_gid_field(const struct ar_memb *m, gid_t *out_gid) {
+    long long value;
+
+    if (m == NULL || out_gid == NULL) {
+        return -1;
+    }
+    if (!parse_numeric_field(m->hdr.ar_gid, sizeof(m->hdr.ar_gid), 10, &value) || value < 0) {
+        return -1;
+    }
+    *out_gid = (gid_t)value;
+    return 0;
+}
+
+static int parse_mtime_field(const struct ar_memb *m, time_t *out_time) {
+    long long value;
+
+    if (m == NULL || out_time == NULL) {
+        return -1;
+    }
+    if (!parse_numeric_field(m->hdr.ar_date, sizeof(m->hdr.ar_date), 10, &value) || value < 0) {
+        return -1;
+    }
+    *out_time = (time_t)value;
+    return 0;
+}
+
+static bool name_has_path_components(const char *name) {
+    if (name == NULL || name[0] == '\0') {
+        return false;
+    }
+    if (strchr(name, '/') != NULL) {
+        return true;
+    }
+    if (strstr(name, "..") != NULL) {
+        return true;
+    }
+    return false;
+}
+
 static void read_archive(const char *path) {
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
@@ -312,6 +521,8 @@ static void read_archive(const char *path) {
 static void append_files(char **files, int count) {
     for (int i = 0; i < count; i++) {
         const char *fname = files[i];
+        struct ar_memb *m = NULL;
+        struct ar_memb *m_prev = NULL;
         int fd = open(fname, O_RDONLY);
         if (fd < 0) {
             warn("%s", fname);
@@ -319,27 +530,35 @@ static void append_files(char **files, int count) {
         }
 
         struct stat st;
-        fstat(fd, &st);
+        if (fstat(fd, &st) != 0) {
+            warn("%s", fname);
+            close(fd);
+            continue;
+        }
 
         void *data = malloc(st.st_size);
-        read(fd, data, st.st_size);
+        if (data == NULL && st.st_size != 0) {
+            warnx("%s: out of memory", fname);
+            close(fd);
+            continue;
+        }
+        if (st.st_size > 0 && read(fd, data, st.st_size) != st.st_size) {
+            warn("%s", fname);
+            free(data);
+            close(fd);
+            continue;
+        }
         close(fd);
 
         const char *base = get_basename(fname);
-        struct ar_memb *m = NULL;
-        struct ar_memb *cur = head;
-        while (cur) {
-            if (strcmp(cur->name, base) == 0) {
-                m = cur;
-                break;
-            }
-            cur = cur->next;
+        if (operation == AR_REPLACE) {
+            m = list_find_first(base, &m_prev);
         }
 
         if (operation == AR_REPLACE && m) {
             if (modifiers & MOD_UPDATE) {
-                long old_time = atol(m->hdr.ar_date);
-                if (st.st_mtime <= old_time) {
+                time_t old_time = 0;
+                if (parse_mtime_field(m, &old_time) == 0 && st.st_mtime <= old_time) {
                     free(data);
                     continue;
                 }
@@ -350,12 +569,20 @@ static void append_files(char **files, int count) {
         } else {
             if (modifiers & MOD_VERBOSE) printf("a - %s\n", base);
             m = malloc(sizeof(struct ar_memb));
+            if (m == NULL) {
+                warnx("%s: out of memory", fname);
+                free(data);
+                continue;
+            }
             m->next = NULL;
-            if (head == NULL) head = m;
-            else {
-                struct ar_memb *last = head;
-                while (last->next) last = last->next;
-                last->next = m;
+            if ((modifiers & (MOD_AFTER | MOD_BEFORE)) != 0 && position_member != NULL) {
+                bool inserted = list_insert_relative(m, position_member, (modifiers & MOD_BEFORE) != 0);
+                if (!inserted) {
+                    warnx("%s: position member '%s' not found, appending", base, position_member);
+                    list_insert_tail(m);
+                }
+            } else {
+                list_insert_tail(m);
             }
         }
 
@@ -378,6 +605,7 @@ static void append_files(char **files, int count) {
         snprintf(buf, sizeof(buf), "%-10ld", (long)st.st_size);
         memcpy(m->hdr.ar_size, buf, 10);
         memcpy(m->hdr.ar_fmag, ARFMAG, 2);
+        (void)m_prev;
     }
 }
 
@@ -399,34 +627,44 @@ static void delete_members(char **members, int count) {
 }
 
 static void move_members(char **members, int count) {
-    if (count == 0) return;
-    for (int i = 0; i < count; i++) {
-        struct ar_memb *cur = head;
-        struct ar_memb *prev = NULL;
-        struct ar_memb *target = NULL;
+    bool use_relative = (modifiers & (MOD_AFTER | MOD_BEFORE)) != 0;
 
-        while (cur) {
-            if (strcmp(cur->name, members[i]) == 0 && !cur->deleted) {
-                target = cur;
-                if (prev) prev->next = cur->next;
-                else head = cur->next;
-                break;
-            }
-            prev = cur;
-            cur = cur->next;
+    if (count == 0) return;
+    if (use_relative && (position_member == NULL || position_member[0] == '\0')) {
+        errx(1, "move with -a/-b/-i requires a position member");
+    }
+    if (use_relative && list_find_first(position_member, NULL) == NULL) {
+        errx(1, "position member '%s' not found", position_member);
+    }
+
+    for (int i = 0; i < count; i++) {
+        struct ar_memb *prev = NULL;
+        struct ar_memb *target = list_find_first(members[i], &prev);
+
+        if (target == NULL) {
+            warnx("%s: not found", members[i]);
+            continue;
         }
 
-        if (target) {
-            if (modifiers & MOD_VERBOSE) printf("m - %s\n", target->name);
-            target->next = NULL;
-            if (head == NULL) head = target;
-            else {
-                struct ar_memb *last = head;
-                while (last->next) last = last->next;
-                last->next = target;
+        if (use_relative && strcmp(target->name, position_member) == 0) {
+            continue;
+        }
+
+        if (prev != NULL) {
+            prev->next = target->next;
+        } else {
+            head = target->next;
+        }
+
+        if (modifiers & MOD_VERBOSE) printf("m - %s\n", target->name);
+        target->next = NULL;
+
+        if (use_relative) {
+            if (!list_insert_relative(target, position_member, (modifiers & MOD_BEFORE) != 0)) {
+                errx(1, "position member '%s' not found", position_member);
             }
         } else {
-            warnx("%s: not found", members[i]);
+            list_insert_tail(target);
         }
     }
 }
@@ -460,13 +698,52 @@ static void extract_members(char **members, int count) {
             }
         }
         if (match) {
-            const char *base = get_basename(cur->name);
-            if (modifiers & MOD_VERBOSE) printf("x - %s\n", base);
-            int fd = open(base, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            if (fd < 0) warn("%s", base);
+            mode_t mode = 0644;
+            uid_t uid = 0;
+            gid_t gid = 0;
+            time_t mtime = 0;
+            const char *name = cur->name;
+
+            if (name_has_path_components(name)) {
+                warnx("%s: refusing to extract member with path components", name);
+                cur = cur->next;
+                continue;
+            }
+
+            if (parse_mode_field(cur, &mode) != 0) {
+                mode = 0644;
+            }
+
+            if (modifiers & MOD_VERBOSE) printf("x - %s\n", name);
+            int fd = open(name, O_WRONLY | O_CREAT | O_TRUNC, mode & 07777);
+            if (fd < 0) warn("%s", name);
             else {
-                write(fd, cur->data, cur->size);
+                ssize_t wr = write(fd, cur->data, cur->size);
+                if (wr != (ssize_t)cur->size) {
+                    warn("%s", name);
+                }
+                if (fchmod(fd, mode & 07777) != 0) {
+                    warn("%s", name);
+                }
                 close(fd);
+
+                if (!no_same_owner && geteuid() == 0 &&
+                    parse_uid_field(cur, &uid) == 0 &&
+                    parse_gid_field(cur, &gid) == 0) {
+                    if (chown(name, uid, gid) != 0) {
+                        warn("%s", name);
+                    }
+                }
+
+                if ((modifiers & MOD_PRESERVE) && parse_mtime_field(cur, &mtime) == 0) {
+                    struct timeval tv[2];
+                    tv[0].tv_sec = mtime;
+                    tv[0].tv_usec = 0;
+                    tv[1] = tv[0];
+                    if (utimes(name, tv) != 0) {
+                        warn("%s", name);
+                    }
+                }
             }
         }
         cur = cur->next;
@@ -490,13 +767,39 @@ static void list_members(char **members, int count) {
         }
         if (match) {
             if (modifiers & MOD_VERBOSE) {
-                int m = strtol(cur->hdr.ar_mode, NULL, 8);
-                printf("%c%c%c%c%c%c%c%c%c %ld/%ld %6ld %s %s\n",
-                    (m & S_IRUSR) ? 'r' : '-', (m & S_IWUSR) ? 'w' : '-', (m & S_IXUSR) ? 'x' : '-',
-                    (m & S_IRGRP) ? 'r' : '-', (m & S_IWGRP) ? 'w' : '-', (m & S_IXGRP) ? 'x' : '-',
-                    (m & S_IROTH) ? 'r' : '-', (m & S_IWOTH) ? 'w' : '-', (m & S_IXOTH) ? 'x' : '-',
-                    strtol(cur->hdr.ar_uid, NULL, 10), strtol(cur->hdr.ar_gid, NULL, 10),
-                    (long)cur->size, "date", cur->name);
+                mode_t mode = 0;
+                uid_t uid = 0;
+                gid_t gid = 0;
+                time_t mtime = 0;
+                char date_buf[32] = "Jan  1 00:00 1970";
+                char type_char = '-';
+
+                (void)parse_mode_field(cur, &mode);
+                (void)parse_uid_field(cur, &uid);
+                (void)parse_gid_field(cur, &gid);
+
+                if (parse_mtime_field(cur, &mtime) == 0) {
+                    struct tm *tm = localtime(&mtime);
+                    if (tm != NULL) {
+                        (void)strftime(date_buf, sizeof(date_buf), "%b %e %H:%M %Y", tm);
+                    }
+                }
+
+                if (S_ISDIR(mode)) type_char = 'd';
+                else if (S_ISCHR(mode)) type_char = 'c';
+                else if (S_ISBLK(mode)) type_char = 'b';
+                else if (S_ISFIFO(mode)) type_char = 'p';
+                else if (S_ISLNK(mode)) type_char = 'l';
+#ifdef S_ISSOCK
+                else if (S_ISSOCK(mode)) type_char = 's';
+#endif
+
+                printf("%c%c%c%c%c%c%c%c%c%c %ld/%ld %6ld %s %s\n",
+                    type_char,
+                    (mode & S_IRUSR) ? 'r' : '-', (mode & S_IWUSR) ? 'w' : '-', (mode & S_IXUSR) ? 'x' : '-',
+                    (mode & S_IRGRP) ? 'r' : '-', (mode & S_IWGRP) ? 'w' : '-', (mode & S_IXGRP) ? 'x' : '-',
+                    (mode & S_IROTH) ? 'r' : '-', (mode & S_IWOTH) ? 'w' : '-', (mode & S_IXOTH) ? 'x' : '-',
+                    (long)uid, (long)gid, (long)cur->size, date_buf, cur->name);
             } else {
                 printf("%s\n", cur->name);
             }

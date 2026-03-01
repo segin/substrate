@@ -22,35 +22,35 @@ Goal: implement a production `ar` where ELF member inspection/parsing comes from
 ## 3. Core Operations (`r`, `d`, `x`, `t`, `q`, `m`, `p`)
 
 ### 3a. Create / Replace (`r`)
-- [ ] `r` without members should be a no‑op write (not an error).
-- [ ] `rc` must suppress "creating archive" warning.
-- [ ] `ru` (update) must compare mtime correctly with `time_t`, not `atol` truncation.
-- [ ] On replace, preserve original member ordering (current code appends to tail on first‑insert only — verify).
+- [x] `r` without members should be a no‑op write (not an error).
+- [x] `rc` must suppress "creating archive" warning.
+- [x] `ru` (update) must compare mtime correctly with `time_t`, not `atol` truncation.
+- [x] On replace, preserve original member ordering (current code appends to tail on first‑insert only — verify).
 
 ### 3b. Quick Append (`q`)
-- [ ] `q` must not search for duplicates — always append.
-- [ ] `q` should refuse modifier `u` (update makes no sense with quick‑append).
+- [x] `q` must not search for duplicates — always append.
+- [x] `q` should refuse modifier `u` (update makes no sense with quick‑append).
 
 ### 3c. Delete (`d`)
-- [ ] `d` of a non‑existent member should warn but exit 0 (POSIX).
-- [ ] Deleting the only member must still write a valid (header‑only) archive.
+- [x] `d` of a non‑existent member should warn but exit 0 (POSIX).
+- [x] Deleting the only member must still write a valid (header‑only) archive.
 
 ### 3d. Extract (`x`)
-- [ ] Restore file mode from `ar_mode` header field (currently hardcoded `0644`).
-- [ ] Restore mtime via `utimes()` / `utimensat()` when `-o` (preserve timestamps) is given.
-- [ ] Restore uid/gid when running as root and not `-o` is specified (or new `--no-same-owner`).
-- [ ] Handle extraction of members whose names contain path components — refuse or strip depending on policy.
+- [x] Restore file mode from `ar_mode` header field (currently hardcoded `0644`).
+- [x] Restore mtime via `utimes()` / `utimensat()` when `-o` (preserve timestamps) is given.
+- [x] Restore uid/gid when running as root and not `-o` is specified (or new `--no-same-owner`).
+- [x] Handle extraction of members whose names contain path components — refuse or strip depending on policy.
 
 ### 3e. List (`t`)
-- [ ] `tv` should print the timestamp in a human‑readable format (currently prints literal `"date"`).
-- [ ] `tv` should print file type character (`-` for regular) before permissions.
+- [x] `tv` should print the timestamp in a human‑readable format (currently prints literal `"date"`).
+- [x] `tv` should print file type character (`-` for regular) before permissions.
 
 ### 3f. Move (`m`)
-- [ ] Support positional modifiers `a`, `b`/`i` (after/before a named member).
-- [ ] Error if the anchor member does not exist.
+- [x] Support positional modifiers `a`, `b`/`i` (after/before a named member).
+- [x] Error if the anchor member does not exist.
 
 ### 3g. Print (`p`)
-- [ ] `p` must write raw member data to stdout without any header (current code is correct, verify no trailing newline is added).
+- [x] `p` must write raw member data to stdout without any header (current code is correct, verify no trailing newline is added).
 
 ## 4. Modifiers and Flags
 
