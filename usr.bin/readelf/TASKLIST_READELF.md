@@ -218,9 +218,9 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 18. Build System
 
-- [ ] Create `Makefile` linking `libelfobj.a` and `libdemangle.a`.
-- [ ] `NATIVE_BUILD=1` support.
-- [ ] `install` to `$(DESTDIR)/usr/bin/readelf`.
+- [x] Create `Makefile` linking `libelfobj.a` and `libdemangle.a`.
+- [x] `NATIVE_BUILD=1` support.
+- [x] `install` to `$(DESTDIR)/usr/bin/readelf`.
 
 ## 19. Testing
 
