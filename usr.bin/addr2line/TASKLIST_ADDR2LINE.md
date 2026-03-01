@@ -297,8 +297,8 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Stdin mode: pipe addresses, verify per-line output.
 
 ### 10h. Compressed Debug Tests **(FR‑04)**
-- [ ] `.zdebug_line` (zlib‑gnu): verify transparent decompression.
-- [ ] `SHF_COMPRESSED` `.debug_line`: verify transparent decompression.
+- [x] `.zdebug_line` (zlib‑gnu): verify transparent decompression.
+- [x] `SHF_COMPRESSED` `.debug_line`: verify transparent decompression.
 
 ### 10i. Integration Tests
 - [ ] Compile `.c` → `a.out` with `-g`, run addr2line on known function address, verify output.

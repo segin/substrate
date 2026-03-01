@@ -345,6 +345,17 @@ SRC
     STDIN_LINES=$(printf '%s\n' "$OUT_STDIN" | wc -l | tr -d ' ')
     expect_eq "10g-4" "$STDIN_LINES" "3"
 
+    # 10h-1: .zdebug_line (zlib-gnu) decompression
+    OUT_BASE_COMP=$($BIN -e "$TMP/exec64_v5" 0x$A5)
+    objcopy --compress-debug-sections=zlib-gnu "$TMP/exec64_v5" "$TMP/exec64_zgnu"
+    OUT_ZGNU=$($BIN -e "$TMP/exec64_zgnu" 0x$A5)
+    expect_eq "10h-1" "$OUT_ZGNU" "$OUT_BASE_COMP"
+
+    # 10h-2: SHF_COMPRESSED .debug_line decompression
+    objcopy --compress-debug-sections=zlib "$TMP/exec64_v5" "$TMP/exec64_shfcomp"
+    OUT_SHFC=$($BIN -e "$TMP/exec64_shfcomp" 0x$A5)
+    expect_eq "10h-2" "$OUT_SHFC" "$OUT_BASE_COMP"
+
     pass "all"
 }
 
