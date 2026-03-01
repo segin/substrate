@@ -76,6 +76,23 @@ SRC
     rustc -C debuginfo=2 -C opt-level=2 -o "$out" "$TMP/inline.rs"
 }
 
+build_fixture_pie() {
+    out=$1
+    cat > "$TMP/pie.c" <<'SRC'
+int pie_func(int x) { return x + 9; }
+int main(void) { return pie_func(2); }
+SRC
+    cc -g -gdwarf-4 -fPIE -pie -o "$out" "$TMP/pie.c"
+}
+
+build_fixture_so() {
+    out=$1
+    cat > "$TMP/so.c" <<'SRC'
+int so_func(int x) { return x + 11; }
+SRC
+    cc -g -gdwarf-4 -fPIC -shared -Wl,-soname,libfixture.so -o "$out" "$TMP/so.c"
+}
+
 first_line() {
     printf '%s\n' "$1" | sed -n '1p'
 }
@@ -220,6 +237,22 @@ SRC
     grep -E 'unknown section: \.not_a_real_section' "$TMP/err_10d2" >/dev/null 2>&1 || \
         fail "10d-2 missing unknown section diagnostic"
     pass "10d-2"
+
+    # 10e-1: ET_DYN PIE lookup with load bias style runtime address
+    build_fixture_pie "$TMP/pie_v4"
+    PIE_SYM=$(addr_of "$TMP/pie_v4" pie_func)
+    [ -n "$PIE_SYM" ] || fail "10e-1 pie_func symbol not found"
+    OUT_PIE_STATIC=$($BIN -e "$TMP/pie_v4" 0x$PIE_SYM)
+    PIE_RUNTIME=$(printf '%x' $((0x$PIE_SYM + 0x55555000)))
+    OUT_PIE_RUNTIME=$($BIN -e "$TMP/pie_v4" 0x$PIE_RUNTIME)
+    expect_eq "10e-1" "$OUT_PIE_RUNTIME" "$OUT_PIE_STATIC"
+
+    # 10e-2: ET_DYN shared object function lookup
+    build_fixture_so "$TMP/libfixture.so"
+    SO_SYM=$(addr_of "$TMP/libfixture.so" so_func)
+    [ -n "$SO_SYM" ] || fail "10e-2 so_func symbol not found"
+    OUT_SO=$($BIN -f -e "$TMP/libfixture.so" 0x$SO_SYM)
+    expect_eq "10e-2" "$(first_line "$OUT_SO")" "so_func"
 
     pass "all"
 }

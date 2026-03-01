@@ -280,8 +280,8 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Invalid section name: error handling.
 
 ### 10e. PIE / Shared Object Tests **(FR‑41)**
-- [ ] `ET_DYN` PIE binary: verify addresses resolved with load bias.
-- [ ] `ET_DYN` shared library: verify symbol lookup.
+- [x] `ET_DYN` PIE binary: verify addresses resolved with load bias.
+- [x] `ET_DYN` shared library: verify symbol lookup.
 
 ### 10f. Edge Cases **(NF‑01 – NF‑07)**
 - [ ] Stripped binary (no DWARF): all addresses return `??:0`, `??` for function.
