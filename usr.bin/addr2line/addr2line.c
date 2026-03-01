@@ -269,20 +269,27 @@ static int read_u64_cursor(const uint8_t **pp, const uint8_t *end,
 }
 
 static int read_uleb128(const uint8_t **pp, const uint8_t *end, uint64_t *out) {
-    uint64_t value = 0;
+    unsigned __int128 value = 0;
     unsigned shift = 0;
     const uint8_t *p = *pp;
 
     while (p < end) {
         uint8_t byte = *p++;
-        value |= ((uint64_t)(byte & 0x7fu)) << shift;
+        unsigned __int128 chunk = (unsigned __int128)(byte & 0x7fu);
+        if (shift >= 128u) {
+            return -1;
+        }
+        value |= chunk << shift;
         if ((byte & 0x80u) == 0) {
+            if (value > (unsigned __int128)UINT64_MAX) {
+                return -1;
+            }
             *pp = p;
-            *out = value;
+            *out = (uint64_t)value;
             return 0;
         }
         shift += 7u;
-        if (shift >= 64u) {
+        if (shift > 70u) {
             return -1;
         }
     }
@@ -291,19 +298,22 @@ static int read_uleb128(const uint8_t **pp, const uint8_t *end, uint64_t *out) {
 }
 
 static int read_sleb128(const uint8_t **pp, const uint8_t *end, int64_t *out) {
-    int64_t value = 0;
+    __int128 value = 0;
     unsigned shift = 0;
     uint8_t byte = 0;
     const uint8_t *p = *pp;
 
     while (p < end) {
         byte = *p++;
-        value |= ((int64_t)(byte & 0x7fu)) << shift;
+        if (shift >= 128u) {
+            return -1;
+        }
+        value |= ((__int128)(byte & 0x7fu)) << shift;
         shift += 7u;
         if ((byte & 0x80u) == 0u) {
             break;
         }
-        if (shift >= 64u) {
+        if (shift > 70u) {
             return -1;
         }
     }
@@ -311,11 +321,17 @@ static int read_sleb128(const uint8_t **pp, const uint8_t *end, int64_t *out) {
     if ((byte & 0x80u) != 0u) {
         return -1;
     }
-    if (shift < 64u && (byte & 0x40u) != 0u) {
-        value |= -((int64_t)1 << shift);
+    if ((byte & 0x40u) != 0u) {
+        if (shift >= 128u) {
+            return -1;
+        }
+        value |= -((__int128)1 << shift);
+    }
+    if (value > (__int128)INT64_MAX || value < (__int128)INT64_MIN) {
+        return -1;
     }
     *pp = p;
-    *out = value;
+    *out = (int64_t)value;
     return 0;
 }
 

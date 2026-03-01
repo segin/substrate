@@ -173,8 +173,8 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Append row.
 
 ### 2e. LEB128 Encoding **(FR‑15)**
-- [ ] Unsigned LEB128 decoder with overflow guard.
-- [ ] Signed LEB128 decoder with overflow guard.
+- [x] Unsigned LEB128 decoder with overflow guard.
+- [x] Signed LEB128 decoder with overflow guard.
 
 ---
 
