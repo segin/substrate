@@ -5109,10 +5109,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `^_` (`undo`): undo last editing operation.
     - [x] **Escape Sequence Decoding:**
         - [x] Two‑byte CSI: `ESC [` + final byte.
-        - [ ] Three‑byte CSI with numeric parameter: `ESC [ <digit> ~` (Delete, Insert, PgUp, PgDn).
-        - [ ] SS3 sequences: `ESC O A`/`B`/`C`/`D` (alternate arrow encoding).
-        - [ ] Extended CSI: `ESC [ 1 ; <mod> <final>` (Shift/Ctrl/Alt + arrow/Home/End).
-        - [ ] Timeout on incomplete escape (avoid blocking on bare ESC).
+        - [x] Three‑byte CSI with numeric parameter: `ESC [ <digit> ~` (Delete, Insert, PgUp, PgDn).
+        - [x] SS3 sequences: `ESC O A`/`B`/`C`/`D` (alternate arrow encoding).
+        - [x] Extended CSI: `ESC [ 1 ; <mod> <final>` (Shift/Ctrl/Alt + arrow/Home/End).
+        - [x] Timeout on incomplete escape (avoid blocking on bare ESC).
     - [ ] **Kill Ring:**
         - [ ] Circular buffer (8 entries default).
         - [ ] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring.

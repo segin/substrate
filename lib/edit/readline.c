@@ -4,10 +4,31 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include "el.h"
 
 static int is_word_char(unsigned char ch) {
     return isalnum(ch) || ch == '_';
+}
+
+static int read_esc_byte(EditLine *el, char *out, int timeout_ms) {
+    fd_set rfds;
+    struct timeval tv;
+    int fd;
+    int ret;
+
+    if (!el || !out) return 0;
+    fd = fileno(el->fin);
+
+    FD_ZERO(&rfds);
+    FD_SET(fd, &rfds);
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    ret = select(fd + 1, &rfds, NULL, NULL, &tv);
+    if (ret <= 0) return 0;
+    if (read(fd, out, 1) != 1) return 0;
+    return 1;
 }
 
 static void kill_ring_push(EditLine *el, const char *text, size_t len, int append) {
@@ -628,93 +649,40 @@ const char *el_gets(EditLine *el, int *count) {
             if (undo_pop(el)) refresh_line(el);
         } else if (c == 0x1B) { /* ESC */
             char seq0;
-            if (read(fileno(el->fin), &seq0, 1) == 1) {
-                if (seq0 == '[') {
-                    char seq1;
-                    if (read(fileno(el->fin), &seq1, 1) != 1) continue;
-                    if (seq1 == 'C') { /* Right */
-                        el->last_cmd_was_kill = 0;
-                        el->yank_active = 0;
-                        if (el->line.cursor < el->line.len) {
-                            el->line.cursor++;
-                            refresh_line(el);
-                        }
-                    } else if (seq1 == 'D') { /* Left */
-                        el->last_cmd_was_kill = 0;
-                        el->yank_active = 0;
-                        if (el->line.cursor > 0) {
-                            el->line.cursor--;
-                            refresh_line(el);
-                        }
-                    } else if (seq1 == 'H') { /* Home */
-                        el->last_cmd_was_kill = 0;
-                        el->yank_active = 0;
-                        el->line.cursor = 0;
+            if (!read_esc_byte(el, &seq0, 80)) {
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                continue;
+            }
+            if (seq0 == '[') {
+                char seq1;
+                if (!read_esc_byte(el, &seq1, 80)) continue;
+
+                if (seq1 == 'C') { /* Right */
+                    el->last_cmd_was_kill = 0;
+                    el->yank_active = 0;
+                    if (el->line.cursor < el->line.len) {
+                        el->line.cursor++;
                         refresh_line(el);
-                    } else if (seq1 == 'F') { /* End */
-                        el->last_cmd_was_kill = 0;
-                        el->yank_active = 0;
-                        el->line.cursor = el->line.len;
-                        refresh_line(el);
-                    } else if (seq1 == 'A') { /* Up (History) */
-                        el->last_cmd_was_kill = 0;
-                        el->yank_active = 0;
-                        if (el->history) {
-                            HistEvent ev;
-                            if (!el->history_browsing) {
-                                (void)history_save_current_input(el);
-                                el->history_browsing = 1;
-                            }
-                            if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                                line_load_history(el, ev.str);
-                                refresh_line(el);
-                            }
-                        }
-                    } else if (seq1 == 'B') { /* Down (History) */
-                        el->last_cmd_was_kill = 0;
-                        el->yank_active = 0;
-                        if (el->history) {
-                            HistEvent ev;
-                            if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                                line_load_history(el, ev.str);
-                                refresh_line(el);
-                            } else {
-                                history_restore_current_input(el);
-                                el->history_browsing = 0;
-                                refresh_line(el);
-                            }
-                        }
-                    } else if (seq1 >= '0' && seq1 <= '9') {
-                        char seq2;
-                        if (read(fileno(el->fin), &seq2, 1) == 1 && seq2 == '~') {
-                            el->last_cmd_was_kill = 0;
-                            el->yank_active = 0;
-                            if (seq1 == '2') {
-                                el->overwrite_mode = !el->overwrite_mode;
-                            } else if (seq1 == '1') {
-                                el->line.cursor = 0;
-                                refresh_line(el);
-                            } else if (seq1 == '4') {
-                                el->line.cursor = el->line.len;
-                                refresh_line(el);
-                            }
-                        }
                     }
-                } else if (seq0 == 'd' || seq0 == 'D') { /* M-d kill-word */
-                    el->yank_active = 0;
-                    undo_push(el);
-                    if (kill_word(el)) refresh_line(el);
-                } else if (seq0 == 'f' || seq0 == 'F') { /* M-f */
+                } else if (seq1 == 'D') { /* Left */
                     el->last_cmd_was_kill = 0;
                     el->yank_active = 0;
-                    move_forward_word(el);
-                    refresh_line(el);
-                } else if (seq0 == 'b' || seq0 == 'B') { /* M-b */
+                    if (el->line.cursor > 0) {
+                        el->line.cursor--;
+                        refresh_line(el);
+                    }
+                } else if (seq1 == 'H') { /* Home */
                     el->last_cmd_was_kill = 0;
                     el->yank_active = 0;
-                    move_backward_word(el);
+                    el->line.cursor = 0;
                     refresh_line(el);
-                } else if (seq0 == '<') { /* M-< beginning-of-history */
+                } else if (seq1 == 'F') { /* End */
+                    el->last_cmd_was_kill = 0;
+                    el->yank_active = 0;
+                    el->line.cursor = el->line.len;
+                    refresh_line(el);
+                } else if (seq1 == 'A') { /* Up (History) */
                     el->last_cmd_was_kill = 0;
                     el->yank_active = 0;
                     if (el->history) {
@@ -723,40 +691,221 @@ const char *el_gets(EditLine *el, int *count) {
                             (void)history_save_current_input(el);
                             el->history_browsing = 1;
                         }
-                        if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
+                        if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
                             line_load_history(el, ev.str);
                             refresh_line(el);
                         }
                     }
-                } else if (seq0 == '>') { /* M-> end-of-history */
+                } else if (seq1 == 'B') { /* Down (History) */
                     el->last_cmd_was_kill = 0;
                     el->yank_active = 0;
                     if (el->history) {
                         HistEvent ev;
-                        if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
-                            if (!el->history_browsing) {
-                                (void)history_save_current_input(el);
-                                el->history_browsing = 1;
-                            }
+                        if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
                             line_load_history(el, ev.str);
+                            refresh_line(el);
                         } else {
                             history_restore_current_input(el);
                             el->history_browsing = 0;
+                            refresh_line(el);
                         }
+                    }
+                } else if (seq1 >= '0' && seq1 <= '9') {
+                    char seq2;
+                    if (!read_esc_byte(el, &seq2, 80)) continue;
+
+                    if (seq2 == '~') {
+                        el->last_cmd_was_kill = 0;
+                        el->yank_active = 0;
+                        if (seq1 == '1') {
+                            el->line.cursor = 0;
+                            refresh_line(el);
+                        } else if (seq1 == '2') {
+                            el->overwrite_mode = !el->overwrite_mode;
+                        } else if (seq1 == '3') { /* Delete */
+                            if (el->line.cursor < el->line.len) {
+                                undo_push(el);
+                                memmove(el->line.buffer + el->line.cursor,
+                                        el->line.buffer + el->line.cursor + 1,
+                                        el->line.len - el->line.cursor);
+                                el->line.len--;
+                                refresh_line(el);
+                            }
+                        } else if (seq1 == '4') {
+                            el->line.cursor = el->line.len;
+                            refresh_line(el);
+                        } else if (seq1 == '5') { /* PgUp */
+                            if (el->history) {
+                                HistEvent ev;
+                                if (!el->history_browsing) {
+                                    (void)history_save_current_input(el);
+                                    el->history_browsing = 1;
+                                }
+                                if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
+                                    line_load_history(el, ev.str);
+                                    refresh_line(el);
+                                }
+                            }
+                        } else if (seq1 == '6') { /* PgDn */
+                            if (el->history) {
+                                HistEvent ev;
+                                if (!el->history_browsing) {
+                                    (void)history_save_current_input(el);
+                                    el->history_browsing = 1;
+                                }
+                                if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
+                                    line_load_history(el, ev.str);
+                                    refresh_line(el);
+                                }
+                            }
+                        }
+                    } else if (seq1 == '1' && seq2 == ';') { /* ESC [ 1 ; <mod> <final> */
+                        char mod;
+                        char final;
+                        if (!read_esc_byte(el, &mod, 80)) continue;
+                        if (!read_esc_byte(el, &final, 80)) continue;
+                        (void)mod;
+                        el->last_cmd_was_kill = 0;
+                        el->yank_active = 0;
+                        if (final == 'A') {
+                            if (el->history) {
+                                HistEvent ev;
+                                if (!el->history_browsing) {
+                                    (void)history_save_current_input(el);
+                                    el->history_browsing = 1;
+                                }
+                                if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                                    line_load_history(el, ev.str);
+                                    refresh_line(el);
+                                }
+                            }
+                        } else if (final == 'B') {
+                            if (el->history) {
+                                HistEvent ev;
+                                if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                                    line_load_history(el, ev.str);
+                                    refresh_line(el);
+                                } else {
+                                    history_restore_current_input(el);
+                                    el->history_browsing = 0;
+                                    refresh_line(el);
+                                }
+                            }
+                        } else if (final == 'C') {
+                            if (el->line.cursor < el->line.len) {
+                                el->line.cursor++;
+                                refresh_line(el);
+                            }
+                        } else if (final == 'D') {
+                            if (el->line.cursor > 0) {
+                                el->line.cursor--;
+                                refresh_line(el);
+                            }
+                        } else if (final == 'H') {
+                            el->line.cursor = 0;
+                            refresh_line(el);
+                        } else if (final == 'F') {
+                            el->line.cursor = el->line.len;
+                            refresh_line(el);
+                        }
+                    }
+                }
+            } else if (seq0 == 'O') { /* SS3 alternate arrows */
+                char seq1;
+                if (!read_esc_byte(el, &seq1, 80)) continue;
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                if (seq1 == 'C') {
+                    if (el->line.cursor < el->line.len) {
+                        el->line.cursor++;
                         refresh_line(el);
                     }
-                } else if (seq0 == 'y' || seq0 == 'Y') { /* M-y yank-pop */
-                    el->last_cmd_was_kill = 0;
-                    undo_push(el);
-                    if (yank_pop(el)) refresh_line(el);
-                } else if (seq0 == 0x08 || seq0 == 0x7F) { /* M-BS or M-DEL */
-                    el->yank_active = 0;
-                    undo_push(el);
-                    if (backward_kill_word(el)) refresh_line(el);
-                } else {
-                    el->last_cmd_was_kill = 0;
-                    el->yank_active = 0;
+                } else if (seq1 == 'D') {
+                    if (el->line.cursor > 0) {
+                        el->line.cursor--;
+                        refresh_line(el);
+                    }
+                } else if (seq1 == 'A') {
+                    if (el->history) {
+                        HistEvent ev;
+                        if (!el->history_browsing) {
+                            (void)history_save_current_input(el);
+                            el->history_browsing = 1;
+                        }
+                        if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                            line_load_history(el, ev.str);
+                            refresh_line(el);
+                        }
+                    }
+                } else if (seq1 == 'B') {
+                    if (el->history) {
+                        HistEvent ev;
+                        if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                            line_load_history(el, ev.str);
+                            refresh_line(el);
+                        } else {
+                            history_restore_current_input(el);
+                            el->history_browsing = 0;
+                            refresh_line(el);
+                        }
+                    }
                 }
+            } else if (seq0 == 'd' || seq0 == 'D') { /* M-d kill-word */
+                el->yank_active = 0;
+                undo_push(el);
+                if (kill_word(el)) refresh_line(el);
+            } else if (seq0 == 'f' || seq0 == 'F') { /* M-f */
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                move_forward_word(el);
+                refresh_line(el);
+            } else if (seq0 == 'b' || seq0 == 'B') { /* M-b */
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                move_backward_word(el);
+                refresh_line(el);
+            } else if (seq0 == '<') { /* M-< beginning-of-history */
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                if (el->history) {
+                    HistEvent ev;
+                    if (!el->history_browsing) {
+                        (void)history_save_current_input(el);
+                        el->history_browsing = 1;
+                    }
+                    if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
+                        line_load_history(el, ev.str);
+                        refresh_line(el);
+                    }
+                }
+            } else if (seq0 == '>') { /* M-> end-of-history */
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                if (el->history) {
+                    HistEvent ev;
+                    if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
+                        if (!el->history_browsing) {
+                            (void)history_save_current_input(el);
+                            el->history_browsing = 1;
+                        }
+                        line_load_history(el, ev.str);
+                    } else {
+                        history_restore_current_input(el);
+                        el->history_browsing = 0;
+                    }
+                    refresh_line(el);
+                }
+            } else if (seq0 == 'y' || seq0 == 'Y') { /* M-y yank-pop */
+                el->last_cmd_was_kill = 0;
+                undo_push(el);
+                if (yank_pop(el)) refresh_line(el);
+            } else if (seq0 == 0x08 || seq0 == 0x7F) { /* M-BS or M-DEL */
+                el->yank_active = 0;
+                undo_push(el);
+                if (backward_kill_word(el)) refresh_line(el);
+            } else {
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
             }
         } else if (c >= 32 && c < 127) {
             if (line_ensure_capacity(el, el->line.len + 2) == 0) {
