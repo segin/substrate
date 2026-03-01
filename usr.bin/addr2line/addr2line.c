@@ -1,4 +1,5 @@
 #include <elfobj.h>
+#include <demangle.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -106,6 +107,9 @@ typedef struct {
     int show_inlines;
     const char *section_name;
     int basenames;
+    int demangle;
+    int pretty;
+    int show_addresses;
 } addr2line_opts_t;
 
 typedef struct {
@@ -307,10 +311,16 @@ static char *line_path_for_unit_file(const addr2line_image_t *img,
                                      uint32_t file_index);
 static const char *path_basename_view(const char *path);
 static void output_unresolved(void);
+static void emit_frame_result(const addr2line_opts_t *opts,
+                              uint64_t query,
+                              const char *function_name,
+                              const char *path,
+                              uint32_t line,
+                              uint32_t column);
 
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-e file] [-f] [-i] [-c] [-s] [-j section] [addr ...]\n"
+            "usage: %s [-e file] [-f] [-i] [-C] [-p] [-a] [-c] [-s] [-j section] [addr ...]\n"
             "       %s --help\n"
             "       %s --version\n",
             g_progname, g_progname, g_progname);
@@ -3330,19 +3340,12 @@ static void output_inline_chain(const addr2line_image_t *img,
         const dwarf_inline_t *inl = &img->inlines[chain[idx]];
         char *path = line_path_for_unit_file(img, inl->line_unit_index, inl->call_file);
         const char *name = inline_function_name(img, inl);
-        if (opts->show_functions) {
-            puts(name);
-        }
-        if (path != NULL && path[0] != '\0') {
-            const char *out_path = opts->basenames ? path_basename_view(path) : path;
-            if (opts->show_column) {
-                printf("%s:%" PRIu32 ":%" PRIu32 "\n", out_path, inl->call_line, inl->call_column);
-            } else {
-                printf("%s:%" PRIu32 "\n", out_path, inl->call_line);
-            }
-        } else {
-            output_unresolved();
-        }
+        emit_frame_result(opts,
+                          query,
+                          name,
+                          path != NULL ? path : "??",
+                          inl->call_line,
+                          inl->call_column);
         free(path);
     }
 }
@@ -3466,6 +3469,57 @@ static const char *path_basename_view(const char *path) {
     return path;
 }
 
+static void emit_frame_result(const addr2line_opts_t *opts,
+                              uint64_t query,
+                              const char *function_name,
+                              const char *path,
+                              uint32_t line,
+                              uint32_t column) {
+    const char *out_path = path != NULL ? path : "??";
+    const char *func = function_name != NULL ? function_name : "??";
+    const char *display_func = func;
+    const char *display_path;
+    char *dem = NULL;
+
+    if (opts->basenames) {
+        out_path = path_basename_view(out_path);
+    }
+    if (opts->demangle && strcmp(func, "??") != 0) {
+        dem = demangle(func, DEMANGLE_AUTO);
+        if (dem != NULL && dem[0] != '\0') {
+            display_func = dem;
+        }
+    }
+    display_path = out_path;
+
+    if (opts->pretty) {
+        if (opts->show_addresses) {
+            printf("0x%" PRIx64 ": ", query);
+        }
+        printf("%s at %s:%" PRIu32, display_func, display_path, line);
+        if (opts->show_column) {
+            printf(":%" PRIu32, column);
+        }
+        putchar('\n');
+        demangle_free(dem);
+        return;
+    }
+
+    if (opts->show_addresses) {
+        printf("0x%" PRIx64 "\n", query);
+    }
+    if (opts->show_functions) {
+        puts(display_func);
+    }
+    printf("%s:%" PRIu32, display_path, line);
+    if (opts->show_column) {
+        printf(":%" PRIu32, column);
+    }
+    putchar('\n');
+
+    demangle_free(dem);
+}
+
 static uint64_t adjust_query_address(const addr2line_image_t *img,
                                      const addr2line_opts_t *opts,
                                      uint64_t query) {
@@ -3559,30 +3613,21 @@ static void output_lookup(const addr2line_image_t *img,
                           const addr2line_opts_t *opts) {
     const line_entry_t *entry = lookup_line_entry(img, query);
     char *path;
+    const char *func = lookup_function_name(img, query);
     if (opts->show_inlines) {
         output_inline_chain(img, query, opts);
     }
-    if (opts->show_functions) {
-        puts(lookup_function_name(img, query));
-    }
     if (entry == NULL) {
-        output_unresolved();
+        emit_frame_result(opts, query, func, "??", 0, 0);
         return;
     }
     path = line_entry_path(img, entry);
     if (path == NULL || path[0] == '\0') {
         free(path);
-        output_unresolved();
+        emit_frame_result(opts, query, func, "??", 0, 0);
         return;
     }
-    {
-        const char *out_path = opts->basenames ? path_basename_view(path) : path;
-        if (opts->show_column) {
-            printf("%s:%" PRIu32 ":%" PRIu32 "\n", out_path, entry->line, entry->column);
-        } else {
-            printf("%s:%" PRIu32 "\n", out_path, entry->line);
-        }
-    }
+    emit_frame_result(opts, query, func, path, entry->line, entry->column);
     free(path);
 }
 
@@ -3657,12 +3702,44 @@ static int parse_options(int argc, char **argv, addr2line_opts_t *opts) {
             opts->exe_path = arg + 6;
             continue;
         }
+        if (strcmp(arg, "--functions") == 0) {
+            opts->show_functions = 1;
+            continue;
+        }
+        if (strcmp(arg, "--inlines") == 0) {
+            opts->show_inlines = 1;
+            continue;
+        }
+        if (strcmp(arg, "--demangle") == 0) {
+            opts->demangle = 1;
+            continue;
+        }
+        if (strcmp(arg, "--pretty-print") == 0) {
+            opts->pretty = 1;
+            continue;
+        }
+        if (strcmp(arg, "--addresses") == 0) {
+            opts->show_addresses = 1;
+            continue;
+        }
         if (strcmp(arg, "-c") == 0) {
             opts->show_column = 1;
             continue;
         }
         if (strcmp(arg, "-f") == 0) {
             opts->show_functions = 1;
+            continue;
+        }
+        if (strcmp(arg, "-C") == 0) {
+            opts->demangle = 1;
+            continue;
+        }
+        if (strcmp(arg, "-p") == 0) {
+            opts->pretty = 1;
+            continue;
+        }
+        if (strcmp(arg, "-a") == 0) {
+            opts->show_addresses = 1;
             continue;
         }
         if (strcmp(arg, "-i") == 0) {

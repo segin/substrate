@@ -220,18 +220,18 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 7. Flags
 
-- [ ] `-e <file>` / `--exe=<file>`: specify ELF executable/object (default: `a.out`). **(FR‑01, FR‑02)**
-- [ ] `-f` / `--functions`: display function name before file:line. **(FR‑24)**
-- [ ] `-s` / `--basenames`: strip directory prefixes from filenames. **(FR‑52)**
-- [ ] `-i` / `--inlines`: unwind inline frames (see §5). **(FR‑30, FR‑31)**
-- [ ] `-j <section>` / `--section=<section>`: interpret addresses relative to section. **(FR‑40)**
-- [ ] `-C` / `--demangle`: demangle function names via `demangle()` from `libdemangle`. **(FR‑53)**
-- [ ] `-p` / `--pretty-print`: print each frame on one line with ` at file:line` format. **(FR‑54)**
-- [ ] `-a` / `--addresses`: print address before each result. **(FR‑55)**
-- [ ] `--help` / `-h`: usage. **(FR‑56)**
-- [ ] `--version` / `-V`: version. **(FR‑57)**
-- [ ] Addresses on stdin (one per line) when no arguments after flags. **(FR‑51)**
-- [ ] Addresses on command line after the flags. **(FR‑50)**
+- [x] `-e <file>` / `--exe=<file>`: specify ELF executable/object (default: `a.out`). **(FR‑01, FR‑02)**
+- [x] `-f` / `--functions`: display function name before file:line. **(FR‑24)**
+- [x] `-s` / `--basenames`: strip directory prefixes from filenames. **(FR‑52)**
+- [x] `-i` / `--inlines`: unwind inline frames (see §5). **(FR‑30, FR‑31)**
+- [x] `-j <section>` / `--section=<section>`: interpret addresses relative to section. **(FR‑40)**
+- [x] `-C` / `--demangle`: demangle function names via `demangle()` from `libdemangle`. **(FR‑53)**
+- [x] `-p` / `--pretty-print`: print each frame on one line with ` at file:line` format. **(FR‑54)**
+- [x] `-a` / `--addresses`: print address before each result. **(FR‑55)**
+- [x] `--help` / `-h`: usage. **(FR‑56)**
+- [x] `--version` / `-V`: version. **(FR‑57)**
+- [x] Addresses on stdin (one per line) when no arguments after flags. **(FR‑51)**
+- [x] Addresses on command line after the flags. **(FR‑50)**
 
 ---
 
