@@ -208,13 +208,13 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 17. Error Handling
 
-- [ ] Non-ELF input: `readelf: Error: Not an ELF file`, exit 1.
-- [ ] Truncated ELF: display what is possible, warn about truncation.
-- [ ] Multiple files: print filename header before each file's output.
-- [ ] Section index out of range: warn, skip.
-- [ ] String table index out of range: display `<corrupt>`.
-- [ ] Unknown machine types: display numeric values.
-- [ ] Unknown section/segment/relocation types: display numeric values.
+- [x] Non-ELF input: `readelf: Error: Not an ELF file`, exit 1.
+- [x] Truncated ELF: display what is possible, warn about truncation.
+- [x] Multiple files: print filename header before each file's output.
+- [x] Section index out of range: warn, skip.
+- [x] String table index out of range: display `<corrupt>`.
+- [x] Unknown machine types: display numeric values.
+- [x] Unknown section/segment/relocation types: display numeric values.
 
 ## 18. Build System
 
