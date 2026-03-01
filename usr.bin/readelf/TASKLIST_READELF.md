@@ -243,11 +243,11 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] C++ demangling with `-C` works.
 
 ### 19d. Relocation Tests
-- [ ] All i386 relocation type names correct.
-- [ ] All x86-64 relocation type names correct.
-- [ ] All ARM relocation type names correct.
-- [ ] All AArch64 relocation type names correct.
-- [ ] Unknown types: numeric display.
+- [x] All i386 relocation type names correct.
+- [x] All x86-64 relocation type names correct.
+- [x] All ARM relocation type names correct.
+- [x] All AArch64 relocation type names correct.
+- [x] Unknown types: numeric display.
 
 ### 19e. Dynamic Tests
 - [ ] All `DT_*` tags decoded.
