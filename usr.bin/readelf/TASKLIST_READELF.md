@@ -196,15 +196,15 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 16. Display Options
 
-- [ ] `-a` / `--all`: equivalent to `-h -l -S -s -r -d -V -A -I`.
-- [ ] `-W` / `--wide`: do not truncate output to 80 columns.
-- [ ] `-e` / `--headers`: equivalent to `-h -l -S`.
-- [ ] `-t` / `--section-details`: more detailed section header display.
-- [ ] `--dyn-syms`: display only dynamic symbol table.
-- [ ] `-C` / `--demangle`: demangle C++ symbol names (via `libdemangle`).
-- [ ] `-D` / `--use-dynamic`: use dynamic symbol table for symbol display.
-- [ ] `--sym-base=0|8|10|16`: control symbol value radix.
-- [ ] `--print-sysv`: sysv-style output for some displays.
+- [x] `-a` / `--all`: equivalent to `-h -l -S -s -r -d -V -A -I`.
+- [x] `-W` / `--wide`: do not truncate output to 80 columns.
+- [x] `-e` / `--headers`: equivalent to `-h -l -S`.
+- [x] `-t` / `--section-details`: more detailed section header display.
+- [x] `--dyn-syms`: display only dynamic symbol table.
+- [x] `-C` / `--demangle`: demangle C++ symbol names (via `libdemangle`).
+- [x] `-D` / `--use-dynamic`: use dynamic symbol table for symbol display.
+- [x] `--sym-base=0|8|10|16`: control symbol value radix.
+- [x] `--print-sysv`: sysv-style output for some displays.
 
 ## 17. Error Handling
 
