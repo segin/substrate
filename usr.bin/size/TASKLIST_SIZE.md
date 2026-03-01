@@ -36,8 +36,8 @@ Goal: implement `size` using section accounting from `libelfobj`.
 - [x] Total row at bottom.
 
 ### 3c. GNU Format (`--format=gnu`)
-- [ ] Header: `      text       data        bss      total filename`.
-- [ ] Same as Berkeley but with wider columns.
+- [x] Header: `      text       data        bss      total filename`.
+- [x] Same as Berkeley but with wider columns.
 
 ### 3d. Radix Options
 - [ ] `-d` / `--radix=10`: decimal (default).

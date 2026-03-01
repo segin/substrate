@@ -34,13 +34,14 @@ typedef enum {
 
 typedef enum {
     SIZE_FORMAT_BERKELEY = 0,
-    SIZE_FORMAT_SYSV = 1
+    SIZE_FORMAT_SYSV = 1,
+    SIZE_FORMAT_GNU = 2
 } size_format_t;
 
 static const char *progname = "size";
 
 static void usage(FILE *out) {
-    fprintf(out, "usage: %s [-A|-B|--format={sysv,berkeley}] <file>...\n", progname);
+    fprintf(out, "usage: %s [-A|-B|--format={sysv,berkeley,gnu}] <file>...\n", progname);
 }
 
 static char *xstrdup(const char *s) {
@@ -215,6 +216,18 @@ static void print_row(const char *path, const size_totals_t *totals) {
            path);
 }
 
+static void print_gnu_row(const char *path, const size_totals_t *totals) {
+    uint64_t total;
+
+    total = totals->text + totals->data + totals->bss;
+    printf("%10llu %10llu %10llu %10llu %s\n",
+           (unsigned long long)totals->text,
+           (unsigned long long)totals->data,
+           (unsigned long long)totals->bss,
+           (unsigned long long)total,
+           path);
+}
+
 static void print_sysv_table(const char *path, const size_report_t *report) {
     size_t i;
     uint64_t total = 0;
@@ -255,6 +268,11 @@ int main(int argc, char **argv) {
             classify_mode = SIZE_CLASSIFY_SYSV;
             continue;
         }
+        if (strcmp(argv[i], "--format=gnu") == 0) {
+            format = SIZE_FORMAT_GNU;
+            classify_mode = SIZE_CLASSIFY_BERKELEY;
+            continue;
+        }
         if (strcmp(argv[i], "-B") == 0 || strcmp(argv[i], "--format=berkeley") == 0) {
             format = SIZE_FORMAT_BERKELEY;
             classify_mode = SIZE_CLASSIFY_BERKELEY;
@@ -278,6 +296,8 @@ int main(int argc, char **argv) {
 
     if (format == SIZE_FORMAT_BERKELEY) {
         printf("   text    data     bss     dec     hex filename\n");
+    } else if (format == SIZE_FORMAT_GNU) {
+        printf("      text       data        bss      total filename\n");
     }
 
     for (i = 1; i < argc; ++i) {
@@ -302,6 +322,8 @@ int main(int argc, char **argv) {
             }
             print_sysv_table(argv[i], &report);
             first_file = 0;
+        } else if (format == SIZE_FORMAT_GNU) {
+            print_gnu_row(argv[i], &report.totals);
         } else {
             print_row(argv[i], &report.totals);
         }
@@ -317,8 +339,12 @@ int main(int argc, char **argv) {
         free_report(&report);
     }
 
-    if (format == SIZE_FORMAT_BERKELEY && printed > 1) {
-        print_row("total", &grand);
+    if (printed > 1) {
+        if (format == SIZE_FORMAT_BERKELEY) {
+            print_row("total", &grand);
+        } else if (format == SIZE_FORMAT_GNU) {
+            print_gnu_row("total", &grand);
+        }
     }
 
     return any_fail ? 1 : 0;
