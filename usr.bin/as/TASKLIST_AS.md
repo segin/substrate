@@ -174,7 +174,7 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `BZHI`, `MULX`, `PDEP`, `PEXT`, `RORX`, `SARX`, `SHLX`, `SHRX` (r32/r64)
 
 ### 4e. F16C
-- [ ] `VCVTPH2PS`, `VCVTPS2PH`
+- [x] `VCVTPH2PS`, `VCVTPS2PH`
 
 ### 4f. FMA (132/213/231 × PS/PD/SS/SD)
 - [ ] `VFMADD`, `VFMSUB`, `VFNMADD`, `VFNMSUB` (all 12 forms each)

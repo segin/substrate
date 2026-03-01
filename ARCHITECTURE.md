@@ -201,6 +201,7 @@ These components are essential for booting and basic system operation.
   - AVX2 integer/vector extension support (`vpadd*` promotions, `vbroadcasti128`, `vextracti128`/`vinserti128`, `vpblendd`, `vpbroadcast*`, `vperm*`, `vpmaskmov*`, variable shifts, and VSIB gather families) is staged in `usr.bin/as/as_x86_avx2.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_avx2_core.sh`.
   - BMI1 support (`andn`, `bextr`, `blsi`, `blsmsk`, `blsr`, `tzcnt` for 32/64-bit forms) is staged in `usr.bin/as/as_x86_bmi1.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_bmi1_core.sh`.
   - BMI2 support (`bzhi`, `mulx`, `pdep`, `pext`, `rorx`, `sarx`, `shlx`, `shrx` for 32/64-bit forms) is staged in `usr.bin/as/as_x86_bmi2.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_bmi2_core.sh`.
+  - F16C support (`vcvtph2ps`, `vcvtps2ph`) is staged in `usr.bin/as/as_x86_f16c.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_f16c_core.sh`.
   - CLI compatibility surface now includes `-msyntax=att|intel`, warning controls (`-W/--warn/--no-warn/--fatal-warnings`), `--defsym`, `-al` listings, `--statistics`, and `--target-help` with regression coverage in `tests/usr.bin/as/test_cli_extended.sh`.
   - For complete ISA coverage during migration, it still forwards final assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).
