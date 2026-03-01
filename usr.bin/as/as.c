@@ -5,7 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -26,8 +28,15 @@ typedef struct {
 
 typedef struct {
     int mode;
+    int syntax_intel;
+    int emit_listing;
+    int statistics;
+    int target_help;
+    int warn_enabled;
+    int fatal_warnings;
     const char *in_path;
     const char *out_path;
+    const char *listing_path;
     const char *self_path;
     const char *march;
     unsigned long long max_input_bytes;
@@ -81,7 +90,9 @@ static void as_diag(as_error_code_t code, const char *fmt, ...) {
 
 static void usage(const char *prog) {
     fprintf(stderr,
-            "usage: %s [-32|-64] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
+            "usage: %s [-32|-64] [-c] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
+            "[-msyntax=att|intel] [-W|--warn|--no-warn|--fatal-warnings] "
+            "[-al[=file]] [--defsym sym=val] [--statistics] [--target-help] "
             "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
             "[--max-macro-depth N] [--max-include-depth N] [-o output] input.s\n",
             prog);
@@ -554,21 +565,137 @@ static int validate_output_file(const as_ctx_t *ctx) {
     return 0;
 }
 
+static unsigned long long wallclock_us(void) {
+    struct timeval tv;
+
+    if (gettimeofday(&tv, NULL) != 0) {
+        return 0;
+    }
+    return (unsigned long long)tv.tv_sec * 1000000ULL + (unsigned long long)tv.tv_usec;
+}
+
+static void print_target_help(const as_ctx_t *ctx) {
+    (void)ctx;
+    puts("Substrate assembler target help:");
+    puts("  x86/i386:");
+    puts("    core integer ops, jumps/calls/returns, basic x87/MMX/SSE names");
+    puts("    prefixes: lock, rep/repe/repne, segment overrides, rex");
+    puts("  x86-64:");
+    puts("    baseline x86-64 plus ISA levels x86-64-v2/v3/v4");
+    puts("  ARMv7 / AArch64:");
+    puts("    baseline branch/arithmetic syntax, register lists, condition codes");
+}
+
+static char *default_listing_path(const as_ctx_t *ctx) {
+    size_t n;
+    char *p;
+
+    if (ctx == NULL || ctx->out_path == NULL) {
+        return NULL;
+    }
+    n = strlen(ctx->out_path);
+    p = (char *)malloc(n + 5);
+    if (p == NULL) {
+        return NULL;
+    }
+    memcpy(p, ctx->out_path, n);
+    memcpy(p + n, ".lst", 5);
+    return p;
+}
+
+static int emit_listing_file(const as_ctx_t *ctx) {
+    FILE *in;
+    FILE *out;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t nread;
+    unsigned long long line_no = 0;
+    char *owned_path = NULL;
+    const char *path;
+
+    if (ctx == NULL || ctx->in_path == NULL) {
+        return -1;
+    }
+    path = ctx->listing_path;
+    if (path == NULL || path[0] == '\0') {
+        owned_path = default_listing_path(ctx);
+        path = owned_path;
+    }
+    if (path == NULL) {
+        as_diag(AS_E_INTERNAL, "failed to allocate listing path");
+        return -1;
+    }
+
+    in = fopen(ctx->in_path, "rb");
+    if (in == NULL) {
+        as_diag(AS_E_INTERNAL, "failed to open source for listing: %s", ctx->in_path);
+        free(owned_path);
+        return -1;
+    }
+    out = fopen(path, "wb");
+    if (out == NULL) {
+        as_diag(AS_E_INTERNAL, "failed to open listing output: %s", path);
+        fclose(in);
+        free(owned_path);
+        return -1;
+    }
+
+    while ((nread = getline(&line, &cap, in)) >= 0) {
+        line_no++;
+        if (fprintf(out, "%6llu  %s", line_no, line) < 0) {
+            as_diag(AS_E_INTERNAL, "failed writing listing output: %s", path);
+            free(line);
+            fclose(in);
+            fclose(out);
+            free(owned_path);
+            return -1;
+        }
+        (void)nread;
+    }
+
+    free(line);
+    fclose(in);
+    fclose(out);
+    free(owned_path);
+    return 0;
+}
+
+static void print_statistics(unsigned long long start_us, unsigned long long end_us) {
+    struct rusage ru;
+    unsigned long long elapsed = 0;
+
+    if (end_us >= start_us) {
+        elapsed = end_us - start_us;
+    }
+    if (getrusage(RUSAGE_SELF, &ru) != 0) {
+        fprintf(stderr, "as: statistics: wall_us=%llu\n", elapsed);
+        return;
+    }
+    fprintf(stderr, "as: statistics: wall_us=%llu maxrss_kb=%ld user_us=%ld sys_us=%ld\n", elapsed, ru.ru_maxrss,
+            (long)ru.ru_utime.tv_sec * 1000000L + (long)ru.ru_utime.tv_usec,
+            (long)ru.ru_stime.tv_sec * 1000000L + (long)ru.ru_stime.tv_usec);
+}
+
 int main(int argc, char **argv) {
     as_ctx_t ctx;
     int i;
     int query_version = 0;
+    unsigned long long t_start_us;
+    unsigned long long t_end_us;
+    char *owned_listing_path = NULL;
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.mode = AS_MODE_AUTO;
     ctx.out_path = "a.out.o";
     ctx.self_path = argv[0];
+    ctx.warn_enabled = 1;
     ctx.max_input_bytes = limit_from_env("AS_MAX_INPUT_BYTES");
     ctx.max_line_bytes = limit_from_env("AS_MAX_LINE_BYTES");
     ctx.max_token_length = limit_from_env("AS_MAX_TOKEN_LENGTH");
     ctx.max_macro_depth = limit_from_env("AS_MAX_MACRO_DEPTH");
     ctx.max_include_depth = limit_from_env("AS_MAX_INCLUDE_DEPTH");
     g_emit_error_codes = getenv("AS_ERROR_CODES") != NULL ? 1 : 0;
+    t_start_us = wallclock_us();
 
     for (i = 1; i < argc; ++i) {
         const char *arg = argv[i];
@@ -577,6 +704,92 @@ int main(int argc, char **argv) {
 
         if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
             query_version = 1;
+            continue;
+        }
+        if (strcmp(arg, "--target-help") == 0) {
+            ctx.target_help = 1;
+            continue;
+        }
+        if (strcmp(arg, "--statistics") == 0) {
+            ctx.statistics = 1;
+            continue;
+        }
+        if (strcmp(arg, "-c") == 0) {
+            continue;
+        }
+        if (strcmp(arg, "-W") == 0 || strcmp(arg, "--warn") == 0) {
+            ctx.warn_enabled = 1;
+            continue;
+        }
+        if (strcmp(arg, "--no-warn") == 0) {
+            ctx.warn_enabled = 0;
+            continue;
+        }
+        if (strcmp(arg, "--fatal-warnings") == 0) {
+            ctx.fatal_warnings = 1;
+            continue;
+        }
+        if (strcmp(arg, "-al") == 0) {
+            ctx.emit_listing = 1;
+            continue;
+        }
+        if (strncmp(arg, "-al=", 4) == 0) {
+            ctx.emit_listing = 1;
+            ctx.listing_path = arg + 4;
+            continue;
+        }
+        if (strcmp(arg, "--defsym") == 0) {
+            if (i + 1 >= argc || push_opt_with_value(&ctx.as_opts, "--defsym=", argv[++i]) != 0) {
+                usage(argv[0]);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            continue;
+        }
+        if (strncmp(arg, "--defsym=", 9) == 0) {
+            if (strvec_push(&ctx.as_opts, arg) != 0) {
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 1;
+            }
+            continue;
+        }
+        if (strcmp(arg, "-msyntax") == 0) {
+            const char *value;
+
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            value = argv[++i];
+            if (strcmp(value, "intel") == 0) {
+                ctx.syntax_intel = 1;
+            } else if (strcmp(value, "att") == 0) {
+                ctx.syntax_intel = 0;
+            } else {
+                as_diag(AS_E_USAGE, "unsupported -msyntax=%s (expected att|intel)", value);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            continue;
+        }
+        if (strncmp(arg, "-msyntax=", 9) == 0) {
+            const char *value = arg + 9;
+
+            if (strcmp(value, "intel") == 0) {
+                ctx.syntax_intel = 1;
+            } else if (strcmp(value, "att") == 0) {
+                ctx.syntax_intel = 0;
+            } else {
+                as_diag(AS_E_USAGE, "unsupported -msyntax=%s (expected att|intel)", value);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
             continue;
         }
         if (strcmp(arg, "--max-input-bytes") == 0 || strcmp(arg, "--max-line-bytes") == 0 ||
@@ -756,6 +969,13 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    if (ctx.target_help) {
+        print_target_help(&ctx);
+        strvec_free(&ctx.gcc_opts);
+        strvec_free(&ctx.as_opts);
+        return 0;
+    }
+
     if (ctx.in_path == NULL) {
         usage(argv[0]);
         strvec_free(&ctx.gcc_opts);
@@ -775,6 +995,31 @@ int main(int argc, char **argv) {
     if (ctx.march != NULL) {
         const char *gas_march = march_to_gas(ctx.mode, ctx.march);
         if (gas_march != NULL && push_opt_with_value(&ctx.as_opts, "-march=", gas_march) != 0) {
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
+            return 1;
+        }
+    }
+    if (push_opt_with_value(&ctx.as_opts, "-msyntax=", ctx.syntax_intel ? "intel" : "att") != 0) {
+        strvec_free(&ctx.gcc_opts);
+        strvec_free(&ctx.as_opts);
+        return 1;
+    }
+    if (ctx.warn_enabled) {
+        if (strvec_push(&ctx.as_opts, "--warn") != 0) {
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
+            return 1;
+        }
+    } else {
+        if (strvec_push(&ctx.as_opts, "--no-warn") != 0) {
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
+            return 1;
+        }
+    }
+    if (ctx.fatal_warnings) {
+        if (strvec_push(&ctx.as_opts, "--fatal-warnings") != 0) {
             strvec_free(&ctx.gcc_opts);
             strvec_free(&ctx.as_opts);
             return 1;
@@ -805,8 +1050,27 @@ int main(int argc, char **argv) {
         strvec_free(&ctx.as_opts);
         return 1;
     }
+    if (ctx.emit_listing) {
+        if (ctx.listing_path != NULL) {
+            owned_listing_path = NULL;
+        } else {
+            owned_listing_path = default_listing_path(&ctx);
+            ctx.listing_path = owned_listing_path;
+        }
+        if (emit_listing_file(&ctx) != 0) {
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
+            free(owned_listing_path);
+            return 1;
+        }
+    }
+    t_end_us = wallclock_us();
+    if (ctx.statistics) {
+        print_statistics(t_start_us, t_end_us);
+    }
 
     strvec_free(&ctx.gcc_opts);
     strvec_free(&ctx.as_opts);
+    free(owned_listing_path);
     return 0;
 }

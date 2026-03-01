@@ -64,16 +64,16 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Iterative relaxation until stable.
 
 ### 1h. CLI Interface
-- [ ] `-o output.o`, `-c` (ignored compat), `-g` (debug info).
-- [ ] `-march=ARCH`, `-mtune=TUNE` (validation per arch).
-- [ ] `-32`/`-64` / `--32`/`--64` mode selection.
-- [ ] `-msyntax=att`/`-msyntax=intel`.
-- [ ] `-W`/`--warn`, `--fatal-warnings`, `--no-warn`.
-- [ ] `-I dir` include path, `-D sym=val` defines.
-- [ ] `-al` listing output.
-- [ ] `--defsym sym=val`.
-- [ ] `--statistics` timing/memory report.
-- [ ] `--target-help` per-arch instruction summary.
+- [x] `-o output.o`, `-c` (ignored compat), `-g` (debug info).
+- [x] `-march=ARCH`, `-mtune=TUNE` (validation per arch).
+- [x] `-32`/`-64` / `--32`/`--64` mode selection.
+- [x] `-msyntax=att`/`-msyntax=intel`.
+- [x] `-W`/`--warn`, `--fatal-warnings`, `--no-warn`.
+- [x] `-I dir` include path, `-D sym=val` defines.
+- [x] `-al` listing output.
+- [x] `--defsym sym=val`.
+- [x] `--statistics` timing/memory report.
+- [x] `--target-help` per-arch instruction summary.
 
 ---
 
