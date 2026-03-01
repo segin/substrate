@@ -5118,10 +5118,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring.
         - [x] Consecutive kills append to the same ring entry.
         - [x] `yank` inserts most recent; `yank-pop` rotates.
-    - [ ] **Undo System:**
-        - [ ] Record each editing operation (insert, delete, cursor move) as an undo entry.
-        - [ ] `^_` pops the undo stack and reverts the operation.
-        - [ ] Limit undo stack depth (256 entries default).
+    - [x] **Undo System:**
+        - [x] Record each editing operation (insert, delete, cursor move) as an undo entry.
+        - [x] `^_` pops the undo stack and reverts the operation.
+        - [x] Limit undo stack depth (256 entries default).
 
 - [ ] **Emacs Key‑Binding Map:**
     - [x] **Implemented:**
