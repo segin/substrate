@@ -24,12 +24,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] ARM: condition codes, shift operands, register lists, coprocessor operands.
 
 ### 1c. Symbol Table
-- [ ] Local, global, weak, common symbol types.
-- [ ] `.globl`/`.global`, `.local`, `.weak`, `.comm`, `.lcomm`.
-- [ ] `.type` (function/object/tls_object/common/notype), `.size`.
-- [ ] `.hidden`, `.protected`, `.internal` visibility.
-- [ ] `.symver` symbol versioning.
-- [ ] Forward reference resolution (two-pass or relaxation).
+- [x] Local, global, weak, common symbol types.
+- [x] `.globl`/`.global`, `.local`, `.weak`, `.comm`, `.lcomm`.
+- [x] `.type` (function/object/tls_object/common/notype), `.size`.
+- [x] `.hidden`, `.protected`, `.internal` visibility.
+- [x] `.symver` symbol versioning.
+- [x] Forward reference resolution (two-pass or relaxation).
 
 ### 1d. Section Management
 - [ ] `.text`, `.data`, `.bss`, `.rodata` built-in sections.

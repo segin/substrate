@@ -186,7 +186,7 @@ These components are essential for booting and basic system operation.
 
 ### Toolchain Utilities (`usr.bin/as`, `usr.bin/ld`)
 - **`as`**: x86 assembler tool for i386/x86_64 with an in-tree standalone frontend under active rollout.
-  - Current frontend includes native lexing/parsing modules (`usr.bin/as/as_lexer.c`, `usr.bin/as/as_parser.c`) with host-side coverage in `tests/usr.bin/as/test_lexer_core.sh` and `tests/usr.bin/as/test_parser_core.sh`.
+  - Current frontend includes native lexing/parsing/symbol-table modules (`usr.bin/as/as_lexer.c`, `usr.bin/as/as_parser.c`, `usr.bin/as/as_symtab.c`) with host-side coverage in `tests/usr.bin/as/test_lexer_core.sh`, `tests/usr.bin/as/test_parser_core.sh`, and `tests/usr.bin/as/test_symtab_core.sh`.
   - For complete ISA coverage during migration, it still forwards final assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).
   - Exposes optional safety limits (`--max-input-bytes`, `--max-line-bytes`, `--max-token-length`, `--max-macro-depth`, `--max-include-depth`) and optional structured wrapper diagnostics via `AS_ERROR_CODES=1`.
