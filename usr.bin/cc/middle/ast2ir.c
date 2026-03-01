@@ -4061,7 +4061,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             in.op = CC_SSA_CALLI;
             in.lhs = indirect_callee;
-            in.call_is_variadic = 0;
+            /*
+             * Function-pointer signatures are not fully represented in cc_type_t
+             * yet; use variadic caller setup for CALLI so va_start-based callees
+             * receive the copied argument area and XMM count consistently.
+             */
+            in.call_is_variadic = 1;
             in.call_fixed_count = 0;
             in.sym = NULL;
         } else {
@@ -4717,7 +4722,22 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->aux_type == CC_TYPE_VOID) {
             return v;
         }
-        return cast_value(sf, v, type_to_val(e->aux_type), diag);
+        v = cast_value(sf, v, type_to_val(e->aux_type), diag);
+        if (v < 0) {
+            return -1;
+        }
+        if (is_integral_type(e->aux_type) && !is_pointer_type(e->aux_type)) {
+            v = normalize_integral_value(sf, v, e->aux_type, diag);
+            if (v < 0) {
+                return -1;
+            }
+        } else if (e->aux_type == CC_TYPE_FLOAT) {
+            v = normalize_float_value(sf, v, e->aux_type, diag);
+            if (v < 0) {
+                return -1;
+            }
+        }
+        return v;
     }
 
     case CC_EXPR_SIZEOF: {
