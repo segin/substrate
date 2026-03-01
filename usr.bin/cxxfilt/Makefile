@@ -33,6 +33,6 @@ clean:
 
 install: $(PROG)
 	@mkdir -p $(DESTDIR)/usr/bin
-	@mkdir -p $(DESTDIR)/usr/share/man/man1
+	@mkdir -p $(DESTDIR)/usr/man/man1
 	cp $(PROG) $(DESTDIR)/usr/bin/$(PROG)
-	cp c++filt.1 $(DESTDIR)/usr/share/man/man1/
+	cp c++filt.1 $(DESTDIR)/usr/man/man1/

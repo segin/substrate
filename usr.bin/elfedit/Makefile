@@ -19,4 +19,4 @@ $(PROG): ../../usr.lib/elfobj/libelfobj.a
 install: install-man
 
 install-man:
-	install -D ../../man/man1/elfedit.1 $(DESTDIR)/usr/share/man/man1/elfedit.1
+	install -D ../../usr.man/man1/elfedit.1 $(DESTDIR)/usr/man/man1/elfedit.1

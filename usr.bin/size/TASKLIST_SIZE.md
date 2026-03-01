@@ -116,4 +116,4 @@ Goal: implement `size` using section accounting from `libelfobj`.
 ## 10. Man Page
 
 - [ ] Write `size.1` covering all flags and format descriptions.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [ ] Install to `$(DESTDIR)/usr/man/man1/`.

@@ -160,4 +160,4 @@ Goal: implement `gprof`‑compatible analysis for `gmon.out` data + ELF symbols.
 
 - [ ] Write `gprof.1` covering all flags, input files, output formats.
 - [ ] Document `gmon.out` format briefly.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [ ] Install to `$(DESTDIR)/usr/man/man1/`.

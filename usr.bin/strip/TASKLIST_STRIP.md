@@ -152,4 +152,4 @@ Goal: implement `strip` as a constrained `libelfobj` transform.
 
 - [ ] Write `strip.1` covering all modes, flags, and exit codes.
 - [ ] Document which sections are removed in each mode.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [ ] Install to `$(DESTDIR)/usr/man/man1/`.

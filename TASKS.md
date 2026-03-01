@@ -13,17 +13,17 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         > **Architecture:** Two-phase allocator — watermark (bootstrap) →
         > buddy (runtime). Returns kernel virtual addresses (0xC0000000+).
 
-        - [ ] **Boot Memory Detection:**
-            - [ ] Parse Multiboot Memory Map (`mmap`).
-            - [ ] Parse e820 Memory Map (legacy BIOS fallback).
-            - [ ] **Hardening:**
-                - [ ] Sanitize memory map entries: validate type, clamp to 32‑bit address space.
-                - [ ] Reject overlapping or zero‑length regions.
-                - [ ] Calculate and report total usable RAM (64‑bit accumulation for >4 GB physical).
-                - [ ] Identify kernel physical bounds from linker symbols (`_kernel_start`, `_kernel_end`).
-                - [ ] Exclude kernel text/data/BSS region from free pool.
-                - [ ] Exclude Multiboot info structure and module regions.
-                - [ ] Reserve BIOS/ACPI regions (type 3/4) and memory holes.
+        - [x] **Boot Memory Detection:**
+            - [x] Parse Multiboot Memory Map (`mmap`).
+            - [x] Parse e820 Memory Map (legacy BIOS fallback).
+            - [x] **Hardening:**
+                - [x] Sanitize memory map entries: validate type, clamp to 32‑bit address space.
+                - [x] Reject overlapping or zero‑length regions.
+                - [x] Calculate and report total usable RAM (64‑bit accumulation for >4 GB physical).
+                - [x] Identify kernel physical bounds from linker symbols (`_kernel_start`, `_kernel_end`).
+                - [x] Exclude kernel text/data/BSS region from free pool.
+                - [x] Exclude Multiboot info structure and module regions.
+                - [x] Reserve BIOS/ACPI regions (type 3/4) and memory holes.
         - [ ] **Bootstrap Watermark Allocator:**
             - [ ] Bump allocator for early boot before buddy is ready.
             - [ ] `pmm_watermark_init(start, end)`: initialize allocator with usable range.
@@ -82,82 +82,82 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
             > **Files:** `sys/vm/vm_page.h`, `sys/vm/vm_page.c`, `sys/vm/phys_mem.c`.
 
-            - [ ] **`vm_page_t` Structure:**
-                - [ ] `phys_addr`: physical address of this page frame.
-                - [ ] `flags`: state flags (see below).
-                - [ ] `wire_count`: wired reference count (cannot be paged out while > 0).
-                - [ ] `ref_count`: general reference count (for COW sharing).
-                - [ ] `order`: buddy allocator order (0 = single page).
-                - [ ] `object`: back-pointer to owning `vm_object` (anonymous, vnode, device).
-                - [ ] `pindex`: page index within owning object.
-                - [ ] `pv_list`: list of `pv_entry` structs for pmap backlinks (which PTEs map this page).
-                - [ ] **State Flags:**
-                    - [ ] `PG_BUSY`: page is being I/O'd (don't touch).
-                    - [ ] `PG_VALID`: page contains valid data.
-                    - [ ] `PG_DIRTY`: page has been modified since last writeback.
-                    - [ ] `PG_ACTIVE`: page is on active queue.
-                    - [ ] `PG_INACTIVE`: page is on inactive queue.
-                    - [ ] `PG_FREE`: page is on free queue.
-                    - [ ] `PG_ZERO`: page is known to be zeroed.
-                    - [ ] `PG_SWAPPED`: page contents are on swap.
-                - [ ] **Initialization:**
-                    - [ ] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator).
-                    - [ ] Initialize all pages as `PG_FREE`, link into free lists.
-                - [ ] **Accessors:**
-                    - [ ] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index).
-                    - [ ] `vm_page_to_phys(page)`: page-to-PA conversion.
-                - [ ] **Ownership Tracking:**
-                    - [ ] Track which `vm_object` (anonymous, vnode, device) owns each page.
-                    - [ ] `vm_page_insert(page, object, pindex)`: link page to object.
-                    - [ ] `vm_page_remove(page)`: unlink page from object.
-                - [ ] **Pmap Backlinks (`pv_entry`):**
-                    - [ ] Track which pmaps/PTEs reference this physical page.
-                    - [ ] `pv_entry`: `{pmap, va, next}` — singly-linked list per page.
-                    - [ ] Used for reverse mapping: given a physical page, find all virtual mappings.
-                    - [ ] Essential for TLB shootdown and page eviction.
+            - [x] **`vm_page_t` Structure:**
+                - [x] `phys_addr`: physical address of this page frame.
+                - [x] `flags`: state flags (see below).
+                - [x] `wire_count`: wired reference count (cannot be paged out while > 0).
+                - [x] `ref_count`: general reference count (for COW sharing).
+                - [x] `order`: buddy allocator order (0 = single page).
+                - [x] `object`: back-pointer to owning `vm_object` (anonymous, vnode, device).
+                - [x] `pindex`: page index within owning object.
+                - [x] `pv_list`: list of `pv_entry` structs for pmap backlinks (which PTEs map this page).
+                - [x] **State Flags:**
+                    - [x] `PG_BUSY`: page is being I/O'd (don't touch).
+                    - [x] `PG_VALID`: page contains valid data.
+                    - [x] `PG_DIRTY`: page has been modified since last writeback.
+                    - [x] `PG_ACTIVE`: page is on active queue.
+                    - [x] `PG_INACTIVE`: page is on inactive queue.
+                    - [x] `PG_FREE`: page is on free queue.
+                    - [x] `PG_ZERO`: page is known to be zeroed.
+                    - [x] `PG_SWAPPED`: page contents are on swap.
+                - [x] **Initialization:**
+                    - [x] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator).
+                    - [x] Initialize all pages as `PG_FREE`, link into free lists.
+                - [x] **Accessors:**
+                    - [x] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index).
+                    - [x] `vm_page_to_phys(page)`: page-to-PA conversion.
+                - [x] **Ownership Tracking:**
+                    - [x] Track which `vm_object` (anonymous, vnode, device) owns each page.
+                    - [x] `vm_page_insert(page, object, pindex)`: link page to object.
+                    - [x] `vm_page_remove(page)`: unlink page from object.
+                - [x] **Pmap Backlinks (`pv_entry`):**
+                    - [x] Track which pmaps/PTEs reference this physical page.
+                    - [x] `pv_entry`: `{pmap, va, next}` — singly-linked list per page.
+                    - [x] Used for reverse mapping: given a physical page, find all virtual mappings.
+                    - [x] Essential for TLB shootdown and page eviction.
 
-            - [ ] **Page Queues:**
-                - [ ] **Queue Types:**
-                    - [ ] **Free Queue:** pages available for immediate allocation.
-                    - [ ] **Active Queue:** recently accessed pages (LRU head).
-                    - [ ] **Inactive Queue:** eviction candidates (LRU tail).
-                    - [ ] **Wired Queue:** kernel/DMA pages that cannot be paged out.
-                    - [ ] **Laundry Queue:** dirty pages waiting to be written to backing store.
-                - [ ] **Queue Operations:**
-                    - [ ] `vm_page_activate(page)`: move to active queue, set `PG_ACTIVE`.
-                    - [ ] `vm_page_deactivate(page)`: move to inactive queue, clear `PG_ACTIVE`.
-                    - [ ] `vm_page_wire(page)`: increment wire count, move to wired queue.
-                    - [ ] `vm_page_unwire(page)`: decrement wire count, move to inactive if count reaches 0.
-                    - [ ] `vm_page_free(page)`: return to free queue, clear all flags.
-                    - [ ] `vm_page_launder(page)`: move to laundry queue for async writeback.
-                - [ ] **LRU Scanning (`vm_pageout_scan`):**
-                    - [ ] Periodic scan of active queue.
-                    - [ ] Check PTE accessed (A) bit via `pmap_is_referenced()`.
-                    - [ ] Clear A bit via `pmap_clear_reference()`.
-                    - [ ] Move unreferenced pages to inactive queue tail.
-                    - [ ] Second-chance algorithm: pages touched again stay active.
-                - [ ] **Page Daemon (`vm_pageout`):**
-                    - [ ] Background kernel thread (`pagedaemon`).
-                    - [ ] Sleep on `vm_pages_needed` wakeup channel.
-                    - [ ] `vm_page_launder()`: write dirty pages to backing store.
-                    - [ ] `vm_page_try_to_free()`: attempt to free clean inactive pages.
-                    - [ ] Priority-based scanning phases: Inactive → Laundry → Active.
-                    - [ ] OOM killer hook: kill process if cannot free memory.
-                - [ ] **Thresholds:**
-                    - [ ] `vm_page_free_min`: absolute minimum free pages (16 default; panic below).
-                    - [ ] `vm_page_free_target`: target free pages (64 default; daemon sleeps above).
-                    - [ ] `vm_page_inactive_target`: target inactive queue length.
-                    - [ ] `vm_page_free_reserved`: reserved for kernel emergencies (8 default).
-                    - [ ] Dynamic threshold adjustment based on total RAM.
-                - [ ] **Statistics (`vm_stat`):**
-                    - [ ] `free_count`, `active_count`, `inactive_count`, `wire_count`, `laundry_count`.
-                    - [ ] `pageins`: pages read from disk.
-                    - [ ] `pageouts`: pages written to disk.
-                    - [ ] `faults`: total page faults handled.
-                    - [ ] `cow_faults`: copy-on-write faults.
-                    - [ ] `reactivations`: pages moved back to active.
-                    - [ ] `zero_fill_pages`: pages satisfied by zero-fill.
-                    - [ ] `/proc/vmstat` or sysctl interface for userspace exposure.
+            - [x] **Page Queues:**
+                - [x] **Queue Types:**
+                    - [x] **Free Queue:** pages available for immediate allocation.
+                    - [x] **Active Queue:** recently accessed pages (LRU head).
+                    - [x] **Inactive Queue:** eviction candidates (LRU tail).
+                    - [x] **Wired Queue:** kernel/DMA pages that cannot be paged out.
+                    - [x] **Laundry Queue:** dirty pages waiting to be written to backing store.
+                - [x] **Queue Operations:**
+                    - [x] `vm_page_activate(page)`: move to active queue, set `PG_ACTIVE`.
+                    - [x] `vm_page_deactivate(page)`: move to inactive queue, clear `PG_ACTIVE`.
+                    - [x] `vm_page_wire(page)`: increment wire count, move to wired queue.
+                    - [x] `vm_page_unwire(page)`: decrement wire count, move to inactive if count reaches 0.
+                    - [x] `vm_page_free(page)`: return to free queue, clear all flags.
+                    - [x] `vm_page_launder(page)`: move to laundry queue for async writeback.
+                - [x] **LRU Scanning (`vm_pageout_scan`):**
+                    - [x] Periodic scan of active queue.
+                    - [x] Check PTE accessed (A) bit via `pmap_is_referenced()`.
+                    - [x] Clear A bit via `pmap_clear_reference()`.
+                    - [x] Move unreferenced pages to inactive queue tail.
+                    - [x] Second-chance algorithm: pages touched again stay active.
+                - [x] **Page Daemon (`vm_pageout`):**
+                    - [x] Background kernel thread (`pagedaemon`).
+                    - [x] Sleep on `vm_pages_needed` wakeup channel.
+                    - [x] `vm_page_launder()`: write dirty pages to backing store.
+                    - [x] `vm_page_try_to_free()`: attempt to free clean inactive pages.
+                    - [x] Priority-based scanning phases: Inactive → Laundry → Active.
+                    - [x] OOM killer hook: kill process if cannot free memory.
+                - [x] **Thresholds:**
+                    - [x] `vm_page_free_min`: absolute minimum free pages (16 default; panic below).
+                    - [x] `vm_page_free_target`: target free pages (64 default; daemon sleeps above).
+                    - [x] `vm_page_inactive_target`: target inactive queue length.
+                    - [x] `vm_page_free_reserved`: reserved for kernel emergencies (8 default).
+                    - [x] Dynamic threshold adjustment based on total RAM.
+                - [x] **Statistics (`vm_stat`):**
+                    - [x] `free_count`, `active_count`, `inactive_count`, `wire_count`, `laundry_count`.
+                    - [x] `pageins`: pages read from disk.
+                    - [x] `pageouts`: pages written to disk.
+                    - [x] `faults`: total page faults handled.
+                    - [x] `cow_faults`: copy-on-write faults.
+                    - [x] `reactivations`: pages moved back to active.
+                    - [x] `zero_fill_pages`: pages satisfied by zero-fill.
+                    - [x] `/proc/vmstat` or sysctl interface for userspace exposure.
 
             - [ ] **Testing:**
                 - [ ] Unit: page queue transitions (free→active→inactive→laundry→free).
@@ -8105,7 +8105,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] **`man` (Manual Pager):**
             - [ ] **Page Discovery:**
                 - [ ] Implement `MANPATH` environment parsing.
-                - [ ] Implement default system paths (`/usr/share/man`, `/usr/man`).
+                - [ ] Implement default system path (`/usr/man`).
                 - [ ] Implement section search order (1, n, p, 8, 2, 3...).
                 - [ ] Implement locale-specific subdirectories handling.
                 - [ ] Support compressed sources (`.gz`, `.bz2`, `.xz`) via decompressors.
@@ -10352,7 +10352,7 @@ Reference: User Request (Step 30668)
         - Docs: Developer guide, `stat.2`
         - Acceptance: Single 64-bit definition in public header, ABI fully documented
     - [ ] Create manpages for `stat(2)` explaining single-ABI policy.
-        - Files: `usr/share/man/man2/stat.2`
+        - Files: `usr/man/man2/stat.2`
         - Tests: doc validation
         - Docs: `stat.2`
         - Acceptance: Manpage documents 64-bit nature and usage

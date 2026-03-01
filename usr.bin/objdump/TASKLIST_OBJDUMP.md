@@ -151,4 +151,4 @@ Goal: implement `objdump` with ELF structure loading from `libelfobj`.
 
 - [ ] Write `objdump.1` covering all flags and output formats.
 - [ ] Document disassembly backend limitations.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [ ] Install to `$(DESTDIR)/usr/man/man1/`.

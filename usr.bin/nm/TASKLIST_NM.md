@@ -141,4 +141,4 @@ Goal: implement `nm` with ELF parsing exclusively via `libelfobj`.
 
 - [ ] Write `nm.1` covering all flags, output formats, exit codes.
 - [ ] Document symbol type letters in a table.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [ ] Install to `$(DESTDIR)/usr/man/man1/`.

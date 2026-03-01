@@ -2,7 +2,7 @@ include Makefile.inc
 
 # Subdirectories to build
 # Order matters: lib is usually a dependency for bin/usr.bin
-SUBDIRS = lib sbin sys bin usr.lib usr.bin man
+SUBDIRS = lib sbin sys bin usr.lib usr.bin usr.man
 
 .PHONY: all clean install efi multiboot freebsd zimage debug host_dist host_dist_install host_install $(SUBDIRS)
 
@@ -31,6 +31,7 @@ host_dist:
 	@mkdir -p host_dist/bin
 	@mkdir -p host_dist/sbin
 	@mkdir -p host_dist/usr/lib
+	@mkdir -p host_dist/usr/man
 	@echo ">>> Building host tools..."
 	-$(MAKE) -C usr.lib clean
 	$(MAKE) -C usr.lib NATIVE_BUILD=1
@@ -42,6 +43,7 @@ host_dist:
 	$(MAKE) -C usr.bin/cc NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
 	-$(MAKE) -C usr.bin clean
 	$(MAKE) -C usr.bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	$(MAKE) -C usr.man DESTDIR=$(TOP)/host_dist install
 	@test -x host_dist/usr/bin/cc
 	@echo ">>> Host tools installed to host_dist"
 
@@ -83,7 +85,6 @@ install:
 	@mkdir -p $(DESTDIR)/usr/lib
 	@mkdir -p $(DESTDIR)/usr/local
 	@mkdir -p $(DESTDIR)/usr/man
-	@mkdir -p $(DESTDIR)/usr/share
 	@mkdir -p $(DESTDIR)/var
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing $$dir"; \

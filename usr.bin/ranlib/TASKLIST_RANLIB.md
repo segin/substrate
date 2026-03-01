@@ -130,4 +130,4 @@ Goal: implement standalone `ranlib` index generation using `libelfobj` for ELF s
 
 - [ ] Write `ranlib.1` covering all flags, format details, and exit codes.
 - [ ] Reference `ar(1)` for archive format details.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [ ] Install to `$(DESTDIR)/usr/man/man1/`.

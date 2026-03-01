@@ -149,4 +149,4 @@ Goal: implement `objcopy` transformations through `libelfobj` object model/write
 
 - [ ] Write `objcopy.1` covering all section/symbol/binary operations.
 - [ ] Document common recipes (strip debug, split debuginfo, binary embed).
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [ ] Install to `$(DESTDIR)/usr/man/man1/`.

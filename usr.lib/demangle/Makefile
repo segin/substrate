@@ -22,7 +22,7 @@ clean:
 install: $(LIBNAME)
 	@mkdir -p $(DESTDIR)/usr/lib
 	@mkdir -p $(DESTDIR)/usr/include
-	@mkdir -p $(DESTDIR)/usr/share/man/man3
+	@mkdir -p $(DESTDIR)/usr/man/man3
 	cp $(LIBNAME) $(DESTDIR)/usr/lib/
 	cp ../../include/demangle.h $(DESTDIR)/usr/include/
-	cp man3/*.3 $(DESTDIR)/usr/share/man/man3/
+	cp man3/*.3 $(DESTDIR)/usr/man/man3/

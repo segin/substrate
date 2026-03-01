@@ -126,4 +126,4 @@ Goal: implement `strings` with optional ELF-aware scanning driven by `libelfobj`
 ## 11. Man Page
 
 - [ ] Write `strings.1` covering all flags, encoding modes, and exit codes.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [ ] Install to `$(DESTDIR)/usr/man/man1/`.
