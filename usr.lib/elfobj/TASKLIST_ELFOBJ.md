@@ -1,6 +1,6 @@
-# `usr.lib/elfobj` — ARM/AArch64 Support Tasklist
+# `usr.lib/elfobj` — Multi-Architecture Tasklist
 
-Goal: extend `libelfobj` with full ARMv7 (ELF32, `EM_ARM`) and AArch64 (ELF64, `EM_AARCH64`) support across all library subsystems — constants, relocation backends, validation, ELF creation, DWARF, link planning, and testing.
+Goal: extend `libelfobj` with complete multi-architecture support for i386, x86-64, ARMv7 (ELF32, `EM_ARM`), and AArch64 (ELF64, `EM_AARCH64`) across all library subsystems — constants, relocation backends, validation, ELF creation, DWARF, link planning, and testing.
 
 ---
 
@@ -202,6 +202,40 @@ Every relocation type used by GCC/LLVM for ARM targets must be defined:
 - [ ] `.ARM.extab` — exception table data.
 - [ ] `.ARM.attributes` — build attributes.
 - [ ] `.note.gnu.property` — BTI/PAC properties (AArch64).
+
+### 1i. Expanded x86 Relocation Type Constants
+
+Beyond the currently-implemented core set, add the full x86 relocation roster:
+
+#### i386 Missing Relocations
+- [ ] `R_386_NONE` (0)
+- [ ] `R_386_COPY` (5), `R_386_GLOB_DAT` (6), `R_386_JMP_SLOT` (7), `R_386_RELATIVE` (8)
+- [ ] `R_386_16` (20), `R_386_PC16` (21), `R_386_8` (22), `R_386_PC8` (23)
+- [ ] `R_386_TLS_DTPMOD32` (35), `R_386_TLS_DTPOFF32` (36)
+- [ ] `R_386_TLS_LE_32` (33), `R_386_TLS_TPOFF32` (37)
+- [ ] `R_386_SIZE32` (38)
+- [ ] `R_386_GOT32X` (43)
+- [ ] `R_386_IRELATIVE` (42)
+
+#### x86-64 Missing Relocations
+- [ ] `R_X86_64_COPY` (5), `R_X86_64_GLOB_DAT` (6), `R_X86_64_JUMP_SLOT` (7), `R_X86_64_RELATIVE` (8)
+- [ ] `R_X86_64_16` (12), `R_X86_64_PC16` (13), `R_X86_64_8` (14), `R_X86_64_PC8` (15)
+- [ ] `R_X86_64_DTPMOD64` (16), `R_X86_64_DTPOFF64` (17), `R_X86_64_TPOFF64` (18)
+- [ ] `R_X86_64_TLSLD` (20), `R_X86_64_DTPOFF32` (21)
+- [ ] `R_X86_64_PC64` (24), `R_X86_64_GOTOFF64` (25), `R_X86_64_GOTPC32` (26)
+- [ ] `R_X86_64_SIZE32` (32), `R_X86_64_SIZE64` (33)
+- [ ] `R_X86_64_GOTPCRELX` (41), `R_X86_64_REX_GOTPCRELX` (42)
+- [ ] `R_X86_64_IRELATIVE` (37)
+- [ ] `R_X86_64_GOTPC32_TLSDESC` (34), `R_X86_64_TLSDESC_CALL` (35), `R_X86_64_TLSDESC` (36)
+
+### 1j. x86 GNU Property Constants
+- [ ] `GNU_PROPERTY_X86_ISA_1_NEEDED` (0xc0008002)
+- [ ] `GNU_PROPERTY_X86_ISA_1_USED` (0xc0010002)
+- [ ] ISA level bits: `GNU_PROPERTY_X86_ISA_1_BASELINE` (1), `_V2` (2), `_V3` (4), `_V4` (8)
+- [ ] `GNU_PROPERTY_X86_FEATURE_1_AND` (0xc0000002)
+- [ ] Feature bits: `GNU_PROPERTY_X86_FEATURE_1_IBT` (1), `_SHSTK` (2)
+- [ ] `GNU_PROPERTY_AARCH64_FEATURE_1_AND` (0xc0000000)
+- [ ] AArch64 feature bits: `_BTI` (1), `_PAC` (2)
 
 ---
 
@@ -534,10 +568,139 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 
 ---
 
-## 12. Documentation
+## 12. Expanded x86 Relocation Backend
 
-- [ ] Update `README.md` with ARM/AArch64 support notes.
-- [ ] Document ARM/AArch64 relocation backend registration.
+### 12a. i386 Backend Expansion
+- [ ] `R_386_COPY` → no value (dynamic linker copies data)
+- [ ] `R_386_GLOB_DAT` → S (GOT slot fill)
+- [ ] `R_386_JMP_SLOT` → S (PLT GOT slot fill)
+- [ ] `R_386_RELATIVE` → B(S) + A (base-relative)
+- [ ] `R_386_16` → S + A, check unsigned 16-bit
+- [ ] `R_386_PC16` → S + A − P, check signed 16-bit
+- [ ] `R_386_8` → S + A, check unsigned 8-bit
+- [ ] `R_386_PC8` → S + A − P, check signed 8-bit
+- [ ] `R_386_SIZE32` → Z + A (symbol size)
+- [ ] `R_386_GOT32X` → GOT(S) + A − GOT_ORG (relaxable GOT reference)
+- [ ] `R_386_IRELATIVE` → indirect function resolution
+- [ ] `R_386_TLS_DTPMOD32` → module ID for TLS
+- [ ] `R_386_TLS_DTPOFF32` → offset within TLS block
+- [ ] `R_386_TLS_LE_32` → negative TP-relative offset
+- [ ] `R_386_TLS_TPOFF32` → negative TP-relative offset (variant)
+- [ ] Add `i386_is_tls()` for complete TLS classification: all `R_386_TLS_*` types
+
+### 12b. x86-64 Backend Expansion
+- [ ] `R_X86_64_COPY` → no value
+- [ ] `R_X86_64_GLOB_DAT` → S
+- [ ] `R_X86_64_JUMP_SLOT` → S
+- [ ] `R_X86_64_RELATIVE` → B + A
+- [ ] `R_X86_64_16` → S + A, check unsigned 16-bit
+- [ ] `R_X86_64_PC16` → S + A − P, check signed 16-bit
+- [ ] `R_X86_64_8` → S + A, check unsigned 8-bit
+- [ ] `R_X86_64_PC8` → S + A − P, check signed 8-bit
+- [ ] `R_X86_64_PC64` → S + A − P (64-bit PC-relative)
+- [ ] `R_X86_64_GOTOFF64` → S + A − GOT_ORG
+- [ ] `R_X86_64_GOTPC32` → GOT_ORG + A − P
+- [ ] `R_X86_64_SIZE32` → Z + A (check 32-bit), `R_X86_64_SIZE64` → Z + A
+- [ ] `R_X86_64_GOTPCRELX` → GOT(S) + A − P (relaxable to LEA for non-preemptible)
+- [ ] `R_X86_64_REX_GOTPCRELX` → same with REX prefix
+- [ ] `R_X86_64_IRELATIVE` → indirect function resolution
+- [ ] `R_X86_64_DTPMOD64`, `R_X86_64_DTPOFF64`, `R_X86_64_TPOFF64` → TLS module/offset dynamic
+- [ ] `R_X86_64_TLSLD` → Local Dynamic TLS
+- [ ] `R_X86_64_DTPOFF32` → 32-bit DTP offset
+- [ ] `R_X86_64_GOTPC32_TLSDESC` → TLSDESC GOT-relative
+- [ ] `R_X86_64_TLSDESC_CALL` → TLSDESC call relocation
+- [ ] `R_X86_64_TLSDESC` → TLSDESC pair
+- [ ] Add `x64_is_tls()` for complete TLS classification: all `R_X86_64_TLS*`, `GOTTPOFF`, `TPOFF32`, `DTPMOD64`, `DTPOFF64`, `TPOFF64`, `DTPOFF32`, `GOTPC32_TLSDESC`, `TLSDESC_CALL`, `TLSDESC`
+
+### 12c. x86 Relocation Name Strings
+- [ ] `elf_reloc_name_for_machine(machine, type)` → human-readable string (e.g., `"R_X86_64_PC32"`)
+- [ ] Complete name tables for all i386 and x86-64 relocation types.
+- [ ] Complete name tables for all ARM and AArch64 relocation types.
+- [ ] Unknown types → `"UNKNOWN(N)"` format.
+
+---
+
+## 13. x86-Specific Validation (`elf_validate.c`)
+
+- [ ] Validate `EM_386` with `ELFCLASS32` only.
+- [ ] Validate `EM_X86_64` with `ELFCLASS64` only.
+- [ ] Both x86 variants: `ELFDATA2LSB` only (x86 is always little-endian).
+- [ ] Validate `.note.gnu.property` structure for x86: NT_GNU_PROPERTY_TYPE_0, correct alignment (4-byte for ELF32, 8-byte for ELF64).
+- [ ] Validate `GNU_PROPERTY_X86_ISA_1_NEEDED` bit values (only defined bits set).
+- [ ] Validate `GNU_PROPERTY_X86_FEATURE_1_AND` bit values (only IBT/SHSTK).
+- [ ] Warn on unknown GNU properties (forward compatibility).
+- [ ] Validate `SHT_REL` used for i386, `SHT_RELA` for x86-64.
+- [ ] Validate `.eh_frame` CIE return address register (8 for i386/RA, 16 for x86-64/RA).
+
+---
+
+## 14. GNU Property / Note API
+
+- [ ] `elf_note_count(obj)` → number of notes across all note sections.
+- [ ] `elf_note_at(obj, index)` → `{name, type, desc_data, desc_size}`.
+- [ ] `elf_gnu_property_count(obj)` → number of GNU properties in `.note.gnu.property`.
+- [ ] `elf_gnu_property_at(obj, index)` → `{type, data, data_size}`.
+- [ ] `elf_x86_isa_level(obj)` → bitmask of `GNU_PROPERTY_X86_ISA_1_NEEDED` (0 if absent).
+- [ ] `elf_x86_feature_flags(obj)` → bitmask of `GNU_PROPERTY_X86_FEATURE_1_AND` (0 if absent).
+- [ ] `elf_aarch64_feature_flags(obj)` → bitmask of `GNU_PROPERTY_AARCH64_FEATURE_1_AND` (0 if absent).
+- [ ] `elf_add_gnu_property_x86(obj, isa_needed, isa_used, feature_1)` → create/update `.note.gnu.property`.
+- [ ] `elf_add_gnu_property_aarch64(obj, feature_1)` → create/update `.note.gnu.property`.
+- [ ] `elf_build_id(obj, out_data, out_size)` → extract `.note.gnu.build-id` contents.
+
+---
+
+## 15. x86-Specific Tests
+
+### 15a. Expanded i386 Relocation Tests
+- [ ] `R_386_16` and `R_386_PC16`: verify 16-bit relocations.
+- [ ] `R_386_8` and `R_386_PC8`: verify 8-bit relocations.
+- [ ] `R_386_SIZE32`: verify symbol size relocation.
+- [ ] `R_386_GOT32X`: verify relaxable GOT reference.
+- [ ] `R_386_IRELATIVE`: verify indirect function.
+- [ ] `R_386_TLS_DTPMOD32`/`DTPOFF32`: verify TLS relocations.
+- [ ] All dynamic relocations (COPY/GLOB_DAT/JMP_SLOT/RELATIVE): verify.
+
+### 15b. Expanded x86-64 Relocation Tests
+- [ ] `R_X86_64_PC64`: verify 64-bit PC-relative.
+- [ ] `R_X86_64_GOTOFF64`/`GOTPC32`: verify GOT-relative.
+- [ ] `R_X86_64_SIZE32`/`SIZE64`: verify size relocations.
+- [ ] `R_X86_64_GOTPCRELX`/`REX_GOTPCRELX`: verify relaxable GOT references.
+- [ ] `R_X86_64_IRELATIVE`: verify indirect function.
+- [ ] `R_X86_64_TLSLD`/`DTPOFF32`: verify Local Dynamic TLS.
+- [ ] `R_X86_64_GOTPC32_TLSDESC`/`TLSDESC_CALL`/`TLSDESC`: verify TLSDESC relocations.
+- [ ] All 16-bit and 8-bit relocations: verify.
+
+### 15c. GNU Property Tests
+- [ ] Read x86-64 object with `.note.gnu.property` → extract ISA level bits.
+- [ ] Read AArch64 object → extract BTI/PAC flags.
+- [ ] Create object → add GNU property → write → read back → verify.
+- [ ] Property with ISA_1_V4 → `elf_x86_isa_level()` returns correct bitmask.
+- [ ] Object without `.note.gnu.property` → `elf_x86_isa_level()` returns 0.
+- [ ] Merge two objects with different ISA levels → OR result.
+- [ ] Merge two objects with FEATURE_1_AND → AND result.
+
+### 15d. Relocation Name Tests
+- [ ] Every i386 relocation type → correct name string.
+- [ ] Every x86-64 relocation type → correct name string.
+- [ ] Every ARM relocation type → correct name string.
+- [ ] Every AArch64 relocation type → correct name string.
+- [ ] Unknown type → `"UNKNOWN(N)"` format.
+
+### 15e. x86 Validation Tests
+- [ ] EM_386 with ELFCLASS64 → rejected.
+- [ ] EM_X86_64 with ELFCLASS32 → rejected.
+- [ ] x86 with ELFDATA2MSB → rejected.
+- [ ] `.note.gnu.property` with bad alignment → diagnostic.
+- [ ] `.note.gnu.property` with unknown property type → warning (not error).
+
+---
+
+## 16. Documentation
+
+- [ ] Update `README.md` with full multi-architecture support notes.
+- [ ] Document all relocation backend registration APIs.
 - [ ] Document ARM build attributes API.
+- [ ] Document GNU property API.
+- [ ] Document relocation name API.
 - [ ] Update `COMPATIBILITY_MATRIX.md` with ARM/AArch64 entries.
-- [ ] Man page updates for `elfobj.3` with ARM-specific API functions.
+- [ ] Man page updates for `elfobj.3` with per-arch API functions.

@@ -354,8 +354,223 @@ Goal: replace the current host‑ld wrapper with a native production ELF linker 
 
 ## 14. Architecture Backend Abstraction
 
-- [ ] `struct ld_target` with function pointers: `apply_reloc`, `create_plt_entry`, `create_got_entry`, `relax`, `create_tls_entries`, `veneer_needed`, `create_veneer`.
+- [ ] `struct ld_target` with function pointers: `apply_reloc`, `create_plt_entry`, `create_got_entry`, `relax`, `create_tls_entries`, `veneer_needed`, `create_veneer`, `write_plt0`, `finalize_got`, `merge_arch_sections`.
 - [ ] `ld_target_i386`, `ld_target_x86_64`, `ld_target_arm`, `ld_target_aarch64` implementations.
 - [ ] Runtime target selection from CLI or input inference.
 - [ ] Per-target default linker script, page sizes, entry point name.
 - [ ] Per-target PLT/GOT layout and stub code templates.
+- [ ] Per-target special section handling callbacks.
+
+---
+
+## 15. Per-Architecture PLT/GOT Stub Code
+
+### 15a. i386 PLT Stubs
+- [ ] PLT0 (resolver stub): `push *GOT[1]` / `jmp *GOT[2]` — 16 bytes.
+    ```
+    ff 35 xx xx xx xx   push DWORD [GOT+4]
+    ff 25 xx xx xx xx   jmp  DWORD [GOT+8]
+    00 00 00 00         (padding)
+    ```
+- [ ] PLTn (lazy stub): `jmp *GOT[n]` / `push reloc_index` / `jmp PLT0` — 16 bytes.
+    ```
+    ff 25 xx xx xx xx   jmp  DWORD [GOT+N]
+    68 xx xx xx xx      push DWORD reloc_offset
+    e9 xx xx xx xx      jmp  PLT0
+    ```
+- [ ] GOT[0] = `_DYNAMIC`, GOT[1] = link_map, GOT[2] = `_dl_runtime_resolve`.
+- [ ] Initial GOT[n] values: point to `push` instruction in PLTn (lazy binding).
+- [ ] With `-z now`: GOT[n] filled at load time, no lazy stub needed.
+
+### 15b. x86-64 PLT Stubs
+- [ ] PLT0 (resolver stub): `push GOT[1](%rip)` / `jmp *GOT[2](%rip)` — 16 bytes.
+    ```
+    ff 35 xx xx xx xx   push QWORD [rip + GOT+8]
+    ff 25 xx xx xx xx   jmp  QWORD [rip + GOT+16]
+    0f 1f 40 00         nop DWORD [rax+0] (padding)
+    ```
+- [ ] PLTn (lazy stub): `jmp *GOT[n](%rip)` / `push index` / `jmp PLT0` — 16 bytes.
+    ```
+    ff 25 xx xx xx xx   jmp  QWORD [rip + GOT_N]
+    68 xx xx xx xx      push DWORD reloc_index
+    e9 xx xx xx xx      jmp  PLT0
+    ```
+- [ ] All GOT references are RIP-relative.
+- [ ] PLT alignment: 16 bytes per entry.
+- [ ] `.plt.got` section for eager-binding entries (no lazy stub, direct `jmp *GOT[n](%rip)` — 8 bytes).
+
+### 15c. ARMv7 PLT Stubs
+- [ ] PLT0 (resolver stub):
+    ```
+    e52de004   str  lr, [sp, #-4]!
+    e59fe004   ldr  lr, [pc, #4]
+    e08fe00e   add  lr, pc, lr
+    e5bef008   ldr  pc, [lr, #8]!
+    xxxxxxxx   .word GOT_offset
+    ```
+- [ ] PLTn (ARM lazy stub):
+    ```
+    e28fc600   add  ip, pc, #0xNN00000   ; page offset high
+    e28cca00   add  ip, ip, #0xNN000     ; page offset mid
+    e5bcf000   ldr  pc, [ip, #0xNNN]!    ; GOT slot load + update ip
+    ```
+- [ ] Thumb PLT variant (for Thumb-only targets):
+    ```
+    4778       bx   pc          ; switch to ARM
+    e7fd       b    .           ; padding
+    (ARM PLT code follows)
+    ```
+- [ ] PLT entry size: 12 bytes (ARM), 16 bytes (Thumb interwork).
+- [ ] GOT layout: GOT[0] = `_DYNAMIC`, GOT[1] = link_map, GOT[2] = resolver.
+
+### 15d. AArch64 PLT Stubs
+- [ ] PLT0 (resolver stub):
+    ```
+    a9bf7bf0   stp  x16, x30, [sp, #-16]!
+    90xxxxxx   adrp x16, GOT_page
+    f94xxxxx   ldr  x17, [x16, #GOT+16]
+    91xxxxxx   add  x16, x16, #GOT_lo12
+    d61f0220   br   x17
+    d503201f   nop
+    d503201f   nop
+    d503201f   nop
+    ```
+- [ ] PLTn (lazy stub):
+    ```
+    90xxxxxx   adrp x16, GOT_page
+    f94xxxxx   ldr  x17, [x16, #GOT_N_lo12]
+    91xxxxxx   add  x16, x16, #GOT_N_lo12
+    d61f0220   br   x17
+    ```
+- [ ] PLT entry size: 16 bytes, PLT0: 32 bytes.
+- [ ] BTI-enabled PLT: prepend `bti c` (0xd503245f) to each PLT entry when `GNU_PROPERTY_AARCH64_FEATURE_1_BTI` is set.
+- [ ] PAC-enabled PLT: authenticate return address with `autia1716` if PAC is enabled.
+
+---
+
+## 16. Veneer/Thunk Generation
+
+### 16a. ARM Veneers
+- [ ] ARM→Thumb veneer (when BL targets Thumb code):
+    ```
+    e59fc000   ldr  ip, [pc]   ; load target address
+    e12fff1c   bx   ip         ; branch-exchange to Thumb
+    xxxxxxxx   .word target | 1
+    ```
+- [ ] Thumb→ARM veneer (when Thumb BL targets ARM code):
+    ```
+    4778       bx   pc          ; switch to ARM
+    e7fd       b    .           ; unreachable
+    eaxxxxxx   b    target      ; ARM branch
+    ```
+- [ ] Long-range veneer (when B/BL offset exceeds ±32MB):
+    ```
+    e51ff004   ldr  pc, [pc, #-4]
+    xxxxxxxx   .word target
+    ```
+- [ ] Thumb long-range veneer (offset > ±16MB for Thumb BL):
+    ```
+    f240xxxx   movw ip, #target_lo16
+    f2cxxxxx   movt ip, #target_hi16
+    4760       bx   ip
+    ```
+- [ ] Veneer placement: insert in `.text` near the call site, within range of original branch.
+- [ ] Veneer deduplication: share veneers for branches to the same target from nearby callers.
+
+### 16b. AArch64 Thunks
+- [ ] Long-range thunk (when B/BL offset exceeds ±128MB):
+    ```
+    90xxxxxx   adrp x16, target_page
+    91xxxxxx   add  x16, x16, #target_lo12
+    d61f0200   br   x16
+    ```
+- [ ] ADRP range thunk (when ADRP ±4GB exceeded — rare, for very large binaries):
+    ```
+    d2xxxxxx   movz x16, #target_g0
+    f2xxxxxx   movk x16, #target_g1, lsl #16
+    f2xxxxxx   movk x16, #target_g2, lsl #32
+    f2xxxxxx   movk x16, #target_g3, lsl #48
+    d61f0200   br   x16
+    ```
+- [ ] Thunk placement: before/after `.text` section, within ±128MB of callers.
+- [ ] Thunk deduplication.
+
+---
+
+## 17. Exception Table and Unwind Handling
+
+### 17a. ARM Exception Tables
+- [ ] Merge `.ARM.exidx` sections from all inputs, sorted by covered function address.
+- [ ] Adjust `R_ARM_PREL31` entries in `.ARM.exidx` during relocation.
+- [ ] Merge `.ARM.extab` sections (extended unwind data).
+- [ ] Generate `PT_ARM_EXIDX` segment covering the merged `.ARM.exidx`.
+- [ ] Handle `EXIDX_CANTUNWIND` sentinel entries.
+- [ ] GC: remove `.ARM.exidx` entries whose covered function was garbage-collected.
+- [ ] Validate `.ARM.exidx` `sh_link` points to the correct `.text` section.
+
+### 17b. x86/x86-64 `.eh_frame` Handling
+- [ ] CIE deduplication: merge identical CIE records across objects.
+- [ ] FDE merging: collect all FDEs, adjust PC-relative addresses.
+- [ ] Generate `.eh_frame_hdr` (binary search table of FDE start addresses).
+- [ ] Build `PT_GNU_EH_FRAME` segment pointing to `.eh_frame_hdr`.
+- [ ] GC: remove FDEs for garbage-collected functions.
+- [ ] Handle LSDA (language-specific data area) pointers in FDEs.
+
+### 17c. AArch64 `.eh_frame`
+- [ ] Same CIE/FDE handling as x86-64.
+- [ ] AArch64-specific CIE augmentation strings.
+- [ ] DWARF register numbers per AArch64 ABI (X0–X30=0–30, SP=31, V0–V31=64–95).
+
+---
+
+## 18. Default Linker Scripts
+
+### 18a. `elf_i386.x` (ET_EXEC)
+- [ ] `OUTPUT_FORMAT("elf32-i386")`, `OUTPUT_ARCH(i386)`, `ENTRY(_start)`.
+- [ ] `.interp` first loadable section.
+- [ ] Max page size: 4096.
+- [ ] Default entry: `_start`.
+- [ ] Standard section ordering: `.interp`, `.note.*`, `.hash`, `.gnu.hash`, `.dynsym`, `.dynstr`, `.rel.dyn`, `.rel.plt`, `.init`, `.plt`, `.plt.got`, `.text`, `.fini`, `.rodata`, `.eh_frame_hdr`, `.eh_frame`, `.init_array`, `.fini_array`, `.data.rel.ro`, `.dynamic`, `.got`, `.got.plt`, `.data`, `.bss`.
+
+### 18b. `elf_x86_64.x` (ET_EXEC)
+- [ ] `OUTPUT_FORMAT("elf64-x86-64")`, `OUTPUT_ARCH(i386:x86-64)`, `ENTRY(_start)`.
+- [ ] Max page size: 4096 (or 2MB for large page support via `-z max-page-size`).
+- [ ] `.rela.dyn` and `.rela.plt` instead of `.rel.*`.
+
+### 18c. `armelf.x` (ET_EXEC)
+- [ ] `OUTPUT_FORMAT("elf32-littlearm")`, `OUTPUT_ARCH(arm)`, `ENTRY(_start)`.
+- [ ] Max page size: 65536 (ARM kernel default).
+- [ ] `.ARM.exidx` after `.text`, `.ARM.extab` after `.ARM.exidx`.
+- [ ] `.ARM.attributes` in non-alloc section.
+- [ ] `.rel.dyn` and `.rel.plt`.
+
+### 18d. `aarch64elf.x` (ET_EXEC)
+- [ ] `OUTPUT_FORMAT("elf64-littleaarch64")`, `OUTPUT_ARCH(aarch64)`, `ENTRY(_start)`.
+- [ ] Max page size: 65536 (AArch64 kernel default).
+- [ ] `.note.gnu.property` early in RO segment.
+- [ ] `.rela.dyn` and `.rela.plt`.
+
+### 18e. Shared Library Variants (`*.xd`)
+- [ ] Same as above but no `ENTRY`, no `.interp`.
+- [ ] `PT_DYNAMIC` mandatory.
+
+### 18f. PIE Variants (`*.xde`)
+- [ ] Like shared library but with `ENTRY(_start)` and `.interp`.
+
+---
+
+## 19. `.note.gnu.property` Merging
+
+### 19a. x86-64 ISA Level Properties
+- [ ] Merge `GNU_PROPERTY_X86_ISA_1_NEEDED` across all inputs: bitwise OR (output needs the union of all input requirements).
+- [ ] Merge `GNU_PROPERTY_X86_ISA_1_USED` across all inputs: bitwise OR.
+- [ ] Merge `GNU_PROPERTY_X86_FEATURE_1_AND` across inputs: bitwise AND (IBT, SHSTK — all inputs must have it for output to have it).
+- [ ] If any input lacks `.note.gnu.property`, skip the AND-merge for that property (conservative).
+- [ ] Emit merged `.note.gnu.property` in output.
+- [ ] Build `PT_GNU_PROPERTY` segment for the merged note.
+
+### 19b. AArch64 Feature Properties
+- [ ] Merge `GNU_PROPERTY_AARCH64_FEATURE_1_AND` across inputs: bitwise AND (BTI, PAC).
+- [ ] If BTI is in the merged output: emit BTI-enabled PLT stubs.
+- [ ] If PAC is in the merged output: emit PAC-enabled PLT stubs.
+- [ ] If any input lacks the property: output drops that feature bit.
