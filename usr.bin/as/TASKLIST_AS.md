@@ -134,15 +134,15 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `PMADDUBSW`, `PMULHRSW`, `PSHUFB`, `PSIGNB/W/D`
 
 ### 3d. SSE4.1
-- [ ] `BLENDPD/PS`, `BLENDVPD/VPS`, `DPPD/DPPS`
-- [ ] `EXTRACTPS`, `INSERTPS`, `MOVNTDQA`, `MPSADBW`, `PACKUSDW`
-- [ ] `PBLENDVB`, `PBLENDW`, `PCMPEQQ`
-- [ ] `PEXTRB/D/Q/W` (new forms), `PINSRB/D/Q`
-- [ ] `PMAXSB/SD/UD/UW`, `PMINSB/SD/UD/UW`
-- [ ] `PMOVSXBW/BD/BQ/WD/WQ/DQ`, `PMOVZXBW/BD/BQ/WD/WQ/DQ`
-- [ ] `PMULDQ`, `PMULLD`, `PTEST`
-- [ ] `ROUNDPD/PS/SD/SS`
-- [ ] `PHMINPOSUW`
+- [x] `BLENDPD/PS`, `BLENDVPD/VPS`, `DPPD/DPPS`
+- [x] `EXTRACTPS`, `INSERTPS`, `MOVNTDQA`, `MPSADBW`, `PACKUSDW`
+- [x] `PBLENDVB`, `PBLENDW`, `PCMPEQQ`
+- [x] `PEXTRB/D/Q/W` (new forms), `PINSRB/D/Q`
+- [x] `PMAXSB/SD/UD/UW`, `PMINSB/SD/UD/UW`
+- [x] `PMOVSXBW/BD/BQ/WD/WQ/DQ`, `PMOVZXBW/BD/BQ/WD/WQ/DQ`
+- [x] `PMULDQ`, `PMULLD`, `PTEST`
+- [x] `ROUNDPD/PS/SD/SS`
+- [x] `PHMINPOSUW`
 
 ### 3e. SSE4.2
 - [ ] `CRC32` (r32/r64 × r/m8/16/32/64)
