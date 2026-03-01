@@ -83,21 +83,22 @@ const char *el_gets(EditLine *el, int *count) {
             fprintf(el->fout, "\033[H\033[2J");
             refresh_line(el);
         } else if (c == 0x1B) { /* ESC */
-            char seq[2];
-            if (read(fileno(el->fin), &seq[0], 1) == 1 &&
-                read(fileno(el->fin), &seq[1], 1) == 1) {
-                if (seq[0] == '[') {
-                    if (seq[1] == 'C') { /* Right */
+            char seq0;
+            char seq1;
+            if (read(fileno(el->fin), &seq0, 1) == 1 &&
+                read(fileno(el->fin), &seq1, 1) == 1) {
+                if (seq0 == '[') {
+                    if (seq1 == 'C') { /* Right */
                         if (el->line.cursor < el->line.len) {
                             el->line.cursor++;
                             refresh_line(el);
                         }
-                    } else if (seq[1] == 'D') { /* Left */
+                    } else if (seq1 == 'D') { /* Left */
                         if (el->line.cursor > 0) {
                             el->line.cursor--;
                             refresh_line(el);
                         }
-                    } else if (seq[1] == 'A') { /* Up (History) */
+                    } else if (seq1 == 'A') { /* Up (History) */
                         if (el->history) {
                             HistEvent ev;
                             if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
@@ -105,7 +106,7 @@ const char *el_gets(EditLine *el, int *count) {
                                 refresh_line(el);
                             }
                         }
-                    } else if (seq[1] == 'B') { /* Down (History) */
+                    } else if (seq1 == 'B') { /* Down (History) */
                         if (el->history) {
                             HistEvent ev;
                             if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
@@ -116,11 +117,24 @@ const char *el_gets(EditLine *el, int *count) {
                                 refresh_line(el);
                             }
                         }
+                    } else if (seq1 >= '0' && seq1 <= '9') {
+                        char seq2;
+                        if (read(fileno(el->fin), &seq2, 1) == 1 && seq2 == '~') {
+                            if (seq1 == '2') {
+                                el->overwrite_mode = !el->overwrite_mode;
+                            }
+                        }
                     }
                 }
             }
         } else if (c >= 32 && c < 127) {
             if (line_ensure_capacity(el, el->line.len + 2) == 0) {
+                if (el->overwrite_mode && el->line.cursor < el->line.len) {
+                    el->line.buffer[el->line.cursor] = (char)c;
+                    el->line.cursor++;
+                    refresh_line(el);
+                    continue;
+                }
                 memmove(el->line.buffer + el->line.cursor + 1,
                         el->line.buffer + el->line.cursor,
                         el->line.len - el->line.cursor + 1);

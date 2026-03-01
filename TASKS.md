@@ -4720,8 +4720,8 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Line Editing Engine (`readline.c`):**
     - [x] **Character Insertion:**
         - [x] Insert printable ASCII at cursor with `memmove` rightward shift.
-        - [ ] Reject insertion when buffer is at capacity (grow or beep).
-        - [ ] Support overwrite/replace mode toggle (Insert key).
+        - [x] Reject insertion when buffer is at capacity (grow or beep).
+        - [x] Support overwrite/replace mode toggle (Insert key).
     - [x] **Deletion:**
         - [x] Backspace (`^H` / 0x7F): delete char before cursor.
         - [x] Delete (`^D`): delete char at cursor (or EOF on empty line).

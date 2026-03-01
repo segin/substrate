@@ -52,6 +52,7 @@ struct editline {
     unsigned char (*completion)(EditLine *, int);
     void *completion_data;
     void *client_data;
+    int overwrite_mode;
 };
 
 /* Internal functions */
