@@ -81,6 +81,27 @@
 #define SHF_ARM_PURECODE 0x20000000u
 #endif
 
+#ifndef PT_GNU_EH_FRAME
+#define PT_GNU_EH_FRAME 0x6474e550u
+#define PT_GNU_STACK 0x6474e551u
+#define PT_GNU_RELRO 0x6474e552u
+#define PT_GNU_PROPERTY 0x6474e553u
+#endif
+
+#ifndef PT_ARM_EXIDX
+#define PT_ARM_EXIDX 0x70000001u
+#endif
+
+#ifndef PT_AARCH64_MEMTAG_MTE
+#define PT_AARCH64_MEMTAG_MTE 0x70000002u
+#endif
+
+#ifndef PF_X
+#define PF_X 0x1u
+#define PF_W 0x2u
+#define PF_R 0x4u
+#endif
+
 typedef struct {
     int wide;
     int show_file_header;
@@ -125,6 +146,17 @@ typedef struct {
     uint32_t info;
     uint64_t addralign;
 } section_header_t;
+
+typedef struct {
+    uint32_t type;
+    uint32_t flags;
+    uint64_t off;
+    uint64_t vaddr;
+    uint64_t paddr;
+    uint64_t filesz;
+    uint64_t memsz;
+    uint64_t align;
+} program_header_t;
 
 static const char *g_progname = "readelf";
 static void warnf(const char *fmt, ...);
@@ -420,6 +452,166 @@ static void print_section_headers(const readelf_opts_t *opts, const elf_view_t *
     printf("  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),\n");
     printf("  L (link order), O (extra OS processing required), G (group), T (TLS),\n");
     printf("  C (compressed), y (purecode), o (OS specific), E (exclude), p (processor specific)\n");
+}
+
+static int read_phdr(const elf_view_t *view, const elf_header_t *hdr, size_t index,
+                     program_header_t *out) {
+    size_t off;
+
+    if (view == NULL || hdr == NULL || out == NULL || hdr->phentsize == 0) {
+        return -1;
+    }
+    off = (size_t)hdr->phoff + ((size_t)hdr->phentsize * index);
+    memset(out, 0, sizeof(*out));
+    if (view->cls == ELFOBJ_CLASS_64) {
+        if (view_u32(view, off + 0, &out->type) != 0) return -1;
+        if (view_u32(view, off + 4, &out->flags) != 0) return -1;
+        if (view_u64(view, off + 8, &out->off) != 0) return -1;
+        if (view_u64(view, off + 16, &out->vaddr) != 0) return -1;
+        if (view_u64(view, off + 24, &out->paddr) != 0) return -1;
+        if (view_u64(view, off + 32, &out->filesz) != 0) return -1;
+        if (view_u64(view, off + 40, &out->memsz) != 0) return -1;
+        if (view_u64(view, off + 48, &out->align) != 0) return -1;
+    } else {
+        uint32_t v = 0;
+
+        if (view_u32(view, off + 0, &out->type) != 0) return -1;
+        if (view_u32(view, off + 4, &v) != 0) return -1;
+        out->off = v;
+        if (view_u32(view, off + 8, &v) != 0) return -1;
+        out->vaddr = v;
+        if (view_u32(view, off + 12, &v) != 0) return -1;
+        out->paddr = v;
+        if (view_u32(view, off + 16, &v) != 0) return -1;
+        out->filesz = v;
+        if (view_u32(view, off + 20, &v) != 0) return -1;
+        out->memsz = v;
+        if (view_u32(view, off + 24, &out->flags) != 0) return -1;
+        if (view_u32(view, off + 28, &v) != 0) return -1;
+        out->align = v;
+    }
+    return 0;
+}
+
+static const char *segment_type_name(uint32_t type) {
+    switch (type) {
+        case PT_NULL: return "NULL";
+        case PT_LOAD: return "LOAD";
+        case PT_DYNAMIC: return "DYNAMIC";
+        case PT_INTERP: return "INTERP";
+        case PT_NOTE: return "NOTE";
+        case 5: return "SHLIB";
+        case PT_PHDR: return "PHDR";
+        case PT_TLS: return "TLS";
+        case PT_GNU_EH_FRAME: return "GNU_EH_FRAME";
+        case PT_GNU_STACK: return "GNU_STACK";
+        case PT_GNU_RELRO: return "GNU_RELRO";
+        case PT_GNU_PROPERTY: return "GNU_PROPERTY";
+        case PT_ARM_EXIDX: return "ARM_EXIDX";
+        case PT_AARCH64_MEMTAG_MTE: return "AARCH64_MEMTAG_MTE";
+        default: return NULL;
+    }
+}
+
+static void segment_flags_letters(uint32_t flags, char out[4]) {
+    out[0] = (flags & PF_R) ? 'R' : ' ';
+    out[1] = (flags & PF_W) ? 'W' : ' ';
+    out[2] = (flags & PF_X) ? 'E' : ' ';
+    out[3] = '\0';
+}
+
+static void print_section_to_segment(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    uint64_t shstrndx = shstrndx_resolved(hdr);
+    section_header_t shstr;
+    const uint8_t *shstr_data = NULL;
+    size_t shstr_size = 0;
+    uint64_t i;
+
+    if (shstrndx < shnum && read_shdr(view, hdr, (size_t)shstrndx, &shstr) == 0 &&
+        shstr.off + shstr.size <= view->size) {
+        shstr_data = view->data + shstr.off;
+        shstr_size = (size_t)shstr.size;
+    }
+
+    printf("\n Section to Segment mapping:\n");
+    printf("  Segment Sections...\n");
+    for (i = 0; i < hdr->phnum; ++i) {
+        program_header_t ph;
+        uint64_t sidx;
+
+        if (read_phdr(view, hdr, (size_t)i, &ph) != 0) {
+            continue;
+        }
+        printf("   %2" PRIu64 "     ", i);
+        for (sidx = 0; sidx < shnum; ++sidx) {
+            section_header_t sh;
+            const char *name;
+            uint64_t sh_end;
+            uint64_t ph_end;
+
+            if (read_shdr(view, hdr, (size_t)sidx, &sh) != 0) {
+                continue;
+            }
+            if ((sh.flags & SHF_ALLOC) == 0 || sh.size == 0) {
+                continue;
+            }
+            sh_end = sh.addr + sh.size;
+            ph_end = ph.vaddr + ph.memsz;
+            if (sh.addr >= ph.vaddr && sh_end <= ph_end) {
+                name = shstr_name(shstr_data, shstr_size, sh.name);
+                printf("%s ", name);
+            }
+        }
+        printf("\n");
+    }
+}
+
+static void print_program_headers(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t i;
+
+    printf("\nProgram Headers:\n");
+    if (view->cls == ELFOBJ_CLASS_64) {
+        printf("  Type           Offset             VirtAddr           PhysAddr\n");
+        printf("                 FileSiz            MemSiz              Flags  Align\n");
+    } else {
+        printf("  Type           Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align\n");
+    }
+
+    for (i = 0; i < hdr->phnum; ++i) {
+        program_header_t ph;
+        const char *name;
+        char type_buf[24];
+        char flags[4];
+
+        if (read_phdr(view, hdr, (size_t)i, &ph) != 0) {
+            warnf("program header %" PRIu64 " is truncated", i);
+            break;
+        }
+        name = segment_type_name(ph.type);
+        if (name == NULL) {
+            snprintf(type_buf, sizeof(type_buf), "0x%x", ph.type);
+            name = type_buf;
+        }
+        segment_flags_letters(ph.flags, flags);
+        if (view->cls == ELFOBJ_CLASS_64) {
+            printf("  %-14s 0x%016" PRIx64 " 0x%016" PRIx64 " 0x%016" PRIx64 "\n",
+                   name, ph.off, ph.vaddr, ph.paddr);
+            printf("                 0x%016" PRIx64 " 0x%016" PRIx64 "  %-3s  0x%" PRIx64 "\n",
+                   ph.filesz, ph.memsz, flags, ph.align);
+        } else {
+            printf("  %-14s 0x%06" PRIx64 " 0x%08" PRIx64 " 0x%08" PRIx64 " 0x%05" PRIx64
+                   " 0x%05" PRIx64 " %-3s 0x%" PRIx64 "\n",
+                   name, ph.off, ph.vaddr, ph.paddr, ph.filesz, ph.memsz, flags, ph.align);
+        }
+
+        if (ph.type == PT_INTERP && ph.off < view->size && ph.off + ph.filesz <= view->size) {
+            const char *interp = (const char *)(view->data + ph.off);
+            printf("      [Requesting program interpreter: %s]\n", interp);
+        }
+    }
+
+    print_section_to_segment(view, hdr);
 }
 
 static int read_header(const elf_view_t *view, elf_header_t *out) {
@@ -775,6 +967,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_section_headers) {
         print_section_headers(opts, &view, &hdr);
+    }
+    if (opts->show_program_headers) {
+        print_program_headers(&view, &hdr);
     }
 
 out:

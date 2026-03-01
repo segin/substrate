@@ -46,13 +46,13 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 4. Program Headers Display (`-l` / `--program-headers` / `--segments`)
 
-- [ ] Display each program header: type, offset, vaddr, paddr, filesz, memsz, flags, align.
-- [ ] Decode segment type: `PT_NULL`, `PT_LOAD`, `PT_DYNAMIC`, `PT_INTERP`, `PT_NOTE`, `PT_SHLIB`, `PT_PHDR`, `PT_TLS`, `PT_GNU_EH_FRAME`, `PT_GNU_STACK`, `PT_GNU_RELRO`, `PT_GNU_PROPERTY`.
-- [ ] ARM-specific: `PT_ARM_EXIDX`.
-- [ ] AArch64-specific: `PT_AARCH64_MEMTAG_MTE`.
-- [ ] Decode flags: `R`/`W`/`E`.
-- [ ] Section-to-segment mapping table.
-- [ ] Display interpreter path for `PT_INTERP`.
+- [x] Display each program header: type, offset, vaddr, paddr, filesz, memsz, flags, align.
+- [x] Decode segment type: `PT_NULL`, `PT_LOAD`, `PT_DYNAMIC`, `PT_INTERP`, `PT_NOTE`, `PT_SHLIB`, `PT_PHDR`, `PT_TLS`, `PT_GNU_EH_FRAME`, `PT_GNU_STACK`, `PT_GNU_RELRO`, `PT_GNU_PROPERTY`.
+- [x] ARM-specific: `PT_ARM_EXIDX`.
+- [x] AArch64-specific: `PT_AARCH64_MEMTAG_MTE`.
+- [x] Decode flags: `R`/`W`/`E`.
+- [x] Section-to-segment mapping table.
+- [x] Display interpreter path for `PT_INTERP`.
 
 ## 5. Symbol Tables (`-s` / `--syms` / `--symbols`)
 
