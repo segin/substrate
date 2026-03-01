@@ -167,10 +167,10 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Skip unknown extended opcodes gracefully using length prefix.
 
 ### 2d. Special Opcodes **(FR‑14)**
-- [ ] Decode `adjusted_opcode = opcode - opcode_base`.
-- [ ] Advance address: `adjusted_opcode / line_range * min_insn_length`.
-- [ ] Advance line: `line_base + (adjusted_opcode % line_range)`.
-- [ ] Append row.
+- [x] Decode `adjusted_opcode = opcode - opcode_base`.
+- [x] Advance address: `adjusted_opcode / line_range * min_insn_length`.
+- [x] Advance line: `line_base + (adjusted_opcode % line_range)`.
+- [x] Append row.
 
 ### 2e. LEB128 Encoding **(FR‑15)**
 - [ ] Unsigned LEB128 decoder with overflow guard.

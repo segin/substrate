@@ -839,6 +839,34 @@ static int decode_line_program_standard_ops(addr2line_image_t *img,
         }
 
         if (opcode >= u->opcode_base) {
+            uint64_t adjusted = (uint64_t)(opcode - u->opcode_base);
+            uint64_t op_advance = adjusted / u->line_range;
+            int64_t line_inc = (int64_t)u->line_base + (int64_t)(adjusted % u->line_range);
+            line_row_t row;
+
+            line_state_advance_pc(u, &address, &op_index, op_advance);
+            line += line_inc;
+
+            memset(&row, 0, sizeof(row));
+            row.address = address;
+            row.file = (uint32_t)file;
+            row.line = line > 0 ? (uint32_t)line : 0u;
+            row.column = (uint32_t)column;
+            row.is_stmt = is_stmt;
+            row.basic_block = basic_block;
+            row.end_sequence = 0;
+            row.prologue_end = prologue_end;
+            row.epilogue_begin = epilogue_begin;
+            row.isa = (uint32_t)isa;
+            row.discriminator = discriminator;
+            row.unit_index = unit_index;
+            if (image_append_line_row(img, &row) != 0) {
+                return -1;
+            }
+            basic_block = 0;
+            prologue_end = 0;
+            epilogue_begin = 0;
+            discriminator = 0;
             continue;
         }
 
