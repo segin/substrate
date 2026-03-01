@@ -201,11 +201,11 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 5. Inlined Frames (`-i`)
 
-- [ ] Parse `DW_TAG_inlined_subroutine` entries in `.debug_info`. **(FR‑30)**
-- [ ] Read `DW_AT_call_file`, `DW_AT_call_line`, `DW_AT_call_column`. **(FR‑30)**
-- [ ] Read `DW_AT_abstract_origin` → resolve to `DW_TAG_subprogram` name. **(FR‑30)**
-- [ ] For each query address, walk the inline chain from innermost to outermost. **(FR‑31)**
-- [ ] Print one line per frame (innermost first). **(FR‑31)**
+- [x] Parse `DW_TAG_inlined_subroutine` entries in `.debug_info`. **(FR‑30)**
+- [x] Read `DW_AT_call_file`, `DW_AT_call_line`, `DW_AT_call_column`. **(FR‑30)**
+- [x] Read `DW_AT_abstract_origin` → resolve to `DW_TAG_subprogram` name. **(FR‑30)**
+- [x] For each query address, walk the inline chain from innermost to outermost. **(FR‑31)**
+- [x] Print one line per frame (innermost first). **(FR‑31)**
 
 ---
 
