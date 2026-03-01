@@ -145,8 +145,8 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `PHMINPOSUW`
 
 ### 3e. SSE4.2
-- [ ] `CRC32` (r32/r64 × r/m8/16/32/64)
-- [ ] `PCMPESTRI/M`, `PCMPISTRI/M`, `PCMPGTQ`
+- [x] `CRC32` (r32/r64 × r/m8/16/32/64)
+- [x] `PCMPESTRI/M`, `PCMPISTRI/M`, `PCMPGTQ`
 
 ---
 
