@@ -110,8 +110,8 @@ Goal: implement `size` using section accounting from `libelfobj`.
 - [x] Stripped ELF (no `.symtab`): sections still countable.
 
 ### 9f. Integration Tests
-- [ ] `cc -c foo.c` → `size foo.o` — verify text ≥ compiled code size.
-- [ ] Compare output against host `size` on same `.o`.
+- [x] `cc -c foo.c` → `size foo.o` — verify text ≥ compiled code size.
+- [x] Compare output against host `size` on same `.o`.
 
 ## 10. Man Page
 
