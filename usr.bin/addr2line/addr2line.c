@@ -28,6 +28,19 @@
 #define DW_LNCT_path 0x1u
 #define DW_LNCT_directory_index 0x2u
 
+#define DW_LNS_copy 0x01u
+#define DW_LNS_advance_pc 0x02u
+#define DW_LNS_advance_line 0x03u
+#define DW_LNS_set_file 0x04u
+#define DW_LNS_set_column 0x05u
+#define DW_LNS_negate_stmt 0x06u
+#define DW_LNS_set_basic_block 0x07u
+#define DW_LNS_const_add_pc 0x08u
+#define DW_LNS_fixed_advance_pc 0x09u
+#define DW_LNS_set_prologue_end 0x0au
+#define DW_LNS_set_epilogue_begin 0x0bu
+#define DW_LNS_set_isa 0x0cu
+
 typedef struct {
     const char *exe_path;
     const char **addr_args;
@@ -90,6 +103,21 @@ typedef struct {
 } line_unit_t;
 
 typedef struct {
+    uint64_t address;
+    uint32_t file;
+    uint32_t line;
+    uint32_t column;
+    uint8_t is_stmt;
+    uint8_t basic_block;
+    uint8_t end_sequence;
+    uint8_t prologue_end;
+    uint8_t epilogue_begin;
+    uint32_t isa;
+    uint32_t discriminator;
+    size_t unit_index;
+} line_row_t;
+
+typedef struct {
     elfobj_t *elf;
     char *path;
     elfobj_class_t elf_class;
@@ -113,6 +141,10 @@ typedef struct {
     line_unit_t *line_units;
     size_t line_unit_count;
     size_t line_unit_cap;
+
+    line_row_t *line_rows;
+    size_t line_row_count;
+    size_t line_row_cap;
 } addr2line_image_t;
 
 static const char *g_progname = "addr2line";
@@ -251,6 +283,35 @@ static int read_uleb128(const uint8_t **pp, const uint8_t *end, uint64_t *out) {
     }
 
     return -1;
+}
+
+static int read_sleb128(const uint8_t **pp, const uint8_t *end, int64_t *out) {
+    int64_t value = 0;
+    unsigned shift = 0;
+    uint8_t byte = 0;
+    const uint8_t *p = *pp;
+
+    while (p < end) {
+        byte = *p++;
+        value |= ((int64_t)(byte & 0x7fu)) << shift;
+        shift += 7u;
+        if ((byte & 0x80u) == 0u) {
+            break;
+        }
+        if (shift >= 64u) {
+            return -1;
+        }
+    }
+
+    if ((byte & 0x80u) != 0u) {
+        return -1;
+    }
+    if (shift < 64u && (byte & 0x40u) != 0u) {
+        value |= -((int64_t)1 << shift);
+    }
+    *pp = p;
+    *out = value;
+    return 0;
 }
 
 static int read_offset(const uint8_t **pp, const uint8_t *end, elfobj_endian_t e,
@@ -587,6 +648,179 @@ static int parse_line_v2_v4_tables(line_unit_t *u, const uint8_t **pp, const uin
     return 0;
 }
 
+static int image_append_line_row(addr2line_image_t *img, const line_row_t *row) {
+    line_row_t *next;
+    if (img->line_row_count == img->line_row_cap) {
+        size_t new_cap = img->line_row_cap == 0 ? 256u : img->line_row_cap * 2u;
+        next = (line_row_t *)realloc(img->line_rows, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        img->line_rows = next;
+        img->line_row_cap = new_cap;
+    }
+    img->line_rows[img->line_row_count++] = *row;
+    return 0;
+}
+
+static void line_state_advance_pc(const line_unit_t *u,
+                                  uint64_t *address,
+                                  uint64_t *op_index,
+                                  uint64_t operation_advance) {
+    uint64_t max_ops = (uint64_t)(u->max_ops_per_insn == 0 ? 1u : u->max_ops_per_insn);
+    uint64_t op = *op_index + operation_advance;
+    *address += (uint64_t)u->min_insn_length * (op / max_ops);
+    *op_index = op % max_ops;
+}
+
+static int decode_line_program_standard_ops(addr2line_image_t *img,
+                                            const line_unit_t *u,
+                                            size_t unit_index) {
+    const uint8_t *p = u->program;
+    const uint8_t *end = u->program + u->program_size;
+    uint64_t address = 0;
+    uint64_t op_index = 0;
+    int64_t line = 1;
+    uint64_t file = 1;
+    uint64_t column = 0;
+    uint8_t is_stmt = u->default_is_stmt;
+    uint8_t basic_block = 0;
+    uint8_t prologue_end = 0;
+    uint8_t epilogue_begin = 0;
+    uint64_t isa = 0;
+    uint32_t discriminator = 0;
+
+    while (p < end) {
+        uint8_t opcode = *p++;
+
+        if (opcode == 0u) {
+            uint64_t ext_len = 0;
+            if (read_uleb128(&p, end, &ext_len) != 0) {
+                return -1;
+            }
+            if ((uint64_t)(end - p) < ext_len) {
+                return -1;
+            }
+            p += (size_t)ext_len;
+            continue;
+        }
+
+        if (opcode >= u->opcode_base) {
+            continue;
+        }
+
+        switch (opcode) {
+        case DW_LNS_copy: {
+            line_row_t row;
+            memset(&row, 0, sizeof(row));
+            row.address = address;
+            row.file = (uint32_t)file;
+            row.line = line > 0 ? (uint32_t)line : 0u;
+            row.column = (uint32_t)column;
+            row.is_stmt = is_stmt;
+            row.basic_block = basic_block;
+            row.end_sequence = 0;
+            row.prologue_end = prologue_end;
+            row.epilogue_begin = epilogue_begin;
+            row.isa = (uint32_t)isa;
+            row.discriminator = discriminator;
+            row.unit_index = unit_index;
+            if (image_append_line_row(img, &row) != 0) {
+                return -1;
+            }
+            basic_block = 0;
+            prologue_end = 0;
+            epilogue_begin = 0;
+            discriminator = 0;
+            break;
+        }
+        case DW_LNS_advance_pc: {
+            uint64_t op_advance = 0;
+            if (read_uleb128(&p, end, &op_advance) != 0) {
+                return -1;
+            }
+            line_state_advance_pc(u, &address, &op_index, op_advance);
+            break;
+        }
+        case DW_LNS_advance_line: {
+            int64_t delta = 0;
+            if (read_sleb128(&p, end, &delta) != 0) {
+                return -1;
+            }
+            line += delta;
+            break;
+        }
+        case DW_LNS_set_file: {
+            uint64_t v = 0;
+            if (read_uleb128(&p, end, &v) != 0) {
+                return -1;
+            }
+            file = v;
+            break;
+        }
+        case DW_LNS_set_column: {
+            uint64_t v = 0;
+            if (read_uleb128(&p, end, &v) != 0) {
+                return -1;
+            }
+            column = v;
+            break;
+        }
+        case DW_LNS_negate_stmt:
+            is_stmt = (uint8_t)!is_stmt;
+            break;
+        case DW_LNS_set_basic_block:
+            basic_block = 1;
+            break;
+        case DW_LNS_const_add_pc: {
+            uint64_t adjusted = 255u - u->opcode_base;
+            uint64_t op_advance = adjusted / u->line_range;
+            line_state_advance_pc(u, &address, &op_index, op_advance);
+            break;
+        }
+        case DW_LNS_fixed_advance_pc: {
+            uint16_t adv = 0;
+            if (read_u16_cursor(&p, end, img->elf_endian, &adv) != 0) {
+                return -1;
+            }
+            address += adv;
+            op_index = 0;
+            break;
+        }
+        case DW_LNS_set_prologue_end:
+            prologue_end = 1;
+            break;
+        case DW_LNS_set_epilogue_begin:
+            epilogue_begin = 1;
+            break;
+        case DW_LNS_set_isa: {
+            uint64_t v = 0;
+            if (read_uleb128(&p, end, &v) != 0) {
+                return -1;
+            }
+            isa = v;
+            break;
+        }
+        default: {
+            size_t operand_count = 0;
+            size_t i;
+            if (opcode > 0u && (size_t)(opcode - 1u) < u->std_opcode_count) {
+                operand_count = u->std_opcode_lengths[opcode - 1u];
+            }
+            for (i = 0; i < operand_count; ++i) {
+                uint64_t ignored = 0;
+                if (read_uleb128(&p, end, &ignored) != 0) {
+                    return -1;
+                }
+            }
+            break;
+        }
+        }
+    }
+
+    return 0;
+}
+
 static int parse_debug_line_units(addr2line_image_t *img) {
     const uint8_t *p = img->debug_line.data;
     const uint8_t *end = img->debug_line.data + img->debug_line.size;
@@ -720,6 +954,11 @@ static int parse_debug_line_units(addr2line_image_t *img) {
 
         if (image_append_line_unit(img, &u) != 0) {
             line_unit_free(&u);
+            return -1;
+        }
+        if (decode_line_program_standard_ops(img,
+                                             &img->line_units[img->line_unit_count - 1u],
+                                             img->line_unit_count - 1u) != 0) {
             return -1;
         }
         p = unit_end;
@@ -992,6 +1231,7 @@ static void image_reset(addr2line_image_t *img) {
     }
 
     free(img->func_syms);
+    free(img->line_rows);
     for (i = 0; i < img->line_unit_count; ++i) {
         line_unit_free(&img->line_units[i]);
     }

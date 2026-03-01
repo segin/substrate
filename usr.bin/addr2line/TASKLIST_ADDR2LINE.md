@@ -146,18 +146,18 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Validate header fields against `.debug_line` section bounds.
 
 ### 2b. Standard Opcodes **(FR‑11)**
-- [ ] `DW_LNS_copy` — append row, reset discriminator.
-- [ ] `DW_LNS_advance_pc` — advance `address` by operand × `min_insn_length`.
-- [ ] `DW_LNS_advance_line` — add signed LEB128 to `line`.
-- [ ] `DW_LNS_set_file` — update `file`.
-- [ ] `DW_LNS_set_column` — update `column`.
-- [ ] `DW_LNS_negate_stmt` — toggle `is_stmt`.
-- [ ] `DW_LNS_set_basic_block`.
-- [ ] `DW_LNS_const_add_pc` — special advance with opcode 255.
-- [ ] `DW_LNS_fixed_advance_pc` — advance by fixed uhalf.
-- [ ] `DW_LNS_set_prologue_end` (DWARF v3+).
-- [ ] `DW_LNS_set_epilogue_begin` (DWARF v3+).
-- [ ] `DW_LNS_set_isa` (DWARF v3+).
+- [x] `DW_LNS_copy` — append row, reset discriminator.
+- [x] `DW_LNS_advance_pc` — advance `address` by operand × `min_insn_length`.
+- [x] `DW_LNS_advance_line` — add signed LEB128 to `line`.
+- [x] `DW_LNS_set_file` — update `file`.
+- [x] `DW_LNS_set_column` — update `column`.
+- [x] `DW_LNS_negate_stmt` — toggle `is_stmt`.
+- [x] `DW_LNS_set_basic_block`.
+- [x] `DW_LNS_const_add_pc` — special advance with opcode 255.
+- [x] `DW_LNS_fixed_advance_pc` — advance by fixed uhalf.
+- [x] `DW_LNS_set_prologue_end` (DWARF v3+).
+- [x] `DW_LNS_set_epilogue_begin` (DWARF v3+).
+- [x] `DW_LNS_set_isa` (DWARF v3+).
 
 ### 2c. Extended Opcodes **(FR‑12, FR‑13)**
 - [ ] `DW_LNE_end_sequence` — mark `end_sequence`, append row, reset state.
