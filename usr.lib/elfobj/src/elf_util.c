@@ -378,6 +378,147 @@ elfobj_t *elf_create(uint16_t type, uint16_t machine, elfobj_class_t cls, elfobj
     return obj;
 }
 
+static void init_default_sections(elfobj_t *obj, uint64_t align_text, uint64_t align_data) {
+    elf_section_t *sec;
+    sec = elf_add_section(obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+    if (sec != NULL) {
+        (void)elf_section_set_align(sec, align_text);
+    }
+    sec = elf_add_section(obj, ".data", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
+    if (sec != NULL) {
+        (void)elf_section_set_align(sec, align_data);
+    }
+    sec = elf_add_section(obj, ".bss", SHT_NOBITS, SHF_ALLOC | SHF_WRITE);
+    if (sec != NULL) {
+        (void)elf_section_set_align(sec, align_data);
+    }
+}
+
+elfobj_t *elf_init_i386(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    init_default_sections(obj, 4, 4);
+    return obj;
+}
+
+elfobj_t *elf_init_x86_64(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    init_default_sections(obj, 16, 8);
+    return obj;
+}
+
+elfobj_t *elf_init_arm(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_ARM, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    obj->flags = EF_ARM_ABI_VER5;
+    init_default_sections(obj, 4, 4);
+    return obj;
+}
+
+elfobj_t *elf_init_aarch64(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_AARCH64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    obj->flags = 0;
+    init_default_sections(obj, 4, 8);
+    return obj;
+}
+
+elf_section_t *elf_add_arm_exidx(elfobj_t *obj) {
+    elf_section_t *exidx;
+    elf_section_t *extab;
+
+    if (obj == NULL) {
+        return NULL;
+    }
+    exidx = elf_find_section(obj, ".ARM.exidx");
+    if (exidx == NULL) {
+        exidx = elf_add_section(obj, ".ARM.exidx", SHT_ARM_EXIDX, SHF_ALLOC | SHF_LINK_ORDER);
+        if (exidx == NULL) {
+            return NULL;
+        }
+        (void)elf_section_set_align(exidx, 4);
+    }
+    extab = elf_find_section(obj, ".ARM.extab");
+    if (extab == NULL) {
+        extab = elf_add_section(obj, ".ARM.extab", SHT_PROGBITS, SHF_ALLOC);
+        if (extab == NULL) {
+            return NULL;
+        }
+        (void)elf_section_set_align(extab, 4);
+    }
+    exidx->link = (uint32_t)extab->index;
+    obj->dirty = 1;
+    return exidx;
+}
+
+elf_err_t elf_add_arm_attributes(elfobj_t *obj, const void *attrs_data, size_t attrs_size) {
+    elf_section_t *attrs;
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    attrs = elf_find_section(obj, ".ARM.attributes");
+    if (attrs == NULL) {
+        attrs = elf_add_section(obj, ".ARM.attributes", SHT_ARM_ATTRIBUTES, 0);
+        if (attrs == NULL) {
+            return obj->last_err == ELF_OK ? ELF_ERR_OOM : obj->last_err;
+        }
+        (void)elf_section_set_align(attrs, 1);
+    }
+    if (attrs_data == NULL || attrs_size == 0) {
+        static const uint8_t default_attrs[] = { 'A', 0 };
+        return elf_section_set_data(attrs, default_attrs, sizeof(default_attrs));
+    }
+    return elf_section_set_data(attrs, attrs_data, attrs_size);
+}
+
+elf_err_t elf_add_gnu_property_aarch64(elfobj_t *obj, uint32_t feature_1) {
+    elf_section_t *sec;
+    uint8_t data[32];
+    size_t off = 0;
+
+    if (obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    sec = elf_find_section(obj, ".note.gnu.property");
+    if (sec == NULL) {
+        sec = elf_add_section(obj, ".note.gnu.property", SHT_NOTE, SHF_ALLOC);
+        if (sec == NULL) {
+            return obj->last_err == ELF_OK ? ELF_ERR_OOM : obj->last_err;
+        }
+        (void)elf_section_set_align(sec, obj->cls == ELFOBJ_CLASS_64 ? 8 : 4);
+    }
+
+    memset(data, 0, sizeof(data));
+    elf__wr32(data + off, obj->endian, 4);
+    off += 4;
+    elf__wr32(data + off, obj->endian, 16);
+    off += 4;
+    elf__wr32(data + off, obj->endian, 5);
+    off += 4;
+    memcpy(data + off, "GNU\0", 4);
+    off += 4;
+    elf__wr32(data + off, obj->endian, GNU_PROPERTY_AARCH64_FEATURE_1_AND);
+    off += 4;
+    elf__wr32(data + off, obj->endian, 4);
+    off += 4;
+    elf__wr32(data + off, obj->endian,
+              feature_1 & (GNU_PROPERTY_AARCH64_FEATURE_1_BTI |
+                           GNU_PROPERTY_AARCH64_FEATURE_1_PAC));
+    off += 4;
+    elf__wr32(data + off, obj->endian, 0);
+    off += 4;
+    return elf_section_set_data(sec, data, off);
+}
+
 elf_err_t elf_finalize(elfobj_t *obj) {
     elf_err_t err;
     size_t first_global;
