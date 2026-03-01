@@ -26,9 +26,9 @@ Goal: implement `size` using section accounting from `libelfobj`.
 ## 3. Output Formats
 
 ### 3a. Berkeley Format (default / `-B`)
-- [ ] Header line: `   text    data     bss     dec     hex filename`.
-- [ ] One row per file: text, data, bss as decimal, total as decimal + hex.
-- [ ] Multiple files: one row each + grand total row.
+- [x] Header line: `   text    data     bss     dec     hex filename`.
+- [x] One row per file: text, data, bss as decimal, total as decimal + hex.
+- [x] Multiple files: one row each + grand total row.
 
 ### 3b. SysV Format (`-A` / `--format=sysv`)
 - [ ] Per‑section breakdown table: Section, Size, Addr.

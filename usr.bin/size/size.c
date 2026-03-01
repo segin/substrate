@@ -120,6 +120,8 @@ static void print_row(const char *path, const size_totals_t *totals) {
 int main(int argc, char **argv) {
     int i;
     int any_fail = 0;
+    int printed = 0;
+    size_totals_t grand;
 
     (void)SIZE_VERSION;
 
@@ -127,6 +129,11 @@ int main(int argc, char **argv) {
         usage(stderr);
         return 1;
     }
+
+    grand.text = 0;
+    grand.data = 0;
+    grand.bss = 0;
+    grand.cls = ELFOBJ_CLASS_32;
 
     printf("   text    data     bss     dec     hex filename\n");
     for (i = 1; i < argc; ++i) {
@@ -142,6 +149,18 @@ int main(int argc, char **argv) {
             continue;
         }
         print_row(argv[i], &totals);
+        printed++;
+
+        grand.text += totals.text;
+        grand.data += totals.data;
+        grand.bss += totals.bss;
+        if (totals.cls == ELFOBJ_CLASS_64) {
+            grand.cls = ELFOBJ_CLASS_64;
+        }
+    }
+
+    if (printed > 1) {
+        print_row("total", &grand);
     }
 
     return any_fail ? 1 : 0;
