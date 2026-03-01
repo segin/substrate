@@ -27,6 +27,7 @@ void      el_reset(EditLine *el);
 const char *el_gets(EditLine *el, int *count);
 int         el_get(EditLine *el, int op, ...);
 int         el_set(EditLine *el, int op, ...);
+int         el_resize(EditLine *el);
 
 const LineInfo *el_line(EditLine *el);
 
@@ -53,6 +54,8 @@ int history(History *h, HistEvent *ev, int op, ...);
 #define EL_SETTC        6
 #define EL_REFRESH      7
 #define EL_HIST         8
+#define EL_RPROMPT      9
+#define EL_CLIENTDATA   10
 
 /* history operations */
 #define H_FUNC          0

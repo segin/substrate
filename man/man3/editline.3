@@ -188,6 +188,12 @@ Public editor command return macros are:
 .BR CC_EOF ,
 and
 .BR CC_ERROR .
+.SH THREAD SAFETY
+An
+.B EditLine
+handle is not thread-safe.
+Applications must confine each handle to one thread at a time and
+serialize external access.
 .SH SEE ALSO
 .BR el_init (3),
 .BR el_gets (3),

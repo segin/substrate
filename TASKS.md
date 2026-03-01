@@ -4708,14 +4708,14 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Define `struct editline` (streams, terminal, line, history, prompt).
     - [x] Define `struct line` (buffer, cap, len, cursor, `LineInfo`).
     - [x] Define `struct terminal` (orig/raw `termios`, `is_raw` flag).
-    - [ ] Add `prog` name storage for error messages.
-    - [ ] Add `editor_mode` field to `struct editline` (enum: `ED_EMACS`, `ED_VI`).
-    - [ ] Add `signal_state` field to `struct editline` (saved dispositions + mask).
-    - [ ] Add `completion` callback pointer and client data to `struct editline`.
-    - [ ] Add `rprompt` (right‑prompt) pointer to `struct editline`.
-    - [ ] Dynamic line‑buffer growth: `realloc` when `len + 1 >= cap` (double strategy, capped at 1 MiB).
-    - [ ] Implement `el_resize(EditLine *el)`: force terminal size re‑query and redraw.
-    - [ ] Thread‑safety: document that `EditLine` is not thread‑safe (single‑thread contract).
+    - [x] Add `prog` name storage for error messages.
+    - [x] Add `editor_mode` field to `struct editline` (enum: `ED_EMACS`, `ED_VI`).
+    - [x] Add `signal_state` field to `struct editline` (saved dispositions + mask).
+    - [x] Add `completion` callback pointer and client data to `struct editline`.
+    - [x] Add `rprompt` (right‑prompt) pointer to `struct editline`.
+    - [x] Dynamic line‑buffer growth: `realloc` when `len + 1 >= cap` (double strategy, capped at 1 MiB).
+    - [x] Implement `el_resize(EditLine *el)`: force terminal size re‑query and redraw.
+    - [x] Thread‑safety: document that `EditLine` is not thread‑safe (single‑thread contract).
 
 - [ ] **Line Editing Engine (`readline.c`):**
     - [x] **Character Insertion:**

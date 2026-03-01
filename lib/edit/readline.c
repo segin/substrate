@@ -15,6 +15,19 @@ static void refresh_line(EditLine *el) {
     fflush(el->fout);
 }
 
+static void line_load_history(EditLine *el, const char *text) {
+    size_t len;
+
+    if (!el || !text) return;
+
+    len = strlen(text);
+    if (line_ensure_capacity(el, len + 1) == -1) return;
+
+    memcpy(el->line.buffer, text, len + 1);
+    el->line.len = len;
+    el->line.cursor = len;
+}
+
 const char *el_gets(EditLine *el, int *count) {
     if (count) *count = 0;
     if (terminal_set_raw(el) == -1) return NULL;
@@ -88,9 +101,7 @@ const char *el_gets(EditLine *el, int *count) {
                         if (el->history) {
                             HistEvent ev;
                             if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                                strncpy(el->line.buffer, ev.str, el->line.cap - 1);
-                                el->line.len = strlen(el->line.buffer);
-                                el->line.cursor = el->line.len;
+                                line_load_history(el, ev.str);
                                 refresh_line(el);
                             }
                         }
@@ -98,9 +109,7 @@ const char *el_gets(EditLine *el, int *count) {
                         if (el->history) {
                             HistEvent ev;
                             if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                                strncpy(el->line.buffer, ev.str, el->line.cap - 1);
-                                el->line.len = strlen(el->line.buffer);
-                                el->line.cursor = el->line.len;
+                                line_load_history(el, ev.str);
                                 refresh_line(el);
                             } else {
                                 el_reset(el);
@@ -111,7 +120,7 @@ const char *el_gets(EditLine *el, int *count) {
                 }
             }
         } else if (c >= 32 && c < 127) {
-            if (el->line.len + 1 < el->line.cap) {
+            if (line_ensure_capacity(el, el->line.len + 2) == 0) {
                 memmove(el->line.buffer + el->line.cursor + 1,
                         el->line.buffer + el->line.cursor,
                         el->line.len - el->line.cursor + 1);
@@ -119,6 +128,9 @@ const char *el_gets(EditLine *el, int *count) {
                 el->line.len++;
                 el->line.cursor++;
                 refresh_line(el);
+            } else {
+                fputc('\a', el->fout);
+                fflush(el->fout);
             }
         }
     }
