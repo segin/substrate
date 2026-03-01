@@ -61,7 +61,7 @@ static const char *progname = "size";
 static void usage(FILE *out) {
     fprintf(out,
             "usage: %s [-A|-B|--format={sysv,berkeley,gnu}] "
-            "[-d|-o|-x|--radix={8,10,16}] <file>...\n",
+            "[-d|-o|-x|--radix={8,10,16}] [-t|--totals] <file>...\n",
             progname);
 }
 
@@ -572,6 +572,30 @@ static void print_sysv_table(const char *path, const size_report_t *report, int 
     printf("Total                %10s\n\n", total_buf);
 }
 
+static void print_sysv_totals(const size_totals_t *totals, int radix) {
+    char text_buf[32];
+    char data_buf[32];
+    char bss_buf[32];
+    char total_buf[32];
+    uint64_t total;
+
+    if (totals == NULL) {
+        return;
+    }
+    total = totals->text + totals->data + totals->bss;
+    format_value(totals->text, radix, text_buf, sizeof(text_buf));
+    format_value(totals->data, radix, data_buf, sizeof(data_buf));
+    format_value(totals->bss, radix, bss_buf, sizeof(bss_buf));
+    format_value(total, radix, total_buf, sizeof(total_buf));
+
+    printf("total  :\n");
+    printf("section              size             addr\n");
+    printf("%-18s %10s %16s\n", ".text", text_buf, "0");
+    printf("%-18s %10s %16s\n", ".data", data_buf, "0");
+    printf("%-18s %10s %16s\n", ".bss", bss_buf, "0");
+    printf("Total                %10s\n", total_buf);
+}
+
 static void accumulate_grand(size_totals_t *grand, const size_report_t *report) {
     if (grand == NULL || report == NULL) {
         return;
@@ -935,6 +959,7 @@ int main(int argc, char **argv) {
     int first_file = 1;
     int radix = 10;
     int radix_explicit = 0;
+    int totals_forced = 0;
     size_format_t format = SIZE_FORMAT_BERKELEY;
     size_classify_mode_t classify_mode = SIZE_CLASSIFY_BERKELEY;
     size_totals_t grand;
@@ -987,6 +1012,10 @@ int main(int argc, char **argv) {
             classify_mode = SIZE_CLASSIFY_BERKELEY;
             continue;
         }
+        if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--totals") == 0) {
+            totals_forced = 1;
+            continue;
+        }
         if (argv[i][0] == '-') {
             usage(stderr);
             return 1;
@@ -1017,11 +1046,16 @@ int main(int argc, char **argv) {
                               &grand, &printed, &first_file, &any_fail);
     }
 
-    if (printed > 1) {
+    if ((totals_forced && printed > 0) || printed > 1) {
         if (format == SIZE_FORMAT_BERKELEY) {
             print_row("total", &grand, radix, radix_explicit);
         } else if (format == SIZE_FORMAT_GNU) {
             print_gnu_row("total", &grand, radix);
+        } else if (format == SIZE_FORMAT_SYSV) {
+            if (!first_file) {
+                printf("\n");
+            }
+            print_sysv_totals(&grand, radix);
         }
     }
 

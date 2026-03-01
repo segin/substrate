@@ -55,9 +55,9 @@ Goal: implement `size` using section accounting from `libelfobj`.
 
 ## 5. Totals and Overflow
 
-- [ ] Use `uint64_t` accumulators for all size sums.
-- [ ] Handle ELF64 sections with sizes > 4 GiB.
-- [ ] `--totals` / `-t`: print grand total across all files (default for multiple files).
+- [x] Use `uint64_t` accumulators for all size sums.
+- [x] Handle ELF64 sections with sizes > 4 GiB.
+- [x] `--totals` / `-t`: print grand total across all files (default for multiple files).
 
 ## 6. Flags
 
