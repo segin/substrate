@@ -5093,11 +5093,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] **History Navigation:**
         - [x] Up arrow (`ESC [A`): `H_PREV` — load previous history entry.
         - [x] Down arrow (`ESC [B`): `H_NEXT` — load next or reset to empty.
-        - [ ] Save current input before first history navigation; restore on down‑past‑end.
-        - [ ] `history-search-backward` (`^R`): incremental reverse search.
-        - [ ] `history-search-forward` (`^S`): incremental forward search.
-        - [ ] `beginning-of-history` (`M-<`): jump to oldest entry.
-        - [ ] `end-of-history` (`M->`): jump to newest / current input.
+        - [x] Save current input before first history navigation; restore on down‑past‑end.
+        - [x] `history-search-backward` (`^R`): incremental reverse search.
+        - [x] `history-search-forward` (`^S`): incremental forward search.
+        - [x] `beginning-of-history` (`M-<`): jump to oldest entry.
+        - [x] `end-of-history` (`M->`): jump to newest / current input.
     - [x] **Special Keys:**
         - [x] `^C`: print `^C`, reset line, reprint prompt.
         - [x] `^L`: clear screen (`CSI H` + `CSI 2J`), refresh line.

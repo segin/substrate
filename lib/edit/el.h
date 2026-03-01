@@ -64,6 +64,9 @@ struct editline {
     size_t render_cache_cap;
     size_t render_cache_len;
     size_t render_cache_cursor;
+    char *saved_input;
+    size_t saved_input_cap;
+    int history_browsing;
 };
 
 /* Internal functions */

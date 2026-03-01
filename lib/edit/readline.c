@@ -275,6 +275,113 @@ static void line_load_history(EditLine *el, const char *text) {
     el->line.cursor = len;
 }
 
+static int line_set_text(EditLine *el, const char *text) {
+    size_t len;
+
+    if (!el || !text) return -1;
+
+    len = strlen(text);
+    if (line_ensure_capacity(el, len + 1) == -1) return -1;
+    memcpy(el->line.buffer, text, len + 1);
+    el->line.len = len;
+    el->line.cursor = len;
+    return 0;
+}
+
+static int history_save_current_input(EditLine *el) {
+    char *new_saved;
+    size_t needed;
+
+    if (!el) return -1;
+    needed = el->line.len + 1;
+    if (el->saved_input_cap < needed) {
+        new_saved = realloc(el->saved_input, needed);
+        if (!new_saved) return -1;
+        el->saved_input = new_saved;
+        el->saved_input_cap = needed;
+    }
+    memcpy(el->saved_input, el->line.buffer, needed);
+    return 0;
+}
+
+static void history_restore_current_input(EditLine *el) {
+    if (!el || !el->saved_input) {
+        el_reset(el);
+        return;
+    }
+    (void)line_set_text(el, el->saved_input);
+}
+
+static const char *history_find_match(EditLine *el, const char *query, int reverse) {
+    HistEvent ev;
+    const char *last;
+
+    if (!el || !el->history || !query || !*query) return NULL;
+
+    if (reverse) {
+        if (history(el->history, &ev, H_LAST) != 0 || !ev.str) return NULL;
+        if (strstr(ev.str, query)) return ev.str;
+        last = ev.str;
+        while (history(el->history, &ev, H_PREV) == 0 && ev.str && ev.str != last) {
+            if (strstr(ev.str, query)) return ev.str;
+            last = ev.str;
+        }
+        return NULL;
+    }
+
+    if (history(el->history, &ev, H_FIRST) != 0 || !ev.str) return NULL;
+    do {
+        if (strstr(ev.str, query)) return ev.str;
+    } while (history(el->history, &ev, H_NEXT) == 0 && ev.str);
+
+    return NULL;
+}
+
+static void history_incremental_search(EditLine *el, int reverse) {
+    char query[256];
+    size_t qlen;
+    const char *match;
+    int ch;
+
+    if (!el || !el->history) return;
+
+    query[0] = '\0';
+    qlen = 0;
+    match = NULL;
+
+    for (;;) {
+        fprintf(el->fout, "\r\033[K(%s-i-search)`%s': %s",
+                reverse ? "reverse" : "forward",
+                query,
+                match ? match : "");
+        fflush(el->fout);
+
+        if (read(fileno(el->fin), &ch, 1) != 1) break;
+        ch &= 0xFF;
+
+        if (ch == '\n' || ch == '\r') {
+            if (match) {
+                line_load_history(el, match);
+                el->history_browsing = 1;
+            }
+            break;
+        }
+        if (ch == 0x1B || ch == 0x07) break;
+        if (ch == 0x08 || ch == 0x7F) {
+            if (qlen > 0) query[--qlen] = '\0';
+        } else if (ch >= 32 && ch < 127) {
+            if (qlen + 1 < sizeof(query)) {
+                query[qlen++] = (char)ch;
+                query[qlen] = '\0';
+            }
+        }
+
+        match = (qlen > 0) ? history_find_match(el, query, reverse) : NULL;
+    }
+
+    refresh_line(el);
+}
+
 const char *el_gets(EditLine *el, int *count) {
     if (count) *count = 0;
     if (terminal_set_raw(el) == -1) return NULL;
@@ -285,6 +392,7 @@ const char *el_gets(EditLine *el, int *count) {
     el->refresh_rows = 1;
     el->render_cache_len = 0;
     el->render_cache_cursor = 0;
+    el->history_browsing = 0;
     if (el->render_cache) el->render_cache[0] = '\0';
 
     if (el->prompt) {
@@ -349,6 +457,12 @@ const char *el_gets(EditLine *el, int *count) {
             el->last_cmd_was_kill = 0;
             el->line.cursor = el->line.len;
             refresh_line(el);
+        } else if (c == 0x12) { /* ^R history-search-backward */
+            el->last_cmd_was_kill = 0;
+            history_incremental_search(el, 1);
+        } else if (c == 0x13) { /* ^S history-search-forward */
+            el->last_cmd_was_kill = 0;
+            history_incremental_search(el, 0);
         } else if (c == 0x0B) { /* ^K kill-line */
             if (kill_line(el)) refresh_line(el);
         } else if (c == 0x15) { /* ^U backward-kill-line */
@@ -383,6 +497,10 @@ const char *el_gets(EditLine *el, int *count) {
                         el->last_cmd_was_kill = 0;
                         if (el->history) {
                             HistEvent ev;
+                            if (!el->history_browsing) {
+                                (void)history_save_current_input(el);
+                                el->history_browsing = 1;
+                            }
                             if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
                                 line_load_history(el, ev.str);
                                 refresh_line(el);
@@ -396,7 +514,8 @@ const char *el_gets(EditLine *el, int *count) {
                                 line_load_history(el, ev.str);
                                 refresh_line(el);
                             } else {
-                                el_reset(el);
+                                history_restore_current_input(el);
+                                el->history_browsing = 0;
                                 refresh_line(el);
                             }
                         }
@@ -425,6 +544,35 @@ const char *el_gets(EditLine *el, int *count) {
                     el->last_cmd_was_kill = 0;
                     move_backward_word(el);
                     refresh_line(el);
+                } else if (seq0 == '<') { /* M-< beginning-of-history */
+                    el->last_cmd_was_kill = 0;
+                    if (el->history) {
+                        HistEvent ev;
+                        if (!el->history_browsing) {
+                            (void)history_save_current_input(el);
+                            el->history_browsing = 1;
+                        }
+                        if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
+                            line_load_history(el, ev.str);
+                            refresh_line(el);
+                        }
+                    }
+                } else if (seq0 == '>') { /* M-> end-of-history */
+                    el->last_cmd_was_kill = 0;
+                    if (el->history) {
+                        HistEvent ev;
+                        if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
+                            if (!el->history_browsing) {
+                                (void)history_save_current_input(el);
+                                el->history_browsing = 1;
+                            }
+                            line_load_history(el, ev.str);
+                        } else {
+                            history_restore_current_input(el);
+                            el->history_browsing = 0;
+                        }
+                        refresh_line(el);
+                    }
                 } else if (seq0 == 0x08 || seq0 == 0x7F) { /* M-BS or M-DEL */
                     if (backward_kill_word(el)) refresh_line(el);
                 } else {
