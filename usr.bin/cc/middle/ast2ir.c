@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <limits.h>
+#include <math.h>
 
 static int g_pointer_size_bytes = 8;
 
@@ -396,7 +397,7 @@ static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
     if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
         return 0;
     }
-    return pointer_depth(t) == array_ndim;
+    return pointer_depth(t) >= array_ndim;
 }
 
 static int is_unsigned_integral_type(cc_type_t t) {
@@ -1369,6 +1370,12 @@ typedef enum {
     BUILTIN_MEMCPY_CHK,
     BUILTIN_MEMMOVE_CHK,
     BUILTIN_MEMSET_CHK,
+    BUILTIN_HUGE_VAL,
+    BUILTIN_HUGE_VALF,
+    BUILTIN_HUGE_VALL,
+    BUILTIN_NANF,
+    BUILTIN_NAN,
+    BUILTIN_NANL,
     BUILTIN_SYNC_FETCH_ADD,
     BUILTIN_SYNC_FETCH_SUB,
     BUILTIN_SYNC_SUB_AND_FETCH,
@@ -1460,6 +1467,24 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin___memset_chk") == 0) {
         return BUILTIN_MEMSET_CHK;
+    }
+    if (strcmp(name, "__builtin_huge_val") == 0) {
+        return BUILTIN_HUGE_VAL;
+    }
+    if (strcmp(name, "__builtin_huge_valf") == 0) {
+        return BUILTIN_HUGE_VALF;
+    }
+    if (strcmp(name, "__builtin_huge_vall") == 0) {
+        return BUILTIN_HUGE_VALL;
+    }
+    if (strcmp(name, "__builtin_nanf") == 0) {
+        return BUILTIN_NANF;
+    }
+    if (strcmp(name, "__builtin_nan") == 0) {
+        return BUILTIN_NAN;
+    }
+    if (strcmp(name, "__builtin_nanl") == 0) {
+        return BUILTIN_NANL;
     }
     if (strcmp(name, "__sync_fetch_and_add") == 0) {
         return BUILTIN_SYNC_FETCH_ADD;
@@ -3310,6 +3335,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+        }
+        if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL) {
+            (void)e;
+            return emit_const_f64_instr(sf, HUGE_VAL);
+        }
+        if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
+            return emit_const_f64_instr(sf, NAN);
         }
         if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
             int av;
@@ -7535,9 +7567,44 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
                 return -1;
             }
             if (asym != NULL || bsym != NULL) {
+                char *base = NULL;
+                long addend = 0;
+                char tmp[384];
+
+                if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
+                    if (asym != NULL && bsym == NULL && !bisf) {
+                        base = asym;
+                        asym = NULL;
+                        addend = (e->op == CC_BIN_ADD) ? bi : -bi;
+                    } else if (asym == NULL && bsym != NULL && !aisf && e->op == CC_BIN_ADD) {
+                        base = bsym;
+                        bsym = NULL;
+                        addend = ai;
+                    }
+                }
                 free(asym);
                 free(bsym);
-                return -1;
+                if (base == NULL) {
+                    return -1;
+                }
+                *out_i = 0;
+                *out_f = 0.0;
+                *out_is_float = 0;
+                if (out_sym != NULL) {
+                    if (addend == 0) {
+                        *out_sym = base;
+                    } else {
+                        snprintf(tmp, sizeof(tmp), "%s%+ld", base, addend);
+                        *out_sym = xstrdup(tmp);
+                        free(base);
+                        if (*out_sym == NULL) {
+                            return -1;
+                        }
+                    }
+                } else {
+                    free(base);
+                }
+                return 0;
             }
 
             if (aisf || bisf) {
@@ -8609,8 +8676,17 @@ static int __attribute__((unused)) tu_has_direct_call_to(const cc_translation_un
 }
 
 static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, const cc_function_t *f) {
+    size_t i;
     (void)tu;
     if (f == NULL || !f->has_body) {
+        return 1;
+    }
+    for (i = 0; i < f->stmt_count; ++i) {
+        if (stmt_calls_named_fn(&f->stmts[i], "__builtin_va_arg_pack")) {
+            return 1;
+        }
+    }
+    if ((f->storage & CC_STORAGE_EXTERN) != 0 && (f->storage & CC_STORAGE_INLINE) != 0) {
         return 1;
     }
     if ((f->storage & CC_STORAGE_STATIC) == 0) {

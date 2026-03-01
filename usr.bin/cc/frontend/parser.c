@@ -3004,6 +3004,69 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
     case CC_EXPR_CAST:
         return eval_const_array_bound_expr(p, e->lhs, out);
     case CC_EXPR_SIZEOF:
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
+            int vidx = var_find_visible_n(p, e->lhs->ident, strlen(e->lhs->ident));
+            if (vidx >= 0 && p->vars[vidx].array_ndim > 0) {
+                cc_type_t elem_type = p->vars[vidx].type;
+                long total;
+                int i;
+                if (is_pointer_type(elem_type)) {
+                    elem_type = ptr_deref_type(elem_type);
+                }
+                sz = parser_type_size_bytes(p, elem_type, p->vars[vidx].struct_id);
+                if (sz <= 0) {
+                    return -1;
+                }
+                total = sz;
+                for (i = 0; i < p->vars[vidx].array_ndim; ++i) {
+                    long dim = p->vars[vidx].array_dims[i];
+                    if (dim <= 0) {
+                        return -1;
+                    }
+                    total *= dim;
+                }
+                *out = total;
+                return 0;
+            }
+            if (vidx < 0 && p->tu != NULL) {
+                size_t gi;
+                for (gi = 0; gi < p->tu->global_count; ++gi) {
+                    const cc_global_t *g = &p->tu->globals[gi];
+                    if (g->name == NULL || strcmp(g->name, e->lhs->ident) != 0) {
+                        continue;
+                    }
+                    {
+                        cc_type_t elem_type = g->type;
+                        long total;
+                        int i;
+                        int ndim = g->array_ndim;
+                        if (ndim <= 0 && g->array_len > 0) {
+                            ndim = 1;
+                        }
+                        if (ndim <= 0) {
+                            continue;
+                        }
+                        if (is_pointer_type(elem_type)) {
+                            elem_type = ptr_deref_type(elem_type);
+                        }
+                        sz = parser_type_size_bytes(p, elem_type, g->type_struct_id);
+                        if (sz <= 0) {
+                            return -1;
+                        }
+                        total = sz;
+                        for (i = 0; i < ndim; ++i) {
+                            long dim = (g->array_ndim > 0) ? g->array_dims[i] : g->array_len;
+                            if (dim <= 0) {
+                                return -1;
+                            }
+                            total *= dim;
+                        }
+                        *out = total;
+                        return 0;
+                    }
+                }
+            }
+        }
         if (e->lhs != NULL && e->lhs->array_ndim > 0) {
             cc_type_t elem_type = e->lhs->value_type;
             long total;
@@ -3054,8 +3117,23 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
         if (e->op == CC_BIN_COMMA) {
             return eval_const_array_bound_expr(p, e->rhs, out);
         }
-        if (eval_const_array_bound_expr(p, e->lhs, &a) != 0 || eval_const_array_bound_expr(p, e->rhs, &b) != 0) {
-            return -1;
+        {
+            int lhs_ok = (eval_const_array_bound_expr(p, e->lhs, &a) == 0);
+            int rhs_ok = (eval_const_array_bound_expr(p, e->rhs, &b) == 0);
+
+            if (e->op == CC_BIN_MUL) {
+                if (lhs_ok && a == 0) {
+                    *out = 0;
+                    return 0;
+                }
+                if (rhs_ok && b == 0) {
+                    *out = 0;
+                    return 0;
+                }
+            }
+            if (!lhs_ok || !rhs_ok) {
+                return -1;
+            }
         }
         switch (e->op) {
         case CC_BIN_ADD: *out = a + b; return 0;
@@ -4703,6 +4781,46 @@ static cc_expr_t *parse_initializer_expr(parser_t *p);
 static cc_expr_t *parse_initializer_item(parser_t *p);
 static cc_expr_t *clone_expr(const cc_expr_t *src);
 
+static cc_expr_t *build_member_designator_expr(char **names, size_t count, cc_expr_t *value) {
+    cc_expr_t *cur = value;
+    size_t i;
+
+    if (names == NULL || count == 0 || value == NULL) {
+        return NULL;
+    }
+
+    for (i = count; i > 1; --i) {
+        cc_expr_t *nested_member = new_expr(CC_EXPR_MEMBER);
+        cc_expr_t *nested_list = new_expr(CC_EXPR_INIT_LIST);
+        if (nested_member == NULL || nested_list == NULL) {
+            free_expr(nested_member);
+            free_expr(nested_list);
+            return NULL;
+        }
+        nested_member->ident = names[i - 1];
+        names[i - 1] = NULL;
+        nested_member->rhs = cur;
+        if (push_arg(nested_list, nested_member) != 0) {
+            nested_member->rhs = NULL;
+            free_expr(nested_list);
+            free_expr(nested_member);
+            return NULL;
+        }
+        cur = nested_list;
+    }
+
+    {
+        cc_expr_t *item = new_expr(CC_EXPR_MEMBER);
+        if (item == NULL) {
+            return NULL;
+        }
+        item->ident = names[0];
+        names[0] = NULL;
+        item->rhs = cur;
+        return item;
+    }
+}
+
 static cc_expr_t *parse_initializer_item(parser_t *p) {
     if (p->tok.kind == TOK_DOT) {
         char **names = NULL;
@@ -4751,34 +4869,12 @@ static cc_expr_t *parse_initializer_item(parser_t *p) {
         if (value == NULL) {
             goto fail;
         }
-        cur = value;
-        value = NULL;
-        for (i = count; i > 1; --i) {
-            cc_expr_t *nested_member = new_expr(CC_EXPR_MEMBER);
-            cc_expr_t *nested_list = new_expr(CC_EXPR_INIT_LIST);
-            if (nested_member == NULL || nested_list == NULL) {
-                free_expr(nested_member);
-                free_expr(nested_list);
-                goto fail;
-            }
-            nested_member->ident = names[i - 1];
-            names[i - 1] = NULL;
-            nested_member->rhs = cur;
-            if (push_arg(nested_list, nested_member) != 0) {
-                nested_member->rhs = NULL;
-                free_expr(nested_list);
-                free_expr(nested_member);
-                goto fail;
-            }
-            cur = nested_list;
-        }
-        item = new_expr(CC_EXPR_MEMBER);
+        item = build_member_designator_expr(names, count, value);
         if (item == NULL) {
             goto fail;
         }
-        item->ident = names[0];
-        names[0] = NULL;
-        item->rhs = cur;
+        value = NULL;
+        cur = NULL;
         free(names);
         return item;
 fail:
@@ -4798,6 +4894,10 @@ fail:
 
 static cc_expr_t *parse_initializer_expr(parser_t *p) {
     cc_expr_t *list = NULL;
+    char **member_names = NULL;
+    size_t member_count = 0;
+    size_t member_cap = 0;
+    size_t mi = 0;
     if (p->tok.kind != TOK_LBRACE) {
         return parse_assign(p);
     }
@@ -4819,10 +4919,14 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
         if (p->tok.kind == TOK_LBRACK) {
             cc_expr_t *idx_expr;
             cc_expr_t *value;
+            cc_expr_t *designated = NULL;
             long idx = -1;
             long hi = -1;
             int is_range = 0;
             size_t fill_i;
+            member_names = NULL;
+            member_count = 0;
+            member_cap = 0;
 
             if (next_tok(p) != 0) {
                 free_expr(list);
@@ -4862,23 +4966,58 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                 free_expr(hi_expr);
                 is_range = 1;
             }
-            if (expect(p, TOK_RBRACK, "expected ']' after array designator index") != 0 ||
-                expect(p, TOK_ASSIGN, "expected '=' after array designator") != 0) {
+            if (expect(p, TOK_RBRACK, "expected ']' after array designator index") != 0) {
                 free_expr(list);
                 return NULL;
             }
+            while (p->tok.kind == TOK_DOT) {
+                char **next_names;
+                if (next_tok(p) != 0) {
+                    goto fail_array_designator;
+                }
+                if (p->tok.kind != TOK_IDENT) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "expected member name in designated initializer");
+                    goto fail_array_designator;
+                }
+                if (member_count == member_cap) {
+                    size_t ncap = member_cap == 0 ? 4 : member_cap * 2;
+                    next_names = (char **)realloc(member_names, ncap * sizeof(*next_names));
+                    if (next_names == NULL) {
+                        goto fail_array_designator;
+                    }
+                    member_names = next_names;
+                    member_cap = ncap;
+                }
+                member_names[member_count] = xstrdup_n(p->tok.start, p->tok.len);
+                if (member_names[member_count] == NULL) {
+                    goto fail_array_designator;
+                }
+                member_count++;
+                if (next_tok(p) != 0) {
+                    goto fail_array_designator;
+                }
+            }
+            if (expect(p, TOK_ASSIGN, "expected '=' after array designator") != 0) {
+                goto fail_array_designator;
+            }
             value = parse_initializer_expr(p);
             if (value == NULL) {
-                free_expr(list);
-                return NULL;
+                goto fail_array_designator;
+            }
+            if (member_count > 0) {
+                designated = build_member_designator_expr(member_names, member_count, value);
+                if (designated == NULL) {
+                    free_expr(value);
+                    goto fail_array_designator;
+                }
+                value = designated;
             }
             for (fill_i = list->arg_count; fill_i < (size_t)idx; ++fill_i) {
                 cc_expr_t *z = new_int_expr(0);
                 if (z == NULL || push_arg(list, z) != 0) {
                     free_expr(z);
                     free_expr(value);
-                    free_expr(list);
-                    return NULL;
+                    goto fail_array_designator;
                 }
             }
             if (!is_range) {
@@ -4887,8 +5026,7 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                     list->args[idx] = value;
                 } else if (push_arg(list, value) != 0) {
                     free_expr(value);
-                    free_expr(list);
-                    return NULL;
+                    goto fail_array_designator;
                 }
             } else {
                 long k;
@@ -4896,8 +5034,7 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                     cc_expr_t *cur = (k == idx) ? value : clone_expr(value);
                     if (cur == NULL) {
                         free_expr(value);
-                        free_expr(list);
-                        return NULL;
+                        goto fail_array_designator;
                     }
                     while ((size_t)k >= list->arg_count) {
                         cc_expr_t *z = new_int_expr(0);
@@ -4907,14 +5044,22 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                                 free_expr(cur);
                             }
                             free_expr(value);
-                            free_expr(list);
-                            return NULL;
+                            goto fail_array_designator;
                         }
                     }
                     free_expr(list->args[k]);
                     list->args[k] = cur;
                 }
             }
+            if (member_names != NULL) {
+                for (mi = 0; mi < member_count; ++mi) {
+                    free(member_names[mi]);
+                }
+            }
+            free(member_names);
+            member_names = NULL;
+            member_count = 0;
+            member_cap = 0;
         } else {
             cc_expr_t *item = parse_initializer_item(p);
             if (item == NULL) {
@@ -4943,6 +5088,17 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
         return NULL;
     }
     return list;
+
+fail_array_designator:
+    if (member_names != NULL) {
+        for (mi = 0; mi < member_count; ++mi) {
+            free(member_names[mi]);
+        }
+    }
+    free(member_names);
+    member_names = NULL;
+    free_expr(list);
+    return NULL;
 }
 
 static int is_static_assert_tok(parser_t *p) {
@@ -6555,6 +6711,16 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 }
             }
         }
+        if (p->tok.kind == TOK_LBRACK) {
+            long arr_len = -1;
+            int arr_ndim = 0;
+            long arr_dims[CC_MAX_ARRAY_DIMS];
+            memset(arr_dims, 0, sizeof(arr_dims));
+            if (parse_array_suffix(p, &e->aux_type, &arr_len, &arr_ndim, arr_dims) != 0) {
+                free_expr(e);
+                return NULL;
+            }
+        }
         if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
             free_expr(e);
             return NULL;
@@ -7535,6 +7701,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         if (complex_fn_ptr_decl) {
             long suffix_array_len = -1;
             int suffix_array_ndim = 0;
+            int pointee_array_decl = 0;
             long suffix_array_dims[CC_MAX_ARRAY_DIMS];
             memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
             if (parse_array_suffix(p, &s.type, &suffix_array_len, &suffix_array_ndim, suffix_array_dims) != 0) {
@@ -7549,7 +7716,14 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             }
-            if (s.array_ndim > 0) {
+            /*
+             * Only plain pointer-to-array declarators (`(*p)[N]`) should be
+             * treated as scalar pointer objects with pointee-shape metadata.
+             * Declarators with inner grouped arrays (e.g. `(*p[])(...)`) are
+             * true array objects and must keep array_len/array_ndim.
+             */
+            pointee_array_decl = (inner_array_ndim == 0 && suffix_array_ndim > 0);
+            if (pointee_array_decl && s.array_ndim > 0) {
                 /*
                  * Declarators of the form `(*p)[N]` carry pointee-array shape
                  * metadata for indexing/stride but are not array objects
@@ -7659,6 +7833,26 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         if (apply_auto_type_deduction(p, &s) != 0) {
             free_stmt(&s);
             return -1;
+        }
+        if (s.array_ndim > 0 && s.array_dims[0] == 0 && s.expr != NULL) {
+            long inferred = 0;
+            if (s.expr->kind == CC_EXPR_INIT_LIST) {
+                inferred = (long)s.expr->arg_count;
+            } else if (s.expr->kind == CC_EXPR_STR) {
+                const char *lit = s.expr->ident;
+                if (lit != NULL) {
+                    size_t n = strlen(lit);
+                    if (n >= 2 && lit[0] == '"' && lit[n - 1] == '"') {
+                        inferred = (long)(n - 1); /* payload bytes + terminating NUL */
+                    }
+                }
+            }
+            if (inferred > 0) {
+                s.array_dims[0] = inferred;
+                if (s.array_len <= 0) {
+                    s.array_len = inferred;
+                }
+            }
         }
         if (is_typedef) {
             int trc;

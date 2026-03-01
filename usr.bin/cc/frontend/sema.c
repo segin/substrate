@@ -985,7 +985,12 @@ static int is_array_object_type(cc_type_t t, long array_len, int array_ndim) {
     if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
         return 0;
     }
-    return pointer_depth(t) == array_ndim;
+    /*
+     * Array declarators are encoded as pointer depth plus explicit array
+     * rank metadata. Arrays whose element type is itself a pointer (including
+     * function pointers in our lowered model) therefore have depth > rank.
+     */
+    return pointer_depth(t) >= array_ndim;
 }
 
 static void expr_clear_array_meta(cc_expr_t *e) {
@@ -3366,6 +3371,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
 
     case CC_EXPR_TERNARY:
+        {
+            int lhs_is_plain_void;
+            int rhs_is_plain_void;
+            int third_is_plain_void;
         if (e->lhs == NULL || e->third == NULL) {
             set_diag(diag, "malformed conditional expression");
             return -1;
@@ -3375,6 +3384,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             check_expr(tu, e->third, vars, var_count, depth, diag) != 0) {
             return -1;
         }
+        lhs_is_plain_void = (e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id < 0);
+        rhs_is_plain_void = (e->rhs != NULL && e->rhs->value_type == CC_TYPE_VOID && e->rhs->struct_id < 0);
+        third_is_plain_void = (e->third->value_type == CC_TYPE_VOID && e->third->struct_id < 0);
         if (e->lhs->value_type == CC_TYPE_VOID) {
             set_diag(diag, "conditional expression condition cannot be void");
             return -1;
@@ -3384,8 +3396,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 0) {
                 return -1;
             }
-            if (e->lhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
-                if (e->lhs->value_type == CC_TYPE_VOID && e->third->value_type == CC_TYPE_VOID) {
+            if (lhs_is_plain_void || third_is_plain_void) {
+                if (lhs_is_plain_void && third_is_plain_void) {
                     e->value_type = CC_TYPE_VOID;
                     e->struct_id = -1;
                     return 0;
@@ -3394,7 +3406,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                                  "conditional expression with one void arm is a GNU extension (non-C99)", 1) != 0) {
                     return -1;
                 }
-                if (e->lhs->value_type == CC_TYPE_VOID) {
+                if (lhs_is_plain_void) {
                     e->value_type = e->third->value_type;
                     e->struct_id = e->third->struct_id;
                 } else {
@@ -3417,6 +3429,16 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "incompatible pointer types in conditional expression");
                 return -1;
             }
+            if (e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0 && e->third->value_type == CC_TYPE_VOID &&
+                e->third->struct_id >= 0) {
+                if (!struct_ids_compatible(tu, e->lhs->struct_id, e->third->struct_id)) {
+                    set_diag(diag, "incompatible struct types in conditional expression");
+                    return -1;
+                }
+                e->value_type = CC_TYPE_VOID;
+                e->struct_id = e->lhs->struct_id;
+                return 0;
+            }
             e->value_type = common_arith_type(e->lhs->value_type, e->third->value_type);
             if (e->value_type == CC_TYPE_VOID) {
                 set_diag(diag, "incompatible types in conditional expression");
@@ -3425,8 +3447,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = -1;
             return 0;
         }
-        if (e->rhs->value_type == CC_TYPE_VOID || e->third->value_type == CC_TYPE_VOID) {
-            if (e->rhs->value_type == CC_TYPE_VOID && e->third->value_type == CC_TYPE_VOID) {
+        if (rhs_is_plain_void || third_is_plain_void) {
+            if (rhs_is_plain_void && third_is_plain_void) {
                 e->value_type = CC_TYPE_VOID;
                 e->struct_id = -1;
                 return 0;
@@ -3435,7 +3457,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                              "conditional expression with one void arm is a GNU extension (non-C99)", 1) != 0) {
                 return -1;
             }
-            if (e->rhs->value_type == CC_TYPE_VOID) {
+            if (rhs_is_plain_void) {
                 e->value_type = e->third->value_type;
                 e->struct_id = e->third->struct_id;
             } else {
@@ -3470,6 +3492,16 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = e->third->struct_id;
             return 0;
         }
+        if (e->rhs->value_type == CC_TYPE_VOID && e->rhs->struct_id >= 0 && e->third->value_type == CC_TYPE_VOID &&
+            e->third->struct_id >= 0) {
+            if (!struct_ids_compatible(tu, e->rhs->struct_id, e->third->struct_id)) {
+                set_diag(diag, "incompatible struct types in conditional expression");
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = e->rhs->struct_id;
+            return 0;
+        }
         e->value_type = common_arith_type(e->rhs->value_type, e->third->value_type);
         if (e->value_type == CC_TYPE_VOID) {
             set_diag(diag, "incompatible types in conditional expression");
@@ -3477,6 +3509,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         e->struct_id = -1;
         return 0;
+        }
 
     default:
         set_diag(diag, "unsupported expression kind");
