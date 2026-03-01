@@ -124,16 +124,16 @@ Execution policy:
 - [x] Structured internal error codes for programmatic use.
 
 ## 10) Testing, Fuzzing, and Performance
-- [ ] Unit tests: lexer/parser/expression engine.
-- [ ] Unit tests: relocation generation and edge overflow.
-- [ ] Golden tests: known `.s` -> `.o` byte/metadata checks.
-- [ ] Round-trip tests with `objdump`/`readelf` verification.
-- [ ] Integration tests with `cc` generated assembly.
-- [ ] Integration tests with `ld` linking real programs.
-- [ ] Differential tests vs GNU as for selected corpora.
-- [ ] Fuzzing harnesses for parser and directive handling.
-- [ ] Large-file throughput benchmarks.
-- [ ] Regression suite for deterministic output stability.
+- [x] Unit tests: lexer/parser/expression engine.
+- [x] Unit tests: relocation generation and edge overflow.
+- [x] Golden tests: known `.s` -> `.o` byte/metadata checks.
+- [x] Round-trip tests with `objdump`/`readelf` verification.
+- [x] Integration tests with `cc` generated assembly.
+- [x] Integration tests with `ld` linking real programs.
+- [x] Differential tests vs GNU as for selected corpora.
+- [x] Fuzzing harnesses for parser and directive handling.
+- [x] Large-file throughput benchmarks.
+- [x] Regression suite for deterministic output stability.
 
 ## 11) Integration and Rollout
 - [ ] Makefile/build integration in recursive tree.
