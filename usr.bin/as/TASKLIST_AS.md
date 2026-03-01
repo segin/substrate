@@ -168,7 +168,7 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `VGATHERDPS/DPD/QPS/QPD`, `VPGATHERDD/DQ/QD/QQ` (VSIB)
 
 ### 4c. BMI1
-- [ ] `ANDN`, `BEXTR`, `BLSI`, `BLSMSK`, `BLSR`, `TZCNT` (r32/r64)
+- [x] `ANDN`, `BEXTR`, `BLSI`, `BLSMSK`, `BLSR`, `TZCNT` (r32/r64)
 
 ### 4d. BMI2
 - [ ] `BZHI`, `MULX`, `PDEP`, `PEXT`, `RORX`, `SARX`, `SHLX`, `SHRX` (r32/r64)
