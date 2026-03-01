@@ -160,11 +160,11 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] `DW_LNS_set_isa` (DWARF v3+).
 
 ### 2c. Extended Opcodes **(FR‑12, FR‑13)**
-- [ ] `DW_LNE_end_sequence` — mark `end_sequence`, append row, reset state.
-- [ ] `DW_LNE_set_address` — set `address` to relocatable value.
-- [ ] `DW_LNE_define_file` — add file entry (deprecated in v5).
-- [ ] `DW_LNE_set_discriminator` (DWARF v4+).
-- [ ] Skip unknown extended opcodes gracefully using length prefix.
+- [x] `DW_LNE_end_sequence` — mark `end_sequence`, append row, reset state.
+- [x] `DW_LNE_set_address` — set `address` to relocatable value.
+- [x] `DW_LNE_define_file` — add file entry (deprecated in v5).
+- [x] `DW_LNE_set_discriminator` (DWARF v4+).
+- [x] Skip unknown extended opcodes gracefully using length prefix.
 
 ### 2d. Special Opcodes **(FR‑14)**
 - [ ] Decode `adjusted_opcode = opcode - opcode_base`.

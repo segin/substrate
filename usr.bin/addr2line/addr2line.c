@@ -41,6 +41,11 @@
 #define DW_LNS_set_epilogue_begin 0x0bu
 #define DW_LNS_set_isa 0x0cu
 
+#define DW_LNE_end_sequence 0x01u
+#define DW_LNE_set_address 0x02u
+#define DW_LNE_define_file 0x03u
+#define DW_LNE_set_discriminator 0x04u
+
 typedef struct {
     const char *exe_path;
     const char **addr_args;
@@ -673,8 +678,33 @@ static void line_state_advance_pc(const line_unit_t *u,
     *op_index = op % max_ops;
 }
 
+static void line_state_reset_defaults(const line_unit_t *u,
+                                      uint64_t *address,
+                                      uint64_t *op_index,
+                                      int64_t *line,
+                                      uint64_t *file,
+                                      uint64_t *column,
+                                      uint8_t *is_stmt,
+                                      uint8_t *basic_block,
+                                      uint8_t *prologue_end,
+                                      uint8_t *epilogue_begin,
+                                      uint64_t *isa,
+                                      uint32_t *discriminator) {
+    *address = 0;
+    *op_index = 0;
+    *line = 1;
+    *file = 1;
+    *column = 0;
+    *is_stmt = u->default_is_stmt;
+    *basic_block = 0;
+    *prologue_end = 0;
+    *epilogue_begin = 0;
+    *isa = 0;
+    *discriminator = 0;
+}
+
 static int decode_line_program_standard_ops(addr2line_image_t *img,
-                                            const line_unit_t *u,
+                                            line_unit_t *u,
                                             size_t unit_index) {
     const uint8_t *p = u->program;
     const uint8_t *end = u->program + u->program_size;
@@ -690,18 +720,121 @@ static int decode_line_program_standard_ops(addr2line_image_t *img,
     uint64_t isa = 0;
     uint32_t discriminator = 0;
 
+    line_state_reset_defaults(u,
+                              &address,
+                              &op_index,
+                              &line,
+                              &file,
+                              &column,
+                              &is_stmt,
+                              &basic_block,
+                              &prologue_end,
+                              &epilogue_begin,
+                              &isa,
+                              &discriminator);
+
     while (p < end) {
         uint8_t opcode = *p++;
 
         if (opcode == 0u) {
             uint64_t ext_len = 0;
+            const uint8_t *ext_end;
+            uint8_t ext_opcode = 0;
+
             if (read_uleb128(&p, end, &ext_len) != 0) {
                 return -1;
             }
             if ((uint64_t)(end - p) < ext_len) {
                 return -1;
             }
-            p += (size_t)ext_len;
+            ext_end = p + (size_t)ext_len;
+            if (ext_len == 0u) {
+                p = ext_end;
+                continue;
+            }
+            if (read_u8_cursor(&p, ext_end, &ext_opcode) != 0) {
+                return -1;
+            }
+
+            switch (ext_opcode) {
+            case DW_LNE_end_sequence: {
+                line_row_t row;
+                memset(&row, 0, sizeof(row));
+                row.address = address;
+                row.file = (uint32_t)file;
+                row.line = line > 0 ? (uint32_t)line : 0u;
+                row.column = (uint32_t)column;
+                row.is_stmt = is_stmt;
+                row.basic_block = basic_block;
+                row.end_sequence = 1;
+                row.prologue_end = prologue_end;
+                row.epilogue_begin = epilogue_begin;
+                row.isa = (uint32_t)isa;
+                row.discriminator = discriminator;
+                row.unit_index = unit_index;
+                if (image_append_line_row(img, &row) != 0) {
+                    return -1;
+                }
+                line_state_reset_defaults(u,
+                                          &address,
+                                          &op_index,
+                                          &line,
+                                          &file,
+                                          &column,
+                                          &is_stmt,
+                                          &basic_block,
+                                          &prologue_end,
+                                          &epilogue_begin,
+                                          &isa,
+                                          &discriminator);
+                break;
+            }
+            case DW_LNE_set_address:
+                if (u->addr_size == 8u) {
+                    uint64_t v = 0;
+                    if (read_u64_cursor(&p, ext_end, img->elf_endian, &v) != 0) {
+                        return -1;
+                    }
+                    address = v;
+                } else if (u->addr_size == 4u) {
+                    uint32_t v = 0;
+                    if (read_u32_cursor(&p, ext_end, img->elf_endian, &v) != 0) {
+                        return -1;
+                    }
+                    address = v;
+                } else {
+                    return -1;
+                }
+                op_index = 0;
+                break;
+            case DW_LNE_define_file: {
+                line_file_t f;
+                uint64_t ignored = 0;
+                memset(&f, 0, sizeof(f));
+                if (read_cstring_dup(&p, ext_end, &f.name) != 0 ||
+                    read_uleb128(&p, ext_end, &f.dir_index) != 0 ||
+                    read_uleb128(&p, ext_end, &ignored) != 0 ||
+                    read_uleb128(&p, ext_end, &ignored) != 0) {
+                    free(f.name);
+                    return -1;
+                }
+                if (line_unit_add_file(u, f) != 0) {
+                    return -1;
+                }
+                break;
+            }
+            case DW_LNE_set_discriminator: {
+                uint64_t v = 0;
+                if (read_uleb128(&p, ext_end, &v) != 0) {
+                    return -1;
+                }
+                discriminator = (uint32_t)v;
+                break;
+            }
+            default:
+                break;
+            }
+            p = ext_end;
             continue;
         }
 
