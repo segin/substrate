@@ -216,7 +216,7 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `VPTESTNMB/MW`
 
 ### 5c. AVX-512CD (Conflict Detection)
-- [ ] `VPCONFLICTD/Q`, `VPLZCNTD/Q`, `VPBROADCASTMB2Q`, `VPBROADCASTMW2D`
+- [x] `VPCONFLICTD/Q`, `VPLZCNTD/Q`, `VPBROADCASTMB2Q`, `VPBROADCASTMW2D`
 
 ### 5d. AVX-512DQ (Doubleword/Quadword)
 - [ ] QQ conversions: `VCVT{PS,PD}2{QQ,UQQ}`, `VCVT{QQ,UQQ}2{PS,PD}` (truncating forms too)
