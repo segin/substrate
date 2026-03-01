@@ -1,4 +1,5 @@
 #include <elfobj.h>
+#include <demangle.h>
 
 #include <errno.h>
 #include <getopt.h>
@@ -190,6 +191,14 @@
 #define NT_GNU_PROPERTY_TYPE_0 5
 #endif
 
+#ifndef NT_PRSTATUS
+#define NT_PRSTATUS 1
+#define NT_FPREGSET 2
+#define NT_PRPSINFO 3
+#define NT_AUXV 6
+#define NT_FILE 0x46494c45
+#endif
+
 #ifndef GNU_PROPERTY_STACK_SIZE
 #define GNU_PROPERTY_STACK_SIZE 1u
 #define GNU_PROPERTY_NO_COPY_ON_PROTECTED 2u
@@ -220,6 +229,14 @@ typedef struct {
     int show_arch_specific;
     const char *hex_dump_target;
     const char *str_dump_target;
+    int demangle_names;
+    int use_dynamic_for_symbols;
+    int section_details;
+    int print_sysv;
+    int sym_base;
+    int show_debug_dump;
+    const char *debug_dump_kind;
+    int show_core;
 } readelf_opts_t;
 
 typedef struct {
@@ -827,7 +844,22 @@ static int read_sym64(const elf_view_t *view, uint64_t base, size_t index,
     return 0;
 }
 
-static void print_symbol_table_section(const elf_view_t *view, const elf_header_t *hdr,
+static void format_sym_value(uint64_t value, int base, int cls64, char *buf, size_t bufsz) {
+    if (base == 10) {
+        snprintf(buf, bufsz, "%llu", (unsigned long long)value);
+    } else if (base == 8) {
+        snprintf(buf, bufsz, "%llo", (unsigned long long)value);
+    } else if (base == 0) {
+        snprintf(buf, bufsz, "%llu", (unsigned long long)value);
+    } else if (cls64) {
+        snprintf(buf, bufsz, "%016llx", (unsigned long long)value);
+    } else {
+        snprintf(buf, bufsz, "%08llx", (unsigned long long)value);
+    }
+}
+
+static void print_symbol_table_section(const readelf_opts_t *opts,
+                                       const elf_view_t *view, const elf_header_t *hdr,
                                        size_t sec_index, const section_header_t *symsec,
                                        const uint8_t *shstr_data, size_t shstr_size) {
     section_header_t strsec;
@@ -880,7 +912,10 @@ static void print_symbol_table_section(const elf_view_t *view, const elf_header_
         char ndx_buf[16];
         uint32_t xindex = 0;
         const char *name = "<corrupt>";
+        const char *print_name = NULL;
+        char *dem = NULL;
         char note[24];
+        char value_buf[32];
         note[0] = '\0';
 
         if (view->cls == ELFOBJ_CLASS_64) {
@@ -899,6 +934,13 @@ static void print_symbol_table_section(const elf_view_t *view, const elf_header_
 
         if (st_name < strtabsz) {
             name = (const char *)(strtab + st_name);
+        }
+        print_name = name;
+        if (opts->demangle_names && name[0] != '\0') {
+            dem = demangle(name, DEMANGLE_AUTO);
+            if (dem != NULL) {
+                print_name = dem;
+            }
         }
         if (st_shndx == SHN_XINDEX && i < xcount) {
             if (view_u32(&(elf_view_t){.data = xdata, .size = xsec.size, .endian = view->endian},
@@ -936,14 +978,13 @@ static void print_symbol_table_section(const elf_view_t *view, const elf_header_
             snprintf(note, sizeof(note), " [mapping]");
         }
 
-        if (view->cls == ELFOBJ_CLASS_64) {
-            printf("%6" PRIu64 ": %016" PRIx64 " %5" PRIu64 " %-7s %-6s %-8s %3s %s%s\n",
-                   i, st_value, st_size, type_name_local, bind_name_local,
-                   vis_name_local, ndx_buf, name, note);
-        } else {
-            printf("%6" PRIu64 ": %08" PRIx64 " %5" PRIu64 " %-7s %-6s %-8s %3s %s%s\n",
-                   i, st_value, st_size, type_name_local, bind_name_local,
-                   vis_name_local, ndx_buf, name, note);
+        format_sym_value(st_value, opts->sym_base, view->cls == ELFOBJ_CLASS_64,
+                         value_buf, sizeof(value_buf));
+        printf("%6" PRIu64 ": %16s %5" PRIu64 " %-7s %-6s %-8s %3s %s%s\n",
+               i, value_buf, st_size, type_name_local, bind_name_local,
+               vis_name_local, ndx_buf, print_name, note);
+        if (dem != NULL) {
+            demangle_free(dem);
         }
     }
 }
@@ -970,7 +1011,7 @@ static void print_symbol_tables(const readelf_opts_t *opts, const elf_view_t *vi
         if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
             break;
         }
-        if (opts->only_dynsyms) {
+        if (opts->only_dynsyms || opts->use_dynamic_for_symbols) {
             is_symtab = (sh.type == SHT_DYNSYM);
         } else {
             is_symtab = (sh.type == SHT_SYMTAB || sh.type == SHT_DYNSYM);
@@ -978,7 +1019,7 @@ static void print_symbol_tables(const readelf_opts_t *opts, const elf_view_t *vi
         if (!is_symtab) {
             continue;
         }
-        print_symbol_table_section(view, hdr, (size_t)i, &sh, shstr_data, shstr_size);
+        print_symbol_table_section(opts, view, hdr, (size_t)i, &sh, shstr_data, shstr_size);
     }
 }
 
@@ -2461,6 +2502,166 @@ static void do_string_dump(const elf_view_t *view, const elf_header_t *hdr, cons
     }
 }
 
+static int debug_kind_match(const char *kind, const char *name) {
+    if (kind == NULL || strcmp(kind, "all") == 0) return 1;
+    if (strcmp(kind, "info") == 0) return strcmp(name, ".debug_info") == 0 || strcmp(name, ".zdebug_info") == 0;
+    if (strcmp(kind, "abbrev") == 0) return strcmp(name, ".debug_abbrev") == 0 || strcmp(name, ".zdebug_abbrev") == 0;
+    if (strcmp(kind, "line") == 0) return strcmp(name, ".debug_line") == 0 || strcmp(name, ".zdebug_line") == 0;
+    if (strcmp(kind, "frames") == 0) return strcmp(name, ".debug_frame") == 0 || strcmp(name, ".eh_frame") == 0;
+    if (strcmp(kind, "ranges") == 0) return strcmp(name, ".debug_ranges") == 0 || strcmp(name, ".debug_rnglists") == 0;
+    if (strcmp(kind, "str") == 0) return strcmp(name, ".debug_str") == 0 || strcmp(name, ".zdebug_str") == 0;
+    if (strcmp(kind, "aranges") == 0) return strcmp(name, ".debug_aranges") == 0;
+    if (strcmp(kind, "loc") == 0) return strcmp(name, ".debug_loc") == 0 || strcmp(name, ".debug_loclists") == 0;
+    return 0;
+}
+
+static void print_debug_info_units(const elf_view_t *view, const section_header_t *sec) {
+    elf_view_t sv = {.data = view->data + sec->off, .size = (size_t)sec->size, .endian = view->endian};
+    size_t off = 0;
+    printf("  .debug_info units:\n");
+    while (off + 11 <= sv.size) {
+        uint32_t len32 = 0;
+        uint16_t ver = 0;
+        uint8_t addr_size = 0;
+        uint64_t unit_len;
+        size_t hdrsz;
+        if (view_u32(&sv, off, &len32) != 0) break;
+        if (len32 == 0xffffffffu) {
+            uint64_t len64 = 0;
+            if (off + 23 > sv.size || view_u64(&sv, off + 4, &len64) != 0) break;
+            unit_len = len64;
+            hdrsz = 12;
+            if (view_u16(&sv, off + 12, &ver) != 0) break;
+            addr_size = sv.data[off + 22];
+        } else {
+            unit_len = len32;
+            hdrsz = 4;
+            if (view_u16(&sv, off + 4, &ver) != 0) break;
+            if (off + 11 > sv.size) break;
+            addr_size = sv.data[off + 10];
+        }
+        printf("    offset=0x%zx version=%u addr_size=%u len=%llu\n",
+               off, ver, addr_size, (unsigned long long)unit_len);
+        off += hdrsz + (size_t)unit_len;
+    }
+}
+
+static void print_debug_dump(const elf_view_t *view, const elf_header_t *hdr, const char *kind) {
+    uint64_t shnum = shnum_resolved(hdr);
+    section_header_t shstr;
+    const uint8_t *shstr_data = NULL;
+    size_t shstr_size = 0;
+    uint64_t i;
+
+    if (hdr->shstrndx < shnum && read_shdr(view, hdr, hdr->shstrndx, &shstr) == 0 &&
+        shstr.off + shstr.size <= view->size) {
+        shstr_data = view->data + shstr.off;
+        shstr_size = (size_t)shstr.size;
+    }
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        const char *name;
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) break;
+        name = shstr_name(shstr_data, shstr_size, sh.name);
+        if (!debug_kind_match(kind, name)) continue;
+        if (sh.off + sh.size > view->size) {
+            warnf("debug section %s is truncated", name);
+            continue;
+        }
+        printf("\nDWARF section %s size=0x%llx", name, (unsigned long long)sh.size);
+        if ((sh.flags & SHF_COMPRESSED) != 0 || strncmp(name, ".zdebug_", 8) == 0) {
+            printf(" [compressed]");
+        }
+        printf("\n");
+        if (strcmp(name, ".debug_info") == 0 || strcmp(name, ".zdebug_info") == 0) {
+            print_debug_info_units(view, &sh);
+        } else {
+            do_hex_dump(view, hdr, name);
+        }
+    }
+}
+
+static void decode_core_note(uint32_t type, const uint8_t *desc, size_t descsz, const elf_view_t *view) {
+    (void)view;
+    if (type == NT_PRSTATUS) {
+        int signo = 0;
+        if (descsz >= 4) {
+            signo = (int)(desc[0] | (desc[1] << 8) | (desc[2] << 16) | (desc[3] << 24));
+        }
+        printf("    NT_PRSTATUS signal=%d regs=%zu bytes\n", signo, descsz);
+    } else if (type == NT_PRPSINFO) {
+        printf("    NT_PRPSINFO size=%zu\n", descsz);
+    } else if (type == NT_FPREGSET) {
+        printf("    NT_FPREGSET size=%zu\n", descsz);
+    } else if (type == NT_AUXV) {
+        printf("    NT_AUXV entries (raw) size=%zu\n", descsz);
+    } else if (type == NT_FILE) {
+        printf("    NT_FILE mappings:\n");
+        if (descsz >= (view->cls == ELFOBJ_CLASS_64 ? 16 : 8)) {
+            uint64_t count = 0, page = 0;
+            size_t off = 0;
+            if (view->cls == ELFOBJ_CLASS_64) {
+                count = *(const uint64_t *)(const void *)(desc + 0);
+                page = *(const uint64_t *)(const void *)(desc + 8);
+                off = 16;
+            } else {
+                count = *(const uint32_t *)(const void *)(desc + 0);
+                page = *(const uint32_t *)(const void *)(desc + 4);
+                off = 8;
+            }
+            printf("      count=%llu page_size=%llu\n",
+                   (unsigned long long)count, (unsigned long long)page);
+            if (view->cls == ELFOBJ_CLASS_64 && descsz >= off + count * 24) {
+                uint64_t i;
+                const uint8_t *p = desc + off;
+                const char *names = (const char *)(desc + off + count * 24);
+                for (i = 0; i < count; ++i) {
+                    uint64_t start = ((const uint64_t *)p)[0];
+                    uint64_t end = ((const uint64_t *)p)[1];
+                    uint64_t foff = ((const uint64_t *)p)[2];
+                    printf("      0x%llx-0x%llx @0x%llx %s\n",
+                           (unsigned long long)start, (unsigned long long)end,
+                           (unsigned long long)foff, names);
+                    names += strlen(names) + 1;
+                    p += 24;
+                }
+            }
+        }
+    } else {
+        printf("    note type=0x%x size=%zu\n", type, descsz);
+    }
+}
+
+static void print_core_info(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t i;
+    size_t align = (view->cls == ELFOBJ_CLASS_64) ? 8 : 4;
+
+    if (hdr->type != ET_CORE) {
+        return;
+    }
+    printf("\nCore file notes:\n");
+    for (i = 0; i < hdr->phnum; ++i) {
+        program_header_t ph;
+        size_t cur = 0;
+        if (read_phdr(view, hdr, (size_t)i, &ph) != 0) break;
+        if (ph.type != PT_NOTE || ph.off + ph.filesz > view->size) continue;
+        while (cur + 12 <= ph.filesz) {
+            elf_view_t sv = {.data = view->data + ph.off + cur, .size = (size_t)(ph.filesz - cur), .endian = view->endian};
+            uint32_t namesz = 0, descsz = 0, type = 0;
+            size_t name_off, desc_off;
+            const uint8_t *desc;
+            if (view_u32(&sv, 0, &namesz) != 0 || view_u32(&sv, 4, &descsz) != 0 || view_u32(&sv, 8, &type) != 0) break;
+            name_off = 12;
+            desc_off = align_up_size(name_off + namesz, align);
+            if (desc_off + descsz > sv.size) break;
+            desc = sv.data + desc_off;
+            decode_core_note(type, desc, descsz, view);
+            cur += align_up_size(desc_off + descsz, align);
+        }
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -2656,6 +2857,13 @@ static void usage(FILE *out) {
             "  -A, --arch-specific     Display arch-specific attributes\n"
             "  -x, --hex-dump=SEC      Hex dump section by name or index\n"
             "  -p, --string-dump=SEC   String dump section by name or index\n"
+            "  -t, --section-details   Show extended section details\n"
+            "  -C, --demangle          Demangle symbol names\n"
+            "  -D, --use-dynamic       Use dynamic symbol table\n"
+            "      --sym-base=0|8|10|16  Symbol value radix\n"
+            "      --print-sysv        SysV style output where supported\n"
+            "  -w, --debug-dump=KIND   Dump DWARF info (info,abbrev,line,frames,ranges,str,aranges,loc)\n"
+            "  -c                      Display core-file notes\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -2688,6 +2896,12 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"arch-specific", no_argument, NULL, 'A'},
         {"hex-dump", required_argument, NULL, 'x'},
         {"string-dump", required_argument, NULL, 'p'},
+        {"section-details", no_argument, NULL, 't'},
+        {"demangle", no_argument, NULL, 'C'},
+        {"use-dynamic", no_argument, NULL, 'D'},
+        {"sym-base", required_argument, NULL, 4},
+        {"print-sysv", no_argument, NULL, 5},
+        {"debug-dump", required_argument, NULL, 'w'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -2704,7 +2918,8 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsrdnVIguAx:p:SeaW", longopts, NULL)) != -1) {
+    opts->sym_base = 16;
+    while ((ch = getopt_long(argc, argv, "hlsrdnVIguAx:p:tCDw:cSeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -2748,6 +2963,24 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 'p':
                 opts->str_dump_target = optarg;
                 break;
+            case 't':
+                opts->section_details = 1;
+                opts->show_section_headers = 1;
+                break;
+            case 'C':
+                opts->demangle_names = 1;
+                break;
+            case 'D':
+                opts->use_dynamic_for_symbols = 1;
+                opts->show_symbols = 1;
+                break;
+            case 'w':
+                opts->show_debug_dump = 1;
+                opts->debug_dump_kind = optarg;
+                break;
+            case 'c':
+                opts->show_core = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -2766,6 +2999,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_groups = 1;
                 opts->show_unwind = 1;
                 opts->show_arch_specific = 1;
+                opts->show_core = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -2779,6 +3013,18 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 3:
                 opts->show_symbols = 1;
                 opts->only_dynsyms = 1;
+                break;
+            case 4:
+                if (strcmp(optarg, "0") == 0 || strcmp(optarg, "8") == 0 ||
+                    strcmp(optarg, "10") == 0 || strcmp(optarg, "16") == 0) {
+                    opts->sym_base = atoi(optarg);
+                } else {
+                    warnf("invalid --sym-base value '%s'", optarg);
+                    return -1;
+                }
+                break;
+            case 5:
+                opts->print_sysv = 1;
                 break;
             default:
                 usage(stderr);
@@ -2840,7 +3086,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         !opts->show_unwind &&
         !opts->show_arch_specific &&
         opts->hex_dump_target == NULL &&
-        opts->str_dump_target == NULL) {
+        opts->str_dump_target == NULL &&
+        !opts->show_debug_dump &&
+        !opts->show_core) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -2934,6 +3182,12 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->str_dump_target != NULL) {
         do_string_dump(&view, &hdr, opts->str_dump_target);
+    }
+    if (opts->show_debug_dump) {
+        print_debug_dump(&view, &hdr, opts->debug_dump_kind ? opts->debug_dump_kind : "all");
+    }
+    if (opts->show_core || hdr.type == ET_CORE) {
+        print_core_info(&view, &hdr);
     }
 
 out:

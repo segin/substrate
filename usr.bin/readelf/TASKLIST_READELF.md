@@ -176,16 +176,16 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 14. DWARF Debug Display (`-w` / `--debug-dump`)
 
-- [ ] `--debug-dump=info`: display `.debug_info` DIE tree.
-- [ ] `--debug-dump=abbrev`: display `.debug_abbrev` tables.
-- [ ] `--debug-dump=line`: display `.debug_line` line number programs.
-- [ ] `--debug-dump=frames`: display `.debug_frame` and `.eh_frame` CIE/FDE.
-- [ ] `--debug-dump=ranges`: display `.debug_ranges` and `.debug_rnglists`.
-- [ ] `--debug-dump=str`: display `.debug_str` string table.
-- [ ] `--debug-dump=aranges`: display `.debug_aranges`.
-- [ ] `--debug-dump=loc`: display `.debug_loc` and `.debug_loclists`.
-- [ ] Handle DWARF versions 2, 3, 4, and 5.
-- [ ] Handle compressed debug sections (`SHF_COMPRESSED` and `.zdebug_*`).
+- [x] `--debug-dump=info`: display `.debug_info` DIE tree.
+- [x] `--debug-dump=abbrev`: display `.debug_abbrev` tables.
+- [x] `--debug-dump=line`: display `.debug_line` line number programs.
+- [x] `--debug-dump=frames`: display `.debug_frame` and `.eh_frame` CIE/FDE.
+- [x] `--debug-dump=ranges`: display `.debug_ranges` and `.debug_rnglists`.
+- [x] `--debug-dump=str`: display `.debug_str` string table.
+- [x] `--debug-dump=aranges`: display `.debug_aranges`.
+- [x] `--debug-dump=loc`: display `.debug_loc` and `.debug_loclists`.
+- [x] Handle DWARF versions 2, 3, 4, and 5.
+- [x] Handle compressed debug sections (`SHF_COMPRESSED` and `.zdebug_*`).
 
 ## 15. Core File Display (`-c` option or auto-detect `ET_CORE`)
 
