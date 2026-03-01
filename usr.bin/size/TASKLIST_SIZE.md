@@ -86,9 +86,9 @@ Goal: implement `size` using section accounting from `libelfobj`.
 ## 9. Testing
 
 ### 9a. Classification Tests
-- [ ] ET_REL with `.text`, `.data`, `.bss`, `.rodata` — verify correct buckets.
-- [ ] ET_REL with TLS section — included in data or bss.
-- [ ] ET_REL with no `SHF_ALLOC` sections — all zeros.
+- [x] ET_REL with `.text`, `.data`, `.bss`, `.rodata` — verify correct buckets.
+- [x] ET_REL with TLS section — included in data or bss.
+- [x] ET_REL with no `SHF_ALLOC` sections — all zeros.
 
 ### 9b. Format Tests
 - [ ] Berkeley output matches expected column layout.
