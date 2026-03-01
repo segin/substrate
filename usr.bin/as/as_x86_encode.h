@@ -1,0 +1,77 @@
+#ifndef SUBSTRATE_AS_X86_ENCODE_H
+#define SUBSTRATE_AS_X86_ENCODE_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    AS_X86_REG_EAX = 0,
+    AS_X86_REG_ECX = 1,
+    AS_X86_REG_EDX = 2,
+    AS_X86_REG_EBX = 3,
+    AS_X86_REG_ESP = 4,
+    AS_X86_REG_EBP = 5,
+    AS_X86_REG_ESI = 6,
+    AS_X86_REG_EDI = 7,
+} as_x86_reg_t;
+
+typedef enum {
+    AS_X86_SEG_NONE = 0,
+    AS_X86_SEG_CS,
+    AS_X86_SEG_DS,
+    AS_X86_SEG_ES,
+    AS_X86_SEG_FS,
+    AS_X86_SEG_GS,
+    AS_X86_SEG_SS,
+} as_x86_seg_t;
+
+typedef enum {
+    AS_X86_OP_NONE = 0,
+    AS_X86_OP_REG,
+    AS_X86_OP_IMM,
+    AS_X86_OP_MEM,
+    AS_X86_OP_REL,
+} as_x86_operand_kind_t;
+
+typedef struct {
+    int has_base;
+    as_x86_reg_t base;
+    int has_index;
+    as_x86_reg_t index;
+    unsigned scale;
+    int has_disp;
+    int32_t disp;
+    int disp_only;
+} as_x86_mem_t;
+
+typedef struct {
+    as_x86_operand_kind_t kind;
+    union {
+        as_x86_reg_t reg;
+        int32_t imm;
+        int32_t rel;
+        as_x86_mem_t mem;
+    } u;
+} as_x86_operand_t;
+
+typedef struct {
+    const char *mnemonic;
+    as_x86_seg_t seg_override;
+    int operand_size_override;
+    int address_size_override;
+    as_x86_operand_t ops[3];
+    size_t op_count;
+} as_x86_insn_t;
+
+int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
+                       size_t *out_len, char *errbuf, size_t errbuf_sz);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

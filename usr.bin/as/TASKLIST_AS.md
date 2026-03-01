@@ -80,11 +80,11 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 ## 2. x86 Encoding Engine (i386 + x86-64)
 
 ### 2a. Legacy Encoding (i386 baseline)
-- [ ] ModR/M + SIB + displacement encoding.
-- [ ] All addressing modes: `[base]`, `[base+disp]`, `[base+idx*s+disp]`, `[disp32]`.
-- [ ] Operand size prefix (`0x66`), address size prefix (`0x67`).
-- [ ] Segment override prefixes (`CS`/`DS`/`ES`/`FS`/`GS`/`SS`).
-- [ ] All i386 base instructions: data movement, arithmetic, logic, shifts, string ops, control flow, stack, flags, I/O, misc.
+- [x] ModR/M + SIB + displacement encoding.
+- [x] All addressing modes: `[base]`, `[base+disp]`, `[base+idx*s+disp]`, `[disp32]`.
+- [x] Operand size prefix (`0x66`), address size prefix (`0x67`).
+- [x] Segment override prefixes (`CS`/`DS`/`ES`/`FS`/`GS`/`SS`).
+- [x] All i386 base instructions: data movement, arithmetic, logic, shifts, string ops, control flow, stack, flags, I/O, misc.
 
 ### 2b. x86-64 Extensions
 - [ ] REX prefix encoding (REX.W/R/X/B).
