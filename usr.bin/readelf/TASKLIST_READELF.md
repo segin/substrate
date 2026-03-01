@@ -237,10 +237,10 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] Section-to-segment mapping correct.
 
 ### 19c. Symbol Tests
-- [ ] `.symtab` and `.dynsym` both displayed.
-- [ ] ARM Thumb bit displayed correctly.
-- [ ] Mapping symbols (`$a`/`$t`/`$d`/`$x`) visible.
-- [ ] C++ demangling with `-C` works.
+- [x] `.symtab` and `.dynsym` both displayed.
+- [x] ARM Thumb bit displayed correctly.
+- [x] Mapping symbols (`$a`/`$t`/`$d`/`$x`) visible.
+- [x] C++ demangling with `-C` works.
 
 ### 19d. Relocation Tests
 - [ ] All i386 relocation type names correct.
