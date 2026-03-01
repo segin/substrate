@@ -136,13 +136,13 @@ Execution policy:
 - [x] Regression suite for deterministic output stability.
 
 ## 11) Integration and Rollout
-- [ ] Makefile/build integration in recursive tree.
-- [ ] Host build and target build behavior validation.
-- [ ] `cc` driver integration for `-S`/`-c` pipelines.
-- [ ] Native Linux host smoke tests for produced objects.
-- [ ] Substrate target smoke tests for produced objects.
-- [ ] Man page and user docs alignment with actual behavior.
-- [ ] Migration checklist from delegated backend path to full native encoder.
-- [ ] ABI contract tests for generated ELF metadata.
-- [ ] Release criteria and gating matrix documented.
-- [ ] Post-release regression triage process defined.
+- [x] Makefile/build integration in recursive tree.
+- [x] Host build and target build behavior validation.
+- [x] `cc` driver integration for `-S`/`-c` pipelines.
+- [x] Native Linux host smoke tests for produced objects.
+- [x] Substrate target smoke tests for produced objects.
+- [x] Man page and user docs alignment with actual behavior.
+- [x] Migration checklist from delegated backend path to full native encoder.
+- [x] ABI contract tests for generated ELF metadata.
+- [x] Release criteria and gating matrix documented.
+- [x] Post-release regression triage process defined.
