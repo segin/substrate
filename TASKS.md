@@ -36,27 +36,27 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] Allocate array via watermark allocator.
             - [x] Remove hardcoded 128 MB static limit.
             - [x] Fallback to static bitmap if RAM < 4 MB (constrained environments).
-        - [ ] **Buddy Allocator:**
-            - [ ] Orders 0–10 (4 KB – 4 MB pages).
-            - [ ] **Free Lists:** per‑order doubly‑linked free page lists.
-            - [ ] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list.
-            - [ ] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages.
-            - [ ] `vm_phys_free_page(page)`: return page and coalesce with buddy if free.
-            - [ ] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block.
-            - [ ] **Buddy Coalescing:** merge adjacent free pages up through orders.
-            - [ ] **Buddy Splitting:** split higher-order blocks when lower order is empty.
-            - [ ] Interrupt‑safe: disable interrupts during alloc/free.
-        - [ ] **Public API (returning kernel virtual addresses):**
-            - [ ] `pmm_alloc_block()`: allocate single page, return 0xC0000000+ virtual address.
-            - [ ] `pmm_free_block(vaddr)`: free single page given virtual address.
-            - [ ] `pmm_alloc_contiguous(count)`: allocate `count` contiguous pages.
-            - [ ] `pmm_free_contiguous(vaddr, count)`: free contiguous block.
-            - [ ] `pmm_get_page(phys_addr)`: look up `vm_page_t` for physical address.
-        - [ ] **Safety & Integration:**
-            - [ ] Fine-grained spinlock for SMP access (`vm_phys_lock`).
-            - [ ] Interrupt disable/restore guards in all API entry points.
-            - [ ] Direct interface with `vm_page.c` queues.
-            - [ ] Low memory watermark: warn when free pages drop below threshold.
+        - [x] **Buddy Allocator:**
+            - [x] Orders 0–10 (4 KB – 4 MB pages).
+            - [x] **Free Lists:** per‑order doubly‑linked free page lists.
+            - [x] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list.
+            - [x] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages.
+            - [x] `vm_phys_free_page(page)`: return page and coalesce with buddy if free.
+            - [x] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block.
+            - [x] **Buddy Coalescing:** merge adjacent free pages up through orders.
+            - [x] **Buddy Splitting:** split higher-order blocks when lower order is empty.
+            - [x] Interrupt‑safe: disable interrupts during alloc/free.
+        - [x] **Public API (returning kernel virtual addresses):**
+            - [x] `pmm_alloc_block()`: allocate single page, return 0xC0000000+ virtual address.
+            - [x] `pmm_free_block(vaddr)`: free single page given virtual address.
+            - [x] `pmm_alloc_contiguous(count)`: allocate `count` contiguous pages.
+            - [x] `pmm_free_contiguous(vaddr, count)`: free contiguous block.
+            - [x] `pmm_get_page(phys_addr)`: look up `vm_page_t` for physical address.
+        - [x] **Safety & Integration:**
+            - [x] Fine-grained spinlock for SMP access (`vm_phys_lock`).
+            - [x] Interrupt disable/restore guards in all API entry points.
+            - [x] Direct interface with `vm_page.c` queues.
+            - [x] Low memory watermark: warn when free pages drop below threshold.
         - [ ] **NUMA-Aware Allocation (deferred):**
             - [ ] Per-node free lists.
             - [ ] Node affinity for allocation (prefer local node).

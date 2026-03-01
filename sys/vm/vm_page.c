@@ -9,9 +9,9 @@
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <stddef.h>
+#include <vm/phys_mem.h>
 
-// Global page queues
-static vm_page_t *free_queue = NULL;
+// System Page Queues
 static vm_page_t *active_queue = NULL;
 static vm_page_t *inactive_queue = NULL;
 static vm_page_t *wired_queue = NULL;      // Pages pinned in memory (kernel, DMA)
@@ -19,7 +19,6 @@ static vm_page_t *laundry_queue = NULL;    // Dirty pages pending writeback
 
 void vm_page_init(void) {
 	// Initialize queues
-	free_queue = NULL;
 	active_queue = NULL;
 	inactive_queue = NULL;
 	wired_queue = NULL;
@@ -169,24 +168,9 @@ void vm_page_remove(vm_page_t *page) {
 vm_page_t *vm_page_alloc(struct vm_object *object, uint64_t pindex, int req) {
 	(void)req; // Ignore flags for now
 
-	vm_page_t *page = NULL;
-
-	// 1. Try to get a page from the free queue
-	if(free_queue) {
-		page = free_queue;
-		dequeue(&free_queue, page);
-		page->flags &= ~PG_FREE;
-	} else {
-		// 2. If free queue is empty, allocate from PMM
-		void *phys = pmm_alloc_block();
-		if(!phys) return(NULL); // OOM
-
-		// Use the globally allocated page array in PMM
-		page = pmm_get_page((uintptr_t)phys);
-		if(!page) return(NULL);
-
-		page->flags &= ~PG_FREE;
-	}
+	// 1. Allocate from the generic PMM (Buddy Allocator)
+	vm_page_t *page = vm_phys_alloc_page();
+	if(!page) return(NULL); // OOM
 
 	// Initialize page
 	page->object = object;
@@ -203,12 +187,6 @@ void vm_page_free(vm_page_t *m) {
 	/* Validate magic canary - detects corruption and invalid pointers */
 	if(!vm_page_valid(m)) {
 		kprint("vm_page_free: corrupted page detected (magic canary invalid)!\n");
-		return;
-	}
-
-	/* Detect double-free: page shouldn't already be free */
-	if(m->flags & PG_FREE) {
-		kprint("vm_page_free: double-free detected!\n");
 		return;
 	}
 
@@ -233,10 +211,10 @@ void vm_page_free(vm_page_t *m) {
 	m->wire_count = 0;
 	m->access_count = 0;
 	m->age = 0;
+	m->flags = 0; // Clear all flags
 
-	// Add to free queue
-	enqueue(&free_queue, m);
-	m->flags = PG_FREE;
+	// Return to generic PMM (Buddy Allocator Coalescing)
+	vm_phys_free_page(m);
 }
 
 // Move page to active queue (recently accessed)
@@ -247,11 +225,9 @@ void vm_page_activate(vm_page_t *m) {
 	if(m->flags & PG_INACTIVE) {
 		dequeue(&inactive_queue, m);
 		m->flags &= ~PG_INACTIVE;
-	} else if(m->flags & PG_FREE) {
-		dequeue(&free_queue, m);
-		m->flags &= ~PG_FREE;
 	}
 
+	// Add to active queue
 	enqueue(&active_queue, m);
 	m->flags |= PG_ACTIVE;
 }
@@ -678,12 +654,8 @@ void vm_page_get_stats(vm_page_stats_t *stats) {
 		m = m->next;
 	}
 
-	// Count free pages
-	m = free_queue;
-	while(m) {
-		stats->free_count++;
-		m = m->next;
-	}
+	// Read true free page count from Buddy Allocator
+	stats->free_count = vm_phys_get_free();
 }
 
 // Estimate working set size (pages actively used)

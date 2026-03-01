@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <intr.h>
+#include <kern/console.h>
 
 // Generic PMM Data Structures
 #define PMM_MAX_ORDER 11
@@ -15,6 +16,8 @@ static size_t vm_phys_free_count;
 static spinlock_t vm_phys_lock;
 static vm_page_t *vm_phys_page_array;
 static size_t vm_phys_page_count;
+
+static size_t vm_phys_low_watermark = 128; // 512 KB target
 
 // Internal Helpers
 static void vm_phys_buddy_enqueue(int order, vm_page_t *page) {
@@ -158,9 +161,16 @@ vm_page_t *vm_phys_alloc_page(void) {
     spinlock_acquire(&vm_phys_lock);
     
     vm_page_t *page = vm_phys_alloc_locked(0);
+    size_t free_left = vm_phys_free_count;
     
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
+    
+    if (page && free_left < vm_phys_low_watermark) {
+        kprint("PMM: Low memory watermark reached. Waking daemon.\n");
+        vm_page_wakeup_daemon();
+    }
+    
     return page;
 }
 
@@ -205,9 +215,16 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
             p->ref_count = 1;
         }
     }
+    size_t free_left = vm_phys_free_count;
     
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
+    
+    if (page && free_left < vm_phys_low_watermark) {
+        kprint("PMM: Low memory watermark reached. Waking daemon.\n");
+        vm_page_wakeup_daemon();
+    }
+    
     return page;
 }
 
