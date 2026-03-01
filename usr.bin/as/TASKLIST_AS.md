@@ -98,12 +98,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Non-destructive 3-operand form for all VEX instructions.
 
 ### 2d. EVEX Prefix Encoding (AVX-512)
-- [ ] 4-byte EVEX prefix: P0 (R/X/B/R'/mm), P1 (W/vvvv/pp), P2 (z/L'L/b/V'/aaa).
-- [ ] Opmask register selection (`{k1}`–`{k7}`).
-- [ ] Zeroing-masking (`{z}`).
-- [ ] Embedded broadcast (`{1to2}`, `{1to4}`, `{1to8}`, `{1to16}`).
-- [ ] Static rounding mode (`{rn-sae}`, `{rd-sae}`, `{ru-sae}`, `{rz-sae}`).
-- [ ] Suppress-all-exceptions (`{sae}`).
+- [x] 4-byte EVEX prefix: P0 (R/X/B/R'/mm), P1 (W/vvvv/pp), P2 (z/L'L/b/V'/aaa).
+- [x] Opmask register selection (`{k1}`–`{k7}`).
+- [x] Zeroing-masking (`{z}`).
+- [x] Embedded broadcast (`{1to2}`, `{1to4}`, `{1to8}`, `{1to16}`).
+- [x] Static rounding mode (`{rn-sae}`, `{rd-sae}`, `{ru-sae}`, `{rz-sae}`).
+- [x] Suppress-all-exceptions (`{sae}`).
 
 ### 2e. x86 Relocation Emission
 - [ ] `R_386_32`, `R_386_PC32`, `R_386_GOT32`, `R_386_PLT32`, `R_386_GOTOFF`, `R_386_GOTPC`.

@@ -1,7 +1,7 @@
 include ../../Makefile.inc
 
 PROG = as
-SRCS = as.c as_lexer.c as_parser.c as_symtab.c as_sections.c as_data.c as_elf_emit.c as_relax.c as_x86_encode.c as_x86_vex.c
+SRCS = as.c as_lexer.c as_parser.c as_symtab.c as_sections.c as_data.c as_elf_emit.c as_relax.c as_x86_encode.c as_x86_vex.c as_x86_evex.c
 LDADD += ../../usr.lib/elfobj/libelfobj.a
 USER_CFLAGS += -iquote ../../include
 
