@@ -248,11 +248,11 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 9. Build System
 
-- [ ] Create `Makefile` in `usr.bin/addr2line/`.
-- [ ] Link against `libelfobj.a` and `libdemangle.a`.
-- [ ] Include paths for `elfobj.h` and `demangle.h`.
-- [ ] `NATIVE_BUILD=1` support for host testing.
-- [ ] `install` target to `$(DESTDIR)/usr/bin/addr2line`.
+- [x] Create `Makefile` in `usr.bin/addr2line/`.
+- [x] Link against `libelfobj.a` and `libdemangle.a`.
+- [x] Include paths for `elfobj.h` and `demangle.h`.
+- [x] `NATIVE_BUILD=1` support for host testing.
+- [x] `install` target to `$(DESTDIR)/usr/bin/addr2line`.
 
 ---
 

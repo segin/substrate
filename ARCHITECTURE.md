@@ -158,9 +158,10 @@ These components are essential for booting and basic system operation.
     - `ls_sort`: stable mergesort backend supporting name/size/time/version ordering with deterministic tie-breakers.
     - `ls_print`: long-format rendering, mode/timestamp/size formatting, multi-output modes (single/comma/columns/by-lines), UID/GID caches, color/quoting handling.
     - `bin/ls/tests`: host-side regression and acceptance harness covering sorting, output modes, symlink edge cases, recursion loops, and core CLI behavior.
-- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`, `c++filt`, `elfedit`).
+- **`usr.bin/`**: User tools (`compress`, `uncompress`, `zcat`, `yacc`, `brandelf`, `as`, `ld`, `c++filt`, `elfedit`, `addr2line`).
   - **`c++filt`**: CLI demangling frontend that streams stdin or argv operands and delegates all symbol parsing to `libdemangle` (Itanium, Rust, and D styles).
   - **`elfedit`**: ELF metadata editor built on `libelfobj` with safe in-place replacement, strict validation/force controls, dry-run mode, ELF header/section/program-header mutation options, and host regression coverage in `tests/usr.bin/elfedit/test_elfedit.sh`.
+  - **`addr2line`**: DWARF-backed address resolver using `libelfobj` section access with in-process line-program decoding (DWARF v2-v5), function/subprogram lookup, inline chain rendering, section-relative/PIE address adjustments, and optional demangling via `libdemangle`.
 - **`include/`**: Userspace C library headers (shared by all userspace libraries).
 - **`lib/`**:
     - **`c/`**: Standard C library (libc) (C11 compliant). Includes `stdio` (buffered I/O), `stdlib`, `string`, `unistd`, `dirent`, `time`, `pwd`, `grp`.

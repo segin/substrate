@@ -3,7 +3,6 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -440,27 +439,30 @@ static int read_u64_cursor(const uint8_t **pp, const uint8_t *end,
 }
 
 static int read_uleb128(const uint8_t **pp, const uint8_t *end, uint64_t *out) {
-    unsigned __int128 value = 0;
+    uint64_t value = 0;
     unsigned shift = 0;
     const uint8_t *p = *pp;
 
     while (p < end) {
         uint8_t byte = *p++;
-        unsigned __int128 chunk = (unsigned __int128)(byte & 0x7fu);
-        if (shift >= 128u) {
+        uint64_t chunk = (uint64_t)(byte & 0x7fu);
+        if (shift >= 64u) {
+            return -1;
+        }
+        if (shift == 63u && chunk > 1u) {
+            return -1;
+        }
+        if (shift < 63u && chunk > (UINT64_MAX >> shift)) {
             return -1;
         }
         value |= chunk << shift;
         if ((byte & 0x80u) == 0) {
-            if (value > (unsigned __int128)UINT64_MAX) {
-                return -1;
-            }
             *pp = p;
-            *out = (uint64_t)value;
+            *out = value;
             return 0;
         }
         shift += 7u;
-        if (shift > 70u) {
+        if (shift > 63u) {
             return -1;
         }
     }
@@ -469,22 +471,30 @@ static int read_uleb128(const uint8_t **pp, const uint8_t *end, uint64_t *out) {
 }
 
 static int read_sleb128(const uint8_t **pp, const uint8_t *end, int64_t *out) {
-    __int128 value = 0;
+    uint64_t value = 0;
     unsigned shift = 0;
     uint8_t byte = 0;
     const uint8_t *p = *pp;
 
     while (p < end) {
+        uint64_t chunk;
         byte = *p++;
-        if (shift >= 128u) {
+        chunk = (uint64_t)(byte & 0x7fu);
+        if (shift >= 64u) {
             return -1;
         }
-        value |= ((__int128)(byte & 0x7fu)) << shift;
+        if (shift == 63u && chunk > 1u) {
+            return -1;
+        }
+        if (shift < 63u && chunk > (UINT64_MAX >> shift)) {
+            return -1;
+        }
+        value |= chunk << shift;
         shift += 7u;
         if ((byte & 0x80u) == 0u) {
             break;
         }
-        if (shift > 70u) {
+        if (shift > 63u) {
             return -1;
         }
     }
@@ -493,16 +503,17 @@ static int read_sleb128(const uint8_t **pp, const uint8_t *end, int64_t *out) {
         return -1;
     }
     if ((byte & 0x40u) != 0u) {
-        if (shift >= 128u) {
+        if (shift < 64u) {
+            value |= (~0ull) << shift;
+        }
+        if ((value & (1ull << 63)) == 0u) {
             return -1;
         }
-        value |= -((__int128)1 << shift);
-    }
-    if (value > (__int128)INT64_MAX || value < (__int128)INT64_MIN) {
+    } else if ((value & (1ull << 63)) != 0u) {
         return -1;
     }
     *pp = p;
-    *out = (int64_t)value;
+    *out = (int64_t)(int64_t)value;
     return 0;
 }
 
@@ -3468,7 +3479,7 @@ static int image_open(addr2line_image_t *img, const char *path) {
 
 static int parse_hex_address(const char *text, uint64_t *out) {
     char *end = NULL;
-    unsigned long long v;
+    long v;
 
     if (text == NULL || out == NULL) {
         return -1;
@@ -3483,8 +3494,11 @@ static int parse_hex_address(const char *text, uint64_t *out) {
     }
 
     errno = 0;
-    v = strtoull(text, &end, 16);
+    v = strtol(text, &end, 16);
     if (errno != 0 || end == text) {
+        return -1;
+    }
+    if (v < 0) {
         return -1;
     }
     while (*end != '\0') {
@@ -3494,7 +3508,7 @@ static int parse_hex_address(const char *text, uint64_t *out) {
         end++;
     }
 
-    *out = (uint64_t)v;
+    *out = (uint64_t)(unsigned long)v;
     return 0;
 }
 
@@ -3539,11 +3553,11 @@ static void emit_frame_result(const addr2line_opts_t *opts,
 
     if (opts->pretty) {
         if (opts->show_addresses) {
-            printf("0x%" PRIx64 ": ", query);
+            printf("0x%llx: ", (unsigned long long)query);
         }
-        printf("%s at %s:%" PRIu32, display_func, display_path, line);
+        printf("%s at %s:%u", display_func, display_path, (unsigned)line);
         if (opts->show_column) {
-            printf(":%" PRIu32, column);
+            printf(":%u", (unsigned)column);
         }
         putchar('\n');
         demangle_free(dem);
@@ -3551,14 +3565,14 @@ static void emit_frame_result(const addr2line_opts_t *opts,
     }
 
     if (opts->show_addresses) {
-        printf("0x%" PRIx64 "\n", query);
+        printf("0x%llx\n", (unsigned long long)query);
     }
     if (opts->show_functions) {
         puts(display_func);
     }
-    printf("%s:%" PRIu32, display_path, line);
+    printf("%s:%u", display_path, (unsigned)line);
     if (opts->show_column) {
-        printf(":%" PRIu32, column);
+        printf(":%u", (unsigned)column);
     }
     putchar('\n');
 
