@@ -199,6 +199,10 @@
 #define GNU_PROPERTY_AARCH64_FEATURE_1_AND 0xc0000000u
 #endif
 
+#ifndef GRP_COMDAT
+#define GRP_COMDAT 0x1u
+#endif
+
 typedef struct {
     int wide;
     int show_file_header;
@@ -211,6 +215,7 @@ typedef struct {
     int show_notes;
     int show_version_info;
     int show_histogram;
+    int show_groups;
 } readelf_opts_t;
 
 typedef struct {
@@ -2039,6 +2044,63 @@ static void print_hash_histogram(const elf_view_t *view, const elf_header_t *hdr
     }
 }
 
+static void print_section_groups(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    section_header_t shstr;
+    const uint8_t *shstr_data = NULL;
+    size_t shstr_size = 0;
+    uint64_t i;
+
+    if (hdr->shstrndx < shnum && read_shdr(view, hdr, hdr->shstrndx, &shstr) == 0 &&
+        shstr.off + shstr.size <= view->size) {
+        shstr_data = view->data + shstr.off;
+        shstr_size = (size_t)shstr.size;
+    }
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        elf_view_t gv;
+        uint32_t gflags = 0;
+        size_t off = 4;
+
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
+            break;
+        }
+        if (sh.type != SHT_GROUP || sh.off + sh.size > view->size || sh.size < 4) {
+            continue;
+        }
+        gv.data = view->data + sh.off;
+        gv.size = (size_t)sh.size;
+        gv.endian = view->endian;
+        gv.cls = view->cls;
+
+        if (view_u32(&gv, 0, &gflags) != 0) {
+            continue;
+        }
+        printf("\nGroup section [%llu] `%s` [%s]:\n",
+               (unsigned long long)i,
+               shstr_name(shstr_data, shstr_size, sh.name),
+               (gflags & GRP_COMDAT) ? "COMDAT" : "0");
+        while (off + 4 <= gv.size) {
+            uint32_t member = 0;
+            if (view_u32(&gv, off, &member) != 0) {
+                break;
+            }
+            if (member < shnum) {
+                section_header_t m;
+                if (read_shdr(view, hdr, member, &m) == 0) {
+                    printf("  [%u] %s\n", member, shstr_name(shstr_data, shstr_size, m.name));
+                } else {
+                    printf("  [%u]\n", member);
+                }
+            } else {
+                printf("  [%u] <corrupt>\n", member);
+            }
+            off += 4;
+        }
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -2229,6 +2291,7 @@ static void usage(FILE *out) {
             "  -n, --notes             Display notes\n"
             "  -V, --version-info      Display version sections\n"
             "  -I, --histogram         Display hash histogram\n"
+            "  -g, --section-groups    Display section groups\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -2256,6 +2319,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"notes", no_argument, NULL, 'n'},
         {"version-info", no_argument, NULL, 'V'},
         {"histogram", no_argument, NULL, 'I'},
+        {"section-groups", no_argument, NULL, 'g'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -2272,7 +2336,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsrdnVISeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsrdnVIgSeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -2301,6 +2365,9 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 'I':
                 opts->show_histogram = 1;
                 break;
+            case 'g':
+                opts->show_groups = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -2316,6 +2383,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_notes = 1;
                 opts->show_version_info = 1;
                 opts->show_histogram = 1;
+                opts->show_groups = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -2385,7 +2453,8 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         !opts->show_dynamic &&
         !opts->show_notes &&
         !opts->show_version_info &&
-        !opts->show_histogram) {
+        !opts->show_histogram &&
+        !opts->show_groups) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -2464,6 +2533,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_histogram) {
         print_hash_histogram(&view, &hdr);
+    }
+    if (opts->show_groups) {
+        print_section_groups(&view, &hdr);
     }
 
 out:

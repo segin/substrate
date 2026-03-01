@@ -137,9 +137,9 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 11. Section Groups (`-g` / `--section-groups`)
 
-- [ ] Display `SHT_GROUP` sections.
-- [ ] Decode group flags: `GRP_COMDAT`.
-- [ ] List member section indices and names.
+- [x] Display `SHT_GROUP` sections.
+- [x] Decode group flags: `GRP_COMDAT`.
+- [x] List member section indices and names.
 
 ## 12. ARM-Specific Displays
 
