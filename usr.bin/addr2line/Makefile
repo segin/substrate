@@ -13,7 +13,7 @@ endif
 
 include ../../Makefile.bin.inc
 
-BINDIR ?= $(DESTDIR)/usr/bin
+BINDIR := $(DESTDIR)/usr/bin
 
 $(PROG): ../../usr.lib/elfobj/libelfobj.a ../../usr.lib/demangle/libdemangle.a
 
@@ -22,3 +22,11 @@ $(PROG): ../../usr.lib/elfobj/libelfobj.a ../../usr.lib/demangle/libdemangle.a
 
 ../../usr.lib/demangle/libdemangle.a:
 	$(MAKE) -C ../../usr.lib/demangle $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
+
+.PHONY: install-man
+
+install: install-man
+
+install-man:
+	mkdir -p $(DESTDIR)/usr/share/man/man1
+	install -m 0644 addr2line.1 $(DESTDIR)/usr/share/man/man1/addr2line.1

@@ -308,10 +308,10 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 11. Man Page
 
-- [ ] Write `addr2line.1` covering all flags, address formats, and output modes.
-- [ ] Document DWARF version support (v2–v5).
-- [ ] Reference `demangle(3)` for demangling details.
-- [ ] Install to `$(DESTDIR)/usr/share/man/man1/`.
+- [x] Write `addr2line.1` covering all flags, address formats, and output modes.
+- [x] Document DWARF version support (v2–v5).
+- [x] Reference `demangle(3)` for demangling details.
+- [x] Install to `$(DESTDIR)/usr/share/man/man1/`.
 
 ---
 

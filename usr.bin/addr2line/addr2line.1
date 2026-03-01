@@ -1,0 +1,133 @@
+.TH ADDR2LINE 1 "March 2026" "Substrate" "User Commands"
+.SH NAME
+addr2line \- convert addresses to file names and line numbers
+.SH SYNOPSIS
+.B addr2line
+[\fIOPTION\fR]... [\fIADDRESS\fR]...
+.SH DESCRIPTION
+.B addr2line
+translates program addresses into source locations using DWARF debug data.
+By default it reads from
+.I a.out
+and prints one
+.IR file:line
+result per query.
+.PP
+If no addresses are provided on the command line, addresses are read from
+standard input, one per line.
+.SH OPTIONS
+.TP
+.BI \-e " FILE\fR,\fP " \-\-exe= FILE
+Use
+.I FILE
+as the input ELF object (default:
+.IR a.out ).
+.TP
+.BR \-f ", " \-\-functions
+Print function names before source locations.
+.TP
+.BR \-i ", " \-\-inlines
+Print inline call frames from innermost to outermost.
+.TP
+.BR \-s ", " \-\-basenames
+Strip directory prefixes from file names.
+.TP
+.BI \-j " SECTION\fR,\fP " \-\-section= SECTION
+Treat input addresses as offsets in
+.IR SECTION .
+.TP
+.BR \-C ", " \-\-demangle
+Demangle function names using
+.BR demangle (3).
+.TP
+.BR \-p ", " \-\-pretty\-print
+Print each frame on one line as
+.IR "function at file:line" .
+.TP
+.BR \-a ", " \-\-addresses
+Print the queried address before each result.
+.TP
+.B \-c
+Print
+.IR file:line:column
+when column data is available.
+.TP
+.BR \-h ", " \-\-help
+Print usage and exit with status 0.
+.TP
+.BR \-V ", " \-\-version
+Print version information and exit with status 0.
+.SH OUTPUT
+If a lookup fails,
+.B addr2line
+prints:
+.PP
+.RS
+??
+.br
+??:0
+.RE
+.PP
+with
+.B \-f
+enabled, or just:
+.PP
+.RS
+??:0
+.RE
+.PP
+without
+.BR \-f .
+.SH ADDRESS ADJUSTMENT
+For
+.B ET_DYN
+objects (PIE and shared libraries),
+.B addr2line
+applies load-bias style correction when absolute runtime addresses are given.
+.SH DWARF SUPPORT
+Supported DWARF versions: v2, v3, v4, v5.
+.PP
+Supported compressed debug formats:
+.I .zdebug_*
+(GNU zlib)
+and
+.I SHF_COMPRESSED
+debug sections.
+.SH EXIT STATUS
+.TP
+.B 0
+Success (including unresolved addresses).
+.TP
+.B 1
+Fatal error, such as invalid ELF format, unreadable input file, or bad options.
+.SH EXAMPLES
+.TP
+Resolve two addresses from an executable:
+.PP
+.RS
+.EX
+addr2line -e ./kernel.elf 0x8049123 0x8049567
+.EE
+.RE
+.TP
+Resolve runtime-style PIE addresses with function names:
+.PP
+.RS
+.EX
+addr2line -f -e ./app.pie 0x555551a3 0x5555520f
+.EE
+.RE
+.TP
+Read addresses from standard input:
+.PP
+.RS
+.EX
+printf '0x401050\\n0x401080\\n' | addr2line -e ./a.out
+.EE
+.RE
+.SH SEE ALSO
+.BR demangle (3),
+.BR c++filt (1),
+.BR nm (1),
+.BR objdump (1),
+.BR readelf (1)
