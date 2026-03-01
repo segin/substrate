@@ -122,16 +122,16 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 1. `libelfobj` Integration
 
-- [ ] Open input file with `elf_open()` / `elf_open_with_options()`. **(FR‑01, FR‑02)**
-- [ ] Locate `.debug_line` section via `elf_section_find_by_name()`. **(FR‑03)**
-- [ ] Locate `.debug_info` section (for compilation‑unit base addresses). **(FR‑03)**
-- [ ] Locate `.debug_abbrev` section (for abbreviation table lookup). **(FR‑03)**
-- [ ] Locate `.debug_str` / `.debug_line_str` sections (for string offsets). **(FR‑03)**
-- [ ] Locate `.debug_ranges` / `.debug_rnglists` sections (for address ranges). **(FR‑03)**
-- [ ] Detect compressed debug sections (`.zdebug_*` / `SHF_COMPRESSED`) via `elf_section_is_compressed_debug()` and handle `SHT_COMPRESSED` header parsing. **(FR‑04)**
-- [ ] Read `.symtab` / `.dynsym` for fallback function‑name lookup when DWARF is absent. **(FR‑05)**
-- [ ] Call `elf_close()` on every opened handle; no leaks on error paths. **(FR‑06)**
-- [ ] Handle `elf_open()` failure: print diagnostic, exit 1. **(NF‑01)**
+- [x] Open input file with `elf_open()` / `elf_open_with_options()`. **(FR‑01, FR‑02)**
+- [x] Locate `.debug_line` section via `elf_section_find_by_name()`. **(FR‑03)**
+- [x] Locate `.debug_info` section (for compilation‑unit base addresses). **(FR‑03)**
+- [x] Locate `.debug_abbrev` section (for abbreviation table lookup). **(FR‑03)**
+- [x] Locate `.debug_str` / `.debug_line_str` sections (for string offsets). **(FR‑03)**
+- [x] Locate `.debug_ranges` / `.debug_rnglists` sections (for address ranges). **(FR‑03)**
+- [x] Detect compressed debug sections (`.zdebug_*` / `SHF_COMPRESSED`) via `elf_section_is_compressed_debug()` and handle `SHT_COMPRESSED` header parsing. **(FR‑04)**
+- [x] Read `.symtab` / `.dynsym` for fallback function‑name lookup when DWARF is absent. **(FR‑05)**
+- [x] Call `elf_close()` on every opened handle; no leaks on error paths. **(FR‑06)**
+- [x] Handle `elf_open()` failure: print diagnostic, exit 1. **(NF‑01)**
 
 ---
 
