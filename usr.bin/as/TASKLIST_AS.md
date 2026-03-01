@@ -219,12 +219,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `VPCONFLICTD/Q`, `VPLZCNTD/Q`, `VPBROADCASTMB2Q`, `VPBROADCASTMW2D`
 
 ### 5d. AVX-512DQ (Doubleword/Quadword)
-- [ ] QQ conversions: `VCVT{PS,PD}2{QQ,UQQ}`, `VCVT{QQ,UQQ}2{PS,PD}` (truncating forms too)
-- [ ] `VPMULLQ`, `VPMOVM2D/Q`, `VPMOVD2M/Q2M`
-- [ ] Insert/Extract 64x2/32x8 forms
-- [ ] `VRANGEPS/PD/SS/SD`, `VREDUCEPS/PD/SS/SD`, `VFPCLASSPS/PD/SS/SD → k`
-- [ ] Bitwise FP: `VANDPS/PD`, `VORPS/PD`, `VXORPS/PD`, `VANDNPS/PD` (EVEX zmm)
-- [ ] `VBROADCASTF32X2/F32X8/I32X2/I32X8`
+- [x] QQ conversions: `VCVT{PS,PD}2{QQ,UQQ}`, `VCVT{QQ,UQQ}2{PS,PD}` (truncating forms too)
+- [x] `VPMULLQ`, `VPMOVM2D/Q`, `VPMOVD2M/Q2M`
+- [x] Insert/Extract 64x2/32x8 forms
+- [x] `VRANGEPS/PD/SS/SD`, `VREDUCEPS/PD/SS/SD`, `VFPCLASSPS/PD/SS/SD → k`
+- [x] Bitwise FP: `VANDPS/PD`, `VORPS/PD`, `VXORPS/PD`, `VANDNPS/PD` (EVEX zmm)
+- [x] `VBROADCASTF32X2/F32X8/I32X2/I32X8`
 
 ### 5e. AVX-512VL (Vector Length)
 - [ ] All 512-bit instructions also available at EVEX.128 (xmm) and EVEX.256 (ymm)
