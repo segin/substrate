@@ -5123,38 +5123,38 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `^_` pops the undo stack and reverts the operation.
         - [x] Limit undo stack depth (256 entries default).
 
-- [ ] **Emacs Key‑Binding Map:**
+- [x] **Emacs Key‑Binding Map:**
     - [x] **Implemented:**
         - [x] Printable self‑insert (0x20–0x7E).
         - [x] Backspace / Delete.
         - [x] `^C` (interrupt), `^D` (delete/EOF), `^L` (clear screen).
         - [x] Arrow keys (cursor movement + history).
-    - [ ] **Required Additions:**
-        - [ ] `^A` — `beginning-of-line`.
-        - [ ] `^B` — `backward-char`.
-        - [ ] `^E` — `end-of-line`.
-        - [ ] `^F` — `forward-char`.
-        - [ ] `^K` — `kill-line`.
-        - [ ] `^N` — `next-history` (alias for down‑arrow).
-        - [ ] `^P` — `previous-history` (alias for up‑arrow).
-        - [ ] `^R` — `reverse-search-history`.
-        - [ ] `^S` — `forward-search-history`.
-        - [ ] `^T` — `transpose-chars`.
-        - [ ] `^U` — `unix-line-discard`.
-        - [ ] `^W` — `unix-word-rubout`.
-        - [ ] `^Y` — `yank`.
-        - [ ] `^_` — `undo`.
-        - [ ] `M-b` — `backward-word`.
-        - [ ] `M-c` — `capitalize-word`.
-        - [ ] `M-d` — `kill-word`.
-        - [ ] `M-f` — `forward-word`.
-        - [ ] `M-l` — `downcase-word`.
-        - [ ] `M-u` — `upcase-word`.
-        - [ ] `M-y` — `yank-pop`.
-        - [ ] `M-<` — `beginning-of-history`.
-        - [ ] `M->` — `end-of-history`.
-        - [ ] `M-.` — `yank-last-arg` (insert last arg of previous command).
-        - [ ] `Tab` (`^I`) — `complete` (filename completion).
+    - [x] **Required Additions:**
+        - [x] `^A` — `beginning-of-line`.
+        - [x] `^B` — `backward-char`.
+        - [x] `^E` — `end-of-line`.
+        - [x] `^F` — `forward-char`.
+        - [x] `^K` — `kill-line`.
+        - [x] `^N` — `next-history` (alias for down‑arrow).
+        - [x] `^P` — `previous-history` (alias for up‑arrow).
+        - [x] `^R` — `reverse-search-history`.
+        - [x] `^S` — `forward-search-history`.
+        - [x] `^T` — `transpose-chars`.
+        - [x] `^U` — `unix-line-discard`.
+        - [x] `^W` — `unix-word-rubout`.
+        - [x] `^Y` — `yank`.
+        - [x] `^_` — `undo`.
+        - [x] `M-b` — `backward-word`.
+        - [x] `M-c` — `capitalize-word`.
+        - [x] `M-d` — `kill-word`.
+        - [x] `M-f` — `forward-word`.
+        - [x] `M-l` — `downcase-word`.
+        - [x] `M-u` — `upcase-word`.
+        - [x] `M-y` — `yank-pop`.
+        - [x] `M-<` — `beginning-of-history`.
+        - [x] `M->` — `end-of-history`.
+        - [x] `M-.` — `yank-last-arg` (insert last arg of previous command).
+        - [x] `Tab` (`^I`) — `complete` (filename completion).
 
 - [ ] **Vi Mode (`EL_EDITOR "vi"`):**
     - [ ] **Mode State Machine:**

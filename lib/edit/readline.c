@@ -5,6 +5,8 @@
 #include <ctype.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "el.h"
 
 static int is_word_char(unsigned char ch) {
@@ -288,6 +290,176 @@ static void move_backward_word(EditLine *el) {
     while (i > 0 && !is_word_char((unsigned char)el->line.buffer[i - 1])) i--;
     while (i > 0 && is_word_char((unsigned char)el->line.buffer[i - 1])) i--;
     el->line.cursor = i;
+}
+
+static int apply_word_case(EditLine *el, int mode) {
+    size_t i;
+    size_t start;
+
+    if (!el) return 0;
+    i = el->line.cursor;
+    while (i < el->line.len && !is_word_char((unsigned char)el->line.buffer[i])) i++;
+    if (i >= el->line.len) return 0;
+    start = i;
+
+    while (i < el->line.len && is_word_char((unsigned char)el->line.buffer[i])) {
+        unsigned char ch = (unsigned char)el->line.buffer[i];
+        if (mode == 0) {
+            el->line.buffer[i] = (char)((i == start) ? toupper(ch) : tolower(ch));
+        } else if (mode > 0) {
+            el->line.buffer[i] = (char)toupper(ch);
+        } else {
+            el->line.buffer[i] = (char)tolower(ch);
+        }
+        i++;
+    }
+    el->line.cursor = i;
+    return 1;
+}
+
+static int yank_last_arg(EditLine *el) {
+    HistEvent ev;
+    const char *s;
+    size_t len;
+    size_t start;
+    size_t end;
+
+    if (!el || !el->history) return 0;
+    if (history(el->history, &ev, H_LAST) != 0 || !ev.str) return 0;
+
+    s = ev.str;
+    len = strlen(s);
+    while (len > 0 && isspace((unsigned char)s[len - 1])) len--;
+    if (len == 0) return 0;
+    end = len;
+    while (len > 0 && !isspace((unsigned char)s[len - 1])) len--;
+    start = len;
+    if (end <= start) return 0;
+
+    if (line_ensure_capacity(el, el->line.len + (end - start) + 1) == -1) return 0;
+    memmove(el->line.buffer + el->line.cursor + (end - start),
+            el->line.buffer + el->line.cursor,
+            el->line.len - el->line.cursor + 1);
+    memcpy(el->line.buffer + el->line.cursor, s + start, end - start);
+    el->line.len += (end - start);
+    el->line.cursor += (end - start);
+    return 1;
+}
+
+static int insert_span(EditLine *el, const char *text, size_t len) {
+    if (!el || !text || len == 0) return 0;
+    if (line_ensure_capacity(el, el->line.len + len + 1) == -1) return 0;
+    memmove(el->line.buffer + el->line.cursor + len,
+            el->line.buffer + el->line.cursor,
+            el->line.len - el->line.cursor + 1);
+    memcpy(el->line.buffer + el->line.cursor, text, len);
+    el->line.len += len;
+    el->line.cursor += len;
+    return 1;
+}
+
+static int default_filename_complete(EditLine *el) {
+    size_t word_start;
+    size_t word_len;
+    char *word;
+    char *slash;
+    const char *dir_path;
+    const char *base;
+    size_t base_len;
+    DIR *dir;
+    struct dirent *de;
+    char *first_match;
+    size_t common_len;
+    int match_count;
+
+    if (!el) return 0;
+
+    word_start = el->line.cursor;
+    while (word_start > 0 && !isspace((unsigned char)el->line.buffer[word_start - 1])) {
+        word_start--;
+    }
+    word_len = el->line.cursor - word_start;
+
+    word = malloc(word_len + 1);
+    if (!word) return 0;
+    memcpy(word, el->line.buffer + word_start, word_len);
+    word[word_len] = '\0';
+
+    slash = strrchr(word, '/');
+    if (slash) {
+        *slash = '\0';
+        dir_path = (*word == '\0') ? "/" : word;
+        base = slash + 1;
+    } else {
+        dir_path = ".";
+        base = word;
+    }
+    base_len = strlen(base);
+
+    dir = opendir(dir_path);
+    if (!dir) {
+        free(word);
+        return 0;
+    }
+
+    first_match = NULL;
+    common_len = 0;
+    match_count = 0;
+    while ((de = readdir(dir)) != NULL) {
+        size_t nlen = strlen(de->d_name);
+        size_t i;
+        if (strncmp(de->d_name, base, base_len) != 0) continue;
+
+        if (match_count == 0) {
+            first_match = strdup(de->d_name);
+            if (!first_match) break;
+            common_len = strlen(first_match);
+        } else {
+            for (i = 0; i < common_len && de->d_name[i] != '\0' && first_match[i] == de->d_name[i]; i++) {
+            }
+            common_len = i;
+        }
+        match_count++;
+        if (nlen == 0) continue;
+    }
+    closedir(dir);
+
+    if (match_count == 0 || !first_match) {
+        free(first_match);
+        free(word);
+        return 0;
+    }
+
+    if (match_count == 1) {
+        char full_path[4096];
+        struct stat st;
+        size_t flen = strlen(first_match);
+
+        if (flen > base_len) {
+            (void)insert_span(el, first_match + base_len, flen - base_len);
+        }
+
+        if (slash) {
+            snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, first_match);
+        } else {
+            snprintf(full_path, sizeof(full_path), "%s", first_match);
+        }
+        if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            (void)insert_span(el, "/", 1);
+        } else {
+            (void)insert_span(el, " ", 1);
+        }
+    } else if (common_len > base_len) {
+        (void)insert_span(el, first_match + base_len, common_len - base_len);
+    } else {
+        free(first_match);
+        free(word);
+        return 0;
+    }
+
+    free(first_match);
+    free(word);
+    return 1;
 }
 
 static size_t get_terminal_columns(EditLine *el) {
@@ -619,6 +791,14 @@ const char *el_gets(EditLine *el, int *count) {
                 el->line.cursor = 0;
                 refresh_line(el);
             }
+        } else if (c == 0x02) { /* ^B */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->line.cursor > 0) {
+                undo_push(el);
+                el->line.cursor--;
+                refresh_line(el);
+            }
         } else if (c == 0x05) { /* ^E */
             el->last_cmd_was_kill = 0;
             el->yank_active = 0;
@@ -626,6 +806,62 @@ const char *el_gets(EditLine *el, int *count) {
                 undo_push(el);
                 el->line.cursor = el->line.len;
                 refresh_line(el);
+            }
+        } else if (c == 0x06) { /* ^F */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->line.cursor < el->line.len) {
+                undo_push(el);
+                el->line.cursor++;
+                refresh_line(el);
+            }
+        } else if (c == 0x09) { /* Tab complete */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->completion) {
+                undo_push(el);
+                el->completion(el, c);
+                refresh_line(el);
+            } else {
+                undo_push(el);
+                if (default_filename_complete(el)) {
+                    refresh_line(el);
+                } else {
+                    undo_discard_last(el);
+                    fputc('\a', el->fout);
+                    fflush(el->fout);
+                }
+            }
+        } else if (c == 0x0E) { /* ^N next-history */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->history) {
+                HistEvent ev;
+                if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                    undo_push(el);
+                    line_load_history(el, ev.str);
+                    refresh_line(el);
+                } else {
+                    undo_push(el);
+                    history_restore_current_input(el);
+                    el->history_browsing = 0;
+                    refresh_line(el);
+                }
+            }
+        } else if (c == 0x10) { /* ^P previous-history */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->history) {
+                HistEvent ev;
+                if (!el->history_browsing) {
+                    (void)history_save_current_input(el);
+                    el->history_browsing = 1;
+                }
+                if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                    undo_push(el);
+                    line_load_history(el, ev.str);
+                    refresh_line(el);
+                }
             }
         } else if (c == 0x12) { /* ^R history-search-backward */
             el->last_cmd_was_kill = 0;
@@ -886,6 +1122,42 @@ const char *el_gets(EditLine *el, int *count) {
                             refresh_line(el);
                         }
                     }
+                }
+            } else if (seq0 == 'c' || seq0 == 'C') { /* M-c capitalize-word */
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                undo_push(el);
+                if (apply_word_case(el, 0)) {
+                    refresh_line(el);
+                } else {
+                    undo_discard_last(el);
+                }
+            } else if (seq0 == 'l' || seq0 == 'L') { /* M-l downcase-word */
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                undo_push(el);
+                if (apply_word_case(el, -1)) {
+                    refresh_line(el);
+                } else {
+                    undo_discard_last(el);
+                }
+            } else if (seq0 == 'u' || seq0 == 'U') { /* M-u upcase-word */
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                undo_push(el);
+                if (apply_word_case(el, 1)) {
+                    refresh_line(el);
+                } else {
+                    undo_discard_last(el);
+                }
+            } else if (seq0 == '.') { /* M-. yank-last-arg */
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                undo_push(el);
+                if (yank_last_arg(el)) {
+                    refresh_line(el);
+                } else {
+                    undo_discard_last(el);
                 }
             } else if (seq0 == 'd' || seq0 == 'D') { /* M-d kill-word */
                 el->yank_active = 0;
