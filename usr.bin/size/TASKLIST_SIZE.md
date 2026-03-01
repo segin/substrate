@@ -15,13 +15,13 @@ Goal: implement `size` using section accounting from `libelfobj`.
 
 ## 2. Section Classification
 
-- [ ] **Text**: `SHF_ALLOC | SHF_EXECINSTR` (any combination with exec).
-- [ ] **Data**: `SHF_ALLOC | SHF_WRITE` and `sh_type != SHT_NOBITS`.
-- [ ] **BSS**: `SHF_ALLOC | SHF_WRITE` and `sh_type == SHT_NOBITS`.
-- [ ] **Read‑only data**: `SHF_ALLOC` without `SHF_WRITE` or `SHF_EXECINSTR`, `sh_type != SHT_NOBITS` — classify as text (Berkeley) or data (SysV).
-- [ ] TLS sections (`SHF_TLS`): include in data/bss as appropriate.
-- [ ] Non‑`SHF_ALLOC` sections (debug, strtab, symtab): exclude from all totals.
-- [ ] Handle `SHT_NOTE` sections: include in text or data per flags.
+- [x] **Text**: `SHF_ALLOC | SHF_EXECINSTR` (any combination with exec).
+- [x] **Data**: `SHF_ALLOC | SHF_WRITE` and `sh_type != SHT_NOBITS`.
+- [x] **BSS**: `SHF_ALLOC | SHF_WRITE` and `sh_type == SHT_NOBITS`.
+- [x] **Read‑only data**: `SHF_ALLOC` without `SHF_WRITE` or `SHF_EXECINSTR`, `sh_type != SHT_NOBITS` — classify as text (Berkeley) or data (SysV).
+- [x] TLS sections (`SHF_TLS`): include in data/bss as appropriate.
+- [x] Non‑`SHF_ALLOC` sections (debug, strtab, symtab): exclude from all totals.
+- [x] Handle `SHT_NOTE` sections: include in text or data per flags.
 
 ## 3. Output Formats
 

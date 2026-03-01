@@ -13,16 +13,27 @@ typedef struct {
     elfobj_class_t cls;
 } size_totals_t;
 
+typedef enum {
+    SIZE_CLASSIFY_BERKELEY = 0,
+    SIZE_CLASSIFY_SYSV = 1
+} size_classify_mode_t;
+
 static const char *progname = "size";
 
 static void usage(FILE *out) {
     fprintf(out, "usage: %s <file>...\n", progname);
 }
 
-static void classify_section(const elf_section_t *sec, size_totals_t *totals) {
+static void classify_section(const elf_section_t *sec, size_totals_t *totals,
+                             size_classify_mode_t mode) {
     uint32_t sh_type;
     uint64_t sh_flags;
     uint64_t sh_size;
+    int is_alloc;
+    int is_exec;
+    int is_write;
+    int is_tls;
+    int is_nobits;
 
     if (sec == NULL || totals == NULL) {
         return;
@@ -32,17 +43,23 @@ static void classify_section(const elf_section_t *sec, size_totals_t *totals) {
     sh_flags = elf_section_flags(sec);
     sh_size = elf_section_size(sec);
 
-    if ((sh_flags & SHF_ALLOC) == 0) {
+    is_alloc = ((sh_flags & SHF_ALLOC) != 0);
+    is_exec = ((sh_flags & SHF_EXECINSTR) != 0);
+    is_write = ((sh_flags & SHF_WRITE) != 0);
+    is_tls = ((sh_flags & SHF_TLS) != 0);
+    is_nobits = (sh_type == SHT_NOBITS);
+
+    if (!is_alloc) {
         return;
     }
 
-    if ((sh_flags & SHF_EXECINSTR) != 0) {
+    if (is_exec) {
         totals->text += sh_size;
         return;
     }
 
-    if ((sh_flags & SHF_WRITE) != 0) {
-        if (sh_type == SHT_NOBITS) {
+    if (is_write || is_tls) {
+        if (is_nobits) {
             totals->bss += sh_size;
         } else {
             totals->data += sh_size;
@@ -50,10 +67,14 @@ static void classify_section(const elf_section_t *sec, size_totals_t *totals) {
         return;
     }
 
-    totals->text += sh_size;
+    if (!is_nobits && mode == SIZE_CLASSIFY_SYSV) {
+        totals->data += sh_size;
+    } else {
+        totals->text += sh_size;
+    }
 }
 
-static int analyze_elf(const char *path, size_totals_t *totals) {
+static int analyze_elf(const char *path, size_totals_t *totals, size_classify_mode_t mode) {
     elfobj_t *obj = NULL;
     size_t i;
     size_t nsec;
@@ -73,7 +94,7 @@ static int analyze_elf(const char *path, size_totals_t *totals) {
     nsec = elf_section_count(obj);
     for (i = 0; i < nsec; ++i) {
         elf_section_t *sec = elf_section_get(obj, i);
-        classify_section(sec, totals);
+        classify_section(sec, totals, mode);
     }
 
     elf_close(obj);
@@ -116,7 +137,7 @@ int main(int argc, char **argv) {
         totals.bss = 0;
         totals.cls = ELFOBJ_CLASS_32;
 
-        if (analyze_elf(argv[i], &totals) != 0) {
+        if (analyze_elf(argv[i], &totals, SIZE_CLASSIFY_BERKELEY) != 0) {
             any_fail = 1;
             continue;
         }
