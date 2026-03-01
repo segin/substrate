@@ -65,8 +65,13 @@ typedef struct vm_page {
 
 /* Validate vm_page_t magic canaries - returns 1 if valid, 0 if corrupted */
 static inline int vm_page_valid(const vm_page_t *m) {
-    if (!m) return 0;
-    return (m->magic_head == VM_PAGE_MAGIC && m->magic_tail == VM_PAGE_MAGIC);
+    if(!m) return(0);
+    return(m->magic_head == VM_PAGE_MAGIC && m->magic_tail == VM_PAGE_MAGIC);
+}
+
+/* Convert vm_page_t to physical address */
+static inline uintptr_t vm_page_to_phys(const vm_page_t *m) {
+    return(m->phys_addr);
 }
 
 // PV Entry: Tracks a single mapping (pmap, va) for a physical page
@@ -75,6 +80,15 @@ struct pv_entry {
     struct pmap *pmap;          // Pmap containing this mapping
     uintptr_t va;               // Virtual address of mapping
 };
+
+// PV Entry management
+void pv_insert(vm_page_t *page, struct pmap *pmap, uintptr_t va);
+void pv_remove(vm_page_t *page, struct pmap *pmap, uintptr_t va);
+void pv_remove_all(vm_page_t *page);
+
+// Ownership tracking
+void vm_page_insert(vm_page_t *page, struct vm_object *object, uint64_t pindex);
+void vm_page_remove(vm_page_t *page);
 
 // Queue management
 void vm_page_init(void);

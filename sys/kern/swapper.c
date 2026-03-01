@@ -18,8 +18,7 @@ static thread_t swapper_thread;
 static volatile int idle_work_pending = 0;
 
 // Forward declarations
-extern void vm_pageout_daemon(void);
-extern void uma_reclaim(void);
+extern void vm_pageout(void);
 
 // Initialize the swapper process (PID 0)
 void swapper_init(void) {
@@ -92,10 +91,7 @@ void swapper_idle_loop(void) {
             idle_work_pending = 0;
             
             // Run pageout if memory pressure
-            // vm_pageout_daemon();
-            
-            // Reclaim UMA caches
-            // uma_reclaim();
+            vm_pageout();
             
             continue;
         }

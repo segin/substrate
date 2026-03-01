@@ -135,6 +135,12 @@ int pmap_test_and_clear_ref(pmap_t pmap, uintptr_t va);
 int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
 int pmap_test_and_clear_modify(pmap_t pmap, uintptr_t va);
 
+// Per-page reference/modification tracking (walks pv_list)
+struct vm_page;
+int pmap_is_referenced(struct vm_page *m);
+void pmap_clear_reference(struct vm_page *m);
+void pmap_track_access(struct vm_page *m);
+
 // Debug and Diagnostic Functions
 void pmap_dump(pmap_t pmap);
 int pmap_check(pmap_t pmap);

@@ -36,6 +36,7 @@ extern thread_t *current_thread;
 
 /* Scheduler API */
 void sched_init(void);
+void swapper_request_work(void);
 
 /* Thread Creation */
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
