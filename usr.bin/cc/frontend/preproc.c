@@ -4932,11 +4932,6 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
                     return -1;
                 }
                 if (p[0] == '.' && p[1] == '.' && p[2] == '.') {
-                    if (!st->std_is_gnu) {
-                        free(param);
-                        strvec_free(&parsed_params);
-                        return -1;
-                    }
                     is_variadic = 1;
                     vararg_name = xstrdup_n(a, (size_t)(p - a));
                     free(param);

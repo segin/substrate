@@ -8898,6 +8898,14 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
         for (i = 0; i < dims[0] && *cursor < list->arg_count; ++i) {
             const cc_expr_t *raw = list->args[*cursor];
             long sub_base = base + i * sub_size;
+            if (raw != NULL && raw->kind == CC_EXPR_STR && ndim == 2 && dims[1] >= 0) {
+                if (fill_fixed_char_array_from_string(raw, scalar_type, scalar_size, dims[1], sub_base, buf, buf_size,
+                                                      diag) != 0) {
+                    return -1;
+                }
+                (*cursor)++;
+                continue;
+            }
             if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
                 size_t sub_cur = 0;
                 (*cursor)++;
@@ -9094,6 +9102,15 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
         if (stmt_calls_named_fn(&f->stmts[i], "__builtin_va_arg_pack")) {
             return 1;
         }
+    }
+    if ((f->storage & CC_STORAGE_EXTERN) != 0 && (f->storage & CC_STORAGE_INLINE) != 0) {
+        /*
+         * Treat extern inline definitions as inline-only bodies.
+         * This matches GNU headers that use extern inline wrappers
+         * (often with __gnu_inline__) and rely on a separate out-of-line
+         * definition in the provider library.
+         */
+        return 1;
     }
     if ((f->storage & CC_STORAGE_STATIC) == 0) {
         return 0;
@@ -9709,6 +9726,15 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             } else if (init != NULL && init->kind == CC_EXPR_STR) {
                 init_is_string = 1;
                 out->globals[i].init_str = xstrdup(init->ident != NULL ? init->ident : "\"\"");
+                if (out->globals[i].init_str == NULL) {
+                    set_diag(diag, "out of memory duplicating global string initializer");
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
+            } else if (init != NULL && init->kind == CC_EXPR_CAST && init->lhs != NULL &&
+                       init->lhs->kind == CC_EXPR_STR && is_pointer_type(tu->globals[i].type)) {
+                init_is_string = 1;
+                out->globals[i].init_str = xstrdup(init->lhs->ident != NULL ? init->lhs->ident : "\"\"");
                 if (out->globals[i].init_str == NULL) {
                     set_diag(diag, "out of memory duplicating global string initializer");
                     cc_ssa_module_free(out);

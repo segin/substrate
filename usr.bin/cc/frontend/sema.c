@@ -173,6 +173,15 @@ static int maybe_warn_assignment_condition(const cc_expr_t *cond, const char *wh
     if (cond == NULL || cond->kind != CC_EXPR_ASSIGN || cond->paren_wrapped) {
         return 0;
     }
+    if (cond->ident != NULL && cond->rhs != NULL && cond->rhs->kind == CC_EXPR_BIN && cond->rhs->lhs != NULL &&
+        cond->rhs->lhs->kind == CC_EXPR_IDENT && cond->rhs->lhs->ident != NULL &&
+        strcmp(cond->ident, cond->rhs->lhs->ident) == 0) {
+        /*
+         * parse_assign lowers compound assignments (e.g. x /= y) into
+         * x = x / y. Do not warn on that form in conditions.
+         */
+        return 0;
+    }
 
     snprintf(buf, sizeof(buf), "assignment used as condition in %s", where);
     return emit_warning(diag, cond->line, cond->col, buf, 0);
@@ -1584,6 +1593,43 @@ static const cc_function_t *generic_selected_function(const cc_translation_unit_
         return NULL;
     }
     return find_function(tu, sel->ident);
+}
+
+static const cc_function_t *infer_callee_function_expr(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    const cc_function_t *a;
+    const cc_function_t *b;
+
+    if (tu == NULL || e == NULL) {
+        return NULL;
+    }
+    switch (e->kind) {
+    case CC_EXPR_IDENT:
+        if (e->ident == NULL) {
+            return NULL;
+        }
+        return find_function(tu, e->ident);
+    case CC_EXPR_ADDR:
+    case CC_EXPR_DEREF:
+    case CC_EXPR_CAST:
+        return infer_callee_function_expr(tu, e->lhs);
+    case CC_EXPR_TERNARY:
+        if (e->rhs == NULL || e->third == NULL) {
+            return NULL;
+        }
+        a = infer_callee_function_expr(tu, e->rhs);
+        b = infer_callee_function_expr(tu, e->third);
+        if (a == NULL || b == NULL) {
+            return NULL;
+        }
+        if (a->ret_type != b->ret_type || a->ret_struct_id != b->ret_struct_id) {
+            return NULL;
+        }
+        return a;
+    case CC_EXPR_GENERIC:
+        return generic_selected_function(tu, e);
+    default:
+        return NULL;
+    }
 }
 
 static cc_type_t integral_promo_type(cc_type_t t) {
@@ -3093,6 +3139,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 e->value_type = gfn->ret_type;
                 e->struct_id = gfn->ret_struct_id;
             } else {
+                const cc_function_t *ifn = infer_callee_function_expr(tu, e->lhs);
+                if (ifn != NULL) {
+                    e->value_type = ifn->ret_type;
+                    e->struct_id = ifn->ret_struct_id;
+                    return 0;
+                }
                 e->value_type = ptr_base_type(indirect_callee_type);
                 e->struct_id = -1;
                 if (indirect_callee_struct_id >= 0 &&
@@ -4038,8 +4090,15 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                 child_len = array_dims[1];
             }
             if (item->kind != CC_EXPR_INIT_LIST) {
-                set_diag(diag, "nested array initializer must use braces");
-                return -1;
+                /*
+                 * Accept brace-elided multidimensional initializers and
+                 * leave precise element shaping to lowering, which already
+                 * flattens with a cursor model.
+                 */
+                if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                continue;
             }
             if (check_array_initializer(tu, name, elem_type, array_struct_id, child_len, array_ndim - 1,
                                         array_dims != NULL ? array_dims + 1 : NULL, item, vars, var_count, depth, NULL,

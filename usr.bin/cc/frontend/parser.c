@@ -397,6 +397,8 @@ static int is_decl_qual_tok(cc_tok_kind_t k);
 static int is_decl_qual_at_token(parser_t *p);
 static cc_type_t ptr_of_type(cc_type_t t);
 static int tok_is_ident(parser_t *p, const char *s);
+static int tok_is_gnu_attribute_kw(parser_t *p);
+static int token_is_gnu_attribute_kw(const cc_token_t *t);
 static int is_ptr_declarator_tok(cc_tok_kind_t kind);
 static void decl_attrs_reset(decl_attrs_t *a);
 static void decl_attrs_clear(decl_attrs_t *a);
@@ -1243,7 +1245,7 @@ static int is_declspec_ident(parser_t *p) {
 static int is_declspec_start(parser_t *p) {
     return is_declspec_tok(p->tok.kind) || is_declspec_ident(p) ||
            (p->tok.kind == TOK_IDENT && typedef_find_visible_n(p, p->tok.start, p->tok.len) >= 0) ||
-           tok_is_ident(p, "__attribute__") ||
+           tok_is_gnu_attribute_kw(p) ||
            (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK);
 }
 
@@ -1263,7 +1265,7 @@ static int is_type_name_start_after_lparen(parser_t *p) {
         if (typedef_find_visible_n(p, t.start, t.len) >= 0) {
             return 1;
         }
-        if (t.len == strlen("__attribute__") && strncmp(t.start, "__attribute__", t.len) == 0) {
+        if (token_is_gnu_attribute_kw(&t)) {
             return 1;
         }
         if ((t.len == strlen("_Atomic") && strncmp(t.start, "_Atomic", t.len) == 0) ||
@@ -1400,7 +1402,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             }
             continue;
         }
-        if ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+        if ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
             tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
             if (skip_decl_gnu_suffix(p, out_attrs) != 0) {
                 return -1;
@@ -2961,7 +2963,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             }
         }
     }
-    while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+    while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
            tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
         if (skip_decl_gnu_suffix(p, NULL) != 0) {
             return -1;
@@ -2987,7 +2989,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 }
             }
         }
-        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
                tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
                 return -1;
@@ -3342,6 +3344,20 @@ static int prepend_array_info(long *io_array_len, int *io_array_ndim, long io_ar
 static int tok_is_ident(parser_t *p, const char *s) {
     size_t n = strlen(s);
     return p->tok.kind == TOK_IDENT && p->tok.len == n && strncmp(p->tok.start, s, n) == 0;
+}
+
+static int tok_is_gnu_attribute_kw(parser_t *p) {
+    return tok_is_ident(p, "__attribute__") || tok_is_ident(p, "__attribute");
+}
+
+static int token_is_gnu_attribute_kw(const cc_token_t *t) {
+    if (t == NULL || t->kind != TOK_IDENT) {
+        return 0;
+    }
+    if (t->len == strlen("__attribute__") && strncmp(t->start, "__attribute__", t->len) == 0) {
+        return 1;
+    }
+    return t->len == strlen("__attribute") && strncmp(t->start, "__attribute", t->len) == 0;
 }
 
 static int tok_is_gnu_attr_name(parser_t *p, const char *s) {
@@ -4175,7 +4191,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
 
 static int parse_gnu_attribute_spec(parser_t *p, decl_attrs_t *out_attrs) {
     decl_attrs_t local_attrs;
-    if (!tok_is_ident(p, "__attribute__")) {
+    if (!tok_is_gnu_attribute_kw(p)) {
         return 0;
     }
     decl_attrs_reset(&local_attrs);
@@ -4250,7 +4266,7 @@ static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs) {
             }
             continue;
         }
-        if (tok_is_ident(p, "__attribute__")) {
+        if (tok_is_gnu_attribute_kw(p)) {
             if (parse_gnu_attribute_spec(p, out_attrs) != 0) {
                 return -1;
             }
@@ -4299,7 +4315,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         if (next_tok(&q) != 0) {
             return -1;
         }
-        while (tok_is_ident(&q, "__attribute__") || (q.tok.kind == TOK_LBRACK && peek_kind(&q) == TOK_LBRACK)) {
+        while (tok_is_gnu_attribute_kw(&q) || (q.tok.kind == TOK_LBRACK && peek_kind(&q) == TOK_LBRACK)) {
             if (skip_decl_gnu_suffix(&q, NULL) != 0) {
                 wrapped_ptr = 0;
                 break;
@@ -4314,7 +4330,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         if (next_tok(p) != 0) {
             return -1;
         }
-        while (tok_is_ident(p, "__attribute__") || (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK)) {
+        while (tok_is_gnu_attribute_kw(p) || (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK)) {
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
                 return -1;
             }
@@ -4396,7 +4412,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             }
         }
     }
-    while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+    while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
            tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
         if (skip_decl_gnu_suffix(p, NULL) != 0) {
             return -1;
@@ -4422,7 +4438,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 }
             }
         }
-        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_ident(p, "__attribute__") ||
+        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
                tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
                 return -1;
@@ -8143,7 +8159,7 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
         *p = saved;
     }
 
-    if (tok_is_ident(p, "__attribute__")) {
+    if (tok_is_gnu_attribute_kw(p)) {
         decl_attrs_t stmt_attrs;
         int rc;
         decl_attrs_reset(&stmt_attrs);
