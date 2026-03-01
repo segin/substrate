@@ -276,8 +276,8 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Verify `DW_AT_call_file` / `DW_AT_call_line` values.
 
 ### 10d. Section Offset Tests **(FR‑40)**
-- [ ] `-j .text`: addresses treated as section offsets.
-- [ ] Invalid section name: error handling.
+- [x] `-j .text`: addresses treated as section offsets.
+- [x] Invalid section name: error handling.
 
 ### 10e. PIE / Shared Object Tests **(FR‑41)**
 - [ ] `ET_DYN` PIE binary: verify addresses resolved with load bias.

@@ -204,6 +204,23 @@ SRC
         fail "10c-3 missing call location: $HOST_LOC2"
     pass "10c-3"
 
+    # 10d-1: -j .text interprets address as section offset
+    TEXT_ADDR=$(readelf -SW "$TMP/exec64_v5" | \
+        awk '$2==".text" {print $4; exit} $3==".text" {print $5; exit}')
+    [ -n "$TEXT_ADDR" ] || fail "10d-1 .text address not found"
+    OFF_HEX=$(printf '%x' $((0x$A5 - 0x$TEXT_ADDR)))
+    OUT_ABS=$($BIN -e "$TMP/exec64_v5" 0x$A5)
+    OUT_OFF=$($BIN -j .text -e "$TMP/exec64_v5" 0x$OFF_HEX)
+    expect_eq "10d-1" "$OUT_OFF" "$OUT_ABS"
+
+    # 10d-2: invalid section name returns error
+    if "$BIN" -j .not_a_real_section -e "$TMP/exec64_v5" 0x$A5 >/dev/null 2>"$TMP/err_10d2"; then
+        fail "10d-2 expected non-zero status for invalid section"
+    fi
+    grep -E 'unknown section: \.not_a_real_section' "$TMP/err_10d2" >/dev/null 2>&1 || \
+        fail "10d-2 missing unknown section diagnostic"
+    pass "10d-2"
+
     pass "all"
 }
 
