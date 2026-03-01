@@ -155,10 +155,10 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 > AVX, AVX2, BMI1, BMI2, F16C, FMA, LZCNT, MOVBE, XSAVE.
 
 ### 4a. AVX (VEX-encoded SSE promotion + new)
-- [ ] All SSE/SSE2/SSE3/SSSE3/SSE4 → VEX 128-bit + 256-bit forms
-- [ ] `VBROADCASTSS/SD`, `VBROADCASTF128`, `VEXTRACTF128`, `VINSERTF128`
-- [ ] `VMASKMOVPS/PD` (load/store), `VPERM2F128`, `VPERMILPS/PD`
-- [ ] `VTESTPS/PD`, `VZEROALL`, `VZEROUPPER`
+- [x] All SSE/SSE2/SSE3/SSSE3/SSE4 → VEX 128-bit + 256-bit forms
+- [x] `VBROADCASTSS/SD`, `VBROADCASTF128`, `VEXTRACTF128`, `VINSERTF128`
+- [x] `VMASKMOVPS/PD` (load/store), `VPERM2F128`, `VPERMILPS/PD`
+- [x] `VTESTPS/PD`, `VZEROALL`, `VZEROUPPER`
 
 ### 4b. AVX2 (256-bit integer)
 - [ ] All SSE2 integer → 256-bit VEX forms
