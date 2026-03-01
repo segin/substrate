@@ -7,12 +7,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 ## 1. Assembler Core Architecture
 
 ### 1a. Lexer
-- [ ] Tokenize mnemonics, registers, immediates (decimal/hex/octal/binary), labels, directives, strings.
-- [ ] AT&T syntax (default) and Intel syntax (`-msyntax=intel`).
-- [ ] Line comments (`#`, `//`, `;`), block comments (`/* */`).
-- [ ] `.include` file inclusion with search path (`-I`).
-- [ ] Preprocessor integration: `.if`/`.ifdef`/`.ifndef`/`.else`/`.endif`, `.macro`/`.endm`, `.rept`/`.endr`, `.irp`/`.irpc`.
-- [ ] String escapes in `.ascii`/`.asciz`/`.string` directives.
+- [x] Tokenize mnemonics, registers, immediates (decimal/hex/octal/binary), labels, directives, strings.
+- [x] AT&T syntax (default) and Intel syntax (`-msyntax=intel`).
+- [x] Line comments (`#`, `//`, `;`), block comments (`/* */`).
+- [x] `.include` file inclusion with search path (`-I`).
+- [x] Preprocessor integration: `.if`/`.ifdef`/`.ifndef`/`.else`/`.endif`, `.macro`/`.endm`, `.rept`/`.endr`, `.irp`/`.irpc`.
+- [x] String escapes in `.ascii`/`.asciz`/`.string` directives.
 
 ### 1b. Parser
 - [ ] Instruction parsing: mnemonic + operand list.
