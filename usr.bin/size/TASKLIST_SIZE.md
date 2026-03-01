@@ -47,11 +47,11 @@ Goal: implement `size` using section accounting from `libelfobj`.
 
 ## 4. Multi‑File and Archive Support
 
-- [ ] Multiple files on command line: print each, then total.
-- [ ] Archive input (`.a`): iterate members, report per‑member on separate rows.
-- [ ] Print archive member as `<archive>(<member>)` in filename column.
-- [ ] Non‑ELF members in archive: skip with diagnostic, continue.
-- [ ] Thin archives: resolve paths, open from disk.
+- [x] Multiple files on command line: print each, then total.
+- [x] Archive input (`.a`): iterate members, report per‑member on separate rows.
+- [x] Print archive member as `<archive>(<member>)` in filename column.
+- [x] Non‑ELF members in archive: skip with diagnostic, continue.
+- [x] Thin archives: resolve paths, open from disk.
 
 ## 5. Totals and Overflow
 
