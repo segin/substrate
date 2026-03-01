@@ -10,13 +10,29 @@ extern "C" {
 
 typedef enum {
     AS_X86_REG_EAX = 0,
+    AS_X86_REG_RAX = 0,
     AS_X86_REG_ECX = 1,
+    AS_X86_REG_RCX = 1,
     AS_X86_REG_EDX = 2,
+    AS_X86_REG_RDX = 2,
     AS_X86_REG_EBX = 3,
+    AS_X86_REG_RBX = 3,
     AS_X86_REG_ESP = 4,
+    AS_X86_REG_RSP = 4,
     AS_X86_REG_EBP = 5,
+    AS_X86_REG_RBP = 5,
     AS_X86_REG_ESI = 6,
+    AS_X86_REG_RSI = 6,
     AS_X86_REG_EDI = 7,
+    AS_X86_REG_RDI = 7,
+    AS_X86_REG_R8 = 8,
+    AS_X86_REG_R9 = 9,
+    AS_X86_REG_R10 = 10,
+    AS_X86_REG_R11 = 11,
+    AS_X86_REG_R12 = 12,
+    AS_X86_REG_R13 = 13,
+    AS_X86_REG_R14 = 14,
+    AS_X86_REG_R15 = 15,
 } as_x86_reg_t;
 
 typedef enum {
@@ -38,6 +54,7 @@ typedef enum {
 } as_x86_operand_kind_t;
 
 typedef struct {
+    int rip_relative;
     int has_base;
     as_x86_reg_t base;
     int has_index;
@@ -61,6 +78,7 @@ typedef struct {
 typedef struct {
     const char *mnemonic;
     as_x86_seg_t seg_override;
+    int rex_w;
     int operand_size_override;
     int address_size_override;
     as_x86_operand_t ops[3];
@@ -69,6 +87,8 @@ typedef struct {
 
 int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                        size_t *out_len, char *errbuf, size_t errbuf_sz);
+int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
+                         size_t *out_len, char *errbuf, size_t errbuf_sz);
 
 #ifdef __cplusplus
 }

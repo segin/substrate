@@ -87,10 +87,10 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] All i386 base instructions: data movement, arithmetic, logic, shifts, string ops, control flow, stack, flags, I/O, misc.
 
 ### 2b. x86-64 Extensions
-- [ ] REX prefix encoding (REX.W/R/X/B).
-- [ ] RIP-relative addressing (default for x86-64).
-- [ ] 64-bit register operands (R8–R15, RAX–RSP).
-- [ ] `SYSCALL`/`SYSRET`, `SWAPGS`, `CMPXCHG16B`.
+- [x] REX prefix encoding (REX.W/R/X/B).
+- [x] RIP-relative addressing (default for x86-64).
+- [x] 64-bit register operands (R8–R15, RAX–RSP).
+- [x] `SYSCALL`/`SYSRET`, `SWAPGS`, `CMPXCHG16B`.
 
 ### 2c. VEX Prefix Encoding (AVX/AVX2/BMI/FMA/F16C)
 - [ ] 2-byte VEX (`C5`), 3-byte VEX (`C4`) selection.
