@@ -6,12 +6,12 @@ Goal: implement `size` using section accounting from `libelfobj`.
 
 ## 1. `libelfobj` Integration
 
-- [ ] Open input files with `elf_open()`.
-- [ ] Iterate sections via `elf_section_count()` / `elf_section_get()`.
-- [ ] Classify sections using `elf_section_type()`, `elf_section_flags()`, `elf_section_size()`.
-- [ ] Use `elf_class()` for correct 32/64‑bit formatting.
-- [ ] Call `elf_close()` on all handles.
-- [ ] Handle `elf_open()` failure with clear diagnostic.
+- [x] Open input files with `elf_open()`.
+- [x] Iterate sections via `elf_section_count()` / `elf_section_get()`.
+- [x] Classify sections using `elf_section_type()`, `elf_section_flags()`, `elf_section_size()`.
+- [x] Use `elf_class()` for correct 32/64‑bit formatting.
+- [x] Call `elf_close()` on all handles.
+- [x] Handle `elf_open()` failure with clear diagnostic.
 
 ## 2. Section Classification
 

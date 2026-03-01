@@ -602,6 +602,13 @@ elf_err_t elf_program_header_set_align(elfobj_t *obj, size_t index, uint64_t ali
     return ELF_OK;
 }
 
+elf_section_t *elf_section_get(const elfobj_t *obj, size_t index) {
+    if (obj == NULL || index >= obj->section_count) {
+        return NULL;
+    }
+    return obj->sections[index];
+}
+
 size_t elf_segment_count(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->segment_count;
 }

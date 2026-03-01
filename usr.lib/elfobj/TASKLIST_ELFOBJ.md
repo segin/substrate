@@ -4,6 +4,12 @@ Goal: extend `libelfobj` with full ARMv7 (ELF32, `EM_ARM`) and AArch64 (ELF64, `
 
 ---
 
+## 0. Generic Tooling API Support
+
+- [x] Add indexed section accessor `elf_section_get(const elfobj_t *, size_t)` for consumer utilities (`size`, `objdump`, `readelf`) that need stable section iteration.
+
+---
+
 ## 1. ELF Constants and Header Definitions
 
 ### 1a. Machine Types (`elf_private.h` or upstream `elf.h`)
