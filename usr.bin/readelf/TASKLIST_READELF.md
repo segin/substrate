@@ -56,17 +56,17 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 5. Symbol Tables (`-s` / `--syms` / `--symbols`)
 
-- [ ] Display `.symtab` and `.dynsym` tables.
-- [ ] Columns: num, value, size, type, bind, vis, ndx, name.
-- [ ] Decode symbol type: `NOTYPE`, `OBJECT`, `FUNC`, `SECTION`, `FILE`, `COMMON`, `TLS`, `GNU_IFUNC`.
-- [ ] Decode binding: `LOCAL`, `GLOBAL`, `WEAK`, `GNU_UNIQUE`.
-- [ ] Decode visibility: `DEFAULT`, `HIDDEN`, `PROTECTED`, `INTERNAL`.
-- [ ] Decode section index: `UND`, `ABS`, `COM`, or numeric.
-- [ ] ARM: note Thumb bit in symbol value (bit 0) for `STT_FUNC` symbols.
-- [ ] ARM: identify mapping symbols (`$a`, `$t`, `$d`) in display.
-- [ ] AArch64: identify mapping symbols (`$x`, `$d`).
-- [ ] Handle `SHT_SYMTAB_SHNDX` extended section indices.
-- [ ] `--dyn-syms`: display only `.dynsym`.
+- [x] Display `.symtab` and `.dynsym` tables.
+- [x] Columns: num, value, size, type, bind, vis, ndx, name.
+- [x] Decode symbol type: `NOTYPE`, `OBJECT`, `FUNC`, `SECTION`, `FILE`, `COMMON`, `TLS`, `GNU_IFUNC`.
+- [x] Decode binding: `LOCAL`, `GLOBAL`, `WEAK`, `GNU_UNIQUE`.
+- [x] Decode visibility: `DEFAULT`, `HIDDEN`, `PROTECTED`, `INTERNAL`.
+- [x] Decode section index: `UND`, `ABS`, `COM`, or numeric.
+- [x] ARM: note Thumb bit in symbol value (bit 0) for `STT_FUNC` symbols.
+- [x] ARM: identify mapping symbols (`$a`, `$t`, `$d`) in display.
+- [x] AArch64: identify mapping symbols (`$x`, `$d`).
+- [x] Handle `SHT_SYMTAB_SHNDX` extended section indices.
+- [x] `--dyn-syms`: display only `.dynsym`.
 
 ## 6. Relocation Tables (`-r` / `--relocs`)
 

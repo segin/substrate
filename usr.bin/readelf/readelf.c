@@ -102,11 +102,32 @@
 #define PF_R 0x4u
 #endif
 
+#ifndef STB_GNU_UNIQUE
+#define STB_GNU_UNIQUE 10
+#endif
+
+#ifndef STT_GNU_IFUNC
+#define STT_GNU_IFUNC 10
+#endif
+
+#ifndef STV_DEFAULT
+#define STV_DEFAULT 0
+#define STV_INTERNAL 1
+#define STV_HIDDEN 2
+#define STV_PROTECTED 3
+#endif
+
+#ifndef SHN_XINDEX
+#define SHN_XINDEX 0xffff
+#endif
+
 typedef struct {
     int wide;
     int show_file_header;
     int show_program_headers;
     int show_section_headers;
+    int show_symbols;
+    int only_dynsyms;
 } readelf_opts_t;
 
 typedef struct {
@@ -614,6 +635,261 @@ static void print_program_headers(const elf_view_t *view, const elf_header_t *hd
     print_section_to_segment(view, hdr);
 }
 
+static const char *sym_type_name(uint8_t type) {
+    switch (type) {
+        case STT_NOTYPE: return "NOTYPE";
+        case STT_OBJECT: return "OBJECT";
+        case STT_FUNC: return "FUNC";
+        case STT_SECTION: return "SECTION";
+        case STT_FILE: return "FILE";
+        case 5: return "COMMON";
+        case STT_TLS: return "TLS";
+        case STT_GNU_IFUNC: return "GNU_IFUNC";
+        default: return NULL;
+    }
+}
+
+static const char *sym_bind_name(uint8_t bind) {
+    switch (bind) {
+        case STB_LOCAL: return "LOCAL";
+        case STB_GLOBAL: return "GLOBAL";
+        case STB_WEAK: return "WEAK";
+        case STB_GNU_UNIQUE: return "GNU_UNIQUE";
+        default: return NULL;
+    }
+}
+
+static const char *sym_vis_name(uint8_t vis) {
+    switch (vis & 0x3) {
+        case STV_DEFAULT: return "DEFAULT";
+        case STV_INTERNAL: return "INTERNAL";
+        case STV_HIDDEN: return "HIDDEN";
+        case STV_PROTECTED: return "PROTECTED";
+        default: return NULL;
+    }
+}
+
+static void format_sym_ndx(uint16_t shndx, uint32_t xindex, char *buf, size_t buflen) {
+    if (shndx == SHN_UNDEF) {
+        snprintf(buf, buflen, "UND");
+    } else if (shndx == SHN_ABS) {
+        snprintf(buf, buflen, "ABS");
+    } else if (shndx == SHN_COMMON) {
+        snprintf(buf, buflen, "COM");
+    } else if (shndx == SHN_XINDEX) {
+        snprintf(buf, buflen, "%u", xindex);
+    } else {
+        snprintf(buf, buflen, "%u", shndx);
+    }
+}
+
+static int find_symtab_shndx_section(const elf_view_t *view, const elf_header_t *hdr,
+                                     size_t symsec_index, section_header_t *out) {
+    uint64_t i;
+    section_header_t sh;
+
+    for (i = 0; i < shnum_resolved(hdr); ++i) {
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
+            continue;
+        }
+        if (sh.type == SHT_SYMTAB_SHNDX && sh.link == symsec_index) {
+            if (out != NULL) {
+                *out = sh;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int read_sym32(const elf_view_t *view, uint64_t base, size_t index,
+                      uint64_t entsize, uint32_t *st_name, uint8_t *st_info, uint8_t *st_other,
+                      uint16_t *st_shndx, uint64_t *st_value, uint64_t *st_size) {
+    uint32_t v = 0;
+    uint64_t off = base + (index * entsize);
+
+    if (view_u32(view, (size_t)(off + 0), st_name) != 0) return -1;
+    if (view_u32(view, (size_t)(off + 4), &v) != 0) return -1;
+    *st_value = v;
+    if (view_u32(view, (size_t)(off + 8), &v) != 0) return -1;
+    *st_size = v;
+    if (off + 16 > view->size) return -1;
+    *st_info = view->data[off + 12];
+    *st_other = view->data[off + 13];
+    if (view_u16(view, (size_t)(off + 14), st_shndx) != 0) return -1;
+    return 0;
+}
+
+static int read_sym64(const elf_view_t *view, uint64_t base, size_t index,
+                      uint64_t entsize, uint32_t *st_name, uint8_t *st_info, uint8_t *st_other,
+                      uint16_t *st_shndx, uint64_t *st_value, uint64_t *st_size) {
+    uint64_t off = base + (index * entsize);
+
+    if (view_u32(view, (size_t)(off + 0), st_name) != 0) return -1;
+    if (off + 24 > view->size) return -1;
+    *st_info = view->data[off + 4];
+    *st_other = view->data[off + 5];
+    if (view_u16(view, (size_t)(off + 6), st_shndx) != 0) return -1;
+    if (view_u64(view, (size_t)(off + 8), st_value) != 0) return -1;
+    if (view_u64(view, (size_t)(off + 16), st_size) != 0) return -1;
+    return 0;
+}
+
+static void print_symbol_table_section(const elf_view_t *view, const elf_header_t *hdr,
+                                       size_t sec_index, const section_header_t *symsec,
+                                       const uint8_t *shstr_data, size_t shstr_size) {
+    section_header_t strsec;
+    section_header_t xsec;
+    const uint8_t *strtab = NULL;
+    size_t strtabsz = 0;
+    const uint8_t *xdata = NULL;
+    size_t xcount = 0;
+    uint64_t count;
+    uint64_t i;
+    const char *secname;
+
+    if (symsec->link >= shnum_resolved(hdr) || read_shdr(view, hdr, symsec->link, &strsec) != 0) {
+        warnf("symbol table at section %zu has invalid string table link", sec_index);
+        return;
+    }
+    if (strsec.off + strsec.size <= view->size) {
+        strtab = view->data + strsec.off;
+        strtabsz = (size_t)strsec.size;
+    }
+    if (find_symtab_shndx_section(view, hdr, sec_index, &xsec) &&
+        xsec.off + xsec.size <= view->size) {
+        xdata = view->data + xsec.off;
+        xcount = (size_t)(xsec.size / 4);
+    }
+
+    if (symsec->entsize == 0) {
+        return;
+    }
+    count = symsec->size / symsec->entsize;
+    secname = shstr_name(shstr_data, shstr_size, symsec->name);
+    printf("\nSymbol table '%s' contains %" PRIu64 " entries:\n", secname, count);
+    printf("   Num:    Value          Size Type    Bind   Vis      Ndx Name\n");
+
+    for (i = 0; i < count; ++i) {
+        uint32_t st_name = 0;
+        uint8_t st_info = 0;
+        uint8_t st_other = 0;
+        uint16_t st_shndx = 0;
+        uint64_t st_value = 0;
+        uint64_t st_size = 0;
+        uint8_t type;
+        uint8_t bind;
+        const char *type_name_local;
+        const char *bind_name_local;
+        const char *vis_name_local;
+        char type_buf[16];
+        char bind_buf[16];
+        char vis_buf[16];
+        char ndx_buf[16];
+        uint32_t xindex = 0;
+        const char *name = "<corrupt>";
+        char note[24];
+        note[0] = '\0';
+
+        if (view->cls == ELFOBJ_CLASS_64) {
+            if (read_sym64(view, symsec->off, (size_t)i, symsec->entsize, &st_name,
+                           &st_info, &st_other, &st_shndx, &st_value, &st_size) != 0) {
+                warnf("symbol entry %" PRIu64 " is truncated", i);
+                break;
+            }
+        } else {
+            if (read_sym32(view, symsec->off, (size_t)i, symsec->entsize, &st_name,
+                           &st_info, &st_other, &st_shndx, &st_value, &st_size) != 0) {
+                warnf("symbol entry %" PRIu64 " is truncated", i);
+                break;
+            }
+        }
+
+        if (st_name < strtabsz) {
+            name = (const char *)(strtab + st_name);
+        }
+        if (st_shndx == SHN_XINDEX && i < xcount) {
+            if (view_u32(&(elf_view_t){.data = xdata, .size = xsec.size, .endian = view->endian},
+                         (size_t)(i * 4), &xindex) != 0) {
+                xindex = 0;
+            }
+        }
+
+        type = st_info & 0x0f;
+        bind = st_info >> 4;
+        type_name_local = sym_type_name(type);
+        if (type_name_local == NULL) {
+            snprintf(type_buf, sizeof(type_buf), "%u", type);
+            type_name_local = type_buf;
+        }
+        bind_name_local = sym_bind_name(bind);
+        if (bind_name_local == NULL) {
+            snprintf(bind_buf, sizeof(bind_buf), "%u", bind);
+            bind_name_local = bind_buf;
+        }
+        vis_name_local = sym_vis_name(st_other);
+        if (vis_name_local == NULL) {
+            snprintf(vis_buf, sizeof(vis_buf), "%u", st_other & 0x3);
+            vis_name_local = vis_buf;
+        }
+        format_sym_ndx(st_shndx, xindex, ndx_buf, sizeof(ndx_buf));
+
+        if (hdr->machine == EM_ARM && type == STT_FUNC && (st_value & 1u)) {
+            snprintf(note, sizeof(note), " [Thumb]");
+        } else if (hdr->machine == EM_ARM &&
+                   (strcmp(name, "$a") == 0 || strcmp(name, "$t") == 0 || strcmp(name, "$d") == 0)) {
+            snprintf(note, sizeof(note), " [mapping]");
+        } else if (hdr->machine == EM_AARCH64 &&
+                   (strcmp(name, "$x") == 0 || strcmp(name, "$d") == 0)) {
+            snprintf(note, sizeof(note), " [mapping]");
+        }
+
+        if (view->cls == ELFOBJ_CLASS_64) {
+            printf("%6" PRIu64 ": %016" PRIx64 " %5" PRIu64 " %-7s %-6s %-8s %3s %s%s\n",
+                   i, st_value, st_size, type_name_local, bind_name_local,
+                   vis_name_local, ndx_buf, name, note);
+        } else {
+            printf("%6" PRIu64 ": %08" PRIx64 " %5" PRIu64 " %-7s %-6s %-8s %3s %s%s\n",
+                   i, st_value, st_size, type_name_local, bind_name_local,
+                   vis_name_local, ndx_buf, name, note);
+        }
+    }
+}
+
+static void print_symbol_tables(const readelf_opts_t *opts, const elf_view_t *view,
+                                const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    uint64_t shstrndx = shstrndx_resolved(hdr);
+    section_header_t shstr;
+    const uint8_t *shstr_data = NULL;
+    size_t shstr_size = 0;
+    uint64_t i;
+
+    if (shstrndx < shnum && read_shdr(view, hdr, (size_t)shstrndx, &shstr) == 0 &&
+        shstr.off + shstr.size <= view->size) {
+        shstr_data = view->data + shstr.off;
+        shstr_size = (size_t)shstr.size;
+    }
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        int is_symtab;
+
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
+            break;
+        }
+        if (opts->only_dynsyms) {
+            is_symtab = (sh.type == SHT_DYNSYM);
+        } else {
+            is_symtab = (sh.type == SHT_SYMTAB || sh.type == SHT_DYNSYM);
+        }
+        if (!is_symtab) {
+            continue;
+        }
+        print_symbol_table_section(view, hdr, (size_t)i, &sh, shstr_data, shstr_size);
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -798,9 +1074,11 @@ static void usage(FILE *out) {
             "  -h, --file-header       Display the ELF file header\n"
             "  -l, --program-headers   Display program headers\n"
             "  -S, --section-headers   Display section headers\n"
+            "  -s, --syms,--symbols    Display symbol table entries\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
+            "      --dyn-syms          Display dynamic symbols only\n"
             "      --help              Display this help and exit\n"
             "      --version           Display version information and exit\n",
             g_progname);
@@ -817,9 +1095,12 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"segments", no_argument, NULL, 'l'},
         {"section-headers", no_argument, NULL, 'S'},
         {"sections", no_argument, NULL, 'S'},
+        {"syms", no_argument, NULL, 's'},
+        {"symbols", no_argument, NULL, 's'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
+        {"dyn-syms", no_argument, NULL, 3},
         {"help", no_argument, NULL, 1},
         {"version", no_argument, NULL, 2},
         {0, 0, 0, 0},
@@ -832,7 +1113,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlSeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsSeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -843,6 +1124,9 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 'S':
                 opts->show_section_headers = 1;
                 break;
+            case 's':
+                opts->show_symbols = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -852,6 +1136,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
                 opts->show_section_headers = 1;
+                opts->show_symbols = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -862,6 +1147,10 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 2:
                 print_version();
                 return 1;
+            case 3:
+                opts->show_symbols = 1;
+                opts->only_dynsyms = 1;
+                break;
             default:
                 usage(stderr);
                 return -1;
@@ -909,7 +1198,10 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         printf("\nFile: %s\n", path);
     }
 
-    if (!opts->show_file_header && !opts->show_program_headers && !opts->show_section_headers) {
+    if (!opts->show_file_header &&
+        !opts->show_program_headers &&
+        !opts->show_section_headers &&
+        !opts->show_symbols) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -970,6 +1262,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_program_headers) {
         print_program_headers(&view, &hdr);
+    }
+    if (opts->show_symbols) {
+        print_symbol_tables(opts, &view, &hdr);
     }
 
 out:
